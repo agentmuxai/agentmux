@@ -955,6 +955,44 @@ describe("resize through collapsed panes", () => {
         }
     });
 
+    it("the tiles follow the container when its size changes after the first layout, up and down, with no reload", () => {
+        // The web build has no native window: the layout's size is the page's, reported by the container's
+        // resize observer. A container that grows (a window enlarged, a zoom ended) or shrinks after
+        // the first layout must lay every pane out for the new size.
+        const box = { width: 400, height: 300 };
+        const model = createLayoutModel(() => ({ top: 0, left: 0, ...box }));
+        const A = leaf("A"), B = leaf("B");
+        const root = newLayoutNode(FlexDirection.Row, 10, [A, B]);
+        model.treeState.rootNode = root;
+        model.updateTree();
+        const extent = () => {
+            const rects = Object.values(model.additionalProps()).map((p) => p.rect).filter(Boolean);
+            return { right: Math.max(...rects.map((r) => r!.left + r!.width)), bottom: Math.max(...rects.map((r) => r!.top + r!.height)) };
+        };
+        const resizeTo = (width: number, height: number) => {
+            box.width = width;
+            box.height = height;
+            model.onContainerResize(undefined, { borderBoxSize: [{ inlineSize: width, blockSize: height }] } as any);
+        };
+
+        const small = extent();
+        expect(small.right).toBeLessThanOrEqual(400);
+        expect(small.bottom).toBeLessThanOrEqual(300);
+
+        resizeTo(1280, 900);
+        const large = extent();
+        expect(large.right).toBeGreaterThan(small.right * 2);
+        expect(large.right).toBeLessThanOrEqual(1280);
+        expect(large.bottom).toBeGreaterThan(small.bottom * 2);
+        expect(large.bottom).toBeLessThanOrEqual(900);
+
+        resizeTo(320, 480);
+        const phone = extent();
+        expect(phone.right).toBeLessThanOrEqual(320);
+        expect(phone.bottom).toBeLessThanOrEqual(480);
+        expect(phone.right).toBeLessThan(large.right);
+    });
+
     it("a splitter drag measures the container once, not on every move", () => {
         const measured = { count: 0 };
         const box = { width: 800, height: 600 };

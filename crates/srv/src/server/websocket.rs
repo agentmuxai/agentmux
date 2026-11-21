@@ -66,6 +66,190 @@ pub(super) async fn handle_ws(
     ws.protocols([super::local_session_routes::WS_PROTOCOL]).on_upgrade(move |socket| handle_ws_connection(socket, state, session, headers))
 }
 
+/// The egress lanes' receivers and per-connection state that the `select!` loop in
+/// `handle_ws_connection` mutates, so each branch is a method instead of an inline block.
+/// A method returns `true` when the connection should end.
+struct WsConn {
+    socket: WebSocket,
+    state: AppState,
+    engine: Arc<WshRpcEngine>,
+    conn_id: String,
+    priority_rx: tokio::sync::mpsc::Receiver<serde_json::Value>,
+    background_rx: tokio::sync::mpsc::Receiver<serde_json::Value>,
+    drops: Arc<crate::backend::eventbus::LaneDrops>,
+    /// Fairly-ordered priority-lane events awaiting their turn, sent one per loop iteration
+    /// (`on_priority_event`, then `flush_one_priority`). Forwarding a whole drained batch inside
+    /// one `select!` branch body would starve `socket.recv()` (this connection's OWN keystrokes)
+    /// for the batch, since `select!` re-polls siblings only when a body returns; one event per
+    /// iteration keeps each send interleaved with a fresh `socket.recv()` poll, while the batch
+    /// keeps its fair pane ordering.
+    pending_priority: std::collections::VecDeque<serde_json::Value>,
+    /// Activated when a pane sends `bus:register`.
+    bus_rx: Option<tokio::sync::mpsc::UnboundedReceiver<crate::backend::messagebus::BusMessage>>,
+    bus_agent_id: Option<String>,
+}
+
+/// The next message of the agent bus, or never when this connection is not registered as an agent.
+async fn next_bus_message(
+    rx: &mut Option<tokio::sync::mpsc::UnboundedReceiver<crate::backend::messagebus::BusMessage>>,
+) -> Option<crate::backend::messagebus::BusMessage> {
+    match rx.as_mut() {
+        Some(rx) => rx.recv().await,
+        None => std::future::pending().await,
+    }
+}
+
+impl WsConn {
+    /// Send one JSON frame. Returns `true` if the send failed.
+    async fn send_json(&mut self, value: &serde_json::Value) -> bool {
+        let msg = serde_json::to_string(value).unwrap_or_default();
+        self.socket.send(Message::Text(msg.into())).await.is_err()
+    }
+
+    /// The client's own traffic: keystrokes and commands (`wscommand`), pings, close.
+    async fn on_client_message(&mut self, msg: Option<Result<Message, axum::Error>>) -> bool {
+        match msg {
+            Some(Ok(Message::Close(_))) | None | Some(Err(_)) => true,
+            Some(Ok(Message::Ping(data))) => {
+                let _ = self.socket.send(Message::Pong(data)).await;
+                false
+            }
+            Some(Ok(Message::Text(text))) => {
+                match handle_incoming_text(&text, &self.engine, &self.state, &mut self.socket).await {
+                    Err(true) => true,
+                    Ok(Some((new_rx, agent_id))) => {
+                        // bus:register returned a new receiver
+                        self.bus_rx = Some(new_rx);
+                        self.bus_agent_id = Some(agent_id);
+                        false
+                    }
+                    _ => false,
+                }
+            }
+            // Binary or other message types are ignored.
+            Some(Ok(_)) => false,
+        }
+    }
+
+    /// An RPC engine reply, wrapped as `eventtype: rpc`.
+    async fn on_rpc_output(&mut self, rpc_msg: RpcMessage) -> bool {
+        self.send_json(&json!({ "eventtype": "rpc", "data": rpc_msg })).await
+    }
+
+    /// A MessageBus message, for a connection registered as an agent.
+    async fn on_bus_message(&mut self, bus_msg: crate::backend::messagebus::BusMessage) -> bool {
+        self.send_json(&json!({ "type": "bus:message", "data": bus_msg })).await
+    }
+
+    /// Priority event lane → WebSocket. Two sources feed it:
+    ///   1. MPS Broker (via EventBusBridge) — already wrapped as
+    ///      { eventtype: "rpc", data: { command: "eventrecv", data: MuxEvent } }
+    ///   2. Direct broadcasts (e.g., SetMeta's obj:update) — raw
+    ///      { eventtype: "waveobj:update", oref: "block:xxx", data: ... }
+    /// This carries terminal echo output and all interactive events.
+    ///
+    /// Fairness: this lane is shared by EVERY pane on the connection, not
+    /// just one. A single FIFO here means a noisy pane (heavy PTY output)
+    /// can queue an unbounded number of frames ahead of a different pane's
+    /// own keystroke echo, which arrives in the same channel. Draining all
+    /// immediately-available events and round-robining them by pane (see
+    /// `fair_drain_priority`) bounds that delay to one "round" per distinct
+    /// active pane instead of the length of the noisy pane's backlog. See
+    /// docs/analysis/ANALYSIS_CROSS_PANE_INPUT_DELAY_UNDER_OUTPUT_LOAD_2026_09_04.md.
+    ///
+    /// Only called when `pending_priority` is empty: while it is still being flushed (one per
+    /// iteration), the lane stays unread so we don't pull more out of `priority_rx` than we have
+    /// finished sending.
+    async fn on_priority_event(&mut self, event: serde_json::Value) -> bool {
+        let mut fair = fair_drain_priority(event, &mut self.priority_rx);
+        // `fair` always has >= 1 element (it contains at least `event`).
+        let first = fair.remove(0);
+        self.pending_priority.extend(fair);
+        forward_event(&mut self.socket, first).await || self.report_drops().await
+    }
+
+    /// Flush one fairly-ordered priority event per iteration: a branch guarded on
+    /// `pending_priority` being non-empty, see its declaration for why it is not a loop.
+    async fn flush_one_priority(&mut self) -> bool {
+        let ev = self.pending_priority.pop_front().expect("guarded non-empty");
+        forward_event(&mut self.socket, ev).await || self.report_drops().await
+    }
+
+    /// Background event lane → WebSocket. Droppable perf telemetry
+    /// (sysinfo/blockstats) only; serviced when the priority lanes are
+    /// momentarily idle, so it can never delay a keystroke echo.
+    ///
+    /// Tradeoff of the loop's `biased;`: a SUSTAINED priority-lane flood (`! yes` pumping terminal
+    /// output) keeps the priority branches ready, so telemetry queues here until the flood
+    /// pauses. The lane is bounded (`BACKGROUND_LANE_CAPACITY`, drop-on-full: see
+    /// eventbus.rs), so a starvation long enough to fill it drops new readings instead of
+    /// growing commit; fine for ~1/s telemetry. Everything immediately available is coalesced to
+    /// the latest reading per (event-name:scope) key before forwarding, so the flush is at most
+    /// 1 sysinfo + 1 blockstats per open block, not a burst of stale frames the browser processes
+    /// back-to-back ahead of queued keypresses.
+    /// See SPEC_TERMINAL_INPUT_PRIORITY_OVER_SYSINFO_2026_06_16.md §4.2.
+    async fn on_background_event(&mut self, first_bg: serde_json::Value) -> bool {
+        for ev in coalesce_background(first_bg, &mut self.background_rx) {
+            if forward_event(&mut self.socket, ev).await {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Tell the client about dropped events once the priority lane has drained.
+    async fn report_drops(&mut self) -> bool {
+        super::ws_resync::report_when_drained(&mut self.socket, &self.drops, &self.priority_rx, &self.pending_priority).await
+    }
+
+    /// Keepalive: a drop report if one is due, then a ping carrying the server time.
+    async fn on_ping_tick(&mut self) -> bool {
+        if self.report_drops().await {
+            return true;
+        }
+        self.send_json(&json!({ "type": "ping", "stime": agentmux_common::time::now_ms() })).await
+    }
+
+    /// Release everything the connection registered.
+    fn close(self) {
+        tracing::info!(conn_id = %self.conn_id, "WebSocket client disconnected");
+        self.state.event_bus.unregister_ws(&self.conn_id);
+        self.state.broker.unsubscribe_all(&self.conn_id);
+        if let Some(r) = crate::backend::notify::router::get(&self.state.broker) {
+            r.disconnect(&self.conn_id);
+        }
+        // Unregister from messagebus if this connection was an agent
+        if let Some(ref agent_id) = self.bus_agent_id {
+            self.state.messagebus.unregister(agent_id);
+        }
+    }
+}
+
+/// What a connecting client is sent first: the `config` event, then `srvinfo`.
+async fn send_greeting(socket: &mut WebSocket, state: &AppState) {
+    // The "config" wave event goes via the RPC eventrecv path so the frontend populates
+    // fullConfigAtom (and shows the widget bar). The frontend only processes events via:
+    // {"eventtype":"rpc","data":{"command":"eventrecv","data":{"event":"config","data":{...}}}}
+    let t = std::time::Instant::now();
+    let config = state.config_watcher.get_full_config();
+    if let Ok(mut config_val) = serde_json::to_value(config.as_ref()) {
+        crate::backend::wconfig::redact_full_config_for_renderer(&mut config_val);
+        let config_event = crate::backend::eventbus::EventBus::typed_frame::<crate::backend::mps_events::Config>(&crate::backend::mps_events::ConfigEvent { fullconfig: config_val });
+        if let Ok(msg) = serde_json::to_string(&config_event) {
+            let _ = socket.send(Message::Text(msg.into())).await;
+        }
+    }
+    tracing::info!("[ws-perf] send_initial_config: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0);
+
+    // Tell the client which srv it reached: the version, so a UI from another
+    // version (an update replaced one side) can ask the user to reload, and
+    // the machine, whose names and paths the UI shows and builds.
+    let info = crate::srv_info::srv_info(&state.version, &state.hostname);
+    if let Ok(msg) = serde_json::to_string(&srv_info_event(info)) {
+        let _ = socket.send(Message::Text(msg.into())).await;
+    }
+}
+
 async fn handle_ws_connection(mut socket: WebSocket, state: AppState, session: Option<super::local_session::SessionId>, headers: axum::http::HeaderMap) {
     let ws_start = std::time::Instant::now();
     let conn_id = uuid::Uuid::new_v4().to_string();
@@ -78,40 +262,10 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState, session: O
     // sysinfo/blockstats). The select! below drains priority before background
     // so typing never waits behind a perf tick. See
     // docs/specs/SPEC_TERMINAL_INPUT_PRIORITY_OVER_SYSINFO_2026_06_16.md.
-    let crate::backend::eventbus::WsReceivers {
-        priority: mut priority_rx,
-        background: mut background_rx,
-        drops,
-    } = state.event_bus.register_ws(&conn_id, &tab_id);
+    let crate::backend::eventbus::WsReceivers { priority, background, drops } = state.event_bus.register_ws(&conn_id, &tab_id);
     tracing::info!("[ws-perf] register_ws: {:.2}ms", ws_start.elapsed().as_secs_f64() * 1000.0);
 
-    // Optional messagebus receiver — activated when pane sends bus:register
-    let mut bus_rx: Option<tokio::sync::mpsc::UnboundedReceiver<crate::backend::messagebus::BusMessage>> = None;
-    let mut bus_agent_id: Option<String> = None;
-
-    // Send initial "config" wave event via the RPC eventrecv path so the frontend
-    // populates fullConfigAtom (and shows the widget bar).
-    // Frontend only processes events via: {"eventtype":"rpc","data":{"command":"eventrecv","data":{"event":"config","data":{...}}}}
-    {
-        let t = std::time::Instant::now();
-        let config = state.config_watcher.get_full_config();
-        if let Ok(mut config_val) = serde_json::to_value(config.as_ref()) {
-            crate::backend::wconfig::redact_full_config_for_renderer(&mut config_val);
-            let config_event = crate::backend::eventbus::EventBus::typed_frame::<crate::backend::mps_events::Config>(&crate::backend::mps_events::ConfigEvent { fullconfig: config_val });
-            if let Ok(msg) = serde_json::to_string(&config_event) {
-                let _ = socket.send(Message::Text(msg.into())).await;
-            }
-        }
-        tracing::info!("[ws-perf] send_initial_config: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0);
-    }
-
-    // Tell the client which srv it reached: the version, so a UI from another
-    // version (an update replaced one side) can ask the user to reload, and
-    // the machine, whose names and paths the UI shows and builds.
-    let info = crate::srv_info::srv_info(&state.version, &state.hostname);
-    if let Ok(msg) = serde_json::to_string(&srv_info_event(info)) {
-        let _ = socket.send(Message::Text(msg.into())).await;
-    }
+    send_greeting(&mut socket, &state).await;
 
     // Create RPC engine for this connection
     let t = std::time::Instant::now();
@@ -128,19 +282,24 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState, session: O
     let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(10));
     ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
-    // Fairly-ordered priority-lane events awaiting their turn, sent one per `'ws` loop iteration
-    // (priority-lane branch below, then the flush branch). Forwarding a whole drained batch inside
-    // one `select!` branch body would starve `socket.recv()` (this connection's OWN keystrokes)
-    // for the batch, since `select!` re-polls siblings only when a body returns; one event per
-    // iteration keeps each send interleaved with a fresh `socket.recv()` poll, while the batch
-    // keeps its fair pane ordering.
-    let mut pending_priority: std::collections::VecDeque<serde_json::Value> =
-        std::collections::VecDeque::new();
-
     let session_ended = { super::operator_proof::vouch_for_signed_in_browser(&engine, session.as_ref()); super::local_session_routes::session_ended(session) };
     tokio::pin!(session_ended);
-    'ws: loop {
-        tokio::select! {
+    let mut conn = WsConn {
+        socket,
+        state,
+        engine,
+        conn_id,
+        priority_rx: priority,
+        background_rx: background,
+        drops,
+        pending_priority: std::collections::VecDeque::new(),
+        bus_rx: None,
+        bus_agent_id: None,
+    };
+    loop {
+        // The other branches' futures are dropped before the winner's handler runs, so a handler
+        // may borrow `conn` whole.
+        let ended = tokio::select! {
             // Biased: poll branches top-to-bottom so interactive terminal I/O
             // always wins over droppable perf telemetry. Order = incoming
             // keystrokes → RPC replies → agent bus → priority events (terminal
@@ -148,156 +307,20 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState, session: O
             // See docs/specs/SPEC_TERMINAL_INPUT_PRIORITY_OVER_SYSINFO_2026_06_16.md.
             biased;
 
-            _ = &mut session_ended => break, // the browser's sign-in ended (logout, idle expiry)
-
-            // Incoming WebSocket messages → parse & dispatch (keystrokes first)
-            msg = socket.recv() => {
-                match msg {
-                    Some(Ok(Message::Close(_))) | None => break,
-                    Some(Ok(Message::Ping(data))) => {
-                        let _ = socket.send(Message::Pong(data)).await;
-                    }
-                    Some(Ok(Message::Text(text))) => {
-                        match handle_incoming_text(&text, &engine, &state, &mut socket).await {
-                            Err(true) => break,
-                            Ok(Some((new_rx, agent_id))) => {
-                                // bus:register returned a new receiver
-                                bus_rx = Some(new_rx);
-                                bus_agent_id = Some(agent_id);
-                            }
-                            _ => {}
-                        }
-                    }
-                    Some(Ok(_)) => {
-                        // Binary or other message types — ignore
-                    }
-                    Some(Err(_)) => break,
-                }
-            }
-
-            // Forward RPC engine output → WebSocket (wrapped as eventtype:rpc)
-            Some(rpc_msg) = rpc_output_rx.recv() => {
-                let wrapped = json!({
-                    "eventtype": "rpc",
-                    "data": rpc_msg,
-                });
-                let msg = serde_json::to_string(&wrapped).unwrap_or_default();
-                if socket.send(Message::Text(msg.into())).await.is_err() {
-                    break;
-                }
-            }
-
-            // Forward MessageBus messages → WebSocket (if registered as agent)
-            Some(bus_msg) = async {
-                match bus_rx.as_mut() {
-                    Some(rx) => rx.recv().await,
-                    None => std::future::pending().await,
-                }
-            } => {
-                let wrapped = json!({
-                    "type": "bus:message",
-                    "data": bus_msg,
-                });
-                let msg = serde_json::to_string(&wrapped).unwrap_or_default();
-                if socket.send(Message::Text(msg.into())).await.is_err() {
-                    break;
-                }
-            }
-
-            // Priority event lane → WebSocket. Two sources feed it:
-            //   1. MPS Broker (via EventBusBridge) — already wrapped as
-            //      { eventtype: "rpc", data: { command: "eventrecv", data: MuxEvent } }
-            //   2. Direct broadcasts (e.g., SetMeta's obj:update) — raw
-            //      { eventtype: "waveobj:update", oref: "block:xxx", data: ... }
-            // This carries terminal echo output and all interactive events.
-            //
-            // Fairness: this lane is shared by EVERY pane on the connection, not
-            // just one. A single FIFO here means a noisy pane (heavy PTY output)
-            // can queue an unbounded number of frames ahead of a different pane's
-            // own keystroke echo, which arrives in the same channel. Draining all
-            // immediately-available events and round-robining them by pane (see
-            // `fair_drain_priority`) bounds that delay to one "round" per distinct
-            // active pane instead of the length of the noisy pane's backlog. See
-            // docs/analysis/ANALYSIS_CROSS_PANE_INPUT_DELAY_UNDER_OUTPUT_LOAD_2026_09_04.md.
-            //
-            // Only drains a fresh batch when `pending_priority` is empty — while
-            // it's still being flushed (one per iteration, below), this branch
-            // stays disabled so we don't pull more out of `priority_rx` than
-            // we've finished sending.
-            Some(event) = priority_rx.recv(), if pending_priority.is_empty() => {
-                let mut fair = fair_drain_priority(event, &mut priority_rx);
-                // `fair` always has >= 1 element (it contains at least `event`).
-                let first = fair.remove(0);
-                pending_priority.extend(fair);
-                if forward_event(&mut socket, first).await {
-                    break 'ws;
-                }
-                if super::ws_resync::report_when_drained(&mut socket, &drops, &priority_rx, &pending_priority).await {
-                    break 'ws;
-                }
-            }
-
-            // Flush one fairly-ordered priority event per iteration. A no-op
-            // branch guarded on `pending_priority` being non-empty — see the
-            // comment on `pending_priority`'s declaration above for why this
-            // is its own branch instead of a loop in the arm above.
-            _ = std::future::ready(()), if !pending_priority.is_empty() => {
-                let ev = pending_priority.pop_front().expect("guarded non-empty");
-                if forward_event(&mut socket, ev).await
-                    || super::ws_resync::report_when_drained(&mut socket, &drops, &priority_rx, &pending_priority).await
-                {
-                    break 'ws;
-                }
-            }
-
-            // Background event lane → WebSocket. Droppable perf telemetry
-            // (sysinfo/blockstats) only; serviced when the priority lanes above
-            // are momentarily idle, so it can never delay a keystroke echo.
-            //
-            // Tradeoff of `biased;`: a SUSTAINED priority-lane flood (`! yes` pumping terminal
-            // output) keeps the priority branches ready, so telemetry queues here until the flood
-            // pauses. The lane is bounded (`BACKGROUND_LANE_CAPACITY`, drop-on-full: see
-            // eventbus.rs), so a starvation long enough to fill it drops new readings instead of
-            // growing commit; fine for ~1/s telemetry. Phase 2: coalesce everything immediately
-            // available to the latest reading per (event-name:scope) key before forwarding, so
-            // the flush is at most 1 sysinfo + 1 blockstats per open block, not a burst of stale
-            // frames the browser processes back-to-back ahead of queued keypresses.
-            // See SPEC_TERMINAL_INPUT_PRIORITY_OVER_SYSINFO_2026_06_16.md §4.2.
-            Some(first_bg) = background_rx.recv() => {
-                let coalesced = coalesce_background(first_bg, &mut background_rx);
-                for ev in coalesced {
-                    if forward_event(&mut socket, ev).await {
-                        break 'ws;
-                    }
-                }
-            }
-
-            // Periodic ping
-            _ = ping_interval.tick() => {
-                if super::ws_resync::report_when_drained(&mut socket, &drops, &priority_rx, &pending_priority).await {
-                    break;
-                }
-                let now = agentmux_common::time::now_ms();
-                let ping = json!({ "type": "ping", "stime": now });
-                let msg = serde_json::to_string(&ping).unwrap_or_default();
-                if socket.send(Message::Text(msg.into())).await.is_err() {
-                    break;
-                }
-            }
+            _ = &mut session_ended => true, // the browser's sign-in ended (logout, idle expiry)
+            msg = conn.socket.recv() => conn.on_client_message(msg).await,
+            Some(rpc_msg) = rpc_output_rx.recv() => conn.on_rpc_output(rpc_msg).await,
+            Some(bus_msg) = next_bus_message(&mut conn.bus_rx) => conn.on_bus_message(bus_msg).await,
+            Some(event) = conn.priority_rx.recv(), if conn.pending_priority.is_empty() => conn.on_priority_event(event).await,
+            _ = std::future::ready(()), if !conn.pending_priority.is_empty() => conn.flush_one_priority().await,
+            Some(first_bg) = conn.background_rx.recv() => conn.on_background_event(first_bg).await,
+            _ = ping_interval.tick() => conn.on_ping_tick().await,
+        };
+        if ended {
+            break;
         }
     }
-
-    tracing::info!(conn_id = %conn_id, "WebSocket client disconnected");
-    state.event_bus.unregister_ws(&conn_id);
-    state.broker.unsubscribe_all(&conn_id);
-    if let Some(r) = crate::backend::notify::router::get(&state.broker) {
-        r.disconnect(&conn_id);
-    }
-
-    // Unregister from messagebus if this connection was an agent
-    if let Some(ref agent_id) = bus_agent_id {
-        state.messagebus.unregister(agent_id);
-    }
+    conn.close();
 }
 
 /// Forward a queued event-bus value to the WebSocket. Returns `true` if the
@@ -1264,3 +1287,7 @@ mod tests {
         assert_eq!(ev["data"]["data"]["data"]["version"], "1.2.3");
     }
 }
+
+#[cfg(test)]
+#[path = "websocket_live_tests.rs"]
+mod live_tests;

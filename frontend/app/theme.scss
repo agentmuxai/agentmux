@@ -346,6 +346,39 @@
     --kanban-stage-merged: var(--process-kind-shells);
     --kanban-stage-released: var(--process-kind-runtimes);
 
+    // The Swarm's tags (element/ui Tag `hue`): a seat's role and a model's family, one colour each, the words
+    // carrying the meaning (docs/specs/SPEC_SWARM_MODEL_AND_SEAT_TAGS_2026_11_20.md §4.2 and §5). Aliases of tokens
+    // every theme already tunes, so a theme overrides one only where two meet or an edge is under 3:1, as
+    // element/ui/tag-hues.test.ts measures (the colours 9 apart in each set, the outline 3:1 against the surfaces).
+    --seat-leader: var(--accent-color);
+    --seat-super: var(--attention-color);
+    --seat-specialist: var(--conn-icon-color-4);
+    --seat-platform-tester: var(--term-bright-yellow);
+    --seat-analyst: var(--info-color);
+    --seat-worker: var(--conn-icon-color-8);
+    --model-fable: var(--conn-icon-color-3);
+    --model-opus: var(--conn-icon-color-6);
+    --model-sonnet: var(--conn-icon-color-5);
+    --model-haiku: var(--conn-icon-color-7);
+    --model-gpt: var(--conn-icon-color-8);
+    --model-gemini: var(--conn-icon-color-2);
+    --model-other: var(--secondary-text-color);
+    // The outline: the colour taken toward the text colour, which keeps it 3:1 on a dark surface; the light
+    // polarity takes it further (below).
+    --seat-leader-edge: color-mix(in srgb, var(--seat-leader) 60%, var(--main-text-color));
+    --seat-super-edge: color-mix(in srgb, var(--seat-super) 60%, var(--main-text-color));
+    --seat-specialist-edge: color-mix(in srgb, var(--seat-specialist) 60%, var(--main-text-color));
+    --seat-platform-tester-edge: color-mix(in srgb, var(--seat-platform-tester) 60%, var(--main-text-color));
+    --seat-analyst-edge: color-mix(in srgb, var(--seat-analyst) 60%, var(--main-text-color));
+    --seat-worker-edge: color-mix(in srgb, var(--seat-worker) 60%, var(--main-text-color));
+    --model-fable-edge: color-mix(in srgb, var(--model-fable) 60%, var(--main-text-color));
+    --model-opus-edge: color-mix(in srgb, var(--model-opus) 60%, var(--main-text-color));
+    --model-sonnet-edge: color-mix(in srgb, var(--model-sonnet) 60%, var(--main-text-color));
+    --model-haiku-edge: color-mix(in srgb, var(--model-haiku) 60%, var(--main-text-color));
+    --model-gpt-edge: color-mix(in srgb, var(--model-gpt) 60%, var(--main-text-color));
+    --model-gemini-edge: color-mix(in srgb, var(--model-gemini) 60%, var(--main-text-color));
+    --model-other-edge: color-mix(in srgb, var(--model-other) 60%, var(--main-text-color));
+
 
     // term colors (16 + 6) form the base terminal theme
     // for consistency these colors should be used by plugins/applications
@@ -772,10 +805,13 @@
 // - Backgrounds stay opaque: fading the alpha-aware `--window-opacity`
 //   backgrounds instead compounds through nested panes. `!important` beats
 //   the inline value AppSettingsUpdater sets.
-// - `opacity` goes on body, not html: a transparent html makes the body's
-//   background propagate to the canvas, which root opacity doesn't fade. So
-//   html and body are transparent and the page background is painted by
-//   body::before, inside the faded group.
+// - `opacity` goes on the app root (`#main`), not on html or body: a transparent html makes the body's background
+//   propagate to the canvas, which root opacity doesn't fade, so html and body are transparent and the page background
+//   is painted by `#main::before`, inside the root, faded with it. What a portal puts directly under body (a menu, a
+//   popover, a window-scope dialog) is outside that group: it is painted opaque and stays opaque over the desktop at
+//   any window opacity (#48092). A dialog with scope "tab" or "pane" is mounted inside the tab or pane, under `#main`,
+//   so it fades with the window, as it did under the whole-window alpha; mounting those outside the group is a
+//   separate change.
 :root.am-uniform-fade {
     --window-opacity: 1 !important;
     --am-window-fade: 1; // the host's inline value wins
@@ -783,16 +819,30 @@
 
     body {
         background: transparent !important;
-        opacity: var(--am-window-fade);
     }
 
-    body::before {
-        content: "";
-        @include mixins.fixed-fill;
-        z-index: var(--z-behind);
-        pointer-events: none;
-        background: var(--main-bg-color);
+    // One group: the page background is painted inside the app root, behind its children, so the root's opacity fades the
+    // background and the panes together, once. Two separately faded layers (the background on body, the panes in the
+    // root) compound: at 35% the window came out 57% opaque, at 65% 88% (Linux look check on #48092).
+    #main {
+        opacity: var(--am-window-fade);
+
+        &::before {
+            content: "";
+            @include mixins.fixed-fill;
+            z-index: var(--z-behind);
+            pointer-events: none;
+            background: var(--main-bg-color);
+        }
     }
+}
+
+// The list a native `<select>` opens is a drop-down: it paints the options' own background, and a select's
+// background follows the window opacity, so without this a drop-down shows the desktop (#48092).
+select option,
+select optgroup {
+    background-color: var(--modal-bg-color);
+    color: var(--main-text-color);
 }
 
 // The default theme (no `data-theme`): its terminal blue is 2.68:1 on its
@@ -807,6 +857,20 @@
 // Light-family override for the `color-scheme` fix above — same marker
 // window-controls.win32.scss already uses for dark/light chrome decisions.
 [data-theme-polarity="light"] {
+    // The Swarm's tag outlines, deeper toward the text colour on a light surface (element/ui/tag-hues.test.ts).
+    --seat-leader-edge: color-mix(in srgb, var(--seat-leader) 40%, var(--main-text-color));
+    --seat-super-edge: color-mix(in srgb, var(--seat-super) 40%, var(--main-text-color));
+    --seat-specialist-edge: color-mix(in srgb, var(--seat-specialist) 40%, var(--main-text-color));
+    --seat-platform-tester-edge: color-mix(in srgb, var(--seat-platform-tester) 40%, var(--main-text-color));
+    --seat-analyst-edge: color-mix(in srgb, var(--seat-analyst) 40%, var(--main-text-color));
+    --seat-worker-edge: color-mix(in srgb, var(--seat-worker) 40%, var(--main-text-color));
+    --model-fable-edge: color-mix(in srgb, var(--model-fable) 40%, var(--main-text-color));
+    --model-opus-edge: color-mix(in srgb, var(--model-opus) 40%, var(--main-text-color));
+    --model-sonnet-edge: color-mix(in srgb, var(--model-sonnet) 40%, var(--main-text-color));
+    --model-haiku-edge: color-mix(in srgb, var(--model-haiku) 40%, var(--main-text-color));
+    --model-gpt-edge: color-mix(in srgb, var(--model-gpt) 40%, var(--main-text-color));
+    --model-gemini-edge: color-mix(in srgb, var(--model-gemini) 40%, var(--main-text-color));
+    --model-other-edge: color-mix(in srgb, var(--model-other) 40%, var(--main-text-color));
     color-scheme: light;
     // A light page takes a lighter shadow, as VS Code's widget shadow does.
     --menu-shadow: 0 8px 24px rgba(0, 0, 0, 0.25), 0 1px 3px rgba(0, 0, 0, 0.18);

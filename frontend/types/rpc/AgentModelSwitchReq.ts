@@ -13,4 +13,14 @@ model: string,
  * Restart the agent's panes (at the end of a turn in progress). The caller that goes on to change the
  * harness's own model itself leaves it out, so there is one restart and not two.
  */
-restart: boolean, };
+restart: boolean, 
+/**
+ * Start a new session on the new model instead of resuming the conversation: each pane ends its session when its
+ * turn ends, and a first message (the move, and `handoff`) starts the new one. A conversation written by another
+ * model can send a new one into a loop of thinking, which resuming it does not avoid. Wins over `restart`.
+ */
+fresh: boolean, 
+/**
+ * With `fresh`: what the next session must know, in its first message. Empty: it reads its task list.
+ */
+handoff: string | null, };

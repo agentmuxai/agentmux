@@ -139,7 +139,7 @@ mod bulletin_handlers;
 mod quota_mode_handler;
 mod agent_status_handlers;
 mod work_claims_handlers;
-mod work_facts_handlers;
+pub(crate) mod work_facts_handlers;
 mod containers_handler;
 mod message_flow_handler;
 mod message_stats_handler;
@@ -247,6 +247,12 @@ mod http_skill_tests;
 #[cfg(test)]
 #[path = "tests/peer_veto_tests.rs"]
 mod peer_veto_tests;
+#[cfg(test)]
+#[path = "tests/mcp_actor_tests.rs"]
+mod mcp_actor_tests;
+#[cfg(test)]
+#[path = "tests/person_only_ws_tests.rs"]
+mod person_only_ws_tests;
 #[cfg(test)]
 #[path = "tests/rpc_attribution_tests.rs"]
 mod rpc_attribution_tests;

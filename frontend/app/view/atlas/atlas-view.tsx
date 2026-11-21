@@ -11,7 +11,8 @@
  * has its container as a frame round it, and the review bot and CI are nodes of their own (atlas-extras.tsx).
  */
 
-import { seatBadgeText, seatTooltipLine } from "@/app/agent-model/seat-format";
+import { seatTooltipLine } from "@/app/agent-model/seat-format";
+import { SeatTag } from "@/app/agent-model/seat-tag";
 import { tip } from "@/app/element/tip";
 import { Button, CloseButton, IconButton, SegmentedControl } from "@/app/element/ui";
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
@@ -115,7 +116,9 @@ function Node(props: {
                 </Show>
             </span>
             <span class="atlas-node__sub">
-                {a().seat ? seatBadgeText(a().seat!) : STATE_LABELS[a().state]}
+                <Show when={a().seat} fallback={STATE_LABELS[a().state]}>
+                    {(seat) => <SeatTag seat={seat()} size="xs" class="atlas-node__seat" />}
+                </Show>
             </span>
         </div>
     );

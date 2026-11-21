@@ -47,7 +47,8 @@ retaken when the UI changes. The design and the reasons behind it are in
 | Script | What it does |
 |---|---|
 | `capture.mjs --suite <name>` | Takes one suite's screenshots: `widgets`, `chrome`, `agent`, `memory` (and `manual`, the first run). `landing` holds shots only agentmux.ai uses. `sysinfo` takes every plot of the Sysinfo pane for the docs' System Metrics page: it starts a little local load, waits two minutes for the plots to fill, and drops the AppImage mount points from the Advanced Disk plot's volume list. |
-| `record.mjs` | Records the clips in `recordings.mjs` as GIF (and `--formats webp,mp4`). Needs ffmpeg. |
+| `record.mjs` | Records the clips in `recordings.mjs` from frames captured at twice the page's size: an H.264 file as large as the capture (or its crop) at 30 fps, plus a WebP poster of the last frame (`--formats mp4,poster`; `gif` and `webp` are opt-in, capped at 1440 px and 15 fps unless `--width` says otherwise). A clip under 1080 lines, or one that would have to be enlarged, fails instead of being written. Needs ffmpeg. |
+| `check-crisp.mjs --run <dir>` / `--dir <folder>` | Fails a screenshot or clip that is not crisp: captured under scale 2, not its CSS size times the scale, a video under 1080 lines, or an image under twice its slot's width. |
 | `publish.mjs --docs <clone> --from <run>...` | Copies a run's images over the docs' files of the same name. `--dry-run` shows what would change. |
 | `publish.mjs --landing <clone> --from <run>...` | Encodes the files the landing site's manifest lists (`publish-landing.mjs`). Each entry names its source: `{ "file": "ui-agent.webp", "shot": "agent-conversation", "width": 960 }`, with `size` for a shot taken at several sizes, or `{ "file": "x.mp4", "clip": "<id>", "poster": "x-poster.webp" }`. |
 | `refresh.mjs` | All of the above, in order. |

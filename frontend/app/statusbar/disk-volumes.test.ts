@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { diskFreeColor, diskPillLabel, diskTooltip, formatDiskGb, parseDiskVolumes, watchVolumeColor } from "./disk-volumes";
+import { diskFreeColor, diskPillLabel, diskTooltip, formatDiskFreeShort, formatDiskGb, parseDiskVolumes, watchVolumeColor } from "./disk-volumes";
 
 describe("diskPillLabel", () => {
     it("says the figure is what is free, so it cannot be read as 'used'", () => {
@@ -16,6 +16,55 @@ describe("diskPillLabel", () => {
         expect(diskPillLabel(6.2)).toBe("Disk 6% free");
         expect(watchVolumeColor(6.2, null)).toBe("var(--error-text-color)");
         expect(watchVolumeColor(98, null)).toBe("var(--secondary-text-color)");
+    });
+});
+
+describe("diskPillLabel with the free amount", () => {
+    it("reads 'Disk 13%/45GB free' when the free bytes are known", () => {
+        expect(diskPillLabel(13.2, 45.3)).toBe("Disk 13%/45GB free");
+        expect(diskPillLabel(99.6, 8.44)).toBe("Disk 100%/8.4GB free");
+        expect(diskPillLabel(2, 1234)).toBe("Disk 2%/1.2TB free");
+    });
+
+    it("reads as before, with no slash, where only a percent is known", () => {
+        expect(diskPillLabel(13.2, null)).toBe("Disk 13% free");
+        expect(diskPillLabel(13.2, undefined)).toBe("Disk 13% free");
+        expect(diskPillLabel(13.2, Number.NaN)).toBe("Disk 13% free");
+    });
+
+    it("keeps the colour on the percent (the thresholds are unchanged), whatever the amount", () => {
+        expect(watchVolumeColor(7.9, null)).toBe("var(--error-text-color)");
+        expect(watchVolumeColor(14.9, null)).toBe("var(--warning-text-color)");
+    });
+});
+
+describe("formatDiskFreeShort", () => {
+    it.each([
+        [45, "45GB"],
+        [45.4, "45GB"],
+        [45.5, "46GB"],
+        [10, "10GB"],
+        [9.96, "10GB"],
+        [9.94, "9.9GB"],
+        [8.44, "8.4GB"],
+        [1, "1.0GB"],
+        [0.04, "0.0GB"],
+        [0, "0.0GB"],
+        [-3, "0.0GB"],
+        [999, "999GB"],
+        [999.4, "999GB"],
+        [999.6, "1.0TB"],
+        [1000, "1.0TB"],
+        [1024, "1.0TB"],
+        [1234, "1.2TB"],
+        [12000, "11.7TB"],
+    ])("%s GB reads %s", (gb, text) => {
+        expect(formatDiskFreeShort(gb)).toBe(text);
+    });
+
+    it("counts in the same units as the drive panel and the low-disk notice (1024 per TB)", () => {
+        expect(formatDiskFreeShort(2048)).toBe("2.0TB");
+        expect(formatDiskGb(2048)).toBe("2.0T");
     });
 });
 

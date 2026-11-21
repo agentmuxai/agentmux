@@ -17,7 +17,7 @@ import { openMediaInEditor } from "@/app/element/markdown-media";
 import { createSignal, For, type JSX } from "solid-js";
 import type { ResultImage } from "../providers/claude-translator";
 import { tip } from "@/app/element/tip";
-import { useAgentMedia } from "../agent-media";
+import { mediaForRow, useAgentMedia } from "../agent-media";
 
 /** A raster or SVG image type: anything else is not put in a data URL. */
 const IMAGE_TYPE_RE = /^image\/[a-z0-9.+-]+$/i;
@@ -36,10 +36,10 @@ export function resultImagesOf(result: unknown): ResultImage[] {
     );
 }
 
-function ResultImageView(props: { image: ResultImage; path?: string; width?: number; height?: number }): JSX.Element {
+function ResultImageView(props: { image: ResultImage; path?: string; width?: number; height?: number; fromContainer?: boolean }): JSX.Element {
     const [full, setFull] = createSignal(false);
     // In a container agent's pane the file is opened by srv from the agent's own folders, not as a path here.
-    const media = useAgentMedia();
+    const media = mediaForRow(useAgentMedia(), () => props.fromContainer);
     return (
         <img
             class="agent-tool-image"
@@ -67,6 +67,8 @@ export function ResultImages(props: {
     /** The image's dimensions, when the result says (only for one image). */
     width?: number;
     height?: number;
+    /** A container agent may have written the row (`mediaForRow`). */
+    fromContainer?: boolean;
 }): JSX.Element {
     return (
         <div class="agent-tool-images">
@@ -75,6 +77,7 @@ export function ResultImages(props: {
                     <ResultImageView
                         image={image}
                         path={props.path}
+                        fromContainer={props.fromContainer}
                         width={props.images.length === 1 ? props.width : undefined}
                         height={props.images.length === 1 ? props.height : undefined}
                     />

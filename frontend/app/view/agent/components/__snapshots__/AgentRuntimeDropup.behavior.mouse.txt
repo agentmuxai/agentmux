@@ -69,6 +69,7 @@ trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-densi
   - high {current}
   - xhigh {}
   - max {}
+  - Start a fresh session / Off: the next model change resumes the conversation on the new model {}
 patchRuntime(block-1, claude, {"model":"opus"}, undefined) meta=undefined
 patchRuntime(block-1, claude, {"effort":"max"}, undefined) meta=undefined
 -- clicked Opus and max
@@ -94,6 +95,7 @@ trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-densi
   - high {current}
   - xhigh {}
   - max {active}
+  - Start a fresh session / Off: the next model change resumes the conversation on the new model {}
 -- Haiku selected: effort rows are shown but cannot be picked
 trigger "Default · Haiku 5.5" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--main-text-color)
   title: Mode / Model / Effort — applies on the next turn
@@ -117,6 +119,7 @@ trigger "Default · Haiku 5.5" class=[ui-button ui-tone-neutral ui-density-compa
   - high {current,disabled}
   - xhigh {disabled}
   - max {disabled}
+  - Start a fresh session / Off: the next model change resumes the conversation on the new model {}
 -- clicking a disabled row does nothing
 trigger "Default · Haiku 5.5" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--main-text-color)
   title: Mode / Model / Effort — applies on the next turn
@@ -140,3 +143,4 @@ trigger "Default · Haiku 5.5" class=[ui-button ui-tone-neutral ui-density-compa
   - high {current,disabled}
   - xhigh {disabled}
   - max {disabled}
+  - Start a fresh session / Off: the next model change resumes the conversation on the new model {}

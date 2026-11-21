@@ -1,10 +1,11 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{ProviderConfig, ControllerType};
+use super::{Tier, ProviderConfig, ControllerType};
 
 pub(super) static OPENCLAW: ProviderConfig = ProviderConfig {
     id: "openclaw",
+    tier: Tier::Preview,
     // `openclaw acp` runs OpenClaw's ACP bridge — speaks ACP over stdio
     // for IDE/tool clients (us) and forwards turns to the local
     // OpenClaw Gateway over WebSocket. The Gateway is OpenClaw's own

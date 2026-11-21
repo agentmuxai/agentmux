@@ -82,7 +82,20 @@ pub fn tail_lines(
 ) -> Result<TailLines, String> {
     let mut found = unvetted_tail_lines(mstore, filestore, block_id, requested)?;
     let owner = crate::backend::transcript::origin_sig::owner_for_block(mstore, block_id);
-    crate::backend::transcript::origin_sig::vet_lines(&owner, &mut found.lines);
+    crate::backend::transcript::attribution::vet_for_viewer(mstore, filestore, &owner, &mut found.lines);
+    Ok(found)
+}
+
+/// [`tail_lines`] for a reader that is not the agent itself (another agent, a device): a value srv holds secret is
+/// replaced by `withhold::MARK` in the lines it gets, whenever the line was stored.
+pub fn tail_lines_for_readers(
+    mstore: &Arc<Store>,
+    filestore: &Arc<FileStore>,
+    block_id: &str,
+    requested: usize,
+) -> Result<TailLines, String> {
+    let mut found = tail_lines(mstore, filestore, block_id, requested)?;
+    crate::backend::transcript::withhold::in_place(&mut found.lines);
     Ok(found)
 }
 

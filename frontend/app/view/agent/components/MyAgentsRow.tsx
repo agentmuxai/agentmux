@@ -6,7 +6,7 @@
 // MyAgentsRowPanel.tsx.
 
 import { Tooltip } from "@/app/element/tooltip";
-import { Button, IconButton, Pill, Tag } from "@/app/element/ui";
+import { Button, IconButton, Tag } from "@/app/element/ui";
 import { hasProcess } from "@/app/store/agent-runtime";
 import { DualProviderLogo } from "@/element/DualProviderLogo";
 import type { RecentSessionRow } from "@/types/rpc/RecentSessionRow";
@@ -14,7 +14,8 @@ import { formatTimeAgo } from "@/util/format-time";
 import { parseRuntimeKind } from "@/util/runtime-kind";
 import clsx from "clsx";
 import { Show, type Accessor, type JSX } from "solid-js";
-import { seatBadgeText, seatReportsLine, seatTooltipLine } from "../../../agent-model/seat-format";
+import { seatReportsLine, seatTooltipLine } from "../../../agent-model/seat-format";
+import { SeatTag } from "../../../agent-model/seat-tag";
 import { resolveEffectiveVendor } from "../providers/catalog";
 import { AgentRuntimeChip } from "./AgentRuntimeChip";
 import { noPreviewText } from "./my-agents-list-text";
@@ -148,9 +149,7 @@ function RowBadges({ s }: { s: RowState }) {
             </Show>
             <Show when={row.seat}>
                 {(seat) => (
-                    <Pill class="agent-seat-badge" title={seatTooltipLine(seat())}>
-                        {seatBadgeText(seat())}
-                    </Pill>
+                    <SeatTag class="agent-seat-badge" seat={seat()} title={seatTooltipLine(seat())} />
                 )}
             </Show>
         </>

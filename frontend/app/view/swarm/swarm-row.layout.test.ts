@@ -41,7 +41,7 @@ function row(id: string, width: number, parked: boolean): string {
 <span class="swarm-agent-expand-spacer"></span>
 <span class="swarm-agent-icon"><i style="display:inline-block;width:14px;height:14px;background:#888"></i></span>
 <span class="swarm-agent-label">Quill</span>
-<span class="swarm-seat-slot"><span class="ui-pill swarm-seat-badge">Worker</span></span>
+<span class="swarm-seat-slot"><span class="ui-tag ui-tag--seat-worker swarm-seat-badge"><span class="ui-tag-sr">Seat </span>Worker</span></span>
 ${mark}
 <span class="swarm-ctx-size">63k</span>
 <span class="swarm-last-active">1m ago</span>
@@ -59,8 +59,8 @@ const fits = (el, whole) => {
   if (!el || getComputedStyle(el).display === 'none') return false;
   const w = whole.getBoundingClientRect();
   if (w.width <= 0) return false;
-  const r = document.createRange(); r.selectNodeContents(el);
-  const rects = [...r.getClientRects()].filter((x) => x.width > 0);
+  // What is seen: the hidden lead word of a tag (.ui-tag-sr, 1px, kept 1px outside by its margin) is not.
+  const rects = [...el.childNodes].filter((n) => !(n.nodeType === 1 && n.classList.contains('ui-tag-sr'))).flatMap((n) => { const r = document.createRange(); r.selectNode(n); return [...r.getClientRects()]; }).filter((x) => x.width > 0);
   return rects.length > 0 && rects.every((x) => x.left >= w.left - 0.5 && x.right <= w.right + 0.5 && x.top >= w.top - 0.5 && x.bottom <= w.bottom + 0.5);
 };
 const result = {};

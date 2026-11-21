@@ -1,10 +1,11 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{ProviderConfig, ControllerType, AppServerConfig, AppServerKind};
+use super::{Tier, ProviderConfig, ControllerType, AppServerConfig, AppServerKind};
 
 pub(super) static CODEX: ProviderConfig = ProviderConfig {
     id: "codex",
+    tier: Tier::FirstClass,
     cli_command: "codex",
     controller_type: ControllerType::Subprocess,
     app_server: Some(AppServerConfig {

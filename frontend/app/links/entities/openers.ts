@@ -45,7 +45,16 @@ export function openUrlEntity(url: string, options: OpenOptions): Promise<OpenRe
     });
 }
 
-/** The agent destination ships with the deep-links framework; until then an agent link is drawn and says so. */
-export function openAgentEntity(_dest: Extract<Destination, { kind: "agent" }>): Promise<OpenResult> {
-    return Promise.resolve({ ok: false, reason: "Opening an agent from text is not available yet" });
+/** An agent of this computer: its pane is shown, or opened, as the palette and the Swarm do. An agent of another
+ *  computer waits for the deep-links framework's remote pane. */
+export function openAgentEntity(dest: Extract<Destination, { kind: "agent" }>): Promise<OpenResult> {
+    return attempt(async () => {
+        const { getHostName } = await import("@/app/store/misc-utils");
+        const here = getHostName().toLowerCase();
+        if (dest.computer && here && dest.computer.toLowerCase() !== here) {
+            throw new Error("That agent runs on another computer");
+        }
+        const { goToAgent } = await import("@/app/modals/palette-agents");
+        await goToAgent({ agent_id: dest.id, name: dest.name });
+    });
 }

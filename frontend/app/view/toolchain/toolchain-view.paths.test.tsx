@@ -866,7 +866,7 @@ describe("the filter", () => {
         await mount();
         fireEvent.input(filterBox(), { target: { value: "lmstudio" } });
         expect(screen.getByRole("heading", { name: "Local models" })).toBeInTheDocument();
-        for (const name of ["Core tools", "Agent CLIs", "External widgets"]) {
+        for (const name of ["Core tools", "Agent CLIs", "Preview agent CLIs", "External widgets"]) {
             expect(screen.queryByRole("heading", { name })).toBeNull();
         }
         expect(screen.queryByRole("group", { name: "Core tools" })).toBeNull();
@@ -1171,11 +1171,18 @@ describe("the view", () => {
         expect((container.querySelector(".toolchain-view") as HTMLElement).style.zoom).toBe("1");
     });
 
-    it("shows the disk-space section and the four groups in order", async () => {
+    it("shows the disk-space section and the groups in order, preview agent CLIs after the first-class ones", async () => {
         await mount();
         expect(screen.getByTestId("cli-disk-space")).toBeInTheDocument();
         const headings = screen.getAllByRole("heading", { level: 4 }).map((el) => el.textContent);
-        expect(headings).toEqual(["Environment", "Core tools", "Local models", "Agent CLIs", "External widgets"]);
+        expect(headings).toEqual([
+            "Environment",
+            "Core tools",
+            "Local models",
+            "Agent CLIs",
+            "Preview agent CLIs",
+            "External widgets",
+        ]);
         const core = within(screen.getByRole("group", { name: "Core tools" }));
         expect(core.getAllByRole("button", { name: /,/ }).map((b) => b.getAttribute("data-tool"))).toEqual([
             "node",

@@ -159,7 +159,9 @@ describe("Swarm seats", () => {
         const { container } = setup(null);
         const row = container.querySelector<HTMLElement>('[data-swarm-key="b-camper"]')!;
         const badge = row.querySelector(".swarm-seat-badge")!;
-        expect(badge.textContent).toBe("Leader · product");
+        // The words, led by the hidden "Seat " a screen reader says, in the leader's colour.
+        expect(badge.textContent).toBe("Seat Leader · product");
+        expect(badge.classList.contains("ui-tag--seat-leader")).toBe(true);
         expect(badge.getAttribute("title")).toBe("Leader · product — reports to the operator — agent pane, identity");
         // The row lays out the badge's slot, which comes right after the name.
         const slot = badge.parentElement!;
@@ -193,7 +195,7 @@ describe("Swarm seats", () => {
         };
         const { container, children } = setup("lead", seated);
         const far = container.querySelector<HTMLElement>('[data-swarm-key*="Far"]')!;
-        expect(far.querySelector(".swarm-seat-badge")!.textContent).toBe("Leader · product");
+        expect(far.querySelector(".swarm-seat-badge")!.textContent).toBe("Seat Leader · product");
         expect(far.querySelector(".swarm-seat-badge")!.getAttribute("title")).toBe(
             "Leader · product — reports to the operator — builds"
         );

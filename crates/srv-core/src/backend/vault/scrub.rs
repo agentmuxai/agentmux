@@ -84,7 +84,8 @@ fn percent_encode(s: &str) -> String {
     out
 }
 
-fn forms(value: &str) -> Vec<String> {
+/// A value and its other ordinary spellings (base64, URL-encoded, hex, as JSON holds it).
+pub(crate) fn forms(value: &str) -> Vec<String> {
     let engines = [
         base64::engine::general_purpose::STANDARD,
         base64::engine::general_purpose::STANDARD_NO_PAD,

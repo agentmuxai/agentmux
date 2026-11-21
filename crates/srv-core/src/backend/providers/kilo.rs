@@ -1,13 +1,14 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{ControllerType, ProviderConfig};
+use super::{Tier, ControllerType, ProviderConfig};
 
 // Kilo Code CLI, an OpenCode fork: `kilo acp` speaks ACP over stdio and runs
 // signed out on Kilo Gateway's free models. Checked against 7.8.8 on
 // 2026-10-14 (SPEC_NINE_NEW_HARNESSES_2026_10_14.md §7.2).
 pub(super) static KILO: ProviderConfig = ProviderConfig {
     id: "kilo",
+    tier: Tier::Preview,
     cli_command: "kilo",
     controller_type: ControllerType::Acp,
     app_server: None,

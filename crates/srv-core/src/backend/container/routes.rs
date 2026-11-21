@@ -37,6 +37,7 @@ mod tests {
             ("/agentmux/reactive/poller/config", "for the AgentMux app itself"),
             ("/api/messaging/discord/send", "for the AgentMux app itself"),
             ("/agentmux/service", "generic gateway"),
+            ("/ws", "generic gateway"),
             ("/agentmux/stream-local-file", "reads files on the host"),
             ("/api/v1/agent/self/upgrade", "replaces the app"),
             ("/api/v1/agent/globalmemory/write", "read it but not change it"),

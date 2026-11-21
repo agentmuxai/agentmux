@@ -32,6 +32,7 @@ import {
     ToolResultSource,
     UserMessageEvent,
 } from "../../agent-model/types";
+import type { WriterTag } from "../../agent-model/node-types";
 import { buildMemoryReinjectionNodeFromReplay, isCatchUpMessage } from "./memory-reinjection";
 import { splitAttachedImages } from "./attachments/attached-images";
 import { parseCliTurn } from "../../agent-model/cli-wrappers";
@@ -366,7 +367,7 @@ export class ClaudeCodeStreamParser {
 
                     try {
                         const event = JSON.parse(line) as StreamEvent;
-                        const node = this.eventToNode(event);
+                        const node = this.markedNode(event);
                         // Released jekts first: they arrived before this event.
                         yield* this.drainReleased();
                         if (node) yield node;
@@ -393,7 +394,7 @@ export class ClaudeCodeStreamParser {
 
         try {
             const event = JSON.parse(line) as StreamEvent;
-            return this.eventToNode(event);
+            return this.markedNode(event);
         } catch (err) {
             console.error("Failed to parse NDJSON line:", line, err);
             return null;
@@ -405,7 +406,7 @@ export class ClaudeCodeStreamParser {
      * Returns array of nodes since some events may generate multiple nodes
      */
     async parseEvent(event: any): Promise<DocumentNode[]> {
-        const node = this.eventToNode(event as StreamEvent);
+        const node = this.markedNode(event as StreamEvent);
         // Released jekts first: they arrived before this event.
         const released = this.drainReleased();
         return node ? [...released, node] : released;
@@ -417,7 +418,7 @@ export class ClaudeCodeStreamParser {
      * content grows with each call).
      */
     parseStreamEvent(event: StreamEvent): DocumentNode | null {
-        return this.eventToNode(event);
+        return this.markedNode(event);
     }
 
     /**
@@ -475,6 +476,29 @@ export class ClaudeCodeStreamParser {
         if (this.heldJekts.length === 0) return;
         this.releasedJekts.push(...this.heldJekts);
         this.heldJekts = [];
+    }
+
+    private fromContainer = false;
+
+    /** `group` marked as `markedNode` does: a jekt held for an open block is released later, when this record is no longer the one parsed. */
+    private markedGroup(group: DocumentNode[]): DocumentNode[] {
+        if (this.fromContainer) for (const n of group) (n as WriterTag).fromContainer = true;
+        return group;
+    }
+
+    /** [`eventToNode`], the row it makes marked when the record being parsed was a container agent's. */
+    private markedNode(event: StreamEvent): DocumentNode | null {
+        const node = this.eventToNode(event);
+        if (this.fromContainer && node) (node as WriterTag).fromContainer = true;
+        return node;
+    }
+
+    /**
+     * Whether the record about to be parsed was written by a container agent (`writtenInContainer`): the nodes it
+     * makes are marked `fromContainer`. Callers set it before each record and clear it after, as `setSourceLine`.
+     */
+    setFromContainer(fromContainer: boolean): void {
+        this.fromContainer = fromContainer;
     }
 
     /**
@@ -540,7 +564,7 @@ export class ClaudeCodeStreamParser {
                     this.currentThinkingNode = null;
                     return null;
                 }
-                const group = this.userMessageToNodes(event as UserMessageEvent);
+                const group = this.markedGroup(this.userMessageToNodes(event as UserMessageEvent));
                 // A turn of CLI wrappers with no text has nothing to show.
                 if (group.length === 0) return null;
                 const node = group[0];

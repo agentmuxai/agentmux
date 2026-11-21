@@ -37,6 +37,9 @@ const CONTROLLER: Record<string, string> = {
     Terminal: "terminal",
 };
 
+/** srv's `Tier` variant → the catalog's `tier`. */
+const TIER: Record<string, string> = { FirstClass: "first_class", Preview: "preview" };
+
 /** `companion_npm_packages`'s match arms: provider id → `{ name, version }[]`. */
 function srvCompanions(): Map<string, { name: string; version: string }[]> {
     const fn = providersRs.match(/pub fn companion_npm_packages\(&self\)[^{]*\{([\s\S]*?)\n    \}/);
@@ -69,6 +72,12 @@ describe("srv ProviderConfig and the frontend catalog agree", () => {
         expect(statics.map((s) => s.id).sort()).toEqual(Object.keys(PROVIDERS).sort());
     });
 
+    it("at most ten harnesses are first-class, and each has a tier", () => {
+        const firstClass = Object.values(PROVIDERS).filter((p) => p.tier === "first_class");
+        expect(firstClass.length, `first-class: ${firstClass.map((p) => p.id).join(", ")}`).toBeLessThanOrEqual(10);
+        for (const p of Object.values(PROVIDERS)) expect(["first_class", "preview"], `${p.id} has no tier`).toContain(p.tier);
+    });
+
     it("srv names no companion package or prompt flag for a provider the catalog lacks", () => {
         for (const id of [...companions.keys(), ...promptFlags.keys()]) {
             expect(PROVIDERS[id], `srv names ${id}, which the catalog does not define`).toBeTruthy();
@@ -78,6 +87,12 @@ describe("srv ProviderConfig and the frontend catalog agree", () => {
     for (const p of statics) {
         describe(p.id, () => {
             const ts = PROVIDERS[p.id];
+
+            it("tier", () => {
+                const variant = srvField(p, "tier").match(/^Tier::(\w+)$/)?.[1] ?? "";
+                expect(TIER[variant], `tier ${variant} has no catalog name: add it to TIER`).toBeTruthy();
+                expect(ts.tier, "tier").toBe(TIER[variant]);
+            });
 
             it("command and controller", () => {
                 expect(ts.cliCommand, "cliCommand").toBe(srvString(srvField(p, "cli_command")));

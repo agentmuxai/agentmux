@@ -1040,6 +1040,14 @@ jobs:
       - name: Bundled tools gate
         run: bash scripts/check-bundled-tools.sh
 
+      # The Taskfile reads cargo's output only through {{.TARGET_DIR}} (CARGO_TARGET_DIR when set): a literal
+      # target/release made a Windows build with its target dir on another drive fail at the copy step after
+      # 36 minutes (#48305). The gate, then the cases that make it fail.
+      - name: Taskfile target-dir gate
+        run: |
+          bash scripts/check-taskfile-target-dir.sh
+          bash scripts/check-taskfile-target-dir.test.sh
+
       # scripts/cef-verify.sh is the carry-set gate for the CEF fork
       # (docs/cef-build/CEF_FORK_MAINTENANCE.md §5). It runs against a CEF
       # checkout, which CI does not have -- so what runs here is its TEST SUITE,

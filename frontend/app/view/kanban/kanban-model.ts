@@ -15,6 +15,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 
 import { viewOfBoard } from "./kanban-boards";
+import { publishBoardTasks } from "./kanban-links";
 import type { KanbanActRequest, KanbanActResult, KanbanBoard, KanbanTask, KanbanTaskDetail } from "./kanban-types";
 
 const POLL_MS = 15_000;
@@ -111,6 +112,7 @@ export class KanbanModel {
             // Every board's tasks in one answer: the pane shows one, and counts what needs the operator on each.
             const board = await RpcApi.KanbanListCommand(TabRpcClient, { board: "all" });
             this.setBoard(keepUnchanged(this.everything(), board));
+            publishBoardTasks(board);
             this.setError(null);
         } catch (e) {
             this.setError(`Couldn't load the Kanban: ${String((e as Error)?.message ?? e)}`);
