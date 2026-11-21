@@ -20,7 +20,7 @@ vi.mock("@/app/store/agent-names", async () => {
     const [agentRoster, setRoster] = createSignal<{ id: string; slug: string; name: string }[]>([]);
     return { followAgentNames: () => {}, agentRoster, setRoster };
 });
-vi.mock("@/app/store/misc-utils", () => ({ getHostName: () => "narko" }));
+vi.mock("@/app/store/srv-info", () => ({ srvInfo: () => ({ hostName: "narko" }) }));
 vi.mock("@/app/store/float-modifier", () => ({ takeFloatRequest: () => false }));
 vi.mock("@/app/element/link-open", () => ({ onLinkClick: () => {}, onLinkAuxClick: () => {} }));
 vi.mock("@/app/links/entities/registry", async (orig) => ({
@@ -111,9 +111,9 @@ describe("a card's words are links", () => {
 
     it("keeps the title as it was when the roster and the board name nothing in it", () => {
         setRoster([]);
-        const { container } = render(() => <KanbanCard task={task("Opaz #999999")} now={2} agents={[]} onOpen={vi.fn()} />);
+        const { container } = render(() => <KanbanCard task={task("Opaz #12")} now={2} agents={[]} onOpen={vi.fn()} />);
         expect(container.querySelectorAll(".kanban-card__text a")).toHaveLength(0);
-        expect(container.querySelector(".kanban-card__text")?.textContent?.trim()).toBe("Opaz #999999");
+        expect(container.querySelector(".kanban-card__text")?.textContent?.trim()).toBe("Opaz #12");
     });
 });
 

@@ -9,7 +9,7 @@ const ctx = testContext();
 
 describe("a Markdown label that looks like another entity (spec §6.2)", () => {
     it("flags an agent's name pointing at a web page", () => {
-        expect(deceptiveLabel("Opaz", "https://example.test", ctx)).toEqual({ kind: "agent", id: "opaz-0909m" });
+        expect(deceptiveLabel("Opaz", "https://example.test", ctx)).toEqual({ kind: "agent", id: "opaz-0909m", name: "Opaz" });
     });
     it("flags an address label whose href is another address, and a task label pointing elsewhere", () => {
         expect(deceptiveLabel("https://example.com/a", "https://evil.test/a", ctx)).toEqual({ kind: "url", url: "https://example.com/a" });

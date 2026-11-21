@@ -6,23 +6,30 @@
  * the two indexes, which come from the window's roster and the published tasks, never from the surface.
  */
 
-import { createMemo, createRoot } from "solid-js";
+import { type Accessor, createMemo, createRoot } from "solid-js";
 import { agentRoster } from "@/app/store/agent-names";
-import { getHostName } from "@/app/store/misc-utils";
+import { srvInfo } from "@/app/store/srv-info";
 import { buildAgentIndex } from "./entities/indexes";
-import type { Author, LinkContext } from "./entities/types";
+import type { AgentIndex, Author, LinkContext } from "./entities/types";
 import { taskIndex } from "./task-index-store";
 
 let agentVersion = 0;
 
-/** Rebuilt only when the roster changes; every surface reads the same index. */
-const agentIndex = createRoot(() =>
-    createMemo(() => {
-        agentVersion += 1;
-        const entries = agentRoster().map((a) => ({ id: a.id, slug: a.slug ?? "", name: a.name ?? "" }));
-        return buildAgentIndex(entries, { localComputer: getHostName().toLowerCase() || undefined, version: agentVersion });
-    })
-);
+let agentIndex: Accessor<AgentIndex> | undefined;
+
+/** Rebuilt only when the roster changes; every surface reads the same index. Made on first use, so a window that
+ *  never links anything never reads the roster. */
+function sharedAgentIndex(): AgentIndex {
+    agentIndex ??= createRoot(() =>
+        createMemo(() => {
+            agentVersion += 1;
+            const entries = agentRoster().map((a) => ({ id: a.id, slug: a.slug ?? "", name: a.name ?? "" }));
+            const host = srvInfo()?.hostName?.toLowerCase();
+            return buildAgentIndex(entries, { localComputer: host || undefined, version: agentVersion });
+        })
+    );
+    return agentIndex();
+}
 
 /** What a surface knows: the repository and board of the thing it shows, who wrote the text, and whether it is complete. */
 export type SurfaceContext = { author?: Author; repo?: string; board?: string; final?: boolean };
@@ -31,7 +38,7 @@ export type SurfaceContext = { author?: Author; repo?: string; board?: string; f
 export function linkContext(surface: SurfaceContext = {}): LinkContext {
     return {
         author: surface.author ?? { kind: "app" },
-        agents: agentIndex(),
+        agents: sharedAgentIndex(),
         tasks: taskIndex(),
         repo: surface.repo,
         board: surface.board,

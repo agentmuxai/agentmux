@@ -17,7 +17,7 @@ vi.mock("@/app/store/agent-names", async () => {
     const [agentRoster, setRoster] = createSignal<Entry[]>([]);
     return { followAgentNames: () => {}, agentRoster, setRoster };
 });
-vi.mock("@/app/store/misc-utils", () => ({ getHostName: () => "narko" }));
+vi.mock("@/app/store/srv-info", () => ({ srvInfo: () => ({ hostName: "narko" }) }));
 vi.mock("@/app/store/float-modifier", () => ({ takeFloatRequest: () => false }));
 vi.mock("@/app/element/link-open", () => ({
     onLinkClick: (e: MouseEvent, href: string) => {

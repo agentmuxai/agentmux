@@ -46,7 +46,7 @@ function press(seg: LinkSegment, e: MouseEvent): void {
     if (web) return onLinkClick(e, web);
     e.preventDefault();
     void openEntity(seg.destination, { floating: takeFloatRequest() }).then((r) => {
-        if (!r.ok) console.warn("[link] couldn't open", seg.label, r.reason);
+        if ("reason" in r) console.warn("[link] couldn't open", seg.label, r.reason);
     });
 }
 
