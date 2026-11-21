@@ -79,13 +79,37 @@ export function slotProblem(width, slotWidth) {
     return `${width} px wide, needs ${need} for a ${slotWidth} px slot (${(width / need).toFixed(2)})`;
 }
 
+/** The fewest lines a clip may have (1080p). */
+export const MIN_CLIP_HEIGHT = 1080;
+
+/** `crop` (a box in CSS pixels) as a box in device pixels at `scale`, kept inside a frame of `frame` pixels, with an
+ *  even width and height (H.264 needs both). `null` when nothing of the box is inside the frame. */
+export function deviceCrop(crop, scale, frame) {
+    const x = Math.max(0, Math.round(crop.x * scale));
+    const y = Math.max(0, Math.round(crop.y * scale));
+    let width = Math.min(Math.round(crop.width * scale), frame.width - x);
+    let height = Math.min(Math.round(crop.height * scale), frame.height - y);
+    width -= width % 2;
+    height -= height % 2;
+    return width > 0 && height > 0 ? { x, y, width, height } : null;
+}
+
+/** The pixel size of a clip cut from `crop` (or from the whole `frame`), shown `width` pixels wide when that is
+ *  given and as wide as it was captured when not. */
+export function clipSize({ frame, crop, width }) {
+    const base = crop ?? frame;
+    if (!width) return { width: base.width, height: base.height };
+    const height = Math.round((base.height * width) / base.width);
+    return { width, height: height - (height % 2) };
+}
+
 /** The problems of a finished clip: captured at 2x or more, at least 1080 lines high, and not enlarged from its
  *  source frames. `source` is the pixel width of the captured frames, when known. Empty when it is crisp. */
 export function clipProblems({ captureScale, width, height, source }) {
     const problems = [];
     const scale = scaleProblem(captureScale);
     if (scale) problems.push(scale);
-    if (!(height >= 1080)) problems.push(`${width}x${height}: under 1080 lines high`);
+    if (!(height >= MIN_CLIP_HEIGHT)) problems.push(`${width}x${height}: under ${MIN_CLIP_HEIGHT} lines high`);
     if (typeof source === "number" && width > source) problems.push(`${width} px wide from ${source} px frames (enlarged)`);
     return problems;
 }

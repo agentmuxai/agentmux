@@ -7,7 +7,8 @@
 //
 //   node scripts/ui-screenshots/check-crisp.mjs --run <run dir> [--run ...]
 //       Each shot in the run's manifest.json: captured at scale 2 or more, and its pixels are its CSS size times
-//       that scale; the PNG on disk has the size the manifest says.
+//       that scale; the PNG on disk has the size the manifest says. Each clip in a recordings manifest: captured at
+//       scale 2 or more, not enlarged, and a video at least 1080 lines high.
 //   node scripts/ui-screenshots/check-crisp.mjs --dir <folder> [--slot <css px>] [--exempt <regex>] [--list]
 //       Every raster image under a folder (a docs clone's src/assets, a landing clone's public/screenshots):
 //       at least twice as wide as the slot it is shown in (the docs' content column, 720 CSS px, unless --slot).
@@ -18,7 +19,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DOCS_SLOT, readImageSize, shotProblems, slotProblem } from "./lib/crisp.mjs";
+import { DOCS_SLOT, clipProblems, readImageSize, shotProblems, slotProblem } from "./lib/crisp.mjs";
 
 const RASTER = new Set([".png", ".webp", ".jpg", ".jpeg", ".gif"]);
 /** Images whose size others define: icons, link-preview (og) images and store badges. */
@@ -40,6 +41,12 @@ export function checkRun(dir) {
             }
         }
         if (problems.length) failures.push({ where: relative(process.cwd(), file) || shot.id, problems });
+    }
+    // A clip's entry (record.mjs): captured at scale 2 or more, not enlarged, and, when it is a video, at least 1080 lines.
+    for (const clip of manifest.recordings ?? []) {
+        const all = clipProblems({ captureScale: clip.capture_scale, width: clip.width, height: clip.height, source: clip.source_width });
+        const problems = clip.formats?.includes("mp4") ? all : all.filter((p) => !p.includes("lines high"));
+        if (problems.length) failures.push({ where: clip.id, problems });
     }
     return failures;
 }
