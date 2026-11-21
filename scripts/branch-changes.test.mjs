@@ -6,8 +6,11 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { baseRef, changedRows, pathsOf, untrackedFiles } from "./lib/branch-changes.mjs";
+
+// Each test runs git a dozen times; a loaded machine takes a minute for that.
+vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 });
 
 let root;
 
