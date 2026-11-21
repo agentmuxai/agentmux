@@ -20,6 +20,7 @@ export const CEF_HOST_CAPS: Readonly<HostCaps> = Object.freeze({
     nativeWindowChrome: true,
     nativeFileDrop: true,
     floatingAlwaysOnTop: true,
+    hostHealthSignals: true,
 });
 
 /** A host with none of the desktop-only capabilities. */
@@ -38,6 +39,7 @@ export const NO_HOST_CAPS: Readonly<HostCaps> = Object.freeze({
     nativeWindowChrome: false,
     nativeFileDrop: false,
     floatingAlwaysOnTop: false,
+    hostHealthSignals: false,
 });
 
 /** Does the current host have `cap`? No host at all (window.api not yet set) has nothing. */

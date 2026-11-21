@@ -85,6 +85,8 @@ const names = (group: string) =>
     [...document.querySelectorAll(`[aria-label="${group}"] .connector-card-name`)].map((n) => n.textContent);
 const connectedNames = () => names("Connected");
 const availableNames = () => names("Available");
+// The agents that have no Connect end the list, under their own heading (§4.2).
+const ownPaneNames = () => names("Agents that sign in inside their own pane");
 // A connected card's disclosure button (the "Other agents" lines under the list have buttons named for providers too).
 const disclosure = (name: RegExp) =>
     screen.getAllByRole("button", { name }).find((b) => b.classList.contains("connector-card-disclosure"))!;
@@ -95,7 +97,9 @@ describe("Connectors as cards", () => {
         render(() => <ConnectorsList />);
         await ready();
         expect(connectedNames()).toEqual(["AgentMux Cloud", "GitHub", "AWS", "Anthropic"]);
-        expect(availableNames()).toEqual(["Gmail", "Calendar", "Drive", "OpenAI", "Slack", "Custom", "xAI", "Moonshot"]);
+        expect(availableNames()).toEqual(["Gmail", "Calendar", "Drive", "OpenAI", "Slack", "Custom"]);
+        expect(ownPaneNames()).toEqual(["xAI", "Moonshot"]);
+        expect(screen.getByText("Agents that sign in inside their own pane")).toBeTruthy();
     });
 
     it("says each state in words, and what each other connector is for", async () => {
@@ -258,6 +262,9 @@ describe("Connect", () => {
         expect(section.closest(".ui-card-detail")).toBeTruthy();
         // Custom has one way to connect (a key), so the account form is already in the section.
         expect(section.querySelector(".identity-form--inline")).toBeTruthy();
+        // The section's own heading and close button are the form's: no second "Add Account" heading with its own close.
+        expect(section.querySelector(".identity-form-header")).toBeNull();
+        expect(within(section).queryByText("Add Account", { selector: ".identity-form-header span" })).toBeNull();
         expect(document.querySelector(".identity-form-overlay, .accounts-chooser-overlay")).toBeNull();
         expect(screen.queryByRole("dialog")).toBeNull();
         // Close collapses it.
@@ -430,10 +437,11 @@ describe("with nothing connected", () => {
         rpc.ListIdentityAccountsCommand.mockResolvedValue([]);
         rpc.MuxBusStatusCommand.mockResolvedValue({ connected: false, valid: false });
         render(() => <ConnectorsList />);
-        await waitFor(() => expect(availableNames()).toHaveLength(12));
+        await waitFor(() => expect(availableNames()).toHaveLength(10));
         expect(availableNames()).toEqual([
-            "AgentMux Cloud", "GitHub", "Gmail", "Calendar", "Drive", "AWS", "OpenAI", "Anthropic", "Slack", "Custom", "xAI", "Moonshot",
+            "AgentMux Cloud", "GitHub", "Gmail", "Calendar", "Drive", "AWS", "OpenAI", "Anthropic", "Slack", "Custom",
         ]);
+        expect(ownPaneNames()).toEqual(["xAI", "Moonshot"]);
         expect(document.querySelector('[aria-label="Connected"]')).toBeNull();
     });
 });
@@ -444,7 +452,8 @@ describe("Gmail, Calendar and Drive (§4.10)", () => {
         render(() => <ConnectorsList />);
         await waitFor(() => expect(connectedNames()).toContain("Gmail"));
         expect(connectedNames()).toEqual(["AgentMux Cloud", "GitHub", "Gmail", "AWS", "Anthropic"]);
-        expect(availableNames()).toEqual(["Calendar", "Drive", "OpenAI", "Slack", "Custom", "xAI", "Moonshot"]);
+        expect(availableNames()).toEqual(["Calendar", "Drive", "OpenAI", "Slack", "Custom"]);
+        expect(ownPaneNames()).toEqual(["xAI", "Moonshot"]);
         expect(screen.getByRole("button", { name: "Connect another Gmail account" })).toBeTruthy();
         expect(screen.getByRole("button", { name: "Connect Calendar" })).toBeTruthy();
         expect(screen.getByRole("button", { name: "Connect Drive" })).toBeTruthy();

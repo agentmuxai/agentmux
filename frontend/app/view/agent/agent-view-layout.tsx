@@ -111,7 +111,7 @@ export function AgentViewLayout({ v }: { v: AgentViewParts }): JSX.Element {
             <MessagesPanelContext.Provider value={messages}>
                 {/* The top band: what the pane puts across its top (the find bar). Above the row, so the Messages
                     panel, which lies over the conversation, never covers it. */}
-                <AgentTopBand blockId={model.blockId} zoom={input.zoomFactor} />
+                <AgentTopBand blockId={model.blockId} />
                 <div class="agent-view-row">
                     <div class="agent-view-zoomed" style={{ zoom: input.zoomFactor() }}>
                         <AgentViewOverlays v={v} />
@@ -251,7 +251,7 @@ function compactThenSwitchFor(
                 boundaryAt: () => paneModel.state.lastCompactionBoundaryAt,
                 turnBusy: () => isWorking(paneModel.state),
                 switchTo: async () => {
-                    const { failed } = await RpcApi.AgentModelSwitchCommand(TabRpcClient, { blockid: blockId, route, model: modelId, restart: true });
+                    const { failed } = await RpcApi.AgentModelSwitchCommand(TabRpcClient, { blockid: blockId, route, model: modelId, restart: true, fresh: false, handoff: null });
                     // Saved, but a pane that could not restart still runs the old model: the card stays and says so.
                     if (failed.length > 0) throw new Error(`Saved, but the running pane did not switch: ${failed.join("; ")}`);
                 },

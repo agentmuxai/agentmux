@@ -4,4 +4,8 @@ export type AgentModelSwitchResult = {
 /**
  * False when the agent was already there.
  */
-changed: boolean, restarted: number, failed: Array<string>, };
+changed: boolean, restarted: number, failed: Array<string>, 
+/**
+ * Panes that start a fresh session (a running pane when its turn ends, a stopped one at its next start).
+ */
+fresh: number, };

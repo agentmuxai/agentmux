@@ -1,12 +1,13 @@
 # Store listing check: is the Microsoft Store behind the latest release?
 #
-# Daily. Reads the Store listing's public product data (its last-updated time) and the repository's published releases
-# (scripts/check-store-listing.mjs), and keeps ONE issue open while more than a release is missing from the Store or the
-# oldest missing release is more than two days old; it closes the issue when the Store catches up. No secret: both are public.
+# Daily. Reads the package version the Store's public display catalog names for the app (the listing's last-updated time
+# only when the catalog cannot be read) and the repository's published releases (scripts/check-store-listing.mjs), and keeps
+# ONE issue open while more than a release is missing from the Store or the oldest missing release is more than two days old;
+# it closes the issue when the Store catches up. No secret: all three are public.
 #
 # NOT A GATE, and it changes nothing about whether anything is submitted: nothing needs this workflow and no release waits
-# for it. If the Store listing cannot be read the job fails (shown in red, and the issue is left as it is): that says nothing
-# about whether the Store is behind.
+# for it. If neither the catalog nor the listing can be read the job fails (shown in red, and the issue is left as it is):
+# that says nothing about whether the Store is behind.
 name: Store listing check
 
 on:
@@ -41,7 +42,7 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Read the Store listing and the releases
+      - name: Read the Store and the releases
         id: read
         run: node scripts/check-store-listing.mjs --repo "$GITHUB_REPOSITORY" --out store-check
 
@@ -62,9 +63,9 @@ jobs:
               echo "The Store is behind: opened $url" | tee -a "$GITHUB_STEP_SUMMARY"
             fi
           else
-            echo "The Store listing is not behind the latest release." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "The Store is not behind the latest release." | tee -a "$GITHUB_STEP_SUMMARY"
             if [ -n "$existing" ]; then
-              gh issue close "$existing" --comment "The Store has caught up: its listing was updated after the latest release. Closed by the Store listing check."
+              gh issue close "$existing" --comment "The Store has caught up: it now serves the latest release. Closed by the Store listing check."
               echo "Closed issue #$existing" | tee -a "$GITHUB_STEP_SUMMARY"
             fi
           fi

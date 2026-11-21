@@ -12,7 +12,7 @@ use cef::*;
 use parking_lot::Mutex;
 
 use super::unresponsive::UnresponsiveAction;
-use super::host_keys::{host_key_for, HostKey};
+use super::host_keys::{chord_event, chord_may_apply, host_key_for, Chord, HostKey, KeyStep, Phase};
 use super::AgentMuxHandler;
 
 // ---------------------------------------------------------------------------
@@ -351,20 +351,25 @@ fn app_shortcut_for(ctrl: bool, shift: bool, alt: bool, meta: bool, vk: i32, mac
 /// runs it as if the key had been pressed in the app. False when this isn't
 /// a browser pane (the app window handles its own keys).
 fn forward_app_shortcut(inner: &Arc<Mutex<AgentMuxHandler>>, browser: Option<&mut Browser>, key: &HostKey) -> bool {
+    let Some((state, block_id)) = focused_pane(inner, browser) else { return false };
+    emit_app_shortcut(&state, &block_id, key)
+}
+
+/// The app state and block id of the browser pane `browser` is, if it is one.
+fn focused_pane(inner: &Arc<Mutex<AgentMuxHandler>>, browser: Option<&mut Browser>) -> Option<(Arc<crate::state::AppState>, String)> {
     let handler = inner.lock();
     if !handler.is_browser_pane {
-        return false;
+        return None;
     }
-    let Some(b) = browser else { return false };
-    let Some(block_id) = crate::browser_pane::callbacks::resolve_pane_block_id(&handler.state, b) else {
-        return false;
-    };
-    let state = handler.state.clone();
-    drop(handler);
-    match state.browser_pane_window_label(&block_id) {
+    let block_id = crate::browser_pane::callbacks::resolve_pane_block_id(&handler.state, browser?)?;
+    Some((handler.state.clone(), block_id))
+}
+
+fn emit_app_shortcut(state: &Arc<crate::state::AppState>, block_id: &str, key: &HostKey) -> bool {
+    match state.browser_pane_window_label(block_id) {
         Some(label) => {
             crate::events::emit_event_to_window(
-                &state,
+                state,
                 &label,
                 "app-shortcut",
                 &serde_json::json!({ "block_id": block_id, "command": key.command, "key": key.source }),
@@ -375,6 +380,42 @@ fn forward_app_shortcut(inner: &Arc<Mutex<AgentMuxHandler>>, browser: Option<&mu
             tracing::warn!("[app-shortcut] no owning window label for block_id={}", block_id);
             false
         }
+    }
+}
+
+/// A key event against the app's two-key chords (Ctrl+Shift+O then a letter, the split chord), which the
+/// page must not see: the first key is the app's reserved prefix, the second is the one it is waiting for.
+/// True when the event is kept from the page. The first key waits here, in the host, because the app's own
+/// chord state never sees a key typed in a browser pane; the second goes to the app as the whole chord.
+fn run_chord_key(inner: &Arc<Mutex<AgentMuxHandler>>, browser: Option<&mut Browser>, ev: &KeyEvent) -> bool {
+    let phase = match ev.type_ {
+        KeyEventType::RAWKEYDOWN => Phase::Down,
+        KeyEventType::CHAR => Phase::Char,
+        KeyEventType::KEYUP => Phase::Up,
+        _ => return false,
+    };
+    let key = KeyStep {
+        ctrl: (ev.modifiers & EVENTFLAG_CONTROL_DOWN) != 0,
+        shift: (ev.modifiers & EVENTFLAG_SHIFT_DOWN) != 0,
+        alt: (ev.modifiers & EVENTFLAG_ALT_DOWN) != 0,
+        #[cfg(target_os = "macos")]
+        meta: (ev.modifiers & EVENTFLAG_COMMAND_DOWN) != 0,
+        #[cfg(not(target_os = "macos"))]
+        meta: false,
+        vk: ev.windows_key_code,
+    };
+    let mac = cfg!(target_os = "macos");
+    if !chord_may_apply(phase, key, mac) {
+        return false;
+    }
+    let Some((state, block_id)) = focused_pane(inner, browser) else { return false };
+    if state.browser_pane_window_label(&block_id).is_none() {
+        return false;
+    }
+    match chord_event(&block_id, phase, key, mac, std::time::Instant::now()) {
+        Chord::Pass => false,
+        Chord::Kept => true,
+        Chord::Run(k) => emit_app_shortcut(&state, &block_id, &k),
     }
 }
 
@@ -537,6 +578,9 @@ fn handle_pre_key_event(
     let ctrl = (ev.modifiers & EVENTFLAG_CONTROL_DOWN) != 0;
     if ev.type_ == KeyEventType::RAWKEYDOWN {
         note_person_key(inner, browser.as_deref());
+    }
+    if run_chord_key(inner, browser.as_deref_mut(), ev) {
+        return 1;
     }
 
     // App shortcuts out of a browser pane, before the page sees the key (and

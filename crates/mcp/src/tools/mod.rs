@@ -10,6 +10,7 @@ use super::*;
 
 mod accounts;
 mod aws_grants;
+mod agents_hosts;
 mod agents_tool;
 mod app_record;
 mod app_workspace;
@@ -23,6 +24,7 @@ mod browser_waiting;
 mod browser_zoom;
 mod cron;
 mod desktop;
+mod drone_tool;
 mod family;
 mod fleet;
 mod global_memory;
@@ -294,6 +296,7 @@ pub(crate) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         app_tool,
         desktop,
         sensitive_tool,
+        drone_tool,
         google_tool
     );
     if let Some((_, instead)) = REPLACED.iter().find(|(old, _)| *old == name) {
@@ -312,6 +315,7 @@ mod tests {
         ("app_tool", include_str!("app_tool.rs")),
         ("browser_tool", include_str!("browser_tool.rs")),
         ("desktop", include_str!("desktop.rs")),
+        ("drone_tool", include_str!("drone_tool.rs")),
         ("google_tool", include_str!("google_tool.rs")),
         ("identity_tool", include_str!("identity_tool.rs")),
         ("memory_tool", include_str!("memory_tool.rs")),

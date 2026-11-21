@@ -596,6 +596,7 @@ pub fn failure_words(run: &JobRun) -> String {
             reason::TARGET_STOPPED => "missed: its agent wasn't running".to_string(),
             reason::EXPIRED => "missed: its agent didn't come back before the next run".to_string(),
             reason::NO_REPORT if run.state == state::MISSED => "missed: no report came in for it".to_string(),
+            reason::NOT_STARTED if run.state == state::MISSED => "missed: the scheduler never started it".to_string(),
             _ if run.state == "lost" => "lost: it stopped reporting".to_string(),
             _ => "missed".to_string(),
         };

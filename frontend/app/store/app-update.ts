@@ -108,6 +108,11 @@ export function viaStore(s: AppUpdateStatus | null = appUpdate()): boolean {
     return s?.install === "windows-store";
 }
 
+/** A `.deb` or `.rpm` install: its restart asks the system's own permission prompt (a password) before it goes on. */
+export function viaPackage(s: AppUpdateStatus | null = appUpdate()): boolean {
+    return s?.install === "linux-package";
+}
+
 /** Whether dotted numeric version `a` is newer than `b` (numbers, not text: 0.60.100 is newer than 0.60.17); a missing part counts as 0. */
 function isNewer(a: string, b: string): boolean {
     const pa = a.split(".").map((n) => Number.parseInt(n, 10) || 0);
@@ -250,6 +255,11 @@ export function acceptStoreProgress(next: unknown): void {
     // While the Store asks, its own earlier states (pending, a finished download) don't take the question off the row.
     if (storeProgress()?.phase === "asking" && (p.phase === "pending" || p.phase === "downloading")) return;
     const percent = typeof p.percent === "number" && Number.isFinite(p.percent) ? Math.max(0, Math.min(100, Math.round(p.percent))) : null;
+    // Within one download the figure only goes forward: a report that reads lower than the last one (an out-of-order
+    // event, a Store that restarts its count for the next package) or has no figure is dropped, not shown. A new
+    // download starts from `pending` or from a cleared row (setStoreProgress(null)), never from the last one's figure.
+    const last = storeProgress();
+    if (p.phase === "downloading" && last?.phase === "downloading" && last.percent !== null && (percent === null || percent < last.percent)) return;
     setStoreProgress({ phase: p.phase as StoreProgress["phase"], percent, doneBytes: Number(p.doneBytes) || 0, totalBytes: Number(p.totalBytes) || 0 });
 }
 
@@ -494,7 +504,8 @@ export async function startAppUpdateDownload(): Promise<void> {
 
 /**
  * Restart into the staged release: once agents finish their turn, or `now`.
- * The launcher then asks the user in a dialog of its own.
+ * The restart is then decided: the launcher restarts without asking again (only a `.deb` or `.rpm` install still shows
+ * the system's own permission prompt).
  */
 export async function upgradeAndRestart(now: boolean): Promise<void> {
     await hostAction("restart", now);

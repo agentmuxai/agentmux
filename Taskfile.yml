@@ -10,9 +10,13 @@ version: "3"
 dotenv: [".env"]
 
 vars:
-    # Where cargo puts its output: CARGO_TARGET_DIR when set (a container agent keeps it in a volume), else target/.
-    # Used by the Linux and macOS dev build and the clean tasks; Windows and the packagers read target/ as before.
-    TARGET_DIR: '{{if .CARGO_TARGET_DIR}}{{.CARGO_TARGET_DIR}}{{else}}target{{end}}'
+    # Where cargo puts its output: CARGO_TARGET_DIR when set (a container agent keeps it in a volume, a Windows machine
+    # with little room on the system drive keeps it on another), else target/. Written with forward slashes (`toSlash`:
+    # D:\cargo-target becomes D:/cargo-target), which PowerShell, Git Bash and Task's shell all accept, so one value is
+    # right in every step. Used by the dev, host and bundle steps on every platform and the clean tasks. NOT used by the
+    # release packagers (scripts/package-portable.sh, package-macos.sh, stage-linux-runtime.sh): they read target/ and
+    # scripts/check-bundled-tools.sh matches that literal path; release builds run with the default target dir.
+    TARGET_DIR: '{{if .CARGO_TARGET_DIR}}{{.CARGO_TARGET_DIR | toSlash}}{{else}}target{{end}}'
     APP_NAME: "AgentMux"
     BIN_DIR: "bin"
     VERSION:
@@ -183,7 +187,7 @@ tasks:
         platforms: [darwin]
         cmds:
             - bash scripts/guard-stable-build.sh
-            - bash -c 'STRIP_MAPS=1 RELEASE_CHANNEL=stable bash scripts/package-macos.sh {{.CLI_ARGS}}'
+            - bash -c 'STRIP_MAPS=1 RELEASE_CHANNEL=stable AGENTMUX_STABLE_BUNDLE_ID=1 bash scripts/package-macos.sh {{.CLI_ARGS}}'
 
     package:linux:
         desc: 'Build + package a LOCAL portable AppImage to ~/Desktop with an ephemeral, traceable label and a per-build data-dir channel (local-<branch>-<hash>-<build-id>) so the build runs as its own AgentMux instance alongside a release install. Does NOT bump the version. Pass `-- <dir>` for an alternate output dir. See docs/specs/SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25.md.'
@@ -382,7 +386,7 @@ tasks:
             # shell, which would otherwise expand `$v` to empty before pwsh
             # sees it (naming the binary `agentmux-srv--windows.x64.exe`).
             # Single quotes pass `$v` through literally for pwsh to evaluate.
-            - cmd: pwsh -Command '$v = (Get-Content -Raw package.json | ConvertFrom-Json).version; New-Item -ItemType Directory -Force -Path dist/bin | Out-Null; Copy-Item target/release/agentmux-srv.exe dist/bin/agentmux-srv-$v-windows.x64.exe -Force'
+            - cmd: pwsh -Command '$v = (Get-Content -Raw package.json | ConvertFrom-Json).version; New-Item -ItemType Directory -Force -Path dist/bin | Out-Null; Copy-Item "{{.TARGET_DIR}}/release/agentmux-srv.exe" dist/bin/agentmux-srv-$v-windows.x64.exe -Force'
 
     # agentmux-wsh build tasks removed — wsh has been retired.
     # agentmux-mcp is built as part of build:host (via -p agentmux-mcp in each platform task).
@@ -399,9 +403,9 @@ tasks:
     artifacts:upload:
         desc: Uploads build artifacts to the staging bucket in S3. To add additional AWS CLI arguments, add them after `--`.
         vars:
-            ORIGIN: "target/release/"
+            ORIGIN: "{{.TARGET_DIR}}/release/"
             DESTINATION: "{{.ARTIFACTS_BUCKET}}/{{.VERSION}}"
-        cmd: aws s3 cp {{.ORIGIN}}/ s3://{{.DESTINATION}}/ --recursive --exclude "*/*" --exclude "builder-*.yml" {{.CLI_ARGS}}
+        cmd: aws s3 cp "{{.ORIGIN}}/" s3://{{.DESTINATION}}/ --recursive --exclude "*/*" --exclude "builder-*.yml" {{.CLI_ARGS}}
 
     artifacts:download:*:
         desc: Downloads the specified artifacts version from the staging bucket. To add additional AWS CLI arguments, add them after `--`.
@@ -542,12 +546,12 @@ tasks:
             # crate-type so it cannot be used as the sandbox discriminator.
             - cmd: pwsh -Command "
                 New-Item -ItemType Directory -Force -Path dist/cef | Out-Null;
-                if (Test-Path 'target/release/bootstrap.exe') {
-                  Copy-Item target/release/bootstrap.exe    dist/cef/agentmux-cef.exe -Force;
-                  Copy-Item target/release/agentmux_cef.dll dist/cef/agentmux-cef.dll -Force;
-                  Copy-Item target/release/agentmux_cef.pdb dist/cef/agentmux-cef.pdb -Force -EA SilentlyContinue
+                if (Test-Path '{{.TARGET_DIR}}/release/bootstrap.exe') {
+                  Copy-Item '{{.TARGET_DIR}}/release/bootstrap.exe'    dist/cef/agentmux-cef.exe -Force;
+                  Copy-Item '{{.TARGET_DIR}}/release/agentmux_cef.dll' dist/cef/agentmux-cef.dll -Force;
+                  Copy-Item '{{.TARGET_DIR}}/release/agentmux_cef.pdb' dist/cef/agentmux-cef.pdb -Force -EA SilentlyContinue
                 } else {
-                  Copy-Item target/release/agentmux-cef.exe dist/cef/agentmux-cef.exe -Force
+                  Copy-Item '{{.TARGET_DIR}}/release/agentmux-cef.exe' dist/cef/agentmux-cef.exe -Force
                 }"
             # Stamp the AgentMux icon onto the staged host exe — bootstrap.exe
             # ships Chrome's icon under the Phase 3 sandbox; winres can't edit a
@@ -628,7 +632,7 @@ tasks:
                 # was written but never wired into this task, so `task dev`/
                 # `task package` silently used the stock CEF with no signal.
                 cefSource="cargo-cache"
-                cefDir="target/release"
+                cefDir="{{.TARGET_DIR}}/release"
                 cefBuildDefault="$HOME/cef-build/chromium_git/chromium/src/out/Release_GN_x64"
                 if [ -n "${AGENTMUX_CEF_RUNTIME_DIR_WINDOWS:-}" ]; then
                   echo "AGENTMUX_CEF_RUNTIME_DIR_WINDOWS set — using override CEF runtime at $AGENTMUX_CEF_RUNTIME_DIR_WINDOWS"
@@ -688,7 +692,7 @@ tasks:
                   # first that passes, so a stale 146 directory is skipped when
                   # the linked crate expects 148.
                   cefOutDir=""
-                  for dll in target/release/build/cef-dll-sys-*/out/*/libcef.dll; do
+                  for dll in "{{.TARGET_DIR}}"/release/build/cef-dll-sys-*/out/*/libcef.dll; do
                     if [ -f "$dll" ]; then
                       candidate="$(dirname "$dll")"
                       if bash scripts/verify-cef-version.sh "$candidate" 2>/dev/null; then
@@ -995,7 +999,7 @@ tasks:
                 fi
                 if [ "{{OS}}" = "windows" ]; then
                   mkdir -p "$DEV_DIR/runtime"
-                  cp target/release/agentmux-launcher.exe "$DEV_DIR/agentmux-launcher.exe"
+                  cp "{{.TARGET_DIR}}/release/agentmux-launcher.exe" "$DEV_DIR/agentmux-launcher.exe"
                   cp -r dist/cef/* "$DEV_DIR/runtime/"
                   # srv binary — launcher's resolve_srv_binary checks
                   # runtime/agentmux-srv-{ver}-windows.x64.exe first
@@ -1009,13 +1013,13 @@ tasks:
                   # scripts/package-portable.sh:121. See
                   # docs/retro/RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md.
                   mkdir -p "$DEV_DIR/runtime/tools/bin"
-                  cp target/release/agentmux-bashwrap.exe "$DEV_DIR/runtime/tools/bin/"
+                  cp "{{.TARGET_DIR}}/release/agentmux-bashwrap.exe" "$DEV_DIR/runtime/tools/bin/"
                   # MCP server — the auto-injected .mcp.json uses the bare name
                   # "command": "agentmux-mcp", resolved via the bundled tools/bin
                   # that agentmux-srv prepends to the agent PATH (tool_store.rs:84).
                   # Without this the Shell tool is command-not-found under task dev.
                   # Built by build:host:windows (-p agentmux-mcp), like bashwrap.
-                  cp target/release/agentmux-mcp.exe "$DEV_DIR/runtime/tools/bin/"
+                  cp "{{.TARGET_DIR}}/release/agentmux-mcp.exe" "$DEV_DIR/runtime/tools/bin/"
                   echo "Built $DEV_DIR with launcher layout (launcher at root, host + DLLs + srv in runtime/, bashwrap + mcp in runtime/tools/bin/)"
                 else
                   # Unix flat layout (Phase 1,
@@ -1512,7 +1516,7 @@ tasks:
         desc: >-
             Remove the extracted/bundled CEF runtime so the next build
             re-materializes one matching the linked `cef` crate. Use after a CEF
-            version bump if target/release holds a stale libcef (see
+            version bump if the release folder of the target dir holds a stale libcef (see
             SPEC_WINDOWS_CEF_BUNDLE_VERSION_INTEGRITY_2026_06_03.md).
         cmds:
             # ROOT CAUSE of the 148-host/146-runtime skew: the `cef` crate's

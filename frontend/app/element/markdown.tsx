@@ -152,6 +152,9 @@ import { getSettingsKeyAtom } from "../store/global";
 import { rehypeLinkify } from "./rehype-linkify";
 import { Code, CodeBlock } from "./markdown-codeblock";
 import { MarkdownImg, type MarkdownMediaOpts, MuxBlock } from "./markdown-media";
+import type { SurfaceContext } from "@/app/links/link-context";
+import { ENTITY_LINK_CLASSES, rehypeEntities } from "@/app/links/rehype-entities";
+import { tip } from "./tip";
 import { rehypeLocalImageSrc } from "./rehype-local-image-src";
 import { rehypeMarkCodeLang } from "./rehype-mark-code-lang";
 import { Mermaid, MermaidErrorFallback } from "./markdown-mermaid";
@@ -189,17 +192,21 @@ function resolveHyperElements(nodes: JSX.Element[]): JSX.Element[] {
 const Link = ({
     setFocusedHeading,
     props,
+    media,
 }: {
     props: JSX.AnchorHTMLAttributes<HTMLAnchorElement>;
     setFocusedHeading: (href: string) => void;
+    /** The agent's message the link is in: a path link of a container agent is opened by srv from the agent's folders. */
+    media?: MarkdownMediaOpts;
 }) => {
+    const owner = () => (media ? { blockId: media.blockId, confined: media.confined } : undefined);
     const onClick = (e: MouseEvent) => {
         const href = (props as any).href as string;
         if (href?.startsWith("#")) {
             e.preventDefault();
             setFocusedHeading(href);
         } else if (href) {
-            onLinkClick(e, href);
+            onLinkClick(e, href, owner());
         } else {
             e.preventDefault();
         }
@@ -210,11 +217,14 @@ const Link = ({
             if (e.button === 1) e.preventDefault();
             return;
         }
-        onLinkAuxClick(e, href);
+        onLinkAuxClick(e, href, owner());
     };
+    // A link `rehypeEntities` made carries its class and what a click does (its accessible name, and the hover).
+    const p = props as any;
+    const name: string | undefined = p["aria-label"] ?? p.ariaLabel;
     return (
-        <a href={(props as any).href} onClick={onClick} onAuxClick={onAuxClick}>
-            {(props as any).children}
+        <a href={p.href} class={p.class ?? p.className} aria-label={name} {...tip(name)} onClick={onClick} onAuxClick={onAuxClick}>
+            {p.children}
         </a>
     );
 };
@@ -239,6 +249,9 @@ type MarkdownProps = {
      *  agent's own messages pass this (SPEC_AGENT_PANE_RICH_OUTPUT §4.1);
      *  without it, a markdown image never makes the pane fetch anything. */
     media?: MarkdownMediaOpts;
+    /** What the surface knows about the text (who wrote it, its repository): agent names, task numbers and pull
+     *  requests in it become links (spec §4.5). Without it, nothing is linked beyond web addresses. */
+    entities?: SurfaceContext;
     /** `.content` scrolls with a native scrollbar, styled by the universal
      *  `*::-webkit-scrollbar` rule (app.scss) like every other scroll surface. */
     scrollable?: boolean;
@@ -368,6 +381,7 @@ interface MarkdownState {
     jsxRuntimeOptions: Parameters<typeof toJsxRuntime>[1];
     highlightOn: Accessor<boolean>;
     streamingOn: Accessor<boolean>;
+    entities: Accessor<SurfaceContext | undefined>;
     /** The tail processor that skips highlighting; built on first need (see `tailProcessor`). */
     plainProcessor: Processor | undefined;
 }
@@ -463,6 +477,7 @@ function createMarkdownState(props: MarkdownProps): MarkdownState {
         jsxRuntimeOptions,
         highlightOn,
         streamingOn,
+        entities: () => props.entities,
         plainProcessor: undefined,
     };
 }
@@ -522,7 +537,7 @@ function createJsxRuntimeOptions(markdownComponents: ReturnType<typeof createMar
 
 function createMarkdownComponents({ props, setFocusedHeading, onClickExecute, contentBlocksMap }: MarkdownComponentDeps) {
     const markdownComponents: Record<string, any> = {
-        a: (props: any) => <Link props={props} setFocusedHeading={setFocusedHeading} />,
+        a: (linkProps: any) => <Link props={linkProps} setFocusedHeading={setFocusedHeading} media={props.media} />,
         p: (props: any) => <div class="paragraph" {...props} />,
         h1: (props: any) => <Heading props={props} hnum={1} />,
         h2: (props: any) => <Heading props={props} hnum={2} />,
@@ -712,11 +727,19 @@ function buildProcessor(s: MarkdownState, withHighlight: boolean) {
               rehypeLocalImageSrc,
               rehypeAlignToClass,
               rehypeLinkify,
+              () => rehypeEntities(s.entities),
               () =>
                   rehypeSanitize({
                       ...defaultSchema,
                       attributes: {
                           ...defaultSchema.attributes,
+                          // The default's own `className` entry (a footnote's) is replaced, not joined: two entries for
+                          // one property leave only the first. Only the classes of the links `rehypeEntities` makes
+                          // are added to it.
+                          a: [
+                              ...(defaultSchema.attributes?.a || []).filter((x) => !(Array.isArray(x) && x[0] === "className")),
+                              ["className", "data-footnote-backref", ...ENTITY_LINK_CLASSES],
+                          ],
                           span: [
                               ...(defaultSchema.attributes?.span || []),
                               // The semantic colour set agents may use. Code
@@ -820,10 +843,11 @@ function createRenderedMarkdown(s: MarkdownState): Accessor<RenderedMarkdown> {
  * segment's headings have to be collected separately before the next
  * call wipes them.
  */
-function runSegment(s: MarkdownState, src: string, proc: Processor): { children: any[]; toc: TocItem[] } {
+function runSegment(s: MarkdownState, src: string, proc: Processor, open = false): { children: any[]; toc: TocItem[] } {
     s.tocRef.length = 0;
     s.stats.parsedChars += src.length;
-    const hast: any = proc.runSync(proc.parse(src));
+    // `open`: the segment is the one still growing, so a link touching its end waits (links/rehype-entities.ts).
+    const hast: any = proc.runSync(proc.parse(src), { data: { open } } as any);
     return { children: hast.children ?? [], toc: s.tocRef.slice() };
 }
 
@@ -891,7 +915,7 @@ function renderWhole(s: MarkdownState, c: Commit): RenderedMarkdown {
     const { txt, tailProc, openTail } = c;
     disposeFrozen(s);
     // Nothing is provably closed, so all of it is the open tail.
-    const whole = runSegment(s, openTail(txt), tailProc);
+    const whole = runSegment(s, openTail(txt), tailProc, s.streamingOn());
     const t = renderTail(s, whole.children, whole.toc);
     return { element: t.nodes, toc: t.toc };
 }
@@ -931,7 +955,7 @@ function renderIncremental(s: MarkdownState, c: Commit, splitAt: number): Render
     // `renderTail`). Solid's array reconcile keeps identical node
     // references, so `frozen.elements` — and a patched tail — are
     // left in place.
-    const parsedTail = runSegment(s, openTail(txt.slice(splitAt)), tailProc);
+    const parsedTail = runSegment(s, openTail(txt.slice(splitAt)), tailProc, s.streamingOn());
     const t = renderTail(s, parsedTail.children, parsedTail.toc);
     const element = s.frozen.elements.concat(t.nodes);
     const toc = s.frozen.toc.concat(t.toc);

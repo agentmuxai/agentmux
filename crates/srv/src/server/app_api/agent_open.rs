@@ -487,6 +487,13 @@ fn write_rendered_config_files(
         std::fs::create_dir_all(base_path) // workdir-fs: creates the workdir itself
             .map_err(|e| format!("failed to create working dir: {e}"))?;
     }
+    let on_host = !agent.runtime().is_container();
+    // A host agent in a folder a container agent can write is given its files from outside the folder
+    // (`host_agent_files`): nothing is written into the folder, and nothing of it is the agent's instructions.
+    if on_host && crate::backend::host_agent_files::write(&expanded_dir, config_files.iter().map(|f| (f.filename.as_str(), f.content.as_str())))? {
+        tracing::info!(agent_id = %agent.id, work_dir = %expanded_dir, file_count = config_files.len(), "agent.open: wrote config files outside the folder");
+        return Ok(());
+    }
     let wd = crate::backend::workdir_fs::Workdir::open(base_path)
         .map_err(|e| format!("failed to open working dir {}: {e}", base_path.display()))?;
 
@@ -502,7 +509,7 @@ fn write_rendered_config_files(
     crate::backend::agent_config::cleanup_stale_managed_skill_files(base_path, &new_managed_skill_paths);
 
     for file in &config_files {
-        super::agent_config_render::write_config_file(&wd, base_path, &expanded_dir, file)?;
+        super::agent_config_render::write_config_file(&wd, base_path, &expanded_dir, file, on_host)?;
     }
 
     crate::backend::agent_config::write_managed_skill_file_manifest(base_path, &new_managed_skill_paths);

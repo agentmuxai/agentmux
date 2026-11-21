@@ -125,6 +125,23 @@ describe("openPathLink", () => {
         expect((pushNotification.mock.calls[0]?.[0] as { message: string }).message).toContain("leads out");
     });
 
+    it("has srv open a link of a container agent's message from the agent's folders, and reads nothing itself", async () => {
+        await openPathLink("/workspace/notes.md", { owner: { blockId: "pane-1", confined: true } });
+        await vi.waitFor(() => expect(paneOpen).toHaveBeenCalledTimes(1));
+        expect(paneOpen.mock.calls[0]?.[1]).toEqual({ view: "editor", file: "/workspace/notes.md", message_of: "pane-1", tab_id: "tab-1" });
+        expect(fsList).not.toHaveBeenCalled();
+        expect(agentFolder).not.toHaveBeenCalled();
+        expect(openInEditorPaneOnScreen).not.toHaveBeenCalled();
+    });
+
+    it("opens nothing for a link of a confined message with no pane to name, and says so", async () => {
+        await openPathLink("/workspace/notes.md", { owner: { confined: true } });
+        expect(paneOpen).not.toHaveBeenCalled();
+        expect(fsList).not.toHaveBeenCalled();
+        expect(openInEditorPaneOnScreen).not.toHaveBeenCalled();
+        expect(pushNotification).toHaveBeenCalledTimes(1);
+    });
+
     it("opens a link as before when whose folder it is in can't be asked", async () => {
         fsList.mockResolvedValue({ path: "C:/work/notes.md", entries: [], error: { kind: "not_a_directory", message: "" } });
         agentFolder.mockRejectedValue(new Error("rpc down"));

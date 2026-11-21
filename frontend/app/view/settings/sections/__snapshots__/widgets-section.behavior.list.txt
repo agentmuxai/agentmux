@@ -1,6 +1,6 @@
 -- every kind
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"

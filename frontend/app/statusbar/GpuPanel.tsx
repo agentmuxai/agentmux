@@ -37,6 +37,7 @@ export const GpuPanel = (props: GpuPanelProps): JSX.Element => {
         <AnchoredPopover
             anchor={props.anchor}
             placement="top-start"
+            fitHeight
             onDismiss={props.onClose}
             class="gpu-panel"
             role="dialog"

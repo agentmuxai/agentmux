@@ -43,6 +43,30 @@ describe("Tag", () => {
         expect(icon?.getAttribute("aria-hidden")).toBe("true");
     });
 
+    it("takes a hue in place of a tone, and says a request not yet confirmed with muted", () => {
+        const { container } = render(() => (
+            <Tag hue="model-opus" tone="warn" icon="star-of-life">
+                Opus 5.5
+            </Tag>
+        ));
+        const tag = screen.getByText("Opus 5.5");
+        // A tag has a tone or a hue, never both: the hue wins and no tone class is left.
+        expect(tag.classList.contains("ui-tag--model-opus")).toBe(true);
+        expect(tag.classList.contains("ui-tag--warn")).toBe(false);
+        expect(tag.classList.contains("ui-tag--neutral")).toBe(false);
+        expect(tag.classList.contains("ui-tag--muted")).toBe(false);
+        expect(container.querySelector("i")?.className).toBe("fa-solid fa-star-of-life");
+        cleanup();
+        render(() => (
+            <Tag hue="seat-worker" muted>
+                Worker
+            </Tag>
+        ));
+        const muted = screen.getByText("Worker");
+        expect(muted.classList.contains("ui-tag--seat-worker")).toBe(true);
+        expect(muted.classList.contains("ui-tag--muted")).toBe(true);
+    });
+
     it("a ribbon sits on a corner (bottom right by default), at the small text size", () => {
         render(() => (
             <Tag kind="ribbon" tone="accent">

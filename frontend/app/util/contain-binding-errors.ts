@@ -12,10 +12,12 @@
  */
 
 import { catchError } from "solid-js";
+import { noteWindowError } from "./window-error-burst";
 
 /** Run `build` (the app's root component) under a handler that reports what no boundary below caught. */
 export function containBindingErrors<T>(build: () => T, report: (message: string) => void): T {
     return catchError(build, (error) => {
+        noteWindowError();
         const text = error instanceof Error ? `${error.message}${error.stack ? `\n${error.stack}` : ""}` : String(error);
         report(`[ui] a binding threw; the window goes on without it: ${text}`);
     });

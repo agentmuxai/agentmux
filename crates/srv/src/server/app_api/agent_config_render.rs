@@ -134,6 +134,7 @@ pub(super) fn write_config_file(
     base_path: &std::path::Path,
     expanded_dir: &str,
     file: &crate::backend::agent_config::AgentConfigFile,
+    on_host: bool,
 ) -> Result<(), String> {
     // CLAUDE.md never gets the generic write below — it goes through
     // ownership-aware materialization instead, which never overwrites
@@ -164,10 +165,18 @@ pub(super) fn write_config_file(
     }
     // `.mcp.json` never goes into a user's project (#3680): in a folder AgentMux owns it
     // merges into the agent's own file as before; elsewhere it is written under the data
-    // directory, outside the project, and Claude is pointed at it at spawn.
+    // directory, outside the project, and Claude is pointed at it at spawn. A host agent's
+    // also goes outside a folder a container agent can write, and is not merged with what
+    // that folder's file holds.
     if file.filename == ".mcp.json" {
-        if let Some(path) = crate::backend::mcp_config_file::relocated_path(expanded_dir) {
-            crate::backend::mcp_config_file::write_relocated(&path, &file.content)
+        let outside = if on_host {
+            crate::backend::mcp_config_file::host_relocated_path(expanded_dir)
+        } else {
+            crate::backend::mcp_config_file::relocated_path(expanded_dir)
+        };
+        if let Some(path) = outside {
+            let content = if on_host { crate::backend::mcp_config_file::host_content(expanded_dir, file.content.clone()) } else { file.content.clone() };
+            crate::backend::mcp_config_file::write_relocated(&path, &content)
                 .map_err(|e| format!("failed to write the agent's MCP config: {e}"))?;
             return Ok(());
         }
@@ -232,7 +241,7 @@ mod tests {
                 filename: ".mcp.json".into(),
                 content: r#"{"mcpServers":{"agentmux":{"command":"agentmux-mcp","env":{"AGENTMUX_AGENT_ID":"aria","AGENTMUX_JEKT_KEY":"PRIVATE-JEKT","AGENTMUX_LAN_KEY":"PRIVATE-LAN"}}}}"#.into(),
             };
-            write_config_file(&wd, project.path(), &project_str, &file).unwrap();
+            write_config_file(&wd, project.path(), &project_str, &file, true).unwrap();
             crate::backend::mcp_config_file::config_path(&project_str)
         });
 
@@ -269,10 +278,60 @@ mod tests {
                 filename: ".mcp.json".into(),
                 content: r#"{"mcpServers":{"agentmux":{"command":"agentmux-mcp"}}}"#.into(),
             };
-            write_config_file(&wd, &home, &home_str, &file).unwrap();
+            write_config_file(&wd, &home, &home_str, &file, true).unwrap();
             crate::backend::mcp_config_file::relocated_path(&home_str)
         });
         assert!(home.join(".mcp.json").is_file());
         assert!(relocated.is_none());
+    }
+
+    /// A host agent's launch into a folder a container agent ran in: the config goes outside the folder with
+    /// the launch's servers only, and the folder's own file, with whatever it lists, is neither read nor written.
+    #[test]
+    fn a_host_launch_into_a_container_agents_folder_keeps_its_config_outside_and_takes_none_of_the_folders_servers() {
+        let data = tempfile::tempdir().unwrap();
+        let home = data.path().join("agents").join("aria");
+        std::fs::create_dir_all(&home).unwrap();
+        let home_str = home.to_string_lossy().into_owned();
+        let theirs = r#"{"mcpServers":{"agentmux":{"command":"other"},"theirs":{"command":"theirs-mcp"}}}"#;
+        std::fs::write(home.join(".mcp.json"), theirs).unwrap();
+        let file = AgentConfigFile {
+            filename: ".mcp.json".into(),
+            content: r#"{"mcpServers":{"agentmux":{"command":"agentmux-mcp","env":{"AGENTMUX_JEKT_KEY":"PRIVATE-JEKT"}}}}"#.into(),
+        };
+        let outside = crate::backend::mcp_config_file::with_data_home(data.path(), || {
+            crate::backend::mcp_folder_rule::mark(&home_str);
+            let wd = crate::backend::workdir_fs::Workdir::open(&home).unwrap();
+            write_config_file(&wd, &home, &home_str, &file, true).unwrap();
+            crate::backend::mcp_config_file::host_config_path(&home_str)
+        });
+        assert!(outside.starts_with(data.path().join(agentmux_common::mcp_config_path::HOST_ONLY_DIR)) && !outside.starts_with(&home), "{outside:?}");
+        let text = std::fs::read_to_string(&outside).unwrap();
+        let written: serde_json::Value = serde_json::from_str(&text).unwrap();
+        // The command by its path (where an `agentmux-mcp` ships on this computer), never the bare name.
+        assert!(crate::backend::mcp_folder_rule::names_the_command_by_path(&text), "{text}");
+        assert_ne!(written["mcpServers"]["agentmux"]["command"], "agentmux-mcp");
+        assert!(written["mcpServers"].as_object().unwrap().keys().all(|name| name == "agentmux"), "none of the folder's servers: {written}");
+        assert_eq!(std::fs::read_to_string(home.join(".mcp.json")).unwrap(), theirs, "the folder's file is left as it is");
+        for file in files_under(&home) {
+            assert!(!std::fs::read_to_string(&file).unwrap_or_default().contains("PRIVATE-JEKT"), "no signing key in the folder: {file:?}");
+        }
+    }
+
+    /// The container agent's own launch into that folder is as it was: its file is the one in the folder.
+    #[test]
+    fn a_container_agents_own_launch_still_writes_the_file_in_its_folder() {
+        let data = tempfile::tempdir().unwrap();
+        let home = data.path().join("agents").join("aria");
+        std::fs::create_dir_all(&home).unwrap();
+        let home_str = home.to_string_lossy().into_owned();
+        let file = AgentConfigFile { filename: ".mcp.json".into(), content: r#"{"mcpServers":{"agentmux":{"command":"agentmux-mcp"}}}"#.into() };
+        crate::backend::mcp_config_file::with_data_home(data.path(), || {
+            crate::backend::mcp_folder_rule::mark(&home_str);
+            let wd = crate::backend::workdir_fs::Workdir::open(&home).unwrap();
+            write_config_file(&wd, &home, &home_str, &file, false).unwrap();
+            assert!(!crate::backend::mcp_config_file::host_config_path(&home_str).exists(), "nothing is written outside for it");
+        });
+        assert!(std::fs::read_to_string(home.join(".mcp.json")).unwrap().contains("agentmux-mcp"));
     }
 }

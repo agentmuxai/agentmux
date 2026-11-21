@@ -25,7 +25,7 @@ use crate::backend::rpc_types::{
     COMMAND_ROUTE_ANNOUNCE, COMMAND_ROUTE_UNANNOUNCE, COMMAND_SET_CONFIG, COMMAND_SET_META, COMMAND_TOOL_DECISION,
 };
 use super::service::{schedule_agent_zoom_mirror, update_object_meta};
-use super::websocket::{parse_block_input, with_question_controller};
+use super::websocket::{parse_block_input, refuse_agent_input, with_question_controller};
 use super::AppState;
 
 /// How far back the fleet list (`COMMAND_LIST_BACKGROUND_TASKS` with an empty
@@ -315,8 +315,9 @@ fn register_block_controller(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // docs/analysis/ANALYSIS_CROSS_PANE_INPUT_DELAY_REGRESSION_2026_09_15.md.
     engine.register_typed(
         COMMAND_CONTROLLER_INPUT,
-        move |cmd: CommandBlockInputData, _ctx| {
+        move |cmd: CommandBlockInputData, ctx| {
             async move {
+                refuse_agent_input(&ctx)?;
                 if blockcontroller::agent_lock::is_locked(&cmd.blockid) {
                     tracing::debug!(block_id = %cmd.blockid, "controllerinput: dropped — agent lock active");
                     return Ok(());
@@ -544,10 +545,10 @@ fn register_tool_decision_and_narration(engine: &Arc<WshRpcEngine>, state: &AppS
     // this tree. That is separate, still-open work — this PR only makes
     // the *transport* (control_response delivery) real, not repeat-
     // decision memory.
-    engine.register_typed(
-        COMMAND_TOOL_DECISION,
-        move |cmd: CommandToolDecisionData, _ctx| async move { tool_decision(cmd) },
-    );
+    engine.register_typed(COMMAND_TOOL_DECISION, move |cmd: CommandToolDecisionData, ctx| async move {
+        person_only(&ctx, "a tool permission")?;
+        tool_decision(cmd)
+    });
 
     // Ambient narration — generate a short user-facing line about something
     // AgentMux just did on its own, and broadcast it to the pane.
@@ -883,7 +884,10 @@ fn register_agent_questions(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
     // `Value` request, parsed into its struct below (an answer to a question); the stub keeps its
     // hand-written request type (generated-manifest.json `dataType`).
-    engine.register_typed(COMMAND_AGENT_ANSWER, move |data: serde_json::Value, _ctx| async move { agent_answer(data) });
+    engine.register_typed(COMMAND_AGENT_ANSWER, move |data: serde_json::Value, ctx| async move {
+        person_only(&ctx, "a question")?;
+        agent_answer(data)
+    });
 
     // agent.cancel → a REAL protocol-level decline of a pending AskUserQuestion
     // (Cancel button / Escape in AgentQuestionPanel.tsx), not a UI-only dismiss.
@@ -895,24 +899,31 @@ fn register_agent_questions(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // block`, `UNSUPPORTED_CONTROLLER`): the frontend's SAFE_TO_RETRY_VIA_FOLLOWUP
     // allowlist (useAgentQuestions.ts) matches on these substrings for both
     // commands. Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
-    engine.register_typed(
-        COMMAND_AGENT_CANCEL,
-        move |cmd: CommandAgentCancelData, _ctx| async move { agent_cancel(cmd) },
-    );
+    engine.register_typed(COMMAND_AGENT_CANCEL, move |cmd: CommandAgentCancelData, ctx| async move {
+        person_only(&ctx, "a question")?;
+        agent_cancel(cmd)
+    });
 
     // The pending-shutdown banner's "Keep running"
     // (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5).
     let state_keep = state.clone();
     engine.register_typed(
         COMMAND_AGENT_SHUTDOWN_KEEP,
-        move |cmd: CommandAgentShutdownKeepData, _ctx| {
+        move |cmd: CommandAgentShutdownKeepData, ctx| {
             let state = state_keep.clone();
             async move {
+                ctx.operator_only("only the person keeps an agent running that is about to stop: ask the person to press Keep running in the AgentMux window")?;
                 let outcome = crate::sagas::pending_shutdown::keep(&state, &cmd.blockid, &cmd.request_id);
                 Ok(AgentShutdownKeepResult { outcome: outcome.to_string() })
             }
         },
     );
+}
+
+/// Answering what an agent put to the person (a question, a tool permission) is the person's: from an agent's
+/// connection it would be an answer in their voice. Only the AgentMux window, proven through the host, passes.
+fn person_only(ctx: &RpcContext, what: &str) -> Result<(), String> {
+    ctx.operator_only(&format!("only the person answers {what} an agent asked"))
 }
 
 /// `agent.answer`: deliver an AskUserQuestion answer over the control protocol.
@@ -1011,6 +1022,9 @@ fn register_event_history_and_settings(engine: &Arc<WshRpcEngine>, state: &AppSt
 
 /// `setconfig`: merge settings keys into `settings.json` and the in-memory config, then broadcast it.
 fn set_config(state: &AppState, data: serde_json::Value, ctx: &RpcContext) -> Result<(), String> {
+    if let Some(keys) = data.as_object() {
+        crate::backend::settings_consent::refuse_unless_person(ctx, keys)?;
+    }
     let cw = state.config_watcher.clone();
     let eb = state.event_bus.clone();
     let lan_listeners = state.lan_listeners.clone();

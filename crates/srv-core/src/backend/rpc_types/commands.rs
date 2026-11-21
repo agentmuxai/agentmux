@@ -564,6 +564,11 @@ pub const COMMAND_AGENT_SET_SEAT: &str = "agent.setSeat";
 /// client only.
 pub const COMMAND_AGENT_PANE_UNREGISTER: &str = "agent.pane.unregister";
 
+/// `workspace.importuserworkspace`: open a saved workspace file as a new workspace and switch to it
+/// (`CommandWorkspaceImportUserWorkspaceData` -> `WorkspaceImportUserWorkspaceResult`). The person's window only:
+/// whether the file's terminal commands run and its agents start is the person's answer in the import preview.
+pub const COMMAND_WORKSPACE_IMPORT_USER_WORKSPACE: &str = "workspace.importuserworkspace";
+
 /// `agent.takeover`: the window takes a pane's agent over from another AgentMux
 /// instance on this host (`CommandAgentTakeoverData`, `AgentTakeoverResult`).
 /// The operator's client only.
@@ -619,6 +624,8 @@ pub const COMMAND_APP_DESKTOP: &str = "app.desktop";
 
 // The cloud presence publisher (muxbus::wan_presence): its state, and a try now.
 pub const COMMAND_PRESENCE_STATUS: &str = "presence.status";
+/// Accepting the terms: the person's, from the AgentMux window alone.
+pub const COMMAND_CLIENT_AGREE_TOS: &str = "client.agreetos";
 pub const COMMAND_PRESENCE_PUBLISH_NOW: &str = "presence.publish-now";
 
 // Tower, the read-only task manager pane (backend::tower::sampler). The
@@ -683,6 +690,9 @@ pub const COMMAND_IDENTITY_SELF_UNLINK: &str = "identity.self.unlink";
 /// The open account episodes: agents out of quota or signed out, grouped by
 /// account (`server::account_episodes`). The operator's window only.
 pub const COMMAND_IDENTITY_ACCOUNT_AVAILABILITY: &str = "identity.account.availability";
+/// Every signed-in account here with how much of each usage window is used (`server::account_episodes`).
+/// The operator's window, and any registered agent: it names no credential.
+pub const COMMAND_IDENTITY_ACCOUNT_USAGE: &str = "identity.account.usage";
 /// The messages held for agents, by agent and reason, as counts (`server::jekt_held_summary`). The operator's window,
 /// and any registered agent: it names no sender and no body.
 pub const COMMAND_JEKT_HELD_SUMMARY: &str = "jekt.held.summary";

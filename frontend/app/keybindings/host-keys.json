@@ -262,6 +262,38 @@
       "vk": 68
     },
     {
+      "command": "split:down",
+      "source": "ctrl+shift+s ArrowDown",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 83,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 40
+      }
+    },
+    {
+      "command": "split:right",
+      "source": "ctrl+shift+s ArrowRight",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 83,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 39
+      }
+    },
+    {
       "command": "pane:close",
       "source": "meta+w",
       "ctrl": false,
@@ -476,6 +508,150 @@
       "alt": false,
       "meta": true,
       "vk": 71
+    },
+    {
+      "command": "open:terminal",
+      "source": "meta+shift+o t",
+      "ctrl": false,
+      "shift": true,
+      "alt": false,
+      "meta": true,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 84
+      }
+    },
+    {
+      "command": "open:files",
+      "source": "meta+shift+o f",
+      "ctrl": false,
+      "shift": true,
+      "alt": false,
+      "meta": true,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 70
+      }
+    },
+    {
+      "command": "open:swarm",
+      "source": "meta+shift+o s",
+      "ctrl": false,
+      "shift": true,
+      "alt": false,
+      "meta": true,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 83
+      }
+    },
+    {
+      "command": "open:kanban",
+      "source": "meta+shift+o k",
+      "ctrl": false,
+      "shift": true,
+      "alt": false,
+      "meta": true,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 75
+      }
+    },
+    {
+      "command": "open:vault",
+      "source": "meta+shift+o v",
+      "ctrl": false,
+      "shift": true,
+      "alt": false,
+      "meta": true,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 86
+      }
+    },
+    {
+      "command": "open:history",
+      "source": "meta+shift+o h",
+      "ctrl": false,
+      "shift": true,
+      "alt": false,
+      "meta": true,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 72
+      }
+    },
+    {
+      "command": "open:sysinfo",
+      "source": "meta+shift+o i",
+      "ctrl": false,
+      "shift": true,
+      "alt": false,
+      "meta": true,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 73
+      }
+    },
+    {
+      "command": "app:connectors",
+      "source": "meta+shift+o c",
+      "ctrl": false,
+      "shift": true,
+      "alt": false,
+      "meta": true,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 67
+      }
+    },
+    {
+      "command": "app:memory",
+      "source": "meta+shift+o m",
+      "ctrl": false,
+      "shift": true,
+      "alt": false,
+      "meta": true,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 77
+      }
     }
   ],
   "other": [
@@ -723,6 +899,38 @@
       "vk": 68
     },
     {
+      "command": "split:down",
+      "source": "ctrl+shift+s ArrowDown",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 83,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 40
+      }
+    },
+    {
+      "command": "split:right",
+      "source": "ctrl+shift+s ArrowRight",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 83,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 39
+      }
+    },
+    {
       "command": "pane:close",
       "source": "ctrl+shift+w",
       "ctrl": true,
@@ -928,6 +1136,168 @@
       "alt": false,
       "meta": false,
       "vk": 71
+    },
+    {
+      "command": "open:terminal",
+      "source": "ctrl+shift+o t",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 84
+      }
+    },
+    {
+      "command": "open:files",
+      "source": "ctrl+shift+o f",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 70
+      }
+    },
+    {
+      "command": "open:swarm",
+      "source": "ctrl+shift+o s",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 83
+      }
+    },
+    {
+      "command": "open:kanban",
+      "source": "ctrl+shift+o k",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 75
+      }
+    },
+    {
+      "command": "open:vault",
+      "source": "ctrl+shift+o v",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 86
+      }
+    },
+    {
+      "command": "open:history",
+      "source": "ctrl+shift+o h",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 72
+      }
+    },
+    {
+      "command": "open:sysinfo",
+      "source": "ctrl+shift+o i",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 73
+      }
+    },
+    {
+      "command": "app:connectors",
+      "source": "ctrl+shift+o c",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 67
+      }
+    },
+    {
+      "command": "app:memory",
+      "source": "ctrl+shift+o m",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 77
+      }
+    },
+    {
+      "command": "pane:history:back",
+      "source": "ctrl+alt+-",
+      "ctrl": true,
+      "shift": false,
+      "alt": true,
+      "meta": false,
+      "vk": 189
+    },
+    {
+      "command": "pane:history:forward",
+      "source": "ctrl+shift+-",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 189
     }
   ],
   "linux": [
@@ -1175,6 +1545,38 @@
       "vk": 68
     },
     {
+      "command": "split:down",
+      "source": "ctrl+shift+s ArrowDown",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 83,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 40
+      }
+    },
+    {
+      "command": "split:right",
+      "source": "ctrl+shift+s ArrowRight",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 83,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 39
+      }
+    },
+    {
       "command": "pane:close",
       "source": "ctrl+shift+w",
       "ctrl": true,
@@ -1380,6 +1782,168 @@
       "alt": false,
       "meta": false,
       "vk": 71
+    },
+    {
+      "command": "open:terminal",
+      "source": "ctrl+shift+o t",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 84
+      }
+    },
+    {
+      "command": "open:files",
+      "source": "ctrl+shift+o f",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 70
+      }
+    },
+    {
+      "command": "open:swarm",
+      "source": "ctrl+shift+o s",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 83
+      }
+    },
+    {
+      "command": "open:kanban",
+      "source": "ctrl+shift+o k",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 75
+      }
+    },
+    {
+      "command": "open:vault",
+      "source": "ctrl+shift+o v",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 86
+      }
+    },
+    {
+      "command": "open:history",
+      "source": "ctrl+shift+o h",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 72
+      }
+    },
+    {
+      "command": "open:sysinfo",
+      "source": "ctrl+shift+o i",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 73
+      }
+    },
+    {
+      "command": "app:connectors",
+      "source": "ctrl+shift+o c",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 67
+      }
+    },
+    {
+      "command": "app:memory",
+      "source": "ctrl+shift+o m",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 79,
+      "second": {
+        "ctrl": false,
+        "shift": false,
+        "alt": false,
+        "meta": false,
+        "vk": 77
+      }
+    },
+    {
+      "command": "pane:history:back",
+      "source": "ctrl+alt+-",
+      "ctrl": true,
+      "shift": false,
+      "alt": true,
+      "meta": false,
+      "vk": 189
+    },
+    {
+      "command": "pane:history:forward",
+      "source": "ctrl+shift+-",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 189
     }
   ]
 }

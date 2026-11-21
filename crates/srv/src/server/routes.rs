@@ -340,6 +340,9 @@ fn agent_routes(state: &AppState) -> Router<AppState> {
         // A sensitive operation: the agent asks, the super agent decides, the person can veto
         // (SPEC_SUPER_AGENT_2026_10_25.md).
         .route("/api/v1/sensitive/:action", post(sensitive_handlers::handle_sensitive))
+        // The Drone tool: an agent lists and reads the drones here, fires one with a payload and reads its
+        // runs; a fire is recorded as that agent (SPEC_DRONE_REAL_WORLD_JOBS_2026_11_11.md §6.5).
+        .route("/api/v1/drone/:action", post(drone_agent::handle_drone))
         // Presence claims and posts to a repository's coordination channel
         // (SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15.md); reading is open.
         .route("/api/v1/work-claims", post(work_claims_handlers::handle_claim_work))
@@ -417,7 +420,7 @@ fn service_shell_and_vault_routes() -> Router<AppState> {
         .route("/docsite/*path", get(files::handle_docsite))
         .route("/schema/*path", get(files::handle_schema))
         .route("/api/lan-instances", get(handle_lan_instances))
-        .route("/agentmux/discovery", get(handle_discovery))
+        .route("/agentmux/discovery", get(super::live_facts::handler::handle))
         .route("/agentmux/old-versions", get(super::old_versions_handlers::handle_get).post(super::old_versions_handlers::handle_post))
         .route("/agentmux/reactive/availability", get(super::availability_view::handle_availability))
         .route("/agentmux/diag/sagas", get(handle_diag_sagas))
@@ -656,6 +659,8 @@ fn forwardable_muxspect_routes() -> Router<AppState> {
         .route("/api/v1/muxspect/list", get(muxspect_handlers::handle_muxspect_list))
         .route("/api/v1/muxspect/layout", get(muxspect_handlers::handle_muxspect_layout))
         .route("/api/v1/muxspect/describe", get(muxspect_handlers::handle_muxspect_describe))
+        // Which page each renderer draws, with CPU and what the page is doing (SPEC_RELEASE_BUILD_BROWSER_PAGE_DIAGNOSTIC_2026_11_13.md).
+        .route("/api/v1/muxspect/browsers", get(muxspect_browsers::handle_muxspect_browsers))
         // Dock: the cached ToolNode status snapshot (2026-08-06 dock diagnosis spec).
         .route("/api/v1/muxspect/dock", get(muxspect_handlers::handle_muxspect_dock))
         // Durable declared-background task registry (see the handler for why it is not the dock).

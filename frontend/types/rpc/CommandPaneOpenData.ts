@@ -115,6 +115,12 @@ target_block_id?: string,
  */
 from_link?: boolean, 
 /**
+ * The block_id of a container agent's pane whose message the person clicked a file in (an inline picture
+ * or video). The path is then taken as the agent wrote it and opened only from the agent's own folders, as
+ * a read-only copy: a path anywhere else is refused with the reason. For any other pane it is ignored.
+ */
+message_of?: string, 
+/**
  * `view: "editor"` only: the opened image or video tab follows newer
  * matching files in its folder (a render pipeline's output), as the
  * retired Media pane did. Set by `OpenMedia` and `view: "media"`.

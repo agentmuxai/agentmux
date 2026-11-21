@@ -229,6 +229,16 @@ describe("appHandleKeyDown", () => {
         expect(handlers["tab:new"]).toHaveBeenCalledTimes(1);
     });
 
+    it("runs a chord the host forwards out of a browser pane, and not one the keybindings no longer have", async () => {
+        registerHostShortcuts();
+        // The host kept both keys from the page and sends the whole chord.
+        listeners.get("app-shortcut")?.({ block_id: "b1", command: "split:down", key: "ctrl+shift+s ArrowDown" });
+        await vi.waitFor(() => expect(handlers["split:down"]).toHaveBeenCalledTimes(1));
+        listeners.get("app-shortcut")?.({ block_id: "b1", command: "split:down", key: "ctrl+shift+s x" });
+        await new Promise((r) => setTimeout(r, 0));
+        expect(handlers["split:down"]).toHaveBeenCalledTimes(1);
+    });
+
     it("skips a forwarded key the user's keybindings unbound", async () => {
         registerHostShortcuts();
         setUserKeybindings([{ command: "-tab:new", key: "ctrl+shift+t" }]);

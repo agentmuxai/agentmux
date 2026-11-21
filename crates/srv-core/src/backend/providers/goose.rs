@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{ControllerType, ProviderConfig};
+use super::{Tier, ControllerType, ProviderConfig};
 
 // goose: `goose acp` speaks ACP over stdio. Not on npm: the user installs the
 // GitHub release (the install hint), and srv finds it on PATH or in
@@ -10,6 +10,7 @@ use super::{ControllerType, ProviderConfig};
 // after an ACP `initialize` against the real binary.
 pub(super) static GOOSE: ProviderConfig = ProviderConfig {
     id: "goose",
+    tier: Tier::Preview,
     cli_command: "goose",
     controller_type: ControllerType::Acp,
     app_server: None,

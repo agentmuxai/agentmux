@@ -99,7 +99,8 @@ export function applyDownloadUpdate(rows: DownloadRow[], u: DownloadUpdate): Dow
         received: u.received ?? prev?.received ?? 0,
         total: u.total ?? prev?.total ?? -1,
         path: u.state === "done" ? u.path : undefined,
-        reason: u.state === "failed" ? u.reason : undefined,
+        // A failed download says why; a saved one may carry a note (it was saved without asking).
+        reason: u.state === "failed" || u.state === "done" ? u.reason : undefined,
     };
     return prev ? rows.map((r) => (r.key === key ? row : r)) : capRows([...rows, row]);
 }

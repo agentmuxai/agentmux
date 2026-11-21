@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{ControllerType, ProviderConfig};
+use super::{Tier, ControllerType, ProviderConfig};
 
 // Grok Build (xAI): `grok agent stdio` speaks ACP over stdio. Not on npm: AgentMux
 // downloads the pinned release itself (`cli_download::SPECS`), and a copy the user
@@ -10,6 +10,7 @@ use super::{ControllerType, ProviderConfig};
 // on 2026-11-09 after an ACP `initialize` against the real binary.
 pub(super) static GROK: ProviderConfig = ProviderConfig {
     id: "grok",
+    tier: Tier::FirstClass,
     cli_command: "grok",
     controller_type: ControllerType::Acp,
     app_server: None,

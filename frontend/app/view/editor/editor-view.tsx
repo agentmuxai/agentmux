@@ -19,6 +19,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { TextViewerSwitch, ViewerHost } from "./viewers/viewer-host";
 import { SaveAsInput } from "./editor-save-as-input";
 import { TabNameInput, TabRenameLine } from "./editor-tab-name-input";
+import { revealMenuItems } from "./editor-tab-reveal";
 import { showAsMenuItems } from "./editor-tab-show-as";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { editorDocTabs } from "./editor-doc-tabs";
@@ -30,6 +31,7 @@ import "./editor-view.scss";
 import { keyLabel } from "@/app/keybindings";
 import { OpenFromRemoteModal } from "./open-from-remote-modal";
 import { EditorEmptyState } from "./EditorEmptyState";
+import { EditorDiskConflictPanel } from "./editor-disk-conflict-panel";
 import { EditorErrorPanel, EditorLspBanner, EditorLspStatusChip, EditorMarkdownPreview, EditorModeToolbar } from "./EditorPanels";
 import { lspStatusChipText } from "./editor-lsp-status";
 import type { EditorViewModel } from "./editor-model";
@@ -298,6 +300,10 @@ function EditorMainColumn(props: {
                     <EditorLspBanner state={lspState} onDismiss={banner.dismissBanner} onCopy={copyToClipboard} />
                 </Show>
 
+                <Show when={model.diskConflicts.has(model.activeIdAtom() ?? undefined)}>
+                    <EditorDiskConflictPanel model={model} />
+                </Show>
+
                 <EditorBody
                     model={model}
                     shows={props.shows}
@@ -346,6 +352,7 @@ function EditorTabBar(props: {
                 // Once the menu has closed: it must not take the keyboard back from the box.
                 click: () => void setTimeout(() => startRename(tab.id), 0),
             },
+            ...revealMenuItems(model, tab),
             ...showAsMenuItems(model, tab),
         ];
     };

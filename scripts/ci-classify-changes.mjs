@@ -76,7 +76,7 @@ const DOCS_INDEX_PATTERNS = [
     // The other tests that step runs, and what they import (scripts/lib is shared by them). A test of ci-classify-changes
     // reads the step's list and fails when a file it covers is missing here: the job runs on Windows, and a failure
     // only there must show on the PR, not on main.
-    /^scripts\/(check-rust-pin|check-shared-paths|check-test-support-off|release-gate|release-manifest|release-publish-needs|release-sshsig|ci-main-stalled)\./,
+    /^scripts\/(check-rust-pin|check-shared-paths|check-test-support-off|release-gate|release-manifest|release-publish-needs|release-sshsig|ci-main-stalled|ci-main-range)\./,
     /^scripts\/lib\//,
     /^\.github\/workflows\/ci-pr\.yml$/,
     /^package(-lock)?\.json$/,
@@ -119,6 +119,7 @@ const RUST_READS_FRONTEND = [
     /^frontend\/app\/view\/agent\/providers\/catalog\.ts$/,
     /^frontend\/layout\/tests\/fixtures\//,
     /^frontend\/app\/util\/widgets-json-template\.jsonc$/,
+    /^frontend\/app\/store\/low-disk-levels\.json$/,
 ];
 
 /**
@@ -146,6 +147,7 @@ const CEF_BUILT_FROM = [
     /^settings-template\.jsonc$/,
     /^assets\/linux\/icons\//,
     /^frontend\/app\/keybindings\/host-keys\.json$/,
+    /^frontend\/app\/store\/low-disk-levels\.json$/,
     /^\.github\/workflows\/ci-pr\.yml$/,
     /^scripts\/(ci-apt|ci-require-tools|ci-classify-changes)\./,
 ];

@@ -530,3 +530,117 @@ async fn card_text_is_counted_after_it_is_cleaned() {
     let (_, t) = get(&app, &format!("/agentmux/work/{num}"), "a1").await;
     assert_eq!(t["card"]["note"], "n".repeat(4_000).as_str());
 }
+
+fn card_of(state: &crate::server::AppState, num: i64) -> crate::backend::storage::work_board::WorkCard {
+    state.identity_store.work_board_get(&num.to_string()).unwrap().unwrap().card
+}
+
+/// A note on a task nobody holds (waiting, or on hold) needs no claim and no attempt, and the card and the
+/// history both say who wrote it (a leader can say on a held card why it waits).
+#[tokio::test]
+async fn an_agent_that_does_not_hold_a_waiting_or_held_task_can_leave_a_note_and_links_on_it() {
+    let (app, state) = app_and_state();
+    let (_, v) = post(&app, "/agentmux/work", json!({"title": "t", "payload": "p", "target_agent": "a1"})).await;
+    let num = v["num"].as_i64().unwrap();
+    post(&app, &format!("/agentmux/work/{num}/hold"), json!({"agent_id": "a2", "reason": "waits"})).await;
+
+    let uri = format!("/agentmux/work/{num}/update");
+    let note = json!({"agent_id": "a2", "note": "waits on the design", "pr_url": "https://example.test/pull/1", "branch": "a2/x"});
+    let (s, v) = post(&app, &uri, note).await;
+    assert_eq!((s, v["ok"].as_bool()), (StatusCode::OK, Some(true)), "a held task: {v}");
+    let card = card_of(&state, num);
+    assert_eq!(card.note, "a2: waits on the design", "the card says who wrote it");
+    assert_eq!((card.pr_url.as_str(), card.branch.as_str()), ("https://example.test/pull/1", "a2/x"));
+    let rows = history(&state, num);
+    assert!(rows.iter().any(|(k, a, b)| k == "updated" && a == "a2" && b == "a2: waits on the design"), "recorded as the writer: {rows:?}");
+    assert!(rows.iter().any(|(k, a, _)| k == "linked" && a == "a2"), "{rows:?}");
+
+    // Still on hold, still nobody's: the note moved nothing.
+    let id = state.identity_store.work_board_get(&num.to_string()).unwrap().unwrap().item.id;
+    let item = state.identity_store.work_queue_get(&id).unwrap().unwrap();
+    assert_eq!((item.state.as_str(), item.attempts, item.claimed_by.as_str()), ("held", 0, ""), "no claim, no attempt used");
+
+    // A waiting (open) task takes one too, from a third agent, and the next claim is still its first attempt.
+    post(&app, &format!("/agentmux/work/{num}/unhold"), json!({"agent_id": "a3"})).await;
+    let (s, _) = post(&app, &uri, json!({"agent_id": "a3", "note": "design is in"})).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(card_of(&state, num).note, "a3: design is in");
+    let (_, c) = post(&app, "/agentmux/work/claim", json!({"agent_id": "a1"})).await;
+    assert_eq!((c["num"].as_i64(), c["attempt"].as_i64()), (Some(num), Some(1)), "{c}");
+}
+
+/// The holder's own note, checklist and files stay the holder's: a claimed task refuses everyone else and
+/// the holder without its attempt, says who to message, and the holder with its attempt is unchanged.
+#[tokio::test]
+async fn a_claimed_tasks_note_stays_its_holders_and_the_refusal_says_what_to_do_instead() {
+    let (app, state) = app_and_state();
+    post(&app, "/agentmux/work", json!({"title": "t", "payload": "p"})).await;
+    let (_, c) = post(&app, "/agentmux/work/claim", json!({"agent_id": "a1"})).await;
+    let (num, attempt) = (c["num"].as_i64().unwrap(), c["attempt"].as_i64().unwrap());
+    let uri = format!("/agentmux/work/{num}/update");
+
+    let (s, v) = post(&app, &uri, json!({"agent_id": "a2", "note": "I know better"})).await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    let why = v["error"].as_str().unwrap();
+    assert!(why.contains("a1") && why.contains("message a1"), "names the holder and says to message them: {v}");
+    let (s, _) = post(&app, &uri, json!({"agent_id": "a1", "note": "forgot my attempt"})).await;
+    assert_eq!(s, StatusCode::CONFLICT, "the holder's call stays fenced by its attempt");
+    assert_eq!(card_of(&state, num).note, "", "nothing was written");
+
+    let (s, _) = post(&app, &uri, json!({"agent_id": "a1", "attempt": attempt, "note": "mine"})).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(card_of(&state, num).note, "mine", "the holder's note carries no author prefix, as before");
+
+    // After `Tasks ask` the task is blocked and still the holder's.
+    post(&app, &format!("/agentmux/work/{num}/ask"), json!({"agent_id": "a1", "attempt": attempt, "text": "which?"})).await;
+    let (s, _) = post(&app, &uri, json!({"agent_id": "a2", "note": "x"})).await;
+    assert_eq!(s, StatusCode::CONFLICT, "a blocked task is held too");
+    assert_eq!(card_of(&state, num).note, "mine");
+}
+
+#[tokio::test]
+async fn a_note_without_an_attempt_takes_only_a_note_and_links_and_only_on_a_waiting_task() {
+    let (app, state) = app_and_state();
+    let (_, v) = post(&app, "/agentmux/work", json!({"title": "t", "payload": "p", "review": true})).await;
+    let num = v["num"].as_i64().unwrap();
+    let uri = format!("/agentmux/work/{num}/update");
+
+    for (what, body) in [
+        ("a checklist", json!({"agent_id": "a2", "note": "n", "checklist": [{"text": "a", "status": "pending"}]})),
+        ("files", json!({"agent_id": "a2", "note": "n", "media": [{"sha256": "ab"}]})),
+        ("the UI flag", json!({"agent_id": "a2", "note": "n", "ui_change": true})),
+    ] {
+        let (s, v) = post(&app, &uri, body).await;
+        assert_eq!(s, StatusCode::CONFLICT, "{what} are the holder's: {v}");
+        assert!(v["error"].as_str().unwrap().contains("holder"), "{what}: {v}");
+    }
+    let (s, _) = post(&app, &uri, json!({"agent_id": "a2"})).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "nothing to write");
+    let (s, v) = post(&app, &uri, json!({"agent_id": "a2", "doc": "docs/SPEC_X.md"})).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "a relative document path, as for the holder: {v}");
+    let (s, _) = post(&app, &uri, json!({"agent_id": "  ", "note": "n"})).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "who is writing is required");
+    let (s, _) = post(&app, "/agentmux/work/9999/update", json!({"agent_id": "a2", "note": "n"})).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    assert_eq!(card_of(&state, num).note, "", "none of those wrote anything");
+
+    // A task handed in for review is not waiting.
+    let (_, c) = post(&app, "/agentmux/work/claim", json!({"agent_id": "a1"})).await;
+    post(&app, &format!("/agentmux/work/{num}/submit"), json!({"agent_id": "a1", "attempt": c["attempt"], "text": "done"})).await;
+    let (s, v) = post(&app, &uri, json!({"agent_id": "a2", "note": "late"})).await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    assert!(v["error"].as_str().unwrap().contains("review"), "{v}");
+}
+
+#[tokio::test]
+async fn ask_and_submit_still_need_the_attempt() {
+    let app = app();
+    post(&app, "/agentmux/work", json!({"title": "t", "payload": "p"})).await;
+    let (_, c) = post(&app, "/agentmux/work/claim", json!({"agent_id": "a1"})).await;
+    let num = c["num"].as_i64().unwrap();
+    for (segment, text) in [("ask", "which?"), ("submit", "done")] {
+        let (s, v) = post(&app, &format!("/agentmux/work/{num}/{segment}"), json!({"agent_id": "a1", "text": text})).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{segment}: {v}");
+        assert!(v["error"].as_str().unwrap().contains("attempt"), "{segment}: {v}");
+    }
+}

@@ -110,6 +110,14 @@ pub struct AgentModelSwitchReq {
     /// harness's own model itself leaves it out, so there is one restart and not two.
     #[serde(default = "yes")]
     pub restart: bool,
+    /// Start a new session on the new model instead of resuming the conversation: each pane ends its session when its
+    /// turn ends, and a first message (the move, and `handoff`) starts the new one. A conversation written by another
+    /// model can send a new one into a loop of thinking, which resuming it does not avoid. Wins over `restart`.
+    #[serde(default)]
+    pub fresh: bool,
+    /// With `fresh`: what the next session must know, in its first message. Empty: it reads its task list.
+    #[serde(default)]
+    pub handoff: Option<String>,
 }
 
 fn yes() -> bool {
@@ -123,6 +131,9 @@ pub struct AgentModelSwitchResult {
     pub changed: bool,
     pub restarted: u32,
     pub failed: Vec<String>,
+    /// Panes that start a fresh session (a running pane when its turn ends, a stopped one at its next start).
+    #[serde(default)]
+    pub fresh: u32,
 }
 
 /// What `agent.peer-labels` answers.
@@ -296,6 +307,65 @@ fn refuse_unreadable(harness: &str, route: &str, model: &str, images: u32) -> Re
     }
 }
 
+/// What a fresh session on a model change needs, checked before anything is changed: a handoff within the limit, and every
+/// pane of the agent able to start a fresh session (a container's can't yet, as `Agents fresh` says).
+pub(crate) fn check_fresh(state: &AppState, def_id: &str, handoff: &str) -> Result<(), String> {
+    if handoff.chars().count() > super::agent_context::HANDOFF_MAX_CHARS {
+        return Err(format!("the handoff is over {} characters: shorten it, with the next step in it", super::agent_context::HANDOFF_MAX_CHARS));
+    }
+    for block in crate::server::account_episodes::panes_of(state, def_id) {
+        super::agent_context::fresh_refusal(state, &block.oid).map_err(fresh_refused)?;
+    }
+    Ok(())
+}
+
+/// What a refused fresh session says: why, and what to do instead. A container agent can't start a fresh session yet
+/// (its turns run on a per-turn exec controller that has no session to end); what it can do is compact first.
+fn fresh_refused(why: &str) -> String {
+    if why.contains("containers") {
+        "a fresh session is not built for container agents yet, so this model change was not made: compact the conversation first (Agents compact, or Compact, then switch in the model panel) and change the model after, or change it without fresh to resume the conversation as it is".to_string()
+    } else {
+        format!("a fresh session is not possible for this agent ({why}), so this model change was not made: change it without fresh to resume the conversation, or compact it first")
+    }
+}
+
+/// Starts the fresh sessions of a model change. A running pane ends its session when its turn ends and starts the new one
+/// with `message`, on the model the agent is set to now; a pane with no controller (a stopped agent) forgets the session
+/// it would resume, so its next start begins a new one. Returns how many panes will start fresh, and what could not.
+pub(crate) fn start_fresh_panes(state: &AppState, def_id: &str, message: &str) -> (u32, Vec<String>) {
+    let (mut started, mut failed, mut running) = (0, Vec::new(), 0);
+    for block in crate::server::account_episodes::panes_of(state, def_id) {
+        if crate::backend::blockcontroller::get_controller(&block.oid).is_some() {
+            if super::agent_context::start_fresh_after_switch(state, &block.oid, message.to_string()) {
+                started += 1;
+                running += 1;
+            } else {
+                failed.push("no runtime to start the fresh session on".to_string());
+            }
+        } else {
+            crate::backend::blockcontroller::core::forget_saved_session(&block.oid, &state.mstore, &state.event_bus);
+            started += 1;
+        }
+    }
+    // The route the agent left ends when a launch on the new one follows (`launch.rs`): with no running pane to relaunch, or one that
+    // could not be started, nothing is coming to do it, so it ends now, as `restart_panes` does.
+    if running == 0 || !failed.is_empty() {
+        switch::finish_leaving_after_relaunch(&state.mstore, def_id, "", |b| switch::pane_in_a_turn(&state.mstore, b));
+    }
+    (started, failed)
+}
+
+/// Where the agent is moved to, as its first message says it: the model's name and its route, or the harness's own sign-in.
+pub(crate) fn place_label(harness: &str, route: &str, model: &str) -> String {
+    if route.is_empty() {
+        return "the harness's own sign-in".to_string();
+    }
+    match catalog::validate(harness, route, model) {
+        Ok((r, m)) => format!("{} on {}", m.label, r.label),
+        Err(_) => format!("{route} {model}").trim().to_string(),
+    }
+}
+
 pub(crate) fn switch_model(state: &AppState, req: &AgentModelSwitchReq) -> Result<AgentModelSwitchResult, String> {
     let def = agent_of_block(state, &req.blockid)?;
     let harness = state.id_store.resolve_effective_provider_id(&def);
@@ -308,12 +378,22 @@ pub(crate) fn switch_model(state: &AppState, req: &AgentModelSwitchReq) -> Resul
             return Err("ACCOUNT_CANT_RUN: this agent is on an API key, which is billed to the key; move it back to a plan account first".to_string());
         }
     }
+    let handoff = req.handoff.as_deref().map(str::trim).unwrap_or_default();
+    // Before anything changes: a fresh session that can't be started must not leave the model moved behind it.
+    if req.fresh {
+        check_fresh(state, &def.id, handoff)?;
+    }
     let moved = switch::move_to(&state.mstore, &def.id, &harness, target, |r| route_key::present(&state.identity_store, r.key_label))?;
-    if !moved.changed() || !req.restart {
-        return Ok(AgentModelSwitchResult { changed: moved.changed(), restarted: 0, failed: Vec::new() });
+    if !moved.changed() || (!req.restart && !req.fresh) {
+        return Ok(AgentModelSwitchResult { changed: moved.changed(), restarted: 0, failed: Vec::new(), fresh: 0 });
+    }
+    if req.fresh {
+        let message = super::agent_context::switch_message(&place_label(&harness, route, req.model.trim()), handoff);
+        let (fresh, failed) = start_fresh_panes(state, &def.id, &message);
+        return Ok(AgentModelSwitchResult { changed: true, restarted: 0, failed, fresh });
     }
     let (restarted, failed) = restart_panes(state, &def.id);
-    Ok(AgentModelSwitchResult { changed: true, restarted, failed })
+    Ok(AgentModelSwitchResult { changed: true, restarted, failed, fresh: 0 })
 }
 
 /// Restarts the agent's panes on its new place, and ends the access of a route it left when no relaunch is coming to do it:
@@ -471,5 +551,23 @@ mod tests {
         let running = panel_model(route, flash, Some(&on), true, &over);
         assert!(running.current && running.unavailable.is_none() && running.compact_first.is_none(), "{running:?}");
         assert!(panel_model(route, flash, None, true, &req(Some(10_000), None)).compact_first.is_none());
+    }
+
+    #[test]
+    fn the_fresh_sessions_first_message_names_the_move_and_carries_the_handoff() {
+        let said = super::super::agent_context::switch_message("DeepSeek V4.1 Flash on OpenRouter", "Task 31427 is yours; the next step is the card.");
+        assert!(said.starts_with("[AgentMux] You were moved to DeepSeek V4.1 Flash on OpenRouter and this is a fresh session"), "{said}");
+        assert!(said.contains("Agents search_history"), "it says where the earlier conversation is: {said}");
+        assert!(said.ends_with("Task 31427 is yours; the next step is the card."), "{said}");
+        let none = super::super::agent_context::switch_message("x", "  ");
+        assert!(none.contains("Tasks list"), "with no handoff it says where to look: {none}");
+    }
+
+    #[test]
+    fn a_place_is_named_by_its_model_and_route_or_as_the_harness_own_sign_in() {
+        assert_eq!(place_label("claude", "", ""), "the harness's own sign-in");
+        let flash = place_label("claude", "openrouter", "deepseek/deepseek-v4.1-flash-1017");
+        assert!(flash.contains("Flash") && flash.contains(" on "), "{flash}");
+        assert_eq!(place_label("claude", "nowhere", "m"), "nowhere m", "a place that does not validate is named as given");
     }
 }

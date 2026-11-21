@@ -443,6 +443,8 @@ fn a_stage_set_is_kept_cleaned_and_survives_a_reopen() {
     let set = crate::backend::storage::work_board_stages::parse_stored(&b.stages).unwrap();
     assert_eq!(set.stages.len(), 5);
     assert_eq!(set.stages[1].name, "Doing", "names are trimmed");
+    assert_eq!(set.stages[1].colour, "active", "a hue name is kept as its role name");
+    assert!(!b.stages.contains("magenta"), "{}", b.stages);
     drop(s);
     let s = Store::open_identity_store(&d.path().join("identity-store.db")).unwrap();
     let again = s.work_board_resolve(Some("main"), 6).unwrap();
@@ -469,6 +471,13 @@ fn a_stale_revision_is_refused_and_the_current_one_is_accepted() {
     let stale = BoardEdit { stages_rev: Some(0), ..stages_edit(merged_set()) };
     let Err(BoardError::Refused(why)) = s.work_board_edit("main", &stale, 6) else { panic!("should be refused") };
     assert!(why.contains("changed since you read them (now revision 1)"), "{why}");
+    // The refusal says what the stages are now, and which revision to send, so a retry needs no separate read.
+    assert!(why.contains(r#""id":"doing""#) && why.contains(r#""colour":"active""#), "{why}");
+    assert!(why.contains("send it with stages_rev 1"), "{why}");
+    let stale_default = BoardEdit { stages_rev: Some(5), ..stages_edit(merged_set()) };
+    let (s2, _d2) = store();
+    let Err(BoardError::Refused(why2)) = s2.work_board_edit("main", &stale_default, 6) else { panic!("should be refused") };
+    assert!(why2.contains("now revision 0") && why2.contains(r#""id":"backlog""#), "a board with no set of its own says the default: {why2}");
     let current = BoardEdit { stages_rev: Some(1), ..stages_edit(merged_set()) };
     assert_eq!(s.work_board_edit("main", &current, 7).unwrap().stages_rev, 2);
 }

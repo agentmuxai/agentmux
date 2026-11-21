@@ -21,8 +21,6 @@ const DEFAULT_GAP_PX = 8;
 
 export interface AgentTopBandProps {
     blockId: string;
-    /** The pane's zoom, which the band follows like the conversation under it. */
-    zoom: Accessor<number>;
 }
 
 const formKey = (id: string, form: "full" | "compact") => `${id}:${form}`;
@@ -32,7 +30,7 @@ export function AgentTopBand(props: AgentTopBandProps): JSX.Element {
     onCleanup(() => releaseTopBand(props.blockId));
     return (
         <Show when={items().length > 0}>
-            <div class="agent-top-band" style={{ zoom: props.zoom() }}>
+            <div class="agent-top-band" data-zoom-scope="chrome">
                 <TopBandBody items={items} />
             </div>
         </Show>

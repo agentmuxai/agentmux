@@ -71,11 +71,15 @@ pub fn install_state_hooks(state: &AppState) {
     // Out-of-band native-memory write detection (fast fs-watch path + slow
     // reconciliation-sweep path) — see
     // docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §4.5.
+    // Only the agents running in this process: the roster and the identity folders are shared by every
+    // channel on the host, and a channel starting beside another reads nothing of the other's agents.
+    let drift_state = state.clone();
     backend::memory::native_drift::spawn(
         state.fs_watch_pool.clone(),
         state.mstore.clone(),
         state.id_store.clone(),
         state.broker.clone(),
+        std::sync::Arc::new(move || crate::server::agent_lifecycle::running_agent_ids(&drift_state)),
     );
 
     // Retention/GC for native-memory version history — see
@@ -132,6 +136,7 @@ pub async fn start_job_ledger_and_cron(state: &AppState) {
     if let Some(jobs_store) = crate::server::cron::jobs_store(state) {
         backend::jobs::paused::spawn(jobs_store, run_ledger.clone());
     }
+    let local_ledger = run_ledger.clone();
     state.cron_scheduler.install_runs(run_ledger);
     // An `app_event` job's runs start when the broker reports the event it names; a `file_watch` job's, when its folder changes; a `poll` job's, when its query finds something new.
     if let Some(jobs_store) = crate::server::cron::jobs_store(state) {
@@ -143,6 +148,11 @@ pub async fn start_job_ledger_and_cron(state: &AppState) {
     // Start persistent cron scheduler — load enabled jobs from DB, fire any
     // that missed their window (FIRE_ONCE_NOW), schedule all for future fires.
     state.cron_scheduler.start().await;
+    // A local slot that passed with no row of any kind is given up on (jobs spec §4.4). After the scheduler's start-up
+    // catch-up, whose collapsed rows cover the slots missed while AgentMux was off.
+    if let Some(jobs_store) = crate::server::cron::jobs_store(state) {
+        backend::jobs::watchdog::start_local(local_ledger, jobs_store);
+    }
 }
 
 /// Compensates the sagas an earlier run left unresolved; non-fatal when it fails.
@@ -191,7 +201,9 @@ fn spawn_spend_services(state: &AppState) {
 fn spawn_background_task_sweep(state: &AppState) {
     backend::background_task_exit::install(Arc::clone(&state.broker), Arc::clone(&state.mstore));
     backend::background_task_pid::install(Arc::clone(&state.broker), Arc::clone(&state.mstore));
-    backend::background_task_sweep::start(Arc::clone(&state.mstore), Arc::clone(&state.broker));
+    // A container pane's rows are checked inside its container, through whichever runtime srv is connected to.
+    let containers = backend::container_task_probe::DockerProbe { runtime: Arc::clone(&state.container_manager) };
+    backend::background_task_sweep::start(Arc::clone(&state.mstore), Arc::clone(&state.broker), Some(Arc::new(containers)));
 }
 
 /// Starts the services that run beside the server and need the app state.

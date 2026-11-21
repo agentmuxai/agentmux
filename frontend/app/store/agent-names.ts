@@ -29,6 +29,11 @@ export function nameInAgents(agents: Pick<AgentDefinition, "id" | "slug" | "name
     return found?.name?.trim() || id;
 }
 
+/** Every agent in the list, for what recognises a name in text. Reactive: it follows the list of agents. */
+export function agentRoster(): Pick<AgentDefinition, "id" | "slug" | "name">[] {
+    return store.data();
+}
+
 /** An agent as a person reads it, for the id srv records it by. Reactive: it follows the list of agents. */
 export function agentDisplayName(id: string): string {
     return nameInAgents(store.data(), id);

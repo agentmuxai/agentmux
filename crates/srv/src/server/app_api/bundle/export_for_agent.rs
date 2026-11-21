@@ -370,7 +370,7 @@ pub(super) async fn bundle_export_for_agent_with_history_impl(
                         format!("history/{}/{}.jsonl", session.provider, session.session_id);
                     export.files.push(crate::backend::bundle_export::BundleExportFile {
                         path: out_path.clone(),
-                        content,
+                        content: crate::backend::transcript::withhold::text(&content).into_owned(),
                     });
                     history_paths.push(out_path);
                     included += 1;

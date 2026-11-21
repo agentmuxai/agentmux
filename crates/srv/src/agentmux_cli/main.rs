@@ -22,6 +22,11 @@ mod service;
 mod settings;
 mod setup;
 mod state;
+// The service entry's parts that need no Windows (the names, the command line, what is told to the service manager) are also
+// for the installer, which is the next PR of docs/specs/SPEC_WINDOWS_HEADLESS_AS_A_SERVICE_2026_11_20.md: until then only the
+// tests use some of them.
+#[allow(dead_code)]
+mod winservice;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -70,6 +75,8 @@ macro_rules! tell {
     ($($arg:tt)*) => { println!("{}", say_as(&format!($($arg)*))) };
 }
 const DEFAULT_CHANNEL: &str = "headless";
+/// The environment variable that moves the whole data root (`channels/` and `shared/`) off `~/.agentmux`.
+const HOME_VAR: &str = "AGENTMUX_HOME_OVERRIDE";
 /// The server's key file name inside its data folder.
 const KEY_FILE_NAME: &str = "srv-auth-key";
 /// How long `start` waits for the server to answer, which includes preparing the data of a new version.
@@ -80,9 +87,15 @@ const STOP_WAIT: Duration = Duration::from_secs(30);
 #[derive(Parser, Debug)]
 #[command(name = "agentmux", version, about = "Run and manage AgentMux Headless on this machine")]
 struct Cli {
-    /// The server's channel: its own data, settings and agents, apart from a desktop AgentMux's.
+    /// The server's channel: its own settings, log, ports, workspaces and windows, apart from a desktop AgentMux's. Agents, their
+    /// memory, accounts and history are shared by every channel of this folder.
     #[arg(long, global = true, default_value = DEFAULT_CHANNEL)]
     channel: String,
+    /// Keep everything in this folder instead of `~/.agentmux`: this server's own data, and the agents, accounts and
+    /// history that servers on the same folder share. A server given a folder of its own shares nothing with the
+    /// AgentMux on this machine. The login service made by `setup` carries the same folder.
+    #[arg(long, global = true, value_name = "DIR")]
+    home: Option<PathBuf>,
     #[command(subcommand)]
     command: Cmd,
 }
@@ -172,6 +185,18 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// What the Windows service manager runs (not a command to type).
+    #[command(hide = true)]
+    Service {
+        #[command(subcommand)]
+        command: ServiceCmd,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ServiceCmd {
+    /// Be the Windows service: report to the service manager and run the server as `run` does.
+    Run(ServerArgs),
 }
 
 fn main() {
@@ -184,7 +209,7 @@ fn dispatch(cli: Cli) -> i32 {
     if let Cmd::Version { json } = cli.command {
         return cmd_version(&cli.channel, json);
     }
-    let paths = match context(&cli.channel) {
+    let paths = match context(&cli.channel, cli.home.as_deref()) {
         Ok(p) => p,
         Err(e) => return fail(&e),
     };
@@ -221,6 +246,7 @@ fn dispatch(cli: Cli) -> i32 {
         }
         Cmd::Uninstall { remove_data, yes } => cmd_uninstall(&paths, remove_data, yes),
         Cmd::Version { .. } => unreachable!("answered above"),
+        Cmd::Service { command: ServiceCmd::Run(args) } => winservice::command(&paths, &args),
     }
 }
 
@@ -237,7 +263,7 @@ fn service_ignores(paths: &DataPaths, args: &ServerArgs) -> Option<i32> {
     if !args.any() {
         return None;
     }
-    user_home().ok().filter(|h| service::installed(h, &paths.channel))?;
+    service_here(paths)?;
     warn!("AgentMux starts from its service, which uses the saved settings, so these flags would be ignored. Change them with `agentmux setup` (for example `agentmux setup --port 7500`).");
     Some(2)
 }
@@ -258,15 +284,35 @@ fn fail(message: &str) -> i32 {
 
 /// The channel's paths. The environment of the shell this runs in is not trusted to say anything about
 /// the server: a terminal inside a desktop AgentMux carries that instance's variables, which would
-/// point the server at the desktop's data. Only the test root override is kept.
-fn context(channel: &str) -> Result<DataPaths, String> {
+/// point the server at the desktop's data. Only the root override is kept, and `--home` sets it: the server this
+/// starts and the programs it starts inherit it, so one folder holds all of it.
+fn context(channel: &str, home: Option<&Path>) -> Result<DataPaths, String> {
     for (key, _) in std::env::vars_os() {
-        if key.to_string_lossy().starts_with("AGENTMUX_") && key != "AGENTMUX_HOME_OVERRIDE" {
+        if key.to_string_lossy().starts_with("AGENTMUX_") && key != HOME_VAR {
             std::env::remove_var(key);
         }
     }
+    if let Some(home) = home {
+        std::env::set_var(HOME_VAR, checked_home(home)?);
+    }
     std::env::set_var("AGENTMUX_CHANNEL", channel);
     DataPaths::resolve(VERSION, &RuntimeMode::Installed).map_err(|e| format!("channel {channel:?}: {e}"))
+}
+
+/// The folder `--home` names, as a full path (a service and the server it starts have another working folder), and
+/// one a service file can carry whole: no quote or line break in it.
+fn checked_home(home: &Path) -> Result<PathBuf, String> {
+    let text = home.to_string_lossy();
+    if text.is_empty() || text.contains(['"', '\n', '\r']) {
+        return Err(format!("--home {text:?} is not a folder name (it is empty, or has a quote or a line break in it)"));
+    }
+    std::path::absolute(home).map_err(|e| format!("--home {text:?}: {e}"))
+}
+
+/// The folder this run keeps everything in when it is not `~/.agentmux`: `--home`, or the root override in the
+/// environment. A login service made by `setup` is given the same.
+fn data_home_override() -> Option<PathBuf> {
+    std::env::var_os(HOME_VAR).filter(|v| !v.is_empty()).map(PathBuf::from)
 }
 
 fn client_args(print: bool, origin: Option<String>) -> Vec<String> {
@@ -538,7 +584,7 @@ fn cmd_start(paths: &DataPaths, args: &ServerArgs) -> i32 {
     }
     // Any refusal found while waiting below is this start's own.
     state::clear_blocked(&paths.instance_dir);
-    if let Some(home) = user_home().ok().filter(|h| service::installed(h, &paths.channel)) {
+    if let Some(home) = service_here(paths) {
         return match service::control(&home, &paths.channel, "start") {
             Ok(()) => wait_for_server(paths, None),
             Err(e) => fail(&e),
@@ -648,7 +694,7 @@ fn cmd_stop(paths: &DataPaths, force: bool) -> i32 {
         return 0;
     }
     // A service restarts a server that exits non-zero, so a service's server is stopped through the service.
-    let stopped = match user_home().ok().filter(|h| !cfg!(windows) && service::installed(h, &paths.channel)) {
+    let stopped = match service_here(paths).filter(|_| !cfg!(windows)) {
         Some(home) => service::control(&home, &paths.channel, "stop"),
         None if process::terminate(record.pid) => Ok(()),
         // Windows has no signal to send: the server is asked over its signed channel.
@@ -701,7 +747,7 @@ fn cmd_status(paths: &DataPaths, json: bool) -> i32 {
     let healthy = record.as_ref().is_some_and(|s| process::health_ok(s.web_port));
     let uptime = record.as_ref().map(|s| agentmux_common::time::now_secs_u64().saturating_sub(s.started_unix));
     let blocked = state::read_blocked(&paths.instance_dir).filter(|_| record.is_none());
-    let service = user_home().is_ok_and(|h| service::installed(&h, &paths.channel));
+    let service = service_here(paths).is_some();
     let browsers = if healthy { browser_sessions(paths) } else { None };
     if json {
         println!(
@@ -774,6 +820,24 @@ fn human_duration(secs: u64) -> String {
 
 fn user_home() -> Result<PathBuf, String> {
     dirs::home_dir().ok_or_else(|| "cannot find your home folder".to_string())
+}
+
+/// The person's home folder, when this channel has a login service that starts the server on this run's folder. A service
+/// is named by its channel alone, so one that starts a server on another folder is not this server's to start or stop.
+fn service_here(paths: &DataPaths) -> Option<PathBuf> {
+    user_home().ok().filter(|h| service::installed_on(h, &paths.channel, data_home_override().as_deref()))
+}
+
+/// The refusal for a login service of this channel that starts a server on another folder, which the command (`would`)
+/// would take from that server without a word.
+fn service_elsewhere(paths: &DataPaths, would: &str) -> Option<String> {
+    let home = user_home().ok()?;
+    service::runs_elsewhere(&home, &paths.channel, data_home_override().as_deref()).then(|| {
+        say_as(&format!(
+            "the login service of channel {:?} starts a server on another folder than this one, and {would}. Give this server a channel of its own (`agentmux --channel NAME --home FOLDER setup`).",
+            paths.channel
+        ))
+    })
 }
 
 /// The path a service should run this command by: the one it was started as, when that is a link
@@ -859,7 +923,10 @@ fn cmd_setup(paths: &DataPaths, args: &setup::SetupArgs) -> i32 {
         warn!("fix the failures above, then run `agentmux setup` again.");
         return 1;
     }
-    let service_installed = user_home().ok().is_some_and(|h| service::installed(&h, &paths.channel));
+    if let Some(refusal) = service_elsewhere(paths, "`setup` would replace or remove it") {
+        return fail(&refusal);
+    }
+    let service_installed = service_here(paths).is_some();
     let plan = match setup::plan(args, &current, service::manager().is_some(), service_installed, &mut setup::Terminal) {
         Ok(p) => p,
         Err(e) => {
@@ -883,7 +950,7 @@ fn cmd_setup(paths: &DataPaths, args: &setup::SetupArgs) -> i32 {
         Err(e) => return fail(&e),
     };
     if plan.service {
-        let installed = stable_exe().and_then(|exe| service::install(&home, &exe, &paths.channel, &state::log_path(&paths.instance_dir)));
+        let installed = stable_exe().and_then(|exe| service::install(&home, &exe, &paths.channel, &state::log_path(&paths.instance_dir), data_home_override().as_deref()));
         match installed {
             Ok(file) => {
                 println!("The service is installed ({}): AgentMux starts at every login.", file.display());
@@ -918,7 +985,8 @@ fn cmd_setup(paths: &DataPaths, args: &setup::SetupArgs) -> i32 {
     // A start has already said how to sign in.
     let sign_in = if plan.start { "" } else { "Start it with `agentmux start`, and sign in with `agentmux open`. " };
     tell!("{sign_in}Models sign in where their command-line tools do: run the tool (for example `claude`) in a terminal pane once.");
-    println!("Agents, tasks and Global Memory of this server live in {}.", paths.instance_dir.display());
+    println!("This server's settings, log, workspaces and windows are in {}.", paths.instance_dir.display());
+    tell!("Your agents, their memory, tasks, accounts and history are in the shared folder of {}, common to every AgentMux on this machine. To keep this server apart from them, run it with `agentmux --home <folder> setup`.", paths.home_dir.display());
     0
 }
 
@@ -1011,6 +1079,10 @@ fn cmd_uninstall(paths: &DataPaths, remove_data: bool, yes: bool) -> i32 {
             "the install is also used by the channel(s) {}: stop each (`agentmux --channel <name> stop`) and remove its login service (`agentmux --channel <name> setup --no-service --no-start`), then run uninstall again",
             in_use.join(", ")
         ));
+    }
+    // A service of this channel's name that starts a server on another folder is that server's, and stays.
+    if let Some(refusal) = service_elsewhere(paths, "`uninstall` would remove it") {
+        return fail(&refusal);
     }
     match service::remove(&home, &paths.channel) {
         Ok(Some(file)) => tell!("Removed the login service ({}).", file.display()),
@@ -1159,6 +1231,12 @@ mod tests {
             vec!["logs", "--since", "1h"],
             vec!["logs", "--since", "30m", "--lines", "20"],
             vec!["version", "--json"],
+            vec!["--home", "/data/am", "start"],
+            vec!["status", "--home", "/data/am", "--json"],
+            vec!["setup", "--yes", "--home", "/data/am", "--no-service"],
+            vec!["--channel", "work", "--home", "/data/am", "doctor"],
+            vec!["stop", "--home", "/data/am"],
+            vec!["open", "--home", "/data/am", "--print"],
         ] {
             assert!(parse(&args).is_ok(), "{args:?}");
         }
@@ -1176,13 +1254,13 @@ mod tests {
         std::env::set_var("AGENTMUX_CHANNEL", "stable");
         std::env::set_var("AGENTMUX_DATA_DIR", "/the/desktops/data");
         std::env::set_var("AGENTMUX_AUTH_KEY", "a key of the desktop's");
-        let paths = context("headless").unwrap();
+        let paths = context("headless", None).unwrap();
         assert_eq!(paths.channel, "headless");
         assert_eq!(paths.instance_dir, home.path().join("channels").join("headless"));
         assert!(paths.data_dir.starts_with(home.path().join("channels").join("headless").join("versions")));
         assert!(std::env::var_os("AGENTMUX_DATA_DIR").is_none(), "the desktop's variables are dropped");
         assert!(std::env::var_os("AGENTMUX_AUTH_KEY").is_none());
-        assert_eq!(context("work").unwrap().instance_dir, home.path().join("channels").join("work"));
+        assert_eq!(context("work", None).unwrap().instance_dir, home.path().join("channels").join("work"));
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
         std::env::remove_var("AGENTMUX_CHANNEL");
     }
@@ -1193,10 +1271,37 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("AGENTMUX_HOME_OVERRIDE", home.path());
         for bad in ["..", "a/b", "shared", "channels"] {
-            assert!(context(bad).is_err(), "{bad}");
+            assert!(context(bad, None).is_err(), "{bad}");
         }
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
         std::env::remove_var("AGENTMUX_CHANNEL");
+    }
+
+    /// `--home` moves the whole root (the channel folder, and the folder of agents, accounts and history that channels
+    /// share), so a server given its own folder shares nothing with another. The server and the programs it starts
+    /// inherit the variable, so the one flag is enough.
+    #[test]
+    fn a_home_flag_moves_the_channel_and_the_shared_folder_and_reaches_the_server() {
+        let _lock = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let (desktop, own) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", desktop.path());
+        let paths = context("headless", Some(own.path())).unwrap();
+        assert_eq!(paths.home_dir, own.path(), "the flag wins over the environment");
+        assert_eq!(paths.instance_dir, own.path().join("channels").join("headless"));
+        assert!(!paths.instance_dir.starts_with(desktop.path()) && !paths.data_dir.starts_with(desktop.path()), "nothing is under the other root");
+        assert_eq!(data_home_override().as_deref(), Some(own.path()), "a service made by setup is given the same folder");
+        assert_eq!(std::env::var_os("AGENTMUX_HOME_OVERRIDE").map(PathBuf::from).as_deref(), Some(own.path()), "the server inherits it");
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        std::env::remove_var("AGENTMUX_CHANNEL");
+        assert_eq!(data_home_override(), None, "no flag and no variable: the default root, and a service with no --home");
+    }
+
+    #[test]
+    fn a_home_that_is_relative_or_cannot_be_written_into_a_service_file_is_dealt_with() {
+        assert!(checked_home(Path::new("data/am")).unwrap().is_absolute(), "a service and the server start elsewhere");
+        for bad in ["", "a\"b", "a\nb", "a\rb"] {
+            assert!(checked_home(Path::new(bad)).is_err(), "{bad:?}");
+        }
     }
 
     #[test]
@@ -1268,7 +1373,7 @@ mod tests {
         let _lock = ENV.lock().unwrap_or_else(|e| e.into_inner());
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("AGENTMUX_HOME_OVERRIDE", home.path());
-        let paths = context("headless").unwrap();
+        let paths = context("headless", None).unwrap();
         paths.ensure_dirs().unwrap();
         let out = f(&paths);
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");

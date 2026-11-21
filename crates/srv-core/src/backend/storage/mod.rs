@@ -30,6 +30,7 @@ pub mod lan_peer_pubkey_pins;
 pub mod lan_peer_uid_pins;
 pub mod agents;
 pub mod agents_consolidate;
+pub mod background_container_calls;
 pub mod background_tasks;
 pub mod content;
 pub mod bulletins;
@@ -76,6 +77,7 @@ pub mod work_claims;
 pub mod google_grants;
 pub mod work_deps;
 pub mod work_media;
+pub mod work_card_prs;
 pub mod work_prs;
 pub mod work_queue;
 

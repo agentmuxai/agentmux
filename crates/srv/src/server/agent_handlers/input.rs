@@ -106,12 +106,14 @@ pub(super) enum TurnGate {
     Admission(String),
     /// The identity/credential spawn gate refused.
     Identity(crate::identity::resolver::SpawnGateError),
+    /// The agent's harness is not started on the host in its folder (`mcp_folder_rule`).
+    Folder(String),
 }
 
 impl std::fmt::Display for TurnGate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TurnGate::Admission(refusal) => f.write_str(refusal),
+            TurnGate::Admission(refusal) | TurnGate::Folder(refusal) => f.write_str(refusal),
             TurnGate::Identity(e) => write!(f, "{e}"),
         }
     }
@@ -196,7 +198,7 @@ pub async fn run_agent_turn_joining(
         Err(gate) => {
             steps::surface_refusal(deps, &block_id, &gate.to_string());
             return Err(match &gate {
-                TurnGate::Admission(refusal) => refusal.clone(),
+                TurnGate::Admission(refusal) | TurnGate::Folder(refusal) => refusal.clone(),
                 TurnGate::Identity(e) => format!("identity spawn gate: {e}"),
             });
         }

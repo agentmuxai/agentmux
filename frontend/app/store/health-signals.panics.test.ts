@@ -67,7 +67,8 @@ describe("startHealthSignals follows srv-panics", () => {
     afterEach(() => stop());
 
     it("turns the dot on a warn, to critical, and back to normal", () => {
-        expect(mux.handlers).toHaveLength(1);
+        // srv's panics first, then what the record's rules flagged.
+        expect(mux.handlers).toHaveLength(2);
         expect(worstHealthLevel()).toBe("normal");
         mux.handlers[0](panics("warn"));
         expect(worstHealthLevel()).toBe("warn");
@@ -102,6 +103,6 @@ describe("startHealthSignals follows srv-panics", () => {
 
     it("stops listening when stopped", () => {
         stop();
-        expect(mux.off).toHaveBeenCalledTimes(1);
+        expect(mux.off).toHaveBeenCalledTimes(2);
     });
 });

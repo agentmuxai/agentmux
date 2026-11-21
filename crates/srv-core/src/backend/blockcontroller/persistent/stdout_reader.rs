@@ -305,12 +305,13 @@ impl StdoutReader {
                     );
                 }
             }
-            crate::backend::transcript::append::append_output_line(
+            crate::backend::transcript::append::append_agent_output_line(
                 broker,
                 &self.block_id_read,
                 &line,
                 self.filestore_read.as_ref(),
                 crate::backend::agent_admission::fenced_zone(self.global_output_zone.as_deref(), &self.record_fence),
+                crate::backend::transcript::origin_sig::WriterRuntime::Host,
             );
         } else {
             tracing::warn!(block_id = %self.block_id_read, "persistent stdout: no broker available");
@@ -535,6 +536,10 @@ impl StdoutReader {
         // The latest `rate_limit_event`: a usage limit stored later
         // reads its reset from it (`agents::limit_reset`).
         crate::agents::limit_reset::observe_frame(&self.block_id_read, parsed);
+        // The same frame's usage windows, kept for the pane's account (`backend::account_usage`).
+        if let Some(store) = self.mstore_read.as_ref() {
+            crate::backend::account_usage::observe_claude_frame(&self.block_id_read, store, parsed);
+        }
         crate::backend::context_reading::observe_claude_frame(&self.block_id_read, parsed);
         // This block's CLI compacted: only its pane may send the
         // hidden memory reinjection for that boundary.

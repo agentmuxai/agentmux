@@ -22,6 +22,7 @@ import { createBlock } from "@/store/block-layout-actions";
 import { CORE_TOOLS, LOCAL_MODEL_TOOLS, cliCommandForPlatform, currentPlatform, rowIconClass, type CoreTool } from "@/app/store/toolchain-catalog";
 import { EXTERNAL_WIDGETS, widgetCliCommandForPlatform } from "@/app/view/agent/providers/widget-catalog";
 import { getProviderList } from "@/app/view/agent/providers";
+import type { ProviderTier } from "@/app/view/agent/providers/types";
 import { checkProviderInstalled, invalidateInstallCheck, onInstallCheckInvalidated } from "@/app/view/agent/install-check-cache";
 import { resolveDrift } from "@/app/view/agent/providers/version-drift";
 import { ensureCapability, getCapability, isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
@@ -88,6 +89,8 @@ interface ToolRow {
     /** `pinnedVersion` from the provider catalog — the version AgentMux
      *  validated. Provider rows only; core tools have no pin. */
     pinnedVersion?: string;
+    /** The provider's tier: first-class doors are listed first, preview harnesses under their own heading. Provider rows only. */
+    tier?: ProviderTier;
 }
 
 interface WidgetRow {
@@ -185,6 +188,7 @@ function buildToolRows(plat: ToolchainState["plat"]): ToolRow[] {
         // undefined — resolveDrift reports `unknown` for them rather than
         // claiming they're current.
         pinnedVersion: p.pinnedVersion || undefined,
+        tier: p.tier,
     }));
     return [...coreRows, ...localRows, ...providerRows];
 }
@@ -507,9 +511,9 @@ function widgetIndex(s: ToolchainState, key: string): number {
     return s.wrows.findIndex((w) => widgetKey(w) === key);
 }
 
-function toolKeys(s: ToolchainState, kind: ToolRow["kind"]): string[] {
+function toolKeys(s: ToolchainState, kind: ToolRow["kind"], tier?: ProviderTier): string[] {
     return s.rows
-        .filter((r) => r.kind === kind && matchesEveryWord(s.filter(), r.label, r.id, r.version))
+        .filter((r) => r.kind === kind && (tier === undefined || r.tier === tier) && matchesEveryWord(s.filter(), r.label, r.id, r.version))
         .map(toolKey);
 }
 function widgetKeys(s: ToolchainState): string[] {
@@ -556,9 +560,12 @@ function toolCard(s: ToolchainState, key: string): JSX.Element {
                         title={row().label}
                         tooltip={row().label}
                         subtitle={status().subtitle}
-                        meta={notes().map((n) => (
-                            <span {...tip(n.title)}>{n.text}</span>
-                        ))}
+                        meta={[
+                            ...(row().tier === "preview"
+                                ? [<span {...tip("Installable and working, but not supported to the same depth as the first-class agents")}>Preview</span>]
+                                : []),
+                            ...notes().map((n) => <span {...tip(n.title)}>{n.text}</span>),
+                        ]}
                         status={{ tone: status().tone, label: status().label }}
                         attention={status().attention}
                         muted={!row().loading && !row().found && row().optional}
@@ -844,7 +851,8 @@ export function ToolchainView(props: { zoom?: () => number } = {}): JSX.Element 
 
                 {group(s, "Core tools", () => toolKeys(s, "core"), (key) => toolCard(s, key), (key) => toolDetail(s, key))}
                 {group(s, "Local models", () => toolKeys(s, "local"), (key) => toolCard(s, key), (key) => toolDetail(s, key))}
-                {group(s, "Agent CLIs", () => toolKeys(s, "provider"), (key) => toolCard(s, key), (key) => toolDetail(s, key))}
+                {group(s, "Agent CLIs", () => toolKeys(s, "provider", "first_class"), (key) => toolCard(s, key), (key) => toolDetail(s, key))}
+                {group(s, "Preview agent CLIs", () => toolKeys(s, "provider", "preview"), (key) => toolCard(s, key), (key) => toolDetail(s, key))}
                 {group(s, "External widgets", () => widgetKeys(s), (key) => widgetCard(s, key), (key) => widgetDetail(s, key))}
                 <Show when={nothingMatches(s)}>
                     <EmptyState>No tools match “{s.filter()}”.</EmptyState>

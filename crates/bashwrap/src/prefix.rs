@@ -418,15 +418,75 @@ async fn report_call(tool_id: String, description: String) {
 /// command line, which the CLI joined unquoted, so bash runs it. Except on
 /// Windows when the program is a Windows path: bash would strip its
 /// backslashes, and only an MCP server's line can have one (the CLI makes a
-/// hook's paths POSIX), so it is split back into words, as the CLI joined it.
+/// hook's paths POSIX), so it is split back into words, as the CLI joined it
+/// ([`windows_path_words`]).
 fn run_passthrough(script: &str) -> Result<i32> {
     let script = script.trim();
-    let mut words = script.split_whitespace();
-    let program = words.next().unwrap_or_default();
-    if !script.contains(char::is_whitespace) || (cfg!(windows) && program.contains('\\')) {
-        return run_program(program, &words.collect::<Vec<_>>());
+    if cfg!(windows) {
+        if let Some(words) = windows_path_words(script) {
+            let args: Vec<&str> = words[1..].iter().map(String::as_str).collect();
+            return run_program(&words[0], &args);
+        }
+    }
+    if !script.contains(char::is_whitespace) {
+        return run_program(script, &[]);
     }
     run_plain(script)
+}
+
+/// The words of a line whose program is a Windows path, or `None` for any
+/// other line. The CLI joins a server's command and arguments with spaces and
+/// puts a word it finds unsafe (a path with a backslash is one) in single
+/// quotes, so `'C:\tools\my server.exe' --port 1` is three words. A quoted
+/// part is taken as written, `'\''` inside single quotes is a quote, and a
+/// backslash is never an escape: it is the path's own. A line whose quotes
+/// don't pair is split at its spaces alone.
+fn windows_path_words(line: &str) -> Option<Vec<String>> {
+    let words = quoted_words(line).unwrap_or_else(|| line.split_whitespace().map(str::to_owned).collect());
+    words.first().is_some_and(|program| program.contains('\\')).then_some(words)
+}
+
+/// A line's words, each quoted part taken as written. `None` when a quote is never closed.
+fn quoted_words(line: &str) -> Option<Vec<String>> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut in_word = false;
+    let mut rest = line;
+    while let Some(c) = rest.chars().next() {
+        rest = &rest[c.len_utf8()..];
+        match c {
+            '\'' | '"' => {
+                in_word = true;
+                loop {
+                    let close = rest.find(c)?;
+                    word.push_str(&rest[..close]);
+                    rest = &rest[close + 1..];
+                    // `'it'\''s'`: the quote ends, a quote is written, the quote opens again.
+                    match rest.strip_prefix("\\''") {
+                        Some(after) if c == '\'' => {
+                            word.push('\'');
+                            rest = after;
+                        }
+                        _ => break,
+                    }
+                }
+            }
+            c if c.is_whitespace() => {
+                if in_word {
+                    words.push(std::mem::take(&mut word));
+                    in_word = false;
+                }
+            }
+            c => {
+                in_word = true;
+                word.push(c);
+            }
+        }
+    }
+    if in_word {
+        words.push(word);
+    }
+    Some(words)
 }
 
 /// Become the program, so the CLI's signals and pid reach it. Returns only
@@ -579,6 +639,41 @@ mod tests {
         let code = run_passthrough(&line);
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(code.unwrap(), 5, "its argument reached it");
+    }
+
+    /// The CLI puts a path with a backslash in single quotes: the quotes are
+    /// the line's, not the program's name, and a folder with a space is one word.
+    #[cfg(windows)]
+    #[test]
+    fn a_quoted_windows_path_starts_and_its_arguments_reach_it() {
+        let dir = std::env::temp_dir().join(format!("bashwrap quoted path test-{}-{}", std::process::id(), now_ms()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("server.cmd");
+        std::fs::write(&script, "@exit /b %1\r\n").unwrap();
+        let alone = run_passthrough(&format!("'{}'", script.display()));
+        let with_an_argument = run_passthrough(&format!("'{}' 7", script.display()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(alone.unwrap(), 0, "the quoted path alone is the program");
+        assert_eq!(with_an_argument.unwrap(), 7, "its argument reached it");
+    }
+
+    #[test]
+    fn a_windows_path_line_is_read_word_by_word_with_its_quotes_taken_off() {
+        let words = |line: &str| windows_path_words(line);
+        let own = |list: &[&str]| Some(list.iter().map(|w| (*w).to_owned()).collect::<Vec<_>>());
+        // As the CLI joins it: the path quoted, a plain argument not.
+        assert_eq!(words(r"'C:\tools\my server.exe' --port 1"), own(&[r"C:\tools\my server.exe", "--port", "1"]));
+        assert_eq!(words(r"'C:\tools\server.exe'"), own(&[r"C:\tools\server.exe"]));
+        // Unquoted, as it was joined before: a backslash is the path's own.
+        assert_eq!(words(r"C:\tools\server.exe --port 1"), own(&[r"C:\tools\server.exe", "--port", "1"]));
+        // A quote inside a quoted word, double quotes, and an empty argument.
+        assert_eq!(words(r#"'C:\a\it'\''s.exe' "two words" ''"#), own(&[r"C:\a\it's.exe", "two words", ""]));
+        // A quote that is never closed: split at the spaces, as before.
+        assert_eq!(words(r"C:\tools\server.exe it's"), own(&[r"C:\tools\server.exe", "it's"]));
+        // Not a Windows path: not this function's line.
+        assert_eq!(words("node 'C:\\x\\server.js'"), None);
+        assert_eq!(words("agentmux-mcp"), None);
+        assert_eq!(words(""), None);
     }
 
     #[test]

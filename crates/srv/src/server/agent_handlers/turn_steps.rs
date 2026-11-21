@@ -73,6 +73,14 @@ pub(super) async fn gated_spawn_env(
     env_vars: HashMap<String, String>,
 ) -> Result<HashMap<String, String>, TurnGate> {
     let AgentTurnDeps { mstore, id_store, identity_store, auth_key, broker, .. } = deps.clone();
+    // First, before anything is written for the spawn: a harness other than Claude Code is not started on
+    // the host in a folder a container agent can write. Asked off the async workers (it reads the disk).
+    let meta = block.meta.clone();
+    let refusal = tokio::task::spawn_blocking(move || crate::backend::mcp_folder_rule::turn_refusal(&meta)).await.unwrap_or_else(|_| Some(crate::backend::mcp_folder_rule::TURN_REFUSAL.to_string()));
+    if let Some(why) = refusal {
+        return Err(TurnGate::Folder(why));
+    }
+    crate::server::mcp_folder_notice::tell(&broker, &deps.filestore_gate, &mstore, block).await;
     // Identity gate, MuxBus token, reserved wrapper vars, agent identity,
     // git identity, tools PATH — see `build_persistent_spawn_env`'s own doc
     // comment. Broker hand-in lets the identity resolver publish
@@ -426,6 +434,17 @@ pub(super) fn dispatch_persistent(turn: Turn<'_>, persistent_ctrl: &blockcontrol
     Ok(())
 }
 
+/// The container runtime a container agent's turn runs in, or the reason there is none. The reason is written to
+/// the pane like every other refusal before a process starts: otherwise the turn returns an error nobody sees and the
+/// pane shows work that never happens.
+async fn runtime_for_turn(deps: &AgentTurnDeps, block_id: &str) -> Result<crate::backend::container::ContainerManager, String> {
+    deps.container_manager.get_or_explain().await.map_err(|reason| {
+        let said = format!("{reason} Start one, or run this agent on this computer instead.");
+        surface_refusal(deps, block_id, &said);
+        said
+    })
+}
+
 /// Dispatch to a per-turn subprocess controller (a host CLI, or a Docker exec for a container agent).
 pub(super) async fn dispatch_subprocess(
     turn: Turn<'_>,
@@ -464,7 +483,7 @@ pub(super) async fn dispatch_subprocess(
     let adapter: Box<dyn RuntimeAdapter> = match RuntimeKind::of_agent_mode(&crate::backend::obj::meta_get_string(&block.meta, "agentMode", "host")) {
         RuntimeKind::Host => RuntimeKind::Host.adapter(),
         RuntimeKind::Container => {
-            let cm = container_manager.get_or_explain().await?;
+            let cm = runtime_for_turn(deps, block_id).await?;
             // Starting the container takes minutes the first time, so it runs in the turn's own task: this
             // handler is dropped after five seconds. The pre-start builds the same one.
             let adapter = super::container_turn::container_adapter_for_block(

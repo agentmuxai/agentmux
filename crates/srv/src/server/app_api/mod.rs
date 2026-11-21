@@ -123,10 +123,12 @@ pub(crate) use memory::{memory_list_impl, memory_read_impl, memory_write_impl, m
 pub(crate) use global_memory::{append_to_global_order, removed_global_entries, global_memory_write_impl, global_memory_write_inner, global_memory_write_with_reach_impl, global_memory_reach_impl, global_memory_reaches, global_memory_list_impl, global_memory_read_impl, global_memory_remove_impl, global_memory_history_impl, global_memory_diff_impl, bundle_version_diff, global_memory_revert_impl};
 mod skill;
 mod mcp;
+mod mcp_actor;
 mod bookmarks;
 mod browser_profiles;
 mod browser_grants;
 mod pins;
+pub(crate) mod workspace_import;
 pub(crate) use browser_profiles::ensure_agent_profile as browser_ensure_agent_profile;
 pub(crate) use browser_profiles::list as browser_profiles_list;
 mod layout;
@@ -150,6 +152,7 @@ pub(crate) mod desktop;
 pub(crate) mod viewer;
 mod input_history;
 mod presence;
+pub(crate) mod client_terms;
 pub(crate) mod tower_pane;
 mod gpu_panel;
 pub(crate) mod record_read;
@@ -186,6 +189,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     crate::server::browser_signup::register(engine, state);
     crate::server::browser_signin::register(engine);
     pins::register(engine, state);
+    workspace_import::register(engine, state);
     browser_grants::register(engine, state);
     layout::register(engine, state);
     other_build_layouts::register(engine, state);
@@ -201,6 +205,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     app_update::register(engine, state);
     desktop::register(engine, state);
     presence::register(engine, state);
+    client_terms::register(engine, state);
     tower_pane::register(engine, state);
     gpu_panel::register(engine, state);
     blockstats::register(engine, state);

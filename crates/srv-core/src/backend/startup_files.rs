@@ -67,6 +67,44 @@ pub fn claude_startup_files(cwd: &Path, config_dir: Option<&Path>, home: Option<
     claude_startup_files_with_ancestors(cwd, config_dir, home, cwd.ancestors())
 }
 
+/// [`claude_startup_files`] for a host agent. In a folder a container agent can write
+/// (`mcp_folder_rule`), the CLI is started with AgentMux's own MCP config and not the folder's
+/// `.mcp.json`, so the servers listed are that config's.
+pub fn host_startup_files(cwd: &Path, config_dir: Option<&Path>, home: Option<&Path>) -> Vec<StartupFile> {
+    let folder = cwd.to_string_lossy();
+    let Some(own) = crate::backend::host_agent_files::dir_of(&folder) else {
+        return claude_startup_files(cwd, config_dir, home);
+    };
+    // There the CLI reads the person's own `CLAUDE.md` and what AgentMux keeps for the agent outside the
+    // folder (`host_agent_files`): its instructions, its skills and its MCP config. Nothing of the folder's.
+    let (mut out, mut seen) = (Vec::new(), HashSet::new());
+    let user_md = config_dir.map(Path::to_path_buf).or_else(|| home.map(|h| h.join(".claude"))).map(|d| d.join("CLAUDE.md"));
+    if let Some(p) = user_md {
+        add_instructions(&p, "user_instructions", cwd, home, 0, &mut seen, &mut out, None);
+    }
+    add_instructions(&crate::backend::host_agent_files::instructions_path(&own), "instructions", cwd, home, 0, &mut seen, &mut out, None);
+    out.extend(own_skills_item(&crate::backend::host_agent_files::plugin_dir(&own), home));
+    out.extend(mcp_item(&crate::backend::mcp_config_file::host_config_path(&folder), home, None));
+    out
+}
+
+/// The skills and commands AgentMux gives a host agent from `plugin`, its own folder outside the agent's
+/// working folder: one item with a count, as [`skills_item`] is for a working folder.
+fn own_skills_item(plugin: &Path, home: Option<&Path>) -> Option<StartupFile> {
+    let entries = |dir: &str| std::fs::read_dir(plugin.join(dir)).into_iter().flatten().flatten();
+    let count = entries("commands").filter(|e| e.path().extension().is_some_and(|x| x == "md")).count()
+        + entries("skills").filter(|e| e.path().join("SKILL.md").is_file()).count();
+    (count > 0).then(|| StartupFile {
+        role: "skills",
+        name: format!("Skills ({count}) in {}", display_name(plugin, home)),
+        path: plugin.to_path_buf(),
+        owner: Owner::Agentmux,
+        text: String::new(),
+        count: Some(count),
+        contains: Vec::new(),
+    })
+}
+
 pub fn claude_startup_files_with_ancestors<'a>(
     cwd: &Path,
     config_dir: Option<&Path>,
@@ -113,7 +151,7 @@ fn startup_files_confined<'a>(
     if let Some(skills) = skills_item(cwd, home, confine) {
         out.push(skills);
     }
-    if let Some(mcp) = mcp_item(cwd, home, confine) {
+    if let Some(mcp) = mcp_item(&cwd.join(".mcp.json"), home, confine) {
         out.push(mcp);
     }
     out
@@ -270,10 +308,10 @@ fn skills_item(cwd: &Path, home: Option<&Path>, confine: Option<&Path>) -> Optio
     })
 }
 
-/// The MCP servers in `cwd/.mcp.json`, by name only: the file carries the
+/// The MCP servers in the config at `path`, by name only: the file carries the
 /// agent's signing keys, so its text never leaves this function.
-fn mcp_item(cwd: &Path, home: Option<&Path>, confine: Option<&Path>) -> Option<StartupFile> {
-    let path = cwd.join(".mcp.json");
+fn mcp_item(path: &Path, home: Option<&Path>, confine: Option<&Path>) -> Option<StartupFile> {
+    let path = path.to_path_buf();
     let json: serde_json::Value = serde_json::from_str(&crate::backend::confined_read::read_to_string_within(&path, confine)?).ok()?;
     let names: Vec<&str> = json.get("mcpServers")?.as_object()?.keys().map(String::as_str).collect();
     if names.is_empty() {
@@ -408,6 +446,64 @@ mod tests {
         std::os::unix::fs::symlink(outside.path(), ws.join(".claude/commands")).unwrap();
         let files = workspace_startup_files(&ws);
         assert!(files.iter().all(|f| f.role != "skills"), "nothing outside the workspace is counted");
+    }
+
+    /// In a folder a container agent has run in, a host agent is started with AgentMux's own config: the
+    /// servers listed are that file's, not the ones the folder's `.mcp.json` names.
+    #[test]
+    fn a_host_agent_in_a_container_agents_folder_lists_the_servers_it_is_given() {
+        let (data, was) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let dir = was.path().to_string_lossy().into_owned();
+        std::fs::write(was.path().join(".mcp.json"), r#"{"mcpServers":{"agentmux":{"command":"x"},"of-the-folder":{"command":"y"}}}"#).unwrap();
+        crate::backend::mcp_config_file::with_data_home(data.path(), || {
+            let listed = |files: Vec<StartupFile>| files.into_iter().filter(|f| f.role == "mcp_servers").map(|f| (f.name, f.path)).collect::<Vec<_>>();
+            let before = listed(host_startup_files(was.path(), None, None));
+            assert!(before.len() == 1 && before[0].0.contains("of-the-folder") && before[0].1 == was.path().join(".mcp.json"), "{before:?}");
+
+            crate::backend::mcp_folder_rule::mark(&dir);
+            assert_eq!(listed(host_startup_files(was.path(), None, None)), Vec::new(), "nothing of the folder's file while AgentMux's is not written");
+            let ours = crate::backend::mcp_config_file::host_config_path(&dir);
+            crate::backend::mcp_config_file::write_relocated(&ours, r#"{"mcpServers":{"agentmux":{"command":"x"}}}"#).unwrap();
+            let after = listed(host_startup_files(was.path(), None, None));
+            assert!(after.len() == 1 && after[0].1 == ours && !after[0].0.contains("of-the-folder") && after[0].0.contains("agentmux"), "{after:?}");
+        });
+    }
+
+    /// What the card lists for a host agent there is what its CLI is given: the person's own `CLAUDE.md` and
+    /// AgentMux's instructions and skills from outside the folder. The folder's own instruction files and
+    /// skills, and those of the folders above it, are not listed: they are not loaded.
+    #[test]
+    fn a_host_agent_in_a_container_agents_folder_lists_the_instructions_and_skills_it_is_given() {
+        let (data, tree) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (config, was) = (tree.path().join("config"), tree.path().join("code").join("app"));
+        write(&config.join("CLAUDE.md"), "the person's own");
+        write(&tree.path().join("code").join("CLAUDE.md"), "of the folder above");
+        write(&was.join("CLAUDE.md"), "of the folder");
+        write(&was.join(".claude/CLAUDE.md"), "of the folder too");
+        write(&was.join(".claude/skills/theirs/SKILL.md"), "x");
+        let dir = was.to_string_lossy().into_owned();
+        crate::backend::mcp_config_file::with_data_home(data.path(), || {
+            crate::backend::mcp_folder_rule::mark(&dir);
+            let launch = [("CLAUDE.md", "# [Workspace] rule\nfrom AgentMux"), (".claude/skills/review/SKILL.md", "x"), (".claude/commands/go.md", "x")];
+            assert_eq!(crate::backend::host_agent_files::write(&dir, launch.into_iter()), Ok(true));
+            let own = crate::backend::host_agent_files::dir_of(&dir).unwrap();
+
+            let files = host_startup_files(&was, Some(&config), None);
+            let listed: Vec<(&str, &Path, Owner)> = files.iter().map(|f| (f.role, f.path.as_path(), f.owner)).collect();
+            let instructions = crate::backend::host_agent_files::instructions_path(&own);
+            let plugin = crate::backend::host_agent_files::plugin_dir(&own);
+            assert_eq!(
+                listed,
+                vec![
+                    ("user_instructions", config.join("CLAUDE.md").as_path(), Owner::External),
+                    ("instructions", instructions.as_path(), Owner::Agentmux),
+                    ("skills", plugin.as_path(), Owner::Agentmux),
+                ],
+                "nothing of the folder or of the folders above it"
+            );
+            assert_eq!(files[2].count, Some(2), "AgentMux's own skill and command");
+            assert!(files[1].contains.contains(&"global_memory"), "what the startup file carries is read from AgentMux's own file");
+        });
     }
 
     #[test]

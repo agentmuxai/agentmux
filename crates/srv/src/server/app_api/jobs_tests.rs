@@ -102,6 +102,65 @@ async fn the_list_shows_each_job_with_its_runs_spend_and_whether_it_is_failing()
     assert_eq!((row["infra"].as_str(), row["failed"].as_bool()), (Some("error"), Some(true)));
 }
 
+/// A Drone graph that has run is listed from the store the Drone pane reads its definitions from. The test state
+/// aliases that store to the channel's own, which hid a list that read the wrong one, so here they are apart.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_drone_that_has_run_is_listed_from_the_store_the_drone_pane_reads() {
+    let (mut state, _) = state();
+    state.id_store = crate::test_support::core_parts().mstore;
+    let def: crate::drone::types::DroneDefinition = serde_json::from_value(json!({
+        "id": "", "name": "Say hello", "created_at": 0, "updated_at": 0,
+        "graph": { "nodes": [], "edges": [] },
+    }))
+    .unwrap();
+    let drone = crate::server::drone_handlers::upsert_drone(&state, def).unwrap();
+    let never_run = serde_json::from_value::<crate::drone::types::DroneDefinition>(json!({
+        "id": "", "name": "Never run", "created_at": 0, "updated_at": 0,
+        "graph": { "nodes": [], "edges": [] },
+    }))
+    .unwrap();
+    crate::server::drone_handlers::upsert_drone(&state, never_run).unwrap();
+    let mut run = JobRun::new(&uuid::Uuid::new_v4().to_string(), &drone.id, "drone", "Say hello", "manual", run_state::FINISHED, now_ms() - 1_000);
+    run.infra = infra::OK.to_string();
+    ledger_of(&state).store().job_run_insert(&run).unwrap();
+
+    let list = list(&state).await.unwrap();
+    let v = view(&list, &drone.id);
+    assert_eq!((v.source.as_str(), v.name.as_str(), v.recent.len()), ("drone", "Say hello", 1));
+    assert_eq!(list.jobs.iter().filter(|j| j.source == "drone").count(), 1, "a drone with no run is not a job: {:?}", list.jobs.iter().map(|j| &j.name).collect::<Vec<_>>());
+}
+
+/// A drone run is on the ledger as the connection that started it: an agent's as that agent's, never the operator's,
+/// the person's window as the operator's, and a connection that has proved nothing as that.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_drone_run_is_recorded_as_the_connection_that_started_it() {
+    use crate::backend::rpc_types::RpcContext;
+    use crate::server::drone_handlers::{run_started_by, start_drone_run_as, upsert_drone, RunDroneReq};
+    let (state, _) = state();
+    let def: crate::drone::types::DroneDefinition =
+        serde_json::from_value(json!({ "id": "", "name": "Who ran it", "created_at": 0, "updated_at": 0, "graph": { "nodes": [], "edges": [] } })).unwrap();
+    let drone = upsert_drone(&state, def).unwrap();
+    let agent = RpcContext { agent_id: "opaz".into(), ..Default::default() };
+    let mut started = Vec::new();
+    for (who, ctx) in [("opaz", &agent), ("window", &RpcContext::operator_for_tests()), ("unproven", &RpcContext::default())] {
+        let by = run_started_by(ctx);
+        let resp = start_drone_run_as(&state, RunDroneReq { drone_id: drone.id.clone(), input: None }, by.as_deref()).await.unwrap();
+        started.push((who, resp.run_id));
+    }
+    // The Drone tool's `fire` names the agent the same way, even for an agent whose id is "operator".
+    for (who, id) in [("fired by opaz", "opaz"), ("fired by an agent called operator", "operator")] {
+        let run_id = crate::server::drone_handlers::start_agent_drone_run(&state, &drone.id, json!({}), id).await.unwrap();
+        started.push((who, run_id));
+    }
+    let rows = ledger_of(&state).store().job_runs_for_job(&drone.id, 10, None).unwrap();
+    let by_of = |run_id: &str| rows.iter().find(|r| r.links["drone_run_id"] == run_id).map(|r| r.triggered_by.clone());
+    assert_eq!(by_of(&started[0].1).as_deref(), Some("agent:opaz"));
+    assert_eq!(by_of(&started[1].1).as_deref(), Some("operator"));
+    assert_eq!(by_of(&started[2].1).as_deref(), Some("unproven"));
+    assert_eq!(by_of(&started[3].1).as_deref(), Some("agent:opaz"));
+    assert_eq!(by_of(&started[4].1).as_deref(), Some("agent:operator"));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failure_stays_failing_behind_more_skips_than_the_strip_shows_until_a_success() {
     let (state, _) = state();

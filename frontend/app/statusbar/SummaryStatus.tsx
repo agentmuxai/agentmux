@@ -43,6 +43,7 @@ function SummaryButtons(props: { summary: Accessor<Summary>; recent: number; has
                             aria-haspopup={props.hasList ? "dialog" : undefined}
                             onClick={() => props.click(p.id === "agents" ? undefined : p.id)}
                             data-operator-only={p.id === "vault" ? "" : undefined}
+                            data-operator-item={p.id === "vault" ? "" : undefined}
                         >
                             <span class="status-summary__count">{p.count}</span>
                         </Button>
@@ -73,6 +74,7 @@ function SummaryButtons(props: { summary: Accessor<Summary>; recent: number; has
                     aria-haspopup="dialog"
                     onClick={() => props.click()}
                     data-operator-only={vaultCount() > 0 ? "" : undefined}
+                    data-operator-item={vaultCount() > 0 ? "" : undefined}
                 >
                     <span class="status-summary__count">{props.summary().waiting}</span>
                 </Button>

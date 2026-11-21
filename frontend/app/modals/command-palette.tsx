@@ -6,6 +6,7 @@
 // specific chrome (search row + scroll list) lives in the panel body.
 
 import { commandRegistry, isCommandAvailable, type CommandEntry } from "@/app/store/command-registry";
+import { recentCommandIds, rememberCommand } from "@/app/store/palette-recent";
 import type { ModalCloseProps } from "@/app/store/modalmodel";
 import { disableGlobalKeybindings, enableGlobalKeybindings } from "@/app/store/keymodel";
 import { isKeyFor } from "@/app/keybindings";
@@ -14,7 +15,7 @@ import { t } from "@/app/i18n/i18n";
 import { Modal } from "@/element/modal";
 import { searchCommands } from "./command-palette-search";
 import { usePaletteAgents } from "./palette-agents";
-import { paletteRows, paletteSegments, sortCommands } from "./palette-groups";
+import { arrangeRecent, paletteRows, paletteSegments, sortCommands } from "./palette-groups";
 import { PaletteRow } from "./palette-row";
 import { createMemo, createSignal, createUniqueId, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import "./command-palette.scss";
@@ -68,22 +69,30 @@ function keyIntent(e: KeyboardEvent, i: number, last: number, list: HTMLElement)
     return e.key === "Enter" ? { kind: "run", forceNew: e.shiftKey } : null;
 }
 
+/** Runs what the person picked: remembered as recently used (R29), and run after the palette has closed so it doesn't interfere. */
+function runPicked(cmd: CommandEntry, forceNew: boolean): void {
+    rememberCommand(cmd.id);
+    setTimeout(() => void Promise.resolve(cmd.execute({ forceNew })), 0);
+}
+
 /** What the palette lists for `query`, and which row is selected (held to the list when it shrinks). */
 function usePaletteResults(query: () => string, selectedIdx: () => number) {
     // The agents AgentMux knows, listed after the commands and found by name, seat or state.
     const agents = usePaletteAgents();
-    const filtered = createMemo(() => {
+    const arranged = createMemo(() => {
         const q = query().trim();
         const all = sortCommands([...commandRegistry.all(), ...agents()].filter((c) => !c.hidden && isCommandAvailable(c)));
-        if (!q) return all; // browsing, unfiltered: keep category+label order
-        // Ranked while actively searching: the exact command first, then
-        // commands containing what was typed (category+label order among
-        // equals); fuzzy only for a typo. See command-palette-search.ts.
-        return searchCommands(all, q);
+        // Browsing, unfiltered: category+label order. Ranked while actively searching: the exact command first, then
+        // commands containing what was typed (category+label order among equals); fuzzy only for a typo. See
+        // command-palette-search.ts. Either way the ones the person ran from here lead (R30).
+        return arrangeRecent(q ? searchCommands(all, q) : all, recentCommandIds(), q !== "");
     });
+    const filtered = () => arranged().cmds;
     const clampedIdx = createMemo(() => Math.min(selectedIdx(), Math.max(filtered().length - 1, 0)));
-    const rows = createMemo(() => paletteRows(filtered(), query().trim() !== ""));
-    return { filtered, clampedIdx, rows };
+    const rows = createMemo(() => paletteRows(filtered(), query().trim() !== "", arranged().recent));
+    // A group's name has room at the right of its first row, and the shortcuts line up beside it.
+    const hasGroups = createMemo(() => rows().some((r) => r.group !== undefined));
+    return { filtered, clampedIdx, rows, hasGroups };
 }
 
 /** The listbox: the rows in their groups (each group a screen-reader group, the unnamed first one none). */
@@ -124,7 +133,7 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
     const [selectedIdx, setSelectedIdx] = createSignal(0);
     let inputRef!: HTMLInputElement;
     let listRef!: HTMLDivElement;
-    const { filtered, clampedIdx, rows } = usePaletteResults(query, selectedIdx);
+    const { filtered, clampedIdx, rows, hasGroups } = usePaletteResults(query, selectedIdx);
     const listId = `command-palette-list-${createUniqueId()}`;
     const optionId = (i: number) => `${listId}-option-${i}`;
     const segments = createMemo(() => paletteSegments(rows()));
@@ -151,10 +160,7 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
         if (cmds.length === 0) return;
         const cmd = cmds[idx];
         close();
-        // Execute after close so the palette doesn't interfere
-        setTimeout(() => {
-            void Promise.resolve(cmd.execute({ forceNew }));
-        }, 0);
+        runPicked(cmd, forceNew);
     }
 
     // Arrow keys + Enter are palette-specific navigation. ESC and
@@ -208,7 +214,7 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
                     id={listId}
                     segments={segments()}
                     selectedIdx={clampedIdx()}
-                    groupColumn={query().trim() === ""}
+                    groupColumn={hasGroups()}
                     optionId={optionId}
                     onPick={(row, shift) => {
                         setSelectedIdx(row);

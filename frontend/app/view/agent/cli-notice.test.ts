@@ -434,3 +434,80 @@ describe("a container agent's large build caches", () => {
         expect(parseCliNoticeFrame(caches({ bytes: "big" }), 0)).toBeNull();
     });
 });
+
+describe("the MCP servers a host agent is not given from its folder's own file", () => {
+    const leftOut = (extra: Record<string, unknown> = {}) => ({
+        type: "system",
+        subtype: "agentmux_mcp_left_out",
+        provider: "claude",
+        block_id: "blk-1",
+        event_id: "ev-1",
+        names: ["build-tools", "notes"],
+        timestamp: TS,
+        ...extra,
+    });
+
+    it("is a row that names each server, says why, and says where to add one", () => {
+        const row = parseCliNoticeFrame(leftOut(), 0) as CliNoticeNode;
+        expect(row).toMatchObject({ kind: "mcp_left_out", id: "mcp-left-out-ev-1", servers: ["build-tools", "notes"], blockId: "blk-1" });
+        const text = cliNoticeText(row);
+        expect(text).toMatchObject({ label: "2 MCP servers of this folder not started: build-tools, notes", tone: "warn" });
+        expect(text.detail).toContain("A container agent can write in this folder");
+        expect(text.detail).toContain("add it in the agent's own settings");
+        const one = parseCliNoticeFrame(leftOut({ names: ["notes"] }), 0) as CliNoticeNode;
+        expect(cliNoticeText(one).label).toBe("1 MCP server of this folder not started: notes");
+    });
+
+    it("lists at most twenty names and only text ones", () => {
+        const many = Array.from({ length: 30 }, (_, i) => `s${i}`);
+        expect((parseCliNoticeFrame(leftOut({ names: many }), 0) as CliNoticeNode).servers).toHaveLength(20);
+        expect((parseCliNoticeFrame(leftOut({ names: ["ok", 7, "", null] }), 0) as CliNoticeNode).servers).toEqual(["ok"]);
+    });
+
+    it("ignores a frame without an event id or without a name", () => {
+        expect(parseCliNoticeFrame(leftOut({ event_id: undefined }), 0)).toBeNull();
+        expect(parseCliNoticeFrame(leftOut({ names: [] }), 0)).toBeNull();
+        expect(parseCliNoticeFrame(leftOut({ names: "notes" }), 0)).toBeNull();
+    });
+
+    it("is replayed from the stored conversation", () => {
+        const { nodes } = parseHistoryLines([JSON.stringify(leftOut())], "claude-stream-json");
+        expect(nodes.some((n) => n.type === "cli_notice" && n.kind === "mcp_left_out")).toBe(true);
+    });
+
+    const counted = (folder: Record<string, unknown>, extra: Record<string, unknown> = {}) => leftOut({ folder, no_path: [], ...extra });
+
+    it("says in one row what else of the folder is not loaded, by kind and count", () => {
+        const row = parseCliNoticeFrame(counted({ settings: 2, instructions: 1, skills: 3, commands: 1, agents: 1, other: 2 }), 0) as CliNoticeNode;
+        expect(row.folderFiles).toEqual({ settings: 2, instructions: 1, skills: 3, commands: 1, agents: 1, other: 2 });
+        const text = cliNoticeText(row);
+        expect(text.label).toBe(
+            "Not loaded from this folder: 2 MCP servers (build-tools, notes), 2 settings files, 1 instruction file, 3 skills, 1 command, 1 subagent, 2 other files"
+        );
+        expect(text.tone).toBe("warn");
+        expect(text.detail).toContain("takes its settings, hooks, instructions, skills and MCP servers from AgentMux only");
+        expect(text.detail).toContain("add it in the agent's own settings");
+    });
+
+    it("says that scheduled prompts are off there and that what the agent runs is still the folder's", () => {
+        const detail = cliNoticeText(parseCliNoticeFrame(counted({}), 0) as CliNoticeNode).detail;
+        expect(detail).toContain("/loop and CronCreate are off here, because a scheduled prompt can be kept in the folder");
+        expect(detail).toContain("What the agent itself runs in this folder, such as git and build scripts, still comes from the folder");
+    });
+
+    it("is a row for a folder with nothing of its own too, and names only the kinds that are there", () => {
+        const none = parseCliNoticeFrame(counted({ settings: 0 }, { names: [] }), 0) as CliNoticeNode;
+        expect(none).not.toBeNull();
+        expect(cliNoticeText(none).label).toBe("Nothing of this folder's own settings is loaded");
+        const one = parseCliNoticeFrame(counted({ skills: 1, agents: "many", other: -3 }, { names: [] }), 0) as CliNoticeNode;
+        expect(cliNoticeText(one).label).toBe("Not loaded from this folder: 1 skill");
+        expect(one.folderFiles).toMatchObject({ agents: 0, other: 0 });
+    });
+
+    it("names the agent's own servers whose command has no path, and what to do", () => {
+        const row = parseCliNoticeFrame(counted({}, { no_path: ["search", 4] }), 0) as CliNoticeNode;
+        expect(row.serversWithNoPath).toEqual(["search"]);
+        expect(cliNoticeText(row).detail).toContain("Not started, because its command is no program found outside this folder: search. Give it by its full path, in a folder no container agent can write");
+        expect(cliNoticeText(parseCliNoticeFrame(counted({}), 0) as CliNoticeNode).detail).not.toContain("Not started");
+    });
+});

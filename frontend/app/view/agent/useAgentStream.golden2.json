@@ -14,17 +14,17 @@
   "pane {\"type\":\"TokensIn\",\"input\":2020,\"model\":\"claude-test\",\"freshInput\":20,\"cacheCreation\":0,\"cacheRead\":2000}",
   "-- after step: phase=Streaming",
   "pane {\"type\":\"ToolStart\",\"name\":\"Grep\",\"arg\":\"needle\",\"id\":\"t2\",\"params\":{\"pattern\":\"needle\"},\"parentId\":\"tA\"}",
-  "doc {\"type\":\"StreamFlush\",\"newNodes\":[{\"type\":\"tool\",\"id\":\"t2\",\"tool\":\"Grep\",\"toolName\":\"Grep\",\"params\":{\"pattern\":\"needle\"},\"status\":\"running\",\"collapsed\":false,\"summary\":\"🔍 Grep needle\",\"timestamp\":1793700000250}],\"updatedNodes\":[]}",
+  "doc {\"type\":\"StreamFlush\",\"newNodes\":[{\"type\":\"tool\",\"id\":\"t2\",\"tool\":\"Grep\",\"toolName\":\"Grep\",\"params\":{\"pattern\":\"needle\"},\"status\":\"running\",\"collapsed\":false,\"summary\":\"🔍 Grep needle\",\"timestamp\":1793700000256}],\"updatedNodes\":[]}",
   "pane {\"type\":\"StreamFlushObserved\",\"addedCount\":1,\"at\":\"<frame clock>\",\"turnRelevant\":true}",
   "-- after step: phase=Streaming",
   "pane {\"type\":\"ToolEnd\",\"id\":\"t2\"}",
-  "doc {\"type\":\"StreamFlush\",\"newNodes\":[],\"updatedNodes\":[{\"type\":\"tool\",\"id\":\"t2\",\"tool\":\"Grep\",\"toolName\":\"Grep\",\"params\":{\"pattern\":\"needle\"},\"status\":\"success\",\"result\":{\"content\":\"found\"},\"collapsed\":true,\"summary\":\"🔍 Grep needle\",\"timestamp\":1793700000250}]}",
+  "doc {\"type\":\"StreamFlush\",\"newNodes\":[],\"updatedNodes\":[{\"type\":\"tool\",\"id\":\"t2\",\"tool\":\"Grep\",\"toolName\":\"Grep\",\"params\":{\"pattern\":\"needle\"},\"status\":\"success\",\"result\":{\"content\":\"found\"},\"collapsed\":true,\"summary\":\"🔍 Grep needle\",\"timestamp\":1793700000256}]}",
   "pane {\"type\":\"StreamFlushObserved\",\"addedCount\":0,\"at\":\"<frame clock>\",\"turnRelevant\":true}",
   "-- after step: phase=Streaming",
   "-- after step: phase=Streaming",
-  "pane {\"type\":\"ProviderWaiting\",\"reason\":\"rate_limited\",\"retryAfterMs\":5000,\"at\":1793700000400}",
+  "pane {\"type\":\"ProviderWaiting\",\"reason\":\"rate_limited\",\"retryAfterMs\":5000,\"at\":1793700000416}",
   "-- after step: phase=Streaming",
-  "doc {\"type\":\"StreamFlush\",\"newNodes\":[{\"id\":\"stderr-1793700000450-4fzz\",\"type\":\"markdown\",\"content\":\"**stderr:** ordinary warning from the CLI that is shown\",\"timestamp\":1793700000450}],\"updatedNodes\":[]}",
+  "doc {\"type\":\"StreamFlush\",\"newNodes\":[{\"id\":\"stderr-1793700000464-4fzz\",\"type\":\"markdown\",\"content\":\"**stderr:** ordinary warning from the CLI that is shown\",\"timestamp\":1793700000464}],\"updatedNodes\":[]}",
   "pane {\"type\":\"StreamFlushObserved\",\"addedCount\":1,\"at\":\"<frame clock>\",\"turnRelevant\":true}",
   "-- after step: phase=Streaming",
   "pane {\"type\":\"ContextWindowsReported\",\"windows\":{\"claude-test\":200000,\"claude-test-canon\":200000}}",
@@ -50,8 +50,8 @@
  "rpc": [
   "EventReadHistoryCommand {\"event\":\"agent-resume-retry\",\"scope\":\"block:stream-golden\",\"maxitems\":1}",
   "ListBackgroundTasksCommand {\"blockid\":\"stream-golden\"}",
-  "DockNodeStatusCommand {\"blockid\":\"stream-golden\",\"node_id\":\"t2\",\"tool_name\":\"Grep\",\"status\":\"running\",\"timestamp\":1793700000250}",
-  "DockNodeStatusCommand {\"blockid\":\"stream-golden\",\"node_id\":\"t2\",\"tool_name\":\"Grep\",\"status\":\"success\",\"timestamp\":1793700000250}"
+  "DockNodeStatusCommand {\"blockid\":\"stream-golden\",\"node_id\":\"t2\",\"tool_name\":\"Grep\",\"status\":\"running\",\"timestamp\":1793700000256}",
+  "DockNodeStatusCommand {\"blockid\":\"stream-golden\",\"node_id\":\"t2\",\"tool_name\":\"Grep\",\"status\":\"success\",\"timestamp\":1793700000256}"
  ],
  "document": [
   {
@@ -83,13 +83,13 @@
    },
    "collapsed": true,
    "summary": "🔍 Grep needle",
-   "timestamp": 1793700000250
+   "timestamp": 1793700000256
   },
   {
-   "id": "stderr-1793700000450-4fzz",
+   "id": "stderr-1793700000464-4fzz",
    "type": "markdown",
    "content": "**stderr:** ordinary warning from the CLI that is shown",
-   "timestamp": 1793700000450
+   "timestamp": 1793700000464
   }
  ],
  "registryTasks": 0,

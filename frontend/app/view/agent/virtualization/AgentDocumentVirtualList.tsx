@@ -67,8 +67,10 @@ import { useScrollMemo } from "./scroll-memo";
 import { useListZoomAnchor } from "./zoom-anchor-adapter";
 import { inFlowState, ROW_GAP_PX, type ExpansionState } from "@/app/store/agent-pane-layout/types";
 import { blockAgentName } from "@/app/block/block-agent-name";
-import { liftedEarlyLine, logShowCover } from "@/app/block/pane-cover-log";
+import { liftedEarlyLine, logDrawnAheadShow, logShowCover } from "@/app/block/pane-cover-log";
 import { useSearchPaint } from "../search/search-paint";
+import { skeletonRows } from "./skeleton-band";
+import { partitionKeepingHead } from "./stable-head";
 import {
     initialStickyFrontierId,
     locateFrontierRow,
@@ -208,6 +210,9 @@ interface ListState {
     tailRowNode: WeakMap<Element, () => DocumentNode>;
     tailRO: ResizeObserver | undefined;
     partition: Accessor<ReturnType<typeof partitionAt>>;
+    /** The head array alone: it changes only when a head row does, not on a flush that touched the tail (stable-head.ts). */
+    virtualized: Accessor<readonly DocumentNode[]>;
+    head: readonly DocumentNode[] | null;
     showCoveredNow: () => boolean;
     releaseScrolledOffHolds: () => void;
     observedGeometry: () => ScrollGeometry;
@@ -229,6 +234,8 @@ interface ListState {
 /** What the render needs from the rows hook. */
 interface RowRendering {
     windowedRows: Accessor<RowPosition[]>;
+    /** Rows just outside the window, drawn as empty boxes of their own height (skeleton-band.ts). */
+    skeletonRows: Accessor<RowPosition[]>;
     nodeById: Accessor<Map<string, DocumentNode>>;
     observeRow: (el: HTMLElement, nodeId: string) => void;
     unobserveRow: (el: HTMLElement) => void;
@@ -252,6 +259,7 @@ function createListState(props: AgentDocumentVirtualListProps): ListState {
         settleNode: null,
         follow: null,
         stickyFrontierId: null,
+        head: null,
         frontierIndexHint: -1,
         frontierRow: undefined,
         lastScrollMarginPx: -1,
@@ -411,7 +419,8 @@ const turnPartition = (props: AgentDocumentVirtualListProps, s: ListState, nodes
     s.stickyFrontierId = nodes[at]?.id ?? null;
     s.frontierRow = nodes[at];
     s.frontierIndexHint = at;
-    const result = partitionAt(nodes, at);
+    const result = partitionKeepingHead(nodes, at, s.head);
+    s.head = result.virtualizedNodes;
     trail("agent:virt:partition", {
         virtCount: result.virtualizedNodes.length,
         streamCount: result.streamingNodes.length,
@@ -604,7 +613,7 @@ function useLayoutSliceFeed(props: AgentDocumentVirtualListProps, s: ListState):
     );
     createEffect(() => {
         const blockId = props.blockId!;
-        const vnodes = s.partition().virtualizedNodes;
+        const vnodes = s.virtualized();
         const docState = props.documentState();
         const cap = capPx();
         if (cap !== lastCapPx) {
@@ -637,8 +646,10 @@ function useLayoutSliceFeed(props: AgentDocumentVirtualListProps, s: ListState):
             zoom: () => props.zoomFactor?.() ?? 1,
             following: props.viewState.stickToBottom,
         });
-        // Heights of nodes that left the buffer any other way (removed,
-        // cleared) are dropped; the buffer holds a few dozen at most.
+    });
+    // Heights of nodes that left the buffer any other way (removed, cleared) are dropped; the buffer holds
+    // a few dozen at most. After the effect above, which hands a node's height on as it enters the head.
+    createEffect(() => {
         const inBuffer = new Set(s.partition().streamingNodes.map((n) => n.id));
         for (const id of s.tailHeights.keys()) if (!inBuffer.has(id)) s.tailHeights.delete(id);
     });
@@ -1101,6 +1112,7 @@ function useOneWayFlow(props: AgentDocumentVirtualListProps, s: ListState): Acce
         onLift: (why, frames, ms) => {
             if (why !== "still" && props.blockId) console.info("[pane-cover]", liftedEarlyLine(props.blockId, why, frames, ms, agentName()));
         },
+        onShow: (covered) => logDrawnAheadShow(props.blockId, covered, agentName),
     });
     s.showCoveredNow = () => untrack(showCovered);
     logShowCover(props.blockId, showCovered, agentName);
@@ -1132,12 +1144,14 @@ function useRowRendering(props: AgentDocumentVirtualListProps, s: ListState): Ro
         return v.rows.slice(v.window.startIndex, v.window.endIndex + 1);
     });
 
+    const skeletons = createMemo<RowPosition[]>(() => skeletonRows(props.layoutView?.()));
+
     // nodeId → live DocumentNode for the virtualized partition, so a row renders the CURRENT node
     // (streaming updates propagate without remount). A windowed row with no node this frame is
     // skipped: a recoverable drop.
     const nodeById = createMemo(() => {
         const m = new Map<string, DocumentNode>();
-        for (const n of s.partition().virtualizedNodes) m.set(n.id, n);
+        for (const n of s.virtualized()) m.set(n.id, n);
         return m;
     });
 
@@ -1162,7 +1176,7 @@ function useRowRendering(props: AgentDocumentVirtualListProps, s: ListState): Ro
         s.oneWayFlow.unobserveRow(el);
         elNodeId.delete(el);
     };
-    return { windowedRows, nodeById, observeRow, unobserveRow, showCovered };
+    return { windowedRows, skeletonRows: skeletons, nodeById, observeRow, unobserveRow, showCovered };
 }
 
 // Virtualized head, present only when the document exceeds the buffer. <Key by={r => r.nodeId}>
@@ -1181,6 +1195,18 @@ function VirtualizedHead(list: { props: AgentDocumentVirtualListProps; s: ListSt
                 width: "100%",
             }}
         >
+            <Key each={rows.skeletonRows()} by={(r) => r.nodeId}>
+                {(row) => (
+                    <div
+                        class="agent-row-skeleton"
+                        aria-hidden="true"
+                        style={{
+                            height: `${row().height}px`,
+                            transform: `translateY(${row().start - (props.layoutView?.()?.scrollMarginPx ?? 0)}px)`,
+                        }}
+                    />
+                )}
+            </Key>
             <Key each={rows.windowedRows()} by={(r) => r.nodeId}>
                 {(row) => {
                     let rowEl: HTMLElement | undefined;
@@ -1292,6 +1318,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     useFollowController(props, s);
     useTailRowHeights(props, s);
     s.partition = createPartition(props, s);
+    s.virtualized = createMemo(() => s.partition().virtualizedNodes);
     useLayoutSliceFeed(props, s);
     useViewportFeed(props, s);
     // Positions, windowing and measurement come from the agent-pane-layout slice (rendered by

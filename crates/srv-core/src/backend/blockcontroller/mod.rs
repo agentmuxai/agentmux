@@ -630,6 +630,7 @@ pub fn release_block_processes(block_id: &str) {
     // And its latest rate-limit report (`agents::limit_reset`).
     crate::agents::limit_reset::forget(block_id);
     crate::backend::context_reading::forget(block_id);
+    crate::backend::agent_runtime_latest::forget(block_id);
 }
 
 // ---- Close-on-exit handler (SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md §10) ----
@@ -1140,3 +1141,6 @@ mod cmd_env_tests {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod folder_rule_tests;

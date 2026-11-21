@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use base64::Engine as _;
 
-use super::origin_sig;
+use super::{origin_sig, withhold};
 use crate::backend::message_origin::RecordOrigin;
 use crate::backend::mps;
 use crate::backend::storage::filestore::{AppendPos, FileStore};
@@ -99,6 +99,9 @@ fn persist_user_line_as(
     if record.is_some_and(|r| r.resend) {
         return;
     }
+    // What srv holds secret is never stored, and the record is signed over what is stored (below).
+    let data = withhold::lines(data);
+    let data: &[u8] = &data;
     let global = global_output_zone.and_then(|zone| {
         crate::backend::agent_session::global_transcript_store().map(|gfs| (gfs, zone))
     });
@@ -129,7 +132,8 @@ fn origin_of_echo(block_id: &str, line: &str, global_output_zone: Option<&str>) 
     let record = origin_sig::echoed_prompt(line).and_then(|text| super::origin_ledger::take(block_id, &text))?;
     let mut value: serde_json::Value = serde_json::from_str(line).ok()?;
     value.as_object_mut()?.remove("amx");
-    let stamped = crate::backend::message_origin::stamp_bytes(format!("{value}\n").as_bytes(), &record);
+    let stored = format!("{value}\n");
+    let stamped = crate::backend::message_origin::stamp_bytes(withhold::text(&stored).as_bytes(), &record);
     let owner = origin_sig::owner_of_zone(global_output_zone.unwrap_or(block_id));
     String::from_utf8(origin_sig::sign_line(owner, &stamped, agentmux_common::time::now_ms())).ok()
 }
@@ -146,7 +150,38 @@ pub fn append_output_line(
     filestore: Option<&Arc<FileStore>>,
     global_output_zone: Option<&str>,
 ) {
-    let line_with_newline = origin_of_echo(block_id, line, global_output_zone).unwrap_or_else(|| format!("{line}\n"));
+    append_output_line_by(broker, block_id, line, filestore, global_output_zone, None);
+}
+
+/// [`append_output_line`] for a line an agent's process wrote: besides an echo's origin, it is stored with which
+/// runtime wrote it (`origin_sig::stamp_writer`), so a reader decides what the message may name by who wrote it.
+pub fn append_agent_output_line(
+    broker: &mps::Broker,
+    block_id: &str,
+    line: &str,
+    filestore: Option<&Arc<FileStore>>,
+    global_output_zone: Option<&str>,
+    runtime: origin_sig::WriterRuntime,
+) {
+    append_output_line_by(broker, block_id, line, filestore, global_output_zone, Some(runtime));
+}
+
+fn append_output_line_by(
+    broker: &mps::Broker,
+    block_id: &str,
+    line: &str,
+    filestore: Option<&Arc<FileStore>>,
+    global_output_zone: Option<&str>,
+    writer: Option<origin_sig::WriterRuntime>,
+) {
+    // The echo is looked up by the words as the provider wrote them; what is stored, and signed, has nothing srv holds secret.
+    let line_with_newline = origin_of_echo(block_id, line, global_output_zone)
+        .or_else(|| {
+            let owner = origin_sig::owner_of_zone(global_output_zone.unwrap_or(block_id));
+            let stamped = origin_sig::stamp_writer(owner, &withhold::text(line), writer?, agentmux_common::time::now_ms())?;
+            Some(format!("{stamped}\n"))
+        })
+        .unwrap_or_else(|| format!("{}\n", withhold::text(line)));
     handle_append_block_file(
         broker,
         block_id,
@@ -277,7 +312,10 @@ pub(crate) fn append_transcript_with(
     // `offset` is where they landed, so a consumer can match the event to a
     // byte range read back from the file (review of #3635). Nothing to write,
     // nothing to announce.
-    let records = crate::backend::storage::filestore::normalized_records(data);
+    // The last guard, for a writer that did not go through the ones above: a line already withheld has nothing to change,
+    // so a signed record stays as it was signed.
+    let data = withhold::lines(data);
+    let records = crate::backend::storage::filestore::normalized_records(&data);
     if records.is_empty() {
         return;
     }
@@ -478,5 +516,86 @@ mod damage_tests {
         append_transcript_with(None, block, LINE, Some(&own), Some((&gfs, zone)), true, None, false);
         assert_eq!(gfs.read_file(zone, "output").unwrap().unwrap(), LINE);
         assert!(!damage::is_damaged(zone));
+    }
+}
+
+/// The canary: a value srv holds secret is seeded, written every way srv writes a transcript line, and read back.
+#[cfg(test)]
+mod withhold_tests {
+    use super::*;
+    use crate::backend::message_origin::{MessageOrigin, RecordOrigin};
+    use crate::backend::storage::store::Store;
+    use serde_json::json;
+
+    const KEY: &str = "canary-instance-key-7741-QzXw";
+    const TOKEN: &str = "canary-agent-token-9082-LmNo";
+    const VAULT: &str = "canary-vault-value-5513-RsTu";
+
+    fn seed() {
+        for value in [KEY, TOKEN, VAULT] {
+            withhold::register(value);
+        }
+    }
+
+    fn user_line(text: &str) -> Vec<u8> {
+        format!("{}\n", json!({ "type": "user", "message": { "role": "user", "content": text } })).into_bytes()
+    }
+
+    fn stored(fs: &FileStore, zone: &str) -> String {
+        String::from_utf8(fs.read_file(zone, "output").unwrap().unwrap_or_default()).unwrap()
+    }
+
+    #[test]
+    fn nothing_srv_holds_secret_reaches_a_stored_transcript_by_any_writer() {
+        seed();
+        let (own, gfs) = (Arc::new(FileStore::open_in_memory().unwrap()), Arc::new(FileStore::open_in_memory().unwrap()));
+        let (block, zone) = ("blk-withhold-all", "agent:withhold-all:current");
+        let broker = mps::Broker::new();
+        // The agent's process: a tool result that printed its environment, its own text, a streamed delta.
+        for line in [
+            json!({ "type": "user", "message": { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": "t1", "content": format!("AUTH={KEY}\nAGENT={TOKEN}") }] } }),
+            json!({ "type": "assistant", "message": { "content": [{ "type": "text", "text": format!("the key is {VAULT}") }] } }),
+            json!({ "type": "stream_event", "event": { "delta": { "text": VAULT } } }),
+        ] {
+            append_agent_output_line(&broker, block, &line.to_string(), Some(&own), Some(zone), origin_sig::WriterRuntime::Host);
+        }
+        // What srv writes for a person: a typed message and an injected one.
+        let origin = RecordOrigin::new(MessageOrigin::user());
+        persist_user_line(None, block, &user_line(&format!("use {KEY}")), Some(&own), Some(zone), Some(&origin));
+        persist_injected_user_line(None, block, &user_line(&format!("note {TOKEN}")), Some(&own), Some(zone), Some(&origin));
+        // A writer that goes straight to the append, and the agent's zone.
+        append_transcript_with(None, block, &user_line(&format!("raw {VAULT}")), Some(&own), Some((&gfs, zone)), true, None, false);
+
+        for (what, text) in [("the block's copy", stored(&own, block)), ("the agent's zone", stored(&gfs, zone))] {
+            for canary in [KEY, TOKEN, VAULT] {
+                assert!(!text.contains(canary), "{what} holds {canary}");
+            }
+            assert!(text.contains(withhold::MARK), "{what} has the marks: {text}");
+        }
+    }
+
+    #[test]
+    fn a_record_srv_signed_still_verifies_with_a_value_withheld_from_its_words() {
+        seed();
+        let (fs, ms) = (Arc::new(FileStore::open_in_memory().unwrap()), Arc::new(Store::open_in_memory().unwrap()));
+        let block = "blk-withhold-sig";
+        let record = RecordOrigin::new(MessageOrigin::from_sender("agent1"));
+        persist_injected_user_line(None, block, &user_line(&format!("note {TOKEN}")), Some(&fs), None, Some(&record));
+        let read = crate::backend::transcript::tail::tail_lines(&ms, &fs, block, 10).unwrap().lines;
+        assert_eq!(read.len(), 1);
+        let line: serde_json::Value = serde_json::from_str(&read[0]).unwrap();
+        assert_eq!(line["amx"]["verified"], true, "the signature covers what is stored: {line}");
+        assert_eq!(line["message"]["content"], format!("note {}", withhold::MARK));
+    }
+
+    #[test]
+    fn a_line_with_nothing_to_withhold_is_stored_byte_for_byte() {
+        seed();
+        let (own, gfs) = (Arc::new(FileStore::open_in_memory().unwrap()), Arc::new(FileStore::open_in_memory().unwrap()));
+        let (block, zone) = ("blk-withhold-none", "agent:withhold-none:current");
+        let line = b"{\"type\":\"assistant\",\"message\":{\"content\":\"nothing secret\"}}\n";
+        append_transcript_with(None, block, line, Some(&own), Some((&gfs, zone)), true, None, false);
+        assert_eq!(stored(&own, block).as_bytes(), line);
+        assert_eq!(stored(&gfs, zone).as_bytes(), line);
     }
 }

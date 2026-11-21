@@ -191,11 +191,26 @@
     font-size: var(--text-xs);
 }
 
-// What opens under a connected card: its accounts, then the Connect section when its Connect is pressed.
+// The header and the grid are one block, at most about 1560 px wide and left-aligned (§4.7): the filter sits at the
+// block's end, not at the far end of an ultrawide pane, and the rest of that pane stays empty.
+.connectors-section {
+    max-width: 1560px;
+}
+
+// What opens under a connected card: its accounts, then the Connect section when its Connect is pressed. One column up
+// to about 720 px, two from about 900 (the accounts on the left, the Connect section on the right), each at most 720 px,
+// so an account's line never runs as a bar across a wide pane (§4.7).
 .connector-details {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    // The columns are counted by their 440 px minimum (so two start at about 900 px); each part is capped at 720 px.
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr));
+    align-items: start;
     gap: var(--space-2);
     padding: var(--space-2);
     min-width: 0;
+
+    > * {
+        min-width: 0;
+        max-width: 720px;
+    }
 }

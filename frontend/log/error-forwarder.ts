@@ -26,6 +26,7 @@
 
 import { invokeCommand } from "@/app/platform/ipc";
 import { describeEvent, isEvent } from "@/util/describe-rejection";
+import { noteWindowError } from "@/app/util/window-error-burst";
 import { resolveStack, resolveStackSync, type ResolveStatus } from "./source-map-resolver";
 
 let initialized = false;
@@ -185,6 +186,8 @@ export function initErrorForwarder(): void {
 
     window.addEventListener("error", (event: ErrorEvent) => {
         if (isBenignBrowserNotice(event.message)) return;
+        // A burst of these offers the person a reload (util/window-error-burst.ts); a rejected promise is not counted.
+        noteWindowError();
         // Codex P2 on #989: when `event.error` is null/undefined (common
         // for cross-origin and resource/script errors), the previous
         // implementation passed `undefined` through `extractErrorFields`

@@ -116,6 +116,8 @@ ring = { version = "0.17", default-features = false, features = ["alloc"] }
 # __fastfail (0xC0000409) is handled separately by WER LocalDumps.
 crash-handler = "0.7"
 minidumper = "0.9"
+# The Windows service entry of `agentmux service run` (SCM status and stop), docs/specs/SPEC_WINDOWS_HEADLESS_AS_A_SERVICE_2026_11_20.md B.1.
+windows-service = "0.8"
 # Win32 Job Objects for the agent process tracker. Wraps every agent
 # CLI in a job so `CreateProcess` descendants can be enumerated and
 # killed as a tree. See `backend::process_tracker`.

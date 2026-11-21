@@ -49,6 +49,20 @@ async fn a_refusal_before_any_process_is_recorded_as_the_blocks_last_failure() {
     assert!(failure.to_string().contains("Attachments aren't supported"), "{failure}");
 }
 
+#[tokio::test]
+async fn a_container_agents_turn_on_a_machine_with_no_container_runtime_ends_with_the_reason_on_the_pane() {
+    let state = test_state();
+    let deps = AgentTurnDeps::from_state(&state);
+    let mut block = block_with(&[("agentMode", json!("container"))]);
+    state.mstore.insert(&mut block).unwrap();
+
+    let err = runtime_for_turn(&deps, &block.oid).await.err().expect("no runtime to run the turn in");
+
+    let stored: Block = state.mstore.must_get(&block.oid).unwrap();
+    let failure = stored.meta.get(crate::backend::blockcontroller::core::META_LAST_FAILURE).expect("the pane is told");
+    assert!(failure.to_string().contains(&err), "{failure}");
+}
+
 fn resolved(number: usize, name: &str, path: std::path::PathBuf) -> crate::backend::attachments::prompt::Resolved {
     crate::backend::attachments::prompt::Resolved { number, name: name.to_string(), path, mime: "image/png".into(), page_count: None, note: None }
 }

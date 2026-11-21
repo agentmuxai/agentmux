@@ -6,8 +6,11 @@
 
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
+import { hostHas } from "@/util/host-caps";
 import { createSignal, onCleanup, onMount } from "solid-js";
 import { parseDiskVolumes, type DiskVolume } from "./disk-volumes";
+import { createLowDiskTracker, readingFromSysinfo } from "./low-disk";
+import type { LowDiskNoticeData } from "./LowDiskNotice";
 
 export type SysStats = {
     cpu: number;
@@ -44,6 +47,14 @@ export function createSystemStats() {
     const [diskPanelOpen, setDiskPanelOpen] = createSignal(false);
     const toggleDiskPanel = () => setDiskPanelOpen(!diskPanelOpen());
 
+    // Low free space, for a host that does not push the signal itself (a browser tab): the notice's level and numbers
+    // while the volume is low, and whether its panel is showing. The panel opens on a crossing (the level got worse)
+    // and stays closed after a dismissal until the next one; a polled reading at the same level opens nothing.
+    const lowDiskTracker = createLowDiskTracker();
+    const [lowDisk, setLowDisk] = createSignal<LowDiskNoticeData | null>(null);
+    const [lowDiskOpen, setLowDiskOpen] = createSignal(false);
+    const dismissLowDisk = () => setLowDiskOpen(false);
+
     onMount(() => {
         const unsub = onMuxEvent(
             WpsEvent.SysInfo,
@@ -70,7 +81,21 @@ export function createSystemStats() {
                     pagefileSystemManaged:
                         vals["disk:pagefile_system_managed"] != null ? vals["disk:pagefile_system_managed"] > 0 : null,
                 });
-                setDiskVolumes(parseDiskVolumes(vals));
+                const volumes = parseDiskVolumes(vals);
+                setDiskVolumes(volumes);
+                if (!hostHas("hostHealthSignals")) {
+                    const reading = readingFromSysinfo(vals);
+                    if (reading) {
+                        const step = lowDiskTracker.observe(reading);
+                        if (step.level === "normal") {
+                            setLowDisk(null);
+                            setLowDiskOpen(false);
+                        } else {
+                            setLowDisk({ level: step.level, reading, label: volumes.find((v) => v.isWatch)?.label });
+                            if (step.crossed) setLowDiskOpen(true);
+                        }
+                    }
+                }
             },
             "local"
         );
@@ -86,5 +111,8 @@ export function createSystemStats() {
         diskPanelOpen,
         setDiskPanelOpen,
         toggleDiskPanel,
+        lowDisk,
+        lowDiskOpen,
+        dismissLowDisk,
     };
 }

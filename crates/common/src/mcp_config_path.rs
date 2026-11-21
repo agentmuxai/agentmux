@@ -172,10 +172,7 @@ pub fn expand_home(path: &Path) -> PathBuf {
 
 /// A stable, filesystem-safe key for an already-expanded working directory.
 pub fn workdir_key(expanded: &Path) -> String {
-    let mut hash = Sha256::new();
-    hash.update(normalized(expanded).as_bytes());
-    let digest = hash.finalize();
-    digest[..16].iter().map(|byte| format!("{byte:02x}")).collect()
+    spelling_key(&normalized(expanded))
 }
 
 /// The folder holding `expanded`'s relocated config, or `None` when the folder is AgentMux's
@@ -188,6 +185,50 @@ pub fn relocated_dir_for(expanded: &Path) -> Option<PathBuf> {
     }
     let root = crate::data_paths::agentmux_root().ok()?;
     Some(root.join("mcp").join(workdir_key(&expanded)))
+}
+
+/// The folder, under the data root, of what AgentMux keeps for host agents alone. Nothing in it is bound into
+/// a container: a relocated config's folder under `mcp` is (read-only, `container::mounts`), this one never.
+/// The data root is one version's of one install: what is kept here is written again by a launch, so nothing
+/// that must outlive an upgrade belongs in it.
+pub const HOST_ONLY_DIR: &str = "mcp-host";
+
+/// [`HOST_ONLY_DIR`] under the data root. `None` when the data root can't be named.
+pub fn host_only_root() -> Option<PathBuf> {
+    Some(crate::data_paths::agentmux_root().ok()?.join(HOST_ONLY_DIR))
+}
+
+/// The folder under [`host_only_root`] that is keyed by an expanded working directory, whoever owns that
+/// directory: where srv keeps the config of a host agent whose own folder may not hold it.
+pub fn host_only_dir_for(expanded: &Path) -> Option<PathBuf> {
+    Some(host_only_root()?.join(workdir_key(&absolutize(expanded))))
+}
+
+/// The spellings one folder is compared under: as it is written (absolute, `.` and `..` and links resolved
+/// as they are met), and as the filesystem names it when it exists (which also settles letter case on a
+/// filesystem that ignores it, and short names on Windows). Each is separator-normalized, with no trailing
+/// separator, and case-folded on Windows. One entry when the two are the same.
+pub fn spellings(expanded: &Path) -> Vec<String> {
+    let written = absolutize(expanded);
+    let mut all = vec![normalized(&written)];
+    if let Some(real) = canonical(&written).map(|real| normalized(&real)) {
+        if real != all[0] {
+            all.push(real);
+        }
+    }
+    all
+}
+
+/// Whether the folder spelled `inner` is the one spelled `outer` or lies beneath it (two of [`spellings`]).
+pub fn spelled_within(inner: &str, outer: &str) -> bool {
+    !outer.is_empty() && (inner == outer || inner.starts_with(&format!("{outer}/")))
+}
+
+/// The key of one of [`spellings`], as [`workdir_key`] makes it for a path.
+pub fn spelling_key(spelling: &str) -> String {
+    let mut hash = Sha256::new();
+    hash.update(spelling.as_bytes());
+    hash.finalize()[..16].iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 /// The relocated config for an expanded working directory, or `None` when the file belongs in
@@ -297,6 +338,40 @@ mod tests {
         // A link as the last part is followed too, and a path with no link in it is left as written.
         assert_eq!(normalize_path(&link), child);
         assert_eq!(normalize_path(&base.join("home").join("not-there")), base.join("home").join("not-there"));
+    }
+
+    /// One folder written another way compares as the same folder: a trailing separator, a way round, a link
+    /// to it, and another letter case where the filesystem ignores it.
+    #[test]
+    fn one_folder_has_a_spelling_in_common_however_it_is_written() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = canonical(tmp.path()).expect("the temp folder resolves");
+        let folder = base.join("Work").join("Project");
+        std::fs::create_dir_all(folder.join("src")).unwrap();
+        let own = spellings(&folder);
+        let same = |other: &Path| spellings(other).iter().any(|s| own.contains(s));
+        assert!(same(&PathBuf::from(format!("{}{}", folder.display(), std::path::MAIN_SEPARATOR))), "a trailing separator");
+        assert!(same(&folder.join("src").join("..")), "a way round");
+        let link = base.join("link");
+        link_dir(&link, &folder);
+        assert!(same(&link), "a link to it");
+        #[cfg(windows)]
+        assert!(same(Path::new(&folder.to_string_lossy().to_uppercase())), "another letter case");
+        assert!(!same(&base.join("Work")), "its parent is another folder");
+        let inner = spellings(&folder.join("src"));
+        assert!(spelled_within(&inner[0], &own[0]) && !spelled_within(&own[0], &inner[0]));
+        assert!(own.iter().all(|s| spelling_key(s).len() == 32));
+        assert_eq!(spelling_key(&own[0]), workdir_key(&absolutize(&folder)), "the key a config's folder is named by");
+    }
+
+    #[test]
+    fn what_is_kept_for_host_agents_alone_is_apart_from_the_relocated_configs() {
+        let project = if cfg!(windows) { Path::new(r"C:\agentmux-test-project") } else { Path::new("/agentmux-test-project") };
+        let host_only = host_only_dir_for(project).unwrap();
+        let relocated = relocated_dir_for(project).unwrap();
+        assert_eq!(host_only.file_name(), relocated.file_name(), "the same key");
+        assert_ne!(host_only.parent(), relocated.parent(), "another folder: a relocated config's is bound into a container");
+        assert!(host_only.parent().is_some_and(|dir| dir.ends_with(HOST_ONLY_DIR)));
     }
 
     /// #47392: the writer gets `cmd:cwd` as written; ACP/MSP resolve a relative one against the

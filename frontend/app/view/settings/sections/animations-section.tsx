@@ -138,7 +138,7 @@ export function AnimationsSection(): JSX.Element {
     };
 
     return (
-        <div class="settings-section-body animations-section">
+        <div class="settings-section-body settings-section-body--single animations-section">
             <SettingRow
                 settingKey="animation:preset"
                 id={ANIMATIONS_SETTINGS.preset.id}

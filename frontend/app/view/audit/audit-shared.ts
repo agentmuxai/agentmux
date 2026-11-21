@@ -51,13 +51,17 @@ export const RANGES: { value: AuditRange; label: string; ms: number }[] = [
  */
 const RANGE_STEP_MS = 60_000;
 
-/** Where the entries come from: this channel's, or every channel on this computer's. */
-export type AuditScope = "channel" | "machine";
+/** Where the entries come from: this channel's, every channel on this computer's, or those of the paired computers too. */
+export type AuditScope = "channel" | "machine" | "lan";
 
 export const SCOPES: { value: AuditScope; label: string }[] = [
     { value: "channel", label: "This channel" },
     { value: "machine", label: "This machine" },
+    { value: "lan", label: "LAN" },
 ];
+
+/** The scopes whose other channels and computers are asked, not pushed: the list looks again every few seconds. */
+export const isAsked = (scope: AuditScope) => scope !== "channel";
 
 export interface AuditFilter {
     agent: string;
@@ -93,13 +97,13 @@ export function buildRequest(filter: AuditFilter, now: number, cursor?: string, 
 }
 
 /**
- * The entries of a newest page: this channel's, and the rows the other channels on this computer keep in their own
- * files (`other_channels`), newest first. Those channels' rows are one page and are not paged further, so when this
- * channel has older pages to come, the ones older than this page's last entry are left out: they would sit above
- * entries the next page adds.
+ * The entries of a newest page: this channel's, the rows the other channels on this computer keep in their own files
+ * (`other_channels`) and the paired computers' (`peers`), newest first. Those are one page each and are not paged
+ * further, so when this channel has older pages to come, the ones older than this page's last entry are left out:
+ * they would sit above entries the next page adds.
  */
 export function pageEntries(res: AuditQueryResult): AuditEntry[] {
-    const others = (res.other_channels ?? []).flatMap((c) => c.entries);
+    const others = [...(res.other_channels ?? []).flatMap((c) => c.entries), ...(res.peers ?? []).flatMap((p) => p.entries)];
     if (others.length === 0) return res.entries;
     const floor = res.next_cursor && res.entries.length > 0 ? res.entries[res.entries.length - 1].ts_ms : 0;
     return [...res.entries, ...others.filter((e) => e.ts_ms >= floor)].sort((a, b) => b.ts_ms - a.ts_ms);
@@ -115,24 +119,28 @@ export interface AuditSection {
 
 /**
  * The list cut into one section per channel that wrote its entries, in the order each first appears (the newest
- * first). An entry that names no channel is `own`'s (the channel that answered). Within a section the order is the
- * list's, so paging in older entries adds to the sections, not to a new list.
+ * first). An entry that names no channel is `own`'s (the channel that answered). An entry from a paired computer
+ * (`peerHosts`) is in a section of that computer's channel. Within a section the order is the list's, so paging in
+ * older entries adds to the sections, not to a new list.
  */
-export function sectionsOf(entries: readonly AuditEntry[], own: string | undefined): AuditSection[] {
-    const sections = new Map<string, AuditSection>();
+export function sectionsOf(entries: readonly AuditEntry[], own: string | undefined, peerHosts?: ReadonlySet<string>): AuditSection[] {
+    const sections = new Map<string, AuditSection & { channel: string }>();
     for (const entry of entries) {
         const channel = entry.provenance?.channel ?? own ?? "";
-        let section = sections.get(channel);
-        if (!section) sections.set(channel, (section = { key: channel, label: "", entries: [] }));
+        const host = entry.provenance?.host;
+        // A paired computer's channel is its own section: two computers on one channel are two sections.
+        const key = host && peerHosts?.has(host) ? `${host}/${channel}` : channel;
+        let section = sections.get(key);
+        if (!section) sections.set(key, (section = { key, channel, label: "", entries: [] }));
         section.entries.push(entry);
     }
-    return [...sections.values()].map((s) => ({ ...s, label: sectionLabel(s) }));
+    return [...sections.values()].map(({ channel, ...s }) => ({ ...s, label: sectionLabel(s, channel) }));
 }
 
-function sectionLabel(section: AuditSection): string {
+function sectionLabel(section: AuditSection, channel: string): string {
     const named = (field: "host" | "version") => section.entries.find((e) => e.provenance?.[field])?.provenance?.[field];
     // A channel with no name (a dev home) is left out; "this channel" is only for a section that says nothing at all.
-    return [named("host"), section.key, named("version")].filter(Boolean).join(" · ") || "this channel";
+    return [named("host"), channel, named("version")].filter(Boolean).join(" · ") || "this channel";
 }
 
 /** How many entries of `fresh` (the newest page) the list shown does not hold. */

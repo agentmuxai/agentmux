@@ -1214,6 +1214,10 @@
             "method": "PresenceStatusCommand"
         },
         {
+            "command": "client.agreetos",
+            "method": "ClientAgreeTosCommand"
+        },
+        {
             "command": "browsergrants.list",
             "method": "BrowserGrantsListCommand",
             "send": "data ?? {}"
@@ -1810,6 +1814,10 @@
             "method": "IdentityAccountAvailabilityCommand"
         },
         {
+            "command": "identity.account.usage",
+            "method": "IdentityAccountUsageCommand"
+        },
+        {
             "command": "jekt.held.summary",
             "method": "JektHeldSummaryCommand"
         },
@@ -1956,6 +1964,10 @@
         {
             "command": "writeagentconfig",
             "method": "WriteAgentConfigCommand"
+        },
+        {
+            "command": "workspace.importuserworkspace",
+            "method": "WorkspaceImportUserWorkspaceCommand"
         },
         {
             "command": "writeeditorfile",

@@ -31,6 +31,7 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
             <AnchoredPopover
                 anchor={props.anchor}
                 placement="top-end"
+                fitHeight
                 onDismiss={props.onClose}
                 class="token-usage-breakdown"
                 role="dialog"

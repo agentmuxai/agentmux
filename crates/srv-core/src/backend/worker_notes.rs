@@ -487,7 +487,7 @@ fn note_target(block_id: &str) -> Option<String> {
 }
 
 /// The first open pane of the lead of the agent `def_id` (its seat's lead, on this machine), if it has one.
-fn leader_pane_of(mstore: &Store, def_id: &str) -> Option<String> {
+pub(crate) fn leader_pane_of(mstore: &Store, def_id: &str) -> Option<String> {
     let lead = crate::backend::agent_seat::effective_seat_by_id(mstore, def_id)
         .and_then(|seat| seat.lead)
         .filter(|lead| !crate::backend::agent_seat::is_remote_lead(lead));

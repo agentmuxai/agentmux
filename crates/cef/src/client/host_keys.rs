@@ -7,21 +7,42 @@
 //! the person's keybindings change the app sends the list its effective table gives (`set_host_keys`), which
 //! replaces it until the next push (docs/specs/SPEC_KEYBOARD_SHORTCUTS_SETTINGS_2026_11_06.md §7).
 
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use std::sync::{Arc, LazyLock};
+use std::time::{Duration, Instant};
+
+/// One key press: its modifiers and Windows virtual-key code.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
+pub(crate) struct KeyStep {
+    pub(crate) ctrl: bool,
+    pub(crate) shift: bool,
+    pub(crate) alt: bool,
+    pub(crate) meta: bool,
+    pub(crate) vk: i32,
+}
 
 /// One app shortcut the host forwards: the modifiers and Windows virtual-key code of a key in the frontend's
-/// shortcut table.
+/// shortcut table. A chord has `second`: the key that follows this one (the fields here are its first key).
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 pub(crate) struct HostKey {
     pub(crate) command: String,
-    /// The table key ("ctrl+shift+t"), sent back so the app can check the person's own keybindings still bind it.
+    /// The table key ("ctrl+shift+t", or "ctrl+shift+o l" for a chord), sent back so the app can check the
+    /// person's own keybindings still bind it.
     pub(crate) source: String,
     ctrl: bool,
     shift: bool,
     alt: bool,
     meta: bool,
     vk: i32,
+    #[serde(default)]
+    second: Option<KeyStep>,
+}
+
+impl HostKey {
+    /// The key this shortcut starts with.
+    fn first(&self) -> KeyStep {
+        KeyStep { ctrl: self.ctrl, shift: self.shift, alt: self.alt, meta: self.meta, vk: self.vk }
+    }
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -44,20 +65,136 @@ static PUSHED: RwLock<Option<Arc<Vec<HostKey>>>> = RwLock::new(None);
 /// A push is a handful of keys; this keeps a bad one from holding the key handler up.
 const MAX_PUSHED: usize = 256;
 
-/// The key a browser pane's key press is, if it is one the app wants.
-pub(crate) fn host_key_for(ctrl: bool, shift: bool, alt: bool, meta: bool, vk: i32, mac: bool) -> Option<HostKey> {
-    let matches = |k: &&HostKey| k.ctrl == ctrl && k.shift == shift && k.alt == alt && k.meta == meta && k.vk == vk;
+/// Runs `f` over the keys in force for this platform: what the app pushed, else the generated list.
+fn with_keys<R>(mac: bool, f: impl FnOnce(&[HostKey]) -> R) -> R {
     if let Some(pushed) = PUSHED.read().as_ref() {
-        return pushed.iter().find(matches).cloned();
+        return f(pushed);
     }
-    let keys = if mac {
+    f(if mac {
         &DEFAULT_KEYS.mac
     } else if cfg!(target_os = "linux") {
         &DEFAULT_KEYS.linux
     } else {
         &DEFAULT_KEYS.other
+    })
+}
+
+/// The key a browser pane's key press is, if it is one the app wants. A chord's keys are not single keys: see
+/// [`chord_step`].
+pub(crate) fn host_key_for(ctrl: bool, shift: bool, alt: bool, meta: bool, vk: i32, mac: bool) -> Option<HostKey> {
+    let at = KeyStep { ctrl, shift, alt, meta, vk };
+    with_keys(mac, |keys| keys.iter().find(|k| k.second.is_none() && k.first() == at).cloned())
+}
+
+/// How long a chord's second key is awaited: the app's own wait (`CHORD_TIMEOUT` in `util/sharedconst.ts`).
+const CHORD_TIMEOUT: Duration = Duration::from_millis(2000);
+
+/// How long a key the host kept is taken to be still held when its release is never seen (focus moved away).
+const HELD_MAX: Duration = Duration::from_secs(5);
+
+/// A chord's first key was pressed in `pane`, and the second is awaited.
+struct Pending {
+    pane: String,
+    first: KeyStep,
+    at: Instant,
+}
+
+/// A key the host kept from the page, whose repeats, character and release are kept too.
+struct Held {
+    pane: String,
+    vk: i32,
+    at: Instant,
+}
+
+struct ChordState {
+    pending: Option<Pending>,
+    held: Option<Held>,
+}
+
+static CHORD: Mutex<ChordState> = Mutex::new(ChordState { pending: None, held: None });
+
+/// Which event of a key press CEF is reporting.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Phase {
+    Down,
+    /// The character the key types.
+    Char,
+    Up,
+}
+
+/// What a key event in a browser pane is to a chord.
+#[derive(Debug, PartialEq)]
+pub(crate) enum Chord {
+    /// Not part of a chord: the page gets it, or a single shortcut takes it.
+    Pass,
+    /// Kept from the page and nothing runs: a chord's first key, a second key that ends no chord (the app keeps
+    /// it too), or a repeat, character or release of a key already kept.
+    Kept,
+    /// Kept from the page, and this chord's command runs: its second key.
+    Run(HostKey),
+}
+
+/// Windows virtual-key codes of the keys that only modify others (Shift, Ctrl, Alt, the Windows keys and the
+/// left/right forms). Pressing one while a chord waits is not its second key, as in the app's own handling.
+fn is_modifier(vk: i32) -> bool {
+    matches!(vk, 0x10..=0x12 | 0x5B | 0x5C | 0xA0..=0xA5)
+}
+
+/// Whether this key event could be part of a chord, so the page's ordinary typing costs a lock and a scan and
+/// the pane is looked up only when it matters.
+pub(crate) fn chord_may_apply(phase: Phase, key: KeyStep, mac: bool) -> bool {
+    {
+        let st = CHORD.lock();
+        if st.pending.is_some() || st.held.is_some() {
+            return true;
+        }
+    }
+    phase == Phase::Down && with_keys(mac, |keys| keys.iter().any(|c| c.second.is_some() && c.first() == key))
+}
+
+/// A key event in `pane`, against the chord that may be waiting. The page never sees a chord's first key (the
+/// app's reserved prefix: it is in the list because the app asked) nor its second, so a page with a field in
+/// focus gets every other key. A key pressed in another pane, or after the wait ran out, starts over.
+pub(crate) fn chord_event(pane: &str, phase: Phase, key: KeyStep, mac: bool, now: Instant) -> Chord {
+    with_keys(mac, |keys| step(&mut CHORD.lock(), keys, pane, phase, key, now))
+}
+
+fn step(st: &mut ChordState, keys: &[HostKey], pane: &str, phase: Phase, key: KeyStep, now: Instant) -> Chord {
+    st.held = st.held.take().filter(|h| now.saturating_duration_since(h.at) <= HELD_MAX);
+    if let Some((here, vk)) = st.held.as_ref().map(|h| (h.pane == pane, h.vk)) {
+        match phase {
+            Phase::Char if here => return Chord::Kept,
+            Phase::Down if here && key.vk == vk => return Chord::Kept,
+            Phase::Up if here && key.vk == vk => {
+                st.held = None;
+                return Chord::Kept;
+            }
+            _ => {}
+        }
+    }
+    if phase != Phase::Down {
+        return Chord::Pass;
+    }
+    let waiting = st.pending.take().filter(|p| p.pane == pane && now.saturating_duration_since(p.at) <= CHORD_TIMEOUT);
+    let out = if let Some(p) = waiting {
+        if is_modifier(key.vk) {
+            st.pending = Some(p);
+            return Chord::Pass;
+        }
+        match keys.iter().find(|c| c.second == Some(key) && c.first() == p.first) {
+            Some(c) => Chord::Run(c.clone()),
+            None => Chord::Kept,
+        }
+    } else if keys.iter().any(|c| c.second.is_some() && c.first() == key) {
+        st.pending = Some(Pending { pane: pane.to_string(), first: key, at: now });
+        Chord::Kept
+    } else {
+        Chord::Pass
     };
-    keys.iter().find(matches).cloned()
+    if out != Chord::Pass {
+        st.held = Some(Held { pane: pane.to_string(), vk: key.vk, at: now });
+    }
+    out
 }
 
 fn replace(keys: Vec<HostKey>) {
@@ -71,7 +208,8 @@ pub(crate) fn set_host_keys(args: &serde_json::Value) -> Result<serde_json::Valu
     if keys.len() > MAX_PUSHED {
         return Err(format!("set_host_keys: at most {MAX_PUSHED} keys"));
     }
-    if let Some(bad) = keys.iter().find(|k| k.command.is_empty() || !(1..=254).contains(&k.vk)) {
+    let usable = |vk: i32| (1..=254).contains(&vk);
+    if let Some(bad) = keys.iter().find(|k| k.command.is_empty() || !usable(k.vk) || k.second.is_some_and(|s| !usable(s.vk))) {
         return Err(format!("set_host_keys: {:?} is not a usable key", bad.source));
     }
     tracing::info!("[app-shortcut] host keys replaced: {} keys", keys.len());
@@ -142,6 +280,133 @@ mod tests {
         }
         assert!(set_host_keys(&serde_json::json!({})).is_err());
         assert!(PUSHED.read().is_none());
+    }
+
+    fn key(command: &str, source: &str, first: (bool, bool, i32), second: Option<(bool, bool, i32)>) -> HostKey {
+        let step = |(ctrl, shift, vk)| serde_json::json!({ "ctrl": ctrl, "shift": shift, "alt": false, "meta": false, "vk": vk });
+        let mut v = step(first);
+        v["command"] = command.into();
+        v["source"] = source.into();
+        if let Some(s) = second {
+            v["second"] = step(s);
+        }
+        serde_json::from_value(v).unwrap()
+    }
+
+    const O: i32 = 0x4F;
+    const L: i32 = 0x4C;
+    const S: i32 = 0x53;
+    const DOWN: i32 = 0x28;
+    const CTRL: i32 = 0x11;
+
+    fn step_of(ctrl: bool, shift: bool, vk: i32) -> KeyStep {
+        KeyStep { ctrl, shift, alt: false, meta: false, vk }
+    }
+
+    /// Ctrl+Shift+O then L, Ctrl+Shift+S then ArrowDown, and one single key.
+    fn chord_keys() -> Vec<HostKey> {
+        vec![
+            key("open:terminal", "ctrl+shift+o l", (true, true, O), Some((false, false, L))),
+            key("split:down", "ctrl+shift+s ArrowDown", (true, true, S), Some((false, false, DOWN))),
+            key("tab:new", "ctrl+shift+t", (true, true, 0x54), None),
+        ]
+    }
+
+    fn at(ms: u64, base: Instant) -> Instant {
+        base + Duration::from_millis(ms)
+    }
+
+    fn chord(st: &mut ChordState, pane: &str, phase: Phase, k: KeyStep, now: Instant) -> Chord {
+        step(st, &chord_keys(), pane, phase, k, now)
+    }
+
+    fn fresh() -> ChordState {
+        ChordState { pending: None, held: None }
+    }
+
+    #[test]
+    fn a_chord_runs_from_a_browser_pane_and_the_page_gets_neither_key() {
+        let (mut st, t) = (fresh(), Instant::now());
+        // The first key is kept, with the character and the release it makes.
+        assert_eq!(chord(&mut st, "p", Phase::Down, step_of(true, true, O), t), Chord::Kept);
+        assert_eq!(chord(&mut st, "p", Phase::Char, step_of(true, true, 0x0F), t), Chord::Kept);
+        assert_eq!(chord(&mut st, "p", Phase::Up, step_of(true, true, O), at(80, t)), Chord::Kept);
+        // The person lets go of Ctrl and Shift (the modifiers alone are not the second key), then types L.
+        assert_eq!(chord(&mut st, "p", Phase::Up, step_of(false, true, CTRL), at(100, t)), Chord::Pass);
+        assert_eq!(chord(&mut st, "p", Phase::Down, step_of(false, false, 0x10), at(150, t)), Chord::Pass);
+        let ran = chord(&mut st, "p", Phase::Down, step_of(false, false, L), at(400, t));
+        assert_eq!(ran, Chord::Run(chord_keys().remove(0)));
+        // The L that goes with it (the character a field would take) and its release are kept too.
+        assert_eq!(chord(&mut st, "p", Phase::Char, step_of(false, false, 0x6C), at(401, t)), Chord::Kept);
+        assert_eq!(chord(&mut st, "p", Phase::Down, step_of(false, false, L), at(900, t)), Chord::Kept, "a repeat");
+        assert_eq!(chord(&mut st, "p", Phase::Up, step_of(false, false, L), at(950, t)), Chord::Kept);
+        // Then the page has its keys back: the next L is typed, and is not a chord.
+        assert_eq!(chord(&mut st, "p", Phase::Down, step_of(false, false, L), at(1500, t)), Chord::Pass);
+        assert_eq!(chord(&mut st, "p", Phase::Char, step_of(false, false, 0x6C), at(1501, t)), Chord::Pass);
+    }
+
+    #[test]
+    fn a_second_key_that_ends_no_chord_is_kept_like_the_app_keeps_it_and_ends_the_wait() {
+        let (mut st, t) = (fresh(), Instant::now());
+        chord(&mut st, "p", Phase::Down, step_of(true, true, S), t);
+        assert_eq!(chord(&mut st, "p", Phase::Down, step_of(false, false, L), at(300, t)), Chord::Kept);
+        chord(&mut st, "p", Phase::Up, step_of(false, false, L), at(350, t));
+        // The wait is over: Down is a chord only after its own first key again.
+        assert_eq!(chord(&mut st, "p", Phase::Down, step_of(false, false, DOWN), at(500, t)), Chord::Pass);
+        // Modifiers are part of the second key: ArrowDown with Shift is not ArrowDown.
+        chord(&mut st, "p", Phase::Down, step_of(true, true, S), at(600, t));
+        assert_eq!(chord(&mut st, "p", Phase::Down, step_of(false, true, DOWN), at(700, t)), Chord::Kept);
+    }
+
+    #[test]
+    fn a_wait_that_ran_out_or_moved_to_another_pane_starts_over() {
+        let (mut st, t) = (fresh(), Instant::now());
+        chord(&mut st, "p", Phase::Down, step_of(true, true, O), t);
+        chord(&mut st, "p", Phase::Up, step_of(true, true, O), at(50, t));
+        // Past the app's own wait of two seconds the L is typed.
+        assert_eq!(chord(&mut st, "p", Phase::Down, step_of(false, false, L), at(2500, t)), Chord::Pass);
+        // A first key in one pane does not complete in another.
+        chord(&mut st, "p", Phase::Down, step_of(true, true, O), at(3000, t));
+        chord(&mut st, "p", Phase::Up, step_of(true, true, O), at(3050, t));
+        assert_eq!(chord(&mut st, "q", Phase::Down, step_of(false, false, L), at(3200, t)), Chord::Pass);
+        // A release that was never seen does not keep the key from the page for ever.
+        chord(&mut st, "p", Phase::Down, step_of(true, true, O), at(4000, t));
+        assert_eq!(chord(&mut st, "p", Phase::Char, step_of(false, false, 0x6C), at(4000 + 6000, t)), Chord::Pass);
+    }
+
+    #[test]
+    fn a_page_types_freely_and_only_the_chords_leader_is_kept() {
+        let (mut st, t) = (fresh(), Instant::now());
+        for (i, vk) in [L, O, S, DOWN, 0x41].into_iter().enumerate() {
+            let now = at(i as u64 * 10, t);
+            assert_eq!(chord(&mut st, "p", Phase::Down, step_of(false, false, vk), now), Chord::Pass);
+            assert_eq!(chord(&mut st, "p", Phase::Char, step_of(false, false, vk + 0x20), now), Chord::Pass);
+            assert_eq!(chord(&mut st, "p", Phase::Up, step_of(false, false, vk), now), Chord::Pass);
+        }
+        // Ctrl+Shift+O with an extra modifier is not the leader either.
+        let alt = KeyStep { alt: true, ..step_of(true, true, O) };
+        assert_eq!(chord(&mut st, "p", Phase::Down, alt, at(100, t)), Chord::Pass);
+        assert!(st.pending.is_none() && st.held.is_none());
+    }
+
+    #[test]
+    fn a_chords_keys_are_not_single_keys_and_a_bad_second_key_is_refused() {
+        let _g = TEST_LOCK.lock();
+        clear();
+        let pushed = serde_json::json!({ "keys": [
+            { "command": "open:terminal", "source": "ctrl+shift+o l", "ctrl": true, "shift": true, "alt": false, "meta": false, "vk": O,
+              "second": { "ctrl": false, "shift": false, "alt": false, "meta": false, "vk": L } },
+        ] });
+        assert_eq!(set_host_keys(&pushed).unwrap()["count"], 1);
+        assert_eq!(host_key_for(true, true, false, false, O, false), None, "the leader runs nothing by itself");
+        assert!(chord_may_apply(Phase::Down, step_of(true, true, O), false));
+        assert!(!chord_may_apply(Phase::Down, step_of(false, false, L), false));
+        let bad = serde_json::json!({ "keys": [
+            { "command": "x", "source": "ctrl+shift+o l", "ctrl": true, "shift": true, "alt": false, "meta": false, "vk": O,
+              "second": { "ctrl": false, "shift": false, "alt": false, "meta": false, "vk": 0 } },
+        ] });
+        assert!(set_host_keys(&bad).is_err());
+        clear();
     }
 
     #[test]

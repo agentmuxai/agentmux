@@ -81,7 +81,7 @@ const UpdateStatus = (): JSX.Element => {
     };
     // The panel is for a staged release, for the wait on agents after Restart now, and for the
     // restart that follows by itself: once the launcher has been asked the panel only says so,
-    // since its own dialog is then the one place to stop it.
+    // since the restart can no longer be cancelled from here.
     const hasPanel = () => !!staged();
     const [panelOpen, setPanelOpen] = createSignal(false);
     let chipRef: HTMLDivElement | undefined;

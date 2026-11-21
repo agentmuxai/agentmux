@@ -14,10 +14,12 @@
 
 pub(crate) mod agent_ops;
 pub(crate) mod app_ops;
+pub(crate) mod audit_ops;
 mod disk_ops;
 pub(crate) mod fleet_sync;
 mod google_ops;
 pub(crate) mod identity_ops;
+mod live_facts_ops;
 pub(crate) mod memory;
 pub(crate) mod op;
 mod disk_cleanup_op;
@@ -175,6 +177,9 @@ pub(crate) fn lookup(op: &str) -> Option<Op> {
         // service on or off for an agent here. `connect` has no remote form: the sign-in is the person's.
         "google.status" => Op::read_personal(|state, caller, params| Box::pin(google_ops::status(state, caller, params))),
         "google.grant" => Op::write(|state, caller, params| Box::pin(google_ops::grant(state, caller, params))),
+        // Which agents run on what, and in what state, with no message text, prompt or account email: a read for an
+        // approved install, like the account listing.
+        "agents.status" => Op::read_personal(|state, caller, params| Box::pin(live_facts_ops::status(state, caller, params))),
         "agents.start" => Op::write(|state, caller, params| Box::pin(agent_ops::start(state, caller, params))),
         "agents.open" => Op::write(|state, caller, params| Box::pin(agent_ops::open(state, caller, params))),
         "agents.stop" => Op::write(|state, caller, params| Box::pin(agent_ops::stop(state, caller, params))),
@@ -197,6 +202,9 @@ pub(crate) fn lookup(op: &str) -> Option<Op> {
         // The report names every agent's clone folder, so it takes a certificate from an approved install like the logs do.
         "app.disk.report" => Op::read_personal(|state, caller, params| Box::pin(disk_ops::disk_report(state, caller, params))),
         "app.logs.tail" => Op::read_personal(|state, caller, params| Box::pin(log_ops::logs_tail(state, caller, params))),
+        // The Audit's rows (agents and what they did, no message text): answered only when the owner shares it
+        // (`audit:sharewithpaired`), and only to an approved install, like the logs.
+        "audit.query" => Op::read_personal(|state, caller, params| Box::pin(audit_ops::query(state, caller, params))),
         "app.history_reclaim" => Op::write(|state, caller, params| Box::pin(reclaim_op::history_reclaim(state, caller, params))),
         // Files the same sensitive request a local agent's App upgrade files: this machine's super agent and the person's veto.
         "app.upgrade" => Op::write(|state, caller, params| Box::pin(upgrade_op::upgrade(state, caller, params))),

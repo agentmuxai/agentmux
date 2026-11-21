@@ -37,6 +37,7 @@ mod install_task;
 #[cfg(all(test, unix))]
 mod install_task_tests;
 mod lsp_handlers;
+pub(crate) mod mcp_folder_notice;
 mod system_install_handlers;
 mod uninstall_handlers;
 mod messagebus;
@@ -49,6 +50,7 @@ mod name_resolution;
 pub(crate) mod caller;
 pub(crate) mod agent_self_keys;
 pub(crate) mod agent_folder_open;
+pub(crate) mod agent_media_files;
 pub(crate) mod container_pane_snapshot;
 pub(crate) mod streamed_browser;
 pub(crate) mod files_root;
@@ -69,6 +71,8 @@ pub(crate) mod agent_lifecycle;
 pub(crate) mod agent_wanted_running;
 pub(crate) mod restart_resume;
 pub(crate) mod availability_view;
+/// What each agent runs on and is doing now, for `Agents list`, `Agents status` and the Swarm.
+pub(crate) mod live_facts;
 pub(crate) mod agent_runtime;
 pub(crate) mod registry_reconcile;
 pub(crate) mod start_rate;
@@ -104,6 +108,7 @@ mod websocket;
 mod ws_register;
 mod cli_version;
 mod ws_resync;
+mod drone_agent;
 pub(crate) mod drone_handlers;
 pub(crate) mod drone_payload;
 pub(crate) mod drone_replay;
@@ -125,6 +130,7 @@ mod work_act;
 mod sensitive_handlers;
 mod messaging_handlers;
 mod muxbus_handlers;
+mod muxspect_browsers;
 mod muxspect_handlers;
 mod muxspect_instances;
 pub(crate) mod transcript_tail;
@@ -133,7 +139,7 @@ mod bulletin_handlers;
 mod quota_mode_handler;
 mod agent_status_handlers;
 mod work_claims_handlers;
-mod work_facts_handlers;
+pub(crate) mod work_facts_handlers;
 mod containers_handler;
 mod message_flow_handler;
 mod message_stats_handler;
@@ -241,6 +247,12 @@ mod http_skill_tests;
 #[cfg(test)]
 #[path = "tests/peer_veto_tests.rs"]
 mod peer_veto_tests;
+#[cfg(test)]
+#[path = "tests/mcp_actor_tests.rs"]
+mod mcp_actor_tests;
+#[cfg(test)]
+#[path = "tests/person_only_ws_tests.rs"]
+mod person_only_ws_tests;
 #[cfg(test)]
 #[path = "tests/rpc_attribution_tests.rs"]
 mod rpc_attribution_tests;

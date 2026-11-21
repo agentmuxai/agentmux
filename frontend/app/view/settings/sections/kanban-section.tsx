@@ -3,7 +3,8 @@
 //
 // Kanban: the person sets the stages of a board here (docs/specs/SPEC_KANBAN_CUSTOM_STAGES_2026_11_16.md §8.2): how
 // many, what each is called, its colour, and which of the board's sources it shows. A board keeps its own set. The
-// cog at the top right of a Kanban pane opens this section on the board it was showing.
+// cog at the top right of a Kanban pane opens this section on the board it was showing. Under the stages are the two
+// rows that set how the board behaves: whether a merged PR closes its task, and Review's limit.
 
 import { For, type JSX } from "solid-js";
 
@@ -15,6 +16,7 @@ import { SectionHeader } from "../settings-controls";
 import { settingEntry } from "../settings-model";
 import type { SettingsViewModel } from "../settings-model";
 import { createKanbanStagesState } from "./kanban-section-state";
+import { KANBAN_ROW_SETTINGS, KanbanBehaviourRows } from "./kanban-section-rows";
 import { Footer, History, Notices, Preview, Problems, StageActions, StageList } from "./kanban-section-parts";
 
 import "./kanban-section.scss";
@@ -29,6 +31,7 @@ export const KANBAN_SETTINGS = {
         groupKey: "settings.kanban.group.stages",
         keywords: ["columns", "board", "stage names", "stage colours", "backlog", "needs you", "merged", "released", "lanes", "workflow"],
     }),
+    ...KANBAN_ROW_SETTINGS,
 };
 
 export function KanbanSection(props: { model?: SettingsViewModel }): JSX.Element {
@@ -37,7 +40,7 @@ export function KanbanSection(props: { model?: SettingsViewModel }): JSX.Element
         () => props.model?.kanbanAsk?.() ?? 0
     );
     return (
-        <div class="settings-section-body kanban-stages" id={`setting-${KANBAN_SETTINGS.stages.id}`}>
+        <div class="settings-section-body settings-section-body--single kanban-stages" id={`setting-${KANBAN_SETTINGS.stages.id}`}>
             <SectionHeader label={t("settings.kanban.group.stages")} />
             <p class="kanban-stages__tier">{t("settings.kanban.stages.description")}</p>
             <div class="kanban-stages__board">
@@ -67,6 +70,7 @@ export function KanbanSection(props: { model?: SettingsViewModel }): JSX.Element
             <Problems s={s} />
             <Footer s={s} />
             <History s={s} />
+            <KanbanBehaviourRows />
         </div>
     );
 }

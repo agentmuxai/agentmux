@@ -262,240 +262,172 @@ async fn emit_layout_for_tab(
 /// events. Saga events, OS facts, launcher-domain events all fall through
 /// to the catch-all `_ => {}` arm.
 async fn dispatch_event(event: Event, mstore: Arc<Store>, event_bus: Arc<EventBus>) {
-    use crate::backend::obj::{Block, Window, Workspace};
+    // Each group takes the event if it is one of its own and hands it back otherwise. Saga
+    // lifecycle, launcher-domain events, OS facts, etc. are not StoreObj changes: they fall out
+    // of the last group, which keeps the bridge future-proof for new event variants.
+    let Some(event) = bridge_workspace_event(event, &mstore, &event_bus).await else { return };
+    let Some(event) = bridge_window_event(event, &mstore, &event_bus).await else { return };
+    let Some(event) = bridge_tab_event(event, &mstore, &event_bus).await else { return };
+    let Some(event) = bridge_block_event(event, &mstore, &event_bus).await else { return };
+    bridge_layout_event(event, &mstore, &event_bus).await;
+}
 
+async fn bridge_workspace_event(event: Event, mstore: &Arc<Store>, event_bus: &Arc<EventBus>) -> Option<Event> {
+    use crate::backend::obj::Workspace;
     match event {
-        // ----- Workspace -----
         Event::WorkspaceRenamed { workspace_id, .. }
         | Event::WorkspaceMetaUpdated { workspace_id, .. }
         | Event::WorkspaceCreated { workspace_id, .. } => {
-            emit_fetched::<Workspace>(
-                &mstore, &event_bus, OTYPE_WORKSPACE, workspace_id, "Workspace*",
-            )
-            .await;
+            emit_fetched::<Workspace>(mstore, event_bus, OTYPE_WORKSPACE, workspace_id, "Workspace*").await;
         }
-        Event::WorkspaceDeleted { workspace_id, .. } => {
-            emit_delete(&event_bus, OTYPE_WORKSPACE, &workspace_id);
-        }
+        Event::WorkspaceDeleted { workspace_id, .. } => emit_delete(event_bus, OTYPE_WORKSPACE, &workspace_id),
+        other => return Some(other),
+    }
+    None
+}
 
-        // ----- Window (Phase 2 + #855) -----
+async fn bridge_window_event(event: Event, mstore: &Arc<Store>, event_bus: &Arc<EventBus>) -> Option<Event> {
+    use crate::backend::obj::Window;
+    match event {
         Event::WindowMetaUpdated { window_id, .. } => {
-            emit_fetched::<Window>(
-                &mstore, &event_bus, OTYPE_WINDOW, window_id, "WindowMetaUpdated",
-            )
-            .await;
+            emit_fetched::<Window>(mstore, event_bus, OTYPE_WINDOW, window_id, "WindowMetaUpdated").await;
         }
         Event::SrvWindowWorkspaceChanged { window_id, .. } => {
-            emit_fetched::<Window>(
-                &mstore, &event_bus, OTYPE_WINDOW, window_id, "SrvWindowWorkspaceChanged",
-            )
-            .await;
+            emit_fetched::<Window>(mstore, event_bus, OTYPE_WINDOW, window_id, "SrvWindowWorkspaceChanged").await;
         }
-        // SrvWindowOpened/Closed: the persist path
-        // (apply_srv_window_opened / apply_srv_window_closed) ALSO
-        // mutates Client.windowids inside the same transaction, so
-        // renderers with a pinned Client need to see the updated
-        // singleton too — otherwise their window list lags behind
-        // until reload. (Codex P2 on PR #861.)
+        // SrvWindowOpened/Closed: the persist path (apply_srv_window_opened / apply_srv_window_closed)
+        // ALSO mutates Client.windowids inside the same transaction, so renderers with a pinned
+        // Client need to see the updated singleton too, or their window list lags behind until
+        // reload (#861).
         Event::SrvWindowOpened { window_id, .. } => {
-            emit_fetched::<Window>(
-                &mstore, &event_bus, OTYPE_WINDOW, window_id, "SrvWindowOpened",
-            )
-            .await;
-            emit_client_singleton(&mstore, &event_bus, "SrvWindowOpened").await;
+            emit_fetched::<Window>(mstore, event_bus, OTYPE_WINDOW, window_id, "SrvWindowOpened").await;
+            emit_client_singleton(mstore, event_bus, "SrvWindowOpened").await;
         }
-        // Parent (Client singleton) update first, window delete second —
-        // same delete-ordering rationale as the TabDeleted arm below.
+        // Parent (Client singleton) update first, window delete second: the delete-ordering
+        // rationale of `bridge_tab_event`'s TabDeleted arm.
         Event::SrvWindowClosed { window_id, .. } => {
-            emit_client_singleton(&mstore, &event_bus, "SrvWindowClosed").await;
-            emit_delete(&event_bus, OTYPE_WINDOW, &window_id);
+            emit_client_singleton(mstore, event_bus, "SrvWindowClosed").await;
+            emit_delete(event_bus, OTYPE_WINDOW, &window_id);
         }
+        other => return Some(other),
+    }
+    None
+}
 
-        // ----- Tab (Phase 2) -----
-        // TabCreated also touches the parent workspace's tab_ids field
-        // (reducer mutates both in one dispatch). Broadcast both so the
-        // frontend MOS sees the new Tab AND the updated parent ordering.
-        Event::TabCreated {
-            workspace_id,
-            tab_id,
-            ..
-        } => {
-            emit_fetched::<Tab>(&mstore, &event_bus, OTYPE_TAB, tab_id, "TabCreated").await;
-            emit_fetched::<Workspace>(
-                &mstore, &event_bus, OTYPE_WORKSPACE, workspace_id, "TabCreated parent",
-            )
-            .await;
+async fn bridge_tab_event(event: Event, mstore: &Arc<Store>, event_bus: &Arc<EventBus>) -> Option<Event> {
+    use crate::backend::obj::Workspace;
+    match event {
+        // TabCreated also touches the parent workspace's tab_ids field (the reducer mutates both
+        // in one dispatch). Broadcast both so the frontend MOS sees the new Tab AND the updated
+        // parent ordering.
+        Event::TabCreated { workspace_id, tab_id, .. } => {
+            emit_fetched::<Tab>(mstore, event_bus, OTYPE_TAB, tab_id, "TabCreated").await;
+            emit_fetched::<Workspace>(mstore, event_bus, OTYPE_WORKSPACE, workspace_id, "TabCreated parent").await;
         }
-        // Delete ordering: PARENT UPDATE FIRST, child delete second — the
-        // reverse of the create arms above. These are two separate WS
-        // frames the renderer applies (and paints) independently; if the
-        // tab delete lands first, the still-mounted <Tab>'s own signal
-        // goes null and it blanks in place for a paint before the
-        // workspace update finally unmounts it (the §6 flash of
-        // SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md, riding in
-        // through the WS push path — §7). Parent-first, the component
-        // unmounts with its data still intact and the late child delete
-        // touches an unsubscribed signal — nothing paints.
-        Event::TabDeleted {
-            workspace_id,
-            tab_id,
-            ..
-        } => {
-            emit_fetched::<Workspace>(
-                &mstore, &event_bus, OTYPE_WORKSPACE, workspace_id, "TabDeleted parent",
-            )
-            .await;
-            emit_delete(&event_bus, OTYPE_TAB, &tab_id);
+        // Delete ordering: PARENT UPDATE FIRST, child delete second, the reverse of the create
+        // arms. These are two separate WS frames the renderer applies (and paints) independently;
+        // if the tab delete lands first, the still-mounted <Tab>'s own signal goes null and it
+        // blanks in place for a paint before the workspace update finally unmounts it (the §6
+        // flash of SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md, riding in through the WS push
+        // path, §7). Parent-first, the component unmounts with its data still intact and the late
+        // child delete touches an unsubscribed signal, so nothing paints.
+        Event::TabDeleted { workspace_id, tab_id, .. } => {
+            emit_fetched::<Workspace>(mstore, event_bus, OTYPE_WORKSPACE, workspace_id, "TabDeleted parent").await;
+            emit_delete(event_bus, OTYPE_TAB, &tab_id);
         }
         Event::TabRenamed { tab_id, .. } | Event::TabMetaUpdated { tab_id, .. } => {
-            emit_fetched::<Tab>(&mstore, &event_bus, OTYPE_TAB, tab_id, "Tab*").await;
+            emit_fetched::<Tab>(mstore, event_bus, OTYPE_TAB, tab_id, "Tab*").await;
         }
         Event::ActiveTabChanged { workspace_id, .. }
         | Event::TabReordered { workspace_id, .. }
         | Event::TabsReorderedBulk { workspace_id, .. } => {
-            emit_fetched::<Workspace>(
-                &mstore,
-                &event_bus,
-                OTYPE_WORKSPACE,
-                workspace_id,
-                "ActiveTab/Reorder",
-            )
-            .await;
+            emit_fetched::<Workspace>(mstore, event_bus, OTYPE_WORKSPACE, workspace_id, "ActiveTab/Reorder").await;
         }
-        Event::TabMoved {
-            tab_id,
-            src_workspace_id,
-            dst_workspace_id,
-            ..
-        } => {
-            emit_fetched::<Tab>(&mstore, &event_bus, OTYPE_TAB, tab_id, "TabMoved").await;
-            emit_fetched::<Workspace>(
-                &mstore,
-                &event_bus,
-                OTYPE_WORKSPACE,
-                src_workspace_id,
-                "TabMoved src",
-            )
-            .await;
-            emit_fetched::<Workspace>(
-                &mstore,
-                &event_bus,
-                OTYPE_WORKSPACE,
-                dst_workspace_id,
-                "TabMoved dst",
-            )
-            .await;
+        Event::TabMoved { tab_id, src_workspace_id, dst_workspace_id, .. } => {
+            emit_fetched::<Tab>(mstore, event_bus, OTYPE_TAB, tab_id, "TabMoved").await;
+            emit_fetched::<Workspace>(mstore, event_bus, OTYPE_WORKSPACE, src_workspace_id, "TabMoved src").await;
+            emit_fetched::<Workspace>(mstore, event_bus, OTYPE_WORKSPACE, dst_workspace_id, "TabMoved dst").await;
         }
+        other => return Some(other),
+    }
+    None
+}
 
-        // ----- Block (Phase 2) -----
+async fn bridge_block_event(event: Event, mstore: &Arc<Store>, event_bus: &Arc<EventBus>) -> Option<Event> {
+    use crate::backend::obj::Block;
+    match event {
         // BlockCreated/BlockDeleted touch the parent tab's blockids field.
-        Event::BlockCreated {
-            tab_id, block_id, ..
-        } => {
-            emit_fetched::<Block>(
-                &mstore, &event_bus, OTYPE_BLOCK, block_id, "BlockCreated",
-            )
-            .await;
-            emit_fetched::<Tab>(
-                &mstore, &event_bus, OTYPE_TAB, tab_id, "BlockCreated parent",
-            )
-            .await;
+        Event::BlockCreated { tab_id, block_id, .. } => {
+            emit_fetched::<Block>(mstore, event_bus, OTYPE_BLOCK, block_id, "BlockCreated").await;
+            emit_fetched::<Tab>(mstore, event_bus, OTYPE_TAB, tab_id, "BlockCreated parent").await;
         }
-        // Parent update first, block delete second — same delete-ordering
-        // rationale as the TabDeleted arm above.
-        Event::BlockDeleted {
-            tab_id, block_id, ..
-        } => {
+        // Parent update first, block delete second: the delete-ordering rationale of
+        // `bridge_tab_event`'s TabDeleted arm.
+        Event::BlockDeleted { tab_id, block_id, .. } => {
             // A parked block had no parent tab.
             if !tab_id.is_empty() {
-                emit_fetched::<Tab>(
-                    &mstore, &event_bus, OTYPE_TAB, tab_id, "BlockDeleted parent",
-                )
-                .await;
+                emit_fetched::<Tab>(mstore, event_bus, OTYPE_TAB, tab_id, "BlockDeleted parent").await;
             }
-            emit_delete(&event_bus, OTYPE_BLOCK, &block_id);
+            emit_delete(event_bus, OTYPE_BLOCK, &block_id);
         }
         Event::BlockMetaUpdated { block_id, .. } => {
-            emit_fetched::<Block>(
-                &mstore,
-                &event_bus,
-                OTYPE_BLOCK,
-                block_id,
-                "BlockMetaUpdated",
-            )
-            .await;
+            emit_fetched::<Block>(mstore, event_bus, OTYPE_BLOCK, block_id, "BlockMetaUpdated").await;
         }
         // A parked block keeps its row, so the block is updated (its mark) and not deleted.
         Event::BlockParked { tab_id, block_id, .. } => {
-            emit_fetched::<Tab>(&mstore, &event_bus, OTYPE_TAB, tab_id, "BlockParked parent").await;
-            emit_fetched::<Block>(&mstore, &event_bus, OTYPE_BLOCK, block_id, "BlockParked").await;
+            emit_fetched::<Tab>(mstore, event_bus, OTYPE_TAB, tab_id, "BlockParked parent").await;
+            emit_fetched::<Block>(mstore, event_bus, OTYPE_BLOCK, block_id, "BlockParked").await;
         }
         Event::BlockAttached { block_id, dst_tab_id, .. } => {
-            emit_fetched::<Block>(&mstore, &event_bus, OTYPE_BLOCK, block_id, "BlockAttached").await;
-            emit_fetched::<Tab>(&mstore, &event_bus, OTYPE_TAB, dst_tab_id, "BlockAttached parent").await;
+            emit_fetched::<Block>(mstore, event_bus, OTYPE_BLOCK, block_id, "BlockAttached").await;
+            emit_fetched::<Tab>(mstore, event_bus, OTYPE_TAB, dst_tab_id, "BlockAttached parent").await;
         }
-        Event::BlockMoved {
-            block_id,
-            src_tab_id,
-            dst_tab_id,
-            ..
-        } => {
-            emit_fetched::<Block>(&mstore, &event_bus, OTYPE_BLOCK, block_id, "BlockMoved").await;
-            emit_fetched::<Tab>(&mstore, &event_bus, OTYPE_TAB, src_tab_id, "BlockMoved src")
-                .await;
-            emit_fetched::<Tab>(&mstore, &event_bus, OTYPE_TAB, dst_tab_id, "BlockMoved dst")
-                .await;
+        Event::BlockMoved { block_id, src_tab_id, dst_tab_id, .. } => {
+            emit_fetched::<Block>(mstore, event_bus, OTYPE_BLOCK, block_id, "BlockMoved").await;
+            emit_fetched::<Tab>(mstore, event_bus, OTYPE_TAB, src_tab_id, "BlockMoved src").await;
+            emit_fetched::<Tab>(mstore, event_bus, OTYPE_TAB, dst_tab_id, "BlockMoved dst").await;
         }
+        other => return Some(other),
+    }
+    None
+}
 
-        // ----- Layout (Phase 2 — partial) -----
-        // Focused/Magnified + TreeReplaced are persisted by
-        // `apply_event_to_mstore` (persist_subscriber.rs), so the bridge
-        // can safely re-read LayoutState and broadcast it: the HTTP RPC
-        // path applies SQLite synchronously before publishing the event
-        // (see the post-event-state guarantee above), so the read sees
-        // post-event tree state.
-        //
-        // `LayoutNodeDeleted` is persisted too but deliberately NOT bridged:
-        // on the srv-IPC path `srv_ipc/server.rs` publishes without a
-        // synchronous apply, so a re-read could race ahead of the persist
-        // subscriber and emit pre-event state (#1883). Its handlers'
-        // `success_with_updates(...)` responses cover it (#861).
-        Event::FocusedNodeChanged { tab_id, .. }
-        | Event::MagnifiedNodeChanged { tab_id, .. } => {
-            emit_layout_for_tab(&mstore, &event_bus, tab_id, "Focused/MagnifiedNodeChanged").await;
+/// Layout events (Phase 2, partial). Focused/Magnified + TreeReplaced are persisted by
+/// `apply_event_to_mstore` (persist_subscriber.rs), so the bridge can safely re-read LayoutState
+/// and broadcast it: the HTTP RPC path applies SQLite synchronously before publishing the event
+/// (the post-event-state guarantee on `dispatch_event`), so the read sees post-event tree state.
+///
+/// `LayoutNodeDeleted` is persisted too but deliberately NOT bridged: on the srv-IPC path
+/// `srv_ipc/server.rs` publishes without a synchronous apply, so a re-read could race ahead of the
+/// persist subscriber and emit pre-event state (#1883). Its handlers' `success_with_updates(...)`
+/// responses cover it (#861). It falls out here with every other unbridged event.
+async fn bridge_layout_event(event: Event, mstore: &Arc<Store>, event_bus: &Arc<EventBus>) {
+    match event {
+        Event::FocusedNodeChanged { tab_id, .. } | Event::MagnifiedNodeChanged { tab_id, .. } => {
+            emit_layout_for_tab(mstore, event_bus, tab_id, "Focused/MagnifiedNodeChanged").await;
         }
         Event::LayoutTreeReplaced { tab_id, .. } => {
-            emit_layout_for_tab(&mstore, &event_bus, tab_id, "LayoutTreeReplaced").await;
+            emit_layout_for_tab(mstore, event_bus, tab_id, "LayoutTreeReplaced").await;
         }
-        // Without this, a backend-queued layout action reaches a frontend
-        // ONLY if that frontend happens to construct its `LayoutModel`
-        // afterward — `initializeFromMuxObject` reads
-        // `pendingbackendactions` once at init
-        // (`frontend/layout/lib/layoutPersistence.ts`). That was invisible
-        // for as long as the queue's only producer was tear-off/redock,
-        // which creates a NEW window (hence a fresh model) as part of the
-        // same gesture. Close-on-exit is the first producer that queues an
-        // action for an ALREADY-OPEN window, and there the queue simply
-        // sat in SQLite unread: the block row was deleted and the
-        // backend's own tree pruned, but the frontend kept its leaf,
-        // rendering a pane whose block resolves to null (a permanent
-        // loading spinner) instead of closing. `onBackendUpdate`'s
-        // `processPendingBackendActions` call already handles the queue
-        // correctly — it just never heard that the queue had changed. See
+        // Without this, a backend-queued layout action reaches a frontend ONLY if that frontend
+        // happens to construct its `LayoutModel` afterward: `initializeFromMuxObject` reads
+        // `pendingbackendactions` once at init (`frontend/layout/lib/layoutPersistence.ts`). That
+        // was invisible while the queue's only producer was tear-off/redock, which creates a NEW
+        // window (a fresh model) in the same gesture. Close-on-exit is the first producer that
+        // queues an action for an ALREADY-OPEN window, and there the queue sat in SQLite unread:
+        // the block row was deleted and the backend's own tree pruned, but the frontend kept its
+        // leaf, rendering a pane whose block resolves to null (a permanent loading spinner)
+        // instead of closing. `onBackendUpdate`'s `processPendingBackendActions` already handles
+        // the queue correctly; it never heard that the queue had changed. See
         // docs/specs/SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md §14.
         //
-        // Race-free for the reason the granular-events note below gives:
-        // the ONLY dispatcher of `LayoutQueueBackendActions` is
-        // `service::reducer_helpers::queue_layout_actions_via_reducer`,
-        // which applies every emitted event to the store synchronously
-        // before calling `publish_events`, so this re-read of LayoutState
-        // cannot observe pre-event state.
+        // Race-free because the ONLY dispatcher of `LayoutQueueBackendActions` is
+        // `service::reducer_helpers::queue_layout_actions_via_reducer`, which applies every
+        // emitted event to the store synchronously before calling `publish_events`, so this
+        // re-read of LayoutState cannot observe pre-event state.
         Event::LayoutBackendActionsQueued { tab_id, .. } => {
-            emit_layout_for_tab(&mstore, &event_bus, tab_id, "LayoutBackendActionsQueued").await;
+            emit_layout_for_tab(mstore, event_bus, tab_id, "LayoutBackendActionsQueued").await;
         }
-        // Saga lifecycle, launcher-domain events, OS facts, etc. — not
-        // StoreObj changes. The catch-all keeps the bridge future-proof
-        // for new event variants the reducer may add.
         _ => {}
     }
 }
@@ -781,3 +713,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "mux_obj_bridge_tests.rs"]
+mod bridge_tests;

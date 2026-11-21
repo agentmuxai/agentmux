@@ -2539,6 +2539,25 @@
     }
   },
   {
+    "command": "client.agreetos",
+    "request": "core::option::Option<agentmux_srv_core::backend::rpc_types::websocket::NoArgsReq>",
+    "requestName": "core::option::Option<agentmux_srv_core::backend::rpc_types::websocket::NoArgsReq>",
+    "requestTs": {
+      "imports": [
+        "NoArgsReq"
+      ],
+      "name": "NoArgsReq | null"
+    },
+    "response": "agentmux_srv_core::backend::rpc_types::client_terms::ClientAgreeTosResult",
+    "responseName": "ClientAgreeTosResult",
+    "responseTs": {
+      "imports": [
+        "ClientAgreeTosResult"
+      ],
+      "name": "ClientAgreeTosResult"
+    }
+  },
+  {
     "command": "connconnect",
     "request": "serde_json::value::Value",
     "requestName": "Value",
@@ -4478,6 +4497,25 @@
         "IdentityAccountUpsertResult"
       ],
       "name": "IdentityAccountUpsertResult"
+    }
+  },
+  {
+    "command": "identity.account.usage",
+    "request": "core::option::Option<agentmux_srv_core::backend::rpc_types::websocket::NoArgsReq>",
+    "requestName": "core::option::Option<agentmux_srv_core::backend::rpc_types::websocket::NoArgsReq>",
+    "requestTs": {
+      "imports": [
+        "NoArgsReq"
+      ],
+      "name": "NoArgsReq | null"
+    },
+    "response": "agentmux_srv::server::account_episodes::accounts::IdentityAccountsResult",
+    "responseName": "IdentityAccountsResult",
+    "responseTs": {
+      "imports": [
+        "IdentityAccountsResult"
+      ],
+      "name": "IdentityAccountsResult"
     }
   },
   {
@@ -8612,6 +8650,25 @@
         "WidgetPackagesResult"
       ],
       "name": "WidgetPackagesResult"
+    }
+  },
+  {
+    "command": "workspace.importuserworkspace",
+    "request": "agentmux_srv_core::backend::rpc_types::workspace_import::CommandWorkspaceImportUserWorkspaceData",
+    "requestName": "CommandWorkspaceImportUserWorkspaceData",
+    "requestTs": {
+      "imports": [
+        "CommandWorkspaceImportUserWorkspaceData"
+      ],
+      "name": "CommandWorkspaceImportUserWorkspaceData"
+    },
+    "response": "agentmux_srv_core::backend::rpc_types::workspace_import::WorkspaceImportUserWorkspaceResult",
+    "responseName": "WorkspaceImportUserWorkspaceResult",
+    "responseTs": {
+      "imports": [
+        "WorkspaceImportUserWorkspaceResult"
+      ],
+      "name": "WorkspaceImportUserWorkspaceResult"
     }
   },
   {

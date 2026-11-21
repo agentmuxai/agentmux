@@ -886,9 +886,10 @@ pub fn open_or_reveal(raw: &str, reveal: bool) -> Result<(), String> {
     // A drive root has no parent to canonicalize; it is opened as it is.
     let target = if path.parent().is_none() { path } else { resolve_entry_path(raw)? };
     std::fs::symlink_metadata(&target).map_err(|e| missing_or(e, "open"))?;
-    let cmd = if reveal { platform::reveal_command(&target) } else { platform::open_command(&target) };
-    // `spawn_detached` applies the strict external-process policy (I7).
-    let result = platform::spawn_detached(cmd).map_err(|e| format!("Couldn't open it: {e}"));
+    // Both go through the strict external-process policy (I7): `spawn_detached`, and `platform::reveal`'s D-Bus
+    // step on Linux (SPEC_EDITOR_TAB_REVEAL_IN_FILE_MANAGER_2026_11_17.md §3.4).
+    let started = if reveal { platform::reveal(&target) } else { platform::spawn_detached(platform::open_command(&target)) };
+    let result = started.map_err(|e| format!("Couldn't open it: {e}"));
     tracing::info!(
         op = if reveal { "fs.reveal" } else { "fs.open" },
         path = %display_path(&target),

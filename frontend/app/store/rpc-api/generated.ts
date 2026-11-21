@@ -93,6 +93,7 @@ import type { BundleImportPreviewResponse } from "@/types/rpc/BundleImportPrevie
 import type { CancelProviderAuthReq } from "@/types/rpc/CancelProviderAuthReq";
 import type { CheckCliAuthResult } from "@/types/rpc/CheckCliAuthResult";
 import type { ClaudeGlobalConfig } from "@/types/rpc/ClaudeGlobalConfig";
+import type { ClientAgreeTosResult } from "@/types/rpc/ClientAgreeTosResult";
 import type { CommandActivitySummaryData } from "@/types/rpc/CommandActivitySummaryData";
 import type { CommandAgentAnswerData } from "@/types/rpc/CommandAgentAnswerData";
 import type { CommandAgentApiRetryData } from "@/types/rpc/CommandAgentApiRetryData";
@@ -298,6 +299,7 @@ import type { CommandViewerAgentHiddenData } from "@/types/rpc/CommandViewerAgen
 import type { CommandViewerCanSendData } from "@/types/rpc/CommandViewerCanSendData";
 import type { CommandViewerRevokeData } from "@/types/rpc/CommandViewerRevokeData";
 import type { CommandVoiceCheckPathData } from "@/types/rpc/CommandVoiceCheckPathData";
+import type { CommandWorkspaceImportUserWorkspaceData } from "@/types/rpc/CommandWorkspaceImportUserWorkspaceData";
 import type { CommandWriteAgentConfigData } from "@/types/rpc/CommandWriteAgentConfigData";
 import type { CommandWriteAgentConfigResult } from "@/types/rpc/CommandWriteAgentConfigResult";
 import type { CommandWriteEditorFileData } from "@/types/rpc/CommandWriteEditorFileData";
@@ -399,6 +401,7 @@ import type { IdentityAccountSetFailoverReq } from "@/types/rpc/IdentityAccountS
 import type { IdentityAccountSetFailoverResult } from "@/types/rpc/IdentityAccountSetFailoverResult";
 import type { IdentityAccountSignedInReq } from "@/types/rpc/IdentityAccountSignedInReq";
 import type { IdentityAccountSignedInResult } from "@/types/rpc/IdentityAccountSignedInResult";
+import type { IdentityAccountsResult } from "@/types/rpc/IdentityAccountsResult";
 import type { ImportAgentDefinitionsResult } from "@/types/rpc/ImportAgentDefinitionsResult";
 import type { InputDraftResult } from "@/types/rpc/InputDraftResult";
 import type { InputHistoryAppendResult } from "@/types/rpc/InputHistoryAppendResult";
@@ -623,6 +626,7 @@ import type { WidgetSectionEntryResult } from "@/types/rpc/WidgetSectionEntryRes
 import type { WidgetSessionReq } from "@/types/rpc/WidgetSessionReq";
 import type { WidgetSessionResult } from "@/types/rpc/WidgetSessionResult";
 import type { WidgetSetEnabledReq } from "@/types/rpc/WidgetSetEnabledReq";
+import type { WorkspaceImportUserWorkspaceResult } from "@/types/rpc/WorkspaceImportUserWorkspaceResult";
 import { RpcClient } from "../rpc-client";
 
 export const GeneratedApi = {
@@ -2325,6 +2329,10 @@ export const GeneratedApi = {
   PresenceStatusCommand(client: RpcClient, opts?: RpcOpts): Promise<PresenceStatusResult> {
     return client.rpcCall("presence.status", {}, opts);
   },
+  // command "client.agreetos"
+  ClientAgreeTosCommand(client: RpcClient, opts?: RpcOpts): Promise<ClientAgreeTosResult> {
+    return client.rpcCall("client.agreetos", {}, opts);
+  },
   // command "browsergrants.list"
   BrowserGrantsListCommand(
     client: RpcClient,
@@ -3195,6 +3203,10 @@ export const GeneratedApi = {
   IdentityAccountAvailabilityCommand(client: RpcClient, opts?: RpcOpts): Promise<IdentityAccountAvailabilityResult> {
     return client.rpcCall("identity.account.availability", {}, opts);
   },
+  // command "identity.account.usage"
+  IdentityAccountUsageCommand(client: RpcClient, opts?: RpcOpts): Promise<IdentityAccountsResult> {
+    return client.rpcCall("identity.account.usage", {}, opts);
+  },
   // command "jekt.held.summary"
   JektHeldSummaryCommand(client: RpcClient, opts?: RpcOpts): Promise<JektHeldSummaryResult> {
     return client.rpcCall("jekt.held.summary", {}, opts);
@@ -3382,6 +3394,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<CommandWriteAgentConfigResult> {
     return client.rpcCall("writeagentconfig", data, opts);
+  },
+  // command "workspace.importuserworkspace"
+  WorkspaceImportUserWorkspaceCommand(
+    client: RpcClient,
+    data: CommandWorkspaceImportUserWorkspaceData,
+    opts?: RpcOpts
+  ): Promise<WorkspaceImportUserWorkspaceResult> {
+    return client.rpcCall("workspace.importuserworkspace", data, opts);
   },
   // command "writeeditorfile"
   WriteEditorFileCommand(client: RpcClient, data: CommandWriteEditorFileData, opts?: RpcOpts): Promise<void> {

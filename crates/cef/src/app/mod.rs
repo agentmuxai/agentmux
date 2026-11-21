@@ -45,7 +45,6 @@ pub(crate) use monitor::primary_work_area;
 pub use monitor::{dpi_scale_at, get_monitor_work_area_physical, window_work_area_physical};
 #[cfg(target_os = "linux")]
 pub use window_settings::{install_linux_window_properties_override, SELECTED_OZONE_PLATFORM};
-pub(crate) use window_settings::read_window_transparent_setting;
 
 // ---------------------------------------------------------------------------
 // Window & BrowserView delegates (CEF Views framework)
@@ -1018,7 +1017,7 @@ wrap_app! {
                 // the frontend via the URL query string (early opacity hint).
                 // Only runs in the browser process (process_type == None).
                 let is_transparent = if process_type.is_none() {
-                    let t = read_window_transparent_setting();
+                    let t = window_settings::starts_alpha_capable();
                     self.state.window_transparent.store(t, std::sync::atomic::Ordering::Relaxed);
                     tracing::info!("window:transparent={}", t);
                     t

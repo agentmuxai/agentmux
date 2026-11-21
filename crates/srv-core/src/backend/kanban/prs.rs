@@ -40,6 +40,7 @@ use serde_json::Value;
 use super::{publish_changed, CONTEXT};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::work_board::{BoardTask, CardUpdate, WorkEvent};
+use crate::backend::storage::work_card_prs::{self, CardPrState, PrReport, PrSource};
 use crate::backend::storage::work_queue::work_state;
 
 /// The setting that stops a merged PR closing its task (default on).
@@ -78,29 +79,14 @@ impl PrRef {
 /// `owner/repo`, as the card stores a repository from its `origin` remote;
 /// not a local folder (`local:…`).
 fn github_repo(repo: &str) -> Option<String> {
-    let repo = repo.trim();
-    let (owner, name) = repo.split_once('/')?;
-    let ok = |p: &str| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
-    (ok(owner) && ok(name)).then(|| repo.to_ascii_lowercase())
+    work_card_prs::github_repo(repo)
 }
 
 /// The PR a card's link names: a GitHub PR address, `owner/repo#12`, or
 /// `#12` / `12` in the card's repository.
 pub fn parse_pr_ref(link: &str, card_repo: &str) -> Option<PrRef> {
-    let link = link.trim();
-    if let Some((_, path)) = link.split_once("github.com/") {
-        let parts: Vec<&str> = path.split(['/', '?', '#']).collect();
-        if let [owner, repo, "pull" | "pulls", n, ..] = parts.as_slice() {
-            return Some(PrRef { repo: github_repo(&format!("{owner}/{repo}"))?, number: n.parse().ok()? });
-        }
-        return None;
-    }
-    let (repo, n) = match link.split_once('#') {
-        Some((r, n)) if !r.is_empty() => (github_repo(r)?, n),
-        Some((_, n)) => (github_repo(card_repo)?, n),
-        None => (github_repo(card_repo)?, link),
-    };
-    Some(PrRef { repo, number: n.parse().ok().filter(|n| *n > 0)? })
+    let (repo, number) = work_card_prs::parse_pr_ref(link, card_repo)?;
+    Some(PrRef { repo, number })
 }
 
 /// The one PR a hand-in's text names ("PR #12", a PR address), when it names
@@ -188,6 +174,27 @@ pub fn pr_state(v: &Value) -> Option<PrState> {
         "closed" => Some(PrState::Closed),
         _ => None,
     }
+}
+
+/// What GitHub's answer for one PR tells the card's list: its state, head, and when it was opened and last
+/// changed. `None` for an answer that names no state.
+pub fn report_of(pr: &PrRef, v: &Value, now_ms: i64) -> Option<PrReport> {
+    let state = match pr_state(v)? {
+        PrState::Open => CardPrState::Open,
+        PrState::Merged => CardPrState::Merged,
+        PrState::Closed => CardPrState::Closed,
+        PrState::Missing => return None,
+    };
+    let at = |key: &str| v.get(key).and_then(Value::as_str).and_then(rfc3339_ms);
+    Some(PrReport {
+        repo: pr.repo.clone(),
+        number: pr.number,
+        state,
+        head: v.pointer("/head/sha").and_then(Value::as_str).map(str::to_string),
+        opened_at: at("created_at"),
+        merged_at: merged_at(v),
+        updated_at: at("updated_at").unwrap_or(now_ms),
+    })
 }
 
 /// Why a call came back with nothing.
@@ -288,14 +295,15 @@ fn history(identity: &Store, work_id: &str, kind: &str, from: &str, to: &str, bo
     }
 }
 
-/// Link a task to its PR, unless it has one already. Returns whether it did.
-pub fn link(identity: &Store, work_id: &str, pr: &PrRef, now_ms: i64) -> bool {
+/// Link a task to its PR, unless it has one already; `source` says whose finding it is (the holder's own
+/// `gh pr create`, or a hand-in's text). Returns whether it did.
+pub fn link(identity: &Store, work_id: &str, pr: &PrRef, source: PrSource, now_ms: i64) -> bool {
     let Ok(Some(t)) = identity.work_board_get(work_id) else { return false };
     if !t.card.pr_url.is_empty() {
         return false;
     }
     let url = pr.url();
-    if identity.work_card_update(work_id, &CardUpdate { pr_url: Some(url.clone()), ..Default::default() }, now_ms).is_err() {
+    if identity.work_card_update(work_id, &CardUpdate { pr_url: Some(url.clone()), pr_source: Some(source), ..Default::default() }, now_ms).is_err() {
         return false;
     }
     history(identity, work_id, "linked", &t.item.state, &t.item.state, &url, now_ms);
@@ -442,6 +450,16 @@ pub async fn run_merge_loop() {
                 Ok(v) => {
                     let state = pr_state(&v);
                     checked.at.insert(id.clone(), (now, state.clone()));
+                    // The card's list takes what GitHub says (an older report than its row is ignored).
+                    if let Some(report) = report_of(&pr, &v, now) {
+                        let identity = ctx.identity.clone();
+                        let id = id.clone();
+                        changed |= tokio::task::spawn_blocking(move || {
+                            identity.work_card_pr_apply(&id, &report, PrSource::Read, now).map(|a| a.changed).unwrap_or(false)
+                        })
+                        .await
+                        .unwrap_or(false);
+                    }
                     if state == Some(PrState::Merged) {
                         let identity = ctx.identity.clone();
                         let (id, pr) = (id.clone(), pr.clone());
@@ -541,7 +559,7 @@ pub fn find_opened(work_id: String, repo: String, owner: Option<String>, branch:
                 let pr = PrRef { repo: repo.clone(), number };
                 let identity = ctx.identity.clone();
                 let id = work_id.clone();
-                if tokio::task::spawn_blocking(move || link(&identity, &id, &pr, now)).await.unwrap_or(false) {
+                if tokio::task::spawn_blocking(move || link(&identity, &id, &pr, PrSource::Holder, now)).await.unwrap_or(false) {
                     publish_changed(&ctx.broker);
                 }
                 return;
@@ -566,7 +584,7 @@ pub fn link_if_from(work_id: String, pr: PrRef, repo: String, branch: String) {
             return;
         }
         let identity = ctx.identity.clone();
-        if tokio::task::spawn_blocking(move || link(&identity, &work_id, &pr, now)).await.unwrap_or(false) {
+        if tokio::task::spawn_blocking(move || link(&identity, &work_id, &pr, PrSource::HandIn, now)).await.unwrap_or(false) {
             publish_changed(&ctx.broker);
         }
     });

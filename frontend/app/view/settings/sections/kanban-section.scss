@@ -60,6 +60,11 @@
     padding-left: var(--space-4);
 }
 
+// A line that wraps (a narrow pane) takes two or three rows: a gap between lines keeps each change a unit.
+.kanban-stages__history-list > li + li {
+    margin-top: var(--space-1);
+}
+
 .kanban-stages__row[data-dragging] {
     opacity: 0.5;
 }
@@ -109,6 +114,13 @@
     height: 0.6em;
     border-radius: 50%;
     background: var(--kanban-stage, var(--border-color));
+}
+
+// The colour button: its swatch, its name and a chevron, one line, so the name never wraps beside the stage's name.
+.kanban-stages__colour {
+    flex: none;
+    gap: var(--space-1);
+    white-space: nowrap;
 }
 
 .kanban-stages__count {
@@ -193,4 +205,15 @@
 .kanban-stages__chip-count {
     color: var(--secondary-text-color);
     font-variant-numeric: tabular-nums;
+}
+
+// The copy of a row that follows the pointer while it is dragged (kanban-stages-reorder.ts): a solid surface, so the
+// picture reads in a dark theme as it does in a light one. It sits off screen; the browser takes its picture at once.
+.kanban-stages__ghost {
+    position: fixed;
+    top: -1000px;
+    left: 0;
+    background: var(--modal-bg-color);
+    color: var(--main-text-color);
+    pointer-events: none;
 }

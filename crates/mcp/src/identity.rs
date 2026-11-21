@@ -50,8 +50,8 @@ pub(crate) enum BoundaryResolution {
     /// An agent reachable by name only (no uid), or an srv too old to say:
     /// send the bare name.
     NameOnly,
-    /// No agent of that name on this computer, in any channel.
-    NoSuchAgent,
+    /// No agent of that name on this computer, in any channel; the ids it most likely meant, best first.
+    NoSuchAgent(Vec<String>),
 }
 
 impl BoundaryResolution {
@@ -150,7 +150,12 @@ pub(crate) fn interpret_resolve_detail(
                 listed.join("\n")
             )
         }
-        "none" => Ok(BoundaryResolution::NoSuchAgent),
+        "none" => Ok(BoundaryResolution::NoSuchAgent(
+            v.get("did_you_mean")
+                .and_then(|d| d.as_array())
+                .map(|ids| ids.iter().filter_map(|i| i.as_str().map(String::from)).collect())
+                .unwrap_or_default(),
+        )),
         "unidentified" => Ok(BoundaryResolution::NameOnly),
         other => {
             anyhow::bail!("could not resolve agent \"{name}\": unexpected resolution {other:?}")

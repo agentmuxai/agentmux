@@ -1,7 +1,7 @@
 store.follow
 -- defaults
 <div>
-  <div class="settings-section-body">
+  <div class="settings-section-body settings-section-body--single">
     <h3 data-stand="SectionHeader">
       "Paired devices"
     <div class="setting-row" id="setting-devices.paired">
@@ -39,7 +39,7 @@ ToggleControl true click
 set statusbar:showmuxbuscloud false
 -- all turned the other way
 <div>
-  <div class="settings-section-body">
+  <div class="settings-section-body settings-section-body--single">
     <h3 data-stand="SectionHeader">
       "Paired devices"
     <div class="setting-row" id="setting-devices.paired">

@@ -36,6 +36,7 @@ vi.mock("../../../agent-model/seat-format", () => ({
     seatBadgeText: (s: { role: string }) => `badge:${s.role}`,
     seatReportsLine: (s: { role: string }) => `reports:${s.role}`,
     seatTooltipLine: (s: { role: string }) => `tip:${s.role}`,
+    seatHue: (role: string) => (role === "worker" ? "seat-worker" : null),
 }));
 vi.mock("./AgentRuntimeChip", () => ({
     AgentRuntimeChip: (p: { state: string; detail?: string; blocked?: string }) => (
@@ -340,7 +341,9 @@ describe("the runtime and seat badges", () => {
     it("shows the seat as a badge with its tooltip line", () => {
         const m = mount({ row: { seat: { role: "worker" } as never } });
         const pill = m.q(".agent-seat-badge")!;
-        expect(pill.textContent).toBe("badge:worker");
+        // The tag's words, led by the hidden "Seat " a screen reader says; the role's colour is its hue class.
+        expect(pill.textContent).toBe("Seat badge:worker");
+        expect(pill.classList.contains("ui-tag--seat-worker")).toBe(true);
         expect(pill.getAttribute("title")).toBe("tip:worker");
     });
 

@@ -39,16 +39,8 @@ pub(super) async fn handle_client_service(state: &AppState, call: &WebCallType) 
                 Err(e) => WebReturnType::error(e.to_string()),
             }
         }
-        "AgreeTos" => match wcore::get_client(store) {
-            Ok(mut client) => {
-                client.tosagreed = chrono::Utc::now().timestamp_millis();
-                match store.update(&mut client) {
-                    Ok(_) => WebReturnType::success_empty(),
-                    Err(e) => WebReturnType::error(e.to_string()),
-                }
-            }
-            Err(e) => WebReturnType::error(e.to_string()),
-        },
+        // Nothing on this route proves the person made the call: the window accepts the terms over its websocket.
+        "AgreeTos" => WebReturnType::error(crate::server::app_api::client_terms::TERMS_ARE_THE_PERSONS),
         "GetAllConnStatus" => {
             // Every connection that has a status (backend::remote::status);
             // `local` is never listed, it is always connected.

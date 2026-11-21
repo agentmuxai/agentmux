@@ -507,7 +507,7 @@ impl Record {
         }
     }
 
-    /// This is the process's record, in `dir` (the data directory's `record` folder). Set once.
+    /// This is the process's record, in `dir` (the channel's `record` folder). Set once.
     pub fn global(dir: impl FnOnce() -> Option<PathBuf>, version: &str) -> Option<&'static Record> {
         static GLOBAL: std::sync::OnceLock<Option<Record>> = std::sync::OnceLock::new();
         GLOBAL.get_or_init(|| dir().map(|d| Record::new(d, version))).as_ref()
@@ -516,15 +516,16 @@ impl Record {
     /// Offer a sample Tower took: written when [`EVERY_MS`] (less [`JITTER_MS`]) have passed since the last line,
     /// and the hours finished since the last rollup are folded when a new hour begins. BLOCKING (a file
     /// append); call it where the sample is taken, off the async workers. A failure is logged and never
-    /// returned: the record is never a reason for a sample to fail.
-    pub fn note(&self, snap: &TowerSnapshot) {
+    /// returned: the record is never a reason for a sample to fail. What comes back is what the rules found,
+    /// when this line began a new hour and they looked ([`super::record_flags::look`]).
+    pub fn note(&self, snap: &TowerSnapshot) -> Option<super::record_flags::Looked> {
         if snap.memory.is_none() && snap.machine.is_none() {
-            return;
+            return None;
         }
         {
             let mut gate = self.gate.lock().unwrap_or_else(|e| e.into_inner());
             if gate.last_t.is_some_and(|last| snap.ts_ms.saturating_sub(last) < EVERY_MS - JITTER_MS) {
-                return;
+                return None;
             }
             gate.last_t = Some(snap.ts_ms);
         }
@@ -533,24 +534,25 @@ impl Record {
         sample.pages = pages_at(snap.ts_ms);
         if let Err(e) = self.append(&sample) {
             tracing::warn!(error = %e, "[record] a line could not be written");
-            return;
+            return None;
         }
-        self.roll_up_once_an_hour(snap.ts_ms);
+        let looked = self.roll_up_once_an_hour(snap.ts_ms);
         self.prune_once_a_day(&day_of(snap.ts_ms));
+        looked
     }
 
-    fn roll_up_once_an_hour(&self, now_ms: u64) {
+    fn roll_up_once_an_hour(&self, now_ms: u64) -> Option<super::record_flags::Looked> {
         let hour = now_ms / HOUR_MS;
         {
             let mut gate = self.gate.lock().unwrap_or_else(|e| e.into_inner());
             if gate.rolled_hour == Some(hour) {
-                return;
+                return None;
             }
             gate.rolled_hour = Some(hour);
         }
         roll_up(&self.dir, now_ms);
         // The rules read the hour just folded, and what they find is written beside the stalls.
-        super::record_flags::look(&self.dir, now_ms);
+        Some(super::record_flags::look(&self.dir, now_ms))
     }
 
     /// The nearest folder that exists, for the drive's free space (the record's own folder may not exist yet).
@@ -642,7 +644,7 @@ pub fn events_to_remove(files: &[(String, u64)], today: &str, keep_days: i64) ->
         .collect()
 }
 
-/// Where this machine keeps its record: the `record` folder of the data directory.
+/// Where this AgentMux keeps its record: the `record` folder of its channel, which an upgrade keeps.
 pub fn default_dir() -> Option<PathBuf> {
     agentmux_common::record_events::record_dir()
 }

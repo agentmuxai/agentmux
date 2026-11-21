@@ -151,7 +151,7 @@ An `IconButton` (`gear`, label "Kanban settings") at the right end of the Kanban
 
 ### 8.2 Settings, a Kanban section
 
-A new section `kanban` (rail icon `table-columns`, label `t("settings.sections.kanban")`), placed after Agents and before Advanced. It also takes the two Kanban rows now listed in Advanced (`kanban:closeonmerge`, `kanban:reviewlimit`); the search index moves them with it. The review limit's words change from "Review" to "the stage that shows Review".
+A new section `kanban` (rail icon `table-columns`, label `t("settings.sections.kanban")`), placed after Agents and before Advanced. It also takes the two Kanban settings (`kanban:closeonmerge`, `kanban:reviewlimit`), which had no row in Settings before: a switch and a number under the stages, with entries in the search index. The review limit's words change from "Review" to "the stage that shows Review".
 
 The editor is compact (UI kit `density="compact"`, as the Kanban toolbar):
 
@@ -201,21 +201,21 @@ A colour is a **palette id**, never a hex. The palette is the eight existing col
 
 | Id | Token (alias set on `:root`) | Today's meaning |
 |---|---|---|
-| `grey` | `--kanban-stage-backlog` → `--secondary-text-color` | Backlog |
-| `cyan` | `--kanban-stage-research` → `--process-kind-agentmux` | In Research |
-| `violet` | `--kanban-stage-specd` → `--info-color` | Spec'd |
-| `magenta` | `--kanban-stage-progress` → `--process-kind-agents` | In progress |
-| `amber` | `--kanban-stage-needs` → `--attention-color` | Needs you |
-| `yellow` | `--kanban-stage-review` → `--process-kind-builds` | Review |
-| `green` | `--kanban-stage-merged` → `--process-kind-shells` | Merged |
-| `blue` | `--kanban-stage-released` → `--process-kind-runtimes` | Released |
+| `muted` | `--kanban-stage-backlog` → `--secondary-text-color` | Backlog |
+| `research` | `--kanban-stage-research` → `--process-kind-agentmux` | In Research |
+| `info` | `--kanban-stage-specd` → `--info-color` | Spec'd |
+| `active` | `--kanban-stage-progress` → `--process-kind-agents` | In progress |
+| `attention` | `--kanban-stage-needs` → `--attention-color` | Needs you |
+| `review` | `--kanban-stage-review` → `--process-kind-builds` | Review |
+| `done` | `--kanban-stage-merged` → `--process-kind-shells` | Merged |
+| `shipped` | `--kanban-stage-released` → `--process-kind-runtimes` | Released |
 | two more | `--kanban-stage-extra-1`, `-2` | the build picks the aliases that pass the test below; if none pass in every theme, the palette stays at eight |
 
-The default set uses the same colours as today. The existing token names stay; the ids are what is stored.
+The default set uses the same colours as today. The existing token names stay; the ids are what is stored. The ids are the role names the editor shows (Muted, Research, Info, Active, Attention, Review, Done, Shipped). The first build stored the hue names (`grey`, `cyan`, `violet`, `magenta`, `amber`, `yellow`, `green`, `blue`): a stored or sent set that uses them is still read and accepted, and is written back with the role name.
 
 ### 9.2 How it reaches the screen
 
-- TSX sets a **class or data attribute** from the id (`data-stage-colour="green"`), and `kanban.scss` maps each to `var(--kanban-stage-…)`. No inline colour, no `#hex`, `rgb()` or `hsl()` in TSX or SCSS, no `var()` fallbacks on a token that is always set (the UI-primitives ratchet counts both; its per-file counts must not rise), and no palette utilities in Tailwind classes (`npm run lint:theme-colors`).
+- TSX sets a **class or data attribute** from the id (`data-stage-colour="done"`), and `kanban.scss` maps each to `var(--kanban-stage-…)`. No inline colour, no `#hex`, `rgb()` or `hsl()` in TSX or SCSS, no `var()` fallbacks on a token that is always set (the UI-primitives ratchet counts both; its per-file counts must not rise), and no palette utilities in Tailwind classes (`npm run lint:theme-colors`).
 - Colour is on the bar and the dot only; column bodies and cards stay uncoloured (the board's "borders, not fills" rule).
 
 ### 9.3 What the test checks

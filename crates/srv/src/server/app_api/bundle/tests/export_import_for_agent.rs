@@ -1178,6 +1178,66 @@ async fn import_for_agent_warns_when_a_declared_memory_path_has_no_matching_cont
 }
 
 #[tokio::test]
+async fn import_for_agent_skips_a_skill_the_catalog_already_has_and_says_so() {
+    let state = test_state();
+    let config_dir = tempfile::tempdir().unwrap();
+    make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+    make_agent(&state, "agent-2", "/work/other", config_dir.path());
+    // Bundle names are unique, so the second archive carries its own.
+    let import = |agent: &str, name: &str| {
+        let mut files = abf_files_with_components();
+        files[0].content = files[0].content.replace("imported-bundle", name);
+        ImportForAgentReq { agent_id: agent.to_string(), file_path: None, zip_base64: None, files: Some(files) }
+    };
+    let first = bundle_import_for_agent_impl(&state.id_store, &state.identity_store, &state.mstore, import("agent-1", "imported-bundle")).await.unwrap();
+    assert!(!first.warnings.iter().any(|w| w.contains("already exists")), "{:?}", first.warnings);
+    let second = bundle_import_for_agent_impl(&state.id_store, &state.identity_store, &state.mstore, import("agent-2", "imported-bundle-2")).await.unwrap();
+    assert!(
+        second.warnings.iter().any(|w| w == "skill \"deploy\" already exists; skipped"),
+        "{:?}",
+        second.warnings
+    );
+    assert_ne!(first.bundle_id, second.bundle_id, "each import creates its own bundle row");
+    let bundle = state.id_store.bundle_get(&second.bundle_id).unwrap().unwrap();
+    assert_eq!(
+        (bundle.name.as_str(), bundle.instructions.as_str(), bundle.mcp_servers.as_str(), bundle.is_global, bundle.is_blank),
+        ("imported-bundle-2", "Be helpful.", "[]", false, false)
+    );
+    assert_eq!(bundle.skills, "[]", "the skill that was skipped is not bound to the second bundle");
+}
+
+#[tokio::test]
+async fn import_for_agent_warns_about_a_memory_path_outside_memory() {
+    let state = test_state();
+    let config_dir = tempfile::tempdir().unwrap();
+    make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+    let manifest = serde_json::json!({
+        "$schema": "https://docs.agentmux.ai/schemas/armory-bundle/v0.2/bundle.schema.json",
+        "name": "imported-bundle",
+        "version": "0.1.0",
+        "description": "",
+        "components": { "memory": ["notes/other.md"] },
+        "metadata": {},
+    });
+    let files = vec![
+        FileEntry { path: "armory.json".to_string(), content: manifest.to_string() },
+        FileEntry { path: "notes/other.md".to_string(), content: "elsewhere".to_string() },
+    ];
+    let result = bundle_import_for_agent_impl(&state.id_store, &state.identity_store, &state.mstore, ImportForAgentReq {
+        agent_id: "agent-1".to_string(),
+        file_path: None,
+        zip_base64: None,
+        files: Some(files),
+    }).await.unwrap();
+    assert_eq!(result.memory_files_written, 0);
+    assert!(
+        result.warnings.iter().any(|w| w == "notes/other.md: components.memory path is not under memory/; skipped"),
+        "{:?}",
+        result.warnings
+    );
+}
+
+#[tokio::test]
 async fn round_trip_export_then_import_into_a_fresh_agent_preserves_memory() {
     let state = test_state();
     let config_a = tempfile::tempdir().unwrap();
@@ -1419,6 +1479,49 @@ mod with_history_tests {
             json!(["history/mock/sess-1.jsonl"]),
             "history must be registered in the manifest, not just zipped"
         );
+    }
+
+    #[tokio::test]
+    async fn an_exported_session_holds_no_value_srv_holds_secret() {
+        use base64::Engine as _;
+        use std::io::Read as _;
+        let value = "canary-export-8863-PqRs";
+        let state = test_state();
+        let config_dir = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+        make_bundle(&state, "bundle-1", "Be helpful.");
+        link_agent_to_identity(&state, "agent-1", "acct-mine");
+        let session_dir = tempfile::tempdir().unwrap();
+        let session_path = session_dir.path().join("sess-1.jsonl");
+        std::fs::write(&session_path, format!("{{\"role\":\"user\",\"out\":\"env {value}\"}}\n")).unwrap();
+        crate::backend::transcript::withhold::register(value);
+        let index = SessionIndex::with_isolated_roots(
+            vec![Box::new(MockAdapter {
+                files: vec![DiscoveredFile { file_path: session_path.to_string_lossy().into_owned(), mtime_ms: 1 }],
+                identity_id: "acct-mine".to_string(),
+            })],
+            vec![session_dir.path().to_path_buf()],
+        );
+        let result = bundle_export_for_agent_with_history_impl(
+            state.id_store.clone(),
+            state.identity_store.clone(),
+            &state.mstore,
+            std::sync::Arc::new(HistoryService::from_index(index)),
+            ExportForAgentWithHistoryReq { bundle_id: "bundle-1".to_string(), agent_id: "agent-1".to_string() },
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.history_session_count, 1);
+        let bytes = base64::engine::general_purpose::STANDARD.decode(&result.zip_base64).unwrap();
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let name = (0..archive.len())
+            .map(|i| archive.by_index(i).unwrap().name().to_string())
+            .find(|n| n.ends_with("history/mock/sess-1.jsonl"))
+            .unwrap();
+        let mut content = String::new();
+        archive.by_name(&name).unwrap().read_to_string(&mut content).unwrap();
+        assert!(!content.contains(value), "a value reached the archive: {content}");
+        assert!(content.contains(crate::backend::transcript::withhold::MARK), "{content}");
     }
 
     #[tokio::test]

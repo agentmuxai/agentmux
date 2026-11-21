@@ -33,6 +33,8 @@ pub const VERSION_CHANGED_SUBTYPE: &str = "agentmux_cli_version_changed";
 pub const CONTAINER_IMAGE_SUBTYPE: &str = "agentmux_container_image";
 pub const CONTAINER_LIMIT_SUBTYPE: &str = "agentmux_container_limit";
 pub const CONTAINER_CACHES_SUBTYPE: &str = "agentmux_container_caches";
+/// Subtype of the frame that names the MCP servers a host agent is not given from its folder's own file.
+pub const MCP_LEFT_OUT_SUBTYPE: &str = "agentmux_mcp_left_out";
 /// Subtype of the frame that says a container agent is ready and waiting for its first message.
 pub const AGENT_READY_SUBTYPE: &str = "agentmux_agent_ready";
 
@@ -246,6 +248,25 @@ pub fn container_caches_frame(provider: &str, block_id: &str, agent: (&str, &str
         "agent_name": agent.1,
         "event_id": uuid::Uuid::new_v4().to_string(),
         "bytes": bytes,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+    })
+}
+
+/// An `agentmux_mcp_left_out` frame: a container agent can write the folder of the host agent on `block_id`, so
+/// the agent takes nothing of the folder's own configuration (`mcp_folder_rule`, `host_agent_files`). `names`
+/// are the servers its folder's own `.mcp.json` lists besides the agent's, `folder` is what else of the folder
+/// is not loaded, by kind and count, and `no_path` are the agent's own servers left out because their command
+/// has no path outside the folder.
+pub fn mcp_left_out_frame(provider: &str, block_id: &str, names: &[String], folder: &crate::backend::host_agent_files::LeftOut, no_path: &[String]) -> Value {
+    json!({
+        "type": "system",
+        "subtype": MCP_LEFT_OUT_SUBTYPE,
+        "provider": provider,
+        "block_id": block_id,
+        "event_id": uuid::Uuid::new_v4().to_string(),
+        "names": names,
+        "folder": folder,
+        "no_path": no_path,
         "timestamp": chrono::Utc::now().to_rfc3339(),
     })
 }

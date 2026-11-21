@@ -8,6 +8,7 @@ import { draggable } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { type Accessor, createMemo, For, type JSX, onCleanup, onMount, Show } from "solid-js";
 
 import { seatTooltipLine } from "@/app/agent-model/seat-format";
+import { AgentLink, Linkified } from "@/app/links/linkified";
 import { kanbanCardItemType } from "@/app/drag/drag-types";
 import { Button, Pill, StatusDot, type StatusTone } from "@/app/element/ui";
 import { MOS } from "@/app/store/global";
@@ -28,6 +29,7 @@ import {
     waitingOn,
 } from "./kanban-columns";
 import { refOf } from "./kanban-boards";
+import { surfaceOf } from "./kanban-links";
 import { CardMedia } from "./kanban-media";
 import { seatOf, useSeatIndex } from "./kanban-seats";
 import type { KanbanAfter, KanbanAgent, KanbanAgentState, KanbanTask } from "./kanban-types";
@@ -91,12 +93,15 @@ export function AgentChip(props: {
     colors?: Record<string, string>;
     /** Its seat as the tooltip: a card's owner (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §4). */
     showSeat?: boolean;
+    /** The name as text, not a link: for a chip that sits inside a button, which must not hold another control. */
+    plain?: boolean;
 }): JSX.Element {
     // The theme's readable variant of its hue, the one made for text and icons.
     const nameColor = () => agentColor(props.agent, props.uid, props.colors, "identity");
     const seats = useSeatIndex();
     const seat = () => (props.showSeat ? seatOf(seats(), props.uid || props.agent?.uid, props.name) : null);
     const shown = () => props.display || props.agent?.display || props.name;
+    const agentUid = () => (props.plain ? undefined : props.uid || props.agent?.uid || undefined);
     return (
         <span class="kanban-agent-chip" {...tip(seat() ? `${shown()}: ${seatTooltipLine(seat()!)}` : undefined)}>
             <StatusDot
@@ -107,7 +112,9 @@ export function AgentChip(props: {
                 class="kanban-agent-chip__name"
                 style={nameColor() ? { "--kanban-agent-text": nameColor() } : undefined}
             >
-                {shown()}
+                <Show when={agentUid()} fallback={shown()}>
+                    {(id) => <AgentLink id={id()} name={shown()} />}
+                </Show>
             </span>
         </span>
     );
@@ -221,7 +228,9 @@ export function KanbanCard(props: KanbanCardProps): JSX.Element {
         >
             <div class="kanban-card__title">
                 <span class="kanban-card__num">{refOf(t())}</span>
-                <span class="kanban-card__text">{t().title}</span>
+                <span class="kanban-card__text">
+                    <Linkified text={t().title} surface={surfaceOf(t())} />
+                </span>
             </div>
             <ReasonOrNote s={s} />
             <CardMedia task={t()} />
@@ -247,12 +256,17 @@ function ReasonOrNote({ s }: { s: CardState }) {
                 {(r) => (
                     <div class="kanban-card__reason">
                         <i class="fa-solid fa-circle-exclamation" aria-hidden="true" />
-                        {r()}
+                        {/* One span: the line is a flex row, and each text run and link would otherwise be its own column. */}
+                        <span>
+                            <Linkified text={r()} surface={surfaceOf(t())} />
+                        </span>
                     </div>
                 )}
             </Show>
             <Show when={!reason() && t().card.note}>
-                <div class="kanban-card__note">{t().card.note}</div>
+                <div class="kanban-card__note">
+                    <Linkified text={t().card.note} surface={surfaceOf(t())} />
+                </div>
             </Show>
         </>
     );

@@ -6,6 +6,8 @@
  *  (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5.6). */
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -220,5 +222,60 @@ describe("Secrets in the Vault's Audit section", () => {
         render(() => <VaultSecrets />);
         expect(await screen.findByText("No agent has used a secret yet.")).toBeInTheDocument();
         expect(screen.queryByRole("table", { name: "Standing permissions" })).toBeNull();
+    });
+});
+
+describe("the Secrets list in a narrow pane", () => {
+    const scss = readFileSync(join(process.cwd(), "frontend/app/view/audit/audit-manager.scss"), "utf8");
+    /** The rules of the Audit container's narrow query that is about `.vault-uses`. */
+    const narrow = (() => {
+        const from = scss.indexOf("@container audit (max-width: 720px)");
+        return from < 0 ? "" : scss.slice(from, scss.indexOf("\n}\n", from));
+    })();
+
+    it("marks each cell by what it holds, in the order a reader wants them, and labels the two that fold under the row", async () => {
+        render(() => <VaultSecrets />);
+        const table = await screen.findByRole("table", { name: "Agents' use of secrets" });
+        expect(table.classList.contains("vault-uses")).toBe(true);
+        const cells = [...table.querySelectorAll("tbody tr")[0].children];
+        expect(cells.map((c) => c.className.split(" ").find((k) => k.startsWith("vault-uses__")))).toEqual([
+            "vault-uses__when",
+            "vault-uses__agent",
+            "vault-uses__what",
+            "vault-uses__entry",
+            "vault-uses__where",
+            "vault-uses__outcome",
+        ]);
+        // The headings are hidden when the row stacks: the two cells whose value says nothing alone carry their own label.
+        expect(cells.map((c) => c.getAttribute("data-label"))).toEqual([null, null, null, null, "Where", "Outcome"]);
+        expect(cells.map((c) => c.textContent)).toEqual([expect.any(String), "Agent1", "ran a command", "Stripe", "stripe balance retrieve", "done"]);
+    });
+
+    it("stacks a row under 720px: no table columns, the entry on its own line, long words wrapped, nothing hidden but the headings", () => {
+        expect(narrow).not.toBe("");
+        const rule = (selector: string) => narrow.slice(narrow.indexOf(selector), narrow.indexOf("}", narrow.indexOf(selector)));
+        expect(rule("tr {")).toContain("display: flex");
+        expect(rule("tr {")).toContain("flex-wrap: wrap");
+        expect(rule("thead {")).toContain("display: none");
+        expect(rule("tbody td {")).toContain("min-width: 0");
+        expect(rule("tbody td {")).toContain("overflow-wrap: anywhere");
+        expect(rule("td.vault-uses__entry {")).toContain("flex: 1 1 100%");
+        expect(rule("td[data-label]::before {")).toContain("attr(data-label)");
+        // Only the headings are hidden: no cell is.
+        expect(narrow).not.toMatch(/td[^{]*\{[^}]*display:\s*none/);
+    });
+
+    it("leaves the wide table to the shared table's own rules, but for wrapping a long unbroken value in its cell", () => {
+        const wide = scss.slice(0, scss.indexOf("@container audit (max-width: 720px)"));
+        const rules = [...wide.matchAll(/^\.vault-uses[^{}]*\{[^}]*\}/gm)].map((m) => m[0].replace(/\s+/g, " ").trim());
+        // Only the entry and where cells: on every cell the short columns shrink to nothing and break ordinary words.
+        expect(rules).toEqual([".vault-uses td.vault-uses__entry, .vault-uses td.vault-uses__where { overflow-wrap: anywhere; }"]);
+    });
+
+    it("answers the width queries on the element that carries the pane's zoom, so a zoomed pane measures its laid-out width", () => {
+        const block = (selector: string) => scss.slice(scss.indexOf(`\n${selector} {`), scss.indexOf("\n}\n", scss.indexOf(`\n${selector} {`)));
+        expect(block(".audit-pane")).toContain("container-type: inline-size");
+        expect(block(".audit-pane")).toContain("container-name: audit");
+        expect(block(".audit-container")).not.toContain("container-type");
     });
 });

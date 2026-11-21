@@ -57,7 +57,7 @@ export const recordings = [
         id: "swarm-follows-agent",
         title: "Swarm following an agent",
         description: "Sending an agent a message: Swarm shows it working, with each step, while the reply streams in.",
-        viewport: { width: 1280, height: 800, scale: 1 },
+        viewport: { width: 1280, height: 800 },
         maximized: false,
         run: async (session, cursor, pane) => {
             await cursor.clickSelector(`${pane} textarea.agent-input`);

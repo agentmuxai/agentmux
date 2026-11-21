@@ -6,6 +6,7 @@ import { cpuColor } from "./cpu-color";
 import { CpuCoresPopover } from "./CpuCoresPopover";
 import { diskPillLabel, diskTooltip, watchVolumeColor } from "./disk-volumes";
 import { DiskVolumesPopover } from "./DiskVolumesPopover";
+import { LowDiskNotice } from "./LowDiskNotice";
 import { GpuReadout, MemReadouts, RateReadouts, UiBusyReadout } from "./SystemStatsParts";
 import { createSystemStats } from "./SystemStatsState";
 
@@ -20,6 +21,9 @@ const SystemStats = (): JSX.Element => {
         diskPanelOpen,
         setDiskPanelOpen,
         toggleDiskPanel,
+        lowDisk,
+        lowDiskOpen,
+        dismissLowDisk,
     } = state;
     let cpuButtonRef: HTMLButtonElement | undefined;
     let diskButtonRef: HTMLButtonElement | undefined;
@@ -75,7 +79,7 @@ const SystemStats = (): JSX.Element => {
                             aria-haspopup="dialog"
                             aria-expanded={diskPanelOpen()}
                         >
-                            {diskPillLabel(s().watchVolumeFreePct!)}
+                            {diskPillLabel(s().watchVolumeFreePct!, s().watchVolumeFreeGb)}
                         </button>
                         <Show when={diskPanelOpen()}>
                             <DiskVolumesPopover
@@ -83,6 +87,11 @@ const SystemStats = (): JSX.Element => {
                                 initialVolumes={diskVolumes()}
                                 onClose={() => setDiskPanelOpen(false)}
                             />
+                        </Show>
+                        {/* A host that pushes no health signals (a browser tab): the panel for low free space, opened once
+                            for each crossing of the desktop's lines (low-disk.ts). */}
+                        <Show when={lowDiskOpen() && lowDisk()}>
+                            {(notice) => <LowDiskNotice anchor={diskButtonRef} notice={notice()} onDismiss={dismissLowDisk} />}
                         </Show>
                     </Show>
                     <RateReadouts s={s} />

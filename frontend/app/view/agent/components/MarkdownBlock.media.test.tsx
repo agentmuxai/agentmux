@@ -46,8 +46,9 @@ describe("MarkdownBlock inline media", () => {
     });
 
     it.each([
-        [{ meta: { "cmd:cwd": "D:/launched" } }, { working_directory: "D:/defined" }, "D:/launched/shots/after.png"],
-        [{ meta: {} }, { working_directory: "D:/defined" }, "D:/defined/shots/after.png"],
+        // A real pane has its block id and a definition that says where the agent runs (a pane that can't say is confined).
+        [{ oid: "b1", meta: { "cmd:cwd": "D:/launched" } }, { agent_type: "claude", working_directory: "D:/defined" }, "D:/launched/shots/after.png"],
+        [{ oid: "b1", meta: {} }, { agent_type: "claude", working_directory: "D:/defined" }, "D:/defined/shots/after.png"],
     ])("the pane's providers prefer the launch cwd over the definition's directory", async (block, agent, want) => {
         const { container } = render(() => (
             <AgentPaneProviders dormant={() => false} block={() => block} agent={() => agent}>
@@ -62,5 +63,31 @@ describe("MarkdownBlock inline media", () => {
         const { container } = render(() => <MarkdownBlock node={node} />);
         expect(container.querySelector("img")).toBeNull();
         expect(h.fetch).not.toHaveBeenCalled();
+    });
+});
+
+describe("a message a container agent may have written, in a pane that is not a container's", () => {
+    const host = { oid: "b1", meta: { "cmd:cwd": "D:/launched" } };
+    const agent = { agent_type: "claude", working_directory: "D:/defined" };
+
+    it("reads nothing as a path of this computer", () => {
+        const marked = { ...node, fromContainer: true as const };
+        const { container } = render(() => (
+            <AgentPaneProviders dormant={() => false} block={() => host} agent={() => agent}>
+                <MarkdownBlock node={marked} />
+            </AgentPaneProviders>
+        ));
+        expect(container.querySelector("img")).toBeNull();
+        expect(h.fetch).not.toHaveBeenCalled();
+    });
+
+    it("leaves a message that is not marked as it was", async () => {
+        const { container } = render(() => (
+            <AgentPaneProviders dormant={() => false} block={() => host} agent={() => agent}>
+                <MarkdownBlock node={node} />
+            </AgentPaneProviders>
+        ));
+        await waitFor(() => expect(container.querySelector("img")).not.toBeNull());
+        expect(h.fetch).toHaveBeenCalledTimes(1);
     });
 });

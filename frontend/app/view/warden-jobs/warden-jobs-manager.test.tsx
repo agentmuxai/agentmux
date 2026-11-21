@@ -32,6 +32,8 @@ vi.mock("@/app/store/global", () => ({ openLink: vi.fn() }));
 vi.mock("@/app/util/reveal-block", () => ({ revealBlock: vi.fn() }));
 const warden = vi.hoisted(() => ({ open: vi.fn() }));
 vi.mock("@/app/view/warden/open-warden", () => ({ openWarden: (section: string) => warden.open(section) }));
+const droneOpen = vi.hoisted(() => ({ open: vi.fn(async (_id: string) => {}) }));
+vi.mock("@/app/view/drone/open-drone", () => ({ openDroneGraph: (id: string) => droneOpen.open(id) }));
 
 import { openLink } from "@/app/store/global";
 
@@ -222,6 +224,24 @@ describe("WardenJobsManager", () => {
         render(() => <WardenJobsManager visible={false} />);
         await Promise.resolve();
         expect(rpc.list).not.toHaveBeenCalled();
+    });
+
+    it("opens a Drone graph's own graph from its history, and offers that to no other job", async () => {
+        rpc.list.mockResolvedValue(
+            listOf([
+                mkJob({ id: "d1", source: "drone", name: "Graph", expression: "", owner: "", actions: false, next_run_ms: null, recent: [mkRun()] }),
+                mkJob({ id: "c9", name: "Nightly" }),
+            ]),
+        );
+        rpc.runs.mockResolvedValue({ runs: [mkRun()] });
+        render(() => <WardenJobsManager visible />);
+        await waitFor(() => expect(screen.getByText("Graph")).toBeInTheDocument());
+        fireEvent.click(screen.getByText("Nightly"));
+        await waitFor(() => expect(rpc.runs).toHaveBeenCalled());
+        expect(screen.queryByRole("button", { name: /Open graph/ })).toBeNull();
+        fireEvent.click(screen.getByText("Graph"));
+        fireEvent.click(await screen.findByRole("button", { name: /Open graph/ }));
+        expect(droneOpen.open).toHaveBeenCalledWith("d1");
     });
 
     it("shows a cloud job read-only with its reporter, and opens its Run now page", async () => {

@@ -3,4 +3,4 @@ popover placement=top-end role=dialog aria-label="Host info" class="status-bar-p
 popover placement=top-end role=dialog aria-label="Host info" class="status-bar-popover host-popover" anchor=trigger
 -- mac: Reveal in Finder
 popover placement=top-end role=dialog aria-label="Host info" class="status-bar-popover host-popover" anchor=trigger
--- linux: Reveal in file manager
+-- linux: Open in File Manager

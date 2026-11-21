@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{ControllerType, ProviderConfig};
+use super::{Tier, ControllerType, ProviderConfig};
 
 // DeepSeek Harness (`dsh`): `dsh --profile acp` speaks ACP over stdio. A
 // prerelease upstream (breaking changes promised), shown as a preview. It
@@ -11,6 +11,7 @@ use super::{ControllerType, ProviderConfig};
 // http MCP only), so a session is taken back with `session/resume` (blockcontroller/acp.rs).
 pub(super) static DSH: ProviderConfig = ProviderConfig {
     id: "dsh",
+    tier: Tier::Preview,
     cli_command: "dsh",
     controller_type: ControllerType::Acp,
     app_server: None,

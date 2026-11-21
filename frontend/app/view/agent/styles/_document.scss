@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 @use "../../../mixins.scss";
+@use "../../../element/menu-frame";
 
 // Document container + status log (terminal-style). Wrapped in .agent-view so the cascade chain matches
 // the pre-split file (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
@@ -58,7 +59,7 @@
         z-index: var(--z-over-content);
         padding: 3px 10px;
         border: 1px solid var(--border-color);
-        background: var(--main-bg-color);
+        @include menu-frame.menu-fill;
         color: var(--secondary-text-color);
         font-size: var(--text-sm);
         pointer-events: none;
@@ -206,6 +207,29 @@
         // head was empty and only the flex gap separated the buffer from the
         // top (Codex P2, #3610). All three values are tied by reducer.test.ts.
         margin-bottom: -4px;
+    }
+
+    // A row just outside the mounted window, before it is drawn: an empty box of the row's own height
+    // (virtualization/skeleton-band.ts), so a fast scroll past the window edge meets a row's shape, not a
+    // hole. No text, nothing to measure, and it never takes a click or a scroll anchor.
+    .agent-row-skeleton {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        box-sizing: border-box;
+        padding: 6px 12px;
+        pointer-events: none;
+        overflow-anchor: none;
+        contain: layout paint style;
+
+        &::before {
+            content: "";
+            display: block;
+            height: 100%;
+            border-radius: var(--radius-sm);
+            background: var(--tint-1);
+        }
     }
 
     .agent-document-streaming-buffer {

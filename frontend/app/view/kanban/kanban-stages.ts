@@ -17,19 +17,31 @@ import {
 import type { KanbanBoardInfo, KanbanTask } from "./kanban-types";
 
 /** The colours a stage may use: names of theme colours, never a hex (spec §9). */
-export type StageColour = "grey" | "cyan" | "violet" | "magenta" | "amber" | "yellow" | "green" | "blue";
+export type StageColour = "muted" | "research" | "info" | "active" | "attention" | "review" | "done" | "shipped";
 
 /** The palette, with the source whose `--kanban-stage-<source>` theme token each name is an alias of. */
 export const STAGE_PALETTE: readonly { id: StageColour; token: ColumnId }[] = [
-    { id: "grey", token: "backlog" },
-    { id: "cyan", token: "research" },
-    { id: "violet", token: "specd" },
-    { id: "magenta", token: "progress" },
-    { id: "amber", token: "needs" },
-    { id: "yellow", token: "review" },
-    { id: "green", token: "merged" },
-    { id: "blue", token: "released" },
+    { id: "muted", token: "backlog" },
+    { id: "research", token: "research" },
+    { id: "info", token: "specd" },
+    { id: "active", token: "progress" },
+    { id: "attention", token: "needs" },
+    { id: "review", token: "review" },
+    { id: "done", token: "merged" },
+    { id: "shipped", token: "released" },
 ];
+
+/** The first build named the palette by hue; a set stored then still reads, as the role name. */
+const LEGACY_COLOURS = new Map<string, StageColour>([
+    ["grey", "muted"],
+    ["cyan", "research"],
+    ["violet", "info"],
+    ["magenta", "active"],
+    ["amber", "attention"],
+    ["yellow", "review"],
+    ["green", "done"],
+    ["blue", "shipped"],
+]);
 
 export interface KanbanStage {
     /** The default set's ids are the source ids; a new stage's is `st-` and six base-36 characters. */
@@ -56,7 +68,7 @@ export function defaultStages(): KanbanStage[] {
     return COLUMNS.map((c) => ({
         id: c.id,
         name: c.label,
-        colour: STAGE_PALETTE.find((p) => p.token === c.id)?.id ?? "grey",
+        colour: STAGE_PALETTE.find((p) => p.token === c.id)?.id ?? "muted",
         takes: [c.id],
     }));
 }
@@ -113,13 +125,15 @@ export function validateStages(stages: readonly KanbanStage[]): StageProblem[] {
     return [...out, ...sourceProblems(stages)];
 }
 
-/** A stored colour this build doesn't know draws as grey (a future palette), never as a missing colour. */
+/** A stored colour this build doesn't know draws as muted (a future palette), never as a missing colour; a hue name
+ *  from the first build is its role name. */
 function knownColour(value: unknown): StageColour {
-    return STAGE_PALETTE.some((p) => p.id === value) ? (value as StageColour) : "grey";
+    if (STAGE_PALETTE.some((p) => p.id === value)) return value as StageColour;
+    return (typeof value === "string" ? LEGACY_COLOURS.get(value) : undefined) ?? "muted";
 }
 
 /** The stages srv sent for a board, ready to draw: its set when it is whole, else the default eight. An
- *  unknown colour is grey and an unknown source is ignored; a set that then breaks a rule is not used (the
+ *  unknown colour is muted and an unknown source is ignored; a set that then breaks a rule is not used (the
  *  editor says why, and nothing is overwritten until the person acts). */
 export function stagesOfBoard(info: Pick<KanbanBoardInfo, "stages" | "stages_error"> | undefined): KanbanStage[] {
     const raw = info?.stages;
