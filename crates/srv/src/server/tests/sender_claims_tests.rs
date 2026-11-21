@@ -128,10 +128,23 @@ async fn the_cross_channel_broadcast_forward_refuses_a_request_that_carries_an_a
     let (status, v) = post(&state, Some(&token), "/agentmux/agent/broadcast", body.clone()).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
     assert!(refused(&v), "{v}");
+    // Without a token the request is read, but it is the person's words only when the sending instance confirms it.
     let (status, v) = post(&state, None, "/agentmux/agent/broadcast", body).await;
-    assert_eq!(status, StatusCode::OK, "a server's forward is served as before: {v}");
+    assert_eq!(status, StatusCode::OK, "{v}");
     assert_eq!(v["success"], false);
     assert!(!refused(&v), "{v}");
+}
+
+/// Nothing sent from an instance that never sent it is confirmed, and an agent's token cannot ask.
+#[tokio::test]
+async fn a_forward_no_instance_sent_is_not_confirmed() {
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
+    let (state, token) = state_with_alpha();
+    let body = json!({ "block_id": "sc-blk", "body_sha256": crate::server::app_api::fleet::body_digest("x"), "msg_id": "sc-never-sent", "recipients": 1 });
+    let (status, v) = post(&state, None, "/agentmux/agent/broadcast/confirm", body.clone()).await;
+    assert_eq!((status, &v["confirmed"]), (StatusCode::OK, &json!(false)), "{v}");
+    let (status, v) = post(&state, Some(&token), "/agentmux/agent/broadcast/confirm", body).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
 }
 
 async fn rpc(state: &AppState, ctx: RpcContext, command: &str, data: Value) -> Result<Value, String> {
