@@ -116,6 +116,11 @@ describe.skipIf(!BROWSER)("Kanban section bar", () => {
         expect(measured["w220z1"].barHeight).toBeGreaterThanOrEqual(measured["w300z1"].barHeight);
     });
 
+    it("keeps to 6rem, scrolling inside itself past that", () => {
+        // The page's root font is 16px; the pane's zoom scales the bar's drawn height with it.
+        for (const [w, z] of CASES) expect(measured[`w${w}z${z}`].barHeight, `bar's height at ${w}px, zoom ${z}`).toBeLessThanOrEqual(6 * 16 * z + 1);
+    });
+
     it("never scrolls the list sideways", () => {
         for (const [w, z] of CASES) expect(measured[`w${w}z${z}`].sideways, `${w}px, zoom ${z}`).toBeLessThanOrEqual(1);
     });
