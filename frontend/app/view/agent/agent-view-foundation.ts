@@ -34,7 +34,9 @@ export function usePaneFoundation(model: AgentViewModel, agentId: string, agentD
     // timeout, the failure auto-retry) run on.
     const visibility = usePaneTabVisibility(model.blockId);
     const hidden = (): boolean => visibility() !== "active";
-    const renderDormant = useRenderDormant(hidden, model.blockId); // `hidden`, or the window itself (minimized)
+    // The pane's document, once it is registered below: what a draw ahead of its tab's switch compares (hooks/usePrewarm.ts).
+    let documentNow: (() => unknown) | undefined;
+    const renderDormant = useRenderDormant(hidden, model.blockId, () => documentNow?.()); // `hidden`, or the window itself (minimized)
     const provider = () => getProvider(providerKey());
     // For the identity and memory modal requests.
     const currentAgent = createMemo(() => agentDefinitions().find((a) => a.id === agentId));
@@ -50,6 +52,7 @@ export function usePaneFoundation(model: AgentViewModel, agentId: string, agentD
 
     const agentAtoms = createMemo(() => createAgentAtoms());
     const { paneModel, layoutView } = usePaneRegistration({ blockId: model.blockId, agentId, agentName });
+    documentNow = paneModel.document;
 
     // The context meter and its Swarm mirror (hooks/useContextReading.ts).
     const context = useContextReading(model.blockId, paneModel, block);
