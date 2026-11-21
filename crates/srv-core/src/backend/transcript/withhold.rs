@@ -7,7 +7,11 @@
 //! spellings (base64, URL-encoded, hex, as JSON holds it: `vault::scrub::forms`).
 //!
 //! The values are registered where srv learns them (a token is minted or loaded, the instance key is made, a Vault value
-//! is handed to a process).
+//! is handed to a process). The registry holds only what can still be used:
+//! - [`register`] keeps a value for the life of the process;
+//! - [`hold`] keeps a value for an owner, until its expiry, until the owner is [`release`]d (its token revoked, its
+//!   container removed, its device unpaired) or until the owner holds another value in its place;
+//! - a batch of registrations ([`register_all`]) costs one rebuild of the matcher, made when a line next needs it.
 
 use std::borrow::Cow;
 use std::sync::{Arc, OnceLock, RwLock};
@@ -20,36 +24,134 @@ pub const MARK: &str = "[withheld]";
 /// Shorter values are not registered: matching them would mangle ordinary text.
 pub const MIN_LEN: usize = 8;
 
-#[derive(Default)]
-struct State {
-    values: Vec<String>,
-    matcher: Option<Arc<Regex>>,
-    /// A value was registered since `matcher` was built.
-    stale: bool,
+struct Entry {
+    /// Who holds the value; `None` for one kept for the life of the process.
+    owner: Option<String>,
+    value: String,
+    /// Unix ms from which the value no longer works and is dropped.
+    expires_at: Option<i64>,
 }
 
-fn state() -> &'static RwLock<State> {
-    static STATE: OnceLock<RwLock<State>> = OnceLock::new();
+#[derive(Default)]
+struct Registry {
+    entries: Vec<Entry>,
+    matcher: Option<Arc<Regex>>,
+    /// The values changed since `matcher` was built.
+    stale: bool,
+    /// The earliest expiry among the entries.
+    next_expiry: Option<i64>,
+    /// How many times the matcher has been built.
+    rebuilds: usize,
+}
+
+impl Registry {
+    fn reindex(&mut self) {
+        self.next_expiry = self.entries.iter().filter_map(|e| e.expires_at).min();
+    }
+
+    /// Keeps `value` for the process (`owner` `None`) or for `owner`, in place of what the owner held. A value
+    /// shorter than [`MIN_LEN`] is not kept, so an owner given one holds nothing.
+    fn add(&mut self, owner: Option<&str>, value: &str, expires_at: Option<i64>) {
+        let value = value.trim();
+        let keep = value.len() >= MIN_LEN;
+        let mine = |e: &Entry| e.owner.as_deref() == owner;
+        if let Some(same) = self.entries.iter_mut().find(|e| mine(e) && e.value == value) {
+            if keep && owner.is_none() {
+                return;
+            }
+            if keep && owner.is_some() {
+                // The same value again: the matcher stays, only the expiry can move.
+                same.expires_at = expires_at;
+                self.entries.retain(|e| !(mine(e) && e.value != value));
+                self.reindex();
+                return;
+            }
+        }
+        if owner.is_some() {
+            let before = self.entries.len();
+            self.entries.retain(|e| !mine(e));
+            self.stale |= self.entries.len() != before;
+        }
+        if keep {
+            self.entries.push(Entry { owner: owner.map(str::to_string), value: value.to_string(), expires_at });
+            self.stale = true;
+        }
+        self.reindex();
+    }
+
+    fn release(&mut self, owner: &str) {
+        let before = self.entries.len();
+        self.entries.retain(|e| e.owner.as_deref() != Some(owner));
+        if self.entries.len() != before {
+            self.stale = true;
+            self.reindex();
+        }
+    }
+
+    /// Drops what has run out by `now`.
+    fn expire(&mut self, now: i64) {
+        if self.next_expiry.is_some_and(|at| at <= now) {
+            self.entries.retain(|e| e.expires_at.map_or(true, |at| at > now));
+            self.stale = true;
+            self.reindex();
+        }
+    }
+
+    /// Whether the matcher is right for `now` as it stands.
+    fn current(&self, now: i64) -> bool {
+        !self.stale && self.next_expiry.map_or(true, |at| at > now)
+    }
+
+    /// The matcher for the values that have not run out at `now`, built only when they changed.
+    fn matcher(&mut self, now: i64) -> Option<Arc<Regex>> {
+        self.expire(now);
+        if self.stale {
+            let values: Vec<&str> = self.entries.iter().map(|e| e.value.as_str()).collect();
+            self.matcher = build(&values);
+            self.rebuilds += 1;
+            self.stale = false;
+        }
+        self.matcher.clone()
+    }
+}
+
+fn state() -> &'static RwLock<Registry> {
+    static STATE: OnceLock<RwLock<Registry>> = OnceLock::new();
     STATE.get_or_init(Default::default)
 }
 
-/// Registers `value` to be withheld from now on. A value shorter than [`MIN_LEN`] and one already registered change nothing.
-pub fn register(value: &str) {
-    let value = value.trim();
-    if value.len() < MIN_LEN {
-        return;
-    }
-    let mut state = state().write().unwrap_or_else(|e| e.into_inner());
-    if state.values.iter().any(|v| v == value) {
-        return;
-    }
-    state.values.push(value.to_string());
-    state.stale = true;
+fn write() -> std::sync::RwLockWriteGuard<'static, Registry> {
+    state().write().unwrap_or_else(|e| e.into_inner())
 }
 
-/// One matcher for every registered value in every spelling, longest first so a spelling that contains another is
+/// Registers `value` to be withheld from now on, for the life of the process. A value shorter than [`MIN_LEN`] and one
+/// already registered change nothing.
+pub fn register(value: &str) {
+    write().add(None, value, None);
+}
+
+/// [`register`] for each of `values`, under one lock: the matcher is built once for the lot, when a line next needs it.
+pub fn register_all<'a>(values: impl IntoIterator<Item = &'a str>) {
+    let mut registry = write();
+    for value in values {
+        registry.add(None, value, None);
+    }
+}
+
+/// Withholds `value` for `owner`, in place of what the owner held before, until `expires_at` (unix ms; `None` for no
+/// expiry) or until the owner is [`release`]d. Holding the value the owner already holds changes nothing.
+pub fn hold(owner: &str, value: &str, expires_at: Option<i64>) {
+    write().add(Some(owner), value, expires_at);
+}
+
+/// Stops withholding what `owner` holds: its value no longer works.
+pub fn release(owner: &str) {
+    write().release(owner);
+}
+
+/// One matcher for every value in every spelling, longest first so a spelling that contains another is
 /// replaced whole. `None` when nothing is registered, or when the matcher could not be built.
-fn build(values: &[String]) -> Option<Arc<Regex>> {
+fn build(values: &[&str]) -> Option<Arc<Regex>> {
     let mut needles: Vec<String> = Vec::new();
     for value in values {
         for form in crate::backend::vault::scrub::forms(value) {
@@ -73,18 +175,14 @@ fn build(values: &[String]) -> Option<Arc<Regex>> {
 }
 
 fn matcher() -> Option<Arc<Regex>> {
+    let now = agentmux_common::time::now_ms();
     {
-        let state = state().read().unwrap_or_else(|e| e.into_inner());
-        if !state.stale {
-            return state.matcher.clone();
+        let registry = state().read().unwrap_or_else(|e| e.into_inner());
+        if registry.current(now) {
+            return registry.matcher.clone();
         }
     }
-    let mut state = state().write().unwrap_or_else(|e| e.into_inner());
-    if state.stale {
-        state.matcher = build(&state.values);
-        state.stale = false;
-    }
-    state.matcher.clone()
+    write().matcher(now)
 }
 
 /// `text` with every registered value replaced by [`MARK`]; the text itself when it holds none.
@@ -183,5 +281,104 @@ mod tests {
         let mut many = vec![format!("x {value}"), "clean".to_string()];
         in_place(&mut many);
         assert_eq!(many, vec![format!("x {MARK}"), "clean".to_string()]);
+    }
+
+    // The tests below use a registry of their own and a clock they set, so they say nothing about the process-wide one.
+
+    fn shows(registry: &mut Registry, now: i64, value: &str) -> bool {
+        let line = format!("KEY={value}");
+        registry.matcher(now).map_or(line.clone(), |m| m.replace_all(&line, NoExpand(MARK)).into_owned()).contains(value)
+    }
+
+    #[test]
+    fn a_value_is_dropped_at_its_expiry_and_a_live_one_stays() {
+        let mut registry = Registry::default();
+        registry.add(Some("short"), "canary-expiry-0001-short", Some(1_000));
+        registry.add(Some("long"), "canary-expiry-0002-long", Some(9_000));
+        registry.add(None, "canary-expiry-0003-forever", None);
+        for value in ["canary-expiry-0001-short", "canary-expiry-0002-long", "canary-expiry-0003-forever"] {
+            assert!(!shows(&mut registry, 999, value), "{value} is withheld before any expiry");
+        }
+        assert!(shows(&mut registry, 1_000, "canary-expiry-0001-short"), "an expired value is dropped");
+        assert!(!shows(&mut registry, 1_000, "canary-expiry-0002-long"), "a live one stays");
+        assert!(!shows(&mut registry, 1_000, "canary-expiry-0003-forever"), "one with no expiry stays");
+        assert_eq!(registry.entries.len(), 2, "the expired value is not kept");
+        assert!(shows(&mut registry, 9_000, "canary-expiry-0002-long"));
+        assert!(!shows(&mut registry, 9_000, "canary-expiry-0003-forever"));
+    }
+
+    #[test]
+    fn a_released_owner_is_dropped_and_the_others_stay() {
+        let mut registry = Registry::default();
+        registry.add(Some("container:a"), "canary-release-0001-a", None);
+        registry.add(Some("container:b"), "canary-release-0002-b", None);
+        registry.release("container:a");
+        assert!(shows(&mut registry, 0, "canary-release-0001-a"), "a revoked value is no longer matched");
+        assert!(!shows(&mut registry, 0, "canary-release-0002-b"));
+        registry.release("container:a");
+        registry.release("no-such-owner");
+        assert_eq!(registry.entries.len(), 1, "releasing what is not held changes nothing");
+    }
+
+    #[test]
+    fn an_owner_given_a_new_value_holds_only_that_one() {
+        let mut registry = Registry::default();
+        registry.add(Some("signin:acct:refresh"), "canary-replace-0001-old", None);
+        registry.add(Some("signin:acct:refresh"), "canary-replace-0002-new", None);
+        assert!(shows(&mut registry, 0, "canary-replace-0001-old"), "the value that was replaced is dropped");
+        assert!(!shows(&mut registry, 0, "canary-replace-0002-new"));
+        registry.add(Some("signin:acct:refresh"), "short", None);
+        assert!(registry.entries.is_empty(), "a value too short to match holds nothing, and the old one is gone");
+    }
+
+    #[test]
+    fn a_value_held_again_with_a_later_expiry_is_kept_to_that_expiry() {
+        let mut registry = Registry::default();
+        registry.add(Some("github:a"), "canary-again-0001-token", Some(1_000));
+        registry.add(Some("github:a"), "canary-again-0001-token", Some(5_000));
+        assert_eq!(registry.entries.len(), 1);
+        assert!(!shows(&mut registry, 2_000, "canary-again-0001-token"));
+        assert!(shows(&mut registry, 5_000, "canary-again-0001-token"));
+    }
+
+    #[test]
+    fn a_batch_of_registrations_builds_the_matcher_once() {
+        let mut registry = Registry::default();
+        for i in 0..200 {
+            registry.add(None, &format!("canary-batch-{i:04}-value"), None);
+            registry.add(Some(&format!("owner-{i}")), &format!("canary-batch-held-{i:04}-value"), Some(100_000));
+        }
+        assert_eq!(registry.rebuilds, 0, "nothing is built until a line needs it");
+        for _ in 0..5 {
+            assert!(registry.matcher(0).is_some());
+        }
+        assert_eq!(registry.rebuilds, 1, "400 registrations and five lines cost one build");
+        registry.add(None, "canary-batch-late-value", None);
+        registry.matcher(0);
+        assert_eq!(registry.rebuilds, 2, "a later change builds again, once");
+        registry.matcher(0);
+        assert_eq!(registry.rebuilds, 2, "and a registration that changes nothing builds nothing");
+        registry.add(None, "canary-batch-late-value", None);
+        registry.matcher(0);
+        assert_eq!(registry.rebuilds, 2);
+    }
+
+    #[test]
+    fn the_process_wide_registry_drops_an_owner_that_is_released() {
+        let value = "canary-global-release-0001";
+        hold("withhold-test:global-release", value, None);
+        assert_eq!(text(&format!("k {value}")), format!("k {MARK}"));
+        release("withhold-test:global-release");
+        assert_eq!(text(&format!("k {value}")), format!("k {value}"));
+    }
+
+    #[test]
+    fn the_process_wide_registry_drops_a_value_after_its_expiry() {
+        let value = "canary-global-expiry-0001";
+        let now = agentmux_common::time::now_ms();
+        hold("withhold-test:global-expiry", value, Some(now + 600_000));
+        assert_eq!(text(&format!("k {value}")), format!("k {MARK}"));
+        hold("withhold-test:global-expiry", value, Some(now - 1));
+        assert_eq!(text(&format!("k {value}")), format!("k {value}"), "a value held to a time already past is not withheld");
     }
 }

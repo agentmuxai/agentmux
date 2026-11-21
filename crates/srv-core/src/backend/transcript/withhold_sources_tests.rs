@@ -44,6 +44,44 @@ fn a_container_token_a_gateway_token_and_a_device_token_are_withheld_when_made()
     withheld(&crate::backend::viewer::pairing::new_token());
 }
 
+fn shown(value: &str) -> String {
+    withhold::text(&format!("TOKEN={value}")).into_owned()
+}
+
+#[test]
+fn a_container_token_is_withheld_until_its_block_is_revoked() {
+    let token = crate::backend::container::credential::token_for_block("withhold-revoke-block", None);
+    assert_eq!(shown(&token), format!("TOKEN={MARK}"));
+    crate::backend::container::credential::revoke_block("withhold-revoke-block");
+    assert_eq!(shown(&token), format!("TOKEN={token}"), "a revoked token no longer works, so it is no longer held");
+    let next = crate::backend::container::credential::token_for_block("withhold-revoke-block", None);
+    assert_ne!(next, token);
+    assert_eq!(shown(&next), format!("TOKEN={MARK}"));
+}
+
+#[test]
+fn a_gateway_token_is_withheld_until_it_is_replaced_or_ended() {
+    use crate::backend::model_gateway::token;
+    let first = token::token_for_account("withhold-gw-agent", "withhold-gw-def", "withhold-gw-route", "acct");
+    assert_eq!(shown(&first), format!("TOKEN={MARK}"));
+    let renewed = token::renew_for_account("withhold-gw-agent", "withhold-gw-def", "withhold-gw-route", "other", None);
+    assert_ne!(first, renewed);
+    assert_eq!(shown(&renewed), format!("TOKEN={MARK}"));
+    assert_eq!(shown(&first), format!("TOKEN={first}"), "the token it replaced is dropped");
+    token::revoke("withhold-gw-def", "withhold-gw-route");
+    assert_eq!(shown(&renewed), format!("TOKEN={renewed}"), "a route that was changed ends its token, and its hold");
+}
+
+#[test]
+fn a_devices_token_is_withheld_until_the_device_is_unpaired() {
+    let store = Store::open_in_memory().unwrap();
+    let token = crate::backend::viewer::pairing::new_token();
+    store.viewer_device_insert("withhold-device", &crate::backend::viewer::pairing::token_hash(&token), "phone", "", 1).unwrap();
+    assert_eq!(shown(&token), format!("TOKEN={MARK}"));
+    store.viewer_device_delete("withhold-device").unwrap();
+    assert_eq!(shown(&token), format!("TOKEN={token}"));
+}
+
 #[test]
 fn a_stored_transcript_never_holds_a_token_an_agent_printed() {
     let token = crate::backend::container::credential::token_for_block("withhold-store-block", None);

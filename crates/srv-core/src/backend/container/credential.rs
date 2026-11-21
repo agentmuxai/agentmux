@@ -47,9 +47,12 @@ fn mint() -> String {
         uuid::Uuid::new_v4().simple(),
         uuid::Uuid::new_v4().simple()
     );
-    // A token an agent's process holds is never written into a transcript.
-    crate::backend::transcript::withhold::register(&token);
     token
+}
+
+/// Who holds a block's token in the transcript withhold registry: dropped with the token ([`revoke_block`]).
+fn withhold_owner(block_id: &str) -> String {
+    format!("container-token:{block_id}")
 }
 
 /// The block's container token: minted on first use, reused on later turns,
@@ -57,6 +60,8 @@ fn mint() -> String {
 pub fn token_for_block(block_id: &str, agent_token: Option<&str>) -> String {
     let mut reg = registry().lock().unwrap();
     let token = reg.by_block.get(block_id).cloned().unwrap_or_else(mint);
+    // A token an agent's process holds is never written into a transcript, for as long as it works.
+    crate::backend::transcript::withhold::hold(&withhold_owner(block_id), &token, None);
     reg.by_block.insert(block_id.to_string(), token.clone());
     reg.by_digest.insert(
         digest(&token),
@@ -81,6 +86,7 @@ pub fn revoke_block(block_id: &str) {
     if let Some(token) = reg.by_block.remove(block_id) {
         reg.by_digest.remove(&digest(&token));
     }
+    crate::backend::transcript::withhold::release(&withhold_owner(block_id));
 }
 
 /// Whether a container agent may call `path`. A route is open to it unless its audience
