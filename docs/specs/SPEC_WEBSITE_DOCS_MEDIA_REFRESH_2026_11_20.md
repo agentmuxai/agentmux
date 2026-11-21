@@ -1,7 +1,9 @@
 # Spec: website and docs media refresh: crisp screenshots and workflow videos, shot together with the video series
 
-Date: 2026-11-20 · Task: Spec #48240 (build #48241 follows) · Author: Loap · Status: draft for the operator's approval.
-Left uncommitted, as the workspace rule says for specs. Written against agentmux `09ad1d53c6`, agentmux-docs `84aa5fe` and the landing site at `2dac5aa` (all current main on 2026-11-20).
+**Status:** draft
+
+Date: 2026-11-20 · Task: Spec #48240, build #48241 · Author: Loap. The capture and export standard (§5) is approved by the operator; the workflow list (§3) is not yet, and the other decisions (§10) wait for the operator.
+Written against agentmux `09ad1d53c6`, agentmux-docs `84aa5fe` and the landing site at `2dac5aa` (all current main on 2026-11-20).
 
 This is the one plan that joins what already exists: the demo-workspace seed spec (#30225), the getting-started video series spec, the landing re-shoot (#29493), the docs screenshot coverage report and the docs-screenshot audit (#654). It does not start over and does not audit prose; it takes the audit's list as the list of docs pages whose pictures change.
 
