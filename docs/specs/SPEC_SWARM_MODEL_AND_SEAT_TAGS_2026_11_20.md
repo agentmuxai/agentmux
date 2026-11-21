@@ -70,7 +70,9 @@ One colour per family, one family per Claude tier, because the question people a
 | `observed` (the last call's model; harnesses that cannot answer `get_settings`) | Same as effective | "Sonnet 5.5, from its last call." |
 | `requested` | **Muted**: dashed outline, no wash, secondary text colour, the family glyph still shown | "Sonnet 5.5 was asked for; not confirmed yet." |
 | `pending_switch` (a switch just asked for, waiting for the next turn boundary) | Muted as `requested`, with an arrow glyph before the label | "Switching to Opus 5.5 at its next turn. Now: Sonnet 5.5." |
-| `unknown`, or the agent has no runtime | **No tag, no placeholder, no line.** Nothing is guessed (matches #48221 section 7) | none |
+| `route` (an agent on a model route: its gateway's model; #48222 P1) | Same as `effective` | "GPT 6, on its model route." |
+| `unknown` with no label, or the agent has no runtime | **No tag, no placeholder, no line.** Nothing is guessed (matches #48221 section 7) | none |
+| `unknown` with a label (#48222 sends the label only when it has one) | **Muted**, as `requested` | "... was asked for; not confirmed yet." |
 | Differs from the definition (`differs_from_definition`) | Normal tag, no extra mark in the row | A second line: "Its definition says Haiku 5.5." (decision D3 if you want a marker in the row) |
 | Stopped agent | None. The remembered request is a definition fact, not a running one | none |
 

@@ -6,7 +6,8 @@
  * colours (`--seat-*`, `--model-*`, theme.scss). Measured the way view/kanban/kanban-stage-colours.test.ts measures
  * its stages: each set's colours at least 9 apart in OKLab (x100), and in the way tag-contrast.test.ts measures a
  * tone: the outline 3:1 against every surface a tag sits on (the window, a card, a panel, and the selected row's
- * highlight over the window), the text 4.5:1 on the colour's wash. The two sets are not asked to be apart from
+ * highlight over the window), the text 4.5:1 on the colour's wash, and a muted tag's quiet text (the secondary text
+ * colour, on the bare surface) 4.5:1 on each of those surfaces. The two sets are not asked to be apart from
  * each other: they differ by shape, glyph and place. A theme where two meet, or an outline is short, overrides an
  * alias or an edge in its own file (docs/specs/SPEC_SWARM_MODEL_AND_SEAT_TAGS_2026_11_20.md §6.3).
  */
@@ -68,6 +69,15 @@ describe("Swarm tag colours", () => {
                     const edgeRatio = contrast(edge!, surface);
                     if (edgeRatio < OUTLINE_AA) short.push(`${hue} outline on the ${where}: ${edgeRatio.toFixed(2)} < ${OUTLINE_AA}`);
                 }
+            }
+            // A muted tag (a model asked for, not confirmed) has no fill: its words are the secondary text colour on the bare
+            // surface the row gives it, so that colour has to reach the text bar on each of them. Its dashed outline is the
+            // hue's edge, measured against the same surfaces above.
+            const secondary = theme.pick("secondary-text-color");
+            expect(secondary, `--secondary-text-color in ${id}`).toBeTruthy();
+            for (const [where, surface] of Object.entries(surfaces)) {
+                const ratio = contrast(secondary!, surface);
+                if (ratio < TEXT_AA) short.push(`muted text on the ${where}: ${ratio.toFixed(2)} < ${TEXT_AA}`);
             }
             for (const set of [TAG_HUES.seat, TAG_HUES.model]) {
                 for (let i = 0; i < set.length; i++) {

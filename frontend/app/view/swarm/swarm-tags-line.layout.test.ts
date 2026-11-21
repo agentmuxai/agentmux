@@ -119,7 +119,7 @@ describe.skipIf(!BROWSER)("Swarm tags line", () => {
     });
 
     it("starts where the summary's text starts, at every zoom the pane is shown at", () => {
-        for (const [w, z] of CASES.filter(([w]) => w > 120 * 1 || true)) {
+        for (const [w, z] of CASES) {
             const m = measured[`short-${w}-${z}`];
             if (!m.shown) continue;
             expect(Math.abs(m.tagLeft - m.summaryLeft), `at ${w}px, zoom ${z}: ${JSON.stringify(m)}`).toBeLessThanOrEqual(1);

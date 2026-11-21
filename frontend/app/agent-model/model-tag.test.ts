@@ -99,8 +99,15 @@ describe("modelTag", () => {
         expect(modelTag({ label: "Sonnet 5.5", definitionLabel: "sonnet 5.5" })!.lines).toHaveLength(1);
     });
 
-    it("draws nothing when the model is unknown, or there is neither a label nor an id", () => {
-        expect(modelTag({ label: "Sonnet 5.5", source: "unknown" })).toBeNull();
+    it("shows a model on a route as sure as a running one, and says so", () => {
+        const tag = modelTag({ label: "GPT 6", source: "route", effort: "medium" })!;
+        expect(tag).toMatchObject({ muted: false, family: "gpt", glyph: "hexagon-nodes" });
+        expect(tag.lines).toEqual(["GPT 6, on its model route. Effort medium."]);
+    });
+
+    it("draws a label that srv calls unknown muted, like a request, and nothing without a label or an id", () => {
+        expect(modelTag({ label: "Sonnet 5.5", source: "unknown" })).toMatchObject({ muted: true, text: "Sonnet 5.5" });
+        expect(modelTag({ source: "unknown" })).toBeNull();
         expect(modelTag({})).toBeNull();
         expect(modelTag({ label: "  ", id: null })).toBeNull();
     });
@@ -126,9 +133,16 @@ describe("readModelFacts", () => {
             provider: "claude",
             model_label: "Opus 5.5",
             model_source: "effective",
-            pending_switch: { to_label: "Fable 5.2" },
+            pending_switch: "Fable 5.2",
+            definition_model_label: "Haiku 5.5",
         });
-        expect(facts).toMatchObject({ label: "Opus 5.5", source: "effective", pendingTo: "Fable 5.2", provider: "claude" });
+        expect(facts).toMatchObject({
+            label: "Opus 5.5",
+            source: "effective",
+            pendingTo: "Fable 5.2",
+            provider: "claude",
+            definitionLabel: "Haiku 5.5",
+        });
         expect(modelTag(facts!)).toMatchObject({ family: "opus", muted: true, glyph: "arrow-right" });
     });
 });

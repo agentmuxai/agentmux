@@ -254,6 +254,7 @@ than none. Add the line when you touch one and know which area it belongs to.
 | Spec | Title | Status | Date | Replaces / replaced by |
 |---|---|---|---|---|
 | [`SPEC_SKILLS_B6_PORTABLE_SKILL_FILES_2026_11_20`](SPEC_SKILLS_B6_PORTABLE_SKILL_FILES_2026_11_20.md) | Spec: Skills B6, portable skill files for non-Claude agents | implemented | 2026-11-20 |  |
+| [`SPEC_SWARM_MODEL_AND_SEAT_TAGS_2026_11_20`](SPEC_SWARM_MODEL_AND_SEAT_TAGS_2026_11_20.md) | Spec: Swarm, short colour-coded tags for each agent's model and seat | implemented | 2026-11-20 |  |
 | [`SPEC_CONNECTORS_ONE_LIST_2026_11_19`](SPEC_CONNECTORS_ONE_LIST_2026_11_19.md) | Spec: Connectors is one list, one connector per line, details on click, open at startup | active | 2026-11-19 |  |
 | [`SPEC_CONTAINER_AGENT_PERSISTENT_CONTROLLER_2026_11_19`](SPEC_CONTAINER_AGENT_PERSISTENT_CONTROLLER_2026_11_19.md) | Spec: a container agent runs as one long-lived process, like a native agent | draft | 2026-11-19 |  |
 | [`SPEC_PICKED_COLOUR_IS_THE_COLOUR_SEEN_2026_11_18`](SPEC_PICKED_COLOUR_IS_THE_COLOUR_SEEN_2026_11_18.md) | SPEC: the colour you pick is the colour you see (tabs first), with the filters and overlays audited | active | 2026-11-18 |  |
@@ -379,7 +380,6 @@ than none. Add the line when you touch one and know which area it belongs to.
 | [`SPEC_LINUX_PACKAGE_UPGRADE_AND_REPOSITORY_2026_10_24`](SPEC_LINUX_PACKAGE_UPGRADE_AND_REPOSITORY_2026_10_24.md) | Spec: upgrading a .deb or .rpm install from the app, and an apt/dnf repository | active | 2026-10-24 |  |
 | [`SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24`](SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md) | Spec: Moving pane tabs between panes — a faster, doubled drop flash; Ctrl/Cmd+click to select several tabs and drag them together; selecting a tab on a collapsed pane expands it | active | 2026-10-24 |  |
 | [`SPEC_PANE_TAB_PROGRESS_LINE_2026_10_24`](SPEC_PANE_TAB_PROGRESS_LINE_2026_10_24.md) | Spec: A working agent shows a progress line on its pane tab pill, in every pane; a collapsed pane never shows the border animation | implemented | 2026-10-24 |  |
-| [`SPEC_SWARM_MODEL_AND_SEAT_TAGS_2026_11_20`](SPEC_SWARM_MODEL_AND_SEAT_TAGS_2026_11_20.md) | Spec: Swarm, short colour-coded tags for each agent's model and seat | active | 2026-11-20 |  |
 | [`SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24`](SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md) | Spec: the Swarm as three sections (Supervisor, Broadcast, Kanban); the Supervisor switched off until the operator turns it on, with its settings in the Supervisor section | active | 2026-10-24 |  |
 | [`SPEC_UNIX_SRV_RESTART_BUDGET_2026_10_24`](SPEC_UNIX_SRV_RESTART_BUDGET_2026_10_24.md) | Unix srv restart budget: recycle srv instead of ending the app | implemented | 2026-10-24 |  |
 | [`SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23`](SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md) | SPEC: Agent seats in the UI: role, lead and area on the agent, shown where you meet it | active | 2026-10-23 |  |

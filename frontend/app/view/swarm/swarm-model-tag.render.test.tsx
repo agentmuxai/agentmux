@@ -135,7 +135,7 @@ describe("the model tag on a Swarm row", () => {
         expect(tagOf(asked.container)!.classList.contains("ui-tag--muted")).toBe(true);
         asked.unmount();
         const switching = renderRow("b-r2", { agentId: "uid-r2" }, [
-            { agent_id: "uid-r2", model_label: "Sonnet 5.5", model_source: "effective", pending_switch: { to_label: "Opus 5.5" } },
+            { agent_id: "uid-r2", model_label: "Sonnet 5.5", model_source: "effective", pending_switch: "Opus 5.5" },
         ]);
         const tag = tagOf(switching.container)!;
         expect(tag.classList.contains("ui-tag--muted")).toBe(true);
@@ -143,11 +143,11 @@ describe("the model tag on a Swarm row", () => {
     });
 
     it("draws no line and no placeholder when the model is not known", () => {
-        // A runtime row without the fields (a build that does not send them), one marked unknown, a row of another
+        // A runtime row without the fields (a build that does not send them), one with a source and no label, a row of another
         // agent, and an agent with no id in its pane's meta.
         const cases: [Record<string, unknown>, Record<string, unknown>[]][] = [
             [{ agentId: "uid-u1" }, [{ agent_id: "uid-u1", state: "running" }]],
-            [{ agentId: "uid-u2" }, [{ agent_id: "uid-u2", model_label: "Sonnet 5.5", model_source: "unknown" }]],
+            [{ agentId: "uid-u2" }, [{ agent_id: "uid-u2", model_source: "unknown" }]],
             [{ agentId: "uid-u3" }, [{ agent_id: "someone-else", model_label: "Opus 5.5", model_source: "effective" }]],
             [{}, [{ agent_id: "uid-u4", model_label: "Opus 5.5", model_source: "effective" }]],
         ];
@@ -159,7 +159,7 @@ describe("the model tag on a Swarm row", () => {
         }
     });
 
-    it("follows the runtime: a model that arrives makes the line, and one that goes unknown takes it away", () => {
+    it("follows the runtime: a model that arrives makes the line, and one that goes away takes it away", () => {
         const [rows, setRows] = createSignal<Record<string, unknown>[]>([]);
         runtime.read = rows;
         registerPane("b-live");
@@ -172,8 +172,36 @@ describe("the model tag on a Swarm row", () => {
         expect(container.querySelector(".swarm-tags-line")).toBeNull();
         setRows([{ agent_id: "uid-live", model_label: "Opus 5.5", model_source: "effective" }]);
         expect(tagOf(container)!.textContent).toBe("Model Opus 5.5");
-        setRows([{ agent_id: "uid-live", model_label: "Opus 5.5", model_source: "unknown" }]);
+        setRows([{ agent_id: "uid-live", model_source: "unknown" }]);
         expect(container.querySelector(".swarm-tags-line")).toBeNull();
+    });
+
+    // The runtime store's rows are keyed by the id `agent.open` takes: a pane bound to an agent instance names it in
+    // `agentInstanceId`, with `agentId` the definition's, so the row is found by the instance first (swarm-open-parked.ts).
+    it("finds the row of the agent instance a pane is bound to, not the definition's", () => {
+        const rows = [
+            { agent_id: "tpl-1", model_label: "Haiku 5.5", model_source: "effective" },
+            { agent_id: "uid-inst-1", model_label: "Opus 5.5", model_source: "effective" },
+        ];
+        // Bound to an instance: its own row, never the definition's.
+        const both = renderRow("b-i1", { agentId: "tpl-1", agentInstanceId: "uid-inst-1" }, rows);
+        expect(tagOf(both.container)!.textContent).toBe("Model Opus 5.5");
+        both.unmount();
+        // Only an instance id.
+        const instance = renderRow("b-i2", { agentInstanceId: "uid-inst-1" }, rows);
+        expect(tagOf(instance.container)!.textContent).toBe("Model Opus 5.5");
+        instance.unmount();
+        // No instance: the agent id.
+        const plain = renderRow("b-i3", { agentId: "tpl-1" }, rows);
+        expect(tagOf(plain.container)!.textContent).toBe("Model Haiku 5.5");
+        plain.unmount();
+        // An instance with no row of its own does not borrow the definition's.
+        const none = renderRow("b-i4", { agentId: "tpl-1", agentInstanceId: "uid-other" }, rows);
+        expect(none.container.querySelector(".swarm-tags-line")).toBeNull();
+        none.unmount();
+        // An empty instance id falls back to the agent id.
+        const empty = renderRow("b-i5", { agentId: "tpl-1", agentInstanceId: "" }, rows);
+        expect(tagOf(empty.container)!.textContent).toBe("Model Haiku 5.5");
     });
 
     it("sits with the seat tag, each in its own colour", () => {

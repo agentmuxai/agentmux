@@ -4,6 +4,7 @@
 import type { JSX } from "solid-js";
 
 import { Tag } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import type { SeatSummary } from "@/types/rpc/SeatSummary";
 import { seatBadgeText, seatHue } from "./seat-format";
 
@@ -24,7 +25,7 @@ export function SeatTag(props: {
     const hue = () => seatHue(props.seat.role) ?? undefined;
     return (
         <Tag hue={hue()} tone={hue() ? undefined : "neutral"} size={props.size} class={props.class} title={props.title}>
-            <span class="ui-tag-sr">Seat </span>
+            <span class="ui-tag-sr">{t("swarm.tag.seat")} </span>
             {seatBadgeText(props.seat)}
         </Tag>
     );

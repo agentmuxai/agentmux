@@ -11,6 +11,7 @@ import { createMemo, For, Show, type Accessor, type JSX } from "solid-js";
 
 import { modelTag, type ModelFacts } from "@/app/agent-model/model-tag";
 import { Tag } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 
 import "./swarm-tags.scss";
 
@@ -22,16 +23,16 @@ export function SwarmModelTag(props: { facts: Accessor<ModelFacts | null | undef
     });
     return (
         <Show when={tag()}>
-            {(t) => (
+            {(shown) => (
                 <Tag
-                    hue={t().hue}
-                    muted={t().muted}
-                    icon={t().glyph}
+                    hue={shown().hue}
+                    muted={shown().muted}
+                    icon={shown().glyph}
                     class="swarm-model-tag"
-                    detail={<For each={t().lines}>{(line) => <div>{line}</div>}</For>}
+                    detail={<For each={shown().lines}>{(line) => <div>{line}</div>}</For>}
                 >
-                    <span class="ui-tag-sr">Model </span>
-                    <span class="swarm-model-tag__text">{t().text}</span>
+                    <span class="ui-tag-sr">{t("swarm.tag.model")} </span>
+                    <span class="swarm-model-tag__text">{shown().text}</span>
                 </Tag>
             )}
         </Show>

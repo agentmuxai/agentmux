@@ -10,8 +10,11 @@
 
 import type { ModelHue } from "@/app/element/ui/tag-tokens";
 
-/** How sure the runtime is of the model (#48221's `model_source`). */
-export type ModelSource = "effective" | "observed" | "requested" | "unknown";
+/**
+ * How sure the runtime is of the model (#48222's `model_source`). `route` is an agent on a model route: its gateway's
+ * model, shown as sure as `effective`.
+ */
+export type ModelSource = "effective" | "observed" | "route" | "requested" | "unknown";
 
 export type ModelFamily = "fable" | "opus" | "sonnet" | "haiku" | "gpt" | "gemini" | "other";
 
@@ -101,22 +104,26 @@ export function modelFamily(facts: Pick<ModelFacts, "label" | "id" | "provider">
     return "other";
 }
 
-/** The tag for an agent's model, or null when no model is known (nothing is drawn, no placeholder). */
+/**
+ * The tag for an agent's model, or null when no model is known (nothing is drawn, no placeholder): neither a label nor
+ * an id. A label with a source of `unknown` is drawn muted, like a request: srv sends the label only when it has one,
+ * and does not call it confirmed.
+ */
 export function modelTag(facts: ModelFacts): ModelTag | null {
     const source = clean(facts.source);
-    if (source === "unknown") return null;
     const full = fullLabel(facts);
     if (!full) return null;
     const family = modelFamily(facts);
     const pendingTo = fullLabel({ label: facts.pendingTo, id: null });
     const pending = pendingTo !== "";
-    const requested = source === "requested";
+    const requested = source === "requested" || source === "unknown";
     const effort = clean(facts.effort);
 
     const lines: string[] = [];
     if (pending) lines.push(`Switching to ${pendingTo} at its next turn. Now: ${full}.`);
     else if (requested) lines.push(`${full} was asked for; not confirmed yet.`);
     else if (source === "observed") lines.push(`${full}, from its last call.`);
+    else if (source === "route") lines.push(`${full}, on its model route.${effort ? ` Effort ${effort}.` : ""}`);
     else lines.push(`${full}, running now (confirmed by its CLI).${effort ? ` Effort ${effort}.` : ""}`);
     const definition = clean(facts.definitionLabel);
     if (definition && definition.toLowerCase() !== full.toLowerCase()) lines.push(`Its definition says ${definition}.`);
@@ -132,9 +139,10 @@ export function modelTag(facts: ModelFacts): ModelTag | null {
 }
 
 /**
- * The model facts a runtime row carries, read defensively: `model_label`, `model_source` and `pending_switch` arrive
- * with the live-facts work, and a row from a build or a peer without them gives null, so no tag is drawn. This is the
- * one place the Swarm reads them from.
+ * The model facts a runtime row carries (#48222: `model_id`, `model_label`, `model_source`, `effort`, `pending_switch`
+ * as the short label of the model it switches to, `definition_model_label`), all optional and omitted when unknown, read
+ * defensively: a row from a build or a peer without them gives null, so no tag is drawn. This is the one place the Swarm
+ * reads them from.
  */
 export function readModelFacts(row: unknown, definitionLabel?: string | null): ModelFacts | null {
     if (row == null || typeof row !== "object") return null;
