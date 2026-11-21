@@ -969,3 +969,77 @@ fn the_staging_folder_is_not_inside_anything_bound_into_a_container() {
         assert!(staging_is_exposed(&root, &[covering.clone()]), "{covering}");
     }
 }
+
+#[test]
+fn a_copy_is_synced_when_it_changes_while_the_container_runs_and_not_when_it_does_not() {
+    use std::time::{Duration, SystemTime};
+    let t = |s: u64| Some(SystemTime::UNIX_EPOCH + Duration::from_secs(s));
+    let mut seen = HashMap::new();
+    assert!(!changed_since_last_look(&mut seen, "acct", t(10)), "the first look only notes it");
+    assert!(!changed_since_last_look(&mut seen, "acct", t(10)), "nothing changed");
+    assert!(changed_since_last_look(&mut seen, "acct", t(20)), "the CLI refreshed");
+    assert!(!changed_since_last_look(&mut seen, "acct", t(20)), "and it is synced once");
+    assert!(changed_since_last_look(&mut seen, "acct", None), "a copy that disappeared is a change too");
+    assert!(!changed_since_last_look(&mut seen, "other", t(5)), "another account is its own");
+}
+
+#[test]
+fn writes_to_the_accounts_file_never_share_a_temporary_file_or_leave_half_a_login() {
+    let (tmp, config) = setup();
+    let service = FileLogin.service_of(&config);
+    std::fs::write(&service, login(1, "start")).unwrap();
+    let writers: Vec<_> = (0..8)
+        .map(|w| {
+            let service = service.clone();
+            std::thread::spawn(move || {
+                for i in 0..40 {
+                    FileLogin.write(&service, &login(1000 + w * 100 + i, &format!("w{w}"))).unwrap();
+                }
+            })
+        })
+        .collect();
+    for writer in writers {
+        writer.join().unwrap();
+    }
+    let text = std::fs::read_to_string(&service).unwrap();
+    assert!(expires_at(&text).is_some(), "a whole login");
+    assert_eq!(std::fs::read_dir(&config).unwrap().count(), 2, "no temporary file left");
+    drop(tmp);
+}
+
+#[test]
+fn two_containers_of_one_account_syncing_at_once_leave_the_newest_login_in_the_account() {
+    let (tmp, config) = setup();
+    let host_file = Path::new(&config).join(".credentials.json");
+    std::fs::write(&host_file, login(100, "old")).unwrap();
+    let root = tmp.path().join("root");
+    let dirs: Vec<_> = ["agentmux-a", "agentmux-b"]
+        .iter()
+        .map(|name| prepare(&FileLogin, &root, name, &config, None, &mut |_| {}).unwrap())
+        .collect();
+    let workers: Vec<_> = ["agentmux-a", "agentmux-b"]
+        .into_iter()
+        .zip(dirs.clone())
+        .enumerate()
+        .map(|(n, (name, dir))| {
+            let (root, config) = (root.clone(), config.clone());
+            std::thread::spawn(move || {
+                for step in 1..=20i64 {
+                    let expires = 1000 * (step + 1) + n as i64;
+                    std::fs::write(dir.join(".credentials.json"), login(expires, &format!("{name}-{step}"))).unwrap();
+                    let _ = prepare(&FileLogin, &root, name, &config, Some(ACCOUNT), &mut |_| {});
+                }
+            })
+        })
+        .collect();
+    for worker in workers {
+        worker.join().unwrap();
+    }
+    let account = expires_at(&std::fs::read_to_string(&host_file).unwrap()).expect("a whole login in the account");
+    // A copy that is refused because the account moved on is replaced by it, so every copy and the account stay whole
+    // logins and the account never goes back below where it began.
+    assert!(dirs.iter().all(|d| expires_at(&held(d)).is_some()), "every copy is a whole login");
+    assert!(account >= 100, "the account is not taken back: {account}");
+    let beside = std::fs::read_dir(&config).unwrap().count();
+    assert_eq!(beside, 2, "no temporary file left beside the account's file");
+}

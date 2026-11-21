@@ -57,8 +57,11 @@ impl Keychain for FileLogin {
     }
 
     fn write(&self, service: &str, value: &str) -> Result<(), String> {
+        // A name of its own for each write: two syncs never share a temporary file.
+        static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let file = Path::new(service);
-        let temp = file.with_extension(format!("agentmux-{}", std::process::id()));
+        let n = WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let temp = file.with_extension(format!("agentmux-{}-{n}", std::process::id()));
         let wrote = put_file(&temp, value).and_then(|()| std::fs::rename(&temp, file));
         if wrote.is_err() {
             let _ = std::fs::remove_file(&temp);
@@ -117,6 +120,28 @@ struct Meta {
     /// the container holds is not a login to write back. Empty for a copy made before this was kept.
     #[serde(default)]
     seed: String,
+}
+
+/// How often a running container's copy of the login is looked at for a refresh.
+const WATCH_EVERY: std::time::Duration = std::time::Duration::from_secs(15);
+
+fn modified(file: &Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(file).and_then(|m| m.modified()).ok()
+}
+
+/// Whether the copy of `key` changed since it was last looked at. The first look of a key only notes it.
+fn changed_since_last_look(seen: &mut std::collections::HashMap<String, Option<std::time::SystemTime>>, key: &str, now: Option<std::time::SystemTime>) -> bool {
+    match seen.insert(key.to_string(), now) {
+        None => false,
+        Some(before) => before != now,
+    }
+}
+
+/// The lock of one account (by its config dir), held for a whole [`sync_account`].
+fn account_lock(config_dir: &str) -> std::sync::Arc<std::sync::Mutex<()>> {
+    static LOCKS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<std::sync::Mutex<()>>>>> = std::sync::OnceLock::new();
+    let mut locks = LOCKS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    locks.entry(config_dir.to_string()).or_default().clone()
 }
 
 /// A short digest of a login's refresh token, to tell whether two copies descend from one refresh. Not a secret,
@@ -297,6 +322,10 @@ fn sync_account(
     container_account: Option<&str>,
     moved: &mut dyn FnMut(Moved),
 ) -> Result<PathBuf, String> {
+    // One sync of an account at a time: what is read, compared and written (the account's login, this copy and the
+    // other containers' copies) is never changed under it by a sync for another container of the same account.
+    let lock = account_lock(config_dir);
+    let _one_at_a_time = lock.lock().unwrap_or_else(|e| e.into_inner());
     let dir = staging_dir(root, container_name, config_dir);
     let file = dir.join(CLAUDE_CREDENTIALS_FILE);
     let service = keychain.service_of(config_dir);
@@ -719,7 +748,53 @@ impl ContainerManager {
         if staging_is_exposed(&root, &spec.bound_host_dirs()) {
             return Err("the folder that holds the container's copy of the login would be visible inside a container".to_string());
         }
-        self.sync_login(container_name, config_dir, true).await.map(|dir| dir.to_string_lossy().into_owned())
+        let dir = self.sync_login(container_name, config_dir, true).await.map(|dir| dir.to_string_lossy().into_owned())?;
+        self.watch_staged_login(container_name);
+        Ok(dir)
+    }
+
+    /// While the container runs, a refresh its CLI makes in its copy is taken at once (to the account's file and the
+    /// other containers' copies), not at the next start or removal: the copy's modification time is looked at every
+    /// [`WATCH_EVERY`], and a change is synced. One watch per container; it ends when the container's copies are gone.
+    fn watch_staged_login(&self, container_name: &str) {
+        static WATCHED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
+        let watched = WATCHED.get_or_init(Default::default);
+        if !watched.lock().unwrap_or_else(|e| e.into_inner()).insert(container_name.to_string()) {
+            return;
+        }
+        let (cm, name) = (self.clone(), container_name.to_string());
+        tokio::spawn(async move {
+            cm.watch_loop(&name).await;
+            watched.lock().unwrap_or_else(|e| e.into_inner()).remove(&name);
+        });
+    }
+
+    async fn watch_loop(&self, container_name: &str) {
+        let mut seen = std::collections::HashMap::new();
+        // What the start just synced is the baseline: a refresh in the first moments is a change from it.
+        if let Ok(root) = agentmux_common::data_paths::agentmux_root() {
+            for config_dir in staged_config_dirs(&root, container_name) {
+                let file = staging_dir(&root, container_name, &config_dir).join(CLAUDE_CREDENTIALS_FILE);
+                changed_since_last_look(&mut seen, &config_dir, modified(&file));
+            }
+        }
+        loop {
+            tokio::time::sleep(WATCH_EVERY).await;
+            let Ok(root) = agentmux_common::data_paths::agentmux_root() else { return };
+            let dirs = staged_config_dirs(&root, container_name);
+            if dirs.is_empty() {
+                return;
+            }
+            for config_dir in dirs {
+                let file = staging_dir(&root, container_name, &config_dir).join(CLAUDE_CREDENTIALS_FILE);
+                if !changed_since_last_look(&mut seen, &config_dir, modified(&file)) {
+                    continue;
+                }
+                let _ = self.sync_login(container_name, &config_dir, false).await;
+                // What the sync itself wrote is not a change to sync again.
+                seen.insert(config_dir, modified(&file));
+            }
+        }
     }
 
     /// After a drift removal, which is followed at once by a create from the same mount spec: the folder `remove`
