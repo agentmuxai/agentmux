@@ -202,7 +202,8 @@
 // so an account's line never runs as a bar across a wide pane (§4.7).
 .connector-details {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 720px));
+    // The columns are counted by their 440 px minimum (so two start at about 900 px); each part is capped at 720 px.
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr));
     align-items: start;
     gap: var(--space-2);
     padding: var(--space-2);
@@ -210,5 +211,6 @@
 
     > * {
         min-width: 0;
+        max-width: 720px;
     }
 }
