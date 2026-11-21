@@ -105,6 +105,26 @@ async fn a_container_agent_is_refused_every_command_that_would_start_a_program_o
     }
 }
 
+/// An agent connection whose runtime can't be told gets the same answer as a container agent's: an id no
+/// definition has, and an id whose lookup fails because the store can't be read.
+#[tokio::test]
+async fn an_agent_whose_runtime_cannot_be_told_is_refused_like_a_container_agent() {
+    let (engine, mut rx, state) = connection();
+    an_agent(&state, "known-host", "agent");
+    for step in ["unknown id", "store error"] {
+        if step == "store error" {
+            state.mstore.conn().lock().unwrap().execute_batch("DROP TABLE db_agents;").unwrap();
+        }
+        let id = if step == "unknown id" { "nobody-by-this-name" } else { "known-host" };
+        engine.set_rpc_context(RpcContext { agent_id: id.into(), ..Default::default() });
+        for command in HOST_STARTS {
+            let error = error_of(&engine, &mut rx, command, id).await;
+            assert!(error.contains(REFUSED), "{step}: {command}: {error:?}");
+            assert!(error.contains("couldn't tell where this agent runs"), "{step}: {command}: {error:?}");
+        }
+    }
+}
+
 #[tokio::test]
 async fn a_host_agent_the_window_and_an_unproven_connection_are_not_refused() {
     for who in ["host-agent", "window", "unproven"] {
