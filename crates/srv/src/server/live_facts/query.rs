@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 
 use super::model::{ModelFacts, ModelSource};
 use super::{block_of, facts_of, model_of, Agent, Ctx, LiveFacts, Select};
+use crate::backend::runtime_adapter::RuntimeKind;
 use crate::server::AppState;
 
 /// A list that asks for groups or a page stops at this many bytes (a default call keeps every agent, as
@@ -129,7 +130,7 @@ fn agent_of(row: &Value) -> Option<Agent<'_>> {
         provider: string_at(row, "/runtime/provider"),
         block_id: row.pointer("/runtime/block_id").and_then(Value::as_str),
         state: string_at(row, "/runtime/state"),
-        container: string_at(row, "/runtime/runtime") == "container",
+        container: row.pointer("/runtime/runtime").and_then(|v| serde_json::from_value::<RuntimeKind>(v.clone()).ok()) == Some(RuntimeKind::Container),
     })
 }
 
