@@ -352,7 +352,7 @@ pub(crate) async fn handle_preview(state: &AppState, call: &WebCallType) -> WebR
 /// the import is the websocket command `workspace.importuserworkspace`, which only the window may call.
 pub(crate) async fn handle_import(_state: &AppState, _call: &WebCallType) -> WebReturnType {
     WebReturnType::error(
-        "FORBIDDEN: importing a workspace is the person's own action: it runs only from the AgentMux window (the websocket command workspace.importuserworkspace)"
+        "FORBIDDEN: importing a workspace is the person's own action: ask the person to import the workspace file from the AgentMux window"
             .to_string(),
     )
 }

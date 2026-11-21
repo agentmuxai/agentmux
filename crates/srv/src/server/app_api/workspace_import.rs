@@ -15,7 +15,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_WORKSPACE_IMPORT_USER_WORKSPACE, move |req: CommandWorkspaceImportUserWorkspaceData, ctx| {
         let state = state.clone();
         async move {
-            ctx.operator_only("only the person's own window imports a workspace: whether its commands run and its agents start is their answer in the preview")?;
+            ctx.operator_only("importing a workspace is the person's own action: ask the person to import the workspace file from the AgentMux window")?;
             crate::server::service::user_workspace_files::import_for_window(&state, req).await
         }
     });

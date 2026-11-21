@@ -317,7 +317,7 @@ async fn only_the_persons_window_imports_and_the_http_service_route_no_longer_do
     // and nothing is imported.
     for (who, agent) in [("an agent", Some("AgentX")), ("an unproven connection", None)] {
         let (err, _) = import_command(&state, agent, false, request(true)).await;
-        assert!(err.starts_with("FORBIDDEN"), "{who}: {err}");
+        assert!(err.starts_with("FORBIDDEN") && err.contains("ask the person to import"), "{who}: {err}");
     }
     assert_eq!(workspaces(&state), before, "a refused call imports nothing");
 
@@ -330,7 +330,7 @@ async fn only_the_persons_window_imports_and_the_http_service_route_no_longer_do
     };
     let reply = crate::server::service::run_service_call(&state, &http).await;
     let error = reply.error.unwrap_or_default();
-    assert!(!reply.success && error.starts_with("FORBIDDEN") && error.contains("workspace.importuserworkspace"), "{error}");
+    assert!(!reply.success && error.starts_with("FORBIDDEN") && error.contains("ask the person to import"), "{error}");
     assert_eq!(workspaces(&state), before, "a body that says run_commands changes nothing on the route");
 
     // The person's proven window imports, and the answer is what the window shows.
