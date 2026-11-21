@@ -109,6 +109,9 @@ export function useSectionBar(
 ) {
     const [current, setCurrent] = createSignal<string | null>(null);
     let bar: HTMLElement | undefined;
+    // A link that cannot bring its section to the top (the list is at its end and the section is short) still makes that
+    // section the current one, until the person scrolls the list themselves.
+    let pinned: string | null = null;
     let observer: ResizeObserver | undefined;
     const barHeight = () => bar?.offsetHeight ?? 0;
     const update = () => {
@@ -116,7 +119,19 @@ export function useSectionBar(
         const order = ids();
         if (!list || !bar || order.length === 0) return setCurrent(null);
         const tops = order.map((id) => sectionEl(id)?.offsetTop ?? 0);
-        setCurrent(order[currentSection(tops, list.scrollTop, barHeight())] ?? null);
+        const natural = currentSection(tops, list.scrollTop, barHeight());
+        // The pin ends when the scroll has brought its section to the line, and with it nothing is held.
+        if (pinned && order.indexOf(pinned) <= natural) pinned = null;
+        setCurrent((pinned ?? order[natural]) || null);
+    };
+    const pin = (id: string) => {
+        pinned = id;
+        update();
+    };
+    const unpin = () => {
+        if (!pinned) return;
+        pinned = null;
+        update();
     };
     const measure = () => {
         board()?.style.setProperty("--kanban-bar-h", `${barHeight()}px`);
@@ -126,11 +141,15 @@ export function useSectionBar(
         const list = board();
         if (!list) return;
         list.addEventListener("scroll", update, { passive: true });
+        // The person's own scrolling, not the link's: it ends a pin.
+        const own = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+        own.forEach((type) => list.addEventListener(type, unpin, { passive: true }));
         observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(measure);
         if (bar) observer?.observe(bar);
         observer?.observe(list);
         onCleanup(() => {
             list.removeEventListener("scroll", update);
+            own.forEach((type) => list.removeEventListener(type, unpin));
             observer?.disconnect();
         });
     });
@@ -144,6 +163,7 @@ export function useSectionBar(
     return {
         current,
         update,
+        pin,
         bindBar: (el: HTMLElement) => {
             bar = el;
             observer?.observe(el);

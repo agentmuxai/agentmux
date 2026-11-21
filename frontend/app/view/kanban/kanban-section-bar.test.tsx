@@ -282,4 +282,52 @@ describe("the section you are in", () => {
         fireEvent.scroll(list);
         expect(link("Review")).toHaveAttribute("aria-current", "location");
     });
+    describe("a link that cannot bring its section to the top", () => {
+        const names = ["Needs you", "Backlog", "In Research", "Spec'd", "In progress", "Review", "Merged", "Released"];
+        const atEnd = () => {
+            board();
+            const list = document.querySelector(".kanban-board") as HTMLElement;
+            names.forEach((name, i) => Object.defineProperty(column(name), "offsetTop", { configurable: true, value: i * 300 }));
+            // The list is at its end and Released is short: its top (2100) is further down than the list can scroll (1700).
+            list.scrollTop = 1700;
+            fireEvent.scroll(list);
+            expect(link("Review")).toHaveAttribute("aria-current", "location");
+            return list;
+        };
+        const press = async (name: string) => {
+            const original = Element.prototype.scrollIntoView;
+            Element.prototype.scrollIntoView = vi.fn();
+            try {
+                link(name).dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+                await Promise.resolve();
+            } finally {
+                Element.prototype.scrollIntoView = original;
+            }
+        };
+
+        it("still marks that section as the one you are in", async () => {
+            atEnd();
+            await press("Released");
+            expect(link("Released")).toHaveAttribute("aria-current", "location");
+            expect(document.querySelectorAll('[aria-current="location"]')).toHaveLength(1);
+        });
+
+        it("hands the mark back when the person scrolls the list themselves", async () => {
+            const list = atEnd();
+            await press("Released");
+            fireEvent.wheel(list);
+            expect(link("Review")).toHaveAttribute("aria-current", "location");
+        });
+
+        it("lets go once the scroll has brought the section to the top, and does not come back", async () => {
+            const list = atEnd();
+            await press("Released");
+            list.scrollTop = 2100;
+            fireEvent.scroll(list);
+            expect(link("Released")).toHaveAttribute("aria-current", "location");
+            list.scrollTop = 1000;
+            fireEvent.scroll(list);
+            expect(link("Spec'd")).toHaveAttribute("aria-current", "location");
+        });
+    });
 });

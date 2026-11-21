@@ -24,6 +24,10 @@
     padding: var(--space-1) 0;
     background: var(--main-bg-color);
     border-bottom: 1px solid var(--border-color);
+    // At a large zoom in a narrow pane the links wrap onto many lines: the bar keeps to a share of the list and scrolls
+    // inside itself past that, so the sections stay in view.
+    max-height: 6rem;
+    overflow-y: auto;
 }
 
 .kanban-section-bar__links {

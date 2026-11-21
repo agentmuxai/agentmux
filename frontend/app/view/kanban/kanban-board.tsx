@@ -283,7 +283,7 @@ export function KanbanBoard(props: BoardProps): JSX.Element {
         s.open(id);
         queueMicrotask(() => {
             sectionEl(id)?.scrollIntoView({ block: "start" });
-            bar.update();
+            bar.pin(id);
         });
     };
     return (
