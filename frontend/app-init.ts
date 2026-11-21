@@ -8,6 +8,7 @@ import { registerInputOwnerTracking } from "@/app/store/input-owner";
 import { globalRefocus, installShortcutApi, registerChordCapture, registerControlShiftTracking, registerGlobalKeys, registerHostShortcuts, registerUserKeybindings } from "@/app/store/keymodel";
 import { modalsModel } from "@/app/store/modalmodel";
 import { registerLinkInPaneListener } from "@/app/element/link-open";
+import { installPaneSelectGuard } from "@/app/element/ui/pane-select";
 import { installTextDragGuard } from "@/app/element/ui/text-drag";
 import { installFloatModifier } from "@/app/store/float-modifier";
 import { initUiEventSubs } from "@/app/store/ui-event-subs";
@@ -1162,6 +1163,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     registerHostShortcuts();
     installShortcutApi();
     installTextDragGuard();
+    installPaneSelectGuard();
     registerLinkInPaneListener();
     installFloatModifier();
     tlog("registerKeys", t);
