@@ -252,19 +252,25 @@ fn as_read(msg: &str) -> String {
 }
 
 /// Words right before "token" that make it the unit a model's usage is counted in ("save tokens", "fewer
-/// tokens", "40k tokens"; a number before it counts too).
+/// tokens", "10 million tokens"). Only words that say so on their own: a word that fits a credential as well
+/// ("of", "context", "input", "max") is not one.
 const USAGE_WORDS_BEFORE: &[&str] = &[
     "save", "saves", "saved", "saving", "spend", "spends", "spent", "spending", "waste", "wastes", "wasted", "fewer",
-    "fewest", "more", "less", "many", "much", "few", "count", "counts", "counted", "input", "output", "thinking",
-    "reasoning", "cached", "cache", "context", "max", "total", "per", "of", "million", "thousand", "billion",
+    "fewest", "million", "thousand", "billion",
 ];
 
 /// Words right after "token" that make it a usage unit ("token budget", "tokens saved", "token savers").
 const USAGE_WORDS_AFTER: &[&str] = &[
     "budget", "budgets", "usage", "count", "counts", "limit", "limits", "saver", "savers", "saving", "savings",
-    "cost", "costs", "spend", "window", "windows", "quota", "use", "used", "per", "saved", "wasted", "waste",
-    "estimate", "estimates", "or", "and",
+    "cost", "costs", "spend", "quota", "saved", "wasted", "waste", "estimate", "estimates",
 ];
+
+/// Whether `word` is a quantity: digits with commas or a decimal point, and an optional k, m or b after them
+/// ("40", "5,000", "1.5m"; not "2fa" or "1password").
+fn is_quantity(word: &str) -> bool {
+    let digits = word.strip_suffix(['k', 'm', 'b']).unwrap_or(word);
+    !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit() || c == '.' || c == ',') && digits.chars().any(|c| c.is_ascii_digit())
+}
 
 /// The word that ends `text` (separators of space, tab, newline and hyphen skipped first), or "".
 fn word_before(text: &str) -> &str {
@@ -283,7 +289,7 @@ fn word_after(text: &str) -> &str {
 /// `the token ...`, `slack token`, `token=...`) is read as a credential.
 fn token_reads_as_usage_unit(lower: &str, start: usize, end: usize) -> bool {
     let prev = word_before(&lower[..start]);
-    if prev.chars().next().is_some_and(|c| c.is_ascii_digit()) || USAGE_WORDS_BEFORE.contains(&prev) {
+    if is_quantity(prev) || USAGE_WORDS_BEFORE.contains(&prev) {
         return true;
     }
     USAGE_WORDS_AFTER.contains(&word_after(&lower[end..]))

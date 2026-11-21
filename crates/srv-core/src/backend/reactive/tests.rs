@@ -2841,6 +2841,16 @@ fn test_a_post_with_token_outside_a_usage_is_refused_and_the_word_is_named() {
         ("a slack token", "token"),
         ("access\ntoken", "token"),
         ("your token", "token"),
+        ("copy of token abc123", "token"),
+        ("the value of token abc123", "token"),
+        ("context token ghp_abc", "token"),
+        ("max token abc123", "token"),
+        ("token and abc123", "token"),
+        ("token or abc123", "token"),
+        ("input token: abc123", "token"),
+        ("cache token abc123", "token"),
+        ("2fa token: 123456", "token"),
+        ("1password token abc", "token"),
     ] {
         assert_eq!(post_refusal_reason(msg).as_deref(), Some(why), "{msg:?}");
     }
@@ -2855,7 +2865,9 @@ fn test_a_post_about_tokens_as_usage_units_is_let_through_but_a_jekt_tier_still_
         "about 5,000 tokens and seven turns",
         "the token budget for this turn",
         "fewer tokens or turns",
-        "tokens saved per call",
+        "tokens saved on every call",
+        "1.5m tokens",
+        "10 million tokens",
         "tokenize the input",
     ] {
         assert_eq!(post_refusal_reason(msg), None, "refused: {msg:?}");
