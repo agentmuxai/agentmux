@@ -165,7 +165,7 @@ describe("the model panel's routes", () => {
         await openRoute();
         fireEvent.click(option(/DeepSeek V4 Pro/));
         await flush();
-        expect(switchCommand).toHaveBeenCalledWith({}, { blockid: "block-1", route: "openrouter", model: PRO, restart: true }, { timeout: 120000 });
+        expect(switchCommand).toHaveBeenCalledWith({}, { blockid: "block-1", route: "openrouter", model: PRO, restart: true, fresh: false, handoff: null }, { timeout: 120000 });
         expect(patchRuntime).not.toHaveBeenCalled();
     });
 
@@ -175,7 +175,7 @@ describe("the model panel's routes", () => {
         await openPanel();
         fireEvent.click(option(/Opus/));
         await flush();
-        expect(switchCommand).toHaveBeenCalledWith({}, { blockid: "block-1", route: "", model: "", restart: false }, { timeout: 120000 });
+        expect(switchCommand).toHaveBeenCalledWith({}, { blockid: "block-1", route: "", model: "", restart: false, fresh: false, handoff: null }, { timeout: 120000 });
         expect(patchRuntime.mock.calls[0][2]).toEqual({ model: "opus" });
     });
 
@@ -222,7 +222,7 @@ describe("the model panel's routes", () => {
         const back = option(/Back to DeepSeek V4.1 Flash/);
         fireEvent.click(back);
         await flush();
-        expect(switchCommand).toHaveBeenCalledWith({}, { blockid: "block-1", route: "openrouter", model: FLASH, restart: true }, { timeout: 120000 });
+        expect(switchCommand).toHaveBeenCalledWith({}, { blockid: "block-1", route: "openrouter", model: FLASH, restart: true, fresh: false, handoff: null }, { timeout: 120000 });
     });
 
     it("shows a failed switch on the trigger and leaves the agent where it was", async () => {
@@ -243,7 +243,7 @@ describe("the model panel's routes", () => {
         await openPanel();
         fireEvent.click(option(/Opus/));
         await flush();
-        expect(switchCommand).toHaveBeenCalledWith({}, { blockid: "block-1", route: "", model: "", restart: false }, { timeout: 120000 });
+        expect(switchCommand).toHaveBeenCalledWith({}, { blockid: "block-1", route: "", model: "", restart: false, fresh: false, handoff: null }, { timeout: 120000 });
         expect(patchRuntime.mock.calls[0][2]).toEqual({ model: "opus" });
     });
 

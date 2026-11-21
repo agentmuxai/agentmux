@@ -129,7 +129,7 @@
 222 crates/procstats/examples/memtree.rs::main
 144 crates/remote/src/daemon.rs::attach
 159 crates/remote/src/serve.rs::handle
-113 crates/srv-core/src/agents/runner.rs::run_agent_with_bin
+109 crates/srv-core/src/agents/runner.rs::run_agent_with_bin
 104 crates/srv-core/src/ambient/cli.rs::invoke_haiku
 124 crates/srv-core/src/ambient/digest.rs::extract_digest_parts
 124 crates/srv-core/src/backend/agent_config.rs::build_config_files
@@ -266,7 +266,6 @@
 133 crates/srv/src/server/http_viewer_input.rs::handle_viewer_input
 102 crates/srv/src/server/jekt_files.rs::receive
 104 crates/srv/src/server/jekt_hold.rs::hold_with_reason
-238 crates/srv/src/server/mux_obj_bridge.rs::dispatch_event
 124 crates/srv/src/server/muxspect_handlers.rs::handle_muxspect_conversations
 118 crates/srv/src/server/muxspect_handlers.rs::handle_muxspect_find
 170 crates/srv/src/server/reactive.rs::handle_reactive_register
