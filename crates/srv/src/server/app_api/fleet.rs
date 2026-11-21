@@ -98,7 +98,7 @@ pub(crate) struct BroadcastOutcome {
     pub result: Result<(), String>,
 }
 
-const NO_REGISTERED_AGENT: &str =
+pub(super) const NO_REGISTERED_AGENT: &str =
     "no registered agent for this block (not a live agent pane, or not yet registered)";
 
 /// The broadcast logic, with srv's two touch points passed in so it can be tested
@@ -295,6 +295,10 @@ pub(crate) struct BroadcastForward<'a> {
     pub recipients: usize,
 }
 
+// The receiving end, and the confirmation that decides how a forward is delivered (fleet_forward.rs).
+use super::fleet_forward::vouch_for_forward;
+pub(crate) use super::fleet_forward::{body_digest, confirm_forward, deliver_forwarded_broadcast};
+
 /// Asks the instance at `local_url` (another channel on this machine, its
 /// `auth_key` from the shared registry, same user) to deliver one broadcast.
 /// A channel from before the route answers 404 and is named as such, for that
@@ -332,43 +336,6 @@ pub(crate) async fn forward_broadcast_to_channel(
     } else {
         Err(body.get("error").and_then(|v| v.as_str()).unwrap_or("cross-channel forward failed").to_string())
     }
-}
-
-/// The receiving end of `forward_broadcast_to_channel`: builds the header here,
-/// from the target's own agent id, and delivers it as any broadcast turn
-/// (`MessageOrigin::broadcast()`). Audited on this side too, naming where it came
-/// from.
-pub(crate) async fn deliver_forwarded_broadcast(
-    state: &AppState,
-    block_id: &str,
-    body: &str,
-    msg_id: &str,
-    recipients: usize,
-) -> Result<(), String> {
-    let result = match state.reactive_handler.get_agent_by_block(block_id) {
-        None => Err(NO_REGISTERED_AGENT.to_string()),
-        Some(agent) => {
-            let text = broadcast_turn_message(&agent.agent_id, recipients, msg_id, body);
-            let deps = AgentTurnDeps::from_state(state);
-            deliver_broadcast_turn(&deps, block_id.to_string(), text, MessageOrigin::broadcast()).await
-        }
-    };
-    let target = state
-        .reactive_handler
-        .get_agent_by_block(block_id)
-        .map(|a| a.agent_id)
-        .unwrap_or_else(|| block_id.to_string());
-    state.reactive_handler.log_fleet_action_audit(
-        None,
-        &target,
-        block_id,
-        FLEET_BROADCAST_AUDIT_ACTION,
-        result.is_ok(),
-        result.as_ref().err().map(String::as_str),
-        msg_id,
-        Some("forwarded from another channel on this machine"),
-    );
-    result
 }
 
 pub(crate) async fn fleet_broadcast_impl(
@@ -432,6 +399,7 @@ pub(crate) async fn fleet_broadcast_impl(
                 match routes.get(&block_id) {
                     Some(BroadcastRoute::Channel(entry)) => {
                         let forward = BroadcastForward { block_id: &block_id, body: &body, msg_id: &msg_id, recipients };
+                        vouch_for_forward(&forward);
                         forward_broadcast_to_channel(&client, &entry.local_url, &entry.auth_key, &forward).await
                     }
                     Some(BroadcastRoute::Lan { route, agent }) => match lan_sender.as_ref() {

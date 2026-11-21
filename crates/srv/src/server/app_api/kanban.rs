@@ -453,6 +453,11 @@ struct ActRequest {
     /// ui_change: whether the task changes the UI (then it needs media to be handed in for review).
     #[serde(default)]
     ui_change: Option<bool>,
+    /// pr_link, pr_unlink, pr_dismiss: the pull request, as an address or `owner/repo#12`; or by `repo` and `number`.
+    #[serde(default)]
+    pr: Option<String>,
+    #[serde(default)]
+    number: Option<u64>,
     /// create: the board to file on (name or slug); the default board when absent. move: the board
     /// to move the task to.
     #[serde(default)]
@@ -670,6 +675,11 @@ pub(crate) async fn act_as(state: &AppState, data: Value, actor: &Actor) -> Resu
     if !actor.is_operator && matches!(req.action.as_str(), "accept" | "send_back") {
         return Err(format!("{}: an agent decides with Tasks {}", req.action, req.action));
     }
+    // A card's pull requests are the operator's to correct here; the holder does it with `Tasks update`
+    // (`links.pr` adds one, `links.unpr` takes one off), which records the agent by name.
+    if !actor.is_operator && req.action.starts_with("pr_") {
+        return Err(format!("{}: an agent changes a task's pull requests with Tasks update (links.pr, links.unpr)", req.action));
+    }
     // The boards themselves (SPEC_SHARED_KANBAN_ACROSS_MACHINES_2026_11_01.md §9.2): the same moves the
     // MuxAPI has, as the operator's. An agent makes them through `Tasks`, which records it by name.
     if let Some(board_action) = req.action.strip_prefix("board_") {
@@ -713,6 +723,10 @@ pub(crate) async fn act_as(state: &AppState, data: Value, actor: &Actor) -> Resu
         },
         "media_remove" => act.media_remove()?,
         "ui_change" => act.ui_change()?,
+        "pr_link" => act.pr_link()?,
+        "pr_unlink" => act.pr_unlink()?,
+        "pr_unmatched" => act.pr_unmatched()?,
+        "pr_dismiss" => act.pr_dismiss()?,
         other => return Err(format!("kanban.act: unknown action {other:?}")),
     };
     changed(state);

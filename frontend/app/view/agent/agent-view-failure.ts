@@ -41,7 +41,8 @@ export function useFailureHandling(p: {
     const retryLastTurn = () => {
         const last = lastUserMessage(p.shown.getDocument());
         if (last) {
-            void commands.sendWithState(last.text, last.attachments, last.system);
+            // The conversation holds it from the first send: a retry delivers it again but adds no second copy.
+            void commands.sendWithState(last.text, last.attachments, last.system, true);
         } else {
             log("agent", "Retry — no prior message to re-send; relaunching the agent");
             void status.startLaunchFlow();

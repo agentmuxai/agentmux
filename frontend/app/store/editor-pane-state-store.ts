@@ -44,6 +44,7 @@ import {
     newDocTabId,
     openDoc,
     promoteDoc,
+    setPinned,
     updateDoc,
 } from "@/app/doc-tabs/doc-tabs";
 import { pickHandler } from "@/util/handler-map";
@@ -218,6 +219,8 @@ export type EditorPaneCommand =
           source?: EditorCommandSource;
       }
     | { type: "PinTab"; tabId: string; source?: EditorCommandSource }
+    /** The tab menu's Pin and Unpin (`setPinned`): a pinned tab stays at the left and is spared by Close Others. */
+    | { type: "SetTabPinned"; tabId: string; pinned: boolean; source?: EditorCommandSource }
     | { type: "SwitchTab"; tabId: string; source?: EditorCommandSource }
     | { type: "CycleTab"; delta: number; source?: EditorCommandSource }
     | { type: "ReorderTab"; tabId: string; toIndex: number; source?: EditorCommandSource }
@@ -481,6 +484,13 @@ function onPinTab(state: EditorPaneState, command: Cmd<"PinTab">): ReducerResult
     const tab = tabById(doc, command.tabId);
     if (!tab?.preview) return same(state);
     return next(state, promoteDoc(doc, tab.id));
+}
+
+function onSetTabPinned(state: EditorPaneState, command: Cmd<"SetTabPinned">): ReducerResult {
+    const doc = state.doc;
+    const tab = tabById(doc, command.tabId);
+    if (!tab || tab.pinned === command.pinned) return same(state);
+    return next(state, setPinned(doc, tab.id, command.pinned));
 }
 
 function onSetTabViewer(state: EditorPaneState, command: Cmd<"SetTabViewer">): ReducerResult {
@@ -747,6 +757,7 @@ type Handlers = {
 const HANDLERS: Handlers = {
     OpenFile: onOpenFile,
     PinTab: onPinTab,
+    SetTabPinned: onSetTabPinned,
     SetTabViewer: onSetTabViewer,
     SetFollowFolder: onSetFollowFolder,
     RetargetTab: onRetargetTab,

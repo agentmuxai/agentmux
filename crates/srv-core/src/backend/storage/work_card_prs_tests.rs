@@ -207,6 +207,32 @@ fn an_address_set_on_the_card_joins_the_list_with_its_source_and_keeps_the_ones_
 }
 
 #[test]
+fn taking_off_the_cards_own_pull_request_moves_its_address_to_the_newest_one_left() {
+    let (s, _d) = store();
+    add(&s, "a");
+    let set = |url: &str| s.work_card_update("a", &CardUpdate { pr_url: Some(url.into()), ..Default::default() }, 5).unwrap();
+    set("https://github.com/o/r/pull/1");
+    s.work_card_pr_link("a", "o/r", 2, PrSource::Person, 6).unwrap();
+    set("https://github.com/o/r/pull/3");
+    s.work_card_pr_apply("a", &report("o/r", 3, CardPrState::Merged, 20), PrSource::Holder, 21).unwrap();
+    let url = |s: &Store| s.work_board_get("a").unwrap().unwrap().card.pr_url;
+
+    // One that is not the card's address changes nothing about it.
+    assert!(s.work_card_pr_unlink("a", "o/r", 2, 30).unwrap());
+    assert_eq!(url(&s), "https://github.com/o/r/pull/3");
+
+    // The card's own address: it moves to the newest left, and the old one's merge goes with it.
+    assert!(s.work_card_pr_unlink("a", "o/r", 3, 31).unwrap());
+    assert_eq!(url(&s), "https://github.com/o/r/pull/1");
+    assert!(s.work_card_prs("a").unwrap().iter().all(|p| p.number != 3));
+
+    // The last one: the address is empty.
+    assert!(s.work_card_pr_unlink("a", "o/r", 1, 32).unwrap());
+    assert_eq!(url(&s), "");
+    assert!(s.work_card_prs("a").unwrap().is_empty());
+}
+
+#[test]
 fn a_hand_in_link_is_recorded_as_one() {
     let (s, _d) = store();
     add(&s, "a");

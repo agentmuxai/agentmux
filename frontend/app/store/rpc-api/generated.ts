@@ -109,12 +109,14 @@ import type { CommandAgentNoticeSetGrantData } from "@/types/rpc/CommandAgentNot
 import type { CommandAgentOpenData } from "@/types/rpc/CommandAgentOpenData";
 import type { CommandAgentOpenTailData } from "@/types/rpc/CommandAgentOpenTailData";
 import type { CommandAgentPaneUnregisterData } from "@/types/rpc/CommandAgentPaneUnregisterData";
+import type { CommandAgentQuitData } from "@/types/rpc/CommandAgentQuitData";
 import type { CommandAgentSessionAppendOutputData } from "@/types/rpc/CommandAgentSessionAppendOutputData";
 import type { CommandAgentSessionArchiveData } from "@/types/rpc/CommandAgentSessionArchiveData";
 import type { CommandAgentSessionListArchivesData } from "@/types/rpc/CommandAgentSessionListArchivesData";
 import type { CommandAgentSessionReadData } from "@/types/rpc/CommandAgentSessionReadData";
 import type { CommandAgentSessionWriteStateData } from "@/types/rpc/CommandAgentSessionWriteStateData";
 import type { CommandAgentSetSeatData } from "@/types/rpc/CommandAgentSetSeatData";
+import type { CommandAgentShutdownData } from "@/types/rpc/CommandAgentShutdownData";
 import type { CommandAgentShutdownKeepData } from "@/types/rpc/CommandAgentShutdownKeepData";
 import type { CommandAgentShutdownNowData } from "@/types/rpc/CommandAgentShutdownNowData";
 import type { CommandAgentStartData } from "@/types/rpc/CommandAgentStartData";
@@ -861,6 +863,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<AgentShutdownKeepResult> {
     return client.rpcCall("agentshutdownkeep", data, opts);
+  },
+  // command "agentquit"
+  AgentQuitCommand(client: RpcClient, data: CommandAgentQuitData, opts?: RpcOpts): Promise<any> {
+    return client.rpcCall("agentquit", data, opts);
+  },
+  // command "agentshutdown"
+  AgentShutdownCommand(client: RpcClient, data: CommandAgentShutdownData, opts?: RpcOpts): Promise<any> {
+    return client.rpcCall("agentshutdown", data, opts);
   },
   // command "agentshutdownnow"
   AgentShutdownNowCommand(

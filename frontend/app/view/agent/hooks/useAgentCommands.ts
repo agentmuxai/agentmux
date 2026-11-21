@@ -191,14 +191,16 @@ export interface UseAgentCommands {
         authFailureToPreserve?: PaneFailure | null,
         attachments?: AttachmentRef[],
         system?: boolean,
+        resend?: boolean,
     ) => Promise<void>;
     /**
      * `sendMessage` as the composer and the panes around it call it: reads what must be read
      * before `TurnStart` clears it (is a turn running, is an auth failure showing), starts the
      * turn when the agent is idle, then sends. A `!cmd` opens the shell drawer first, so its
-     * output is visible.
+     * output is visible. `resend`: the same message again (a Retry), which the conversation
+     * already holds: srv delivers it and records no second copy, and the pane adds no second node.
      */
-    sendWithState: (message: string, attachments?: AttachmentRef[], system?: boolean) => Promise<void>;
+    sendWithState: (message: string, attachments?: AttachmentRef[], system?: boolean, resend?: boolean) => Promise<void>;
     /**
      * Esc on an empty composer: a message held behind the running turn goes out now, otherwise
      * the turn is stopped. Never both: stopping would kill the session the delivery wrote into.
@@ -293,9 +295,9 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     const { picker, help, btw } = s;
 
     return {
-        sendMessage: (message, wasAlreadyWorking, authFailureToPreserve, attachments, system) =>
-            sendMessage(opts, s, message, wasAlreadyWorking, authFailureToPreserve, attachments, system),
-        sendWithState: (message, attachments, system) => sendWithState(opts, s, message, attachments, system),
+        sendMessage: (message, wasAlreadyWorking, authFailureToPreserve, attachments, system, resend) =>
+            sendMessage(opts, s, message, wasAlreadyWorking, authFailureToPreserve, attachments, system, resend),
+        sendWithState: (message, attachments, system, resend) => sendWithState(opts, s, message, attachments, system, resend),
         escapeOnEmptyComposer: () => escapeOnEmptyComposer(opts, s),
         flushHeldMessages: () => flushHeldMessages(opts, s),
         recallLatestHeld: () => recallLatestHeld(opts, s),
@@ -349,6 +351,8 @@ interface CommandsState {
     attachmentsByMessage: Map<string, AttachmentRef[]>;
     /** Ids of the messages the pane sends on AgentMux's behalf, until their send is made. */
     systemMessages: Set<string>;
+    /** Ids of the messages sent again (a Retry), until their send is made: srv records no second copy of them. */
+    resendMessages: Set<string>;
     heldQueue: HeldMessage[];
     /** The drain in progress, so a caller can await it. */
     inFlightHeldFlush: Promise<void> | null;
@@ -401,6 +405,7 @@ function createCommandsState(opts: UseAgentCommandsOptions): CommandsState {
         pendingExpiryTimers,
         attachmentsByMessage,
         systemMessages,
+        resendMessages: new Set<string>(),
         heldQueue,
         inFlightHeldFlush: null,
         controllerRefreshPendingUntilIdle: false,
@@ -655,6 +660,8 @@ interface SendCall {
     /** The pane sends it on AgentMux's behalf (the start-up document, the opening update): srv
      *  records it as AgentMux's words, not the person's. */
     system: boolean;
+    /** The same message again (a Retry): the conversation already holds it, so it gets no second node or record. */
+    resend: boolean;
 }
 
 async function sendMessage(
@@ -665,6 +672,7 @@ async function sendMessage(
     authFailureToPreserve: PaneFailure | null = null,
     attachments: AttachmentRef[] = [],
     system = false,
+    resend = false,
 ): Promise<void> {
     // Crash trace for "user pressed send": BlockErrorBoundary dumps the
     // trail on a renderer fault (frontend/log/render-trail.ts).
@@ -675,7 +683,7 @@ async function sendMessage(
     // Intercept `!` and slash commands FIRST — client-side ones must not
     // touch the backend queue. Unknown `/foo` falls through to a turn.
     const trimmed = message.trim();
-    const call: SendCall = { message, wasAlreadyWorking, authFailureToPreserve, attachments, system };
+    const call: SendCall = { message, wasAlreadyWorking, authFailureToPreserve, attachments, system, resend };
 
     const bangCommand = attachments.length > 0 ? null : parseBangCommand(trimmed);
     if (bangCommand !== null) {
@@ -703,6 +711,7 @@ async function sendMessage(
     const messageId = `user_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     if (attachments.length > 0) s.attachmentsByMessage.set(messageId, attachments);
     if (system) s.systemMessages.add(messageId);
+    if (resend) s.resendMessages.add(messageId);
 
     queuePendingMessage(opts, call, messageId);
 
@@ -801,8 +810,8 @@ async function runSlashCommand(opts: UseAgentCommandsOptions, s: CommandsState, 
 }
 
 function queuePendingMessage(opts: UseAgentCommandsOptions, call: SendCall, messageId: string): void {
-    const { message, wasAlreadyWorking, attachments, system } = call;
-    // Into the pending zone, not `document`: acceptance promotes it.
+    const { message, wasAlreadyWorking, attachments, system, resend } = call;
+    // Into the pending zone, not `document`: acceptance promotes it (a resend is only taken off: it adds no node).
     // Soft dispatch: a cascade can dispose the pane first (retro
     // 2026-05-23, agent-pane cascade → replaceChild quick-win).
     trail("agent:dispatch:PendingMessageQueued", { messageId });
@@ -815,6 +824,7 @@ function queuePendingMessage(opts: UseAgentCommandsOptions, call: SendCall, mess
             enqueuedWhileBusy: wasAlreadyWorking,
             ...(attachments.length > 0 ? { attachments } : {}),
             ...(system ? { system: true } : {}),
+            ...(resend ? { resend: true } : {}),
         },
         "user",
     );
@@ -1073,6 +1083,7 @@ async function postToBackend(
     // backend acceptance (#752).
     const attachments = s.attachmentsByMessage.get(messageId);
     const system = s.systemMessages.has(messageId);
+    const resend = s.resendMessages.delete(messageId);
     try {
         await RpcApi.AgentInputCommand(TabRpcClient, {
             blockid: opts.blockId,
@@ -1080,6 +1091,7 @@ async function postToBackend(
             message_id: messageId,
             ...(attachments?.length ? { attachments } : {}),
             ...(system ? { system: true } : {}),
+            ...(resend ? { resend: true } : {}),
             ...(joinsTurn != null ? { joins_turn: joinsTurn } : {}),
         });
         s.attachmentsByMessage.delete(messageId);
@@ -1313,7 +1325,7 @@ function stopAgent(opts: UseAgentCommandsOptions): void {
     });
 }
 
-function sendWithState(opts: UseAgentCommandsOptions, s: CommandsState, message: string, attachments: AttachmentRef[] = [], system = false): Promise<void> {
+function sendWithState(opts: UseAgentCommandsOptions, s: CommandsState, message: string, attachments: AttachmentRef[] = [], system = false, resend = false): Promise<void> {
     if (isBangCommand(message)) opts.model.dispatchPane({ type: "DetailsExpand" }, "user");
     // Read before `TurnStart`, which clears the failure and moves the phase: the queue marks a
     // message `enqueuedWhileBusy` from the first, and a rejected send puts the auth row back from
@@ -1323,7 +1335,7 @@ function sendWithState(opts: UseAgentCommandsOptions, s: CommandsState, message:
     const authFailureToPreserve = isAuthFailure(live) ? live : null;
     // A running turn is not restarted: that would flicker it back to "Submitting".
     if (!wasAlreadyWorking) opts.model.dispatchPane({ type: "TurnStart", at: Date.now(), content: message }, "user");
-    return sendMessage(opts, s, message, wasAlreadyWorking, authFailureToPreserve, attachments, system);
+    return sendMessage(opts, s, message, wasAlreadyWorking, authFailureToPreserve, attachments, system, resend);
 }
 
 function escapeOnEmptyComposer(opts: UseAgentCommandsOptions, s: CommandsState): void {
