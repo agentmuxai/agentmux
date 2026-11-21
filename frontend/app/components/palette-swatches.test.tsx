@@ -52,6 +52,21 @@ describe("PaletteSwatches", () => {
         expect(new Set(all.map(paint)).size).toBe(14);
     });
 
+    it("draws a sample of what is picked (its fill and its bar) when it is given one, and a plain swatch otherwise", () => {
+        const sample = (slot: { id: string }) => ({ fill: `#00000${PALETTE.findIndex((s) => s.id === slot.id) % 10}`, bar: "#ffffff" });
+        const { container } = render(() => <PaletteSwatches label="c" value={null} onSelect={() => {}} sample={sample} />);
+        const all = swatches(container);
+        expect(all).toHaveLength(14);
+        all.forEach((b, i) => {
+            expect(b.classList.contains("palette-swatch--sample")).toBe(true);
+            expect(b.style.getPropertyValue("--swatch-fill")).toBe(`#00000${i % 10}`);
+            expect(b.style.getPropertyValue("--swatch-bar")).toBe("#ffffff");
+            expect(b.style.backgroundColor).toBe("");
+        });
+        const plain = render(() => <PaletteSwatches label="c" value={null} onSelect={() => {}} />);
+        for (const b of swatches(plain.container)) expect(b.classList.contains("palette-swatch--sample")).toBe(false);
+    });
+
     it("leaves the columns to its styles (two rows of 7, with the none swatch in a column of its own) unless asked", () => {
         const grid = (c: HTMLElement) => c.querySelector(".palette-swatches") as HTMLElement;
         const plain = render(() => <PaletteSwatches label="c" value={null} onSelect={() => {}} />);

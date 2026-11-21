@@ -3,7 +3,21 @@
 
 import { describe, expect, it } from "vitest";
 
-import { diskFreeColor, diskTooltip, formatDiskGb, parseDiskVolumes, watchVolumeColor } from "./disk-volumes";
+import { diskFreeColor, diskPillLabel, diskTooltip, formatDiskGb, parseDiskVolumes, watchVolumeColor } from "./disk-volumes";
+
+describe("diskPillLabel", () => {
+    it("says the figure is what is free, so it cannot be read as 'used'", () => {
+        expect(diskPillLabel(98)).toBe("Disk 98% free");
+        expect(diskPillLabel(98.4)).toBe("Disk 98% free");
+        expect(diskPillLabel(99.6)).toBe("Disk 100% free");
+    });
+
+    it("says the same at a low value, where the colour (unchanged) is the warning", () => {
+        expect(diskPillLabel(6.2)).toBe("Disk 6% free");
+        expect(watchVolumeColor(6.2, null)).toBe("var(--error-text-color)");
+        expect(watchVolumeColor(98, null)).toBe("var(--secondary-text-color)");
+    });
+});
 
 describe("parseDiskVolumes", () => {
     it("parses Windows mounts whose own colons/backslashes sit inside the key", () => {

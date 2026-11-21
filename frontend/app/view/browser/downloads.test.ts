@@ -45,22 +45,36 @@ describe("applyDownloadUpdate", () => {
         expect(cancelled[0].state).toBe("cancelled");
     });
 
+    it("keeps a saved download's note, such as that it was saved without asking", () => {
+        const note = "saved without asking: the Save As window could not open";
+        const done = applyDownloadUpdate([], upd({ state: "done", path: "/d/report.pdf", reason: note }));
+        expect(done[0].reason).toBe(note);
+        expect(applyDownloadUpdate([], upd({ state: "done", path: "/d/report.pdf" }))[0].reason).toBeUndefined();
+    });
+
     it("does not bring a finished row back with a late running update", () => {
         const done = applyDownloadUpdate([], upd({ state: "done", path: "/x/report.pdf" }));
         expect(applyDownloadUpdate(done, upd({ state: "running" }))).toBe(done);
     });
 
-    it("shows the flood line once, tied to no download", () => {
+    it("shows the flood line once, tied to no download, and counts the skipped downloads", () => {
         const line = upd({
             download_id: null,
             state: "ignored",
             reason: "This page tried to start more downloads. Ignored.",
         });
         let rows = applyDownloadUpdate([], line);
-        rows = applyDownloadUpdate(rows, line);
+        expect(rows[0].reason).toBe("1 download skipped: this page started too many at once.");
+        for (let i = 0; i < 6; i++) rows = applyDownloadUpdate(rows, line);
         expect(rows).toHaveLength(1);
-        expect(rows[0]).toMatchObject({ key: "ignored", id: null, state: "ignored" });
-        expect(rows[0].reason).toBe("This page tried to start more downloads. Ignored.");
+        expect(rows[0]).toMatchObject({ key: "ignored", id: null, state: "ignored", skipped: 7 });
+        expect(rows[0].reason).toBe("7 downloads skipped: this page started too many at once.");
+        // A download's own row does not change the count.
+        rows = applyDownloadUpdate(rows, upd({ download_id: 4 }));
+        expect(rows.find((r) => r.key === "ignored")?.skipped).toBe(7);
+        // Once the line is hidden or folded, the next skip starts at one.
+        rows = dismissDownload(rows, "ignored");
+        expect(applyDownloadUpdate(rows, line).find((r) => r.key === "ignored")?.skipped).toBe(1);
     });
 
     it("keeps at most MAX_ROWS rows, dropping the oldest finished one and never a running one", () => {

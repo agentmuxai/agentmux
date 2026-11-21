@@ -10,8 +10,8 @@
  * panel that covers the pointer closes, reopens under the pointer, and flickers
  * at the enter delay.
  *
- * The panel always sits NEAR THE POINTER, like every other peek: below it, or
- * above it, with `CURSOR_GAP_PX` of clearance. Horizontal and vertical are
+ * The panel always sits NEAR THE POINTER, like every other peek: above it when
+ * there is room, else below it, with `CURSOR_GAP_PX` of clearance. Horizontal and vertical are
  * decided separately.
  *
  * Horizontal (`computePeekHorizontal`)
@@ -29,7 +29,7 @@
  *
  * Vertical (`computePeekVertical`)
  *  - Fits on one side of the pointer inside the transcript container: placed
- *    there (what it always did).
+ *    there, above the pointer first.
  *  - Otherwise it leaves the container, up to the window edge, on the side of
  *    the pointer with more room, and its HEIGHT is cut to that room so it can
  *    never reach the pointer; the rest scrolls inside it. The earlier code
@@ -224,23 +224,29 @@ export function computePeekVertical(input: PeekVerticalInput): PeekVertical {
     const belowTop = flushToRow ? Math.min(mouseY + CURSOR_GAP_PX, row.bottom) : mouseY + CURSOR_GAP_PX;
     const aboveBottom = flushToRow ? Math.max(mouseY - CURSOR_GAP_PX, row.top) : mouseY - CURSOR_GAP_PX;
 
-    // Fits on one side of the pointer, inside the container.
-    const containerLimit = container.bottom - BOTTOM_MARGIN_PX;
-    if (belowTop + h <= containerLimit) {
-        return { top: Math.max(belowTop, container.top), maxHeight: h, leavesContainer: false, scrolls: false };
-    }
+    // Fits on one side of the pointer, inside the container: above it when there is room (the pointer's own
+    // wheel and text are below it, never under it), else below.
     const aboveTop = aboveBottom - h;
     if (aboveTop >= container.top) {
         return { top: aboveTop, maxHeight: h, leavesContainer: false, scrolls: false };
     }
+    const containerLimit = container.bottom - BOTTOM_MARGIN_PX;
+    if (belowTop + h <= containerLimit) {
+        return { top: Math.max(belowTop, container.top), maxHeight: h, leavesContainer: false, scrolls: false };
+    }
 
-    // Leaves the container: the side of the pointer with more room, height cut
-    // to that room so it cannot reach the pointer.
-    const roomBelow = Math.max(0, windowBottom - belowTop);
-    const roomAbove = Math.max(0, aboveBottom - VIEWPORT_MARGIN_PX);
-    const useBelow = h <= roomBelow || (h > roomAbove && roomBelow >= roomAbove);
+    // Leaves the container: above the pointer if it fits there whole, else the side of the pointer with more
+    // room, height cut to that room so it cannot reach the pointer.
+    // Both edges are held inside the window: a pinned panel follows its row as the transcript scrolls, and a row
+    // that has gone past the window's bottom (or top) must not take the panel with it, or all the room "above" a row
+    // below the window grew the panel with every notch until it hung over the composer.
+    const nearEdge = Math.max(belowTop, VIEWPORT_MARGIN_PX);
+    const farEdge = Math.min(aboveBottom, windowBottom);
+    const roomBelow = Math.max(0, windowBottom - nearEdge);
+    const roomAbove = Math.max(0, farEdge - VIEWPORT_MARGIN_PX);
+    const useBelow = h > roomAbove && (h <= roomBelow || roomBelow >= roomAbove);
     const maxHeight = Math.min(h, useBelow ? roomBelow : roomAbove);
-    const top = useBelow ? belowTop : aboveBottom - maxHeight;
+    const top = useBelow ? nearEdge : farEdge - maxHeight;
     return {
         top,
         maxHeight,

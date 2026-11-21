@@ -4,9 +4,10 @@
 import { Show, type JSX } from "solid-js";
 import { cpuColor } from "./cpu-color";
 import { CpuCoresPopover } from "./CpuCoresPopover";
-import { diskTooltip, watchVolumeColor } from "./disk-volumes";
+import { diskPillLabel, diskTooltip, watchVolumeColor } from "./disk-volumes";
 import { DiskVolumesPopover } from "./DiskVolumesPopover";
-import { GpuReadout, MemReadouts, RateReadouts } from "./SystemStatsParts";
+import { LowDiskNotice } from "./LowDiskNotice";
+import { GpuReadout, MemReadouts, RateReadouts, UiBusyReadout } from "./SystemStatsParts";
 import { createSystemStats } from "./SystemStatsState";
 
 const SystemStats = (): JSX.Element => {
@@ -20,6 +21,9 @@ const SystemStats = (): JSX.Element => {
         diskPanelOpen,
         setDiskPanelOpen,
         toggleDiskPanel,
+        lowDisk,
+        lowDiskOpen,
+        dismissLowDisk,
     } = state;
     let cpuButtonRef: HTMLButtonElement | undefined;
     let diskButtonRef: HTMLButtonElement | undefined;
@@ -44,6 +48,7 @@ const SystemStats = (): JSX.Element => {
                     <Show when={cpuPanelOpen()}>
                         <CpuCoresPopover anchor={cpuButtonRef} onClose={() => setCpuPanelOpen(false)} />
                     </Show>
+                    <UiBusyReadout />
                     <GpuReadout s={s} />
                     <MemReadouts s={s} />
                     {/* Free-space share of the watched volume: the page-file drive on
@@ -74,7 +79,7 @@ const SystemStats = (): JSX.Element => {
                             aria-haspopup="dialog"
                             aria-expanded={diskPanelOpen()}
                         >
-                            Disk {Math.round(s().watchVolumeFreePct!)}%
+                            {diskPillLabel(s().watchVolumeFreePct!)}
                         </button>
                         <Show when={diskPanelOpen()}>
                             <DiskVolumesPopover
@@ -82,6 +87,11 @@ const SystemStats = (): JSX.Element => {
                                 initialVolumes={diskVolumes()}
                                 onClose={() => setDiskPanelOpen(false)}
                             />
+                        </Show>
+                        {/* A host that pushes no health signals (a browser tab): the panel for low free space, opened once
+                            for each crossing of the desktop's lines (low-disk.ts). */}
+                        <Show when={lowDiskOpen() && lowDisk()}>
+                            {(notice) => <LowDiskNotice anchor={diskButtonRef} notice={notice()} onDismiss={dismissLowDisk} />}
                         </Show>
                     </Show>
                     <RateReadouts s={s} />

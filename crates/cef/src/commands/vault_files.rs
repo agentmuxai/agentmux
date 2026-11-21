@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
 
+use super::file_dialog::{ask, DialogSpec, Kind};
 use crate::state::AppState;
 
 /// The file the person last picked to import, by the id the page was given.
@@ -63,13 +64,8 @@ pub async fn export(state: &Arc<AppState>, args: &Value) -> Result<Value, String
         _ => ("vault", "vault", "AgentMux Vault"),
     };
     let name = suggested_name(args.get("default_name").and_then(Value::as_str).unwrap_or(""), extension);
-    let path = tokio::task::spawn_blocking(move || {
-        let _guard = super::platform::host_dialog_guard();
-        rfd::FileDialog::new().set_title("Export the Vault").set_file_name(name).add_filter(filter, &[extension]).save_file()
-    })
-    .await
-    .map_err(|e| format!("vault_export: {e}"))?;
-    let Some(mut path) = path else { return Ok(json!({ "cancelled": true })) };
+    let spec = DialogSpec::new(Kind::Save, "Export the Vault").file_name(name).filter(filter, &[extension]);
+    let Some(mut path) = ask(spec, "vault_export").await? else { return Ok(json!({ "cancelled": true })) };
     if path.extension().is_none() {
         path.set_extension(extension);
     }
@@ -106,13 +102,10 @@ async fn export_plain(state: &Arc<AppState>, args: &Value) -> Result<Value, Stri
             return Err("Exporting the Vault unencrypted needs this computer to confirm it is you first, and it can't yet on this system. Export a .vault file instead.".into());
         }
         let name = suggested_name(args.get("default_name").and_then(Value::as_str).unwrap_or(""), format);
-        let path = tokio::task::spawn_blocking(move || {
-            let _guard = super::platform::host_dialog_guard();
-            rfd::FileDialog::new().set_title("Export the Vault, unencrypted").set_file_name(name).add_filter(if format == "json" { "JSON" } else { "CSV" }, &[format]).save_file()
-        })
-        .await
-        .map_err(|e| format!("vault_export: {e}"))?;
-        let Some(mut path) = path else { return Ok(json!({ "cancelled": true })) };
+        let spec = DialogSpec::new(Kind::Save, "Export the Vault, unencrypted")
+            .file_name(name)
+            .filter(if format == "json" { "JSON" } else { "CSV" }, &[format]);
+        let Some(mut path) = ask(spec, "vault_export").await? else { return Ok(json!({ "cancelled": true })) };
         if path.extension().is_none() {
             path.set_extension(format);
         }
@@ -148,19 +141,12 @@ async fn export_plain(state: &Arc<AppState>, args: &Value) -> Result<Value, Stri
 pub async fn import(state: &Arc<AppState>, args: &Value) -> Result<Value, String> {
     let wanted = args.get("pick_id").and_then(Value::as_str).unwrap_or("").to_string();
     let (pick_id, path) = if wanted.is_empty() {
-        let picked = tokio::task::spawn_blocking(|| {
-            let _guard = super::platform::host_dialog_guard();
-            // Every export AgentMux reads: its own, other managers' CSV and JSON, .env.
-            rfd::FileDialog::new()
-                .set_title("Import into the Vault")
-                .add_filter("Vault and password exports", &["vault", "kdbx", "1pux", "csv", "json", "env", "txt"])
-                .add_filter("AgentMux Vault", &["vault"])
-                .add_filter("All files", &["*"])
-                .pick_file()
-        })
-        .await
-        .map_err(|e| format!("vault_import: {e}"))?;
-        let Some(path) = picked else { return Ok(json!({ "cancelled": true })) };
+        // Every export AgentMux reads: its own, other managers' CSV and JSON, .env.
+        let spec = DialogSpec::new(Kind::Open, "Import into the Vault")
+            .filter("Vault and password exports", &["vault", "kdbx", "1pux", "csv", "json", "env", "txt"])
+            .filter("AgentMux Vault", &["vault"])
+            .filter("All files", &["*"]);
+        let Some(path) = ask(spec, "vault_import").await? else { return Ok(json!({ "cancelled": true })) };
         let id = uuid::Uuid::new_v4().to_string();
         *PICKED.lock().unwrap_or_else(|e| e.into_inner()) = Some((id.clone(), path.clone()));
         // A new file starts with no key file.
@@ -181,17 +167,10 @@ pub async fn import(state: &Arc<AppState>, args: &Value) -> Result<Value, String
         *KEY_PICKED.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
     if flag("choose_key_file") {
-        let picked = tokio::task::spawn_blocking(|| {
-            let _guard = super::platform::host_dialog_guard();
-            rfd::FileDialog::new()
-                .set_title("Choose the database's key file")
-                .add_filter("KeePass key files", &["keyx", "key"])
-                .add_filter("All files", &["*"])
-                .pick_file()
-        })
-        .await
-        .map_err(|e| format!("vault_import: {e}"))?;
-        if let Some(key) = picked {
+        let spec = DialogSpec::new(Kind::Open, "Choose the database's key file")
+            .filter("KeePass key files", &["keyx", "key"])
+            .filter("All files", &["*"]);
+        if let Some(key) = ask(spec, "vault_import").await? {
             *KEY_PICKED.lock().unwrap_or_else(|e| e.into_inner()) = Some((pick_id.clone(), key));
             tracing::info!("[vault] a key file the person chose for an import");
         }

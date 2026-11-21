@@ -132,8 +132,8 @@ pub(crate) async fn handle_compact_self(
     }
     let focus_note = (provider == "codex" && req.focus.as_deref().is_some_and(|f| !f.trim().is_empty()))
         .then_some("Codex takes no focus: it compacts with its own prompt");
-    tracing::info!(block_id = %block_id, provider = %provider, focus_chars = req.focus.as_deref().map_or(0, str::len), "self-compaction scheduled");
-    tokio::spawn(compact_when_turn_ends(state, block_id, message));
+    tracing::info!(block_id = %block_id, provider = %provider, tokens = context_reading::tokens_now(&block_id), focus_chars = req.focus.as_deref().map_or(0, str::len), "self-compaction scheduled");
+    tokio::spawn(compact_when_turn_ends(state, block_id, message, container));
     Json(json!({ "status": "scheduled", "runs": "when your current turn ends", "note": focus_note })).into_response()
 }
 
@@ -292,13 +292,17 @@ pub(crate) fn compact_for_backstop(state: &AppState, block_id: &str) -> Result<(
     let (provider, container) = provider_of(state, block_id).ok_or("the pane can't be read")?;
     let message = compact_request(&provider, container, None)?;
     context_reading::schedule_compact(block_id, agentmux_common::time::now_ms_u64())?;
-    tokio::runtime::Handle::current().spawn(compact_when_turn_ends(state.clone(), block_id.to_string(), message));
+    tokio::runtime::Handle::current().spawn(compact_when_turn_ends(state.clone(), block_id.to_string(), message, container));
     Ok(())
 }
 
-/// Wait for `block_id`'s turn to end, then send `message` as AgentMux's own turn.
-async fn compact_when_turn_ends(state: AppState, block_id: String, message: String) {
-    if !wait_for_turn_end(&block_id).await {
+/// Send `message` as AgentMux's own turn once `block_id`'s turn has ended. A container agent's turn is not waited for: it
+/// runs one turn at a time from a queue, and the compaction is placed at the head of that queue, so it starts the moment
+/// the turn in flight ends and ahead of the messages already waiting. Waiting for a moment with no turn running could
+/// take as long as the queue stays full, and the compaction would then go behind it (the queue is never empty for a busy
+/// agent: the next waiting message starts the moment a turn ends).
+async fn compact_when_turn_ends(state: AppState, block_id: String, message: String, container: bool) {
+    if !container && !wait_for_turn_end(&block_id).await {
         tracing::warn!(block_id = %block_id, "self-compaction given up: the turn didn't end within 30 minutes");
         context_reading::compact_sent(&block_id, false);
         return;
@@ -316,7 +320,7 @@ async fn compact_when_turn_ends(state: AppState, block_id: String, message: Stri
     .await;
     context_reading::compact_sent(&block_id, outcome.is_ok());
     match outcome {
-        Ok(()) => tracing::info!(block_id = %block_id, "self-compaction sent"),
+        Ok(()) => tracing::info!(block_id = %block_id, tokens = context_reading::tokens_now(&block_id), "self-compaction sent"),
         Err(e) => tracing::warn!(block_id = %block_id, error = %e, "self-compaction could not be sent"),
     }
 }

@@ -63,6 +63,25 @@ fn end_row(store: &Store, exit: &Exit) -> bool {
     }
 }
 
+/// The container that ran `block_id`'s commands was started again or made anew, so nothing that ran in it before
+/// is running. A container pane files no pid (`container_tool_chunk`), so the liveness sweep can't tell and these
+/// rows would stay `running`, then read as unknown in the dock for a day. They end here, at their last sighting.
+/// Returns how many rows ended; the pane is told to re-read when any did.
+pub fn end_for_restarted_container(store: &Store, broker: &Broker, block_id: &str) -> usize {
+    match store.background_task_end_unchecked_for_block(block_id) {
+        Ok(0) => 0,
+        Ok(ended) => {
+            tracing::info!(target: "background_tasks", block_id, ended, "a container started again: its background tasks are over");
+            publish_background_task_updated(broker, block_id);
+            ended
+        }
+        Err(e) => {
+            tracing::warn!(target: "background_tasks", block_id, error = %e, "could not end the background tasks of a restarted container");
+            0
+        }
+    }
+}
+
 /// Start listening. Called once, with the app's broker and store.
 pub fn install(broker: Arc<Broker>, store: Arc<Store>) {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Exit>();
@@ -150,5 +169,38 @@ mod tests {
         assert!(!end_row(&store, &exit));
         let row = store.background_task_get("toolu_1").unwrap().unwrap();
         assert_eq!((row.status, row.ended_at_ms), (BackgroundTaskStatus::Stopped, Some(4000)));
+    }
+
+    fn state(store: &Store, id: &str) -> (BackgroundTaskStatus, Option<i64>) {
+        let row = store.background_task_get(id).unwrap().unwrap();
+        (row.status, row.ended_at_ms)
+    }
+
+    #[test]
+    fn a_restarted_container_ends_its_panes_unchecked_rows_at_their_last_sighting() {
+        let store = Store::open(std::path::Path::new(":memory:")).unwrap();
+        let broker = Broker::new();
+        // The two rows of the report: running, no pid, last seen long ago, labelled with the tool's name only.
+        store.background_task_observe("old_1", "b1", "Bash", 1000, 1000).unwrap();
+        store.background_task_observe("old_2", "b1", "Bash", 2000, 2500).unwrap();
+        assert_eq!(end_for_restarted_container(&store, &broker, "b1"), 2);
+        assert_eq!(state(&store, "old_1"), (BackgroundTaskStatus::Stopped, Some(1000)));
+        assert_eq!(state(&store, "old_2"), (BackgroundTaskStatus::Stopped, Some(2500)));
+        assert_eq!(end_for_restarted_container(&store, &broker, "b1"), 0, "a second start finds nothing to end");
+    }
+
+    #[test]
+    fn a_restarted_container_leaves_other_panes_ended_rows_and_rows_with_a_pid_alone() {
+        let store = Store::open(std::path::Path::new(":memory:")).unwrap();
+        let broker = Broker::new();
+        store.background_task_observe("other_pane", "b2", "Bash", 1000, 1000).unwrap();
+        store.background_task_observe("done", "b1", "Bash", 1000, 1000).unwrap();
+        store.background_task_complete("done", BackgroundTaskStatus::Done, 4000).unwrap();
+        store.background_task_observe("host_task", "b1", "task dev", 1000, 1000).unwrap();
+        store.background_task_set_pid("host_task", 4242).unwrap();
+        assert_eq!(end_for_restarted_container(&store, &broker, "b1"), 0);
+        assert_eq!(state(&store, "other_pane").0, BackgroundTaskStatus::Running);
+        assert_eq!(state(&store, "done"), (BackgroundTaskStatus::Done, Some(4000)));
+        assert_eq!(state(&store, "host_task").0, BackgroundTaskStatus::Running, "the sweep checks a pid");
     }
 }

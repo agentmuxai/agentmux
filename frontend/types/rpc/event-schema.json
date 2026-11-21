@@ -593,6 +593,15 @@
     }
   },
   {
+    "event": "fleetbroadcastprogress",
+    "payloadTs": {
+      "imports": [
+        "FleetBroadcastProgressEvent"
+      ],
+      "name": "FleetBroadcastProgressEvent"
+    }
+  },
+  {
     "event": "fs:renamed",
     "payloadTs": {
       "imports": [
@@ -667,6 +676,15 @@
         "InstallProgressEvent"
       ],
       "name": "InstallProgressEvent"
+    }
+  },
+  {
+    "event": "jektheld",
+    "payloadTs": {
+      "imports": [
+        "JektHeldEvent"
+      ],
+      "name": "JektHeldEvent"
     }
   },
   {
@@ -882,6 +900,15 @@
     "payloadTs": {
       "imports": [],
       "name": "null"
+    }
+  },
+  {
+    "event": "record-flags",
+    "payloadTs": {
+      "imports": [
+        "RecordFlagsEvent"
+      ],
+      "name": "RecordFlagsEvent"
     }
   },
   {
@@ -1153,6 +1180,15 @@
     "payloadTs": {
       "imports": [],
       "name": "null"
+    }
+  },
+  {
+    "event": "workspace:stop",
+    "payloadTs": {
+      "imports": [
+        "WorkspaceStopView"
+      ],
+      "name": "WorkspaceStopView"
     }
   },
   {

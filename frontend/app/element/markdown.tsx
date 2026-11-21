@@ -189,17 +189,21 @@ function resolveHyperElements(nodes: JSX.Element[]): JSX.Element[] {
 const Link = ({
     setFocusedHeading,
     props,
+    media,
 }: {
     props: JSX.AnchorHTMLAttributes<HTMLAnchorElement>;
     setFocusedHeading: (href: string) => void;
+    /** The agent's message the link is in: a path link of a container agent is opened by srv from the agent's folders. */
+    media?: MarkdownMediaOpts;
 }) => {
+    const owner = () => (media ? { blockId: media.blockId, confined: media.confined } : undefined);
     const onClick = (e: MouseEvent) => {
         const href = (props as any).href as string;
         if (href?.startsWith("#")) {
             e.preventDefault();
             setFocusedHeading(href);
         } else if (href) {
-            onLinkClick(e, href);
+            onLinkClick(e, href, owner());
         } else {
             e.preventDefault();
         }
@@ -210,7 +214,7 @@ const Link = ({
             if (e.button === 1) e.preventDefault();
             return;
         }
-        onLinkAuxClick(e, href);
+        onLinkAuxClick(e, href, owner());
     };
     return (
         <a href={(props as any).href} onClick={onClick} onAuxClick={onAuxClick}>
@@ -522,7 +526,7 @@ function createJsxRuntimeOptions(markdownComponents: ReturnType<typeof createMar
 
 function createMarkdownComponents({ props, setFocusedHeading, onClickExecute, contentBlocksMap }: MarkdownComponentDeps) {
     const markdownComponents: Record<string, any> = {
-        a: (props: any) => <Link props={props} setFocusedHeading={setFocusedHeading} />,
+        a: (linkProps: any) => <Link props={linkProps} setFocusedHeading={setFocusedHeading} media={props.media} />,
         p: (props: any) => <div class="paragraph" {...props} />,
         h1: (props: any) => <Heading props={props} hnum={1} />,
         h2: (props: any) => <Heading props={props} hnum={2} />,

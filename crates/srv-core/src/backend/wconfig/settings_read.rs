@@ -16,6 +16,7 @@ use serde_json::Value;
 
 use super::loader::jsonc_to_json;
 use super::types::{ConfigError, SettingsType};
+use super::unrecognized::{self, UnrecognizedSetting};
 
 /// What `settings.json` gave.
 pub struct SettingsRead {
@@ -27,6 +28,8 @@ pub struct SettingsRead {
     /// defaults, and the caller keeps the settings it has. True with `errors` means some keys were
     /// left out and every other key applied.
     pub readable: bool,
+    /// The keys of the file that are not settings: kept in the file, with no effect.
+    pub unrecognized: Vec<UnrecognizedSetting>,
 }
 
 impl SettingsRead {
@@ -35,6 +38,7 @@ impl SettingsRead {
             settings: SettingsType::default(),
             errors: vec![ConfigError { file: file_name(path), err, line, column }],
             readable: false,
+            unrecognized: Vec::new(),
         }
     }
 }
@@ -138,7 +142,7 @@ pub fn read_settings_file(path: &Path) -> SettingsRead {
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return SettingsRead { settings: SettingsType::default(), errors: Vec::new(), readable: true };
+            return SettingsRead { settings: SettingsType::default(), errors: Vec::new(), readable: true, unrecognized: Vec::new() };
         }
         Err(e) => return SettingsRead::unreadable(path, format!("cannot read file: {e}"), None, None),
     };
@@ -166,6 +170,8 @@ pub fn read_settings_text(path: &Path, content: &str) -> SettingsRead {
     let lines = agentmux_common::settings_file::key_lines(content).unwrap_or_default();
     let mut errors = Vec::new();
     let keys: Vec<String> = map.keys().cloned().collect();
+    let known: Vec<&str> = schema_rules().keys().map(String::as_str).collect();
+    let unrecognized = unrecognized::find(&keys, &known, &lines);
     for key in keys {
         if let Some(err) = problem_with(&key, &map[&key]) {
             map.remove(&key);
@@ -179,7 +185,7 @@ pub fn read_settings_text(path: &Path, content: &str) -> SettingsRead {
     }
 
     match serde_json::from_value::<SettingsType>(Value::Object(map)) {
-        Ok(settings) => SettingsRead { settings, errors, readable: true },
+        Ok(settings) => SettingsRead { settings, errors, readable: true, unrecognized },
         Err(e) => SettingsRead::unreadable(path, format!("JSON parse error: {e}"), None, None),
     }
 }
@@ -215,6 +221,37 @@ mod tests {
         assert_eq!(read.settings.term_theme, "dracula");
         assert_eq!(read.settings.term_scrollback, Some(5000));
         assert_eq!(read.settings.term_font_family, "Fira Code");
+    }
+
+    #[test]
+    fn keys_that_are_not_settings_are_listed_with_their_line_and_a_suggestion_and_are_not_errors() {
+        let read = read("{
+  \"term:fontsise\": 18,
+  \"my:own:note\": 1,
+  \"term:theme\": \"nord\"
+}");
+        assert!(read.readable);
+        assert!(read.errors.is_empty(), "{:?}", read.errors);
+        let listed: Vec<(&str, Option<&str>, Option<u32>)> =
+            read.unrecognized.iter().map(|u| (u.key.as_str(), u.suggestion.as_deref(), u.line)).collect();
+        assert_eq!(listed, vec![("term:fontsise", Some("term:fontsize"), Some(2)), ("my:own:note", None, Some(3))]);
+        // Kept for the file and the frontend, as before: the key is not dropped from the settings.
+        assert!(read.settings.extra.contains_key("my:own:note"));
+    }
+
+    #[test]
+    fn a_key_with_a_bad_value_is_an_error_and_not_also_unrecognized_and_connections_is_not_listed() {
+        let read = read("{
+  \"term:fontsize\": \"big\",
+  \"connections\": { \"a\": { \"ssh:hostname\": \"h\" } }
+}");
+        assert_eq!(read.errors.len(), 1);
+        assert!(read.unrecognized.is_empty(), "{:?}", read.unrecognized);
+    }
+
+    #[test]
+    fn an_unreadable_file_lists_nothing_so_the_caller_keeps_what_it_had() {
+        assert!(read("{ not json").unrecognized.is_empty());
     }
 
     #[test]

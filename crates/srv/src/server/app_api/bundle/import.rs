@@ -676,245 +676,65 @@ pub(super) async fn bundle_import_commit_impl(
     req: CommitReq,
 ) -> Result<crate::backend::rpc_types::BundleImportCommitResponse, String> {
     use crate::backend::bundle_import as bi;
-    use crate::backend::rpc_types::{BundleImportCommitResponse, BundleImportUnresolvedRequirement};
+    use crate::backend::rpc_types::BundleImportCommitResponse;
 
-                let resolved = resolve_import_input(req.file_path, req.zip_base64, req.files, preview_commit_warning_budget())
-                    .map_err(|e| format!("bundle.import.commit: {e}"))?;
+    let resolved = resolve_import_input(req.file_path, req.zip_base64, req.files, preview_commit_warning_budget())
+        .map_err(|e| format!("bundle.import.commit: {e}"))?;
 
-                // §3.0.5: reject BEFORE doing anything else on a mismatch --
-                // never a partial import against whatever content was
-                // actually given. The mode tag baked into content_digest
-                // (round 7) means this single comparison also enforces
-                // "same input mode as preview" (round 6) with no separate
-                // mode field needed.
-                if resolved.content_digest != req.expected_content_digest {
-                    return Err(
-                        "bundle.import.commit: content changed since preview (digest mismatch) — re-select and preview again"
-                            .to_string(),
-                    );
-                }
+    // §3.0.5: reject BEFORE doing anything else on a mismatch -- never a partial import against
+    // whatever content was actually given. The mode tag baked into content_digest also enforces
+    // "same input mode as preview", so no separate mode field is needed.
+    if resolved.content_digest != req.expected_content_digest {
+        return Err(
+            "bundle.import.commit: content changed since preview (digest mismatch) — re-select and preview again"
+                .to_string(),
+        );
+    }
 
-                let parsed = bi::parse_bundle_import_with_budget(&resolved.files, preview_commit_warning_budget())
-                    .map_err(|e| format!("bundle.import.commit: {e}"))?;
+    let parsed = bi::parse_bundle_import_with_budget(&resolved.files, preview_commit_warning_budget())
+        .map_err(|e| format!("bundle.import.commit: {e}"))?;
 
-                let mut warnings = resolved.intake_warnings;
-                warnings.extend(parsed.warnings.clone());
+    let mut warnings = resolved.intake_warnings;
+    warnings.extend(parsed.warnings.clone());
 
-                // codex P2, PR #2381 round 11: bundle_name must actually be
-                // substituted for parsed.name, never silently ignored.
-                // reagentx P2, PR #2382 round 3: unlike parsed.name (bounded
-                // at parse time), a client-supplied override had no length
-                // cap at all -- bound_bundle_name closes that gap the same
-                // way for both paths (a no-op when bundle_name is already
-                // parsed.name, since that's already within the cap).
-                let bundle_name = bi::bound_bundle_name(&req.bundle_name.unwrap_or_else(|| parsed.name.clone()));
+    // The bundle_name override must be substituted for parsed.name, never silently ignored.
+    // Unlike parsed.name (bounded at parse time) a client-supplied override had no length cap, so
+    // bound_bundle_name applies the same cap to both paths (a no-op when it is already parsed.name).
+    let bundle_name = bi::bound_bundle_name(&req.bundle_name.unwrap_or_else(|| parsed.name.clone()));
 
-                let instructions = if req.include_instructions { parsed.instructions.clone() } else { String::new() };
-                // ABF v0.2 §2.2: provider-scoped variants are part of the
-                // same "instructions" component, gated by the same
-                // include_instructions flag — no separate per-variant
-                // selection exists in the Phase 3 preview/commit UI.
-                let instructions_by_provider = if req.include_instructions {
-                    parsed.instructions_by_provider.clone()
-                } else {
-                    std::collections::HashMap::new()
-                };
+    let resolved_reqs = resolve_account_requirements(id_store, &parsed.requirements)
+        .map_err(|e| format!("bundle.import.commit: {e}"))?;
+    let (resolved_requirement_ids, unresolved_requirements) = split_requirements(&resolved_reqs);
 
-                // include_context_files selects by the stable `id` (round
-                // 13), never by (truncatable) display_path.
-                let selected_context_files: Vec<serde_json::Value> = parsed
-                    .context_files
-                    .iter()
-                    .filter(|cf| req.include_context_files.contains(&cf.id))
-                    .map(|cf| json!({ "path": cf.path, "content": cf.content }))
-                    .collect();
+    let now = now_ms();
+    let mut skipped_skills: Vec<String> = Vec::new();
+    let imported_skill_ids = import_selected_skills(
+        mstore,
+        identity_store,
+        &parsed,
+        &req.include_skills,
+        now,
+        &mut warnings,
+        &mut skipped_skills,
+    )?;
 
-                let resolved_reqs = resolve_account_requirements(id_store, &parsed.requirements)
-                    .map_err(|e| format!("bundle.import.commit: {e}"))?;
-                // codex P2, PR #2381 round 12: commit's response reuses the
-                // exact same bounded-display projection preview's
-                // equivalent fields use, via the shared bounded_display fn.
-                let resolved_requirement_ids: Vec<String> =
-                    resolved_reqs.iter().filter(|r| r.resolved()).map(|r| bounded_display(&r.id)).collect();
-                let unresolved_requirements: Vec<BundleImportUnresolvedRequirement> = resolved_reqs
-                    .iter()
-                    .filter(|r| !r.resolved())
-                    .map(|r| BundleImportUnresolvedRequirement {
-                        id: bounded_display(&r.id),
-                        provider: bounded_display(&r.provider),
-                        env: bounded_display(&r.env),
-                        match_count: r.match_count,
-                    })
-                    .collect();
+    let memory = commit_bundle_row(&parsed, bundle_name, req.include_instructions, &req.include_context_files, &imported_skill_ids, now);
+    if let Err(e) = id_store.bundle_upsert(&memory) {
+        let rollback_errors = rollback_skill_rows(mstore, identity_store, &imported_skill_ids);
+        return Err(with_rollback_note(format!("bundle.import.commit: {e}"), rollback_errors));
+    }
 
-                // Two-pass skill collision, recomputed server-side --
-                // §4.1 point 4's "empty rename on a colliding skill = skip"
-                // rule is enforced authoritatively here, not left to a
-                // possibly-buggy/malicious client to have honored: without
-                // this, a "duplicate_in_bundle" collision (not yet in the
-                // global catalog) would let the FIRST of two same-slug
-                // skills write successfully under its own slug even with
-                // an empty rename, since skill_upsert_unique_global alone
-                // wouldn't reject it until the second attempt.
-                let global_slugs: std::collections::HashSet<String> = mstore
-                    .skill_list_global(identity_store)
-                    .map_err(|e| format!("bundle.import.commit: {e}"))?
-                    .into_iter()
-                    .map(|item| item.skill.name)
-                    .collect();
-                let in_bundle_dupes = bi::duplicate_in_bundle_slugs(&parsed.skills);
+    // Ref tables are authoritative — bind after the bundle row exists.
+    warnings.extend(bind_imported_components(mstore, id_store, identity_store, &memory.id, &imported_skill_ids));
+    warnings.extend(mcp_servers_not_imported_warning(&parsed.mcp_servers));
 
-                let rollback_skills = |ids: &[String]| -> Vec<String> {
-                    ids.iter()
-                        .filter_map(|id| mstore.skill_delete(identity_store, id).err().map(|e| format!("{id}: {e}")))
-                        .collect()
-                };
+    broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
+    if !imported_skill_ids.is_empty() {
+        broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);
+    }
 
-                let now = now_ms();
-                let mut imported_skill_ids: Vec<String> = Vec::new();
-                let mut skipped_skills: Vec<String> = Vec::new();
-
-                // reagentx P1, PR #2382 round 3: req.include_skills is
-                // client-supplied with no length cap and no dedup by
-                // source_dir -- an unbounded/repeated array could otherwise
-                // drive an unbounded number of skill_upsert_unique_global
-                // Store writes regardless of how many skills the archive
-                // itself actually parsed to (parsed.skills is already
-                // bounded by MAX_IMPORTED_SKILLS). First occurrence wins per
-                // source_dir (matches this module's existing duplicate-
-                // reference convention elsewhere), then capped at the same
-                // MAX_IMPORTED_SKILLS the parser itself enforces.
-                let mut seen_source_dirs: std::collections::HashSet<&str> = std::collections::HashSet::new();
-                let deduped_skill_selections: Vec<&SkillSelection> = req
-                    .include_skills
-                    .iter()
-                    .filter(|s| seen_source_dirs.insert(s.source_dir.as_str()))
-                    .take(bi::MAX_IMPORTED_SKILLS)
-                    .collect();
-
-                for selection in deduped_skill_selections {
-                    let Some(skill) = parsed.skills.iter().find(|s| s.source_dir == selection.source_dir) else {
-                        continue; // source_dir not present in this parse -- nothing to import
-                    };
-                    let collision = bi::classify_skill_collision(&skill.slug, &global_slugs, &in_bundle_dupes);
-                    let non_empty_rename = selection.import_as.as_deref().filter(|s| !s.is_empty());
-
-                    if collision != "none" && non_empty_rename.is_none() {
-                        // §4.1 point 4: never silently sent through with
-                        // its original, known-conflicting slug.
-                        skipped_skills.push(bounded_display(&skill.slug));
-                        continue;
-                    }
-                    let effective_slug = non_empty_rename.map(|s| s.to_string()).unwrap_or_else(|| skill.slug.clone());
-
-                    let row = crate::backend::storage::Skill {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        name: effective_slug.clone(),
-                        trigger: effective_slug.clone(),
-                        skill_type: crate::backend::agent_config::SKILL_TYPE_AGENT_SKILL.to_string(),
-                        description: skill.description.clone(),
-                        content: skill.content.clone(),
-                        is_global: true,
-                        created_at: now,
-                        updated_at: now,
-                    };
-                    match identity_store.skill_upsert_unique_global(&row) {
-                        Ok(()) => imported_skill_ids.push(row.id),
-                        Err(crate::backend::storage::error::StoreError::Other(msg))
-                            if msg.contains("already exists") =>
-                        {
-                            // codex P2, PR #2382 round 2: effective_slug can be
-                            // the caller-supplied import_as, which has no
-                            // length bound anywhere before this point (unlike
-                            // a parsed skill.slug, implicitly bounded by the
-                            // per-entry decompression cap) -- and msg's own
-                            // text embeds the identical unbounded value a
-                            // second time (StoreError::Other's own format!
-                            // interpolates skill.name). Use a fixed message
-                            // instead of msg's text (its only informative
-                            // content, "already exists", is already implied by
-                            // the branch guard) and the shared bounded_display
-                            // projection every other warning in this handler
-                            // already uses, closing both unbounded paths at
-                            // once rather than truncating msg's text in place.
-                            warnings.push(format!("skill \"{}\": already exists", bounded_display(&effective_slug)));
-                            skipped_skills.push(bounded_display(&effective_slug));
-                        }
-                        Err(e) => {
-                            let rollback_errors = rollback_skills(&imported_skill_ids);
-                            let mut msg = format!(
-                                "bundle.import.commit: failed to create skill \"{effective_slug}\": {e}"
-                            );
-                            if !rollback_errors.is_empty() {
-                                msg.push_str(&format!(
-                                    "; additionally, rollback of {} previously-created skill(s) failed and may have left orphaned global skill row(s): {}",
-                                    rollback_errors.len(),
-                                    rollback_errors.join("; ")
-                                ));
-                            }
-                            return Err(msg);
-                        }
-                    }
-                }
-
-                let memory = Bundle {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    name: bundle_name,
-                    description: parsed.description,
-                    is_blank: false,
-                    is_global: false,
-                    // Like `description` above (and unlike instructions and
-                    // context files), provider/model are structural identity
-                    // fields, not opt-in components — there's no
-                    // include_provider toggle in the preview/commit UI, so
-                    // these always carry straight through when present.
-                    provider: parsed.provider,
-                    model: parsed.model,
-                    instructions,
-                    instructions_by_provider: serde_json::to_string(&instructions_by_provider)
-                        .unwrap_or_else(|_| "{}".to_string()),
-                    context_files: serde_json::to_string(&selected_context_files)
-                        .unwrap_or_else(|_| "[]".to_string()),
-                    mcp_servers: "[]".to_string(),
-                    skills: serde_json::to_string(&imported_skill_ids)
-                        .unwrap_or_else(|_| "[]".to_string()),
-                    sort_order: 0,
-                    created_at: now,
-                    updated_at: now,
-                    is_system: false,
-                };
-                if let Err(e) = id_store.bundle_upsert(&memory) {
-                    let rollback_errors = rollback_skills(&imported_skill_ids);
-                    let mut msg = format!("bundle.import.commit: {e}");
-                    if !rollback_errors.is_empty() {
-                        msg.push_str(&format!(
-                            "; additionally, rollback of {} previously-created skill(s) failed and may have left orphaned global skill row(s): {}",
-                            rollback_errors.len(),
-                            rollback_errors.join("; ")
-                        ));
-                    }
-                    return Err(msg);
-                }
-
-                // Ref tables are authoritative — bind after the bundle row
-                // exists.
-                warnings.extend(bind_imported_components(
-                    &mstore,
-                    &id_store,
-                    &identity_store,
-                    &memory.id,
-                    &imported_skill_ids,
-                ));
-                warnings.extend(mcp_servers_not_imported_warning(&parsed.mcp_servers));
-
-                broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
-                if !imported_skill_ids.is_empty() {
-                    broker.publish_event::<crate::backend::mps_events::SkillsChanged>(&(), vec![], 0);
-                }
-
-                // codex P1, PR #2381 round 9: bounded the same as preview's
-                // response, not left unbounded like today's bundle.import.
-                let (bounded_warnings, warnings_truncated) = bound_warnings_for_response(warnings);
+    // Bounded the same as preview's response, not left unbounded like bundle.import.
+    let (bounded_warnings, warnings_truncated) = bound_warnings_for_response(warnings);
 
     Ok(BundleImportCommitResponse {
         widgets: vec![],
@@ -926,6 +746,168 @@ pub(super) async fn bundle_import_commit_impl(
         warnings: bounded_warnings,
         warnings_truncated,
     })
+}
+
+/// The commit response's requirement lists, using the same bounded-display projection as preview.
+fn split_requirements(
+    resolved_reqs: &[RequirementResolution],
+) -> (Vec<String>, Vec<crate::backend::rpc_types::BundleImportUnresolvedRequirement>) {
+    let resolved_ids = resolved_reqs.iter().filter(|r| r.resolved()).map(|r| bounded_display(&r.id)).collect();
+    let unresolved = resolved_reqs
+        .iter()
+        .filter(|r| !r.resolved())
+        .map(|r| crate::backend::rpc_types::BundleImportUnresolvedRequirement {
+            id: bounded_display(&r.id),
+            provider: bounded_display(&r.provider),
+            env: bounded_display(&r.env),
+            match_count: r.match_count,
+        })
+        .collect();
+    (resolved_ids, unresolved)
+}
+
+/// Delete the skill rows a failed commit already created; returns one message per row that would
+/// not delete.
+fn rollback_skill_rows(
+    mstore: &crate::backend::storage::store::Store,
+    identity_store: &crate::backend::storage::store::Store,
+    ids: &[String],
+) -> Vec<String> {
+    ids.iter()
+        .filter_map(|id| mstore.skill_delete(identity_store, id).err().map(|e| format!("{id}: {e}")))
+        .collect()
+}
+
+/// The selections to import: the client-supplied `include_skills` has no length cap and no dedup
+/// by source_dir, so an unbounded or repeated array could otherwise drive an unbounded number of
+/// skill_upsert_unique_global writes regardless of how many skills the archive itself parsed to
+/// (parsed.skills is already bounded by MAX_IMPORTED_SKILLS). First occurrence wins per source_dir,
+/// then the list is capped at the same MAX_IMPORTED_SKILLS the parser enforces.
+fn dedupe_skill_selections(include_skills: &[SkillSelection]) -> Vec<&SkillSelection> {
+    let mut seen_source_dirs: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    include_skills
+        .iter()
+        .filter(|s| seen_source_dirs.insert(s.source_dir.as_str()))
+        .take(crate::backend::bundle_import::MAX_IMPORTED_SKILLS)
+        .collect()
+}
+
+/// Write the selected skills as global skills and return the ids created. A skill whose slug
+/// collides and has no non-empty rename is skipped; a name conflict at write time is a warning and
+/// a skip; any other write error rolls back the skills already created and fails the commit.
+///
+/// The collision is recomputed server-side so §4.1 point 4 ("an empty rename on a colliding skill =
+/// skip") is enforced here, not left to a client to honour: otherwise a "duplicate_in_bundle"
+/// collision (not yet in the global catalog) would let the FIRST of two same-slug skills write
+/// under its own slug even with an empty rename, since skill_upsert_unique_global alone would not
+/// reject it until the second attempt.
+fn import_selected_skills(
+    mstore: &crate::backend::storage::store::Store,
+    identity_store: &crate::backend::storage::store::Store,
+    parsed: &crate::backend::bundle_import::ParsedBundleImport,
+    include_skills: &[SkillSelection],
+    now: i64,
+    warnings: &mut Vec<String>,
+    skipped_skills: &mut Vec<String>,
+) -> Result<Vec<String>, String> {
+    use crate::backend::bundle_import as bi;
+    let global_slugs: std::collections::HashSet<String> = mstore
+        .skill_list_global(identity_store)
+        .map_err(|e| format!("bundle.import.commit: {e}"))?
+        .into_iter()
+        .map(|item| item.skill.name)
+        .collect();
+    let in_bundle_dupes = bi::duplicate_in_bundle_slugs(&parsed.skills);
+    let mut imported_skill_ids: Vec<String> = Vec::new();
+
+    for selection in dedupe_skill_selections(include_skills) {
+        let Some(skill) = parsed.skills.iter().find(|s| s.source_dir == selection.source_dir) else {
+            continue; // source_dir not present in this parse -- nothing to import
+        };
+        let collision = bi::classify_skill_collision(&skill.slug, &global_slugs, &in_bundle_dupes);
+        let non_empty_rename = selection.import_as.as_deref().filter(|s| !s.is_empty());
+
+        if collision != "none" && non_empty_rename.is_none() {
+            // §4.1 point 4: never silently sent through with its original, known-conflicting slug.
+            skipped_skills.push(bounded_display(&skill.slug));
+            continue;
+        }
+        let effective_slug = non_empty_rename.map(|s| s.to_string()).unwrap_or_else(|| skill.slug.clone());
+
+        let row = crate::backend::storage::Skill {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: effective_slug.clone(),
+            trigger: effective_slug.clone(),
+            skill_type: crate::backend::agent_config::SKILL_TYPE_AGENT_SKILL.to_string(),
+            description: skill.description.clone(),
+            content: skill.content.clone(),
+            is_global: true,
+            created_at: now,
+            updated_at: now,
+        };
+        match identity_store.skill_upsert_unique_global(&row) {
+            Ok(()) => imported_skill_ids.push(row.id),
+            Err(crate::backend::storage::error::StoreError::Other(msg)) if msg.contains("already exists") => {
+                // effective_slug can be the caller-supplied import_as, which has no length bound
+                // before this point, and msg's own text embeds that same value a second time. Use a
+                // fixed message (its only informative content, "already exists", is implied by the
+                // branch guard) and the shared bounded_display projection, closing both unbounded
+                // paths at once rather than truncating msg in place.
+                warnings.push(format!("skill \"{}\": already exists", bounded_display(&effective_slug)));
+                skipped_skills.push(bounded_display(&effective_slug));
+            }
+            Err(e) => {
+                let rollback_errors = rollback_skill_rows(mstore, identity_store, &imported_skill_ids);
+                let msg = format!("bundle.import.commit: failed to create skill \"{effective_slug}\": {e}");
+                return Err(with_rollback_note(msg, rollback_errors));
+            }
+        }
+    }
+    Ok(imported_skill_ids)
+}
+
+/// The bundle row a commit writes: the parsed bundle with only the selected components.
+fn commit_bundle_row(
+    parsed: &crate::backend::bundle_import::ParsedBundleImport,
+    bundle_name: String,
+    include_instructions: bool,
+    include_context_files: &[usize],
+    imported_skill_ids: &[String],
+    now: i64,
+) -> Bundle {
+    let instructions = if include_instructions { parsed.instructions.clone() } else { String::new() };
+    // ABF v0.2 §2.2: provider-scoped variants are part of the same "instructions" component, gated
+    // by the same include_instructions flag; the preview/commit UI has no per-variant selection.
+    let instructions_by_provider =
+        if include_instructions { parsed.instructions_by_provider.clone() } else { std::collections::HashMap::new() };
+    // include_context_files selects by the stable `id`, never by (truncatable) display_path.
+    let selected_context_files: Vec<serde_json::Value> = parsed
+        .context_files
+        .iter()
+        .filter(|cf| include_context_files.contains(&cf.id))
+        .map(|cf| json!({ "path": cf.path, "content": cf.content }))
+        .collect();
+    Bundle {
+        id: uuid::Uuid::new_v4().to_string(),
+        name: bundle_name,
+        description: parsed.description.clone(),
+        is_blank: false,
+        is_global: false,
+        // Like `description` (and unlike instructions and context files), provider/model are
+        // structural identity fields, not opt-in components: there is no include_provider toggle in
+        // the preview/commit UI, so these always carry straight through when present.
+        provider: parsed.provider.clone(),
+        model: parsed.model.clone(),
+        instructions,
+        instructions_by_provider: serde_json::to_string(&instructions_by_provider).unwrap_or_else(|_| "{}".to_string()),
+        context_files: serde_json::to_string(&selected_context_files).unwrap_or_else(|_| "[]".to_string()),
+        mcp_servers: "[]".to_string(),
+        skills: serde_json::to_string(imported_skill_ids).unwrap_or_else(|_| "[]".to_string()),
+        sort_order: 0,
+        created_at: now,
+        updated_at: now,
+        is_system: false,
+    }
 }
 
 pub(super) fn register_bundle_import_commit(engine: &Arc<WshRpcEngine>, state: &AppState) {

@@ -57,12 +57,34 @@ pub async fn run(args: Vec<String>) -> i32 {
         env!("CARGO_PKG_VERSION"),
         std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default()
     ));
-    let entry = check_config(&mut report, &workdir);
-    check_handshakes(&mut report, entry.as_ref());
+    // Asked first, about the folder the config is in (wherever this process was told the config is): srv's
+    // answer says whether a command read from a file there may be started.
+    let config = config_path(&workdir);
+    let config_folder = config.parent().map(|dir| dir.to_string_lossy().into_owned()).unwrap_or_default();
     let srv = Srv::from_env();
-    match &srv {
-        Some(srv) => check_srv(&mut report, srv).await,
-        None => report.fail("AGENTMUX_LOCAL_URL, AGENTMUX_AUTH_KEY, AGENTMUX_AGENT_TOKEN or AGENTMUX_AGENT_SLUG is not set: run this from the agent's own shell"),
+    let health = match &srv {
+        Some(srv) => Some(srv.post("/api/v1/agent/self/mcp-health", Some(&config_folder)).await),
+        None => None,
+    };
+    let rule = match &health {
+        Some(Ok((200, body))) => body.get("folder_rule").and_then(Value::as_bool),
+        _ => None,
+    };
+    let entry = check_config(&mut report, &config);
+    let may_start = may_start_entry(&config, in_container(), rule);
+    let entry = match &may_start {
+        Ok(()) => entry,
+        Err(why) => {
+            if entry.is_some() {
+                report.fail(why.clone());
+            }
+            None
+        }
+    };
+    check_handshakes(&mut report, entry.as_ref(), &config, may_start.is_ok());
+    match (&srv, health) {
+        (Some(srv), Some(answer)) => report_srv(&mut report, srv, answer),
+        _ => report.fail("AGENTMUX_LOCAL_URL, AGENTMUX_AUTH_KEY, AGENTMUX_AGENT_TOKEN or AGENTMUX_AGENT_SLUG is not set: run this from the agent's own shell"),
     }
     check_cli_log(&mut report, &workdir);
     if heal {
@@ -95,7 +117,20 @@ fn config_path(workdir: &Path) -> PathBuf {
     let configured = std::env::var_os("AGENTMUX_MCP_CONFIG")
         .map(PathBuf::from)
         .filter(|p| !p.as_os_str().is_empty());
-    resolve_config_path(workdir, configured.as_deref(), crate::self_keys::in_container())
+    resolve_config_path(workdir, configured.as_deref(), in_container())
+}
+
+/// Whether this doctor runs inside a container, for deciding what it may start. The hint in the environment
+/// (`self_keys::in_container`) is a word, not a fact about this system, so it is not enough for that. It
+/// also takes the fact: a Linux system with the container runtime's own marker at the root of the filesystem.
+fn in_container() -> bool {
+    is_in_container(crate::self_keys::in_container(), cfg!(target_os = "linux"), || {
+        Path::new("/.dockerenv").exists() || Path::new("/run/.containerenv").exists()
+    })
+}
+
+fn is_in_container(hint: bool, linux: bool, runtime_marker: impl FnOnce() -> bool) -> bool {
+    hint && linux && runtime_marker()
 }
 
 /// [`config_path`] with its inputs given, so a test can pin them.
@@ -113,8 +148,30 @@ fn resolve_config_path(workdir: &Path, configured: Option<&Path>, in_container: 
     agentmux_common::mcp_config_path::config_path_for(&expanded)
 }
 
-fn check_config(report: &mut Report, workdir: &Path) -> Option<Entry> {
-    let path = config_path(workdir);
+/// Whether doctor may start a command read from `config` (its `agentmux` entry, and the shell prefix it is
+/// started through). `rule` is srv's answer about the folder the file is in: whether a host agent there gets
+/// only the servers AgentMux writes, because a container agent can write the folder or has run in it (`None`
+/// when srv gave no answer). On this computer a command from the file is started only on a plain no, wherever
+/// the file is and whatever named it. Inside a container nothing here runs on the host.
+fn may_start_entry(config: &Path, in_container: bool, rule: Option<bool>) -> Result<(), String> {
+    if in_container {
+        return Ok(());
+    }
+    let folder = config.parent().unwrap_or(config).display();
+    match rule {
+        Some(false) => Ok(()),
+        Some(true) => Err(format!(
+            "a container agent can write in {folder} (or has run in it), so no command from {} is started on this computer: run doctor inside the container, or from a host agent's own pane",
+            config.display()
+        )),
+        None => Err(format!(
+            "AgentMux did not say whether a container agent can write in {folder}, so no command from {} is started: run doctor from the agent's own pane",
+            config.display()
+        )),
+    }
+}
+
+fn check_config(report: &mut Report, path: &Path) -> Option<Entry> {
     let parsed = match std::fs::read_to_string(&path).map(|t| serde_json::from_str::<Value>(&t)) {
         Ok(Ok(v)) => v,
         Ok(Err(e)) => {
@@ -155,14 +212,34 @@ fn check_config(report: &mut Report, workdir: &Path) -> Option<Entry> {
 
 /// Start the server the way the CLI does, and without the prefix too, so a
 /// failure says which part broke.
-fn check_handshakes(report: &mut Report, entry: Option<&Entry>) {
+///
+/// With no entry to start it is this executable that is started, by its own path and never by name. With
+/// `from_the_environment` false (the config's folder is one a container agent can write, or srv did not say)
+/// nothing named by a file or a variable is started: this executable alone, and no shell prefix.
+fn check_handshakes(report: &mut Report, entry: Option<&Entry>, config: &Path, from_the_environment: bool) {
     let (command, args) = match entry {
         Some(e) => (e.command.clone(), e.args.clone()),
-        None => ("agentmux-mcp".to_string(), Vec::new()),
+        None => match std::env::current_exe() {
+            Ok(own) => (own.to_string_lossy().into_owned(), Vec::new()),
+            Err(e) => {
+                report.fail(format!("can't tell where this agentmux-mcp is, so it is not started: {e}"));
+                return;
+            }
+        },
     };
+    // Said before it is started, not with the report at the end: the command was read from a file.
+    if entry.is_some() {
+        let line = std::iter::once(command.as_str()).chain(args.iter().map(String::as_str)).collect::<Vec<_>>().join(" ");
+        println!("info about to start `{line}`, the agentmux entry of {}", config.display());
+        let _ = std::io::stdout().flush();
+    }
     match handshake(Command::new(&command).args(&args)) {
         Ok(version) => report.ok(format!("`{command}` starts and answers MCP (server {version})")),
         Err(e) => report.fail(format!("`{command}` doesn't answer MCP: {e}")),
+    }
+    if !from_the_environment {
+        report.info("the shell prefix is not started here either");
+        return;
     }
     let Some(prefix) = std::env::var("CLAUDE_CODE_SHELL_PREFIX").ok().filter(|p| !p.is_empty()) else {
         report.info("no CLAUDE_CODE_SHELL_PREFIX: the CLI starts the server directly");
@@ -244,13 +321,18 @@ impl Srv {
         })
     }
 
-    async fn post(&self, path: &str) -> Result<(u16, Value), String> {
+    /// `folder`: the folder doctor runs for, sent with the health question.
+    async fn post(&self, path: &str, folder: Option<&str>) -> Result<(u16, Value), String> {
+        let mut body = json!({ "agent": self.slug });
+        if let Some(folder) = folder {
+            body["folder"] = json!(folder);
+        }
         let resp = self
             .client
             .post(format!("{}{path}", self.url.trim_end_matches('/')))
             .header(agentmux_common::AUTH_KEY_HEADER, &self.auth_key)
             .header("X-Agent-Token", self.token.trim())
-            .json(&json!({ "agent": self.slug }))
+            .json(&body)
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -259,8 +341,8 @@ impl Srv {
     }
 }
 
-async fn check_srv(report: &mut Report, srv: &Srv) {
-    match srv.post("/api/v1/agent/self/mcp-health").await {
+fn report_srv(report: &mut Report, srv: &Srv, answer: Result<(u16, Value), String>) {
+    match answer {
         Ok((200, body)) => {
             report.ok(format!("AgentMux (srv) answers at {}", srv.url));
             report.info(srv_health_line(&body));
@@ -305,7 +387,7 @@ fn srv_health_line(body: &Value) -> String {
 }
 
 async fn request_heal(report: &mut Report, srv: &Srv) {
-    match srv.post("/api/v1/agent/self/mcp-heal").await {
+    match srv.post("/api/v1/agent/self/mcp-heal", None).await {
         Ok((202, _)) => report.ok("repair started: AgentMux is reconnecting the server; the pane shows how it goes"),
         Ok((404, _)) => report.fail("this AgentMux is older than this doctor and can't repair: ask the operator to restart the agent"),
         Ok((200, body)) => {
@@ -484,5 +566,51 @@ mod tests {
         assert!(!r.failed());
         r.fail("c");
         assert!(r.failed());
+    }
+
+    #[test]
+    fn a_command_from_a_file_is_started_only_when_srv_says_no_container_agent_can_write_its_folder() {
+        let (folder, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        // The folder's own file, and a file somewhere else that this process was told is the config.
+        for config in [folder.path().join(".mcp.json"), data.path().join("mcp").join("abc").join("mcp.json")] {
+            assert_eq!(may_start_entry(&config, false, Some(false)), Ok(()), "srv said no container agent can");
+            let refused = may_start_entry(&config, false, Some(true)).unwrap_err();
+            assert!(refused.contains("a container agent can write in") && refused.contains("no command from") && refused.contains("is started on this computer"), "{refused}");
+            let untold = may_start_entry(&config, false, None).unwrap_err();
+            assert!(untold.contains("did not say") && untold.contains("no command from"), "{untold}");
+            assert_eq!(may_start_entry(&config, true, Some(true)), Ok(()), "inside the container nothing runs on the host");
+        }
+    }
+
+    /// The hint in the environment does not make a host a container.
+    #[test]
+    fn only_a_linux_system_with_the_runtimes_marker_is_a_container() {
+        assert!(is_in_container(true, true, || true));
+        assert!(!is_in_container(true, true, || false), "the hint with no marker of the runtime");
+        assert!(!is_in_container(true, false, || true), "the hint on a system that is not Linux");
+        assert!(!is_in_container(false, true, || true), "no hint: srv did not start it as a container agent's");
+        #[cfg(not(target_os = "linux"))]
+        {
+            std::env::set_var("AGENTMUX_IN_CONTAINER", "1");
+            let said = in_container();
+            std::env::remove_var("AGENTMUX_IN_CONTAINER");
+            assert!(!said, "set in the environment on this computer, and still not a container");
+        }
+    }
+
+    /// With nothing to start from a file, doctor starts itself by its own path, so a file named like it in
+    /// the folder it runs in is never the one started.
+    #[test]
+    fn with_no_entry_to_start_doctor_names_its_own_executable_by_path() {
+        let folder = tempfile::tempdir().unwrap();
+        let planted = folder.path().join(if cfg!(windows) { "agentmux-mcp.exe" } else { "agentmux-mcp" });
+        std::fs::write(&planted, b"not the real one").unwrap();
+        let mut report = Report::default();
+        check_handshakes(&mut report, None, &folder.path().join(".mcp.json"), false);
+        let own = std::env::current_exe().unwrap();
+        let lines: Vec<&String> = report.lines.iter().map(|(_, text)| text).collect();
+        assert!(lines.iter().any(|text| text.contains(&*own.to_string_lossy())), "{lines:?}");
+        assert!(!lines.iter().any(|text| text.contains(&*planted.to_string_lossy())), "{lines:?}");
+        assert!(lines.iter().any(|text| text.contains("shell prefix is not started")), "{lines:?}");
     }
 }

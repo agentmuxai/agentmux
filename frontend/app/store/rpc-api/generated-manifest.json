@@ -519,6 +519,10 @@
             "method": "FleetBulkStopCommand"
         },
         {
+            "command": "fleet.check-limits",
+            "method": "FleetCheckLimitsCommand"
+        },
+        {
             "command": "supervisor.set-mode",
             "method": "SupervisorSetModeCommand"
         },
@@ -553,6 +557,10 @@
         {
             "command": "fs.delete",
             "method": "FsDeleteCommand"
+        },
+        {
+            "command": "fs.agent_folder",
+            "method": "FsAgentFolderCommand"
         },
         {
             "command": "fs.git_status",
@@ -738,6 +746,10 @@
             "command": "globalmemory:sections",
             "method": "GlobalMemorySectionsCommand",
             "send": "data ?? {}"
+        },
+        {
+            "command": "gpu.sample",
+            "method": "GpuSampleCommand"
         },
         {
             "command": "hidenamedagent",
@@ -1796,6 +1808,14 @@
         {
             "command": "identity.account.availability",
             "method": "IdentityAccountAvailabilityCommand"
+        },
+        {
+            "command": "identity.account.usage",
+            "method": "IdentityAccountUsageCommand"
+        },
+        {
+            "command": "jekt.held.summary",
+            "method": "JektHeldSummaryCommand"
         },
         {
             "command": "agent.account.switch",

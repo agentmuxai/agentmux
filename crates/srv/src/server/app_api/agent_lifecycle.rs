@@ -83,7 +83,7 @@ pub(super) fn target_of(state: &AppState, named: &str) -> Result<AgentRuntime, R
     if named.is_empty() {
         return Err(refuse(StatusCode::BAD_REQUEST, "INVALID_ARG: agent is empty; give an agent's id or slug (Agents list)"));
     }
-    let uid = crate::backend::agent_resolve::resolve_agent_id(&state.mstore, named)
+    let uid = crate::backend::agent_resolve::resolve_agent_named(&state.mstore, named)
         .map_err(|e| refuse(StatusCode::NOT_FOUND, format!("no agent '{named}' on this machine: {e}")))?;
     agent_runtime::list(state, agentmux_common::time::now_ms_u64())
         .into_iter()

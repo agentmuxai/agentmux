@@ -49,6 +49,8 @@
 
 .native-memory-history-item {
     display: flex;
+    // The revert control goes under the version's details when the pane is too thin for both side by side.
+    flex-wrap: wrap;
     align-items: flex-start;
     gap: var(--space-1-5);
     padding: var(--space-1-5) var(--space-2);
@@ -69,7 +71,7 @@
 }
 
 .native-memory-history-item-body {
-    flex: 1;
+    flex: 1 1 10em;
     min-width: 0;
     display: flex;
     flex-direction: column;
@@ -78,8 +80,9 @@
 
 .native-memory-history-item-meta {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-1-5);
+    gap: 2px var(--space-1-5);
     font-size: var(--text-sm);
 }
 
@@ -107,13 +110,13 @@
 }
 
 .native-memory-history-revert-confirm {
-    flex-shrink: 0;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--space-1);
+    min-width: 0;
     font-size: var(--text-xs);
     color: var(--secondary-text-color);
-    white-space: nowrap;
 }
 
 // The history buttons are element/ui Buttons at compact density.

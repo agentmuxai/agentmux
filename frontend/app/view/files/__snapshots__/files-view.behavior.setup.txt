@@ -6,8 +6,10 @@ model.start()
 ResizeObserver.observe(list)
 model.onShown()
 model.applyRequestedSelection()
+ResizeObserver.observe(list)
 window.addEventListener(dragend, capture=true)
 setInterval(60000)
+model.applyRequestedSelection()
 model.navigate("/home/a", {"push":false})
 model.applyRequestedSelection()
 pane content released
@@ -23,6 +25,7 @@ model.applyRequestedSelection()
 > opened: path=/home/a/src listScrollTop=0 rows=["inner.ts"]
 > the list's size changes
 > unmounted
+ResizeObserver.disconnect()
 ResizeObserver.disconnect()
 file drop target disposed
 pane command runner disposed

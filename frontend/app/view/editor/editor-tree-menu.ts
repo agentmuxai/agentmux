@@ -55,7 +55,7 @@ export function buildTreeContextMenuItems(
             { type: "action", label: "New Folder…", icon: MENU_ICON.newFolder, onSelect: () => { void model.treeModel.expandFolder(path); actions.startNewEntry(path, "dir"); } },
             { type: "separator" },
             { type: "action", label: "Open in Terminal", icon: MENU_ICON.openTerminal, onSelect: () => void model.openInTerminal(path) },
-            { type: "action", label: revealInFileManagerLabel(), icon: MENU_ICON.reveal, onSelect: () => void model.revealInExplorer(path) },
+            { type: "action", label: revealInFileManagerLabel("folder"), icon: MENU_ICON.reveal, onSelect: () => void model.revealInExplorer(path) },
             { type: "action", label: "Collapse Folder", onSelect: () => model.treeModel.collapseFolder(path) },
         ];
         if (!isRoot) {

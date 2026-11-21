@@ -19,6 +19,7 @@ import { createEffect, createSignal, For, on, Show, type Accessor, type JSX } fr
 import { agentsUsingAccount, linksRevision, type AccountAgent } from "./account-agents";
 import { failoverToggle } from "./account-failover";
 import { buildAccountRowMenu } from "./bind-to-agent-menu";
+import { AccountUsageField } from "@/app/view/account-usage/account-usage";
 import type { Account, IdentityViewModel } from "./identity-model";
 import { accountLabel, KIND_LABELS, PROVIDER_LABELS, revokeFailureText, revokesOnDelete } from "./identity-model";
 import "./identity-view.scss";
@@ -334,6 +335,7 @@ export function AccountDetailPanel({ model, account }: { model: IdentityViewMode
             <ContextFields s={s} />
             <OAuthAccountSection account={account} />
             <CliSignInSection account={account} />
+            <AccountUsageField accountId={account.id} />
             <UsedBy s={s} />
             <DetailField label={t("accountsTab.field.created")} value={new Date(account.created_at).toLocaleString()} />
             <PanelActions s={s} />

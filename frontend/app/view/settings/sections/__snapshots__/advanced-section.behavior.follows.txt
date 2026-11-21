@@ -54,7 +54,7 @@
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Dollars a day that all agents together may use through the OpenRouter model route. When it is used, every agent on the route stops until you raise it here or the UTC day ends. 0 is no cap"
         <div class="ui-field-control">
-          <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number setting-number--wide\\\"\",\"min\":\"0\",\"step\":\"1\",\"value\":\"100\"}">
+          <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number setting-number--wide\\\"\",\"min\":\"0\",\"step\":\"1\",\"value\":\"500\"}">
             <span data-cb="onChange">
               "change"
     <div class="setting-row" id="setting-advanced.route_spend_cap_anthropic">
@@ -67,7 +67,7 @@
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Dollars a day that all agents together may use through Anthropic API keys (the accounts under Connectors > Accounts). When it is used, every agent on a key account stops until you raise it here or the UTC day ends. 0 is no cap"
         <div class="ui-field-control">
-          <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number setting-number--wide\\\"\",\"min\":\"0\",\"step\":\"1\",\"value\":\"100\"}">
+          <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number setting-number--wide\\\"\",\"min\":\"0\",\"step\":\"1\",\"value\":\"500\"}">
             <span data-cb="onChange">
               "change"
     <div class="setting-row" id="setting-advanced.preview_skid_notches">
@@ -266,8 +266,10 @@
     <div class="setting-row" id="setting-advanced.dev_mode">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Dev mode"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Dev mode"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Shows DevTools in the menu, Inspect Element and View Page Source in right-click menus, and other developer tools. Off by default in the installed app; on by default in a task dev or debug build"
         <div class="ui-field-control">
@@ -330,7 +332,7 @@
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Dollars a day that all agents together may use through the OpenRouter model route. When it is used, every agent on the route stops until you raise it here or the UTC day ends. 0 is no cap"
         <div class="ui-field-control">
-          <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number setting-number--wide\\\"\",\"min\":\"0\",\"step\":\"1\",\"value\":\"100\"}">
+          <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number setting-number--wide\\\"\",\"min\":\"0\",\"step\":\"1\",\"value\":\"500\"}">
             <span data-cb="onChange">
               "change"
     <div class="setting-row" id="setting-advanced.route_spend_cap_anthropic">
@@ -343,7 +345,7 @@
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Dollars a day that all agents together may use through Anthropic API keys (the accounts under Connectors > Accounts). When it is used, every agent on a key account stops until you raise it here or the UTC day ends. 0 is no cap"
         <div class="ui-field-control">
-          <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number setting-number--wide\\\"\",\"min\":\"0\",\"step\":\"1\",\"value\":\"100\"}">
+          <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number setting-number--wide\\\"\",\"min\":\"0\",\"step\":\"1\",\"value\":\"500\"}">
             <span data-cb="onChange">
               "change"
     <div class="setting-row" id="setting-advanced.preview_skid_notches">
@@ -542,8 +544,10 @@
     <div class="setting-row" id="setting-advanced.dev_mode">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Dev mode"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Dev mode"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Shows DevTools in the menu, Inspect Element and View Page Source in right-click menus, and other developer tools. Off by default in the installed app; on by default in a task dev or debug build"
         <div class="ui-field-control">

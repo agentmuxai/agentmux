@@ -206,9 +206,10 @@ pub fn dismiss() {
 /// The swap, run by `/bin/sh` once this launcher (`$1`) has exited. Every
 /// path is an argument, never part of the script, so nothing in one is
 /// parsed. Arguments: launcher pid, `.dmg`, SHA-256, version, the app to
-/// replace, the channel to record beside it (may be empty), the log.
+/// replace, the channel to record beside it (may be empty), the log, the file
+/// to leave when the upgrade failed ([`crate::updating_window::failed_marker`]).
 const APPLY_SCRIPT: &str = r#"
-pid="$1"; dmg="$2"; sha="$3"; ver="$4"; app="$5"; channel="$6"; log="$7"
+pid="$1"; dmg="$2"; sha="$3"; ver="$4"; app="$5"; channel="$6"; log="$7"; marker="$8"
 exec >>"$log" 2>&1
 say() { echo "$(/bin/date -u +%Y-%m-%dT%H:%M:%SZ) $*"; }
 work=""; mnt=""; staging=""
@@ -218,14 +219,18 @@ cleanup() {
   [ -n "$work" ] && /bin/rm -rf "$work"
   [ -n "$locked" ] && /bin/rm -rf "$lock"
 }
-fail() { say "failed: $*; opening the AgentMux that is in place"; cleanup; /usr/bin/open "$app"; exit 1; }
+# The "Updating to <version>" window (updating_window) says the update failed when this file is there. The
+# folder is the window's own: with no window it isn't there and touch fails quietly (an external command, so a
+# failed redirect can't end this shell, as one on a special builtin would).
+mark_failed() { [ -n "$marker" ] && /usr/bin/touch "$marker" 2>/dev/null; return 0; }
+fail() { say "failed: $*; opening the AgentMux that is in place"; mark_failed; cleanup; /usr/bin/open "$app"; exit 1; }
 team_of() { /usr/bin/codesign -dv "$1" 2>&1 | /usr/bin/sed -n 's/^TeamIdentifier=//p'; }
 parent=$(/usr/bin/dirname "$app"); base=$(/usr/bin/basename "$app")
 lock="$parent/.$base.upgrade-lock"; locked=""
 say "upgrade to $ver: waiting for the launcher ($pid) to exit"
 i=0
 while /bin/kill -0 "$pid" 2>/dev/null; do
-  i=$((i+1)); [ "$i" -gt 600 ] && { say "the launcher is still running after 60 s; nothing changed"; /usr/bin/open "$app"; exit 1; }
+  i=$((i+1)); [ "$i" -gt 600 ] && { say "the launcher is still running after 60 s; nothing changed"; mark_failed; /usr/bin/open "$app"; exit 1; }
   /bin/sleep 0.1
 done
 # One swap of this app at a time: two launchers on different channels can
@@ -236,7 +241,7 @@ if ! /bin/mkdir "$lock" 2>/dev/null; then
     # That swap opens the app when it is done.
     say "another upgrade of $app is running ($other); nothing changed"; exit 1
   fi
-  /bin/rm -rf "$lock"; /bin/mkdir "$lock" 2>/dev/null || { say "couldn't take the upgrade lock; nothing changed"; /usr/bin/open "$app"; exit 1; }
+  /bin/rm -rf "$lock"; /bin/mkdir "$lock" 2>/dev/null || { say "couldn't take the upgrade lock; nothing changed"; mark_failed; /usr/bin/open "$app"; exit 1; }
 fi
 locked=1; echo "$$" > "$lock/pid"
 work=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/agentmux-upgrade.XXXXXX") || fail "no temporary folder"
@@ -296,7 +301,8 @@ pub fn apply_command(up: &MacUpgrade, launcher_pid: u32) -> std::process::Comman
         .arg(&up.version)
         .arg(&up.app)
         .arg(&up.channel)
-        .arg(up.log());
+        .arg(up.log())
+        .arg(crate::updating_window::failed_marker(&crate::updating_window::dir()));
     cmd
 }
 
@@ -400,6 +406,9 @@ mod tests {
         assert_eq!(record, Path::new("/Users/u/My Apps/.AgentMux.app.agentmux-channel"));
         assert!(args[1].contains(r#"record="$parent/.$base.agentmux-channel""#));
         assert!(args[1].contains("mkdir \"$lock\""), "the swap holds a lock on the app");
+        // Every way the swap fails leaves the marker the "Updating" window reads, before the old app is opened.
+        assert!(args[1].contains("mark_failed; cleanup; /usr/bin/open"), "fail() marks the failure");
+        assert_eq!(args[1].matches("mark_failed;").count(), 3, "fail(), the launcher that never exited, the lock");
         assert_eq!(
             &args[2..],
             &[
@@ -411,8 +420,55 @@ mod tests {
                 "/Users/u/My Apps/AgentMux.app",
                 "stable",
                 &up.log().display().to_string(),
+                &crate::updating_window::failed_marker(&crate::updating_window::dir()).display().to_string(),
             ]
         );
+    }
+
+    /// Run the real script against a disk image that isn't there: it fails at its first step, which must leave the
+    /// marker the "Updating to <version>" window reads, and end with status 1 whether or not the window's folder
+    /// exists (no window: the marker can't be written, which must not end the script early or differently).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_failed_swap_leaves_the_marker_for_the_updating_window() {
+        let root = tempfile::tempdir().unwrap();
+        // A launcher pid that is already gone, so the script goes straight on.
+        let mut gone = std::process::Command::new("/usr/bin/true").spawn().unwrap();
+        let pid = gone.id();
+        gone.wait().unwrap();
+        let apps = root.path().join("Apps");
+        std::fs::create_dir(&apps).unwrap();
+        let run = |marker: &Path| {
+            let log = root.path().join("apply.log");
+            let st = std::process::Command::new("/bin/sh")
+                .arg("-c")
+                .arg(APPLY_SCRIPT)
+                .arg("agentmux-upgrade")
+                .arg(pid.to_string())
+                .arg(root.path().join("missing.dmg"))
+                .arg("0".repeat(64))
+                .arg("0.60.36")
+                // Not an app, so the script's `open` of it opens nothing.
+                .arg(apps.join("NoSuchAgentMux.app"))
+                .arg("stable")
+                .arg(&log)
+                .arg(marker)
+                .env("TMPDIR", root.path())
+                .status()
+                .unwrap();
+            (st.code(), std::fs::read_to_string(&log).unwrap_or_default())
+        };
+        let window_dir = root.path().join("agentmux-updating-1");
+        std::fs::create_dir(&window_dir).unwrap();
+        let marker = crate::updating_window::failed_marker(&window_dir);
+        let (code, log) = run(&marker);
+        assert_eq!(code, Some(1), "{log}");
+        assert!(log.contains("failed: couldn't copy the disk image"), "{log}");
+        assert!(marker.exists(), "the window is told the update failed");
+        // No window folder: the failure is the same, nothing else breaks.
+        let (code, log) = run(&root.path().join("no-such-folder/failed"));
+        assert_eq!(code, Some(1), "{log}");
+        assert!(log.contains("failed: couldn't copy the disk image"), "{log}");
     }
 
     #[cfg(unix)]

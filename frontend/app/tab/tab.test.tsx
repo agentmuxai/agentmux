@@ -112,6 +112,17 @@ describe("Tab context panel", () => {
         expect(buttons[0].querySelector("i.fa-pen")).not.toBeNull();
         expect(buttons[1].querySelector("i.fa-xmark")).not.toBeNull();
     });
+
+    it("stays open when a colour is picked, so colours can be tried one after another; Close menu closes it", async () => {
+        const { container } = renderTab();
+        fireEvent.contextMenu(container.querySelector(".tab")!);
+        const swatch = document.querySelector<HTMLElement>(".tab-context-panel [role='radio'], .tab-context-panel .palette-swatch, .tab-context-panel button[aria-label]");
+        expect(swatch).not.toBeNull();
+        fireEvent.click(swatch!);
+        expect(document.querySelector(".tab-context-panel")).not.toBeNull();
+        fireEvent.click(document.querySelector<HTMLButtonElement>(".tab-context-btn-close")!);
+        expect(document.querySelector(".tab-context-panel")).toBeNull();
+    });
 });
 
 // SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md — a tab clicks, subtly, on

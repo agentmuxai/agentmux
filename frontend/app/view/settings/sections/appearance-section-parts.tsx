@@ -11,6 +11,7 @@ import { hostHas } from "@/util/host-caps";
 import { NumberControl, SettingRow, SliderControl, ToggleControl, set } from "../settings-controls";
 import type { APPEARANCE_SETTINGS as AppearanceSettings } from "./appearance-section";
 import { LanguageRow } from "./language-row";
+import { MagnifiedSizeRow } from "./magnified-size-row";
 
 type Rows = { s: () => any; rows: typeof AppearanceSettings };
 
@@ -20,6 +21,7 @@ export function ThemeRows(props: Rows): JSX.Element {
     return (
         <>
             <SettingRow
+                settingKey="window:theme"
                 id={rows.theme.id}
                 label={rows.theme.label}
                 description={rows.theme.description}
@@ -35,6 +37,7 @@ export function ThemeRows(props: Rows): JSX.Element {
             />
             <LanguageRow />
             <SettingRow
+                settingKey="splash:disabled"
                 id={rows.splash.id}
                 label={rows.splash.label}
                 description={rows.splash.description}
@@ -60,6 +63,7 @@ export function TransparencyRows(props: Rows): JSX.Element {
     return (
         <Show when={hostHas("windowTransparency")}>
             <SettingRow
+                settingKey="window:transparent"
                 id={rows.transparency.id}
                 label={rows.transparency.label}
                 description={rows.transparency.description}
@@ -67,6 +71,7 @@ export function TransparencyRows(props: Rows): JSX.Element {
             />
             <Show when={transparent()}>
                 <SettingRow
+                    settingKey="window:opacity"
                     id={rows.opacity.id}
                     indent
                     label={rows.opacity.label}
@@ -82,6 +87,7 @@ export function TransparencyRows(props: Rows): JSX.Element {
                     }
                 />
                 <SettingRow
+                    settingKey="window:blur"
                     id={rows.blur.id}
                     indent
                     label={rows.blur.label}
@@ -103,6 +109,7 @@ export function PaneGapRow(props: Rows): JSX.Element {
     const { s, rows } = props;
     return (
         <SettingRow
+            settingKey="window:tilegapsize"
             id={rows.paneGap.id}
             label={rows.paneGap.label}
             description={rows.paneGap.description}
@@ -127,6 +134,7 @@ export function MagnifyRows(props: Rows): JSX.Element {
     return (
         <>
             <SettingRow
+                settingKey="window:magnifiedblockopacity"
                 id={rows.magnifiedOpacity.id}
                 label={rows.magnifiedOpacity.label}
                 description={rows.magnifiedOpacity.description}
@@ -140,21 +148,9 @@ export function MagnifyRows(props: Rows): JSX.Element {
                     />
                 }
             />
+            <MagnifiedSizeRow s={s} row={rows.magnifiedSize} />
             <SettingRow
-                id={rows.magnifiedSize.id}
-                label={rows.magnifiedSize.label}
-                description={rows.magnifiedSize.description}
-                control={
-                    <NumberControl
-                        class="setting-number setting-number--wide"
-                        min={1}
-                        step={0.1}
-                        value={(s()["window:magnifiedblocksize"] as number) ?? 1.5}
-                        onChange={(v) => set("window:magnifiedblocksize", v)}
-                    />
-                }
-            />
-            <SettingRow
+                settingKey="window:magnifiedblockblurprimarypx"
                 id={rows.magnifiedBlurPrimary.id}
                 label={rows.magnifiedBlurPrimary.label}
                 description={rows.magnifiedBlurPrimary.description}
@@ -170,6 +166,7 @@ export function MagnifyRows(props: Rows): JSX.Element {
                 }
             />
             <SettingRow
+                settingKey="window:magnifiedblockblursecondarypx"
                 id={rows.magnifiedBlurSecondary.id}
                 label={rows.magnifiedBlurSecondary.label}
                 description={rows.magnifiedBlurSecondary.description}

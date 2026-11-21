@@ -101,8 +101,8 @@ function modelStub() {
         toggleSelected: vi.fn((key: string) => change([key], !selected().has(key))),
         selectAll: vi.fn((keys: string[]) => setSelected(new Set(keys))),
         clearSelection: vi.fn(() => setSelected(new Set<string>())),
-        broadcastToSelection: vi.fn(async () => ({ succeeded: [...selected()], failed: [], aborted_early: false, pending: [] })),
-        bulkStopSelection: vi.fn(async () => ({ succeeded: [], failed: [], aborted_early: false, pending: [] })),
+        broadcastToSelection: vi.fn(async () => ({ succeeded: [...selected()], failed: [], aborted_early: false, pending: [], held: [] })),
+        bulkStopSelection: vi.fn(async () => ({ succeeded: [], failed: [], aborted_early: false, pending: [], held: [] })),
         superviseSelection: vi.fn(),
         dismissFleetResult: vi.fn(),
     };
@@ -121,13 +121,15 @@ function rig(agents: AtlasAgent[], meta: Record<string, unknown> = {}, flows: At
         { ...machine("far", "far-1"), badge: "cloud", cloud: true },
     ];
     const model = modelStub();
+    // The agents as the Swarm reports them now: a test replaces the list, as a live update does.
+    const [live, setLive] = createSignal(agents);
     const selectable = agents.flatMap((a) => (a.remote ? [a.key] : a.blockId ? [a.blockId] : []));
     const [m, setM] = createSignal(meta);
     const setMeta = vi.fn(async (patch: Record<string, unknown>) => {
         setM((prev) => ({ ...prev, ...patch }));
     });
     const data: AtlasData = {
-        graph: () => buildAtlasGraph(machines, agents, extras),
+        graph: () => buildAtlasGraph(machines, live(), extras),
         model: model as unknown as AtlasData["model"],
         swarm: {
             tree: () => agents.flatMap((a) => (a.blockId ? [{ blockId: a.blockId, agentName: a.name }] : [])),
@@ -142,7 +144,7 @@ function rig(agents: AtlasAgent[], meta: Record<string, unknown> = {}, flows: At
                 counts: () => ({ shown: agents.length, total: agents.length }),
             },
         } as unknown as AtlasData["swarm"],
-        agents: () => new Map(agents.map((a) => [a.key, a] as const)),
+        agents: () => new Map(live().map((a) => [a.key, a] as const)),
         machines: () => new Map(machines.map((x) => [x.key, x] as const)),
         flows: () => flows,
         cloudUnavailable: () => !!extras.cloudUnavailable,
@@ -161,7 +163,7 @@ function rig(agents: AtlasAgent[], meta: Record<string, unknown> = {}, flows: At
         const p = layoutAtlas(buildAtlasGraph(machines, agents, extras)).nodes.get(key)!;
         return [p.x + 16, p.y + 16];
     };
-    return { ...utils, setMeta, model, drag, at };
+    return { ...utils, setMeta, model, drag, at, setAgents: setLive };
 }
 
 describe("AtlasView", () => {
@@ -230,6 +232,44 @@ describe("AtlasView", () => {
         const before = world().style.transform;
         fireEvent.wheel(getByTestId("atlas-viewport"), { deltaY: -200, clientX: 10, clientY: 10 });
         expect(world().style.transform).not.toBe(before);
+    });
+
+    // The Swarm's data is rebuilt on every update, so each agent is a new object with the same key. A node that goes and
+    // comes back under a resting pointer loses its hover label's anchor and the cursor: the label shows for a moment and
+    // goes while the pointer has not moved.
+    it("keeps a node's element, and its hover label, when an update rebuilds every agent", () => {
+        const { getAllByTestId, setAgents } = rig([agent("Ann", "local", { line: "Fixing the map" }), agent("Bo", "local")]);
+        const [ann, bo] = getAllByTestId("atlas-node");
+        expect(ann.getAttribute("data-hover-tip")).toBe("Fixing the map");
+        setAgents([agent("Ann", "local", { line: "Testing the map" }), agent("Bo", "local")]);
+        const after = getAllByTestId("atlas-node");
+        expect(after).toHaveLength(2);
+        expect(after[0]).toBe(ann);
+        expect(after[1]).toBe(bo);
+        expect(ann.isConnected).toBe(true);
+        expect(ann.getAttribute("data-hover-tip")).toBe("Testing the map");
+    });
+
+    it("draws a new node for an agent that came, drops the one that went, and keeps the rest", () => {
+        const { getAllByTestId, setAgents } = rig([agent("Ann", "local"), agent("Bo", "local")]);
+        const [ann, bo] = getAllByTestId("atlas-node");
+        setAgents([agent("Bo", "local", { state: "working" }), agent("Cy", "local")]);
+        const after = getAllByTestId("atlas-node");
+        expect(after.map((n) => n.getAttribute("aria-label"))).toEqual(["Bo, Working", "Cy, Idle"]);
+        expect(after[0]).toBe(bo);
+        expect(after[0].className).toContain("atlas-node--working");
+        expect(ann.isConnected).toBe(false);
+    });
+
+    it("keeps the selected node selected, and its element, through an update", () => {
+        const { getAllByTestId, getByTestId, setAgents } = rig([agent("Ann", "local", { blockId: "b1" })]);
+        const ann = getAllByTestId("atlas-node")[0];
+        fireEvent.click(ann);
+        expect(getByTestId("atlas-card").textContent).toContain("Ann");
+        setAgents([agent("Ann", "local", { blockId: "b1", line: "New line" })]);
+        expect(getAllByTestId("atlas-node")[0]).toBe(ann);
+        expect(ann.getAttribute("aria-pressed")).toBe("true");
+        expect(getByTestId("atlas-card").textContent).toContain("New line");
     });
 });
 
@@ -350,7 +390,8 @@ describe("selecting agents on the map", () => {
         fireEvent.input(container.querySelector(".swarm-broadcast-input")!, { target: { value: "ship it" } });
         fireEvent.click(container.querySelector(".swarm-fleet-btn--primary")!);
         await Promise.resolve();
-        expect(model.broadcastToSelection).toHaveBeenCalledWith("ship it");
+        // The second argument is the id the composer follows the send's progress by.
+        expect(model.broadcastToSelection).toHaveBeenCalledWith("ship it", expect.any(String));
     });
 
     it("stops the selection only after the Swarm's own confirmation", async () => {

@@ -37,6 +37,8 @@ export type DownloadRow = {
     total: number;
     path?: string;
     reason?: string;
+    /** The "ignored" line only: how many downloads it stands for. */
+    skipped?: number;
 };
 
 /** How long a finished or cancelled download's row stays in the strip before it folds away. */
@@ -56,11 +58,19 @@ function capRows(rows: DownloadRow[]): DownloadRow[] {
     return out;
 }
 
-const IGNORED_KEY = "ignored";
+/** The key of the one line that says downloads were skipped; it folds away like a finished row. */
+export const IGNORED_KEY = "ignored";
+
+/** What the skipped-downloads line says: how many of the page's downloads were not asked about. */
+export function skippedLine(count: number): string {
+    return `${count} ${count === 1 ? "download" : "downloads"} skipped: this page started too many at once.`;
+}
 
 /** The row a host update makes or changes; every row not named stays as it was. */
 export function applyDownloadUpdate(rows: DownloadRow[], u: DownloadUpdate): DownloadRow[] {
     if (u.state === "ignored") {
+        // The host sends one update per download it skipped, so the line counts them.
+        const skipped = (rows.find((r) => r.key === IGNORED_KEY)?.skipped ?? 0) + 1;
         const row: DownloadRow = {
             key: IGNORED_KEY,
             id: null,
@@ -68,7 +78,8 @@ export function applyDownloadUpdate(rows: DownloadRow[], u: DownloadUpdate): Dow
             state: "ignored",
             received: 0,
             total: -1,
-            reason: u.reason,
+            reason: skippedLine(skipped),
+            skipped,
         };
         return rows.some((r) => r.key === IGNORED_KEY)
             ? rows.map((r) => (r.key === IGNORED_KEY ? row : r))
@@ -88,7 +99,8 @@ export function applyDownloadUpdate(rows: DownloadRow[], u: DownloadUpdate): Dow
         received: u.received ?? prev?.received ?? 0,
         total: u.total ?? prev?.total ?? -1,
         path: u.state === "done" ? u.path : undefined,
-        reason: u.state === "failed" ? u.reason : undefined,
+        // A failed download says why; a saved one may carry a note (it was saved without asking).
+        reason: u.state === "failed" || u.state === "done" ? u.reason : undefined,
     };
     return prev ? rows.map((r) => (r.key === key ? row : r)) : capRows([...rows, row]);
 }

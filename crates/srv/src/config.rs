@@ -41,9 +41,17 @@ pub struct CliArgs {
     pub frontend_dir: Option<PathBuf>,
 
     /// Headless: also accept this browser origin (e.g. https://app.example.com)
-    /// for CORS and the /ws check, beside loopback. Repeatable.
+    /// for CORS and the /ws check, beside loopback. Repeatable. A launcher that
+    /// starts srv per run can give the one origin as `AGENTMUX_ALLOWED_ORIGIN`
+    /// instead (https, nothing else allowed); if both are given they must agree.
     #[arg(long = "allowed-origin")]
     pub allowed_origins: Vec<String>,
+
+    /// Headless: the key file of an external host whose attestations srv accepts (the person's window,
+    /// vouched for by a separate host process). Read once at boot; there is no way to register another
+    /// later. Without it srv accepts no external attestation.
+    #[arg(long = "external-host-key-file")]
+    pub external_host_key_file: Option<PathBuf>,
 
     /// Headless, with `--frontend-dir`: the one origin a browser reaches the UI on when it is not
     /// srv's own port, e.g. through `ssh -L 8080:127.0.0.1:7380`. Must be `http://127.0.0.1:<port>`.

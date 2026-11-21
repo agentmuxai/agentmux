@@ -20,13 +20,39 @@
 
 // ── Shared row geometry ──────────────────────────────────────────────────────
 
-.maintenance-update-row {
+// A row is a message and its buttons (maintenance-rows.tsx). They share a line when both fit; when they do not, the
+// buttons wrap to a line of their own under the message, which then has the whole width. The message's size is what it
+// needs (`flex: 1 1 auto`: its text on one line), so what decides is whether message and buttons fit together, the same
+// for every state. Not `nowrap`: that squeezed a long message into the space the buttons left.
+.maintenance-row {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-1);
-    padding: 3px var(--space-1-5);
+    column-gap: var(--space-1-5);
+    row-gap: var(--space-1);
+    padding: var(--space-1) var(--space-1-5);
     font-size: var(--text-xs);
     min-height: 24px;
+}
+
+// The glyph and the text, one block: when it does not fit beside the buttons the glyph stays with its text.
+.maintenance-message {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-1);
+}
+
+// The buttons: left on their own line, after the message when they share one; more than fit wrap to a second line.
+.maintenance-actions {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
 }
 
 // ── Icons ────────────────────────────────────────────────────────────────────

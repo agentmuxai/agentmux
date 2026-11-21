@@ -59,6 +59,15 @@
 use agentmux_common::win32::NoWindow;
 use std::path::Path;
 
+pub mod login_item;
+#[cfg(target_os = "windows")]
+pub mod packaged;
+
+#[cfg(any(target_os = "windows", test))]
+mod task_xml;
+#[cfg(any(target_os = "windows", test))]
+pub use task_xml::scheduled_task_xml;
+
 /// The flag every generated artifact passes to the launcher.
 ///
 /// This is the ONLY thing that makes an auto-started instance behave like a
@@ -74,7 +83,20 @@ pub const BACKGROUND_FLAG: &str = "--background";
 /// host actually reads (`AGENTMUX_BACKGROUND_SERVICE`, plus `AGENTMUX_TRAY` —
 /// see `background_env_for`).
 pub fn background_requested(args: &[String]) -> bool {
-    args.iter().any(|a| a == BACKGROUND_FLAG)
+    args.iter().any(|a| a == BACKGROUND_FLAG) || started_by_login_task()
+}
+
+/// The Store package's startup task starts the exe with no arguments, so a login start there is known from how
+/// Windows activated the process, not from `--background`. Nowhere else is it ever true.
+fn started_by_login_task() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        packaged::started_by_startup_task()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
+    }
 }
 
 /// Was this process started by a login entry? Every artifact passes
@@ -123,79 +145,6 @@ pub const AUTOSTART_ID: &str = "AgentMux";
 /// Reverse-DNS label for the macOS LaunchAgent, which requires that form.
 #[cfg(any(not(target_os = "windows"), test))]
 pub const MACOS_LABEL: &str = "com.agentmux.launcher";
-
-/// Windows Task Scheduler registration XML.
-///
-/// `LogonType=InteractiveToken` is the load-bearing detail (issue WS2): it
-/// runs the task as the logged-in user *in their interactive session*, which
-/// is what lets the process own a tray icon and later spawn visible windows.
-/// `RunLevel=LeastPrivilege` keeps it out of elevation prompts — auto-start
-/// must not require admin.
-///
-/// `<Delay>PT30S</Delay>` staggers startup behind the desktop's own login
-/// work; a background service racing Explorer for disk on every boot is a
-/// bad citizen, and 30s is invisible for something meant to run all day.
-///
-/// `DisallowStartIfOnBatteries`/`StopIfGoingOnBatteries` are both false
-/// deliberately: the defaults are *true*, which would make a laptop user's
-/// background service silently not start, or die mid-turn on unplug — the
-/// exact "is it actually running?" unreliability WS4 warns about.
-#[cfg(any(target_os = "windows", test))]
-pub fn scheduled_task_xml(exe: &Path, channel: &str) -> String {
-    let exe = xml_escape(&exe.display().to_string());
-    let channel = xml_escape(channel);
-    format!(
-        r#"<?xml version="1.0" encoding="UTF-16"?>
-<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <RegistrationInfo>
-    <Description>Starts AgentMux in the background at logon. Created by AgentMux; remove it by turning off auto-start in AgentMux, or with: schtasks /Delete /TN "{id}" /F {marker}{channel}]</Description>
-    <URI>\{id}</URI>
-  </RegistrationInfo>
-  <Triggers>
-    <LogonTrigger>
-      <Enabled>true</Enabled>
-      <Delay>PT30S</Delay>
-    </LogonTrigger>
-  </Triggers>
-  <Principals>
-    <Principal id="Author">
-      <LogonType>InteractiveToken</LogonType>
-      <RunLevel>LeastPrivilege</RunLevel>
-    </Principal>
-  </Principals>
-  <Settings>
-    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-    <AllowHardTerminate>false</AllowHardTerminate>
-    <StartWhenAvailable>false</StartWhenAvailable>
-    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
-    <IdleSettings>
-      <StopOnIdleEnd>false</StopOnIdleEnd>
-      <RestartOnIdle>false</RestartOnIdle>
-    </IdleSettings>
-    <AllowStartOnDemand>true</AllowStartOnDemand>
-    <Enabled>true</Enabled>
-    <Hidden>false</Hidden>
-    <RunOnlyIfIdle>false</RunOnlyIfIdle>
-    <WakeToRun>false</WakeToRun>
-    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
-    <Priority>7</Priority>
-  </Settings>
-  <Actions Context="Author">
-    <Exec>
-      <Command>"{exe}"</Command>
-      <Arguments>--background</Arguments>
-    </Exec>
-  </Actions>
-</Task>
-"#,
-        id = AUTOSTART_ID,
-        exe = exe,
-        marker = TASK_CHANNEL_MARKER,
-        channel = channel,
-    )
-}
 
 /// Marks the owning channel inside the Task's `<Description>`, the only
 /// free-text field Task Scheduler keeps verbatim.
@@ -451,21 +400,32 @@ fn schtasks_command() -> std::process::Command {
 /// whatever wrote it. So this inspects the real system state (the Task
 /// Scheduler store, or the artifact file) rather than any bookkeeping of our
 /// own.
+/// Is the Scheduled Task (every install but the Store package's login entry) registered? `/Query` fails if not.
+#[cfg(target_os = "windows")]
+fn scheduled_task_exists() -> bool {
+    schtasks_command()
+        .args(["/Query", "/TN", AUTOSTART_ID])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 pub fn is_enabled() -> bool {
     #[cfg(target_os = "windows")]
     {
-        // `schtasks /Query` exits non-zero when the task does not exist.
-        schtasks_command()
-            .args(["/Query", "/TN", AUTOSTART_ID])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
+        // The Store package's login entry is its startup task, which Windows owns.
+        if packaged::is_packaged() {
+            return packaged::state().map(packaged::TaskState::is_on).unwrap_or(false);
+        }
+        scheduled_task_exists()
     }
     #[cfg(not(target_os = "windows"))]
     {
-        artifact_path().map(|p| p.exists()).unwrap_or(false)
+        // A login item waiting for the person's approval is registered too: switching it on twice must not
+        // register it twice, and an uninstaller must find it.
+        artifact_path().map(|p| p.exists()).unwrap_or(false) || login_item::registration().is_some_and(|r| r.is_registered())
     }
 }
 
@@ -475,6 +435,29 @@ pub fn is_enabled() -> bool {
 pub fn enable(exe: &Path, channel: &str) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
+        if packaged::is_packaged() {
+            // The package's task runs no file AgentMux picks: `exe` and `channel` are written nowhere. A person's
+            // "off" in Windows stays off, and the error says so.
+            let _ = (exe, channel);
+            // A copy installed with the setup program has its own login entry, the Scheduled Task. Single
+            // instance is per version, so with both on, two versions start at login and show two tray icons.
+            // The other direction cannot be seen from outside the package, so only this one is checked.
+            if scheduled_task_exists() {
+                return Err(
+                    "start at login is already on for the AgentMux installed with the setup program: turn it off there first, so AgentMux does not start twice".to_string(),
+                );
+            }
+            return match packaged::request_enable()? {
+                s if s.is_on() => Ok(()),
+                packaged::TaskState::DisabledByUser => Err(
+                    "Windows has start at login turned off for AgentMux: turn it on in Settings > Apps > Startup".to_string(),
+                ),
+                packaged::TaskState::DisabledByPolicy => {
+                    Err("start at login is turned off for AgentMux by your organisation's policy".to_string())
+                }
+                _ => Err("Windows did not turn start at login on".to_string()),
+            };
+        }
         // Register from XML — the only way to set LogonType/battery settings;
         // the flag-based `schtasks /Create /SC ONLOGON` form cannot express
         // them. The XML must be UTF-16 per the Task Scheduler schema
@@ -513,6 +496,13 @@ pub fn enable(exe: &Path, channel: &str) -> Result<(), String> {
     }
     #[cfg(not(target_os = "windows"))]
     {
+        // A bundle that ships a login agent registers it with the system (`SMAppService`): the entry shows in Login
+        // Items, and the LaunchAgent plist an earlier build wrote is removed so AgentMux does not start twice.
+        if login_item::available() {
+            let _ = (exe, channel);
+            login_item::register()?;
+            return remove_launch_agent_plist();
+        }
         let path = artifact_path().ok_or_else(|| "unsupported platform".to_string())?;
         let contents = if cfg!(target_os = "macos") {
             launch_agent_plist(exe, channel)
@@ -537,6 +527,9 @@ pub fn enable(exe: &Path, channel: &str) -> Result<(), String> {
 pub fn disable() -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
+        if packaged::is_packaged() {
+            return packaged::disable();
+        }
         if !is_enabled() {
             return Ok(());
         }
@@ -553,16 +546,23 @@ pub fn disable() -> Result<(), String> {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let Some(path) = artifact_path() else {
-            return Ok(());
-        };
-        match std::fs::remove_file(&path) {
-            Ok(()) => Ok(()),
-            // Already gone is success, not an error — that is what makes this
-            // safe to call unconditionally from an uninstaller.
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(format!("remove {}: {}", path.display(), e)),
-        }
+        // Both: the registration of a build that ships a login agent, and the plist an earlier build wrote.
+        login_item::unregister()?;
+        remove_launch_agent_plist()
+    }
+}
+
+/// Remove the login entry written as a file (the LaunchAgent plist, the XDG desktop entry). Succeeds when it is not
+/// there, which is what makes [`disable`] safe to call unconditionally from an uninstaller.
+#[cfg(not(target_os = "windows"))]
+fn remove_launch_agent_plist() -> Result<(), String> {
+    let Some(path) = artifact_path() else {
+        return Ok(());
+    };
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("remove {}: {}", path.display(), e)),
     }
 }
 
@@ -580,7 +580,10 @@ pub fn disable() -> Result<(), String> {
 /// disturb a running instance):
 /// - `--enable-autostart`  — register, using this executable's own path
 /// - `--disable-autostart` — remove; idempotent, safe to run unconditionally
-/// - `--autostart-status`  — print `enabled` / `disabled`, exit 0 either way
+/// - `--remove-autostart-for-this-install` — remove only an entry that runs a file from this
+///   executable's own folder (what an uninstaller calls)
+/// - `--autostart-status`  — print `enabled` / `disabled`, exit 0 either way;
+///   with `--json`, print the [`Status`] object instead
 /// The channel this launcher belongs to, which owns any entry it writes
 /// (`SPEC_START_WITH_OS_2026_09_25.md` §3.5). Resolved the same way as the
 /// data dir; `"unknown"` only if that resolution fails.
@@ -654,6 +657,14 @@ pub struct Entry {
 pub fn read_entry() -> Option<Entry> {
     #[cfg(target_os = "windows")]
     {
+        // The package's task runs this package's launcher and belongs to this channel by construction.
+        if packaged::is_packaged() {
+            return packaged::state().ok().filter(|s| s.is_on()).map(|_| Entry {
+                target: std::env::current_exe().ok().map(|e| e.display().to_string()),
+                channel: Some(current_channel()),
+                current: true,
+            });
+        }
         let out = schtasks_command()
             .args(["/Query", "/TN", AUTOSTART_ID, "/XML"])
             .stderr(std::process::Stdio::null())
@@ -666,12 +677,26 @@ pub fn read_entry() -> Option<Entry> {
     }
     #[cfg(not(target_os = "windows"))]
     {
+        // A registered login item is this build's own entry, whatever else is on the machine.
+        if login_item::registration().is_some_and(|r| r.is_registered()) {
+            return Some(Entry {
+                target: std::env::current_exe().ok().map(|p| p.display().to_string()),
+                channel: Some(current_channel()),
+                current: true,
+            });
+        }
         let text = std::fs::read_to_string(artifact_path()?).ok()?;
-        Some(if cfg!(target_os = "macos") {
+        let mut entry = if cfg!(target_os = "macos") {
             parse_plist(&text)
         } else {
             parse_desktop_entry(&text)
-        })
+        };
+        // An earlier build's LaunchAgent plist, read by a build that registers a login item: out of date, so
+        // the reconcile rewrites it as the login item (`plan` writes for an entry that is not current).
+        if login_item::available() {
+            entry.current = false;
+        }
+        Some(entry)
     }
 }
 
@@ -776,6 +801,12 @@ pub(crate) fn moved_from() -> Option<String> {
 pub fn startup() {
     take_stable_exe_env();
     note_appimage_start();
+    // How Windows started a packaged copy, so a bug report about a login start that opened a window or showed
+    // no tray says whether the package's startup task was recognised (`startup_task`) or not.
+    #[cfg(target_os = "windows")]
+    if packaged::is_packaged() {
+        crate::log(&format!("packaged start: activation {}", packaged::activation_name()));
+    }
 }
 
 /// At start, for an AppImage: put its channel record back beside it if a move or a rename left that behind, and
@@ -797,6 +828,56 @@ pub fn note_appimage_start() {
 /// (the desktop entry's `TryExec`), so AgentMux silently stops starting at login.
 pub fn missing_target(entry: &Entry) -> Option<&str> {
     entry.target.as_deref().filter(|t| !t.is_empty() && !Path::new(t).exists())
+}
+
+/// How the login entry stands (`SPEC_START_WITH_OS_2026_09_25.md` §3.8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum State {
+    /// No login entry.
+    Off,
+    /// An entry that runs a file that is there.
+    On,
+    /// An entry whose file is gone: the session skips it without a word.
+    Broken,
+    /// Registered, but the system waits for the user's approval (macOS Login Items): `current_status` says so for a
+    /// login item whose registration is `RequiresApproval`.
+    NeedsApproval,
+}
+
+/// `--autostart-status --json`: what Settings shows next to the switch.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Status {
+    pub state: State,
+    /// What the entry runs, when readable.
+    pub target: Option<String>,
+    /// The channel that wrote the entry; `None` for no entry or one from before ownership was recorded.
+    pub owner_channel: Option<String>,
+    pub this_channel: String,
+    /// The entry belongs to another channel (or to none) and this build can take it over.
+    pub movable: bool,
+    /// The Store package's startup task, as Windows says it now (`enabled`, `disabled`, `disabled_by_user`,
+    /// `disabled_by_policy`, `enabled_by_policy`); `None` anywhere that is not a packaged install.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub package: Option<String>,
+    /// How Windows activated this process (`launch`, `startup_task`, `unknown`), packaged installs only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activation: Option<String>,
+}
+
+/// Pure: the status from what is on the machine. `registered` is [`is_enabled`], which can say yes when
+/// `entry` could not be read (an entry this build cannot parse still starts something at login).
+/// `can_write` is whether this build has a target to point an entry at.
+pub fn status(entry: Option<&Entry>, registered: bool, this_channel: &str, can_write: bool) -> Status {
+    let state = match entry {
+        Some(e) if missing_target(e).is_some() => State::Broken,
+        Some(_) => State::On,
+        None if registered => State::On,
+        None => State::Off,
+    };
+    let owner_channel = entry.and_then(|e| e.channel.clone());
+    let movable = entry.is_some() && owner_channel.as_deref() != Some(this_channel) && can_write;
+    Status { state, target: entry.and_then(|e| e.target.clone()), owner_channel, this_channel: this_channel.to_string(), movable, package: None, activation: None }
 }
 
 /// Pure decision. `setting` is `app:startatlogin`, `None` when never set.
@@ -824,11 +905,64 @@ pub fn plan(setting: Option<bool>, entry: Option<&Entry>, channel: &str, target:
     }
 }
 
+/// [`status`] of this machine, with the login item's approval: a registration the person has not allowed (or has
+/// switched off) in System Settings is `needs_approval`, not `on` (`SPEC_START_WITH_OS_2026_09_25.md` §3.8).
+pub fn current_status() -> Status {
+    let mut s = status(read_entry().as_ref(), is_enabled(), &current_channel(), stable_target().is_ok());
+    if login_item::registration() == Some(login_item::Registration::RequiresApproval) {
+        s.state = State::NeedsApproval;
+    }
+    // The Store package's login entry is its startup task, which Windows owns: say what Windows says. A person's
+    // "off" there is not `needs_approval` (that is macOS' Login Items, with a button that opens it): the state
+    // stays off and Settings reads `package`.
+    #[cfg(target_os = "windows")]
+    if packaged::is_packaged() {
+        s.package = packaged::state().ok().map(|task| task.as_str().to_string());
+        s.activation = Some(packaged::activation_name());
+        s.movable = false;
+    }
+    s
+}
+
+/// Does the login entry run a file inside `dir`? An uninstaller asks this with its own install folder, so it
+/// removes the entry that would be left pointing at nothing (`SPEC_START_WITH_OS_2026_09_25.md` G6, G7) and
+/// leaves an entry that another install or channel owns alone. Windows paths compare without case.
+pub fn entry_runs_from(entry: &Entry, dir: &Path) -> bool {
+    fn norm(p: &str) -> String {
+        let p = p.trim_end_matches(|c| c == '\\' || c == '/');
+        if cfg!(target_os = "windows") { p.replace('/', "\\").to_lowercase() } else { p.to_string() }
+    }
+    let Some(target) = entry.target.as_deref().filter(|t| !t.is_empty()) else { return false };
+    let dir = norm(&dir.to_string_lossy());
+    let target = norm(target);
+    let sep = if cfg!(target_os = "windows") { '\\' } else { '/' };
+    !dir.is_empty() && target.len() > dir.len() && target.starts_with(&dir) && target[dir.len()..].starts_with(sep)
+}
+
 pub fn handle_cli(args: &[String]) -> bool {
     let has = |v: &str| args.iter().any(|a| a == v);
 
+    // The login job of a build that registers a login item (`login_item`): open AgentMux and leave.
+    if has(login_item::LOGIN_START_FLAG) {
+        std::process::exit(login_item::login_start());
+    }
+    if has(login_item::OPEN_LOGIN_ITEMS_FLAG) {
+        match login_item::open_settings() {
+            Ok(()) => println!("opened Login Items"),
+            Err(e) => {
+                eprintln!("failed to open Login Items: {}", e);
+                std::process::exit(1);
+            }
+        }
+        return true;
+    }
     if has("--autostart-status") {
-        println!("{}", if is_enabled() { "enabled" } else { "disabled" });
+        if has("--json") {
+            let s = current_status();
+            println!("{}", serde_json::to_string(&s).unwrap_or_else(|_| "{}".to_string()));
+        } else {
+            println!("{}", if is_enabled() { "enabled" } else { "disabled" });
+        }
         return true;
     }
     if has("--enable-autostart") {
@@ -854,6 +988,22 @@ pub fn handle_cli(args: &[String]) -> bool {
                 eprintln!("failed to disable auto-start: {}", e);
                 std::process::exit(1);
             }
+        }
+        return true;
+    }
+    if has("--remove-autostart-for-this-install") {
+        // What an uninstaller runs (Inno's `[UninstallRun]`): remove the login entry only when it runs a file
+        // from this install's folder. Another build's entry stays; no entry is a success.
+        let dir = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf));
+        match (read_entry(), dir) {
+            (Some(entry), Some(dir)) if entry_runs_from(&entry, &dir) => match disable() {
+                Ok(()) => println!("auto-start entry for this install removed"),
+                Err(e) => {
+                    eprintln!("failed to remove the auto-start entry: {}", e);
+                    std::process::exit(1);
+                }
+            },
+            _ => println!("no auto-start entry runs from this install; left alone"),
         }
         return true;
     }
@@ -886,6 +1036,20 @@ mod autostart_tests {
             xml.contains("<RunLevel>LeastPrivilege</RunLevel>"),
             "auto-start must never require elevation"
         );
+    }
+
+    /// A logon trigger with no user is the any-user form, which only an elevated token may create. Naming the
+    /// user in the trigger and the principal makes it this user's alone.
+    #[test]
+    fn scheduled_task_names_the_user_so_a_normal_token_can_create_it() {
+        let xml = task_xml::scheduled_task_xml_for(&exe(), "test", Some(r"PC\Ann & Bo"));
+        assert_eq!(xml.matches(r"<UserId>PC\Ann &amp; Bo</UserId>").count(), 2, "{xml}");
+        let trigger = xml.split("<LogonTrigger>").nth(1).unwrap().split("</LogonTrigger>").next().unwrap();
+        assert!(trigger.contains("<UserId>"));
+        let principal = xml.split("<Principal id=\"Author\">").nth(1).unwrap().split("</Principal>").next().unwrap();
+        assert!(principal.contains("<UserId>"));
+        // Without a user it stays the form it was.
+        assert!(!task_xml::scheduled_task_xml_for(&exe(), "test", None).contains("<UserId>"));
     }
 
     #[test]
@@ -1064,6 +1228,36 @@ mod autostart_tests {
         Entry { target: Some(target.to_string()), channel: channel.map(str::to_string), current: true }
     }
 
+    /// An uninstaller removes the entry that runs from its own folder, and nothing else.
+    #[test]
+    fn an_uninstall_removes_only_an_entry_that_runs_from_its_own_folder() {
+        let (dir, ours, other) = if cfg!(target_os = "windows") {
+            (
+                r"C:\Users\a\AppData\Local\Programs\AgentMux",
+                r"C:\Users\a\AppData\Local\Programs\AgentMux\agentmux.exe",
+                r"C:\dev\agentmux\agentmux.exe",
+            )
+        } else {
+            ("/opt/agentmux", "/opt/agentmux/agentmux", "/home/a/dev/agentmux/agentmux")
+        };
+        assert!(entry_runs_from(&entry(ours, Some("stable")), Path::new(dir)));
+        // Another build's entry stays, whoever owns it.
+        assert!(!entry_runs_from(&entry(other, Some("stable")), Path::new(dir)));
+        // A folder whose name only starts the same is not inside it.
+        let sibling = format!("{}-dev{}agentmux.exe", dir, std::path::MAIN_SEPARATOR);
+        assert!(!entry_runs_from(&entry(&sibling, None), Path::new(dir)));
+        // No target, or no folder: nothing to remove.
+        assert!(!entry_runs_from(&Entry { target: None, channel: None, current: true }, Path::new(dir)));
+        assert!(!entry_runs_from(&entry(ours, None), Path::new("")));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_paths_compare_without_case_or_slash_direction() {
+        let e = entry(r"c:\users\a\appdata\local\programs\agentmux\AGENTMUX.EXE", None);
+        assert!(entry_runs_from(&e, Path::new("C:/Users/A/AppData/Local/Programs/AgentMux/")));
+    }
+
     #[test]
     fn plan_on_writes_unless_the_entry_is_already_ours_and_current() {
         let t = "/home/u/Desktop/AgentMux.AppImage";
@@ -1150,6 +1344,46 @@ mod autostart_tests {
         assert_eq!(super::plan(Some(false), Some(&entry(old, Some("local-x"))), "stable", Some(new), None), Plan::Nothing);
         // No target to point it at: no repoint.
         assert_eq!(super::plan(Some(false), Some(&entry(old, Some("local-x"))), "stable", None, Some(old)), Plan::Nothing);
+    }
+
+    #[test]
+    fn status_says_off_on_or_broken_and_who_owns_the_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let there = dir.path().join("AgentMux.AppImage");
+        std::fs::write(&there, b"x").unwrap();
+        let there = there.display().to_string();
+        let gone = dir.path().join("Gone.AppImage").display().to_string();
+
+        let none = status(None, false, "stable", true);
+        assert_eq!((none.state, none.movable, none.owner_channel.as_deref(), none.target.as_deref()), (State::Off, false, None, None));
+
+        let ours = status(Some(&entry(&there, Some("stable"))), true, "stable", true);
+        assert_eq!((ours.state, ours.movable, ours.owner_channel.as_deref()), (State::On, false, Some("stable")));
+        assert_eq!(ours.target.as_deref(), Some(there.as_str()));
+
+        let broken = status(Some(&entry(&gone, Some("stable"))), true, "stable", true);
+        assert_eq!((broken.state, broken.movable), (State::Broken, false), "ours but its file is gone: Repair, not a move");
+
+        let theirs = status(Some(&entry(&there, Some("local-x"))), true, "stable", true);
+        assert_eq!((theirs.state, theirs.movable, theirs.owner_channel.as_deref()), (State::On, true, Some("local-x")));
+        assert!(!status(Some(&entry(&there, Some("local-x"))), true, "stable", false).movable, "no target to point it at: not movable");
+
+        let unowned = status(Some(&entry(&there, None)), true, "stable", true);
+        assert_eq!((unowned.state, unowned.movable, unowned.owner_channel), (State::On, true, None), "from before ownership was recorded");
+
+        let unreadable = status(None, true, "stable", true);
+        assert_eq!((unreadable.state, unreadable.movable), (State::On, false), "registered but unparsed still starts something at login");
+    }
+
+    #[test]
+    fn status_json_has_the_keys_settings_reads() {
+        let s = status(Some(&entry("/x/AgentMux.AppImage", Some("local-x"))), true, "stable", true);
+        let v: serde_json::Value = serde_json::to_value(&s).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({ "state": "broken", "target": "/x/AgentMux.AppImage", "owner_channel": "local-x", "this_channel": "stable", "movable": true })
+        );
+        assert_eq!(serde_json::to_value(State::NeedsApproval).unwrap(), "needs_approval");
     }
 
     #[test]

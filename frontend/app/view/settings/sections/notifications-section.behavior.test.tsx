@@ -18,7 +18,7 @@ const h = vi.hoisted(() => ({
     log: [] as string[],
     arg: undefined as unknown,
     caps: {} as Record<string, boolean>,
-    autostart: { available: true, enabled: false } as { available: boolean; enabled: boolean },
+    autostart: { available: true, enabled: false } as AutostartStatus,
     autostartFails: false,
     notifyFails: false,
 }));
@@ -65,6 +65,10 @@ vi.mock("@/util/app-api", () => ({
         getAutostartStatus: () => {
             h.log.push("getAutostartStatus");
             return h.autostartFails ? Promise.reject(new Error("no verb")) : Promise.resolve(h.autostart);
+        },
+        openLoginItems: () => {
+            h.log.push("openLoginItems");
+            return Promise.resolve();
         },
     }),
 }));
@@ -124,6 +128,11 @@ const look = (label: string) => {
     log(`-- ${label}`);
     // The kit numbers its fields as they are made, so the count depends on the tests that ran before.
     log(dump(host).join("\n").replace(/-cl-\d+/g, "-cl-N"));
+};
+/** Just one row, for a case that is about it. */
+const lookRow = (label: string, id = "autostart") => {
+    log(`-- ${label}`);
+    log(dump(row(id)!).join("\n").replace(/-cl-\d+/g, "-cl-N"));
 };
 const flush = async () => {
     for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
@@ -235,6 +244,74 @@ describe("NotificationsSection, pinned", () => {
         await flush();
         look("the verb is missing");
         await snapshot("autostart");
+    });
+
+    it("offers Repair for a login entry whose file is gone and Use this build for another build's, and a click writes the setting off and on again", async () => {
+        setSettings({ "app:startatlogin": true });
+        h.autostart = { available: true, enabled: true, state: "on", ownerChannel: "stable", thisChannel: "stable", movable: false };
+        mount();
+        await flush();
+        lookRow("an entry of this build that works: no button");
+        cleanup();
+        h.autostart = { available: true, enabled: true, state: "broken", target: "/gone/AgentMux", ownerChannel: "stable", thisChannel: "stable", movable: false };
+        mount();
+        await flush();
+        lookRow("an entry whose file is gone");
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        log("== Repair");
+        fireEvent.click(row("autostart")!.querySelector("[data-stand=Button] [data-cb], [data-stand=Button][data-cb]")!);
+        await vi.advanceTimersByTimeAsync(399);
+        log("-- 399 ms later: only the off write so far");
+        await vi.advanceTimersByTimeAsync(1);
+        log("-- 400 ms later: switched on again");
+        vi.useRealTimers();
+        cleanup();
+        h.autostart = { available: true, enabled: true, state: "on", target: "/x/AgentMux", ownerChannel: "local-x", thisChannel: "stable", movable: true };
+        mount();
+        await flush();
+        lookRow("another build's entry");
+        cleanup();
+        h.autostart = { available: true, enabled: true, state: "on", ownerChannel: null, movable: true };
+        mount();
+        await flush();
+        lookRow("an entry from before owners were recorded");
+        await snapshot("autostart-fix");
+    });
+
+    it("says a login item waits for the person's approval in Login Items, opens that page from its button, and reads the registration again when the window gets the focus back", async () => {
+        setSettings({ "app:startatlogin": true });
+        h.autostart = { available: true, enabled: true, state: "needs_approval", target: "/Applications/AgentMux.app/Contents/MacOS/agentmux-launcher", ownerChannel: "stable", thisChannel: "stable", movable: false };
+        mount();
+        await flush();
+        lookRow("registered, waiting for approval");
+        log("== Open Login Items");
+        fireEvent.click(row("autostart")!.querySelector("[data-stand=Button] [data-cb], [data-stand=Button][data-cb]")!);
+        await flush();
+        h.autostart = { available: true, enabled: true, state: "on", ownerChannel: "stable", thisChannel: "stable", movable: false };
+        log("== the person allows it and comes back to the window");
+        window.dispatchEvent(new Event("focus"));
+        await flush();
+        lookRow("allowed: no button");
+        await snapshot("autostart-approval");
+    });
+
+    it("says where to turn start at login back on when Windows has it off for the Store package, by the person or by policy", async () => {
+        setSettings({ "app:startatlogin": true });
+        h.autostart = { available: true, enabled: false, state: "off", thisChannel: "stable", movable: false, package: "disabled_by_user" };
+        mount();
+        await flush();
+        lookRow("the person turned it off in Windows");
+        cleanup();
+        h.autostart = { available: true, enabled: false, state: "off", thisChannel: "stable", movable: false, package: "disabled_by_policy" };
+        mount();
+        await flush();
+        lookRow("off by the organisation's policy");
+        cleanup();
+        h.autostart = { available: true, enabled: true, state: "on", thisChannel: "stable", movable: false, package: "enabled" };
+        mount();
+        await flush();
+        lookRow("on, as Windows says");
+        await snapshot("autostart-package");
     });
 
     it("reads the registration again two seconds after a change to start at login, and not for another setting", async () => {

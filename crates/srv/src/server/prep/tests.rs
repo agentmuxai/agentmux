@@ -180,6 +180,43 @@ async fn another_target_replaces_the_closure_and_keeps_the_window_and_the_same_t
     assert_eq!(sink::notes("prep-f").len(), 1, "the agent was asked once, not once per request");
 }
 
+/// The choice the closure acts on is written before the window can end: a window that ended while it was
+/// still being written would run the closure, and the write would then outlive it.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_choice_is_recorded_before_a_window_that_is_ended_at_once_runs_its_closure() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let state = test_state();
+    sink::expect("prep-r");
+    let recorded = Arc::new(AtomicBool::new(false));
+    let seen: Arc<Mutex<Vec<bool>>> = Default::default();
+    let (flag, log) = (recorded.clone(), seen.clone());
+    let proceed: Proceed = Box::new(move |_| log.lock().unwrap().push(flag.load(Ordering::SeqCst)));
+    let flag = recorded.clone();
+    ledger::open_with(&state, prep("prep-def-r", "Prep-R", "acct-2"), proceed, || {
+        // The person presses "Switch now" while the choice is still being written.
+        ledger::person_says_now("prep-def-r", "").unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        flag.store(true, Ordering::SeqCst);
+    });
+    until("the change", || !seen.lock().unwrap().is_empty()).await;
+    assert_eq!(*seen.lock().unwrap(), vec![true], "the closure ran after the choice was recorded, once");
+}
+
+#[tokio::test]
+async fn the_choice_of_a_window_already_open_is_recorded_too() {
+    let state = test_state();
+    sink::expect("prep-s");
+    let (ran, proceed_first) = recorder();
+    let (_, proceed_second) = recorder();
+    ledger::open_with(&state, prep("prep-def-s", "Prep-S", "acct-2"), proceed_first, || {});
+    let recorded = Arc::new(Mutex::new(0));
+    let count = recorded.clone();
+    ledger::open_with(&state, prep("prep-def-s", "Prep-S", "acct-3"), proceed_second, move || *count.lock().unwrap() += 1);
+    assert_eq!(*recorded.lock().unwrap(), 1, "recorded for the replacing target");
+    ledger::cancel(&state, "prep-def-s");
+    assert!(ran.lock().unwrap().is_empty());
+}
+
 #[tokio::test]
 async fn a_cancel_drops_the_closure_and_what_the_agent_left_and_tells_it_to_carry_on() {
     store_installed();

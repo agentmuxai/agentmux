@@ -12,6 +12,7 @@
 // other agent's UI click can reach (spec §5).
 
 import { Button } from "@/app/element/ui";
+import { agentDisplayName, followAgentNames } from "@/app/store/agent-names";
 import { createSignal, Show, type JSX } from "solid-js";
 import type { BrowserViewModel } from "./browser-model";
 import { ActionLogPanel, BypassConfirm, BypassStrip, PlainStrip } from "./driven-by-strip-parts";
@@ -20,16 +21,24 @@ import { createDrivenBy } from "./driven-by-strip-state";
 export function DrivenByStrip(props: { model: BrowserViewModel; agent: string }): JSX.Element {
     const t = createDrivenBy(props);
     const model = props.model;
+    followAgentNames();
+    // The agent is recorded by its id ("tess-2"); the strip says its name ("Tess").
+    const p = {
+        model,
+        get agent() {
+            return agentDisplayName(props.agent);
+        },
+    };
     return (
         <>
-            <Show when={model.bypassAtom()} fallback={<PlainStrip t={t} p={props} />}>
-                {(b) => <BypassStrip t={t} p={props} grant={b} />}
+            <Show when={model.bypassAtom()} fallback={<PlainStrip t={t} p={p} />}>
+                {(b) => <BypassStrip t={t} p={p} grant={b} />}
             </Show>
             <Show when={t.showLog()}>
-                <ActionLogPanel model={model} agent={props.agent} onClose={() => t.setShowLog(false)} />
+                <ActionLogPanel model={model} agent={p.agent} onClose={() => t.setShowLog(false)} />
             </Show>
             <Show when={t.confirming() && !model.bypassAtom()}>
-                <BypassConfirm t={t} p={props} />
+                <BypassConfirm t={t} p={p} />
             </Show>
         </>
     );
@@ -41,7 +50,8 @@ export function ActionLogStrip(props: { model: BrowserViewModel }): JSX.Element 
     const [showLog, setShowLog] = createSignal(false);
     const entries = () => props.model.actionsAtom().entries;
     // Whoever drove it last: the newest entry's agent.
-    const agent = () => entries()[entries().length - 1]?.agent || "The agent";
+    followAgentNames();
+    const agent = () => agentDisplayName(entries()[entries().length - 1]?.agent || "") || "The agent";
     return (
         <>
             <div class="browser-driven-by browser-driven-by--ended" role="status">

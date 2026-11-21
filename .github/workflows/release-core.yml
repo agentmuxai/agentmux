@@ -554,9 +554,25 @@ jobs:
       # The same selection `publish` makes (its "Flatten artifact tree"); the
       # "Check the files that are published" step there fails if they differ.
       - name: Flatten artifact tree
+        env:
+          MACOS_DMG_SHA256: ${{ needs.build-macos.outputs.dmg-sha256 }}
         run: |
           mkdir -p dist-flat
-          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" -o -name "agentmux-headless-*.tar.gz" -o -name "agentmux-headless-*-windows-x64.zip" \) -exec cp {} dist-flat/ \;
+          # Each package file from the artifact that makes it and no other (a build job runs the built commit's code and can
+          # upload an artifact of its own): see the script for the list. A package file anywhere else stops the release.
+          bash scripts/release-collect-files.sh release-artifacts dist-flat
+          # The macOS DMG is the one in the artifact named macos-dmg, which only build-macos.yml's publish job uploads, after it
+          # has checked the DMG's signature, its stapled ticket and its team. A .dmg in any other artifact (the build job runs the
+          # built commit's code and can upload an artifact of its own) is not taken: it stops the release instead.
+          if [ -n "$(find release-artifacts -type f -name '*.dmg' ! -path 'release-artifacts/macos-dmg/*' -print -quit)" ]; then
+            echo "::error::a .dmg came in an artifact other than macos-dmg"; exit 1
+          fi
+          # ...and it is the file the publish job reported the digest of (none reported when the macOS build did not run).
+          have="$(find release-artifacts/macos-dmg -type f -name '*.dmg' -print0 2> /dev/null | xargs -0 -r node -e 'for (const f of process.argv.slice(1)) console.log(require("crypto").createHash("sha256").update(require("fs").readFileSync(f)).digest("hex"))' | sort | tr '\n' ' ')"
+          if [ "$have" != "${MACOS_DMG_SHA256:+$MACOS_DMG_SHA256 }" ]; then
+            echo "::error::the macOS DMG is not the one build-macos.yml published (digest reported: '${MACOS_DMG_SHA256:-none}')"; exit 1
+          fi
+          if [ -d release-artifacts/macos-dmg ]; then find release-artifacts/macos-dmg -type f -name "*.dmg" -exec cp {} dist-flat/ \; ; fi
           # The install scripts are release assets too, so the signed manifest covers them: as agentmux-install.sh/.ps1 and, for two more releases, as install.sh/.ps1 (a pasted releases/latest/download/install.sh link keeps working)
           # (docs/specs/SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md).
           for f in install.sh install.ps1; do if [ -f "scripts/install/$f" ]; then cp "scripts/install/$f" "dist-flat/$f"; cp "scripts/install/$f" "dist-flat/agentmux-$f"; fi; done
@@ -696,9 +712,25 @@ jobs:
         # docs/specs/SPEC_LINUX_PACKAGES_XZ_2026_10_14.md); *.rpm added for Phase 2 (.pacman lands here
         # too once Phase 3 ships). *.7z is the Windows portable, which replaced
         # the only *.zip (docs/specs/SPEC_WINDOWS_PORTABLE_7Z_2026_10_11.md).
+        env:
+          MACOS_DMG_SHA256: ${{ needs.build-macos.outputs.dmg-sha256 }}
         run: |
           mkdir -p dist-flat
-          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" -o -name "agentmux-headless-*.tar.gz" -o -name "agentmux-headless-*-windows-x64.zip" \) -exec cp {} dist-flat/ \;
+          # Each package file from the artifact that makes it and no other (a build job runs the built commit's code and can
+          # upload an artifact of its own): see the script for the list. A package file anywhere else stops the release.
+          bash scripts/release-collect-files.sh release-artifacts dist-flat
+          # The macOS DMG is the one in the artifact named macos-dmg, which only build-macos.yml's publish job uploads, after it
+          # has checked the DMG's signature, its stapled ticket and its team. A .dmg in any other artifact (the build job runs the
+          # built commit's code and can upload an artifact of its own) is not taken: it stops the release instead.
+          if [ -n "$(find release-artifacts -type f -name '*.dmg' ! -path 'release-artifacts/macos-dmg/*' -print -quit)" ]; then
+            echo "::error::a .dmg came in an artifact other than macos-dmg"; exit 1
+          fi
+          # ...and it is the file the publish job reported the digest of (none reported when the macOS build did not run).
+          have="$(find release-artifacts/macos-dmg -type f -name '*.dmg' -print0 2> /dev/null | xargs -0 -r node -e 'for (const f of process.argv.slice(1)) console.log(require("crypto").createHash("sha256").update(require("fs").readFileSync(f)).digest("hex"))' | sort | tr '\n' ' ')"
+          if [ "$have" != "${MACOS_DMG_SHA256:+$MACOS_DMG_SHA256 }" ]; then
+            echo "::error::the macOS DMG is not the one build-macos.yml published (digest reported: '${MACOS_DMG_SHA256:-none}')"; exit 1
+          fi
+          if [ -d release-artifacts/macos-dmg ]; then find release-artifacts/macos-dmg -type f -name "*.dmg" -exec cp {} dist-flat/ \; ; fi
           # The install scripts are release assets too, so the signed manifest covers them: as agentmux-install.sh/.ps1 and, for two more releases, as install.sh/.ps1 (a pasted releases/latest/download/install.sh link keeps working)
           # (docs/specs/SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md).
           for f in install.sh install.ps1; do if [ -f "scripts/install/$f" ]; then cp "scripts/install/$f" "dist-flat/$f"; cp "scripts/install/$f" "dist-flat/agentmux-$f"; fi; done
@@ -876,6 +908,11 @@ jobs:
     # microsoft/winget-create ships no Linux binary (only wingetcreate.exe).
     runs-on: windows-latest
     continue-on-error: true
+    # For the WinGet line of the run summary (winget-note below): a continue-on-error job reads as success even when it failed
+    # or never ran a step, so the step that submitted says so itself, and the step that failed is named.
+    outputs:
+      failed_step: ${{ steps.failed.outputs.step }}
+      submitted: ${{ steps.submit.outputs.sent }}
     permissions:
       contents: read
     env:
@@ -886,6 +923,7 @@ jobs:
       WINGETCREATE_SHA256: 24042bd37915805615e6cf969ac57c6439124c3fe85823327f5f3fb24bd9ffea
     steps:
       - name: The run is for the release tag
+        id: tag
         shell: bash
         env:
           REF_TYPE: ${{ github.ref_type }}
@@ -897,6 +935,7 @@ jobs:
           fi
 
       - name: Install wingetcreate (pinned)
+        id: install
         shell: pwsh
         run: |
           Invoke-WebRequest -Uri $env:WINGETCREATE_URL -OutFile wingetcreate.exe
@@ -909,6 +948,7 @@ jobs:
       # The installer URL is the one the release published, so WinGet gets what
       # GitHub has; wingetcreate downloads it and writes its hash into the manifest.
       - name: Submit the WinGet manifest pull request
+        id: submit
         shell: bash
         env:
           WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
@@ -932,6 +972,71 @@ jobs:
             --urls "$INSTALLER_URL" \
             --submit \
             --token "$WINGET_TOKEN"
+          # Only reached when wingetcreate exited 0 (the shell stops at the first failing command).
+          echo "sent=true" >> "$GITHUB_OUTPUT"
+
+      - name: Say which step failed
+        id: failed
+        if: ${{ failure() }}
+        shell: bash
+        env:
+          O_TAG: ${{ steps.tag.outcome }}
+          O_INSTALL: ${{ steps.install.outcome }}
+          O_SUBMIT: ${{ steps.submit.outcome }}
+        run: |
+          step="a step of the job"
+          [ "$O_TAG" = failure ] && step="the check that the run is for the release tag"
+          [ "$O_INSTALL" = failure ] && step="installing wingetcreate"
+          [ "$O_SUBMIT" = failure ] && step="submitting the WinGet manifest pull request"
+          echo "step=$step" >> "$GITHUB_OUTPUT"
+
+  # One line, on every release, for what happened to the WinGet submission, in the same style as the Microsoft Store line: the
+  # WinGet job above is skipped when its switch is off and is continue-on-error, so by itself a release that never reached WinGet
+  # looks the same as one that did. "Submitted" means a pull request was opened in microsoft/winget-pkgs; a moderator still has
+  # to merge it before `winget install` offers the release. This changes nothing about whether anything is submitted. It sends
+  # nothing out of the run and holds no token beyond reading the repository.
+  winget-note:
+    name: WinGet line of the run summary
+    needs: [gate, publish, winget]
+    if: ${{ always() && needs.publish.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      TAG: v${{ needs.gate.outputs.version }}
+      RESULT: ${{ needs.winget.result }}
+      FAILED_STEP: ${{ needs.winget.outputs.failed_step }}
+      SUBMITTED: ${{ needs.winget.outputs.submitted }}
+    steps:
+      - name: Say what happened to the WinGet submission
+        shell: bash
+        run: |
+          by_hand="submit it with wingetcreate update AgentMux.AI, or fix the job and re-run it"
+          if [ -n "$FAILED_STEP" ] || [ "$RESULT" = failure ]; then
+            line="failed: ${FAILED_STEP:-the WinGet job failed}. $TAG is on GitHub but was not sent to WinGet: $by_hand."
+            warn=1
+          elif [ "$RESULT" = success ] && [ "$SUBMITTED" != true ]; then
+            # A continue-on-error job reads as success even when it stopped before any step ran: only the submit step's own
+            # output says a pull request was opened.
+            line="failed: the WinGet job did not reach the submission. $TAG is on GitHub but was not sent to WinGet: $by_hand."
+            warn=1
+          elif [ "$RESULT" = skipped ]; then
+            line="skipped: WinGet submission is switched off. $TAG is on GitHub but was not sent to WinGet: $by_hand."
+            warn=1
+          elif [ "$RESULT" = cancelled ]; then
+            line="cancelled: the WinGet job was cancelled. $TAG was not sent to WinGet: $by_hand."
+            warn=1
+          else
+            line="submitted: a WinGet pull request for $TAG was opened in microsoft/winget-pkgs. A moderator has to merge it before winget install offers $TAG."
+            warn=0
+          fi
+          {
+            echo "### WinGet"
+            echo ""
+            echo "$line"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$warn" = 1 ]; then echo "::warning title=WinGet::$line"; else echo "$line"; fi
 
   # The Microsoft Store: submits the MSIX that `publish` attached to the GitHub
   # Release, through the Store Developer CLI (`msstore`). The Store certifies it
@@ -954,6 +1059,11 @@ jobs:
     runs-on: windows-latest
     environment: release-store
     continue-on-error: true
+    # Which step failed, for `ms-store-note`: a continue-on-error job reports success to its dependents whatever happened in it.
+    outputs:
+      failed_step: ${{ steps.failed.outputs.step }}
+      # Set by the submit step only after `msstore publish` succeeded: the one positive sign that something reached the Store.
+      submitted: ${{ steps.submit.outputs.sent }}
     permissions:
       contents: read
       id-token: write
@@ -963,6 +1073,7 @@ jobs:
       STORE_PRODUCT_ID: 9P9QCXNNCRK3
     steps:
       - name: The run is for the release tag
+        id: tag
         shell: bash
         env:
           REF_TYPE: ${{ github.ref_type }}
@@ -975,6 +1086,7 @@ jobs:
 
       # The file the release published, so the Store gets what GitHub has.
       - name: Download the MSIX from the GitHub Release
+        id: download
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -993,6 +1105,7 @@ jobs:
       # credentials. The command below is for this CLI version (v0.4.3): the MSIX file
       # itself is the path, and the app id is given because there is no project to read it from.
       - name: Install the Microsoft Store Developer CLI
+        id: cli
         uses: microsoft/microsoft-store-apppublisher@cc9910a8d59f2eb55cbb83df0a3800cf3b5300e0 # v1.4
         with:
           version: v0.4.3
@@ -1004,6 +1117,7 @@ jobs:
       # checks them again. The token is short-lived, so it is fetched just before
       # it is used, and never printed.
       - name: Get the identity token for the Store app
+        id: token
         shell: pwsh
         run: |
           $uri = "$($env:ACTIONS_ID_TOKEN_REQUEST_URL)&audience=api://AzureADTokenExchange"
@@ -1021,6 +1135,7 @@ jobs:
           "MSSTORE_CLIENT_ASSERTION=$token" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
 
       - name: Configure the CLI with the Store app
+        id: configure
         shell: pwsh
         env:
           MSSTORE_TENANT_ID: ${{ secrets.MSSTORE_TENANT_ID }}
@@ -1040,6 +1155,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Submit to the Microsoft Store
+        id: submit
         shell: pwsh
         env:
           MSSTORE_COMMIT: ${{ vars.MSSTORE_COMMIT }}
@@ -1051,3 +1167,76 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $what = if ($commit) { 'sent to the Store for certification' } else { 'left as a draft in Partner Center: check it there and send it' }
           "Microsoft Store: $($msix.Name) $what." | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          'sent=true' | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+
+      # Names the step that failed, for `ms-store-note`. Runs only on a failure and carries no secret: it reads the steps' outcomes.
+      - name: Say which step failed
+        id: failed
+        if: ${{ failure() }}
+        shell: bash
+        env:
+          O_TAG: ${{ steps.tag.outcome }}
+          O_DOWNLOAD: ${{ steps.download.outcome }}
+          O_CLI: ${{ steps.cli.outcome }}
+          O_TOKEN: ${{ steps.token.outcome }}
+          O_CONFIGURE: ${{ steps.configure.outcome }}
+          O_SUBMIT: ${{ steps.submit.outcome }}
+        run: |
+          step="a step of the job"
+          [ "$O_TAG" = failure ] && step="the check that the run is for the release tag"
+          [ "$O_DOWNLOAD" = failure ] && step="downloading the MSIX from the GitHub Release"
+          [ "$O_CLI" = failure ] && step="installing the Microsoft Store Developer CLI"
+          [ "$O_TOKEN" = failure ] && step="getting the identity token for the Store app"
+          [ "$O_CONFIGURE" = failure ] && step="configuring the CLI with the Store app"
+          [ "$O_SUBMIT" = failure ] && step="submitting to the Microsoft Store"
+          echo "step=$step" >> "$GITHUB_OUTPUT"
+
+  # One line, on every release, for what happened to the Store: the Store job above is skipped when its switch is off and is
+  # continue-on-error, so by itself a release that never reached the Store looks the same as one that did. This changes nothing
+  # about whether anything is submitted. It sends nothing out of the run and holds no token beyond reading the repository.
+  ms-store-note:
+    name: Microsoft Store line of the run summary
+    needs: [gate, publish, ms-store]
+    if: ${{ always() && needs.publish.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      TAG: v${{ needs.gate.outputs.version }}
+      RESULT: ${{ needs.ms-store.result }}
+      FAILED_STEP: ${{ needs.ms-store.outputs.failed_step }}
+      SUBMITTED: ${{ needs.ms-store.outputs.submitted }}
+      COMMIT: ${{ vars.MSSTORE_COMMIT }}
+    steps:
+      - name: Say what happened to the Store submission
+        shell: bash
+        run: |
+          msix="AgentMux_${TAG#v}_x64.msix"
+          if [ -n "$FAILED_STEP" ] || [ "$RESULT" = failure ]; then
+            line="failed: ${FAILED_STEP:-the Store job failed}. $TAG is on GitHub but was not sent to the Microsoft Store: upload $msix by hand, or fix the job and re-run it."
+            warn=1
+          elif [ "$RESULT" = success ] && [ "$SUBMITTED" != true ]; then
+            # A continue-on-error job reads as success even when it stopped before any step ran (an environment approval that was
+            # refused, a runner that never started): only the submit step's own output says something was sent.
+            line="failed: the Store job did not reach the submission. $TAG is on GitHub but was not sent to the Microsoft Store: upload $msix by hand, or fix the job and re-run it."
+            warn=1
+          elif [ "$RESULT" = skipped ]; then
+            line="skipped: Store submission is switched off. $TAG is on GitHub but was not sent to the Microsoft Store: upload $msix by hand."
+            warn=1
+          elif [ "$RESULT" = cancelled ]; then
+            line="cancelled: the Store job was cancelled. $TAG was not sent to the Microsoft Store: upload $msix by hand."
+            warn=1
+          elif [ "$COMMIT" = true ]; then
+            line="submitted: $TAG was sent to the Microsoft Store for certification."
+            warn=0
+          else
+            line="submitted as a draft: $TAG is in Partner Center as a draft, not yet sent to certification. Check it there and send it."
+            warn=1
+          fi
+          {
+            echo "### Microsoft Store"
+            echo ""
+            echo "$line"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$warn" = 1 ]; then echo "::warning title=Microsoft Store::$line"; else echo "$line"; fi

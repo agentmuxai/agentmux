@@ -47,6 +47,7 @@ export function AgentViewSetting(): JSX.Element {
     return (
         <>
             <SettingRow
+                settingKey="agent:view"
                 id={AGENT_VIEW_SETTING.id}
                 label={AGENT_VIEW_SETTING.label}
                 description={AGENT_VIEW_SETTING.description}
@@ -63,6 +64,7 @@ export function AgentViewSetting(): JSX.Element {
             <For each={SWITCH_KEYS}>
                 {(key) => (
                     <SettingRow
+                        settingKey="agent:view"
                         indent
                         label={SWITCH_LABEL[key]}
                         control={

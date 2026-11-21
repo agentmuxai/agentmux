@@ -2,11 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The panel the status bar's "Restart to update" chip opens.
+//
+// A readout popover pads only its top and bottom (its rows and header carry the
+// side padding). This one is prose and a button row with no such wrapper, so the
+// panel pads all four sides itself, and the blocks inside sit a line apart.
 
 @use "../element/popover-frame" as popoverFrame;
 
 .update-popover {
     @include popoverFrame.readout-popover;
+    padding: var(--space-3);
+    gap: var(--space-1-5);
 
     .update-popover-title {
         @include popoverFrame.readout-popover-title;
@@ -14,8 +20,8 @@
 
     .update-popover-note,
     .update-popover-wait {
-        margin-top: var(--space-1);
         font-size: var(--text-xs);
+        line-height: 1.4;
         opacity: 0.8;
     }
 
@@ -25,15 +31,15 @@
     }
 
     .update-popover-error {
-        margin-top: var(--space-1);
         font-size: var(--text-xs);
+        line-height: 1.4;
         color: var(--error-text-color);
     }
 
     .update-popover-actions {
         display: flex;
         justify-content: flex-end;
-        gap: var(--space-1);
-        margin-top: var(--space-2);
+        gap: var(--space-1-5);
+        margin-top: var(--space-1-5);
     }
 }

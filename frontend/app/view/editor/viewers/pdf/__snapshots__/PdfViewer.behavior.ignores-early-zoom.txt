@@ -3,7 +3,7 @@ setZoomStepRatio blk-1 1.25
 setZoomMax blk-1 15
 --- still loading
 <div class="editor-viewer pdf-viewer">
-  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer">
+  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer" data-zoom-scope="chrome">
     <div class="editor-viewer-bar-group">
       <div class="ui-tooltip-anchor">
         <button aria-label="Previous page" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button" disabled="">

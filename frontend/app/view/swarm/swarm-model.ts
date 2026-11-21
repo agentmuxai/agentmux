@@ -1413,8 +1413,8 @@ export class SwarmViewModel {
 
     /** Non-destructive: executes immediately, no confirmation — see spec
      *  §5.2/§3 (reserve blocking confirms for irreversible actions). */
-    broadcastToSelection(message: string): Promise<FleetActionResult> {
-        return this.runFleetAction("broadcast", "broadcast", (targets) => RpcApi.FleetBroadcastCommand(TabRpcClient, { targets, message }));
+    broadcastToSelection(message: string, progressId?: string): Promise<FleetActionResult> {
+        return this.runFleetAction("broadcast", "broadcast", (targets) => RpcApi.FleetBroadcastCommand(TabRpcClient, { targets, message, progress_id: progressId }, { timeout: 90_000 } /* srv waits up to 30 s for an agent out of quota */));
     }
 
     /** Destructive — callers must confirm with the user first, showing the

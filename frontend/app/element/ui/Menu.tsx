@@ -39,6 +39,8 @@ export interface MenuEntry {
     sublabel?: string;
     /** An exact-hue square before the label (a palette colour), in place of the icon. */
     swatchColor?: string;
+    /** With `swatchColor`: the bar across the top of the swatch (a tab's or pill's bar). */
+    swatchBar?: string;
     /** More inside the label (a second line under it); the row's `class` styles it. */
     detail?: JSX.Element;
     /** After the label: a mark at the row's end (the tab's own identity). */
@@ -47,6 +49,8 @@ export interface MenuEntry {
     class?: string;
     /** A submenu: the row opens it (hovering, Right or Enter) and has no pick of its own. */
     submenu?: MenuEntry[];
+    /** A pick runs `onSelect` and leaves the menu open (colours to try one after another); Esc, an outside press or another row closes it. */
+    keepOpen?: boolean;
 }
 
 /** An element (followed live), a rect, or a point (a right-click). */
@@ -246,7 +250,7 @@ function useMenuNav(props: MenuPanelProps, sub: ReturnType<typeof useSubmenus>, 
         if (!pickable(i)) return;
         const entry = props.items[i];
         if (entry.submenu) return sub.openNow(i, false);
-        props.onPick();
+        if (!entry.keepOpen) props.onPick();
         entry.onSelect?.();
     };
     const onKeyDown = (e: KeyboardEvent) => {
@@ -397,7 +401,12 @@ function MenuRowLead(props: { entry: MenuEntry; reserve: boolean }): JSX.Element
                 </Show>
             </Show>
             <Show when={props.entry.swatchColor}>
-                {(color) => <span class="menu-item-swatch" style={{ "background-color": color() }} />}
+                {(color) => (
+                    <span
+                        class={clsx("menu-item-swatch", props.entry.swatchBar && "menu-item-swatch--bar")}
+                        style={{ "background-color": color(), ...(props.entry.swatchBar ? { "--swatch-bar": props.entry.swatchBar } : {}) }}
+                    />
+                )}
             </Show>
         </>
     );

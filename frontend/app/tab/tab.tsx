@@ -14,8 +14,11 @@ import { createEffect, createSignal, onCleanup, onMount, Show, on } from "solid-
 import type { JSX } from "solid-js";
 import { PaletteSwatches } from "@/app/components/palette-swatches";
 import { flashElement, onActivityFlash } from "@/app/notification/activity-flash";
-import { paneRoleColor } from "../block/pane-color-scheme";
 import { isLightThemeActive } from "../block/pane-identity";
+import { tabPaint, tabSample, type TabInk } from "../theme/paint";
+import { currentTabInk } from "./tab-ink";
+import { appliedWindowTheme } from "../store/window-appearance";
+import { slotOf } from "../theme/palette";
 import { ObjectService } from "../store/services";
 import { makeORef, useMuxObjectValue } from "../store/mos";
 import { measureTabWidth } from "./tab-measure";
@@ -25,15 +28,28 @@ import { renameRequest } from "./tab-rename-request";
 
 // The stored hex only names a slot of the shared palette, a hue or Black or White
 // (theme/palette.ts), the same slots panes, agents and browser profiles use.
-// Sharing them cannot recolour a pane border: the tab is drawn in the
-// pane-tab pill tones for that slot (pane-color-scheme.ts), so a window tab and
-// a pane tab of one colour read as the same family in dark and light themes.
-export function windowTabToneVars(hex: string, isLightTheme: boolean): Record<string, string> | undefined {
-    const bg = paneRoleColor(undefined, hex, isLightTheme, "pill");
-    const bgActive = paneRoleColor(undefined, hex, isLightTheme, "pillActive");
-    const underline = paneRoleColor(undefined, hex, isLightTheme, "identity");
-    if (!bg || !bgActive || !underline) return undefined;
-    return { "--tab-bg": bg, "--tab-bg-active": bgActive, "--tab-underline": underline };
+// Sharing them cannot recolour a pane border: the tab is drawn from theme/paint.ts,
+// the one place that says what a slot paints on a window tab in each state, and
+// the picker's sample is drawn from the same call.
+export function windowTabToneVars(hex: string, isLightTheme: boolean, ink?: TabInk): Record<string, string> | undefined {
+    const slot = slotOf(hex);
+    if (!slot) return undefined;
+    const p = tabPaint(slot, isLightTheme, ink);
+    return {
+        "--tab-bg": p.unselected,
+        "--tab-bg-hover": p.unselectedHover,
+        "--tab-bg-active": p.selected,
+        "--tab-bg-active-hover": p.selectedHover,
+        "--tab-underline": p.bar,
+    };
+}
+
+// The label is drawn in the theme's own text tokens, so the fills are made readable under them: read once the
+// theme's attribute is on the document.
+function windowTabToneNow(hex: string | null | undefined): Record<string, string> | undefined {
+    if (!hex) return undefined;
+    appliedWindowTheme();
+    return windowTabToneVars(hex, isLightThemeActive(), currentTabInk());
 }
 
 interface TabContextPanelProps {
@@ -62,6 +78,7 @@ const TabContextPanel = (props: TabContextPanelProps): JSX.Element => (
             label="Tab color"
             value={props.currentColor ?? null}
             noneLabel="No color"
+            sample={(slot) => tabSample(slot, isLightThemeActive(), currentTabInk())}
             onSelect={(slot) => props.onColorSelect(slot ? slot.hex : null)}
         />
         <div class="tab-context-actions">
@@ -102,10 +119,7 @@ function Tab(props: TabProps): JSX.Element {
     let loadedRef = false;
 
     const tabColor = (): string | undefined | null => tabData()?.meta?.["tab:color"] as string | undefined | null;
-    const tabTone = () => {
-        const hex = tabColor();
-        return hex ? windowTabToneVars(hex, isLightThemeActive()) : undefined;
-    };
+    const tabTone = () => windowTabToneNow(tabColor());
 
     createEffect(() => {
         const name = tabData()?.name;
@@ -241,7 +255,7 @@ function Tab(props: TabProps): JSX.Element {
         fireAndForget(async () => {
             await ObjectService.UpdateObjectMeta(oref, { "tab:color": hex } as MetaType);
         });
-        setShowColorPicker(false);
+        // The panel stays open (a click outside, Esc or Close menu ends it): colours are tried one after another.
     };
 
     const handleContextMenu = (e: MouseEvent) => {

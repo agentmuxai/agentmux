@@ -7,6 +7,7 @@ pub mod agent_create_types;
 pub mod api_types;
 pub mod appimage_record;
 pub mod file_rename_types;
+pub mod ui_record_types;
 pub mod gateway_stamp;
 pub mod browser_control_types;
 pub mod build_kind;
@@ -88,7 +89,7 @@ pub use data_paths::{
 };
 pub use errors::{AgentMuxError, AmxCode};
 pub use settings_path::{settings_dir_for, SETTINGS_FILE};
-pub use layout_intent::{LayoutIntent, LayoutResizeOp, LayoutViewState};
+pub use layout_intent::{LayoutEdge, LayoutIntent, LayoutResizeOp, LayoutViewState};
 pub use layout_types::{
     FlexDirection, LayoutClientSlices, LayoutNode, LayoutNodeData, SplitPosition,
     StackMovePosition,

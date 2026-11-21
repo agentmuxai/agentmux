@@ -2,7 +2,7 @@ model.setSelectedPath /home/a/src
 -- new file in src
 <div>
   <div class="file-tree">
-    <div class="file-tree-toolbar">
+    <div class="file-tree-toolbar" data-zoom-scope="chrome">
       <span data-stand="IconButton" data-icon="angles-left" data-label="Hide file tree" data-density="compact" data-pressed="undefined">
       <span data-stand="IconButton" data-icon="eye-slash" data-label="Show hidden files" data-density="compact" data-pressed="false">
       <span data-stand="IconButton" data-icon="square-minus" data-label="Collapse all folders" data-density="compact" data-pressed="undefined">
@@ -92,7 +92,7 @@ onNewEntryConfirm /home/a/src "fresh.ts" file
 -- new folder in src
 <div>
   <div class="file-tree">
-    <div class="file-tree-toolbar">
+    <div class="file-tree-toolbar" data-zoom-scope="chrome">
       <span data-stand="IconButton" data-icon="angles-left" data-label="Hide file tree" data-density="compact" data-pressed="undefined">
       <span data-stand="IconButton" data-icon="eye-slash" data-label="Show hidden files" data-density="compact" data-pressed="false">
       <span data-stand="IconButton" data-icon="square-minus" data-label="Collapse all folders" data-density="compact" data-pressed="undefined">
@@ -181,7 +181,7 @@ onNewEntryConfirm /home/a/src "fresh.ts" file
 -- parent closed: nothing shown
 <div>
   <div class="file-tree">
-    <div class="file-tree-toolbar">
+    <div class="file-tree-toolbar" data-zoom-scope="chrome">
       <span data-stand="IconButton" data-icon="angles-left" data-label="Hide file tree" data-density="compact" data-pressed="undefined">
       <span data-stand="IconButton" data-icon="eye-slash" data-label="Show hidden files" data-density="compact" data-pressed="false">
       <span data-stand="IconButton" data-icon="square-minus" data-label="Collapse all folders" data-density="compact" data-pressed="undefined">
@@ -269,7 +269,7 @@ ListEditorDirCommand /home/a/docs
 -- docs opened: its input appears
 <div>
   <div class="file-tree">
-    <div class="file-tree-toolbar">
+    <div class="file-tree-toolbar" data-zoom-scope="chrome">
       <span data-stand="IconButton" data-icon="angles-left" data-label="Hide file tree" data-density="compact" data-pressed="undefined">
       <span data-stand="IconButton" data-icon="eye-slash" data-label="Show hidden files" data-density="compact" data-pressed="false">
       <span data-stand="IconButton" data-icon="square-minus" data-label="Collapse all folders" data-density="compact" data-pressed="undefined">
@@ -371,7 +371,7 @@ ListEditorDirCommand /home/a/docs
 -- cleared
 <div>
   <div class="file-tree">
-    <div class="file-tree-toolbar">
+    <div class="file-tree-toolbar" data-zoom-scope="chrome">
       <span data-stand="IconButton" data-icon="angles-left" data-label="Hide file tree" data-density="compact" data-pressed="undefined">
       <span data-stand="IconButton" data-icon="eye-slash" data-label="Show hidden files" data-density="compact" data-pressed="false">
       <span data-stand="IconButton" data-icon="square-minus" data-label="Collapse all folders" data-density="compact" data-pressed="undefined">

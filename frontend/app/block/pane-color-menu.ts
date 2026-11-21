@@ -44,7 +44,7 @@ export function setPaneColor(blockId: string, slotId: string | null, agentId?: s
  * `undefined` returns it to its built-in color. The last key removed deletes
  * the setting.
  */
-export function setWidgetColor(view: string, slotId: string | null | undefined): void {
+export function setWidgetColor(view: string, slotId: string | null | undefined): Promise<unknown> {
     const next: Record<string, string | number | null> = { ...getSettingsKeyAtom("pane:colors")() };
     // A color saved under the widget's former id goes too, or it would keep
     // applying after a reset.
@@ -53,12 +53,12 @@ export function setWidgetColor(view: string, slotId: string | null | undefined):
     else next[view] = slotId === null ? null : (slotById(slotId)?.id ?? null);
     // A null value deletes the key on disk; SettingsType has no null.
     const data: Record<string, unknown> = { "pane:colors": Object.keys(next).length > 0 ? next : null };
-    void RpcApi.SetConfigCommand(TabRpcClient, data as SettingsType);
+    return Promise.resolve(RpcApi.SetConfigCommand(TabRpcClient, data as SettingsType));
 }
 
 /** "Use for all <Label> panes": this pane's pick becomes its widget's color,
  *  and the pane goes back to following it (spec §3.7). */
 export function applyColorToAllPanes(blockId: string, view: string, slotId: string): void {
-    setWidgetColor(view, slotId);
+    void setWidgetColor(view, slotId);
     setPaneColor(blockId, null);
 }

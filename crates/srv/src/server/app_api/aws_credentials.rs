@@ -21,6 +21,7 @@ use crate::identity::aws_broker::mint::{HostRunner, Runner};
 use crate::identity::aws_broker::request::{credentials_for, Ask, Granted, Refusal};
 use crate::identity::aws_broker::sessions::Source;
 use crate::identity::aws_broker::{policy, sessions};
+use crate::sagas::credential_notice::{self, Cause};
 use crate::server::caller::Caller;
 
 /// The audit entry's action.
@@ -102,10 +103,24 @@ pub(crate) async fn serve<R: Runner>(
     match credentials_for(policy, sessions, runner, &ask, chrono::Utc::now()).await {
         Ok(granted) => {
             audit_granted(state, &def.slug, uid, &granted);
+            credential_notice::worked(state, uid, &def.slug, Cause::Aws);
             Json(granted.creds.to_json()).into_response()
         }
-        Err(refusal) => refused(state, &def.slug, uid, ask.profile, refusal),
+        Err(refusal) => {
+            if the_persons_to_fix(&refusal) {
+                // The sentence the agent reads, in its pane.
+                credential_notice::refused(state, uid, &def.slug, Cause::Aws, &refusal.message);
+            }
+            refused(state, &def.slug, uid, ask.profile, refusal)
+        }
     }
+}
+
+/// Whether a refusal is one the person can fix on this computer, so the agent's pane says so: the host's AWS login
+/// lapsed or was refused, the grant is switched off, or a new or wider grant waits to be allowed. A wrong profile name, a missing reason, a cap or a slow mint is
+/// the agent's own to correct or a bad moment.
+fn the_persons_to_fix(refusal: &Refusal) -> bool {
+    matches!(refusal.code, "AWS_HOST_LOGIN_NEEDED" | "AWS_HOST_REFUSED" | "GRANT_DISABLED" | "GRANT_HELD")
 }
 
 /// What the request's profile is called in the audit row, the log and the refusal. The string is the container's to

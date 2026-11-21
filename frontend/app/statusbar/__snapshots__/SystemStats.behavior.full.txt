@@ -10,7 +10,7 @@ parseDiskVolumes 4
       "%"
     <span class="stat-separator">
       "|"
-    <span class="stat-mono stat-gpu" data-tip="GPU usage" aria-label="GPU usage" style="color: var(--cpu-12);">
+    <button style="color: var(--secondary-text-color);" data-tip="GPU use of the busiest adapter. Click for use and memory per adapter and per process." aria-label="GPU use, click for the GPU panel" aria-haspopup="dialog" aria-expanded="false" type="button" class="ui-button--chrome stat-mono stat-gpu stat-gpu-button">
       "GPU"
       "12"
       "%"
@@ -31,9 +31,7 @@ parseDiskVolumes 4
     <span class="stat-separator">
       "|"
     <button type="button" class="stat-mono stat-watch-disk stat-disk-button" aria-label="Free disk space, click for per-drive breakdown" aria-haspopup="dialog" style="color: var(--watch-61.4-true);" data-tip="4 volumes" aria-expanded="false">
-      "Disk"
-      "61"
-      "%"
+      "Disk 61% free"
     <span class="stat-separator">
       "|"
     <span class="stat-mono stat-net" data-tip="Network upload and download" aria-label="Network traffic">

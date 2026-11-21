@@ -5,6 +5,8 @@ pub mod caches;
 pub mod credential_mode;
 pub mod dev_exec;
 pub mod host_name;
+pub mod read_exec;
+pub mod writable;
 pub(super) use self::host_name::host_name_for_new_container;
 
 use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
@@ -31,7 +33,13 @@ pub(crate) fn personal_memory_host_dir(claude_config_dir: Option<&str>, working_
     if working_dir.is_empty() {
         return None;
     }
-    let dir = crate::backend::memory::native_files::memory_dir_for_cwd(claude_config_dir.unwrap_or(""), working_dir);
+    // The workspace of a container agent, whether or not its pane is in the store yet: the folder is named
+    // after the workspace's own path, never after anything in it.
+    let workspace = crate::backend::base::expand_home_dir_safe(working_dir);
+    let written = |dir: &std::path::Path| {
+        dir.starts_with(&workspace) || crate::backend::fs_ops::container_folders::written_by_a_container_agent(dir)
+    };
+    let dir = crate::backend::memory::native_files::memory_dir_for_cwd_with(claude_config_dir.unwrap_or(""), working_dir, &written);
     if let Err(e) = std::fs::create_dir_all(&dir) {
         tracing::warn!(dir = %dir.display(), error = %e, "container agent: can't create the Personal Memory folder; not mounting it");
         return None;
@@ -411,6 +419,24 @@ mod tests {
         assert_eq!(std::path::Path::new(&got), expected);
         assert_eq!(personal_memory_host_dir(Some(&config.to_string_lossy()), ""), None);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The folder bound as a container agent's memory is the one of its workspace's own path, whatever the
+    /// workspace holds: a workspace that is a linked worktree does not get the main checkout's.
+    #[test]
+    fn the_memory_folder_is_named_after_the_workspaces_path_whatever_it_holds() {
+        let base = tempfile::tempdir().unwrap();
+        let config = base.path().join("claude");
+        let (repo, worktree) = crate::backend::claude_layout::tests::repo_with_worktree(base.path());
+        let plain = crate::backend::claude_layout::real_path(base.path()).join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        let name = |dir: &std::path::Path| crate::backend::claude_layout::project_dir_name(&dir.to_string_lossy());
+        for workspace in [&worktree, &repo, &plain] {
+            let bound = personal_memory_host_dir(Some(&config.to_string_lossy()), &workspace.to_string_lossy()).expect("a folder");
+            let project = std::path::Path::new(&bound).parent().unwrap().file_name().unwrap().to_string_lossy().into_owned();
+            assert_eq!(project, name(workspace), "{}", workspace.display());
+        }
+        assert_ne!(name(&worktree), name(&repo));
     }
 
     #[test]

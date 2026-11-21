@@ -9,15 +9,20 @@ import {
     inlineMediaKind,
     isNetworkPath,
     MediaTooLargeError,
+    refusalReason,
     resolveMediaPath,
+    type MediaOwner,
 } from "@/app/element/local-media";
+import { showMediaCopyMenu, sourceFromUrl } from "@/app/element/media-copy";
+import { openMessageFile } from "@/app/element/open-message-file";
+import { t } from "@/app/i18n/i18n";
 import { formatBytes } from "@/util/format-bytes";
 import { MarkdownContentBlockType } from "@/app/element/markdown-util";
 import { createBlock } from "@/app/store/block-layout-actions";
 import { openLink } from "@/app/store/global";
 import { withHeightContinuity } from "@/app/motion/resize-contract";
 import { openInEditorPaneOnScreen } from "@/app/util/editor-open";
-import { Button } from "@/element/ui";
+import { Button, IconButton } from "@/element/ui";
 import { fireAndForget } from "@/util/util";
 import { createSignal, Match, onCleanup, onMount, Show, Switch, type JSX } from "solid-js";
 import { tip } from "@/app/element/tip";
@@ -32,27 +37,47 @@ import { createLocalAv, whenNearViewport, type LocalAvState } from "./markdown-m
 export type MarkdownMediaOpts = {
     /** Relative paths resolve against this: the agent's working directory. */
     baseDir: string;
+    /** The agent pane showing the message: srv reads a container agent's paths from its own folders (see `MediaOwner`). */
+    blockId?: string;
+    /** A click on a file of the message is opened by srv from the agent's own folders, not as a path of this computer. */
+    confined?: boolean;
     /**
-     * Set by the agent pane: a click on an image of a message with two or more local images opens them
-     * in a preview that steps through them. Without it (or with one image) a click opens the Editor.
+     * Set by the agent pane: a click on a local image of a message, or on a video's enlarge button, opens a
+     * preview over the whole tab that steps through the message's images and videos. Without it a click on an
+     * image opens the Editor.
      */
     openGallery?: (gallery: MediaGallery) => void;
 };
 
-/** One image of a message, for the preview that steps through them. */
-export type MediaGalleryItem = { path: string; name: string; alt: string };
-export type MediaGallery = { items: MediaGalleryItem[]; index: number };
+/** One image or video of a message, for the preview that steps through them. */
+export type MediaGalleryItem = { path: string; name: string; alt: string; kind?: "image" | "video" };
+/** Where the inline player was when it was enlarged, so the enlarged one carries on from there. */
+export type VideoHandoff = { path: string; time: number; muted: boolean; paused: boolean };
+export type MediaGallery = { items: MediaGalleryItem[]; index: number; start?: VideoHandoff };
 
-/** The block's text is one message: its images, in reading order, and the position of `figure` among them. */
+/** The block's text is one message: its images and videos, in reading order, and the position of `figure` among them. */
 function messageGallery(figure: HTMLElement): MediaGallery {
     const figures = [...(figure.closest(".agent-markdown-block")?.querySelectorAll<HTMLElement>("figure[data-am-media-path]") ?? [])];
     return {
         items: figures.map((f) => {
             const path = f.dataset.amMediaPath ?? "";
-            return { path, name: basenameOf(path), alt: f.dataset.amMediaAlt ?? "" };
+            const kind: "image" | "video" = f.dataset.amMediaKind === "video" ? "video" : "image";
+            return { path, name: basenameOf(path), alt: f.dataset.amMediaAlt ?? "", kind };
         }),
         index: figures.indexOf(figure),
     };
+}
+
+/** The inline players that are playing a file, by path: where the enlarged player starts, and where it hands back to. */
+const inlineVideos = new Map<string, HTMLVideoElement>();
+
+/** The enlarged player closed: the inline one for the same file is left where it ended, paused, with its sound as set. */
+export function handBackVideo(h: { path: string; time: number; muted: boolean }): void {
+    const el = inlineVideos.get(h.path);
+    if (!el?.isConnected) return;
+    el.pause();
+    if (Number.isFinite(h.time)) el.currentTime = h.time;
+    el.muted = h.muted;
 }
 
 interface MuxBlockProps {
@@ -86,20 +111,31 @@ const MuxBlock = (props: MuxBlockProps) => {
 /** Open an image or video in the Editor: a tab of the Editor pane on screen,
  *  else a new Editor pane, following newer files in its folder as the Media
  *  pane did (SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.12.1). */
-export function openMediaInEditor(path: string): void {
+export function openMediaInEditor(path: string, owner?: MediaOwner): void {
+    // A file of a container agent's message is opened by srv, from the agent's own folders and as a read-only copy:
+    // never as the path the message wrote, which this computer would read as the person.
+    if (owner?.confined) {
+        openMessageFile(path, owner.blockId);
+        return;
+    }
     fireAndForget(async () => {
         if (await openInEditorPaneOnScreen(path, { followFolder: true })) return;
         await createBlock({ meta: { view: "editor", file: path, "editor:follow_folder": true } });
     });
 }
 
-type LocalImageProps = { path: string; src: string; alt: string; openGallery?: MarkdownMediaOpts["openGallery"] };
+/** srv's reason for refusing a file, after the placeholder's text, when it gave one. */
+function reasonOf(state: { kind: string; reason?: string }): string {
+    return state.kind === "missing" && state.reason ? " " + state.reason : "";
+}
 
-/** A message with two or more images steps through them; one image, or no pane to show it, goes to the Editor. */
+type LocalImageProps = { path: string; src: string; alt: string; openGallery?: MarkdownMediaOpts["openGallery"]; owner?: MediaOwner };
+
+/** A click on an image of an agent's message opens the preview over the tab; with no pane to show it, the Editor. */
 function openImage(props: LocalImageProps, figure: HTMLElement | undefined): void {
     const gallery = props.openGallery && figure ? messageGallery(figure) : undefined;
-    if (gallery && gallery.items.length > 1 && gallery.index >= 0) props.openGallery!(gallery);
-    else openMediaInEditor(props.path);
+    if (gallery && gallery.index >= 0) props.openGallery!(gallery);
+    else openMediaInEditor(props.path, props.owner);
 }
 
 /** An image of an agent's message is a button for the keyboard too, named with its place among the message's images once focused. */
@@ -157,7 +193,7 @@ type LocalImageState =
     | { kind: "waiting" }
     | { kind: "ready"; url: string }
     | { kind: "too-large"; size: number }
-    | { kind: "missing" };
+    | { kind: "missing"; reason?: string };
 
 /**
  * A local image file (§4.2): a 16:9 placeholder until it nears the viewport,
@@ -180,6 +216,7 @@ function LocalImage(props: LocalImageProps): JSX.Element {
                 maxBytes: INLINE_IMAGE_MAX_BYTES,
                 type: extOf(props.path) === "svg" ? "image/svg+xml" : undefined,
                 signal: abort.signal,
+                blockId: props.owner?.blockId,
             });
             if (disposed) return;
             const objectUrl = URL.createObjectURL(blob);
@@ -197,7 +234,7 @@ function LocalImage(props: LocalImageProps): JSX.Element {
             else swap();
         } catch (e) {
             if (disposed) return;
-            setState(e instanceof MediaTooLargeError ? { kind: "too-large", size: e.size } : { kind: "missing" });
+            setState(e instanceof MediaTooLargeError ? { kind: "too-large", size: e.size } : { kind: "missing", reason: refusalReason(e) });
         }
     };
 
@@ -239,6 +276,7 @@ function LocalImage(props: LocalImageProps): JSX.Element {
                                 style={ratio() ? { "aspect-ratio": ratio() } : undefined}
                                 {...(props.openGallery ? galleryKeys(open, props.alt || basenameOf(props.path)) : {})}
                                 onClick={open}
+                                onContextMenu={(e) => showMediaCopyMenu(e, sourceFromUrl(src(), { path: props.path }))}
                                 onError={() => {
                                     // Undecodable: free the blob now, not at unmount.
                                     if (url) URL.revokeObjectURL(url);
@@ -255,19 +293,19 @@ function LocalImage(props: LocalImageProps): JSX.Element {
             }
         >
             <Match when={state().kind === "missing"}>
-                <span class="am-muted">[image not found: {props.src}]</span>
+                <span class="am-muted">[image not found: {props.src}]{reasonOf(state())}</span>
             </Match>
             <Match when={state().kind === "too-large"}>
-                <MediaCard path={props.path} size={tooLargeSize()} icon="fa-image" />
+                <MediaCard path={props.path} owner={props.owner} size={tooLargeSize()} icon="fa-image" />
             </Match>
         </Switch>
     );
 }
 
 /** Over the inline cap: the file's name and size, opening it in the Editor. */
-function MediaCard(props: { path: string; size: number; icon: string }): JSX.Element {
+function MediaCard(props: { path: string; size: number; icon: string; owner?: MediaOwner }): JSX.Element {
     return (
-        <Button class="am-media-card" onClick={() => openMediaInEditor(props.path)}>
+        <Button class="am-media-card" onClick={() => openMediaInEditor(props.path, props.owner)}>
             <i class={`fa ${props.icon}`} aria-hidden="true" />
             <span class="am-media-card-name">{basenameOf(props.path)}</span>
             <span class="am-muted">{formatBytes(props.size)}</span>
@@ -322,10 +360,39 @@ function AudioCard(props: { s: LocalAvState; path: string }): JSX.Element {
     );
 }
 
-function VideoStage(props: { s: LocalAvState; path: string }): JSX.Element {
+/** Opens the message's media over the tab, the video first: from where the inline player is, which stops. */
+function enlargeVideo(stage: HTMLElement | undefined, path: string, openGallery: (g: MediaGallery) => void): void {
+    const figure = stage?.closest<HTMLElement>("figure[data-am-media-path]");
+    if (!figure) return;
+    const gallery = messageGallery(figure);
+    if (gallery.index < 0) return;
+    const inline = inlineVideos.get(path);
+    // Not played yet: the enlarged player starts at the beginning, muted like the inline one, waiting for a press.
+    let start: VideoHandoff = { path, time: 0, muted: true, paused: true };
+    if (inline?.isConnected) {
+        start = { path, time: inline.currentTime, muted: inline.muted, paused: inline.paused };
+        // Two players never make sound at once.
+        inline.pause();
+    }
+    openGallery({ ...gallery, start });
+}
+
+function VideoStage(props: { s: LocalAvState; path: string; openGallery?: MarkdownMediaOpts["openGallery"] }): JSX.Element {
     const s = props.s;
+    let stage: HTMLDivElement | undefined;
+    const canEnlarge = () => !!props.openGallery && ["ready", "loading", "playing"].includes(s.state().kind);
     return (
-        <div class="am-media-stage">
+        <div class="am-media-stage" ref={stage}>
+            <Show when={canEnlarge()}>
+                <IconButton
+                    class="am-media-enlarge"
+                    icon="expand"
+                    label={t("mediaPreview.enlarge", { name: basenameOf(props.path) })}
+                    tooltip={false}
+                    {...tip("Enlarge")}
+                    onClick={() => enlargeVideo(stage, props.path, props.openGallery!)}
+                />
+            </Show>
             <Show
                 when={s.playingUrl()}
                 fallback={
@@ -349,31 +416,57 @@ function VideoStage(props: { s: LocalAvState; path: string }): JSX.Element {
                     </>
                 }
             >
-                {(url) => (
-                    <video
-                        // Starts muted (§5); the property, not just
-                        // the attribute, so it holds whatever loads.
-                        ref={(el) => (el.muted = true)}
-                        class="am-media-player"
-                        src={url()}
-                        controls
-                        autoplay
-                        muted
-                        playsinline
-                        onError={s.onMediaError}
-                    />
-                )}
+                {(url) => {
+                    let el: HTMLVideoElement | undefined;
+                    onCleanup(() => {
+                        if (el && inlineVideos.get(props.path) === el) inlineVideos.delete(props.path);
+                    });
+                    return (
+                        <video
+                            // Starts muted (§5); the property, not just
+                            // the attribute, so it holds whatever loads.
+                            ref={(v) => {
+                                el = v;
+                                v.muted = true;
+                                inlineVideos.set(props.path, v);
+                            }}
+                            class="am-media-player"
+                            src={url()}
+                            controls
+                            autoplay
+                            muted
+                            playsinline
+                            onError={s.onMediaError}
+                        />
+                    );
+                }}
             </Show>
         </div>
     );
 }
 
 /** The player itself: a video's reserved stage, or an audio file's card. */
-export function AvFigure(props: { s: LocalAvState; path: string; kind: "video" | "audio" }): JSX.Element {
+export function AvFigure(props: {
+    s: LocalAvState;
+    path: string;
+    kind: "video" | "audio";
+    openGallery?: MarkdownMediaOpts["openGallery"];
+}): JSX.Element {
     return (
-        <figure class={`am-media am-media-${props.kind}`} ref={props.s.setBox}>
+        <figure
+            class={`am-media am-media-${props.kind}`}
+            ref={props.s.setBox}
+            // Anywhere on it, before play (the poster and the play button) and after: the same items as the media
+            // viewer. The element is read when Copy frame is pressed: the poster first, the player once it plays.
+            onContextMenu={(e) => {
+                const figure = e.currentTarget;
+                showMediaCopyMenu(e, { kind: props.kind, mime: "", path: props.path, element: () => figure.querySelector("video") });
+            }}
+            // A video of an agent's message is one of the preview's items; audio is not.
+            {...(props.kind === "video" ? { "data-am-media-path": props.path, "data-am-media-kind": "video" } : {})}
+        >
             <Show when={props.kind === "video"} fallback={<AudioCard s={props.s} path={props.path} />}>
-                <VideoStage s={props.s} path={props.path} />
+                <VideoStage s={props.s} path={props.path} openGallery={props.openGallery} />
             </Show>
         </figure>
     );
@@ -387,13 +480,19 @@ export function AvFigure(props: { s: LocalAvState; path: string; kind: "video" |
  * the 200 MB cap, and plays it (video muted, with controls). A video keeps its
  * reserved 16:9 stage throughout, so its row never changes height.
  */
-function LocalAV(props: { path: string; src: string; kind: "video" | "audio" }): JSX.Element {
+function LocalAV(props: {
+    path: string;
+    src: string;
+    kind: "video" | "audio";
+    openGallery?: MarkdownMediaOpts["openGallery"];
+    owner?: MediaOwner;
+}): JSX.Element {
     const s = createLocalAv(props);
     return (
-        <Switch fallback={<AvFigure s={s} path={props.path} kind={props.kind} />}>
+        <Switch fallback={<AvFigure s={s} path={props.path} kind={props.kind} openGallery={props.openGallery} />}>
             <Match when={s.state().kind === "missing"}>
                 <span class="am-muted">
-                    [{props.kind} not found: {props.src}]
+                    [{props.kind} not found: {props.src}]{reasonOf(s.state())}
                 </span>
             </Match>
             <Match when={s.state().kind === "error"}>
@@ -402,7 +501,7 @@ function LocalAV(props: { path: string; src: string; kind: "video" | "audio" }):
                 </span>
             </Match>
             <Match when={s.state().kind === "too-large"}>
-                <MediaCard path={props.path} size={s.tooLargeSize()} icon={props.kind === "video" ? "fa-film" : "fa-music"} />
+                <MediaCard path={props.path} owner={props.owner} size={s.tooLargeSize()} icon={props.kind === "video" ? "fa-film" : "fa-music"} />
             </Match>
         </Switch>
     );
@@ -483,8 +582,12 @@ const MarkdownImg = (p: { props: JSX.ImgHTMLAttributes<HTMLImageElement>; media?
     const shown = /^file:/i.test(src) ? path : src;
     if (isNetworkPath(path)) return <span class="am-muted">[image: {shown} — network paths aren't loaded]</span>;
     const kind = inlineMediaKind(path);
-    if (kind === "image") return <LocalImage path={path} src={shown} alt={alt} openGallery={p.media.openGallery} />;
-    if (kind === "video" || kind === "audio") return <LocalAV path={path} src={shown} kind={kind} />;
+    // Fail closed: a message of an agent not known to run on this computer, with no pane to name, reads nothing. srv
+    // decides by the pane's runtime; this flag only picks the route, and without a pane there is no route.
+    if (p.media.confined && !p.media.blockId) return <span class="am-muted">{t("mediaPreview.notShownHere", { name: shown })}</span>;
+    const owner: MediaOwner = { blockId: p.media.blockId, confined: p.media.confined };
+    if (kind === "image") return <LocalImage path={path} src={shown} alt={alt} openGallery={p.media.openGallery} owner={owner} />;
+    if (kind === "video" || kind === "audio") return <LocalAV path={path} src={shown} kind={kind} openGallery={p.media.openGallery} owner={owner} />;
     return <span class="am-muted">[image: {shown} — unsupported type]</span>;
 };
 

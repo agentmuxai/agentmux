@@ -20,10 +20,15 @@ import { siteOf } from "./vault-use-question";
 /** The Share dialog's value for every agent: srv's own mark for it. */
 export const EVERY_AGENT = "*";
 
-/** Whether a login can be shared: one saved for a site. A sign-in for a site's HTTP prompt or a proxy is typed by the
- *  browser itself, so it has no share. */
+/** Whether a login can be shared: one saved for a site. */
 export function canShare(e: VaultEntryInfo): boolean {
-    return e.kind === "login" && !!e.fields.site && !e.fields.realm && !e.fields.proxy;
+    return e.kind === "login" && !!e.fields.site;
+}
+
+/** Whether a login is a sign-in for a site's HTTP prompt or a proxy: the browser answers that prompt itself, in the
+ *  agent's own profile, and the login is typed into no form. */
+export function answersPrompt(e: VaultEntryInfo): boolean {
+    return !!e.fields.realm || !!e.fields.proxy;
 }
 
 /** Whether a login is shared with anyone, as its fields say. */
@@ -33,9 +38,13 @@ export function isShared(e: VaultEntryInfo): boolean {
 
 /** What a share is for, said in the dialog: it lets the agent ask, and never answers for the person. */
 function ShareNote(props: { entry: VaultEntryInfo; every: boolean }): JSX.Element {
+    const key = () => {
+        if (answersPrompt(props.entry)) return props.every ? "vault.share.anyAgentNotePrompt" : "vault.share.agentNotePrompt";
+        return props.every ? "vault.share.anyAgentNote" : "vault.share.agentNote";
+    };
     return (
         <p class="warden-manager-dim">
-            <Rich k={props.every ? "vault.share.anyAgentNote" : "vault.share.agentNote"} params={{ site: siteOf(props.entry.fields.site ?? "") }} />
+            <Rich k={key()} params={{ site: siteOf(props.entry.fields.site ?? "") }} />
         </p>
     );
 }
@@ -108,10 +117,11 @@ export function ShareButton(props: { entry: VaultEntryInfo }): JSX.Element {
     );
 }
 
-/** How a share has been used: the number of sign-ins and the last one. */
-function usedLine(uses: number, last: number): string {
-    if (uses === 0) return t("vault.share.notUsed");
-    return t("vault.share.used", { count: uses, when: formatWhen(last) });
+/** How a share has been used: the number of sign-ins and the last one. A sign-in the browser answers a prompt with
+ *  says so when the person chose "Always" for it. */
+function usedLine(uses: number, last: number, always = false): string {
+    const used = uses === 0 ? t("vault.share.notUsed") : t("vault.share.used", { count: uses, when: formatWhen(last) });
+    return always ? `${used}; ${t("vault.share.always")}` : used;
 }
 
 /** A login's shares under its label: each agent it is shared with, how it was used, and a button to stop. */
@@ -138,7 +148,9 @@ export function EntryShares(props: { entry: VaultEntryInfo }): JSX.Element {
                 <For each={data()?.shares ?? []}>
                     {(s) => (
                         <span class="vault-grant" data-agent={s.agent}>
-                            {s.name} <span class="warden-manager-dim">({usedLine(s.uses, s.last_used_ms)})</span>
+                            <span class="vault-grant__text">
+                                {s.name} <span class="warden-manager-dim">({usedLine(s.uses, s.last_used_ms, s.always)})</span>
+                            </span>
                             <CloseButton size="sm" label={t("vault.share.stop", { label: props.entry.label, name: s.name })} onClick={() => void stop(s.agent)} />
                         </span>
                     )}

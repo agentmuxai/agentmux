@@ -50,6 +50,7 @@ export const DiskVolumesPopover = (props: DiskVolumesPopoverProps): JSX.Element 
         <AnchoredPopover
             anchor={props.anchor}
             placement="top-start"
+            fitHeight
             onDismiss={props.onClose}
             class="disk-volumes-popover"
             role="dialog"

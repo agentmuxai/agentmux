@@ -122,6 +122,7 @@ export function AppearanceSection(): JSX.Element {
             <TransparencyRows s={s} rows={rows} />
             <PaneGapRow s={s} rows={rows} />
             <SettingRow
+                settingKey="window:bgcolor"
                 id={rows.bgColor.id}
                 label={rows.bgColor.label}
                 description={rows.bgColor.description}

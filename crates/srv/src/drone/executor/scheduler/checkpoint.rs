@@ -216,13 +216,7 @@ impl<'a> Scheduler<'a> {
         let finished = c.position.finished.iter().map(|id| node(id)).collect::<Result<HashSet<_>, _>>()?;
         let failed = match &c.position.failed {
             Some(ids) => ids.iter().map(|id| node(id)).collect::<Result<HashSet<_>, _>>()?,
-            // Written before the set was kept: a block that finished with a handled failure said so
-            // as its output (`failed: true` and the error), and that is still what it says.
-            None => finished
-                .iter()
-                .copied()
-                .filter(|id| c.outputs.get(*id).is_some_and(|o| o.get("failed").and_then(serde_json::Value::as_bool) == Some(true) && o.get("error").is_some()))
-                .collect(),
+            None => self.legacy_failed(c, &finished, &decided),
         };
         let held = c.position.held.iter().map(|id| edge(id)).collect::<Result<Vec<_>, _>>()?;
         let mut rounds = HashMap::new();
@@ -282,11 +276,52 @@ impl<'a> Scheduler<'a> {
         Ok(())
     }
 
+    /// The blocks that failed in this pass, for a checkpoint written before the set was kept. A block that
+    /// finished with a handled failure said so as its output (`failed: true` and the error), but a block that
+    /// failed in one pass of a loop and was skipped in the next keeps that output too. So the output counts
+    /// only for a block that ran this pass: a root, or one an edge into it was taken for, or a Join that a
+    /// branch (found the same way) failed into.
+    fn legacy_failed(&self, c: &Checkpoint, finished: &HashSet<&'a str>, decided: &HashMap<&'a str, bool>) -> HashSet<&'a str> {
+        let says_failed = |id: &str| c.outputs.get(id).is_some_and(|o| o.get("failed").and_then(serde_json::Value::as_bool) == Some(true) && o.get("error").is_some());
+        let ran = |id: &str| {
+            let ins = self.incoming.get(id).map(Vec::as_slice).unwrap_or_default();
+            ins.is_empty() || ins.iter().any(|e| decided.get(e.id.as_str()) == Some(&true))
+        };
+        let is_join = |id: &str| self.node_of.get(id).is_some_and(|n| kind_of(n).is_ok_and(|k| k == BlockKind::Join));
+        let mut failed: HashSet<&'a str> = finished.iter().copied().filter(|id| says_failed(id) && ran(id)).collect();
+        loop {
+            let more: Vec<&'a str> = finished
+                .iter()
+                .copied()
+                .filter(|id| !failed.contains(id) && says_failed(id) && is_join(id))
+                .filter(|id| self.incoming.get(id).is_some_and(|ins| ins.iter().any(|e| failed.contains(e.source.as_str()))))
+                .collect();
+            if more.is_empty() {
+                return failed;
+            }
+            failed.extend(more);
+        }
+    }
+
     /// Show what the restored blocks did, as the run's own block states, so what
     /// a person sees of a resumed run is not blank where blocks already ran.
     pub(super) async fn show_restored(&self) {
         for id in &self.finished {
-            let output = self.scope.outputs.get(*id).cloned();
+            let mut output = self.scope.outputs.get(*id).cloned();
+            // A Drone block's callee may have spent money the output does not say: a callee that spent and
+            // then failed (the error edge's output is only the error), or one that ended after the call
+            // was given up on. That spend is kept as the position's `spent_by`, and the ledger sums the
+            // blocks' `cost_usd`, so it goes back on the state.
+            let drone = self.node_of.get(*id).is_some_and(|n| kind_of(n).is_ok_and(|k| k == BlockKind::Drone));
+            let spent = self.spent_by.get(*id).copied().unwrap_or(0.0);
+            if let (true, Some(out)) = (drone && spent > 0.0, output.as_mut()) {
+                let counted = out.get("cost_usd").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+                if spent > counted {
+                    if let Some(map) = out.as_object_mut() {
+                        map.insert("cost_usd".to_string(), serde_json::json!(spent));
+                    }
+                }
+            }
             let status = if output.is_some() { "done" } else { "skipped" };
             mark_state(self.states, id, BlockState { status: status.to_string(), output, error: None, started_at: None, completed_at: Some(agentmux_common::time::now_ms()) }).await;
         }

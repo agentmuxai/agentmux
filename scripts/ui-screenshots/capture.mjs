@@ -11,7 +11,7 @@
 //
 // Usage:
 //   node scripts/ui-screenshots/capture.mjs [--port N] [--out DIR] [--only id1,id2]
-//       [--suite manual|widgets|chrome|agent|memory|landing] [--sizes small,medium,large|all]
+//       [--suite manual|widgets|chrome|agent|memory|landing|sysinfo] [--sizes small,medium,large|all]
 //       [--redact from=to]... [--no-redact]
 //
 // --suite picks the manifest: `manual` (shots.mjs, the default), `widgets`
@@ -19,7 +19,8 @@
 // menus, the status bar and Settings, spec §9) or `agent` (agent-shots.mjs: the
 // agent pane, driven by a scripted Claude Code, spec §10) or `memory`
 // (memory-shots.mjs: Memory, Connectors and a widget approval, spec §11) or
-// `landing` (landing-shots.mjs: shots for agentmux.ai, each proving one claim).
+// `landing` (landing-shots.mjs: shots for agentmux.ai, each proving one claim) or
+// `sysinfo` (sysinfo-shots.mjs: every plot of the Sysinfo pane, for the System Metrics page).
 // --sizes limits which of
 // sizes.mjs's sizes a shot with `sizes: true` is captured in (default: all);
 // see the spec's §8.
@@ -46,11 +47,12 @@ import { SIZES, parseSizes, shotFilename } from "./sizes.mjs";
 import { machinePairs, parseRedactArg, redactExpression } from "./redact.mjs";
 import { checkVerify } from "./verify.mjs";
 import { CdpSession, NO_DIALOGS, findMainTarget, resolveClip } from "./lib/session.mjs";
+import { scaleProblem } from "./lib/crisp.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /** Suite name → manifest module (relative to this directory). */
-const SUITES = { manual: "./shots.mjs", widgets: "./widget-shots.mjs", chrome: "./chrome-shots.mjs", agent: "./agent-shots.mjs", memory: "./memory-shots.mjs", landing: "./landing-shots.mjs" };
+const SUITES = { manual: "./shots.mjs", widgets: "./widget-shots.mjs", chrome: "./chrome-shots.mjs", agent: "./agent-shots.mjs", memory: "./memory-shots.mjs", landing: "./landing-shots.mjs", sysinfo: "./sysinfo-shots.mjs" };
 
 function parseArgs(argv) {
     const args = {
@@ -109,6 +111,12 @@ async function captureOne(session, shot, redaction) {
         if (!clip) throw new Error(`selector not found: ${selector}`);
         if (process.env.SHOTS_DEBUG) console.log(`\n  clip ${JSON.stringify(clip)} for ${selector}`);
     }
+    // The scale the page is really drawn at, and the CSS size of what is captured (the crop, or the whole
+    // viewport): the manifest records both, and a capture below the minimum scale is refused, never kept.
+    const view = await session.evaluate("({ scale: window.devicePixelRatio, width: window.innerWidth, height: window.innerHeight })");
+    const tooLow = scaleProblem(view.scale);
+    if (tooLow) throw new Error(tooLow);
+    const css = clip ? { width: clip.width, height: clip.height } : { width: view.width, height: view.height };
     // A capture waits for the next compositor frame, which can be slow to come
     // when the window is behind others; give it longer, and one retry.
     const params = { format: "png", ...(clip ? { clip } : {}) };
@@ -116,7 +124,7 @@ async function captureOne(session, shot, redaction) {
     for (let attempt = 0; attempt < 2; attempt++) {
         try {
             const { data } = await session.send("Page.captureScreenshot", params, 20000);
-            return Buffer.from(data, "base64");
+            return { png: Buffer.from(data, "base64"), scale: view.scale, css };
         } catch (err) {
             lastErr = err;
             await session.send("Page.bringToFront").catch(() => {});
@@ -149,6 +157,8 @@ async function main() {
     await session.send("Page.enable").catch(() => {});
     await session.send("Page.addScriptToEvaluateOnNewDocument", { source: NO_DIALOGS }).catch(() => {});
     await session.evaluate(NO_DIALOGS);
+    // Every shot is captured at CAPTURE_SCALE, whatever scale the display has.
+    await session.applyBaseScale();
 
     // The names themselves never reach the manifest or the console: only how
     // many pairs there were and how many replacements were made.
@@ -192,10 +202,10 @@ async function main() {
                         await session.setViewport(SIZES[size]);
                         await session.wait(shot.sizeSettleMs ?? 600);
                     }
-                    const pngBuffer = await captureOne(session, shot, redaction);
+                    const taken = await captureOne(session, shot, redaction);
                     const filename = shotFilename(n, shot.id, size);
-                    writeFileSync(join(args.out, filename), pngBuffer);
-                    const { width, height } = pngDimensions(pngBuffer);
+                    writeFileSync(join(args.out, filename), taken.png);
+                    const { width, height } = pngDimensions(taken.png);
                     entries.push({
                         id: shot.id,
                         title: shot.title,
@@ -206,6 +216,11 @@ async function main() {
                         ...(shot.containsWorkspaceData !== undefined ? { containsWorkspaceData: shot.containsWorkspaceData } : {}),
                         file: filename,
                         capturedAt: new Date().toISOString(),
+                        // What check-crisp.mjs reads: the scale it was captured at, its CSS size, and its pixels
+                        // (the CSS size times the scale).
+                        capture_scale: taken.scale,
+                        css_width: Math.round(taken.css.width * 100) / 100,
+                        css_height: Math.round(taken.css.height * 100) / 100,
                         width,
                         height,
                     });

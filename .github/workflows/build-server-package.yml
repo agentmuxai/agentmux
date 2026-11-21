@@ -20,7 +20,8 @@ name: build-server-package
 # A release without it says so in its summary, and `install.sh --headless` says that version has no Headless package for the
 # platform.
 #
-# `sign` (only a release asks for it, once the repository variable SERVER_PACKAGE_MACOS_SIGNING is 'true'; release-core.yml):
+# `sign` (a release asks for it, once the repository variable SERVER_PACKAGE_MACOS_SIGNING is 'true'; release-core.yml; a dispatch on main
+# building ref main can ask for it too, to prove the signing without a release, and this file uploads nothing to a release):
 # the macOS programs are signed with the Developer ID certificate and notarized before they are packed, as the desktop
 # app's are (build-macos.yml, scripts/package-macos.sh). Without it they carry only the linker's ad-hoc signature, which
 # Gatekeeper rejects for a tarball a browser downloaded. On the macOS leg the work is three jobs: `package` builds the
@@ -45,7 +46,7 @@ on:
         type: string
         default: all
       sign:
-        description: "Developer ID sign and notarize the macOS programs (a call from a release; there is no such input on a dispatch)"
+        description: "Developer ID sign and notarize the macOS programs (a call from a release)"
         required: false
         type: boolean
         default: false
@@ -59,6 +60,11 @@ on:
         description: "release (the legs on runner kinds a release already waits for) or all"
         required: false
         default: all
+      sign:
+        description: "Developer ID sign and notarize the macOS programs. Only a run on main building ref main signs; nothing is uploaded to a release (this file never uploads to one)"
+        required: false
+        type: boolean
+        default: false
   pull_request:
     paths:
       - '.github/workflows/build-server-package.yml'
@@ -77,6 +83,7 @@ jobs:
       legs: ${{ steps.legs.outputs.legs }}
       macos_legs: ${{ steps.legs.outputs.macos_legs }}
       sign: ${{ steps.sign.outputs.sign }}
+      build_ref: ${{ steps.sign.outputs.build_ref }}
     steps:
       - id: legs
         env:
@@ -100,26 +107,47 @@ jobs:
       - id: sign
         env:
           WANT: ${{ inputs.sign }}
+          # In a workflow called by another, `github.event_name` is the caller's event and `github.workflow_ref` the caller's
+          # file: a release started by a dispatch of release.yml is a call, not a dispatch of this file.
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          REPO: ${{ github.repository }}
           RUN_REF: ${{ github.ref }}
           RUN_SHA: ${{ github.sha }}
           BUILD_REF: ${{ inputs.ref }}
         run: |
           sign=false
+          direct=false
+          case "$WORKFLOW_REF" in "$REPO"/.github/workflows/build-server-package.yml@*) direct=true ;; esac
           if [ "$WANT" = true ]; then
-            case "$RUN_REF" in
-              refs/heads/main | refs/tags/v*)
-                if [ "$BUILD_REF" = "$RUN_SHA" ]; then sign=true; else echo "::warning::not signing: the ref to build ($BUILD_REF) is not the commit of this run ($RUN_SHA)"; fi ;;
-              *) echo "::warning::not signing: a run on '$RUN_REF' is not main or a release tag" ;;
-            esac
+            if [ "$direct" = true ]; then
+              # A dispatch of this file (the proving run of the signing): only a run on main that builds ref main.
+              if [ "$RUN_REF" = refs/heads/main ] && [ "$BUILD_REF" = main ]; then sign=true; else echo "::warning::not signing: a dispatch signs only a run on main building ref main (run on '$RUN_REF', ref '$BUILD_REF')"; fi
+            else
+              case "$RUN_REF" in
+                refs/heads/main | refs/tags/v*)
+                  if [ "$BUILD_REF" = "$RUN_SHA" ]; then sign=true; else echo "::warning::not signing: the ref to build ($BUILD_REF) is not the commit of this run ($RUN_SHA)"; fi ;;
+                *) echo "::warning::not signing: a run on '$RUN_REF' is not main or a release tag" ;;
+              esac
+            fi
           fi
+          # What is built: a run that signs builds the commit the run is on (the one the identity token's workflow is at), never
+          # a name that can move on while the run waits; any other run builds the ref it was asked for.
+          if [ "$sign" = true ]; then build_ref="$RUN_SHA"; else build_ref="${BUILD_REF:-$RUN_SHA}"; fi
           echo "sign=$sign" >> "$GITHUB_OUTPUT"
-          echo "sign=$sign"
+          echo "build_ref=$build_ref" >> "$GITHUB_OUTPUT"
+          echo "sign=$sign build_ref=$build_ref"
 
   package:
     name: Server package (${{ matrix.os }}-${{ matrix.arch }})
     needs: plan
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
+    # The digests of the unsigned programs, one output per macOS leg (a matrix leg that sets no output leaves it alone): the signing
+    # job checks the artifact it downloads against them, since an artifact is found by name and another job of the run could put
+    # a file of its own under that name.
+    outputs:
+      programs_macos_arm64: ${{ steps.programs_digest.outputs.programs_macos_arm64 }}
+      programs_macos_x64: ${{ steps.programs_digest.outputs.programs_macos_x64 }}
     strategy:
       fail-fast: false
       matrix:
@@ -127,7 +155,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.sha }}
+          ref: ${{ needs.plan.outputs.build_ref }}
 
       - uses: actions/setup-node@v4
         with:
@@ -262,6 +290,23 @@ jobs:
 
       # The macOS leg that is signed stops here: its programs and the web UI go to the next jobs, which sign, pack and run
       # them (`pack-macos`). Nothing is uploaded as a package from this job then.
+      - name: Name the digest of the unsigned programs (macOS)
+        id: programs_digest
+        if: matrix.os == 'macos' && needs.plan.outputs.sign == 'true'
+        shell: bash
+        env:
+          LEG: ${{ matrix.os }}_${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          # The programs' digest: the four files, by name, each hashed on stdin, and the list hashed. The same text is in the
+          # package, sign-macos and pack-macos jobs (the signing job calls its tools by absolute path).
+          programs_digest() {
+            local dir="$1" f
+            for f in agentmux agentmux-mcp agentmux-bashwrap agentmux-srv; do [ -f "$dir/$f" ] && [ ! -L "$dir/$f" ] || return 1; done
+            for f in agentmux agentmux-mcp agentmux-bashwrap agentmux-srv; do printf '%s %s\n' "$f" "$(shasum -a 256 < "$dir/$f" | cut -d' ' -f1)"; done | shasum -a 256 | cut -d' ' -f1
+          }
+          echo "programs_${LEG}=$(programs_digest target/fast-release)" >> "$GITHUB_OUTPUT"
+
       - name: Keep the unsigned programs and the web UI for signing (macOS)
         if: matrix.os == 'macos' && needs.plan.outputs.sign == 'true'
         uses: actions/upload-artifact@v4
@@ -491,6 +536,12 @@ jobs:
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.sign == 'true' && needs.plan.outputs.macos_legs != '[]' }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
+    # The Apple role's trust names this environment: it is the same one the desktop build's signing job runs in (no secrets,
+    # deployments only from main and v* tags).
+    environment: apple-signing
+    outputs:
+      signed_arm64: ${{ steps.signed.outputs.signed_arm64 }}
+      signed_x64: ${{ steps.signed.outputs.signed_x64 }}
     permissions:
       contents: read
       id-token: write   # the identity token the role for the Apple signing secrets accepts; this is the only job that has it
@@ -504,23 +555,53 @@ jobs:
           name: server-programs-unsigned-${{ matrix.os }}-${{ matrix.arch }}
           path: programs
 
+      # The programs are input from a job that ran the built commit's code: they are the ones that job made (its digest came by job
+      # output, which no other job of the run can set), and nothing else came with them. Nothing reads them before this.
+      - name: The programs are the ones the build job made
+        shell: bash
+        env:
+          WANT: ${{ needs.package.outputs[format('programs_{0}_{1}', matrix.os, matrix.arch)] }}
+        run: |
+          set -euo pipefail
+          # The programs' digest: the four files, by name, each hashed on stdin, and the list hashed. The same text is in the
+          # package, sign-macos and pack-macos jobs.
+          programs_digest() {
+            local dir="$1" f
+            for f in agentmux agentmux-mcp agentmux-bashwrap agentmux-srv; do [ -f "$dir/$f" ] && [ ! -L "$dir/$f" ] || return 1; done
+            for f in agentmux agentmux-mcp agentmux-bashwrap agentmux-srv; do printf '%s %s\n' "$f" "$(/usr/bin/shasum -a 256 < "$dir/$f" | /usr/bin/cut -d' ' -f1)"; done | /usr/bin/shasum -a 256 | /usr/bin/cut -d' ' -f1
+          }
+          [[ "$WANT" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::the build job reported no digest for the unsigned programs"; exit 1; }
+          [ "$(/usr/bin/find programs -mindepth 1 | /usr/bin/wc -l | /usr/bin/tr -d ' ')" = 4 ] || { echo "::error::the artifact holds more or less than the four programs"; exit 1; }
+          [ "$(programs_digest programs)" = "$WANT" ] || { echo "::error::the programs in the artifact are not the ones the build job made"; exit 1; }
+
       - name: The identity token names build-server-package.yml on main
         shell: bash
         run: |
-          TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r .value)
+          TOKEN=$(/usr/bin/curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | /usr/bin/jq -r .value)
           echo "::add-mask::$TOKEN"
-          CLAIMS=$(echo "$TOKEN" | jq -R 'split(".")[1] | @base64d | fromjson')
-          echo "$CLAIMS" | jq '{sub, job_workflow_ref, job_workflow_sha, workflow_ref, ref, event_name}'
+          CLAIMS=$(echo "$TOKEN" | /usr/bin/jq -R 'split(".")[1] | @base64d | fromjson')
+          echo "$CLAIMS" | /usr/bin/jq '{sub, job_workflow_ref, job_workflow_sha, workflow_ref, ref, event_name, environment}'
           WANT="${GITHUB_REPOSITORY}/.github/workflows/build-server-package.yml@refs/heads/main"
-          GOT=$(echo "$CLAIMS" | jq -r .job_workflow_ref)
-          SUB=$(echo "$CLAIMS" | jq -r .sub)
+          GOT=$(echo "$CLAIMS" | /usr/bin/jq -r .job_workflow_ref)
+          SUB=$(echo "$CLAIMS" | /usr/bin/jq -r .sub)
+          REF=$(echo "$CLAIMS" | /usr/bin/jq -r .ref)
           if [ "$GOT" != "$WANT" ]; then
             echo "::error::the identity token's job_workflow_ref is '$GOT', not '$WANT'"
             exit 1
           fi
-          case "$SUB" in
-            "repo:${GITHUB_REPOSITORY}:ref:refs/heads/main"|"repo:${GITHUB_REPOSITORY}:ref:refs/tags/v"*) ;;
-            *) echo "::error::the identity token's sub is '$SUB': only main and v* tags are signed"; exit 1 ;;
+          if [ "$SUB" != "repo:${GITHUB_REPOSITORY}:environment:apple-signing" ]; then
+            echo "::error::the identity token's sub is '$SUB': only the apple-signing environment is signed for"
+            exit 1
+          fi
+          case "$REF" in
+            refs/heads/main|refs/tags/v*) ;;
+            *) echo "::error::the identity token's ref is '$REF': only main and v* tags are signed"; exit 1 ;;
+          esac
+          # A run of this file itself (a dispatch) signs only on main (the plan refuses anything else too; the role's trust and
+          # the environment's policy are the other two checks). A call from a release has the release workflow's own ref here.
+          case "$(echo "$CLAIMS" | /usr/bin/jq -r .workflow_ref)" in
+            "${GITHUB_REPOSITORY}"/.github/workflows/build-server-package.yml@*)
+              [ "$REF" = refs/heads/main ] || { echo "::error::a dispatch signs only a run on main (this one is on '$REF')"; exit 1; } ;;
           esac
 
       - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
@@ -531,7 +612,9 @@ jobs:
           role-session-name: apple-signing-server-${{ github.run_id }}
           role-duration-seconds: 900
 
-      # The secret goes to a file that the next step reads and deletes.
+      # The secret goes to a file that the next step reads and deletes. Every tool of this job is called by absolute path (the
+      # system's own, /usr/bin and /bin of the runner image) except `aws`: the AWS CLI is not at one path on the runner images
+      # (Intel and Apple silicon differ), and it is the CLI the image ships, run with a session that lives for this one call.
       - name: Fetch the Apple signing secrets
         shell: bash
         env:
@@ -543,14 +626,14 @@ jobs:
           umask 077
           if [ -n "$SECRET_FIELD" ]; then
             aws secretsmanager get-secret-value --secret-id "$SECRET_ID" --query SecretString --output text \
-              | jq -ce "$SECRET_FIELD" > "$FILE" \
+              | /usr/bin/jq -ce "$SECRET_FIELD" > "$FILE" \
               || { echo "::error::the Apple signing secret has no value at the configured field"; exit 1; }
           else
             aws secretsmanager get-secret-value --secret-id "$SECRET_ID" --query SecretString --output text > "$FILE"
           fi
-          jq -e 'type == "object" and length > 0 and all(.[]; type == "string" and length > 0 and (contains("\n") | not))' "$FILE" > /dev/null \
+          /usr/bin/jq -e 'type == "object" and length > 0 and all(.[]; type == "string" and length > 0 and (contains("\n") | not))' "$FILE" > /dev/null \
             || { echo "::error::the Apple signing secret is not a flat object of non-empty single-line strings"; exit 1; }
-          jq -r '.[]' "$FILE" | while IFS= read -r v; do echo "::add-mask::$v"; done
+          /usr/bin/jq -r '.[]' "$FILE" | while IFS= read -r v; do echo "::add-mask::$v"; done
           echo "APPLE_SIGNING_FILE=$FILE" >> "$GITHUB_ENV"
           for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do echo "$v=" >> "$GITHUB_ENV"; done
 
@@ -559,24 +642,24 @@ jobs:
         run: |
           set -euo pipefail
           KEYCHAIN_PATH="$RUNNER_TEMP/server-package-${{ github.run_id }}.keychain"
-          KEYCHAIN_PASS="$(uuidgen)"
+          KEYCHAIN_PASS="$(/usr/bin/uuidgen)"
           echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
           echo "KEYCHAIN_PASS=$KEYCHAIN_PASS" >> "$GITHUB_ENV"
-          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
-          security default-keychain -s "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
-          security set-keychain-settings -t 21600 -u "$KEYCHAIN_PATH"
-          jq -er .APPLE_CERTIFICATE "$APPLE_SIGNING_FILE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
-          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN_PATH" -P "$(jq -er .APPLE_CERTIFICATE_PASSWORD "$APPLE_SIGNING_FILE")" -T /usr/bin/codesign -T /usr/bin/security
-          rm -f "$RUNNER_TEMP/cert.p12"
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
-          xcrun notarytool store-credentials "notarytool" \
-            --apple-id "$(jq -er .APPLE_ID "$APPLE_SIGNING_FILE")" \
-            --password "$(jq -er .APPLE_PASSWORD "$APPLE_SIGNING_FILE")" \
-            --team-id "$(jq -er .APPLE_TEAM_ID "$APPLE_SIGNING_FILE")" \
+          /usr/bin/security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          /usr/bin/security default-keychain -s "$KEYCHAIN_PATH"
+          /usr/bin/security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          /usr/bin/security set-keychain-settings -t 21600 -u "$KEYCHAIN_PATH"
+          /usr/bin/jq -er .APPLE_CERTIFICATE "$APPLE_SIGNING_FILE" | /usr/bin/base64 --decode > "$RUNNER_TEMP/cert.p12"
+          /usr/bin/security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN_PATH" -P "$(/usr/bin/jq -er .APPLE_CERTIFICATE_PASSWORD "$APPLE_SIGNING_FILE")" -T /usr/bin/codesign -T /usr/bin/security
+          /bin/rm -f "$RUNNER_TEMP/cert.p12"
+          /usr/bin/security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          /usr/bin/xcrun notarytool store-credentials "notarytool" \
+            --apple-id "$(/usr/bin/jq -er .APPLE_ID "$APPLE_SIGNING_FILE")" \
+            --password "$(/usr/bin/jq -er .APPLE_PASSWORD "$APPLE_SIGNING_FILE")" \
+            --team-id "$(/usr/bin/jq -er .APPLE_TEAM_ID "$APPLE_SIGNING_FILE")" \
             --keychain "$KEYCHAIN_PATH" \
             --no-validate
-          rm -f "$APPLE_SIGNING_FILE"
+          /bin/rm -f "$APPLE_SIGNING_FILE"
 
       # Hardened runtime and a secure timestamp, as notarization needs. No entitlements: none of the four programs loads
       # code that is not its own, generates code at run time, or records audio, which is all the desktop's entitlements allow.
@@ -586,14 +669,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
-          CERT="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | awk -F'"' '/Developer ID Application/ {print $2; exit}')"
+          /usr/bin/security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          CERT="$(/usr/bin/security find-identity -v -p codesigning "$KEYCHAIN_PATH" | /usr/bin/awk -F'"' '/Developer ID Application/ {print $2; exit}')"
           [ -n "$CERT" ] || { echo "::error::no 'Developer ID Application' identity in the keychain"; exit 1; }
-          chmod +x programs/*
-          SIGN=(codesign --force --timestamp --options runtime --sign "$CERT" --keychain "$KEYCHAIN_PATH")
+          /bin/chmod +x programs/*
+          SIGN=(/usr/bin/codesign --force --timestamp --options runtime --sign "$CERT" --keychain "$KEYCHAIN_PATH")
           "${SIGN[@]}" --identifier ai.agentmux.srv programs/agentmux-srv
           for prog in agentmux agentmux-mcp agentmux-bashwrap; do "${SIGN[@]}" "programs/$prog"; done
-          for prog in agentmux agentmux-srv agentmux-mcp agentmux-bashwrap; do codesign --verify --strict --verbose=2 "programs/$prog"; done
+          for prog in agentmux agentmux-srv agentmux-mcp agentmux-bashwrap; do /usr/bin/codesign --verify --strict --verbose=2 "programs/$prog"; done
 
       # Apple's notary service takes a zip, a disk image or an installer, not a bare program: the four go in a zip, which is
       # only the vehicle. A program cannot be stapled, so the ticket stays with Apple and Gatekeeper asks for it when a
@@ -602,17 +685,32 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          /usr/bin/security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
           zip_dir="$RUNNER_TEMP/notarize"
-          rm -rf "$zip_dir" && mkdir -p "$zip_dir"
-          ditto -c -k --keepParent programs "$zip_dir/programs.zip"
+          /bin/rm -rf "$zip_dir" && /bin/mkdir -p "$zip_dir"
+          /usr/bin/ditto -c -k --keepParent programs "$zip_dir/programs.zip"
           # The whole output first, then look at it: grep -q on a pipe would end notarytool early.
-          out="$(xcrun notarytool submit "$zip_dir/programs.zip" --keychain-profile notarytool --keychain "$KEYCHAIN_PATH" --wait 2>&1 || true)"
+          out="$(/usr/bin/xcrun notarytool submit "$zip_dir/programs.zip" --keychain-profile notarytool --keychain "$KEYCHAIN_PATH" --wait 2>&1 || true)"
           printf '%s\n' "$out"
-          if ! printf '%s\n' "$out" | grep -q "status: Accepted"; then
+          if ! printf '%s\n' "$out" | /usr/bin/grep -q "status: Accepted"; then
             echo "::error::Apple did not accept the notarization of the server programs (the log above says why)"
             exit 1
           fi
+
+      # The signed, notarized programs have a digest too: the job that packs them checks the artifact against it.
+      - name: Name the digest of the signed programs
+        id: signed
+        shell: bash
+        env:
+          LEG: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          programs_digest() {
+            local dir="$1" f
+            for f in agentmux agentmux-mcp agentmux-bashwrap agentmux-srv; do [ -f "$dir/$f" ] && [ ! -L "$dir/$f" ] || return 1; done
+            for f in agentmux agentmux-mcp agentmux-bashwrap agentmux-srv; do printf '%s %s\n' "$f" "$(/usr/bin/shasum -a 256 < "$dir/$f" | /usr/bin/cut -d' ' -f1)"; done | /usr/bin/shasum -a 256 | /usr/bin/cut -d' ' -f1
+          }
+          echo "signed_${LEG}=$(programs_digest programs)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -625,8 +723,8 @@ jobs:
         if: always()
         shell: bash
         run: |
-          rm -f "$RUNNER_TEMP/apple-signing.json" "$RUNNER_TEMP/cert.p12"
-          if [ -n "${KEYCHAIN_PATH:-}" ]; then security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true; fi
+          /bin/rm -f "$RUNNER_TEMP/apple-signing.json" "$RUNNER_TEMP/cert.p12"
+          if [ -n "${KEYCHAIN_PATH:-}" ]; then /usr/bin/security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true; fi
 
   # Packs the signed programs, runs the package as a user would and checks the signatures. No identity token: it checks
   # out the ref (its scripts run here) and has only what it needs to read.
@@ -645,12 +743,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.sha }}
+          ref: ${{ needs.plan.outputs.build_ref }}
 
       - uses: actions/download-artifact@v4
         with:
           name: server-programs-signed-${{ matrix.os }}-${{ matrix.arch }}
           path: signed
+
+      # The programs are the signed ones the signing job made (its digest came by job output), before any repository script touches them.
+      - name: The programs are the ones the signing job made
+        shell: bash
+        env:
+          WANT: ${{ needs.sign-macos.outputs[format('signed_{0}', matrix.arch)] }}
+        run: |
+          set -euo pipefail
+          programs_digest() {
+            local dir="$1" f
+            for f in agentmux agentmux-mcp agentmux-bashwrap agentmux-srv; do [ -f "$dir/$f" ] && [ ! -L "$dir/$f" ] || return 1; done
+            for f in agentmux agentmux-mcp agentmux-bashwrap agentmux-srv; do printf '%s %s\n' "$f" "$(shasum -a 256 < "$dir/$f" | cut -d' ' -f1)"; done | shasum -a 256 | cut -d' ' -f1
+          }
+          [[ "$WANT" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::the signing job reported no digest for the signed programs"; exit 1; }
+          [ "$(find signed -mindepth 1 | wc -l | tr -d ' ')" = 4 ] || { echo "::error::the artifact holds more or less than the four programs"; exit 1; }
+          [ "$(programs_digest signed)" = "$WANT" ] || { echo "::error::the programs in the artifact are not the ones the signing job made"; exit 1; }
 
       - uses: actions/download-artifact@v4
         with:
@@ -686,8 +800,12 @@ jobs:
           curl -fsS http://127.0.0.1:17380/ | grep -qi '<html'
           "$bin/agentmux" status
 
-      # What a person gets: the unpacked programs are signed by the Developer ID team with the hardened runtime, and
-      # Gatekeeper (which asks Apple for the notarization ticket) accepts them as notarized.
+      # What a person gets: the unpacked programs are signed by the Developer ID team with the hardened runtime, and Apple's
+      # notarization covers each one. A bare program cannot carry a stapled ticket, so Gatekeeper asks Apple for it (or its own
+      # cache of an earlier answer): the assessment needs the network, and the ticket can lag a minute behind an accepted
+      # submission, so it is asked a few times. `spctl -t exec` assesses app bundles and says "does not seem to be an app" about
+      # a bare program, so the assessment is the one for any signed code (`-t open --context context:primary-signature`).
+      # The step fails when a program never reads as a notarized Developer ID program (no ticket, or Apple not reachable).
       - name: Check the signatures of the packed programs
         run: |
           set -eu
@@ -700,14 +818,12 @@ jobs:
             echo "$info" | grep -q "TeamIdentifier=" || { echo "::error::$prog has no team identifier"; exit 1; }
             echo "$info" | grep -q "flags=0x[0-9a-f]*(.*runtime" || { echo "::error::$prog is not signed with the hardened runtime"; exit 1; }
             codesign --verify --strict "$f"
-            # Gatekeeper's own answer needs the notarization ticket from Apple, which can lag a minute behind an accepted
-            # submission: it is asked a few times and reported, and does not fail the leg by itself.
             ok=no
             for _ in 1 2 3 4 5; do
-              if spctl -a -t exec -vv "$f" 2>&1 | tee /dev/stderr | grep -q "source=Notarized Developer ID"; then ok=yes; break; fi
+              if spctl -a -vvv -t open --context context:primary-signature "$f" 2>&1 | tee /dev/stderr | grep -q "source=Notarized Developer ID"; then ok=yes; break; fi
               sleep 20
             done
-            [ "$ok" = yes ] || echo "::warning::Gatekeeper did not report $prog as a notarized Developer ID program after five tries"
+            [ "$ok" = yes ] || { echo "::error::Gatekeeper did not report $prog as a notarized Developer ID program after five tries (no ticket for it at Apple, or Apple was not reachable)"; exit 1; }
           done
 
       - uses: actions/upload-artifact@v4

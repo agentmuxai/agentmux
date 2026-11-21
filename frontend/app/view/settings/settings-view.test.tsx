@@ -78,6 +78,7 @@ import { createRoot, createSignal } from "solid-js";
 import { create as createSettings } from "./settings-instance";
 import { SettingsView } from "./settings-view";
 import { SettingsViewModel } from "./settings-model";
+import { TERMINAL_SETTINGS } from "./sections/terminal-settings-index";
 
 describe("SettingsView section tabs", () => {
     afterEach(() => {
@@ -90,11 +91,11 @@ describe("SettingsView section tabs", () => {
         return { ...result, model };
     }
 
-    it("orders the tabs as Appearance, Animations, Window & Panes, Browser, Terminal, Keyboard shortcuts, Sounds, Notifications & Tray, Recording, Paired devices, Widgets, Agents, Advanced", () => {
+    it("orders the tabs as Appearance, Animations, Window & Panes, Browser, Terminal, Keyboard shortcuts, Sounds, Notifications & Tray, Recording, Paired devices, Widgets, Agents, Kanban, Advanced", () => {
         renderSettings();
         const tabs = screen.getByRole("tablist", { name: "Settings section" });
         const labels = Array.from(tabs.querySelectorAll('[role="tab"]')).map((el) => el.textContent);
-        expect(labels).toEqual(["Appearance", "Animations", "Window & Panes", "Browser", "Terminal", "Keyboard shortcuts", "Sounds", "Notifications & Tray", "Recording", "Paired devices", "Widgets", "Agents", "Advanced"]);
+        expect(labels).toEqual(["Appearance", "Animations", "Window & Panes", "Browser", "Terminal", "Keyboard shortcuts", "Sounds", "Notifications & Tray", "Recording", "Paired devices", "Widgets", "Agents", "Kanban", "Advanced"]);
     });
 
     it("defaults to the Appearance section visible", () => {
@@ -128,6 +129,19 @@ describe("SettingsView section tabs", () => {
         setMetaSignal({ "settings:section": "terminal" });
         await Promise.resolve();
         expect(model.activeSection()).toBe("terminal");
+    });
+
+    // The scroller is a wrapper around the section, one per section (SPEC_SETTINGS_WIDE_PANE_COLUMNS_2026_11_20.md 3.2):
+    // a section that flows into columns has an auto height inside it, and a section picked next starts at the top.
+    it("puts the section in its own scroll wrapper, a new one for each section", () => {
+        const { model } = renderSettings();
+        const first = screen.getByTestId("appearance-section").closest(".settings-scroll");
+        expect(first).not.toBeNull();
+        model.setSection("terminal");
+        const second = screen.getByTestId("terminal-section").closest(".settings-scroll");
+        expect(second).not.toBeNull();
+        expect(second).not.toBe(first);
+        expect(document.querySelectorAll(".settings-scroll")).toHaveLength(1);
     });
 
     it("clicking a tab switches the visible section", () => {
@@ -248,6 +262,34 @@ describe("SettingsView search bar", () => {
         expect(model.activeSection()).toBe("terminal");
         expect(model.query()).toBe("");
         expect(screen.queryByTestId("settings-search-results")).not.toBeInTheDocument();
+    });
+
+    // A result in the last column of a section is the last row in the DOM: the jump is the same one, by id, and it needs
+    // only some scrollable ancestor (SPEC_SETTINGS_WIDE_PANE_COLUMNS_2026_11_20.md 3.4).
+    it("scrolls a chosen row to the middle of the view and highlights it, wherever it is in the section", async () => {
+        const scrollIntoView = vi.fn();
+        const original = Element.prototype.scrollIntoView;
+        Element.prototype.scrollIntoView = scrollIntoView;
+        // The row the mocked Terminal section does not draw.
+        const row = document.createElement("div");
+        row.id = `setting-${TERMINAL_SETTINGS.copyOnSelect.id}`;
+        document.body.appendChild(row);
+        try {
+            const { model } = renderSettings();
+            fireEvent.input(screen.getByTestId("settings-search-input"), { target: { value: "clipboard" } });
+            const result = screen.getAllByTestId("settings-search-result")[0];
+            expect(result).toHaveTextContent("Copy on select");
+            fireEvent.click(result);
+            // The jump runs in a microtask, once the section it is in has drawn.
+            await Promise.resolve();
+            expect(model.activeSection()).toBe("terminal");
+            expect(scrollIntoView.mock.contexts[0]).toBe(row);
+            expect(scrollIntoView).toHaveBeenCalledWith({ block: "center" });
+            expect(row.classList.contains("setting-row--search-highlight")).toBe(true);
+        } finally {
+            Element.prototype.scrollIntoView = original;
+            row.remove();
+        }
     });
 
     it("opens the Swarm's Supervisor settings for a Supervisor result, and stays in this section", async () => {

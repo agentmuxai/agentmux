@@ -78,7 +78,7 @@ fn cases() -> Vec<Case> {
             json!({}),
             "/agentmux/work/7/ask",
             json!({ "attempt": 1, "text": "Which one?" }),
-            &["Asked: task 7 now waits in the operator's Needs you column"],
+            &["Asked: task 7 now waits for the operator"],
         ),
         c(
             "WorkSubmit",
@@ -420,6 +420,70 @@ async fn a_call_without_an_attempt_for_a_task_it_asked_about_is_told_the_attempt
 async fn a_call_without_an_attempt_and_no_claimed_task_is_told_to_claim() {
     let err = missing_attempt_says("WorkUpdate", json!({ "id": "7" }), json!({ "items": [] })).await;
     assert!(err.contains("You hold no claimed task: claim one first"), "{err}");
+}
+
+/// A note or links on a task nobody holds need no attempt: the tool checks the agent does not hold the task
+/// (the lists of claimed and of blocked tasks), then sends srv the note with no attempt.
+#[tokio::test]
+async fn a_note_on_a_task_the_agent_does_not_hold_goes_to_srv_without_an_attempt() {
+    let listed = json!({ "ok": true, "items": [{ "ref": "#9", "state": "claimed", "claimed_by": "tester", "attempts": 5 }] });
+    let srv = stub_srv("200 OK", listed);
+    let fx = Fixture::new(&srv);
+    let args = json!({ "id": "47467", "note": "waits on the design", "links": { "pr": "https://example.test/pull/1" } });
+    let out = call("WorkUpdate", &args, &fx.cx()).await.expect("a note on a task nobody holds is taken");
+    assert!(out.contains("Noted on task 47467") && out.contains("no claim or attempt was needed"), "{out}");
+    let seen = srv.seen.lock().unwrap().clone();
+    assert_eq!(seen.len(), 3, "the two lists, then the note: {seen:?}");
+    assert!(seen[0].0.contains("state=claimed") && seen[1].0.contains("state=blocked"), "{seen:?}");
+    assert_eq!(seen[2].0, "/agentmux/work/47467/update");
+    let body = &seen[2].1;
+    assert!(body.get("attempt").is_none(), "no attempt is sent: {body}");
+    assert_eq!((body["note"].as_str(), body["pr_url"].as_str()), (Some("waits on the design"), Some("https://example.test/pull/1")));
+    assert!(body["agent_id"].as_str().is_some_and(|a| !a.is_empty()), "{body}");
+}
+
+/// The attempt is how srv rejects a stale holder: a task this agent holds still asks for it, with a note too.
+#[tokio::test]
+async fn a_note_on_a_task_the_agent_holds_still_needs_its_attempt() {
+    let listed = json!({ "items": [{ "ref": "#9", "state": "claimed", "claimed_by": "tester", "attempts": 5 }] });
+    let srv = stub_srv("200 OK", listed);
+    let fx = Fixture::new(&srv);
+    let err = call("WorkUpdate", &json!({ "id": "9", "note": "half way" }), &fx.cx()).await.expect_err("fenced by its attempt").to_string();
+    assert!(err.contains("You hold #9 as attempt 5: pass id=9 attempt=5"), "{err}");
+    let seen = srv.seen.lock().unwrap().clone();
+    assert!(seen.iter().all(|(p, _)| p.starts_with("/agentmux/work?")), "nothing was written: {seen:?}");
+}
+
+/// A checklist, files and the UI flags are the holder's: with a note and no attempt they still ask for it.
+#[tokio::test]
+async fn a_checklist_or_files_without_an_attempt_are_not_a_note() {
+    for extra in [
+        json!({ "checklist": [{ "text": "a", "status": "pending" }] }),
+        json!({ "files": ["C:/x/a.png"] }),
+        json!({ "ui_change": true }),
+        json!({ "no_media_reason": "nothing to see" }),
+    ] {
+        let srv = stub_srv("200 OK", json!({ "items": [] }));
+        let fx = Fixture::new(&srv);
+        let mut args = json!({ "id": "7", "note": "n" });
+        args.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        let err = call("WorkUpdate", &args, &fx.cx()).await.expect_err("not a bare note").to_string();
+        assert!(err.contains("missing required parameter: attempt"), "{args}: {err}");
+        let seen = srv.seen.lock().unwrap().clone();
+        assert!(seen.iter().all(|(p, _)| p.starts_with("/agentmux/work?")), "{args}: nothing was written: {seen:?}");
+    }
+}
+
+/// srv refuses a note on a task someone holds, saying what to do instead: the tool passes those words on, not
+/// the "no longer yours" it says for a holder's old attempt.
+#[tokio::test]
+async fn srvs_refusal_of_a_note_on_a_held_task_reaches_the_agent_in_its_own_words() {
+    let said = "#7 is being worked on by a1: its note, checklist and files are the holder's to write. To tell them something, message a1";
+    let srv = stub_srv("409 Conflict", json!({ "ok": false, "error": said }));
+    let fx = Fixture::new(&srv);
+    let err = call("WorkUpdate", &json!({ "id": "7", "note": "x" }), &fx.cx()).await.expect_err("refused").to_string();
+    assert!(err.contains("being worked on by a1") && err.contains("message a1"), "{err}");
+    assert!(!err.contains("no longer yours"), "{err}");
 }
 
 #[tokio::test]

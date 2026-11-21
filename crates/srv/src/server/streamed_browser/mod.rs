@@ -8,10 +8,15 @@
 //!
 //! The route is behind the same layers as `/ws`: the key, or a signed-in browser's cookie and token.
 
+mod address_policy;
+#[cfg_attr(not(unix), allow(dead_code))]
+mod address_proxy;
 #[cfg_attr(not(unix), allow(dead_code))]
 mod cdp;
 #[cfg_attr(not(unix), allow(dead_code))]
 mod chromium;
+mod host;
+mod lease_token;
 mod nav;
 #[cfg_attr(not(unix), allow(dead_code))]
 mod pane;
@@ -25,6 +30,13 @@ use serde::Deserialize;
 
 use super::local_session::SessionId;
 use super::local_session_routes::{session_ended, WS_PROTOCOL};
+
+pub(crate) use host::exit_if_requested as exit_if_browser_host;
+
+/// Note a port this server listens on: a page in the browser may never connect to it (`address_policy`).
+pub fn note_own_port(port: u16) {
+    address_policy::note_own_port(port);
+}
 
 /// The route (the same literal is registered in `routes.rs`; a test holds them together).
 pub const ROUTE: &str = "/agentmux/streamed-browser";
@@ -79,9 +91,14 @@ pub(in crate::server) async fn handle(
         Err(e) => return (StatusCode::BAD_REQUEST, e).into_response(),
     };
     let session = session.map(|Extension(s)| s);
+    upgrade(ws, start, session_ended(session))
+}
+
+/// Upgrade to the pane's WebSocket and run the pane until it ends (or `ended` does).
+fn upgrade(ws: WebSocketUpgrade, start: pane::Start, ended: impl std::future::Future<Output = ()> + Send + 'static) -> Response {
     ws.protocols([WS_PROTOCOL]).on_upgrade(move |mut socket| async move {
         match chromium::lease().await {
-            Ok(lease) => pane::run(socket, lease, start, session_ended(session)).await,
+            Ok(lease) => pane::run(socket, lease, start, ended).await,
             Err(e) => {
                 tracing::warn!(error = %e, "streamed browser: no browser for a pane");
                 let _ = socket.send(axum::extract::ws::Message::Text(serde_json::json!({ "t": "error", "message": e }).to_string().into())).await;

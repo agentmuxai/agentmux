@@ -108,9 +108,15 @@ on:
 # have via the PR number — a second push can never land on the same SHA, so
 # this loses no real cancellation behavior, only the spurious cross-merge
 # kind.
+#
+# Pushes to main are the one exception. They share a single group and a run in progress is NOT
+# cancelled: GitHub keeps one run going and one waiting, and a newer push replaces the waiting one,
+# so a burst of merges is tested at its head, not once per merge. A waiting run that is replaced
+# starts no job, so `main status` (a job of the run) never reports for it. It only acts for the run
+# whose commit is main's head, and that run always executes.
 concurrency:
-  group: ci-pr-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'push' && format('ci-pr-{0}-main-push', github.workflow) || format('ci-pr-{0}-{1}', github.workflow, github.event.pull_request.number || github.sha) }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 # Read-only by default; a job that needs more says so itself (job-level permissions replace this
 # block). A job added later gets nothing it did not ask for.
@@ -144,6 +150,8 @@ jobs:
       frontend_build: ${{ steps.classify.outputs.frontend_build }}
       docs_only: ${{ steps.classify.outputs.docs_only }}
       docs_index: ${{ steps.classify.outputs.docs_index }}
+      # The agentmux-cef crate's tests (the `cef-crate` job): a PR that changes what the crate is built from (R10).
+      cef: ${{ steps.classify.outputs.cef }}
       version_only: ${{ steps.classify.outputs.version_only }}
       # Set only in a merge queue (below); every other run uses the defaults
       # each job's matrix falls back to.
@@ -172,8 +180,10 @@ jobs:
         # dependents skipped — i.e. green — which is the exact outcome this
         # whole design exists to prevent.
         run: |
+          # $2 is whether the agentmux-cef crate's check runs too: yes unless a caller says no (a push to main,
+          # where the nightly owns that crate's tests).
           run_everything() {
-            printf 'rust=true\nfrontend=true\nfrontend_build=true\ndocs_only=false\ndocs_index=true\nversion_only=false\n' >> "$GITHUB_OUTPUT"
+            printf 'rust=true\nfrontend=true\nfrontend_build=true\ndocs_only=false\ndocs_index=true\nversion_only=false\ncef=%s\n' "${2:-true}" >> "$GITHUB_OUTPUT"
             echo "::notice::running all checks — $1"
           }
 
@@ -184,7 +194,7 @@ jobs:
           # vitest). The rest of the Rust tests ran on each PR and run again on the push
           # to main.
           if [ "${{ github.event_name }}" = "merge_group" ]; then
-            printf 'rust=true\nfrontend=true\nfrontend_build=true\ndocs_only=false\ndocs_index=true\nversion_only=false\nqueue=true\n' >> "$GITHUB_OUTPUT"
+            printf 'rust=true\nfrontend=true\nfrontend_build=true\ndocs_only=false\ndocs_index=true\nversion_only=false\ncef=false\nqueue=true\n' >> "$GITHUB_OUTPUT"
             printf 'rust_os=["ubuntu-latest"]\ndocs_index_os=["ubuntu-latest"]\n' >> "$GITHUB_OUTPUT"
             echo "::notice::merge queue: fast gates and the tests that read the tree"
             exit 0
@@ -193,7 +203,7 @@ jobs:
           # R4: only pull requests are eligible. Post-merge runs on main always
           # do the full job — low volume, and the last gate before a release.
           if [ "${{ github.event_name }}" != "pull_request" ]; then
-            run_everything "not a pull_request (R4)"
+            run_everything "not a pull_request (R4)" false
             exit 0
           fi
 
@@ -567,9 +577,12 @@ jobs:
   # gate merges; then `macos-latest` moves into the `rust` matrix instead.
   rust-macos:
     name: cargo check --tests (macos-latest)
-    needs: changes
-    # Same condition as `rust`, for the same reasons (see its comment).
-    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.changes.outputs.queue != 'true' }}
+    needs: [changes, docs, frontend]
+    # Same condition as `rust`, for the same reasons (see its comment), and the fast gates first: this job
+    # blocks nothing, so it starts once `docs` and `frontend` (about 5 minutes) have not failed, and a push
+    # that replaces this commit before then cancels the run without a Windows or macOS minute spent. A gate
+    # that was skipped (a PR with no frontend change skips `frontend`) does not stop it: only a failed one does.
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.changes.outputs.queue != 'true' && needs.docs.result != 'failure' && needs.frontend.result != 'failure' }}
     runs-on: macos-latest
     continue-on-error: true
     timeout-minutes: 35
@@ -599,9 +612,12 @@ jobs:
   # partitions are disjoint and together are the whole suite.
   rust-windows-build:
     name: nextest build (windows-latest)
-    needs: changes
-    # Same condition as `rust`, for the same reasons (see its comment).
-    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.changes.outputs.queue != 'true' }}
+    needs: [changes, docs, frontend]
+    # Same condition as `rust`, for the same reasons (see its comment), and the fast gates first: this job
+    # blocks nothing, so it starts once `docs` and `frontend` (about 5 minutes) have not failed, and a push
+    # that replaces this commit before then cancels the run without a Windows or macOS minute spent. A gate
+    # that was skipped (a PR with no frontend change skips `frontend`) does not stop it: only a failed one does.
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.changes.outputs.queue != 'true' && needs.docs.result != 'failure' && needs.frontend.result != 'failure' }}
     runs-on: windows-latest
     continue-on-error: true
     # `continue-on-error` makes this job's `result` read `success` to `needs` even
@@ -707,9 +723,12 @@ jobs:
   # signal for the other crates, which the shards above also run.
   rust-windows-host:
     name: nextest (windows-latest, host)
-    needs: changes
-    # Same condition as `rust`, for the same reasons (see its comment).
-    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.changes.outputs.queue != 'true' }}
+    needs: [changes, docs, frontend]
+    # Same condition as `rust`, for the same reasons (see its comment), and the fast gates first: this job
+    # blocks nothing, so it starts once `docs` and `frontend` (about 5 minutes) have not failed, and a push
+    # that replaces this commit before then cancels the run without a Windows or macOS minute spent. A gate
+    # that was skipped (a PR with no frontend change skips `frontend`) does not stop it: only a failed one does.
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.changes.outputs.queue != 'true' && needs.docs.result != 'failure' && needs.frontend.result != 'failure' }}
     runs-on: windows-latest
     continue-on-error: true
     timeout-minutes: 35
@@ -740,6 +759,47 @@ jobs:
         uses: taiki-e/install-action@nextest
       - name: cargo nextest (CEF-free crates but srv)
         run: cargo nextest run --profile ci -p agentmux-common -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
+
+  # The agentmux-cef crate's own tests on a PR that changes what the crate is built from (the classifier's R10).
+  # Until now they ran only in the nightly, so a break in the page wiring merged with nothing run against it and
+  # surfaced a day later on main. The whole set is 1,295 tests; on the nightly's Ubuntu run they take about 4 seconds
+  # and the build about 2 minutes on top of the workspace's, no browser or display needed, so nothing is split off:
+  # the full `cargo test -p agentmux-cef --features test-authfile`, the nightly's own command. Linux only: a
+  # Windows-only `cfg` break in the crate is still the nightly's to catch.
+  #
+  # Reports, blocks nothing: `continue-on-error`, and not in `CI required`'s `needs` (the same stance as `rust-macos`).
+  # It becomes a required check once it has been green and stable for a few days. A job of its own, so the `rust`
+  # job's required path (which leaves this crate out for its build time) is unchanged.
+  cef-crate:
+    name: agentmux-cef tests (ubuntu-latest)
+    needs: changes
+    # `!= 'false'` and `!cancelled()` for the reasons given on `rust`: a failed or skipped `changes` job runs it.
+    if: ${{ !cancelled() && needs.changes.outputs.cef != 'false' }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: clippy, rustfmt
+      - name: Install build deps (Linux — CEF)
+        timeout-minutes: 20
+        env:
+          CI_APT_BUDGET: 600
+          CI_APT_DNS_WAIT: 180
+          CI_APT_UPDATE_LIMIT: 120
+          CI_APT_INSTALL_LIMIT: 240
+        run: |
+          # The same list and steps as the nightly's "Install build deps (Linux — CEF + launcher Wayland/GTK)".
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*
+          bash scripts/ci-apt.sh update --strict
+          bash scripts/ci-apt.sh install -y ninja-build cmake libwayland-dev libxkbcommon-dev libgtk-3-dev
+      - name: Check the build tools are on PATH
+        run: bash scripts/ci-require-tools.sh ninja cmake
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo test -p agentmux-cef
+        run: cargo test -p agentmux-cef --features test-authfile --no-fail-fast -- --test-threads=1
 
   docs:
     name: doc status + grep gates
@@ -1051,6 +1111,16 @@ jobs:
       - name: macOS srv signing identity check self-test
         run: bash scripts/verify-srv-identity-darwin.test.sh
 
+      # The stable app's bundle id carries no version (that is what keeps macOS's privacy grants across upgrades), and
+      # its signed requirement names the same id. The packaging and signing steps run this check; fake bundles here.
+      - name: macOS app identity check self-test
+        run: bash scripts/verify-app-identity-darwin.test.sh
+
+      # The release's signing job runs these scripts, with the Apple credentials, on an app that came out of another job:
+      # the zip's unpack checks, and that none of them starts anything that is in the app. Stand-in tools; runs on Linux.
+      - name: macOS signing scripts self-test
+        run: bash scripts/macos-signing-scripts.test.sh
+
       # The root helper behind a .deb/.rpm's in-app upgrade runs as root on a file a
       # user process names: these are the ways it could install the wrong one.
       # Fake dpkg/rpm/apt and a fake GitHub listing; needs no root.
@@ -1077,6 +1147,15 @@ jobs:
       # sudo, apt-get, getent and sleep, so no package is installed and no wait is real.
       - name: apt retry script self-test
         run: bash scripts/ci-apt.test.sh
+
+      # The go-task installer every build workflow uses (pinned release, SHA-256, retries) and the tool check that
+      # fails a step when a tool it should have provided is missing; their tests replace curl and download nothing.
+      - name: go-task install and tool check self-test
+        run: bash scripts/ci-install-go-task.test.sh
+
+      # The build slot's claim: one holder at a time, even when mkdir answers yes to a caller that lost the race.
+      - name: build slot self-test
+        run: bash scripts/build-slot/build-slot.test.sh
 
       # The nextest step's stall handling: which attempt statuses are retried, and when memory counts as gone.
       - name: nextest step script self-test
@@ -1131,7 +1210,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: generator and classifier tests
-        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs scripts/cli-probe/fake-anthropic.test.mjs scripts/cli-probe/probe-safety.test.mjs scripts/release-manifest.test.mjs scripts/release-gate.test.mjs scripts/release-publish-needs.test.mjs scripts/check-rust-pin.test.mjs scripts/check-shared-paths.test.mjs scripts/check-test-support-off.test.mjs scripts/ci-main-stalled.test.mjs
+        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs scripts/cli-probe/fake-anthropic.test.mjs scripts/cli-probe/probe-safety.test.mjs scripts/release-manifest.test.mjs scripts/release-gate.test.mjs scripts/release-publish-needs.test.mjs scripts/check-rust-pin.test.mjs scripts/check-shared-paths.test.mjs scripts/check-test-support-off.test.mjs scripts/ci-main-stalled.test.mjs scripts/ci-main-range.test.mjs
       - name: Specs index is current (changed specs only)
         run: node scripts/gen-docs-index.mjs --check
       - name: bash wrapper reaches the same generator
@@ -1214,6 +1293,11 @@ jobs:
       - name: generated settings template is current
         if: matrix.shard == 1
         run: node scripts/gen-settings-template.mjs --check
+      # The schema and the code that reads settings list the same keys, and every entry has what settings.json shows
+      # for it. Known gaps are in scripts/check-settings-keys.baseline; the list only shrinks.
+      - name: settings schema and code agree (one to one)
+        if: matrix.shard == 1
+        run: node scripts/check-settings-keys.mjs
       # npm dependencies match the imports (#4207 S2, the npm half of the
       # cargo machete gate): fails on an unused dependency, or on an import
       # that only resolves because npm hoisted someone else's dependency.
@@ -1366,6 +1450,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             scripts/ci-main-stalled.mjs
+            scripts/ci-main-range.mjs
           sparse-checkout-cone-mode: false
       - name: Report a stalled or cancelled job to the ci-stalled issue
         id: stall
@@ -1407,6 +1492,9 @@ jobs:
           open=$(printf '%s\n' "$open" | head -1)
           failing=$(gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/jobs" --jq '.jobs[] | select(.conclusion == "failure") | "- " + .name' | grep -v -- '- CI required$' || true)
           note="CI failed on main at $at: $RUN_URL"$'\n\n'"Failing jobs:"$'\n'"${failing:-- (see the run)}"
+          # Pushes to main share a group and a waiting run is replaced, so this run can stand for several merges.
+          range=$(node scripts/ci-main-range.mjs || true)
+          if [ -n "$range" ]; then note="$note"$'\n\n'"$range"; fi
           if [ -n "$open" ]; then
             gh issue comment "$open" --repo "$REPO" --body "$note"
           else

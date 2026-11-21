@@ -88,7 +88,7 @@ async fn check(arguments: &Value, cx: &ToolCtx<'_>, base: &str) -> Result<String
         "reason": arguments.get("reason").and_then(Value::as_str),
         "auth": crate::identity::sign_ui_automation_auth().map_err(|e| anyhow::anyhow!("Vault check needs this agent's signed identity: {e}"))?,
     });
-    // The read of the other place: the CLI's 25 s and some room.
+    // The read of the other place: the CLI's wait (`RECIPE_TIMEOUT`, 50 s) and some room.
     post_waiting(cx, &format!("{base}/api/v1/vault/check"), &body, "Vault check", 0).await
 }
 
@@ -144,7 +144,7 @@ async fn import(arguments: &Value, cx: &ToolCtx<'_>, base: &str) -> Result<Strin
         "wait_secs": wait,
         "auth": crate::identity::sign_ui_automation_auth().map_err(|e| anyhow::anyhow!("Vault import needs this agent's signed identity: {e}"))?,
     });
-    // The person's answer, then AWS: the wait plus the CLI's 25 s and some room.
+    // The person's answer, then AWS: the wait plus the CLI's wait (`RECIPE_TIMEOUT`, 50 s) and some room.
     let url = format!("{base}/api/v1/vault/import");
     let resp = cx
         .client

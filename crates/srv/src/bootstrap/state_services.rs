@@ -37,6 +37,8 @@ pub fn install_state_hooks(state: &AppState) {
     // Durable jekt: replay messages held for an agent that was not running
     // (SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md).
     crate::server::jekt_held::install(state);
+    // The status bar learns of a change in the messages held for agents without asking (`jekt.held.summary`).
+    crate::server::jekt_held_summary::install(state);
     // A routine message that came by the relay waits for a session gone cold, as a local one does (#2263).
     crate::server::jekt_cold::install(state);
     // A parked agent no pane shows is sent the input held for it while its model API was out.
@@ -69,11 +71,15 @@ pub fn install_state_hooks(state: &AppState) {
     // Out-of-band native-memory write detection (fast fs-watch path + slow
     // reconciliation-sweep path) — see
     // docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §4.5.
+    // Only the agents running in this process: the roster and the identity folders are shared by every
+    // channel on the host, and a channel starting beside another reads nothing of the other's agents.
+    let drift_state = state.clone();
     backend::memory::native_drift::spawn(
         state.fs_watch_pool.clone(),
         state.mstore.clone(),
         state.id_store.clone(),
         state.broker.clone(),
+        std::sync::Arc::new(move || crate::server::agent_lifecycle::running_agent_ids(&drift_state)),
     );
 
     // Retention/GC for native-memory version history — see
@@ -130,6 +136,7 @@ pub async fn start_job_ledger_and_cron(state: &AppState) {
     if let Some(jobs_store) = crate::server::cron::jobs_store(state) {
         backend::jobs::paused::spawn(jobs_store, run_ledger.clone());
     }
+    let local_ledger = run_ledger.clone();
     state.cron_scheduler.install_runs(run_ledger);
     // An `app_event` job's runs start when the broker reports the event it names; a `file_watch` job's, when its folder changes; a `poll` job's, when its query finds something new.
     if let Some(jobs_store) = crate::server::cron::jobs_store(state) {
@@ -141,6 +148,11 @@ pub async fn start_job_ledger_and_cron(state: &AppState) {
     // Start persistent cron scheduler — load enabled jobs from DB, fire any
     // that missed their window (FIRE_ONCE_NOW), schedule all for future fires.
     state.cron_scheduler.start().await;
+    // A local slot that passed with no row of any kind is given up on (jobs spec §4.4). After the scheduler's start-up
+    // catch-up, whose collapsed rows cover the slots missed while AgentMux was off.
+    if let Some(jobs_store) = crate::server::cron::jobs_store(state) {
+        backend::jobs::watchdog::start_local(local_ledger, jobs_store);
+    }
 }
 
 /// Compensates the sagas an earlier run left unresolved; non-fatal when it fails.
@@ -189,7 +201,9 @@ fn spawn_spend_services(state: &AppState) {
 fn spawn_background_task_sweep(state: &AppState) {
     backend::background_task_exit::install(Arc::clone(&state.broker), Arc::clone(&state.mstore));
     backend::background_task_pid::install(Arc::clone(&state.broker), Arc::clone(&state.mstore));
-    backend::background_task_sweep::start(Arc::clone(&state.mstore), Arc::clone(&state.broker));
+    // A container pane's rows are checked inside its container, through whichever runtime srv is connected to.
+    let containers = backend::container_task_probe::DockerProbe { runtime: Arc::clone(&state.container_manager) };
+    backend::background_task_sweep::start(Arc::clone(&state.mstore), Arc::clone(&state.broker), Some(Arc::new(containers)));
 }
 
 /// Starts the services that run beside the server and need the app state.
@@ -210,6 +224,8 @@ fn start_container_status(state: &AppState) {
     let hub = backend::container_status::install(Arc::clone(&state.broker), move || {
         mstore.agent_def_list().unwrap_or_default().into_iter().filter(|d| d.is_seeded != 1).map(|d| (d.id, d.name)).collect()
     });
+    // Git facts of a container agent are read inside its container, through this runtime.
+    backend::container::mounts::read_exec::install(&state.container_manager);
     let source = backend::container_status::DockerSource::new(Arc::clone(&state.container_manager));
     tokio::spawn(backend::container_status::run(source, hub, Default::default()));
 }
@@ -293,6 +309,11 @@ pub fn spawn_state_services(state: &AppState) {
     // Claude config dirs get the auto-compact window `agent:compactat` asks for.
     backend::providers::install_config(Arc::clone(&state.config_watcher));
     backend::context_reading::install_config(Arc::clone(&state.config_watcher));
+    // A container agent's turn that ended well is when srv's compaction backstop looks at its context.
+    let backstop_state = state.clone();
+    backend::context_reading::observe_container_turn_ends(Box::new(move |block_id| {
+        crate::server::compact_backstop::after_container_turn(&backstop_state, block_id);
+    }));
     backend::container::limits::install_config(Arc::clone(&state.config_watcher));
     // The Claude CLI's own cross-session messaging is off unless `agent:climessaging` is true.
     backend::cli_messaging::install_config(Arc::clone(&state.config_watcher));
@@ -316,7 +337,7 @@ pub fn spawn_state_services(state: &AppState) {
         Arc::clone(&state.config_watcher),
     );
     // The version folders and unpacked portables an upgrade leaves behind are listed daily, and cleared on a host that turns it on.
-    backend::old_versions_service::install(Arc::clone(&state.config_watcher));
+    backend::old_versions_service::install(Arc::clone(&state.config_watcher), crate::server::external_host::host().is_some());
     install_turn_outcome_notes(state);
 }
 

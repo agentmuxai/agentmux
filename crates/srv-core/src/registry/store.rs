@@ -66,6 +66,7 @@ impl Registry {
     pub fn open(root: PathBuf) -> Result<Self, RegistryError> {
         std::fs::create_dir_all(&root)?;
         std::fs::create_dir_all(root.join("retired"))?;
+        super::atomic::sweep_stale_temps(&root, super::atomic::STALE_TEMP_AGE);
         Ok(Self {
             root,
             write_lock: Mutex::new(()),
@@ -350,7 +351,7 @@ impl Registry {
         for entry in std::fs::read_dir(&self.root)? {
             let entry = entry?;
             let path = entry.path();
-            if !path.is_file() {
+            if !path.is_file() || super::atomic::is_temp_file(&path) {
                 continue;
             }
             let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {

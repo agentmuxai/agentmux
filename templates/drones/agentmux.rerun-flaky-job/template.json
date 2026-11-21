@@ -1,0 +1,71 @@
+{
+  "templateVersion": 1,
+  "id": "agentmux.rerun-flaky-job",
+  "name": "Flag a flaky job's first failure",
+  "version": "1.1.0",
+  "kind": "drone",
+  "description": "Every 10 minutes it looks at the repository's failed pull request runs. A workflow you name that failed on its first attempt is told once to the leader, with the run's link and a line saying to re-run it. It starts nothing itself: a person or an agent re-runs the job. A run is told once: it counts as seen the first time.",
+  "params": {
+    "type": "object",
+    "properties": {
+      "repo": {
+        "type": "string",
+        "title": "Repository",
+        "description": "The GitHub repository to watch, as owner/name."
+      },
+      "credential": {
+        "type": "string",
+        "title": "Vault entry",
+        "description": "The id of the Vault entry that holds a GitHub token that can read the repository's runs. The first call asks you once; the token goes only to api.github.com.",
+        "default": "api-key-github"
+      },
+      "workflow": {
+        "type": "string",
+        "title": "The flaky workflow",
+        "description": "The workflow's name as GitHub shows it, such as CI. Leave out quote marks."
+      },
+      "leader": {
+        "type": "string",
+        "title": "Who to tell",
+        "description": "The id of the agent that gets one line for each first failure."
+      }
+    },
+    "required": [
+      "repo",
+      "workflow",
+      "leader"
+    ]
+  },
+  "trigger": {
+    "kind": "event",
+    "source": "poll",
+    "filter": {
+      "query": "api",
+      "every_minutes": 10,
+      "url": "https://api.github.com/repos/{{param.repo}}/actions/runs?event=pull_request&status=failure&per_page=20",
+      "auth": {
+        "vault": "{{param.credential}}",
+        "as": "bearer"
+      },
+      "headers": {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "AgentMux-Drone"
+      },
+      "items": "workflow_runs",
+      "id": "id"
+    },
+    "max_per_hour": 6
+  },
+  "policy": {
+    "overlap": "skip",
+    "catch_up": "skip",
+    "caps": {
+      "run_usd": 1
+    }
+  },
+  "outputs": [
+    "message:owner"
+  ],
+  "secrets": []
+}

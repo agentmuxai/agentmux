@@ -59,7 +59,9 @@ pub struct SensitiveClearedEvent {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct NoticeView {
     pub id: String,
-    #[ts(type = r#""spawn" | "ssh" | "google" | "memory""#)]
+    /// `github` and `aws` are a container agent refused a credential (`sagas::credential_notice`): a line with
+    /// no countdown and no buttons, kept until the credential works again.
+    #[ts(type = r#""spawn" | "ssh" | "google" | "memory" | "github" | "aws""#)]
     pub kind: &'static str,
     pub block_id: String,
     pub agent: String,

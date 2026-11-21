@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Where the toast stack sits: bottom-right, in real pixels, kept off any block a pane or drawer marks
-// with `data-toast-avoid` (toast-placement.ts). The stack's gaps are chrome: the status bar they clear
+// with `data-toast-avoid` (toast-placement.ts) and shows. The stack's gaps are chrome: the status bar they clear
 // grows with chrome zoom, so the gaps are the usual ones times `--zoomfactor`.
 
 import { chromeZoomAtom } from "@/app/store/chrome-zoom";
@@ -32,6 +32,17 @@ export function naturalHeight(stack: HTMLElement): number {
     return height;
 }
 
+/**
+ * Whether a marked block is on screen, where a toast could cover it. A window tab that is not the displayed one stays
+ * laid out and hides with `visibility` (workspace/window-tab-visibility.ts), as does a pane's tab that is not in front:
+ * the composer of an agent pane there has a place in the window and nothing to cover. Counted, it lifted the stack
+ * clear of blocks nobody could see, up to the middle of the window.
+ */
+export function isShown(el: Element): boolean {
+    if (typeof el.checkVisibility === "function") return el.checkVisibility({ checkVisibilityCSS: true });
+    return getComputedStyle(el).visibility !== "hidden";
+}
+
 /** The stack's distance from the window's right edge, in real pixels. */
 export const toastRight = (): number => RIGHT * chromeZoomAtom();
 
@@ -54,7 +65,9 @@ export function useToastPlacement(active: Accessor<boolean>, track: () => unknow
     };
     const measure = () => {
         if (!stack) return;
-        const marked = [...document.querySelectorAll(`[${TOAST_AVOID_ATTR}]`)];
+        // Only the blocks that are shown: one in a hidden tab is not in the way (a tab that comes to the front changes a
+        // `style`, which the observer below takes as a reason to measure again).
+        const marked = [...document.querySelectorAll(`[${TOAST_AVOID_ATTR}]`)].filter(isShown);
         syncWatched(marked);
         const avoid: Box[] = marked.map((el) => {
             const r = el.getBoundingClientRect();

@@ -2,56 +2,141 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Command palette modal — opened via Ctrl+P, lists all registered commands.
-// Uses the canonical `element/modal` primitive; the palette's specific
-// chrome (search row + scroll list) lives in the panel body.
+// Uses the canonical `element/modal` primitive, hung from the top of the window with no backdrop; the palette's
+// specific chrome (search row + scroll list) lives in the panel body.
 
 import { commandRegistry, isCommandAvailable, type CommandEntry } from "@/app/store/command-registry";
+import { recentCommandIds, rememberCommand } from "@/app/store/palette-recent";
 import type { ModalCloseProps } from "@/app/store/modalmodel";
 import { disableGlobalKeybindings, enableGlobalKeybindings } from "@/app/store/keymodel";
+import { isKeyFor } from "@/app/keybindings";
 import { SearchIcon } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { Modal } from "@/element/modal";
 import { searchCommands } from "./command-palette-search";
 import { usePaletteAgents } from "./palette-agents";
-import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { arrangeRecent, paletteRows, paletteSegments, sortCommands } from "./palette-groups";
+import { PaletteRow } from "./palette-row";
+import { createMemo, createSignal, createUniqueId, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import "./command-palette.scss";
-import { shortcutFor } from "@/app/keybindings";
 
-const CATEGORY_ORDER: string[] = ["Open", "Split", "Window", "Tab", "Pane", "Agent", "Dev"];
+/**
+ * The row a navigation key selects from row `i` (`last` is the last row), or null for any other key. Up and Down
+ * wrap at the ends (R17); a page, Home and End stop there.
+ */
+function selectionAfterKey(key: string, i: number, last: number, page: number): number | null {
+    const to = (row: number) => Math.max(0, Math.min(row, last));
+    switch (key) {
+        case "ArrowDown":
+            return i >= last ? 0 : i + 1;
+        case "ArrowUp":
+            return i <= 0 ? Math.max(last, 0) : i - 1;
+        case "PageDown":
+            return to(i + page);
+        case "PageUp":
+            return to(i - page);
+        case "Home":
+            return 0;
+        case "End":
+            return to(last);
+        default:
+            return null;
+    }
+}
 
-function sortCommands(cmds: CommandEntry[]): CommandEntry[] {
-    return [...cmds].sort((a, b) => {
-        const ai = CATEGORY_ORDER.indexOf(a.category);
-        const bi = CATEGORY_ORDER.indexOf(b.category);
-        const ac = ai === -1 ? 99 : ai;
-        const bc = bi === -1 ? 99 : bi;
-        if (ac !== bc) return ac - bc;
-        return a.label.localeCompare(b.label);
+/** How many rows the list shows at once, for PageUp and PageDown (at least 1). */
+function rowsPerPage(list: HTMLElement): number {
+    const row = list.querySelector<HTMLElement>(".command-palette-item");
+    return row && row.offsetHeight > 0 ? Math.max(1, Math.floor(list.clientHeight / row.offsetHeight) - 1) : 8;
+}
+
+/** After a key move: the selected row in view (the first row: the list's top, padding included). */
+function keepRowInView(list: HTMLElement, idx: number) {
+    if (idx === 0) list.scrollTop = 0;
+    else list.querySelector(".command-palette-item.selected")?.scrollIntoView?.({ block: "nearest" });
+}
+
+type KeyIntent = { kind: "close" } | { kind: "run"; forceNew: boolean } | { kind: "move"; to: number };
+
+/** What a key does in the palette, or null when it is none of its keys. */
+function keyIntent(e: KeyboardEvent, i: number, last: number, list: HTMLElement): KeyIntent | null {
+    // While text is being composed (an IME) these keys belong to the composition (R19).
+    if (e.isComposing || e.keyCode === 229) return null;
+    // The key that opens the palette closes it (R20). The window's own keys are off while it is open.
+    if (isKeyFor(e, "view:command-palette")) return { kind: "close" };
+    const to = selectionAfterKey(e.key, i, last, rowsPerPage(list));
+    if (to != null) return { kind: "move", to };
+    return e.key === "Enter" ? { kind: "run", forceNew: e.shiftKey } : null;
+}
+
+/** Runs what the person picked: remembered as recently used (R29), and run after the palette has closed so it doesn't interfere. */
+function runPicked(cmd: CommandEntry, forceNew: boolean): void {
+    rememberCommand(cmd.id);
+    setTimeout(() => void Promise.resolve(cmd.execute({ forceNew })), 0);
+}
+
+/** What the palette lists for `query`, and which row is selected (held to the list when it shrinks). */
+function usePaletteResults(query: () => string, selectedIdx: () => number) {
+    // The agents AgentMux knows, listed after the commands and found by name, seat or state.
+    const agents = usePaletteAgents();
+    const arranged = createMemo(() => {
+        const q = query().trim();
+        const all = sortCommands([...commandRegistry.all(), ...agents()].filter((c) => !c.hidden && isCommandAvailable(c)));
+        // Browsing, unfiltered: category+label order. Ranked while actively searching: the exact command first, then
+        // commands containing what was typed (category+label order among equals); fuzzy only for a typo. See
+        // command-palette-search.ts. Either way the ones the person ran from here lead (R30).
+        return arrangeRecent(q ? searchCommands(all, q) : all, recentCommandIds(), q !== "");
     });
+    const filtered = () => arranged().cmds;
+    const clampedIdx = createMemo(() => Math.min(selectedIdx(), Math.max(filtered().length - 1, 0)));
+    const rows = createMemo(() => paletteRows(filtered(), query().trim() !== "", arranged().recent));
+    // A group's name has room at the right of its first row, and the shortcuts line up beside it.
+    const hasGroups = createMemo(() => rows().some((r) => r.group !== undefined));
+    return { filtered, clampedIdx, rows, hasGroups };
+}
+
+/** The listbox: the rows in their groups (each group a screen-reader group, the unnamed first one none). */
+function PaletteList(props: {
+    ref: (el: HTMLDivElement) => void;
+    id: string;
+    segments: ReturnType<typeof paletteSegments>;
+    selectedIdx: number;
+    groupColumn: boolean;
+    optionId: (i: number) => string;
+    onPick: (row: number, shift: boolean) => void;
+}): JSX.Element {
+    return (
+        <div class="command-palette-list" ref={props.ref} id={props.id} role="listbox" aria-label={t("palette.listLabel")}>
+            <For each={props.segments}>
+                {(segment) => (
+                    <div role={segment.label ? "group" : undefined} aria-label={segment.label}>
+                        <For each={segment.rows}>
+                            {(row) => (
+                                <PaletteRow
+                                    row={row}
+                                    id={props.optionId(row.index)}
+                                    selected={row.index === props.selectedIdx}
+                                    groupColumn={props.groupColumn}
+                                    onPick={(e) => props.onPick(row.index, e.shiftKey)}
+                                />
+                            )}
+                        </For>
+                    </div>
+                )}
+            </For>
+        </div>
+    );
 }
 
 const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
     const [query, setQuery] = createSignal("");
     const [selectedIdx, setSelectedIdx] = createSignal(0);
     let inputRef!: HTMLInputElement;
-    // The agents AgentMux knows, listed after the commands and found by name, seat or state.
-    const agents = usePaletteAgents();
-
-    const filtered = createMemo(() => {
-        const q = query().trim();
-        const all = sortCommands([...commandRegistry.all(), ...agents()].filter((c) => !c.hidden && isCommandAvailable(c)));
-        if (!q) return all; // browsing, unfiltered: keep category+label order
-        // Ranked while actively searching: the exact command first, then
-        // commands containing what was typed (category+label order among
-        // equals); fuzzy only for a typo. See command-palette-search.ts.
-        return searchCommands(all, q);
-    });
-
-    // Clamp selectedIdx when results change
-    const clampedIdx = createMemo(() => {
-        const len = filtered().length;
-        if (len === 0) return 0;
-        return Math.min(selectedIdx(), len - 1);
-    });
+    let listRef!: HTMLDivElement;
+    const { filtered, clampedIdx, rows, hasGroups } = usePaletteResults(query, selectedIdx);
+    const listId = `command-palette-list-${createUniqueId()}`;
+    const optionId = (i: number) => `${listId}-option-${i}`;
+    const segments = createMemo(() => paletteSegments(rows()));
 
     onMount(() => {
         disableGlobalKeybindings();
@@ -75,42 +160,33 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
         if (cmds.length === 0) return;
         const cmd = cmds[idx];
         close();
-        // Execute after close so the palette doesn't interfere
-        setTimeout(() => {
-            void Promise.resolve(cmd.execute({ forceNew }));
-        }, 0);
+        runPicked(cmd, forceNew);
     }
 
     // Arrow keys + Enter are palette-specific navigation. ESC and
     // backdrop close are handled by `<Modal>` → `onClose`.
     function handleKeyDown(e: KeyboardEvent) {
-        if (e.key === "ArrowDown") {
-            e.preventDefault();
-            setSelectedIdx((i) => Math.min(i + 1, filtered().length - 1));
-            return;
-        }
-        if (e.key === "ArrowUp") {
-            e.preventDefault();
-            setSelectedIdx((i) => Math.max(i - 1, 0));
-            return;
-        }
-        if (e.key === "Enter") {
-            e.preventDefault();
-            executeSelected(e.shiftKey);
-            return;
-        }
+        const intent = keyIntent(e, clampedIdx(), filtered().length - 1, listRef);
+        if (!intent) return;
+        e.preventDefault();
+        if (intent.kind === "close") return close();
+        if (intent.kind === "run") return executeSelected(intent.forceNew);
+        setSelectedIdx(intent.to);
+        keepRowInView(listRef, intent.to);
     }
 
     function handleInput(e: InputEvent) {
         setQuery((e.target as HTMLInputElement).value);
         setSelectedIdx(0);
+        listRef.scrollTop = 0; // the first row is selected again: show it
     }
 
     return (
         <Modal
             open={true}
             onClose={close}
-            placement="top"
+            placement="dropdown"
+            backdrop="none"
             panelClass="command-palette-panel"
             ariaLabel="Command palette"
         >
@@ -121,48 +197,35 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
                         ref={inputRef}
                         class="command-palette-input" aria-label="Search commands and agents" data-raw-text-field="the command palette's search line: it owns the arrow, Enter and Escape keys of the list below it, not a form field"
                         type="text"
-                        placeholder="Search commands and agents..."
+                        role="combobox"
+                        aria-expanded={true}
+                        aria-controls={listId}
+                        aria-autocomplete="list"
+                        aria-activedescendant={filtered().length > 0 ? optionId(clampedIdx()) : undefined}
+                        placeholder="Search commands and agents"
                         value={query()}
                         onInput={handleInput}
                         autocomplete="off"
                         spellcheck={false}
                     />
-                    <kbd class="command-palette-esc-hint">ESC</kbd>
                 </div>
-                <div class="command-palette-list">
-                    <For each={filtered()}>
-                        {(cmd, i) => (
-                            <div
-                                class={`command-palette-item${i() === clampedIdx() ? " selected" : ""}`}
-                                onClick={(e) => {
-                                    setSelectedIdx(i());
-                                    executeSelected(e.shiftKey);
-                                }}
-                                onMouseEnter={() => setSelectedIdx(i())}
-                            >
-                                {cmd.icon && (
-                                    <i
-                                        class={`fa-solid fa-${cmd.icon} command-palette-item-icon`}
-                                        style={cmd.iconColor ? { color: cmd.iconColor } : {}}
-                                    />
-                                )}
-                                <span class="command-palette-item-text">
-                                    <span class="command-palette-item-label">{cmd.label}</span>
-                                    <Show when={cmd.detail}>
-                                        <span class="command-palette-item-detail">{cmd.detail}</span>
-                                    </Show>
-                                </span>
-                                <span class="command-palette-item-category">{cmd.category}</span>
-                                <Show when={shortcutFor(cmd.id)}>
-                                    {(k) => <kbd class="command-palette-item-shortcut">{k()}</kbd>}
-                                </Show>
-                            </div>
-                        )}
-                    </For>
-                    {filtered().length === 0 && (
-                        <div class="command-palette-empty">Nothing matches "{query()}"</div>
-                    )}
-                </div>
+                <PaletteList
+                    ref={(el) => (listRef = el)}
+                    id={listId}
+                    segments={segments()}
+                    selectedIdx={clampedIdx()}
+                    groupColumn={hasGroups()}
+                    optionId={optionId}
+                    onPick={(row, shift) => {
+                        setSelectedIdx(row);
+                        executeSelected(shift);
+                    }}
+                />
+                <Show when={filtered().length === 0}>
+                    <div class="command-palette-empty" role="status">
+                        Nothing matches "{query()}"
+                    </div>
+                </Show>
             </div>
         </Modal>
     );

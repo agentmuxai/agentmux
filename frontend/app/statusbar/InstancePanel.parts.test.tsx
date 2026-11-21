@@ -313,14 +313,15 @@ describe("a window's name and id", () => {
         await open();
         h.log.push(`names: ${names().join(" | ")}`);
         const remove = (i: number) => rows()[i].querySelector<HTMLButtonElement>(".instance-panel-row-action")!;
-        fireEvent.click(remove(1));
-        h.log.push("removed the other one without an id");
-        fireEvent.click(remove(0));
-        h.log.push("removed this one");
+        // (a removed row leaves the list at once, so the renames are tried first)
         fireEvent.dblClick(rows()[1]);
         h.log.push(`rename of the other opens: ${!!screen.queryByLabelText("Window name")}`);
         fireEvent.dblClick(rows()[0]);
         h.log.push(`rename of this one opens: ${!!screen.queryByLabelText("Window name")}`);
+        fireEvent.click(remove(1));
+        h.log.push("removed the other one without an id");
+        fireEvent.click(remove(0));
+        h.log.push("removed this one");
         await expect(out()).toMatchFileSnapshot(snap("own-id"));
     });
 
@@ -405,7 +406,7 @@ describe("when the panel is dismissed", () => {
 });
 
 describe("a window that has no id anywhere", () => {
-    it("shows its place in the list, cannot be renamed or removed, and says <null> in the console", async () => {
+    it("shows its place in the list, cannot be renamed, is closed by its label when removed, and says <null> in the console", async () => {
         h.ownOid = null;
         setEntries([
             { label: "main", windowId: null },

@@ -37,6 +37,29 @@
         flex: 1 1 auto;
         min-height: 0;
     }
+
+    // The smallest width the Vault supports is 160px of this box (inside the pane's zoom: 240px of pane at 150%).
+    // Below it the Vaults row, the list and the dialogs cannot hold a word each, so one line says so instead.
+    container-type: inline-size;
+    container-name: vault-pane;
+}
+
+.vault-too-narrow {
+    display: none;
+    padding: var(--space-3);
+    color: var(--secondary-text-color);
+    font-size: var(--text-sm);
+    overflow-wrap: anywhere;
+}
+
+@container vault-pane (max-width: 159px) {
+    .vault-view > :not(.vault-too-narrow) {
+        display: none;
+    }
+
+    .vault-too-narrow {
+        display: block;
+    }
 }
 
 // The list: the filter stays put, the sections scroll under it.
@@ -57,12 +80,20 @@
 
 .vault-list__bar {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--space-2);
+
+    // Expiring soon goes under the filter in a pane too narrow for both, and its words wrap, so the bar never
+    // needs a sideways scroll.
+    .ui-button {
+        max-width: 100%;
+        white-space: normal;
+    }
 }
 
 .vault-list__filter {
-    flex: 1 1 auto;
+    flex: 1 1 6rem;
     min-width: 0;
 }
 
@@ -130,6 +161,15 @@
     justify-content: flex-start;
     min-width: 0;
     text-align: left;
+}
+
+// The name and its count wrap in a pane under about 10rem; a word that is still wider than the pane breaks last, so
+// the head never pushes the list sideways. The head's other buttons (Add) keep their words whole and drop to a line
+// of their own: the head wraps.
+.vault-section__toggle {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .vault-section__label {
@@ -209,6 +249,13 @@
     gap: var(--space-1);
     padding: var(--space-2) var(--space-3);
     border-bottom: 1px solid var(--border-color);
+    // Requests taller than the pane (a long card in a narrow, zoomed pane) scroll here: the view itself never
+    // scrolls, so without this a card's buttons fell below the pane, out of the wheel's reach. They take the
+    // room they need before the list does, and never more than the pane.
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    max-height: 100%;
+    overflow-y: auto;
 }
 
 .vault-request {
@@ -325,6 +372,20 @@
     overflow-wrap: normal;
 }
 
+// A badge (a card's brand) wraps between its words, never inside one: with `anywhere` above, "Mastercard" broke into
+// "Masterc / ard" in a list 650px wide at 150% zoom.
+.vault-table td .ui-pill {
+    overflow-wrap: normal;
+}
+
+// The details (owner, when it expires) wrap between words and keep room for a few of them. With `anywhere` above the
+// table could take the cell down to a letter's width, and in a list 600 to 900px wide it gave "Test Perso / n" and
+// "expire / s in 1870 days" (macOS look). A long word with no break in it still wraps, as `break-word` does last.
+.vault-table td.vault-details {
+    overflow-wrap: break-word;
+    min-width: 8rem;
+}
+
 .vault-actions {
     white-space: nowrap;
     text-align: right;
@@ -363,9 +424,23 @@
         min-width: 0;
     }
 
+    // The details cell keeps room for a few words only in the table layout; stacked, it takes the row's width,
+    // and in a pane narrower than that room the minimum would push the row past the edge.
+    tbody td.vault-details {
+        min-width: 0;
+    }
+
     td:first-child,
     td.vault-actions {
         flex: 1 1 100%;
+    }
+
+    // A row's action buttons wrap in a row of their own, so two or three of them fit a pane under about 10rem.
+    td.vault-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-1);
+        white-space: normal;
     }
 
     // An entry's name on the Activity tab is a button: a long one wraps inside it.
@@ -385,6 +460,43 @@
 @container vault (max-width: 700px) {
     .vault-table--wide {
         @include stacked-rows;
+    }
+}
+
+// A list under about 10rem (about 130px of room): nothing may push it sideways. The padding tightens, and a word wider
+// than the room (a card's brand, the last four digits) breaks as a last resort, after its line has wrapped between
+// words. Above this the brand and the digits stay whole.
+@container vault (max-width: 130px) {
+    .vault-section__head {
+        padding-inline: var(--space-1);
+    }
+
+    .vault-section__head .ui-button {
+        padding-inline: 0;
+    }
+
+    .vault-section__body {
+        padding-inline: var(--space-1);
+    }
+
+    .vault-table tr {
+        padding-inline: var(--space-1);
+    }
+
+    .vault-table td .ui-pill {
+        overflow-wrap: anywhere;
+    }
+
+    // The time and the kind are short and stay whole above this; here they wrap, and a word wider than the room breaks.
+    .vault-table td.vault-when,
+    .vault-table td.vault-kind {
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+
+    .vault-table .vault-last-four {
+        white-space: normal;
+        overflow-wrap: anywhere;
     }
 }
 
@@ -553,6 +665,13 @@
     max-width: 100%;
     overflow-wrap: anywhere;
     border: 1px solid var(--border-color);
+}
+
+// A chip's words in one box, so they wrap at spaces together. As loose parts of the chip (a name, then its note) each
+// was a flex item of its own, and a narrow column shrank the name to a letter before the note had wrapped: "Test / er".
+.vault-grant__text {
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 // An entry's expiry date, read against today; near or past it, in the warning colour.

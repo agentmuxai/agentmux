@@ -23,6 +23,7 @@ import { RecordingSection } from "./sections/recording-section";
 import { DevicesSection } from "./sections/devices-section";
 import { WidgetsSection } from "./sections/widgets-section";
 import { AgentsSection } from "./sections/agents-section";
+import { KanbanSection } from "./sections/kanban-section";
 import { AdvancedSection } from "./sections/advanced-section";
 import "./settings.scss";
 import { DURATION_LINGER_MS } from "@/app/motion/tokens";
@@ -30,10 +31,16 @@ import { focusWhenRendered } from "@/util/focusutil";
 
 // ── Config error banner ───────────────────────────────────────────────────────
 
-export function ConfigErrorsBanner(props: { onOpen: (file: ConfigFile) => void }): JSX.Element {
+/** An error that carries a line and does not already say so in its text (a bad value does not; a parse error does). */
+function lineToShow(e: { err: string; line?: number }): number | undefined {
+    return e.line != null && !/\bline \d/i.test(e.err) ? e.line : undefined;
+}
+
+export function ConfigErrorsBanner(props: { onOpen: (file: ConfigFile, line?: number) => void }): JSX.Element {
     const errors = () => fullConfigAtom()?.configerrors ?? [];
-    // The file the first error is about: a mistake in widgets.json opens widgets.json, anything else settings.json.
-    const openRaw = () => props.onOpen(/widgets\.json$/i.test(errors()[0]?.file ?? "") ? "widgets.json" : "settings.json");
+    // The file the first error is about: a mistake in widgets.json opens widgets.json, anything else settings.json, and
+    // the Editor opens it on that error's line when srv knows it.
+    const openRaw = () => props.onOpen(/widgets\.json$/i.test(errors()[0]?.file ?? "") ? "widgets.json" : "settings.json", errors()[0]?.line);
     return (
         <Show when={errors().length > 0}>
             <div class="settings-config-errors">
@@ -44,6 +51,9 @@ export function ConfigErrorsBanner(props: { onOpen: (file: ConfigFile) => void }
                             {" "}{e.err}
                             <Show when={e.file}>
                                 {" "}<span class="mono">{e.file}</span>
+                            </Show>
+                            <Show when={lineToShow(e)}>
+                                {(line) => <>{" "}<span class="mono">{t("settings.errors.line", { line: line() })}</span></>}
                             </Show>
                         </div>
                     )}
@@ -61,7 +71,7 @@ export function ConfigErrorsBanner(props: { onOpen: (file: ConfigFile) => void }
 const RAIL: TabItem<SettingsSection>[] = [...SETTINGS_SECTIONS.items];
 
 // The body each rail entry shows. A section mounts when its tab is chosen and unmounts when another is.
-const SECTION_VIEWS: Record<SettingsSection, () => JSX.Element> = {
+const SECTION_VIEWS: Record<SettingsSection, (p: { model: SettingsViewModel }) => JSX.Element> = {
     appearance: AppearanceSection,
     animations: AnimationsSection,
     window: WindowPanesSection,
@@ -74,6 +84,7 @@ const SECTION_VIEWS: Record<SettingsSection, () => JSX.Element> = {
     devices: DevicesSection,
     widgets: WidgetsSection,
     agents: AgentsSection,
+    kanban: KanbanSection,
     advanced: AdvancedSection,
 };
 
@@ -98,7 +109,7 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
         focusWhenRendered(() => container.querySelector<HTMLInputElement>("[data-testid='settings-search-input']"), { select: true });
     };
 
-    const openFile = (file: ConfigFile) => openConfigFileOrTell(file);
+    const openFile = (file: ConfigFile, line?: number) => openConfigFileOrTell(file, { line });
     const openRaw = () => openFile("settings.json");
 
     function handleSelectResult(entry: SettingsIndexEntry) {
@@ -138,8 +149,17 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
                         setQuery={props.model.setQuery}
                         onSelectResult={handleSelectResult}
                     />
-                    <ConfigErrorsBanner onOpen={(f) => void openFile(f)} />
-                    <Dynamic component={SECTION_VIEWS[section()]} />
+                    <ConfigErrorsBanner onOpen={(f, line) => void openFile(f, line)} />
+                    {/* The scroller. A section that flows into columns sits in it with an auto height, so the
+                        browser balances the columns down instead of paging them to the right; one wrapper per
+                        section, so a new section starts at the top. */}
+                    <Show when={section()} keyed>
+                        {(current) => (
+                            <div class="settings-scroll">
+                                <Dynamic component={SECTION_VIEWS[current]} model={props.model} />
+                            </div>
+                        )}
+                    </Show>
                     <footer class="settings-footer">
                         <Button icon="file-code" onClick={() => void openRaw()}>
                             {t("settings.footer.openRaw", { file: "settings.json" })}

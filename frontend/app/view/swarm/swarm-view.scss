@@ -578,6 +578,31 @@
     min-width: 0;
 }
 
+// The chip is a button when it opens the Spend cap panel: the kit's chrome button, which takes its look from the chip. It
+// rests at full strength like the plain chip, and shows a focus ring (the kit's chrome button has none of its own).
+.spend-chip-button {
+    display: inline-flex;
+    max-width: 100%;
+    opacity: 1;
+    border-radius: var(--radius-sm);
+
+    &:focus-visible {
+        @include mixins.focus-ring;
+    }
+}
+
+// The Spend cap panel hung from the chip: as wide as its own text needs, never wider than the window, and its buttons
+// wrap onto a second row where the four do not fit in one.
+.spend-chip-popover {
+    width: 22rem;
+    max-width: calc(100vw - 2rem);
+    padding: 0;
+
+    .agent-primitive-modal-actions {
+        flex-wrap: wrap;
+    }
+}
+
 .swarm-current-tool-icon {
     font-size: var(--glyph-mark);
     color: var(--accent-color);
@@ -993,6 +1018,19 @@
     }
 }
 
+// "Check now" beside "Out of quota" (swarm-check-limits.tsx): a UI kit Button; it keeps its size in a narrow row.
+.swarm-unavailable-check {
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+// In a narrow pane the button is its icon alone (its aria-label and the chip's tooltip carry the words), so the chip keeps its text.
+@container swarm-tree (max-width: 340px) {
+    .swarm-tree .swarm-unavailable-check .swarm-unavailable-check-text {
+        display: none;
+    }
+}
+
 // An agent another instance claims, or whose message was refused: the row's one warning (swarm-row-registration.tsx).
 .swarm-reg-badge {
     display: flex;
@@ -1280,6 +1318,12 @@
     &--fail {
         color: var(--error-text-color);
     }
+
+    // Kept for an agent that is out of quota: not sent yet, not failed.
+    &--held {
+        align-items: flex-start;
+        color: var(--warning-text-color);
+    }
 }
 
 // ── Long-running tool calls bucket ───────────────────────────────────────────
@@ -1460,9 +1504,21 @@
     flex-wrap: wrap;
 }
 
+// The hint and, while a paced broadcast goes out, the count shown in its place. Both sit in one grid
+// cell and the hint stays laid out (hidden) under the count, so the row keeps the hint's height where
+// the hint wraps to two lines and the count is one.
 .swarm-broadcast-hint {
+    display: grid;
     color: var(--secondary-text-color);
     font-size: var(--text-sm);
+}
+
+.swarm-broadcast-hint > * {
+    grid-area: 1 / 1;
+}
+
+.swarm-broadcast-hint-text.is-covered {
+    visibility: hidden;
 }
 
 .swarm-broadcast-recent-row {

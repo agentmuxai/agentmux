@@ -103,7 +103,13 @@ jobs:
     # PR runs evict the once-a-day nightly entries), so each night builds from nothing, and on 11-02 both legs were cut
     # at 90 min while still compiling (the test leg got as far as running its binaries). Five of the last six nights
     # were cancelled or red from this, and a leg that is cut never saves a cache either.
-    timeout-minutes: ${{ matrix.os == 'macos-latest' && 150 || 60 }}
+    #
+    # 240 (macOS) and 90 (the others) since 2026-11-18: the nightly built from nothing on 11-15 to 11-18, and the
+    # macOS test leg spent 1 h 51 min compiling before it ran one test, then was cut at 150 min with 40 min of
+    # tests unrun (11-16, 11-17 and 11-18). The Windows and Ubuntu test legs ran the whole workspace in 54 to
+    # 58 min on 11-16 and 11-17, and Windows was cut at 60 min inside the agentmux-cef step on 11-18. A leg that
+    # is cut saves no cache either, so the next night is as slow. Still a hang bound (GitHub's own cap is 360).
+    timeout-minutes: ${{ matrix.os == 'macos-latest' && 240 || 90 }}
     # Test binaries with line tables only, as in ci-pr.yml: backtraces keep file and line, and the
     # biggest share of rustc's memory and link time for the large srv test binaries goes. Set on
     # every leg so the pre-build step and the test step below share one fingerprint.
@@ -216,7 +222,12 @@ jobs:
         run: choco install ninja -y
       - name: Install build deps (Linux — CEF + launcher Wayland/GTK)
         if: matrix.os == 'ubuntu-latest'
-        timeout-minutes: 20
+        timeout-minutes: 25
+        env:
+          # 11-18: the first apt attempt spent 4 min on one 11 MB package from a slow mirror, and the 600 s default
+          # left no second attempt (`cargo release (ubuntu)` failed in this step; no other night has). 900 s, under the
+          # step's 25 minutes, gives it one.
+          CI_APT_BUDGET: 900
         run: |
           # The runner image ships a google-chrome apt source we install nothing
           # from; a corrupt index there exits apt 100 and takes the whole Linux
@@ -233,6 +244,12 @@ jobs:
       - name: Install build deps (macOS)
         if: matrix.os == 'macos-latest'
         run: brew install ninja cmake
+
+      # A package manager can answer an error and still exit 0 (0.60.34's Chocolatey 504): say so here, not in the build.
+      - name: Check the build tools are on PATH
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then bash scripts/ci-require-tools.sh ninja; else bash scripts/ci-require-tools.sh ninja cmake; fi
 
       - uses: Swatinem/rust-cache@v2
         with:

@@ -8,6 +8,7 @@ import { For, Show, type JSX } from "solid-js";
 
 import { Button, FilterInput, IconButton, Select, Switch } from "@/app/element/ui";
 import { tip } from "@/app/element/tip";
+import { t } from "@/app/i18n/i18n";
 
 import { KanbanBoard, useCardDrop } from "./kanban-board";
 import { KanbanBoardPicker } from "./kanban-board-picker";
@@ -18,6 +19,7 @@ import type { KanbanModel } from "./kanban-model";
 import { KANBAN_REMINDERS_DESCRIPTION, kanbanRemindersOn, setKanbanReminders } from "./kanban-reminders";
 import { ReportsToSelect } from "./kanban-seats";
 import { settingsAtom } from "@/app/store/config-signals";
+import { openSettingsAt } from "@/app/view/settings/open-settings";
 import type { KanbanSectionState } from "./kanban-section-state";
 import type { KanbanAgent, KanbanTask } from "./kanban-types";
 
@@ -85,6 +87,11 @@ export function KanbanToolbar(props: Part): JSX.Element {
                 New task
             </Button>
             <IconButton icon="rotate" label="Refresh" onClick={() => void s.model.refresh()} />
+            <IconButton
+                icon="gear"
+                label={t("kanban.settings")}
+                onClick={() => void openSettingsAt("kanban", s.selectedSlug())}
+            />
         </div>
     );
 }
@@ -136,6 +143,7 @@ function SectionBoard(props: Part & { tasks: KanbanTask[]; untracked: KanbanAgen
             onOpenAgent={s.openAgent}
             reviewLimit={s.reviewLimit()}
             reviewTotal={s.reviewTotal()}
+            stages={s.stages()}
             colors={s.board()?.agent_colors}
             narrow={s.narrow()}
             collapsed={s.collapsed()}

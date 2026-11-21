@@ -112,6 +112,8 @@ events! {
     AgentResumeRetry: super::mps::EVENT_AGENT_RESUME_RETRY => ResumeRetryEvent,
     /// srv is panicking, or stopped (`panic_watch`): its level, counts and the places that panicked most; no message text.
     SrvPanics: super::mps::EVENT_SRV_PANICS => crate::backend::panic_watch::SrvPanicsEvent,
+    /// What the record's rules have flagged and still say (`record_notice`): rules, keys and numbers; no text of anyone's.
+    RecordFlags: super::mps::EVENT_RECORD_FLAGS => crate::backend::record_notice::RecordFlagsEvent,
     /// A Claude CLI request is being retried, or no longer is.
     AgentApiRetry: super::mps::EVENT_AGENT_API_RETRY => crate::backend::agent_api_retry::ApiRetryEvent,
     /// One line of a closing agent pane's shutdown log (`sagas::close_pane::publish_shutdown`).
@@ -209,6 +211,8 @@ events! {
     /// A shutdown waiting for the user to keep the agent, and its end (`sagas::pending_shutdown`).
     AgentShutdownPending: crate::backend::shutdown_events::EVENT_SHUTDOWN_PENDING => crate::backend::shutdown_events::PendingView,
     AgentShutdownPendingCleared: crate::backend::shutdown_events::EVENT_SHUTDOWN_PENDING_CLEARED => crate::backend::shutdown_events::PendingClearedEvent,
+    /// A headless workspace will stop at a time, or will not after all (`server::host_control`).
+    WorkspaceStop: crate::backend::shutdown_events::EVENT_WORKSPACE_STOP => crate::backend::shutdown_events::WorkspaceStopView,
     /// A sensitive request's countdown, and its end (`sagas::sensitive_window`).
     SensitivePending: crate::backend::prompt_events::EVENT_SENSITIVE_PENDING => crate::backend::prompt_events::SensitiveView,
     SensitiveCleared: crate::backend::prompt_events::EVENT_SENSITIVE_CLEARED => crate::backend::prompt_events::SensitiveClearedEvent,
@@ -258,6 +262,10 @@ events! {
     AppUpdateStatusChanged: crate::backend::update::check::EVENT_APP_UPDATE_STATUS => crate::backend::update::check::AppUpdateStatus,
     /// An account episode opened, changed or closed (`server::account_episodes`).
     AccountAvailability: crate::backend::account_availability::EVENT_ACCOUNT_AVAILABILITY => crate::backend::account_availability::AccountAvailabilityEvent,
+    /// The messages held for agents changed in count (`server::jekt_held_summary`).
+    JektHeld: crate::backend::jekt_held_summary::EVENT_JEKT_HELD => crate::backend::jekt_held_summary::JektHeldEvent,
+    /// One more delivery of a paced broadcast has ended (`server::app_api::fleet_pacing`).
+    FleetBroadcastProgress: crate::backend::rpc_types::EVENT_FLEET_BROADCAST_PROGRESS => crate::backend::rpc_types::FleetBroadcastProgressEvent,
     /// Tell a window's renderer to reveal a block (`notify::router`).
     BlockReveal: crate::backend::notify::router::EVENT_BLOCK_REVEAL => crate::backend::notify::router::BlockRevealEvent,
     /// An agent opened a pane; the person's active window offers to show it (`http_open`).

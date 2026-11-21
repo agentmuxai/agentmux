@@ -26,9 +26,8 @@ import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
 import { NodeModel } from "@/layout/index";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { computeBgStyleFromMeta } from "@/util/muxutil";
-import { BackdropPicker } from "@/app/backdrop/BackdropPicker";
+import { backdropSubmenuItem } from "@/app/backdrop/backdrop-menu";
 import { supportsBackdrop } from "@/app/backdrop/meta";
-import { closeBackdropPicker, isBackdropPickerOpen, openBackdropPicker, releaseBackdropPicker } from "@/app/backdrop/picker-state";
 import { getPaneScope } from "@/app/backdrop/scope";
 import { usePaneBackdrop } from "@/app/backdrop/usePaneBackdrop";
 import * as util from "@/util/util";
@@ -48,13 +47,15 @@ import { buildPaneContextMenu, type PaneMenuSection } from "./pane-actions";
 import { sectionPinMenuItems } from "@/app/window/section-pins";
 import { applyColorToAllPanes, setPaneColor } from "./pane-color-menu";
 import { blockRoleColor, isLightThemeActive, widgetColorView, type PaneIdentityOptions } from "./pane-identity";
-import { slotSwatchColor } from "./pane-color-scheme";
+import { tabSample } from "@/app/theme/paint";
+import { currentTabInk } from "@/app/tab/tab-ink";
 import { PALETTE, slotOf, type PaletteSlot } from "@/app/theme/palette";
 import { PaneSizeBadge } from "./pane-size-badge";
 import { TitleBar } from "./titlebar";
 import { UnseenTurnsDot } from "./UnseenTurnsDot";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { tip } from "@/app/element/tip";
+import { catchPaneErrors } from "@/app/util/pane-error-scope";
 
 /**
  * The header background a block's own assigned color resolves to (a subtle
@@ -74,24 +75,9 @@ export function computeBlockColorBg(
     return blockRoleColor(blockMeta, isLightTheme, "headerTint", opts);
 }
 
-/** Same as computeBlockColorBg, for an inactive pane-tab pill's own
- * background (pane-color-scheme.ts `pill`). Deliberately stronger than the
- * header tint: on a small pill the header's subtle value is nearly
- * indistinguishable from black and from a neighbouring uncoloured pill
- * (ANALYSIS_PANE_TAB_COLOR_COLLAPSE_2026_09_21.md). */
-export function computeBlockTabPillBg(blockMeta: Block["meta"] | undefined, isLightTheme: boolean): string | undefined {
-    return blockRoleColor(blockMeta, isLightTheme, "pill");
-}
-
-/** The selected pane-tab pill's background (`pillActive`): this block's own
- * identity a step stronger than its inactive pill. Undefined when the block
- * has no colour of its own. */
-export function computeBlockTabPillActiveBg(
-    blockMeta: Block["meta"] | undefined,
-    isLightTheme: boolean
-): string | undefined {
-    return blockRoleColor(blockMeta, isLightTheme, "pillActive");
-}
+// A pane-tab pill's own colours (resting, selected, hover, bar) are `theme/paint.ts`'s `tabPaint`, the call a window
+// tab uses; the pill is stronger than the header tint on purpose, so a small pill is told from a neighbouring uncoloured one
+// (ANALYSIS_PANE_TAB_COLOR_COLLAPSE_2026_09_21.md).
 
 /** This block's identity at full strength for the theme: the active-tab
  * underline. Normalised in OKLCH so it clears 3:1 against the pill and header
@@ -166,25 +152,35 @@ export function computeNonAgentHeaderBg(isLightTheme: boolean): string {
  * "Default" clears it. The 12 hues come first, then Black and White in a
  * group of their own.
  */
-export function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
+export function buildPaneColorSubmenu(blockData: Block, live?: () => Block | undefined): ContextMenuItem[] {
+    // The pane's block as it is now: with `live`, the open menu follows a pick (it stays open); without, as it was built.
+    const now = () => live?.() ?? blockData;
     // The pane's own pick: a palette slot (`frame:color`), or an older HSL
     // pick (`frame:hue`) read as the slot nearest it.
-    const own = blockData?.meta?.["frame:color"] ?? blockData?.meta?.["frame:hue"];
-    const currentSlot = slotOf(own as string | number | null | undefined);
+    const pickOf = (b: Block) => slotOf((b?.meta?.["frame:color"] ?? b?.meta?.["frame:hue"]) as string | number | null | undefined);
+    const currentSlot = pickOf(blockData);
     // Only real agent panes have an identity color to persist into — see
     // setPaneColor's own doc comment for why "Default" never passes this.
     const agentId = blockData?.meta?.agentId as string | undefined;
     const isLight = isLightThemeActive();
+    // A colour pick leaves the menu open: the person tries one colour after another.
+    // The swatch is the pane's selected tab pill as it will be drawn (fill and bar, theme/paint.ts), so what is picked is what is seen.
+    const ink = currentTabInk();
     const colorItem = (slot: PaletteSlot): ContextMenuItem => ({
         label: slot.name,
-        swatchColor: slotSwatchColor(slot, isLight),
+        swatchColor: tabSample(slot, isLight, ink).fill,
+        swatchBar: tabSample(slot, isLight, ink).bar,
         checked: currentSlot?.id === slot.id,
+        live: () => ({ checked: pickOf(now())?.id === slot.id }),
+        keepOpen: true,
         click: () => setPaneColor(blockData.oid, slot.id, agentId),
     });
     const colorItems: ContextMenuItem[] = [
         {
             label: "Default",
             checked: !currentSlot,
+            live: () => ({ checked: !pickOf(now()) }),
+            keepOpen: true,
             click: () => setPaneColor(blockData.oid, null),
         },
         { type: "separator" as const },
@@ -193,15 +189,21 @@ export function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
         ...PALETTE.filter((slot) => slot.neutral).map(colorItem),
     ];
     // Spec §3.7. Not on agent panes: their pick is the agent's own color, and
-    // widget colors don't apply to an agent with one.
+    // widget colors don't apply to an agent with one. In a menu that follows the pane it is always there
+    // (it is off until the pane has a pick), since a pick can come while the menu is open.
     const widgetView = widgetColorView(blockData?.meta?.view);
-    if (currentSlot && widgetView && !agentId) {
+    if ((currentSlot || live) && widgetView && !agentId) {
         colorItems.push(
             { type: "separator" as const },
             {
                 label: `Use for all ${paneTabLabelFor(widgetView)} panes`,
                 icon: MENU_ICON.paneColorAll,
-                click: () => applyColorToAllPanes(blockData.oid, widgetView, currentSlot.id),
+                live: () => ({ enabled: !!pickOf(now()) }),
+                keepOpen: true,
+                click: () => {
+                    const pick = pickOf(now());
+                    if (pick) applyColorToAllPanes(blockData.oid, widgetView, pick.id);
+                },
             }
         );
     }
@@ -211,8 +213,7 @@ export function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
     // implement getSettingsMenuItems (sysinfo).
     // A backdrop is offered on the pane types whose own colours follow it. Phase 1 is the agent pane; a terminal keeps its
     // own default text colour until phase 2 gives it the backdrop's, and would be unreadable on a pale one (spec §6, §14).
-    const backdropItems =
-        supportsBackdrop(blockData?.meta?.view) ? [{ label: "Backdrop…", icon: MENU_ICON.paneColor, click: () => openBackdropPicker(blockData.oid) }] : [];
+    const backdropItems = supportsBackdrop(blockData?.meta?.view) ? [backdropSubmenuItem(blockData, live)] : [];
     return [
         { type: "separator" as const },
         { label: "Pane Color", icon: MENU_ICON.paneColor, type: "submenu" as const, submenu: colorItems },
@@ -249,7 +250,7 @@ function handleHeaderContextMenu(
     );
 
     // Header-only: pane color submenu
-    menu.push(...buildPaneColorSubmenu(blockData));
+    menu.push(...buildPaneColorSubmenu(blockData, () => MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockData.oid))()));
 
     // Header-only: a pane on a remote links to that host's row in Remotes
     menu.push(...remoteSettingsMenuItems(blockData.oid, blockData.meta?.connection));
@@ -1213,15 +1214,16 @@ function createFrameHeaders(
     // caller (PR 3) will pass nodeModel.activeBlockId instead, to track a
     // switch without this header remounting.
     const headerBlockId: Accessor<string> = () => nodeModel.blockId;
-    const headerElem = (
+    // Each header is built under a handler that names the pane and "chrome" in the log for a throw in it.
+    const headerElem = catchPaneErrors(nodeModel.blockId, "chrome", () => (
         <BlockFrame_Header
             {...props}
             connBtnRef={connBtnRef}
             changeConnModalAtom={changeConnModalAtom}
             blockId={headerBlockId}
         />
-    );
-    const headerElemNoView = (
+    ));
+    const headerElemNoView = catchPaneErrors(nodeModel.blockId, "chrome", () => (
         <BlockFrame_Header
             {...props}
             connBtnRef={connBtnRef}
@@ -1229,7 +1231,7 @@ function createFrameHeaders(
             viewModel={null}
             blockId={headerBlockId}
         />
-    );
+    ));
     return { headerElem, headerElemNoView };
 }
 
@@ -1393,10 +1395,6 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
         { owner: !props.preview }
     );
     const backdropVars = getPaneScope(nodeModel.blockId);
-    const pickerOpen = isBackdropPickerOpen(nodeModel.blockId);
-    // Only the live frame owns the picker's flag: a drag preview is a second frame for the same block, and its unmounting
-    // must not close the live pane's picker or delete the flag the live frame still holds.
-    if (!props.preview) onCleanup(() => releaseBackdropPicker(nodeModel.blockId));
 
     return (
         <div
@@ -1438,13 +1436,6 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                 />
             </Show>
             {renderFrameInner(s)}
-            <Show when={pickerOpen() && !props.preview}>
-                <BackdropPicker
-                    blockId={nodeModel.blockId}
-                    meta={() => ({ backdrop: s.blockData()?.meta?.backdrop, bg: s.blockData()?.meta?.bg })}
-                    onClose={() => closeBackdropPicker(nodeModel.blockId)}
-                />
-            </Show>
             {renderFrameOverlays(s)}
         </div>
     );

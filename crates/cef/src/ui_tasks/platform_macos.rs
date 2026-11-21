@@ -262,7 +262,87 @@ mod keywin_objc {
             if is_rwhvc(view) { return view; }
             view = get(view, b"superview\0");
         }
+        // The window's own hit test did not reach a page view: with a pane window open it stops at the content
+        // view and never descends (#48237, measured on the release build), so every press was left to AppKit,
+        // which drops it while the pane holds the key. Ask each page view of the window directly instead.
+        let page = rwhvc_containing(win, x, y);
+        if page.is_null() {
+            tracing::debug!("[press] {}", describe_miss(win, x, y));
+        }
+        page
+    }
+    /// The shown page view of `win` that the window point `(x, y)` is over, asking each page view's own hit test
+    /// (which takes the point in its superview's coordinates), or null. Hidden views, and points outside every
+    /// page view (the window's border, chrome that is not a page), give null.
+    unsafe fn rwhvc_containing(win: *mut c_void, x: f64, y: f64) -> *mut c_void {
+        #[repr(C)]
+        #[derive(Copy, Clone)]
+        struct NSPoint { x: f64, y: f64 }
+        let count: extern "C" fn(*mut c_void, *const c_void) -> usize =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        let at: extern "C" fn(*mut c_void, *const c_void, usize) -> *mut c_void =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        let convert: extern "C" fn(*mut c_void, *const c_void, NSPoint, *mut c_void) -> NSPoint =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        let hit: extern "C" fn(*mut c_void, *const c_void, NSPoint) -> *mut c_void =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        let sel_count = sel_registerName(b"count\0".as_ptr() as _);
+        let sel_at = sel_registerName(b"objectAtIndex:\0".as_ptr() as _);
+        let sel_convert = sel_registerName(b"convertPoint:fromView:\0".as_ptr() as _);
+        let sel_hit = sel_registerName(b"hitTest:\0".as_ptr() as _);
+        let mut stack = vec![get(win, b"contentView\0")];
+        while let Some(view) = stack.pop() {
+            if view.is_null() { continue; }
+            if is_rwhvc(view) {
+                let superview = get(view, b"superview\0");
+                if !superview.is_null() && !get_bool(view, b"isHiddenOrHasHiddenAncestor\0") {
+                    // From window coordinates (nil view) into the page view's superview.
+                    let p = convert(superview, sel_convert, NSPoint { x, y }, std::ptr::null_mut());
+                    if !hit(view, sel_hit, p).is_null() { return view; }
+                }
+                continue;
+            }
+            let subs = get(view, b"subviews\0");
+            if !subs.is_null() {
+                for i in 0..count(subs, sel_count) { stack.push(at(subs, sel_at, i)); }
+            }
+        }
         std::ptr::null_mut()
+    }
+    /// For a press that found no page view (#48237): what the hit test did find, as words for the log. The class
+    /// names from the view under the pointer up to the frame view, each with whether it is hidden, and whether
+    /// `win` holds a page view at all, and whether that one is hidden. Names and flags only: no geometry, which
+    /// would need struct returns from `objc_msgSend`.
+    pub(super) unsafe fn describe_miss(win: *mut c_void, x: f64, y: f64) -> String {
+        extern "C" {
+            fn object_getClass(obj: *mut c_void) -> *mut c_void;
+            fn object_getClassName(cls: *mut c_void) -> *const i8;
+        }
+        #[repr(C)]
+        #[derive(Copy, Clone)]
+        struct NSPoint { x: f64, y: f64 }
+        let name_of = |view: *mut c_void| -> String {
+            let name = object_getClassName(object_getClass(view));
+            if name.is_null() { "?".into() } else { std::ffi::CStr::from_ptr(name).to_string_lossy().into_owned() }
+        };
+        let content = get(win, b"contentView\0");
+        let frame = get(content, b"superview\0");
+        let root = if frame.is_null() { content } else { frame };
+        let hit: extern "C" fn(*mut c_void, *const c_void, NSPoint) -> *mut c_void =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        let mut view = if root.is_null() { std::ptr::null_mut() } else { hit(root, sel_registerName(b"hitTest:\0".as_ptr() as _), NSPoint { x, y }) };
+        let mut chain = Vec::new();
+        while !view.is_null() && chain.len() < 8 {
+            chain.push(format!("{}{}", name_of(view), if get_bool(view, b"isHidden\0") { "(hidden)" } else { "" }));
+            view = get(view, b"superview\0");
+        }
+        let page = find_rwhvc(win);
+        let page_state = if page.is_null() {
+            "none in this window".to_string()
+        } else {
+            format!("one, {}", if get_bool(page, b"isHiddenOrHasHiddenAncestor\0") { "hidden" } else { "shown" })
+        };
+        format!("hit chain [{}]; page view: {page_state}", chain.join(" < "))
     }
     pub(super) unsafe fn send_bool(obj: *mut c_void, sel: &[u8], arg: bool) {
         if obj.is_null() { return; }

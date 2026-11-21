@@ -37,6 +37,12 @@ subscribe agents:changed
 </i>
 </button>
 </div>
+<div class="ui-tooltip-anchor">
+<button aria-label="Kanban settings" type="button" class="ui-button ui-tone-quiet ui-icon-button">
+<i aria-hidden="true" class="fa-solid fa-gear">
+</i>
+</button>
+</div>
 </div>
 <p class="warden-manager-dim">Loading the Kanban…</p>
 </div>
@@ -84,6 +90,12 @@ board#1 mounted
 <div class="ui-tooltip-anchor">
 <button aria-label="Refresh" type="button" class="ui-button ui-tone-quiet ui-icon-button">
 <i aria-hidden="true" class="fa-solid fa-rotate">
+</i>
+</button>
+</div>
+<div class="ui-tooltip-anchor">
+<button aria-label="Kanban settings" type="button" class="ui-button ui-tone-quiet ui-icon-button">
+<i aria-hidden="true" class="fa-solid fa-gear">
 </i>
 </button>
 </div>

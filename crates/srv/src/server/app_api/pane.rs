@@ -14,7 +14,7 @@ fn register_pane_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_PANE_OPEN, move |mut cmd: CommandPaneOpenData, ctx| {
         let state = state.clone();
         async move {
-            if ctx.operator_proven {
+            if ctx.operator_proven_now() {
                 super::pane_open_tab::window_open_names_a_tab(&cmd)?;
             }
             if let Some(meta) = cmd.meta.as_mut() {
@@ -1221,7 +1221,20 @@ mod close_pane_tests {
 /// block/tab/layout updates so the frontend renders the new pane.
 pub async fn open_pane(state: &AppState, mut cmd: CommandPaneOpenData) -> Result<PaneOpenResult, String> {
     steps::fold_media_into_editor(&mut cmd)?;
-    crate::server::files_root::bind_pane_open(state, &mut cmd).await?;
+    // A file of a container agent's folder opens as a read-only copy, which goes with the pane it opened in.
+    let copy = crate::server::agent_folder_open::bind(state, &mut cmd).await?;
+    let opened = open_checked(state, cmd).await;
+    if let Some(copy) = &copy {
+        match &opened {
+            Ok(pane) => copy.opened(&pane.block_id),
+            Err(_) => copy.discard(),
+        }
+    }
+    opened
+}
+
+/// [`open_pane`], once what it opens is settled.
+async fn open_checked(state: &AppState, mut cmd: CommandPaneOpenData) -> Result<PaneOpenResult, String> {
     let viewer = pane::requested_viewer(&cmd)?;
     let bring_back = super::pane_singleton::wants_existing(&cmd);
     let _one_at_a_time = if bring_back { Some(super::pane_singleton::OPENING.lock().await) } else { None };

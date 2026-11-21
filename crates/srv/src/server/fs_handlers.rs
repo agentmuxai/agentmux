@@ -24,7 +24,7 @@ use std::sync::Arc;
 use crate::backend::fs_ops;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
-    FsCreateReq, FsDeleteReq, FsEmptyResult, FsGitStatus, FsListReq, FsListResult, FsOpCancelReq, FsOpResolveReq,
+    FsAgentFolder, FsCreateReq, FsDeleteReq, FsEmptyResult, FsGitStatus, FsListReq, FsListResult, FsOpCancelReq, FsOpResolveReq,
     FsOpResult, FsOpResults, FsOpStartReq, FsOpStartResult, FsPathReq, FsPlace, FsPlaceKind, FsPlacesReq, FsPlacesResult,
     FsCreateResult, FsRenameReq, FsRenameResult, FsRestoreReq, FsTrashReq, FsUnwatchReq, FsWatchReq,
     FsWatchResult,
@@ -93,6 +93,13 @@ pub(crate) async fn fs_list(state: &AppState, mut cmd: FsListReq) -> Result<FsLi
     blocking(move || fs_ops::list_page(&cmd)).await
 }
 
+/// `fs.agent_folder` → whether a path is in a folder a container agent can write. A window asks before it
+/// opens a linked file itself: such a file is opened by srv, as a read-only copy.
+pub(crate) async fn fs_agent_folder(cmd: FsPathReq) -> Result<FsAgentFolder, String> {
+    let Ok(path) = fs_ops::resolve_request_path(&cmd.path) else { return Ok(FsAgentFolder::default()) };
+    blocking(move || FsAgentFolder { agent_folder: fs_ops::container_folders::written_by_a_container_agent(&path) }).await
+}
+
 /// `fs.places` → home, known folders, drives and WSL distros. Known folders
 /// are named, never read (spec §9.1.5).
 pub(crate) async fn fs_places() -> Result<FsPlacesResult, String> {
@@ -146,11 +153,24 @@ pub(crate) fn fs_unwatch(state: &AppState, cmd: FsUnwatchReq) -> Result<FsEmptyR
 /// `fs.git_status` → the markers for a listed folder's entries. Never an
 /// error: outside a repository, or if git fails, the pane shows none.
 pub(crate) async fn fs_git_status(state: &AppState, cmd: FsPathReq) -> Result<FsGitStatus, String> {
-    // A confined pane shows no markers.
-    if super::files_root::is_confined(state, cmd.block_id.as_deref()) {
+    // Named before any git run: what says whose a folder is, and what reads inside a container.
+    fs_ops::container_folders::install(&state.mstore);
+    crate::backend::container::mounts::read_exec::install(&state.container_manager);
+    if !super::files_root::is_confined(state, cmd.block_id.as_deref()) {
+        return Ok(fs_ops::git::git_status(&cmd.path).await);
+    }
+    // A confined pane shows a container agent's folder. Its path is resolved inside its root again, and
+    // its markers are the ones read inside that agent's container: a folder no container agent has is
+    // shown without any.
+    let Ok(path) = super::files_root::bound_path(state, cmd.block_id.as_deref(), &cmd.path).await else {
+        return Ok(Default::default());
+    };
+    let asked = path.clone();
+    let place = tokio::task::spawn_blocking(move || fs_ops::container_folders::place(&asked)).await;
+    if !matches!(place, Ok(fs_ops::container_folders::Place::Inside(_))) {
         return Ok(Default::default());
     }
-    Ok(fs_ops::git::git_status(&cmd.path).await)
+    Ok(fs_ops::git::git_status(&path).await)
 }
 
 // ── Mutations. Spec §7, §9 ──────────────────────────────────────────
@@ -320,6 +340,7 @@ fn register_fs_browsing(engine: &Arc<WshRpcEngine>, state: &AppState) {
         let s = s.clone();
         async move { fs_git_status(&s, cmd).await }
     });
+    engine.register_typed("fs.agent_folder", |cmd: FsPathReq, _ctx| async move { fs_agent_folder(cmd).await });
 }
 
 fn register_fs_mutations(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -419,6 +440,7 @@ mod tests {
             ("fs.op.resolve", "FsOpResolveReq", "FsEmptyResult"),
             ("fs.op.cancel", "FsOpCancelReq", "FsEmptyResult"),
             ("fs.git_status", "FsPathReq", "FsGitStatus"),
+            ("fs.agent_folder", "FsPathReq", "FsAgentFolder"),
         ] {
             let row = find(cmd);
             assert_eq!(row["requestName"], req, "{cmd} request");

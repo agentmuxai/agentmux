@@ -34,8 +34,10 @@ export interface PinnedActivity {
     status: ActivityStatus;
     /** Unix ms — drives the elapsed timer and the D3 newest-first ordering. */
     startedAt: number;
-    /** Unix ms when it reached a terminal status (drives D4 retention). */
+    /** Unix ms when it reached a terminal status (drives D4 retention). For an `unknown` row: when it was last seen. */
     endedAt?: number;
+    /** Unix ms when an `unknown` row turned unknown (its retention window runs from here). */
+    unknownSince?: number;
     /** True while the activity can be stopped (running). */
     canStop: boolean;
 
@@ -80,11 +82,17 @@ export const KIND_SIGIL: Record<ActivityKind, string> = {
  *  read the error (well above `done`/`stopped`) while still self-clearing. */
 export const RETENTION_MS: Record<ActivityStatus, number> = {
     running: Infinity,
-    unknown: Infinity,
+    // A row nobody can vouch for must not sit in the dock for good: it leaves 10 minutes after it turned unknown.
+    unknown: 10 * 60 * 1000,
     done: 8_000,
     stopped: 3_000,
     error: 15_000,
 };
+
+/** The moment a row's retention window runs from: when it ended, or for an `unknown` row when it turned unknown. */
+export function retentionStartedAt(a: PinnedActivity): number | undefined {
+    return a.status === "unknown" ? a.unknownSince : a.endedAt;
+}
 
 /** Duration of the landing/departure flash (ActivityRow) — matches the tab
  *  landing bounce's own clear-timeout (tab-reorder.ts / tab-tearoff-events.ts)

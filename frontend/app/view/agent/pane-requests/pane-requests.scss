@@ -53,6 +53,13 @@
     font-size: var(--text-sm);
 }
 
+// A request's name in the "N more:" row wraps inside the dock instead of running past its edge.
+.pane-request-more-item {
+    max-width: 100%;
+    white-space: normal;
+    text-align: start;
+}
+
 .pane-request-more-count {
     margin-right: var(--space-1);
 }

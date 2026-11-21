@@ -63,6 +63,43 @@ export function describeWsMessage(msg: unknown, size: number): string {
     return parts.join(" ");
 }
 
+/** A subscriber that ran this long, or longer, inside one message's dispatch is the one a slow line names. */
+export const SLOW_LISTENER_MS = 50;
+/** How much of a subscriber's source the line carries: enough to find it, never data. */
+const LISTENER_SOURCE_CHARS = 100;
+
+interface SlowListener {
+    ms: number;
+    event: string;
+    scope: string;
+    source: string;
+}
+
+let slowestListener: SlowListener | null = null;
+
+/** The start of a function's source on one line (a subscriber has no name, its code is how it is found). */
+function describeListener(fn: unknown): string {
+    if (typeof fn !== "function") return "?";
+    return Function.prototype.toString.call(fn).replace(/\s+/g, " ").slice(0, LISTENER_SOURCE_CHARS);
+}
+
+/**
+ * Called by the event dispatch after each subscriber ran: keeps the slowest one of the message being handled. Nothing is
+ * described until a subscriber is over SLOW_LISTENER_MS, so the usual message costs a comparison.
+ */
+export function noteListenerTime(ms: number, event: string, scope: string | undefined, fn: unknown): void {
+    if (ms < SLOW_LISTENER_MS || (slowestListener != null && slowestListener.ms >= ms)) return;
+    slowestListener = { ms, event: event.slice(0, 60), scope: (scope ?? "").slice(0, 40), source: describeListener(fn) };
+}
+
+/** The slowest subscriber of the message just handled, as the end of its line; clears it for the next message. */
+function takeSlowestListener(): string {
+    const s = slowestListener;
+    slowestListener = null;
+    if (s == null) return "";
+    return ` slowest-listener=${Math.round(s.ms)}ms event=${s.event}${s.scope ? ` scope=${s.scope}` : ""} source=${JSON.stringify(s.source)}`;
+}
+
 interface Clock {
     now: () => number;
     /** Runs `fn` after the microtasks already queued, the listener's promise continuations among them. */
@@ -86,6 +123,7 @@ export function createSlowHandlerWatch(clock: Clock = realClock) {
     let skipped = 0;
     return function done(start: number, msg: unknown, size: number): void {
         const syncMs = clock.now() - start;
+        const listener = takeSlowestListener();
         clock.afterMicrotasks(() => {
             const total = clock.now() - start;
             if (total < SLOW_WS_HANDLER_MS) return;
@@ -102,7 +140,7 @@ export function createSlowHandlerWatch(clock: Clock = realClock) {
             const more = skipped > 0 ? ` (+${skipped} slow messages not logged)` : "";
             skipped = 0;
             clock.log(
-                `[perf] slow-ws-handler total=${Math.round(total)}ms sync=${Math.round(syncMs)}ms ${describeWsMessage(msg, size)}${more}`
+                `[perf] slow-ws-handler total=${Math.round(total)}ms sync=${Math.round(syncMs)}ms ${describeWsMessage(msg, size)}${listener}${more}`
             );
         });
     };

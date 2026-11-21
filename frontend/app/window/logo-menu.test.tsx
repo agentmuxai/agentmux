@@ -78,7 +78,7 @@ vi.mock("@/app/store/block-component-registry", () => h.registry);
 vi.mock("@/app/store/global", () => h.store);
 vi.mock("@/store/global", () => h.store);
 vi.mock("@/app/store/modalmodel", () => ({
-    modalsModel: { hasOpenModals: () => false, closeTopModal: vi.fn() },
+    modalsModel: { hasOpenModals: () => false, isModalOpen: () => false, closeTopModal: vi.fn(), closeModalsOf: vi.fn() },
     openModal: h.openModal,
 }));
 vi.mock("@/app/modals/command-palette", () => ({ CommandPaletteModal: h.CommandPaletteModal }));
@@ -245,7 +245,7 @@ describe.each(["darwin", "win32", "linux"] as Platform[])("AgentMux logo menu sh
             await vi.waitFor(() => expect(action).toHaveBeenCalledTimes(1));
 
             menuItem(spec.label).onClick(new MouseEvent("click"));
-            expect(action).toHaveBeenCalledTimes(2);
+            await vi.waitFor(() => expect(action).toHaveBeenCalledTimes(2));
             expect(action.mock.calls[1]).toEqual(action.mock.calls[0]);
         });
 

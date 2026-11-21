@@ -11,9 +11,9 @@ function ev(key: string, code: string, mods: Partial<KeyEventLike> = {}): KeyEve
     return { key, code, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...mods };
 }
 
-const NONE: KeyContext = { textInputFocus: false, terminalFocus: false, viewType: "term", docTabsHost: false };
-const TERM: KeyContext = { textInputFocus: false, terminalFocus: true, viewType: "term", docTabsHost: false };
-const TYPING: KeyContext = { textInputFocus: true, terminalFocus: false, viewType: "agent", docTabsHost: false };
+const NONE: KeyContext = { textInputFocus: false, textInputFilled: false, terminalFocus: false, viewType: "term", docTabsHost: false };
+const TERM: KeyContext = { textInputFocus: false, textInputFilled: false, terminalFocus: true, viewType: "term", docTabsHost: false };
+const TYPING: KeyContext = { textInputFocus: true, textInputFilled: true, terminalFocus: false, viewType: "agent", docTabsHost: false };
 
 describe("key syntax", () => {
     it("formats per platform", () => {
@@ -113,6 +113,29 @@ describe("resolveKey", () => {
         expect(resolveKey(ev("ArrowDown", "ArrowDown"), NONE, "other", "ctrl+shift+s")?.row.command).toBe("split:down");
     });
 
+    it("resolves each Open chord in two steps, in a terminal too", () => {
+        const wanted = { t: "open:terminal", f: "open:files", s: "open:swarm", k: "open:kanban", v: "open:vault", h: "open:history", i: "open:sysinfo", c: "app:connectors", m: "app:memory" };
+        for (const ctx of [NONE, TERM, TYPING]) {
+            const first = resolveKey(ev("O", "KeyO", { ctrlKey: true, shiftKey: true }), ctx, "other");
+            expect(first?.chordStart).toBe(true);
+            for (const [letter, command] of Object.entries(wanted)) {
+                expect(resolveKey(ev(letter, `Key${letter.toUpperCase()}`), ctx, "other", "ctrl+shift+o")?.row.command).toBe(command);
+            }
+        }
+        const mac = resolveKey(ev("O", "KeyO", { metaKey: true, shiftKey: true }), NONE, "mac");
+        expect(mac?.chordStart).toBe(true);
+        expect(resolveKey(ev("t", "KeyT"), NONE, "mac", "meta+shift+o")?.row.command).toBe("open:terminal");
+    });
+
+    it("keeps Back and Forward to the panes on keys that are not zoom", () => {
+        expect(resolveKey(ev("-", "Minus", { ctrlKey: true, altKey: true }), TERM, "other")?.row.command).toBe("pane:history:back");
+        expect(resolveKey(ev("_", "Minus", { ctrlKey: true, shiftKey: true }), TERM, "other")?.row.command).toBe("pane:history:forward");
+        expect(resolveKey(ev("-", "Minus", { ctrlKey: true }), NONE, "other")?.row.command).toBe("view:zoom:out");
+        expect(resolveKey(ev("-", "Minus", { ctrlKey: true }), NONE, "mac")?.row.command).toBe("pane:history:back");
+        // In a terminal ⌃- is the shell's undo, so a Mac leaves it there.
+        expect(resolveKey(ev("-", "Minus", { ctrlKey: true }), TERM, "mac")).toBeNull();
+    });
+
     it("resolves the pane swap / resize, tab move and rename keys", () => {
         expect(resolveKey(ev("ArrowLeft", "ArrowLeft", { ctrlKey: true, altKey: true, shiftKey: true }), NONE, "other")?.row.command).toBe("pane:swap:left");
         expect(resolveKey(ev("ArrowUp", "ArrowUp", { altKey: true, shiftKey: true }), TERM, "other")?.row.command).toBe("pane:resize:up");
@@ -135,9 +158,29 @@ describe("resolveKey", () => {
     });
 });
 
+describe("pane keys in a text field", () => {
+    const FOCUS_LEFT = ev("ArrowLeft", "ArrowLeft", { ctrlKey: true, shiftKey: true });
+    const RESIZE_UP = ev("ArrowUp", "ArrowUp", { altKey: true, shiftKey: true });
+    const EMPTY_FIELD: KeyContext = { ...TYPING, textInputFilled: false };
+
+    it("move focus and resize from a field with nothing in it (a Shortcuts pane's filter holds the caret when it opens)", () => {
+        expect(resolveKey(FOCUS_LEFT, EMPTY_FIELD, "other")?.row.command).toBe("pane:focus:left");
+        expect(resolveKey(RESIZE_UP, EMPTY_FIELD, "other")?.row.command).toBe("pane:resize:up");
+    });
+
+    it("stay with the field once it holds text: they select a word or a line there", () => {
+        expect(resolveKey(FOCUS_LEFT, TYPING, "other")).toBeNull();
+        expect(resolveKey(RESIZE_UP, TYPING, "other")).toBeNull();
+    });
+
+    it("leave a plain-letter shortcut blocked in an empty field", () => {
+        expect(resolveKey(ev("F2", "F2"), EMPTY_FIELD, "other")).toBeNull();
+    });
+});
+
 describe("pane rows", () => {
-    const FILES: KeyContext = { textInputFocus: false, terminalFocus: false, viewType: "files", docTabsHost: false };
-    const EDITOR: KeyContext = { textInputFocus: true, terminalFocus: false, viewType: "editor", docTabsHost: true };
+    const FILES: KeyContext = { textInputFocus: false, textInputFilled: false, terminalFocus: false, viewType: "files", docTabsHost: false };
+    const EDITOR: KeyContext = { textInputFocus: true, textInputFilled: true, terminalFocus: false, viewType: "editor", docTabsHost: true };
 
     it("a pane matches only its own rows", () => {
         expect(matchPaneKey(ev("N", "KeyN", { ctrlKey: true, shiftKey: true }), "files", "other")).toBe("files:newFolder");

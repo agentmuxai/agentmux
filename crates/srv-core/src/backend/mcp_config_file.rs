@@ -59,6 +59,35 @@ pub fn config_path(work_dir: &str) -> PathBuf {
     shared::config_path_for(Path::new(&expanded))
 }
 
+/// The config of a host agent in `work_dir` when it is kept outside the folder: [`relocated_path`] for a
+/// user's project. For any folder the rule of [`crate::backend::mcp_folder_rule`] holds for (a container agent
+/// can write it), AgentMux's own included, it is in the folder kept for host agents alone
+/// (`mcp_config_path::HOST_ONLY_DIR`), which no container has in its mounts. `None` when the file belongs in
+/// the folder. Reads the disk and the store.
+pub fn host_relocated_path(work_dir: &str) -> Option<PathBuf> {
+    if crate::backend::mcp_folder_rule::holds_in(work_dir) {
+        let expanded = crate::backend::blockcontroller::core::expand_home_dir(work_dir);
+        return shared::host_only_dir_for(Path::new(&expanded)).map(|dir| dir.join(shared::RELOCATED_MCP_JSON));
+    }
+    relocated_path(work_dir)
+}
+
+/// `content` as a host agent's config is written for `work_dir`: as it is, except in a folder the rule holds
+/// for, where the `agentmux` command is named by its path (`mcp_folder_rule::with_the_command_by_path`). Every
+/// writer of a host agent's config outside its folder passes the text through here.
+pub fn host_content(work_dir: &str, content: String) -> String {
+    if crate::backend::mcp_folder_rule::holds_in(work_dir) {
+        return crate::backend::mcp_folder_rule::with_the_command_by_path(&content, work_dir);
+    }
+    content
+}
+
+/// Where a host agent's MCP config is: [`config_path`], except that it is outside a folder a container agent
+/// can write ([`host_relocated_path`]).
+pub fn host_config_path(work_dir: &str) -> PathBuf {
+    host_relocated_path(work_dir).unwrap_or_else(|| config_path(work_dir))
+}
+
 /// Write the relocated config `content` at `path`: parent folders created, the file `0600` on
 /// Unix, through a temporary file and a rename so it is never briefly readable.
 pub fn write_relocated(path: &Path, content: &str) -> std::io::Result<()> {
@@ -100,8 +129,14 @@ pub fn write_relocated(path: &Path, content: &str) -> std::io::Result<()> {
 /// with the project's own `.mcp.json` servers (read-only — the project file is never written),
 /// so a user's servers keep reaching every harness, as they did when the launch merged them.
 /// `None` when neither file exists or is usable.
+///
+/// In a folder a container agent can write (`mcp_folder_rule`) the turn reads AgentMux's own config and
+/// nothing of the folder's: neither its `.mcp.json` as the config nor its servers merged in.
 pub fn read_for_turn(work_dir: &str) -> Option<String> {
     let expanded = crate::backend::blockcontroller::core::expand_home_dir(work_dir);
+    if crate::backend::mcp_folder_rule::holds_in(&expanded) {
+        return host_relocated_path(&expanded).and_then(|path| std::fs::read_to_string(path).ok());
+    }
     let Some(relocated) = relocated_path(&expanded) else {
         return std::fs::read_to_string(Path::new(&expanded).join(MCP_JSON)).ok();
     };
@@ -160,7 +195,10 @@ pub fn with_data_home<T>(root: &Path, f: impl FnOnce() -> T) -> T {
     let _held = data_home_lock();
     let saved = std::env::var_os("AGENTMUX_DATA_HOME");
     std::env::set_var("AGENTMUX_DATA_HOME", root);
+    // The marks of folders a container agent ran in are in the shared folder: a test gets its own.
+    let marks = crate::backend::mcp_folder_rule::set_marks_dir_for_test(Some(root.join("shared-for-test").join("container-agent-folders")));
     let out = f();
+    crate::backend::mcp_folder_rule::set_marks_dir_for_test(marks);
     match saved {
         Some(v) => std::env::set_var("AGENTMUX_DATA_HOME", v),
         None => std::env::remove_var("AGENTMUX_DATA_HOME"),
@@ -193,7 +231,14 @@ mod tests {
             std::fs::create_dir_all(&owned).unwrap();
             let owned_path = owned.to_string_lossy().into_owned();
             assert_eq!(relocated_path(&owned_path), None);
-            assert_eq!(config_path(&owned_path), owned.join(".mcp.json"));
+            // The config path is resolved, so compare the folder resolved the same way: on macOS
+            // the temp dir is under /var, a link to /private/var.
+            let config = config_path(&owned_path);
+            assert_eq!(config.file_name(), Some(std::ffi::OsStr::new(".mcp.json")));
+            assert_eq!(
+                std::fs::canonicalize(config.parent().unwrap()).unwrap(),
+                std::fs::canonicalize(&owned).unwrap()
+            );
         });
     }
 
@@ -263,6 +308,52 @@ mod tests {
                 r#"{"mcpServers":{"agentmux":{"command":"stale"},"mine":{"command":"mine-mcp"}}}"#,
                 "the project file is never rewritten"
             );
+        });
+    }
+
+    #[test]
+    fn a_host_agents_config_is_outside_a_folder_a_container_agent_can_write_and_nothing_of_the_folders_is_read() {
+        let (data, project) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        with_data_home(data.path(), || {
+            // AgentMux's own folder (under the data root) and a user's project, each with a file of its own.
+            let owned = data.path().join("agents").join("aria");
+            std::fs::create_dir_all(&owned).unwrap();
+            let theirs = r#"{"mcpServers":{"agentmux":{"command":"other"},"theirs":{"command":"theirs-mcp"}}}"#;
+            for folder in [owned.as_path(), project.path()] {
+                std::fs::write(folder.join(MCP_JSON), theirs).unwrap();
+            }
+            let owned_dir = owned.to_string_lossy().into_owned();
+            let project_dir = project.path().to_string_lossy().into_owned();
+            // As today while no container agent has to do with them.
+            assert_eq!(host_relocated_path(&owned_dir), None);
+            let untouched = r#"{"mcpServers":{"agentmux":{"command":"agentmux-mcp"}}}"#;
+            assert_eq!(host_content(&project_dir, untouched.to_string()), untouched, "a folder of the agent's own keeps the command as the launch writes it");
+            // A config path is resolved, so compare the folder resolved the same way (a temp dir can be a link).
+            let in_the_folder = |config: PathBuf| config.file_name() == Some(std::ffi::OsStr::new(MCP_JSON)) && std::fs::canonicalize(config.parent().unwrap()).unwrap() == std::fs::canonicalize(&owned).unwrap();
+            assert!(in_the_folder(host_config_path(&owned_dir)));
+            assert_eq!(read_for_turn(&owned_dir).as_deref(), Some(theirs), "the folder's own file is the config");
+            assert_eq!(host_relocated_path(&project_dir), relocated_path(&project_dir));
+
+            for (folder, dir) in [(owned.as_path(), &owned_dir), (project.path(), &project_dir)] {
+                crate::backend::mcp_folder_rule::mark(dir);
+                let outside = host_relocated_path(dir).expect("kept outside the folder");
+                assert!(outside.starts_with(data.path().join(shared::HOST_ONLY_DIR)) && !outside.starts_with(folder), "{outside:?}");
+                // Not the folder a container agent of a project is given (its relocated config's, read-only).
+                assert!(relocated_dir(dir).is_none_or(|given| !outside.starts_with(given)), "{outside:?}");
+                assert_eq!(host_config_path(dir), outside);
+                assert_eq!(read_for_turn(dir), None, "no config of AgentMux's yet: the folder's is not read in its place");
+                // As a writer writes it: the `agentmux` command by its path, or no such entry.
+                let content = host_content(dir, r#"{"mcpServers":{"agentmux":{"command":"agentmux-mcp"},"git":{"command":"git-mcp"}}}"#.to_string());
+                assert!(crate::backend::mcp_folder_rule::names_the_command_by_path(&content), "{content}");
+                write_relocated(&outside, r#"{"mcpServers":{"agentmux":{"command":"agentmux-mcp"}}}"#).unwrap();
+                let read: serde_json::Value = serde_json::from_str(&read_for_turn(dir).unwrap()).unwrap();
+                assert_eq!(read["mcpServers"]["agentmux"]["command"], "agentmux-mcp");
+                assert_eq!(read["mcpServers"].as_object().unwrap().len(), 1, "the folder's servers are not merged in");
+                assert_eq!(std::fs::read_to_string(folder.join(MCP_JSON)).unwrap(), theirs, "the folder's file is left as it is");
+            }
+            // A container agent's own launch still finds its file where it was.
+            assert_eq!(relocated_path(&owned_dir), None);
+            assert!(in_the_folder(config_path(&owned_dir)));
         });
     }
 }

@@ -77,7 +77,15 @@ macro_rules! builtin_drone {
 }
 
 /// The Drone templates AgentMux ships: graphs that run on the blocks this build has, each easy to build off.
-pub static DRONE_BUILTINS: &[Builtin] = &[builtin_drone!("scheduled-report"), builtin_drone!("check-and-file-task"), builtin_drone!("two-agent-handoff"), builtin_drone!("after-upgrade-check")];
+pub static DRONE_BUILTINS: &[Builtin] = &[
+    builtin_drone!("scheduled-report"),
+    builtin_drone!("check-and-file-task"),
+    builtin_drone!("two-agent-handoff"),
+    builtin_drone!("after-upgrade-check"),
+    builtin_drone!("triage-failed-nightly"),
+    builtin_drone!("rerun-flaky-job"),
+    builtin_drone!("merged-pr-still-claimed"),
+];
 
 /// Every template AgentMux ships: the job templates, then the Drone ones.
 fn all_builtins() -> &'static [Builtin] {
@@ -348,7 +356,7 @@ impl JobTemplates {
             error: None,
             hash: pkg.hash.clone(),
             manifest: Some(pkg.manifest.clone()),
-            drone: pkg.graph.as_ref().map(graph::summarize),
+            drone: pkg.graph.as_ref().map(|g| graph::DroneSummary { credentials: graph::credentials(g, pkg.manifest.trigger.as_ref()), ..graph::summarize(g) }),
             reporter: pkg.manifest.reporter.as_ref().filter(|_| pkg.manifest.kind == JobTemplateKind::Cloud).map(|r| cloud::ReporterNote {
                 name: r.name.clone(),
                 fingerprint: sig::fingerprint(&r.key),

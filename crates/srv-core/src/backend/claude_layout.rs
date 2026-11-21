@@ -98,12 +98,47 @@ fn radix_36(mut n: u32) -> String {
 /// repository root's memory folder.
 ///
 /// Returns the working directory unchanged when it isn't in a repository.
+///
+/// A folder a container agent can write is named after its own path alone:
+/// that agent's memory is a folder AgentMux binds into its container, so
+/// nothing the agent can write decides which one it is. No file in the
+/// folder is read, no folder above it is looked at, and a link in a part of
+/// the path such an agent can write is not followed. A linked worktree whose
+/// repository such an agent can write keeps its own root, for the same reason.
 pub fn memory_project_root(cwd: &std::path::Path) -> std::path::PathBuf {
+    memory_project_root_with(cwd, &crate::backend::fs_ops::container_folders::written_by_a_container_agent)
+}
+
+/// [`memory_project_root`], with `written` saying whether a container agent
+/// can write a folder.
+pub fn memory_project_root_with(cwd: &std::path::Path, written: &dyn Fn(&std::path::Path) -> bool) -> std::path::PathBuf {
+    if written(cwd) {
+        // Inside another such folder, a part of its own path can be written too.
+        return if cwd.parent().is_some_and(written) { as_written(cwd) } else { physical_dir(cwd) };
+    }
     let cwd = physical_dir(cwd);
     match git_root(&cwd) {
-        Some(root) => canonical_worktree_root(&root),
+        Some(root) => canonical_worktree_root(&root, written),
         None => cwd,
     }
+}
+
+/// `dir` as it is written: absolute, with `.` and `..` taken out, and nothing
+/// looked up on the disk.
+fn as_written(dir: &std::path::Path) -> std::path::PathBuf {
+    use std::path::Component;
+    let absolute = std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf());
+    let mut out = std::path::PathBuf::new();
+    for part in absolute.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 /// The working directory as the CLI's process sees it (`process.cwd()`):
@@ -134,8 +169,9 @@ fn git_root(dir: &std::path::Path) -> Option<std::path::PathBuf> {
 /// For a linked worktree, the main checkout that owns it; otherwise `root`
 /// (the CLI's `ke`/`Ht`). Anything that doesn't check out — a `.git` file
 /// that isn't `gitdir:`, a missing `commondir`, a worktree whose `gitdir`
-/// doesn't point back — leaves `root` as it is, as the CLI does.
-fn canonical_worktree_root(root: &std::path::Path) -> std::path::PathBuf {
+/// doesn't point back — leaves `root` as it is, as the CLI does. So does a
+/// repository a container agent can write (`written`).
+fn canonical_worktree_root(root: &std::path::Path, written: &dyn Fn(&std::path::Path) -> bool) -> std::path::PathBuf {
     use std::path::{Path, PathBuf};
     fn read_trimmed(p: &Path) -> Option<String> {
         std::fs::read_to_string(p).ok().map(|s| s.trim().to_string())
@@ -143,7 +179,13 @@ fn canonical_worktree_root(root: &std::path::Path) -> std::path::PathBuf {
     let resolve = || -> Option<PathBuf> {
         let git_file = read_trimmed(&root.join(".git"))?;
         let git_dir = real_path(&root.join(git_file.strip_prefix("gitdir:")?.trim()));
+        if written(&git_dir) {
+            return None;
+        }
         let common = real_path(&git_dir.join(read_trimmed(&git_dir.join("commondir"))?));
+        if written(&common) {
+            return None;
+        }
         if git_dir.parent()? != common.join("worktrees") {
             return None;
         }
@@ -279,12 +321,16 @@ pub(crate) mod tests {
     /// A repository with one commit, and a linked worktree of it outside it,
     /// as the CLI's process would see them ([`real_path`]).
     pub(crate) fn repo_with_worktree(base: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
-        let (repo, wt) = (base.join("repo"), base.join("wt"));
+        repo_and_worktree_at(&base.join("repo"), &base.join("wt"))
+    }
+
+    /// [`repo_with_worktree`], at the two folders named.
+    pub(crate) fn repo_and_worktree_at(repo: &std::path::Path, wt: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
         std::fs::create_dir_all(repo.join("sub")).unwrap();
         let git = |args: &[&str]| {
             use agentmux_common::win32::NoWindow;
             let mut cmd = std::process::Command::new("git");
-            cmd.args(["-c", "user.email=a@b", "-c", "user.name=a"]).args(args).current_dir(&repo);
+            cmd.args(["-c", "user.email=a@b", "-c", "user.name=a"]).args(args).current_dir(repo);
             cmd.no_window();
             let out = cmd.output().unwrap();
             assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
@@ -294,7 +340,7 @@ pub(crate) mod tests {
         git(&["add", "."]);
         git(&["commit", "-qm", "x"]);
         git(&["worktree", "add", "-q", wt.to_str().unwrap()]);
-        (real_path(&repo), real_path(&wt))
+        (real_path(repo), real_path(wt))
     }
 
     #[test]
@@ -305,6 +351,75 @@ pub(crate) mod tests {
         assert_eq!(memory_project_root(&repo.join("sub")), repo);
         assert_eq!(memory_project_root(&wt), repo, "a linked worktree shares the main checkout's memory");
         assert_eq!(memory_project_root(&wt.join("sub")), repo);
+    }
+
+    /// A folder a container agent can write is keyed by its own path, whatever it holds: a linked worktree
+    /// (a `.git` file that points elsewhere) does not get the main checkout's memory, even one whose path
+    /// differs from its own only by an ending, and a folder below a repository's top does not get the top's.
+    #[test]
+    fn a_folder_a_container_agent_can_write_is_keyed_by_its_own_path() {
+        let base = tempfile::tempdir().unwrap();
+        let (repo, wt) = repo_with_worktree(base.path());
+        let none = |_: &std::path::Path| false;
+        let the_worktree = |p: &std::path::Path| p.starts_with(&wt);
+        assert_eq!(memory_project_root_with(&wt, &none), repo, "on the host a linked worktree shares the main checkout's");
+        assert_eq!(memory_project_root_with(&wt, &the_worktree), wt);
+        let below = |p: &std::path::Path| p.starts_with(repo.join("sub"));
+        assert_eq!(memory_project_root_with(&repo.join("sub"), &below), repo.join("sub"), "nothing above it is looked at");
+
+        // A workspace `w` that is a linked worktree of `w-b` and of nothing else: the folder of `w`, never of `w-b` or `w.b`.
+        for ending in ["-b", ".b"] {
+            let other = tempfile::tempdir().unwrap();
+            let (main, w) = repo_and_worktree_at(&other.path().join(format!("w{ending}")), &other.path().join("w"));
+            let name = |root: &std::path::Path| project_dir_name(&root.to_string_lossy());
+            assert_eq!(memory_project_root_with(&w, &none), main, "on the host it shares the main checkout's");
+            let got = memory_project_root_with(&w, &|p| p.starts_with(&w));
+            assert_eq!(got, w);
+            assert_ne!(name(&got), name(&main), "{ending}");
+        }
+    }
+
+    /// What a container agent's workspace was keyed by before stays its key: a workspace that is no
+    /// repository, and one that is a repository of its own, keep the folder they had.
+    #[test]
+    fn a_container_agents_workspace_keeps_the_folder_it_had() {
+        let base = tempfile::tempdir().unwrap();
+        let plain = real_path(base.path()).join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        let (repo, _) = repo_with_worktree(base.path());
+        for workspace in [plain, repo] {
+            let before = memory_project_root_with(&workspace, &|_| false);
+            let now = memory_project_root_with(&workspace, &|p| p.starts_with(&workspace));
+            assert_eq!(now, before);
+            assert_eq!(now, workspace);
+        }
+    }
+
+    /// A worktree on the host whose repository a container agent can write keeps its own root.
+    #[test]
+    fn a_worktree_of_a_repository_a_container_agent_can_write_keeps_its_own_root() {
+        let base = tempfile::tempdir().unwrap();
+        let (repo, wt) = repo_with_worktree(base.path());
+        assert_eq!(memory_project_root_with(&wt, &|p| p.starts_with(&repo)), wt);
+    }
+
+    /// Inside another folder a container agent can write, a link in the path is not followed.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_in_a_path_a_container_agent_can_write_is_not_followed() {
+        let base = tempfile::tempdir().unwrap();
+        let outer = real_path(base.path()).join("outer");
+        let elsewhere = real_path(base.path()).join("elsewhere");
+        std::fs::create_dir_all(&outer).unwrap();
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let inner = outer.join("inner");
+        std::os::unix::fs::symlink(&elsewhere, &inner).unwrap();
+        assert_eq!(memory_project_root_with(&inner, &|p| p.starts_with(&outer)), inner);
+        assert_eq!(memory_project_root_with(&outer.join("x").join("..").join("inner"), &|p| p.starts_with(&outer)), inner);
+        // The agent's own workspace, inside no other: its path is not the agent's to write, and resolves as before.
+        let link = real_path(base.path()).join("link");
+        std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
+        assert_eq!(memory_project_root_with(&link, &|p| p == link), elsewhere);
     }
 
     #[test]

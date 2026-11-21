@@ -47,18 +47,34 @@ pub struct AgentConfigFile {
 /// (.claude/commands, .claude/skills) by itself, so for it the index carries
 /// only those without one (LC3, §4.4). By the resolved provider, so an alias
 /// (`claude-code`) counts as Claude. Shared with `memory:launchcost`.
+///
+/// Any other provider has no skill loader, so for it an Agent Skill's line names the `SKILL.md` that
+/// `build_config_files` wrote for it (`.claude/skills/<slug>/SKILL.md`, written for every provider) and
+/// the heading's sentence tells the agent to read that file before it acts (Skills B6). Claude's index
+/// keeps the sentence an older AgentMux wrote, which `is_legacy_agentmux_claude_md` still matches.
 pub fn skills_index_text(skills: &[AgentSkill], provider_id: &str) -> String {
     let is_claude = crate::backend::providers::get_provider(provider_id).is_some_and(|p| p.id == "claude");
     let own_file = skills_with_their_own_file(skills);
-    let indexed: Vec<_> = skills.iter().enumerate().filter(|(i, _)| !is_claude || !own_file[*i]).map(|(_, s)| s).collect();
+    let slugs = crate::backend::skill_slugs::agent_skill_slugs(skills);
+    let indexed: Vec<_> = skills.iter().zip(slugs).enumerate().filter(|(i, _)| !is_claude || !own_file[*i]).map(|(_, s)| s).collect();
     if indexed.is_empty() {
         return String::new();
     }
-    let mut out = String::from("\n# Available Skills\n\nUse `/<trigger>` to invoke a skill.\n\n");
-    for skill in indexed {
+    let usage = if is_claude {
+        "Use `/<trigger>` to invoke a skill."
+    } else {
+        "Read a skill's file before you act on what its line describes; the line is all you have until you do. \
+         A skill with a trigger can also be run as `/<trigger>`. The `Skills` tool (`list`, then `get`) reads any skill."
+    };
+    let mut out = format!("\n# Available Skills\n\n{usage}\n\n");
+    for (skill, slug) in indexed {
         let trigger_part = if skill.trigger.is_empty() { String::new() } else { format!(" (trigger: /{})", skill.trigger) };
         let desc_part = if skill.description.is_empty() { String::new() } else { format!(" \u{2014} {}", skill.description) };
-        out.push_str(&format!("- **{}**{}{}\n", skill.name, trigger_part, desc_part));
+        let file_part = match slug {
+            Some(slug) if !is_claude => format!(" (file: `.claude/skills/{slug}/SKILL.md`)"),
+            _ => String::new(),
+        };
+        out.push_str(&format!("- **{}**{}{}{}\n", skill.name, trigger_part, desc_part, file_part));
     }
     out
 }
@@ -591,32 +607,13 @@ pub fn build_settings_with_hooks(
     }
     settings_obj.insert("hooks".to_string(), Value::Object(hooks_obj));
 
-    // Claude Code requires the bashwrap exec command (produced by the hook rewrite)
-    // to be in permissions.allow — otherwise it raises a permissions error and the
-    // agent cannot run any bash commands. Merge with any user-supplied allow list
-    // rather than overwriting it.
-    {
-        // Space before * enforces a command-name boundary: matches
-        // "agentmux-bashwrap <args>" only, not other executables that
-        // happen to share the prefix (e.g. agentmux-bashwrapXYZ).
-        let bashwrap_allow = Value::String("Bash(agentmux-bashwrap *)".to_string());
-        let mut allow_arr = match settings_obj.get("permissions") {
-            Some(Value::Object(perms)) => match perms.get("allow") {
-                Some(Value::Array(arr)) => arr.clone(),
-                _ => Vec::new(),
-            },
-            _ => Vec::new(),
-        };
-        if !allow_arr.iter().any(|v| v == &bashwrap_allow) {
-            allow_arr.push(bashwrap_allow);
-        }
-        let mut perms_obj = match settings_obj.remove("permissions") {
-            Some(Value::Object(obj)) => obj,
-            _ => serde_json::Map::new(),
-        };
-        perms_obj.insert("allow".to_string(), Value::Array(allow_arr));
-        settings_obj.insert("permissions".to_string(), Value::Object(perms_obj));
-    }
+    // No `permissions.allow` entry for the wrapper is written. One for `Bash(agentmux-bashwrap *)` used to be:
+    // checked against the pinned CLI, it changes nothing. In prefix mode the CLI's rules see the model's own
+    // command, which that pattern never matches; in rewrite mode the hook's own `allow` decision already
+    // lets the call run, trusted workspace or not. And a project's allow entries are ignored by the CLI until
+    // the workspace is trusted ("Ignoring 1 permissions.allow entry ... this workspace has not been trusted"),
+    // which AgentMux must not grant: a trusted project lets whatever lands in its `.claude` folder take effect.
+    // A user's own `permissions` in their settings are left as they wrote them.
 
     // No AI attribution in commits or PR descriptions: the repos' checks
     // (`.github/workflows/no-coauthor-trailers.yml`) reject Co-Authored-By
@@ -1915,6 +1912,49 @@ mod tests {
         assert!(claude_md.content.contains("Available Skills"));
         assert!(claude_md.content.contains("**Notes**"));
         assert!(!claude_md.content.contains("/deploy"), "Deploy has a command file");
+    }
+
+    /// Skills B6: a provider with no skill loader is told to read the Agent Skill's file, and the line
+    /// names it, so the skill reaches it as text it can open (the path is the one the file is written to).
+    #[test]
+    fn a_non_claude_provider_is_told_where_an_agent_skill_file_is() {
+        let skills = vec![
+            make_agent_skill("Deploy Checklist", "Use before a deploy", "1. Test\n2. Ship"),
+            make_skill("Test", "test", "Run tests", "Run: test suite"),
+        ];
+        for provider in ["codex", "gemini", "qwen"] {
+            let files = build_config_files(&HashMap::new(), &skills, "Aria", "agent-1", "aria", "/tmp/aria", provider);
+            let startup = files.iter().find(|f| f.filename != ".claude/skills/deploy-checklist/SKILL.md" && f.content.contains("Available Skills")).unwrap();
+            assert!(startup.content.contains("Read a skill's file before you act"), "{provider}");
+            assert!(
+                startup.content.contains("**Deploy Checklist** \u{2014} Use before a deploy (file: `.claude/skills/deploy-checklist/SKILL.md`)"),
+                "{provider}: {}",
+                startup.content
+            );
+            // The path it names is a file that is written.
+            assert!(files.iter().any(|f| f.filename == ".claude/skills/deploy-checklist/SKILL.md"), "{provider}");
+            // A slash command has no skill file to name.
+            assert!(startup.content.contains("**Test** (trigger: /test) \u{2014} Run tests\n"), "{provider}");
+        }
+    }
+
+    /// An Agent Skill with no body writes no file, so its line names none.
+    #[test]
+    fn a_skill_with_no_body_names_no_file() {
+        let skills = vec![make_agent_skill("Empty", "Nothing here", "")];
+        let text = skills_index_text(&skills, "codex");
+        assert!(text.contains("**Empty** \u{2014} Nothing here\n"), "{text}");
+        assert!(!text.contains("(file:"), "{text}");
+    }
+
+    /// Claude's index is unchanged: its sentence is the one `is_legacy_agentmux_claude_md` matches, and a
+    /// skill it lists (one with no file) names no path.
+    #[test]
+    fn claude_keeps_its_index_sentence() {
+        let skills = vec![make_agent_skill("Empty", "Nothing here", "")];
+        let text = skills_index_text(&skills, "claude");
+        assert!(text.starts_with("\n# Available Skills\n\nUse `/<trigger>` to invoke a skill.\n\n"), "{text}");
+        assert!(!text.contains("(file:"), "{text}");
     }
 
     /// An agent whose skills all have files, and nothing else, still gets its

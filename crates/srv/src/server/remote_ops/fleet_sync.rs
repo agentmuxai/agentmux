@@ -77,15 +77,28 @@ fn peers(state: &AppState) -> Vec<Peer> {
         .into_iter()
         .map(|p| {
             let name = p.hostname.trim().to_string();
+            let key = peer_key(&p.install_id, &name, &p.channel, &p.address, p.port);
             let host = if p.channel.is_empty() { name } else { format!("{name}/{}", p.channel) };
-            let key = if p.instance_id.is_empty() { format!("{}:{}", p.address, p.port) } else { p.instance_id };
             Peer { key, host }
         })
         .collect()
 }
 
+/// What tells one peer from another in the sync's bookkeeping. Not the discovery's `instance_id`: on a
+/// stable build it is the version (`v0.60.35`), the same on every machine running it, so peers that share
+/// a version shared one record, and a pass that had synced one counted the others as synced too (only one
+/// peer in ten minutes got anything). The install and the channel are the machine's own; an install that
+/// does not announce an id is told apart by its name, channel and address.
+fn peer_key(install_id: &str, hostname: &str, channel: &str, address: &str, port: u16) -> String {
+    if install_id.is_empty() {
+        format!("{hostname}/{channel}@{address}:{port}")
+    } else {
+        format!("{install_id}/{channel}")
+    }
+}
+
 /// An agent of this machine to sign with: the requests are `slug@machine` on both audit trails.
-fn signer(state: &AppState) -> Option<String> {
+pub(crate) fn signer(state: &AppState) -> Option<String> {
     state.fleet_feed.snapshot().agents.iter().find(|a| !a.trim().is_empty()).cloned()
 }
 
@@ -261,6 +274,14 @@ where
             OpStatus::Refused if matches!(answer.refused_reason.as_deref(), Some("bad_params")) => {
                 tracing::warn!(peer = %peer.host, op, "fleet memory: the other machine refused an entry as malformed");
                 not_applied.insert(entry_id, "bad_params".to_string());
+            }
+            // The machine ran this one entry and it failed there (a store error on its side, from an
+            // older build than one that answers `name_taken`): say so for the entry and go on. One entry
+            // the peer cannot take must not stop the rest. An answer with no audit id never ran.
+            OpStatus::Failed if !answer.audit_id.is_empty() => {
+                let why = why_not(&answer);
+                tracing::warn!(peer = %peer.host, op, entry = %entry_id, why, "fleet memory: the other machine failed on an entry");
+                not_applied.insert(entry_id, format!("failed: {}", why.chars().take(120).collect::<String>()));
             }
             _ => return Err(format!("{op}: {}", why_not(&answer))),
         }

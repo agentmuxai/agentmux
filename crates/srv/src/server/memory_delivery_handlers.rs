@@ -264,7 +264,8 @@ async fn session_start_ack(state: AppState, req: AckRequest) -> Json<serde_json:
         }
     };
     if complete {
-        tracing::info!(block_id = %req.block_id, reason = reason.as_str(), parked = parked_at.is_some(), "memory delivery: complete, notice sent");
+        let tokens = agentmux_srv_core::backend::context_reading::tokens_now(&req.block_id);
+        tracing::info!(block_id = %req.block_id, reason = reason.as_str(), tokens, parked = parked_at.is_some(), "memory delivery: complete, notice sent");
     }
     if let Some(line) = write_now {
         append_notice(&state, &req.block_id, &line);
@@ -597,7 +598,7 @@ fn startup_files(launch: &LaunchDirs) -> Vec<crate::backend::startup_files::Star
         return crate::backend::startup_files::workspace_startup_files(&launch.cwd);
     }
     let home = dirs::home_dir();
-    crate::backend::startup_files::claude_startup_files(&launch.cwd, launch.config_dir.as_deref(), home.as_deref())
+    crate::backend::startup_files::host_startup_files(&launch.cwd, launch.config_dir.as_deref(), home.as_deref())
 }
 
 /// Which current Global sections the CLI already got from a startup file: one AgentMux wrote that holds

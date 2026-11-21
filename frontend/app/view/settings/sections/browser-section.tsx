@@ -284,6 +284,7 @@ function AgentSitesBlock(): JSX.Element {
 function AskDownloadLocationRow(): JSX.Element {
     return (
         <SettingRow
+            settingKey="browser:askdownloadlocation"
             id={BROWSER_SETTINGS.askDownloadLocation.id}
             label={BROWSER_SETTINGS.askDownloadLocation.label}
             description={BROWSER_SETTINGS.askDownloadLocation.description}
@@ -319,8 +320,9 @@ export function BrowserSection(): JSX.Element {
     };
 
     return (
-        <div class="settings-section-body">
+        <div class="settings-section-body settings-section-body--single">
             <SettingRow
+                settingKey="browser:searchsuggestions"
                 id={BROWSER_SETTINGS.searchSuggestions.id}
                 label={BROWSER_SETTINGS.searchSuggestions.label}
                 description={BROWSER_SETTINGS.searchSuggestions.description}
@@ -333,6 +335,7 @@ export function BrowserSection(): JSX.Element {
             />
             <AskDownloadLocationRow />
             <SettingRow
+                settingKey="browser:hibernate"
                 id={BROWSER_SETTINGS.hibernate.id}
                 label={BROWSER_SETTINGS.hibernate.label}
                 description={BROWSER_SETTINGS.hibernate.description}
@@ -345,6 +348,7 @@ export function BrowserSection(): JSX.Element {
             />
             <Show when={s()["browser:hibernate"] !== false}>
                 <SettingRow
+                    settingKey="browser:hibernateafter"
                     indent
                     id={BROWSER_SETTINGS.hibernateAfter.id}
                     label={BROWSER_SETTINGS.hibernateAfter.label}
@@ -361,6 +365,7 @@ export function BrowserSection(): JSX.Element {
                     }
                 />
                 <SettingRow
+                    settingKey="browser:keepawakesites"
                     indent
                     id={BROWSER_SETTINGS.keepAwakeSites.id}
                     label={BROWSER_SETTINGS.keepAwakeSites.label}

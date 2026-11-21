@@ -319,9 +319,22 @@ fn spawn_sampling_loops(
     // Keep each agent's repository, branch and uncommitted files fresh for
     // WhoIsWorkingOn and ListConversations (backend/work_facts/git.rs): git
     // runs here, never on a request.
+    // The folders a container agent can write are read from this store. Named here, before anything that asks
+    // about a folder can run (the loop below names it too, once its task starts).
+    backend::fs_ops::container_folders::install(mstore);
     let work_facts_mstore = Arc::clone(mstore);
     tokio::spawn(async move {
         backend::work_facts::git::run_git_refresh_loop(work_facts_mstore).await;
+    });
+
+    // The AWS grants file for container agents: a change to it is compared with the record and recorded when it is
+    // made, not only when the next container asks (identity::aws_broker::record).
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(15));
+        loop {
+            tick.tick().await;
+            let _ = tokio::task::spawn_blocking(crate::identity::aws_broker::policy::current).await;
+        }
     });
 }
 

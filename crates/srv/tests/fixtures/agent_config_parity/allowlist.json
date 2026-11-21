@@ -110,13 +110,6 @@
         "(preamble)"
       ],
       "why": "{{WORKING_DIR}} expands to the folder the launch writes into (as in agent.open); the window's TypeScript builder expanded it to the definition's working_directory field, unexpanded and empty when none is set."
-    },
-    {
-      "path": ".claude/settings.json",
-      "differs": [
-        "/permissions/allow/1"
-      ],
-      "why": "The window's launch now gets what agent.open always got: Bash(agentmux-bashwrap *) in permissions.allow, which the window's TypeScript builder did not add."
     }
   ],
   "window_before_vs_after_container": [
@@ -126,13 +119,6 @@
         "(preamble)"
       ],
       "why": "{{WORKING_DIR}} expands to the folder the launch writes into (as in agent.open); the window's TypeScript builder expanded it to the definition's working_directory field, unexpanded and empty when none is set."
-    },
-    {
-      "path": ".claude/settings.json",
-      "differs": [
-        "/permissions/allow/1"
-      ],
-      "why": "The window's launch now gets what agent.open always got: Bash(agentmux-bashwrap *) in permissions.allow, which the window's TypeScript builder did not add."
     }
   ]
 }

@@ -27,8 +27,12 @@ export type LspState =
     | { kind: "initializing" }
     | { kind: "ready"; capabilities: LspInitializeResult["capabilities"] }
     | { kind: "missing"; language: string } // server binary not installed
+    | { kind: "notOnHost" } // the folder is a container agent's: no server runs on the host for it
     | { kind: "crashed"; error: string }
     | { kind: "disposed" };
+
+/** What `lspstart` answers for a file in a folder a container agent can write (srv's `LspError::ContainerAgentFolder`). */
+export const NOT_ON_HOST_ERROR = "no_host_server_for_container_agent_folder";
 
 type DiagnosticsHandler = (params: LspPublishDiagnosticsParams) => void;
 
@@ -63,6 +67,10 @@ export class LspClient {
             const msg = e?.message ?? String(e);
             if (msg.includes("server_binary_not_found")) {
                 this.setState({ kind: "missing", language: this.language });
+                return false;
+            }
+            if (msg.includes(NOT_ON_HOST_ERROR)) {
+                this.setState({ kind: "notOnHost" });
                 return false;
             }
             this.setState({ kind: "crashed", error: msg });

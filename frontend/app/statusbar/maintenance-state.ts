@@ -13,6 +13,7 @@ import {
     cancelUpgrade,
     checkedAt,
     checkForUpdate,
+    downloadFollowsCheck,
     downloadPageUrl,
     loadAppUpdate,
     releaseDownload,
@@ -88,14 +89,21 @@ function createUpdateView() {
     return { release, download, updaterStatus, percent, updaterVersion, installFirst, storeBelowFloor, storeOffers, storeLagging, openStorePage, opensDownloadPage, downloadBlocked, standing, badge };
 }
 
-/** Check for update, and what it said when it failed. */
-function createCheck() {
+/**
+ * Check for update, and what it said when it failed. A check that finds a release this install can download goes on
+ * to download it (`downloadFollowsCheck`): the button stays busy until srv has taken the download, so the row goes
+ * from Checking to Downloading without the Download button showing in between. A download that fails to start is
+ * shown as one (`setStartError`), not as a failed check.
+ */
+function createCheck(setStartError: (message: string | null) => void) {
     const [checking, setChecking] = createSignal(false);
     const [checkError, setCheckError] = createSignal<string | null>(null);
     const handleCheck = () => {
         setChecking(true);
         setCheckError(null);
+        setStartError(null);
         checkForUpdate()
+            .then(() => (downloadFollowsCheck() ? startAppUpdateDownload().catch((e) => setStartError(String(e?.message ?? e))) : undefined))
             .catch((e) => setCheckError(String(e?.message ?? e)))
             .finally(() => setChecking(false));
     };
@@ -111,7 +119,7 @@ export function createMaintenance() {
     const view = createUpdateView();
     const { release, installFirst, storeBelowFloor } = view;
     const [startError, setStartError] = createSignal<string | null>(null);
-    const check = createCheck();
+    const check = createCheck(setStartError);
     const store = createStoreInstall(setStartError);
 
     // Opens a folder, or shows a file in its folder; a failure is shown, like the other actions here.

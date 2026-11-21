@@ -136,6 +136,10 @@ declare global {
         /** Keep a floating pane above every window of this instance (the header tack).
          *  SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27. */
         floatingAlwaysOnTop: boolean;
+        /** The host measures the machine and pushes the performance signals itself (`health-signal`,
+         *  `getHealthSignals`: low RAM, low page file, low disk space). Without it the page works the low-disk
+         *  notice out from the system info it already receives (statusbar/low-disk.ts). */
+        hostHealthSignals: boolean;
     };
 
     /** Host-mediated approvals (the approval windows) and the Vault's file steps. */
@@ -437,8 +441,22 @@ declare global {
         }): Promise<{ label: string | null; window_id: string | null }>;
     };
 
-    /** Whether the host can manage an OS login entry, and whether one is registered. */
-    type AutostartStatus = { available: boolean; enabled: boolean };
+    /** Whether the host can manage an OS login entry, and whether one is registered. A launcher that reports it
+     *  (SPEC_START_WITH_OS_2026_09_25.md §3.8) also says how the entry stands and which channel owns it. */
+    type AutostartStatus = {
+        available: boolean;
+        enabled: boolean;
+        state?: "off" | "on" | "broken" | "needs_approval";
+        /** What the entry runs, when readable. */
+        target?: string | null;
+        /** The channel that wrote the entry; null for none, or one from before ownership was recorded. */
+        ownerChannel?: string | null;
+        thisChannel?: string;
+        /** The entry is another channel's (or nobody's) and this build can take it over. */
+        movable?: boolean;
+        /** The Store package's startup task as Windows says it now; absent anywhere that is not a packaged install. */
+        package?: "enabled" | "disabled" | "disabled_by_user" | "disabled_by_policy" | "enabled_by_policy";
+    };
 
     /** A window opened at a user's click, to be pointed at a URL later (`AppApi.reserveExternalWindow`). */
     type ExternalWindow = {
@@ -453,6 +471,8 @@ declare global {
         getHostCaps(): HostCaps;
         /** Start at login: can the host manage a login entry, and is one registered? */
         getAutostartStatus(): Promise<AutostartStatus>;
+        /** macOS: open System Settings at Login Items, where the person allows AgentMux to start at login. */
+        openLoginItems(): Promise<void>;
         /** Create the settings file if it is missing (or bring it up to the latest template) and return its path. */
         ensureSettingsFile(): Promise<string>;
         /** Create the settings file if it is missing, and open it in the operating system's default editor. The
@@ -480,6 +500,8 @@ declare global {
          *  composer's right-click Paste, which has no `paste` event. */
         readClipboardAttachments(): Promise<{ text: string; paths: string[] }>;
         writeClipboardText(text: string): Promise<void>;
+        /** Put an image on the clipboard as an image: a PNG, base64 (`writeImage` in util/clipboard.ts). A host without it leaves the page's own clipboard. */
+        writeClipboardImage?(png: string): Promise<void>;
         /** Local paths of the files an OS drag just dropped into this window (`nativeFileDrop`). */
         consumeDroppedFilePaths(): Promise<string[]>;
         /** The same paths while the drag is still hovering; doesn't consume them. */
@@ -811,6 +833,8 @@ declare global {
         sublabel?: string;
         /** CSS color for an inline swatch square rendered before the label. */
         swatchColor?: string;
+        /** With `swatchColor`: the bar drawn across the top of the swatch (a tab's or pill's bar). */
+        swatchBar?: string;
         /** A Font Awesome name (`"copy"`, `"regular@window-maximize"`) drawn in the row's leading slot; decoration only. See app/util/menu-icons.ts. */
         icon?: string;
         /** A CSS colour for that icon (a widget's own colour in the pane "+" menu); the label keeps the menu's text colour. */
@@ -829,10 +853,16 @@ declare global {
         sublabel?: string;
         /** CSS color for an inline swatch square rendered before the label. */
         swatchColor?: string;
+        /** With `swatchColor`: the bar drawn across the top of the swatch (a tab's or pill's bar). */
+        swatchBar?: string;
         /** A Font Awesome name (`"copy"`, `"regular@window-maximize"`) drawn in the row's leading slot; decoration only. See app/util/menu-icons.ts. */
         icon?: string;
         /** A CSS colour for that icon (a widget's own colour in the pane "+" menu); the label keeps the menu's text colour. */
         iconColor?: string;
+        /** A pick runs `click` and leaves the menu open (the pane colours: try one after another). Kit menu only (`openMenuAt`). */
+        keepOpen?: boolean;
+        /** The row's `checked` and `enabled` as they are now, read each time the row draws, so an open menu follows a change a pick made. Kit menu only. */
+        live?: () => { checked?: boolean; enabled?: boolean };
     };
 
     type KeyPressDecl = {
@@ -1094,6 +1124,12 @@ declare global {
             canGoBack?: boolean;
             canGoForward?: boolean;
         }) => ContextMenuItem[];
+        /**
+         * The pane menu's Copy, for a view whose content isn't text (an image, a video): items that stand in for the
+         * plain Copy, which only a text selection enables. `selection` is the text selected in the pane. Omitted or
+         * empty: the plain Copy.
+         */
+        getCopyMenuItems?: (selection: string) => ContextMenuItem[];
         giveFocus?: () => boolean;
         keyDownHandler?: (e: MuxKeyboardEvent) => boolean;
         /** Fired by the host (block.tsx) when this tab becomes visible to the
@@ -1380,7 +1416,7 @@ declare global {
             onFailure: (code: number, message: string) => void;
         }) => number;
         /** A lab's probe: every host command roundtrip, when a script has put an array here (perf/index.ts). */
-        __agentmuxIpcProbe?: Array<{ command: string; durationMs: number; at: number }>;
+        __agentmuxIpcProbe?: Array<{ command: string; durationMs: number; at: number; host?: { waited_ms?: number; handled_ms: number } }>;
         __WAVE_SERVER_WS_ENDPOINT__?: string;
         __WAVE_SERVER_WEB_ENDPOINT__?: string;
         __startupPerfStart?: number;

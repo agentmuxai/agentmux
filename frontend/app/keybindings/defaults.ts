@@ -76,10 +76,10 @@ export const DEFAULT_KEYBINDINGS: KeyBindingRow[] = [
     { command: "split:right", label: "Split right", helpGroup: "Split in a direction", category: "Panes", mac: ["ctrl+shift+s ArrowRight"], other: ["ctrl+shift+s ArrowRight"], skipShell: true },
     { command: "pane:close", label: "Close pane", category: "Panes", mac: ["meta+w"], other: ["ctrl+shift+w"], skipShell: true },
     { command: "pane:magnify", label: "Maximize pane", category: "Panes", mac: ["meta+m"], other: ["ctrl+shift+m"], skipShell: true },
-    { command: "pane:focus:up", label: "Focus pane above", helpGroup: "Focus pane by direction", category: "Panes", mac: ["ctrl+shift+ArrowUp"], other: ["ctrl+shift+ArrowUp"], when: "!textInputFocus", skipShell: true },
-    { command: "pane:focus:down", label: "Focus pane below", helpGroup: "Focus pane by direction", category: "Panes", mac: ["ctrl+shift+ArrowDown"], other: ["ctrl+shift+ArrowDown"], when: "!textInputFocus", skipShell: true },
-    { command: "pane:focus:left", label: "Focus pane left", helpGroup: "Focus pane by direction", category: "Panes", mac: ["ctrl+shift+ArrowLeft"], other: ["ctrl+shift+ArrowLeft"], when: "!textInputFocus", skipShell: true },
-    { command: "pane:focus:right", label: "Focus pane right", helpGroup: "Focus pane by direction", category: "Panes", mac: ["ctrl+shift+ArrowRight"], other: ["ctrl+shift+ArrowRight"], when: "!textInputFocus", skipShell: true },
+    { command: "pane:focus:up", label: "Focus pane above", helpGroup: "Focus pane by direction", category: "Panes", mac: ["ctrl+shift+ArrowUp"], other: ["ctrl+shift+ArrowUp"], when: "!textInputFilled", skipShell: true },
+    { command: "pane:focus:down", label: "Focus pane below", helpGroup: "Focus pane by direction", category: "Panes", mac: ["ctrl+shift+ArrowDown"], other: ["ctrl+shift+ArrowDown"], when: "!textInputFilled", skipShell: true },
+    { command: "pane:focus:left", label: "Focus pane left", helpGroup: "Focus pane by direction", category: "Panes", mac: ["ctrl+shift+ArrowLeft"], other: ["ctrl+shift+ArrowLeft"], when: "!textInputFilled", skipShell: true },
+    { command: "pane:focus:right", label: "Focus pane right", helpGroup: "Focus pane by direction", category: "Panes", mac: ["ctrl+shift+ArrowRight"], other: ["ctrl+shift+ArrowRight"], when: "!textInputFilled", skipShell: true },
     { command: "pane:focus:next", label: "Next pane", category: "Panes", mac: ["F6"], other: ["F6"], skipShell: true },
     { command: "pane:focus:prev", label: "Previous pane", category: "Panes", mac: ["shift+F6"], other: ["shift+F6"], skipShell: true },
     ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(
@@ -93,20 +93,41 @@ export const DEFAULT_KEYBINDINGS: KeyBindingRow[] = [
             skipShell: true,
         })
     ),
-    { command: "pane:swap:up", label: "Swap with pane above", helpGroup: "Swap pane with neighbour", category: "Panes", mac: ["ctrl+alt+shift+ArrowUp"], other: ["ctrl+alt+shift+ArrowUp"], linux: ["ctrl+shift+s shift+ArrowUp"], when: "!textInputFocus", skipShell: true },
-    { command: "pane:swap:down", label: "Swap with pane below", helpGroup: "Swap pane with neighbour", category: "Panes", mac: ["ctrl+alt+shift+ArrowDown"], other: ["ctrl+alt+shift+ArrowDown"], linux: ["ctrl+shift+s shift+ArrowDown"], when: "!textInputFocus", skipShell: true },
-    { command: "pane:swap:left", label: "Swap with pane left", helpGroup: "Swap pane with neighbour", category: "Panes", mac: ["ctrl+alt+shift+ArrowLeft"], other: ["ctrl+alt+shift+ArrowLeft"], linux: ["ctrl+shift+s shift+ArrowLeft"], when: "!textInputFocus", skipShell: true },
-    { command: "pane:swap:right", label: "Swap with pane right", helpGroup: "Swap pane with neighbour", category: "Panes", mac: ["ctrl+alt+shift+ArrowRight"], other: ["ctrl+alt+shift+ArrowRight"], linux: ["ctrl+shift+s shift+ArrowRight"], when: "!textInputFocus", skipShell: true },
-    { command: "pane:resize:up", label: "Move pane border up", helpGroup: "Resize pane", category: "Panes", mac: ["ctrl+alt+meta+ArrowUp"], other: ["alt+shift+ArrowUp"], when: "!textInputFocus", skipShell: true },
-    { command: "pane:resize:down", label: "Move pane border down", helpGroup: "Resize pane", category: "Panes", mac: ["ctrl+alt+meta+ArrowDown"], other: ["alt+shift+ArrowDown"], when: "!textInputFocus", skipShell: true },
-    { command: "pane:resize:left", label: "Move pane border left", helpGroup: "Resize pane", category: "Panes", mac: ["ctrl+alt+meta+ArrowLeft"], other: ["alt+shift+ArrowLeft"], when: "!textInputFocus", skipShell: true },
-    { command: "pane:resize:right", label: "Move pane border right", helpGroup: "Resize pane", category: "Panes", mac: ["ctrl+alt+meta+ArrowRight"], other: ["alt+shift+ArrowRight"], when: "!textInputFocus", skipShell: true },
+    { command: "pane:swap:up", label: "Swap with pane above", helpGroup: "Swap pane with neighbour", category: "Panes", mac: ["ctrl+alt+shift+ArrowUp"], other: ["ctrl+alt+shift+ArrowUp"], linux: ["ctrl+shift+s shift+ArrowUp"], when: "!textInputFilled", skipShell: true },
+    { command: "pane:swap:down", label: "Swap with pane below", helpGroup: "Swap pane with neighbour", category: "Panes", mac: ["ctrl+alt+shift+ArrowDown"], other: ["ctrl+alt+shift+ArrowDown"], linux: ["ctrl+shift+s shift+ArrowDown"], when: "!textInputFilled", skipShell: true },
+    { command: "pane:swap:left", label: "Swap with pane left", helpGroup: "Swap pane with neighbour", category: "Panes", mac: ["ctrl+alt+shift+ArrowLeft"], other: ["ctrl+alt+shift+ArrowLeft"], linux: ["ctrl+shift+s shift+ArrowLeft"], when: "!textInputFilled", skipShell: true },
+    { command: "pane:swap:right", label: "Swap with pane right", helpGroup: "Swap pane with neighbour", category: "Panes", mac: ["ctrl+alt+shift+ArrowRight"], other: ["ctrl+alt+shift+ArrowRight"], linux: ["ctrl+shift+s shift+ArrowRight"], when: "!textInputFilled", skipShell: true },
+    { command: "pane:resize:up", label: "Move pane border up", helpGroup: "Resize pane", category: "Panes", mac: ["ctrl+alt+meta+ArrowUp"], other: ["alt+shift+ArrowUp"], when: "!textInputFilled", skipShell: true },
+    { command: "pane:resize:down", label: "Move pane border down", helpGroup: "Resize pane", category: "Panes", mac: ["ctrl+alt+meta+ArrowDown"], other: ["alt+shift+ArrowDown"], when: "!textInputFilled", skipShell: true },
+    { command: "pane:resize:left", label: "Move pane border left", helpGroup: "Resize pane", category: "Panes", mac: ["ctrl+alt+meta+ArrowLeft"], other: ["alt+shift+ArrowLeft"], when: "!textInputFilled", skipShell: true },
+    { command: "pane:resize:right", label: "Move pane border right", helpGroup: "Resize pane", category: "Panes", mac: ["ctrl+alt+meta+ArrowRight"], other: ["alt+shift+ArrowRight"], when: "!textInputFilled", skipShell: true },
     { command: "pane:refocus", label: "Refocus pane", category: "Panes", mac: ["meta+i"], skipShell: true },
     { command: "agent:focusComposer", label: "Focus the message box", category: "Panes", mac: ["meta+l"], other: ["ctrl+l"], when: "viewType == agent" },
     { command: "pane:replaceWithLauncher", label: "Replace pane with Shortcuts", category: "Panes", mac: ["ctrl+shift+k"], other: ["ctrl+shift+k"], when: "!textInputFocus", skipShell: true },
     { command: "pane:changeConnection", label: "Change connection", category: "Panes", mac: ["meta+shift+g"], other: ["ctrl+shift+g"], skipShell: true },
     { command: "term:multiInput", label: "Type into all terminals", category: "Terminal", mac: ["meta+shift+m"], other: ["ctrl+shift+alt+m"], skipShell: true },
     { command: "pane:voice", label: "Voice input", category: "General", mac: ["ctrl+shift+v"], other: ["ctrl+shift+v"], when: "!terminalFocus" },
+    // "Open" chords: Ctrl+Shift+O (⌘⇧O), then a letter. Nothing else uses Ctrl+Shift+O as a first step.
+    ...(
+        [
+            ["open:terminal", "Open Terminal", "t"],
+            ["open:files", "Open Files", "f"],
+            ["open:swarm", "Open Swarm", "s"],
+            ["open:kanban", "Open Kanban", "k"],
+            ["open:vault", "Open Vault", "v"],
+            ["open:history", "Open History", "h"],
+            ["open:sysinfo", "Open System Info", "i"],
+            ["app:connectors", "Connectors", "c"],
+            ["app:memory", "Memory", "m"],
+        ] as const
+    ).map(
+        ([command, label, letter]): KeyBindingRow => ({ command, label, category: "General", mac: [`meta+shift+o ${letter}`], other: [`ctrl+shift+o ${letter}`], skipShell: true })
+    ),
+    // Back and forward through the panes you focused. In a terminal ⌃- and ⌃⇧- are the shell's undo, so on macOS they are left to it.
+    { command: "pane:history:back", label: "Back to Previous Pane", category: "Panes", other: ["ctrl+alt+-"], skipShell: true },
+    { command: "pane:history:back", label: "Back to Previous Pane", category: "Panes", mac: ["ctrl+-"] },
+    { command: "pane:history:forward", label: "Forward to Next Pane", category: "Panes", other: ["ctrl+shift+-"], skipShell: true },
+    { command: "pane:history:forward", label: "Forward to Next Pane", category: "Panes", mac: ["ctrl+shift+-"] },
 
     // ── Find & zoom ──
     { command: "pane:find", label: "Find in pane", category: "Find & zoom", mac: ["meta+f"], skipShell: true },

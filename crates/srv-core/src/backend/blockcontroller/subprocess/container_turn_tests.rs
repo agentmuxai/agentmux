@@ -523,6 +523,38 @@ async fn an_interrupt_that_is_not_a_stop_still_runs_the_message_queued_behind_th
     assert!(ctrl.inner.lock().unwrap().held_after_stop.is_empty());
 }
 
+/// The case an operator hit: the CLI answered (its result is out) but a command the model sent to the background
+/// keeps the exec alive, and messages sent since wait behind it. The person's "Stop it and send now" interrupts the
+/// process; every waiting message must then run, in the order sent, each exactly once.
+#[tokio::test]
+async fn an_exec_that_outlives_its_result_hands_the_container_to_each_waiting_message_in_order_once() {
+    let fake = FakeDocker::start().await;
+    let broker = Arc::new(Broker::new());
+    let seen = watch(&broker);
+    fake.script(vec![
+        Turn { hold_open: true, ..Turn::says(&[INIT, RESULT_OK], 0) },
+        Turn::says(&[RESULT_OK], 0),
+        Turn::says(&[RESULT_OK], 0),
+    ]);
+    let ctrl = controller(&unique("blk"), Some(broker));
+    let (cm, name) = (fake.manager(), unique("c"));
+    let with_id = |text: &str, id: &str| SubprocessSpawnConfig { message_id: Some(id.to_string()), ..config(text) };
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), with_id("start the build", "m-0")).unwrap();
+    wait_for("the CLI to be started", || ctrl.session_id().as_deref() == Some("sid-one")).await;
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), with_id("first waiting", "m-1")).unwrap();
+    ctrl.spawn_container_turn(cm, name, cli(), with_id("second waiting", "m-2")).unwrap();
+    assert!(ctrl.turn_in_flight(), "the exec is still alive, so the container is busy");
+    assert_eq!(queued_events(&seen), [("m-1".to_string(), 0), ("m-2".to_string(), 1)], "the pane is told both wait, and how many are ahead");
+
+    // The pane's stop sends SIGINT, which the controller turns into this interrupt.
+    ctrl.stop_subprocess(true).unwrap();
+    wait_for("both waiting messages to run", || fake.execs(Kind::Turn).len() == 3 && !ctrl.run_lock.load(Ordering::SeqCst)).await;
+    let texts: Vec<String> = fake.uploads().into_iter().map(|u| u.3).collect();
+    assert_eq!(texts, ["start the build", "first waiting", "second waiting"], "in the order sent, each delivered once");
+    let inner = ctrl.inner.lock().unwrap();
+    assert!(inner.pending_messages.is_empty() && inner.held_after_stop.is_empty(), "nothing is left to run twice");
+}
+
 #[tokio::test]
 async fn a_turn_in_flight_is_reported_while_it_runs_and_not_after_it_ends() {
     let fake = FakeDocker::start().await;
@@ -783,4 +815,161 @@ async fn a_turn_on_an_api_key_runs_on_a_token_of_its_own_or_is_refused_with_the_
     assert!(fake.execs(Kind::Turn).is_empty(), "nothing ran in the container");
     assert_eq!(token::grant_for(&gate_token), None, "and the token the spawn made for it ends: nothing holds it");
     token::revoke("kt-def", KEY_ROUTE_ID);
+}
+
+// ---- The turn-end context hint (SPEC_AGENT_SELF_COMPACTION §3.5): a container agent gets what a host agent gets,
+// ---- in the one wording that works where it runs.
+
+/// An assistant frame reporting a main-agent call that left `tokens` in context.
+fn call_of(id: &str, tokens: u64) -> String {
+    format!(
+        r#"{{"type":"assistant","message":{{"id":"{id}","model":"claude-opus-5-5","usage":{{"input_tokens":2,"cache_creation_input_tokens":1000,"cache_read_input_tokens":{}}},"content":[{{"type":"text","text":"pong"}}]}}}}"#,
+        tokens - 1002
+    )
+}
+
+/// What the agent's next message carries from srv's held notes.
+fn next_message(block: &str) -> String {
+    let (message, held) = crate::backend::reactive::held_notes::attach(block, "next");
+    held.delivered();
+    message.to_string()
+}
+
+/// One more turn of `cli` on `ctrl`, scripted as `frames`, run to its end.
+async fn another_turn(fake: &FakeDocker, ctrl: &Arc<SubprocessController>, cli: Vec<String>, frames: &[&str], code: i64) {
+    fake.script(vec![Turn::says(frames, code)]);
+    ctrl.spawn_container_turn(fake.manager(), unique("c"), cli, config("go")).expect("the turn is accepted");
+    wait_done(ctrl).await;
+}
+
+#[tokio::test]
+async fn a_container_claude_turn_that_ends_large_holds_the_compact_hint_once() {
+    let fake = FakeDocker::start().await;
+    let block = unique("blk");
+    let ctrl = controller(&block, None);
+    let big = call_of("m1", 500_000);
+    another_turn(&fake, &ctrl, cli(), &[INIT, &big, RESULT_OK], 0).await;
+    let message = next_message(&block);
+    assert!(message.contains("[AgentMux] Your context is 500K") && message.contains("compact now"), "{message}");
+    assert!(!message.contains("Agents fresh"), "a container can't start fresh: {message}");
+
+    let again = call_of("m2", 510_000);
+    another_turn(&fake, &ctrl, cli(), &[INIT, &again, RESULT_OK], 0).await;
+    assert_eq!(next_message(&block), "next", "not again while the context stays high");
+
+    let small = call_of("m3", 60_000);
+    another_turn(&fake, &ctrl, cli(), &[INIT, &small, RESULT_OK], 0).await;
+    let crossed = call_of("m4", 450_000);
+    another_turn(&fake, &ctrl, cli(), &[INIT, &crossed, RESULT_OK], 0).await;
+    assert!(next_message(&block).contains("compact now"), "again after it dropped and crossed");
+    crate::backend::context_reading::forget(&block);
+}
+
+#[tokio::test]
+async fn a_container_turn_that_finished_a_task_is_never_told_to_start_fresh() {
+    let fake = FakeDocker::start().await;
+    let block = unique("blk");
+    let ctrl = controller(&block, None);
+    let mid = call_of("m1", 200_000);
+    crate::backend::context_reading::note_task_boundary(&block);
+    another_turn(&fake, &ctrl, cli(), &[INIT, &mid, RESULT_OK], 0).await;
+    assert_eq!(next_message(&block), "next", "200K and a finished task: the host's fresh note would be refused here");
+    assert!(!crate::backend::context_reading::get(&block).unwrap().task_boundary, "the boundary ends with the turn");
+    crate::backend::context_reading::forget(&block);
+}
+
+#[tokio::test]
+async fn a_failed_container_turn_gives_no_hint_and_clears_the_task_boundary() {
+    let fake = FakeDocker::start().await;
+    let block = unique("blk");
+    let ctrl = controller(&block, None);
+    let big = call_of("m1", 500_000);
+    crate::backend::context_reading::note_task_boundary(&block);
+    another_turn(&fake, &ctrl, cli(), &[INIT, &big], 1).await;
+    assert_eq!(next_message(&block), "next");
+    assert!(!crate::backend::context_reading::get(&block).unwrap().task_boundary);
+    crate::backend::context_reading::forget(&block);
+}
+
+#[tokio::test]
+async fn a_container_codex_turn_gets_no_hint_since_it_cannot_compact_there() {
+    let fake = FakeDocker::start().await;
+    let block = unique("blk");
+    let ctrl = controller(&block, None);
+    let big = call_of("m1", 500_000);
+    let codex = vec!["codex".to_string(), "exec".to_string()];
+    another_turn(&fake, &ctrl, codex, &[INIT, &big, RESULT_OK], 0).await;
+    assert_eq!(next_message(&block), "next");
+    crate::backend::context_reading::forget(&block);
+}
+
+/// A `/compact` that AgentMux sends (the agent's own `Agents compact`, or srv's backstop) is a system turn.
+fn compaction(text: &str) -> SubprocessSpawnConfig {
+    let origin = crate::backend::message_origin::MessageOrigin::system();
+    SubprocessSpawnConfig { record: Some(crate::backend::message_origin::RecordOrigin::new(origin)), ..config(text) }
+}
+
+fn queued_messages(ctrl: &SubprocessController) -> Vec<String> {
+    ctrl.inner.lock().unwrap().pending_messages.iter().map(|c| c.message.clone()).collect()
+}
+
+/// A busy agent's queue is never empty, so a compaction put at the back waits for every message ahead of it, and the
+/// context it is meant to shrink grows meanwhile. It runs next instead; nothing is dropped and the others keep the
+/// order they were sent in.
+#[tokio::test]
+async fn a_compaction_runs_next_ahead_of_the_queue_and_the_rest_keep_their_order() {
+    let fake = FakeDocker::start().await;
+    fake.script(vec![
+        Turn::says(&[INIT, RESULT_OK], 0),
+        Turn::says(&[RESULT_OK], 0),
+        Turn::says(&[RESULT_OK], 0),
+        Turn::says(&[RESULT_OK], 0),
+    ]);
+    let ctrl = controller(&unique("blk"), None);
+    let (cm, name) = (fake.manager(), unique("c"));
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), config("running")).unwrap();
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), config("first behind")).unwrap();
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), config("second behind")).unwrap();
+    ctrl.spawn_container_turn(cm, name, cli(), compaction("/compact keep: the PR")).expect("a compaction is queued like any message");
+
+    assert_eq!(queued_messages(&ctrl), ["/compact keep: the PR", "first behind", "second behind"], "ahead of the waiting messages");
+
+    wait_for("all four turns", || fake.execs(Kind::Turn).len() == 4 && !ctrl.run_lock.load(Ordering::SeqCst)).await;
+    wait_done(&ctrl).await;
+    let texts: Vec<String> = fake.uploads().into_iter().map(|u| u.3).collect();
+    assert_eq!(texts, ["running", "/compact keep: the PR", "first behind", "second behind"], "the compaction is the turn after the running one; none is lost");
+}
+
+#[tokio::test]
+async fn compactions_keep_their_order_among_themselves_and_a_persons_compact_is_an_ordinary_message() {
+    let fake = FakeDocker::start().await;
+    fake.script(vec![Turn { hold_open: true, ..Turn::says(&[INIT, RESULT_OK], 0) }]);
+    let ctrl = controller(&unique("blk"), None);
+    let (cm, name) = (fake.manager(), unique("c"));
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), config("running")).unwrap();
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), config("a")).unwrap();
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), config("/compact")).unwrap();
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), compaction("/compact one")).unwrap();
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), compaction("/compact")).unwrap();
+    ctrl.spawn_container_turn(cm, name, cli(), config("b")).unwrap();
+    assert_eq!(queued_messages(&ctrl), ["/compact one", "/compact", "a", "/compact", "b"], "AgentMux's compactions first, in order; a person's /compact stays where it was sent");
+
+    wait_for("the CLI to be started", || ctrl.session_id().as_deref() == Some("sid-one")).await;
+    assert_eq!(fake.execs(Kind::Turn).len(), 1, "a compaction never interrupts the turn in flight: it waits with the rest");
+
+    Controller::stop(ctrl.as_ref(), true, STATUS_DONE).expect("the stop is accepted");
+    wait_done(&ctrl).await;
+}
+
+#[test]
+fn only_a_claude_compaction_from_agentmux_goes_ahead() {
+    let queue = std::collections::VecDeque::from([config("a")]);
+    let ahead = |c: &SubprocessSpawnConfig| super::super::queue_position(&queue, c);
+    assert_eq!(ahead(&compaction("/compact")), (0, true));
+    assert_eq!(ahead(&compaction("/compact keep: x")), (0, true));
+    assert_eq!(ahead(&compaction("/compaction notes")), (1, false), "only the /compact command");
+    assert_eq!(ahead(&compaction("please /compact")), (1, false));
+    assert_eq!(ahead(&config("/compact")), (1, false), "not from AgentMux");
+    let codex = SubprocessSpawnConfig { resume_strategy: "codex-exec".into(), ..compaction("/compact") };
+    assert_eq!(ahead(&codex), (1, false), "a Codex compaction has its own path");
 }

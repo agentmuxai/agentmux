@@ -169,7 +169,7 @@ export type {
     WatchEditorFileReq,
     WatchMediaDirReq,
 } from "./file";
-export type { FleetActionFailure, FleetActionResult, FleetGroup, FleetStagePlan } from "./fleet";
+export type { FleetActionFailure, FleetActionHeld, FleetActionResult, FleetGroup, FleetStagePlan } from "./fleet";
 export type {
     FsCreateKind,
     FsCreateReq,

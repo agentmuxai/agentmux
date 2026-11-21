@@ -15,9 +15,11 @@
 //!    exactly that version, newer than this one, beside a portable; or that
 //!    version's installer, with the release's digest, in this version's own
 //!    `updates/<v>/`, on a `setup.exe` install;
-//! 2. asks the user with a native dialog ([`confirm`]), which no page or agent
-//!    tool in AgentMux can click: a restart stops every agent, so it takes the
-//!    user's own answer here, whoever asked srv;
+//! 2. goes ahead when srv marks the request confirmed (the restart was decided
+//!    in the app: the user's own click or turn, or an approved request's in-app
+//!    countdown with no veto); a request without the mark, from an older srv, is
+//!    asked with a native dialog ([`confirm`]), which no page or agent tool in
+//!    AgentMux can click;
 //! 3. quits the host the way the tray's Quit does, which closes the windows and
 //!    saves the session;
 //! 4. after srv has stopped (so the new version copies complete data,
@@ -26,7 +28,7 @@
 //!    installer silently and starts AgentMux again ([`relaunch`]), and exits.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -100,8 +102,10 @@ pub enum Staged {
     /// again. The installer keeps the install's own mode (all users or the
     /// current one): Inno Setup's default `UsePreviousPrivileges` reads it
     /// from the previous install, which the folder alone can't tell.
-    /// `sha256` is the release's digest, checked again as it runs.
-    Installer { installer: PathBuf, sha256: String, own_dir: PathBuf },
+    /// `sha256` is the release's digest, checked again as it runs. `version`
+    /// is the release, for the "Updating to <version>" window that is on
+    /// screen while the installer runs ([`crate::updating_window`]).
+    Installer { installer: PathBuf, sha256: String, own_dir: PathBuf, version: String },
     /// A macOS `.app`: replace it from the release's `.dmg` once this
     /// launcher has exited (`upgrade_macos`).
     MacDmg(crate::upgrade_macos::MacUpgrade),
@@ -203,7 +207,7 @@ pub fn staged(req: &UpgradeRequest, own_dir: &Path, data_dir: &Path, channel_dir
             if !is_sha256_hex(sha256) || file_sha256(installer).as_deref() != Some(sha256.as_str()) {
                 return Err(format!("{} isn't the AgentMux {} release; download it again", installer.display(), req.version));
             }
-            Ok(Staged::Installer { installer: installer.clone(), sha256: sha256.clone(), own_dir: own_dir.to_path_buf() })
+            Ok(Staged::Installer { installer: installer.clone(), sha256: sha256.clone(), own_dir: own_dir.to_path_buf(), version: req.version.clone() })
         }
     }
 }
@@ -219,7 +223,12 @@ fn check_package(_: &Path, _: &str, _: &str, _: &Path, _: &Path) -> Result<Stage
     Err("this AgentMux doesn't install .deb or .rpm packages".into())
 }
 
-/// Ask the user on a thread of its own, and call `on_yes` only for an
+/// Restart as srv asked, on a thread of its own. When the restart is `confirmed` (srv's line says so: the user's
+/// own click or turn, or an approved request whose in-app countdown ran out with no veto) nothing more is asked:
+/// no native dialog, so a computer nobody sits at restarts. The staged file was checked again before this
+/// ([`staged`]), and on a `.deb` or `.rpm` install the OS's own permission prompt still stands: that one is the
+/// system's, not a question of ours. A request that does not say it is confirmed is asked about, and `on_yes`
+/// is called only for an
 /// explicit Yes that still counts ([`answer_counts`]): one given within
 /// [`ANSWER_WITHIN`], to the latest request. One dialog at a time: a newer
 /// request closes the open one, and a dialog closes itself (as No) once its
@@ -234,54 +243,152 @@ pub fn ask_then(
     stopping: Vec<String>,
     data_dir: PathBuf,
     host_pid: Option<u32>,
+    confirmed: bool,
     on_yes: impl FnOnce(Staged) + Send + 'static,
 ) {
     let ask = LATEST_ASK.fetch_add(1, Ordering::SeqCst) + 1;
     dismiss(DIALOG_THREAD.load(Ordering::SeqCst));
     std::thread::spawn(move || {
         let opened = Instant::now();
+        if confirmed {
+            let ok = confirmed_go(&staged);
+            let outcome = confirmed_outcome(ok, opened.elapsed());
+            crate::log(&outcome.log_line(opened.elapsed()));
+            if outcome == DialogOutcome::Confirmed {
+                on_yes(staged);
+            } else if let Some(why) = outcome.declined() {
+                write_declined(&data_dir, &version, why);
+            }
+            return;
+        }
         let thread = current_thread();
         DIALOG_THREAD.store(thread, Ordering::SeqCst);
+        // Set by the timer below just before it closes the dialog: a close by time is told from a No by it.
+        let timed_out = std::sync::Arc::new(AtomicBool::new(false));
+        let timer_closed = timed_out.clone();
         std::thread::spawn(move || {
             std::thread::sleep(ANSWER_WITHIN);
             if DIALOG_THREAD.load(Ordering::SeqCst) == thread {
+                timer_closed.store(true, Ordering::SeqCst);
                 dismiss(thread);
             }
         });
         let yes = confirm(&version, &staged, &stopping, host_pid);
         let _ = DIALOG_THREAD.compare_exchange(thread, 0, Ordering::SeqCst, Ordering::SeqCst);
         let latest = LATEST_ASK.load(Ordering::SeqCst);
-        if !yes {
-            // A No, or the dialog closing itself. Not when a newer request closed
-            // this one: that request's own answer is still to come.
-            if ask == latest {
-                write_declined(&data_dir, &version);
+        let waited = opened.elapsed();
+        let outcome = dialog_outcome(yes, timed_out.load(Ordering::SeqCst), ask, latest, waited);
+        crate::log(&outcome.log_line(waited));
+        match outcome {
+            DialogOutcome::Yes => on_yes(staged),
+            // A newer request closed this one: that request's own answer is still to come.
+            DialogOutcome::Superseded | DialogOutcome::Confirmed => {}
+            DialogOutcome::No | DialogOutcome::TimedOut | DialogOutcome::TooLate => {
+                // Not when the question was an older one: only the latest is waited for.
+                if ask == latest {
+                    if let Some(why) = outcome.declined() {
+                        write_declined(&data_dir, &version, why);
+                    }
+                }
+                if outcome == DialogOutcome::TooLate {
+                    crate::show_fatal_dialog(
+                        "AgentMux upgrade",
+                        "This upgrade request expired, so AgentMux didn't restart.\n\nStart it again from the version panel.",
+                    );
+                }
             }
-            return;
-        }
-        if answer_counts(ask, latest, opened.elapsed()) {
-            on_yes(staged);
-        } else {
-            if ask == latest {
-                write_declined(&data_dir, &version);
-            }
-            crate::log(&format!("upgrade: a Yes {}s after asking, or to an older request, was ignored", opened.elapsed().as_secs()));
-            crate::show_fatal_dialog(
-                "AgentMux upgrade",
-                "This upgrade request expired, so AgentMux didn't restart.\n\nStart it again from the version panel.",
-            );
         }
     });
 }
 
-/// Tell srv the restart it asked for won't happen
+/// How the restart question ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DialogOutcome {
+    /// An explicit Yes that still counts.
+    Yes,
+    /// The user answered No.
+    No,
+    /// Nobody answered: the dialog closed itself after [`ANSWER_WITHIN`], which counts as a No.
+    TimedOut,
+    /// A Yes that came too late, or to an older request: ignored.
+    TooLate,
+    /// A newer request closed this dialog.
+    Superseded,
+    /// srv said the restart is decided, so nothing was asked (and nothing more was needed).
+    Confirmed,
+}
+
+/// Whether to go on with a restart srv says is decided: always, except on a `.deb` or `.rpm` install, where the OS's
+/// own permission prompt for the install is asked here and may be refused or go unanswered.
+#[cfg(target_os = "linux")]
+fn confirmed_go(staged: &Staged) -> bool {
+    match staged {
+        Staged::Package(up) => crate::upgrade_package::authorize(up, std::process::id(), ANSWER_WITHIN),
+        _ => true,
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn confirmed_go(_staged: &Staged) -> bool {
+    true
+}
+
+/// How a decided restart went: on, or (the permission prompt of a package install said no, or was not answered within
+/// [`ANSWER_WITHIN`]) not.
+fn confirmed_outcome(go: bool, waited: Duration) -> DialogOutcome {
+    match (go, waited >= ANSWER_WITHIN) {
+        (true, _) => DialogOutcome::Confirmed,
+        (false, true) => DialogOutcome::TimedOut,
+        (false, false) => DialogOutcome::No,
+    }
+}
+
+/// What became of the question: `yes` is the dialog's answer, `timed_out` that the timer closed it,
+/// `ask` this request's number and `latest` the newest one's, `waited` how long it was open.
+fn dialog_outcome(yes: bool, timed_out: bool, ask: u64, latest: u64, waited: Duration) -> DialogOutcome {
+    match (yes, timed_out) {
+        (true, _) if answer_counts(ask, latest, waited) => DialogOutcome::Yes,
+        (true, _) => DialogOutcome::TooLate,
+        (false, _) if ask != latest => DialogOutcome::Superseded,
+        (false, true) => DialogOutcome::TimedOut,
+        (false, false) => DialogOutcome::No,
+    }
+}
+
+impl DialogOutcome {
+    /// The launcher log's line for it: every outcome says so, with how long the dialog was open.
+    fn log_line(self, waited: Duration) -> String {
+        let s = waited.as_secs();
+        match self {
+            DialogOutcome::Yes => format!("upgrade: the dialog was answered Yes after {s}s"),
+            DialogOutcome::No => format!("upgrade: the dialog was answered No after {s}s"),
+            DialogOutcome::TimedOut => format!("upgrade: nobody answered the dialog within {s}s; it closed itself, which counts as No"),
+            DialogOutcome::TooLate => format!("upgrade: a Yes {s}s after asking, or to an older request, was ignored"),
+            DialogOutcome::Superseded => format!("upgrade: a newer request closed the dialog after {s}s"),
+            DialogOutcome::Confirmed => format!("upgrade: the restart is already confirmed (the user's own click or turn, or an approved request's countdown); no dialog, going on after {s}s"),
+        }
+    }
+
+    /// What srv is told when this ends the question without a restart.
+    fn declined(self) -> Option<agentmux_common::srv_stderr::Declined> {
+        use agentmux_common::srv_stderr::Declined;
+        match self {
+            DialogOutcome::No => Some(Declined::No),
+            DialogOutcome::TimedOut => Some(Declined::TimedOut),
+            DialogOutcome::TooLate => Some(Declined::TooLate),
+            DialogOutcome::Yes | DialogOutcome::Superseded | DialogOutcome::Confirmed => None,
+        }
+    }
+}
+
+/// Tell srv the restart it asked for won't happen, and why
 /// ([`agentmux_common::srv_stderr::UPGRADE_DECLINED_FILE`]): it is waiting on
 /// this launcher and would otherwise say "Restarting" for minutes after a No.
-fn write_declined(data_dir: &Path, version: &str) {
+fn write_declined(data_dir: &Path, version: &str, why: agentmux_common::srv_stderr::Declined) {
     let dir = data_dir.join("updates");
     let _ = std::fs::create_dir_all(&dir);
     let file = dir.join(agentmux_common::srv_stderr::UPGRADE_DECLINED_FILE);
-    if let Err(e) = std::fs::write(&file, format!("{version}\n")) {
+    if let Err(e) = std::fs::write(&file, agentmux_common::srv_stderr::declined_text(version, why)) {
         crate::log(&format!("upgrade: couldn't leave {} for srv: {e}", file.display()));
     }
 }
@@ -502,21 +609,30 @@ fn ps_quote(path: &Path) -> String {
 /// write, rename or delete; hashes it through that handle; and runs it only
 /// if it is `sha256`, holding the handle until the installer exits. The file
 /// that runs is the file that was checked.
-fn installer_script(installer: &Path, sha256: &str, own_dir: &Path) -> String {
+///
+/// An install that did not succeed (the installer's exit code was not 0, or it
+/// was not the file that was checked) leaves `failed_marker` before AgentMux
+/// starts again, so the "Updating to <version>" window can say so
+/// ([`crate::updating_window`]). Writing it is best effort and changes nothing else.
+fn installer_script(installer: &Path, sha256: &str, own_dir: &Path, failed_marker: &Path) -> String {
     debug_assert!(is_sha256_hex(sha256));
     let installer = ps_quote(installer);
     format!(
         "Start-Sleep -Seconds 3; \
+         $ok = $false; \
          $f = $null; \
          try {{ \
          $f = [System.IO.File]::Open({installer}, 'Open', 'Read', 'Read'); \
          $h = [System.BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash($f)).Replace('-', ''); \
          if ($h -eq '{sha256}') {{ \
-         Start-Process -FilePath {installer} -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait \
+         $p = Start-Process -FilePath {installer} -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait -PassThru; \
+         if ($p.ExitCode -eq 0) {{ $ok = $true }} \
          }} \
          }} catch {{ }} finally {{ if ($f) {{ $f.Dispose() }} }}; \
-         Start-Process -FilePath {}",
-        ps_quote(&own_dir.join("agentmux.exe"))
+         if (-not $ok) {{ try {{ New-Item -ItemType File -Force -Path {marker} | Out-Null }} catch {{ }} }}; \
+         Start-Process -FilePath {restart}",
+        marker = ps_quote(failed_marker),
+        restart = ps_quote(&own_dir.join("agentmux.exe")),
     )
 }
 
@@ -600,10 +716,11 @@ fn relaunch_with_env(staged: &Staged, inherited: impl IntoIterator<Item = (std::
         }
         // The swap runs after this launcher exits; it opens the new app itself.
         Staged::MacDmg(up) => crate::upgrade_macos::apply_command(up, std::process::id()),
-        Staged::Installer { installer, sha256, own_dir } => {
+        Staged::Installer { installer, sha256, own_dir, .. } => {
+            let marker = crate::updating_window::failed_marker(&crate::updating_window::dir());
             let mut c = std::process::Command::new(powershell_exe());
             c.args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand"])
-                .arg(encoded_command(&installer_script(installer, sha256, own_dir)));
+                .arg(encoded_command(&installer_script(installer, sha256, own_dir, &marker)));
             c
         }
         // Already running: the install helper's waiter, started when the user agreed, starts AgentMux.
@@ -618,12 +735,31 @@ fn relaunch_with_env(staged: &Staged, inherited: impl IntoIterator<Item = (std::
         // this one's group never reaches it.
         cmd.process_group(0);
     }
-    cmd.stdin(std::process::Stdio::null())
+    let child = cmd
+        .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .no_window()
-        .spawn()
-        .map(|_| ())
+        .spawn()?;
+    // A `setup.exe` install: nothing of AgentMux is on screen while the script waits for this launcher to be
+    // gone and runs the installer, so a window says which version is coming. The upgrade doesn't depend on it.
+    #[cfg(windows)]
+    if let Staged::Installer { version, .. } = staged {
+        if let Err(e) = crate::updating_window::start(version, child.id(), &crate::updating_window::dir()) {
+            crate::log(&format!("upgrade: no updating window ({e}); the upgrade goes on without it"));
+        }
+    }
+    // A macOS `.dmg` install: the same gap, from this launcher's exit to the swap script opening the new app, with
+    // a window from a clone of this app (the app itself is about to be replaced).
+    #[cfg(target_os = "macos")]
+    if let Staged::MacDmg(up) = staged {
+        if let Err(e) = crate::updating_window::start(&up.version, child.id(), &up.app, &crate::updating_window::dir()) {
+            crate::log(&format!("upgrade: no updating window ({e}); the upgrade goes on without it"));
+        }
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let _ = child;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -641,7 +777,7 @@ mod tests {
 
     #[cfg(windows)]
     fn req(version: &str, launcher: &Path) -> UpgradeRequest {
-        UpgradeRequest { version: version.into(), target: UpgradeTarget::Launcher(launcher.to_path_buf()) }
+        UpgradeRequest { version: version.into(), target: UpgradeTarget::Launcher(launcher.to_path_buf()), confirmed: false }
     }
 
     #[test]
@@ -731,7 +867,7 @@ echo \"PROBE=$AGENTMUX_QTEST_PROBE\" >> '{0}'
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     fn setup_req(version: &str, installer: &Path) -> UpgradeRequest {
         let target = UpgradeTarget::Installer { installer: installer.to_path_buf(), sha256: EMPTY_SHA256.into() };
-        UpgradeRequest { version: version.into(), target }
+        UpgradeRequest { version: version.into(), target, confirmed: false }
     }
 
     // A Windows portable; Linux's targets are `upgrade_linux`'s tests.
@@ -774,12 +910,12 @@ echo \"PROBE=$AGENTMUX_QTEST_PROBE\" >> '{0}'
         std::fs::create_dir_all(&updates).unwrap();
         let installer = updates.join("AgentMux-0.59.27-x64-setup.exe");
         std::fs::write(&installer, b"").unwrap();
-        let Staged::Installer { installer: got, sha256, own_dir } =
+        let Staged::Installer { installer: got, sha256, own_dir, version } =
             staged(&setup_req("0.59.27", &installer), &own, &data, &data, "0.59.26").unwrap()
         else {
             panic!("expected the installer")
         };
-        assert_eq!((got, sha256.as_str(), own_dir), (installer.clone(), EMPTY_SHA256, own.clone()));
+        assert_eq!((got, sha256.as_str(), own_dir, version.as_str()), (installer.clone(), EMPTY_SHA256, own.clone(), "0.59.27"));
 
         // Changed since srv checked it, or no proper digest to check against.
         std::fs::write(&installer, b"not the release").unwrap();
@@ -823,8 +959,14 @@ echo \"PROBE=$AGENTMUX_QTEST_PROBE\" >> '{0}'
     #[test]
     fn the_installer_script_runs_silently_then_always_starts_agentmux_again() {
         let path = "C:/Users/A %TEMP% $x/AgentMux-0.59.27-x64-setup.exe";
-        let script = installer_script(Path::new(path), EMPTY_SHA256, Path::new("C:/Apps/O'Neil"));
+        let marker = "C:/Users/A %TEMP%/agentmux-updating-1/failed";
+        let script = installer_script(Path::new(path), EMPTY_SHA256, Path::new("C:/Apps/O'Neil"), Path::new(marker));
         assert!(script.starts_with("Start-Sleep -Seconds 3; "), "{script}");
+        // The updating window is told when the install did not succeed: only a zero exit code of the checked
+        // installer is a success, and the marker is written after the install and before AgentMux starts again.
+        let ok = script.find("if ($p.ExitCode -eq 0) { $ok = $true }").expect(&script);
+        let leave = script.find(&format!("if (-not $ok) {{ try {{ New-Item -ItemType File -Force -Path '{marker}'")).expect(&script);
+        assert!(script.find("$ok = $false").unwrap() < ok && ok < leave, "{script}");
         // Opened so nothing else can change it, hashed through that handle,
         // and run only on a match, before the handle is let go.
         let open = script.find(&format!("[System.IO.File]::Open('{path}', 'Open', 'Read', 'Read')")).expect(&script);
@@ -837,7 +979,7 @@ echo \"PROBE=$AGENTMUX_QTEST_PROBE\" >> '{0}'
         assert!(open < check && check < run && run < release, "{script}");
         // AgentMux starts again whatever happened, last.
         let restart = script.rfind("Start-Process -FilePath 'C:/Apps/O''Neil").expect(&script);
-        assert!(restart > release, "{script}");
+        assert!(restart > release && restart > leave, "{script}");
         // Typographic quotes close a PowerShell string too: doubled as well.
         assert_eq!(ps_quote(Path::new("C:/Users/O\u{2019}Neil")), "'C:/Users/O\u{2019}\u{2019}Neil'");
         assert_eq!(ps_quote(Path::new("a\u{2018}b\u{201A}c\u{201B}")), "'a\u{2018}\u{2018}b\u{201A}\u{201A}c\u{201B}\u{201B}'");
@@ -892,11 +1034,61 @@ Naki-2: `node server.js`
     }
 
     #[test]
+    fn a_confirmed_restart_goes_ahead_with_no_dialog_and_leaves_nothing_for_srv_to_read_as_a_no() {
+        let data = tempfile::tempdir().unwrap();
+        let launcher = data.path().join("agentmux-0.60.35").join(if cfg!(windows) { "agentmux.exe" } else { "agentmux.sh" });
+        let (tx, rx) = std::sync::mpsc::channel();
+        ask_then("0.60.35".into(), Staged::Launcher(launcher.clone()), Vec::new(), data.path().to_path_buf(), None, true, move |s| {
+            let _ = tx.send(s);
+        });
+        // The answer is Yes without anyone: it arrives at once (a dialog would wait for a person, and none can be shown here).
+        let staged = rx.recv_timeout(Duration::from_secs(10)).expect("a confirmed restart goes ahead without a dialog");
+        assert_eq!(staged, Staged::Launcher(launcher));
+        assert!(!data.path().join("updates").join(agentmux_common::srv_stderr::UPGRADE_DECLINED_FILE).exists(), "no decline was left");
+        // Only an install's own permission prompt can still refuse a decided restart (Linux .deb/.rpm), and when it does the
+        // reason is told apart: refused (No) or not answered in time.
+        assert_eq!(confirmed_outcome(true, Duration::ZERO), DialogOutcome::Confirmed);
+        assert_eq!(confirmed_outcome(true, ANSWER_WITHIN), DialogOutcome::Confirmed);
+        assert_eq!(confirmed_outcome(false, Duration::from_secs(3)), DialogOutcome::No);
+        assert_eq!(confirmed_outcome(false, ANSWER_WITHIN), DialogOutcome::TimedOut);
+    }
+
+    #[test]
     fn a_no_is_left_for_srv_under_the_name_it_reads() {
         let data = tempfile::tempdir().unwrap();
         // The updates folder may not exist yet.
-        write_declined(data.path(), "0.59.37");
+        write_declined(data.path(), "0.59.37", agentmux_common::srv_stderr::Declined::TimedOut);
         let file = data.path().join("updates").join(agentmux_common::srv_stderr::UPGRADE_DECLINED_FILE);
-        assert_eq!(std::fs::read_to_string(file).unwrap().trim(), "0.59.37");
+        let text = std::fs::read_to_string(file).unwrap();
+        assert_eq!(agentmux_common::srv_stderr::parse_declined(&text), ("0.59.37", Some(agentmux_common::srv_stderr::Declined::TimedOut)));
+    }
+
+    #[test]
+    fn every_way_the_question_can_end_is_told_apart_and_logged() {
+        use agentmux_common::srv_stderr::Declined;
+        let quick = Duration::from_secs(2);
+        // Yes, within the time, to the latest request.
+        assert_eq!(dialog_outcome(true, false, 3, 3, quick), DialogOutcome::Yes);
+        // A Yes at or after the time, or to an older request, is ignored.
+        assert_eq!(dialog_outcome(true, false, 3, 3, ANSWER_WITHIN), DialogOutcome::TooLate);
+        assert_eq!(dialog_outcome(true, false, 2, 3, quick), DialogOutcome::TooLate);
+        // No: an answer; a timeout: the timer closed the dialog; both end as a decline, with different reasons.
+        assert_eq!(dialog_outcome(false, false, 3, 3, quick), DialogOutcome::No);
+        assert_eq!(dialog_outcome(false, true, 3, 3, ANSWER_WITHIN), DialogOutcome::TimedOut);
+        // A newer request closed it: neither, and srv is told nothing.
+        assert_eq!(dialog_outcome(false, false, 2, 3, quick), DialogOutcome::Superseded);
+        assert_eq!(dialog_outcome(false, true, 2, 3, ANSWER_WITHIN), DialogOutcome::Superseded);
+        assert_eq!(DialogOutcome::No.declined(), Some(Declined::No));
+        assert_eq!(DialogOutcome::TimedOut.declined(), Some(Declined::TimedOut));
+        assert_eq!(DialogOutcome::TooLate.declined(), Some(Declined::TooLate));
+        assert_eq!((DialogOutcome::Yes.declined(), DialogOutcome::Superseded.declined(), DialogOutcome::Confirmed.declined()), (None, None, None));
+        // Every outcome has a line, and the line says how long the dialog was open.
+        let lines: Vec<String> =
+            [DialogOutcome::Yes, DialogOutcome::No, DialogOutcome::TimedOut, DialogOutcome::TooLate, DialogOutcome::Superseded, DialogOutcome::Confirmed]
+                .iter()
+                .map(|o| o.log_line(Duration::from_secs(150)))
+                .collect();
+        assert!(lines.iter().all(|l| l.starts_with("upgrade: ") && l.contains("150s")), "{lines:?}");
+        assert_eq!(lines.iter().collect::<std::collections::HashSet<_>>().len(), 6, "each outcome reads differently");
     }
 }

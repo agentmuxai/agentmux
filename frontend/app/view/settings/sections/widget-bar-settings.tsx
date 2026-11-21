@@ -174,6 +174,7 @@ export function WidgetBarSettings(): JSX.Element {
                 </Show>
             </div>
             <SettingRow
+                settingKey="widget:icononly"
                 id={WIDGET_BAR_SETTINGS.iconOnly.id}
                 label={WIDGET_BAR_SETTINGS.iconOnly.label}
                 description={WIDGET_BAR_SETTINGS.iconOnly.description}

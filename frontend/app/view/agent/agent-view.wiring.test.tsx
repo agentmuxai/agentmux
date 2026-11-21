@@ -693,7 +693,6 @@ describe("AgentPresentationView callbacks", () => {
         seen.NewActivityPill.onJump();
         seen.AgentFooter.onTyping();
         const SB = seen.AgentFindBandItem;
-        note("top band zoom", seen.AgentTopBand.zoom());
         note("top band pane", seen.AgentTopBand.blockId);
         note("find band pane", SB.blockId);
         same("search visible", SB.visible, F.search.visible);

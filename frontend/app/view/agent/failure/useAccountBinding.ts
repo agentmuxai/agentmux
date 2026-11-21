@@ -54,7 +54,7 @@ const defaultDeps: AccountBindingDeps = {
     prepNow: (agentId) => RpcApi.AgentPrepNowCommand(TabRpcClient, { agent_id: agentId }),
     quotaNote: () => undefined,
     signInAnother: (blockId, onSignedIn) =>
-        void openPaneModal(blockId, AnotherAccountLogin, { onSignedIn }, { source: "signin", waits: false }),
+        void openPaneModal(blockId, AnotherAccountLogin, { onSignedIn }, { source: "signin", waits: false, operatorOnly: true }),
     notify: (type, title, message = "") =>
         pushNotification({
             icon: type === "info" ? "fa-check" : "fa-triangle-exclamation",

@@ -166,6 +166,8 @@ zbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] 
 # Agent process tracking (process_tracker::cgroup_linux): ask the systemd user
 # manager for srv's delegated scope. Same zbus 5 the launcher already uses.
 zbus = { version = "5", default-features = false, features = ["tokio"] }
+# NVIDIA's management library, opened at run time for the GPU panel (backend/gpu/nvml.rs); already in the tree.
+libloading = "0.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Trash through NSFileManager ourselves, to learn where each item went, so
@@ -202,6 +204,10 @@ windows = { version = "0.61", features = [
     "Win32_Graphics_Gdi",
     "Win32_Storage_FileSystem",
     "Win32_System_Registry",
+    # The GPU's use and memory for the status bar and its panel (backend/gpu): the performance
+    # counters (PDH) and the adapters DXGI lists to name them. No vendor library, nothing installed.
+    "Win32_System_Performance",
+    "Win32_Graphics_Dxgi",
 ] }
 # Win32 Job Objects for the agent process tracker. Wraps every agent
 # CLI in a job so `CreateProcess` descendants can be enumerated and

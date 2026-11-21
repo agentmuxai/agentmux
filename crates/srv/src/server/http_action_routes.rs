@@ -37,17 +37,18 @@ pub(super) const ALWAYS: &[&str] = &[
     "POST /agentmux/work/media", "POST /api/bus/broadcast", "POST /api/bus/inject", "POST /api/bus/messages/delete",
     "POST /api/bus/register", "POST /api/bus/send", "POST /api/messaging/discord/send",
     "POST /api/messaging/slack/send", "POST /api/messaging/telegram/send", "POST /api/messaging/whatsapp/send",
-    "POST /api/v1/agent/container/caches", "POST /api/v1/agent/create", "POST /api/v1/agent/container/limits", "POST /api/v1/agent/container/update", "POST /api/v1/agent/desktop/authorize",
+    "POST /api/v1/aws/grants/decide", "POST /api/v1/agent/container/caches", "POST /api/v1/agent/create", "POST /api/v1/agent/container/limits", "POST /api/v1/agent/container/update", "POST /api/v1/agent/desktop/authorize",
     "POST /api/v1/agent/desktop/policy", "POST /api/v1/agent/desktop/record", "POST /api/v1/agent/desktop/release",
     "POST /api/v1/agent/dev_server/register", "POST /api/v1/agent/globalmemory/reach",
     "POST /api/v1/agent/globalmemory/remove", "POST /api/v1/agent/globalmemory/revert", "POST /api/v1/agent/globalmemory/write",
     "POST /api/v1/agent/history/reclaim",
+    "POST /api/v1/agent/keep-running",
     "POST /api/v1/agent/remote/op", "POST /agentmux/remote/op",
-    "POST /api/v1/agent/identity/signin/notice", "POST /api/v1/agent/identity/switch", "POST /api/v1/agent/identity/validate", "POST /api/v1/agent/memory/revert",
+    "POST /api/v1/agent/identity/check-limits", "POST /api/v1/agent/identity/signin/notice", "POST /api/v1/agent/identity/switch", "POST /api/v1/agent/identity/validate", "POST /api/v1/agent/memory/revert",
     "POST /api/v1/agent/memory/write", "POST /api/v1/agent/open", "POST /api/v1/agent/open_many", "POST /api/v1/agent/pane/close",
     "POST /api/v1/agent/self/compact", "POST /api/v1/agent/self/fresh", "POST /api/v1/agent/self/mcp-heal", "POST /api/v1/agent/self/ready",
     "POST /api/v1/agent/self/quit", "POST /api/v1/agent/self/upgrade", "POST /api/v1/agent/skill", "POST /api/v1/agent/spawn", "POST /api/v1/agent/spawn_many", "POST /api/v1/agent/status",
-    "POST /api/v1/agent/takeover", "POST /api/v1/bulletin", "POST /api/v1/quota-mode", "POST /api/v1/coord/posts", "POST /api/v1/file/rename", "POST /api/v1/fleet/bulk-stop", "POST /api/v1/github/token", "POST /api/v1/github/push-scan", "POST /api/v1/github/pr-merge",
+    "POST /api/v1/agent/takeover", "POST /api/v1/bulletin", "POST /api/v1/quota-mode", "POST /api/v1/coord/posts", "POST /api/v1/drone/:action", "POST /api/v1/file/rename", "POST /api/v1/fleet/bulk-stop", "POST /api/v1/github/token", "POST /api/v1/github/push-scan", "POST /api/v1/github/pr-merge",
     "POST /api/v1/google/calendar", "POST /api/v1/google/drive", "POST /api/v1/google/gmail", "POST /api/v1/google/grant",
     "POST /api/v1/google/connect", "POST /api/v1/google/connect/status", "POST /api/v1/google/connect/cancel", "POST /api/v1/google/disconnect",
     "POST /api/v1/muxspect/dock/clear", "POST /api/v1/pane/open", "POST /api/v1/pane/title",
@@ -76,6 +77,8 @@ pub(super) const PLUMBING: &[&str] = &[
     "POST /api/v1/host/browser_navigation", "POST /api/v1/host/browser_permission", "POST /api/v1/host/browser_pause", "POST /api/v1/host/browser_popup",
     "POST /api/v1/host/browser_popup_window", "POST /api/v1/host/desktop_request", "POST /api/v1/host/desktop_stop",
     "POST /api/v1/host/google", "POST /api/v1/host/job_templates", "POST /api/v1/host/jobs", "POST /api/v1/host/operator_attest",
+    "POST /api/v1/host/external_attest", "POST /api/v1/host/external_nonce", "POST /api/v1/host/external_revoke",
+    "POST /api/v1/host/activity", "POST /api/v1/host/shutdown", "POST /api/v1/host/notice",
     "POST /api/v1/host/upgrade_request", "POST /api/v1/host/vault", "POST /api/v1/host/widget_approval",
     "POST /api/v1/voice/transcribe",
 ];
@@ -91,6 +94,9 @@ pub(super) const HANDLER: &[&str] = &[
 /// Answers a question or carries a stream; nothing it changes is kept.
 pub(super) const NEVER: &[&str] = &[
     "POST /agentmux/agents/resolve", "POST /agentmux/wps/publish", "POST /api/post-chat-message",
+    // The Audit's read of another channel's own rows, every ten seconds while it is listed: a record of each would
+    // be rows in the Audit it reads.
+    "POST /agentmux/audit/own",
     "POST /api/v1/agent/memory/session-start/ack", "POST /api/v1/agent/memory/session-start/part",
     "POST /api/v1/agent/self/context", "POST /api/v1/agent/self/mcp-beat", "POST /api/v1/agent/self/mcp-health",
     "POST /api/v1/agent/tool-chunk", "POST /api/v1/agent/compaction-started", "POST /api/v1/agent/watch", "POST /api/v1/agent/workers", "POST /api/v1/agent/routes",

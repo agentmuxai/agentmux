@@ -577,6 +577,8 @@ impl Splash {
         // tray each iteration. Declared here, before `main` spawns the
         // supervisor thread, so the tray's `spawn` can rely on it.
         crate::tray::macos::mark_main_pump_available();
+        // Up: an "Updating to <version>" window of the upgrade that started this launcher has done its job.
+        crate::updating_window::signal_new_splash();
         Splash {
             window,
             image_view,
@@ -823,6 +825,8 @@ pub fn prepare_headless_app() {
         send_void(pool, sel(b"drain\0"));
     }
     crate::tray::macos::mark_main_pump_available();
+    // No splash to wait for here: the app is up, so an "Updating to <version>" window can go.
+    crate::updating_window::signal_new_splash();
     crate::log("headless AppKit pump prepared (menu-bar item on, splash disabled)");
 }
 
@@ -926,6 +930,14 @@ unsafe fn dump_window_png(window: id, path: &str) {
 /// pulsed; stage_fields are pre-allocated (label, time) NSTextField pairs
 /// updated live by `update_stage_fields`.
 unsafe fn build_window() -> (id, id, Vec<(id, id)>) {
+    let (window, image_view, stage_fields, _footer) = build_window_with(None, true);
+    (window, image_view, stage_fields)
+}
+
+/// [`build_window`], with the footer's lines given (`None`: the identity strip, `user@host` and the version) and
+/// whether to activate the app, which brings it in front of what the person is doing. Also returns the footer's
+/// labels, so they can be changed.
+unsafe fn build_window_with(footer: Option<&[String]>, activate: bool) -> (id, id, Vec<(id, id)>, Vec<id>) {
     // NSApplication, as an accessory app: no Dock tile (the host sets .regular
     // and owns the single tile). Accessory == 1.
     let app = send(class(b"NSApplication\0"), sel(b"sharedApplication\0"));
@@ -1066,53 +1078,7 @@ unsafe fn build_window() -> (id, id, Vec<(id, id)>) {
 
     send_void_id(backdrop, sel(b"addSubview:\0"), image_view);
 
-    // Footer: native NSTextField labels in the bottom band (muted, centered).
-    // They fade with the window on dismiss (window alpha ramps) and do not
-    // pulse. macOS Y is bottom-up: line[0] (user@host) sits above line[1] (version).
-    {
-        let info = crate::splash_info::SplashInfo::gather();
-        let max_chars = ((SPLASH_W - 24.0) / 7.5) as usize; // ~7.5 px/char at 13px mono
-        let lines = info.footer_lines(max_chars.max(8));
-        let footer_color = {
-            let f: extern "C" fn(id, SEL, f64, f64, f64, f64) -> id =
-                std::mem::transmute(objc_msgSend as *const ());
-            f(
-                class(b"NSColor\0"),
-                sel(b"colorWithSRGBRed:green:blue:alpha:\0"),
-                FOOTER_R,
-                FOOTER_G,
-                FOOTER_B,
-                1.0,
-            )
-        };
-        let font = send_id_f64(class(b"NSFont\0"), sel(b"userFixedPitchFontOfSize:\0"), 13.0);
-        let n = lines.len();
-        for (i, line) in lines.iter().enumerate() {
-            let ly = FOOTER_PAD + (n - 1 - i) as f64 * FOOTER_LINE_H;
-            let rect = CGRect {
-                origin: CGPoint { x: 0.0, y: ly },
-                size: CGSize {
-                    width: SPLASH_W,
-                    height: FOOTER_LINE_H,
-                },
-            };
-            // labelWithString: → a non-editable, borderless, transparent label.
-            let label = send_id(
-                class(b"NSTextField\0"),
-                sel(b"labelWithString:\0"),
-                nsstring(line),
-            );
-            send_void_rect(label, sel(b"setFrame:\0"), rect);
-            send_void_id(label, sel(b"setTextColor:\0"), footer_color);
-            send_void_id(label, sel(b"setFont:\0"), font);
-            // NSTextAlignmentCenter == 1 in the *unified* NSTextAlignment enum
-            // (macOS 10.12+ adopted UIKit's values: Left 0, Center 1, Right 2,
-            // Justified 3, Natural 4). The pre-Sierra macOS value for center was
-            // 2 — using it here right-aligns the footer instead of centering it.
-            send_void_i64(label, sel(b"setAlignment:\0"), 1);
-            send_void_id(backdrop, sel(b"addSubview:\0"), label);
-        }
-    }
+    let footer_labels = add_footer(backdrop, footer);
 
     // Stage-telemetry rows: MAX_STAGE_ROWS pre-allocated (label, time) field
     // pairs between the footer band and the brain region, hidden/empty until
@@ -1154,10 +1120,71 @@ unsafe fn build_window() -> (id, id, Vec<(id, id)>) {
 
     // Bring the app + window up immediately.
     send_void(app, sel(b"finishLaunching\0"));
-    send_void_bool(app, sel(b"activateIgnoringOtherApps:\0"), 1);
+    if activate {
+        send_void_bool(app, sel(b"activateIgnoringOtherApps:\0"), 1);
+    }
     send_void(window, sel(b"orderFrontRegardless\0"));
-    (window, image_view, stage_fields)
+    (window, image_view, stage_fields, footer_labels)
 }
+
+/// The footer: native NSTextField labels in the bottom band (muted, centered), `footer`'s lines or, with none given,
+/// the identity strip. They fade with the window on dismiss (window alpha ramps) and do not pulse. macOS Y is
+/// bottom-up: line[0] (user@host) sits above line[1] (version). Returns the labels, so they can be changed.
+unsafe fn add_footer(backdrop: id, footer: Option<&[String]>) -> Vec<id> {
+    let mut footer_labels: Vec<id> = Vec::new();
+    {
+        let max_chars = ((SPLASH_W - 24.0) / 7.5) as usize; // ~7.5 px/char at 13px mono
+        let lines = match footer {
+            Some(lines) => lines.to_vec(),
+            None => crate::splash_info::SplashInfo::gather_and_log("start").footer_lines(max_chars.max(8)),
+        };
+        let footer_color = {
+            let f: extern "C" fn(id, SEL, f64, f64, f64, f64) -> id =
+                std::mem::transmute(objc_msgSend as *const ());
+            f(
+                class(b"NSColor\0"),
+                sel(b"colorWithSRGBRed:green:blue:alpha:\0"),
+                FOOTER_R,
+                FOOTER_G,
+                FOOTER_B,
+                1.0,
+            )
+        };
+        let font = send_id_f64(class(b"NSFont\0"), sel(b"userFixedPitchFontOfSize:\0"), 13.0);
+        let n = lines.len();
+        for (i, line) in lines.iter().enumerate() {
+            let ly = FOOTER_PAD + (n - 1 - i) as f64 * FOOTER_LINE_H;
+            let rect = CGRect {
+                origin: CGPoint { x: 0.0, y: ly },
+                size: CGSize {
+                    width: SPLASH_W,
+                    height: FOOTER_LINE_H,
+                },
+            };
+            // labelWithString: → a non-editable, borderless, transparent label.
+            let label = send_id(
+                class(b"NSTextField\0"),
+                sel(b"labelWithString:\0"),
+                nsstring(line),
+            );
+            send_void_rect(label, sel(b"setFrame:\0"), rect);
+            send_void_id(label, sel(b"setTextColor:\0"), footer_color);
+            send_void_id(label, sel(b"setFont:\0"), font);
+            // NSTextAlignmentCenter == 1 in the *unified* NSTextAlignment enum
+            // (macOS 10.12+ adopted UIKit's values: Left 0, Center 1, Right 2,
+            // Justified 3, Natural 4). The pre-Sierra macOS value for center was
+            // 2 — using it here right-aligns the footer instead of centering it.
+            send_void_i64(label, sel(b"setAlignment:\0"), 1);
+            send_void_id(backdrop, sel(b"addSubview:\0"), label);
+            footer_labels.push(label);
+        }
+    }
+    footer_labels
+}
+
+// The "Updating to <version>" window of a `.dmg` upgrade's hand-off: its own file.
+mod updating;
+pub use updating::run_updating_window;
 
 #[cfg(test)]
 mod tests {

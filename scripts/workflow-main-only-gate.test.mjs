@@ -94,12 +94,16 @@ describe("build-server-package.yml", () => {
     });
 });
 
+// The macOS build's gate is a job of its own (see workflow-macos-signing-split.test.mjs): it runs no code from the
+// checkout, and the jobs that build and sign wait for it.
 describe("build-macos.yml", () => {
-    it("keeps its gate before any step that runs the checkout's code", () => {
-        const steps = stepsOf(read("build-macos.yml"));
-        const gate = steps.findIndex(isGate);
-        expect(gate).toBeGreaterThan(-1);
-        expect(steps.findIndex((s, i) => i !== gate && runsCheckoutCode(s))).toBeGreaterThan(gate);
+    it("has its gate in a job that runs no step of the checkout's code, which the build waits for", () => {
+        const source = read("build-macos.yml");
+        const steps = stepsOf(source, "gate");
+        expect(steps.filter(isGate)).toHaveLength(1);
+        expect(steps.filter((s) => runsCheckoutCode(s))).toHaveLength(0);
+        expect(steps.some(isBroker)).toBe(false);
+        expect(source).toMatch(/^ {2}build:[\s\S]*?^ {4}needs: gate\s*$/m);
     });
 });
 
@@ -111,7 +115,7 @@ describe("the tag branch of the gate", () => {
         ["build-linux.yml", "build"],
         ["build-windows.yml", "build"],
         ["build-server-package.yml", "package"],
-        ["build-macos.yml", "build"],
+        ["build-macos.yml", "gate"],
     ];
     const tagBranch = ([file, job]) => {
         const gate = stepsOf(read(file), job).find(isGate);

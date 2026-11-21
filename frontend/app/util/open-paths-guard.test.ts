@@ -21,6 +21,7 @@ const FRONTEND_ROOT = join(__dirname, "..", "..");
  */
 const OPENS_BY_THEMSELVES: Record<string, string> = {
     "app/element/link-destinations.ts": "a link opens a file, folder or URL, docked or floating",
+    "app/element/open-message-file.ts": "opens a file of a container agent's message, which srv finds in the agent's own folders",
     "app/store/agent-runtime-live.ts": "opens the named agent's own pane",
     "app/store/open-floating.ts": "the float modifier: always a new floating window",
     "app/util/open-config-file.ts": "opens a config file in the Editor",

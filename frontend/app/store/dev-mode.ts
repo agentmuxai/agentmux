@@ -27,12 +27,12 @@ export function devModeOn(): boolean {
     return devModeValue(getSettingsKeyAtom(DEV_MODE_KEY)(), isDev());
 }
 
-/** Writes the setting for every window. */
-export function setDevMode(on: boolean): void {
-    void RpcApi.SetConfigCommand(TabRpcClient, { [DEV_MODE_KEY]: on });
+/** Writes the setting for every window. Hands back the write, for a row that shows whether it was saved. */
+export function setDevMode(on: boolean): Promise<unknown> {
+    return Promise.resolve(RpcApi.SetConfigCommand(TabRpcClient, { [DEV_MODE_KEY]: on }));
 }
 
 /** Palette command. */
 export function toggleDevMode(): void {
-    setDevMode(!devModeOn());
+    void setDevMode(!devModeOn());
 }

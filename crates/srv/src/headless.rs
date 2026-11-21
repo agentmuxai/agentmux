@@ -113,7 +113,12 @@ pub fn prepare_env() -> Result<Option<PathBuf>, String> {
     // aren't valid UTF-8 arrive intact (Codex P2 on #3893).
     let cli = <CliArgs as clap::Parser>::try_parse_from(std::env::args_os()).map_err(|e| e.to_string())?;
     // Checked before anything is written, so a typo leaves no lock or key behind.
-    let web = web_options(cli.frontend_dir.clone(), &cli.allowed_origins, cli.public_origin.as_deref())?;
+    let origins = per_run_origin(&cli.allowed_origins, std::env::var(ALLOWED_ORIGIN_ENV).ok().as_deref())?;
+    let web = web_options(cli.frontend_dir.clone(), &origins, cli.public_origin.as_deref())?;
+    // The external host, if there is one, is registered here: once, before srv serves a connection or starts an agent.
+    if let Some(file) = &cli.external_host_key_file {
+        crate::server::external_host::register_from_file(file)?;
+    }
     // A key srv did not generate is held to a floor when a browser can sign in: checked before anything is written.
     let serves_ui = web.frontend_dir.is_some();
     check_env_key(env_key().as_deref(), serves_ui)?;
@@ -189,6 +194,35 @@ fn effective_data_dir(wavedata: Option<&Path>, resolved: &Path) -> PathBuf {
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(resolved)
         .to_path_buf()
+}
+
+/// The environment variable a launcher that starts srv per run gives its one allowed origin in (a hosted
+/// workspace is served at a host of its own), as `--allowed-origin` would.
+pub const ALLOWED_ORIGIN_ENV: &str = "AGENTMUX_ALLOWED_ORIGIN";
+
+/// The origins to allow once `AGENTMUX_ALLOWED_ORIGIN` is taken into account. Unset or empty: `--allowed-origin`
+/// as given. Set: exactly that one origin, and nothing else (so a request from any other origin, including one
+/// an earlier launch allowed, is refused). It must be one `https` origin (a host, an optional port, no path,
+/// no wildcard, no list), and a `--allowed-origin` given too must name the same origin: srv refuses to start
+/// on a launch whose two forms disagree, rather than pick one.
+fn per_run_origin(cli: &[String], env: Option<&str>) -> Result<Vec<String>, String> {
+    let Some(raw) = env.map(str::trim).filter(|v| !v.is_empty()) else {
+        return Ok(cli.to_vec());
+    };
+    let name = ALLOWED_ORIGIN_ENV;
+    if raw.contains(['*', ',', ' ']) {
+        return Err(format!("{name} {raw:?}: one origin, with no wildcard or list"));
+    }
+    let origin = normalize_origin(raw).map_err(|e| format!("{name} {raw:?}: {e}"))?;
+    if !origin.starts_with("https://") {
+        return Err(format!("{name} {raw:?}: must be an https origin"));
+    }
+    for given in cli {
+        if normalize_origin(given).map_err(|e| format!("--allowed-origin {given:?}: {e}"))? != origin {
+            return Err(format!("--allowed-origin {given:?} and {name} {raw:?} name different origins"));
+        }
+    }
+    Ok(vec![origin])
 }
 
 fn web_options(frontend_dir: Option<PathBuf>, origins: &[String], public_origin: Option<&str>) -> Result<WebOptions, String> {
@@ -409,6 +443,15 @@ fn write_generated_key(dir: &Path) -> Result<(String, PathBuf), String> {
 /// with `SO_EXCLUSIVEADDRUSE` the address is this server's alone and any other bind of it is refused, whatever it asks for.
 /// Elsewhere the system already refuses a second bind.
 pub(crate) async fn bind_exclusive(addr: &str) -> std::io::Result<tokio::net::TcpListener> {
+    let listener = bind_exclusive_to(addr).await?;
+    // A page in the streamed browser may never connect to a port this server listens on.
+    if let Ok(local) = listener.local_addr() {
+        crate::server::streamed_browser::note_own_port(local.port());
+    }
+    Ok(listener)
+}
+
+async fn bind_exclusive_to(addr: &str) -> std::io::Result<tokio::net::TcpListener> {
     #[cfg(windows)]
     {
         use std::os::windows::io::AsRawSocket;
@@ -722,5 +765,55 @@ mod tests {
         acquire_data_dir_lock(dir.path()).unwrap();
         // Anyone else is refused while it's held.
         assert!(MuxLock::acquire_at(&dir.path().join(SRV_DATA_LOCK_FILE)).is_err());
+    }
+}
+
+#[cfg(test)]
+mod per_run_origin_tests {
+    use super::*;
+
+    fn v(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn without_the_variable_the_flag_is_as_given() {
+        assert_eq!(per_run_origin(&v(&["https://a.example"]), None), Ok(v(&["https://a.example"])));
+        assert_eq!(per_run_origin(&v(&["https://a.example"]), Some("  ")), Ok(v(&["https://a.example"])));
+        assert_eq!(per_run_origin(&[], None), Ok(vec![]));
+    }
+
+    #[test]
+    fn the_variable_alone_allows_that_origin_and_a_request_from_the_old_shared_one_is_refused() {
+        let allowed = per_run_origin(&[], Some("https://w1.web.example")).unwrap();
+        assert_eq!(allowed, v(&["https://w1.web.example"]));
+        assert!(origin_in("https://w1.web.example", &allowed));
+        assert!(origin_in("HTTPS://W1.web.example/", &allowed), "every spelling of the same origin");
+        assert!(!origin_in("https://app.example", &allowed), "the old shared origin");
+        assert!(!origin_in("https://w2.web.example", &allowed), "another workspace's");
+    }
+
+    #[test]
+    fn the_flag_and_the_variable_must_agree_or_srv_does_not_start() {
+        assert_eq!(per_run_origin(&v(&["https://w1.web.example/"]), Some("https://W1.web.example")), Ok(v(&["https://w1.web.example"])));
+        let e = per_run_origin(&v(&["https://app.example"]), Some("https://w1.web.example")).unwrap_err();
+        assert!(e.contains("different origins"), "{e}");
+        assert!(per_run_origin(&v(&["https://w1.web.example", "https://app.example"]), Some("https://w1.web.example")).is_err());
+    }
+
+    #[test]
+    fn the_variable_is_one_https_origin_and_nothing_looser() {
+        for bad in [
+            "http://w1.web.example",
+            "https://*.web.example",
+            "https://w1.web.example,https://w2.web.example",
+            "https://w1.web.example https://w2.web.example",
+            "https://w1.web.example/path",
+            "https://user@w1.web.example",
+            "w1.web.example",
+            "https://",
+        ] {
+            assert!(per_run_origin(&[], Some(bad)).is_err(), "{bad}");
+        }
     }
 }

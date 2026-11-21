@@ -67,6 +67,19 @@ pub fn claude_startup_files(cwd: &Path, config_dir: Option<&Path>, home: Option<
     claude_startup_files_with_ancestors(cwd, config_dir, home, cwd.ancestors())
 }
 
+/// [`claude_startup_files`] for a host agent. In a folder a container agent can write
+/// (`mcp_folder_rule`), the CLI is started with AgentMux's own MCP config and not the folder's
+/// `.mcp.json`, so the servers listed are that config's.
+pub fn host_startup_files(cwd: &Path, config_dir: Option<&Path>, home: Option<&Path>) -> Vec<StartupFile> {
+    let mut files = claude_startup_files(cwd, config_dir, home);
+    let folder = cwd.to_string_lossy();
+    if crate::backend::mcp_folder_rule::holds_in(&folder) {
+        files.retain(|f| f.role != "mcp_servers");
+        files.extend(mcp_item(&crate::backend::mcp_config_file::host_config_path(&folder), home, None));
+    }
+    files
+}
+
 pub fn claude_startup_files_with_ancestors<'a>(
     cwd: &Path,
     config_dir: Option<&Path>,
@@ -113,7 +126,7 @@ fn startup_files_confined<'a>(
     if let Some(skills) = skills_item(cwd, home, confine) {
         out.push(skills);
     }
-    if let Some(mcp) = mcp_item(cwd, home, confine) {
+    if let Some(mcp) = mcp_item(&cwd.join(".mcp.json"), home, confine) {
         out.push(mcp);
     }
     out
@@ -270,10 +283,10 @@ fn skills_item(cwd: &Path, home: Option<&Path>, confine: Option<&Path>) -> Optio
     })
 }
 
-/// The MCP servers in `cwd/.mcp.json`, by name only: the file carries the
+/// The MCP servers in the config at `path`, by name only: the file carries the
 /// agent's signing keys, so its text never leaves this function.
-fn mcp_item(cwd: &Path, home: Option<&Path>, confine: Option<&Path>) -> Option<StartupFile> {
-    let path = cwd.join(".mcp.json");
+fn mcp_item(path: &Path, home: Option<&Path>, confine: Option<&Path>) -> Option<StartupFile> {
+    let path = path.to_path_buf();
     let json: serde_json::Value = serde_json::from_str(&crate::backend::confined_read::read_to_string_within(&path, confine)?).ok()?;
     let names: Vec<&str> = json.get("mcpServers")?.as_object()?.keys().map(String::as_str).collect();
     if names.is_empty() {
@@ -408,6 +421,27 @@ mod tests {
         std::os::unix::fs::symlink(outside.path(), ws.join(".claude/commands")).unwrap();
         let files = workspace_startup_files(&ws);
         assert!(files.iter().all(|f| f.role != "skills"), "nothing outside the workspace is counted");
+    }
+
+    /// In a folder a container agent has run in, a host agent is started with AgentMux's own config: the
+    /// servers listed are that file's, not the ones the folder's `.mcp.json` names.
+    #[test]
+    fn a_host_agent_in_a_container_agents_folder_lists_the_servers_it_is_given() {
+        let (data, was) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let dir = was.path().to_string_lossy().into_owned();
+        std::fs::write(was.path().join(".mcp.json"), r#"{"mcpServers":{"agentmux":{"command":"x"},"of-the-folder":{"command":"y"}}}"#).unwrap();
+        crate::backend::mcp_config_file::with_data_home(data.path(), || {
+            let listed = |files: Vec<StartupFile>| files.into_iter().filter(|f| f.role == "mcp_servers").map(|f| (f.name, f.path)).collect::<Vec<_>>();
+            let before = listed(host_startup_files(was.path(), None, None));
+            assert!(before.len() == 1 && before[0].0.contains("of-the-folder") && before[0].1 == was.path().join(".mcp.json"), "{before:?}");
+
+            crate::backend::mcp_folder_rule::mark(&dir);
+            assert_eq!(listed(host_startup_files(was.path(), None, None)), Vec::new(), "nothing of the folder's file while AgentMux's is not written");
+            let ours = crate::backend::mcp_config_file::host_config_path(&dir);
+            crate::backend::mcp_config_file::write_relocated(&ours, r#"{"mcpServers":{"agentmux":{"command":"x"}}}"#).unwrap();
+            let after = listed(host_startup_files(was.path(), None, None));
+            assert!(after.len() == 1 && after[0].1 == ours && !after[0].0.contains("of-the-folder") && after[0].0.contains("agentmux"), "{after:?}");
+        });
     }
 
     #[test]

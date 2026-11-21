@@ -337,6 +337,7 @@ function WhisperRows(p: {
     return (
         <>
             <SettingRow
+                settingKey="voice:whisperCliPath"
                 id={RECORDING_SETTINGS.whisperCliPath.id}
                 label={RECORDING_SETTINGS.whisperCliPath.label}
                 control={
@@ -348,6 +349,7 @@ function WhisperRows(p: {
                 }
             />
             <SettingRow
+                settingKey="voice:whisperModel"
                 id={RECORDING_SETTINGS.model.id}
                 label={RECORDING_SETTINGS.model.label}
                 control={
@@ -375,6 +377,7 @@ function WhisperRows(p: {
             />
             <Show when={p.modelChoice() === "custom"}>
                 <SettingRow
+                    settingKey="voice:whisperModelPath"
                     id={RECORDING_SETTINGS.modelFilePath.id}
                     indent
                     label={RECORDING_SETTINGS.modelFilePath.label}
@@ -401,6 +404,7 @@ function EngineRows(p: {
         <>
             <SectionHeader label={t("settings.recording.group.transcriptionEngine")} />
             <SettingRow
+                settingKey="voice:engine"
                 id={RECORDING_SETTINGS.engine.id}
                 label={RECORDING_SETTINGS.engine.label}
                 control={
@@ -417,6 +421,7 @@ function EngineRows(p: {
 
             <Show when={p.engine() === "groq"}>
                 <SettingRow
+                    settingKey="voice:groqApiKey"
                     id={RECORDING_SETTINGS.groqApiKey.id}
                     label={RECORDING_SETTINGS.groqApiKey.label}
                     control={
@@ -443,6 +448,7 @@ function MicrophoneRows(p: { s: SettingsFn; devices: Accessor<MediaDeviceInfo[]>
         <>
             <SectionHeader label={t("settings.recording.group.microphone")} />
             <SettingRow
+                settingKey="voice:inputDeviceId"
                 id={RECORDING_SETTINGS.inputDevice.id}
                 label={RECORDING_SETTINGS.inputDevice.label}
                 control={
@@ -518,6 +524,7 @@ export function RecordingSection(): JSX.Element {
     return (
         <div class="settings-section-body">
             <SettingRow
+                settingKey="voice:enabled"
                 id={RECORDING_SETTINGS.enableVoiceInput.id}
                 label={RECORDING_SETTINGS.enableVoiceInput.label}
                 description={RECORDING_SETTINGS.enableVoiceInput.description}

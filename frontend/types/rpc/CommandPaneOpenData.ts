@@ -109,6 +109,18 @@ reuse_editor_pane?: boolean,
  */
 target_block_id?: string, 
 /**
+ * `Some(true)`: the person clicked a link in a message. A path in a folder a container agent can
+ * write then opens as the agent's own `pane.open` shows it: a file as a read-only copy, a folder in a
+ * Files pane confined to it. Any other path opens as asked.
+ */
+from_link?: boolean, 
+/**
+ * The block_id of a container agent's pane whose message the person clicked a file in (an inline picture
+ * or video). The path is then taken as the agent wrote it and opened only from the agent's own folders, as
+ * a read-only copy: a path anywhere else is refused with the reason. For any other pane it is ignored.
+ */
+message_of?: string, 
+/**
  * `view: "editor"` only: the opened image or video tab follows newer
  * matching files in its folder (a render pipeline's output), as the
  * retired Media pane did. Set by `OpenMedia` and `view: "media"`.

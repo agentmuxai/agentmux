@@ -259,6 +259,9 @@ fn reactive_routes() -> Router<AppState> {
     Router::new()
         .route("/agentmux/reactive/agents", get(reactive::handle_reactive_agents))
         .route("/agentmux/reactive/audit", get(reactive::handle_reactive_audit))
+        // What this channel keeps in its own audit file, for another channel on this computer listing every channel
+        // (SPEC_AUDIT_LIVE_LOG_OF_EVERY_AGENT_ACTION_2026_11_03.md §3.6 point 5).
+        .route("/agentmux/audit/own", post(app_api::audit_query::handle_audit_own))
         .route("/agentmux/reactive/register", post(reactive::handle_reactive_register))
         // Holder side of a takeover — full auth only, never LAN (spec §4.6).
         .route("/agentmux/agent/release", post(agent_takeover::handle_agent_release))
@@ -337,12 +340,17 @@ fn agent_routes(state: &AppState) -> Router<AppState> {
         // A sensitive operation: the agent asks, the super agent decides, the person can veto
         // (SPEC_SUPER_AGENT_2026_10_25.md).
         .route("/api/v1/sensitive/:action", post(sensitive_handlers::handle_sensitive))
+        // The Drone tool: an agent lists and reads the drones here, fires one with a payload and reads its
+        // runs; a fire is recorded as that agent (SPEC_DRONE_REAL_WORLD_JOBS_2026_11_11.md §6.5).
+        .route("/api/v1/drone/:action", post(drone_agent::handle_drone))
         // Presence claims and posts to a repository's coordination channel
         // (SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15.md); reading is open.
         .route("/api/v1/work-claims", post(work_claims_handlers::handle_claim_work))
         .route("/api/v1/work-claims/release", post(work_claims_handlers::handle_release_work))
         // Presence status: the agent's own one-line account of what it is doing now.
         .route("/api/v1/agent/status", post(agent_status_handlers::handle_agent_status))
+        // An agent asks for a pending workspace stop to be put back (recorded as that agent).
+        .route("/api/v1/agent/keep-running", post(app_api::workspace_stop::handle_keep_running))
         .route("/api/v1/coord/posts", post(coord_channel_handlers::handle_post_to_channel))
         .route("/api/v1/bulletin", post(bulletin_handlers::handle_post_bulletin).get(bulletin_handlers::handle_read_bulletin))
         .route("/api/v1/quota-mode", post(quota_mode_handler::handle_set_quota_mode).get(quota_mode_handler::handle_get_quota_mode))
@@ -722,8 +730,21 @@ fn memory_and_identity_routes() -> Router<AppState> {
         .route("/api/v1/agent/identity/accounts", get(handle_agent_identity_accounts))
         .route("/api/v1/agent/identity/validate", post(handle_agent_identity_validate))
         .route("/api/v1/agent/identity/switch", post(handle_agent_identity_switch))
+        .route("/api/v1/agent/identity/check-limits", post(handle_agent_identity_check_limits))
         .route("/api/v1/agent/identity/signin/notice", post(signin_notice::handle_agent_signin_notice))
         .route("/api/v1/agent/skill", post(handle_agent_skill))
+}
+
+/// A headless server's registered external host: it vouches for a connection, and asks what the workspace is doing,
+/// for a graceful shutdown and for a stop notice. Every one answers 404 unless a host is registered.
+fn external_host_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/v1/host/external_nonce", post(super::external_host::handle_nonce))
+        .route("/api/v1/host/external_attest", post(super::external_host::handle_attest))
+        .route("/api/v1/host/external_revoke", post(super::external_host::handle_revoke))
+        .route("/api/v1/host/activity", post(super::host_control::handle_activity))
+        .route("/api/v1/host/shutdown", post(super::host_control::handle_shutdown))
+        .route("/api/v1/host/notice", post(super::host_control::handle_notice))
 }
 
 /// UI automation, the browser pane and the host relays.
@@ -783,6 +804,7 @@ fn ui_and_host_routes() -> Router<AppState> {
         .route("/api/v1/host/desktop_stop", post(app_api::desktop::handle_host_stop))
         // The host vouches for the AgentMux window's websocket connection.
         .route("/api/v1/host/operator_attest", post(super::operator_proof::handle_host_attest))
+        .merge(external_host_routes())
         .route("/api/v1/host/browser_navigation", post(crate::server::browser_allowlist::handle_host_browser_navigation))
         .route("/api/v1/host/browser_dialog", post(crate::server::browser_dialog::handle_host_browser_dialog))
         .route("/api/v1/host/browser_permission", post(crate::server::browser_permission::handle_host_browser_permission))
@@ -814,6 +836,8 @@ fn ui_and_host_routes() -> Router<AppState> {
         .route("/api/v1/agent/remote/op", post(super::remote_ops::send::handle_agent_remote_op))
         .route("/api/v1/app/connectivity", get(app_api::connectivity::handle_status))
         .route("/api/v1/app/health", get(super::remote_ops::app_ops::handle_health))
+        // This workspace's pending stop, for any agent to read.
+        .route("/api/v1/app/workspace", get(app_api::workspace_stop::handle_workspace))
         .route("/api/v1/app/logs", get(super::remote_ops::log_ops::handle_local_logs))
         // The record of AgentMux's own size over weeks (SPEC_LONG_RUNNING_ZERO_DEGRADATION §6).
         .route("/api/v1/app/record", get(app_api::record_read::handle_record))
@@ -852,6 +876,9 @@ fn agent_self_and_fleet_routes() -> Router<AppState> {
         // A container agent's `gh pr merge`, run by the host's gh-agent: the container's own token cannot write contents.
         .route("/api/v1/github/pr-merge", post(app_api::pr_merge::handle_pr_merge))
         .route("/api/v1/aws/credentials", post(app_api::aws_credentials::handle_aws_credentials))
+        // The grants a host shares with its container agents: which are in force, and the answer to a new or wider one.
+        .route("/api/v1/aws/grants", get(app_api::aws_grants::handle_aws_grants))
+        .route("/api/v1/aws/grants/decide", post(app_api::aws_grants::handle_aws_grant_decide))
         // An agent sets or clears seats, several at once; recorded under its name.
         .merge(agent_definition_routes())
         // An agent asks for the shared pane-history store's free space to be given back at the next

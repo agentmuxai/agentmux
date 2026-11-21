@@ -143,13 +143,18 @@ export function spendChipTone(today: SpendToday): "neutral" | "warn" | "error" {
     return used >= 1 ? "error" : used >= 0.8 ? "warn" : "neutral";
 }
 
-/** What the chip's tooltip says. `outOfCredits`: the route's balance stopped the agent, not its cap (#47477). */
-export function spendChipTitle(today: SpendToday, outOfCredits = false): string {
+/**
+ * What the chip's tooltip says. `outOfCredits`: the route's balance stopped the agent, not its cap (#47477).
+ * `editable`: a click on the chip opens the Spend cap panel.
+ */
+export function spendChipTitle(today: SpendToday, outOfCredits = false, editable = false): string {
     if (outOfCredits) {
         return `What this agent has used through its model route today (UTC). It is stopped because the route has no credits left, not by a cap: add credits to the route's key in the provider's account.`;
     }
-    if (today.cap == null) return "What this agent has used through its model route today (UTC). It has no daily cap.";
-    return `What this agent has used through its model route today (UTC), against its daily cap of ${usd(today.cap)}. The gateway stops its requests at the cap; its leader or you can raise it.`;
+    const used = "What this agent has used today (UTC) through AgentMux's model gateway, on a model route or an API key.";
+    const change = editable ? " Click to change its cap." : "";
+    if (today.cap == null) return `${used} It has no daily cap.${change}`;
+    return `${used} Its daily cap is ${usd(today.cap)}: the gateway stops its requests at the cap, and its leader or you can raise it.${change}`;
 }
 
 /** The card's title: "Stopped: this agent used $20 of its $20 today." */
@@ -179,12 +184,12 @@ export function raisedCap(cap: number): number {
 
 /** Sets the agent's daily cap (null: no cap). Rejects with srv's reason. */
 export async function setSpendCap(blockId: string, cap: number | null): Promise<void> {
-    await RpcApi.AgentSpendCommand(TabRpcClient, { blockid: blockId, action: "set", cap_usd: cap });
+    await RpcApi.AgentSpendCommand(TabRpcClient, { blockid: blockId, agent: null, action: "set", cap_usd: cap });
 }
 
 /** Zeroes today's figure. Rejects with srv's reason. */
 export async function resetSpendToday(blockId: string): Promise<void> {
-    await RpcApi.AgentSpendCommand(TabRpcClient, { blockid: blockId, action: "reset", cap_usd: null });
+    await RpcApi.AgentSpendCommand(TabRpcClient, { blockid: blockId, agent: null, action: "reset", cap_usd: null });
 }
 
 /** Takes the card off the pane; the stop stays. Best effort. */

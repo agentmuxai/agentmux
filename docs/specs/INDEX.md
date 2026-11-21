@@ -253,11 +253,20 @@ than none. Add the line when you touch one and know which area it belongs to.
 
 | Spec | Title | Status | Date | Replaces / replaced by |
 |---|---|---|---|---|
+| [`SPEC_SETTINGS_WIDE_PANE_COLUMNS_2026_11_20`](SPEC_SETTINGS_WIDE_PANE_COLUMNS_2026_11_20.md) | SPEC: Settings fills a wide pane in several columns of readable width | implemented | 2026-11-20 |  |
+| [`SPEC_SKILLS_B6_PORTABLE_SKILL_FILES_2026_11_20`](SPEC_SKILLS_B6_PORTABLE_SKILL_FILES_2026_11_20.md) | Spec: Skills B6, portable skill files for non-Claude agents | implemented | 2026-11-20 |  |
+| [`SPEC_WEBSITE_DOCS_MEDIA_REFRESH_2026_11_20`](SPEC_WEBSITE_DOCS_MEDIA_REFRESH_2026_11_20.md) | Spec: website and docs media refresh: crisp screenshots and workflow videos, shot together with the video series | active | 2026-11-20 |  |
+| [`SPEC_CONNECTORS_ONE_LIST_2026_11_19`](SPEC_CONNECTORS_ONE_LIST_2026_11_19.md) | Spec: Connectors is one list, one connector per line, details on click, open at startup | active | 2026-11-19 |  |
+| [`SPEC_CONTAINER_AGENT_PERSISTENT_CONTROLLER_2026_11_19`](SPEC_CONTAINER_AGENT_PERSISTENT_CONTROLLER_2026_11_19.md) | Spec: a container agent runs as one long-lived process, like a native agent | draft | 2026-11-19 |  |
+| [`SPEC_PICKED_COLOUR_IS_THE_COLOUR_SEEN_2026_11_18`](SPEC_PICKED_COLOUR_IS_THE_COLOUR_SEEN_2026_11_18.md) | SPEC: the colour you pick is the colour you see (tabs first), with the filters and overlays audited | active | 2026-11-18 |  |
+| [`SPEC_COMMAND_PALETTE_TOP_CENTRE_2026_11_17`](SPEC_COMMAND_PALETTE_TOP_CENTRE_2026_11_17.md) | Command palette: top centre, plain rows, every shortcut shown | active | 2026-11-17 |  |
+| [`SPEC_EDITOR_TAB_REVEAL_IN_FILE_MANAGER_2026_11_17`](SPEC_EDITOR_TAB_REVEAL_IN_FILE_MANAGER_2026_11_17.md) | SPEC: Right-click an Editor document tab to show the file in the computer's file manager | implemented | 2026-11-17 |  |
 | [`SPEC_MEMORY_DELIVERY_INDEX_NOT_FULL_TEXT_2026_11_17`](SPEC_MEMORY_DELIVERY_INDEX_NOT_FULL_TEXT_2026_11_17.md) | Spec: Memory after a compaction or a rebuilt session: an index of Personal Memory, nothing sent twice, nothing cut silently | active | 2026-11-17 |  |
 | [`SPEC_MENU_SURFACES_STAND_OUT_2026_11_17`](SPEC_MENU_SURFACES_STAND_OUT_2026_11_17.md) | Spec: menus that stand out from the background, in every theme | implemented | 2026-11-17 |  |
 | [`SPEC_AGENT_PANE_API_KEY_ACCOUNT_SWITCH_2026_11_16`](SPEC_AGENT_PANE_API_KEY_ACCOUNT_SWITCH_2026_11_16.md) | Spec: an Anthropic API key as an account in the agent pane's menu (first slice) | active | 2026-11-16 |  |
 | [`SPEC_EDITOR_TREE_AND_EDITOR_SEPARATE_ZOOM_2026_11_16`](SPEC_EDITOR_TREE_AND_EDITOR_SEPARATE_ZOOM_2026_11_16.md) | SPEC: the Editor's file tree and the editor zoom separately | active | 2026-11-16 |  |
 | [`SPEC_HEADLESS_RENAME_AND_PER_PLATFORM_2026_11_16`](SPEC_HEADLESS_RENAME_AND_PER_PLATFORM_2026_11_16.md) | Spec: AgentMux Headless: one name for the server package, offered next to Standard on Windows, macOS and Linux (task #2598, build #2599) | active | 2026-11-16 |  |
+| [`SPEC_KANBAN_CUSTOM_STAGES_2026_11_16`](SPEC_KANBAN_CUSTOM_STAGES_2026_11_16.md) | Spec: the person sets their own Kanban stages (number, names, colour) in Settings, opened from a cog on the board | active | 2026-11-16 |  |
 | [`SPEC_LONG_RUNNING_ZERO_DEGRADATION_2026_11_16`](SPEC_LONG_RUNNING_ZERO_DEGRADATION_2026_11_16.md) | Spec: hour 2,000 is as fast as hour 1: no degradation over a session's life, with budgets and local telemetry that find a slow decline | active | 2026-11-16 |  |
 | [`SPEC_SHARED_PALETTE_12_HUES_BLACK_WHITE_2026_11_16`](SPEC_SHARED_PALETTE_12_HUES_BLACK_WHITE_2026_11_16.md) | SPEC: the shared palette becomes 12 evenly spaced hues plus Black and White (14 slots, down from 16) | active | 2026-11-16 |  |
 | [`SPEC_VAULT_AGENTS_ENTER_CREDENTIALS_WHEREVER_ASKED_2026_11_16`](SPEC_VAULT_AGENTS_ENTER_CREDENTIALS_WHEREVER_ASKED_2026_11_16.md) | Spec: an agent can have a Vault credential entered wherever one is asked for, and never sees it | active | 2026-11-16 |  |
@@ -265,6 +274,7 @@ than none. Add the line when you touch one and know which area it belongs to.
 | [`SPEC_RELEASE_SSHSIG_SECOND_SIGNATURE_2026_11_15`](SPEC_RELEASE_SSHSIG_SECOND_SIGNATURE_2026_11_15.md) | Spec: a second signature of each release's envelope, in SSH signature form, so a stock Mac can check it | active | 2026-11-15 |  |
 | [`SPEC_REVIEWS_PANE_2026_11_15`](SPEC_REVIEWS_PANE_2026_11_15.md) | Spec: a Reviews pane, every task's pull request and its review state in one viewer | active | 2026-11-15 |  |
 | [`SPEC_STATUS_BAR_COMPACT_SUMMARY_AND_VAULT_REQUESTS_2026_11_15`](SPEC_STATUS_BAR_COMPACT_SUMMARY_AND_VAULT_REQUESTS_2026_11_15.md) | Spec: one compact status bar summary, and Vault requests that notify there | active | 2026-11-15 |  |
+| [`SPEC_STATUS_BAR_GPU_PANEL_2026_11_15`](SPEC_STATUS_BAR_GPU_PANEL_2026_11_15.md) | Spec: the status bar's "GFX HW" item opens a GPU panel (use and memory, total and per process) | active | 2026-11-15 | replaces [`gpu-and-extended-system-metrics`](gpu-and-extended-system-metrics.md) |
 | [`SPEC_STREAMED_BROWSER_PANE_DEMO_2026_11_15`](SPEC_STREAMED_BROWSER_PANE_DEMO_2026_11_15.md) | Spec: a streamed Browser pane in the web UI of a headless AgentMux server (task #18045, the demo) | active | 2026-11-15 |  |
 | [`SPEC_VAULT_LINKED_ENTRIES_FLEET_VAULT_AND_BATCH_IMPORT_2026_11_15`](SPEC_VAULT_LINKED_ENTRIES_FLEET_VAULT_AND_BATCH_IMPORT_2026_11_15.md) | Spec: The Vault as the central index of keys: linked entries, a Fleet Vault, and bulk import with one approval per batch | active | 2026-11-15 |  |
 | [`SPEC_CONNECTORS_EVERY_WAY_TO_CONNECT_2026_11_14`](SPEC_CONNECTORS_EVERY_WAY_TO_CONNECT_2026_11_14.md) | Spec: Connectors show every way to connect each provider, with plain explanations | active | 2026-11-14 |  |
@@ -1479,7 +1489,7 @@ than none. Add the line when you touch one and know which area it belongs to.
 | [`frontend-reducer-architecture-2026-05-03`](frontend-reducer-architecture-2026-05-03.md) | Frontend Reducer Architecture — spec roadmap | superseded |  | replaced by [`frontend-reducer-conventions-2026-05-03`](frontend-reducer-conventions-2026-05-03.md) |
 | [`frontend-reducer-conventions-2026-05-03`](frontend-reducer-conventions-2026-05-03.md) | Frontend Reducer Conventions | living |  | replaces [`frontend-reducer-architecture-2026-05-03`](frontend-reducer-architecture-2026-05-03.md), [`frontend-reducer-implementation-plan-2026-05-03`](frontend-reducer-implementation-plan-2026-05-03.md) |
 | [`frontend-reducer-implementation-plan-2026-05-03`](frontend-reducer-implementation-plan-2026-05-03.md) | Frontend Reducer Implementation Plan | superseded |  | replaced by [`frontend-reducer-conventions-2026-05-03`](frontend-reducer-conventions-2026-05-03.md) |
-| [`gpu-and-extended-system-metrics`](gpu-and-extended-system-metrics.md) | Spec: GPU Monitoring & Extended System Metrics | proposed |  |  |
+| [`gpu-and-extended-system-metrics`](gpu-and-extended-system-metrics.md) | Spec: GPU Monitoring & Extended System Metrics | superseded |  | replaced by [`SPEC_STATUS_BAR_GPU_PANEL_2026_11_15`](SPEC_STATUS_BAR_GPU_PANEL_2026_11_15.md) |
 | [`hostname-popover`](hostname-popover.md) | Hostname Popover — Network & Instance Info | proposed |  |  |
 | [`identity-implementation-plan`](identity-implementation-plan.md) | Identity Pane — Implementation Plan (Phase 1) | all |  |  |
 | [`instance-indicator`](instance-indicator.md) | Spec: Window Instance Indicator | draft |  |  |

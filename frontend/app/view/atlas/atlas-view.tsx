@@ -18,6 +18,7 @@ import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { openAgentInActiveTab, startAgent } from "@/app/store/agent-runtime-live";
 import { revealBlock } from "@/app/util/reveal-block";
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
+import { ByKey } from "./atlas-by-key";
 import { SwarmFilterBar } from "../swarm/swarm-filter-bar";
 import { CardFacts } from "./atlas-card-facts";
 import { inContainer } from "./atlas-containers";
@@ -307,23 +308,23 @@ function AtlasMap(props: {
                 width={props.layout.width}
                 height={props.layout.height}
             />
-            <For each={shownAgents()}>
-                {(agent) => (
-                    <Show when={props.layout.nodes.get(agent.key)}>
+            <ByKey each={shownAgents()}>
+                {(agent, key) => (
+                    <Show when={props.layout.nodes.get(key)}>
                         {(p) => (
                             <Node
-                                agent={agent}
+                                agent={agent()}
                                 x={p().x}
                                 y={p().y}
-                                tint={props.mode === "seat" ? machineIndex(agent.machine) % 6 : null}
-                                selected={props.selected === agent.key}
-                                picked={props.picked(agent)}
+                                tint={props.mode === "seat" ? machineIndex(agent().machine) % 6 : null}
+                                selected={props.selected === key}
+                                picked={props.picked(agent())}
                                 onSelect={props.onSelect}
                             />
                         )}
                     </Show>
                 )}
-            </For>
+            </ByKey>
             <ExtraNodes graph={props.data.graph()} nodes={props.layout.nodes} selected={props.selected} onSelect={props.onSelect} />
         </div>
     );

@@ -174,6 +174,7 @@ import type { CommandDockNodeStatusData } from "@/types/rpc/CommandDockNodeStatu
 import type { CommandEventReadHistoryData } from "@/types/rpc/CommandEventReadHistoryData";
 import type { CommandFleetBroadcastData } from "@/types/rpc/CommandFleetBroadcastData";
 import type { CommandFleetBulkStopData } from "@/types/rpc/CommandFleetBulkStopData";
+import type { CommandFleetCheckLimitsData } from "@/types/rpc/CommandFleetCheckLimitsData";
 import type { CommandFleetGroupCreateData } from "@/types/rpc/CommandFleetGroupCreateData";
 import type { CommandFleetGroupDeleteData } from "@/types/rpc/CommandFleetGroupDeleteData";
 import type { CommandFleetGroupListData } from "@/types/rpc/CommandFleetGroupListData";
@@ -336,6 +337,7 @@ import type { FleetGroup } from "@/types/rpc/FleetGroup";
 import type { FleetGroupDeleteResult } from "@/types/rpc/FleetGroupDeleteResult";
 import type { FleetGroupListResult } from "@/types/rpc/FleetGroupListResult";
 import type { ForkAgentDefinitionSuggestResult } from "@/types/rpc/ForkAgentDefinitionSuggestResult";
+import type { FsAgentFolder } from "@/types/rpc/FsAgentFolder";
 import type { FsCreateReq } from "@/types/rpc/FsCreateReq";
 import type { FsCreateResult } from "@/types/rpc/FsCreateResult";
 import type { FsDeleteReq } from "@/types/rpc/FsDeleteReq";
@@ -375,6 +377,8 @@ import type { GlobalMemoryReachListResult } from "@/types/rpc/GlobalMemoryReachL
 import type { GlobalMemoryRemovedResult } from "@/types/rpc/GlobalMemoryRemovedResult";
 import type { GlobalMemoryRevertResult } from "@/types/rpc/GlobalMemoryRevertResult";
 import type { GlobalMemorySection } from "@/types/rpc/GlobalMemorySection";
+import type { GpuSampleReq } from "@/types/rpc/GpuSampleReq";
+import type { GpuSampleResult } from "@/types/rpc/GpuSampleResult";
 import type { HideNamedAgentResult } from "@/types/rpc/HideNamedAgentResult";
 import type { HistoryAgentSessions } from "@/types/rpc/HistoryAgentSessions";
 import type { HistoryAgentSessionsReq } from "@/types/rpc/HistoryAgentSessionsReq";
@@ -395,6 +399,7 @@ import type { IdentityAccountSetFailoverReq } from "@/types/rpc/IdentityAccountS
 import type { IdentityAccountSetFailoverResult } from "@/types/rpc/IdentityAccountSetFailoverResult";
 import type { IdentityAccountSignedInReq } from "@/types/rpc/IdentityAccountSignedInReq";
 import type { IdentityAccountSignedInResult } from "@/types/rpc/IdentityAccountSignedInResult";
+import type { IdentityAccountsResult } from "@/types/rpc/IdentityAccountsResult";
 import type { ImportAgentDefinitionsResult } from "@/types/rpc/ImportAgentDefinitionsResult";
 import type { InputDraftResult } from "@/types/rpc/InputDraftResult";
 import type { InputHistoryAppendResult } from "@/types/rpc/InputHistoryAppendResult";
@@ -411,6 +416,7 @@ import type { InstallStartResult } from "@/types/rpc/InstallStartResult";
 import type { InstallSystemToolReq } from "@/types/rpc/InstallSystemToolReq";
 import type { InstallSystemToolResult } from "@/types/rpc/InstallSystemToolResult";
 import type { InstallToolResult } from "@/types/rpc/InstallToolResult";
+import type { JektHeldSummaryResult } from "@/types/rpc/JektHeldSummaryResult";
 import type { JobReporterAddReq } from "@/types/rpc/JobReporterAddReq";
 import type { JobReporterForgetReq } from "@/types/rpc/JobReporterForgetReq";
 import type { JobReportersResult } from "@/types/rpc/JobReportersResult";
@@ -1394,6 +1400,14 @@ export const GeneratedApi = {
   FleetBulkStopCommand(client: RpcClient, data: CommandFleetBulkStopData, opts?: RpcOpts): Promise<FleetActionResult> {
     return client.rpcCall("fleet.bulk-stop", data, opts);
   },
+  // command "fleet.check-limits"
+  FleetCheckLimitsCommand(
+    client: RpcClient,
+    data: CommandFleetCheckLimitsData,
+    opts?: RpcOpts
+  ): Promise<FleetActionResult> {
+    return client.rpcCall("fleet.check-limits", data, opts);
+  },
   // command "supervisor.set-mode"
   SupervisorSetModeCommand(
     client: RpcClient,
@@ -1449,6 +1463,10 @@ export const GeneratedApi = {
   // command "fs.delete"
   FsDeleteCommand(client: RpcClient, data: FsDeleteReq, opts?: RpcOpts): Promise<FsOpResults> {
     return client.rpcCall("fs.delete", data, opts);
+  },
+  // command "fs.agent_folder"
+  FsAgentFolderCommand(client: RpcClient, data: FsPathReq, opts?: RpcOpts): Promise<FsAgentFolder> {
+    return client.rpcCall("fs.agent_folder", data, opts);
   },
   // command "fs.git_status"
   FsGitStatusCommand(client: RpcClient, data: FsPathReq, opts?: RpcOpts): Promise<FsGitStatus> {
@@ -1693,6 +1711,10 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<Array<GlobalMemorySection>> {
     return client.rpcCall("globalmemory:sections", data ?? {}, opts);
+  },
+  // command "gpu.sample"
+  GpuSampleCommand(client: RpcClient, data: GpuSampleReq, opts?: RpcOpts): Promise<GpuSampleResult> {
+    return client.rpcCall("gpu.sample", data, opts);
   },
   // command "hidenamedagent"
   HideNamedAgentCommand(
@@ -3173,6 +3195,14 @@ export const GeneratedApi = {
   // command "identity.account.availability"
   IdentityAccountAvailabilityCommand(client: RpcClient, opts?: RpcOpts): Promise<IdentityAccountAvailabilityResult> {
     return client.rpcCall("identity.account.availability", {}, opts);
+  },
+  // command "identity.account.usage"
+  IdentityAccountUsageCommand(client: RpcClient, opts?: RpcOpts): Promise<IdentityAccountsResult> {
+    return client.rpcCall("identity.account.usage", {}, opts);
+  },
+  // command "jekt.held.summary"
+  JektHeldSummaryCommand(client: RpcClient, opts?: RpcOpts): Promise<JektHeldSummaryResult> {
+    return client.rpcCall("jekt.held.summary", {}, opts);
   },
   // command "agent.account.switch"
   AgentAccountSwitchCommand(

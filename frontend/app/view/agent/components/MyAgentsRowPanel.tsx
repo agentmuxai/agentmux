@@ -6,12 +6,14 @@
 // my-agents-list-panels.ts.
 
 import { Button } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import type { RecentSessionRow } from "@/types/rpc/RecentSessionRow";
 import { batch, For, Match, Show, Switch, type JSX } from "solid-js";
 import { AgentBundlesTab } from "./AgentBundlesTab";
 import { AgentEnvPanel } from "./AgentEnvPanel";
 import { AgentRowPanel } from "./AgentRowPanel";
 import { AgentSeatPanel } from "./AgentSeatPanel";
+import { AgentSpendPanel } from "./AgentSpendPanel";
 import type { MyAgentsListProps } from "./MyAgentsList";
 import { NamePrompt } from "./NamePrompt";
 import type { RowPanels, SubView } from "./my-agents-list-panels";
@@ -24,10 +26,11 @@ const PANEL_SUBTITLE: Record<PanelView, string | undefined> = {
     seat: "Seat",
     bundles: "Bundles",
     env: "Environment",
+    spend: undefined, // its subtitle is the dictionary's (see MyAgentsRowPanel)
     delete: "Delete",
 };
 // The choices are the answer to a click on the tile, so they have nothing to go back to.
-const PANEL_HAS_BACK: ReadonlySet<PanelView> = new Set(["rename", "fork-name", "seat", "bundles", "env", "delete"]);
+const PANEL_HAS_BACK: ReadonlySet<PanelView> = new Set(["rename", "fork-name", "seat", "bundles", "env", "spend", "delete"]);
 
 interface PanelProps {
     row: RecentSessionRow;
@@ -97,7 +100,7 @@ export const MyAgentsRowPanel = (props: PanelProps): JSX.Element => {
     return (
         <AgentRowPanel
             title={name}
-            subtitle={PANEL_SUBTITLE[view()]}
+            subtitle={view() === "spend" ? t("agentSpend.subtitle") : PANEL_SUBTITLE[view()]}
             viewKey={view()}
             tile={() => tileEls.get(id)}
             onClose={() => {
@@ -137,6 +140,11 @@ function PanelBody({ s }: { s: PanelState }) {
             <Match when={view() === "env"}>
                 <div class="agent-row-panel-embed">
                     <AgentEnvPanel agentId={id} agentName={name} draft={envDraftOf(id)} onClose={toActions} />
+                </div>
+            </Match>
+            <Match when={view() === "spend"}>
+                <div class="agent-row-panel-embed">
+                    <AgentSpendPanel agentId={id} agentName={name} onClose={toActions} />
                 </div>
             </Match>
             <Match when={view() === "delete"}>

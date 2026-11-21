@@ -62,17 +62,12 @@ use super::AppState;
 use super::agent_io::stop_one_agent_block;
 use crate::server::agent_handlers::{run_agent_turn, AgentTurnDeps, TurnRegistration};
 
-const FLEET_BROADCAST_AUDIT_ACTION: &str = "fleet.broadcast";
-
-/// Turns started at once. Delivery is not rate-limited the way `inject_message`
-/// was (which is why the old 10-per-second chunking is gone), but a pane's turn
-/// can spawn a CLI, so a broadcast to a large selection is bounded rather than
-/// starting every turn in the same instant.
-const BROADCAST_CONCURRENCY: usize = 8;
+pub(super) const FLEET_BROADCAST_AUDIT_ACTION: &str = "fleet.broadcast";
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_fleet_broadcast(engine, state);
     register_fleet_bulk_stop(engine, state);
+    super::fleet_check_limits::register(engine, state);
     register_fleet_group_create(engine, state);
     register_fleet_group_list(engine, state);
     register_fleet_group_update(engine, state);
@@ -88,7 +83,7 @@ fn register_fleet_broadcast(engine: &Arc<WshRpcEngine>, state: &AppState) {
             async move {
                 // A broadcast arrives as the user's own turn, so only the operator's window sends one.
                 ctx.operator_only("a Swarm broadcast arrives as the operator's own words, so only the AgentMux window sends one; an agent broadcasts as itself with the Message tool")?;
-                let result = fleet_broadcast_impl(&state, cmd.targets, cmd.message).await;
+                let result = fleet_broadcast_impl(&state, cmd.targets, cmd.message, cmd.progress_id).await;
                 Ok(result)
             }
         },
@@ -112,13 +107,14 @@ const NO_REGISTERED_AGENT: &str =
 ///
 /// Targets are resolved first so `RECIPIENTS` in every header counts the agents
 /// actually addressed; the same `msg_id` ties the copies together in the audit
-/// log. Turns start up to `concurrency` at a time, and results come back in the
-/// order of `targets`.
+/// log. Each delivery starts at its own time in `pace` (`fleet_pacing`), so a
+/// slow or failed one holds up no other, and results come back in the order of
+/// `targets`.
 pub(crate) async fn run_broadcast<R, D, Fut>(
     targets: Vec<String>,
     body: &str,
     msg_id: &str,
-    concurrency: usize,
+    pace: super::fleet_pacing::Pace,
     resolve: R,
     deliver: D,
 ) -> Vec<BroadcastOutcome>
@@ -137,11 +133,13 @@ where
         })
         .collect();
     let recipients = resolved.iter().filter(|(_, agent)| agent.is_some()).count();
+    let (total, ended) = (resolved.len(), std::sync::atomic::AtomicUsize::new(0));
 
-    futures_util::stream::iter(resolved)
-        .map(|(block_id, agent_id)| {
-            let deliver = &deliver;
+    let mut outcomes: Vec<(usize, BroadcastOutcome)> = futures_util::stream::iter(resolved.into_iter().enumerate())
+        .map(|(index, (block_id, agent_id))| {
+            let (deliver, pace, ended) = (&deliver, &pace, &ended);
             async move {
+                pace.until_start(index).await;
                 let result = match &agent_id {
                     None => Err(NO_REGISTERED_AGENT.to_string()),
                     Some(agent) => {
@@ -149,12 +147,15 @@ where
                         deliver(block_id.clone(), text, MessageOrigin::broadcast()).await
                     }
                 };
-                BroadcastOutcome { block_id, agent_id, result }
+                pace.ended(ended.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1, total);
+                (index, BroadcastOutcome { block_id, agent_id, result })
             }
         })
-        .buffered(concurrency.max(1))
+        .buffer_unordered(total.max(1))
         .collect()
-        .await
+        .await;
+    outcomes.sort_by_key(|(index, _)| *index);
+    outcomes.into_iter().map(|(_, outcome)| outcome).collect()
 }
 
 /// What to do with one target, given how its controller routes a message.
@@ -210,6 +211,16 @@ pub(crate) async fn deliver_broadcast_turn(
     if let Some(u) = unavailable {
         return Err(format!("{}{}: not sent", crate::backend::reactive::UNAVAILABLE_PREFIX, u.reason()));
     }
+    deliver_available(deps, block_id, text, from).await
+}
+
+/// [`deliver_broadcast_turn`] for an agent that can work: the words go as a turn of the person's.
+pub(crate) async fn deliver_available(
+    deps: &AgentTurnDeps,
+    block_id: String,
+    text: String,
+    from: MessageOrigin,
+) -> Result<(), String> {
     let input = crate::backend::blockcontroller::health::TurnInput { from: from.clone(), text: text.clone(), joins_turn: None };
     match broadcast_action(crate::bootstrap::route_agent_message_from(&block_id, &text, Some(input), from.clone(), &[], None)) {
         BroadcastAction::Done => Ok(()),
@@ -364,6 +375,7 @@ pub(crate) async fn fleet_broadcast_impl(
     state: &AppState,
     targets: Vec<String>,
     message: String,
+    progress_id: Option<String>,
 ) -> FleetActionResult {
     let deps = AgentTurnDeps::from_state(state);
     let msg_id = uuid::Uuid::new_v4().to_string();
@@ -401,11 +413,14 @@ pub(crate) async fn fleet_broadcast_impl(
     // The same count `run_broadcast` puts in the local headers: every target
     // that resolved, here or on another channel.
     let recipients = targets.iter().filter(|b| routes.contains_key(*b)).count();
+    // Only a turn that starts on this AgentMux is paced; a target handed on to another channel or machine is not.
+    let local = routes.iter().filter(|(_, r)| matches!(r, BroadcastRoute::Local(_))).map(|(key, _)| key.clone()).collect();
+    let pace = super::fleet_pacing::pace_for(state, &targets, local, &msg_id, progress_id).await;
     let outcomes = run_broadcast(
         targets,
         &message,
         &msg_id,
-        BROADCAST_CONCURRENCY,
+        pace,
         |block_id| routes.get(block_id).map(|r| r.agent_id().to_string()),
         |block_id, text, origin| {
             let deps = deps.clone();
@@ -423,38 +438,22 @@ pub(crate) async fn fleet_broadcast_impl(
                         Some(sender) => sender.deliver(&client, route, agent, &body, recipients).await,
                         None => Err("no LAN sender".to_string()),
                     },
-                    _ => deliver_broadcast_turn(&deps, block_id, text, origin).await,
+                    _ => crate::server::person_hold::deliver_person_broadcast(&deps, block_id, text, origin).await,
                 }
             }
         },
     )
     .await;
+    // The agents kept for a check are waited for together, outside the delivery slots above.
+    let outcomes = crate::server::person_hold::resolve_pending(outcomes).await;
 
-    let mut result = FleetActionResult::default();
-    for outcome in outcomes {
-        let target_agent = outcome.agent_id.as_deref().unwrap_or(&outcome.block_id);
-        match outcome.result {
-            Ok(()) => {
-                state.reactive_handler.log_fleet_action_audit(
-                    None, target_agent, &outcome.block_id, FLEET_BROADCAST_AUDIT_ACTION,
-                    true, None, &msg_id, None,
-                );
-                // What the user typed, in each recipient of this instance's history.
-                if matches!(routes.get(&outcome.block_id), Some(BroadcastRoute::Local(_))) {
-                    super::input_history::record_broadcast(state, &outcome.block_id, &message);
-                }
-                result.succeeded.push(outcome.block_id);
-            }
-            Err(error) => {
-                state.reactive_handler.log_fleet_action_audit(
-                    None, target_agent, &outcome.block_id, FLEET_BROADCAST_AUDIT_ACTION,
-                    false, Some(&error), &msg_id, None,
-                );
-                result.failed.push(FleetActionFailure { id: outcome.block_id, error });
-            }
-        }
-    }
-    result
+    super::fleet_result::settle_broadcast(
+        state,
+        outcomes,
+        |block_id| matches!(routes.get(block_id), Some(BroadcastRoute::Local(_))),
+        &msg_id,
+        &message,
+    )
 }
 
 
@@ -1243,7 +1242,7 @@ mod override_tests {
 #[cfg(test)]
 mod broadcast_core_tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use crate::server::app_api::fleet_pacing::Pace;
     use std::sync::{Arc, Mutex};
 
     fn ids(n: usize) -> Vec<String> {
@@ -1265,7 +1264,7 @@ mod broadcast_core_tests {
     async fn every_target_is_delivered_with_the_broadcast_origin() {
         let seen: Arc<Mutex<Vec<MessageOrigin>>> = Arc::default();
         let seen2 = seen.clone();
-        let out = run_broadcast(ids(3), "hi", "m1", 4, agent_for, move |_b, _t, origin| {
+        let out = run_broadcast(ids(3), "hi", "m1", Pace::at_once(), agent_for, move |_b, _t, origin| {
             seen2.lock().unwrap().push(origin);
             async { Ok(()) }
         })
@@ -1294,7 +1293,7 @@ mod broadcast_core_tests {
         let texts2 = texts.clone();
         // blk-1 resolves to nothing: three targets, two recipients.
         let resolve = |b: &str| if b == "blk-1" { None } else { agent_for(b) };
-        let out = run_broadcast(ids(3), "great, merge on approval", "bcast-42", 4, resolve, move |b, t, _| {
+        let out = run_broadcast(ids(3), "great, merge on approval", "bcast-42", Pace::at_once(), resolve, move |b, t, _| {
             texts2.lock().unwrap().push((b, t));
             async { Ok(()) }
         })
@@ -1316,7 +1315,7 @@ mod broadcast_core_tests {
             vec!["blk-0".into(), "nope".into(), "blk-2".into()],
             "x",
             "m",
-            4,
+            Pace::at_once(),
             agent_for,
             |b, _t, _| async move { if b == "blk-2" { Err("no controller".to_string()) } else { Ok(()) } },
         )
@@ -1330,41 +1329,18 @@ mod broadcast_core_tests {
         assert_eq!(out[2].agent_id.as_deref(), Some("agent-2"));
     }
 
+    // Targets that cost this AgentMux nothing are not paced, however many (pacing itself: `fleet_pacing`'s tests).
     #[tokio::test]
-    async fn a_large_broadcast_does_not_pause_between_chunks() {
+    async fn a_large_broadcast_with_nothing_to_pace_goes_out_at_once() {
         let started = std::time::Instant::now();
-        let out = run_broadcast(ids(25), "x", "m", BROADCAST_CONCURRENCY, agent_for, |_b, _t, _| async { Ok(()) }).await;
+        let out = run_broadcast(ids(25), "x", "m", Pace::at_once(), agent_for, |_b, _t, _| async { Ok(()) }).await;
         assert_eq!(out.iter().filter(|o| o.result.is_ok()).count(), 25);
-        assert!(started.elapsed() < std::time::Duration::from_millis(900), "the old limiter pause is gone: {:?}", started.elapsed());
-    }
-
-    #[tokio::test]
-    async fn at_most_the_concurrency_limit_turns_start_at_once() {
-        let in_flight = Arc::new(AtomicUsize::new(0));
-        let peak = Arc::new(AtomicUsize::new(0));
-        let (inf, pk) = (in_flight.clone(), peak.clone());
-        let out = run_broadcast(ids(20), "x", "m", 3, agent_for, move |_b, _t, _| {
-            let (inf, pk) = (inf.clone(), pk.clone());
-            async move {
-                let now = inf.fetch_add(1, Ordering::SeqCst) + 1;
-                pk.fetch_max(now, Ordering::SeqCst);
-                for _ in 0..5 {
-                    tokio::task::yield_now().await;
-                }
-                inf.fetch_sub(1, Ordering::SeqCst);
-                Ok(())
-            }
-        })
-        .await;
-        assert_eq!(out.len(), 20);
-        let peak = peak.load(Ordering::SeqCst);
-        assert!(peak <= 3, "peak {peak} exceeded the limit");
-        assert!(peak > 1, "targets should overlap, peak {peak}");
+        assert!(started.elapsed() < std::time::Duration::from_millis(900), "{:?}", started.elapsed());
     }
 
     #[tokio::test]
     async fn no_targets_is_a_no_op() {
-        let out = run_broadcast(vec![], "x", "m", 4, agent_for, |_b, _t, _| async { Ok(()) }).await;
+        let out = run_broadcast(vec![], "x", "m", Pace::at_once(), agent_for, |_b, _t, _| async { Ok(()) }).await;
         assert!(out.is_empty());
     }
 }

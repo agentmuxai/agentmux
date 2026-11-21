@@ -12,10 +12,12 @@
  * docs/analysis/ANALYSIS_READ_TOOL_PREVIEW_2026_10_01.md §6.
  */
 
+import { showMediaCopyMenu, sourceFromUrl } from "@/app/element/media-copy";
 import { openMediaInEditor } from "@/app/element/markdown-media";
 import { createSignal, For, type JSX } from "solid-js";
 import type { ResultImage } from "../providers/claude-translator";
 import { tip } from "@/app/element/tip";
+import { useAgentMedia } from "../agent-media";
 
 /** A raster or SVG image type: anything else is not put in a data URL. */
 const IMAGE_TYPE_RE = /^image\/[a-z0-9.+-]+$/i;
@@ -36,6 +38,8 @@ export function resultImagesOf(result: unknown): ResultImage[] {
 
 function ResultImageView(props: { image: ResultImage; path?: string; width?: number; height?: number }): JSX.Element {
     const [full, setFull] = createSignal(false);
+    // In a container agent's pane the file is opened by srv from the agent's own folders, not as a path here.
+    const media = useAgentMedia();
     return (
         <img
             class="agent-tool-image"
@@ -50,7 +54,8 @@ function ResultImageView(props: { image: ResultImage; path?: string; width?: num
                     ? { width: `min(100%, ${props.width}px)`, "aspect-ratio": `${props.width} / ${props.height}` }
                     : undefined
             }
-            onClick={() => (props.path ? openMediaInEditor(props.path) : setFull((v) => !v))}
+            onClick={() => (props.path ? openMediaInEditor(props.path, { blockId: media()?.blockId, confined: media()?.confined }) : setFull((v) => !v))}
+            onContextMenu={(e) => showMediaCopyMenu(e, sourceFromUrl(e.currentTarget.src, { mime: props.image.mediaType, path: props.path }))}
         />
     );
 }

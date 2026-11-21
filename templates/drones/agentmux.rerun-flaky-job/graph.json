@@ -1,0 +1,35 @@
+{
+  "nodes": [
+    {
+      "id": "flaky",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "kind": "condition",
+        "expr": "{{trigger.item.run_attempt}} == 1 && {{trigger.item.name}} == '{{param.workflow}}'"
+      }
+    },
+    {
+      "id": "tell",
+      "position": {
+        "x": 240,
+        "y": -80
+      },
+      "data": {
+        "kind": "message",
+        "to": "{{param.leader}}",
+        "body": "Run {{trigger.key}} of {{trigger.item.name}} failed on its first attempt: re-run its failed jobs once ({{trigger.item.html_url}}). No reply needed."
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "flaky-tell",
+      "source": "flaky",
+      "target": "tell",
+      "sourceHandle": "true"
+    }
+  ]
+}

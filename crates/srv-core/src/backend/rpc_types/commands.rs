@@ -581,6 +581,8 @@ pub const COMMAND_AGENT_MOVE_HERE: &str = "agent.move-here";
 // transport.
 pub const COMMAND_FLEET_BROADCAST: &str = "fleet.broadcast";
 pub const COMMAND_FLEET_BULK_STOP: &str = "fleet.bulk-stop";
+/// Look again, now, at agents marked out of quota (`CommandFleetCheckLimitsData`), returning `FleetActionResult`.
+pub const COMMAND_FLEET_CHECK_LIMITS: &str = "fleet.check-limits";
 pub const COMMAND_FLEET_GROUP_CREATE: &str = "fleet.group.create";
 pub const COMMAND_FLEET_GROUP_LIST: &str = "fleet.group.list";
 pub const COMMAND_FLEET_GROUP_UPDATE: &str = "fleet.group.update";
@@ -622,6 +624,8 @@ pub const COMMAND_PRESENCE_PUBLISH_NOW: &str = "presence.publish-now";
 // Tower, the read-only task manager pane (backend::tower::sampler). The
 // window's, not an agent API: a registered agent connection is refused.
 pub const COMMAND_TOWER_SAMPLE: &str = "tower.sample";
+/// The status bar's GPU panel (backend::gpu): the adapters' and the processes' use and memory.
+pub const COMMAND_GPU_SAMPLE: &str = "gpu.sample";
 pub const COMMAND_TOWER_PEERS: &str = "tower.peers";
 pub const COMMAND_TOWER_PAIR: &str = "tower.pair";
 pub const COMMAND_TOWER_FORGET: &str = "tower.forget";
@@ -679,6 +683,12 @@ pub const COMMAND_IDENTITY_SELF_UNLINK: &str = "identity.self.unlink";
 /// The open account episodes: agents out of quota or signed out, grouped by
 /// account (`server::account_episodes`). The operator's window only.
 pub const COMMAND_IDENTITY_ACCOUNT_AVAILABILITY: &str = "identity.account.availability";
+/// Every signed-in account here with how much of each usage window is used (`server::account_episodes`).
+/// The operator's window, and any registered agent: it names no credential.
+pub const COMMAND_IDENTITY_ACCOUNT_USAGE: &str = "identity.account.usage";
+/// The messages held for agents, by agent and reason, as counts (`server::jekt_held_summary`). The operator's window,
+/// and any registered agent: it names no sender and no body.
+pub const COMMAND_JEKT_HELD_SUMMARY: &str = "jekt.held.summary";
 /// Move an episode's idle agents to another signed-in account. The operator's
 /// window only.
 pub const COMMAND_IDENTITY_ACCOUNT_MOVE_AGENTS: &str = "identity.account.move_agents";

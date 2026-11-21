@@ -20,7 +20,7 @@ use std::time::Instant;
 use serde_json::{json, Value};
 
 use crate::backend::cli_notice::{self, ContainerStartState, InstallState};
-use crate::backend::container::{CliProvision, ContainerError, ContainerManager, ContainerMountSpec, StartEvent};
+use crate::backend::container::{CliProvision, ContainerError, ContainerManager, ContainerMountSpec, StartEvent, StartObserver};
 use crate::backend::container::cli::CliInstall;
 use crate::backend::container::image::resolve_container_image;
 use crate::backend::runtime_adapter::{ContainerAdapter, ContainerLaunch, RuntimeAdapter, RuntimeKind};
@@ -339,6 +339,14 @@ impl<F: Fn()> Drop for IfDropped<F> {
     }
 }
 
+/// What a container agent's turn does to its workspace folder on the host before the container has it: the
+/// folder is marked as a container agent's, so a host agent given it later gets only the MCP servers AgentMux
+/// writes (`mcp_folder_rule`), and signing keys an earlier launch left in its `.mcp.json` come out.
+fn before_the_container_has_the_folder(dir: &str) {
+    crate::backend::mcp_folder_rule::mark(dir);
+    crate::backend::mcp_json_identity::strip_workspace_signing_keys(dir);
+}
+
 impl ContainerStartup {
     /// Start the container, then make sure the provider CLI is in it. The pane
     /// shows each step that takes time (frames persisted, so they survive a
@@ -370,9 +378,9 @@ impl ContainerStartup {
 
     async fn run_reporting(&self, report_failure: bool) -> Result<(), String> {
         // The workspace is mounted into the container: signing keys an earlier launch wrote into its
-        // .mcp.json come out before it starts (and a launch no longer writes them).
+        // .mcp.json come out before it starts (and a launch no longer writes them), and it is marked.
         if let Some(dir) = self.mount_spec.workspace_host_dir.clone() {
-            let _ = tokio::task::spawn_blocking(move || crate::backend::mcp_json_identity::strip_workspace_signing_keys(&dir)).await;
+            let _ = tokio::task::spawn_blocking(move || before_the_container_has_the_folder(&dir)).await;
         }
         // On macOS a Keychain-backed account has no credentials file to mount: its login is staged for the container.
         let mut mount_spec = self.mount_spec.clone();
@@ -412,11 +420,7 @@ impl ContainerStartup {
                 StartEvent::Starting => start_row(ContainerStartState::Starting, None, &image, None),
             }
         };
-        let ensured = async {
-            self.cm.ensure_running_observed(&self.container_name, &image, &self.volumes, &[], &mount_spec, &observe).await?;
-            self.cm.check_image_tools(&self.container_name, &image).await
-        };
-        if let Err(e) = ensured.await {
+        if let Err(e) = self.ensure_container(&image, &mount_spec, &observe).await {
             if shown.load(Ordering::Relaxed) {
                 start_row(ContainerStartState::Failed, None, &image, Some(&e.user_message()));
             }
@@ -475,6 +479,16 @@ impl ContainerStartup {
                 Err(self.fail(&e, report_failure))
             }
         }
+    }
+
+    /// The container up with its tools in it. A container started anew ran nothing before, so the rows the pane's
+    /// dock still holds for what ran in the old one can only be stale: they end here.
+    async fn ensure_container(&self, image: &str, mount_spec: &ContainerMountSpec, observe: StartObserver<'_>) -> Result<(), ContainerError> {
+        let started = self.cm.ensure_running_observed(&self.container_name, image, &self.volumes, &[], mount_spec, observe).await?;
+        if started {
+            crate::backend::background_task_exit::end_for_restarted_container(&self.mstore, &self.broker, &self.block_id);
+        }
+        self.cm.check_image_tools(&self.container_name, image).await
     }
 
     /// Once per agent per run: a row in the pane when the agent's cache volumes have grown past the warning level.

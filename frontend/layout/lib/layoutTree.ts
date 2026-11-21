@@ -6,6 +6,7 @@ import { lazy } from "@/util/util";
 import {
     addChildAt,
     addIntermediateNode,
+    balanceNode,
     findInsertLocationFromIndexArr,
     findNextInsertLocation,
     findNode,
@@ -26,6 +27,7 @@ import {
     LayoutTreeMagnifyNodeToggleAction,
     LayoutTreeMinimizeNodeAction,
     LayoutTreeMoveNodeAction,
+    LayoutTreeMoveToEdgeAction,
     LayoutTreeResizeNodeAction,
     LayoutTreeState,
     LayoutTreeSwapNodeAction,
@@ -107,9 +109,8 @@ export function computeMoveNode(layoutState: LayoutTreeState, computeInsertActio
     // Center means "swap the two panes" — meaningless when the dragged pane
     // isn't in this tree. Bail so no pending action (ghost) is produced; the
     // drop handler falls back to a plain append for direction-less drops.
-    if (isForeignNode && direction === DropDirection.Center) {
-        return;
-    }
+    if (isForeignNode && direction === DropDirection.Center) return;
+    if (isWideDirection(direction)) return isForeignNode ? undefined : computeMoveToEdge(layoutState, nodeToMoveId, direction);
 
     switch (direction) {
         case DropDirection.OuterTop:
@@ -265,6 +266,24 @@ export function computeMoveNode(layoutState: LayoutTreeState, computeInsertActio
         } as LayoutTreeMoveNodeAction;
 }
 
+/** A band across the whole layout (a pane of this tree only), wherever the pointer is on the layout. */
+const isWideDirection = (d: DropDirection): boolean => d === DropDirection.WideTop || d === DropDirection.WideCenter || d === DropDirection.WideBottom;
+
+/** The move of `nodeToMoveId` to be a band across the layout, or none where it already is that band or cannot be one. */
+function computeMoveToEdge(layoutState: LayoutTreeState, nodeToMoveId: string, direction: DropDirection): LayoutTreeMoveToEdgeAction | undefined {
+    const root = layoutState.rootNode;
+    const edge = direction === DropDirection.WideTop ? "top" : direction === DropDirection.WideBottom ? "bottom" : "middle";
+    const moving = root && findNode(root, nodeToMoveId);
+    if (!root || !moving || root.id === nodeToMoveId) return;
+    if (moving.children?.length && isEffectivelyMinimized(moving)) return;
+    // Already the first or the last row of a root column: that band, where it is.
+    if (edge !== "middle" && root.flexDirection === FlexDirection.Column && root.children) {
+        const at = root.children.findIndex((child) => child.id === nodeToMoveId);
+        if (at === (edge === "top" ? 0 : root.children.length - 1)) return;
+    }
+    return { type: LayoutTreeActionType.MoveToEdge, nodeId: nodeToMoveId, edge };
+}
+
 export function moveNode(layoutState: LayoutTreeState, action: LayoutTreeMoveNodeAction) {
     const rootNode = layoutState.rootNode;
     if (!action) {
@@ -317,6 +336,67 @@ export function moveNode(layoutState: LayoutTreeState, action: LayoutTreeMoveNod
         removeChild(oldParent, node, startingIndex);
     }
     
+}
+
+/** Flex size of a band, and of the rest of the layout beside a band that wraps it (a third of the layout). */
+const BAND_SIZE = DefaultNodeSize;
+const BESIDE_BAND_SIZE = 2 * DefaultNodeSize;
+/** Flex size of each half of the rest of the layout, above and below a band across the middle. */
+const HALF_SIZE = 1.5 * DefaultNodeSize;
+
+/**
+ * Move a pane to be a band across the whole layout: take it out, then put it back as the full width of the layout at
+ * its top, its bottom or its middle. The rest is balanced first, and what the band goes into depends on how it is
+ * arranged:
+ * - a column of rows: the band is one more row, first, last, or in the middle;
+ * - one row of columns, or one pane: the band is above (or below) the rest, which becomes the rest of a new column;
+ * - across the middle of a row of columns: its first half above the band, the others below it.
+ * Nothing changes where the rest is one pane and the band is asked for the middle. The pane's own place closes.
+ * The middle of a column is after half of its rows, rounded up.
+ * srv applies the same (`move_to_edge`, crates/srv-core/src/backend/layout/intent.rs).
+ */
+export function moveToEdge(layoutState: LayoutTreeState, action: LayoutTreeMoveToEdgeAction) {
+    const { nodeId, edge } = action;
+    const root = layoutState.rootNode;
+    // A refusal throws, as the reducer does where srv refuses (layoutIntentActions.ts): the layout stays as it was.
+    if (!root || root.id === nodeId) throw new Error(`moveToEdge: no pane to move, or it is the root: ${nodeId}`);
+    const found = findNode(root, nodeId);
+    if (!found || (found.children?.length && isEffectivelyMinimized(found))) {
+        throw new Error(`moveToEdge rejected: no such pane, or a strip of chips: ${nodeId}`);
+    }
+    // Worked on a copy: a refusal below leaves the layout as it was.
+    const node: LayoutNode = JSON.parse(JSON.stringify(found));
+    let rest: LayoutNode = JSON.parse(JSON.stringify(root));
+    const parent = findParent(rest, nodeId);
+    const removed = findNode(rest, nodeId);
+    if (!parent || !removed) throw new Error(`moveToEdge: ${nodeId} has no place in the layout`);
+    const before = leafIds(rest);
+    removeChild(parent, removed);
+    restoreNearestIfAllMinimized(rest, before, leafIds(removed));
+    rest = balanceNode(rest);
+    // A row or column left holding one branch is that branch (the pane that left was its other child).
+    while (rest.children?.length === 1 && rest.children[0].children?.length) rest = rest.children[0];
+    node.size = BAND_SIZE;
+    const inColumn = rest.flexDirection === FlexDirection.Column && !!rest.children?.length;
+    let placed: LayoutNode;
+    if (inColumn && edge !== "middle") {
+        addChildAt(rest, edge === "top" ? 0 : rest.children.length, node);
+        placed = rest;
+    } else if (inColumn) {
+        addChildAt(rest, Math.ceil(rest.children.length / 2), node);
+        placed = rest;
+    } else if (edge !== "middle") {
+        rest.size = BESIDE_BAND_SIZE;
+        placed = newLayoutNode(FlexDirection.Column, DefaultNodeSize, edge === "top" ? [node, rest] : [rest, node]);
+    } else if (rest.children?.length >= 2) {
+        const half = Math.ceil(rest.children.length / 2);
+        const above = newLayoutNode(FlexDirection.Row, HALF_SIZE, rest.children.slice(0, half));
+        const below = newLayoutNode(FlexDirection.Row, HALF_SIZE, rest.children.slice(half));
+        placed = newLayoutNode(FlexDirection.Column, DefaultNodeSize, [above, node, below]);
+    } else {
+        throw new Error("moveToEdge: one pane has no middle to put a band across");
+    }
+    layoutState.rootNode = placed;
 }
 
 export function insertNode(layoutState: LayoutTreeState, action: LayoutTreeInsertNodeAction) {

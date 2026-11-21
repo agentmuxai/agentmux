@@ -143,8 +143,31 @@ export async function requestCloseWindow(): Promise<void> {
 /** The status bar panel's delete for an open window: asks first when an agent
  *  in it is mid-turn, then closes it with its contents deleted (srv
  *  `DiscardWorkspaceOnClose`). `onRemoving` runs once the contents are deleted,
- *  just before the window closes: the point the window is certain to go. */
-export async function requestRemoveWindow(w: { windowId: string; label: string }, onRemoving?: () => void): Promise<void> {
+ *  just before the window closes: the point the window is certain to go.
+ *  A window the host has not yet said the id of (`windowId` null: its panel row
+ *  has no opacity slider yet) has nothing of it in srv to delete or ask about,
+ *  so it is closed by its label; the row's trash never does nothing.
+ *  `onFailed` runs if the window then does not close (after `onRemoving`, which
+ *  the caller undoes there): also on the path where an agent is working and the
+ *  answer comes from the confirm panel, after this promise has resolved. */
+export async function requestRemoveWindow(
+    w: { windowId: string | null; label: string },
+    onRemoving?: () => void,
+    onFailed?: () => void,
+): Promise<void> {
+    const closeIt = async (): Promise<void> => {
+        try {
+            await getApi().closeWindow(w.label);
+        } catch (err) {
+            notifyError("Couldn't remove the window", err);
+            onFailed?.();
+        }
+    };
+    if (!w.windowId) {
+        onRemoving?.();
+        await closeIt();
+        return;
+    }
     const agents = await agentsUnlessAsking(w.windowId);
     if (!agents) return;
     const remove = async (): Promise<void> => {
@@ -155,7 +178,7 @@ export async function requestRemoveWindow(w: { windowId: string; label: string }
             return;
         }
         onRemoving?.();
-        await getApi().closeWindow(w.label);
+        await closeIt();
     };
     if (!agents.some((a) => a.working)) {
         await remove();

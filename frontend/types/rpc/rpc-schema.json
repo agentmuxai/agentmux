@@ -3265,6 +3265,25 @@
     }
   },
   {
+    "command": "fleet.check-limits",
+    "request": "agentmux_srv_core::backend::rpc_types::fleet::CommandFleetCheckLimitsData",
+    "requestName": "CommandFleetCheckLimitsData",
+    "requestTs": {
+      "imports": [
+        "CommandFleetCheckLimitsData"
+      ],
+      "name": "CommandFleetCheckLimitsData"
+    },
+    "response": "agentmux_srv_core::backend::rpc_types::fleet::FleetActionResult",
+    "responseName": "FleetActionResult",
+    "responseTs": {
+      "imports": [
+        "FleetActionResult"
+      ],
+      "name": "FleetActionResult"
+    }
+  },
+  {
     "command": "fleet.group.create",
     "request": "agentmux_srv_core::backend::rpc_types::fleet::CommandFleetGroupCreateData",
     "requestName": "CommandFleetGroupCreateData",
@@ -3376,6 +3395,25 @@
         "ForkAgentDefinitionSuggestResult"
       ],
       "name": "ForkAgentDefinitionSuggestResult"
+    }
+  },
+  {
+    "command": "fs.agent_folder",
+    "request": "agentmux_srv_core::backend::rpc_types::fs::FsPathReq",
+    "requestName": "FsPathReq",
+    "requestTs": {
+      "imports": [
+        "FsPathReq"
+      ],
+      "name": "FsPathReq"
+    },
+    "response": "agentmux_srv_core::backend::rpc_types::fs::FsAgentFolder",
+    "responseName": "FsAgentFolder",
+    "responseTs": {
+      "imports": [
+        "FsAgentFolder"
+      ],
+      "name": "FsAgentFolder"
     }
   },
   {
@@ -4215,6 +4253,25 @@
     }
   },
   {
+    "command": "gpu.sample",
+    "request": "agentmux_srv_core::backend::rpc_types::gpu::GpuSampleReq",
+    "requestName": "GpuSampleReq",
+    "requestTs": {
+      "imports": [
+        "GpuSampleReq"
+      ],
+      "name": "GpuSampleReq"
+    },
+    "response": "agentmux_srv_core::backend::rpc_types::gpu::GpuSampleResult",
+    "responseName": "GpuSampleResult",
+    "responseTs": {
+      "imports": [
+        "GpuSampleResult"
+      ],
+      "name": "GpuSampleResult"
+    }
+  },
+  {
     "command": "hidenamedagent",
     "request": "agentmux_srv_core::backend::rpc_types::instance::CommandHideNamedAgentData",
     "requestName": "CommandHideNamedAgentData",
@@ -4424,6 +4481,25 @@
     }
   },
   {
+    "command": "identity.account.usage",
+    "request": "core::option::Option<agentmux_srv_core::backend::rpc_types::websocket::NoArgsReq>",
+    "requestName": "core::option::Option<agentmux_srv_core::backend::rpc_types::websocket::NoArgsReq>",
+    "requestTs": {
+      "imports": [
+        "NoArgsReq"
+      ],
+      "name": "NoArgsReq | null"
+    },
+    "response": "agentmux_srv::server::account_episodes::accounts::IdentityAccountsResult",
+    "responseName": "IdentityAccountsResult",
+    "responseTs": {
+      "imports": [
+        "IdentityAccountsResult"
+      ],
+      "name": "IdentityAccountsResult"
+    }
+  },
+  {
     "command": "identity.account.validate",
     "request": "agentmux_srv::server::app_api::identity::IdentityAccountValidateReq",
     "requestName": "IdentityAccountValidateReq",
@@ -4630,6 +4706,25 @@
         "InstallToolResult"
       ],
       "name": "InstallToolResult"
+    }
+  },
+  {
+    "command": "jekt.held.summary",
+    "request": "core::option::Option<agentmux_srv_core::backend::rpc_types::websocket::NoArgsReq>",
+    "requestName": "core::option::Option<agentmux_srv_core::backend::rpc_types::websocket::NoArgsReq>",
+    "requestTs": {
+      "imports": [
+        "NoArgsReq"
+      ],
+      "name": "NoArgsReq | null"
+    },
+    "response": "agentmux_srv_core::backend::jekt_held_summary::JektHeldSummaryResult",
+    "responseName": "JektHeldSummaryResult",
+    "responseTs": {
+      "imports": [
+        "JektHeldSummaryResult"
+      ],
+      "name": "JektHeldSummaryResult"
     }
   },
   {

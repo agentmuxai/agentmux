@@ -46,9 +46,10 @@
     "b1": {
       "label": "View:term",
       "color": {
-        "underline": "underline-200",
-        "background": "bg-200",
-        "activeBackground": "bg-active-200",
+        "underline": "#5ed5ff",
+        "background": "#043b4c",
+        "activeBackground": "#007493",
+        "hoverBackground": "#0f4354",
         "neutralBackground": "neutral-term"
       },
       "closing": false
@@ -56,9 +57,10 @@
     "b2": {
       "label": "Korp",
       "color": {
-        "underline": "underline-30",
-        "background": "bg-30",
-        "activeBackground": "bg-active-30",
+        "underline": "#ffbd9a",
+        "background": "#4e2b18",
+        "activeBackground": "#a24d13",
+        "hoverBackground": "#573320",
         "neutralBackground": "neutral-agent"
       },
       "closing": false

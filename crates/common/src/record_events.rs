@@ -18,9 +18,15 @@ const EXT: &str = "jsonl";
 /// A line longer than this is not written: an event is a few numbers.
 const MAX_LINE_BYTES: usize = 2_048;
 
-/// Where this machine keeps its record: the `record` folder of the data directory.
+/// Where this AgentMux keeps its record: the `record` folder of its channel (of a dev build's own folder). Not
+/// the data folder: an installed AgentMux has one of those per version, and the record must outlast an upgrade.
 pub fn record_dir() -> Option<PathBuf> {
-    crate::data_paths::DataPaths::from_env().map(|p| p.data_dir.join("record"))
+    crate::data_paths::DataPaths::from_env().map(|p| record_dir_in(&p))
+}
+
+/// [`record_dir`] for the folders in `paths`.
+pub fn record_dir_in(paths: &crate::data_paths::DataPaths) -> PathBuf {
+    paths.instance_dir.join("record")
 }
 
 /// `(year, month)` of a time in ms since the epoch, UTC.
@@ -87,6 +93,28 @@ mod tests {
         assert_eq!(file_name(951_782_400_000), "events-2000-02.jsonl");
         assert_eq!(file_name(1_798_761_599_999), "events-2026-12.jsonl");
         assert_eq!(file_name(1_798_761_600_000), "events-2027-01.jsonl");
+    }
+
+    #[test]
+    fn the_record_is_in_the_channels_folder_so_an_upgrade_keeps_it() {
+        let channel = PathBuf::from("home").join("channels").join("stable");
+        let version = channel.join("versions").join("0.60.35");
+        let paths = crate::data_paths::DataPaths {
+            home_dir: PathBuf::from("home"),
+            instance_dir: channel.clone(),
+            channel: "stable".to_string(),
+            data_dir: version.join("data"),
+            config_dir: channel.join("config"),
+            logs_dir: version.join("logs"),
+            cef_cache_dir: version.join("cef-cache"),
+            agents_dir: channel.join("agents"),
+            instance_runtime_dir: version.join("runtime"),
+            shared_dir: PathBuf::from("home").join("shared"),
+            mode: crate::RuntimeMode::Installed,
+        };
+        let dir = record_dir_in(&paths);
+        assert_eq!(dir, channel.join("record"));
+        assert!(!dir.starts_with(&version));
     }
 
     #[test]

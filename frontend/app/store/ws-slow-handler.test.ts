@@ -3,11 +3,13 @@
 
 import { describe, expect, it } from "vitest";
 import {
+    SLOW_LISTENER_MS,
     SLOW_WS_HANDLER_MS,
     SLOW_WS_LOG_MAX,
     SLOW_WS_LOG_WINDOW_MS,
     createSlowHandlerWatch,
     describeWsMessage,
+    noteListenerTime,
 } from "./ws-slow-handler";
 
 const event = (name: string, scopes: string[], data?: unknown) => ({
@@ -97,6 +99,57 @@ describe("createSlowHandlerWatch", () => {
         f.runMicrotasks();
         expect(f.lines).toHaveLength(1);
         expect(f.lines[0]).toContain("total=27870ms");
+    });
+
+    describe("the slowest listener", () => {
+        const slowMessage = (f: ReturnType<typeof fakeClock>, watch: ReturnType<typeof createSlowHandlerWatch>) => {
+            const start = f.clock.now();
+            f.advance(SLOW_WS_HANDLER_MS);
+            watch(start, event("agent:process-added", ["block:b1"]), 341);
+            f.runMicrotasks();
+        };
+
+        it("names the slowest subscriber of the message, by its event, scope and the start of its code", () => {
+            const f = fakeClock();
+            const watch = createSlowHandlerWatch(f.clock);
+            noteListenerTime(80, "agent:process-added", "block:b1", () => "a quick one");
+            noteListenerTime(1900, "agent:process-added", undefined, function refreshSwarmRows() {
+                return 1;
+            });
+            noteListenerTime(300, "agent:process-added", "block:b2", () => 2);
+            slowMessage(f, watch);
+            expect(f.lines).toHaveLength(1);
+            expect(f.lines[0]).toContain("slowest-listener=1900ms event=agent:process-added source=");
+            expect(f.lines[0]).toContain("refreshSwarmRows");
+            expect(f.lines[0]).not.toContain("scope=block:b2");
+        });
+
+        it("ignores a subscriber under the listener threshold, and starts over for the next message", () => {
+            const f = fakeClock();
+            const watch = createSlowHandlerWatch(f.clock);
+            noteListenerTime(SLOW_LISTENER_MS - 1, "x", undefined, () => 0);
+            slowMessage(f, watch);
+            expect(f.lines[0]).not.toContain("slowest-listener");
+            noteListenerTime(400, "y", "block:b1", () => 0);
+            slowMessage(f, watch);
+            f.advance(SLOW_WS_LOG_WINDOW_MS);
+            slowMessage(f, watch);
+            expect(f.lines[1]).toContain("slowest-listener=400ms event=y scope=block:b1");
+            expect(f.lines[2]).not.toContain("slowest-listener");
+        });
+
+        it("quotes at most the start of the code, on one line", () => {
+            const f = fakeClock();
+            const watch = createSlowHandlerWatch(f.clock);
+            noteListenerTime(500, "z", undefined, () => {
+                const aVeryLongNamedValue = "x".repeat(10);
+                return `${aVeryLongNamedValue}-${aVeryLongNamedValue}-${aVeryLongNamedValue}-${aVeryLongNamedValue}`;
+            });
+            slowMessage(f, watch);
+            const source = f.lines[0].split("source=")[1];
+            expect(source).not.toContain("\n");
+            expect(JSON.parse(source).length).toBeLessThanOrEqual(100);
+        });
     });
 
     it("logs at most SLOW_WS_LOG_MAX lines in a window, and says how many it left out in the next", () => {

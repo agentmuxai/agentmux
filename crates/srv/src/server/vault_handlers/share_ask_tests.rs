@@ -12,7 +12,9 @@ use super::*;
 use axum::body::Body;
 use axum::http::Request;
 use tower::ServiceExt;
-use crate::backend::vault::uses::{self, Decision, UseAnswer, UseRequest};
+use crate::backend::vault::signins::Space;
+use crate::backend::vault::uses::{self, Decision, UseAnswer, UseHttpPrompt, UseRequest};
+use crate::server::vault_prompt_share as prompt_share;
 
 const REASON: &str = "sign in to the dashboard to read the build status";
 
@@ -160,18 +162,120 @@ async fn a2_a_login_already_shared_with_the_agent_asks_nobody_and_one_that_canno
     let (s, out) = call(&app, Some(&token), "/api/v1/vault/share", json!({ "id": id, "reason": REASON, "auth": keyless("vid-ask-e") })).await;
     assert_eq!((s, out["status"].as_str(), out["already"].as_bool()), (StatusCode::OK, Some("shared"), Some(true)), "{out}");
     assert!(no_card(&id, "vid-ask-e"), "no card for what is shared already");
-    // A sign-in for a site's HTTP prompt is typed by the browser itself: no share, and no card.
-    let (s, made) = host(&app, json!({ "op": "create", "kind": "login", "label": "Intranet", "fields": { "site": "https://intranet.example.com", "realm": "Staff" }, "parts": { "password": "pw-two" } })).await;
+    // A login saved for no site has nothing to sign in to: no share, and no card.
+    let (s, made) = host(&app, json!({ "op": "create", "kind": "login", "label": "Spare", "fields": { "username": "spare" }, "parts": { "password": "pw-two" } })).await;
     assert_eq!(s, StatusCode::OK, "{made}");
-    let realm_id = made["data"]["id"].as_str().unwrap().to_string();
-    let (s, out) = call(&app, Some(&token), "/api/v1/vault/share", json!({ "id": realm_id, "reason": REASON, "auth": keyless("vid-ask-e") })).await;
-    assert!(s.is_client_error() && out["error"].as_str().unwrap().contains("can't be shared"), "{out}");
-    assert!(no_card(&realm_id, "vid-ask-e"));
+    let spare_id = made["data"]["id"].as_str().unwrap().to_string();
+    let (s, out) = call(&app, Some(&token), "/api/v1/vault/share", json!({ "id": spare_id, "reason": REASON, "auth": keyless("vid-ask-e") })).await;
+    assert!(s.is_client_error() && out["error"].as_str().unwrap().contains("saved for a site"), "{out}");
+    assert!(no_card(&spare_id, "vid-ask-e"));
     // An entry the agent may not use is "no entry", and a reason is needed.
     let (s, out) = call(&app, Some(&token), "/api/v1/vault/share", json!({ "id": "no-such-entry", "reason": REASON, "auth": keyless("vid-ask-e") })).await;
     assert_eq!(s, StatusCode::NOT_FOUND, "{out}");
     let (s, _) = call(&app, Some(&token), "/api/v1/vault/share", json!({ "id": id, "auth": keyless("vid-ask-e") })).await;
     assert!(s.is_client_error());
+}
+
+/// A sign-in for the prompt of realm "Staff" on the intranet, saved for Personal.
+async fn prompt_login(app: &axum::Router) -> String {
+    let fields = json!({ "site": "https://intranet.example.com", "realm": "Staff", "username": "alice" });
+    let (s, made) = host(app, json!({ "op": "create", "kind": "login", "label": "Intranet", "fields": fields, "parts": { "password": "pw-two-of-a-kind" } })).await;
+    assert_eq!(s, StatusCode::OK, "{made}");
+    made["data"]["id"].as_str().unwrap().to_string()
+}
+
+/// That prompt, met in a tab of agent `slug`'s own browser profile: what the host's credential broker asks about.
+fn prompt_space(slug: &str) -> Space {
+    let profile = format!("profile:{}", crate::backend::browser_profiles_store::agent_profile_id(&format!("uid-{slug}")));
+    Space { profile, origin: "https://intranet.example.com".into(), realm: "Staff".into(), proxy: false }
+}
+
+#[tokio::test]
+async fn a11_a_yes_on_the_card_shares_a_prompt_sign_in_and_covers_the_prompt_that_waited() {
+    let (app, state) = setup().await;
+    let token = agent(&state, "vid-pr-a");
+    let _other = agent(&state, "vid-pr-other");
+    let id = prompt_login(&app).await;
+    let space = prompt_space("vid-pr-a");
+    assert!(prompt_share::lookup(&state, &space).unwrap().is_none(), "nothing answers the prompt before the share");
+    let asked = ask(&app, &token, "vid-pr-a", json!({ "id": id, "reason": REASON }));
+    let card = card_of(&id, "vid-pr-a").await;
+    // What the person is shown: the prompt by its realm, the user name masked, an Always, and silence is a no.
+    assert_eq!(card.prompt, Some(UseHttpPrompt { realm: "Staff".into(), proxy: false }));
+    assert_eq!((card.entry_label.as_str(), card.origin.as_str(), card.agent_reason.as_str()), ("Intranet", "https://intranet.example.com", REASON));
+    assert!(card.offer_always && !uses::goes_ahead(&card) && !card.field.contains("alice"), "{card:?}");
+    assert!(prompt_share::lookup(&state, &space).unwrap().is_none(), "nothing answers while the person is asked");
+    uses::uses().answer(&card.id, UseAnswer::of(Decision::Once));
+    let (s, out) = asked.await.unwrap();
+    assert_eq!((s, out["status"].as_str(), out["prompt"].as_bool(), out["always"].as_bool()), (StatusCode::OK, Some("shared"), Some(true), Some(false)), "{out}");
+    assert!(out["next"].as_str().unwrap().contains("load the page again"), "{out}");
+    assert!(!out.to_string().contains("alice") && !out.to_string().contains("pw-two-of-a-kind"), "{out}");
+    assert_eq!(shared_of(&state, &id).as_deref(), Some("uid-vid-pr-a"));
+
+    // The host is told there is one, shared, with the user name masked; the yes just given covers this prompt.
+    let found = prompt_share::lookup(&state, &space).unwrap().expect("the shared sign-in answers in the agent's own profile");
+    assert!(found.granted && !found.username.contains("alice") && !found.agent.is_empty(), "{} {}", found.username, found.agent);
+    let (user, password) = prompt_share::fill(&state, &space).unwrap().expect("the browser is given it");
+    assert_eq!((user.as_str(), password.as_str()), ("alice", "pw-two-of-a-kind"));
+    // One use: the next prompt asks the person again.
+    assert!(!prompt_share::lookup(&state, &space).unwrap().unwrap().granted);
+    let used = lines_of(&state, &id).into_iter().find(|l| l.action == vault::signins::SIGNED_IN).expect("the use is in the history");
+    assert_eq!((used.actor.as_str(), used.outcome.as_str()), ("vid-pr-a", "done"), "the use is the agent's line");
+
+    // Another agent's profile, and Personal, are given nothing through this share.
+    for other in [prompt_space("vid-pr-other"), Space { profile: "personal".into(), ..space.clone() }, Space { realm: "Admin".into(), ..space.clone() }] {
+        assert!(prompt_share::lookup(&state, &other).unwrap().is_none(), "{other:?}");
+        assert!(prompt_share::fill(&state, &other).unwrap().is_none(), "{other:?}");
+    }
+}
+
+#[tokio::test]
+async fn a11_always_on_the_card_answers_each_prompt_until_the_share_is_removed() {
+    let (app, state) = setup().await;
+    let token = agent(&state, "vid-pr-b");
+    let id = prompt_login(&app).await;
+    let space = prompt_space("vid-pr-b");
+    let asked = ask(&app, &token, "vid-pr-b", json!({ "id": id, "reason": REASON }));
+    let card = card_of(&id, "vid-pr-b").await;
+    uses::uses().answer(&card.id, UseAnswer::of(Decision::Always));
+    let (s, out) = asked.await.unwrap();
+    assert_eq!((s, out["always"].as_bool()), (StatusCode::OK, Some(true)), "{out}");
+    for _ in 0..2 {
+        assert!(prompt_share::lookup(&state, &space).unwrap().unwrap().granted, "an Always is not used up");
+        assert!(prompt_share::fill(&state, &space).unwrap().is_some());
+    }
+    let (s, list) = host(&app, json!({ "op": "share_list", "id": id })).await;
+    assert_eq!((s, list["data"]["shares"][0]["always"].as_bool()), (StatusCode::OK, Some(true)), "the person sees it on the login's row: {list}");
+    // The person stops sharing: the prompt is answered by nothing, and sharing again starts by asking.
+    assert_eq!(host(&app, json!({ "op": "share_remove", "id": id, "agent": "uid-vid-pr-b" })).await.0, StatusCode::OK);
+    assert!(prompt_share::lookup(&state, &space).unwrap().is_none());
+    assert!(prompt_share::fill(&state, &space).unwrap().is_none());
+    assert_eq!(host(&app, json!({ "op": "share_add", "id": id, "agent": "uid-vid-pr-b" })).await.0, StatusCode::OK);
+    assert!(!prompt_share::lookup(&state, &space).unwrap().unwrap().granted, "a share made again asks again");
+}
+
+#[tokio::test]
+async fn a11_removing_the_share_ends_a_yes_nobody_used() {
+    let (app, state) = setup().await;
+    let token = agent(&state, "vid-pr-c");
+    let id = prompt_login(&app).await;
+    let space = prompt_space("vid-pr-c");
+    let asked = ask(&app, &token, "vid-pr-c", json!({ "id": id, "reason": REASON }));
+    let card = card_of(&id, "vid-pr-c").await;
+    uses::uses().answer(&card.id, UseAnswer::of(Decision::Once));
+    assert_eq!(asked.await.unwrap().0, StatusCode::OK);
+    assert!(prompt_share::lookup(&state, &space).unwrap().unwrap().granted);
+    assert_eq!(host(&app, json!({ "op": "share_remove", "id": id, "agent": "uid-vid-pr-c" })).await.0, StatusCode::OK);
+    assert_eq!(host(&app, json!({ "op": "share_add", "id": id, "agent": "uid-vid-pr-c" })).await.0, StatusCode::OK);
+    assert!(!prompt_share::lookup(&state, &space).unwrap().unwrap().granted, "the yes went with the share it was given for");
+    // A form login's card is as it was: no Always, and its yes covers no prompt.
+    let form = login(&app).await;
+    let asked = ask(&app, &token, "vid-pr-c", json!({ "id": form, "reason": REASON }));
+    let card = card_of(&form, "vid-pr-c").await;
+    assert!(card.prompt.is_none() && !card.offer_always);
+    uses::uses().answer(&card.id, UseAnswer::of(Decision::Once));
+    let (s, out) = asked.await.unwrap();
+    assert_eq!((s, out.get("prompt"), out.get("next")), (StatusCode::OK, None, None), "{out}");
 }
 
 #[tokio::test]
@@ -212,4 +316,68 @@ async fn generate_makes_a_login_for_the_agents_own_profile_and_leaves_where_it_i
     assert_eq!(s, StatusCode::OK, "{key}");
     let row = state.identity_store.vault_get(key["id"].as_str().unwrap()).unwrap().unwrap();
     assert!(!vault::signins::fields_of(&row).contains_key("profile"));
+}
+
+/// A call the browser's own process makes to srv about a prompt met in `space` (`credential.Lookup`, `credential.Fill`),
+/// with the secret only the paired host holds when `secret` is given.
+async fn broker(state: &crate::server::AppState, method: &str, space: &Space, secret: Option<&str>) -> crate::backend::service::WebReturnType {
+    let args = json!({ "identity_id": space.profile, "origin": space.origin, "realm": space.realm, "is_proxy": space.proxy });
+    let call = crate::backend::service::WebCallType { service: "credential".into(), method: method.into(), uicontext: None, args: vec![args, json!(secret.unwrap_or(""))] };
+    crate::server::service::run_service_call(state, &call).await
+}
+
+const HOST_SECRET: &str = "test-host-reg-secret";
+
+#[tokio::test]
+async fn a11_the_browsers_credential_calls_answer_a_prompt_from_a_share_the_agent_asked_for() {
+    // The whole chain through the real routes: the agent's `Vault share` request, the person's Always on its card, then
+    // what the browser's process asks srv when the site's prompt appears in the agent's own profile.
+    let (app, state) = setup().await;
+    let token = agent(&state, "vid-pr-d");
+    let _other = agent(&state, "vid-pr-e");
+    let id = prompt_login(&app).await;
+    let space = prompt_space("vid-pr-d");
+
+    // Before any share: nothing answers, and Fill gives nothing.
+    let before = broker(&state, "Lookup", &space, Some(HOST_SECRET)).await;
+    assert_eq!((before.success, before.data.as_ref().and_then(|d| d["found"].as_bool())), (true, Some(false)), "{before:?}");
+    assert!(!broker(&state, "Fill", &space, Some(HOST_SECRET)).await.success);
+
+    // The agent asks, the person answers Always.
+    let asked = ask(&app, &token, "vid-pr-d", json!({ "id": id, "reason": REASON }));
+    let card = card_of(&id, "vid-pr-d").await;
+    uses::uses().answer(&card.id, UseAnswer::of(Decision::Always));
+    let (s, out) = asked.await.unwrap();
+    assert_eq!((s, out["always"].as_bool()), (StatusCode::OK, Some(true)), "{out}");
+
+    // Lookup: found, shared with that agent, already approved, the user name masked and no password.
+    let looked = broker(&state, "Lookup", &space, Some(HOST_SECRET)).await;
+    let data = looked.data.clone().unwrap_or_default();
+    assert!(looked.success, "{looked:?}");
+    assert_eq!((data["found"].as_bool(), data["shared"].as_bool(), data["approval"].as_str(), data["username"].as_str()), (Some(true), Some(true), Some("granted"), Some("al***")), "{data}");
+    assert!(!data.to_string().contains("pw-two-of-a-kind") && !data.to_string().contains("alice"), "{data}");
+
+    // Fill is the one call that returns the password, and an Always is not used up by it.
+    for _ in 0..2 {
+        let filled = broker(&state, "Fill", &space, Some(HOST_SECRET)).await;
+        let data = filled.data.clone().unwrap_or_default();
+        assert!(filled.success, "{filled:?}");
+        assert_eq!((data["username"].as_str(), data["password"].as_str()), (Some("alice"), Some("pw-two-of-a-kind")));
+    }
+    let used = lines_of(&state, &id).into_iter().filter(|l| l.action == vault::signins::SIGNED_IN).count();
+    assert_eq!(used, 2, "each use is in the history, as the agent's");
+
+    // A caller without the host's secret (an agent riding the shared key) is given nothing; nor is another agent's
+    // profile, nor Personal.
+    for secret in [None, Some("not-the-secret")] {
+        let refused = broker(&state, "Fill", &space, secret).await;
+        assert!(!refused.success && refused.data.is_none(), "{refused:?}");
+    }
+    let other = prompt_space("vid-pr-e");
+    assert_eq!(broker(&state, "Lookup", &other, Some(HOST_SECRET)).await.data.unwrap()["found"].as_bool(), Some(false), "another agent's profile");
+    assert!(!broker(&state, "Fill", &other, Some(HOST_SECRET)).await.success, "another agent's profile");
+    // Personal's own tab is offered its own saved login, as before, and it is no share's: nothing says it was shared.
+    let personal = Space { profile: "personal".into(), ..space.clone() };
+    let own = broker(&state, "Lookup", &personal, Some(HOST_SECRET)).await.data.unwrap();
+    assert_eq!((own["found"].as_bool(), own.get("shared")), (Some(true), None), "{own}");
 }

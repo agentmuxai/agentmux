@@ -36,17 +36,20 @@ struct Fake {
     asked: Arc<Mutex<Vec<String>>>,
     /// When set, `memory.global.list` is refused with this reason.
     refuse_list: Arc<Mutex<Option<&'static str>>>,
+    /// When set, a put of this entry id fails on this machine as an older build's store error does: the
+    /// operation ran (the answer carries its audit id) and failed. The bool: whether it carries one.
+    fail_put: Arc<Mutex<Option<(String, bool)>>>,
 }
 
 impl Fake {
     fn new(store: Arc<Store>) -> Self {
-        Self { store, asked: Default::default(), refuse_list: Default::default() }
+        Self { store, asked: Default::default(), refuse_list: Default::default(), fail_put: Default::default() }
     }
 
     fn call(&self) -> impl Fn(String, &'static str, Value) -> BoxFuture<'static, RemoteOpResult> {
-        let (store, asked, refuse) = (self.store.clone(), self.asked.clone(), self.refuse_list.clone());
+        let (store, asked, refuse, fail_put) = (self.store.clone(), self.asked.clone(), self.refuse_list.clone(), self.fail_put.clone());
         move |_host, op, params| {
-            let (store, asked, refuse) = (store.clone(), asked.clone(), refuse.clone());
+            let (store, asked, refuse, fail_put) = (store.clone(), asked.clone(), refuse.clone(), fail_put.clone());
             Box::pin(async move {
                 asked.lock().unwrap().push(op.to_string());
                 let actor = Actor { label: "synced@narko", uid: "" };
@@ -59,6 +62,15 @@ impl Fake {
                     }
                     "memory.global.put" => {
                         let entry: FleetEntry = serde_json::from_value(params).unwrap();
+                        if let Some((id, ran)) = fail_put.lock().unwrap().clone() {
+                            if id == entry.id {
+                                let mut answer = RemoteOpResult::failed("sqlite error: UNIQUE constraint failed: db_bundles.name");
+                                if ran {
+                                    answer.audit_id = "nonce-1".into();
+                                }
+                                return answer;
+                            }
+                        }
                         RemoteOpResult::done(apply_put(&store, &entry, actor).unwrap().to_json())
                     }
                     "memory.global.remove" => {
@@ -104,6 +116,47 @@ async fn a_machine_that_is_behind_gets_what_it_lacks_and_nothing_is_sent_when_no
 
     sync_peers(mine.clone(), &[peer("charlie")], &mut seen, &call, now + Duration::from_secs(15)).await;
     assert_eq!(fake.asked().len(), 3, "an unchanged machine makes no calls at all");
+}
+
+#[tokio::test]
+async fn one_entry_that_fails_on_the_peer_is_reported_and_the_rest_still_go() {
+    let (mine, theirs) = (machine(), machine());
+    write(&mine, "a", "one", 1_000);
+    write(&mine, "b", "two", 2_000);
+    write(&mine, "c", "three", 3_000);
+    let fake = Fake::new(theirs.clone());
+    *fake.fail_put.lock().unwrap() = Some(("c".into(), true));
+    let call = fake.call();
+    let mut seen = HashMap::new();
+
+    // `c` is newest, so it goes first: it used to end the pass before `b` and `a` went.
+    let report = status::Status::default();
+    sync_peers_with(mine.clone(), &[peer("area54")], &mut seen, &call, Instant::now(), &report).await;
+    assert_eq!(fake.asked(), ["memory.global.list", "memory.global.put", "memory.global.put", "memory.global.put"]);
+    assert!(theirs.bundle_get("a").unwrap().is_some() && theirs.bundle_get("b").unwrap().is_some());
+    assert!(theirs.bundle_get("c").unwrap().is_none());
+    let snap = report.snapshot();
+    assert_eq!(snap["peers"]["area54"]["sent"], 2);
+    assert_eq!(snap["peers"]["area54"]["error"], Value::Null, "the machine answered: it is not unreachable");
+    let why = snap["peers"]["area54"]["not_applied"]["c"].as_str().unwrap();
+    assert!(why.starts_with("failed: ") && why.contains("UNIQUE constraint failed"), "{why}");
+}
+
+#[tokio::test]
+async fn an_answer_that_never_ran_still_ends_the_pass_for_that_peer() {
+    let (mine, theirs) = (machine(), machine());
+    write(&mine, "a", "one", 1_000);
+    write(&mine, "b", "two", 2_000);
+    let fake = Fake::new(theirs.clone());
+    *fake.fail_put.lock().unwrap() = Some(("b".into(), false));
+    let call = fake.call();
+    let mut seen = HashMap::new();
+
+    let report = status::Status::default();
+    sync_peers_with(mine.clone(), &[peer("unreachable")], &mut seen, &call, Instant::now(), &report).await;
+    assert_eq!(fake.asked(), ["memory.global.list", "memory.global.put"], "the pass stopped at the first failure");
+    let snap = report.snapshot();
+    assert!(snap["peers"]["unreachable"]["error"].as_str().unwrap().starts_with("memory.global.put: "));
 }
 
 #[tokio::test]
@@ -266,4 +319,37 @@ async fn a_peer_that_cannot_be_listed_shows_the_reason_in_the_status() {
 
     sync_peers_with(mine, &[peer("old-build")], &mut seen, &call, Instant::now(), &report).await;
     assert_eq!(report.snapshot()["peers"]["old-build"]["error"], "list: peer_cannot_do_remote_ops");
+}
+
+#[test]
+fn peers_are_told_apart_by_their_install_and_channel_whatever_their_discovery_instance_id_says() {
+    // Four machines on one stable build all announce the version as their instance id; the key must not use it.
+    let keys: Vec<String> = ["install-a", "install-b", "install-c", "install-d"].iter().map(|i| peer_key(i, "host", "stable", "addr-1", 29700)).collect();
+    let mut unique = keys.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(unique.len(), 4, "{keys:?}");
+    // The same install on another channel is another peer, and the key survives the machine's address changing.
+    assert_ne!(peer_key("install-a", "h", "stable", "addr-1", 29700), peer_key("install-a", "h", "dev", "addr-1", 29700));
+    assert_eq!(peer_key("install-a", "h", "stable", "addr-1", 29700), peer_key("install-a", "h", "stable", "addr-9", 29701));
+    // An install that announces no id is told apart by name, channel and address.
+    assert_ne!(peer_key("", "one", "stable", "addr-1", 29700), peer_key("", "two", "stable", "addr-1", 29700));
+    assert_ne!(peer_key("", "one", "stable", "addr-1", 29700), peer_key("", "one", "stable", "addr-2", 29700));
+}
+
+#[tokio::test]
+async fn every_peer_is_synced_in_one_pass_not_one_per_resync() {
+    let (mine, a, b) = (machine(), machine(), machine());
+    write(&mine, "x", "one", 1_000);
+    let (fake_a, fake_b) = (Fake::new(a.clone()), Fake::new(b.clone()));
+    let (call_a, call_b) = (fake_a.call(), fake_b.call());
+    // One call that routes by host, as the real send does.
+    let call = move |host: String, op: &'static str, params: Value| -> BoxFuture<'static, RemoteOpResult> {
+        if host == "alpha" { call_a(host, op, params) } else { call_b(host, op, params) }
+    };
+    let mut seen = HashMap::new();
+    let peers = [Peer { key: peer_key("install-alpha", "alpha", "stable", "addr-3", 29700), host: "alpha".into() }, Peer { key: peer_key("install-beta", "beta", "stable", "addr-4", 29700), host: "beta".into() }];
+    sync_peers(mine.clone(), &peers, &mut seen, &call, Instant::now()).await;
+    assert_eq!(ids(&a), ids(&mine), "the first peer");
+    assert_eq!(ids(&b), ids(&mine), "the second peer, in the same pass");
 }

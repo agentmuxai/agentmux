@@ -1,11 +1,19 @@
 #!/usr/bin/env bash
 # Build AgentMux as a signed macOS .app + .dmg (Developer ID, hardened runtime).
 #
-# Usage:  bash scripts/package-macos.sh [--fresh] [output-dir]   (output-dir defaults to ~/Desktop)
+# Usage:  bash scripts/package-macos.sh [--fresh] [--unsigned-app] [output-dir]   (output-dir defaults to ~/Desktop)
 #
 #   --fresh      No-op (accepted for back-compat). Every local build is now
 #                already its own isolated data dir — see CHANNEL below — so
 #                there is nothing left for --fresh to do.
+#   --unsigned-app
+#                Stop after the .app is assembled and stripped: build/AgentMux.app,
+#                unsigned, no certificate, no keychain, no DMG. The release workflow
+#                (build-macos.yml) builds this way in a job that holds no signing
+#                credential; a later job that holds them signs it with
+#                scripts/sign-macos-app.sh, notarizes and staples it
+#                (scripts/notarize-macos.sh) and makes the DMG
+#                (scripts/make-macos-dmg.sh), all taken from the workflow's own revision.
 #   output-dir   Where the DMG lands (default ~/Desktop).
 #
 # Self-contained orchestrator — runs the FULL build pipeline itself
@@ -39,7 +47,7 @@
 # before this change.
 #
 # Release / CI path:
-#   RELEASE_CHANNEL=stable bash scripts/package-macos.sh [output-dir]
+#   RELEASE_CHANNEL=stable AGENTMUX_STABLE_BUNDLE_ID=1 bash scripts/package-macos.sh [output-dir]
 #   (task package:release:macos sets this automatically)
 #
 # Bundle layout. The host resolves everything RELATIVE TO ITS OWN BINARY
@@ -69,12 +77,18 @@
 #     Resources/
 #       AgentMux.icns
 #
-# Signing/notarization: each Mach-O is signed inside-out with --options runtime.
-# Notarization is ATTEMPTED via the `notarytool` keychain profile; if it fails
-# (e.g. an expired Apple Developer agreement → HTTP 403) the script still emits a
-# SIGNED — but un-notarized — DMG and warns. Gatekeeper will then require a
-# right-click→Open on first launch on other Macs until the build is notarized.
+# Signing/notarization: each Mach-O is signed inside-out with --options runtime
+# (scripts/sign-macos-app.sh). Notarization (scripts/notarize-macos.sh) is
+# ATTEMPTED via the `notarytool` keychain profile; if it fails (e.g. an expired
+# Apple Developer agreement → HTTP 403) a local build still emits a SIGNED — but
+# un-notarized — DMG and warns. Gatekeeper will then require a right-click→Open
+# on first launch on other Macs until the build is notarized. The release workflow
+# sets REQUIRE_NOTARIZATION=1 (in its own signing job), where that is a failure.
 #   NOTARIZE=0            skip notarization entirely (signed-only)
+#   NOTARIZE_APP=1        also notarize and staple the .app before the DMG is made,
+#                         so the app inside the DMG carries its own ticket (the release
+#                         does; a local build skips this extra submission by default)
+#   REQUIRE_NOTARIZATION=1  a notarization Apple does not accept fails the build
 #   NOTARY_PROFILE=name   keychain profile name (default: notarytool)
 #   MACOS_SIGN_CERT="..." override the Developer ID cert name
 set -euo pipefail
@@ -83,11 +97,13 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
 FRESH=0
+UNSIGNED_APP=0
 OUTDIR=""
 for arg in "$@"; do
     case "$arg" in
         --fresh) FRESH=1 ;;
-        --*) echo "ERROR: unknown flag $arg (supported: --fresh)" >&2; exit 1 ;;
+        --unsigned-app) UNSIGNED_APP=1 ;;
+        --*) echo "ERROR: unknown flag $arg (supported: --fresh, --unsigned-app)" >&2; exit 1 ;;
         *) OUTDIR="$arg" ;;
     esac
 done
@@ -173,9 +189,12 @@ DMG="$OUTDIR/AgentMux_${VERSION}_${ARCH}.dmg"
 # Resolve the Developer ID cert from the keychain — never hardcode the signing
 # identity (name + team id) in the public repo. Override with MACOS_SIGN_CERT.
 # Credential/identity details live in the private agentmux-builder repo.
-CERT="${MACOS_SIGN_CERT:-$(security find-identity -v -p codesigning 2>/dev/null \
-        | awk -F'"' '/Developer ID Application/ {print $2; exit}')}"
-[ -n "$CERT" ] || { echo "❌ No 'Developer ID Application' identity in the keychain (and MACOS_SIGN_CERT unset)." >&2; exit 1; }
+CERT=""
+if [ "$UNSIGNED_APP" != "1" ]; then
+    CERT="${MACOS_SIGN_CERT:-$(security find-identity -v -p codesigning 2>/dev/null \
+            | awk -F'"' '/Developer ID Application/ {print $2; exit}')}"
+    [ -n "$CERT" ] || { echo "❌ No 'Developer ID Application' identity in the keychain (and MACOS_SIGN_CERT unset)." >&2; exit 1; }
+fi
 ENTITLEMENTS="$REPO_ROOT/build/entitlements.mac.plist"
 # Bundle id: ai.agentmux.<channel>.<version>
 # Channel matches AGENTMUX_BUILD_CHANNEL_DEFAULT compiled into the binaries
@@ -187,6 +206,17 @@ ENTITLEMENTS="$REPO_ROOT/build/entitlements.mac.plist"
 # See docs/specs/SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md.
 CHANNEL_ID="$(printf '%s' "$CHANNEL" | tr -C 'A-Za-z0-9.-' '-' | tr '[:upper:]' '[:lower:]')"
 BUNDLE_ID="ai.agentmux.${CHANNEL_ID}.${VERSION}"
+# A fixed bundle id (no version) is what keeps macOS's privacy grants (Screen Recording, Accessibility, folders,
+# notifications) and the Login Items registration across upgrades: they are keyed to the signed requirement, which
+# names the id, so with a versioned id every release is a new app and asks again. Decided for the release channel
+# (docs/specs/SPEC_START_WITH_OS_2026_09_25.md section 3.7): the release's build job sets AGENTMUX_STABLE_BUNDLE_ID=1
+# and the app is `ai.agentmux.stable`, for every release. scripts/verify-app-identity-darwin.sh fails the build when a
+# stable app comes out with a version in its id. Every other build keeps the per-version id above (a local build
+# next to the installed app is a different app, so double-clicking it does not hand over to the installed one).
+AGENTMUX_STABLE_BUNDLE_ID="${AGENTMUX_STABLE_BUNDLE_ID:-0}"
+if [ "$AGENTMUX_STABLE_BUNDLE_ID" = "1" ]; then
+    BUNDLE_ID="ai.agentmux.${CHANNEL_ID}"
+fi
 NOTARIZE="${NOTARIZE:-1}"
 NOTARY_PROFILE="${NOTARY_PROFILE:-notarytool}"
 SRV="dist/bin/agentmux-srv-${VERSION}-darwin.${ARCH}"
@@ -497,6 +527,38 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
+# Start at login, as a Login Items entry: a login agent the launcher registers with SMAppService
+# (crates/launcher/src/autostart/login_item.rs). Only a bundle with a stable id ships it: the launcher
+# registers it when the file is there and otherwise keeps writing the LaunchAgent plist of earlier builds.
+# The job is the launcher's --login-start shim (BundleProgram must be a signed Mach-O in the bundle): it opens
+# the app through LaunchServices in background mode unless it already runs, then exits.
+# Only a Developer-ID-signed bundle ships it: the system ties the registration to the app's code requirement, which for
+# an ad-hoc signature is the build's own hash, so after an in-place upgrade launchd refuses to start the job (a
+# "launch constraint violation" with no message to the person). A build that no job will sign with a Developer ID keeps
+# the LaunchAgent plist. With --unsigned-app the release job signs the bundle afterwards, so that counts as signed.
+if [ "$AGENTMUX_STABLE_BUNDLE_ID" = "1" ] && { [ -n "$CERT" ] || [ "$UNSIGNED_APP" = "1" ]; }; then
+    LOGIN_AGENT_DIR="$APP/Contents/Library/LaunchAgents"
+    mkdir -p "$LOGIN_AGENT_DIR"
+    cat > "$LOGIN_AGENT_DIR/${BUNDLE_ID}.login.plist" <<LOGINPLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>${BUNDLE_ID}.login</string>
+    <key>BundleProgram</key><string>Contents/MacOS/agentmux-launcher</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>agentmux-launcher</string>
+        <string>--login-start</string>
+    </array>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><false/>
+    <key>ProcessType</key><string>Interactive</string>
+</dict>
+</plist>
+LOGINPLIST
+fi
+
 FW="$APP/Contents/Frameworks/Chromium Embedded Framework.framework"
 
 # Strip debug/local symbols from every Mach-O BEFORE signing (a from-source
@@ -530,152 +592,52 @@ for lp in "$LOCDIR"/*.lproj; do
 done
 echo "  framework now: $(du -sh "$FW" 2>/dev/null | awk '{print $1}')  (locales trimmed to en*)"
 
-echo "==> Signing inside-out (Developer ID: $CERT)"
-SIGN=(codesign --force --timestamp --options runtime --sign "$CERT")
+# The stable channel's id carries no version, and its Login Items agent is in the bundle: a stable app that comes out
+# otherwise would send every person back to granting again at the next upgrade. The signing step checks the signed
+# requirement as well (scripts/sign-macos-app.sh).
+echo "==> Checking the app's bundle id"
+bash "$REPO_ROOT/scripts/verify-app-identity-darwin.sh" "$APP" \
+    || { echo "❌ the stable app's bundle id is not the fixed one; not packaging. Set AGENTMUX_STABLE_BUNDLE_ID=1." >&2; exit 1; }
 
-# 1. GL dylibs next to the exe (plain libraries — no entitlements).
-shopt -s nullglob
-for dy in "$APP/Contents/MacOS/"*.dylib; do "${SIGN[@]}" "$dy"; done
-# 2. Framework's nested dylibs, then the framework bundle itself.
-for dy in "$FW/Libraries/"*.dylib; do "${SIGN[@]}" "$dy"; done
-# 3. Each Helper app: its GL dylibs → helper exe (entitlements: the renderer's
-#    V8 JIT + framework dlopen) → helper bundle. Signed before the outer .app so
-#    the signatures are included in the bundle seal.
-for ha in "${HELPER_APPS[@]}"; do
-    for dy in "$ha/Contents/MacOS/"*.dylib; do "${SIGN[@]}" "$dy"; done
-done
-shopt -u nullglob
-"${SIGN[@]}" "$FW"
-for ha in "${HELPER_APPS[@]}"; do
-    "${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$ha/Contents/MacOS/$(basename "$ha" .app)"
-    "${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$ha"
-done
-# 4. Backend + host get the app entitlements (CLI feature access + CEF JIT).
-#    The host is now NESTED code (the launcher is CFBundleExecutable), so it must
-#    be signed here, before the bundle seal.
-#    srv gets a fixed --identifier: without one, codesign takes it from the
-#    versioned file name, and srv is the process that reads the Keychain. An
-#    item trusts an app by its designated requirement, identifier included, so
-#    "Always Allow" never carried over and every new version asked for the
-#    login keychain on first launch (retro-keychain-prompt-recurs-per-build-
-#    identity-2026-08-21.md). Same identifier on every channel and version.
-#    srv now lives in its own helper app, whose CFBundleIdentifier is that same
-#    ai.agentmux.srv. Signing the bundle below re-signs its main executable
-#    with the bundle's identifier, so that plist entry is what keeps the
-#    identifier; the explicit --identifier here only matches it.
-#    agentmux-mcp and agentmux-bashwrap (on Claude's PATH through the
-#    MacOS/tools/bin symlinks) are signed the same way, inside-out, before the
-#    seal, or `codesign --verify --deep --strict` fails and notarization
-#    rejects the bundle. The symlinks themselves are sealed as resources.
-"${SIGN[@]}" --identifier ai.agentmux.srv --entitlements "$ENTITLEMENTS" "$SRV_APP_BIN/agentmux-srv"
-"${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$MCP_APP_BIN/agentmux-mcp"
-"${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$BASHWRAP_APP_BIN/agentmux-bashwrap"
-for ta in "${TOOL_APPS[@]}"; do
-    "${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$ta"
-done
-"${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$APP/Contents/MacOS/agentmux-cef"
-# The two macOS remote helpers are nested Mach-Os as well, signed the same way
-# (no entitlements: they run on a remote Mac, not in this app). The Linux builds
-# under Contents/Resources/remote are not code and are sealed as resources.
-for helper in "$APP"/Contents/MacOS/tools/remote/*/agentmux-remote; do
-    [ -f "$helper" ] && "${SIGN[@]}" "$helper"
-done
-# 5. Seal the .app bundle last. codesign signs the main executable
-#    (agentmux-launcher) as part of sealing; pass the entitlements so the
-#    launcher is hardened-runtime signed identically to the host.
-"${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$APP"
+if [ "$UNSIGNED_APP" = "1" ]; then
+    # The release workflow stops here: the assembled, stripped, UNSIGNED app is handed to the job that holds the
+    # signing credentials. Nothing below runs, and nothing above needed a certificate or a keychain.
+    phase_done "assemble (unsigned)"
+    echo "✓ Built UNSIGNED app: $APP"
+    exit 0
+fi
 
-echo "==> Verifying signature"
-codesign --verify --deep --strict --verbose=2 "$APP"
-
-# srv must still be the app the login keychain trusts: identifier
-# ai.agentmux.srv, signed by this cert's team. A build that comes out
-# otherwise makes every keychain item ask again after the upgrade, so it stops
-# here, before the DMG and notarization (it lost this once before, #4482).
-echo "==> Verifying srv's signing identity"
-bash "$REPO_ROOT/scripts/verify-srv-identity-darwin.sh" "$APP" "$CERT" \
-    || { echo "❌ srv is not signed as ai.agentmux.srv by the signing team; not packaging." >&2; exit 1; }
+# Signing: inside-out, then verified (including srv's identity) — scripts/sign-macos-app.sh, the same script the
+# release workflow runs in its signing job.
+bash "$REPO_ROOT/scripts/sign-macos-app.sh" "$APP" "$ENTITLEMENTS" "$CERT"
 phase_done "assemble and sign"
 
-echo "==> Creating DMG (icon-view drag-to-install layout)"
 mkdir -p "$OUTDIR"
-rm -f "$DMG"
-DMG_VOL="AgentMux"
-STAGE="$(mktemp -d)/dmg"; mkdir -p "$STAGE"
-ditto "$APP" "$STAGE/AgentMux.app"
-ln -s /Applications "$STAGE/Applications"
-# Build a READ-WRITE DMG first so we can set the Finder window (icon view, the
-# AgentMux app icon on the left + an /Applications drop-target on the right —
-# the standard drag-to-install UX), then compress it read-only. Without this a
-# plain DMG opens in whatever view Finder last used (list/column), showing the
-# bundle as folders. Falls back to a plain DMG if Finder automation is
-# unavailable (headless / no TCC grant).
-RW="$(mktemp -u).dmg"
-# Use APFS (not HFS+) for the intermediate read-write volume. macOS 26 Tahoe
-# has a regression in HFS+ transparent file decompression (decmpfs, the `z`
-# attribute that hdiutil applies automatically to compressible files like JS/HTML
-# when building an HFS+ image). On the mounted HFS+ DMG, reading those files
-# fails with ENOTTY / Input/output error — the IPC server sets Content-Length
-# from file metadata but then can't stream the body, causing ERR_CONTENT_LENGTH_MISMATCH
-# in CEF. APFS images get the same `z` attribute but their decompressor is
-# unaffected on macOS 26, so switching here fixes the bug. APFS DMGs have been
-# mountable since macOS 10.14 and we target 11+, so this is safe.
-hdiutil create -volname "$DMG_VOL" -srcfolder "$STAGE" -ov -format UDRW -fs APFS "$RW" >/dev/null
-RWMNT="$(hdiutil attach "$RW" -nobrowse -noautoopen 2>/dev/null | sed -n 's/.*\(\/Volumes\/.*\)/\1/p' | tail -1)"
-if [ -n "$RWMNT" ]; then
-    osascript >/dev/null 2>&1 <<OSA || echo "  ⚠ Finder layout skipped (automation unavailable) — DMG uses default view"
-tell application "Finder"
-    tell disk "$DMG_VOL"
-        open
-        set current view of container window to icon view
-        set toolbar visible of container window to false
-        set statusbar visible of container window to false
-        set the bounds of container window to {300, 150, 880, 520}
-        set vopts to the icon view options of container window
-        set arrangement of vopts to not arranged
-        set icon size of vopts to 128
-        set position of item "AgentMux.app" of container window to {150, 195}
-        set position of item "Applications" of container window to {430, 195}
-        update without registering applications
-        delay 1
-        close
-    end tell
-end tell
-OSA
-    sync
-    hdiutil detach "$RWMNT" >/dev/null 2>&1 || true
+NOTARY_STATUS=0
+if [ "$NOTARIZE" = "1" ] && [ "${NOTARIZE_APP:-0}" = "1" ]; then
+    # The app first, so the DMG is made from an app that carries its own ticket.
+    NOTARY_PROFILE="$NOTARY_PROFILE" bash "$REPO_ROOT/scripts/notarize-macos.sh" app "$APP" || NOTARY_STATUS=$?
+    if [ "$NOTARY_STATUS" -ne 0 ] && [ "${REQUIRE_NOTARIZATION:-0}" = "1" ]; then
+        echo "❌ the app was not notarized and stapled (status $NOTARY_STATUS): not making the DMG" >&2
+        exit 1
+    fi
+    NOTARY_STATUS=0
 fi
-# ULFO (LZFSE) compression. Every page of the app read from a mounted DMG is
-# decompressed on the way in: the first launch from a fresh mount, and the
-# copy into /Applications. ULMO (LZMA) made that slow: on 0.59.20 (M2), reading
-# the 309 MB Chromium framework from a fresh mount took 4.2 s with ULMO and
-# 0.4 s with ULFO, and a cold launch from the mount 16.1 s vs 10.1 s. The cost
-# is size: ULMO 170 MB, ULFO 223 MB (UDZO/zlib was ~248 MB). ULFO mounts on
-# macOS 10.11+ (we target 11+).
-hdiutil convert "$RW" -format ULFO -o "$DMG" >/dev/null
-rm -f "$RW"
+
+bash "$REPO_ROOT/scripts/make-macos-dmg.sh" "$APP" "$DMG"
 codesign --force --timestamp --sign "$CERT" "$DMG"
 phase_done "DMG"
 
 NOTARIZED=0
 if [ "$NOTARIZE" = "1" ]; then
-    echo "==> Notarizing (keychain profile: $NOTARY_PROFILE)"
-    # Capture the full output FIRST, then inspect — do NOT pipe into `grep -q`.
-    # `grep -q` exits on the first match (the mid-stream "Current status:
-    # Accepted"), which SIGPIPEs notarytool; under `set -o pipefail` that makes
-    # the whole pipeline non-zero and the success branch is skipped even though
-    # Apple accepted the submission (notarized-but-not-stapled). `|| true` keeps
-    # set -e from aborting if notarytool exits non-zero.
-    notary_out="$(xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait 2>&1 || true)"
-    printf '%s\n' "$notary_out" > /tmp/agentmux-notary.log
-    if printf '%s\n' "$notary_out" | grep -q "status: Accepted"; then
-        xcrun stapler staple "$DMG"
+    NOTARY_PROFILE="$NOTARY_PROFILE" bash "$REPO_ROOT/scripts/notarize-macos.sh" dmg "$DMG" || NOTARY_STATUS=$?
+    if [ "$NOTARY_STATUS" -eq 0 ]; then
         NOTARIZED=1
-        echo "✓ Notarized + stapled"
+    elif [ "${REQUIRE_NOTARIZATION:-0}" = "1" ]; then
+        echo "❌ the DMG was not notarized and stapled (status $NOTARY_STATUS): not emitting a signed-only DMG" >&2
+        exit 1
     else
-        echo "⚠ Notarization not accepted — emitting a SIGNED-ONLY DMG. Log: /tmp/agentmux-notary.log"
-        echo "  If this is an agreement issue, re-sign at https://appstoreconnect.apple.com"
-        echo "  (notarytool returns HTTP 403 'a required agreement is missing or has expired')."
+        echo "⚠ Notarization not completed — emitting a SIGNED-ONLY DMG."
     fi
 else
     echo "==> Skipping notarization (NOTARIZE=0)"

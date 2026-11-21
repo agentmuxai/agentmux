@@ -24,7 +24,7 @@ vi.mock("@/app/store/block-component-registry", () => ({
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: {} }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
-import { createPaneFlushQueue, paneFlushRate } from "./stream-flush-rate";
+import { createPaneFlushQueue, paneCursorHold, paneFlushRate } from "./stream-flush-rate";
 import { createStreamFlushQueue } from "./stream-flush-queue";
 import { HIDDEN_DELAY_MS, __resetStreamSchedulerForTests } from "./stream-scheduler";
 import type { DocumentNode } from "../../agent-model/types";
@@ -161,6 +161,44 @@ describe("a pane's flush queue asks the scheduler for the pane's rate", () => {
         setFocus("other");
         expect(dormantReads).toBe(readsBefore);
         dispose();
+    });
+
+    it("a pane whose window tab is not shown is hidden too, though its pane stack shows it", () => {
+        const [off, setOff] = createSignal(true);
+        state.focused = "b"; // not dormant in its stack: only the wider signal says it is off screen
+        const { model: m, docs } = model();
+        const dispose = createRoot((d) => {
+            const q = createPaneFlushQueue(m, "b", off);
+            q.pushNewNode(node("n1"));
+            q.scheduleFlush();
+            return d;
+        });
+        runFrame();
+        expect(docs).toHaveLength(0);
+        setOff(false);
+        runFrame();
+        expect(docs.length).toBeGreaterThan(0);
+        dispose();
+    });
+
+    it("a held cursor asks for the hidden slot once, and giving it back withdraws the request", () => {
+        let off = true;
+        const hold = paneCursorHold("b", () => off);
+        const ran: string[] = [];
+        expect(hold.hold()).toBe(true);
+        hold.wake(() => ran.push("drain"));
+        runFrame();
+        expect(ran).toEqual([]); // not due before HIDDEN_DELAY_MS
+        clock += HIDDEN_DELAY_MS;
+        hold.wake(() => ran.push("drain"));
+        runFrame();
+        expect(ran).toEqual(["drain"]);
+        hold.wake(() => ran.push("later"));
+        off = false;
+        hold.cancel();
+        clock += HIDDEN_DELAY_MS;
+        runFrame();
+        expect(ran).toEqual(["drain"]);
     });
 
     it("the focused pane flushes in the next frame", () => {

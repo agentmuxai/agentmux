@@ -1,0 +1,38 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// A Kanban stage's colour is a palette name (kanban-stages.ts `STAGE_PALETTE`), never a hex: each name is an alias of
+// a `--kanban-stage-*` token every theme tunes (theme.scss, themes/*.scss; kanban-stage-colours.test.ts measures
+// them). The board's columns and the Settings editor's swatches both say `data-stage-colour`.
+
+[data-stage-colour="muted"] {
+    --kanban-stage: var(--kanban-stage-backlog);
+}
+
+[data-stage-colour="research"] {
+    --kanban-stage: var(--kanban-stage-research);
+}
+
+[data-stage-colour="info"] {
+    --kanban-stage: var(--kanban-stage-specd);
+}
+
+[data-stage-colour="active"] {
+    --kanban-stage: var(--kanban-stage-progress);
+}
+
+[data-stage-colour="attention"] {
+    --kanban-stage: var(--kanban-stage-needs);
+}
+
+[data-stage-colour="review"] {
+    --kanban-stage: var(--kanban-stage-review);
+}
+
+[data-stage-colour="done"] {
+    --kanban-stage: var(--kanban-stage-merged);
+}
+
+[data-stage-colour="shipped"] {
+    --kanban-stage: var(--kanban-stage-released);
+}

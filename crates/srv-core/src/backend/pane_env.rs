@@ -361,8 +361,9 @@ mod spawn_site_coverage {
     const SPAWN_MARKERS: &[&str] = &["CommandBuilder::new", "process::Command::new", "Command::new("];
 
     /// Recognised classifications. The prefix is load-bearing: `sanitized:`
-    /// entries are cross-checked against the file actually calling a sanitizer.
-    const CLASSES: &[&str] = &["sanitized:", "probe:", "test:", "own-exe:", "not a spawn:", "mixed:"];
+    /// entries are cross-checked against the file actually calling a sanitizer, and `allowlisted:` ones (the
+    /// environment is cleared and only a named list is passed) against the file calling `env_clear()`.
+    const CLASSES: &[&str] = &["sanitized:", "allowlisted:", "probe:", "test:", "own-exe:", "not a spawn:", "mixed:"];
 
     /// Every process spawn in srv: `(file, program, count, classification)`.
     ///
@@ -399,6 +400,10 @@ mod spawn_site_coverage {
          "sanitized: `agentmux-srv open` starts the person's browser (Linux) at the sign-in line, sanitize_external_std_command"),
         ("src/server/files_root.rs", "\"cmd\"", 1,
          "test: Windows only; makes a junction in a temp folder with mklink /J to prove a link swapped in after a pane opened is refused"),
+        ("src/server/agent_folder_open.rs", "\"cmd\"", 1,
+         "test: Windows only; makes a junction in a temp folder with mklink /J to prove a link opened from a pane is followed to where it leads before it is placed"),
+        ("src/server/agent_media_files.rs", "\"cmd\"", 1,
+         "test: Windows only; makes a junction in a temp folder with mklink /J to prove a link swapped in after a message's file was found is not followed"),
         ("src/backend/blockcontroller/subprocess/container_spawn.rs", "&argv[0]", 1,
          "test: Unix only; runs the container turn launcher on the host to prove an exported function reaches the provider"),
         ("src/agents/runner.rs", "bin", 1,
@@ -421,6 +426,8 @@ mod spawn_site_coverage {
          "test: Unix only; re-runs the test harness as a child that tries the database's write lock, to prove reading the WAL index leaves a transaction's lock in place"),
         ("src/backend/storage/filestore/tests_tail_slack.rs", "std::env::current_exe(", 1,
          "test: re-runs the test harness as a child that appends lines in a loop until the test kills it, to prove a transcript reads back whole after a kill mid-append"),
+        ("src/backend/gpu/nvml.rs", "\"cc\"", 1,
+         "test: Linux only; compiles a tiny fake NVIDIA library (a C file written to a temp folder, fixed arguments) so the NVML calls can be exercised without a GPU; skipped where there is no C compiler"),
         ("src/backend/transcript/framer_tests.rs", "&exe", 1,
          "test: re-runs the test harness as writer, framer and reader children on one scratch store (ignored; the multi-process stress)"),
         ("src/backend/blockcontroller/app_server.rs", "fake_server_binary(", 1,
@@ -467,6 +474,8 @@ mod spawn_site_coverage {
          "test: Unix only; runs the container download and uv install scripts against a fake curl in a temp dir, to prove the hash check, the size cap and the marker-last order"),
         ("src/backend/container/cli_release_tests.rs", "\"tar\"", 2,
          "test: Unix only; builds throwaway tarballs in a temp dir (one with a `..` member) as the download script tests' fixtures"),
+        ("src/backend/container_task_probe.rs", "\"sh\"", 1,
+         "test: Linux only; runs the probe's script against this test's own pid and a pid no process has, to prove what it prints"),
         ("src/backend/lsp/supervisor.rs", "&resolved", 1,
          "sanitized: language server, sanitize_process_command"),
         ("src/backend/mcp_probe.rs", "command", 1,
@@ -551,25 +560,33 @@ mod spawn_site_coverage {
          "probe: Windows availability check for npm before install; runs nothing else"),
         ("src/server/cli_handlers.rs", "\"which\"", 2,
          "probe: Unix availability check for npm before install; runs nothing else"),
-        ("src/backend/fs_ops/git.rs", "\"git\"", 5,
-         "mixed: run_git (Files pane git markers, agents' work facts) is sanitize_external_command'd; four are this file's own #[cfg(test)] module"),
+        ("src/backend/fs_ops/git.rs", "\"git\"", 6,
+         "mixed: git_command (Files pane git markers, agents' work facts) is sanitize_external_command'd, and set to fetch nothing and allow no transport; five are this file's own #[cfg(test)] module"),
         ("src/backend/work_facts/git.rs", "\"git\"", 1,
          "test: builds a throwaway repository in a temp dir to check the work-facts probe; production git goes through fs_ops::git's run_git"),
         ("src/backend/fs_ops/platform.rs", "\"explorer.exe\"", 2,
          "sanitized: Files pane open/reveal (file manager, default app), sanitize_external_std_command in platform::spawn_detached"),
         ("src/backend/fs_ops/platform.rs", "\"open\"", 2,
          "sanitized: Files pane open/reveal (file manager, default app), sanitize_external_std_command in platform::spawn_detached"),
-        ("src/backend/fs_ops/platform.rs", "\"xdg-open\"", 2,
+        ("src/backend/fs_ops/platform.rs", "\"xdg-open\"", 3,
          "sanitized: Files pane open/reveal (file manager, default app), sanitize_external_std_command in platform::spawn_detached"),
+        ("src/backend/fs_ops/platform.rs", "\"dbus-send\"", 1,
+         "sanitized: Linux reveal asks the file manager over D-Bus to select the file, sanitize_external_std_command in platform::succeeds_within"),
+        ("src/backend/fs_ops/platform.rs", "\"agentmux-no-such-program-for-this-test\"", 1,
+         "test: a program that does not exist, to prove a missing program is not a success"),
+        ("src/backend/fs_ops/platform.rs", "\"false\"", 1,
+         "test: exits non-zero, to prove a failing program is not a success"),
+        ("src/backend/fs_ops/platform.rs", "\"sleep\"", 1,
+         "test: runs past the limit, to prove it is stopped and is not a success"),
+        ("src/backend/fs_ops/platform.rs", "\"true\"", 1,
+         "test: exits zero, to prove a succeeding program is a success"),
         ("src/backend/fs_watch/pool.rs", "\"wsl.exe\"", 2,
          "test: an ignored test writes and removes a file inside a WSL distro"),
         ("src/server/streamed_browser/chromium.rs", "&binary", 1,
-         "sanitized: the streamed Browser pane's Chromium (unix only), sanitize_external_command: it opens pages from the web and gets none of srv's AGENTMUX_ environment"),
+         "allowlisted: the streamed Browser pane's Chromium (unix only): it opens pages from the web, so its environment is cleared and only a short named list (chromium.rs ENV_KEEP) is passed, never srv's own"),
         ("src/server/editor_handlers/file_io.rs", "\"explorer.exe\"", 1,
          "sanitized: file manager, strict policy (I7 fix, this PR)"),
         ("src/server/editor_handlers/file_io.rs", "\"open\"", 1,
-         "sanitized: file manager, strict policy (I7 fix, this PR)"),
-        ("src/server/editor_handlers/file_io.rs", "\"xdg-open\"", 1,
          "sanitized: file manager, strict policy (I7 fix, this PR)"),
         ("src/server/identity_auth_spawn_steps.rs", "&spawn_program", 1,
          "sanitized: provider OAuth CLI under a PTY (the resolved npm shim), strict policy"),
@@ -732,6 +749,17 @@ mod spawn_site_coverage {
                 assert!(
                     SANITIZERS_FOR_AUDIT.iter().any(|s| src.contains(s)),
                     "{file} -> {program} is classified `sanitized:` but the file calls no sanitizer"
+                );
+            }
+            // A row claiming an allow-list must be in a file that clears the environment first.
+            if reason.starts_with("allowlisted:") {
+                let src = packages
+                    .iter()
+                    .find_map(|root| std::fs::read_to_string(root.join(file)).ok())
+                    .expect("read inventory file");
+                assert!(
+                    src.contains(".env_clear()"),
+                    "{file} -> {program} is classified `allowlisted:` but the file does not clear the environment"
                 );
             }
         }

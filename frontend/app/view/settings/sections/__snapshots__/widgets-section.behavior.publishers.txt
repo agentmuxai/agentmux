@@ -1,6 +1,6 @@
 -- publishers
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"
@@ -69,7 +69,7 @@ forgetWidgetKey ["acme"]
 WidgetsList {"timeout":5000}
 -- forgot one
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"
@@ -137,7 +137,7 @@ WidgetsList {"timeout":5000}
 forgetWidgetKey ["zeta"]
 -- forget failed
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"
@@ -206,7 +206,7 @@ forgetWidgetKey ["zeta"]
             "Forget key"
 -- a host that can't forget keys
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"

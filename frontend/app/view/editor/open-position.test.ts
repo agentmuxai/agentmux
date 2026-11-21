@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { clearOpenPositions, OPEN_POSITION_TTL_MS, setOpenPosition, takeOpenPosition, whole } from "./open-position";
+import { clearOpenPositions, OPEN_POSITION_TTL_MS, readPositionMeta, setOpenPosition, takeOpenPosition, whole } from "./open-position";
 import { openPendingFiles, parsePendingEntry } from "./pending-open-files";
 
 describe("open positions", () => {
@@ -16,6 +16,17 @@ describe("open positions", () => {
         expect(takeOpenPosition("b1", "C:/a/x.pdf", "page")).toBeUndefined();
         expect(takeOpenPosition("b1", "C:/a/x.pdf", "offset")).toBe(4096);
         expect(takeOpenPosition("b1", "C:/a/x.pdf", "offset")).toBeUndefined();
+    });
+
+    it("gives a line to the Large text viewer once, and drops one that is not a whole number from 1", () => {
+        setOpenPosition("b1", "C:/a/big.log", { line: 700 });
+        expect(takeOpenPosition("b1", "C:/a/big.log", "line")).toBe(700);
+        expect(takeOpenPosition("b1", "C:/a/big.log", "line")).toBeUndefined();
+        setOpenPosition("b1", "C:/a/big.log", { line: 0 });
+        expect(takeOpenPosition("b1", "C:/a/big.log", "line")).toBeUndefined();
+        // A new pane's meta carries its line the same way.
+        expect(readPositionMeta({ "editor:line": 12 }).line).toBe(12);
+        expect(readPositionMeta({ "editor:line": -3 }).line).toBeUndefined();
     });
 
     it("matches a path however it is spelled", () => {

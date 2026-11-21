@@ -143,6 +143,13 @@ launch.
   process's allocator roots: v8, blink_gc, partition_alloc, malloc, cc, gpu,
   ...), per-page JS heap and DOM counters (read after the GC), and OS samples. The median of the
   final's OS samples is the steady value reported.
+- Each allocator root is recorded twice: `roots` is what the allocator holds
+  from the system, `rootsLive` what is alive in it, for the allocators whose
+  dump says (`lib/allocators.mjs`). A heap that frees a page only when the whole
+  page is empty can hold far more than is alive in it, so read a memory change
+  with both: more alive is something kept, more held with the same alive is
+  allocation churn. `summary.md` has the main window renderer's line, and a
+  comparison (`compare.mjs`) a table of both sides.
 
 ## Measuring a window recycle
 

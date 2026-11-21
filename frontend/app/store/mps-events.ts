@@ -81,6 +81,9 @@ export const WpsEvent = {
     // srv's own panics, counted by `backend::panic_watch`: a health-signal-shaped payload (`kind: "panics"`, a level, the counts).
     // Persisted, so a window that opens mid-storm gets the current state. Mirrors EVENT_SRV_PANICS in mps.rs.
     SrvPanics: "srv-panics",
+    // What the rules that read the long-run record have flagged and still say (`backend::record_notice`): a
+    // health-signal-shaped payload (`kind: "record"`, `warn` or `normal`, the flags). Persisted. Mirrors EVENT_RECORD_FLAGS in mps.rs.
+    RecordFlags: "record-flags",
     // A Claude CLI request is being retried, or no longer is (`{ retry }`,
     // `null` when cleared); see useApiRetryState.ts.
     AgentApiRetry: "agent-api-retry",
@@ -240,10 +243,15 @@ export const WpsEvent = {
     /** An account episode opened, changed or closed: agents out of quota or signed out on one account
      *  (crates/srv/src/server/account_episodes/mod.rs). */
     AccountAvailability: "accountavailability",
+    JektHeld: "jektheld",
+    /** One more delivery of a broadcast this window sent has ended (crates/srv/src/server/app_api/fleet_pacing.rs). */
+    FleetBroadcastProgress: "fleetbroadcastprogress",
     AgentInputHistoryChanged: "agent:inputhistory",
     AgentShutdown: "agent:shutdown",
     AgentShutdownPending: "agent:shutdown-pending",
     AgentShutdownPendingCleared: "agent:shutdown-pending-cleared",
+    /** A headless workspace will stop at a time, or will not after all (crates/srv/src/server/host_control.rs). */
+    WorkspaceStop: "workspace:stop",
     /** A sensitive request's countdown for the person to veto, and its end (crates/srv/src/sagas/sensitive_window.rs). */
     SensitivePending: "sensitive:pending",
     SensitiveCleared: "sensitive:cleared",

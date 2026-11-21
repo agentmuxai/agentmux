@@ -60,12 +60,15 @@ import { chooseViewer, isBinaryProbe, isViewerId, viewerForDropped, type FilePro
 import { droppedFileOf, isDroppedPath, rememberDropped, ViewerTabs } from "./viewers/viewer-tabs";
 import { showBlockWithoutFocus } from "@/app/util/reveal-block";
 import { paneZoom } from "@/app/store/pane-zoom-local";
-import { clampTreeWidth, seedTreeZoom, TREE_WIDTH_DEFAULT, treeZoomOf } from "./editor-zoom-parts";
+import { clampTreeWidth, seedTreeZoom, TREE_WIDTH_DEFAULT, treeHasFocus, treeZoomOf } from "./editor-zoom-parts";
 import { isSshConnection } from "@/app/view/term/ssh-connection";
 import { cursorAtLine, META_OPEN_AT_LINE, readOpenAtLine } from "./open-at-line";
 import { POSITION_META_CLEARED, readPositionMeta, setOpenPosition } from "./open-position";
 import { openRemoteFile } from "./open-from-remote";
+import { revealInFileManagerLabel } from "@/app/util/file-manager-label";
 import { MENU_ICON } from "@/app/util/menu-icons";
+import { DiskConflicts } from "./editor-disk-conflict";
+import { sha256Hex } from "./editor-hash";
 
 const META_SHOW_HIDDEN = "editor:show_hidden";
 const META_TREE_WIDTH = "editor:tree_width";
@@ -101,17 +104,6 @@ const META_SCRATCH = "editor:scratch";
 const PREVIEW_HEIGHT_DEFAULT = 300;
 const PREVIEW_HEIGHT_MIN = 80;
 const PREVIEW_HEIGHT_MAX = 1200;
-
-/** Hash a string with SHA-256 → hex. Used for the slice's contentHash field
- *  so the saga (Phase 1C) can decide whether a tab is dirty vs. disk. Cheap;
- *  files are capped at 10 MB by the read RPC. */
-async function sha256Hex(s: string): Promise<string> {
-    const buf = new TextEncoder().encode(s);
-    const digest = await crypto.subtle.digest("SHA-256", buf);
-    return Array.from(new Uint8Array(digest))
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("");
-}
 
 // ── Module-level event-sink fan-out ───────────────────────────────────────
 // The slice's setEventSink is a singleton — a per-instance call would
@@ -261,6 +253,15 @@ export class EditorViewModel {
     /** Set by the view: ask before closing a tab with unsaved changes;
      *  `discard` closes it anyway. Without it, such a close is refused. */
     confirmDirtyClose: ((tab: EditorTab, discard: () => void) => void) | null = null;
+
+    /** A tab with unsaved edits whose file changed on disk: Reload or Keep mine (editor-disk-conflict.ts). */
+    readonly diskConflicts = new DiskConflicts({
+        on: (id) => this.on(id),
+        current: (id) => snapshot(this.blockId)?.tabs.find((t) => t.id === id),
+        reload: async (t) => void ((await this._loadFileIntoTab(t.id, t.filePath)) && dispatch(this.blockId, { type: "ClearDirty", tabId: t.id, source: "system" })),
+        // saveFile writes the tab in front: only when it is still this one.
+        overwrite: async (t) => void (this.activeTabAtom()?.id === t.id && (await this.saveFile({ overwrite: true }))),
+    });
 
     // A native pane tab (Pane Tab contract Phase 2c): built by `create(ctx)`
     // (editor.tsx); its own block's meta comes from, and goes to, the host
@@ -592,7 +593,9 @@ export class EditorViewModel {
     /** Remembers where `opts` asks the file to open, for the viewer that reads it (a hex offset, a PDF page, a text line). */
     private noteOpenPosition(filePath: string, opts?: OpenFileOpts): void {
         if (opts?.offset === undefined && opts?.page === undefined && !opts?.line) return;
-        setOpenPosition(this.blockId, filePath, { offset: opts.offset, page: opts.page });
+        // A line goes to the Large text viewer by this note; the text viewer's is `_openAtLine`.
+        const forLarge = !opts.viewer || opts.viewer === "large";
+        setOpenPosition(this.blockId, filePath, { offset: opts.offset, page: opts.page, line: forLarge ? opts.line : undefined });
         if (opts.line && (!opts.viewer || opts.viewer === "text")) this._openAtLine = { path: canonicalizePath(filePath), line: opts.line };
     }
 
@@ -841,15 +844,16 @@ export class EditorViewModel {
 
     /** Handler for `editor:file_changed` MPS events. Reloads every open tab
      *  in this pane pointing at the changed path — but only if it's clean.
-     *  A dirty tab is never auto-clobbered (no dirty-conflict banner exists
-     *  yet; see SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md Phase 3 — until
-     *  then a dirty tab simply doesn't reload, same as today's behavior). */
+     *  A dirty tab is never auto-clobbered: it asks Reload or Keep mine. */
     private async _handleExternalFileChanged(rawPath: string): Promise<void> {
         const canonical = canonicalizePath(rawPath);
         const tabs = snapshot(this.blockId)?.tabs ?? [];
         for (const tab of tabs) {
             if (canonicalizePath(tab.filePath) !== canonical) continue;
-            if (tab.dirty) continue;
+            if (tab.dirty) {
+                void this.diskConflicts.noteChange(tab);
+                continue;
+            }
             if (this._loadingPaths.has(canonical)) continue; // a load is already in flight for this path
             await this._loadFileIntoTab(tab.id, tab.filePath, { skipIfHashMatches: tab.contentHash });
         }
@@ -875,6 +879,7 @@ export class EditorViewModel {
     /** Stop watching whatever path `tabId` was registered under, if any.
      *  Called on tab close and pane dispose. */
     private _unwatchTab(tabId: string): void {
+        this.diskConflicts.forget(tabId);
         const prev = this._watchedPathByTab.get(tabId);
         if (!prev) return;
         this._watchedPathByTab.delete(tabId);
@@ -988,12 +993,14 @@ export class EditorViewModel {
         return { encoding: e.encoding, bom: e.bom, line_ending: e.lineEnding };
     }
 
-    async saveFile(): Promise<void> {
+    /** `overwrite`: the file changed on disk and the person chose to keep their edits. */
+    async saveFile(opts?: { overwrite?: boolean }): Promise<void> {
         if (this.readOnlyAtom()) return;
         const tab = this.activeTabAtom();
         if (!tab) return;
         // Only the text viewer has a buffer: never write an image's tab.
         if (tab.viewer && tab.viewer !== "text") return;
+        if (!opts?.overwrite && !(await this.diskConflicts.guardSave(tab))) return;
 
         // Refuse to save a file that decoded with replacement characters
         // (likely the wrong encoding) — re-encoding the lossy buffer would
@@ -1028,6 +1035,7 @@ export class EditorViewModel {
                 tabId: tab.id,
                 source: "system",
             });
+            this.diskConflicts.forget(tab.id); // the disk holds this tab's own content now
             // Recompute content hash since disk now matches buffer.
             const hash = await sha256Hex(content);
             dispatch(this.blockId, {
@@ -1265,12 +1273,13 @@ export class EditorViewModel {
         }
     }
 
-    /** Reveal a path in the OS file manager. */
+    /** Show a path in the computer's file manager through `fs.reveal` (as the Files pane does): refusals are shown, a remote file is refused. */
     async revealInExplorer(path: string): Promise<void> {
+        if (this.connection()) return this.reportFileOpError(revealInFileManagerLabel(), new Error(`The file is on ${this.connection()}`));
         try {
-            await RpcApi.OpenInShellCommand(TabRpcClient, { path });
-        } catch {
-            // Non-fatal — some platforms may not support this.
+            await RpcApi.FsRevealCommand(TabRpcClient, { path, block_id: this.blockId });
+        } catch (e: unknown) {
+            this.reportFileOpError(revealInFileManagerLabel(), e);
         }
     }
 
@@ -1464,7 +1473,8 @@ export class EditorViewModel {
     giveFocus(): boolean {
         const cm = this.cmViewRef.current;
         if (cm == null) return false;
-        cm.focus();
+        // The pane takes focus when it is clicked: after a click on the tree's toolbar or blank space the keyboard stays there.
+        if (!treeHasFocus(this.blockId)) cm.focus();
         return true;
     }
 

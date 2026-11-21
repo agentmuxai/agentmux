@@ -14,6 +14,15 @@ The same list is in the app: press F1, or open the Help pane. A terminal keeps e
 | Settings | ⌘, | Ctrl+, |
 | Keyboard shortcuts | ⌘/, F1 | Ctrl+/, F1 |
 | Voice input | ⌃⇧V | Ctrl+Shift+V |
+| Open Terminal | ⇧⌘O then T | Ctrl+Shift+O then T |
+| Open Files | ⇧⌘O then F | Ctrl+Shift+O then F |
+| Open Swarm | ⇧⌘O then S | Ctrl+Shift+O then S |
+| Open Kanban | ⇧⌘O then K | Ctrl+Shift+O then K |
+| Open Vault | ⇧⌘O then V | Ctrl+Shift+O then V |
+| Open History | ⇧⌘O then H | Ctrl+Shift+O then H |
+| Open System Info | ⇧⌘O then I | Ctrl+Shift+O then I |
+| Connectors | ⇧⌘O then C | Ctrl+Shift+O then C |
+| Memory | ⇧⌘O then M | Ctrl+Shift+O then M |
 | Close dialog or find bar | Esc | Esc |
 
 ## Tabs & windows
@@ -53,6 +62,8 @@ The same list is in the app: press F1, or open the Help pane. A terminal keeps e
 | Focus the message box | ⌘L | Ctrl+L |
 | Replace pane with Shortcuts | ⌃⇧K | Ctrl+Shift+K |
 | Change connection | ⇧⌘G | Ctrl+Shift+G |
+| Back to Previous Pane | ⌃- | Ctrl+Alt+- |
+| Forward to Next Pane | ⌃⇧- | Ctrl+Shift+- |
 
 ## Find & zoom
 
@@ -163,7 +174,7 @@ Gestures that aren't plain keys: modifier + mouse, double- and middle-click, dra
 | Rename its file in place; an untitled document is saved under the name (Enter renames, Esc or a click elsewhere cancels) | on a document tab in the editor | double-click | double-click |
 | A click opens a preview tab, a double-click a tab that stays; F2 renames | on a file in the editor's file tree | click or double-click | click or double-click |
 | Previous / next row, previewing a file / open the file in a tab that stays and go to the editor / keep its tab / go to the editor; ← → close and open folders, Home, End and the Page keys jump, typing a name jumps to it | in the editor's file tree | ↑ or ↓ or Enter or Space or Escape | ↑ or ↓ or Enter or Space or Escape |
-| Zoom the file tree on its own, apart from the document; the zoom keys zoom whichever of the two last had the keyboard or the pointer | over the editor's file tree | ⌘ + scroll | Ctrl + scroll |
+| Zoom the file tree on its own, apart from the document; the zoom keys zoom whichever of the two last had the keyboard or a click | over the editor's file tree | ⌘ + scroll | Ctrl + scroll |
 | Add another cursor | in an editor | ⌘ + click | Ctrl + click |
 | Make a column (block) selection | in an editor | ⌥ + drag | Alt + drag |
 | Select the next match of the selected text | in an editor | ⌘ + D | Ctrl + D |
@@ -193,6 +204,7 @@ Gestures that aren't plain keys: modifier + mouse, double- and middle-click, dra
 | Type a path | on the Files pane's folder path | double-click | double-click |
 | Send files to an agent, editor or terminal pane; dropping copies here, or into the folder under the pointer | Files rows onto a pane, or files onto the list | drag or drop | drag or drop |
 | Drag to resize that column; double-click to give it its default width back | on the right edge of a column header | drag or double-click | drag or double-click |
+| Zoom Places on its own, apart from the rest of the pane; the zoom keys zoom whichever of the two last had the keyboard or a click | over the Files pane's Places list | ⌘ + scroll | Ctrl + scroll |
 
 ### Agent
 
@@ -256,7 +268,7 @@ Add a `keybindings` list to your settings file (command palette → Open Setting
 
 - `key`: modifiers `ctrl`, `shift`, `alt`, `meta` and `mod` (⌘ on macOS, Ctrl elsewhere), then a key: a letter, a digit, punctuation, or a name such as `Enter`, `Tab`, `ArrowLeft`, `F6`, `PageUp`. Two keys separated by a space make a chord.
 - `command`: the command to run (the ids are in the help pane's list and the command palette). Prefix it with `-` to unbind it: every key, or just the `key` you give. An unbind removes the defaults and your own entries above it, so put a new key for the same command after it.
-- `when` (optional): `textInputFocus`, `terminalFocus`, `docTabsHost`, `viewType == <pane>` or `viewType != <pane>`, each optionally negated with `!`, joined with `&&`.
+- `when` (optional): `textInputFocus`, `textInputFilled` (the focused field holds text), `terminalFocus`, `docTabsHost`, `viewType == <pane>` or `viewType != <pane>`, each optionally negated with `!`, joined with `&&`.
 - `platform` (optional): `mac` or `other` (Windows and Linux). Both when omitted.
 
 An entry that can't be used (an unknown command, a bad key or `when`) is skipped and the rest still apply.

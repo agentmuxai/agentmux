@@ -17,6 +17,7 @@
 // and `swarm-model.ts` imports that name. Renaming the Rust type to match
 // would churn the server for a frontend spelling, so the alias lives here.
 export type { FleetActionFailure } from "@/types/rpc/FleetActionFailure";
+export type { FleetActionHeld } from "@/types/rpc/FleetActionHeld";
 export type { FleetActionResult } from "@/types/rpc/FleetActionResult";
 export type { FleetGroup } from "@/types/rpc/FleetGroup";
 export type { StagePlanInput as FleetStagePlan } from "@/types/rpc/StagePlanInput";

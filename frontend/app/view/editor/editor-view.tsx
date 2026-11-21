@@ -19,6 +19,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { TextViewerSwitch, ViewerHost } from "./viewers/viewer-host";
 import { SaveAsInput } from "./editor-save-as-input";
 import { TabNameInput, TabRenameLine } from "./editor-tab-name-input";
+import { revealMenuItems } from "./editor-tab-reveal";
 import { showAsMenuItems } from "./editor-tab-show-as";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { editorDocTabs } from "./editor-doc-tabs";
@@ -30,6 +31,7 @@ import "./editor-view.scss";
 import { keyLabel } from "@/app/keybindings";
 import { OpenFromRemoteModal } from "./open-from-remote-modal";
 import { EditorEmptyState } from "./EditorEmptyState";
+import { EditorDiskConflictPanel } from "./editor-disk-conflict-panel";
 import { EditorErrorPanel, EditorLspBanner, EditorLspStatusChip, EditorMarkdownPreview, EditorModeToolbar } from "./EditorPanels";
 import { lspStatusChipText } from "./editor-lsp-status";
 import type { EditorViewModel } from "./editor-model";
@@ -197,7 +199,7 @@ function EditorTreeColumn(props: {
                 }}
             >
                 {/* The tree's part of the pane: its own zoom (`editor:tree_zoom`), never the chrome's. */}
-                <div class="editor-tree-zoom" {...zoomPartAttrs(TREE_PART)} data-zoom-scope="pane" style={{ zoom: props.treeZoom() }}>
+                <div class="editor-tree-zoom" tabindex="-1" {...zoomPartAttrs(TREE_PART)} data-zoom-scope="pane" style={{ zoom: props.treeZoom(), "--editor-tree-zoom": props.treeZoom() } as JSX.CSSProperties}>
                 <FileTree
                     model={model.treeModel}
                     activeFilePath={model.filePathAtom()}
@@ -268,7 +270,7 @@ function EditorMainColumn(props: {
                     class="editor-main-zoom"
                     {...zoomPartAttrs(MAIN_PART)}
                     data-zoom-scope={props.contentZoomed() ? "chrome" : undefined}
-                    style={{ zoom: props.mainZoom() }}
+                    style={{ zoom: props.mainZoom(), "--editor-main-zoom": props.mainZoom() } as JSX.CSSProperties}
                 >
                 <EditorTabBar model={model} docTabs={docTabs} names={props.names} showTreeButton={props.showTreeButton} />
 
@@ -296,6 +298,10 @@ function EditorMainColumn(props: {
                     isn't on PATH. Dismissable per session via the X button. */}
                 <Show when={banner.lspBannerVisible()}>
                     <EditorLspBanner state={lspState} onDismiss={banner.dismissBanner} onCopy={copyToClipboard} />
+                </Show>
+
+                <Show when={model.diskConflicts.has(model.activeIdAtom() ?? undefined)}>
+                    <EditorDiskConflictPanel model={model} />
                 </Show>
 
                 <EditorBody
@@ -346,6 +352,7 @@ function EditorTabBar(props: {
                 // Once the menu has closed: it must not take the keyboard back from the box.
                 click: () => void setTimeout(() => startRename(tab.id), 0),
             },
+            ...revealMenuItems(model, tab),
             ...showAsMenuItems(model, tab),
         ];
     };
@@ -354,6 +361,7 @@ function EditorTabBar(props: {
             <DocTabStrip
                 ctl={docTabs}
                 docType="editor"
+                zoomScope="chrome"
                 blockId={model.blockId}
                 show={() => props.showTreeButton() || docTabs.tabs().length > 0}
                 leading={

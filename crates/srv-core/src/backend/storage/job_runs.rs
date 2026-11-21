@@ -116,6 +116,9 @@ pub mod reason {
     pub const APP_NOT_RUNNING: &str = "app_not_running";
     /// A cloud job's expected slot and its grace passed with no event for it (§4.4).
     pub const NO_REPORT: &str = "no_report";
+    /// A local job's slot passed while AgentMux was running and nothing started it: the job's
+    /// scheduler task is gone or stalled, and no row was written for the slot (§4.4).
+    pub const NOT_STARTED: &str = "not_started";
     /// A cloud run's `finished` event came after the watchdog gave it up.
     pub const LATE: &str = "late";
     pub const TARGET_MISSING: &str = "target_missing";
@@ -432,6 +435,19 @@ impl Store {
         let mut stmt = conn.prepare("SELECT DISTINCT job_id FROM db_job_runs WHERE job_id = ?1 OR job_name = ?1 ORDER BY job_id")?;
         let rows = stmt.query_map(params![text], |r| r.get::<_, String>(0))?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Whether the ledger has a row for the job's `slot_ms`, whatever its state: a run, a skip or a miss. Every
+    /// way a scheduled slot is handled writes one (the slot's unique index, §3.1), so a slot without a row was
+    /// never handled.
+    pub fn job_run_slot_taken(&self, job_id: &str, slot_ms: i64) -> Result<bool, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM db_job_runs WHERE job_id = ?1 AND scheduled_for_ms = ?2",
+            params![job_id, slot_ms],
+            |r| r.get(0),
+        )?;
+        Ok(n > 0)
     }
 
     /// The job's newest run, if any.

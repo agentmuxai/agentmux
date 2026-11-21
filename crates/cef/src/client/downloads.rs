@@ -169,9 +169,23 @@ fn default_save_path(suggested: &str) -> PathBuf {
 #[derive(Default)]
 pub(crate) struct WaitingDownloads {
     by_pane: HashMap<String, HashSet<u32>>,
+    /// Downloads this handler refused after CEF gave them an id (too many waiting or running). CEF still
+    /// reports each as cancelled; the strip already says they were skipped, so that report is not sent on
+    /// as a "cancelled" row of its own (a burst of ten would stack seven).
+    skipped: HashSet<(String, u32)>,
 }
 
 impl WaitingDownloads {
+    /// `id` of `pane` was refused: its cancelled report is for the skipped line, not a row.
+    pub(crate) fn mark_skipped(&mut self, pane: &str, id: u32) {
+        self.skipped.insert((pane.to_string(), id));
+    }
+
+    /// Whether `id` of `pane` was a skipped download; true once, so a reused id is not hidden later.
+    pub(crate) fn take_skipped(&mut self, pane: &str, id: u32) -> bool {
+        self.skipped.remove(&(pane.to_string(), id))
+    }
+
     /// Can this pane have another download wait for its dialog?
     pub(crate) fn has_room(&self, pane: &str) -> bool {
         self.by_pane.get(pane).map_or(0, HashSet::len) < MAX_WAITING_PER_PANE
@@ -206,7 +220,19 @@ impl WaitingDownloads {
     /// The pane closed: nothing of its can still be waiting.
     pub(crate) fn clear_pane(&mut self, pane: &str) {
         self.by_pane.remove(pane);
+        self.skipped.retain(|(p, _)| p != pane);
     }
+}
+
+/// A download this handler refused after CEF numbered it: the pane's strip gets the skipped line, and the
+/// cancelled report CEF sends for it afterwards is dropped (see `WaitingDownloads::skipped`).
+pub(crate) fn note_skipped(block_id: &str, id: u32) {
+    with_waiting(|w| w.mark_skipped(block_id, id));
+}
+
+/// Whether a pane's cancelled report is one of its skipped downloads' (true once per skip).
+fn was_skipped(block_id: &str, id: u32) -> bool {
+    with_waiting(|w| w.take_skipped(block_id, id))
 }
 
 /// Whether a permission prompt is exactly Chromium's "this page wants to download more files".
@@ -284,8 +310,11 @@ thread_local! {
 
 /// Whether the Save As dialog is ours (`rfd`) rather than CEF's. On Linux CEF's chooser answered
 /// "cancel" within milliseconds with no dialog on the packaged build (2026-11-06, D0), so Linux asks
-/// with the same dialog library the Vault export and layout dialogs use (spec §4.3).
-const OWN_SAVE_DIALOG: bool = cfg!(target_os = "linux");
+/// with the same dialog library the Vault export and layout dialogs use (spec §4.3). macOS asks that way too:
+/// CEF's chooser drops the folder of the path it is given, so its first dialog opened in the home folder
+/// whatever the default was (#196, macOS D0); `rfd` opens where we say. Windows keeps CEF's own until its
+/// first dialog is checked there.
+const OWN_SAVE_DIALOG: bool = cfg!(any(target_os = "linux", target_os = "macos"));
 
 thread_local! {
     /// The callbacks of downloads whose `rfd` dialog is open, by (pane, id). Not `Send`, so they stay on
@@ -294,11 +323,15 @@ thread_local! {
         std::cell::RefCell::new(HashMap::new());
 }
 
+use super::save_answer::{ask_guarded, SaveAnswer};
+use crate::commands::file_dialog::{DialogSpec, Kind, Outcome};
+
 wrap_task! {
     struct SaveAnswerTask {
         block_id: String,
         id: u32,
-        path: Option<PathBuf>,
+        suggested: String,
+        answer: SaveAnswer,
     }
 
     impl Task {
@@ -306,33 +339,52 @@ wrap_task! {
             let cb = ASKING.with(|m| m.borrow_mut().remove(&(self.block_id.clone(), self.id)));
             // Gone: the pane closed while the dialog was open.
             let Some(cb) = cb else { return };
-            match &self.path {
+            match &self.answer {
                 // `show_dialog = false`: the person already chose, CEF just writes there.
-                Some(p) => cb.cont(Some(&CefString::from(p.to_string_lossy().as_ref())), 0),
+                SaveAnswer::Chosen(p) => cb.cont(Some(&CefString::from(p.to_string_lossy().as_ref())), 0),
                 // Cancelled: dropping the last reference cancels the download (CEF does that for a
                 // callback never answered). An empty path would instead save to the temp folder.
-                None => drop(cb),
+                SaveAnswer::Cancelled => drop(cb),
+                // Nobody could be asked. The person did start this download, so it is saved the way it would
+                // be with "Ask where to save" off (the default folder, a name that replaces nothing), and the
+                // strip says so; with no room for it, it is cancelled rather than left waiting.
+                SaveAnswer::Failed => match super::download_place::save_after_dialog_failed(&self.block_id, self.id, &self.suggested) {
+                    Some(p) => cb.cont(Some(&CefString::from(p.to_string_lossy().as_ref())), 0),
+                    None => drop(cb),
+                },
             }
         }
     }
 }
 
-/// Ask where to save with `rfd` on its own thread (the dialog blocks), then answer on the UI thread. A
-/// dialog can't be closed from outside, so one still open when its pane closes stays until the person
-/// answers; the answer is then dropped (`SaveAnswerTask` finds no callback).
+/// Ask where to save with `rfd` (the dialog blocks), then answer on the UI thread. The dialog runs on the app's
+/// Tokio runtime ([`crate::commands::file_dialog`]): on Linux its portal needs a reactor, which a plain thread
+/// does not have. A dialog can't be closed from outside, so one still open when its pane closes stays until the
+/// person answers; the answer is then dropped (`SaveAnswerTask` finds no callback).
 fn ask_with_rfd(block_id: &str, id: u32, path: PathBuf, cb: &BeforeDownloadCallback) {
     ASKING.with(|m| m.borrow_mut().insert((block_id.to_string(), id), cb.clone()));
     let block_id = block_id.to_string();
-    std::thread::spawn(move || {
-        let mut dialog = rfd::FileDialog::new().set_title("Save as");
-        if let Some(name) = path.file_name() {
-            dialog = dialog.set_file_name(name.to_string_lossy());
+    let path = super::save_answer::offered_path(path);
+    let suggested = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    crate::commands::file_dialog::spawn(move || {
+        let answer = ask_guarded(crate::commands::file_dialog::can_ask(), || {
+            let mut spec = DialogSpec::new(Kind::Save, "Save as");
+            if let Some(name) = path.file_name() {
+                spec = spec.file_name(name.to_string_lossy());
+            }
+            if let Some(dir) = path.parent().filter(|d| d.is_dir()) {
+                spec = spec.dir(dir);
+            }
+            let outcome = crate::commands::file_dialog::show(&spec);
+            if let Outcome::Failed(why) = &outcome {
+                tracing::warn!(target: "pane-download", %block_id, id, %why, "the Save As dialog failed");
+            }
+            outcome
+        });
+        if answer == SaveAnswer::Failed {
+            tracing::warn!(target: "pane-download", %block_id, id, "the Save As dialog could not open");
         }
-        if let Some(dir) = path.parent().filter(|d| d.is_dir()) {
-            dialog = dialog.set_directory(dir);
-        }
-        let chosen = dialog.save_file();
-        let mut task = SaveAnswerTask::new(block_id.clone(), id, chosen);
+        let mut task = SaveAnswerTask::new(block_id.clone(), id, suggested, answer);
         if post_task(ThreadId::UI, Some(&mut task)) == 0 {
             tracing::warn!(target: "pane-download", %block_id, id, "could not post the Save As answer to the UI thread");
         }
@@ -507,6 +559,15 @@ pub(crate) fn update_payload(block_id: &str, id: u32, snap: &DownloadSnapshot) -
         v["reason"] = serde_json::json!(snap.reason.clone().unwrap_or_else(|| "The download failed.".into()));
     }
     v
+}
+
+/// An update with no path (a download turned away in the Save As window ends so) gets the name it was offered
+/// under, so its strip row reads `notes-2.csv cancelled` and not `download cancelled`.
+fn name_a_pathless_update(payload: &mut serde_json::Value, offered: Option<&str>) {
+    let unnamed = payload["name"].as_str().unwrap_or("").is_empty();
+    if let (true, Some(name)) = (unnamed, offered) {
+        payload["name"] = serde_json::json!(name);
+    }
 }
 
 /// The strip's line for a page that started more downloads than may wait
@@ -755,10 +816,13 @@ wrap_download_handler! {
             // slipped in between; the add is the check that counts.
             if !with_waiting(|w| w.add(&block_id, id)) {
                 tracing::warn!(target: "pane-download", %block_id, id, "dropping download — too many waiting");
+                note_skipped(&block_id, id);
                 crate::events::emit_browser_pane_event(&self.state, &block_id, UPDATE_EVENT, &ignored_payload(&block_id));
                 return 0;
             }
 
+            // If the person turns it away, CEF reports it cancelled with no path: keep the name for its strip row.
+            super::download_place::remember_asked_name(&block_id, id, &safe_download_name(&suggested));
             // One dialog at a time per pane: a second would cancel itself and the open one.
             let parked = (suggested.clone(), cb.clone());
             match SAVE_DIALOGS.with(|d| d.borrow_mut().offer(&block_id, id, parked)) {
@@ -808,6 +872,9 @@ wrap_download_handler! {
             let chosen = !block_id.as_deref().is_some_and(|b| {
                 super::agent_downloads::is_saving(b, id) || super::download_place::is_quiet(b, id)
             });
+            // Read before the end below forgets it: a download saved because the Save As window could not open.
+            let fallback_note = block_id.as_deref().and_then(|b| super::download_place::fallback_note(b, id));
+            let asked_name = block_id.as_deref().and_then(|b| super::download_place::asked_name(b, id));
             if let Some(block_id) = &block_id {
                 with_waiting(|w| w.release(block_id, id));
                 // This dialog is over: the pane's next parked download asks now.
@@ -834,6 +901,10 @@ wrap_download_handler! {
                 );
             }
             let Some(block_id) = block_id else { return };
+            // A download this handler refused: the strip's skipped line already says so.
+            if ended && was_skipped(&block_id, id) {
+                return;
+            }
             super::agent_downloads::updated(&self.state, browser.as_deref(), &block_id, item, callback.as_deref());
 
             // Keep the callback while it runs so Cancel can reach it; drop it
@@ -865,12 +936,12 @@ wrap_download_handler! {
                 reason: (state == DownloadState::Failed)
                     .then(|| failure_reason(&format!("{:?}", item.interrupt_reason()))),
             };
-            crate::events::emit_browser_pane_event(
-                &self.state,
-                &block_id,
-                UPDATE_EVENT,
-                &update_payload(&block_id, id, &snap),
-            );
+            let mut payload = update_payload(&block_id, id, &snap);
+            name_a_pathless_update(&mut payload, asked_name.as_deref());
+            if let Some(note) = fallback_note.filter(|_| state == DownloadState::Done) {
+                payload["reason"] = serde_json::json!(note);
+            }
+            crate::events::emit_browser_pane_event(&self.state, &block_id, UPDATE_EVENT, &payload);
         }
     }
 }
@@ -878,6 +949,24 @@ wrap_download_handler! {
 #[cfg(test)]
 mod save_dialog_tests {
     use super::*;
+
+    #[test]
+    fn a_download_turned_away_in_the_dialog_is_named_for_its_strip_row() {
+        let cancelled = DownloadSnapshot { state: DownloadState::Cancelled, path: String::new(), received: 0, total: -1, reason: None };
+        let mut payload = update_payload("blk", 3, &cancelled);
+        assert_eq!(payload["name"], "", "CEF reports it with no path");
+        name_a_pathless_update(&mut payload, Some("notes-2.csv"));
+        assert_eq!(payload["name"], "notes-2.csv");
+        // A download that has a path keeps the name of that file.
+        let saved = DownloadSnapshot { state: DownloadState::Done, path: "/d/other.csv".into(), received: 5, total: 5, reason: None };
+        let mut payload = update_payload("blk", 3, &saved);
+        name_a_pathless_update(&mut payload, Some("notes-2.csv"));
+        assert_eq!(payload["name"], "other.csv");
+        // Nothing was offered: nothing to add.
+        let mut payload = update_payload("blk", 4, &cancelled);
+        name_a_pathless_update(&mut payload, None);
+        assert_eq!(payload["name"], "");
+    }
 
     #[test]
     fn only_the_multiple_downloads_prompt_is_answered_for_downloads() {
@@ -1191,6 +1280,23 @@ mod tests {
         assert!(!w.release("p2", 2), "p1's id 2 is not p2's");
         assert!(w.release("p1", 1));
         assert!(w.has_room("p1"));
+    }
+
+    #[test]
+    fn a_skipped_download_hides_its_cancelled_report_once() {
+        let mut w = WaitingDownloads::default();
+        w.mark_skipped("p1", 7);
+        // Another pane's id 7, and an id never skipped, are shown as usual.
+        assert!(!w.take_skipped("p2", 7));
+        assert!(!w.take_skipped("p1", 8));
+        assert!(w.take_skipped("p1", 7));
+        assert!(!w.take_skipped("p1", 7), "a later download that reuses the id is not hidden");
+        // The pane closing forgets its skipped ids.
+        w.mark_skipped("p1", 9);
+        w.mark_skipped("p2", 9);
+        w.clear_pane("p1");
+        assert!(!w.take_skipped("p1", 9));
+        assert!(w.take_skipped("p2", 9));
     }
 
     #[test]

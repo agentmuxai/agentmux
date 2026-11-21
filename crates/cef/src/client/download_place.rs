@@ -14,7 +14,7 @@
 //!   confirms where a file goes.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -92,11 +92,58 @@ pub(crate) fn is_quiet(pane: &str, id: u32) -> bool {
 /// The download ended (done, failed or cancelled): its file name and its slot are free.
 pub(crate) fn ended(pane: &str, id: u32) {
     QUIET.with(|m| m.borrow_mut().remove(&(pane.to_string(), id)));
+    FALLBACK.with(|m| m.borrow_mut().remove(&(pane.to_string(), id)));
+    ASKED.with(|m| m.borrow_mut().remove(&(pane.to_string(), id)));
 }
 
 /// The pane closed: none of its downloads is still running here.
 pub(crate) fn forget_pane(pane: &str) {
     QUIET.with(|m| m.borrow_mut().retain(|(p, _), _| p != pane));
+    FALLBACK.with(|m| m.borrow_mut().retain(|(p, _)| p != pane));
+    ASKED.with(|m| m.borrow_mut().retain(|(p, _), _| p != pane));
+}
+
+thread_local! {
+    /// The file names of the downloads that ask where to save, by (pane, id). A download the person turns away in
+    /// the Save As window ends "cancelled" with no path, so its strip row would have no name; this is the name it
+    /// had when it was offered.
+    static ASKED: RefCell<HashMap<(String, u32), String>> = RefCell::new(HashMap::new());
+}
+
+/// This download asks where to save, under this file name (the page's own, made safe).
+pub(crate) fn remember_asked_name(pane: &str, id: u32, name: &str) {
+    ASKED.with(|m| m.borrow_mut().insert((pane.to_string(), id), name.to_string()));
+}
+
+/// The name this download was offered under; read before `ended`, which forgets it.
+pub(crate) fn asked_name(pane: &str, id: u32) -> Option<String> {
+    ASKED.with(|m| m.borrow().get(&(pane.to_string(), id)).cloned())
+}
+
+thread_local! {
+    /// The downloads that were saved without a dialog because the Save As window could not open, by (pane, id).
+    static FALLBACK: RefCell<HashSet<(String, u32)>> = RefCell::new(HashSet::new());
+}
+
+/// What the strip says of a download that was saved without asking because the Save As window could not open.
+const FALLBACK_NOTE: &str = "saved without asking: the Save As window could not open";
+
+/// The Save As window could not open: where this download goes instead, the way it goes with the setting off (the
+/// default folder, a name that replaces no file). `None` when there is no room or no folder, and the download is
+/// cancelled. A saved one is remembered, so its strip line can say why it was not asked about.
+pub(crate) fn save_after_dialog_failed(pane: &str, id: u32, suggested: &str) -> Option<PathBuf> {
+    let Quiet::Save(path) = decide(pane, id, suggested) else { return None };
+    mark_fallback(pane, id);
+    Some(path)
+}
+
+fn mark_fallback(pane: &str, id: u32) {
+    FALLBACK.with(|m| m.borrow_mut().insert((pane.to_string(), id)));
+}
+
+/// The words for the strip when this download was saved after the Save As window failed; read before `ended`.
+pub(crate) fn fallback_note(pane: &str, id: u32) -> Option<&'static str> {
+    FALLBACK.with(|m| m.borrow().contains(&(pane.to_string(), id))).then_some(FALLBACK_NOTE)
 }
 
 /// Save the download without the dialog when the setting is off. Returns whether it was answered (saved, or
@@ -119,6 +166,7 @@ pub(crate) fn answer_quietly(
         }
         Quiet::TooMany => {
             tracing::warn!(target: "pane-download", %block_id, id, "dropping download: this pane already has {MAX_QUIET_PER_PANE} running");
+            super::downloads::note_skipped(block_id, id);
             crate::events::emit_browser_pane_event(state, block_id, UPDATE_EVENT, &ignored_payload(block_id));
             // `cont` is never called, so CEF cancels the download.
             true
@@ -159,6 +207,37 @@ pub(crate) fn load_last_dir_once(data_dir: Option<&str>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_download_saved_after_the_dialog_failed_says_why_until_it_ends() {
+        assert_eq!(fallback_note("p1", 5), None, "an ordinary download has no note");
+        mark_fallback("p1", 5);
+        assert!(fallback_note("p1", 5).is_some_and(|n| n.contains("Save As window could not open")));
+        // Another pane's id 5 is another download.
+        assert_eq!(fallback_note("p2", 5), None);
+        ended("p1", 5);
+        assert_eq!(fallback_note("p1", 5), None, "an id that comes round again is not marked");
+        mark_fallback("p1", 6);
+        mark_fallback("p2", 6);
+        forget_pane("p1");
+        assert_eq!(fallback_note("p1", 6), None);
+        assert!(fallback_note("p2", 6).is_some());
+        ended("p2", 6);
+    }
+
+    #[test]
+    fn a_turned_away_download_keeps_the_name_it_was_offered_under_until_it_ends() {
+        assert_eq!(asked_name("p1", 9), None);
+        remember_asked_name("p1", 9, "notes-2.csv");
+        assert_eq!(asked_name("p1", 9).as_deref(), Some("notes-2.csv"));
+        // Another pane's id 9 is another download.
+        assert_eq!(asked_name("p2", 9), None);
+        ended("p1", 9);
+        assert_eq!(asked_name("p1", 9), None, "an id that comes round again has no old name");
+        remember_asked_name("p1", 10, "a.zip");
+        forget_pane("p1");
+        assert_eq!(asked_name("p1", 10), None);
+    }
 
     #[test]
     fn the_fourth_quiet_download_of_a_pane_is_refused() {

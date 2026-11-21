@@ -46,9 +46,10 @@ describe("the window's grip", () => {
         expect(grip.querySelectorAll("svg circle").length).toBe(16);
     });
 
-    it("stays last when the host draws no window controls (macOS's AgentMux logo follows the status area)", () => {
+    it("is left out with the window controls by a host with no window of its own (a browser tab)", () => {
         h.chrome = false;
         const { container } = render(() => <SystemStatus />);
-        expect(order(container)).toEqual(["widgets", "window-grip"]);
+        expect(order(container)).toEqual(["widgets"]);
+        expect(container.querySelector("[data-testid=window-grip]")).toBeNull();
     });
 });

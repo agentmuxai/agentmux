@@ -75,6 +75,62 @@ describe("taking a report from the host", () => {
         expect(storeProgress()?.phase).toBe("installing");
     });
 
+    describe("one download only goes forward", () => {
+        const report = (percent: number | null) => acceptStoreProgress({ phase: "downloading", percent, doneBytes: 0, totalBytes: 0 });
+
+        it("drops a report that reads lower than the last, so a count that starts over for the next package is not shown", () => {
+            // The flash this guards: 99 (a small package done), then 1 (the large one begins).
+            for (const p of [1, 2, 99, 1, 2, 3]) report(p);
+            expect(storeProgress()?.percent).toBe(99);
+            report(100);
+            expect(storeProgress()?.percent).toBe(100);
+        });
+
+        it("shows every report that moves forward, and the same figure again", () => {
+            const shown: Array<number | null | undefined> = [];
+            for (const p of [0, 0, 1, 5, 5, 40]) {
+                report(p);
+                shown.push(storeProgress()?.percent);
+            }
+            expect(shown).toEqual([0, 0, 1, 5, 5, 40]);
+        });
+
+        it("keeps the last figure when a report has none, rather than falling back to the plain line", () => {
+            report(30);
+            report(null);
+            expect(storeProgress()?.percent).toBe(30);
+        });
+
+        it("takes a first report with no figure as it is (nothing known yet)", () => {
+            report(null);
+            expect(storeProgress()).toMatchObject({ phase: "downloading", percent: null });
+            report(4);
+            expect(storeProgress()?.percent).toBe(4);
+        });
+
+        it("starts a new download from nothing: after pending, after installing, and after the row is cleared", () => {
+            report(80);
+            acceptStoreProgress({ phase: "pending", percent: null });
+            report(2);
+            expect(storeProgress()?.percent).toBe(2);
+            report(60);
+            acceptStoreProgress({ phase: "installing", percent: null });
+            report(3);
+            expect(storeProgress()?.percent).toBe(3);
+            report(70);
+            setStoreProgress(null);
+            report(1);
+            expect(storeProgress()?.percent).toBe(1);
+        });
+
+        it("never shows a figure below 0 or above 100", () => {
+            report(-20);
+            expect(storeProgress()?.percent).toBe(0);
+            report(250);
+            expect(storeProgress()?.percent).toBe(100);
+        });
+    });
+
     it("ignores anything malformed", () => {
         acceptStoreProgress({ phase: "downloading", percent: 10, doneBytes: 1, totalBytes: 2 });
         for (const bad of [null, undefined, "x", {}, { phase: "flying" }, { phase: 3 }]) acceptStoreProgress(bad);

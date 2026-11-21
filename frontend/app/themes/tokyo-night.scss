@@ -30,6 +30,9 @@
     --highlight-bg-color: rgba(122, 162, 247, 0.14);
 
     --error-color: #f7768e;
+    // Words on an error fill: this red is too pale for white (themes/on-error-text.test.ts), so the theme's base.
+    --on-error-color: #1a1b2e;
+    --on-error-edge: #fff;
     --warning-color: #e0af68;
     --success-color: #9ece6a;
     // Text in the status colours: each colour with its lightness moved until it reads at 4.6:1 on this

@@ -65,6 +65,12 @@ function createFigures(props: ActivityRowProps, tick: () => number) {
     const elapsed = createMemo(() => {
         const a = props.activity();
         if (!a) return "";
+        // An unknown row has no clock: a stopped one would read "0s" for a call that may still be running. It says
+        // how long ago anything last heard of it instead.
+        if (a.status === "unknown" && a.endedAt != null) {
+            tick();
+            return `seen ${formatElapsedCompact(Math.max(0, Date.now() - a.endedAt))} ago`;
+        }
         const end = a.endedAt ?? (tick(), Date.now());
         return formatElapsedCompact(end - a.startedAt);
     });

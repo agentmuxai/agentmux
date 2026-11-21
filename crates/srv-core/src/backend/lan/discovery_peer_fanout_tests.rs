@@ -336,3 +336,16 @@ async fn an_old_miss_that_is_still_a_miss_stays_one() {
     assert!(matches!(c.find_agent_lan_pubkey_again_from(&[peer_at(&addr)], "agentx", &http).await, LanPubkeyLookup::NotFound));
     assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1, "asked once");
 }
+
+/// A test's controller never opens a real mDNS daemon: that registers a service
+/// on the real multicast group and shows up as a fake peer in an AgentMux
+/// installed on the same machine. Asking for LAN still records the want.
+#[tokio::test]
+async fn a_test_controller_never_opens_a_daemon() {
+    let c = controller();
+    c.apply(true);
+    assert!(c.is_wanted(), "the want is recorded");
+    assert!(c.health().is_none(), "but no daemon is running, so nothing was announced");
+    assert!(!c.restart_if_wanted() && !c.rebuild(), "a restart or rebuild cannot start one either");
+    assert!(c.health().is_none());
+}

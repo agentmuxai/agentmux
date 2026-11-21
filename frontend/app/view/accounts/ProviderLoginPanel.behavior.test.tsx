@@ -206,9 +206,8 @@ describe("ProviderLoginPanel behavior", () => {
         registered(runs[0]);
         runs[0].resolve("inapp-success");
         await flush();
-        page("signed in");
-        fireEvent.click(screen.getByText("Done"));
-        calls();
+        // Nothing to read or dismiss: the dialog is asked to close at once (onSignedIn, then onClose).
+        page("signed in: closed by itself");
         await snapshot("success");
     });
 
@@ -220,7 +219,7 @@ describe("ProviderLoginPanel behavior", () => {
         registered(runs[0], "acct-new");
         runs[0].resolve("terminal-success");
         await flush();
-        page("inline, signed in");
+        page("inline, signed in: closed by itself");
         await snapshot("inline-link");
     });
 

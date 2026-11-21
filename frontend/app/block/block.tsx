@@ -41,6 +41,7 @@ import { createEffect, createMemo, createRoot, createSignal, onCleanup, onMount,
 import "./block.scss";
 import "./pane-size-badge.scss";
 import { BlockErrorBoundary } from "./BlockErrorBoundary";
+import { catchPaneErrors } from "@/app/util/pane-error-scope";
 import { BlockSuspenseSpinner } from "./BlockSuspenseSpinner";
 import { PaneViewBoundary } from "./PaneViewBoundary";
 import { agentNameOf, logBlockCover } from "./pane-cover-log";
@@ -97,12 +98,22 @@ function makeViewModel(blockId: string, blockView: string, nodeModel: NodeModel)
     let disposeRoot!: () => void;
     const vm = createRoot((dispose) => {
         disposeRoot = dispose;
-        // An unregistered view (a widget that failed to load, a view from a
-        // newer build) gets the default ViewModel.
-        if (manifest == null) return makeDefaultViewModel(blockId, effectiveView);
-        // The instance gets a host context, never the raw nodeModel.
-        const ctx = makePaneTabHostContext(blockId, nodeModel);
-        return adaptPaneTabInstance(manifest, ctx, createPaneTabInstance(manifest, ctx));
+        // The root has no owner, so a memo or effect the constructor made had no handler above it: a throw there
+        // aborted the window's flush and named no pane. This one logs the pane and carries on (a throw while the
+        // constructor runs still reaches its caller, as before).
+        return catchPaneErrors(
+            blockId,
+            `${effectiveView} view model`,
+            () => {
+                // An unregistered view (a widget that failed to load, a view from a
+                // newer build) gets the default ViewModel.
+                if (manifest == null) return makeDefaultViewModel(blockId, effectiveView);
+                // The instance gets a host context, never the raw nodeModel.
+                const ctx = makePaneTabHostContext(blockId, nodeModel);
+                return adaptPaneTabInstance(manifest, ctx, createPaneTabInstance(manifest, ctx));
+            },
+            "contain"
+        );
     });
     viewModelRoots.set(vm, disposeRoot);
     viewModelManifests.set(vm, manifest ?? null);
@@ -201,13 +212,23 @@ function getViewElem(
 }
 
 /**
+ * A pane in the shared zoom has its level as `--pane-zoom`, for a view that scales only part of itself (Sysinfo: its
+ * text, not its charts) and for a dialog over it that follows the pane's zoom (the agent pane's sign-in).
+ */
+function paneZoomLevelOf(meta: { view?: string } | null | undefined): string | undefined {
+    return paneTabCapability(meta?.view, "paneZoom") ? String(readZoom(meta)) : undefined;
+}
+
+/**
  * The pane's modal host, for every kind of pane: a dialog about this pane (`<Modal scope="pane">`,
  * `useModalLayer()`, or a request raised with `openPaneModal`) covers its content and nothing else.
  * SPEC_PANE_MODALS_NOT_WINDOW_MODALS_2026_11_02.md D3.
  */
-function PaneModalHost(props: { blockId: string; children: JSX.Element }): JSX.Element {
+function PaneModalHost(props: { blockId: string; paneZoom?: string; children: JSX.Element }): JSX.Element {
     return (
-        <ModalLayer scope="pane" fill>
+        // `--pane-zoom` is the pane's level, for a dialog that follows the pane's zoom (the agent pane's sign-in)
+        // instead of the chrome's, as every other dialog does.
+        <ModalLayer scope="pane" fill style={props.paneZoom === undefined ? undefined : { "--pane-zoom": props.paneZoom } as JSX.CSSProperties}>
             <PaneRequestModals blockId={props.blockId} />
             {props.children}
         </ModalLayer>
@@ -274,15 +295,12 @@ function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Eleme
     // Track previous focus state to handle blockClicked
     const [blockContentOffset, setBlockContentOffset] = createSignal<Dimensions>(null);
 
+    const paneZoomLevel = createMemo(() => paneZoomLevelOf(blockData()?.meta));
     const blockContentStyle = createMemo<JSX.CSSProperties>(() => {
         const retVal: JSX.CSSProperties = {
             "pointer-events": disablePointerEvents() ? "none" : undefined,
         };
-        // A pane in the shared zoom gets its level as `--pane-zoom`, for a view
-        // that scales only part of itself (Sysinfo: its text, not its charts).
-        if (paneTabCapability(blockData()?.meta?.view, "paneZoom")) {
-            (retVal as Record<string, string>)["--pane-zoom"] = String(readZoom(blockData()?.meta));
-        }
+        if (paneZoomLevel() !== undefined) (retVal as Record<string, string>)["--pane-zoom"] = paneZoomLevel()!;
         const rect = innerRect();
         const offset = blockContentOffset();
         if (rect?.width && rect?.height && offset) {
@@ -368,7 +386,7 @@ function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Eleme
             blockModel={blockModel}
             viewModel={viewModel}
         >
-            <PaneModalHost blockId={nodeModel.blockId}>
+            <PaneModalHost blockId={nodeModel.blockId} paneZoom={paneZoomLevel()}>
                 <div class="block-focuselem">
                     <input
                         type="text"
@@ -390,7 +408,7 @@ function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Eleme
                             assembly), but suppressed while the cover is up over this box:
                             "two brains at once". SPEC_PANE_LOADING_CONSOLIDATION §5.3. */}
                         <PaneViewBoundary fallback={<Show when={!covered?.()}><BlockSuspenseSpinner blockId={nodeModel.blockId} agent={() => agentNameOf(blockData())} /></Show>}>
-                            <PaneView blockId={nodeModel.blockId} blockRef={blockRef} contentRef={contentRef} viewType={blockViewType()} viewModel={viewModel} />
+                            {catchPaneErrors(nodeModel.blockId, "body", () => <PaneView blockId={nodeModel.blockId} blockRef={blockRef} contentRef={contentRef} viewType={blockViewType()} viewModel={viewModel} />)}
                         </PaneViewBoundary>
                     </ErrorBoundary>
                 </div>

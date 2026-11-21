@@ -52,6 +52,7 @@ impl DefinitionStore {
     pub fn open(root: PathBuf) -> Result<Self, DefStoreError> {
         std::fs::create_dir_all(&root)?;
         std::fs::create_dir_all(root.join("retired"))?;
+        super::atomic::sweep_stale_temps(&root, super::atomic::STALE_TEMP_AGE);
         Ok(Self {
             root,
             lock_timeout: super::def_record_lock::LOCK_TIMEOUT,
@@ -221,7 +222,7 @@ impl DefinitionStore {
         for entry in std::fs::read_dir(&self.root)? {
             let entry = entry?;
             let path = entry.path();
-            if !path.is_file() {
+            if !path.is_file() || super::atomic::is_temp_file(&path) {
                 continue;
             }
             let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
@@ -570,6 +571,29 @@ mod tests {
 
     fn former(slug: &str, retired_at: i64) -> crate::registry::FormerSlug {
         crate::registry::FormerSlug { slug: slug.to_string(), retired_at }
+    }
+
+    /// A temp file left by an interrupted write is no record: listing and the slug
+    /// index pass over it without a warning or a failed strict read, and opening
+    /// the store removes it once it is old.
+    #[test]
+    fn a_leftover_write_temp_file_is_not_a_record_and_is_swept_when_old() {
+        let (tmp, s) = store();
+        s.upsert(&rec("aaa", "Loap")).unwrap();
+        let temp = s.root().join(".registry-tmp-AbC123.json");
+        std::fs::write(&temp, b"{\"half\":").unwrap();
+
+        let listed = s.list_active().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(s.slug_index().unwrap().len(), 1);
+        assert_eq!(s.slug_index_strict().unwrap().len(), 1, "a strict read must not trip on it");
+        assert!(temp.exists(), "a fresh temp file may be a write in flight: left alone");
+
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        std::fs::OpenOptions::new().write(true).open(&temp).unwrap().set_modified(old).unwrap();
+        let reopened = DefinitionStore::open(tmp.path().join("definitions")).unwrap();
+        assert!(!temp.exists(), "an old one is removed when the store opens");
+        assert!(reopened.exists("aaa"), "the record is untouched");
     }
 
     /// P0.2: a channel whose `objects.db` still holds a slug the shared

@@ -25,6 +25,19 @@ pub struct FleetActionResult {
     /// agent): not stopped yet, and not failed.
     #[serde(default)]
     pub pending: Vec<String>,
+    /// A broadcast kept for an agent that is out of quota: its check has started and the words go as
+    /// soon as the agent can work. Not sent yet, and not failed.
+    #[serde(default)]
+    pub held: Vec<FleetActionHeld>,
+}
+
+/// One target of a broadcast whose words are kept until the agent can work.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FleetActionHeld {
+    pub id: String,
+    /// Why, in words: "Out of quota until Sun 7:00 PM; the check has not cleared it yet. Kept, and sent when it can work".
+    pub note: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
@@ -32,6 +45,15 @@ pub struct FleetActionResult {
 pub struct FleetActionFailure {
     pub id: String,
     pub error: String,
+}
+
+/// Input for fleet.check-limits: the panes (block ids) whose agents are marked out of quota, to be
+/// looked at again now: each gets a small turn, and one that works clears the limit. The answer is
+/// a `FleetActionResult`: `succeeded` where a check started or runs, `failed` with why not.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandFleetCheckLimitsData {
+    pub targets: Vec<String>,
 }
 
 /// Input for fleet.broadcast. `targets` are block ids (Swarm's native
@@ -42,6 +64,29 @@ pub struct FleetActionFailure {
 pub struct CommandFleetBroadcastData {
     pub targets: Vec<String>,
     pub message: String,
+    /// A name the sender chose for this broadcast. With it, srv publishes
+    /// `fleetbroadcastprogress` as each delivery ends, so the sender can show
+    /// how far a paced broadcast has got.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub progress_id: Option<String>,
+}
+
+/// The event a broadcast's sender follows while its deliveries are paced.
+pub const EVENT_FLEET_BROADCAST_PROGRESS: &str = "fleetbroadcastprogress";
+
+/// `fleetbroadcastprogress`: one more delivery of a broadcast has ended, delivered or failed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FleetBroadcastProgressEvent {
+    /// The `progress_id` the sender gave.
+    pub id: String,
+    /// Deliveries that have ended so far.
+    #[ts(type = "number")]
+    pub sent: u32,
+    /// Targets in all.
+    #[ts(type = "number")]
+    pub total: u32,
 }
 
 /// Input for supervisor.set-mode: the Swarm Supervisor's mode for each target
@@ -165,6 +210,7 @@ mod req_shape_tests {
             serde_json::from_value(json!({"targets": ["b1", "b2"], "message": "go"}))
                 .expect("fleet.broadcast must accept targets and message");
         assert_eq!(r.targets.len(), 2);
+        assert!(r.progress_id.is_none(), "an older page sends no progress id and gets no progress events");
     }
 
     // swarm-model.ts's `bulkStopSelection` spreads `...opts`, so bulk-stop is

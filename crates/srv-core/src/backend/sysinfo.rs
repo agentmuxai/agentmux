@@ -1245,6 +1245,7 @@ pub async fn run_sysinfo_loop(
             get_commit_data(&mut values);
             net_state.get_net_data(net_totals, &mut values);
             get_disk_data(&disks, elapsed_secs, &mut values);
+            crate::backend::gpu::add_compact_values(&mut values);
             // Must follow get_disk_data: it summarises the per-volume figures that
             // call just wrote. The Windows equivalent already ran with the
             // machine reads above (it makes a real syscall); this one does not.

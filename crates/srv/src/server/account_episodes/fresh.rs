@@ -22,6 +22,11 @@ const REREAD_GAP: std::time::Duration = std::time::Duration::from_millis(100);
 /// `unknown` are not re-read, and an account the file cannot speak for (no config dir, a Keychain on
 /// macOS) keeps the stored status.
 fn status_now(account: &IdentityAccount, now_ms: i64) -> String {
+    status_after(account, now_ms, || std::thread::sleep(REREAD_GAP))
+}
+
+/// [`status_now`], with what happens between the two looks given (a pause, in production).
+fn status_after(account: &IdentityAccount, now_ms: i64, between_looks: impl FnOnce()) -> String {
     let SecretRef::OAuthConfigDir { dir } = &account.secret_ref else { return account.status.clone() };
     if !matches!(account.status.as_str(), "valid" | "ok" | "expired") {
         return account.status.clone();
@@ -30,7 +35,7 @@ fn status_now(account: &IdentityAccount, now_ms: i64) -> String {
     let mut read = probe_oauth_status(provider, dir, now_ms);
     if read == Some(OAuthProbeStatus::NeedsReauth) {
         // A CLI rewriting the file can leave it unreadable for a moment: look again before trusting it.
-        std::thread::sleep(REREAD_GAP);
+        between_looks();
         read = probe_oauth_status(provider, dir, now_ms);
     }
     match read {
@@ -100,15 +105,12 @@ mod tests {
         let file = tmp.path().join(".credentials.json");
         std::fs::write(&file, "{ half written").unwrap();
         let whole = format!(r#"{{"claudeAiOauth":{{"accessToken":"a","refreshToken":"r","expiresAt":{}}}}}"#, NOW + 3_600_000);
-        let fixer = std::thread::spawn({
-            let file = file.clone();
-            move || {
-                std::thread::sleep(REREAD_GAP / 4);
-                std::fs::write(file, whole).unwrap();
-            }
-        });
-        assert_eq!(status_now(&account(tmp.path(), "valid"), NOW), "valid");
-        fixer.join().unwrap();
+        // The writer finishes between the two looks: done in the pause itself, not by a thread racing a clock
+        // (on a loaded machine the thread can be late, or the second look can catch the file mid-write).
+        assert_eq!(status_after(&account(tmp.path(), "valid"), NOW, || std::fs::write(&file, &whole).unwrap()), "valid");
+        let once = std::cell::Cell::new(0);
+        assert_eq!(status_after(&account(tmp.path(), "valid"), NOW, || once.set(once.get() + 1)), "valid", "a file that is whole stays valid");
+        assert_eq!(once.get(), 0, "and is not looked at twice");
     }
 
     #[test]

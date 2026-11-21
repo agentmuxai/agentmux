@@ -107,6 +107,7 @@ async fn app_main() {
     exit_if_helper_child();
     // `agentmux-srv open` is a client of a running headless srv: it starts nothing of srv's own.
     open_cli::exit_if_requested().await;
+    server::streamed_browser::exit_if_browser_host().await; // --streamed-browser-host: one person's browser, nothing else
     // -1. Crash monitor branch — must be checked before any other initialization.
     if bootstrap::maybe_run_crash_monitor() {
         return;
@@ -137,6 +138,8 @@ async fn app_main() {
 
     // 1. Init tracing (stderr + rolling file)
     let _log_guard = bootstrap::init_logging();
+    // The external host key registered by `prepare_process_mode`, if any: its fingerprint, now that there is a log to say it in.
+    server::external_host::log_registered();
 
     // 1'. Count every panic from here on (`backend::panic_watch`): the log keeps its lines, and the status bar, `/health` and the
     //     agents hear of a storm (2026-11-15: 30,000 panics in two hours, and nothing said so).

@@ -24,10 +24,11 @@ fn cases() -> Vec<Case> {
         c(
             "UIScreenshot",
             json!({ "pane": "p1" }),
-            json!({ "path": "/tmp/shot.png", "png_base64": "" }),
+            json!({ "path": "/tmp/shot.png", "png_base64": "iVBORw0KGgo=" }),
             "/api/v1/ui/screenshot",
             json!({ "pane": "p1", "agent_id": "tester" }),
-            &["Screenshot saved to /tmp/shot.png — use Read on that path"],
+            // The stand-in's caller is in a container: its copy, not srv's path.
+            &["Screenshot saved to ", "(inside your container) — use Read on that path"],
         ),
         c(
             "UIRecord",
@@ -185,4 +186,110 @@ async fn a_name_that_is_not_a_ui_tool_is_not_in_the_family() {
     let fx = Fixture::new(&srv);
     assert!(call("UINope", &json!({}), &fx.cx()).await.is_err());
     assert!(srv.seen.lock().unwrap().is_empty());
+}
+
+
+// A container agent cannot read srv's folders: the screenshot and recording it is told about are its own copies.
+
+const PNG_BYTES: &[u8] = b"\x89PNG\r\n\x1a\nfake image bytes";
+
+fn b64(bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+#[test]
+fn a_native_agent_is_told_the_hosts_screenshot_path_as_before() {
+    let dir = tempfile::tempdir().unwrap();
+    let shot = UiScreenshotResponse { path: "/host/tmp/s.png".into(), png_base64: b64(PNG_BYTES) };
+    let said = screenshot_text(&shot, false, dir.path()).unwrap();
+    assert!(said.contains("Screenshot saved to /host/tmp/s.png — use Read on that path"), "{said}");
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0, "a native agent gets no copy");
+}
+
+#[test]
+fn a_container_agents_screenshot_is_a_readable_file_in_its_own_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let shot = UiScreenshotResponse { path: "/host/tmp/s.png".into(), png_base64: b64(PNG_BYTES) };
+    let said = screenshot_text(&shot, true, dir.path()).unwrap();
+    assert!(!said.contains("/host/tmp"), "the host's path is not given: {said}");
+    let files: Vec<_> = std::fs::read_dir(dir.path()).unwrap().flatten().collect();
+    assert_eq!(files.len(), 1);
+    let path = files[0].path();
+    assert_eq!(path.extension().and_then(|e| e.to_str()), Some("png"));
+    assert!(said.contains(&path.to_string_lossy().to_string()), "{said}");
+    assert!(said.contains("files") && said.contains("Tasks") && said.contains("Message"), "{said}");
+    assert_eq!(std::fs::read(&path).unwrap(), PNG_BYTES);
+    // The tools that take `files` accept it.
+    let checked = super::super::send_files::check(&[path.to_string_lossy().into_owned()]).unwrap();
+    assert_eq!((checked[0].size, checked[0].name.ends_with(".png")), (PNG_BYTES.len() as u64, true));
+}
+
+#[test]
+fn a_container_screenshot_srv_sent_no_image_for_says_so_instead_of_naming_a_host_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let shot = UiScreenshotResponse { path: "/host/tmp/s.png".into(), png_base64: String::new() };
+    let err = screenshot_text(&shot, true, dir.path()).unwrap_err().to_string();
+    assert!(err.contains("on the host") && !err.contains("/host/tmp"), "{err}");
+    let bad = UiScreenshotResponse { path: "/h/s.png".into(), png_base64: "not base64!".into() };
+    assert!(screenshot_text(&bad, true, dir.path()).unwrap_err().to_string().contains("could not be decoded"));
+}
+
+fn recording(path: Option<&str>, gif: Option<String>) -> UiRecordResponse {
+    UiRecordResponse {
+        status: "saved".into(),
+        message: format!("Recording saved to {} (12 frames).", path.unwrap_or("-")),
+        path: path.map(str::to_string),
+        gif_base64: gif,
+        frames: 12,
+        skipped: 0,
+        seconds: 2.0,
+    }
+}
+
+#[test]
+fn a_container_agents_recording_is_its_own_copy_and_the_message_names_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let rec = recording(Some("/host/tmp/r.gif"), Some(b64(b"GIF89a-bytes")));
+    let said = record_text(&rec, true, dir.path()).unwrap();
+    assert!(!said.contains("/host/tmp") && said.contains("(inside your container)") && said.contains("12 frames"), "{said}");
+    let files: Vec<_> = std::fs::read_dir(dir.path()).unwrap().flatten().collect();
+    assert_eq!(files.len(), 1);
+    assert_eq!(std::fs::read(files[0].path()).unwrap(), b"GIF89a-bytes");
+    // Native, or a call that finished nothing (a start), is told what srv said.
+    assert_eq!(record_text(&rec, false, dir.path()).unwrap(), rec.message);
+    let started = recording(None, None);
+    assert_eq!(record_text(&started, true, dir.path()).unwrap(), started.message);
+    // A finished recording with no bytes cannot be offered.
+    assert!(record_text(&recording(Some("/h/r.gif"), None), true, dir.path()).is_err());
+}
+
+#[test]
+fn copies_an_hour_old_go_and_newer_ones_and_other_files_stay() {
+    let dir = tempfile::tempdir().unwrap();
+    let old_png = dir.path().join("old.png");
+    let old_gif = dir.path().join("old.gif");
+    let fresh = dir.path().join("fresh.png");
+    let notes = dir.path().join("notes.txt");
+    for p in [&old_png, &old_gif, &fresh, &notes] {
+        std::fs::write(p, b"x").unwrap();
+    }
+    let two_hours_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 60 * 60);
+    for p in [&old_png, &old_gif, &notes] {
+        std::fs::File::options().write(true).open(p).unwrap().set_modified(two_hours_ago).unwrap();
+    }
+    prune_old_media(dir.path());
+    assert!(!old_png.exists() && !old_gif.exists());
+    assert!(fresh.exists() && notes.exists(), "a new copy and a file that is not a capture stay");
+}
+
+#[tokio::test]
+async fn ui_record_asks_srv_for_the_file_in_a_container_and_names_the_copy() {
+    let reply = json!({ "status": "saved", "message": "Recording saved to /host/r.gif (3 frames).", "path": "/host/r.gif", "gif_base64": b64(b"GIF89a") });
+    let srv = stub_srv("200 OK", reply);
+    let fx = Fixture::new(&srv);
+    let said = call("UIRecord", &json!({ "op": "stop" }), &fx.cx()).await.unwrap();
+    let seen = srv.seen.lock().unwrap().clone();
+    assert_eq!(seen[0].1.get("inline"), Some(&json!(true)), "{}", seen[0].1);
+    assert!(!said.contains("/host/r.gif") && said.contains("(inside your container)"), "{said}");
 }

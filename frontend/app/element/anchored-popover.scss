@@ -16,6 +16,13 @@
     z-index: var(--z-tooltip);
 }
 
+// A tooltip stands on the same opaque surface a menu does (menu-frame.scss), so it reads at any window opacity and
+// over a pane with a backdrop; the utility classes on the body (`bg-modalbg`, `border-border`) are the fallback.
+.anchored-popover--tooltip > .anchored-popover-body {
+    background: var(--menu-bg-color, var(--modal-bg-color));
+    border-color: var(--menu-edge-color, var(--border-color));
+}
+
 // A tooltip that only reports a status never takes the pointer (Tooltip's `passive`).
 .anchored-popover.anchored-popover--passive {
     pointer-events: none;

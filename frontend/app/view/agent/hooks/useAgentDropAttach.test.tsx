@@ -128,14 +128,26 @@ describe("agent pane file drop", () => {
         expect(hub.copy).toHaveBeenCalledWith("b1", { paths: ["/a/y.md"] }, expect.anything());
     });
 
-    it("container agents copy into the working folder, or are blocked without one", async () => {
+    it("container agents attach to the tray like native ones, with or without a working folder", async () => {
         hub.meta = { agentMode: "container" };
         const hook = mount();
+        expect(hook.accept(drag)).toEqual({ ok: true, message: "Drop 2 files to attach", icon: "fa-paperclip" });
+        await hook.drop({ paths: ["/a/x.png"], files: [file("x.png")] });
+        expect(hub.ingest).toHaveBeenCalledWith(["/a/x.png"]);
+        await hook.drop({ paths: [], files: [file("a.png")] });
+        expect(hub.upload).toHaveBeenCalledWith([expect.any(File)], undefined);
+        expect(hub.copy).not.toHaveBeenCalled();
+    });
+
+    it("with attachments:enabled off, files are copied into the working folder, or blocked without one", async () => {
+        hub.settings["attachments:enabled"] = false;
+        const hook = mount();
         expect(hook.accept(drag)).toEqual({ ok: false, reason: "No working folder for this agent" });
-        hub.meta = { agentMode: "container", "cmd:cwd": "/work" };
+        hub.meta = { "cmd:cwd": "/work" };
         expect(hook.accept(drag)).toEqual({ ok: true, message: "Copy 2 files to /work", icon: "fa-copy" });
         await hook.drop({ paths: [], files: [file("a.txt")] });
         expect(hub.copy).toHaveBeenCalledWith("b1", { files: [expect.any(File)] }, expect.anything());
+        expect(hub.ingest).not.toHaveBeenCalled();
     });
 
     it("says why when file drop is turned off", () => {

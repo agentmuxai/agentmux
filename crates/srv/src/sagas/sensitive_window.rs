@@ -406,8 +406,24 @@ fn audit(state: &AppState, v: &SensitiveView, action: &str, ok: bool, error: Opt
 /// running is not an error.
 pub fn tell_askers(request: &Request, note: &str) {
     for uid in request.askers() {
-        if let Err(e) = crate::backend::reactive::get_global_handler().deliver_system_note(uid, note) {
+        tell_one(uid, note);
+    }
+}
+
+/// Tell one asker, from AgentMux; whether the note was delivered. An agent of another machine (`remote:agent@machine`)
+/// has no pane here to put a note in, and srv can't speak as one of that machine's agents: it is not told from here,
+/// and that is no failure. Its own machine reads where the request stands (`app.upgrade` with `status`) and tells
+/// it how it ended (`remote_ops::upgrade_watch`); the agent can read the same itself.
+pub fn tell_one(uid: &str, note: &str) -> bool {
+    if uid.starts_with(crate::backend::sensitive_requests::REMOTE_OWNER_PREFIX) {
+        tracing::debug!(requester = %uid, "sensitive request: the asker is on another machine; it reads the request's status");
+        return false;
+    }
+    match crate::backend::reactive::get_global_handler().deliver_system_note(uid, note) {
+        Ok(()) => true,
+        Err(e) => {
             tracing::info!(error = %e, "sensitive request: note not delivered");
+            false
         }
     }
 }

@@ -21,7 +21,8 @@ use serde_json::{json, Value};
 
 use agentmux_common::time::now_ms;
 
-use crate::backend::storage::work_boards::{Board, BoardEdit, Deletion, DELETE_COUNTDOWN_MS};
+use crate::backend::storage::work_board_stages as stages;
+use crate::backend::storage::work_boards::{Board, BoardEdit, BoardEvent, Deletion, DELETE_COUNTDOWN_MS};
 
 use super::AppState;
 
@@ -49,20 +50,75 @@ pub(crate) struct BoardsRequest {
     /// The agents that see the board (ids); an empty list means all agents.
     #[serde(default)]
     pub agents: Option<Vec<String>>,
+    /// edit: the whole new stage set (`{version, stages: [{id, name, colour, takes}]}`).
+    #[serde(default)]
+    pub stages: Option<Value>,
+    /// edit: clear the stages back to the default set.
+    #[serde(default)]
+    pub stages_reset: Option<bool>,
+    /// edit: the `stages_rev` the caller read; a different one is refused.
+    #[serde(default)]
+    pub stages_rev: Option<i64>,
 }
 
+/// A board as the routes show it. `stages` is the set in use: the stored one, or the default when none
+/// is stored or the stored one can't be used (`stages_error` then says why, and nothing is overwritten).
 pub(crate) fn board_json(b: &Board) -> Value {
+    let (set, error) = match stages::parse_stored(&b.stages) {
+        Ok(set) => (set, None),
+        Err(why) => (stages::default_set(), Some(why)),
+    };
     json!({
         "id": b.id, "slug": b.slug, "name": b.name, "tier": b.tier, "readable": b.readable,
         "agents": b.agents, "default": b.is_default, "archived": b.archived,
         "open": b.open, "total": b.total, "pending_delete_at": b.pending_delete_at,
+        "stages": set, "stages_rev": b.stages_rev,
+        "stages_default": b.stages.trim().is_empty() || error.is_some(), "stages_error": error,
     })
 }
 
-/// The boards `who` sees (none: all), default first.
+/// How many lines of a board's history the list carries.
+const HISTORY_SHOWN: usize = 8;
+
+/// A board as a list shows it: [`board_json`] and its latest history lines. Every list of boards (the agents'
+/// route and the Kanban's own) goes through this, so none of them leaves the history out.
+pub(crate) fn board_with_history(store: &crate::backend::storage::store::Store, b: &Board) -> Value {
+    let mut v = board_json(b);
+    v["history"] = json!(store.work_board_events(&b.id, HISTORY_SHOWN).unwrap_or_default());
+    v
+}
+
+/// The history line for a change of a board's stages: who, how many stages before and after, and both sets
+/// (kept for a later Restore). A failure to write it is logged and never fails the change itself.
+fn note_stages_change(state: &AppState, who: Option<(&str, &str)>, before: &Board, after: &Board, reset: bool, now: i64) {
+    let set_of = |b: &Board| stages::parse_stored(&b.stages).unwrap_or_else(|_| stages::default_set());
+    let (old, new) = (set_of(before), set_of(after));
+    let what = if reset { "reset the stages to the default" } else { "changed the stages" };
+    let (actor, actor_kind) = match who {
+        Some((id, _)) => (id.to_string(), "agent"),
+        None => (String::new(), "operator"),
+    };
+    let ev = BoardEvent {
+        at: now,
+        actor,
+        actor_kind: actor_kind.to_string(),
+        kind: "stages".to_string(),
+        body: format!("{what}: {} → {}", old.stages.len(), new.stages.len()),
+        detail: json!({ "from": old, "to": new }).to_string(),
+    };
+    if let Err(e) = state.work_store.work_board_event_add(&after.id, &ev) {
+        tracing::warn!(target: "workqueue", board = %after.slug, error = %e, "could not record the stages change in the board's history");
+    }
+}
+
+/// The boards `who` sees (none: all), default first, each with its latest history lines.
 pub(crate) fn boards_view(state: &AppState, who: Option<(&str, &str)>, include_archived: bool) -> Result<Value, String> {
     let boards = state.work_store.work_boards_list(include_archived, now_ms()).map_err(|e| e.to_string())?;
-    let seen: Vec<Value> = boards.iter().filter(|b| who.map_or(true, |(a, u)| b.visible_to(a, u))).map(board_json).collect();
+    let seen: Vec<Value> = boards
+        .iter()
+        .filter(|b| who.map_or(true, |(a, u)| b.visible_to(a, u)))
+        .map(|b| board_with_history(&state.work_store, b))
+        .collect();
     let default = boards.iter().find(|b| b.is_default).map(|b| b.slug.clone());
     Ok(json!({ "boards": seen, "default": default }))
 }
@@ -82,6 +138,9 @@ pub(crate) fn board_act(state: &AppState, who: Option<(&str, &str)>, actor: &str
         tier: req.tier.clone(),
         readable: req.readable,
         agents: req.agents.clone(),
+        stages: req.stages.clone(),
+        stages_reset: req.stages_reset.unwrap_or(false),
+        stages_rev: req.stages_rev,
     };
     let out = match req.action.as_str() {
         "create" => {
@@ -89,8 +148,11 @@ pub(crate) fn board_act(state: &AppState, who: Option<(&str, &str)>, actor: &str
             json!({ "ok": true, "board": board_json(&b) })
         }
         "edit" => {
-            let b = on(&req.board)?;
-            let b = store.work_board_edit(&b.id, &edit, now).map_err(|e| e.to_string())?;
+            let before = on(&req.board)?;
+            let b = store.work_board_edit(&before.id, &edit, now).map_err(|e| e.to_string())?;
+            if edit.stages.is_some() || edit.stages_reset {
+                note_stages_change(state, who, &before, &b, edit.stages_reset, now);
+            }
             json!({ "ok": true, "board": board_json(&b) })
         }
         "archive" | "unarchive" => {
@@ -125,7 +187,8 @@ pub(crate) fn board_act(state: &AppState, who: Option<(&str, &str)>, actor: &str
         }
         other => return Err(format!("unknown board action {other:?}: create, edit, archive, unarchive, delete, cancel_delete or default")),
     };
-    tracing::info!(target: "workqueue", actor, action = %req.action, board = ?req.board.as_deref().or(req.name.as_deref()), "board changed");
+    let stages_changed = req.action == "edit" && (req.stages.is_some() || req.stages_reset == Some(true));
+    tracing::info!(target: "workqueue", actor, action = %req.action, board = ?req.board.as_deref().or(req.name.as_deref()), stages_changed, "board changed");
     super::work_queue::publish_changed(state);
     Ok(out)
 }

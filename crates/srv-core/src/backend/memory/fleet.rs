@@ -152,6 +152,10 @@ pub enum Skipped {
     Protected,
     /// The id belongs to a bundle that is not Global Memory (an agent's own preset).
     NotMemory,
+    /// Another entry here (a different id) already holds this name, and it is live: an entry copied
+    /// by hand, or one of this machine's own. Names are unique, so the two cannot both be kept; a
+    /// person on this machine says which stays (rename or remove one).
+    NameTaken,
     /// A removal for an entry this machine already removed.
     AlreadyRemoved,
     /// A removal for an entry this machine never had.
@@ -181,6 +185,7 @@ impl Outcome {
                 Skipped::MachineScope => "machine_scope",
                 Skipped::Protected => "protected",
                 Skipped::NotMemory => "not_memory",
+                Skipped::NameTaken => "name_taken",
                 Skipped::AlreadyRemoved => "already_removed",
                 Skipped::Unknown => "unknown",
             } }),
@@ -385,6 +390,18 @@ pub fn apply_put(store: &Store, entry: &FleetEntry, actor: Actor<'_>) -> Result<
         }
         Some(_) => return Ok(Outcome::Skipped(Skipped::NotMemory)),
     };
+    // `db_bundles.name` is unique, and the fleet carries entries by id. A different id that holds
+    // this name is either an entry removed here (its name is dead: free it) or a live one, which a
+    // person here has to sort out; the sync says so and goes on with the others.
+    if let Some(holder) = store.bundle_get_by_name(entry.name.trim())? {
+        if holder.id != entry.id {
+            if holder.is_global || holder.is_system || holder.is_blank || !store.bundle_is_removed_global(&holder.id)? {
+                return Ok(Outcome::Skipped(Skipped::NameTaken));
+            }
+            let short: String = holder.id.chars().take(8).collect();
+            store.bundle_rename_removed(&holder.id, &format!("{} (removed {short})", holder.name))?;
+        }
+    }
     if lifts_default && applied == Applied::Updated {
         keep_current_text(store, &bundle)?;
     }

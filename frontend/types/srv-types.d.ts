@@ -328,6 +328,13 @@ declare global {
         opts?: WebSelectorOpts;
     };
 
+    // wconfig.UnrecognizedSetting
+    type UnrecognizedSetting = {
+        key: string;
+        suggestion?: string;
+        line?: number;
+    };
+
     // wconfig.ConfigError
     type ConfigError = {
         file: string;
@@ -513,6 +520,7 @@ declare global {
         connections: {[key: string]: ConnKeywords};
         bookmarks: {[key: string]: WebBookmark};
         configerrors: ConfigError[];
+        unrecognized?: UnrecognizedSetting[];
         browserstartpage?: string;
     };
 
@@ -999,6 +1007,8 @@ declare global {
         /** The Swarm sections that are open, Broadcast and Supervise (swarm-section.ts). */
         "swarm:open"?: ("supervisor" | "broadcast")[];
         "warden:section"?: "jobs";
+        /** A saved drone to put on the canvas, set by a link from elsewhere (the Jobs tab's Open graph) and cleared once shown. Read by the Drone pane. */
+        "drone:open"?: string | null;
         /** A Kanban task to open in the drawer, set by a link from elsewhere (a Swarm row's task chip) and cleared once opened. Read by the Kanban pane. */
         "kanban:open"?: string | null;
         /** The Kanban pane shows one lane per repository. */
@@ -1300,6 +1310,9 @@ declare global {
         "agent:exploremodel"?: string;
         "agent:compacthints"?: boolean;
         "agent:compacthintat"?: number;
+        "agent:compactbackstopat"?: number;
+        "agent:usagenoticeat"?: number;
+        "agent:usagenoticehighat"?: number;
         "agent:freshhintat"?: number;
         "agent:overlapnotes"?: boolean;
         "agent:retryonreconnect"?: boolean;

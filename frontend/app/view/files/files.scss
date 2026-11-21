@@ -7,10 +7,9 @@
 
 @use "../../mixins.scss";
 
-// Up to these widths of the pane there is no room for Places, or for the preview, beside the list: the
-// panel is not drawn, and neither is the toolbar button that would show it.
-$places-hidden-to: 480px;
-$preview-hidden-to: 640px;
+// Up to some widths of the pane there is no room for Places, or for the preview, beside the list: the
+// panel is not drawn, and neither is the toolbar button that would show it (`data-no-places` and
+// `data-no-preview` on the root, set from files-narrow.ts, which has the widths).
 
 .files-view {
     display: flex;
@@ -23,8 +22,6 @@ $preview-hidden-to: 640px;
     font-family: var(--font-sans);
     font-size: var(--text-sm);
     overflow: hidden;
-    // Narrow panes drop Places first (§5.1).
-    container-type: inline-size;
 
     // The list view's column widths: the pane sets its own on .files-list when a divider has been dragged
     // (files-columns.ts); Name takes what is left until then.
@@ -69,16 +66,9 @@ $preview-hidden-to: 640px;
         display: none;
     }
 
-    .ui-tooltip-anchor:has(> .files-tool--places) {
-        @container (max-width: #{$places-hidden-to}) {
-            display: none;
-        }
-    }
-
-    .ui-tooltip-anchor:has(> .files-tool--preview) {
-        @container (max-width: #{$preview-hidden-to}) {
-            display: none;
-        }
+    .files-view[data-no-places] & .ui-tooltip-anchor:has(> .files-tool--places),
+    .files-view[data-no-preview] & .ui-tooltip-anchor:has(> .files-tool--preview) {
+        display: none;
     }
 
     // In a fitted row the open filter box takes the path's place, so the buttons stay where they are.
@@ -169,18 +159,44 @@ $preview-hidden-to: 640px;
     min-height: 0;
 }
 
+// The pane's zoomed parts (files-zoom-parts.ts): each wrapper carries its part's own CSS `zoom` and lays
+// out in its own (zoomed) units, so a part never scales another. The toolbar and the footer are rows of
+// the root's column; the list with its preview fills what Places leaves; Places keeps its own width.
+.files-zoom {
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+}
+
+.files-zoom-bar {
+    flex-direction: column;
+    flex-shrink: 0;
+}
+
+.files-zoom-list {
+    flex: 1;
+}
+
+.files-zoom-places {
+    flex-direction: column;
+    flex-shrink: 0;
+
+    // Focusable so a click on its blank space or heading keeps the keyboard in Places (the zoom keys follow it).
+    &:focus {
+        outline: none;
+    }
+}
+
 .files-places {
     display: flex;
     flex-direction: column;
+    flex: 1;
+    min-height: 0;
     width: 160px;
     flex-shrink: 0;
     padding: 4px 0;
     border-right: 1px solid var(--border-color);
     overflow-y: auto;
-
-    @container (max-width: #{$places-hidden-to}) {
-        display: none;
-    }
 }
 
 .files-places-heading {
@@ -570,11 +586,6 @@ $preview-hidden-to: 640px;
     flex-shrink: 0;
     border-left: 1px solid var(--border-color);
     overflow: auto;
-
-    // Narrow panes drop the preview after Places (§5.1).
-    @container (max-width: #{$preview-hidden-to}) {
-        display: none;
-    }
 }
 
 .files-preview-empty {
@@ -647,17 +658,33 @@ $preview-hidden-to: 640px;
 
 .files-op {
     display: flex;
+    // In a narrow pane (or with a long name) the text takes a line of its own and the bar and Cancel go below it,
+    // instead of the bar and Cancel keeping their width and squeezing the text to an ellipsis.
+    flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
+    gap: 2px 8px;
     padding: 3px 10px;
     border-top: 1px solid var(--border-color);
     color: var(--secondary-text-color);
     white-space: nowrap;
 }
 
+// The name is cut with an ellipsis when there is no room; the " · 3 of 10 · 45%" after it never is.
 .files-op-text {
+    display: flex;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.files-op-name {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.files-op-tail {
+    flex: none;
+    white-space: pre;
 }
 
 .files-op-bar {

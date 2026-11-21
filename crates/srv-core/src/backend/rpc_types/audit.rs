@@ -85,6 +85,25 @@ pub struct AuditLinks {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub pane: Option<AuditPaneLink>,
+    /// The task the agent held when this happened, and its PR.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub task: Option<AuditTaskLink>,
+}
+
+/// A Kanban task, as an Audit row links to it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AuditTaskLink {
+    /// The task's number on its board. Opened as `agentmux://task/<num>` on the default board (`task_ref` starts with `#`).
+    #[ts(type = "number")]
+    pub num: i64,
+    /// How the task is written on its board: `#12`, or `work#12` on another board.
+    pub task_ref: String,
+    /// Its PR, when it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub pr_url: Option<String>,
 }
 
 /// One end of a jekt, or the target of an action.
@@ -254,4 +273,43 @@ pub struct AuditQueryResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub channel: Option<String>,
+    /// What the other channels on this computer keep in their own files, asked over loopback: the first page of a
+    /// `machine` scope only, and only the rows this channel cannot read itself (a channel that gave the shared folder
+    /// up writes its rows to its own file). One entry per channel that answered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub other_channels: Option<Vec<AuditChannelRows>>,
+    /// What each paired computer answered, asked over the LAN: the first page of a `lan` scope only, and only
+    /// from a computer whose owner shares its Audit (`audit:sharewithpaired`). One entry per computer asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub peers: Option<Vec<AuditPeerRows>>,
+}
+
+/// The newest rows of one paired computer (`audit.query`, `peers`): its own channel and its other channels, in one list.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AuditPeerRows {
+    /// The computer's name, as `Agents list` shows it.
+    pub host: String,
+    /// Newest first. Each `id` is prefixed with the computer, and no link into its windows, history or Kanban is kept.
+    pub entries: Vec<AuditEntry>,
+    /// The computer holds older rows than these. They are not paged.
+    pub more: bool,
+    /// Why there are no rows, when it did not answer with any: sharing is off, the computer needs approval, or it could not be reached.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub note: Option<String>,
+}
+
+/// The newest rows another channel on this computer keeps in its own file (`audit.query`, `other_channels`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AuditChannelRows {
+    /// The channel's name, as the host-global registry has it.
+    pub channel: String,
+    /// Newest first. Each `id` is prefixed with the channel, so it cannot equal a row of another store.
+    pub entries: Vec<AuditEntry>,
+    /// The channel holds older rows than these. They are not paged: ask the channel's own Audit.
+    pub more: bool,
 }

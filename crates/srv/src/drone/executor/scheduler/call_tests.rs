@@ -290,3 +290,45 @@ fn what_a_callee_may_spend_is_what_its_caller_has_left() {
     assert_eq!(super::remaining_cap(Some(5.0), 9.0), Some(0.0), "never below nothing");
     assert_eq!(super::remaining_cap(None, 3.0), None, "no cap to share");
 }
+
+#[tokio::test]
+async fn the_key_a_called_drone_waits_on_is_said_on_the_callers_stream_and_ends_the_call() {
+    let waits = DroneGraph {
+        nodes: vec![node("hold", json!({ "kind": "wait", "on": "go" })), response("out", "{{hold.payload}}")],
+        edges: vec![edge("e1", "hold", "out", None)],
+    };
+    let caller = caller_of("waits");
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let lookup = saved(vec![("waits", waits)]);
+    let run = tokio::spawn(async move {
+        let states = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+        execute("run-1", (&caller, Value::Null, Limits { lookup, ..Limits::default() }, "main"), &tx, &states).await
+    });
+    let mut events = Vec::new();
+    while let Some(ev) = rx.recv().await {
+        if let RunEvent::Waiting { key: Some(key), .. } = &ev {
+            crate::backend::drone_wait::signal(key, json!("hi")).unwrap();
+        }
+        events.push(ev);
+    }
+    assert_eq!(run.await.unwrap().ok(), Some(json!("hi")), "the answer to the key ended the callee's wait, and the call");
+    let waiting: Vec<_> = events.iter().filter_map(|e| match e { RunEvent::Waiting { run_id, block_id, on, key, .. } => Some((run_id.as_str(), block_id.as_str(), on.as_deref(), key.is_some())), _ => None }).collect();
+    assert_eq!(waiting, vec![("run-1", "call", Some("go"), true)], "said as the call block's wait, with its key");
+    let ended = events.iter().filter(|e| matches!(e, RunEvent::WaitEnded { run_id, block_id, .. } if run_id == "run-1" && block_id == "call")).count();
+    assert_eq!(ended, 1);
+    assert!(!events.iter().any(|e| matches!(e, RunEvent::RunDone { .. } | RunEvent::RunFailed { .. })), "the callee's own end is not passed on");
+    assert!(events.iter().any(|e| matches!(e, RunEvent::ChildEnded { status, .. } if status == "done")));
+}
+
+#[tokio::test]
+async fn a_callee_stopped_in_the_middle_of_a_wait_ends_the_wait_on_the_callers_stream() {
+    let waits = DroneGraph { nodes: vec![node("hold", json!({ "kind": "wait", "on": "never" }))], edges: vec![] };
+    let graph = DroneGraph {
+        nodes: vec![node("call", json!({ "kind": "drone", "drone": "waits", "timeout_seconds": 1 })), response("handler", "went on")],
+        edges: vec![edge("e1", "call", "handler", Some("error"))],
+    };
+    let ran = run_as("main", graph, Value::Null, saved(vec![("waits", waits)])).await;
+    assert_eq!(ran.result, Ok(json!("went on")));
+    let kinds: Vec<&str> = ran.events.iter().filter_map(|e| match e { RunEvent::Waiting { .. } => Some("waiting"), RunEvent::WaitEnded { .. } => Some("ended"), _ => None }).collect();
+    assert_eq!(kinds, vec!["waiting", "ended"], "the run is not left showing a wait the callee no longer holds");
+}

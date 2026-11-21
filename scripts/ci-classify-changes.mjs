@@ -49,7 +49,12 @@
  *   frontend_build=true|false  run the production frontend build (R9)
  *   docs_only=true|false     every changed file was documentation
  *   docs_index=true|false    run the specs-index generator on all three OSes
+ *   cef=true|false           run the agentmux-cef crate's tests on Linux (R10)
  *   version_only=true|false  the PR only moves the release version (R7)
+ *
+ *   R10 The agentmux-cef crate's tests run on a PR only when a changed file is one the crate is built from
+ *       (CEF_BUILT_FROM), and, like every output here, on anything unrecognised (R2). That check reports and
+ *       blocks nothing until it has been stable for a few days (ci-pr.yml's `cef-crate`).
  */
 
 import { isMain } from "./lib/is-main.mjs";
@@ -71,7 +76,7 @@ const DOCS_INDEX_PATTERNS = [
     // The other tests that step runs, and what they import (scripts/lib is shared by them). A test of ci-classify-changes
     // reads the step's list and fails when a file it covers is missing here: the job runs on Windows, and a failure
     // only there must show on the PR, not on main.
-    /^scripts\/(check-rust-pin|check-shared-paths|check-test-support-off|release-gate|release-manifest|release-publish-needs|release-sshsig|ci-main-stalled)\./,
+    /^scripts\/(check-rust-pin|check-shared-paths|check-test-support-off|release-gate|release-manifest|release-publish-needs|release-sshsig|ci-main-stalled|ci-main-range)\./,
     /^scripts\/lib\//,
     /^\.github\/workflows\/ci-pr\.yml$/,
     /^package(-lock)?\.json$/,
@@ -114,6 +119,7 @@ const RUST_READS_FRONTEND = [
     /^frontend\/app\/view\/agent\/providers\/catalog\.ts$/,
     /^frontend\/layout\/tests\/fixtures\//,
     /^frontend\/app\/util\/widgets-json-template\.jsonc$/,
+    /^frontend\/app\/store\/low-disk-levels\.json$/,
 ];
 
 /**
@@ -125,6 +131,26 @@ const RUST_READS_FRONTEND = [
  * bundles for a path that reaches into crates/.
  */
 const BUILD_NEVER_READS = [/^crates\//, /^Cargo\.(toml|lock)$/, /^rust-toolchain(\.toml)?$/, /^\.cargo\//, /^\.config\/nextest\.toml$/];
+
+/**
+ * R10. What the agentmux-cef crate's tests are built from, so a change to one of them runs that crate's PR check:
+ * the crate, the two workspace crates it depends on by path, the workspace manifests and toolchain pin, the files
+ * outside the crate that it includes at compile time (the key table, the settings template, the Linux icon), and
+ * the check's own workflow and scripts. scripts/ci-classify-changes.test.mjs scans the crate for such includes and
+ * fails when one is not listed here, so a new one cannot go unlisted.
+ */
+const CEF_BUILT_FROM = [
+    /^crates\/(cef|common|procstats)\//,
+    /^Cargo\.(toml|lock)$/,
+    /^rust-toolchain(\.toml)?$/,
+    /^\.cargo\//,
+    /^settings-template\.jsonc$/,
+    /^assets\/linux\/icons\//,
+    /^frontend\/app\/keybindings\/host-keys\.json$/,
+    /^frontend\/app\/store\/low-disk-levels\.json$/,
+    /^\.github\/workflows\/ci-pr\.yml$/,
+    /^scripts\/(ci-apt|ci-require-tools|ci-classify-changes)\./,
+];
 
 /**
  * R3. Checked BEFORE the docs patterns, so a `.md` file under `.github/` (an
@@ -242,6 +268,12 @@ export function isRustOnlyPath(rawPath) {
     return BUILD_NEVER_READS.some((re) => re.test(p));
 }
 
+/** R10: a file the agentmux-cef crate's tests are built from. */
+export function isCefInput(rawPath) {
+    const p = normalize(rawPath);
+    return CEF_BUILT_FROM.some((re) => re.test(p));
+}
+
 /** True when this single path provably cannot affect any build output. */
 export function isDocsOnlyPath(rawPath) {
     const p = normalize(rawPath);
@@ -270,6 +302,7 @@ export function classifyChanges(files) {
             frontend_build: true,
             docs_only: false,
             docs_index: true,
+            cef: true,
             reason: "no files resolved — running everything (R2)",
         };
     }
@@ -278,6 +311,8 @@ export function classifyChanges(files) {
     // was not what this script expects, so run it rather than trust the rest.
     const malformed = files.some((f) => typeof f !== "string");
     const docs_index = malformed || paths.some((p) => DOCS_INDEX_PATTERNS.some((re) => re.test(p)));
+    // R2 for the agentmux-cef check as well; otherwise only a change to what the crate is built from runs it (R10).
+    const cef = malformed || paths.some(isCefInput);
 
     const nonDocs = paths.filter((p) => !isDocsOnlyPath(p));
     if (nonDocs.length === 0) {
@@ -287,6 +322,7 @@ export function classifyChanges(files) {
             frontend_build: false,
             docs_only: true,
             docs_index,
+            cef,
             reason: `all ${paths.length} changed file(s) are documentation`,
         };
     }
@@ -299,6 +335,7 @@ export function classifyChanges(files) {
             frontend_build: true,
             docs_only: false,
             docs_index,
+            cef,
             reason: `all ${nonDocs.length} non-doc file(s) are frontend files no Rust crate reads, e.g. ${nonDocs[0]} (R8)`,
         };
     }
@@ -311,6 +348,7 @@ export function classifyChanges(files) {
         frontend_build: built !== undefined,
         docs_only: false,
         docs_index,
+        cef,
         // Naming a concrete file makes a wrong decision debuggable from the log
         // alone, without re-deriving the whole list.
         reason: `${nonDocs.length} non-doc file(s), e.g. ${nonDocs[0]}; frontend build: ${built !== undefined ? `yes, e.g. ${built}` : "no, only Rust files (R9)"}`,
@@ -342,6 +380,7 @@ export function classifyPullFiles(entries) {
             frontend_build: false,
             docs_only: false,
             docs_index: false,
+            cef: false,
             version_only: true,
             reason: `version-only change, ${version.from} -> ${version.to} (R7)`,
         };
@@ -381,6 +420,7 @@ if (isMain(import.meta.url)) {
     console.log(`frontend_build=${result.frontend_build}`);
     console.log(`docs_only=${result.docs_only}`);
     console.log(`docs_index=${result.docs_index}`);
+    console.log(`cef=${result.cef}`);
     console.log(`version_only=${result.version_only}`);
     console.error(`ci-classify-changes: ${result.reason}`);
 }

@@ -272,15 +272,72 @@ describe("the Files pane: listing", () => {
 });
 
 // SPEC_FILES_ZOOM_2026_10_08.md: the shared per-pane zoom (`term:zoom`).
+// Places zooms apart from the rest (SPEC_EDITOR_TREE_AND_EDITOR_SEPARATE_ZOOM_2026_11_16.md §9): the root is
+// not zoomed, its parts are.
 describe("the Files pane: zoom", () => {
-    it("scales with the pane's term:zoom, and is 1 when unset", async () => {
+    const mains = (v: ReturnType<typeof mount>) => [...v.container.querySelectorAll<HTMLElement>('.files-zoom[data-zoom-part="main"]')];
+    const places = (v: ReturnType<typeof mount>) => v.container.querySelector<HTMLElement>('.files-zoom[data-zoom-part="places"]');
+    const levels = (v: ReturnType<typeof mount>) => mains(v).map((m) => m.style.zoom);
+
+    // The control bar at the top and the footer are the chrome's (the title bar's, the menus'), not the pane's.
+    const CHROME = "var(--zoomfactor)";
+
+    it("zooms the list with the pane's term:zoom, and is 1 when unset; the toolbar and the footer follow the chrome's; the root is never zoomed", async () => {
         const v = mount();
-        const root = () => v.container.querySelector(".files-view") as HTMLElement;
-        expect(root().style.zoom).toBe("1");
+        const root = v.container.querySelector(".files-view") as HTMLElement;
+        expect(mains(v)).toHaveLength(3);
+        expect(levels(v)).toEqual([CHROME, "1", CHROME]);
+        expect(root.style.zoom).toBe("");
         await v.ctx.setMeta({ "term:zoom": 1.5 });
-        expect(root().style.zoom).toBe("1.5");
+        expect(levels(v)).toEqual([CHROME, "1.5", CHROME]);
         await v.ctx.setMeta({ "term:zoom": null });
-        expect(root().style.zoom).toBe("1");
+        expect(levels(v)).toEqual([CHROME, "1", CHROME]);
+        expect(root.style.zoom).toBe("");
+    });
+
+    it("marks the toolbar and the footer as drawn at the chrome's zoom (a Ctrl+wheel over them steps the chrome), and the list and Places as the pane's", () => {
+        const v = mount();
+        const scopes = [...v.container.querySelectorAll<HTMLElement>(".files-zoom")].map((el) => el.getAttribute("data-zoom-scope"));
+        expect([scopes[0], scopes[scopes.length - 1]]).toEqual(["chrome", "chrome"]);
+        expect(scopes.slice(1, -1).every((s) => s === "pane")).toBe(true);
+    });
+
+    it("zooms Places on its own level, and never moves the rest with it", async () => {
+        const v = mount({ "term:zoom": 1.5, "files:places_zoom": 1.2 });
+        expect(places(v)!.style.zoom).toBe("1.2");
+        expect(levels(v)).toEqual([CHROME, "1.5", CHROME]);
+        await v.ctx.setMeta({ "files:places_zoom": 2 });
+        expect(places(v)!.style.zoom).toBe("2");
+        expect(levels(v)).toEqual([CHROME, "1.5", CHROME]);
+        await v.ctx.setMeta({ "term:zoom": 1 });
+        expect(places(v)!.style.zoom).toBe("2");
+    });
+
+    it("gives Places the size the pane had on its first start, once", async () => {
+        const v = mount({ "term:zoom": 1.3 });
+        await waitFor(() => expect(v.meta()["files:places_zoom"]).toBe(1.3));
+        expect(places(v)!.style.zoom).toBe("1.3");
+        await v.ctx.setMeta({ "term:zoom": 1.6 });
+        expect(places(v)!.style.zoom).toBe("1.3");
+    });
+
+    it("keeps the keyboard in Places when the pane takes focus after a click there, so the zoom keys stay on Places", async () => {
+        const v = mount();
+        const p = places(v)!;
+        expect(p.getAttribute("tabindex")).toBe("-1");
+        p.focus();
+        v.model.focusList!();
+        expect(document.activeElement).toBe(p);
+        // From anywhere else the pane still hands focus to the list.
+        (document.activeElement as HTMLElement).blur();
+        v.model.focusList!();
+        expect(document.activeElement).toBe(v.list());
+    });
+
+    it("draws no Places part when the sidebar is hidden, so no part is named that is not there", () => {
+        const v = mount({ "files:sidebar": false });
+        expect(places(v)).toBeNull();
+        expect(mains(v)).toHaveLength(3);
     });
 });
 

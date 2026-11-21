@@ -47,6 +47,13 @@ export interface LauncherEventState {
      */
     closedBeforeSeed: ReadonlySet<string> | null;
     /**
+     * Labels the launcher said closed after seed, with when (ms). A snapshot taken while the host
+     * is still tearing the window down can name it again; `ReconcileFromSnapshot` leaves such a
+     * label out, until a `window_opened` for it (a new window reusing the label) or
+     * `RECENT_CLOSE_MS`.
+     */
+    recentlyClosed: ReadonlyMap<string, number>;
+    /**
      * Derived from `knownEntries`: filtered + sorted view that the
      * projection layer writes to atoms. Stored on state so consumers
      * (and tests) get a single coherent snapshot per command.
@@ -58,8 +65,12 @@ export const initialState = (): LauncherEventState => ({
     knownEntries: new Map(),
     seedHasHappened: false,
     closedBeforeSeed: new Set(),
+    recentlyClosed: new Map(),
     instances: [],
 });
+
+/** How long a close the launcher reported outweighs a snapshot that still lists the window. */
+export const RECENT_CLOSE_MS = 60_000;
 
 /**
  * Three command shapes feed the reducer:

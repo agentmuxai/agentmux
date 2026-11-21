@@ -73,7 +73,7 @@ describe("requestShutdown", () => {
         expect(openPaneModal).toHaveBeenCalledTimes(1);
         // In the agent's own pane, and nothing waits on it.
         expect(openPaneModal.mock.calls[0][0]).toBe("blk-1");
-        expect(openPaneModal.mock.calls[0][3]).toEqual({ source: "shutdown", waits: false });
+        expect(openPaneModal.mock.calls[0][3]).toEqual({ source: "shutdown", waits: false, operatorOnly: false });
         const props = openPaneModal.mock.calls[0][2];
         expect(props.title).toBe("Shut down Korp?");
         shutdownAgent.mockResolvedValue(summary());

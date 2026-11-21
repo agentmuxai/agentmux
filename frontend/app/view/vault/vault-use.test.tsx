@@ -44,8 +44,10 @@ const use = (over: Partial<UseRequest> = {}): UseRequest => ({
 
 let uses: UseRequest[] = [];
 let entries: VaultEntryInfo[] = [];
+let shareList: unknown = {};
 const vault = vi.fn(async (op: string, _args?: Record<string, unknown>): Promise<unknown> => {
     if (op === "list") return { entries, problem: null, requests: [], uses, backend: "keychain" };
+    if (op === "share_list") return shareList;
     return {};
 });
 vi.mock("@/util/app-api", () => ({ getApi: () => ({ approvals: { vault } }) }));
@@ -199,6 +201,37 @@ describe("the prompt for an agent's use of an entry", () => {
         expect(within(dialog).queryByRole("checkbox")).toBeNull();
         expect(dialog.textContent).not.toContain("user name is read");
         fireEvent.click(within(dialog).getByRole("button", { name: "Allow once" }));
+        await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "once" }]));
+    });
+
+    const askShare = async (over: Partial<UseRequest> = {}) => {
+        uses = [use({ entry_id: "login-intranet", entry_label: "Intranet", kind: "login", origin: "https://intranet.example.com", field: "al***", what: "share", offer_always: false, share: true, agent_reason: "read the build status, task 31010", ...over })];
+        await refreshVault();
+        render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+        return screen.findByRole("group");
+    };
+
+    it("asks to share a sign-in the browser answers a prompt with: the prompt is named and an Always is offered", async () => {
+        const dialog = await askShare({ offer_always: true, prompt: { realm: "Staff", proxy: false } });
+        expect(dialog.textContent).toContain("Agent1 wants its browser to answer the sign-in prompt of intranet.example.com with Intranet");
+        expect(dialog.textContent).toContain("The browser would give the user name al*** and the password to the sign-in prompt Staff of intranet.example.com");
+        expect(dialog.textContent).toContain("in Agent1's own browser profile");
+        expect(dialog.textContent).toContain("Always answers every one without asking");
+        expect(dialog.textContent).not.toContain("typed into the sign-in form");
+        expect(within(dialog).getByRole("button", { name: "Share it" })).toBeTruthy();
+        fireEvent.click(within(dialog).getByRole("button", { name: "Always for Agent1 on intranet.example.com" }));
+        await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "always" }]));
+    });
+
+    it("says a proxy's sign-in is for the proxy, and leaves a form login's share card with no Always", async () => {
+        const proxy = await askShare({ origin: "http://proxy.example.com:3128", offer_always: true, prompt: { realm: "", proxy: true } });
+        expect(proxy.textContent).toContain("to the proxy proxy.example.com:3128 (http://proxy.example.com:3128) when it asks");
+        cleanup();
+        const form = await askShare();
+        expect(form.textContent).toContain("Agent1 wants to sign in to intranet.example.com with Intranet");
+        expect(form.textContent).toContain("typed into the sign-in form on intranet.example.com");
+        expect(within(form).queryByRole("button", { name: /Always/ })).toBeNull();
+        fireEvent.click(within(form).getByRole("button", { name: "Share it" }));
         await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "once" }]));
     });
 
@@ -478,6 +511,27 @@ describe("the sites an entry may be filled into", () => {
         expect(row.textContent).not.toContain("Agents may fill it on");
         fireEvent.click(within(row).getByRole("button", { name: "Stop signing in with Alex without asking for Agent1 on accounts.example.com" }));
         await waitFor(() => expect(calls("revoke_grant")).toEqual([{ entry_id: "ssn-alex", origin: "signin:Agent1|personal|https://accounts.example.com" }]));
+    });
+
+    it("names the agent of a shared login's sign-in grant, stored under its id, and the prompt it answers", async () => {
+        const grant = "signin:uid-7|profile:agent-tester-1|https://example.com|prompt:site|Staff area";
+        entries = [{ ...entries[0], kind: "login", grants: [grant] }];
+        shareList = { shares: [{ agent: "uid-7", name: "Tester", uses: 0, last_used_ms: 0 }], agents: [{ uid: "uid-8", name: "Other" }] };
+        await refreshVault();
+        render(() => <VaultEntries section="personal" />);
+        const row = (await screen.findByText("Alex")).closest("tr") as HTMLElement;
+        await waitFor(() => expect(row.textContent).toContain("Tester on example.com (sign-in prompt Staff area)"));
+        expect(row.textContent).not.toContain("uid-7");
+        // Taking it back still names the stored grant.
+        fireEvent.click(within(row).getByRole("button", { name: "Stop signing in with Alex without asking for Tester on example.com (sign-in prompt Staff area)" }));
+        await waitFor(() => expect(calls("revoke_grant")).toEqual([{ entry_id: "ssn-alex", origin: grant }]));
+        shareList = {};
+    });
+
+    it("reads no names for an entry with no sign-in grant", async () => {
+        render(() => <VaultEntries section="personal" />);
+        await screen.findByText("Alex");
+        expect(calls("share_list")).toEqual([]);
     });
 });
 

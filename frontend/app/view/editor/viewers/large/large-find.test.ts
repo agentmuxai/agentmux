@@ -3,7 +3,8 @@
 
 import { describe, expect, it } from "vitest";
 import type { SearchCall } from "../hex/hex-find";
-import { findAligned, hitOrdinal, largePatternFor, splitHits } from "./large-find";
+import { findMatch } from "../hex/hex-find";
+import { hitOrdinal, largePatternFor, splitHits } from "./large-find";
 
 describe("largePatternFor", () => {
     it("is the text's bytes in the file's encoding", () => {
@@ -19,6 +20,13 @@ describe("largePatternFor", () => {
         expect(largePatternFor("windows-1251", "x")).toMatchObject({ hex: "78" });
         expect(largePatternFor("legacy", "é")).toEqual({ error: "This file is in an older encoding: only plain ASCII text can be found" });
         expect(largePatternFor("windows-1251", "é")).toEqual({ error: "This file is in windows-1251: only plain ASCII text can be found" });
+    });
+
+    it("refuses a multibyte legacy encoding, where an ASCII byte can be half of a character", () => {
+        for (const enc of ["Shift_JIS", "GBK", "Big5", "EUC-JP", "EUC-KR", "gb18030", "ISO-2022-JP"]) {
+            expect(largePatternFor(enc, "\\")).toEqual({ error: `This file is in ${enc}, which spells some characters with several bytes: it can't be searched yet` });
+        }
+        expect(largePatternFor("windows-1252", "\\")).toMatchObject({ hex: "5C" });
     });
 
     it("takes at most as many bytes as srv does", () => {
@@ -71,11 +79,12 @@ describe("splitHits", () => {
     });
 });
 
-/** srv's byte search over `data`, finding `needle` anywhere (as filesearchbytes does, misaligned or not). */
-function searchOver(data: number[]): SearchCall {
+/** srv's byte search over `data`, as filesearchbytes does: a match must start at a multiple of `req.align`. */
+function searchOver(data: number[], calls: unknown[] = []): SearchCall {
     return async (req) => {
+        calls.push(req);
         const pat = req.pattern.split(" ").map((b) => parseInt(b, 16));
-        const at = (i: number) => pat.every((b, k) => data[i + k] === b);
+        const at = (i: number) => i % (req.align ?? 1) === 0 && pat.every((b, k) => data[i + k] === b);
         const last = data.length - pat.length;
         const range = req.backward
             ? Array.from({ length: Math.min(req.from, last) + 1 }, (_, i) => Math.min(req.from, last) - i)
@@ -87,28 +96,31 @@ function searchOver(data: number[]): SearchCall {
 
 const common = { path: "C:/x.txt", cancelled: () => false };
 
-describe("findAligned", () => {
-    // UTF-16LE "ab" = 61 00 62 00; the bytes 00 62 also appear at an odd offset.
+describe("a UTF-16 search over srv", () => {
+    // UTF-16LE "ab" = 61 00 62 00; the bytes 62 00 also appear at an odd offset (5).
     const data = [0x61, 0x00, 0x62, 0x00, 0x00, 0x62, 0x00, 0x00];
 
-    it("skips a match that starts between two code units", async () => {
-        const call = searchOver(data);
-        // "b" is 62 00: at offset 2 (aligned) and 5 (not).
-        const first = await findAligned({ ...common, call, hex: "62 00", size: data.length, cursor: -1, backward: false, align: 2 });
+    it("asks srv for matches on a two-byte boundary, one call per sweep however many are misaligned", async () => {
+        const calls: unknown[] = [];
+        const call = searchOver(data, calls);
+        const first = await findMatch({ ...common, call, hex: "62 00", size: data.length, cursor: -1, backward: false, align: 2 });
         expect(first).toEqual({ found: true, offset: 2, length: 2, wrapped: false });
-        const second = await findAligned({ ...common, call, hex: "62 00", size: data.length, cursor: 2, backward: false, align: 2 });
-        // Offset 5 is misaligned: the search goes round to the aligned one it began at.
+        expect(calls).toEqual([{ path: "C:/x.txt", pattern: "62 00", from: 0, backward: false, align: 2 }]);
+        // Offset 5 is misaligned and srv never reports it: the search goes round to the aligned one it began at.
+        const second = await findMatch({ ...common, call, hex: "62 00", size: data.length, cursor: 2, backward: false, align: 2 });
         expect(second).toMatchObject({ found: true, offset: 2, wrapped: true });
     });
 
     it("ends when every match is misaligned", async () => {
         const odd = [0x00, 0x62, 0x00, 0x00];
-        const r = await findAligned({ ...common, call: searchOver(odd), hex: "62 00", size: odd.length, cursor: -1, backward: false, align: 2 });
+        const r = await findMatch({ ...common, call: searchOver(odd), hex: "62 00", size: odd.length, cursor: -1, backward: false, align: 2 });
         expect(r).toEqual({ found: false });
     });
 
-    it("takes every match when the encoding is single-byte", async () => {
-        const r = await findAligned({ ...common, call: searchOver(data), hex: "62 00", size: data.length, cursor: 2, backward: false, align: 1 });
+    it("sends no alignment for a single-byte encoding, and takes every match", async () => {
+        const calls: unknown[] = [];
+        const r = await findMatch({ ...common, call: searchOver(data, calls), hex: "62 00", size: data.length, cursor: 2, backward: false, align: 1 });
         expect(r).toMatchObject({ found: true, offset: 5 });
+        expect(calls).toEqual([{ path: "C:/x.txt", pattern: "62 00", from: 3, backward: false }]);
     });
 });

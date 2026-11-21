@@ -14,8 +14,11 @@ pub mod activity;
 pub mod jekt_file;
 pub mod message_stats;
 pub mod ordered;
+pub mod other_channels;
+pub mod peers;
 pub mod provenance;
 pub mod segments;
+pub mod tasks;
 pub mod totals;
 
 use std::collections::HashSet;
@@ -206,8 +209,9 @@ impl Filter {
         }
         let channel = match req.scope.as_deref().map(str::trim) {
             Some("channel") => Some(own_channel.to_string()),
-            None | Some("") | Some("machine") => None,
-            Some(other) => return Err(format!("audit.query: unknown scope '{other}'; the scopes are channel and machine")),
+            // `lan` reads the same rows here as `machine`: the paired computers' own are asked for by the caller.
+            None | Some("") | Some("machine") | Some("lan") => None,
+            Some(other) => return Err(format!("audit.query: unknown scope '{other}'; the scopes are channel, machine and lan")),
         };
         Ok(Self {
             agent: req.agent_id.as_deref().map(str::trim).filter(|a| !a.is_empty()).map(str::to_string),
@@ -262,6 +266,7 @@ fn end_of(name: &str, ts_ms: u64, block_id: Option<&str>, ctx: &Ctx) -> AuditEnd
             // The reader opens an agent by UID: a name the registry does not know has no history to open.
             history: uid.map(|uid| AuditHistoryLink { definition_id: Some(uid), agent_id: slug, zone: None, at_ms: ts_ms, at_byte: None }),
             pane: pane.map(|block_id| AuditPaneLink { block_id }),
+            task: None,
         },
     }
 }
@@ -496,7 +501,7 @@ pub fn query<'a>(src: &'a Sources<'a>, req: &AuditQueryReq) -> Result<AuditQuery
     });
     let not_recorded = NOT_RECORDED.iter().filter(|k| filter.kinds.contains(**k)).map(|k| k.to_string()).collect();
     let totals = req.totals.unwrap_or(false).then(|| totals::of(src, &filter));
-    Ok(AuditQueryResult { entries, next_cursor, not_recorded, totals, channel: Some(src.channel.to_string()) })
+    Ok(AuditQueryResult { entries, next_cursor, not_recorded, totals, channel: Some(src.channel.to_string()), other_channels: None, peers: None })
 }
 
 #[cfg(test)]

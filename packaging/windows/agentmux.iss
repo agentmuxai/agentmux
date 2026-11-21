@@ -75,7 +75,15 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; IconFilename: "{a
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
 
+[UninstallRun]
+; Start at login registers a Scheduled Task that runs {app}\agentmux.exe. Without this an uninstall leaves it behind,
+; pointing at nothing (SPEC_START_WITH_OS_2026_09_25.md G6, G7). The verb removes the entry only when it runs a file from
+; this install's folder, so a dev build's or another install's entry stays; no entry is a success.
+Filename: "{app}\{#AppExe}"; Parameters: "--remove-autostart-for-this-install"; Flags: runhidden skipifdoesntexist; RunOnceId: "RemoveLoginEntry"
+
 [Code]
+#include "prune-old-versions.iss"
+
 // True when setup was started with /NOICONS (winget or a script may pass it).
 function NoIconsRequested: Boolean;
 var
@@ -85,4 +93,12 @@ begin
   for I := 1 to ParamCount do
     if CompareText(ParamStr(I), '/NOICONS') = 0 then
       Result := True;
+end;
+
+// An all-users install runs the launcher unelevated, so it cannot remove old versions' files from runtime\; setup
+// runs elevated there and does it once its own files are in place. A per-user install keeps the launcher's own prune.
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if (CurStep = ssPostInstall) and IsAdminInstallMode then
+    PruneOldVersions(ExpandConstant('{app}\runtime'), '{#AppVersion}');
 end;

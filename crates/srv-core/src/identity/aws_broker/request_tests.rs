@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::*;
+use crate::identity::aws_broker::policy::Hold;
 use crate::identity::aws_broker::mint::tests::{creds_json, now, Fake};
 use crate::identity::aws_broker::mint::{RunError, RunOutput};
 
@@ -138,7 +139,7 @@ async fn what_goes_wrong_on_the_host_reads_as_the_hosts_problem() {
 
     let r = go(&Fake::answering(Err(RunError::TimedOut)), &Sessions::default(), ask("deploy", Some("x"))).await.err().unwrap();
     assert_eq!(r.code, "AWS_TOOK_TOO_LONG");
-    assert_eq!(r.message, "AWS credentials took too long (25 s). Try again in a minute.");
+    assert_eq!(r.message, format!("AWS credentials took too long ({} s). Try again in a minute.", mint::RECIPE_TIMEOUT.as_secs()));
 
     let r = go(
         &Fake::answering(Ok(RunOutput { success: true, stdout: b"hello".to_vec(), stderr: String::new() })),
@@ -158,5 +159,18 @@ async fn no_refusal_or_answer_text_carries_a_credential() {
     let granted = go(&Fake::ok(creds_json(30)), &Sessions::default(), ask("read", None)).await.unwrap();
     for text in [r.text(), format!("{:?}", granted.creds)] {
         assert!(!text.contains("AKIATESTKEY") && !text.contains("test-secret-value") && !text.contains("test-session-token"), "{text}");
+    }
+}
+
+#[tokio::test]
+async fn a_grant_that_is_held_or_refused_is_never_minted() {
+    for (hold, code) in [(Hold::Awaiting, "GRANT_HELD"), (Hold::Refused, "GRANT_REFUSED")] {
+        let mut p = Policy::parse(POLICY).unwrap();
+        p.grants.get_mut("deploy").unwrap().hold = Some(hold);
+        let fake = Fake::ok(creds_json(30));
+        let r = credentials_for(Ok(Some(Arc::new(p))), &Sessions::default(), &fake, &ask("deploy", Some("why")), now()).await.err().expect("refused");
+        assert_eq!((r.status, r.code), (StatusCode::FORBIDDEN, code));
+        assert!(r.message.contains("Identity aws_grants"), "{}", r.message);
+        assert_eq!(fake.runs(), 0, "nothing is minted for a held grant");
     }
 }

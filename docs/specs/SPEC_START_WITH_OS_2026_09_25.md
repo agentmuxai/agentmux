@@ -164,8 +164,9 @@ Channels are separate installs that share one login, so one entry, with the owne
   "Start at login is on for *<channel>*", with a button to switch it to this build.
 - Turning the setting **off** removes only an entry this channel owns; another build's entry is left
   alone (built: `autostart::plan`).
-- Not built yet: showing the owning channel in Settings, and asking before a non-owning build turns it
-  off.
+- Built: Settings shows the owning channel when another build owns the entry, with **Use this build**
+  (§3.8).
+- Not built yet: asking before a non-owning build turns it off.
 
 This keeps the existing single artifact name, so `disable()` still finds it, while fixing G5.
 
@@ -179,12 +180,25 @@ window, is unchanged.
 
 ### 3.7 Platform-native registration where one exists
 
-- **macOS: `SMAppService.mainApp`.** It is the only path that shows in Login Items and respects the
-  user's approval there. It needs a **stable bundle id for the release channel** (drop the version from
-  `CFBundleIdentifier`; keep it in `CFBundleVersion`), objc2 bindings, and a signed bundle. When the
-  status is `requiresApproval`, Settings says "Allow AgentMux in System Settings → Login Items" and
-  offers `SMAppService.openSystemSettingsLoginItems()`. The LaunchAgent stays as the fallback for
-  unsigned and dev builds, with a stable path per §3.1.
+- **macOS: a login agent registered with `SMAppService`.** It is the only path that shows in Login Items and
+  respects the user's approval there. A bundle with a stable `CFBundleIdentifier` (no version; the release
+  channel, decided in §7 question 4: `AGENTMUX_STABLE_BUNDLE_ID=1` in the release's build job, see
+  `scripts/package-macos.sh`) and that is signed with the Developer ID ships
+  `Contents/Library/LaunchAgents/<id>.login.plist`, and the launcher registers it
+  (`autostart/login_item.rs`). The job is the launcher's own `--login-start` shim (a signed Mach-O: launchd's launch
+  constraints refuse a script): it opens the app through LaunchServices with `--background` unless it already runs,
+  then exits. Only a Developer-ID-signed bundle ships it: the system binds the registration to the app's code
+  requirement, which for an ad-hoc signature is the build's own hash, so after an in-place upgrade launchd refuses to
+  start the job (a launch constraint violation, silently). `SMAppService.mainApp` was not used: it cannot carry `--background`, and an agent whose job is the
+  app itself is stopped when the entry is switched off (unregistering boots the job out), which Settings does from
+  inside that very app. Going through `open` also keeps the login-started app able to post notifications (a
+  `launchd`-started process is refused by `UNUserNotificationCenter`). When the status is `requiresApproval`,
+  `--autostart-status --json` says `needs_approval`, Settings says "Allow AgentMux in System Settings > General >
+  Login Items & Extensions" and its button runs `--open-login-items`
+  (`SMAppService.openSystemSettingsLoginItems()`). Registering replaces the LaunchAgent plist an earlier build wrote
+  (no double start, no orphan); switching off, or an uninstaller's `--disable-autostart`, removes both. The
+  LaunchAgent plist stays for a bundle without the agent (unsigned, dev, test and per-version builds), with a
+  stable path per §3.1.
 - **Windows MSIX: `windows.startupTask`** in the manifest (`Enabled="false"`, toggled through
   `StartupTask.RequestEnableAsync`). Packaged apps cannot rely on a Scheduled Task pointing into their
   versioned install path. Removing the package removes the task.
@@ -194,9 +208,14 @@ window, is unchanged.
 
 `--autostart-status` gains `--json` and returns
 `{ state: "off" | "on" | "broken" | "needs_approval", target, owner_channel, this_channel, movable }`,
-where `broken` means the entry exists but its target does not. Settings will render that status next
-to the switch, with **Repair** (re-apply the setting). Until then, Settings reads the plain
-`--autostart-status` after each change, and says so when the setting is on but nothing is registered.
+where `broken` means the entry exists but its target does not, and `movable` means another channel (or
+none) owns the entry and this build can take it over. `needs_approval` is for the macOS Login Items
+approval (phase 4): a registered login item whose status is `requiresApproval`. Settings renders that status next to the switch: a broken
+entry shows **Repair**, another build's entry shows its channel and **Use this build**. Both write
+`app:startatlogin` off and then on again (400 ms apart), which the launcher reconciles like any change
+(`autostart::plan` writes for a missing target and for another channel's entry), so there is no second
+path to the login entry. An older launcher without `--json` still answers the plain verb, and Settings
+falls back to saying so when the setting is on but nothing is registered.
 
 ### 3.9 One property, two switches, one login entry (built)
 
@@ -277,8 +296,8 @@ broadcasts it like every other setting.
 | 1 | Linux stable target via `AGENTMUX_STABLE_EXE` from AppRun and the wrappers; `TryExec` and the delay key; self-heal (§3.2) | **Built** (PR #3788) | G1, G4, G6 (Linux) |
 | 1b | `--background` second instance exits quietly (§3.6) | **Built** (Phase 2 PR) | G8 |
 | 2 | Start hidden when the tray is up (§3.3); the Linux watcher wait (§3.4); Explorer-restart icon re-add (already in `tray-icon`) | **Built** (Phase 2 PR) | G2, G3 |
-| 3 | Status JSON; Settings status with owner and Repair (§3.8) | Not started | G9 |
-| 4 | macOS `SMAppService` with a stable bundle id; MSIX `StartupTask`; Inno uninstall hook (§3.7) | Not started | G6 (Windows), G7 |
+| 3 | Status JSON; Settings status with owner and Repair (§3.8) | **Built** (this PR: `--autostart-status --json`; Settings shows the owner and offers Repair or Use this build) | G9 |
+| 4 | macOS `SMAppService` with a stable bundle id; MSIX `StartupTask`; Inno uninstall hook (§3.7) | **Windows built** (the Inno uninstall hook and a logon task that needs no elevation, PR #7842; the MSIX `StartupTask`, the launcher's `packaged.rs` and the Settings text, the PR after it). macOS not started. A real login start of the Store package is not tested: the activation kind that marks it is logged at every packaged start (`packaged start: activation ...`) and printed by `--autostart-status --json` | G6 (Windows), G7 |
 
 Phase 4 needs signing and packaging work that cannot be verified on the Linux dev host. With Phase 2
 in, the Settings copy says again that a login start opens in the tray, without a window.
@@ -290,7 +309,7 @@ in, the Settings copy says again that a login start opens in the tray, without a
 | 1 | Keep start-at-login off by default, or offer it once on first run? | **Decided 2026-09-25: off by default, no prompt.** A Settings toggle and a tray check item on one property (§3.9). |
 | 2 | Should `local-*` dev builds be allowed to own start-at-login? | Yes, but with the owner shown (§3.5), since the owner runs dev builds as their main app. |
 | 3 | Linux: add a `systemd --user` option for restart-on-crash? | Not now. The launcher already supervises its children, and lingering past logout is a separate decision (tray spec §4). |
-| 4 | macOS: is dropping the version from the release bundle id acceptable? It is required for `SMAppService` and also changes how macOS treats updates (one app, not many). | Yes, for the release channel only. |
+| 4 | macOS: is dropping the version from the release bundle id acceptable? It is required for `SMAppService` and also changes how macOS treats updates (one app, not many). | **Decided 2026-11-20: yes, for the release channel.** The stable app is `ai.agentmux.stable` for every release: the build job sets `AGENTMUX_STABLE_BUNDLE_ID=1`, and a check (`scripts/verify-app-identity-darwin.sh`) fails the build if the id or the signed requirement carries a version. The one cost is a last round of permission asks on the first upgrade from a per-version install; after it, upgrades keep Screen Recording, Accessibility, folder and notification grants and the Login Items entry. |
 
 ## Appendix — file references
 

@@ -8,6 +8,7 @@ import { createEffect, onCleanup } from "solid-js";
 import type { PeekBridge } from "./peek-overlay-bridge";
 import type { PeekPlacement } from "./peek-overlay-placement";
 import type { PeekState } from "./peek-overlay-state";
+import { trackPointer } from "./peek-pointer";
 import { attachScrollHandoff } from "./scroll-handoff";
 
 /** Creates two effects: the mouse tracking, then the placement when shown. Returns the panel's ref callback. */
@@ -22,6 +23,7 @@ export function usePeekTracking(s: PeekState, p: PeekPlacement, b: PeekBridge) {
     createEffect(() => {
         const row = s.props.rowEl();
         if (!row) return;
+        trackPointer(); // listening from the first row on, so a notch before any panel is still seen
         const onMouseMove = (e: MouseEvent) => {
             s.lastMouseY = e.clientY;
             if (s.mouseMoveRaf != null) return;

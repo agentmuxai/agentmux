@@ -346,7 +346,7 @@ async fn list(state: &AppState, data: &Value) -> Result<Value, String> {
         let default_board = boards.iter().find(|b| b.is_default).map(|b| b.slug.clone());
         Ok(json!({
             "tasks": tasks_json, "agents": agents, "agent_colors": agent_colors, "stamp": stamp, "now": now,
-            "boards": boards.iter().map(crate::server::work_boards::board_json).collect::<Vec<_>>(), "board": scope.as_ref().map(|b| b.slug.clone()).unwrap_or_else(|| "all".into()),
+            "boards": boards.iter().map(|b| crate::server::work_boards::board_with_history(&work, b)).collect::<Vec<_>>(), "board": scope.as_ref().map(|b| b.slug.clone()).unwrap_or_else(|| "all".into()),
             "default_board": default_board,
         }))
     })
@@ -470,6 +470,13 @@ struct ActRequest {
     readable: Option<bool>,
     #[serde(default)]
     agents: Option<Vec<String>>,
+    /// board_edit: the whole new stage set, a reset to the default, and the revision the editor read.
+    #[serde(default)]
+    stages: Option<Value>,
+    #[serde(default)]
+    stages_reset: Option<bool>,
+    #[serde(default)]
+    stages_rev: Option<i64>,
 }
 
 /// "#12, #15" for the history.
@@ -677,6 +684,9 @@ pub(crate) async fn act_as(state: &AppState, data: Value, actor: &Actor) -> Resu
             tier: None,
             readable: req.readable,
             agents: req.agents.clone(),
+            stages: req.stages.clone(),
+            stages_reset: req.stages_reset,
+            stages_rev: req.stages_rev,
         };
         return crate::server::work_boards::board_act(state, None, &actor.name, board_req);
     }

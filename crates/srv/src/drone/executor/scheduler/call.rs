@@ -94,9 +94,12 @@ impl<'a> Scheduler<'a> {
         late.start(&child_id, id);
         let task = tokio::spawn(async move {
             let (tx, rx) = mpsc::unbounded_channel();
-            drop(rx);
+            // Only its waits are said, as the call block's own: the key of a wait on an event is what ends it.
+            let said = tokio::spawn(say_waits(rx, parent_tx.clone(), run_id.clone(), block_id.clone()));
             let states = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
             let (ended, spent) = super::execute_costed(&callee_run, (&graph, inputs, limits, &drone), &tx, &states).await;
+            drop(tx);
+            let _ = said.await;
             let status = match &ended {
                 Ok(_) => "done",
                 Err(RunEnd::Failed(_)) => "failed",
@@ -127,6 +130,31 @@ impl<'a> Scheduler<'a> {
                 Err(format!("stopped: {why}"))
             }
         }
+    }
+}
+
+/// What a callee's events say to its caller: when it waits (and for what, with the key that ends a wait
+/// on an event) and when the wait is over, put on the calling block, so the caller's run shows it waits and
+/// `resumedronewait` can be given the key. Nothing else of the callee's is passed on: its end is
+/// `ChildEnded`, and a `RunDone` of its own would end the caller's stream. A callee stopped in the middle
+/// of a wait never says it ended, so that is said when its events stop.
+async fn say_waits(mut from: mpsc::UnboundedReceiver<RunEvent>, to: mpsc::UnboundedSender<RunEvent>, run_id: String, block_id: String) {
+    let mut open = 0usize;
+    while let Some(ev) = from.recv().await {
+        match ev {
+            RunEvent::Waiting { resume_at, on, key, .. } => {
+                open += 1;
+                let _ = to.send(RunEvent::Waiting { run_id: run_id.clone(), block_id: block_id.clone(), resume_at, on, key });
+            }
+            RunEvent::WaitEnded { late, .. } => {
+                open = open.saturating_sub(1);
+                let _ = to.send(RunEvent::WaitEnded { run_id: run_id.clone(), block_id: block_id.clone(), late });
+            }
+            _ => {}
+        }
+    }
+    for _ in 0..open {
+        let _ = to.send(RunEvent::WaitEnded { run_id: run_id.clone(), block_id: block_id.clone(), late: false });
     }
 }
 

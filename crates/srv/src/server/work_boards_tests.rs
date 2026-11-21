@@ -265,3 +265,96 @@ async fn an_agent_a_boards_list_names_by_uid_can_act_on_its_tasks() {
     let moved = act_as(&state, json!({ "action": "move", "id": "team#1", "board": "work" }), &Actor::agent("naki-2").with_uid("uid-naki")).await;
     assert!(moved.is_ok(), "{moved:?}");
 }
+
+
+fn merged_set() -> Value {
+    json!({
+        "version": 1,
+        "stages": [
+            { "id": "backlog", "name": "Backlog", "colour": "grey", "takes": ["backlog", "specd"] },
+            { "id": "doing", "name": "Doing", "colour": "magenta", "takes": ["research", "progress"] },
+            { "id": "needs", "name": "Needs you", "colour": "amber", "takes": ["needs"] },
+            { "id": "review", "name": "Review", "colour": "yellow", "takes": ["review"] },
+            { "id": "done", "name": "Done", "colour": "green", "takes": ["merged", "released"] }
+        ]
+    })
+}
+
+fn set_stages(state: &AppState, who: Option<(&str, &str)>, board: &str, stages: Value, rev: Option<i64>) -> Result<Value, String> {
+    let req = BoardsRequest { action: "edit".into(), board: Some(board.into()), stages: Some(stages), stages_rev: rev, ..Default::default() };
+    board_act(state, who, "naki-2", req)
+}
+
+#[tokio::test]
+async fn a_board_shows_the_default_stages_until_the_person_sets_their_own() {
+    let state = test_state();
+    let v = boards_view(&state, None, false).unwrap();
+    let main = &v["boards"][0];
+    assert_eq!((main["stages_default"].clone(), main["stages_rev"].clone(), main["stages_error"].clone()), (json!(true), json!(0), Value::Null));
+    assert_eq!(main["stages"]["stages"].as_array().unwrap().len(), 8);
+    assert_eq!(main["stages"]["stages"][4]["id"], json!("needs"));
+
+    let out = set_stages(&state, None, "main", merged_set(), Some(0)).unwrap();
+    assert_eq!((out["board"]["stages_default"].clone(), out["board"]["stages_rev"].clone()), (json!(false), json!(1)));
+    let v = boards_view(&state, None, false).unwrap();
+    assert_eq!(v["boards"][0]["stages"]["stages"].as_array().unwrap().len(), 5);
+
+    let reset = board_act(&state, None, "operator", BoardsRequest { action: "edit".into(), board: Some("main".into()), stages_reset: Some(true), ..Default::default() }).unwrap();
+    assert_eq!((reset["board"]["stages_default"].clone(), reset["board"]["stages_rev"].clone()), (json!(true), json!(2)));
+}
+
+#[tokio::test]
+async fn a_refused_stage_set_says_why_and_a_stale_editor_is_told() {
+    let state = test_state();
+    let mut bad = merged_set();
+    bad["stages"][0]["name"] = json!("   ");
+    let why = set_stages(&state, None, "main", bad, None).unwrap_err();
+    assert!(why.contains("needs a name"), "{why}");
+    set_stages(&state, None, "main", merged_set(), Some(0)).unwrap();
+    let why = set_stages(&state, None, "main", merged_set(), Some(0)).unwrap_err();
+    assert!(why.contains("changed since you read them"), "{why}");
+}
+
+#[tokio::test]
+async fn a_change_of_stages_leaves_a_line_in_the_boards_history() {
+    let state = test_state();
+    set_stages(&state, Some(("agentx", "")), "main", merged_set(), Some(0)).unwrap();
+    // A refused change leaves nothing.
+    assert!(set_stages(&state, None, "main", merged_set(), Some(0)).is_err());
+    let reset = BoardsRequest { action: "edit".into(), board: Some("main".into()), stages_reset: Some(true), ..Default::default() };
+    board_act(&state, None, "operator", reset).unwrap();
+
+    let v = boards_view(&state, None, false).unwrap();
+    let lines = v["boards"][0]["history"].as_array().unwrap();
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    // Newest first; the operator's own name is never recorded, an agent's id is.
+    assert_eq!(lines[0]["body"], json!("reset the stages to the default: 5 → 8"));
+    assert_eq!((lines[0]["actor"].clone(), lines[0]["actor_kind"].clone()), (json!(""), json!("operator")));
+    assert_eq!(lines[1]["body"], json!("changed the stages: 8 → 5"));
+    assert_eq!((lines[1]["actor"].clone(), lines[1]["actor_kind"].clone(), lines[1]["kind"].clone()), (json!("agentx"), json!("agent"), json!("stages")));
+    assert!(lines[1].get("detail").is_none() && lines[1]["at"].as_i64().unwrap() > 0);
+    // The Kanban's own list, which Settings reads, carries the same lines.
+    let listed = crate::server::app_api::kanban::list_for_tests(&state, json!({ "board": "all" })).await;
+    let main = listed["boards"].as_array().unwrap().iter().find(|b| b["slug"] == "main").unwrap();
+    assert_eq!(main["history"], v["boards"][0]["history"]);
+    // The sets before and after are kept, for a later Restore.
+    let kept = state.work_store.work_board_events("main", 5).unwrap();
+    let detail: Value = serde_json::from_str(&kept[1].detail).unwrap();
+    assert_eq!((detail["from"]["stages"].as_array().unwrap().len(), detail["to"]["stages"].as_array().unwrap().len()), (8, 5));
+}
+
+#[tokio::test]
+async fn an_agent_sets_stages_only_on_a_board_it_sees() {
+    let state = test_state();
+    create(&state, "Team", &["agentx"]);
+    let why = set_stages(&state, Some(("naki-2", "")), "team", merged_set(), None).unwrap_err();
+    assert_eq!(why, "no board named \"team\"");
+    assert!(set_stages(&state, Some(("agentx", "")), "team", merged_set(), None).is_ok());
+}
+
+#[tokio::test]
+async fn the_operator_sets_stages_through_the_kanban_act() {
+    let state = test_state();
+    let out = act_as(&state, json!({ "action": "board_edit", "board": "main", "stages": merged_set(), "stages_rev": 0 }), &Actor::operator()).await;
+    assert_eq!(out.unwrap()["board"]["stages_rev"], json!(1));
+}

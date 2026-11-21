@@ -114,6 +114,11 @@ export interface FailureViewState {
     verdict?: FailureVerdict;
     /** "12 min ago", for the lapsed note. */
     agoLabel?: string;
+    /** A usage limit with a known reset, in plain words: "Out of quota until 3:10 AM, in 24 min". It is the
+     *  row's one line, in place of the class title. */
+    quotaLine?: string;
+    /** Automatic retries made so far for this episode: with `autoRetryIn`, "tried 3 times, next in 60 s". */
+    tries?: number;
 }
 
 /** Per-class sigil. */
@@ -189,10 +194,8 @@ function usageLimitAction(f: AgentFailure, retry: PaneRowAction, openAccounts: P
     return { ...openAccounts, label: "Accounts (switch / upgrade)", primary: true };
 }
 
-/** Project a failure + view state + handlers into a PaneRow descriptor. */
-export function failureToRow(f: AgentFailure, view: FailureViewState, on: FailureActions): FailureRow {
-    if (view.verdict === "lapsed") return lapsedRow(f, view, on);
-    const turnAttempted = view.turnAttempted ?? true;
+/** The row's meta line: the class, how the run ended, and what the pane is doing about it. */
+function metaLine(f: AgentFailure, view: FailureViewState): string {
     const meta: string[] = [f.code];
     if (f.signal != null) meta.push(`signal ${f.signal}`);
     else if (f.exitCode != null) meta.push(`exit ${f.exitCode}`);
@@ -200,6 +203,25 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
     if (view.reconnectHint) meta.push(view.reconnectHint);
     // The message this pane refused is not lost: say so, and what it was.
     if (view.notSent) meta.push(`not sent: "${view.notSent.length > 60 ? `${view.notSent.slice(0, 57)}…` : view.notSent}"`);
+    return meta.join(" · ");
+}
+
+/**
+ * The row's one line, in plain words: a usage limit says when it lifts ("Out of quota until 3:10 AM, in 24 min"), a
+ * transient failure being retried says how it is going ("..., tried 3 times, next in 60 s"). It is the title, which
+ * wraps in a narrow pane; the meta line beside it does not.
+ */
+function rowTitle(f: AgentFailure, view: FailureViewState): string {
+    if (f.code === "usage_limit" && view.quotaLine) return view.quotaLine;
+    const title = f.title || "Agent run failed";
+    if (view.autoRetryIn == null || (view.tries ?? 0) <= 0) return title;
+    return `${title}, tried ${view.tries} ${view.tries === 1 ? "time" : "times"}, next in ${view.autoRetryIn} s`;
+}
+
+/** Project a failure + view state + handlers into a PaneRow descriptor. */
+export function failureToRow(f: AgentFailure, view: FailureViewState, on: FailureActions): FailureRow {
+    if (view.verdict === "lapsed") return lapsedRow(f, view, on);
+    const turnAttempted = view.turnAttempted ?? true;
 
     const retryLabel = view.autoRetryIn != null ? `Retry now (${view.autoRetryIn}s)` : "Retry now";
     const retry: PaneRowAction = {
@@ -369,8 +391,8 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
 
     return {
         sigil: ICON[f.code] ?? "⚠",
-        title: f.title || "Agent run failed",
-        meta: meta.join(" · "),
+        title: rowTitle(f, view),
+        meta: metaLine(f, view),
         // Only the never-signed-in auth case is not an error — see FailureRow.accent.
         accent: f.code === "auth" && !turnAttempted ? "active" : "error",
         actions,

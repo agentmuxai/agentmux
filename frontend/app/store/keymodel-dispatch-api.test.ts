@@ -112,17 +112,85 @@ describe("plan()", () => {
 });
 
 describe("a prompt for the person", () => {
-    it("holds back a command and a key press while one is on screen", async () => {
+    type Api = { run: (c: string, target?: string) => Promise<unknown>; plan: (k: string, target?: string) => Promise<unknown>; set: (r: object, a: string) => Promise<unknown> };
+    const api = (): Api => (window as unknown as { __agentmux_shortcuts: Api }).__agentmux_shortcuts;
+    /** An element marked as a prompt for the person, inside pane `blockId` (or over the window, with none). */
+    function prompt(blockId?: string): HTMLElement {
+        const el = document.createElement("div");
+        el.setAttribute("data-operator-only", "");
+        if (blockId) {
+            const host = document.querySelector(`[data-blockid="${blockId}"]`) ?? (pane(blockId), document.querySelector(`[data-blockid="${blockId}"]`)!);
+            host.appendChild(el);
+        } else document.body.appendChild(el);
+        return el;
+    }
+
+    it("holds back a command and a key press while one is on screen over the window", async () => {
         installShortcutApi();
-        const api = (window as unknown as { __agentmux_shortcuts: { run: (c: string) => unknown; plan: (k: string) => Promise<unknown> } }).__agentmux_shortcuts;
-        const prompt = document.createElement("div");
-        prompt.setAttribute("data-operator-only", "");
-        document.body.appendChild(prompt);
+        const p = prompt();
         expect(operatorPromptOpen()).toBe(true);
-        expect(await api.run("split:right")).toEqual({ ran: false, reason: OPERATOR_PROMPT_OPEN });
-        expect(await api.plan("Enter")).toEqual({ reason: OPERATOR_PROMPT_OPEN });
-        prompt.remove();
+        expect(await api().run("split:right")).toEqual({ ran: false, reason: OPERATOR_PROMPT_OPEN });
+        expect(await api().plan("Enter")).toEqual({ reason: OPERATOR_PROMPT_OPEN });
+        p.remove();
         expect(operatorPromptOpen()).toBe(false);
-        expect(await api.plan("Enter")).not.toEqual({ reason: OPERATOR_PROMPT_OPEN });
+        expect(await api().plan("Enter")).not.toEqual({ reason: OPERATOR_PROMPT_OPEN });
+    });
+
+    it("holds back only the pane it is in: a prompt open in another pane refuses nothing here", async () => {
+        installShortcutApi();
+        pane("here");
+        prompt("elsewhere");
+        expect(operatorPromptOpen("here")).toBe(false);
+        expect(operatorPromptOpen("elsewhere")).toBe(true);
+        expect(await api().run("split:right", "here")).not.toEqual({ ran: false, reason: OPERATOR_PROMPT_OPEN });
+        expect(await api().run("split:right", "elsewhere")).toEqual({ ran: false, reason: OPERATOR_PROMPT_OPEN });
+        h.inWindow.add("here");
+        expect(await api().plan("Enter", "here")).not.toEqual({ reason: OPERATOR_PROMPT_OPEN });
+        expect(await api().plan("Enter", "elsewhere")).toEqual({ reason: OPERATOR_PROMPT_OPEN });
+        expect(await api().set({}, "agent")).toEqual({ changed: false, reason: OPERATOR_PROMPT_OPEN });
+    });
+
+    it("always lets a cancel through: the Escape command and the Escape key, in the pane that holds the prompt", async () => {
+        installShortcutApi();
+        h.inWindow.add("asking");
+        pane("asking");
+        prompt("asking");
+        expect(await api().run("app:escape", "asking")).not.toEqual({ ran: false, reason: OPERATOR_PROMPT_OPEN });
+        expect(await api().plan("Escape", "asking")).not.toEqual({ reason: OPERATOR_PROMPT_OPEN });
+        expect(await api().plan(" escape ", "asking")).not.toEqual({ reason: OPERATOR_PROMPT_OPEN });
+        // Nothing else is: a key that could answer it, or a command.
+        expect(await api().plan("Enter", "asking")).toEqual({ reason: OPERATOR_PROMPT_OPEN });
+        expect(await api().plan("Escape+Enter", "asking")).toEqual({ reason: OPERATOR_PROMPT_OPEN });
+        expect(await api().run("pane:close", "asking")).toEqual({ ran: false, reason: OPERATOR_PROMPT_OPEN });
+    });
+
+    it("holds nothing back for the status bar's Vault badge: marked operator-only so agents cannot click it, but it is the person's control, not a prompt over the panes", async () => {
+        installShortcutApi();
+        h.inWindow.add("here");
+        pane("here");
+        const badge = document.createElement("button"); // outside every pane, as the status bar is
+        badge.setAttribute("data-operator-only", "");
+        badge.setAttribute("data-operator-item", "");
+        document.body.appendChild(badge);
+        expect(operatorPromptOpen()).toBe(false);
+        expect(operatorPromptOpen("here")).toBe(false);
+        expect(await api().run("split:right", "here")).not.toEqual({ ran: false, reason: OPERATOR_PROMPT_OPEN });
+        expect(await api().plan("Enter", "here")).not.toEqual({ reason: OPERATOR_PROMPT_OPEN });
+        // A real prompt beside it still holds back.
+        const p = prompt();
+        expect(operatorPromptOpen("here")).toBe(true);
+        p.remove();
+        badge.remove();
+    });
+
+    it("sees no prompt in a confirm that is the person's own action (nothing is marked)", async () => {
+        installShortcutApi();
+        pane("replace");
+        const confirm = document.createElement("div");
+        confirm.className = "modal-root";
+        document.querySelector('[data-blockid="replace"]')!.appendChild(confirm);
+        expect(operatorPromptOpen("replace")).toBe(false);
+        expect(await api().run("app:escape", "replace")).not.toEqual({ ran: false, reason: OPERATOR_PROMPT_OPEN });
+        expect(await api().run("split:right", "replace")).not.toEqual({ ran: false, reason: OPERATOR_PROMPT_OPEN });
     });
 });

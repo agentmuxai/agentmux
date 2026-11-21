@@ -20,6 +20,7 @@ function EventSounds(): JSX.Element {
     return (
         <>
             <SettingRow
+                settingKey="notify:sound:agent.turn.complete"
                 id={SOUNDS_SETTINGS.turnComplete.id}
                 indent
                 label={SOUNDS_SETTINGS.turnComplete.label}
@@ -32,6 +33,7 @@ function EventSounds(): JSX.Element {
                 }
             />
             <SettingRow
+                settingKey="notify:sound:agent.turn.error"
                 id={SOUNDS_SETTINGS.turnError.id}
                 indent
                 label={SOUNDS_SETTINGS.turnError.label}
@@ -44,6 +46,7 @@ function EventSounds(): JSX.Element {
                 }
             />
             <SettingRow
+                settingKey="notify:sound:agent.turn.interrupted"
                 id={SOUNDS_SETTINGS.turnInterrupted.id}
                 indent
                 label={SOUNDS_SETTINGS.turnInterrupted.label}
@@ -56,6 +59,7 @@ function EventSounds(): JSX.Element {
                 }
             />
             <SettingRow
+                settingKey="notify:sound:agent.message.accepted"
                 id={SOUNDS_SETTINGS.messageAccepted.id}
                 indent
                 label={SOUNDS_SETTINGS.messageAccepted.label}
@@ -68,6 +72,7 @@ function EventSounds(): JSX.Element {
                 }
             />
             <SettingRow
+                settingKey="notify:sound:agent.message.rejected"
                 id={SOUNDS_SETTINGS.messageRejected.id}
                 indent
                 label={SOUNDS_SETTINGS.messageRejected.label}
@@ -89,6 +94,7 @@ export function NotificationSoundsGroup(): JSX.Element {
     return (
         <>
             <SettingRow
+                settingKey="notify:sounds:enabled"
                 id={SOUNDS_SETTINGS.notificationSoundsEnabled.id}
                 label={SOUNDS_SETTINGS.notificationSoundsEnabled.label}
                 description={SOUNDS_SETTINGS.notificationSoundsEnabled.description}
@@ -96,6 +102,7 @@ export function NotificationSoundsGroup(): JSX.Element {
             />
             <Show when={soundsEnabled()}>
                 <SettingRow
+                    settingKey="notify:sounds:volume"
                     id={SOUNDS_SETTINGS.volume.id}
                     indent
                     label={SOUNDS_SETTINGS.volume.label}
@@ -108,6 +115,7 @@ export function NotificationSoundsGroup(): JSX.Element {
                     }
                 />
                 <SettingRow
+                    settingKey="notify:sounds:suppresswhenfocused"
                     id={SOUNDS_SETTINGS.suppressWhenFocused.id}
                     indent
                     label={SOUNDS_SETTINGS.suppressWhenFocused.label}
@@ -124,6 +132,7 @@ export function NotificationSoundsGroup(): JSX.Element {
                     tones (where turning tones off would hide it).
                     SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24.md §3.7. */}
                 <SettingRow
+                    settingKey="notify:tooltones:flash"
                     id={SOUNDS_SETTINGS.toolTonesFlash.id}
                     indent
                     label={SOUNDS_SETTINGS.toolTonesFlash.label}
@@ -148,6 +157,7 @@ export function ToolTonesGroup(): JSX.Element {
         <>
             <SectionHeader label={t("settings.sounds.group.toolCallTones")} />
             <SettingRow
+                settingKey="notify:tooltones:enabled"
                 id={SOUNDS_SETTINGS.toolTonesEnabled.id}
                 label={SOUNDS_SETTINGS.toolTonesEnabled.label}
                 description={SOUNDS_SETTINGS.toolTonesEnabled.description}
@@ -155,6 +165,7 @@ export function ToolTonesGroup(): JSX.Element {
             />
             <Show when={toolTonesEnabled()}>
                 <SettingRow
+                    settingKey="notify:tooltones:volume"
                     id={SOUNDS_SETTINGS.toolTonesVolume.id}
                     indent
                     label={SOUNDS_SETTINGS.toolTonesVolume.label}
@@ -167,6 +178,7 @@ export function ToolTonesGroup(): JSX.Element {
                     }
                 />
                 <SettingRow
+                    settingKey="notify:tooltones:scope"
                     id={SOUNDS_SETTINGS.toolTonesScope.id}
                     indent
                     label={SOUNDS_SETTINGS.toolTonesScope.label}
@@ -194,6 +206,7 @@ export function WaitingToneGroup(): JSX.Element {
         <>
             <SectionHeader label={t("settings.sounds.group.waitingForInput")} />
             <SettingRow
+                settingKey="notify:sound:agent.waiting.for.input"
                 id={SOUNDS_SETTINGS.waitingToneEnabled.id}
                 label={SOUNDS_SETTINGS.waitingToneEnabled.label}
                 description={SOUNDS_SETTINGS.waitingToneEnabled.description}
@@ -201,6 +214,7 @@ export function WaitingToneGroup(): JSX.Element {
             />
             <Show when={waitingToneEnabled()}>
                 <SettingRow
+                    settingKey="notify:sounds:waiting:volume"
                     id={SOUNDS_SETTINGS.waitingToneVolume.id}
                     indent
                     label={SOUNDS_SETTINGS.waitingToneVolume.label}
@@ -213,6 +227,7 @@ export function WaitingToneGroup(): JSX.Element {
                     }
                 />
                 <SettingRow
+                    settingKey="notify:waiting:browser"
                     id={SOUNDS_SETTINGS.waitingBrowser.id}
                     indent
                     label={SOUNDS_SETTINGS.waitingBrowser.label}
@@ -226,6 +241,7 @@ export function WaitingToneGroup(): JSX.Element {
                 />
             </Show>
             <SettingRow
+                settingKey="notify:waiting:toast"
                 id={SOUNDS_SETTINGS.waitingToast.id}
                 label={SOUNDS_SETTINGS.waitingToast.label}
                 description={SOUNDS_SETTINGS.waitingToast.description}
@@ -246,6 +262,7 @@ export function ShutdownWarningGroup(): JSX.Element {
         <>
             <SectionHeader label={t("settings.sounds.group.shutdownWarning")} />
             <SettingRow
+                settingKey="notify:sound:agent.shutdown.pending"
                 id={SOUNDS_SETTINGS.shutdownToneEnabled.id}
                 label={SOUNDS_SETTINGS.shutdownToneEnabled.label}
                 description={SOUNDS_SETTINGS.shutdownToneEnabled.description}

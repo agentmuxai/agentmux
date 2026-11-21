@@ -16,6 +16,8 @@ use agentmux_common::jekt_files;
 use crate::backend::attachments::{self, prompt};
 use crate::backend::reactive::sanitize::quote_in_jekt;
 use crate::backend::reactive::types::{FilesDelivery, InjectionRequest, WanInstanceStatus};
+use super::agent_handlers::turn_steps::rehome_for_container;
+use std::sync::Arc;
 
 /// Why a request's files can't be accepted at all, before anything is
 /// delivered: they're malformed, the msgid doesn't bind them, or they
@@ -63,6 +65,12 @@ pub(crate) fn withheld_reason(req: &InjectionRequest) -> Option<&'static str> {
 /// files when none came) a line saying they didn't arrive. Leaves it `None`
 /// for a text-only jekt.
 pub(crate) async fn prepare(req: &mut InjectionRequest) {
+    let destination = destination_of(&req.target_agent);
+    prepare_for(req, attachments::get(), destination).await;
+}
+
+/// [`prepare`] with the attachment store and the target's file destination given.
+async fn prepare_for(req: &mut InjectionRequest, svc: Option<Arc<attachments::Service>>, destination: Destination) {
     let msgid = req.request_id.as_deref().unwrap_or("");
     let Some(files) = req.files.clone() else {
         if jekt_files::bound_digest(msgid).is_some() {
@@ -86,15 +94,14 @@ pub(crate) async fn prepare(req: &mut InjectionRequest) {
         });
         return;
     }
-    let Some(svc) = attachments::get() else {
-        req.files_delivery = Some(FilesDelivery {
-            delivered: 0,
-            text: format!("{count} {noun} sent with this message couldn't be delivered: the attachment store isn't available."),
-            inline: Vec::new(),
-            inline_charge: None,
-        });
+    let Some(svc) = svc else {
+        req.files_delivery = Some(nothing_delivered(format!("{count} {noun} sent with this message couldn't be delivered: the attachment store isn't available.")));
         return;
     };
+    if let Destination::Refused(why) = destination {
+        req.files_delivery = Some(nothing_delivered(format!("{count} {noun} sent with this message couldn't be delivered: {why}")));
+        return;
+    }
     // Re-derive anything stored under an older fingerprint, and check each
     // file's size against the manifest: the hash names the file, the size
     // is part of what was signed.
@@ -127,6 +134,11 @@ pub(crate) async fn prepare(req: &mut InjectionRequest) {
                 None => missing.push(name),
             }
         }
+        // A container agent can't open a path in the host's store: its copies go into its workspace.
+        let (found, missing) = match &destination {
+            Destination::Container(cwd) => rehome_for_container(found, missing, cwd),
+            _ => (found, missing),
+        };
         let (prepared, inline_charge) = match inline_to {
             Some(t) => {
                 let prepared = svc.with_session_inline_budget(&t.session_key, Some(&t.new_session_key), t.session_bytes, |budget| {
@@ -149,6 +161,100 @@ pub(crate) async fn prepare(req: &mut InjectionRequest) {
         inline_charge: None,
     });
     req.files_delivery = Some(delivery);
+}
+
+/// What the agent gets when none of a jekt's files can be delivered: the reason, no list.
+fn nothing_delivered(text: String) -> FilesDelivery {
+    FilesDelivery { text, ..Default::default() }
+}
+
+/// Where the files of a jekt must be put for its target to open them.
+enum Destination {
+    /// A host agent, or a target not resolved here: the store's own paths.
+    Host,
+    /// A container agent: the host folder behind its `/workspace`.
+    Container(String),
+    /// A container agent that has nowhere to put them; the reason is for the agent's list.
+    Refused(&'static str),
+}
+
+/// The block of the agent `target` names, as a delivery finds it.
+fn target_block(target: &str) -> Option<String> {
+    use crate::backend::reactive::handler::LookupOutcome;
+    let handler = crate::backend::reactive::get_global_handler();
+    handler.block_for_uid(target).or_else(|| match handler.lookup_delivery_target(target) {
+        LookupOutcome::One(reg) => Some(reg.block_id),
+        _ => None,
+    })
+}
+
+/// What preparing a jekt's files could learn of the agent it is for.
+enum Found {
+    /// The pane the target is bound to here, as the store has it.
+    Pane(crate::backend::obj::Block),
+    /// Bound to a pane here, but the store couldn't give the pane back.
+    PaneUnreadable,
+    /// Bound to no pane here (not running, starting, or on another instance); `container` is whether it is defined
+    /// here as a container agent.
+    Unbound { container: bool },
+}
+
+const PANE_UNREADABLE: &str = "this agent's pane couldn't be read just now, so its mounted folder can't be written: send the files again.";
+const CONTAINER_NOT_RUNNING: &str = "this container agent has no running pane yet, so its mounted folder can't be written: send the files again once it is running.";
+
+/// Where a target's files must be put. A container agent is never given the host store's paths because something
+/// couldn't be looked up: a target that is a container agent, or might be, is refused with a reason that says so
+/// (the sender's answer then counts the files as not delivered), and only a target known to be a host agent, or one
+/// this instance knows nothing of, is sent the store's own paths.
+fn destination_of(target: &str) -> Destination {
+    let destination = destination_for(found_for(target));
+    tracing::info!(destination = destination_name(&destination), "jekt files: where a target's files go");
+    destination
+}
+
+fn destination_name(destination: &Destination) -> &'static str {
+    match destination {
+        Destination::Host => "host store",
+        Destination::Container(_) => "container workspace",
+        Destination::Refused(_) => "refused",
+    }
+}
+
+fn found_for(target: &str) -> Found {
+    let Some(store) = crate::backend::identity_spawn::row_store() else {
+        return Found::Unbound { container: false };
+    };
+    match target_block(target) {
+        Some(id) => match store.get::<crate::backend::obj::Block>(&id) {
+            Ok(Some(block)) => Found::Pane(block),
+            _ => Found::PaneUnreadable,
+        },
+        None => Found::Unbound { container: defined_as_container(store, target) },
+    }
+}
+
+/// Whether `target` names an agent defined on this instance as a container agent.
+fn defined_as_container(store: &crate::backend::storage::store::Store, target: &str) -> bool {
+    super::reactive::defined_here(store, target)
+        .and_then(|(uid, _slug)| store.agent_def_get(&uid).ok().flatten())
+        .is_some_and(|def| def.runtime().is_container())
+}
+
+fn destination_for(found: Found) -> Destination {
+    match found {
+        Found::Pane(block) => destination_for_block(&block),
+        Found::PaneUnreadable => Destination::Refused(PANE_UNREADABLE),
+        Found::Unbound { container: true } => Destination::Refused(CONTAINER_NOT_RUNNING),
+        Found::Unbound { container: false } => Destination::Host,
+    }
+}
+
+fn destination_for_block(block: &crate::backend::obj::Block) -> Destination {
+    match super::agent_handlers::turn_steps::attachment_destination(block) {
+        Ok(Some(cwd)) => Destination::Container(cwd),
+        Ok(None) => Destination::Host,
+        Err(why) => Destination::Refused(why),
+    }
 }
 
 /// Deliver on this instance, settling the inline budget for the attempt.
@@ -202,12 +308,7 @@ struct InlineTarget {
 
 fn inline_target(target: &str) -> Option<InlineTarget> {
     use crate::backend::blockcontroller::persistent::PersistentSubprocessController;
-    use crate::backend::reactive::handler::LookupOutcome;
-    let handler = crate::backend::reactive::get_global_handler();
-    let block = handler.block_for_uid(target).or_else(|| match handler.lookup_delivery_target(target) {
-        LookupOutcome::One(reg) => Some(reg.block_id),
-        _ => None,
-    })?;
+    let block = target_block(target)?;
     let ctrl = crate::backend::blockcontroller::get_controller(&block)?;
     let persistent = ctrl.as_any().downcast_ref::<PersistentSubprocessController>()?;
     let limits = attachments::get()?.limits();
@@ -755,7 +856,6 @@ mod tests {
 
     // ---- Transfer to another instance (spec §4) ----
 
-    use std::sync::Arc;
 
     fn service(dir: &std::path::Path) -> Arc<attachments::Service> {
         Arc::new(attachments::Service::new(
@@ -898,5 +998,130 @@ mod tests {
         release(&id);
         assert!(reserve(&id), "a delivery that failed may be retried");
         assert!(reserve(&format!("{id}-other")));
+    }
+
+    // ---- Files for a container agent: opened where it can read them ----
+
+    const NOTES: &[u8] = b"Sent to a container agent.
+";
+
+    /// A service holding `notes.txt`, and the jekt that sends it.
+    async fn jekt_with_notes(dir: &std::path::Path) -> (Arc<attachments::Service>, InjectionRequest) {
+        let svc = service(dir);
+        let src = dir.join("notes.txt");
+        std::fs::write(&src, NOTES).unwrap();
+        let (tmp, id, _) = svc.store().copy_in(&src, |_| true).unwrap();
+        svc.commit_upload(tmp, id, "notes.txt".into()).await.unwrap();
+        let files = vec![manifest_entry("notes.txt", NOTES)];
+        let req = req_with(files.clone(), &jekt_files::bind_msgid("m", &files), "host");
+        (svc, req)
+    }
+
+    fn container_block(cwd: Option<&str>) -> crate::backend::obj::Block {
+        let mut block = crate::backend::obj::Block::default();
+        block.meta.insert("agentMode".into(), serde_json::json!("container"));
+        if let Some(cwd) = cwd {
+            block.meta.insert("cmd:cwd".into(), serde_json::json!(cwd));
+        }
+        block
+    }
+
+    fn container_list_names_the_copy(text: &str, cwd: &std::path::Path, store_root: &std::path::Path) {
+        let sha = sha(NOTES);
+        let want = format!("/workspace/.agentmux-attachments/named/{sha}/notes.txt");
+        assert!(text.contains(&want), "the list names the path inside the container: {text}");
+        assert!(!text.contains(store_root.to_str().unwrap()) && !text.contains(cwd.to_str().unwrap()), "no host path is left: {text}");
+        let on_host = cwd.join(".agentmux-attachments").join("named").join(&sha).join("notes.txt");
+        assert_eq!(std::fs::read(on_host).unwrap(), NOTES, "the file is in the folder the container mounts as /workspace");
+    }
+
+    #[tokio::test]
+    async fn a_file_sent_to_a_running_container_agent_is_copied_into_its_workspace() {
+        let d = tempfile::tempdir().unwrap();
+        let (svc, mut req) = jekt_with_notes(d.path()).await;
+        let cwd = d.path().join("agent-workspace");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let dest = destination_for_block(&container_block(Some(cwd.to_str().unwrap())));
+        prepare_for(&mut req, Some(svc), dest).await;
+        let delivery = req.files_delivery.unwrap();
+        assert_eq!(delivery.delivered, 1);
+        container_list_names_the_copy(&delivery.text, &cwd, &d.path().join("attachments"));
+    }
+
+    #[tokio::test]
+    async fn a_queued_or_held_file_jekt_is_prepared_afresh_for_the_container_when_it_is_delivered() {
+        // A held jekt is rebuilt from its row (no list) and prepared again at replay, as a queued one is
+        // prepared when it is accepted: each time the copy lands in the workspace and the list names it.
+        let d = tempfile::tempdir().unwrap();
+        let (svc, req) = jekt_with_notes(d.path()).await;
+        let cwd = d.path().join("agent-workspace");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let block = container_block(Some(cwd.to_str().unwrap()));
+        for _ in 0..2 {
+            let mut replay = InjectionRequest { files_delivery: None, ..req.clone() };
+            prepare_for(&mut replay, Some(svc.clone()), destination_for_block(&block)).await;
+            container_list_names_the_copy(&replay.files_delivery.unwrap().text, &cwd, &d.path().join("attachments"));
+        }
+    }
+
+    #[tokio::test]
+    async fn a_container_agent_with_no_working_folder_yet_is_told_the_files_could_not_be_delivered() {
+        let d = tempfile::tempdir().unwrap();
+        let (svc, mut req) = jekt_with_notes(d.path()).await;
+        prepare_for(&mut req, Some(svc), destination_for_block(&container_block(None))).await;
+        let delivery = req.files_delivery.unwrap();
+        assert_eq!(delivery.delivered, 0);
+        assert!(delivery.text.contains("couldn't be delivered") && delivery.text.contains("working folder"), "{}", delivery.text);
+        assert!(!delivery.text.contains(d.path().to_str().unwrap()), "no host path: {}", delivery.text);
+    }
+
+    /// The files' list for `found`, after the lookup stage that picks where they go.
+    async fn list_for(found: Found) -> (std::path::PathBuf, FilesDelivery) {
+        let d = tempfile::tempdir().unwrap();
+        let (svc, mut req) = jekt_with_notes(d.path()).await;
+        prepare_for(&mut req, Some(svc), destination_for(found)).await;
+        (d.path().to_path_buf(), req.files_delivery.unwrap())
+    }
+
+    #[tokio::test]
+    async fn a_container_agent_the_registry_cant_place_never_gets_the_stores_host_path() {
+        // The case the earlier tests skipped: the lookup that finds the pane fails or finds none. A container agent
+        // must then be refused with a reason, not handed a path it cannot open, and the sender's count says 0.
+        for found in [Found::PaneUnreadable, Found::Unbound { container: true }] {
+            let (dir, delivery) = list_for(found).await;
+            assert_eq!(delivery.delivered, 0, "the sender is told no file arrived");
+            assert!(delivery.text.contains("couldn't be delivered") && delivery.text.contains("send the files again"), "{}", delivery.text);
+            assert!(!delivery.text.contains(dir.to_str().unwrap()) && !delivery.text.contains(&sha(NOTES)), "no host path: {}", delivery.text);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_target_known_to_be_a_host_agent_or_unknown_here_is_sent_the_stores_own_path() {
+        for found in [Found::Unbound { container: false }, Found::Pane(crate::backend::obj::Block::default())] {
+            let (_dir, delivery) = list_for(found).await;
+            assert_eq!(delivery.delivered, 1);
+            assert!(delivery.text.contains(&sha(NOTES)) && !delivery.text.contains("/workspace"), "{}", delivery.text);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_pane_the_store_returns_for_a_container_agent_is_copied_into_its_workspace_by_the_same_lookup_stage() {
+        let d = tempfile::tempdir().unwrap();
+        let (svc, mut req) = jekt_with_notes(d.path()).await;
+        let cwd = d.path().join("agent-workspace");
+        std::fs::create_dir_all(&cwd).unwrap();
+        prepare_for(&mut req, Some(svc), destination_for(Found::Pane(container_block(Some(cwd.to_str().unwrap()))))).await;
+        container_list_names_the_copy(&req.files_delivery.unwrap().text, &cwd, &d.path().join("attachments"));
+    }
+
+    #[tokio::test]
+    async fn a_host_agent_still_gets_the_stores_own_path() {
+        let d = tempfile::tempdir().unwrap();
+        let (svc, mut req) = jekt_with_notes(d.path()).await;
+        let dest = destination_for_block(&crate::backend::obj::Block::default());
+        prepare_for(&mut req, Some(svc), dest).await;
+        let delivery = req.files_delivery.unwrap();
+        assert_eq!(delivery.delivered, 1);
+        assert!(delivery.text.contains(&sha(NOTES)) && !delivery.text.contains("/workspace"), "{}", delivery.text);
     }
 }

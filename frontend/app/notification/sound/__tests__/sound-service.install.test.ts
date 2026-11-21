@@ -74,6 +74,7 @@ vi.mock("@/app/store/agent-pane-state-store", () => ({
 // ─── Import after mocks ───────────────────────────────────────────────
 
 import { __resetActivityFlash, onActivityFlash, type FlashTarget } from "../../activity-flash";
+import { MAX_WAIT_MS, SETTLE_MS } from "../after-gesture";
 import { audibleFlashDelayMs } from "../flash-patterns";
 import { DEFAULT_MASTER_VOLUME, DEFAULT_TOOLTONES_VOLUME, DEFAULT_WAITING_VOLUME } from "../sound-defaults";
 import { __resetSoundListeners, notify } from "../sound-events";
@@ -135,8 +136,22 @@ function primeListener(type: "pointerdown" | "keydown"): { fn: Listener; options
     return { fn: call[1] as Listener, options: call[2] };
 }
 
+/** A real key press: the priming waits only the settle time. */
 function trusted(): Event {
-    return { isTrusted: true } as unknown as Event;
+    return { isTrusted: true, type: "keydown" } as unknown as Event;
+}
+
+/** A real pointer press: the priming waits for the release. */
+function trustedPress(): Event {
+    return { isTrusted: true, type: "pointerdown" } as unknown as Event;
+}
+
+/** Run a prime listener for `ev` and let the gesture end: a press is released, a key is let go, and the settle time passes. */
+async function gesture(fn: Listener, ev: Event = trusted()): Promise<void> {
+    const done = fn(ev);
+    if (ev.type === "pointerdown") document.dispatchEvent(new Event("pointerup"));
+    await vi.advanceTimersByTimeAsync(SETTLE_MS);
+    await done;
 }
 
 const fakeCtx = { currentTime: 1, baseLatency: 0, outputLatency: 0 } as unknown as AudioContext;
@@ -238,7 +253,7 @@ describe("installSoundService: priming on the first real gesture", () => {
         install();
         const down = primeListener("pointerdown").fn;
         const key = primeListener("keydown").fn;
-        await down(trusted());
+        await gesture(down, trustedPress());
         expect(prime).toHaveBeenCalledTimes(1);
         expect(removeSpy).toHaveBeenCalledWith("pointerdown", down, true);
         expect(removeSpy).toHaveBeenCalledWith("keydown", key, true);
@@ -249,10 +264,43 @@ describe("installSoundService: priming on the first real gesture", () => {
         install();
         const down = primeListener("pointerdown").fn;
         const key = primeListener("keydown").fn;
-        await key(trusted());
+        await gesture(key);
         expect(prime).toHaveBeenCalledTimes(1);
         expect(removeSpy).toHaveBeenCalledWith("pointerdown", down, true);
         expect(removeSpy).toHaveBeenCalledWith("keydown", key, true);
+    });
+
+    it("does not open the audio device inside the press, nor while the button is held, nor during the drag it started", async () => {
+        const prime = vi.spyOn(player, "prime").mockResolvedValue();
+        install();
+        const done = primeListener("pointerdown").fn(trustedPress());
+        // Synchronously inside the press: nothing opened (this is where the 16 s freeze was).
+        expect(prime).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(SETTLE_MS * 4);
+        expect(prime).not.toHaveBeenCalled();
+        // The press becomes a drag: the page cancels the pointer as the drag starts.
+        document.dispatchEvent(new Event("dragstart"));
+        document.dispatchEvent(new Event("pointercancel"));
+        await vi.advanceTimersByTimeAsync(SETTLE_MS * 4);
+        expect(prime).not.toHaveBeenCalled();
+        // The drag ends: it opens once the settle time has passed, not before.
+        document.dispatchEvent(new Event("dragend"));
+        await vi.advanceTimersByTimeAsync(SETTLE_MS - 1);
+        expect(prime).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+        await done;
+        expect(prime).toHaveBeenCalledTimes(1);
+    });
+
+    it("opens anyway when a press is never seen to end, after the longest wait", async () => {
+        const prime = vi.spyOn(player, "prime").mockResolvedValue();
+        install();
+        const done = primeListener("pointerdown").fn(trustedPress());
+        await vi.advanceTimersByTimeAsync(MAX_WAIT_MS - 1);
+        expect(prime).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+        await done;
+        expect(prime).toHaveBeenCalledTimes(1);
     });
 
     it("attaches the tool tones and the waiting players only once priming has finished", async () => {
@@ -272,8 +320,9 @@ describe("installSoundService: priming on the first real gesture", () => {
         startWaiting("blk-b");
         expect(wpAttach).not.toHaveBeenCalled();
 
-        const pending = primeListener("pointerdown").fn(trusted());
-        await Promise.resolve();
+        const pending = primeListener("pointerdown").fn(trustedPress());
+        document.dispatchEvent(new Event("pointerup"));
+        await vi.advanceTimersByTimeAsync(SETTLE_MS);
         expect(attach).not.toHaveBeenCalled();
         expect(wpAttach).not.toHaveBeenCalled();
 
@@ -298,7 +347,7 @@ describe("installSoundService: priming on the first real gesture", () => {
         wpIsAttached.mockReturnValue(true);
         vi.spyOn(player, "getAudioContext").mockReturnValue(fakeCtx);
         vi.spyOn(player, "getMasterGain").mockReturnValue(fakeMaster);
-        await primeListener("keydown").fn(trusted());
+        await gesture(primeListener("keydown").fn);
         expect(attach).not.toHaveBeenCalled();
         expect(wpAttach).not.toHaveBeenCalled();
     });
@@ -311,13 +360,13 @@ describe("installSoundService: priming on the first real gesture", () => {
         const master = vi.spyOn(player, "getMasterGain").mockReturnValue(fakeMaster);
         install();
         startWaiting("blk-a");
-        await primeListener("pointerdown").fn(trusted());
+        await gesture(primeListener("pointerdown").fn, trustedPress());
         expect(attach).not.toHaveBeenCalled();
         expect(wpAttach).not.toHaveBeenCalled();
 
         ctx.mockReturnValue(fakeCtx);
         master.mockReturnValue(null);
-        await primeListener("keydown").fn(trusted());
+        await gesture(primeListener("keydown").fn);
         expect(attach).not.toHaveBeenCalled();
         expect(wpAttach).not.toHaveBeenCalled();
     });

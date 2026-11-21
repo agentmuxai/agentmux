@@ -40,9 +40,10 @@ an agent asking for something that affects the user),
   the version panel's Maintenance section: what's new, then **Download**, then
   **Upgrade & restart**. Nothing installs on its own.
 - **An agent can ask for it** with a `RequestUpgrade` tool. AgentMux never
-  restarts on an agent's word alone: the user's own turn asking for it, or a
-  click on "Upgrade now" in the request it raises, is what starts it. A
-  restart touches every agent, not just the one asking.
+  restarts on an agent's word alone: the user's own turn asking for it, a
+  click on "Upgrade now" in the request it raises, or a request whose in-app
+  countdown ended with no veto, is what starts it (§4.1, "Changed
+  2026-11-19"). A restart touches every agent, not just the one asking.
 - **Everyone continues.** After the restart the windows and panes come back,
   each agent resumes its conversation, messages sent meanwhile are delivered,
   and each agent gets one system note: what changed, and that its session
@@ -246,8 +247,9 @@ App({ action: "upgrade", reason: "…", user_instruction?: "…", version?: "0.5
     came out since, nothing is installed and the agent is told to ask again.
     The agent gets an `[AgentMux]` note with the answer; Upgrade now answers
     every waiting request for that release.
-  - Either way the launcher asks the user once more in its own dialog
-    before it restarts (§4.1, phase 3b).
+  - Since 2026-11-19 the launcher no longer asks the user once more in its
+    own dialog: the user's own turn or answer, or an unvetoed countdown, is
+    the decision (§4.1, phase 3b, "Changed 2026-11-19").
 - **Only what the update check found is installed**: the latest release,
   verified against GitHub's checksum. The tool can't name a URL or a file,
   and a `version` other than the latest is refused. An install that can't
@@ -482,9 +484,11 @@ Each phase is small and useful on its own.
         stderr, which the launcher already reads;
      3. the launcher checks the folder again (a portable of exactly that
         version, newer than itself, and itself a portable, not a `setup.exe`
-        install) and asks the user in a native dialog. No page or agent tool
-        in AgentMux can click it, so a restart always takes the user's own
-        Yes, whoever asked srv;
+        install; the installer's digest on a `setup.exe` install) and, the
+        restart being decided (see **Changed 2026-11-19** below), restarts
+        without asking again. It first asked the user in a native dialog that
+        no page or agent tool in AgentMux can click, so that a restart always
+        took the user's own Yes, whoever asked srv; that rule is replaced;
      4. it quits the host like the tray's Quit (windows close, the session is
         saved), stops srv, and only then starts the new launcher without this
         instance's `AGENTMUX*` environment, and exits. A Yes that hasn't led
@@ -493,6 +497,58 @@ Each phase is small and useful on its own.
      Verified end to end on a packaged portable: download, verification,
      staging, the wait, the dialog, the quit, and the new launcher coming up
      on its own channel within a second of the old one exiting.
+
+     **Changed 2026-11-19: a decided restart asks nothing more.** The rule
+     above (a restart always takes the user's own Yes in the launcher's native
+     dialog, whoever asked srv) is replaced, because on a computer nobody sits
+     at the dialog is never answered and closes itself after its 150 s, so an
+     upgrade an agent asked for, and the person's countdown allowed, could not
+     finish there.
+     The requirement now: **when an upgrade request has passed the in-app
+     countdown with no veto, the restart happens; the launcher does not ask
+     again with a native dialog.** What decides a restart is one of:
+       - the user's own click on Upgrade & restart in the version panel (a
+         click is already a Yes);
+       - the user's own turn asking for it (`started`, §5.1);
+       - the user's answer "Upgrade now" to a waiting request (§5.1);
+       - an agent's request that went through the sensitive-request countdown
+         (`SPEC_SUPER_AGENT_2026_10_25.md`): every open window shows who
+         asked and what will happen, the person can veto it at any moment of
+         the countdown, and when it ends unvetoed the upgrade runs. The
+         length of the countdown is the human-override window's, unchanged.
+     srv marks the line it writes for the launcher `confirmed:1` once the
+     restart is decided, and only then. The decision stays visible and
+     recorded: the countdown and its veto are the gate (there is no
+     operator-only step to pass), and the upgrade is recorded as the agent
+     that asked, never as the person.
+
+     What does not change: the download and its signature and digest checks
+     (only a verified file is applied; the launcher checks the staged file
+     and its digest again before restarting, and refuses one that does not
+     match); the wait for agents in the middle of a turn (§8; `Restart now`
+     and `Cancel` as before; `Cancel` has no effect once the launcher has been
+     asked); and a `.deb` or `.rpm` install still shows the desktop's own
+     permission prompt for the install, which is the operating system's and
+     not a question of AgentMux's.
+
+     Decisions:
+       - **A computer with no window open, or nobody at it:** the countdown
+         runs and the upgrade goes ahead. That is the point.
+       - **A request from an agent on another computer:** the same path, with
+         the same countdown on the target computer (`app.upgrade`, filed as
+         the same sensitive request there).
+       - **A launcher dialog for a path no countdown covered:** none. srv asks
+         the launcher only after one of the four decisions above (the
+         automatic check only downloads and never restarts). The dialog and its 150 s stay in the launcher only for a
+         request line that does not say it is confirmed (an older srv), and
+         it is a native dialog, never a modal over the app.
+       - **When the restart does not go ahead** (the launcher refuses the
+         file, an install's permission prompt is refused, or an unconfirmed
+         question is answered No or not at all): the launcher logs how it
+         ended, the status and `App version` say when and why
+         (`not_confirmed_at`, `not_confirmed`), and the agents that asked are
+         told (an agent on another computer reads it in `app.upgrade`'s
+         `status`).
 
      Only the last-closed window's tabs come back after any quit today
      (`session:last_topology`); restoring every window is a follow-up.

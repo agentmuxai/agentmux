@@ -31,9 +31,9 @@ type Source = "template" | "ui" | "app" | "srv";
 // Each needs a decision about which value is right; until then it is listed
 // here. The test also fails when a listed key agrees again, so this only shrinks.
 const KNOWN_MISMATCHES: Record<string, string> = {
-    // TODO: pick one. The template says 0.9 and the pane 1.5, and the layout
-    // itself disagrees: 0.8 in layoutGeometry.ts, 1.0 in tilelayout-shared.tsx.
-    "window:magnifiedblocksize": "template 0.9, pane 1.5, layout 0.8 or 1.0",
+    // TODO: pick one. The template and the pane say 0.9, and the layout itself
+    // disagrees: 0.8 in layoutGeometry.ts, 1.0 in tilelayout-shared.tsx.
+    "window:magnifiedblocksize": "template 0.9, pane 0.9, layout 0.8 or 1.0",
 };
 
 // ── Defaults stated in one place only ───────────────────────────────────────
@@ -54,6 +54,7 @@ const SRV_ZERO_IS_UNSET: Record<string, string> = {
     "telemetry:interval": "the sysinfo pane and srv apply 1 second (sysinfo-model.ts, sysinfo.rs)",
     "telemetry:enabled": "nothing reads it; the template says on",
     "window:savelastwindow": "nothing reads it; the template says on",
+    "conn:helper": "an empty value means ask (helper_consent.rs applies it)",
 };
 const srvZeroSkipped = new Set<string>();
 
@@ -403,6 +404,7 @@ const BACKEND_CONSTANTS: Record<string, [string, RegExp]> = {
     "telemetry:interval": ["crates/srv-core/src/backend/sysinfo.rs", /const DEFAULT_INTERVAL_SECS: f64 = ([\d.]+);/],
     "voice:whisperModel": ["crates/srv/src/server/voice.rs", /const DEFAULT_WHISPER_MODEL: &str = ("[^"]*");/],
     "agent:compacthintat": ["crates/srv-core/src/backend/context_reading.rs", /const DEFAULT_HINT_AT: u64 = (\d+);/],
+    "agent:compactbackstopat": ["crates/srv-core/src/backend/context_reading.rs", /const DEFAULT_BACKSTOP_AT: u64 = (\d+);/],
     "supervisor:enabled": ["crates/srv-core/src/backend/supervisor/settings.rs", /const DEFAULT_ENABLED: bool = (true|false);/],
     "supervisor:steady:continuations": ["crates/srv-core/src/backend/supervisor/settings.rs", /const DEFAULT_STEADY_CONTINUATIONS: \w+ = (\d+);/],
     "supervisor:steady:minutes": ["crates/srv-core/src/backend/supervisor/settings.rs", /const DEFAULT_STEADY_MINUTES: \w+ = (\d+);/],
@@ -415,6 +417,8 @@ const BACKEND_CONSTANTS: Record<string, [string, RegExp]> = {
     "supervisor:notify:limit": ["crates/srv-core/src/backend/supervisor/settings.rs", /const DEFAULT_NOTIFY: bool = (true|false);/],
     "supervisor:notify:failed": ["crates/srv-core/src/backend/supervisor/settings.rs", /const DEFAULT_NOTIFY: bool = (true|false);/],
     "supervisor:notify:done": ["crates/srv-core/src/backend/supervisor/settings.rs", /const DEFAULT_NOTIFY: bool = (true|false);/],
+    "agent:usagenoticeat": ["crates/srv-core/src/backend/account_usage.rs", /const DEFAULT_NOTICE_AT: u64 = (\d+);/],
+    "agent:usagenoticehighat": ["crates/srv-core/src/backend/account_usage.rs", /const DEFAULT_NOTICE_HIGH_AT: u64 = (\d+);/],
     "agent:freshhintat": ["crates/srv-core/src/backend/context_reading.rs", /const DEFAULT_FRESH_HINT_AT: u64 = (\d+);/],
     "agent:subagentmodel": ["crates/srv-core/src/backend/subagent_model.rs", /const DEFAULT_SUBAGENT_MODEL: &str = ("[^"]*");/],
     "agent:exploremodel": ["crates/srv-core/src/backend/subagent_model.rs", /const DEFAULT_EXPLORE_MODEL: &str = ("[^"]*");/],

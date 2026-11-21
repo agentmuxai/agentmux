@@ -328,6 +328,8 @@ export interface LoginShare {
     name: string;
     uses: number;
     last_used_ms: number;
+    /** The person chose "Always" for this agent: its browser answers the site's sign-in prompt without asking. */
+    always?: boolean;
 }
 
 /** An agent a login could be shared with. */

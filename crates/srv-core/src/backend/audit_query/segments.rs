@@ -59,6 +59,7 @@ fn entries_of(slug: &str, segment: &Segment, archives: &[u64], ctx: &Ctx) -> Vec
             at_byte: byte.map(|b| b.max(0) as u64),
         }),
         pane: Some(start.block_id.as_str()).filter(|b| !b.is_empty() && (ctx.block_exists)(b)).map(|b| AuditPaneLink { block_id: b.to_string() }),
+        task: None,
     };
     let how = match start.continuity_rung {
         ledger::Rung::Native => "resumed its session",

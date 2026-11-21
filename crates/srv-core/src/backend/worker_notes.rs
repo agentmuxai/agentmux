@@ -31,13 +31,35 @@ const NOTE_GAP_MS: u64 = 60_000;
 const EXIT_SETTLE: std::time::Duration = std::time::Duration::from_millis(1_000);
 /// How much of a worker's last message a note quotes.
 const LAST_WORDS_CHARS: usize = 200;
+/// How long after a turn ended its note may still be sent. An end is published within seconds of the turn's;
+/// one older than this is a turn from before (an agent's old turn read again when its session resumed), and a
+/// note about it would tell the leader of a turn that did not just end.
+const TURN_END_FRESH_MS: u64 = 10 * 60_000;
+/// How far before a turn's start the transcript's last write may be and still be that turn's words: the file
+/// is written line by line while the turn runs, so a quieter one holds only older turns.
+const WROTE_SINCE_SLACK_MS: u64 = 5_000;
+
+/// Whether a turn that ended at `ended_at_ms` (0: not said) ended recently enough for a note at `now_ms`.
+fn turn_end_is_fresh(ended_at_ms: u64, now_ms: u64) -> bool {
+    ended_at_ms == 0 || now_ms.saturating_sub(ended_at_ms) <= TURN_END_FRESH_MS
+}
+
+/// Whether a transcript last written at `modts` (ms; `None`: no file) holds words of a turn that started at
+/// `started_at_ms` (0: not said).
+fn written_since(modts: Option<i64>, started_at_ms: u64) -> bool {
+    match modts {
+        None => false,
+        Some(_) if started_at_ms == 0 => true,
+        Some(at) => (at.max(0) as u64).saturating_add(WROTE_SINCE_SLACK_MS) >= started_at_ms,
+    }
+}
 
 /// What a worker did that its leader hears about.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum WorkerEvent {
-    /// A turn ended (`agentturn` with `end: completed`), started at
-    /// `started_at_ms`; `key` is the turn's identity (see `Seen`).
-    TurnEnded { block_id: String, started_at_ms: u64, key: String },
+    /// A turn ended (`agentturn` with `end: completed`), started at `started_at_ms` and ended at
+    /// `ended_at_ms` (0 when the event did not say); `key` is the turn's identity (see `Seen`).
+    TurnEnded { block_id: String, started_at_ms: u64, ended_at_ms: u64, key: String },
     /// Its process exited (`agentturn` with `end: exited`).
     Exited { block_id: String, key: String },
     /// It failed (`agentfailure`), with the failure's title.
@@ -84,6 +106,7 @@ pub(crate) fn parse_event(event: &str, scopes: &[String], data: Option<&serde_js
             Some("completed") => Some(WorkerEvent::TurnEnded {
                 block_id,
                 started_at_ms: d.get("started_at_ms").and_then(|s| s.as_u64()).unwrap_or(0),
+                ended_at_ms: d.get("ended_at_ms").and_then(|s| s.as_u64()).unwrap_or(0),
                 key,
             }),
             Some("exited") => Some(WorkerEvent::Exited { block_id, key }),
@@ -268,12 +291,23 @@ fn note_for(mstore: &Store, filestore: &FileStore, ev: &WorkerEvent) -> Option<(
     let leader_block = leader_panes.first()?.clone();
     let mut wait_key = None;
     let body = match ev {
-        WorkerEvent::TurnEnded { started_at_ms, .. } => {
+        WorkerEvent::TurnEnded { started_at_ms, ended_at_ms, .. } => {
+            // Only a turn that has just ended is news. An old end (a turn read again when a session resumed) is not,
+            // and neither is an end heard while the worker is in a turn: nothing has finished, and its words would
+            // be an earlier turn's.
+            if !turn_end_is_fresh(*ended_at_ms, agentmux_common::time::now_ms_u64()) {
+                tracing::debug!(block_id, ended_at_ms, "worker note: an old turn end, no note");
+                return None;
+            }
+            if crate::backend::blockcontroller::get_block_controller_status(block_id).is_some_and(|s| s.turn_active) {
+                tracing::debug!(block_id, "worker note: the worker is in a turn, no note");
+                return None;
+            }
             absorb(&crate::backend::reactive::get_global_handler().get_audit_log(usize::MAX));
             if last_report(&worker.slug, &leader_panes).is_some_and(|at| at + 1_000 >= *started_at_ms) {
                 return None;
             }
-            let words = last_words(mstore, filestore, block_id);
+            let words = last_words(mstore, filestore, block_id, *started_at_ms);
             if !words.asked {
                 wait_key = Some(format!("worker:{}", worker.def_id));
             }
@@ -360,8 +394,11 @@ struct LastWords {
     asked: bool,
 }
 
-fn last_words(mstore: &Store, filestore: &FileStore, block_id: &str) -> LastWords {
-    use crate::ambient::digest::{read_recent_activity, reads_output_format, TurnEnding};
+/// What the worker said in the turn that began at `started_at_ms`: nothing when its transcript was not written
+/// since (the copy read is an older session's, as after a container agent's session resumed), rather than words
+/// from before.
+fn last_words(mstore: &Store, filestore: &FileStore, block_id: &str, started_at_ms: u64) -> LastWords {
+    use crate::ambient::digest::{read_recent_activity_from, reads_output_format, TurnEnding};
     let format = mstore
         .get::<Block>(block_id)
         .ok()
@@ -371,7 +408,11 @@ fn last_words(mstore: &Store, filestore: &FileStore, block_id: &str) -> LastWord
     if !reads_output_format(&format) {
         return LastWords::default();
     }
-    let Some(activity) = read_recent_activity(filestore, mstore, block_id) else {
+    let source = crate::backend::transcript::source::TranscriptSource::resolve(filestore, mstore, block_id);
+    if !written_since(source.stat().map(|(_, modts)| modts), started_at_ms) {
+        return LastWords::default();
+    }
+    let Some(activity) = read_recent_activity_from(&source, block_id) else {
         return LastWords::default();
     };
     LastWords { text: ended_turn_text(&activity.text), asked: matches!(activity.ending, TurnEnding::AssistantAsked | TurnEnding::AskedUser) }
@@ -446,7 +487,7 @@ fn note_target(block_id: &str) -> Option<String> {
 }
 
 /// The first open pane of the lead of the agent `def_id` (its seat's lead, on this machine), if it has one.
-fn leader_pane_of(mstore: &Store, def_id: &str) -> Option<String> {
+pub(crate) fn leader_pane_of(mstore: &Store, def_id: &str) -> Option<String> {
     let lead = crate::backend::agent_seat::effective_seat_by_id(mstore, def_id)
         .and_then(|seat| seat.lead)
         .filter(|lead| !crate::backend::agent_seat::is_remote_lead(lead));

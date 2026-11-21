@@ -307,7 +307,10 @@ export function parseSshsig(text) {
     // The key and the signature, each "ssh-ed25519" and 32 or 64 bytes.
     let k = 0;
     const kstr = (b, n) => {
+        // A length field that runs past the end of its blob is a cut-short signature, not a reason to read elsewhere or throw a RangeError.
+        if (n + 4 > b.length) throw new Error("the SSH signature's key or signature is cut short");
         const len = b.readUInt32BE(n);
+        if (len > b.length - n - 4) throw new Error("the SSH signature's key or signature is cut short");
         return [b.subarray(n + 4, n + 4 + len), n + 4 + len];
     };
     const [keyType, k1] = kstr(keyBlob, k);

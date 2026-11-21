@@ -535,6 +535,10 @@ impl StdoutReader {
         // The latest `rate_limit_event`: a usage limit stored later
         // reads its reset from it (`agents::limit_reset`).
         crate::agents::limit_reset::observe_frame(&self.block_id_read, parsed);
+        // The same frame's usage windows, kept for the pane's account (`backend::account_usage`).
+        if let Some(store) = self.mstore_read.as_ref() {
+            crate::backend::account_usage::observe_claude_frame(&self.block_id_read, store, parsed);
+        }
         crate::backend::context_reading::observe_claude_frame(&self.block_id_read, parsed);
         // This block's CLI compacted: only its pane may send the
         // hidden memory reinjection for that boundary.
@@ -580,6 +584,7 @@ impl StdoutReader {
             if let Some(mstore) = &self.mstore_read {
                 crate::backend::route_credits::turn_succeeded(mstore, self.broker_read.as_ref(), &self.block_id_read);
             }
+            crate::backend::limit_evidence::clean_turn(&self.block_id_read, &self.mstore_read, &self.event_bus_read);
         }
         FrameVerdict { is_result_frame, inband_error, early_failure }
     }
@@ -1054,6 +1059,7 @@ impl StdoutReader {
             // same tick — that state must survive, not be
             // immediately wiped by this frame's own success.
             core::persist_last_failure(&self.block_id_read, None, &self.mstore_read, &self.event_bus_read);
+            crate::backend::limit_evidence::clean_turn(&self.block_id_read, &self.mstore_read, &self.event_bus_read);
             // A completed turn is when the agent's running
             // summary may be due for an update. Background, and
             // a no-op unless enough happened since the last one
@@ -1064,9 +1070,7 @@ impl StdoutReader {
             );
             // A large context when the work may continue: one note
             // for the next turn (SPEC_AGENT_SELF_COMPACTION §3.5).
-            if let Some(note) = crate::backend::context_reading::take_turn_end_hint(&self.block_id_read) {
-                crate::backend::reactive::held_notes::hold(&self.block_id_read, crate::backend::context_reading::HINT_NOTE_KEY, &note);
-            }
+            crate::backend::context_reading::hold_turn_end_hint(&self.block_id_read, true);
         }
     }
 }

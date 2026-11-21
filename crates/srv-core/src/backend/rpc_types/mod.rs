@@ -25,6 +25,7 @@ pub mod editor;
 pub mod editor_read;
 pub mod fleet;
 pub mod fs;
+pub mod gpu;
 pub mod history;
 pub mod audit;
 pub mod identity;
@@ -64,6 +65,7 @@ pub use editor::*;
 pub use editor_read::*;
 pub use fleet::*;
 pub use fs::*;
+pub use gpu::*;
 pub use history::*;
 pub use audit::*;
 pub use identity::*;
@@ -329,6 +331,7 @@ mod tests {
             conn: "local".to_string(),
             agent_id: String::new(),
             operator_proven: true,
+            ..Default::default()
         };
         let json = serde_json::to_string(&ctx).unwrap();
         assert!(json.contains(r#""ctype":"connserver""#));

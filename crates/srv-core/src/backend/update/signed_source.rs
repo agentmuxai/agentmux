@@ -307,7 +307,7 @@ mod tests {
     fn the_release_it_reads_has_the_signed_file_with_its_checksum_and_the_floor_this_build_knows() {
         let kind = InstallKind::WindowsSetup;
         let a = answer(&keys(), "v0.60.1", NEWER_THAN_FIXTURE, &kind, "x86_64", Some("0.55.0"), Some((ENVELOPE.as_bytes(), SIG, MANIFEST.as_bytes())));
-        let status = crate::backend::update::check::status_for(NEWER_THAN_FIXTURE, "stable", released(&a).unwrap(), 1, &kind);
+        let status = crate::backend::update::check::status_for_arch(NEWER_THAN_FIXTURE, "stable", released(&a).unwrap(), 1, &kind, "x86_64");
         assert_eq!(status.state, "available");
         assert!(status.can_download, "{status:?}");
         let asset = status.asset.unwrap();
@@ -315,7 +315,7 @@ mod tests {
         assert_eq!(asset.sha256, SETUP_SHA);
         assert_eq!(asset.url, format!("{RELEASE_DOWNLOAD_PREFIX}v0.60.1/AgentMux-0.60.1-x64-setup.exe"));
         // An install older than that floor is sent to it first, as with the API's answer.
-        let old = crate::backend::update::check::status_for("0.50.0", "stable", released(&a).unwrap(), 1, &kind);
+        let old = crate::backend::update::check::status_for_arch("0.50.0", "stable", released(&a).unwrap(), 1, &kind, "x86_64");
         assert_eq!(old.install_first.as_deref(), Some("0.55.0"));
         assert!(!old.can_download);
     }

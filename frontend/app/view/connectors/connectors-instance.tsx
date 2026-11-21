@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Connectors: what agents connect to outside AgentMux. Accounts (sign-ins) and
+// Connectors: what agents connect to outside AgentMux. The list of connectors (sign-ins) and
 // MCP servers, the two halves of the Armory it replaced
 // (docs/specs/SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md),
 // and Remotes, once a pane of its own
@@ -10,8 +10,8 @@
 import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js";
 
 import type { PaneTabHostContext, PaneTabInstance } from "@/app/store/pane-tab-registry";
-import { AccountsManager } from "@/app/view/accounts/accounts-manager";
 import { McpManager } from "@/app/view/mcp/mcp-manager";
+import { ConnectorsList } from "./connectors-list";
 import { RemotesViewModel } from "@/app/view/remotes/remotes-model";
 import { RemotesView } from "@/app/view/remotes/remotes-view";
 import { CONNECTORS_SECTIONS, CONNECTORS_VIEW, type ConnectorsSection } from "@/app/store/section-panes";
@@ -45,7 +45,7 @@ function RemotesSection(props: { pane: SectionPaneModel<ConnectorsSection> }): J
 }
 
 const CONNECTORS_SPEC = sectionPaneSpec<ConnectorsSection>(CONNECTORS_VIEW, "Connectors section", CONNECTORS_SECTIONS, {
-    accounts: () => <AccountsManager />,
+    accounts: () => <ConnectorsList />,
     mcp: () => <McpManager />,
     remotes: (pane) => <RemotesSection pane={pane} />,
 });

@@ -15,6 +15,9 @@ export const PART_ICON: Record<PartId, string> = {
     asks: "circle-question",
     browser: "globe",
     vault: "vault",
+    signedout: "right-to-bracket",
+    quota: "hourglass-half",
+    held: "envelope",
     tasks: "list-check",
 };
 
@@ -22,7 +25,16 @@ export const SUMMARY_TEXT = {
     title: "Waiting on you",
     empty: "Nothing waits on you.",
     swarm: "Open the Swarm",
-    section: { asks: "Asks", browser: "Browser", vault: "Vault", tasks: "Tasks", agents: "Agents" } as Record<PartId, string>,
+    section: {
+        asks: "Asks",
+        browser: "Browser",
+        vault: "Vault",
+        signedout: "Signed out",
+        quota: "Out of quota",
+        held: "Messages waiting",
+        tasks: "Tasks",
+        agents: "Agents",
+    } as Record<PartId, string>,
     anotherWindow: " (in another window)",
     ended: "Recently ended",
 };
@@ -40,6 +52,12 @@ export function partTip(id: PartId, n: number): string {
             return `${plural(n, "browser pane needs", "browser panes need")} you`;
         case "vault":
             return `${plural(n, "Vault request waits", "Vault requests wait")} on you`;
+        case "signedout":
+            return `${plural(n, "agent is", "agents are")} signed out`;
+        case "quota":
+            return `${plural(n, "agent is", "agents are")} out of quota`;
+        case "held":
+            return `${plural(n, "stopped agent has", "stopped agents have")} messages waiting`;
         case "tasks":
             return `${plural(n, "Kanban task needs", "Kanban tasks need")} you`;
     }
@@ -75,6 +93,7 @@ export function rowButton(click: SummaryClick, parked: boolean): string {
         case "pane":
             return parked ? "Open" : "Go";
         case "kanban":
+        case "swarm":
             return "Open";
         default:
             return "Answer";
@@ -88,6 +107,8 @@ export function rowButtonLabel(click: SummaryClick, name: string, parked: boolea
             return `${parked ? "Open" : "Go to"} ${name}`;
         case "kanban":
             return "Open the Kanban";
+        case "swarm":
+            return `Open ${name} in the Swarm`;
         default:
             return `Answer ${name}`;
     }

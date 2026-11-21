@@ -144,8 +144,13 @@ export const OperatorOnlyModals = createContext(false);
 // overlay layer, a step above the pane it covers (SPEC_PANE_BACKGROUND_THEMES_2026_11_15.md §7.4). A dialog that
 // is mounted outside every pane (window or tab scope), or in a pane with no backdrop, is left as it was.
 
-const ModalRootBindings: Component<{ getEl: Accessor<HTMLElement | null | undefined>; mount: HTMLElement }> = (p) => {
-    usePaneOverlay(p.getEl);
+const ModalRootBindings: Component<{
+    getEl: Accessor<HTMLElement | null | undefined>;
+    /** The element whose rect is cut out of native browser panes: the root, or the panel of a modal with no backdrop. */
+    getClipEl: Accessor<HTMLElement | null | undefined>;
+    mount: HTMLElement;
+}> = (p) => {
+    usePaneOverlay(p.getClipEl);
     onMount(() => {
         const el = p.getEl();
         const stop = el ? carryPaneScope(el, p.mount) : undefined;
@@ -189,10 +194,14 @@ export interface ModalProps {
     /** Width preset. `fit` = auto. Default `md`. */
     size?: "sm" | "md" | "lg" | "xl" | "fit";
     /** Vertical placement of the panel. `center` (default) centers
-     *  with the grid; `top` anchors near the top of the region —
-     *  matches command-palette-style surfaces that drop down from
-     *  the top of the screen. */
-    placement?: "center" | "top";
+     *  with the grid; `top` anchors near the top of the region, 15% of
+     *  its height down; `dropdown` hangs from the top edge, horizontally
+     *  centred, like VS Code's command palette. */
+    placement?: "center" | "top" | "dropdown";
+    /** What is behind the panel. `dim` (default) dims and blurs the region; `none` leaves it as it was, and cuts
+     *  only the panel's own rectangle out of native browser panes. A click on the empty region still closes the
+     *  modal and does nothing else. The command palette hangs from the top bar this way. */
+    backdrop?: "dim" | "none";
     /** Optional extra class on the panel — lets a caller apply
      *  component-specific layout without sidestepping the primitive. */
     panelClass?: string;
@@ -241,6 +250,8 @@ export const Modal: Component<ModalProps> = (props) => {
 
     let panelRef: HTMLDivElement | undefined;
     let rootRef: HTMLDivElement | undefined;
+    // The airspace clip: the whole root, or only the panel when there is no backdrop to clip around.
+    const clipEl = () => (props.backdrop === "none" ? panelRef : rootRef);
     // Taking the caret on open and giving it back on close (modal-caret.ts).
     const caret = createModalCaret(
         () => panelRef,
@@ -266,17 +277,9 @@ export const Modal: Component<ModalProps> = (props) => {
     // whole window is easy to find in the DOM, and reported loudly in dev.
     const [fellBackFrom, setFellBackFrom] = createSignal<ModalScope | null>(null);
 
-    /**
-     * Resolve the scope this modal renders into. Returns the Portal
-     * mount node + the lock region (the element whose children get
-     * inerted and which the backdrop is sized to).
-     *
-     * - `window`: mount = window body; lock region = window body.
-     * - `tab`/`pane`: mount = lock region = the context-supplied node.
-     *   When no provider is present (or it has no node yet) we fall
-     *   back to window scope with a console.warn — an un-hosted scoped
-     *   modal is a wiring bug, not a crash.
-     */
+    // The scope this modal renders into: the Portal mount node and the lock region (inerted; the backdrop is sized to
+    // it). `window`: the window body for both. `tab`/`pane`: the context-supplied node for both; with no provider, or
+    // none yet, it falls back to window with a console.warn (an un-hosted scoped modal is a wiring bug, not a crash).
     const resolveScope = (): { scope: ModalScope; mount: HTMLElement; region: HTMLElement; fellBackFrom?: ModalScope } => {
         const requested = props.scope ?? "window";
         const fallback = (missing: string): string =>
@@ -354,6 +357,8 @@ export const Modal: Component<ModalProps> = (props) => {
     // in the stack, or shadowed by a higher overlapping modal, stay open.
     const handleKeyDown = (ev: KeyboardEvent): void => {
         if (ev.key !== "Escape") return;
+        // Escape while text is being composed (an IME) cancels the composition: it is not for the dialog.
+        if (ev.isComposing) return;
         if (props.closeOnEscape === false) return;
         if (!stackEntry || !isReachable(stackEntry)) return;
         ev.preventDefault();
@@ -414,6 +419,7 @@ export const Modal: Component<ModalProps> = (props) => {
                             data-scope={resolvedScope()}
                             data-scope-fallback={fellBackFrom() ?? undefined}
                             data-placement={props.placement ?? "center"}
+                            data-backdrop={props.backdrop === "none" ? "none" : undefined}
                             data-operator-only={props.operatorOnly || forcedOperatorOnly ? "" : undefined}
                             role="dialog"
                             aria-modal="true"
@@ -423,7 +429,7 @@ export const Modal: Component<ModalProps> = (props) => {
                             tabIndex={-1}
                             onKeyDown={handleKeyDown}
                         >
-                            <ModalRootBindings getEl={() => rootRef} mount={mount()} />
+                            <ModalRootBindings getEl={() => rootRef} getClipEl={clipEl} mount={mount()} />
                             <div class="modal-backdrop" onPointerDown={backdrop.press} onClick={backdrop.click} />
                             <span
                                 class="modal-focus-sentinel"

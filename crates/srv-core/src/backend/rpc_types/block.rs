@@ -858,6 +858,18 @@ pub struct CommandPaneOpenData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub target_block_id: Option<String>,
+    /// `Some(true)`: the person clicked a link in a message. A path in a folder a container agent can
+    /// write then opens as the agent's own `pane.open` shows it: a file as a read-only copy, a folder in a
+    /// Files pane confined to it. Any other path opens as asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub from_link: Option<bool>,
+    /// The block_id of a container agent's pane whose message the person clicked a file in (an inline picture
+    /// or video). The path is then taken as the agent wrote it and opened only from the agent's own folders, as
+    /// a read-only copy: a path anywhere else is refused with the reason. For any other pane it is ignored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub message_of: Option<String>,
     /// `view: "editor"` only: the opened image or video tab follows newer
     /// matching files in its folder (a render pipeline's output), as the
     /// retired Media pane did. Set by `OpenMedia` and `view: "media"`.
@@ -1218,6 +1230,8 @@ mod app_api_manifest_contract_tests {
             stack_onto_block_id: None,
             reuse_editor_pane: None,
             target_block_id: None,
+            from_link: None,
+            message_of: None,
             follow_folder: None,
             viewer: None,
             offset: None,

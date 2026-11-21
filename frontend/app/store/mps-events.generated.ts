@@ -43,6 +43,7 @@ import type { EndpointNoticeEvent } from "@/types/rpc/EndpointNoticeEvent";
 import type { EventsDroppedEvent } from "@/types/rpc/EventsDroppedEvent";
 import type { FileRenamedEvent } from "@/types/rpc/FileRenamedEvent";
 import type { FilesChangedEvent } from "@/types/rpc/FilesChangedEvent";
+import type { FleetBroadcastProgressEvent } from "@/types/rpc/FleetBroadcastProgressEvent";
 import type { FsOpEvent } from "@/types/rpc/FsOpEvent";
 import type { GoogleNoticeEvent } from "@/types/rpc/GoogleNoticeEvent";
 import type { GrantsEvent } from "@/types/rpc/GrantsEvent";
@@ -50,6 +51,7 @@ import type { IncidentEvent } from "@/types/rpc/IncidentEvent";
 import type { InputHistoryChangedEvent } from "@/types/rpc/InputHistoryChangedEvent";
 import type { InstallChunkEvent } from "@/types/rpc/InstallChunkEvent";
 import type { InstallProgressEvent } from "@/types/rpc/InstallProgressEvent";
+import type { JektHeldEvent } from "@/types/rpc/JektHeldEvent";
 import type { JobsChangedEvent } from "@/types/rpc/JobsChangedEvent";
 import type { LanDiscoverability } from "@/types/rpc/LanDiscoverability";
 import type { LanDiscoveryError } from "@/types/rpc/LanDiscoveryError";
@@ -79,6 +81,7 @@ import type { ProcessAddedEvent } from "@/types/rpc/ProcessAddedEvent";
 import type { ProcessExitedEvent } from "@/types/rpc/ProcessExitedEvent";
 import type { ProcessStatus } from "@/types/rpc/ProcessStatus";
 import type { ProtocolFrame } from "@/types/rpc/ProtocolFrame";
+import type { RecordFlagsEvent } from "@/types/rpc/RecordFlagsEvent";
 import type { ResumeRetryEvent } from "@/types/rpc/ResumeRetryEvent";
 import type { ReviewFlowEvent } from "@/types/rpc/ReviewFlowEvent";
 import type { RunEvent } from "@/types/rpc/RunEvent";
@@ -110,6 +113,7 @@ import type { WSFileEventData } from "@/types/rpc/WSFileEventData";
 import type { WidgetPackagesEvent } from "@/types/rpc/WidgetPackagesEvent";
 import type { WidgetRequestsEvent } from "@/types/rpc/WidgetRequestsEvent";
 import type { WidgetStorageEvent } from "@/types/rpc/WidgetStorageEvent";
+import type { WorkspaceStopView } from "@/types/rpc/WorkspaceStopView";
 
 /** Each typed broker event's payload, by its wire name. An event sent under a name per id
  *  (`agent:memory:changed:<agent id>`) is keyed by its prefix and any id. Subscribe with `onMuxEvent`. */
@@ -175,6 +179,7 @@ export type MuxEventPayloads = {
   "editor:file_changed": PathChangedEvent;
   "files:changed": FilesChangedEvent;
   "files:op": FsOpEvent;
+  fleetbroadcastprogress: FleetBroadcastProgressEvent;
   "fs:renamed": FileRenamedEvent;
   "google:notice": GoogleNoticeEvent;
   "history:sessions:changed": null;
@@ -184,6 +189,7 @@ export type MuxEventPayloads = {
   "incident:recorded": IncidentEvent;
   install_chunk: InstallChunkEvent;
   install_progress: InstallProgressEvent;
+  jektheld: JektHeldEvent;
   "jobs:changed": JobsChangedEvent;
   laninstances: LanInstanceList;
   "laninstances:error": LanDiscoveryError;
@@ -209,6 +215,7 @@ export type MuxEventPayloads = {
   "pins:changed": null;
   "processbroker:status-changed": ProcessStatus;
   "processbroker:tracked-blocks-changed": null;
+  "record-flags": RecordFlagsEvent;
   remoteschange: null;
   "review-flow": ReviewFlowEvent;
   "sensitive:cleared": SensitiveClearedEvent;
@@ -240,6 +247,7 @@ export type MuxEventPayloads = {
   widgetrequests: WidgetRequestsEvent;
   widgetstorage: WidgetStorageEvent;
   "workqueue:changed": null;
+  "workspace:stop": WorkspaceStopView;
   "ws:eventsdropped": EventsDroppedEvent;
   [event: `agent:memory:changed:${string}`]: null;
   [event: `agent_event:${string}`]: AgentEvent;
@@ -313,6 +321,7 @@ export const TYPED_MUX_EVENTS = [
   "editor:file_changed",
   "files:changed",
   "files:op",
+  "fleetbroadcastprogress",
   "fs:renamed",
   "google:notice",
   "history:sessions:changed",
@@ -322,6 +331,7 @@ export const TYPED_MUX_EVENTS = [
   "incident:recorded",
   "install_chunk",
   "install_progress",
+  "jektheld",
   "jobs:changed",
   "laninstances",
   "laninstances:error",
@@ -347,6 +357,7 @@ export const TYPED_MUX_EVENTS = [
   "pins:changed",
   "processbroker:status-changed",
   "processbroker:tracked-blocks-changed",
+  "record-flags",
   "remoteschange",
   "review-flow",
   "sensitive:cleared",
@@ -378,6 +389,7 @@ export const TYPED_MUX_EVENTS = [
   "widgetrequests",
   "widgetstorage",
   "workqueue:changed",
+  "workspace:stop",
   "ws:eventsdropped",
 ] as const;
 

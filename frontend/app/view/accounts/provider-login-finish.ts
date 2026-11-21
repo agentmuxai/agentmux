@@ -79,8 +79,11 @@ function finishSignedIn(s: LoginState, linkConfirmed: boolean): void {
     }
     void refreshAccountCache();
     unlinkStaleAlias(s);
-    s.setDone(true);
+    // No "signed in" step to read and dismiss: the pane or card the sign-in was opened from shows it worked. The
+    // login is over, so it is not in flight: closing now must not be taken for abandoning one (the panel's cleanup).
+    s.setInFlight(false);
     s.props.onSignedIn?.(accountId);
+    s.props.onClose();
 }
 
 /**

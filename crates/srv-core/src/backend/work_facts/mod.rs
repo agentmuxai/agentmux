@@ -84,7 +84,16 @@ pub struct WorkFacts {
     /// agents' builds and tests wait behind it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub build_slot: Option<BuildSlotHold>,
+    /// Where the agent runs: [`RUNS_ON_HOST`] or [`RUNS_IN_CONTAINER`]. `None` from an AgentMux that does
+    /// not say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runs_in: Option<String>,
 }
+
+/// [`WorkFacts::runs_in`] of an agent that runs as a process of this machine.
+pub const RUNS_ON_HOST: &str = "host";
+/// [`WorkFacts::runs_in`] of an agent that runs in a container.
+pub const RUNS_IN_CONTAINER: &str = "container";
 
 /// How long and why an agent has held the build slot.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,6 +110,13 @@ impl WorkFacts {
     /// `owner/repo` of its origin, else (no remote) the clone's own folder.
     pub fn repo_key(&self) -> Option<String> {
         self.repo.clone().or_else(|| self.repo_root.as_ref().map(|r| format!("local:{r}")))
+    }
+
+    /// Whether the AgentMux of `channel` may run git in this agent's clone. It does for its own agents,
+    /// whose folders it knows (a container agent's is read inside its container), and for an agent of
+    /// another AgentMux only when that one says it runs on the host.
+    pub fn clone_is_read_by(&self, channel: &str) -> bool {
+        self.channel == channel || self.runs_in.as_deref() == Some(RUNS_ON_HOST)
     }
 }
 
@@ -160,6 +176,8 @@ pub fn collect_local(store: &Store, regs: &[AgentRegistration], channel: &str) -
             facts.build_slot = build_slot_of(slot.as_ref(), &reg.agent_id, || {
                 crate::backend::spawn_env::identity::block_agent_slug(store, &reg.block_id)
             });
+            let in_container = crate::backend::runtime_adapter::RuntimeKind::of_block_meta(&meta).is_container();
+            facts.runs_in = Some(if in_container { RUNS_IN_CONTAINER } else { RUNS_ON_HOST }.to_string());
             facts
         })
         .collect()
@@ -216,6 +234,7 @@ pub fn build(
         current_tool: watched.progress.current_tool,
         git_checked_ms: (git.checked_ms > 0).then_some(git.checked_ms),
         build_slot: None,
+        runs_in: None,
     }
 }
 
@@ -292,6 +311,20 @@ mod tests {
         // Cleared, it falls back to what it did before.
         let cleared = meta(&[("term:live_phrase", ""), ("term:ambient_summary", "Fix the login race")]);
         assert_eq!(goal_of(&cleared).as_deref(), Some("Fix the login race"));
+    }
+
+    #[test]
+    fn git_is_run_in_another_agentmuxs_clone_only_for_an_agent_that_says_it_runs_on_the_host() {
+        let facts = |channel: &str, runs_in: Option<&str>| WorkFacts {
+            channel: channel.to_string(),
+            runs_in: runs_in.map(str::to_string),
+            ..Default::default()
+        };
+        assert!(facts("stable", Some(RUNS_IN_CONTAINER)).clone_is_read_by("stable"), "its own agent: read where its folder's git runs");
+        assert!(facts("stable", None).clone_is_read_by("stable"));
+        assert!(facts("dev", Some(RUNS_ON_HOST)).clone_is_read_by("stable"));
+        assert!(!facts("dev", Some(RUNS_IN_CONTAINER)).clone_is_read_by("stable"));
+        assert!(!facts("dev", None).clone_is_read_by("stable"), "an AgentMux that does not say is not read");
     }
 
     #[test]

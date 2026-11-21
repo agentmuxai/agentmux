@@ -1,6 +1,6 @@
 # Spec: a streamed Browser pane in the web UI of a headless AgentMux server (task #18045, the demo)
 
-**Status:** active - slice 1 (the server side and the probe) shipped in PR #7484; slice 2 (the pane in the web UI) is in review; the demo image and its how-to are not started.
+**Status:** active - slice 1 (the server side and the probe) shipped in PR #7484 and slice 2 (the pane in the web UI) in PR #7528; the address proxy, the environment allow-list, blocked schemes and the sandbox log line (section 12) are the work that lets it run in a hosted workspace for a trial.
 Owner: Korp@narko. Srv side reviewed by AgentA@Area54; pane code by Camper@narko. Security conditions: AgentY@narko.
 
 **The operator's words (via AgentY, 2026-11-15):** "the streamed browser spec is for loading a browser pane inside the agentmux web interface? lets proceed with the spike, it would be cool to see that work".
@@ -99,3 +99,14 @@ The spike's resize cells failed with no first-frame time; the likely cause is th
 - AgentA: a new module `crates/srv/src/server/streamed_browser/` plus one `mod` line and one route in `routes.rs`: acceptable? Anything that route-class test or the Host/Origin checks need that the `/ws` pattern does not already give?
 - Camper: the one branch in `browser-view.tsx` and the new folder under `view/browser/streamed/`: anything in the pane's block lifecycle (close, move between tabs, the `url` meta) that a socket-backed pane must handle?
 - Parlo: a container on charlie with Chromium and no screen, Docker's default network (no published port), for the probe and the demo.
+
+## 12. Where a page may connect, and what the browser gets (trial in a hosted workspace)
+
+Added with the work that lets the pane run in a hosted workspace for a trial. Behaviour only; off unless `AGENTMUX_STREAMED_BROWSER=1`.
+
+- **One way out.** srv starts a small SOCKS5 proxy on the loopback address and starts Chromium with it as its only route (`--proxy-server`, loopback not bypassed, a local name lookup made to fail, no QUIC, WebRTC limited to proxied traffic, no DNS prefetch, no debugging port: the CDP pipe only). If the proxy cannot start, Chromium does not start.
+- **What the proxy refuses.** It resolves a name itself, judges every address the name gave (one refused address refuses the name) and connects to an address it judged, never resolving again. Refused: srv's own listening ports (and any port in `AGENTMUX_STREAMED_BROWSER_DENY_PORTS`, a comma-separated list the server's own process reads) on every loopback form, every private, link-local (the cloud metadata addresses among them), shared, documentation, multicast and reserved range, IPv6 forms that carry an IPv4 address, and port 0. Allowed: the public internet, and other loopback ports (a development server in the same workspace). Only `CONNECT` is served. The rules are in `address_policy.rs` and tested by the guarantee they give: a page cannot reach the metadata address, a private range, srv's own ports, or a name that answers with a public address first and a private one later.
+- **Schemes.** The address bar takes only http and https. A page cannot load `file:`, `chrome:`, `chrome-untrusted:`, `chrome-extension:`, `devtools:` or `view-source:` in any frame or as any request (`Network.setBlockedURLs`).
+- **Environment.** Chromium gets `PATH`, `HOME`, `USER`, `LOGNAME`, the locale and time-zone variables, `TMPDIR` and the fontconfig paths, and nothing else: none of srv's variables, no cloud credential variable, no injected secret.
+- **Sandbox.** Chromium starts with its own sandbox unless the server is started with `AGENTMUX_STREAMED_BROWSER_NO_SANDBOX=1`. srv logs one line either way: `Chromium started with its sandbox ON` or `OFF`, or, when it did not start, the last lines Chromium printed and whether the sandbox was asked for. The no-sandbox variable is for a server whose host cannot give Chromium the sandbox; it is a decision of the person who runs the server.
+- **Agents.** The route stays the signed-in person's: a container agent is refused in words. Agents driving a streamed pane (who drives, handoff, the `Browser` tool) is the next slice, because container agents are the standard and the agent path has to exist.

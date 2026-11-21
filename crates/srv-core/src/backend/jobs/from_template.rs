@@ -104,7 +104,7 @@ pub(crate) fn apply_with(def: &mut Value, previous: Option<&TemplateRef>, svc: &
         set_brief(obj, &approved, &rendered.brief);
     }
     if previous.is_none() {
-        fill_defaults(obj, &approved);
+        fill_defaults(obj, &approved, &rendered.params)?;
     } else if moved {
         let overlay = overlay_policy(obj.get("policy"), template_policy(&approved).as_ref());
         obj.insert("policy".into(), overlay);
@@ -150,12 +150,15 @@ fn set_brief(obj: &mut Map<String, Value>, t: &ApprovedTemplate, brief: &str) {
 
 /// What a create leaves out, from the template: the name, the trigger and the
 /// policy. The request's own fields win.
-fn fill_defaults(obj: &mut Map<String, Value>, t: &ApprovedTemplate) {
+fn fill_defaults(obj: &mut Map<String, Value>, t: &ApprovedTemplate, params: &Map<String, Value>) -> Result<(), String> {
     if obj.get("name").and_then(Value::as_str).is_none_or(|n| n.trim().is_empty()) {
         obj.insert("name".into(), Value::String(t.manifest.name.clone()));
     }
     if obj.get("trigger").is_none_or(Value::is_null) {
-        obj.insert("trigger".into(), t.manifest.trigger.clone().unwrap_or_else(|| json!({ "kind": "manual" })));
+        // A Drone template's trigger may name its parameters (the repository a poll asks about is the one the graph's calls name).
+        let mut trigger = t.manifest.trigger.clone().unwrap_or_else(|| json!({ "kind": "manual" }));
+        jt::graph::render_value(&mut trigger, params)?;
+        obj.insert("trigger".into(), trigger);
     }
     if let Some(defaults) = template_policy(t) {
         let own = obj.get("policy").cloned();
@@ -169,6 +172,7 @@ fn fill_defaults(obj: &mut Map<String, Value>, t: &ApprovedTemplate) {
         }
         obj.insert("action".into(), Value::Object(action));
     }
+    Ok(())
 }
 
 /// Policy settings this build can't run yet (`cron::runnable_yet`). A

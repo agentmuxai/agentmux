@@ -158,6 +158,18 @@ srv never runs a shell. A recipe is an argument vector; placeholders `{reason}`,
 - **The person is told, not asked:** the grant exists because the person wrote it into the policy. There is no per-use approval prompt, which would make an agent wait for a human at 3 a.m. and would count as an operator-only gate. Visibility is the Audit view, the pane row, and, for a fleet, the cloud account's own record (§13).
 - `GET /api/v1/aws/credentials/status` is not added. `audit.query` already reads the rows.
 
+### 9a. A change to the grants file is recorded, and a new or wider grant is held
+
+Anything that can write the grants file can add or widen a grant, so the broker makes a change to it visible and keeps it from working unseen. It keeps one small file beside the grants file, `aws-grants.record.json`: the hash of the grants file as last read and, per grant, a summary (tier, agents, switched off or not, reason needed, longest session, hourly cap, and a short fingerprint of the recipe, never the recipe or any credential), what was last allowed, and the recorded change that last touched it.
+
+- **Baseline.** The first time the broker reads a grants file it has no record of, it records that file as the baseline: every grant in it counts as allowed, and one Audit row (action `aws.grants`) says so. An upgrade therefore changes nothing for a host that already had grants.
+- **A change is compared with the record** when the file's size or time changes, whether or not a container is asking (srv checks every 15 seconds and on each request). A file whose grants have not changed records nothing.
+- **Added, removed, widened, narrowed** are each an Audit row naming the grant and what changed (never a credential). A grant is **wider** when its tier goes from read to write, it names more agents or every agent, its recipe differs, it is switched back on, it no longer needs a reason, its sessions get longer or its hourly cap higher. Wider in one thing and narrower in another is wider. A new grant that is switched off waits for nothing (it cannot mint); switching it on is a widening.
+- **A new or wider grant is held:** the broker refuses it with `GRANT_HELD` (no session is minted, the agent's pane says so) until it is allowed. A removed or narrower grant is in force at once. Putting a held grant back as it was lifts the hold.
+- **Allowing it** is an agent API, not a person-only gate: `GET /api/v1/aws/grants` lists each grant with its state (honoured, held or refused), when it was added and by which recorded change, and who allowed it and why; `POST /api/v1/aws/grants/decide` takes the grant, the change the answerer read, `allow` or `remove`, and a reason, and records it under the answerer's name in the record and the Audit view. The `Identity` tool's `aws_grants` and `aws_grant` actions call them. A container agent may read the list but cannot answer, since it is the agent a grant is for. `remove` keeps the grant refused until the file changes again; it does not edit the grants file.
+- **A record that cannot be read** (it exists and does not parse) holds every grant rather than none, so a damaged record never lets a grant through; the broker says so in its log, and deleting the record makes the next read a new baseline.
+- **What this does not do:** it does not stop a process that can write the grants file; it makes what it did visible, and keeps it from working until an agent or a person has answered. A process that also rewrites the record file defeats it, which is the same trust a host has in the processes of its own user.
+
 ## 10. How a refusal reads
 
 The text goes to the SDK's stderr through `credential_process`; the AWS CLI prints it after "Error when retrieving credentials from custom-process:". Each says what happened and what to do, in one or two sentences:
@@ -172,7 +184,7 @@ The text goes to the SDK's stderr through `credential_process`; the AWS CLI prin
 | `AWS_HOST_LOGIN_NEEDED` | "The host's AWS login for 'work' has lapsed. A person runs `aws sso login --profile work` on this computer." |
 | `AWS_CLI_MISSING` | "This computer has no AWS CLI (v2.9 or newer), which the 'read' grant uses. Install it, or use a grant with a command recipe." |
 | `AWS_HOST_REFUSED` | "The host's AWS refused: <its message, first 400 characters>" |
-| `AWS_TOOK_TOO_LONG` | "AWS credentials took too long (25 s). Try again in a minute." |
+| `AWS_TOOK_TOO_LONG` | "AWS credentials took too long (50 s). Try again in a minute." |
 | `NATIVE_AGENT` | "This is for container agents. A native agent has the host's own AWS setup." |
 
 A person with no AWS at all gets `AWS_NOT_SHARED` first, and, with a policy but no AWS CLI on the host, `AWS_CLI_MISSING`. Neither falls back to another credential, the way the GitHub path never does.
@@ -201,7 +213,7 @@ The grants for our own fleet (which cloud roles, accounts, escalation tiers and 
 - **srv's own AWS identity is never given out.** A `host_profile` recipe returns the profile's credentials, so a policy must not name a profile that can do more than the agents should (a person's administrator profile). The policy docs say so, and the example uses a read profile.
 - **No shell, no argument injection:** placeholders substitute whole arguments (§7); the grant name is a closed pattern; the reason is cleaned; a `command` recipe's argv is the person's own text in a file only they edit.
 - **No credential in logs, errors, Audit, pane rows or the debug log.** A test greps all of them for a planted secret (§15).
-- **Residual risk:** an agent that can write the policy file can grant itself access. The policy file is on the host, outside the container's mounts; a container agent cannot reach it. A *native* agent can edit it, as it can edit any file of the person's; that is the existing trust between a person and the native agents on their host.
+- **Residual risk:** an agent that can write the policy file can grant itself access, but a change to it is recorded and a new or wider grant is held until it is answered (§9a). The policy file is on the host, outside the container's mounts; a container agent cannot reach it. A *native* agent can edit it, as it can edit any file of the person's; that is the existing trust between a person and the native agents on their host.
 
 ## 15. Tests (fail first)
 

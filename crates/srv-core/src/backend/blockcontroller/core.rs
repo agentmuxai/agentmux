@@ -307,7 +307,7 @@ pub fn persist_last_failure(
     let failure = enriched.as_ref();
     // A usage limit with a known reset gets its wake (`limit_wake`).
     if let Some(f) = failure {
-        crate::backend::limit_wake::on_failure(block_id, f);
+        crate::backend::limit_wake::on_failure(block_id, f, store);
     }
     // Logged only for `Some` — this is also called with `None` after every
     // clean turn, and that is not an event worth a line.

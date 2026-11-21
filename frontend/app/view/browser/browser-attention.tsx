@@ -6,6 +6,7 @@
 import { createSignal, For, Match, Show, Switch, type Accessor, type JSX } from "solid-js";
 import { Button } from "@/app/element/ui";
 import { tip } from "@/app/element/tip";
+import { agentDisplayName, followAgentNames } from "@/app/store/agent-names";
 import { attentionLook, dialogMessage } from "./attention-kinds";
 import { asksEachLine, hasEnterSpacePower, hasTerminalPower, hasUploadsPower, LATE_PROMPT_LIMIT, LINE_PREVIEW_CHARS, minutesLabel, siteLabel } from "./bypass";
 import type { BrowserViewModel } from "./browser-model";
@@ -17,6 +18,7 @@ type LineView = { open: Accessor<boolean>; setOpen: (open: boolean) => void };
 export function BrowserAttentionBanner(props: { model: BrowserViewModel; attention: Accessor<BrowserAttention> }): JSX.Element {
     const a = props.attention;
     const [open, setOpen] = createSignal(false);
+    followAgentNames();
     return (
         <div
             class="browser-attention"
@@ -41,7 +43,7 @@ function AttentionHead(props: Part): JSX.Element {
             <Switch
                 fallback={
                     <span>
-                        <b>{a().agent || "An agent"}</b>{" "}
+                        <b>{agentDisplayName(a().agent ?? "") || "An agent"}</b>{" "}
                         {a().kind === "handoff"
                             ? "needs you: "
                             : a().kind === "bypass"
@@ -54,13 +56,13 @@ function AttentionHead(props: Part): JSX.Element {
                 <Match when={attentionLook(a()).text}>{(text) => <span>{text()}</span>}</Match>
                 <Match when={a().kind === "line"}>
                     <span>
-                        <b>{a().agent || "An agent"}</b> typed a line in the terminal on <b>{siteLabel(a().origin ?? "")}</b> and wants to run it
+                        <b>{agentDisplayName(a().agent ?? "") || "An agent"}</b> typed a line in the terminal on <b>{siteLabel(a().origin ?? "")}</b> and wants to run it
                         {a().reason ? <>: {a().reason}</> : null}
                     </span>
                 </Match>
                 <Match when={a().kind === "take"}>
                     <span>
-                        <b>{a().agent || "An agent"}</b> wants to drive this pane
+                        <b>{agentDisplayName(a().agent ?? "") || "An agent"}</b> wants to drive this pane
                         {a().reason ? <> ({a().reason})</> : null}
                     </span>
                 </Match>
@@ -85,7 +87,7 @@ function AttentionHead(props: Part): JSX.Element {
                         {a().agent ? (
                             <>
                                 {" "}
-                                (after <b>{a().agent}</b>'s action)
+                                (after <b>{agentDisplayName(a().agent ?? "")}</b>'s action)
                             </>
                         ) : null}
                         :
@@ -262,7 +264,7 @@ function AttentionActions(props: Part & LineView & { model: BrowserViewModel }):
                     title="Keep this: it is added to Settings, Agents on sites, where you can revoke it"
                     onClick={() => model.resolveAttention("approve_always").catch(() => {})}
                 >
-                    Always for {a().agent ?? "this agent"} on this site
+                    Always for {a().agent ? agentDisplayName(a().agent ?? "") : "this agent"} on this site
                 </Button>
             </Show>
             <Button

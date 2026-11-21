@@ -78,6 +78,22 @@ export async function checkForUpdate(): Promise<void> {
     if (viaStore()) await askStore();
 }
 
+/**
+ * Whether the person's Check for update, having found a release, goes on to download it: one click for "find it and
+ * fetch it"; the restart that installs it stays a click of its own. Only this window's click chains into the
+ * download: srv's check command stays read-only, so an agent asking for a check starts nothing. Not for a Store
+ * install (the Store downloads), an install that can't download itself or must install an earlier version first, a
+ * release that already has a download (running, staged or failed: the panel's Retry stays the way back), or when the
+ * person turned `update:autodownload` off, which keeps the Download button as the second step.
+ */
+export function downloadFollowsCheck(
+    s: AppUpdateStatus | null = appUpdate(),
+    autodownload: boolean = getSettingsKeyAtom("update:autodownload")() !== false,
+): boolean {
+    if (!autodownload || viaStore(s) || !s?.can_download || s.install_first) return false;
+    return availableRelease(s) !== null && releaseDownload(s) === null;
+}
+
 /** Ask srv for the status now (a window opened after the last event). */
 export async function loadAppUpdate(): Promise<void> {
     try {
@@ -234,6 +250,11 @@ export function acceptStoreProgress(next: unknown): void {
     // While the Store asks, its own earlier states (pending, a finished download) don't take the question off the row.
     if (storeProgress()?.phase === "asking" && (p.phase === "pending" || p.phase === "downloading")) return;
     const percent = typeof p.percent === "number" && Number.isFinite(p.percent) ? Math.max(0, Math.min(100, Math.round(p.percent))) : null;
+    // Within one download the figure only goes forward: a report that reads lower than the last one (an out-of-order
+    // event, a Store that restarts its count for the next package) or has no figure is dropped, not shown. A new
+    // download starts from `pending` or from a cleared row (setStoreProgress(null)), never from the last one's figure.
+    const last = storeProgress();
+    if (p.phase === "downloading" && last?.phase === "downloading" && last.percent !== null && (percent === null || percent < last.percent)) return;
     setStoreProgress({ phase: p.phase as StoreProgress["phase"], percent, doneBytes: Number(p.doneBytes) || 0, totalBytes: Number(p.totalBytes) || 0 });
 }
 

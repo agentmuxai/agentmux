@@ -33,7 +33,7 @@ export function WidgetsSection(): JSX.Element {
     const s = createWidgetsSection();
     const { error, setAsking } = s;
     return (
-        <div class="settings-section-body widgets-section">
+        <div class="settings-section-body settings-section-body--single widgets-section">
             <WidgetBarSettings />
             <SectionHeader label={WIDGETS_SETTINGS.installed.label} />
             <div id={`setting-${WIDGETS_SETTINGS.installed.id}`} class="setting-row">

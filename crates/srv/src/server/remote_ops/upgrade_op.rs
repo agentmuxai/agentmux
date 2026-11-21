@@ -17,13 +17,19 @@ use crate::backend::upgrade_request::{self, Outcome};
 
 /// The request owner for a remote caller: not an agent here, so no local uid stands in for it.
 fn owner(caller: &RemoteCaller) -> String {
-    format!("remote:{}", caller.actor())
+    format!("{}{}", crate::backend::sensitive_requests::REMOTE_OWNER_PREFIX, caller.actor())
 }
 
 pub(super) async fn upgrade(state: &AppState, caller: &RemoteCaller, params: Value) -> RemoteResult {
     let uid = owner(caller);
     if let Some(id) = params.get("status").and_then(Value::as_str) {
-        return crate::server::sensitive_handlers::status_for(&uid, id).map_err(RemoteRefusal::failed);
+        let mut shown = crate::server::sensitive_handlers::status_for(&uid, id).map_err(RemoteRefusal::failed)?;
+        // How the restart stands is here too: its state, and when and why it was not confirmed. The requester's
+        // own machine reads this to tell it how the request ends (`upgrade_watch`).
+        if let (Some(d), Value::Object(map)) = (crate::backend::update::check::current_status().download, &mut shown) {
+            map.insert("restart".into(), super::app_ops::download_summary(&d));
+        }
+        return Ok(shown);
     }
     let reason = params.get("reason").and_then(Value::as_str).map(str::trim).filter(|r| !r.is_empty()).unwrap_or_else(|| caller.reason.trim());
     if reason.is_empty() {

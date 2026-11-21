@@ -35,6 +35,7 @@ vi.mock("@/app/store/rpc-api", () => {
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import { registerPane, unregisterPane } from "@/app/store/agent-pane-registration";
+import { __resetStreamSchedulerForTests } from "./stream-scheduler";
 import { useAgentStream } from "./useAgentStream";
 
 const BLOCK = "stream-golden";
@@ -180,12 +181,21 @@ function run(session: Array<() => void> = SESSION, format: { outputFormat: strin
 describe("useAgentStream, pinned", () => {
     beforeEach(() => {
         rpcLog.length = 0;
-        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date", "requestAnimationFrame", "cancelAnimationFrame"] });
-        vi.setSystemTime(new Date("2026-11-03T10:00:00Z"));
+        // `now` at install, not `setSystemTime` after it: the fake animation frames land on 16 ms steps counted from
+        // the install time, so a clock set later left their phase on the real time the test started at.
+        vi.useFakeTimers({
+            now: new Date("2026-11-03T10:00:00Z"),
+            toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date", "requestAnimationFrame", "cancelAnimationFrame"],
+        });
+        // The stream scheduler reads `performance.now()` to decide when a pane is due; on the real clock the frame a
+        // message lands in, and so its timestamp, varied from run to run. It follows the fake clock here.
+        vi.spyOn(performance, "now").mockImplementation(() => Date.now() - 1793700000000);
+        __resetStreamSchedulerForTests(); // a frame left pending by an earlier run is not this run's
         vi.spyOn(Math, "random").mockReturnValue(0.123456789);
     });
     afterEach(() => {
         cleanup();
+        __resetStreamSchedulerForTests();
         unregisterPane(BLOCK);
         listeners.length = 0;
         vi.useRealTimers();

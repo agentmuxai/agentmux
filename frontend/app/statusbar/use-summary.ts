@@ -12,6 +12,8 @@ import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import type { UseRequest } from "@/types/rpc/UseRequest";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
 import { createMemo, type Accessor } from "solid-js";
+import type { JektHeldAgent } from "@/types/rpc/JektHeldAgent";
+import { useHeldMessages } from "./held-messages";
 import { summarize, type Summary } from "./summary";
 
 export interface SummaryStatusProps {
@@ -23,6 +25,8 @@ export interface SummaryStatusProps {
     requests?: Accessor<VaultRequest[]>;
     /** How many Kanban tasks need the person (the Kanban pane's own count); default is the live one. */
     tasks?: Accessor<number>;
+    /** Messages held for agents, as srv counts them; default is the live ones. */
+    held?: Accessor<JektHeldAgent[]>;
     /** The asks that ended lately; default is the window's ring, kept to two minutes. */
     ended?: Accessor<EndedAsk[]>;
 }
@@ -30,11 +34,15 @@ export interface SummaryStatusProps {
 /** The summary of what waits on the person, from what this window already knows. */
 export function useSummary(props: SummaryStatusProps): Accessor<Summary> {
     const tasks = props.tasks ?? useKanbanNeeds();
+    const held = props.held ?? useHeldMessages();
     // The two minutes move on by themselves: a row of the ended list leaves when its time is up.
     const tick = useTick(5_000);
-    return createMemo(() =>
-        summarize({
-            running: runtimeCounts((props.rows ?? sharedAttentionRows)()).running,
+    return createMemo(() => {
+        const rows = (props.rows ?? sharedAttentionRows)();
+        return summarize({
+            running: runtimeCounts(rows).running,
+            agents: rows,
+            held: held(),
             items: (props.items ?? attentionItems)(),
             apps: (props.apps ?? waitingApps)(),
             // A reply that leaves a list out must not stop the summary: it is where a waiting request is found.
@@ -42,6 +50,6 @@ export function useSummary(props: SummaryStatusProps): Accessor<Summary> {
             requests: (props.requests ?? vaultRequests)() ?? [],
             tasks: tasks(),
             ended: props.ended ? props.ended() : endedAsks((tick(), Date.now())),
-        })
-    );
+        });
+    });
 }

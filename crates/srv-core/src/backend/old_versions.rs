@@ -62,7 +62,13 @@ impl Default for Policy {
 impl Policy {
     /// The policy the settings ask for; a missing or mistyped key keeps its default.
     pub fn from_extra(extra: &HashMap<String, serde_json::Value>) -> Self {
-        let d = Self::default();
+        Self::from_extra_for(extra, false)
+    }
+
+    /// [`from_extra`](Self::from_extra), where a hosted workspace removes by default: its volume is the person's and
+    /// every pin move adds a folder to it. An explicit `oldversions:clean` still wins.
+    pub fn from_extra_for(extra: &HashMap<String, serde_json::Value>, hosted: bool) -> Self {
+        let d = Self { clean: hosted, ..Self::default() };
         let num = |key: &str| extra.get(key).and_then(|v| v.as_f64()).filter(|n| n.is_finite() && *n >= 0.0);
         Self {
             clean: extra.get(KEY_CLEAN).and_then(|v| v.as_bool()).unwrap_or(d.clean),

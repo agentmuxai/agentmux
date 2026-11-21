@@ -25,7 +25,9 @@
 
 use crate::runtime_mode::{appimage_channel_file, read_channel_file};
 use serde::{Deserialize, Serialize};
+use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 /// The record, in the account-wide `shared` folder.
 pub const RECORD_FILE: &str = "appimage-channels.json";
@@ -139,13 +141,52 @@ pub fn lookup(record: &Path, appimage: &Path) -> Option<Found> {
         .map(|r| Found { channel: r.channel, was_at: r.path })
 }
 
+/// How long a writer waits for another's turn. A turn is one small file's read and atomic replace.
+const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
+const LOCK_RETRY: Duration = Duration::from_millis(10);
+
+/// The lock file beside the record, held until the returned file is dropped. An OS file lock
+/// (`LockFileEx` / `flock`, through `std`) binds one open handle, so it keeps writers apart in this process as
+/// well as in other AgentMux instances, and the OS drops it if its holder dies. The file is never removed:
+/// deleting it while another writer waits would give two writers two different locks.
+fn lock_record(record: &Path, timeout: Duration) -> std::io::Result<File> {
+    if let Some(dir) = record.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let mut name = record.file_name().map(std::ffi::OsString::from).unwrap_or_else(|| RECORD_FILE.into());
+    name.push(".lock");
+    #[allow(clippy::suspicious_open_options)]
+    let file = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(record.with_file_name(name))?;
+    let started = Instant::now();
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(file),
+            Err(TryLockError::WouldBlock) if started.elapsed() < timeout => std::thread::sleep(LOCK_RETRY),
+            Err(TryLockError::WouldBlock) => {
+                return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "the AppImage channel record is locked by another start"))
+            }
+            Err(TryLockError::Error(e)) => return Err(e),
+        }
+    }
+}
+
 /// Remember that the file at `appimage` runs in `channel`.
+///
+/// The whole read, change and write is one turn under [`lock_record`]: without it two starts at once each read
+/// the same records and the later write drops the earlier one's entry. When the lock can't be had (another
+/// start holds it for longer than [`LOCK_TIMEOUT`]) nothing is written, and the entry comes back from the
+/// record beside the file at its next start.
 pub fn remember(record: &Path, appimage: &Path, channel: &str) -> std::io::Result<()> {
+    remember_within(record, appimage, channel, LOCK_TIMEOUT)
+}
+
+fn remember_within(record: &Path, appimage: &Path, channel: &str, timeout: Duration) -> std::io::Result<()> {
     if !plain_channel(channel) {
         return Ok(());
     }
     let Some(id) = file_id(appimage) else { return Ok(()) };
     let path = appimage.to_string_lossy().into_owned();
+    let _turn = lock_record(record, timeout)?;
     let (mut records, writable) = load(record);
     if !writable {
         return Ok(());

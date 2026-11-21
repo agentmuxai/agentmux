@@ -113,10 +113,19 @@ describe("the chip", () => {
 
     it("says the route's balance stopped the agent, not its cap, when it did", () => {
         const today = { spent: 4.2, cap: 20 };
-        expect(spendChipTitle(today)).toContain("daily cap of $20");
+        expect(spendChipTitle(today)).toContain("daily cap is $20");
         const title = spendChipTitle(today, true);
         expect(title).toContain("no credits left, not by a cap");
         expect(title).not.toContain("$20");
+    });
+
+    it("says which traffic the figure counts, and offers the click only when the chip takes one", () => {
+        const today = { spent: 4.2, cap: 20 };
+        expect(spendChipTitle(today)).toContain("model route or an API key");
+        expect(spendChipTitle(today)).not.toContain("Click");
+        expect(spendChipTitle(today, false, true)).toContain("Click to change its cap.");
+        expect(spendChipTitle({ spent: 1, cap: null }, false, true)).toContain("It has no daily cap. Click to change its cap.");
+        expect(spendChipTitle(today, true, true)).not.toContain("Click");
     });
 
     it("warns from 80% and is an error at the cap", () => {

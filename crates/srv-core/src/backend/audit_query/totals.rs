@@ -85,7 +85,7 @@ fn add_activity(sum: &mut AuditTotals, src: &Sources, filter: &Filter) {
 
 /// Adds to `sum` what `scan` finds in the file at `path` for `filter`: `scan(from, sum)` reads from byte `from` and
 /// returns where it ended.
-fn add_file(sum: &mut AuditTotals, path: &Path, filter: &Filter, scan: impl Fn(u64, &mut AuditTotals) -> Option<u64>) {
+fn add_file(sum: &mut AuditTotals, path: &Path, filter: &Filter, scan: impl Fn(u64, &mut AuditTotals) -> std::io::Result<u64>) {
     let key = format!("{}|{}", path.display(), filter.key());
     let (mut read, mut from_file) = (0u64, AuditTotals::default());
     let mut guard = KEPT_SUMS.lock().unwrap_or_else(|e| e.into_inner());
@@ -100,7 +100,7 @@ fn add_file(sum: &mut AuditTotals, path: &Path, filter: &Filter, scan: impl Fn(u
     // otherwise be counted again from the old position next time.
     let mut scanned = from_file.clone();
     match scan(read, &mut scanned) {
-        Some(end) => {
+        Ok(end) => {
             let (read, from_file_now) = (end, scanned);
             let mut guard = KEPT_SUMS.lock().unwrap_or_else(|e| e.into_inner());
             let map = guard.get_or_insert_with(HashMap::new);
@@ -113,7 +113,13 @@ fn add_file(sum: &mut AuditTotals, path: &Path, filter: &Filter, scan: impl Fn(u
             map.insert(key, Kept { read, sum: from_file_now.clone(), used });
             from_file = from_file_now;
         }
-        None => tracing::warn!(path = %path.display(), "audit.query totals: the audit file couldn't be read to its end; answering from what was read before"),
+        // A day file that went away between listing and opening (rotated or pruned) has nothing to add: not a warning.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            tracing::debug!(path = %path.display(), "audit.query totals: the audit file is gone; answering from what was read before")
+        }
+        Err(e) => {
+            tracing::warn!(path = %path.display(), error = %e, "audit.query totals: the audit file couldn't be read to its end; answering from what was read before")
+        }
     }
     sum.entries += from_file.entries;
     sum.input += from_file.input;
@@ -126,7 +132,7 @@ fn add_file(sum: &mut AuditTotals, path: &Path, filter: &Filter, scan: impl Fn(u
     sum.estimated |= from_file.estimated;
 }
 
-fn scan_into(path: &Path, from: u64, filter: &Filter, sum: &mut AuditTotals) -> Option<u64> {
+fn scan_into(path: &Path, from: u64, filter: &Filter, sum: &mut AuditTotals) -> std::io::Result<u64> {
     let ctx = no_links();
     jekt_file::scan(path, from, |raw: crate::backend::reactive::types::AuditLogEntry| {
         let e = from_audit(0, &raw, &ctx);
@@ -134,15 +140,51 @@ fn scan_into(path: &Path, from: u64, filter: &Filter, sum: &mut AuditTotals) -> 
             add(sum, &e);
         }
     })
-    .ok()
 }
 
-fn scan_activity(path: &Path, day: &str, from: u64, filter: &Filter, ctx: &Ctx, sum: &mut AuditTotals) -> Option<u64> {
+fn scan_activity(path: &Path, day: &str, from: u64, filter: &Filter, ctx: &Ctx, sum: &mut AuditTotals) -> std::io::Result<u64> {
     jekt_file::scan(path, from, |row: ActivityRow| {
         let e = entry_of('t', day, 0, &row, ctx);
         if filter.keep(&e) {
             add(sum, &e);
         }
     })
-    .ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    fn jekt_filter() -> Filter {
+        Filter { agent: None, kinds: HashSet::from([KIND_JEKT.to_string()]), since: 0, until: u64::MAX, text: String::new(), channel: None }
+    }
+
+    /// A day file pruned between the listing and the open adds nothing and is no failure: the scan says why it
+    /// couldn't read (so the warning can), and the sum is left as it was.
+    #[test]
+    fn a_file_that_is_gone_adds_nothing_and_says_why() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("2026-11-17.jsonl");
+        let filter = jekt_filter();
+
+        let mut scanned = AuditTotals::default();
+        let err = scan_into(&missing, 0, &filter, &mut scanned).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+
+        let mut sum = AuditTotals::default();
+        add_file(&mut sum, &missing, &filter, |from, s| scan_into(&missing, from, &filter, s));
+        assert_eq!(sum, AuditTotals::default());
+    }
+
+    /// A line the writer was cut in the middle of is not read, and the scan still succeeds.
+    #[test]
+    fn a_cut_last_line_is_not_a_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit.jsonl");
+        std::fs::write(&path, b"{\"half\":").unwrap();
+        let mut sum = AuditTotals::default();
+        assert_eq!(scan_into(&path, 0, &jekt_filter(), &mut sum).unwrap(), 0);
+        assert_eq!(sum, AuditTotals::default());
+    }
 }

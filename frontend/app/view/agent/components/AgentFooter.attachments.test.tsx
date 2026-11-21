@@ -13,7 +13,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const hub = vi.hoisted(() => ({
     ingest: vi.fn(),
     info: vi.fn(),
-    container: false,
     splice: vi.fn(),
     copy: vi.fn(),
     attachmentsEnabled: undefined as boolean | undefined,
@@ -30,7 +29,6 @@ vi.mock("@/app/drag/file-drop-actions", () => ({
     copyIntoWorkdir: (...a: unknown[]) => hub.copy(...a),
 }));
 vi.mock("../hooks/useAgentDropAttach", () => ({
-    isContainerPane: () => hub.container,
     spliceComposerTokens: (...a: unknown[]) => hub.splice(...a),
 }));
 vi.mock("@/app/store/rpc-api", async (orig) => {
@@ -161,31 +159,6 @@ describe("AgentFooter with attachments", () => {
         expect(upload).toHaveBeenCalledWith([file]);
         // The text part of a mixed paste is left to the browser.
         expect(ev.defaultPrevented).toBe(false);
-    });
-
-    it("container panes: a paste is copied into the working folder, like a drop", () => {
-        const { ta, draft } = setup();
-        hub.container = true;
-        hub.copy.mockReset().mockResolvedValue([]);
-        const tray = vi.spyOn(draft, "uploadFiles");
-        const files = ["a.txt", "b.bin"].map((n) => new File([new Uint8Array([1])], n));
-        const ev = new Event("paste", { bubbles: true, cancelable: true });
-        Object.defineProperty(ev, "clipboardData", { value: { files } });
-        try {
-            ta.dispatchEvent(ev);
-            expect(hub.copy).toHaveBeenCalledTimes(1);
-            const [blockId, source, opts] = hub.copy.mock.calls[0];
-            expect(blockId).toBe(draft.blockId);
-            expect(source).toEqual({ files });
-            expect(opts.paneKind).toBe("agent pane");
-            expect(opts.mentionIn).toBe(ta.parentElement);
-            expect(opts.concurrency).toBeUndefined();
-            opts.splice(ta.parentElement, ["@a.txt"]);
-            expect(hub.splice).toHaveBeenCalledWith(ta.parentElement, ["@a.txt"]);
-            expect(tray).not.toHaveBeenCalled();
-        } finally {
-            hub.container = false;
-        }
     });
 
     it("attachments:enabled off: a paste is copied into the working folder, like a drop", () => {

@@ -1015,6 +1015,7 @@ fn set_config(state: &AppState, data: serde_json::Value, ctx: &RpcContext) -> Re
     let eb = state.event_bus.clone();
     let lan_listeners = state.lan_listeners.clone();
     let new_keys = crate::backend::supervisor::settings::parse_setconfig(data, &ctx.agent_id)?;
+    let removed: Vec<String> = new_keys.iter().filter(|(_, v)| v.is_null()).map(|(k, _)| k.clone()).collect();
 
     // 1. Write to disk (fs watcher will re-broadcast, harmlessly)
     crate::backend::config_watcher_fs::merge_settings_to_disk(new_keys.clone())
@@ -1024,6 +1025,11 @@ fn set_config(state: &AppState, data: serde_json::Value, ctx: &RpcContext) -> Re
     let merged_settings = crate::backend::config_watcher_fs::merge_settings_into_current(&cw, new_keys);
     let lan_enabled = merged_settings.network_lan_discovery;
     cw.update_settings(merged_settings);
+    // A key that was just removed is no longer unrecognized: the list is otherwise only recomputed when the file reloads.
+    if !removed.is_empty() {
+        let left = cw.get_full_config().unrecognized.iter().filter(|u| !removed.contains(&u.key)).cloned().collect();
+        cw.set_unrecognized(left);
+    }
 
     // 3. Live-toggle LAN discovery if the key changed. `apply` is
     //    idempotent so it's safe to call unconditionally — when the

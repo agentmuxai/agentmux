@@ -19,6 +19,7 @@ pub mod redact;
 pub mod settings_read;
 pub mod types;
 pub mod state;
+pub mod unrecognized;
 
 // Re-export all public APIs so callers can continue using `wconfig::Type`.
 pub use loader::*;
@@ -26,6 +27,7 @@ pub use redact::redact_full_config_for_renderer;
 pub use settings_read::{read_settings_file, read_settings_text, SettingsRead};
 pub use types::*;
 pub use state::*;
+pub use unrecognized::UnrecognizedSetting;
 
 // ---- Config file constants ----
 

@@ -15,6 +15,8 @@ export function lspStatusChipText(state: LspState | null, language: string): str
             return `${language}: ready`;
         case "missing":
             return `${language}: not installed`;
+        case "notOnHost":
+            return `${language}: off in this folder`;
         case "crashed":
             return `${language}: error`;
         case "disposed":
@@ -22,8 +24,16 @@ export function lspStatusChipText(state: LspState | null, language: string): str
     }
 }
 
-/** The install banner shows for a missing server, unless its language was dismissed this session. */
+/** The name the banner of a state is dismissed under for the session: a missing server's language, one
+ *  name for every container agent's folder; `null` for a state with no banner. */
+export function lspBannerKey(state: LspState | null): string | null {
+    if (state?.kind === "missing") return state.language;
+    if (state?.kind === "notOnHost") return "(a container agent's folder)";
+    return null;
+}
+
+/** The banner shows for a missing server and for a container agent's folder, until it is dismissed this session. */
 export function lspBannerShows(state: LspState | null, dismissed: ReadonlySet<string>): boolean {
-    if (!state || state.kind !== "missing") return false;
-    return !dismissed.has(state.language);
+    const key = lspBannerKey(state);
+    return key !== null && !dismissed.has(key);
 }

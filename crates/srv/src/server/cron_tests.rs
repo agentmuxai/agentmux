@@ -303,9 +303,10 @@ async fn the_cron_shape_takes_a_time_zone_and_a_policy() {
 }
 
 /// Section 7: an agent's job is its own; a spawn job needs the operator; a
-/// container agent reads only.
+/// container agent does what a native one does, but for the jobs whose runs
+/// start things on the host.
 #[tokio::test(flavor = "multi_thread")]
-async fn agents_create_their_own_message_jobs_and_containers_only_read() {
+async fn agents_create_their_own_message_jobs_and_containers_do_the_same_but_for_host_jobs() {
     let (state, owner, _) = state();
     let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(definition(json!({ "owner": "uid-jobs-other" })))).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
@@ -329,18 +330,61 @@ async fn agents_create_their_own_message_jobs_and_containers_only_read() {
     boxed.slug = "jobs-boxed".into();
     state.mstore.agent_def_insert(&mut boxed).unwrap();
     let boxed = state.mstore.agent_token_ensure("uid-jobs-boxed").unwrap();
-    let (status, _) = send(&state, Method::POST, Some(&boxed), "/agentmux/jobs", Some(definition(json!({})))).await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Not the owner's job: the owner rules are the same as a native agent's.
     for (method, uri, body) in [
-        (Method::PATCH, format!("/agentmux/jobs/{id}"), Some(json!({ "action": "pause" }))),
+        (Method::PATCH, format!("/agentmux/jobs/{id}"), Some(json!({ "name": "mine now" }))),
         (Method::POST, format!("/agentmux/jobs/{id}/run"), Some(json!({}))),
         (Method::DELETE, format!("/agentmux/jobs/{id}"), None),
     ] {
         let (status, v) = send(&state, method.clone(), Some(&boxed), &uri, body).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{method} {uri}: {v}");
+        assert!(!v["error"].as_str().unwrap().contains("container"), "a refusal about the owner says so: {v}");
     }
-    let (status, _) = send(&state, Method::GET, Some(&boxed), &format!("/agentmux/jobs/{id}/runs"), None).await;
+
+    // Its own message job: create, edit, pause, run now, history, delete.
+    let (status, v) = send(&state, Method::POST, Some(&boxed), "/agentmux/jobs", Some(definition(json!({})))).await;
+    assert_eq!(status, StatusCode::CREATED, "{v}");
+    let mine = v["job"]["id"].as_str().unwrap().to_string();
+    state.cron_scheduler.cancel_job(&mine);
+    let job = state.mstore.cron_get(&mine).unwrap().unwrap();
+    assert_eq!((job.owner_uid(), job.created_by.as_str()), ("uid-jobs-boxed", "jobs-boxed"));
+    let uri = format!("/agentmux/jobs/{mine}");
+    let (status, v) = send(&state, Method::PATCH, Some(&boxed), &uri, Some(json!({ "name": "renamed" }))).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    state.cron_scheduler.cancel_job(&mine);
+    let (status, v) = send(&state, Method::PATCH, Some(&boxed), &uri, Some(json!({ "action": "pause" }))).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let (status, v) = send(&state, Method::POST, Some(&boxed), &format!("{uri}/run"), Some(json!({}))).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let (status, _) = send(&state, Method::GET, Some(&boxed), &format!("{uri}/runs"), None).await;
     assert_eq!(status, StatusCode::OK, "history is readable");
+
+    // A spawn or Drone job starts things on the host: refused, with the reason
+    // and what to do instead.
+    let spawn = json!({ "action": { "kind": "spawn", "leader": "uid-jobs-boxed", "brief": "go" } });
+    let drone = json!({ "action": { "kind": "drone", "drone_id": "a-drone" } });
+    for action in [spawn, drone] {
+        let (status, v) = send(&state, Method::POST, Some(&boxed), "/agentmux/jobs", Some(definition(action.clone()))).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+        let why = v["error"].as_str().unwrap();
+        assert!(why.contains("on the host") && why.contains("message or task job") && why.contains("your leader"), "{why}");
+        // The same edit onto its own message job.
+        let (status, v) = send(&state, Method::PATCH, Some(&boxed), &uri, Some(action)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+        assert!(v["error"].as_str().unwrap().contains("on the host"), "{v}");
+    }
+
+    // A spawn or Drone job it owns (made by someone else) isn't run by it.
+    let mut host = crate::backend::cron::test_job("jobs-host", "tick", "jobs-boxed", "uid-jobs-boxed", "uid-jobs-boxed");
+    host.action_kind = "drone".into();
+    state.mstore.cron_create(&host).unwrap();
+    let (status, v) = send(&state, Method::POST, Some(&boxed), "/agentmux/jobs/jobs-host/run", Some(json!({}))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+    assert!(v["error"].as_str().unwrap().contains("on the host"), "{v}");
+
+    let (status, v) = send(&state, Method::DELETE, Some(&boxed), &uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
 }
 
 /// An edit lays fields over the definition. The 15-minute minimum applies

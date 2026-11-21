@@ -184,3 +184,57 @@ fn the_record_carries_its_version() {
     let stored: serde_json::Value = serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
     assert_eq!(stored["version"], VERSION);
 }
+
+/// Two starts at once each read the same records and the later write dropped the earlier one's entry. Many
+/// writers, started together, must all be in the record afterwards.
+#[test]
+fn starts_at_the_same_time_all_keep_their_entry() {
+    for round in 0..20 {
+        let dir = tempfile::tempdir().unwrap();
+        let record = std::sync::Arc::new(dir.path().join("shared").join(RECORD_FILE));
+        let files: Vec<PathBuf> = (0..12).map(|n| appimage(&dir.path().join("Apps"), &format!("AgentMux_{n}.AppImage"), 1000 + n, 5_000 + n as u64)).collect();
+        let gate = std::sync::Arc::new(std::sync::Barrier::new(files.len()));
+        let writers: Vec<_> = files
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(n, file)| {
+                let (record, gate) = (record.clone(), gate.clone());
+                std::thread::spawn(move || {
+                    gate.wait();
+                    remember(&record, &file, &format!("channel-{n}")).unwrap();
+                })
+            })
+            .collect();
+        for w in writers {
+            w.join().unwrap();
+        }
+        for (n, file) in files.iter().enumerate() {
+            let found = lookup(&record, file).map(|f| f.channel);
+            assert_eq!(found.as_deref(), Some(format!("channel-{n}").as_str()), "round {round}: the entry of file {n} was lost");
+        }
+    }
+}
+
+/// A holder that does not let go in time costs the entry (it comes back from the record beside the file), not
+/// the record, and not a hang.
+#[test]
+fn a_start_that_cannot_get_the_lock_in_time_writes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let record = dir.path().join("shared").join(RECORD_FILE);
+    let file = appimage(dir.path(), "AgentMux.AppImage", 1000, 5_000);
+    remember(&record, &file, "stable").unwrap();
+    let before = std::fs::read_to_string(&record).unwrap();
+
+    let other = appimage(dir.path(), "Other.AppImage", 2000, 6_000);
+    let held = lock_record(&record, Duration::from_secs(1)).unwrap();
+    let err = remember_within(&record, &other, "local-x", Duration::from_millis(200)).unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+    assert_eq!(std::fs::read_to_string(&record).unwrap(), before, "nothing was written while the lock was held elsewhere");
+
+    // Once the holder lets go, the same start goes through.
+    drop(held);
+    remember_within(&record, &other, "local-x", Duration::from_millis(200)).unwrap();
+    assert_eq!(lookup(&record, &other).map(|f| f.channel).as_deref(), Some("local-x"));
+    assert_eq!(lookup(&record, &file).map(|f| f.channel).as_deref(), Some("stable"));
+}

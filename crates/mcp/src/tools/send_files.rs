@@ -57,6 +57,16 @@ pub(super) struct Limits {
 /// A jekt's limits (spec §5).
 const MESSAGE_LIMITS: Limits = Limits { max_files: jekt_files::MAX_FILES, max_total: MAX_TOTAL_BYTES, per: "message" };
 
+/// What to add to a "No such file" for a container agent: its file tools only see its own container, so a path on the
+/// host (a screenshot's older answer, a file in a host folder) is simply not there.
+fn missing_hint(kind: std::io::ErrorKind, in_container: bool) -> &'static str {
+    if in_container && kind == std::io::ErrorKind::NotFound {
+        " (not inside your container: a file on the host cannot be read from here. Put the file under /workspace, or take the screenshot or recording again and use the path it gives)"
+    } else {
+        ""
+    }
+}
+
 /// Check every path before anything is uploaded: each names a readable,
 /// non-empty file within the limits. The error names the file.
 pub(super) fn check(paths: &[String]) -> Result<Vec<Local>> {
@@ -73,7 +83,8 @@ pub(super) fn check_within(paths: &[String], limits: Limits) -> Result<Vec<Local
     let mut total = 0u64;
     for given in paths {
         let path = std::path::PathBuf::from(resolve_workdir_path(given));
-        let meta = std::fs::metadata(&path).map_err(|e| anyhow::anyhow!("{given}: {e}"))?;
+        let meta = std::fs::metadata(&path)
+            .map_err(|e| anyhow::anyhow!("{given}: {e}{}", missing_hint(e.kind(), crate::self_keys::in_container())))?;
         if meta.is_dir() {
             anyhow::bail!("{given} is a folder; send the files in it, or an archive of it");
         }
@@ -258,5 +269,15 @@ mod tests {
         assert!(check(&[missing.clone()]).unwrap_err().to_string().contains(&missing));
         let many = vec![p(&ok); jekt_files::MAX_FILES + 1];
         assert!(check(&many).unwrap_err().to_string().contains("limit"));
+    }
+
+    #[test]
+    fn a_container_agent_told_a_host_path_is_missing_is_told_what_to_do() {
+        use std::io::ErrorKind::{NotFound, PermissionDenied};
+        let hint = missing_hint(NotFound, true);
+        assert!(hint.contains("not inside your container") && hint.contains("/workspace"), "{hint}");
+        // Native agents, and other failures, get the plain error.
+        assert_eq!(missing_hint(NotFound, false), "");
+        assert_eq!(missing_hint(PermissionDenied, true), "");
     }
 }
