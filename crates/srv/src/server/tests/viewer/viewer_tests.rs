@@ -323,7 +323,7 @@ fn register(state: &AppState, prefix: &str) -> (String, String) {
 }
 
 /// An agent whose block names its definition, so it can be hidden.
-fn register_defined(state: &AppState, prefix: &str) -> (String, String, String) {
+pub(crate) fn register_defined(state: &AppState, prefix: &str) -> (String, String, String) {
     let (name, block_id) = register(state, prefix);
     let def_id = uuid::Uuid::new_v4().to_string();
     let mut def = crate::backend::storage::agents::test_agent_def(&def_id, &name, "claude", "standalone", 1, "");
@@ -425,7 +425,7 @@ fn user_line(text: &str) -> String {
     serde_json::json!({ "type": "user", "message": { "role": "user", "content": text } }).to_string()
 }
 
-fn append(state: &AppState, block_id: &str, line: &str) {
+pub(crate) fn append(state: &AppState, block_id: &str, line: &str) {
     crate::backend::transcript::append::append_output_line(&state.broker, block_id, line, Some(&state.filestore), None);
 }
 

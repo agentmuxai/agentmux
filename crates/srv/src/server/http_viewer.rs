@@ -864,4 +864,4 @@ pub(crate) fn feed_stream(
 
 #[cfg(test)]
 #[path = "tests/viewer/viewer_tests.rs"]
-mod tests;
+pub(crate) mod tests;
