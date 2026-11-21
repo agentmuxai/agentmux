@@ -2,7 +2,7 @@
 
 Task #47543 (spec first, then the build). Loap-3@narko, 2026-11-13.
 
-**Status:** active — approved 2026-11-20 (task #47543) with decisions D1 to D5 as in §5. Shipped: step 1, the host route `page_probe` (the PR that adds this spec). Remains: steps 2 to 4 (srv join and route, the `muxspect browsers` command, the runbook), and step 5, a release-build proof that is a lab with its own OK.
+**Status:** active — approved 2026-11-20 (task #47543) with decisions D1 to D5 as in §5. Shipped: step 1, the host route `page_probe` (#7968, which adds this spec), and steps 2 to 4 (the srv join and `GET /api/v1/muxspect/browsers`, the `muxspect browsers` command, the runbook and `docs/MUXSPECT.md`; the PR after it). The scale line is one total for the instance's other processes, not a split by kind. Remains: step 5, a release-build proof that is a lab with its own OK.
 
 ## 1. The problem
 
@@ -33,7 +33,7 @@ PID    CPU%   ROLE          PAGE                          VISIBLE  ANIMATIONS (r
 9912   20.6   app-window    Tab 1 - AgentMux              visible  0                            -
 7340    2.1   browser-pane  https://example.com           hidden   0                            -
 6021    0.0   browser-pane  https://example.com (frame)   hidden   -                            pane b1f3 also
-GPU 12.3%  network 0.4%  host 1.1%  srv 0.9%  (other AgentMux processes, for scale)
+4 other AgentMux processes (GPU, network service, window host, srv, launcher): 14.7% together, for scale
 ```
 
 CPU is percent of one core over `--sample` seconds (default 3), the unit the runbook already uses. `--json` returns the same rows for a script. Each row answers, without a restart: which page, which process, how busy, whether Chromium thinks it is visible, and what keeps it painting.
