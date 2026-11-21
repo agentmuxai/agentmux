@@ -14,12 +14,12 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use axum::body::Bytes;
-use axum::extract::DefaultBodyLimit;
+use axum::extract::{ConnectInfo, DefaultBodyLimit};
 use axum::http::{HeaderMap, HeaderValue};
 use serde::Deserialize;
 
 use super::local_proof::{self, Admitted, Channels};
-use super::local_session::{CodeState, Collected, RouteClass, SessionId, SessionStore, LOGGED_FAILURES};
+use super::local_session::{CodeState, Collected, ConfirmHow, RouteClass, SessionId, SessionStore, LOGGED_FAILURES};
 use super::*;
 
 /// The cookie's name is this, then the instance id.
@@ -299,16 +299,42 @@ async fn handle_pending(headers: HeaderMap, body: Bytes) -> Response {
     proved(&admitted, state)
 }
 
-/// `POST /auth/confirm {code, accept}`: the person's answer for the session that code made.
-async fn handle_confirm(headers: HeaderMap, body: Bytes) -> Response {
+/// `POST /auth/confirm {code, accept}`: the person's answer for the session that code made. An accept sent by a process inside
+/// an agent's process tree is not taken (the answer says whose it is); any other accept goes through. Every accept, taken or
+/// not, is recorded with how it arrived ([`super::confirm_peer`]).
+async fn handle_confirm(
+    State(state): State<AppState>,
+    peer: Option<ConnectInfo<std::net::SocketAddr>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
     let admitted = match channel_gate(&headers, "/auth/confirm", &body).await {
         Ok(a) => a,
         Err(r) => return r,
     };
     let Ok(ConfirmBody { code, accept }) = serde_json::from_slice(&body) else { return refuse("/auth/confirm", Reason::Code).await };
+    if accept {
+        let how = confirm_how(&state, peer.map(|p| p.0));
+        let refused = matches!(how, ConfirmHow::Refused(_));
+        let found = store().note_confirm(&code, how.clone(), Instant::now());
+        if refused {
+            tracing::warn!(found, how = %how.label(), "local sign-in confirm refused: it came from an agent's process tree");
+            return proved(&admitted, json!({ "found": false, "refused": super::confirm_peer::REFUSED_TEXT }));
+        }
+    }
     let found = store().decide(&code, accept, Instant::now());
     tracing::info!(accepted = accept && found, found, "local sign-in answered");
     proved(&admitted, json!({ "found": found }))
+}
+
+/// Where the process that sent a confirm stands: unknown when the connection carries no peer address or srv's own address is
+/// not known.
+fn confirm_how(state: &AppState, peer: Option<std::net::SocketAddr>) -> ConfirmHow {
+    let server = SHAPE.get().and_then(|s| s.bound().parse::<std::net::SocketAddr>().ok());
+    match (peer, server) {
+        (Some(peer), Some(server)) => super::confirm_peer::classify(state, peer, server),
+        _ => ConfirmHow::Unknown,
+    }
 }
 
 /// `POST /auth/logout`: end every browser session.
@@ -322,13 +348,19 @@ async fn handle_logout(headers: HeaderMap, body: Bytes) -> Response {
     proved(&admitted, json!({ "revoked": revoked }))
 }
 
-/// `POST /auth/sessions`: how many browsers are signed in now. A number only; nothing that names or reaches one.
+/// `POST /auth/sessions`: how many browsers are signed in now, and how each recent confirm arrived (when, the session's check
+/// phrase, how). Nothing that names or reaches a session.
 async fn handle_sessions(headers: HeaderMap, body: Bytes) -> Response {
     let admitted = match channel_gate(&headers, "/auth/sessions", &body).await {
         Ok(a) => a,
         Err(r) => return r,
     };
-    proved(&admitted, json!({ "sessions": store().session_count(Instant::now()) }))
+    let confirms: Vec<_> = store()
+        .confirms()
+        .iter()
+        .map(|c| json!({ "at_unix_ms": c.at_unix_ms, "session": c.session, "how": c.how.label() }))
+        .collect();
+    proved(&admitted, json!({ "sessions": store().session_count(Instant::now()), "confirms": confirms }))
 }
 
 /// `POST /auth/shutdown`: end the server, as a termination signal does. The answer is sent first; the server leaves a

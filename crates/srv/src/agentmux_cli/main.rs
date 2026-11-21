@@ -14,6 +14,7 @@
 //! Exit codes: 0 done, 1 the thing asked is not so (not running), 2 bad use, 3 could not do it.
 //! Nothing here prints a key, a code or a token.
 
+mod browsers;
 mod doctor;
 mod logs;
 mod uninstall;
@@ -748,7 +749,7 @@ fn cmd_status(paths: &DataPaths, json: bool) -> i32 {
     let uptime = record.as_ref().map(|s| agentmux_common::time::now_secs_u64().saturating_sub(s.started_unix));
     let blocked = state::read_blocked(&paths.instance_dir).filter(|_| record.is_none());
     let service = service_here(paths).is_some();
-    let browsers = if healthy { browser_sessions(paths) } else { None };
+    let browsers = if healthy { browsers::asked(paths) } else { None };
     if json {
         println!(
             "{}",
@@ -763,7 +764,8 @@ fn cmd_status(paths: &DataPaths, json: bool) -> i32 {
                 "uptime_secs": uptime,
                 "data_dir": record.as_ref().map(|s| s.data_dir.clone()),
                 "service": service,
-                "browser_sessions": browsers,
+                "browser_sessions": browsers.as_ref().map(|b| b.count),
+                "browser_confirms": browsers.as_ref().map(|b| b.confirms.clone()),
                 "blocked": blocked.as_ref().map(|b| serde_json::json!({ "owner": b.owner, "reason": b.reason, "since_unix": b.since_unix, "what_to_do": b.sentence() })),
             })
         );
@@ -772,8 +774,8 @@ fn cmd_status(paths: &DataPaths, json: bool) -> i32 {
         println!("  open:  {}", s.url());
         println!("  data:  {}", s.data_dir.display());
         println!("  service: {}", service_line(service));
-        if let Some(n) = browsers {
-            println!("  browsers: {}", browsers_line(n));
+        if let Some(b) = &browsers {
+            browsers::print(b);
         }
         if s.version != VERSION {
             tell!("  installed version is {VERSION}: `agentmux restart` runs it");
@@ -784,24 +786,6 @@ fn cmd_status(paths: &DataPaths, json: bool) -> i32 {
         tell!("AgentMux is not running (channel {}). Start it with `agentmux start`.", paths.channel);
     }
     if healthy { 0 } else { 1 }
-}
-
-/// What `status` says of the browsers signed in.
-fn browsers_line(n: u64) -> String {
-    match n {
-        0 => "none signed in (`agentmux open` signs one in)".to_string(),
-        n => format!("{n} signed in"),
-    }
-}
-
-/// How many browsers are signed in now, asked of the running server; None when it cannot say (the server does not
-/// serve its own UI, or does not answer).
-fn browser_sessions(paths: &DataPaths) -> Option<u64> {
-    let (code, out) = run_client(paths, "sessions", &[], true);
-    if code != 0 {
-        return None;
-    }
-    out.trim().parse().ok()
 }
 
 /// What `status` says of the service: whether the server starts by itself at every login.
@@ -1176,13 +1160,6 @@ mod tests {
     use std::sync::Mutex;
 
     static ENV: Mutex<()> = Mutex::new(());
-
-    #[test]
-    fn status_says_how_many_browsers_are_signed_in() {
-        assert!(browsers_line(0).contains("none") && browsers_line(0).contains("agentmux open"));
-        assert_eq!(browsers_line(1), "1 signed in");
-        assert_eq!(browsers_line(3), "3 signed in");
-    }
 
     fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
         Cli::try_parse_from([&["agentmux"], args].concat())

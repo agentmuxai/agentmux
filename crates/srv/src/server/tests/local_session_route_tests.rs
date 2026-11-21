@@ -93,6 +93,18 @@ impl Open {
         assert!(!self.client.answer_ok(seq, status, format!("{answer} ").as_bytes(), proof), "{path}: a changed answer");
         answer
     }
+
+    /// [`Self::ask`] for a request that arrives from `peer`, with `how` as what the process lookup finds.
+    async fn ask_from(&mut self, router: &Router, path: &str, body: &str, how: ConfirmHow) -> String {
+        crate::server::confirm_peer::hook::set(how);
+        let (mut req, seq) = self.command(path, body);
+        req.extensions_mut().insert(ConnectInfo("127.0.0.1:50123".parse::<std::net::SocketAddr>().unwrap()));
+        let (status, hs, answer) = call(router, req).await;
+        assert_eq!(status, 200, "{path}: {answer}");
+        let proof = hs.get(local_proof::PROOF_HEADER).expect("the answer carries a proof").to_str().unwrap();
+        assert!(self.client.answer_ok(seq, status, answer.as_bytes(), proof), "{path}: the answer's proof");
+        answer
+    }
 }
 
 fn from_page(path: &str, body: &str) -> Request<Body> {
@@ -290,6 +302,73 @@ async fn a_discarded_sign_in_gives_the_browser_nothing_and_the_person_a_line() {
     // Nobody else's code is answerable.
     let other = open.ask(&router, "/auth/confirm", r#"{"code":"someone else's","accept":true}"#).await;
     assert_eq!(field(&other, "found"), "false");
+}
+
+/// A code entered by a browser, ready for the person's answer: (the code, the browser's handle, the check phrase).
+async fn entered_code(router: &Router, open: &mut Open) -> (String, String, String) {
+    let code = field(&open.ask(router, "/auth/code", "{}").await, "code");
+    let entered = call(router, from_page("/auth/enter", &format!(r#"{{"code":"{code}"}}"#))).await.2;
+    (code, field(&entered, "handle"), field(&entered, "phrase"))
+}
+
+/// The confirms the server lists, as `<phrase>: <how>`.
+async fn listed_confirms(router: &Router, open: &mut Open) -> Vec<String> {
+    let body = open.ask(router, "/auth/sessions", "{}").await;
+    serde_json::from_str::<serde_json::Value>(&body).unwrap()["confirms"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| format!("{}: {}", c["session"].as_str().unwrap(), c["how"].as_str().unwrap()))
+        .collect()
+}
+
+#[tokio::test]
+async fn a_confirm_from_an_agents_process_tree_is_refused_with_what_to_do_and_recorded() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    ensure_shape();
+    let router = build_router(test_state());
+    let mut open = Open::connect(&router).await;
+    let (code, _handle, phrase) = entered_code(&router, &mut open).await;
+
+    let refused = open.ask_from(&router, "/auth/confirm", &format!(r#"{{"code":"{code}","accept":true}}"#), ConfirmHow::Refused("agent:opaz".into())).await;
+    assert_eq!(field(&refused, "found"), "false");
+    assert!(field(&refused, "refused").contains("ask the person"), "{refused}");
+    assert!(listed_confirms(&router, &mut open).await.contains(&format!("{phrase}: refused: agent:opaz")));
+    // The refusal changed nothing: the session still waits for the person, and the person's own answer is taken.
+    assert_eq!(field(&open.ask(&router, "/auth/pending", &format!(r#"{{"code":"{code}"}}"#)).await, "state"), "entered");
+    let taken = open.ask_from(&router, "/auth/confirm", &format!(r#"{{"code":"{code}","accept":true}}"#), ConfirmHow::Outside).await;
+    assert_eq!(field(&taken, "found"), "true");
+    assert!(listed_confirms(&router, &mut open).await.contains(&format!("{phrase}: peer outside agent trees")));
+}
+
+#[tokio::test]
+async fn a_confirm_whose_process_cannot_be_found_goes_through_and_is_recorded_as_unknown() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    ensure_shape();
+    let router = build_router(test_state());
+    let mut open = Open::connect(&router).await;
+    let (code, _handle, phrase) = entered_code(&router, &mut open).await;
+    let taken = open.ask_from(&router, "/auth/confirm", &format!(r#"{{"code":"{code}","accept":true}}"#), ConfirmHow::Unknown).await;
+    assert_eq!(field(&taken, "found"), "true");
+    assert!(listed_confirms(&router, &mut open).await.contains(&format!("{phrase}: peer unknown")));
+
+    // A connection that carries no peer address is the same: nothing to look up, so it is unknown.
+    let (code, _handle, phrase) = entered_code(&router, &mut open).await;
+    let taken = open.ask(&router, "/auth/confirm", &format!(r#"{{"code":"{code}","accept":true}}"#)).await;
+    assert_eq!(field(&taken, "found"), "true");
+    assert!(listed_confirms(&router, &mut open).await.contains(&format!("{phrase}: peer unknown")));
+}
+
+#[tokio::test]
+async fn a_decline_from_anywhere_is_taken_and_not_recorded_as_a_confirm() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    ensure_shape();
+    let router = build_router(test_state());
+    let mut open = Open::connect(&router).await;
+    let (code, _handle, phrase) = entered_code(&router, &mut open).await;
+    let no = open.ask_from(&router, "/auth/confirm", &format!(r#"{{"code":"{code}","accept":false}}"#), ConfirmHow::Refused("agent:opaz".into())).await;
+    assert_eq!(field(&no, "found"), "true", "an agent may decline a sign-in: that can only close it");
+    assert!(!listed_confirms(&router, &mut open).await.iter().any(|c| c.starts_with(&phrase)));
 }
 
 // ---- Signing out one browser ----
