@@ -105,6 +105,39 @@ function markRow(el: HTMLElement): void {
     setTimeout(() => el.classList.remove(SEARCH_HIGHLIGHT_CLASS), SEARCH_HIGHLIGHT_MS);
 }
 
+/**
+ * A link to a setting (agentmux://settings/<section>#<id>): the same reveal as a search result, once the section has
+ * drawn the row; a row that never appears within REVEAL_WAIT_MS leaves the section at its top. Called in a component.
+ */
+function revealLinkedSetting(model: SettingsViewModel): void {
+    createEffect(
+        on(
+            // Keyed by the ask, so another change to the pane's meta is not a new ask.
+            () => {
+                const r = model.revealRequest();
+                return r ? `${r.ask}:${r.id}` : null;
+            },
+            (key) => {
+                const req = key ? model.revealRequest() : null;
+                if (!req) return;
+                const until = performance.now() + REVEAL_WAIT_MS;
+                const tryReveal = () => {
+                    const el = document.getElementById(`setting-${req.id}`);
+                    if (el) {
+                        markRow(el);
+                        model.clearReveal();
+                    } else if (performance.now() < until) {
+                        requestAnimationFrame(tryReveal);
+                    } else {
+                        model.clearReveal();
+                    }
+                };
+                queueMicrotask(tryReveal);
+            }
+        )
+    );
+}
+
 export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
     const section = () => props.model.activeSection();
     let container!: HTMLDivElement;
@@ -137,34 +170,7 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
         });
     }
 
-    // A link to a setting (agentmux://settings/<section>#<id>): the same reveal as a search result, once the section
-    // has drawn the row; a row that never appears within REVEAL_WAIT_MS leaves the section at its top.
-    createEffect(
-        on(
-            // Keyed by the ask, so another change to the pane's meta is not a new ask.
-            () => {
-                const r = props.model.revealRequest();
-                return r ? `${r.ask}:${r.id}` : null;
-            },
-            (key) => {
-                const req = key ? props.model.revealRequest() : null;
-                if (!req) return;
-                const until = performance.now() + REVEAL_WAIT_MS;
-                const tryReveal = () => {
-                    const el = document.getElementById(`setting-${req.id}`);
-                    if (el) {
-                        markRow(el);
-                        props.model.clearReveal();
-                    } else if (performance.now() < until) {
-                        requestAnimationFrame(tryReveal);
-                    } else {
-                        props.model.clearReveal();
-                    }
-                };
-                queueMicrotask(tryReveal);
-            }
-        )
-    );
+    revealLinkedSetting(props.model);
 
     return (
         <div
