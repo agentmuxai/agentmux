@@ -200,6 +200,7 @@ impl Store {
         super::job_runs::apply_schema(&conn)?;
         conn.execute_batch(super::work_deps::SCHEMA)?;
         conn.execute_batch(super::work_prs::SCHEMA)?;
+        conn.execute_batch(super::work_card_prs::SCHEMA)?;
         conn.execute_batch(super::work_media::SCHEMA)?;
         Ok(conn.execute_batch(super::google_grants::SCHEMA)?)
     }
@@ -272,6 +273,7 @@ impl Store {
         super::work_boards::apply_schema(&conn)?;
         conn.execute_batch(super::work_deps::SCHEMA)?;
         conn.execute_batch(super::work_prs::SCHEMA)?;
+        conn.execute_batch(super::work_card_prs::SCHEMA)?;
         conn.execute_batch(super::work_media::SCHEMA)?;
         super::job_runs::apply_schema(&conn)?;
         conn.execute_batch(super::google_grants::SCHEMA)?;

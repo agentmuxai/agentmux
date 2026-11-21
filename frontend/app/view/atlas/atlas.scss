@@ -5,6 +5,7 @@
 // idle in the success colour, a limit or a sign-in in the warning colour, stopped muted.
 
 @use "../../mixins.scss";
+@use "../../element/menu-frame";
 
 .atlas {
     display: flex;
@@ -452,6 +453,14 @@
     white-space: nowrap;
 }
 
+// The seat as its coloured tag (agent-model/seat-tag.tsx), cut with an ellipsis inside the node's one line; the line
+// takes the tag's own tight height, so the node (a fixed height in atlas-layout.ts) does not grow.
+.atlas-node__sub .atlas-node__seat {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .atlas-node__dot {
     flex: none;
     width: 8px;
@@ -510,7 +519,7 @@
     list-style: none;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
-    background: var(--main-bg-color);
+    @include menu-frame.menu-fill;
 
     li {
         display: flex;
@@ -553,7 +562,7 @@
     overflow-y: auto;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
-    background: var(--main-bg-color);
+    @include menu-frame.menu-fill;
     cursor: default;
     user-select: text;
     z-index: var(--z-map-card);

@@ -255,6 +255,17 @@ describe("failureToRow", () => {
         expect(action(busy, "Taking over…")?.disabled).toBe(true);
     });
 
+    it("marks Take over and Move here as the person's: an agent's click is refused on them, Go there stays open", () => {
+        const takeOver = vi.fn();
+        const moveHere = vi.fn();
+        const goThere = vi.fn();
+        const live = failureToRow(mkFailure({ code: "live_elsewhere", retryable: false }), mkView(), { ...mkActions(), takeOver });
+        expect(action(live, "Take over")?.operatorOnly).toBe(true);
+        const other = failureToRow(mkFailure({ code: "open_in_other_pane", retryable: false }), mkView(), { ...mkActions(), moveHere, goThere });
+        expect(action(other, "Move here")?.operatorOnly).toBe(true);
+        expect(action(other, "Go there")?.operatorOnly).toBeUndefined();
+    });
+
     it("live_elsewhere without a takeover handler offers only Details and Dismiss", () => {
         const row = failureToRow(mkFailure({ code: "live_elsewhere", retryable: false }), mkView(), mkActions());
         expect(action(row, "Take over")).toBeUndefined();

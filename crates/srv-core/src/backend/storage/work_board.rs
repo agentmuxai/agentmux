@@ -150,6 +150,12 @@ pub struct WorkCard {
     /// release (`work_prs.rs`). `None` until srv has looked.
     #[serde(default)]
     pub pr: Option<super::work_prs::WorkPr>,
+    /// Every pull request of the card, newest first (`work_card_prs.rs`); `pr_url` is the newest open one.
+    #[serde(default)]
+    pub prs: Vec<super::work_card_prs::WorkCardPr>,
+    /// What those add up to: how many are open and merged, and whether the card is waiting on its holder.
+    #[serde(default)]
+    pub pr_rollup: super::work_card_prs::PrRollup,
     /// The path of the document it wrote (`links.doc`), empty when none.
     #[serde(default)]
     pub doc: String,
@@ -209,6 +215,9 @@ pub struct CardUpdate {
     pub checklist: Option<Vec<ChecklistItem>>,
     pub branch: Option<String>,
     pub pr_url: Option<String>,
+    /// Where `pr_url` came from, for the card's list of pull requests (`work_card_prs.rs`): the holder when
+    /// `None`.
+    pub pr_source: Option<super::work_card_prs::PrSource>,
     /// The path of the document the task wrote (`db_work_docs`).
     pub doc: Option<String>,
 }
@@ -241,6 +250,8 @@ fn row_to_card(row: &Row) -> rusqlite::Result<WorkCard> {
         after: Vec::new(),
         followers: Vec::new(),
         pr: None,
+        prs: Vec::new(),
+        pr_rollup: Default::default(),
         doc: String::new(),
         media: Default::default(),
     })
@@ -370,6 +381,7 @@ impl Store {
         attach_boards(&conn, &mut one)?;
         attach_after(&conn, &mut one)?;
         super::work_prs::attach_prs(&conn, &mut one)?;
+        super::work_card_prs::attach_card_prs(&conn, &mut one)?;
         super::work_media::attach_media(&conn, &mut one)?;
         let [t] = one;
         Ok(Some(t))
@@ -421,6 +433,7 @@ impl Store {
         attach_boards(&conn, &mut out)?;
         attach_after(&conn, &mut out)?;
         super::work_prs::attach_prs(&conn, &mut out)?;
+        super::work_card_prs::attach_card_prs(&conn, &mut out)?;
         super::work_media::attach_media(&conn, &mut out)?;
         Ok(out)
     }
@@ -564,6 +577,15 @@ impl Store {
               WHERE work_id = ?1",
             params![work_id, u.note, checklist, u.branch, u.pr_url, now_ms],
         )?;
+        // The address is a pull request of the card too: the list carries it (and keeps the ones before it).
+        if let Some(pr) = &u.pr_url {
+            let repo: Option<String> =
+                tx.query_row("SELECT repo FROM db_work_cards WHERE work_id = ?1", params![work_id], |r| r.get(0)).optional()?;
+            if let Some((repo, number)) = super::work_card_prs::parse_pr_ref(pr, repo.as_deref().unwrap_or("")) {
+                let source = u.pr_source.unwrap_or(super::work_card_prs::PrSource::Holder);
+                super::work_card_prs::link_in(&tx, work_id, &repo, number, source, now_ms)?;
+            }
+        }
         tx.commit()?;
         drop(conn);
         if let Some(doc) = &u.doc {

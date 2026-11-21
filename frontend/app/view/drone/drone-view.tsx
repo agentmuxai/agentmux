@@ -8,8 +8,10 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { showCopyContextMenu, showTextInputContextMenu, type CopyMenuEntry } from "@/app/store/contextmenu";
 import { abbreviateText } from "@/util/format-text";
+import { t } from "@/app/i18n/i18n";
 import { BLOCK_KINDS, blockMeta } from "./block-registry";
 import type { DroneViewModel } from "./drone-model";
+import { TriggerCard } from "./drone-trigger-card";
 import type { BlockKind, FlowEdge, FlowNode } from "./drone-types";
 import "./drone-view.scss";
 import type { Bundle } from "@/app/store/rpc-api";
@@ -38,8 +40,11 @@ export const DroneView = (props: { model: DroneViewModel }): JSX.Element => {
         <div class="drone-pane">
             <NodeTypeBar model={m} />
             <div class="drone-stage">
-                <Canvas model={m} />
-                <RunPanel model={m} />
+                <TriggerCard model={m} />
+                <div class="drone-stage-body">
+                    <Canvas model={m} />
+                    <RunPanel model={m} />
+                </div>
             </div>
         </div>
     );
@@ -681,7 +686,7 @@ const CanvasControls = (p: { s: CanvasState }): JSX.Element => (
     </div>
 );
 
-function nodeSummary(n: FlowNode): string {
+export function nodeSummary(n: FlowNode): string {
     switch (n.data.kind) {
         case "agent": {
             const ref = readAgentRef(n);
@@ -691,8 +696,13 @@ function nodeSummary(n: FlowNode): string {
         }
         case "message":
             return `to ${(n.data["to"] as string) || "<no one>"} · ${truncate((n.data["body"] as string) ?? "")}`;
-        case "task":
+        case "task": {
+            const noteTask = n.data["note_task"];
+            if (typeof noteTask === "number" || (typeof noteTask === "string" && noteTask.trim() !== "")) {
+                return `note on task ${String(noteTask).trim()} · ${truncate((n.data["note"] as string) ?? "")}`;
+            }
             return truncate((n.data["title"] as string) || "<no title>");
+        }
         case "notify":
             return truncate((n.data["title"] as string) || "<no title>");
         case "spawn":
@@ -701,6 +711,11 @@ function nodeSummary(n: FlowNode): string {
             const query = (n.data["query"] as string) || "muxbus";
             if (query === "agent") return `agent ${(n.data["agent"] as string) || "<no one>"}`;
             if (query === "jobs" && n.data["job"]) return `jobs of ${n.data["job"] as string}`;
+            if (query === "memory") return `memory ${(n.data["entry"] as string) || "<no entry>"}`;
+            if (query === "presence") {
+                const where = [n.data["repo"], n.data["path"], n.data["branch"]].filter((v) => typeof v === "string" && v.trim() !== "").join(" ");
+                return `who is on ${where || "<nothing>"}`;
+            }
             return query;
         }
         case "api":
@@ -1113,6 +1128,8 @@ const TaskFields = (p: { node: FlowNode; update: (patch: Record<string, unknown>
         <NodeLongText node={p.node} update={p.update} label="Text" key="body" placeholder="What to look at" />
         <NodeText node={p.node} update={p.update} label="For" key="target" placeholder="an agent's id; empty is the backlog" />
         <NodeText node={p.node} update={p.update} label="Key" key="dedupe" placeholder="one task per key, e.g. {{a.workflow}}" />
+        <NodeText node={p.node} update={p.update} label={t("drone.node.noteTask")} key="note_task" placeholder={t("drone.node.noteTaskHint")} />
+        <NodeLongText node={p.node} update={p.update} label={t("drone.node.note")} key="note" placeholder={t("drone.node.noteHint")} />
     </>
 );
 
@@ -1143,6 +1160,8 @@ const AppQueryFields = (p: { node: FlowNode; update: (patch: Record<string, unkn
                     <option value="tasks">Kanban tasks</option>
                     <option value="lan_peers">LAN peers</option>
                     <option value="jobs">Job runs</option>
+                    <option value="memory">{t("drone.node.queryMemory")}</option>
+                    <option value="presence">{t("drone.node.queryPresence")}</option>
                 </select>
             </NodeField>
             <Show when={query() === "agent"}>
@@ -1155,6 +1174,15 @@ const AppQueryFields = (p: { node: FlowNode; update: (patch: Record<string, unkn
             </Show>
             <Show when={query() === "jobs"}>
                 <NodeText node={p.node} update={p.update} label="Job" key="job" placeholder="a job's name or id (not a {{reference}}); empty is every job's newest run" />
+            </Show>
+            <Show when={query() === "memory"}>
+                <NodeText node={p.node} update={p.update} label={t("drone.node.memoryEntry")} key="entry" placeholder={t("drone.node.memoryEntryHint")} />
+                <NodeText node={p.node} update={p.update} label={t("drone.node.memoryChars")} key="max_chars" placeholder={t("drone.node.memoryCharsHint")} />
+            </Show>
+            <Show when={query() === "presence"}>
+                <NodeText node={p.node} update={p.update} label={t("drone.node.presenceRepo")} key="repo" placeholder={t("drone.node.presenceRepoHint")} />
+                <NodeText node={p.node} update={p.update} label={t("drone.node.presencePath")} key="path" placeholder={t("drone.node.presencePathHint")} />
+                <NodeText node={p.node} update={p.update} label={t("drone.node.presenceBranch")} key="branch" placeholder={t("drone.node.presenceBranchHint")} />
             </Show>
         </>
     );

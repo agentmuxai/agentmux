@@ -1,5 +1,5 @@
 usePaneTabVisibility("blk-12345678")
-useRenderDormant(fn, "blk-12345678")
+useRenderDormant(fn, "blk-12345678", fn)
 createAgentAtoms()
 usePaneRegistration({agentId,agentName,blockId})
 useContextReading("blk-12345678", {dispatchDoc,dispatchPane,document,state}, fn)

@@ -52,7 +52,7 @@ async fn a_claude_agent_moves_onto_a_key_and_back_with_exactly_one_payer_each_ti
     assert_eq!(shown["stopped"], serde_json::json!(false));
     assert!(crate::server::spend_watch::on_a_route(&state, "ag").is_ok(), "its cap can be read, raised and reset");
     // One payer the other way too: the model panel does not put an agent on a key onto a model route.
-    let onto_route = crate::server::app_api::agent_model::AgentModelSwitchReq { blockid: block.clone(), route: "openrouter".into(), model: String::new(), restart: false };
+    let onto_route = crate::server::app_api::agent_model::AgentModelSwitchReq { blockid: block.clone(), route: "openrouter".into(), model: String::new(), restart: false, fresh: false, handoff: None };
     let refused = crate::server::app_api::agent_model::switch_model(&state, &onto_route).unwrap_err();
     assert!(refused.contains("API key"), "{refused}");
     assert_eq!(links(&state), [("anthropic".to_string(), "key1".to_string())], "nothing changed");

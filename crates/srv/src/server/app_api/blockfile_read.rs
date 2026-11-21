@@ -11,6 +11,8 @@ type FileStoreRef = Arc<crate::backend::storage::filestore::FileStore>;
 /// What the guards at the end of a read need to know about it.
 pub(super) struct RangeRead<'a> {
     pub(super) cmd: &'a CommandBlockfileReadRangeData,
+    /// The stores a transcript's lines are attributed from (a transcript only).
+    pub(super) stores: (&'a crate::backend::storage::store::Store, &'a crate::backend::storage::filestore::FileStore),
     pub(super) offset: usize,
     pub(super) stream: String,
     /// Who signed the transcript's lines (a transcript only).
@@ -29,7 +31,7 @@ impl RangeRead<'_> {
     pub(super) fn finish(&self, mut result: BlockfileReadRangeResult, gen_after: Option<String>) -> BlockfileReadRangeResult {
         let cmd = self.cmd;
         if let Some(owner) = &self.owner {
-            crate::backend::transcript::origin_sig::vet_lines(owner, &mut result.lines);
+            crate::backend::transcript::attribution::vet_for_viewer(self.stores.0, self.stores.1, owner, &mut result.lines);
         }
         if let Some(turns) = cmd.tail_turns.filter(|t| *t > 0) {
             trim_to_last_turns(&mut result, self.offset as u64, turns as usize);

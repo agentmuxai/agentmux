@@ -5,12 +5,12 @@ import clsx from "clsx";
 import { createContext, createMemo, createSignal, createUniqueId, For, type JSX, Show, splitProps, useContext } from "solid-js";
 
 import { Tooltip } from "@/app/element/tooltip";
-import { TAG_GROUPS, type TagGroup, type TagTone } from "./tag-tokens";
+import { TAG_GROUPS, type TagGroup, type TagHue, type TagTone } from "./tag-tokens";
 
 import "./tag.scss";
 
-export type { TagGroup, TagTone } from "./tag-tokens";
-export { TAG_GROUPS } from "./tag-tokens";
+export type { TagGroup, TagHue, TagTone } from "./tag-tokens";
+export { TAG_GROUPS, TAG_HUES } from "./tag-tokens";
 
 /** `chip`: a property, inline. `ribbon`: what a click on the card will do, on its corner. `count`: a number on a corner. */
 export type TagKind = "chip" | "ribbon" | "count";
@@ -21,6 +21,13 @@ export interface TagProps {
     kind?: TagKind;
     /** Default `neutral`. */
     tone?: TagTone;
+    /**
+     * A seat's role or a model's family: its own colour, in place of a tone (a tag has a tone or a hue, never both;
+     * the hue wins). The words still carry the meaning.
+     */
+    hue?: TagHue;
+    /** Drawn as a request not yet confirmed: a dashed outline, no fill, the secondary text colour. */
+    muted?: boolean;
     /** `sm` is `--text-xs`, `xs` is `--text-2xs`. Default `sm` (`xs` for a ribbon or a count). */
     size?: "sm" | "xs";
     /** A Font Awesome solid icon name without its prefix: "download", "circle-up". Decorative: the words carry the meaning. */
@@ -61,7 +68,8 @@ export function Tag(props: TagProps): JSX.Element {
         clsx(
             "ui-tag",
             `ui-tag--${kind()}`,
-            `ui-tag--${props.tone ?? "neutral"}`,
+            props.hue ? `ui-tag--${props.hue}` : `ui-tag--${props.tone ?? "neutral"}`,
+            props.muted && "ui-tag--muted",
             `ui-tag--${size()}`,
             kind() !== "chip" && `ui-tag--${corner()}`,
             props.class,

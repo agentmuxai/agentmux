@@ -121,7 +121,7 @@ async fn run_send_message(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String>
 const DISCOVERY_PARAMS: &[&str] = &["fields", "detail", "state", "model", "provider", "runtime", "account", "seat", "limit", "offset", "group_by"];
 
 /// The query for the discovery endpoint from a call's arguments: only the parameters it knows, each as text.
-fn discovery_query(arguments: &Value, status: bool) -> Vec<(&'static str, String)> {
+pub(super) fn discovery_query(arguments: &Value, status: bool) -> Vec<(&'static str, String)> {
     let mut query: Vec<(&'static str, String)> = DISCOVERY_PARAMS
         .iter()
         .filter_map(|key| {
@@ -141,6 +141,12 @@ fn discovery_query(arguments: &Value, status: bool) -> Vec<(&'static str, String
 
 /// DiscoverAgents, its fleet-framed alias FleetList and `Agents status`: one call to the discovery endpoint, returned as it came.
 pub(super) async fn run_discover_agents(arguments: &Value, status: bool, cx: &ToolCtx<'_>) -> Result<String> {
+    let result = discover_value(arguments, status, false, cx).await?;
+    Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+}
+
+/// This machine's discovery answer as a value; with `all_hosts` it also names the LAN peers (`Agents` with `host: all`).
+pub(super) async fn discover_value(arguments: &Value, status: bool, all_hosts: bool, cx: &ToolCtx<'_>) -> Result<Value> {
     let ToolCtx { local_url, auth_key, client, .. } = *cx;
     if local_url.is_empty() || auth_key.is_empty() {
         anyhow::bail!(
@@ -150,9 +156,13 @@ pub(super) async fn run_discover_agents(arguments: &Value, status: bool, cx: &To
     }
 
     let url = format!("{}/agentmux/discovery", local_url.trim_end_matches('/'));
+    let mut query = discovery_query(arguments, status);
+    if all_hosts {
+        query.push(("host", "all".to_string()));
+    }
     let resp = client
         .get(&url)
-        .query(&discovery_query(arguments, status))
+        .query(&query)
         .header(AUTH_KEY_HEADER, auth_key)
         .send()
         .await
@@ -164,12 +174,7 @@ pub(super) async fn run_discover_agents(arguments: &Value, status: bool, cx: &To
         anyhow::bail!("discovery failed: HTTP {code} — {text}");
     }
 
-    let result: Value = resp
-        .json()
-        .await
-        .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-
-    Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+    resp.json().await.map_err(|e| anyhow::anyhow!("response parse failed: {e}"))
 }
 
 async fn run_fleet_broadcast(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {

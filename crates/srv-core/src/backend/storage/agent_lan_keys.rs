@@ -94,14 +94,24 @@ pub(super) fn aligned_name_key(
     }
 }
 
+/// A keypair's private half is never written into a transcript (`transcript::withhold`).
+fn withhold_private(pair: Option<&AgentLanKeypair>) {
+    if let Some(pair) = pair {
+        crate::backend::transcript::withhold::register(&pair.private_key);
+    }
+}
+
 impl Store {
     /// Load this agent's LAN keypair if one has already been minted,
     /// without creating one. The host's key when it has one (see `host_lan_keys.rs`).
+    /// The private key is withheld from transcripts from here on (`transcript::withhold`).
     pub fn agent_lan_key_load(&self, agent_id: &str) -> Result<Option<AgentLanKeypair>, StoreError> {
         let key = agent_id.to_lowercase();
         let host = self.host_lan_keys();
         let conn = self.conn.lock().unwrap();
-        aligned_name_key(&conn, host.as_deref(), &key, true)
+        let pair = aligned_name_key(&conn, host.as_deref(), &key, true)?;
+        withhold_private(pair.as_ref());
+        Ok(pair)
     }
 
     /// This agent's PUBLIC key — the half safe to hand to a LAN
@@ -143,6 +153,12 @@ impl Store {
     /// concurrent first-use: the `INSERT OR IGNORE` on the channel row and on the host row each leave
     /// every caller with the one keypair that won.
     pub fn agent_lan_key_ensure(&self, agent_id: &str) -> Result<AgentLanKeypair, StoreError> {
+        let pair = self.agent_lan_key_ensure_unwithheld(agent_id)?;
+        withhold_private(Some(&pair));
+        Ok(pair)
+    }
+
+    fn agent_lan_key_ensure_unwithheld(&self, agent_id: &str) -> Result<AgentLanKeypair, StoreError> {
         let key = agent_id.to_lowercase();
         let host = self.host_lan_keys();
         let conn = self.conn.lock().unwrap();

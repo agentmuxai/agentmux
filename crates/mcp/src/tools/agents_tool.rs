@@ -65,7 +65,10 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 );
             }
             if let Some(host) = remote_op::host_arg(&args) {
-                let result = remote_agents(cx, act.action, &args, &host).await;
+                let result = match act.action {
+                    "list" | "status" => agents_hosts::across(cx, &args, act.action == "status", &host).await,
+                    _ => remote_agents(cx, act.action, &args, &host).await,
+                };
                 let result = result.map_err(|e| anyhow::anyhow!(public_params(&format!("{e:#}"), act.rename)));
                 return relabeled("Agents", ACTS, result);
             }
@@ -634,7 +637,7 @@ async fn rename_agent(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
 
 /// The fields `update` may change (`/api/v1/agent/update`); the name, provider, environment, accounts and
 /// seat have their own actions.
-const DEFINITION_FIELDS: &[&str] = &["description", "icon", "auto_start", "restart_on_crash", "idle_timeout_minutes", "route", "model", "effort", "spend_cap_usd", "reset_spend_today"];
+const DEFINITION_FIELDS: &[&str] = &["description", "icon", "auto_start", "restart_on_crash", "idle_timeout_minutes", "route", "model", "effort", "spend_cap_usd", "reset_spend_today", "fresh", "handoff"];
 /// What decides what an agent runs, where its traffic goes or which project files it reads: the operator's to set in
 /// My Agents, as `env_set` refuses the same.
 const OPERATOR_FIELDS: &[&str] = &["shell", "provider_flags", "working_directory", "model_vendor_base_url"];
@@ -934,7 +937,7 @@ mod tests {
         let loops = LoopRegistry::default();
         let counter = std::sync::atomic::AtomicU64::new(0);
         let cx = ToolCtx { local_url: "", auth_key: "", block_id: "", client: &client, loops: &loops, loop_counter: &counter };
-        for action in ["list", "spawn", "detach", "watch"] {
+        for action in ["spawn", "detach", "watch"] {
             let e = call("Agents", &json!({ "action": action, "host": "narko" }), &cx).await.unwrap_err().to_string();
             assert!(e.contains("host applies to start, open, stop, set_seat, rename, update (model and effort), env_get and env_set"), "{action}: {e}");
         }

@@ -23,6 +23,8 @@ import {
     BACK_VALUE,
     disclosureRow,
     disclosureValue,
+    freshRow,
+    FRESH_VALUE,
     parseCompactValue,
     parseDisclosureValue,
     parseRouteValue,
@@ -110,6 +112,7 @@ function addRoutesSection(s: DropupState, rows: Row[], options: OptionRow[]) {
     const panel = s.routes.panel();
     if (!panel) return;
     const add = adder(rows, options);
+    add(freshRow(s.routes.fresh()));
     for (const { route, rows: routeModels } of routeRows(panel, s.props.contextTokens)) {
         const expanded = s.routes.isExpanded(route.id);
         add(disclosureRow(route, expanded));
@@ -200,9 +203,10 @@ export function createDropupActions(s: DropupState, a: DropupAgreement) {
     // and from a route it first leaves the route (without a restart of its own: the runtime change restarts).
     const pickModel = async (value: string) => {
         const panel = s.routes.panel();
-        const move = async (route: string, model: string, restart: boolean) => {
+        // The choice to start a fresh session is for a route model or Back, not for leaving the route to a harness model.
+        const move = async (route: string, model: string, restart: boolean, fresh = false) => {
             try {
-                const { failed } = await s.routes.moveTo(route, model, restart);
+                const { failed } = await s.routes.moveTo(route, model, restart, fresh);
                 // Saved, but a pane that could not restart still runs the old model: say so, as the pick cannot be retried.
                 s.setApplyError(failed.length > 0 ? `Saved, but the running pane did not switch: ${failed.join("; ")}` : null);
                 return true;
@@ -214,7 +218,10 @@ export function createDropupActions(s: DropupState, a: DropupAgreement) {
         const target = parseRouteValue(value);
         const compactTarget = parseCompactValue(value);
         let moved = false;
-        if (compactTarget && s.props.compactThenSwitch) {
+        const fresh = s.routes.fresh();
+        // A fresh session does not read the conversation, so a model too small for it needs no compacting first.
+        if (compactTarget && fresh) moved = await move(compactTarget.route, compactTarget.model, true, true);
+        else if (compactTarget && s.props.compactThenSwitch) {
             try {
                 await s.props.compactThenSwitch(compactTarget.route, compactTarget.model);
                 s.setApplyError(null);
@@ -222,8 +229,8 @@ export function createDropupActions(s: DropupState, a: DropupAgreement) {
             } catch (err: any) {
                 s.setApplyError(err?.message ?? String(err));
             }
-        } else if (value === BACK_VALUE && panel?.previous) moved = await move(panel.previous.route, panel.previous.model, true);
-        else if (target) moved = await move(target.route, target.model, true);
+        } else if (value === BACK_VALUE && panel?.previous) moved = await move(panel.previous.route, panel.previous.model, true, fresh);
+        else if (target) moved = await move(target.route, target.model, true, fresh);
         // A harness model: the runtime setting it always was (which shows its own failure), from a route after leaving it.
         else if (!(s.routeModel() || s.routes.onSavedRoute()) || (await move("", "", false))) {
             await s.updateRuntime({ model: value });
@@ -231,6 +238,8 @@ export function createDropupActions(s: DropupState, a: DropupAgreement) {
         }
         // The agent was moved on by hand: a card about the change srv undid no longer says where it is.
         if (moved && s.props.blockId) await dismissModelUndone(s.props.blockId);
+        // The choice was for this change: a later pick in the same opening resumes the conversation unless it is turned on again.
+        if (moved && fresh && (compactTarget || target || value === BACK_VALUE)) s.routes.resetFresh();
     };
 
     // Enter applies and keeps the panel open — deliberate departure from
@@ -246,6 +255,10 @@ export function createDropupActions(s: DropupState, a: DropupAgreement) {
             setRouteOpen(route, !s.routes.isExpanded(route));
             return;
         }
+        if (choice.value === FRESH_VALUE) {
+            s.routes.setFresh(!s.routes.fresh());
+            return;
+        }
         if (choice.section === "mode") await s.updateRuntime({ permissionMode: choice.value as PermissionMode });
         else if (choice.section === "model") await pickModel(choice.value);
         else await s.updateRuntime({ effort: choice.value as EffortLevel });
@@ -257,6 +270,7 @@ export function createDropupActions(s: DropupState, a: DropupAgreement) {
             return;
         }
         s.routes.collapseAll();
+        s.routes.resetFresh();
         const { options } = build();
         const idx = options.findIndex((o) => o.section === "mode" && o.current);
         s.setSelectedOptIndex(idx >= 0 ? idx : 0);

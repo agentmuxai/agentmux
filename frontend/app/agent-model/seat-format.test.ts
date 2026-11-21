@@ -12,6 +12,8 @@ import {
     roleLabel,
     seatBadgeText,
     seatReportsLine,
+    seatHue,
+    SEAT_ROLES,
     seatsByAgent,
     seatTooltipLine,
 } from "./seat-format";
@@ -94,5 +96,18 @@ describe("seat-format", () => {
         ]);
         expect(seats.get("uid-w")?.lead).toEqual({ id: "AgentY@narko", name: "AgentY@narko" });
         expect(seats.get("uid-x")?.lead?.name).toBe("AgentX@narko");
+    });
+});
+
+describe("seatHue", () => {
+    it("gives every role its own hue, named for the role", () => {
+        const hues = SEAT_ROLES.map((r) => seatHue(r.value));
+        expect(hues).toEqual(["seat-leader", "seat-worker", "seat-specialist", "seat-platform-tester", "seat-analyst", "seat-super"]);
+        expect(new Set(hues).size).toBe(SEAT_ROLES.length);
+    });
+
+    it("gives a role this build does not know none, so its tag is neutral", () => {
+        expect(seatHue("overseer")).toBeNull();
+        expect(seatHue("")).toBeNull();
     });
 });

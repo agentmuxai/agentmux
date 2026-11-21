@@ -909,9 +909,10 @@ fn register_agent_questions(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let state_keep = state.clone();
     engine.register_typed(
         COMMAND_AGENT_SHUTDOWN_KEEP,
-        move |cmd: CommandAgentShutdownKeepData, _ctx| {
+        move |cmd: CommandAgentShutdownKeepData, ctx| {
             let state = state_keep.clone();
             async move {
+                ctx.operator_only("only the person keeps an agent running that is about to stop: ask the person to press Keep running in the AgentMux window")?;
                 let outcome = crate::sagas::pending_shutdown::keep(&state, &cmd.blockid, &cmd.request_id);
                 Ok(AgentShutdownKeepResult { outcome: outcome.to_string() })
             }
@@ -1021,6 +1022,9 @@ fn register_event_history_and_settings(engine: &Arc<WshRpcEngine>, state: &AppSt
 
 /// `setconfig`: merge settings keys into `settings.json` and the in-memory config, then broadcast it.
 fn set_config(state: &AppState, data: serde_json::Value, ctx: &RpcContext) -> Result<(), String> {
+    if let Some(keys) = data.as_object() {
+        crate::backend::settings_consent::refuse_unless_person(ctx, keys)?;
+    }
     let cw = state.config_watcher.clone();
     let eb = state.event_bus.clone();
     let lan_listeners = state.lan_listeners.clone();

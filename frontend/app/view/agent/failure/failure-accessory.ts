@@ -330,7 +330,7 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
                     primary: true,
                     danger: !!view.takeoverArmed,
                     disabled: !!view.takingOver,
-                    onClick: on.takeOver,
+                    onClick: on.takeOver, operatorOnly: true,
                 });
             }
             break;
@@ -356,7 +356,7 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
                     primary: true,
                     danger: !!view.takeoverArmed,
                     disabled: !!view.takingOver,
-                    onClick: on.moveHere,
+                    onClick: on.moveHere, operatorOnly: true,
                 });
             }
             break;

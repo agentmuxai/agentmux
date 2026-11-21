@@ -458,6 +458,12 @@ pub(crate) async fn agent_define_core(
     // it as both the lookup key and the insert payload. It holds a single
     // mutex guard for the check + conditional insert, closing the TOCTOU
     // window between list and insert.
+    // A definition that already has the name is not made again, so one with a reserved name is left as it is.
+    let named = cmd.name.trim();
+    let exists = mstore.agent_def_list().map(|all| all.iter().any(|d| d.is_seeded == 0 && (d.name.eq_ignore_ascii_case(named) || d.slug.eq_ignore_ascii_case(named)))).unwrap_or(false);
+    if !exists {
+        crate::backend::reserved_names::check_all(&[named]).map_err(|e| format!("agent.define: {e}"))?;
+    }
     let mut def = new_definition(&cmd, &provider, cmd_model_vendor_base_url, now);
 
     // Returns Some(existing) if a row matched by name/slug already exists;

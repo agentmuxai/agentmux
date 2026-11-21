@@ -22,6 +22,11 @@ mod service;
 mod settings;
 mod setup;
 mod state;
+// The service entry's parts that need no Windows (the names, the command line, what is told to the service manager) are also
+// for the installer, which is the next PR of docs/specs/SPEC_WINDOWS_HEADLESS_AS_A_SERVICE_2026_11_20.md: until then only the
+// tests use some of them.
+#[allow(dead_code)]
+mod winservice;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -180,6 +185,18 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// What the Windows service manager runs (not a command to type).
+    #[command(hide = true)]
+    Service {
+        #[command(subcommand)]
+        command: ServiceCmd,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ServiceCmd {
+    /// Be the Windows service: report to the service manager and run the server as `run` does.
+    Run(ServerArgs),
 }
 
 fn main() {
@@ -229,6 +246,7 @@ fn dispatch(cli: Cli) -> i32 {
         }
         Cmd::Uninstall { remove_data, yes } => cmd_uninstall(&paths, remove_data, yes),
         Cmd::Version { .. } => unreachable!("answered above"),
+        Cmd::Service { command: ServiceCmd::Run(args) } => winservice::command(&paths, &args),
     }
 }
 

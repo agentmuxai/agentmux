@@ -39,7 +39,7 @@ pub(crate) mod session_slots;
 pub(crate) mod session_windows;
 pub(crate) use session_windows::{forget_windows_left_by_quit, live_windows, open_workspace_ids};
 pub(crate) mod user_workspace;
-mod user_workspace_files;
+pub(crate) mod user_workspace_files;
 mod user_workspace_switch;
 mod tab_lifecycle;
 mod tab_move;

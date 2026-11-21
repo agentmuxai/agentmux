@@ -66,6 +66,10 @@ pub(crate) async fn rename_title(state: &AppState, id: &str, title: &str, refuse
         refuse_if_taken(mstore, &all, id, title)?;
     }
     let old_title = shown_name(old).to_string();
+    // An agent that already has such a name may be given it again; a new name must not be reserved.
+    if title != old_title {
+        crate::backend::reserved_names::check_all(&[title]).map_err(RenameError::Invalid)?;
+    }
     let mut updated = old.clone();
     if !updated.branch_label.is_empty() {
         updated.branch_label = title.to_string();
