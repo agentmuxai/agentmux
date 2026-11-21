@@ -151,6 +151,7 @@ pub(crate) mod desktop;
 pub(crate) mod viewer;
 mod input_history;
 mod presence;
+pub(crate) mod client_terms;
 pub(crate) mod tower_pane;
 mod gpu_panel;
 pub(crate) mod record_read;
@@ -202,6 +203,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     app_update::register(engine, state);
     desktop::register(engine, state);
     presence::register(engine, state);
+    client_terms::register(engine, state);
     tower_pane::register(engine, state);
     gpu_panel::register(engine, state);
     blockstats::register(engine, state);

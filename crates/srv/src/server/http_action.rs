@@ -12,6 +12,10 @@
 //! (`Caller::Agent`); a request without one is `unproven`, never the operator: nothing on an HTTP
 //! request proves the window made it. A request's contents are never recorded; the one body read is
 //! the service call's `service` and `method` names.
+//!
+//! A service call with no agent token is recorded as `unproven`, not skipped, so a process that merely
+//! holds the instance key leaves a line. The window's own reads and bookkeeping ([`QUIET`]) are the
+//! exception; a method not named there is recorded.
 
 use axum::body::Body;
 use axum::extract::{MatchedPath, State};
@@ -33,6 +37,29 @@ const SERVICE_BODY_MAX: usize = 2 * 1024 * 1024;
 /// The largest service reply read for its verdict.
 const SERVICE_REPLY_MAX: usize = 32 * 1024 * 1024;
 const MAX_FIELD: usize = 200;
+
+/// The `service.method` calls that are not recorded when they carry no agent token: reads, and the window's
+/// own bookkeeping, which it makes constantly. A method in no list is recorded.
+const QUIET: &[&str] = &[
+    "object.GetObject", "object.GetObjects", "object.UpdateObjectMeta",
+    "client.GetClientData", "client.GetTab", "client.GetAllConnStatus", "client.FocusWindow", "client.TelemetryUpdate",
+    "window.GetWindow", "window.FindWindowByLabel", "window.SaveSessionSnapshot", "window.TakeRestoredWindows",
+    "window.ListClosedWindows", "window.WindowAgents", "window.PlaceWindowSlots", "window.SetWindowPosAndSize",
+    "window.SetWindowOpacity", "window.SetWindowTopology", "window.MarkWindowOpen", "window.InheritWindowAppearance",
+    "workspace.GetWorkspace", "workspace.ListWorkspaces", "workspace.ListUserWorkspaces", "workspace.UserWorkspaceAgents",
+    "workspace.ExportUserWorkspace", "workspace.PreviewImport", "workspace.SetActiveTab", "workspace.Flush",
+    "block.GetControllerStatus", "block.SaveTerminalState", "block.SendCommand", "userinput.SendUserInputResponse",
+    "shell.ListActive", "cron.ListActive", "subagent.ListActive", "subagent.ListDispatches", "subagent.GetHistory",
+    "subagent.GetInfo", "history.List", "history.ListForAgent", "history.Get",
+];
+/// The services that are the host's own plumbing (the credential bridge, the host's registration): none of
+/// their calls is recorded without an agent token.
+const QUIET_SERVICES: &[&str] = &["credential", "host_ipc"];
+
+/// Whether a `service.method` call without an agent token is left out of the record.
+fn is_quiet(names: &str) -> bool {
+    QUIET.contains(&names) || names.split_once('.').is_some_and(|(service, _)| QUIET_SERVICES.contains(&service))
+}
 
 /// The values a request's path gives for the route's `:name` parameters, as `name=value`.
 pub(crate) fn path_params(template: &str, path: &str) -> Vec<String> {
@@ -80,7 +107,8 @@ pub(super) async fn record_action(State(state): State<AppState>, mut req: Reques
     }
     // The window's own calls and the host's cannot be told from a process that merely holds the
     // key, so these routes are recorded when an agent's token is on the request.
-    if policy == Some(Policy::Plumbing) && caller.as_ref().and_then(Caller::uid).is_none() {
+    let untokened = caller.as_ref().and_then(Caller::uid).is_none();
+    if policy == Some(Policy::Plumbing) && untokened && template != SERVICE_ROUTE {
         return next.run(req).await;
     }
     let mut subject = path_params(&template, req.uri().path());
@@ -89,8 +117,12 @@ pub(super) async fn record_action(State(state): State<AppState>, mut req: Reques
         let (parts, body) = req.into_parts();
         match axum::body::to_bytes(body, SERVICE_BODY_MAX).await {
             Ok(bytes) => {
-                subject.extend(service_names(&bytes));
+                let names = service_names(&bytes);
                 req = Request::from_parts(parts, Body::from(bytes));
+                if untokened && names.as_deref().is_some_and(is_quiet) {
+                    return next.run(req).await;
+                }
+                subject.extend(names);
             }
             Err(_) => {
                 refused = Some((StatusCode::PAYLOAD_TOO_LARGE, "request body too large").into_response());
@@ -156,6 +188,16 @@ mod tests {
         assert_eq!(service_names(br#"{"service":"window","method":"CloseWindow","args":["secret"]}"#).as_deref(), Some("window.CloseWindow"));
         assert_eq!(service_names(br#"{"service":"window"}"#), None);
         assert_eq!(service_names(b"not json"), None);
+    }
+
+    #[test]
+    fn a_service_call_with_no_token_is_recorded_unless_it_is_a_read_or_the_windows_bookkeeping() {
+        assert!(is_quiet("object.GetObject") && is_quiet("window.SetWindowPosAndSize") && is_quiet("history.List"));
+        assert!(is_quiet("credential.Fill") && is_quiet("host_ipc.Register"));
+        for recorded in ["client.AgreeTos", "object.QuitAgent", "object.ShutdownAgent", "agent.define", "history.Delete", "workspace.DeleteWorkspace", "object.NewMethod"] {
+            assert!(!is_quiet(recorded), "{recorded}");
+        }
+        assert!(!is_quiet("not a service call"));
     }
 
     #[test]

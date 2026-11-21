@@ -117,12 +117,37 @@ async fn plumbing_is_recorded_only_with_an_agents_token_and_a_service_call_names
     let state = test_state();
     let token = token_for(&state, "uid-http-act-b");
     let body = r#"{"service":"window","method":"CloseWindow","args":["w-1"]}"#;
-    let (_, id) = send(&state, Method::POST, "/agentmux/service", None, body).await;
-    not_recorded(&id).await;
     let (_, id) = send(&state, Method::POST, "/agentmux/service", Some(&token), body).await;
     let line = recorded(&id).await;
     assert_eq!((line.source_agent.as_deref(), line.reason.as_deref()), (Some("agent:uid-http-act-b"), Some("window.CloseWindow")));
     assert!(!serde_json::to_string(&line).unwrap().contains("w-1"));
+    // The host's own routes are recorded only with an agent's token.
+    let (_, id) = send(&state, Method::POST, "/api/v1/host/browser_pause", None, "{}").await;
+    not_recorded(&id).await;
+}
+
+#[tokio::test]
+async fn a_service_call_with_no_token_is_recorded_as_unproven_with_its_names_and_never_its_arguments() {
+    let state = test_state();
+    let body = r#"{"service":"client","method":"AgreeTos","args":["a-secret-value"]}"#;
+    let (_, id) = send(&state, Method::POST, "/agentmux/service", None, body).await;
+    let line = recorded(&id).await;
+    assert_eq!((line.source_agent.as_deref(), line.reason.as_deref()), (Some("unproven"), Some("client.AgreeTos")));
+    assert_eq!(line.outcome.as_deref(), Some("POST /agentmux/service"));
+    assert!(!serde_json::to_string(&line).unwrap().contains("a-secret-value"));
+}
+
+#[tokio::test]
+async fn an_agents_service_read_is_recorded_but_the_windows_reads_and_bookkeeping_are_not() {
+    let state = test_state();
+    let token = token_for(&state, "uid-http-act-f");
+    let read = r#"{"service":"object","method":"GetObject","args":["x"]}"#;
+    let (_, id) = send(&state, Method::POST, "/agentmux/service", Some(&token), read).await;
+    assert_eq!(recorded(&id).await.source_agent.as_deref(), Some("agent:uid-http-act-f"));
+    for quiet in [read, r#"{"service":"credential","method":"Lookup","args":[]}"#, r#"{"service":"window","method":"SetWindowOpacity","args":[]}"#] {
+        let (_, id) = send(&state, Method::POST, "/agentmux/service", None, quiet).await;
+        not_recorded(&id).await;
+    }
 }
 
 #[tokio::test]
