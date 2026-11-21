@@ -1,7 +1,7 @@
 # SPEC: Remote panes: open an agent that runs on another computer, see the same conversation live, and drive it, under a red "Remote" banner
 
 **Date:** 2026-11-20
-**Status:** active: approved by the operator on 2026-11-20 with every recommendation in section 11 (D1 to D15). Phase 0a (section 9) is built in the pull request that adds this file; nothing else is built yet.
+**Status:** active: approved by the operator on 2026-11-20 with every recommendation in section 11 (D1 to D15). Phase 0a (section 9) is built in the pull request that adds this file (build #48246); nothing else is built yet, and phases 0b to 4 remain.
 **Kanban:** #48245 (this spec), #48246 (the build).
 **Written against:** `origin/main` at `ed9e1974ff` (a few facts on `a2d2133de0`, the commit before it). Every `file:line` below was read on that commit; spot-check one before relying on it.
 **Related, read first:** `SPEC_AGENT_PANE_CROSS_CHANNEL_LAN_WAN_SYNC_2026_08_21.md` (an earlier draft of "mirrored panes", which this spec narrows to what was asked and moves onto the code that exists now), `SPEC_AGENTS_OPERATE_OTHER_MACHINES_2026_10_30.md`, `SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md` §8.3 (the computer-to-computer pairing this spec builds on), `SPEC_LAN_KEY_CONTINUITY_2026_10_29.md`, `SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25.md`, and the live-facts spec (#48221, #48222), a draft whose shape is proposed.
