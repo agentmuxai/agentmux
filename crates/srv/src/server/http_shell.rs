@@ -66,7 +66,7 @@ pub(super) fn own_pane(
     let refuse = |why: &str| (StatusCode::FORBIDDEN, Json(json!({ "error": why }))).into_response();
     let pane = calling_pane(state, caller, auth).map_err(|e| refuse(&e))?;
     if !named.is_empty() && named != pane {
-        return Err(refuse("this request names another agent's pane"));
+        return Err(refuse("this request names another agent's pane: a shell call acts on your own pane, so use your own pane's shell, or message that agent"));
     }
     Ok(pane)
 }
@@ -80,7 +80,7 @@ fn refuse_foreign_shell(state: &AppState, caller: Option<&super::caller::Caller>
     };
     let owner = state.shell_sessions.get_status(shell_id).block_id;
     (!owner.is_empty() && owner != pane)
-        .then(|| (StatusCode::FORBIDDEN, Json(json!({ "error": "this shell belongs to another agent's pane" }))).into_response())
+        .then(|| (StatusCode::FORBIDDEN, Json(json!({ "error": "this shell belongs to another agent's pane: use your own pane's shell, or message that agent" }))).into_response())
 }
 
 /// `POST /api/v1/shell/create` — start a persistent background shell.

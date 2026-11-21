@@ -4186,6 +4186,7 @@ async fn a_shell_call_on_a_shell_another_pane_started_is_refused() {
     ] {
         let (status, json) = post_json_with(&app, uri, body, &[("X-Agent-Token", other_token.as_str())]).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{uri}: {json}");
+        assert!(json["error"].as_str().unwrap_or("").contains("message that agent"), "the refusal says what to do: {json}");
     }
     assert!(stdin_rx.try_recv().is_err(), "nothing was written to the other pane's shell");
     assert!(state.shell_sessions.get_status(&shell).running, "it was not stopped");
