@@ -139,10 +139,36 @@ pub fn write<'a>(work_dir: &str, files: impl Iterator<Item = (&'a str, &'a str)>
         }
     }
     if in_plugin {
-        let manifest = serde_json::json!({ "name": PLUGIN_NAME, "version": "1.0.0", "description": "The skills and commands AgentMux gives this agent" });
-        write_one(&plugin_dir(&dir).join(".claude-plugin").join("plugin.json"), &manifest.to_string())?;
+        write_plugin_manifest(&dir)?;
     }
     Ok(true)
+}
+
+/// The agent's skills and commands for `work_dir` again, as a controller start refreshes them: only the plugin
+/// folder outside is rewritten, and nothing is written into the folder. `Ok(false)` when the rule does not hold.
+pub fn refresh_skills<'a>(work_dir: &str, files: impl Iterator<Item = (&'a str, &'a str)>) -> Result<bool, String> {
+    let Some(dir) = dir_of(work_dir) else { return Ok(false) };
+    match std::fs::remove_dir_all(plugin_dir(&dir)) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("failed to clear {}: {e}", plugin_dir(&dir).display())),
+    }
+    let mut in_plugin = false;
+    for (name, content) in files {
+        let Some(place) = place_of(name).filter(|place| place.starts_with(PLUGIN_DIR)) else { continue };
+        let path = crate::backend::base::safe_join_within_base(&dir, &place).map_err(|e| format!("path traversal denied: {name} ({e})"))?;
+        in_plugin = true;
+        write_one(&path, content)?;
+    }
+    if in_plugin {
+        write_plugin_manifest(&dir)?;
+    }
+    Ok(true)
+}
+
+fn write_plugin_manifest(dir: &Path) -> Result<(), String> {
+    let manifest = serde_json::json!({ "name": PLUGIN_NAME, "version": "1.0.0", "description": "The skills and commands AgentMux gives this agent" });
+    write_one(&plugin_dir(dir).join(".claude-plugin").join("plugin.json"), &manifest.to_string())
 }
 
 /// The agent's own MCP servers the last launch left out of its config in `dir` ([`dir_of`]), by name: each is
