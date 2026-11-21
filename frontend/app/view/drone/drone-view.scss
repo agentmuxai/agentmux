@@ -162,6 +162,8 @@
 
 .drone-stage {
     position: relative;
+    display: flex;
+    flex-direction: column;
     flex: 1;
     min-height: 0;
     overflow: hidden;
@@ -172,6 +174,13 @@
         transparent 1px
     );
     background-size: 16px 16px;
+}
+
+// The canvas and the run panel fill what is under the Trigger strip.
+.drone-stage-body {
+    position: relative;
+    flex: 1;
+    min-height: 0;
 }
 
 .drone-canvas {
@@ -274,6 +283,48 @@
     color: var(--secondary-text-color);
     font-size: var(--text-sm);
     pointer-events: none;
+}
+
+// The Trigger card: a strip above the canvas, so it never covers a node. One line; a long list scrolls sideways.
+.drone-trigger {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex: none;
+    padding: 4px 8px;
+    overflow-x: auto;
+    background: var(--main-bg-color);
+    border-bottom: 1px solid var(--border-color);
+    font-size: var(--text-sm);
+}
+
+.drone-trigger-title {
+    flex: none;
+    margin: 0;
+    font-size: var(--text-sm);
+    font-weight: 600;
+}
+
+.drone-trigger-row {
+    display: flex;
+    align-items: center;
+    flex: none;
+    gap: 6px;
+}
+
+.drone-trigger-name {
+    max-width: 16em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.drone-trigger-kind,
+.drone-trigger-note {
+    flex: none;
+    margin: 0;
+    color: var(--secondary-text-color);
+    white-space: nowrap;
 }
 
 .drone-controls {
