@@ -66,8 +66,11 @@ const DATA: &[&str] = &["docker", "dockerdesktop", "docker desktop"];
 /// The first of a container agent's volumes, or its workspace folder, that it may not mount, as the source (or, for a pipe,
 /// the whole entry): a host folder the CLI keeps its sessions in, or a container runtime's socket, pipe or folder.
 pub fn refused_mount(volumes: &[String], workspace: Option<&str>) -> Option<String> {
-    let (homes, data) = (homes(), data_dirs());
-    refused_in(volumes, &homes, &data).or_else(|| workspace.map(str::trim).filter(|w| !w.is_empty()).and_then(|w| refused_entry(w, w, &homes, &data)))
+    refused_mount_in(volumes, workspace, &homes(), &data_dirs())
+}
+
+fn refused_mount_in(volumes: &[String], workspace: Option<&str>, homes: &[PathBuf], data: &[PathBuf]) -> Option<String> {
+    refused_in(volumes, homes, data).or_else(|| workspace.map(str::trim).filter(|w| !w.is_empty()).and_then(|w| refused_entry(w, w, homes, data)))
 }
 
 /// [`refused_mount`] for a volumes list alone.
@@ -447,10 +450,18 @@ mod tests {
 
     #[test]
     fn the_workspace_folder_is_held_to_the_data_rule_too() {
-        // A container agent whose workspace is a home folder, or the AgentMux root, is refused; one in its own folder is not.
-        assert!(refused_mount(&[], dirs::home_dir().unwrap().to_str()).is_some());
-        assert!(refused_mount(&[], agentmux_common::data_paths::agentmux_root().unwrap().to_str()).is_some());
-        assert!(refused_mount(&[], agentmux_common::data_paths::agentmux_root().unwrap().join("agents/aria").to_str()).is_none());
+        // A container agent whose workspace is a home folder that holds an AgentMux root, or the root, is refused; one in
+        // its own folder is not. A home folder of its own here, with a root in it, so nothing of this machine's is read.
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join(".agentmux/agents/aria")).unwrap();
+        let h = slashed(home.path());
+        let homes = [home.path().to_path_buf()];
+        let workspace = |path: &str| refused_mount_in(&[], Some(path), &homes, &[]);
+        assert_eq!(workspace(&h).as_deref(), Some(h.as_str()), "the home folder");
+        assert!(workspace(&format!("{h}/.agentmux")).is_some(), "the root");
+        assert!(workspace(&format!("{h}/.agentmux/shared")).is_some());
+        assert!(workspace(&format!("{h}/.agentmux/agents/aria")).is_none(), "an agent's own folder");
+        assert!(workspace("").is_none() && refused_mount_in(&[], None, &homes, &[]).is_none());
     }
 
     #[test]
