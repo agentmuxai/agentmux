@@ -230,7 +230,6 @@
 109 crates/srv-core/src/registry/migrate.rs::backfill_source_bases_once
 131 crates/srv-core/src/registry/migrate.rs::migrate_from_sqlite_once
 102 crates/srv/src/bootstrap/logging.rs::init_logging
-234 crates/srv/src/bootstrap/network.rs::bind_listeners_and_network
 143 crates/srv/src/bootstrap/plumbing.rs::build_app_state
 102 crates/srv/src/bootstrap/stores.rs::prepare_in_process
 113 crates/srv/src/bootstrap/watchers.rs::start_parent_watcher

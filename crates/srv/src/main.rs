@@ -25,6 +25,8 @@ use server::build_routers;
 use agentmux_srv_core::test_support;
 
 #[cfg(test)]
+mod test_data_env;
+#[cfg(test)]
 mod tls_test_init;
 
 fn main() {
