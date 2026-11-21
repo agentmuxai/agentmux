@@ -624,6 +624,8 @@ pub const COMMAND_APP_DESKTOP: &str = "app.desktop";
 
 // The cloud presence publisher (muxbus::wan_presence): its state, and a try now.
 pub const COMMAND_PRESENCE_STATUS: &str = "presence.status";
+/// Accepting the terms: the person's, from the AgentMux window alone.
+pub const COMMAND_CLIENT_AGREE_TOS: &str = "client.agreetos";
 pub const COMMAND_PRESENCE_PUBLISH_NOW: &str = "presence.publish-now";
 
 // Tower, the read-only task manager pane (backend::tower::sampler). The
