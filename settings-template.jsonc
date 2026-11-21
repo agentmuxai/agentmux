@@ -157,6 +157,11 @@
     // memory; pauses under memory pressure.
     // "window:prewarmagenttabs": false,
 
+    // While the pointer rests on a window tab, draw the agent transcripts in it that changed
+    // since you last saw it, one pane at a time, so the tab shows every pane at once when you
+    // click it. Pauses while you type and under memory pressure.
+    // "window:drawtabonhover": true,
+
     // "window:dimensions": "",
     // "window:zoom": 1,
     // UI color theme. Options: default (dark grey + blue), midnight (deep navy), high-contrast
