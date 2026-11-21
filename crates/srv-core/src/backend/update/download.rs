@@ -132,6 +132,10 @@ pub fn start() -> Result<AppUpdateStatus, String> {
     let (Some(version), Some(asset)) = (status.latest.clone(), status.asset.clone()) else {
         return Err("no newer release is known yet".into());
     };
+    // Older than the release upgrades from: the same reason the check gives, naming the version to install first.
+    if let (true, Some(floor)) = (status.state == "available", status.install_first.as_deref()) {
+        return Err(check::install_first_message(&status.current, &version, floor));
+    }
     if status.state != "available" || !status.can_download {
         return Err("AgentMux can't download this release itself; use the release page".into());
     }
