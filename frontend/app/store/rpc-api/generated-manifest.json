@@ -136,6 +136,14 @@
             "method": "AgentShutdownKeepCommand"
         },
         {
+            "command": "agentquit",
+            "method": "AgentQuitCommand"
+        },
+        {
+            "command": "agentshutdown",
+            "method": "AgentShutdownCommand"
+        },
+        {
             "command": "agentshutdownnow",
             "method": "AgentShutdownNowCommand"
         },

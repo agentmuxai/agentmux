@@ -19,6 +19,7 @@ import { useAgentFailure } from "../hooks/useAgentFailure";
 import type { useOfflineInput } from "../offline/useOfflineInput";
 import { accountStateOf } from "./failure-verdict";
 import { openInOtherPaneActions } from "./open-in-other-pane";
+import { takeOpenHere } from "./open-here";
 import { requestAgentTakeover } from "./takeover";
 import type { useAgentAccountBinding } from "./useAgentAccountBinding";
 
@@ -50,6 +51,7 @@ export function useFailureRow(opts: {
             if (turnAttempted) opts.retryLastTurn();
         },
         ...openInOtherPaneActions({ blockId: model.blockId, log, send: opts.send }),
+        moveHereAtOnce: () => takeOpenHere(model.blockId),
         onOpenAccounts: () => void openConnectors("accounts"),
         // context_exceeded: archive the over-full session and return to the picker (resuming would re-fail).
         onNewSession: () => {

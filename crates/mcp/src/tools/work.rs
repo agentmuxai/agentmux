@@ -964,6 +964,7 @@ async fn note_on_unheld(id: &str, arguments: &Value, self_id: &str, cx: &ToolCtx
         "agent_id": self_id,
         "note": str_arg("note"),
         "pr_url": links.get("pr").and_then(|v| v.as_str()),
+        "unpr": links.get("unpr").and_then(|v| v.as_str()),
         "branch": links.get("branch").and_then(|v| v.as_str()),
         "doc": links.get("doc").and_then(|v| v.as_str()),
     });

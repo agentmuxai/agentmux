@@ -480,6 +480,29 @@ pub(crate) fn hold_wan_for_unavailable(
     kept
 }
 
+/// A relayed message that is not held ([`hold_wan_for_unavailable`] keeps a verified peer's) to an agent here
+/// that can't work now (out of quota, or signed out): not to be injected, because the turn it starts ends in
+/// an error. `true` tells the caller to give the message back to the relay, which offers it again on a later
+/// pull; nothing is stored here, so a message with no proof of its sender never reaches the hold table, whose
+/// replay would raise its tier. A periodic `cron` fire is left to the old path.
+pub(crate) fn give_back_for_unavailable(
+    mstore: &crate::backend::storage::store::Store,
+    handler: &crate::backend::reactive::handler::ReactiveHandler,
+    req: &InjectionRequest,
+) -> bool {
+    use crate::backend::reactive::handler::LookupOutcome;
+    if req.source_agent.as_deref() == Some("cron") {
+        return false;
+    }
+    let Some(target) = crate::backend::reactive::sanitize::route_name(&req.target_agent) else {
+        return false;
+    };
+    let LookupOutcome::One(reg) = handler.lookup_delivery_target(&target) else {
+        return false;
+    };
+    holding_unavailable(mstore, &reg.block_id).is_some()
+}
+
 /// [`hold_applies`] for a verified message from another machine ([`verified_peer`]): the same
 /// exclusions (a cron fire, no id to key the row by), without the full-key, host-tier condition. A
 /// message with files is held with them: the files route reads them into the attachment store first

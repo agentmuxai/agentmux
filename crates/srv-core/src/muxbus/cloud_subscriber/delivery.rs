@@ -205,6 +205,14 @@ pub(super) async fn claim_and_deliver(
             steps::record_delivered(&checked, &pr_flow);
             continue;
         }
+        // Not held, and its agent can't work now: injected it would start a turn that ends in an error (HTTP 429).
+        // The claim goes back to the relay, which offers the message again on a later pull; nothing is kept here.
+        if hooks.give_back_for_unavailable(mstore, handler, &req) {
+            note_flow(&req, MessageFlowOutcome::Queued);
+            hooks.settle_files(&req, false);
+            release(base, http, &agent_token, agent_id, &inj.id, &delivered_at).await;
+            continue;
+        }
         // W3-S §2.5: only now, after it landed, is this signature "seen" —
         // a release-and-redeliver after a failed delivery must not read as
         // a replay.

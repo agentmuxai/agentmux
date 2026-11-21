@@ -78,6 +78,8 @@ fn a_429_that_names_a_plan_window_is_a_usage_limit_and_a_plain_429_is_a_rate_lim
         "HTTP 429 Too Many Requests",
         "API Error: Server is temporarily limiting requests (not your usage limit) · Rate limited",
         "429 rate limit exceeded, retry after 20 seconds",
+        "HTTP 429 You've hit your rate limit, try again in a few seconds",
+        "HTTP 429 you have hit your requests-per-minute limit",
     ] {
         let f = classify(Some(1), None, text, None);
         assert_eq!((f.code, f.retryable), (FailureClass::RateLimited, true), "{text}");

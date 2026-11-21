@@ -100,8 +100,10 @@ mod providers_handlers;
 mod voice;
 mod attachments;
 pub(crate) mod local_proof;
+pub(crate) mod confirm_peer;
 pub(crate) mod local_session;
 pub(crate) mod local_session_routes;
+pub(crate) mod peer_process;
 mod ui_cache;
 pub(crate) mod mux_obj_bridge;
 mod websocket;
@@ -253,6 +255,9 @@ mod mcp_actor_tests;
 #[cfg(test)]
 #[path = "tests/person_only_ws_tests.rs"]
 mod person_only_ws_tests;
+#[cfg(test)]
+#[path = "tests/quit_window_only_tests.rs"]
+mod quit_window_only_tests;
 #[cfg(test)]
 #[path = "tests/rpc_attribution_tests.rs"]
 mod rpc_attribution_tests;

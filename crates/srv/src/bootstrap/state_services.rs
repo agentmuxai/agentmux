@@ -567,8 +567,11 @@ pub async fn serve_until_shutdown(
     router: axum::Router,
     stdin_token: &tokio_util::sync::CancellationToken,
 ) {
-    let web_server = axum::serve(web_listener, router.clone());
-    let ws_server = axum::serve(ws_listener, router);
+    // Every request carries both ends of its connection (`ConnectInfo<Conn>`: the sign-in's confirm reads them) and the
+    // address it came from (`ConnectInfo<SocketAddr>`: the loopback-only routes read it), on either listener.
+    let router = crate::server::confirm_peer::with_plain_peer(router);
+    let web_server = axum::serve(web_listener, router.clone().into_make_service_with_connect_info::<crate::server::confirm_peer::Conn>());
+    let ws_server = axum::serve(ws_listener, router.into_make_service_with_connect_info::<crate::server::confirm_peer::Conn>());
 
     // Run both servers until shutdown
     tokio::select! {
@@ -587,3 +590,7 @@ pub async fn serve_until_shutdown(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "state_services_tests.rs"]
+mod tests;

@@ -1090,6 +1090,57 @@ describe("Take over and Move here", () => {
             });
         });
 
+        it("a pane opened with Open here runs the move at once, with no second click, and the row goes", async () => {
+            const onMoveHere = vi.fn(async () => {});
+            // As the pane's mark: true once, then used up.
+            let marked = true;
+            const moveHereAtOnce = vi.fn(() => marked && !(marked = false));
+            await inRoot(async () => {
+                const { ui } = mk({ onMoveHere, moveHereAtOnce });
+                await flush();
+                fire(held());
+                await flush();
+                expect(onMoveHere).toHaveBeenCalledTimes(1);
+                expect(ui.row()).toBeNull();
+            });
+        });
+
+        it("a pane not opened with Open here still waits for the click", async () => {
+            const onMoveHere = vi.fn(async () => {});
+            await inRoot(async () => {
+                const { ui } = mk({ onMoveHere, moveHereAtOnce: () => false });
+                await flush();
+                fire(held());
+                await flush();
+                expect(onMoveHere).not.toHaveBeenCalled();
+                expect(action(ui, "Move here")).toBeDefined();
+            });
+        });
+
+        it("Open here does not answer any other failure", async () => {
+            const onMoveHere = vi.fn(async () => {});
+            const moveHereAtOnce = vi.fn(() => true);
+            await inRoot(async () => {
+                mk({ onMoveHere, moveHereAtOnce });
+                await flush();
+                fire(fail("killed"));
+                await flush();
+                expect(onMoveHere).not.toHaveBeenCalled();
+                expect(moveHereAtOnce).not.toHaveBeenCalled();
+            });
+        });
+
+        it("a failed move after Open here says so and leaves Move here to try again", async () => {
+            await inRoot(async () => {
+                const { ui } = mk({ onMoveHere: vi.fn(async () => Promise.reject(new Error("stuck"))), moveHereAtOnce: () => true });
+                await flush();
+                fire(held());
+                await flush();
+                expect(ui.row()!.title).toBe("Could not move it here");
+                expect(ui.row()!.detail).toBe("stuck");
+            });
+        });
+
         it("a failed move says so in its own words", async () => {
             await inRoot(async () => {
                 const { ui } = mk({ onMoveHere: vi.fn(async () => Promise.reject(new Error("stuck"))) });

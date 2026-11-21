@@ -218,6 +218,14 @@ open and not otherwise: the work facts once and then every 20 seconds, the board
 
 ### 6.4 After v1: containers, the review bot, CI and the cloud tier (#47607)
 
+> **Removed 2026-11-21 (#48343): the review bot and CI nodes, the "Pull requests" region and every line to or from them.**
+> The map is agents and what passes between them; a bot and a service drew many connector lines across the background
+> and said little about an agent. What the nodes showed (a pull request's review and checks) is better as an attribute
+> of an agent's node or card, which is its own small task. The two bullets below that describe them ("The review bot
+> and CI", "A review, and a pull request's checks") and the By seat row and gap that held them (§6.5) describe what was
+> removed. srv still publishes the review, checks and merge events; the map no longer listens to them or reads
+> `GET /api/v1/pr-flow`.
+
 Decision 4's second half and the cloud tier, on the data three srv builds added: this machine's agent containers
 (`SPEC_CONTAINER_STATUS_IN_THE_FRONTEND_2026_11_14.md`), the review, checks and merge events
 (`SPEC_REVIEW_AND_CHECKS_FLOW_EVENTS_2026_11_14.md`) and the account's other machines

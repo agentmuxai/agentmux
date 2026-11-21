@@ -102,6 +102,7 @@ pub(crate) async fn serve<R: Runner>(
     };
     match credentials_for(policy, sessions, runner, &ask, chrono::Utc::now()).await {
         Ok(granted) => {
+            hold_in_transcripts(uid, ask.profile, &granted.creds);
             audit_granted(state, &def.slug, uid, &granted);
             credential_notice::worked(state, uid, &def.slug, Cause::Aws);
             Json(granted.creds.to_json()).into_response()
@@ -114,6 +115,15 @@ pub(crate) async fn serve<R: Runner>(
             refused(state, &def.slug, uid, ask.profile, refusal)
         }
     }
+}
+
+/// The secret key and session token of the credentials an agent was given are never written into its transcript,
+/// until they run out. Asked for again, an agent's profile gets its next credentials in place of these.
+fn hold_in_transcripts(uid: &str, profile: &str, creds: &crate::identity::aws_broker::mint::Minted) {
+    let until = Some(creds.expiration.timestamp_millis());
+    let owner = |what: &str| format!("aws-credentials:{uid}:{profile}:{what}");
+    crate::backend::transcript::withhold::hold(&owner("secret"), &creds.secret_access_key, until);
+    crate::backend::transcript::withhold::hold(&owner("session"), &creds.session_token, until);
 }
 
 /// Whether a refusal is one the person can fix on this computer, so the agent's pane says so: the host's AWS login

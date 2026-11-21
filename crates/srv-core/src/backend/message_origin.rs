@@ -221,11 +221,14 @@ pub struct RecordOrigin {
     /// (`held_notes::attach`). A viewer compares the exact suffix
     /// `"\n\n" + notes.join("\n")` of the content (spec §3.2).
     pub notes: Vec<String>,
+    /// The pane is sending this message again (its Retry, or a usage limit's resend after the reset): the agent gets
+    /// it, but the transcript already holds it from the first send and keeps one copy.
+    pub resend: bool,
 }
 
 impl RecordOrigin {
     pub fn new(origin: MessageOrigin) -> Self {
-        RecordOrigin { origin, notes: Vec::new() }
+        RecordOrigin { origin, notes: Vec::new(), resend: false }
     }
 
     /// Adds `origin` and `notes` to `record["amx"]`, keeping what is already
@@ -323,6 +326,7 @@ mod tests {
         let ro = RecordOrigin {
             origin: MessageOrigin::from_sender("agent1"),
             notes: vec!["[AgentMux] one".into(), "[AgentMux] two".into()],
+            resend: false,
         };
         ro.stamp(&mut record);
         assert_eq!(record["amx"]["notes"], serde_json::json!(["[AgentMux] one", "[AgentMux] two"]));

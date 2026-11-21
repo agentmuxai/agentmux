@@ -14,6 +14,7 @@
 //! Exit codes: 0 done, 1 the thing asked is not so (not running), 2 bad use, 3 could not do it.
 //! Nothing here prints a key, a code or a token.
 
+mod browsers;
 mod doctor;
 mod logs;
 mod uninstall;
@@ -139,6 +140,10 @@ enum Cmd {
     Doctor {
         #[arg(long)]
         json: bool,
+        /// Check this web port (the websocket port is the next one) instead of the one `setup` kept, else 7380. A server
+        /// that is running is judged on the port it runs on.
+        #[arg(long, value_parser = clap::value_parser!(u16).range(1024..=65534))]
+        port: Option<u16>,
     },
     /// Is AgentMux Headless running, and where.
     Status {
@@ -229,7 +234,7 @@ fn dispatch(cli: Cli) -> i32 {
             }
         }
         Cmd::Setup(args) => cmd_setup(&paths, &args),
-        Cmd::Doctor { json } => cmd_doctor(&paths, json),
+        Cmd::Doctor { json, port } => doctor::command(&paths, json, port),
         Cmd::Status { json } => cmd_status(&paths, json),
         Cmd::Open { print, origin } => cmd_client(&paths, "open", &client_args(print, origin)),
         Cmd::Logout => cmd_client(&paths, "logout", &[]),
@@ -748,7 +753,7 @@ fn cmd_status(paths: &DataPaths, json: bool) -> i32 {
     let uptime = record.as_ref().map(|s| agentmux_common::time::now_secs_u64().saturating_sub(s.started_unix));
     let blocked = state::read_blocked(&paths.instance_dir).filter(|_| record.is_none());
     let service = service_here(paths).is_some();
-    let browsers = if healthy { browser_sessions(paths) } else { None };
+    let browsers = if healthy { browsers::asked(paths) } else { None };
     if json {
         println!(
             "{}",
@@ -763,7 +768,8 @@ fn cmd_status(paths: &DataPaths, json: bool) -> i32 {
                 "uptime_secs": uptime,
                 "data_dir": record.as_ref().map(|s| s.data_dir.clone()),
                 "service": service,
-                "browser_sessions": browsers,
+                "browser_sessions": browsers.as_ref().map(|b| b.count),
+                "browser_confirms": browsers.as_ref().map(|b| b.confirms.clone()),
                 "blocked": blocked.as_ref().map(|b| serde_json::json!({ "owner": b.owner, "reason": b.reason, "since_unix": b.since_unix, "what_to_do": b.sentence() })),
             })
         );
@@ -772,8 +778,8 @@ fn cmd_status(paths: &DataPaths, json: bool) -> i32 {
         println!("  open:  {}", s.url());
         println!("  data:  {}", s.data_dir.display());
         println!("  service: {}", service_line(service));
-        if let Some(n) = browsers {
-            println!("  browsers: {}", browsers_line(n));
+        if let Some(b) = &browsers {
+            browsers::print(b);
         }
         if s.version != VERSION {
             tell!("  installed version is {VERSION}: `agentmux restart` runs it");
@@ -784,24 +790,6 @@ fn cmd_status(paths: &DataPaths, json: bool) -> i32 {
         tell!("AgentMux is not running (channel {}). Start it with `agentmux start`.", paths.channel);
     }
     if healthy { 0 } else { 1 }
-}
-
-/// What `status` says of the browsers signed in.
-fn browsers_line(n: u64) -> String {
-    match n {
-        0 => "none signed in (`agentmux open` signs one in)".to_string(),
-        n => format!("{n} signed in"),
-    }
-}
-
-/// How many browsers are signed in now, asked of the running server; None when it cannot say (the server does not
-/// serve its own UI, or does not answer).
-fn browser_sessions(paths: &DataPaths) -> Option<u64> {
-    let (code, out) = run_client(paths, "sessions", &[], true);
-    if code != 0 {
-        return None;
-    }
-    out.trim().parse().ok()
 }
 
 /// What `status` says of the service: whether the server starts by itself at every login.
@@ -892,22 +880,6 @@ fn facts(paths: &DataPaths, port: u16, srv_flag: Option<&Path>, web_dir_flag: Op
 /// The checks with each command they name written the way this program was run.
 fn said(checks: Vec<doctor::Check>) -> Vec<doctor::Check> {
     checks.into_iter().map(|c| doctor::Check { fix: c.fix.map(|f| say_as(&f)), ..c }).collect()
-}
-
-fn cmd_doctor(paths: &DataPaths, json: bool) -> i32 {
-    let port = match settings::read(&paths.instance_dir) {
-        Ok(s) => s.port,
-        Err(e) => return fail(&e),
-    };
-    let checks = said(doctor::evaluate(&facts(paths, port, None, None)));
-    if json {
-        println!("{}", serde_json::json!({ "ok": !doctor::failed(&checks), "checks": checks }));
-    } else {
-        for line in doctor::lines(&checks) {
-            println!("{line}");
-        }
-    }
-    if doctor::failed(&checks) { 1 } else { 0 }
 }
 
 fn cmd_setup(paths: &DataPaths, args: &setup::SetupArgs) -> i32 {
@@ -1177,13 +1149,6 @@ mod tests {
 
     static ENV: Mutex<()> = Mutex::new(());
 
-    #[test]
-    fn status_says_how_many_browsers_are_signed_in() {
-        assert!(browsers_line(0).contains("none") && browsers_line(0).contains("agentmux open"));
-        assert_eq!(browsers_line(1), "1 signed in");
-        assert_eq!(browsers_line(3), "3 signed in");
-    }
-
     fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
         Cli::try_parse_from([&["agentmux"], args].concat())
     }
@@ -1214,6 +1179,13 @@ mod tests {
     }
 
     #[test]
+    fn doctor_checks_the_port_it_is_given() {
+        assert!(matches!(parse(&["doctor", "--port", "7500"]).unwrap().command, Cmd::Doctor { port: Some(7500), .. }));
+        assert!(matches!(parse(&["doctor"]).unwrap().command, Cmd::Doctor { port: None, .. }));
+        assert!(parse(&["doctor", "--port", "80"]).is_err(), "a port below 1024 is refused, as for start and setup");
+    }
+
+    #[test]
     fn every_command_of_the_package_parses() {
         for args in [
             vec!["run"],
@@ -1222,6 +1194,7 @@ mod tests {
             vec!["restart"],
             vec!["status", "--json"],
             vec!["doctor", "--json"],
+            vec!["doctor", "--port", "7500"],
             vec!["setup", "--yes", "--port", "7380", "--secret-store", "file", "--service", "--no-open"],
             vec!["run", "--secret-store", "keychain", "--public-origin", "http://127.0.0.1:8080"],
             vec!["open", "--print"],

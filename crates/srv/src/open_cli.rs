@@ -68,12 +68,16 @@ async fn logout(server: &HttpServer) -> i32 {
     }
 }
 
-/// How many browsers are signed in (`sessions`): prints the number alone, 0 done, 3 could not.
+/// How many browsers are signed in (`sessions`): prints the number, then a line for each recent confirm (`confirm <unix ms>
+/// <session> <how>`). 0 done, 3 could not.
 async fn sessions(server: &HttpServer) -> i32 {
     match server.post("/auth/sessions", serde_json::json!({})).await {
         Ok(v) => match v["sessions"].as_u64() {
             Some(n) => {
                 println!("{n}");
+                for c in v["confirms"].as_array().into_iter().flatten() {
+                    println!("confirm {} {} {}", c["at_unix_ms"].as_u64().unwrap_or(0), c["session"].as_str().unwrap_or("?"), c["how"].as_str().unwrap_or("?"));
+                }
                 0
             }
             None => {
@@ -340,6 +344,9 @@ impl Server for HttpServer {
 
     async fn answer(&self, code: &str, accept: bool) -> Result<bool, String> {
         let v = self.post("/auth/confirm", serde_json::json!({ "code": code, "accept": accept })).await?;
+        if let Some(refused) = v["refused"].as_str() {
+            return Err(refused.to_string());
+        }
         Ok(v["found"].as_bool().unwrap_or(false))
     }
 }

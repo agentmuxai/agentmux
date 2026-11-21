@@ -93,6 +93,7 @@
         "crates/srv/src/server/app_api/agent_io.rs",
         "crates/srv/src/server/app_api/audit_query.rs",
         "crates/srv/src/server/app_api/fleet.rs",
+        "crates/srv/src/server/app_api/fleet_forward.rs",
         "crates/srv/src/server/http_health.rs",
         "crates/srv/src/server/jekt_start.rs",
         "crates/srv/src/server/muxspect_handlers.rs",

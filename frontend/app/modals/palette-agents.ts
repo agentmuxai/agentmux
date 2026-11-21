@@ -19,7 +19,7 @@ import { mergeOpenDefinitions } from "@/app/view/agent/open-agent-panes";
 import { revealBlock } from "@/app/util/reveal-block";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import type { AgentSeat } from "@/types/rpc/AgentSeat";
-import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { createMemo, createSignal, onMount } from "solid-js";
 import { agentEntries } from "./palette-agent-entries";
 
 /** Where the agent is open, anywhere in this AgentMux: this window's panes, and srv's for the others. */
@@ -57,25 +57,36 @@ export async function goToAgent(agent: Pick<AgentRuntime, "agent_id" | "name">):
     }
 }
 
-/** Each agent's seat by id, read when the palette opens and again when the agents change. */
-function useAgentSeats(): () => ReadonlyMap<string, AgentSeat | undefined> {
-    const [seats, setSeats] = createSignal<ReadonlyMap<string, AgentSeat | undefined>>(new Map());
+type SeatMap = ReadonlyMap<string, AgentSeat | undefined>;
+
+// The seats are kept for the life of the window, not read again on every open: the palette shows the last ones at
+// once, and a read after the open (and one whenever the agents change) replaces them only when something differs,
+// so an answer that changes nothing rebuilds nothing under a person who is typing.
+const [seats, setSeats] = createSignal<SeatMap>(new Map());
+let seatsKey = "";
+let watchingAgents = false;
+
+async function loadSeats(): Promise<void> {
+    try {
+        const defs = (await RpcApi.ListAgentDefinitionsCommand(TabRpcClient)) ?? [];
+        const key = JSON.stringify(defs.map((d) => [d.id, d.seat ?? null]));
+        if (key === seatsKey) return;
+        seatsKey = key;
+        setSeats(new Map(defs.map((d) => [d.id, d.seat] as const)));
+    } catch {
+        // No seats until srv answers: the agents are listed without them.
+    }
+}
+
+/** Each agent's seat by id: the last ones read, refreshed after the palette opens and when the agents change. */
+function useAgentSeats(): () => SeatMap {
     onMount(() => {
-        let cancelled = false;
-        const load = async () => {
-            try {
-                const defs = await RpcApi.ListAgentDefinitionsCommand(TabRpcClient);
-                if (!cancelled) setSeats(new Map((defs ?? []).map((d) => [d.id, d.seat] as const)));
-            } catch {
-                // No seats until srv answers: the agents are listed without them.
-            }
-        };
-        void load();
-        const unsub = onMuxEvent(WpsEvent.AgentsChanged, () => void load());
-        onCleanup(() => {
-            cancelled = true;
-            unsub();
-        });
+        // Not before the first frame: the read answers after it, with nothing waiting on it.
+        setTimeout(() => void loadSeats(), 0);
+        if (!watchingAgents) {
+            watchingAgents = true;
+            onMuxEvent(WpsEvent.AgentsChanged, () => void loadSeats());
+        }
     });
     return seats;
 }
