@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A menu, a submenu, a popover, a dialog and a drop-down are fully solid while the window is faded
- * (docs/specs/OPTIONS_OPAQUE_MENUS_UNDER_WINDOW_OPACITY_2026_11_19.md), measured in a real browser.
+ * A menu, a submenu, a popover, a dialog and a drop-down are fully solid while the window is faded (#48092),
+ * measured in a real browser.
  *
  * The window's opacity reaches the page two ways, and a floating surface must come out opaque through both:
  *  - the window opacity on the page (`--window-opacity`, as the app sets it on the root): the pane's own

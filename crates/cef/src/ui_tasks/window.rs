@@ -977,7 +977,7 @@ wrap_task! {
     }
 }
 
-/// Fade the browser-pane overlay windows of `label` to `alpha` (Codex P2 on #1895). They are separate
+/// Fade the browser-pane overlay windows of `label` to `alpha` (#1895). They are separate
 /// NativeWidgetMacNSWindow instances layered over the host window (browser_pane/creation_views.rs); child NSWindows
 /// do NOT inherit the parent window's alphaValue, so without this a faded host keeps fully opaque pane rectangles
 /// floating on top. Each overlay of the label is resolved through the cached window numbers. try_lock (matching the
