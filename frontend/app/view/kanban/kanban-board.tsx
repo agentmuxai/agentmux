@@ -29,6 +29,7 @@ import {
     type KanbanStage,
 } from "./kanban-stages";
 import type { KanbanAgent, KanbanTask } from "./kanban-types";
+import { WindowedList } from "./kanban-window";
 
 import "./kanban-stage-colours.scss";
 
@@ -101,8 +102,10 @@ function BacklogGroupView(props: {
                     <Show when={!busyOn() && props.group.agent}>{(a) => <>, {agentStateWords(a().state)}</>}</Show>
                 </span>
             </div>
-            <For each={props.group.tasks}>
-                {(t) => (
+            <WindowedList
+                items={props.group.tasks}
+                keyOf={(t) => t.id}
+                each={(t) => (
                     <KanbanCard
                         task={t}
                         now={props.now}
@@ -111,7 +114,7 @@ function BacklogGroupView(props: {
                         onOpen={props.onOpen}
                     />
                 )}
-            </For>
+            />
         </div>
     );
 }
@@ -443,7 +446,7 @@ function ColumnList(listProps: {
                     )}
                 </For>
             </Show>
-            <For each={finished()}>{(t) => card(s, t)}</For>
+            <WindowedList items={finished()} keyOf={(t) => t.id} each={(t) => card(s, t)} />
             <Show when={cancelled().length > 0}>
                 <Button
                     density="compact"
@@ -456,7 +459,7 @@ function ColumnList(listProps: {
                     Cancelled · {cancelled().length}
                 </Button>
                 <Show when={showCancelled()}>
-                    <For each={cancelled()}>{(t) => card(s, t)}</For>
+                    <WindowedList items={cancelled()} keyOf={(t) => t.id} each={(t) => card(s, t)} />
                 </Show>
             </Show>
         </div>

@@ -385,6 +385,25 @@ $kanban-narrow: 760px;
     min-height: 32px;
 }
 
+// A long list's cards, drawn near the view (kanban-window.tsx): the same column of cards with the same gap,
+// and two spacers for the cards left out. The browser must not move the scroll for a spacer's change; the
+// window keeps the card at the top of the view where it was.
+.kanban-window {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    overflow-anchor: none;
+}
+
+.kanban-group .kanban-window {
+    gap: var(--space-1);
+}
+
+.kanban-window__item,
+.kanban-window__spacer {
+    flex: none;
+}
+
 .kanban-group__head {
     display: flex;
     flex-wrap: wrap;
