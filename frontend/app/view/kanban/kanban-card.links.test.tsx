@@ -31,7 +31,7 @@ vi.mock("@/app/links/entities/registry", async (orig) => ({
 import * as names from "@/app/store/agent-names";
 import { publishTasks } from "@/app/links/task-index-store";
 import { AgentChip, KanbanCard } from "./kanban-card";
-import type { KanbanCardFields, KanbanTask } from "./kanban-types";
+import type { KanbanAgent, KanbanCardFields, KanbanTask } from "./kanban-types";
 
 const setRoster = (names as unknown as { setRoster: (e: { id: string; slug: string; name: string }[]) => void }).setRoster;
 
@@ -90,6 +90,21 @@ describe("a card's words are links", () => {
         const title = [...container.querySelectorAll(".kanban-card__text a")].map((a) => a.textContent);
         expect(title).toEqual(["Opaz", "#48247"]);
         expect([...container.querySelectorAll(".kanban-card__note a")].map((a) => a.textContent)).toEqual(["#48247"]);
+    });
+
+    it("keeps the reason line one paragraph: the icon and one span, however many links it holds", () => {
+        const blocked = task("Ask", { question: "Opaz take #48247 or see https://example.com/q first?" }, { state: "blocked" });
+        const { container } = render(() => <KanbanCard task={blocked} now={2} agents={[]} onOpen={vi.fn()} />);
+        const reason = container.querySelector(".kanban-card__reason") as HTMLElement;
+        expect(reason.querySelectorAll("a")).toHaveLength(3);
+        expect([...reason.children].map((c) => c.tagName)).toEqual(["I", "SPAN"]);
+    });
+
+    it("shows the name as plain text for a chip that sits inside a button", () => {
+        const agent = { name: "opaz", uid: "opaz-0909m", state: "working" } as unknown as KanbanAgent;
+        const { container } = render(() => <AgentChip name="opaz" agent={agent} plain />);
+        expect(container.querySelector("a")).toBeNull();
+        expect(container.querySelector(".kanban-agent-chip__name")?.textContent).toBe("opaz");
     });
 
     it("opens what the link names, and not the card", () => {

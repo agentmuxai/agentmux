@@ -11,6 +11,7 @@ import { createMemo, For, type JSX } from "solid-js";
 import { onLinkAuxClick, onLinkClick } from "@/app/element/link-open";
 import { tip } from "@/app/element/tip";
 import { followAgentNames } from "@/app/store/agent-names";
+import { pushNotification } from "@/app/store/global";
 import { takeFloatRequest } from "@/app/store/float-modifier";
 import { pullUrl } from "./entities/kinds/pull";
 import { linkify } from "./entities/linkify";
@@ -46,7 +47,15 @@ function press(seg: LinkSegment, e: MouseEvent): void {
     if (web) return onLinkClick(e, web);
     e.preventDefault();
     void openEntity(seg.destination, { floating: takeFloatRequest() }).then((r) => {
-        if ("reason" in r) console.warn("[link] couldn't open", seg.label, r.reason);
+        if (!("reason" in r)) return;
+        pushNotification({
+            icon: "fa-triangle-exclamation",
+            title: `Couldn't open ${seg.label}`,
+            message: r.reason,
+            timestamp: new Date().toISOString(),
+            type: "error",
+            expiration: Date.now() + 8000,
+        });
     });
 }
 

@@ -93,13 +93,15 @@ export function AgentChip(props: {
     colors?: Record<string, string>;
     /** Its seat as the tooltip: a card's owner (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §4). */
     showSeat?: boolean;
+    /** The name as text, not a link: for a chip that sits inside a button, which must not hold another control. */
+    plain?: boolean;
 }): JSX.Element {
     // The theme's readable variant of its hue, the one made for text and icons.
     const nameColor = () => agentColor(props.agent, props.uid, props.colors, "identity");
     const seats = useSeatIndex();
     const seat = () => (props.showSeat ? seatOf(seats(), props.uid || props.agent?.uid, props.name) : null);
     const shown = () => props.display || props.agent?.display || props.name;
-    const agentUid = () => props.uid || props.agent?.uid || undefined;
+    const agentUid = () => (props.plain ? undefined : props.uid || props.agent?.uid || undefined);
     return (
         <span class="kanban-agent-chip" {...tip(seat() ? `${shown()}: ${seatTooltipLine(seat()!)}` : undefined)}>
             <StatusDot
@@ -254,7 +256,10 @@ function ReasonOrNote({ s }: { s: CardState }) {
                 {(r) => (
                     <div class="kanban-card__reason">
                         <i class="fa-solid fa-circle-exclamation" aria-hidden="true" />
-                        <Linkified text={r()} surface={surfaceOf(t())} />
+                        {/* One span: the line is a flex row, and each text run and link would otherwise be its own column. */}
+                        <span>
+                            <Linkified text={r()} surface={surfaceOf(t())} />
+                        </span>
                     </div>
                 )}
             </Show>

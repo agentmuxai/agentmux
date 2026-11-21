@@ -4,8 +4,9 @@
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { opened, webClick } = vi.hoisted(() => ({
-    opened: vi.fn(async () => ({ ok: true as const })),
+const { opened, webClick, notify } = vi.hoisted(() => ({
+    opened: vi.fn(async (): Promise<{ ok: true } | { ok: false; reason: string }> => ({ ok: true })),
+    notify: vi.fn(),
     webClick: vi.fn(),
 }));
 
@@ -18,6 +19,7 @@ vi.mock("@/app/store/agent-names", async () => {
     return { followAgentNames: () => {}, agentRoster, setRoster };
 });
 vi.mock("@/app/store/srv-info", () => ({ srvInfo: () => ({ hostName: "narko" }) }));
+vi.mock("@/app/store/global", () => ({ pushNotification: notify }));
 vi.mock("@/app/store/float-modifier", () => ({ takeFloatRequest: () => false }));
 vi.mock("@/app/element/link-open", () => ({
     onLinkClick: (e: MouseEvent, href: string) => {
@@ -40,6 +42,7 @@ beforeEach(() => {
     publishTasks([{ board: "main", number: 48247, title: "t", state: "open" }], "main");
     opened.mockClear();
     webClick.mockClear();
+    notify.mockClear();
 });
 afterEach(cleanup);
 
@@ -65,6 +68,14 @@ describe("Linkified", () => {
         fireEvent.keyDown(a, { key: " " });
         expect(opened).toHaveBeenCalledWith({ kind: "task", number: 48247, board: undefined }, { floating: false });
         expect(around).not.toHaveBeenCalled();
+    });
+
+    it("tells the person why a link could not open, instead of doing nothing", async () => {
+        opened.mockResolvedValueOnce({ ok: false, reason: "That agent runs on another computer" });
+        const { container } = render(() => <Linkified text="see #48247" surface={surface} />);
+        fireEvent.click(container.querySelector("a") as HTMLAnchorElement);
+        await vi.waitFor(() => expect(notify).toHaveBeenCalledTimes(1));
+        expect(notify.mock.calls[0][0]).toMatchObject({ title: "Couldn't open #48247", message: "That agent runs on another computer", type: "error" });
     });
 
     it("opens an agent through its kind", () => {
