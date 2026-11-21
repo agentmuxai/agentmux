@@ -3,7 +3,9 @@
 
 import clsx from "clsx";
 import { type JSX, Show, splitProps } from "solid-js";
+import { t } from "@/app/i18n/i18n";
 import { Tooltip } from "../tooltip";
+import { createPendingPress, type PendingMode } from "./pending-press";
 import { densityClass, toneClass, UiIcon, type UiDensity, type UiTone } from "./shared";
 
 import "./ui.scss";
@@ -30,15 +32,47 @@ export interface ButtonProps extends Omit<JSX.ButtonHTMLAttributes<HTMLButtonEle
     busy?: boolean;
     /** For a toggle button: renders `aria-pressed` and the pressed look. */
     pressed?: boolean;
+    /**
+     * What the button does while its click handler's promise is unsettled (see `PendingMode`). A toggle (`pressed`
+     * set) never goes pending.
+     */
+    pending?: PendingMode;
     class?: string;
 }
 
 /**
  * The line-style button. It never fills: tone shows as text and line
  * colour, hover and pressed as a stronger line and a faint tint.
+ *
+ * It answers a press at once (the pressed look, in the frame of the mouse-down) and, when its click handler returns a
+ * promise, locks until the promise settles and shows a spinner if that takes longer than
+ * `PENDING_SPINNER_DELAY_MS` (SPEC_BUTTON_PRESSED_AND_PENDING_FEEDBACK_2026_11_20.md §4).
  */
 export function Button(props: ButtonProps): JSX.Element {
-    const [local, rest] = splitProps(props, ["tone", "variant", "density", "icon", "busy", "pressed", "class", "children", "disabled", "type"]);
+    const [local, rest] = splitProps(props, [
+        "tone",
+        "variant",
+        "density",
+        "icon",
+        "busy",
+        "pressed",
+        "pending",
+        "class",
+        "children",
+        "disabled",
+        "type",
+        "onClick",
+    ]);
+    const press = createPendingPress(
+        () => local.onClick,
+        () => local.pending,
+        () => local.pressed !== undefined
+    );
+    const { pending, spinning, slow } = press;
+
+    // A caller's own `busy` keeps its look (a leading spinner); the automatic one sits over a label-only button so
+    // the button keeps the width its label gave it, and replaces the icon of one that has an icon.
+    const overlay = () => spinning() && !local.busy && !local.icon;
     return (
         <button
             {...rest}
@@ -52,21 +86,34 @@ export function Button(props: ButtonProps): JSX.Element {
                           local.variant && `ui-button--${local.variant}`,
                           densityClass(local.density),
                       ],
+                overlay() && "ui-button--spin-over",
                 local.class
             )}
+            onClick={press.click}
             disabled={local.disabled || local.busy}
-            aria-busy={local.busy ? "true" : undefined}
+            aria-busy={local.busy || pending() ? "true" : undefined}
+            data-pending={pending() ? "true" : undefined}
             aria-pressed={local.pressed === undefined ? undefined : local.pressed ? "true" : "false"}
         >
-            <Show when={local.busy} fallback={<Show when={local.icon}>{(icon) => <UiIcon name={icon()} />}</Show>}>
+            <Show when={local.busy || (spinning() && local.icon)} fallback={<Show when={local.icon}>{(icon) => <UiIcon name={icon()} />}</Show>}>
                 <UiIcon name="spinner" spin />
             </Show>
             {local.children}
+            <Show when={overlay()}>
+                <span class="ui-button-spinner" aria-hidden="true">
+                    <UiIcon name="spinner" spin />
+                </span>
+            </Show>
+            <Show when={slow()}>
+                <span class="ui-button-working" role="status">
+                    {t("ui.button.working")}
+                </span>
+            </Show>
         </button>
     );
 }
 
-export interface IconButtonProps extends Omit<ButtonProps, "children" | "icon" | "busy"> {
+export interface IconButtonProps extends Omit<ButtonProps, "children" | "icon"> {
     icon: string;
     /** Required: becomes the accessible name and the tooltip. */
     label: string;

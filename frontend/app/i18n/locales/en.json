@@ -1227,6 +1227,7 @@
     "editor.diskConflict.message": "{{name}} changed on disk. Reload loses your unsaved edits; Keep mine keeps them.",
     "editor.diskConflict.reload": "Reload",
     "editor.diskConflict.keepMine": "Keep mine",
+    "ui.button.working": "Working",
     "editor.lsp.dismissBanner": "Dismiss banner for this session",
     "editor.lsp.notOnHost": "A container agent can write in this folder, so no language server runs on the host for it.",
     "window.reloadOffer.tabs": "This window stopped switching tabs.",

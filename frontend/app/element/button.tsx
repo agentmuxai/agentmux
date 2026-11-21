@@ -5,7 +5,7 @@
 import clsx from "clsx";
 import { JSX, splitProps } from "solid-js";
 
-import { Button as LineButton, type UiTone } from "./ui";
+import { Button as LineButton, type PendingMode, type UiTone } from "./ui";
 
 // The legacy button, now drawn by element/ui's line-style Button
 // (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §5.6). Its old
@@ -16,6 +16,8 @@ import { Button as LineButton, type UiTone } from "./ui";
 interface ButtonProps extends Omit<JSX.ButtonHTMLAttributes<HTMLButtonElement>, "class"> {
     className?: string;
     children?: JSX.Element;
+    /** What it does while its click handler's promise runs; see the kit's `PendingMode`. */
+    pending?: PendingMode;
 }
 
 /** The legacy category and colour words; everything else in `className` is passed through. */
