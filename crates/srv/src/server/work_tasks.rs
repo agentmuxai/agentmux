@@ -489,6 +489,17 @@ pub(super) async fn handle_work_update(
     if let Some(why) = doc_problem(&req) {
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": why })));
     }
+    // The address to take off is checked before anything is written, so a bad one leaves the card as it was.
+    let unpr = match req.unpr.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        None => None,
+        Some(addr) => {
+            let repo = state.work_store.work_board_get(&id).ok().flatten().map(|t| t.card.repo).unwrap_or_default();
+            match crate::backend::storage::work_card_prs::parse_pr_ref(addr, &repo) {
+                Some(found) => Some(found),
+                None => return (StatusCode::BAD_REQUEST, Json(json!({ "error": "links.unpr is not a pull request address" }))),
+            }
+        }
+    };
     let now = now_ms();
     let _ = state.work_store.work_card_ensure(&id, now);
     let attached = match super::work_media::apply(&state, &item, &req.agent_id, holder_uid(caller), &req.media_call()) {
@@ -514,15 +525,9 @@ pub(super) async fn handle_work_update(
             .join(" ");
         record(&state, &id, &req.agent_id, "agent", "linked", &item.state, &item.state, &link);
     }
-    if let Some(unpr) = req.unpr.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
-        let repo = state.work_store.work_board_get(&id).ok().flatten().map(|t| t.card.repo).unwrap_or_default();
-        match crate::backend::storage::work_card_prs::parse_pr_ref(unpr, &repo) {
-            Some((repo, number)) => {
-                if state.work_store.work_card_pr_unlink(&id, &repo, number, now).unwrap_or(false) {
-                    record(&state, &id, &req.agent_id, "agent", "pr_unlinked", &item.state, &item.state, &crate::backend::storage::work_card_prs::pr_url(&repo, number));
-                }
-            }
-            None => return (StatusCode::BAD_REQUEST, Json(json!({ "error": "links.unpr is not a pull request address" }))),
+    if let Some((repo, number)) = unpr {
+        if state.work_store.work_card_pr_unlink(&id, &repo, number, now).unwrap_or(false) {
+            record(&state, &id, &req.agent_id, "agent", "pr_unlinked", &item.state, &item.state, &crate::backend::storage::work_card_prs::pr_url(&repo, number));
         }
     }
     let mut answer = json!({ "ok": true });

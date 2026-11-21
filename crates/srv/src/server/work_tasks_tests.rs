@@ -672,8 +672,20 @@ async fn the_holder_adds_pull_requests_and_takes_one_off_and_nobody_else_can() {
     assert_eq!(prs(&state), [1, 3]);
     assert!(history(&state, num).iter().any(|(k, a, _)| k == "pr_unlinked" && a == "a1"));
 
-    let (s, v) = post(&app, &uri, json!({"agent_id": "a1", "attempt": attempt, "unpr": "nonsense"})).await;
+    // A bad address is refused before anything is written: the note, the history and the list stay as they were.
+    let before = history(&state, num).len();
+    let (s, v) = post(&app, &uri, json!({"agent_id": "a1", "attempt": attempt, "note": "second note", "unpr": "nonsense"})).await;
     assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+    assert_eq!(history(&state, num).len(), before, "no history line for a refused update");
+    assert_ne!(card_of(&state, num).note, "second note", "the note was not written");
+    assert_eq!(prs(&state), [1, 3]);
+
+    // Taking off the card's own pull request moves its address to the newest one left.
+    let (s, _) = post(&app, &uri, json!({"agent_id": "a1", "attempt": attempt, "unpr": "https://github.com/o/other/pull/3"})).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(card_of(&state, num).pr_url, "https://github.com/o/r/pull/1");
+    let (s, _) = post(&app, &uri, json!({"agent_id": "a1", "attempt": attempt, "pr_url": "https://github.com/o/other/pull/3"})).await;
+    assert_eq!(s, StatusCode::OK);
 
     // Not the holder: refused, whether or not it has an attempt.
     let (s, _) = post(&app, &uri, json!({"agent_id": "a2", "unpr": "https://github.com/o/r/pull/1"})).await;
