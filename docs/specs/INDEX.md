@@ -259,6 +259,7 @@ than none. Add the line when you touch one and know which area it belongs to.
 
 | Spec | Title | Status | Date | Replaces / replaced by |
 |---|---|---|---|---|
+| [`SPEC_DEEP_LINKS_ONE_FRAMEWORK_2026_11_20`](SPEC_DEEP_LINKS_ONE_FRAMEWORK_2026_11_20.md) | Deep links: one framework by which any view opens at a named place, in any pane, with guards | active | 2026-11-20 |  |
 | [`SPEC_LINKS_ON_EVERYTHING_2026_11_20`](SPEC_LINKS_ON_EVERYTHING_2026_11_20.md) | Links on nearly everything: one recognition layer that turns agent names, task numbers, files, pull requests and URLs into correct links | active | 2026-11-20 |  |
 | [`SPEC_MUXAPI_AGENT_LIVE_FACTS_2026_11_20`](SPEC_MUXAPI_AGENT_LIVE_FACTS_2026_11_20.md) | Spec: MuxAPI agent live facts (model and the rest), on this host and across the LAN | active | 2026-11-20 |  |
 | [`SPEC_REMOTE_PANES_WATCH_AND_DRIVE_AN_AGENT_ON_ANOTHER_COMPUTER_2026_11_20`](SPEC_REMOTE_PANES_WATCH_AND_DRIVE_AN_AGENT_ON_ANOTHER_COMPUTER_2026_11_20.md) | SPEC: Remote panes: open an agent that runs on another computer, see the same conversation live, and drive it, under a red "Remote" banner | active | 2026-11-20 |  |
