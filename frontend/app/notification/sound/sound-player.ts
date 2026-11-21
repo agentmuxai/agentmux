@@ -52,8 +52,10 @@ export class SoundPlayer {
 
     /**
      * Initialize the AudioContext and preload assets. Idempotent.
-     * Must be invoked from a user-gesture handler under Chromium's
-     * autoplay policy.
+     * Under Chromium's autoplay policy a context made before a user
+     * gesture starts suspended; `resume()` after a gesture lets it run.
+     * The constructor opens the machine's audio device and blocks the
+     * page while it does (open-when-idle.ts).
      */
     async prime(): Promise<void> {
         if (this.primed) return;
@@ -76,6 +78,14 @@ export class SoundPlayer {
                 .filter((s): s is SoundDef & { asset: string } => !!s.asset)
                 .map((s) => this.loadAsset(s.asset)),
         );
+    }
+
+    /** Test helper (never call from production): forget the context so the next `prime()` opens a new one. */
+    __reset(): void {
+        this.ctx = null;
+        this.masterGain = null;
+        this.buffers.clear();
+        this.primed = false;
     }
 
     setMasterGain(value: number): void {
