@@ -310,11 +310,11 @@ thread_local! {
 
 /// Whether the Save As dialog is ours (`rfd`) rather than CEF's. On Linux CEF's chooser answered
 /// "cancel" within milliseconds with no dialog on the packaged build (2026-11-06, D0), so Linux asks
-/// with the same dialog library the Vault export and layout dialogs use (spec §4.3). macOS asks that way too:
-/// CEF's chooser drops the folder of the path it is given, so its first dialog opened in the home folder
-/// whatever the default was (#196, macOS D0); `rfd` opens where we say. Windows keeps CEF's own until its
-/// first dialog is checked there.
-const OWN_SAVE_DIALOG: bool = cfg!(any(target_os = "linux", target_os = "macos"));
+/// with the same dialog library the Vault export and layout dialogs use (spec §4.3). macOS and Windows ask
+/// that way too: CEF's chooser drops the folder of the path it is given, so its first dialog opened in the
+/// home folder whatever the default was (#196: macOS D0, then Windows on a fresh data home, #48278); `rfd`
+/// opens where we say.
+const OWN_SAVE_DIALOG: bool = cfg!(any(target_os = "linux", target_os = "macos", target_os = "windows"));
 
 thread_local! {
     /// The callbacks of downloads whose `rfd` dialog is open, by (pane, id). Not `Send`, so they stay on
@@ -1203,6 +1203,13 @@ mod tests {
             Some(tmp.path().to_path_buf())
         );
         assert_eq!(default_save_dir(None, None, None), None);
+    }
+
+    #[test]
+    fn the_dialog_is_ours_on_every_desktop_platform() {
+        // CEF's own chooser drops the folder of the path it is given (macOS and Windows both opened the
+        // first dialog in the home folder), so no desktop platform may fall back to it (#196, #48278).
+        assert!(OWN_SAVE_DIALOG);
     }
 
     #[test]
