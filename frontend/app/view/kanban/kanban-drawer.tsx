@@ -19,7 +19,9 @@ import { KanbanAfterSection } from "./kanban-after";
 import { moveEntries } from "./kanban-board-picker";
 import { refOf } from "./kanban-boards";
 import { DrawerMedia } from "./kanban-media";
+import { Linkified } from "@/app/links/linkified";
 import { agentStateWords, AgentChip } from "./kanban-card";
+import { surfaceOf } from "./kanban-links";
 import { agentLabel, columnOf, isFinishedColumn, isResearchKind, needsReason, ownerLabel, requestedBy } from "./kanban-columns";
 import type { KanbanModel } from "./kanban-model";
 import type {
@@ -72,9 +74,13 @@ function EventLine(props: { ev: KanbanEvent; now: number }): JSX.Element {
         <li class="kanban-history__line">
             <span class="kanban-history__age">{formatAge(Math.max(0, props.now - props.ev.at))}</span>
             <span>
-                {who()} {EVENT_WORDS[props.ev.kind] ?? props.ev.kind}
+                <Linkified text={`${who()} ${EVENT_WORDS[props.ev.kind] ?? props.ev.kind}`} />
                 <Show when={props.ev.body}>
-                    {(b) => <span class="kanban-history__body">: {b()}</span>}
+                    {(b) => (
+                        <span class="kanban-history__body">
+                            : <Linkified text={b()} />
+                        </span>
+                    )}
                 </Show>
             </span>
         </li>
@@ -272,18 +278,28 @@ function DrawerAbout(props: { m: DrawerState }): JSX.Element {
     const t = props.m.t;
     return (
         <>
-            <Show when={needsReason(t())}>{(r) => <p class="kanban-drawer__reason">{r()}</p>}</Show>
+            <Show when={needsReason(t())}>
+                {(r) => (
+                    <p class="kanban-drawer__reason">
+                        <Linkified text={r()} surface={surfaceOf(t())} />
+                    </p>
+                )}
+            </Show>
 
             <Show when={t().card.request_text}>
                 <section class="kanban-drawer__section">
                     <h4>What you asked</h4>
-                    <blockquote class="kanban-drawer__quote">{t().card.request_text}</blockquote>
+                    <blockquote class="kanban-drawer__quote">
+                        <Linkified text={t().card.request_text} surface={surfaceOf(t())} />
+                    </blockquote>
                 </section>
             </Show>
 
             <section class="kanban-drawer__section">
                 <h4>The task</h4>
-                <div class="kanban-drawer__payload">{t().payload}</div>
+                <div class="kanban-drawer__payload">
+                    <Linkified text={t().payload} surface={surfaceOf(t())} />
+                </div>
             </section>
 
             <Show when={t().card.checklist.length > 0}>
@@ -297,7 +313,7 @@ function DrawerAbout(props: { m: DrawerState }): JSX.Element {
                                         class={`fa-solid fa-${item.status === "completed" ? "square-check" : item.status === "in_progress" ? "spinner" : "square"}`}
                                         aria-hidden="true"
                                     />
-                                    {item.text}
+                                    <Linkified text={item.text} surface={surfaceOf(t())} />
                                 </li>
                             )}
                         </For>
@@ -346,7 +362,9 @@ function DrawerResult(props: { m: DrawerState }): JSX.Element {
         <Show when={t().result}>
             <section class="kanban-drawer__section">
                 <h4>{HANDED_BACK_STATES.has(t().state) ? "Last handed back because" : "Result"}</h4>
-                <div class="kanban-drawer__payload">{t().result}</div>
+                <div class="kanban-drawer__payload">
+                    <Linkified text={t().result} surface={surfaceOf(t())} />
+                </div>
             </section>
         </Show>
     );
