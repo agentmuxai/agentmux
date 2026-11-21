@@ -514,6 +514,26 @@ describe("useAgentFailure — a usage limit waits for its reset (#48173)", () =>
         });
     });
 
+    it("a replacement limit with a later reset moves the send to that reset, and sends once", async () => {
+        await createRoot(async (dispose) => {
+            const onRetry = vi.fn();
+            mkUI(onRetry);
+            await Promise.resolve();
+            fire("agentfailure", limit(NOW + 60 * 60_000));
+            vi.advanceTimersByTime(30 * 60_000);
+            fire("agentfailure", limit(NOW + 3 * 3600_000));
+
+            // The first reset passes with nothing sent: the limit now says later.
+            vi.advanceTimersByTime(30 * 60_000 + RESEND_AFTER_RESET_MS + 1000);
+            expect(onRetry).not.toHaveBeenCalled();
+            vi.advanceTimersByTime(2 * 3600_000 + RESEND_AFTER_RESET_MS);
+            expect(onRetry).toHaveBeenCalledTimes(1);
+            vi.advanceTimersByTime(24 * 3600_000);
+            expect(onRetry).toHaveBeenCalledTimes(1);
+            dispose();
+        });
+    });
+
     it("a message the person sent meanwhile, or a dismiss, takes the place of the resend", async () => {
         await createRoot(async (dispose) => {
             const onRetry = vi.fn();

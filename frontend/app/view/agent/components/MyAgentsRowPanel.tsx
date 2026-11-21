@@ -188,7 +188,8 @@ function ActionsView({ s }: { s: PanelState }) {
 }
 
 function OpenButtons({ s }: { s: PanelState }) {
-    const { handleOpen, handleAttachNoPane, handleOpenNewSession, handleSwitchToExisting } = s.props.panels;
+    const { handleOpen, handleAttachNoPane, handleOpenNewSession, handleSwitchToExisting, handleOpenHere, canOpenHere } =
+        s.props.panels;
     const { row, isActive, withoutPane } = s;
     return (
         <Switch>
@@ -201,6 +202,16 @@ function OpenButtons({ s }: { s: PanelState }) {
                 >
                     Switch to existing
                 </Button>
+                <Show when={canOpenHere(row.definition_id)}>
+                    <Button
+                        icon="arrow-right-to-bracket"
+                        title={t("agentPicker.openHereTip", { name: s.name })}
+                        data-testid="agent-open-here"
+                        onClick={() => void handleOpenHere(row)}
+                    >
+                        {t("agentPicker.openHere")}
+                    </Button>
+                </Show>
                 <Button
                     icon="code-fork"
                     data-testid="agent-fork-open-new"

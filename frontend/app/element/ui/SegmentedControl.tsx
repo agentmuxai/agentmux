@@ -3,6 +3,7 @@
 
 import clsx from "clsx";
 import { For, type JSX, Show } from "solid-js";
+import { tip } from "../tip";
 import { useField } from "./Field";
 import { densityClass, rovingTarget, UiIcon, type UiDensity } from "./shared";
 
@@ -17,6 +18,11 @@ export interface SegmentedOption<T extends string> {
     disabled?: boolean;
     /** Hover text, e.g. the option's keyboard shortcut. */
     title?: string;
+    /**
+     * What choosing the option does, in a sentence: shown at once on hover and on keyboard focus, and the option's
+     * accessible description. A disabled option with a tip stays reachable (`aria-disabled`) so the tip can say why.
+     */
+    tip?: string;
 }
 
 export interface SegmentedControlProps<T extends string> {
@@ -72,9 +78,13 @@ export function SegmentedControl<T extends string>(props: SegmentedControlProps<
                         aria-checked={option.value === props.value ? "true" : "false"}
                         aria-label={option.iconOnly ? option.label : undefined}
                         title={option.title}
+                        {...tip(option.tip, { instant: true })}
                         tabIndex={i() === tabStop() ? 0 : -1}
-                        disabled={isDisabled(i())}
-                        onClick={() => props.onChange(option.value)}
+                        // A tipped option that cannot be picked stays enabled to the pointer and the keyboard, which a
+                        // `disabled` button is not (no hover, no focus), so its tip can say why.
+                        disabled={isDisabled(i()) && !option.tip}
+                        aria-disabled={isDisabled(i()) && option.tip ? "true" : undefined}
+                        onClick={() => !isDisabled(i()) && props.onChange(option.value)}
                         onKeyDown={(e) => onKeyDown(e, i())}
                     >
                         <Show when={option.icon}>{(icon) => <UiIcon name={icon()} />}</Show>

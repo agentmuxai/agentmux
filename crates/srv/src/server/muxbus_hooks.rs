@@ -32,6 +32,10 @@ impl ServerHooks for Hooks {
         super::jekt_hold::hold_wan_for_unavailable(mstore, handler, req)
     }
 
+    fn give_back_for_unavailable(&self, mstore: &Store, handler: &ReactiveHandler, req: &InjectionRequest) -> bool {
+        super::jekt_hold::give_back_for_unavailable(mstore, handler, req)
+    }
+
     fn hold_relayed<'a>(&'a self, req: &'a InjectionRequest) -> BoxFuture<'a, bool> {
         Box::pin(super::jekt_cold::hold_relayed(req))
     }

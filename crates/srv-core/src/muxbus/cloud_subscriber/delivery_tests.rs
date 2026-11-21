@@ -279,6 +279,33 @@ async fn a_delivery_that_lands_is_not_released() {
 }
 
 #[tokio::test]
+async fn a_message_for_an_agent_out_of_quota_is_given_back_to_the_relay_and_never_typed() {
+    let agent = agent_name();
+    let (handler, typed) = live_pane(&agent);
+    crate::muxbus::server_hooks::TEST_LIMITED.lock().unwrap().push(agent.clone());
+    let (base, asked) = relay(vec![won(&["inj-1"]), released()]).await;
+
+    claim(&base, &agent, handler, rows(serde_json::json!([{ "id": "inj-1", "message": "[muxreview] reviewed" }])), true).await;
+
+    assert!(typed.lock().unwrap().is_empty(), "no turn starts for an agent that cannot work");
+    assert_eq!(lines(&asked), ["POST /reactive/ack", "POST /reactive/release"], "the claim goes back");
+    assert_eq!(body_of(&asked, "POST /reactive/release"), [serde_json::json!({ "injection_id": "inj-1", "delivered_at": STAMP })]);
+    crate::muxbus::server_hooks::TEST_LIMITED.lock().unwrap().retain(|a| a != &agent);
+}
+
+#[tokio::test]
+async fn once_the_agent_can_work_the_same_message_is_delivered() {
+    let agent = agent_name();
+    let (handler, typed) = live_pane(&agent);
+    let (base, asked) = relay(vec![won(&["inj-1"]), released()]).await;
+
+    claim(&base, &agent, handler, rows(serde_json::json!([{ "id": "inj-1", "message": "[muxreview] reviewed" }])), true).await;
+
+    assert_eq!(typed.lock().unwrap().join("").matches("[muxreview] reviewed").count(), 1);
+    assert!(!lines(&asked).contains(&"POST /reactive/release".to_string()));
+}
+
+#[tokio::test]
 async fn a_rejected_agent_credential_is_retried_once_with_the_shared_token() {
     let agent = agent_name();
     let (handler, typed) = live_pane(&agent);

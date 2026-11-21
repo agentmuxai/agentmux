@@ -17,11 +17,44 @@ vi.mock("@/app/element/anchored-popover", () => ({
 }));
 
 import { modalsModel } from "./modalmodel";
-import { openCommandPalette } from "./open-command-palette";
+import { openCommandPalette, preloadCommandPalette } from "./open-command-palette";
 
 afterEach(() => {
     for (const m of [...modalsModel.modalsAtom()]) modalsModel.closeModal(m.id);
     h.dismissed = 0;
+});
+
+// The palette is the one surface where a press must show something at once: once its code is loaded, the open path
+// makes no call and awaits nothing, so the palette is mounted in the same task as the key press.
+describe("openCommandPalette: the fast path", () => {
+    it("before the code is loaded, waits for the load once and then opens", async () => {
+        const pending = openCommandPalette();
+        expect(pending).toBeInstanceOf(Promise);
+        expect(modalsModel.modalsAtom()).toHaveLength(0);
+        await pending;
+        expect(modalsModel.modalsAtom()).toHaveLength(1);
+    });
+
+    it("with the code loaded, opens before the call returns, and returns nothing to wait for", async () => {
+        await preloadCommandPalette();
+        const result = openCommandPalette();
+        expect(result).toBeUndefined();
+        expect(modalsModel.modalsAtom()).toHaveLength(1);
+        expect(h.dismissed).toBe(1);
+    });
+
+    it("with the code loaded, closes it again in the same task", async () => {
+        await preloadCommandPalette();
+        openCommandPalette();
+        expect(openCommandPalette()).toBeUndefined();
+        expect(modalsModel.modalsAtom()).toHaveLength(0);
+    });
+
+    it("loads the code once however often it is asked to", async () => {
+        const a = preloadCommandPalette();
+        expect(preloadCommandPalette()).toBe(a);
+        await a;
+    });
 });
 
 describe("openCommandPalette", () => {

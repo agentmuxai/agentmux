@@ -831,7 +831,7 @@ pub fn deliver_agent_message_from(
         .as_any()
         .downcast_ref::<persistent::PersistentSubprocessController>()
     {
-        let record = RecordOrigin { origin: from, notes: held.note_texts() };
+        let record = RecordOrigin { origin: from, notes: held.note_texts(), resend: false };
         let outcome = persistent_ctrl.send_user_message_with_images_from(message, origin, inline.to_vec(), record, expires_at_ms, held.keyed_notes())?;
         held.delivered();
         return Ok(match outcome {
@@ -841,7 +841,7 @@ pub fn deliver_agent_message_from(
     }
 
     if let Some(agent) = session_agent::session_agent(ctrl.as_ref()) {
-        agent.send_message(message, None, Some(&RecordOrigin { origin: from, notes: held.note_texts() }))?;
+        agent.send_message(message, None, Some(&RecordOrigin { origin: from, notes: held.note_texts(), resend: false }))?;
         held.delivered();
         return Ok(AgentDelivery::Structured);
     }
@@ -850,7 +850,7 @@ pub fn deliver_agent_message_from(
         .as_any()
         .downcast_ref::<app_server_controller::AppServerController>()
     {
-        app_server_ctrl.send_message_from(message, Vec::new(), false, Some(&RecordOrigin { origin: from, notes: held.note_texts() }))?;
+        app_server_ctrl.send_message_from(message, Vec::new(), false, Some(&RecordOrigin { origin: from, notes: held.note_texts(), resend: false }))?;
         held.delivered();
         return Ok(AgentDelivery::Structured);
     }

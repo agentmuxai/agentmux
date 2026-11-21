@@ -67,7 +67,7 @@ pub const ALWAYS: &[&str] = &[
 
 /// The window's own view and bookkeeping state.
 pub const UNLESS_OPERATOR: &[&str] = &[
-    "agent.input-draft", "agent.input-history-append", "agent.input-history-clear", "agent.input-history-delete",
+    "agentquit", "agentshutdown", "agent.input-draft", "agent.input-history-append", "agent.input-history-clear", "agent.input-history-delete",
     "agent.input-history-restore", "agent.input-history-trash", "ambientnarrate", "attachments.cancel",
     "backgroundtaskcompletion", "backgroundtaskpid", "block.reveal", "block.revealed", "blockfile:write_state", "bookmarks.set", "browser.signin_list_close",
     "controllerresync", "createsubblock", "deletesubblock", "docknodestatus", "folderoverlapaccept", "fs.reveal", "fs.unwatch", "fs.watch",

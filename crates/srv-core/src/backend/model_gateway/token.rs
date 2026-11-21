@@ -53,9 +53,13 @@ fn digest(token: &str) -> [u8; 32] {
 
 fn mint() -> String {
     let token = format!("{TOKEN_PREFIX}{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
-    // A token an agent's process holds is never written into a transcript.
-    crate::backend::transcript::withhold::register(&token);
     token
+}
+
+/// Who holds an agent's token for a route in the transcript withhold registry: the token that replaces it takes its
+/// place, and ending the token ([`end_token`]) drops it.
+fn withhold_owner(key: &(String, String)) -> String {
+    format!("gateway-token:{}:{}", key.0, key.1)
 }
 
 /// The agent's token for `route`: minted on first use and reused after, so a relaunch of the same
@@ -71,6 +75,8 @@ pub fn token_for_account(agent: &str, def_id: &str, route: &str, account: &str) 
     let key = (def_id.to_string(), route.to_string());
     let token = reg.by_agent.get(&key).cloned().unwrap_or_else(mint);
     reg.minted.entry(digest(&token)).or_insert_with(Instant::now);
+    // A token an agent's process holds is never written into a transcript, for as long as it works.
+    crate::backend::transcript::withhold::hold(&withhold_owner(&key), &token, None);
     reg.by_agent.insert(key, token.clone());
     // A token a container turn is running on keeps its address when the next message's environment asks for it again.
     let peer = reg.by_digest.get(&digest(&token)).and_then(|g| g.peer);
@@ -99,6 +105,7 @@ pub fn renew_for_account(agent: &str, def_id: &str, route: &str, account: &str, 
         reg.replaced.insert(digest(&old), key.clone());
     }
     let token = mint();
+    crate::backend::transcript::withhold::hold(&withhold_owner(&key), &token, None);
     reg.by_agent.insert(key, token.clone());
     reg.by_digest.insert(digest(&token), grant);
     reg.minted.insert(digest(&token), Instant::now());
@@ -173,6 +180,7 @@ fn end_token(reg: &mut Registry, key: &(String, String)) {
         reg.minted.remove(&digest(&token));
     }
     reg.replaced.retain(|_, k| k != key);
+    crate::backend::transcript::withhold::release(&withhold_owner(key));
 }
 
 #[cfg(test)]
