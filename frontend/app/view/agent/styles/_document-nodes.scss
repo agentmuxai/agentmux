@@ -1572,7 +1572,8 @@ $tool-name-colors: (
         // Transparent so the parent .agent-tool-panel's shade shows
         // through — see the comment there.
         background: transparent;
-        cursor: default;
+        // It is a `role="link"` that opens the page, so it shows the link hand (a card that only expands keeps the arrow).
+        cursor: var(--cursor-link);
 
         &:hover {
             border-color: var(--accent-color);
@@ -2392,7 +2393,8 @@ $tool-name-colors: (
         font-size: var(--text-xs);
         font-weight: 600;
         color: var(--accent-color);
-        cursor: var(--cursor-interactive);
+        // Text that opens the History: a link-like opener, so the link hand (the row or card around a CTA keeps the arrow).
+        cursor: var(--cursor-link);
 
         &:hover,
         &:focus-visible {

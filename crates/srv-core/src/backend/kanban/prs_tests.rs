@@ -195,8 +195,8 @@ fn a_merged_pr_accepts_its_task_once_and_only_from_review() {
     let c = s.work_queue_claim(&f, 2000, 60_000).unwrap().unwrap();
     assert!(!close_merged(&s, "t", &pr, 3000), "still in progress: not closed");
 
-    assert!(link(&s, "t", &pr, 3000));
-    assert!(!link(&s, "t", &PrRef { repo: "o/r".into(), number: 13 }, 3100), "an existing link is kept");
+    assert!(link(&s, "t", &pr, PrSource::Holder, 3000));
+    assert!(!link(&s, "t", &PrRef { repo: "o/r".into(), number: 13 }, PrSource::Holder, 3100), "an existing link is kept");
     assert_eq!(s.work_board_get("t").unwrap().unwrap().card.pr_url, "https://github.com/o/r/pull/12");
 
     s.work_submit("t", "Loap-3", "", c.attempts, "PR #12", 4000).unwrap().unwrap();
@@ -260,4 +260,44 @@ fn the_watch_list_follows_finished_tasks_for_the_boards_window() {
     assert_eq!(ids, ["recent"]);
     let tasks = watch_list(&s, now).unwrap();
     assert!(watched(&tasks[0]), "a finished task whose merge isn't known yet is watched");
+}
+
+#[test]
+fn githubs_answer_for_a_pr_becomes_a_report_for_the_cards_list() {
+    let pr = PrRef { repo: "o/r".into(), number: 12 };
+    let open = serde_json::json!({
+        "state": "open", "merged_at": null, "created_at": "2026-11-20T10:00:00Z", "updated_at": "2026-11-20T11:00:00Z",
+        "head": { "sha": "abc123", "ref": "x/y" }
+    });
+    let r = report_of(&pr, &open, 5).unwrap();
+    assert_eq!((r.repo.as_str(), r.number, r.state), ("o/r", 12, CardPrState::Open));
+    assert_eq!(r.head.as_deref(), Some("abc123"));
+    assert_eq!(r.updated_at, rfc3339_ms("2026-11-20T11:00:00Z").unwrap(), "GitHub's own time, not ours");
+    assert_eq!(r.opened_at, rfc3339_ms("2026-11-20T10:00:00Z"));
+
+    let merged = serde_json::json!({ "state": "closed", "merged_at": "2026-11-20T12:00:00Z", "updated_at": "2026-11-20T12:00:01Z" });
+    let r = report_of(&pr, &merged, 5).unwrap();
+    assert_eq!((r.state, r.merged_at), (CardPrState::Merged, rfc3339_ms("2026-11-20T12:00:00Z")));
+    assert_eq!(r.head, None);
+
+    let closed = serde_json::json!({ "state": "closed", "merged_at": null });
+    let r = report_of(&pr, &closed, 77).unwrap();
+    assert_eq!((r.state, r.updated_at), (CardPrState::Closed, 77), "no time from GitHub: now");
+    assert_eq!(report_of(&pr, &serde_json::json!({ "message": "Not Found" }), 5), None, "an answer with no state tells nothing");
+}
+
+#[test]
+fn the_poll_writes_what_github_says_into_the_cards_list_without_double_counting() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = Store::open_identity_store(&dir.path().join("identity-store.db")).unwrap();
+    s.work_queue_enqueue(&item("t")).unwrap();
+    s.work_card_ensure("t", 1).unwrap();
+    s.work_card_update("t", &CardUpdate { pr_url: Some("https://github.com/o/r/pull/1".into()), ..Default::default() }, 2).unwrap();
+    let pr = PrRef { repo: "o/r".into(), number: 1 };
+    let answer = serde_json::json!({ "state": "closed", "merged_at": "2026-11-20T12:00:00Z", "updated_at": "2026-11-20T12:00:01Z" });
+    let report = report_of(&pr, &answer, 10).unwrap();
+    assert!(s.work_card_pr_apply("t", &report, PrSource::Read, 10).unwrap().newly_merged);
+    assert!(!s.work_card_pr_apply("t", &report, PrSource::Read, 20).unwrap().changed, "the next poll finds nothing new");
+    let row = &s.work_card_prs("t").unwrap()[0];
+    assert_eq!((row.state.as_str(), row.source.as_str()), ("merged", "holder"), "the holder's link stays the holder's");
 }

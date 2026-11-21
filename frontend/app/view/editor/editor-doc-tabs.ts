@@ -120,6 +120,30 @@ function liveStateOf(model: EditorViewModel, tab: DocTab<EditorBuffer>): EditorL
 }
 
 /**
+ * Close several tabs (Close Others, Close to the Right). The clean ones close at once; each one with unsaved
+ * changes asks in turn, and a refusal ends the round, leaving the rest of them open.
+ */
+function closeTabsAsking(model: EditorViewModel, tabIds: string[]): void {
+    const blockId = model.blockId;
+    const dirty: string[] = [];
+    for (const tabId of tabIds) {
+        const events = dispatch(blockId, { type: "CloseTab", tabId, source: "user" });
+        if (events.some((e) => e.type === "RequestDirtyConfirm")) dirty.push(tabId);
+    }
+    const askNext = (): void => {
+        const tabId = dirty.shift();
+        const tab = tabId === undefined ? undefined : snapshot(blockId)?.tabs.find((t) => t.id === tabId);
+        if (!tabId || !tab || !model.confirmDirtyClose) return;
+        model.confirmDirtyClose(tab, () => {
+            dispatch(blockId, { type: "CloseTab", tabId, force: true, source: "user" });
+            // The panel clears itself right after this runs: the next ask goes after that.
+            queueMicrotask(askNext);
+        });
+    };
+    askNext();
+}
+
+/**
  * The Editor pane's tabs as a `DocTabsModel`: each action is the store's
  * command, so the dirty-close confirmation, its events and the audit ring
  * stay the Editor's.
@@ -142,6 +166,18 @@ export function editorDocTabs(model: EditorViewModel): DocTabsModel<EditorBuffer
             return true;
         },
         promote: (id) => void dispatch(blockId, { type: "PinTab", tabId: id, source: "user" }),
+        pin: (id, pinned) => void dispatch(blockId, { type: "SetTabPinned", tabId: id, pinned, source: "user" }),
+        // Pinned tabs stay (as `closeOthers` and `closeToRight` in doc-tabs.ts have it); a dirty one asks first.
+        closeOthers: (id) => {
+            if (!tabOf(id)) return;
+            model.switchTab(id);
+            closeTabsAsking(model, doc().tabs.filter((t) => t.id !== id && !t.pinned).map((t) => t.id));
+        },
+        closeToRight: (id) => {
+            const tabs = doc().tabs;
+            const at = tabs.findIndex((t) => t.id === id);
+            if (at >= 0) closeTabsAsking(model, tabs.slice(at + 1).filter((t) => !t.pinned).map((t) => t.id));
+        },
         cycle: (delta) => model.cycleTab(delta),
         move: (id, delta) => {
             const at = doc().tabs.findIndex((t) => t.id === id);

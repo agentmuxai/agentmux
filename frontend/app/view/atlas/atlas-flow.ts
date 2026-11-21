@@ -24,56 +24,34 @@ export const LEAVING_MS = 1_000;
 export const MAX_MESSAGES = 40;
 export const MAX_TASKS = 12;
 
-/** A pull request's line (atlas-pr.ts) is bright this long, then stays dimmed until the pull request ends. */
-export const PR_FRESH_MS = 5 * 60_000;
-/** A pull request's line with no end goes after this long: the fallback for a merge this machine never heard of. */
-export const PR_SHOWN_MS = 2 * 60 * 60_000;
-export const MAX_PR_LINES = 12;
+/** How a line reads: a message that arrived, one kept or queued for later, one refused; or a task handed over. */
+export type FlowTone = "delivered" | "waiting" | "refused" | "task";
 
-/**
- * How a line reads: a message that arrived, one kept or queued for later, one refused; a task handed over; or a
- * pull request's review or checks that passed, failed, or said neither.
- */
-export type FlowTone = "delivered" | "waiting" | "refused" | "task" | "passed" | "failed" | "neutral";
-
-/**
- * One end of a line: an agent as srv named it (`local`: one of this instance's own, as a pull request's agent
- * always is), or a node of the map by its key (the review bot, CI).
- */
-export type FlowEnd = (MessageFlowEnd & { local?: boolean }) | { node: string };
+/** One end of a line: an agent as srv named it. */
+export type FlowEnd = MessageFlowEnd;
 
 /** One line on show, between two nodes as srv named them. */
 export interface AtlasFlow {
     /** Unique to this drawing: a repeat between the same two agents is a new one, so its line draws again. */
     id: string;
-    kind: "message" | "task" | "review" | "checks";
+    kind: "message" | "task";
     from: FlowEnd;
     to: FlowEnd;
     tone: FlowTone;
-    /** A task's number, as "#12", or a pull request's. */
+    /** A task's number, as "#12". */
     label: string | null;
     /** When it happened, in ms since 1970: its time on show runs from here. */
     atMs: number;
     /** In its last second: fading out. */
     leaving: boolean;
-    /** The pull request a review's or a checks' line is about: the newest of its kind replaces the one before. */
-    pr?: string;
-    /** What srv called the review or the checks: "approved", "failing". */
-    state?: string;
-    /** A pull request's line past its first minutes: still true, no longer news. */
-    dim?: boolean;
 }
 
-/** Whether a line is a pull request's: a review of it, or its checks. */
-export const isPrFlow = (flow: Pick<AtlasFlow, "kind">) => flow.kind === "review" || flow.kind === "checks";
-
 const lower = (s: string | undefined) => (s ?? "").trim().toLowerCase();
-const endKey = (end: FlowEnd) => ("node" in end ? `node:${end.node}` : `${lower(end.agent)}@${lower(end.host)}`);
+const endKey = (end: FlowEnd) => `${lower(end.agent)}@${lower(end.host)}`;
 const sameEnd = (a: FlowEnd, b: FlowEnd) => endKey(a) === endKey(b);
 
 /** Two drawings of the same line: the newer replaces the older. */
-const pairKey = (flow: Pick<AtlasFlow, "kind" | "from" | "to" | "pr">) =>
-    flow.pr ? `${flow.kind}|${flow.pr}` : `${flow.kind}|${endKey(flow.from)}|${endKey(flow.to)}`;
+const pairKey = (flow: Pick<AtlasFlow, "kind" | "from" | "to">) => `${flow.kind}|${endKey(flow.from)}|${endKey(flow.to)}`;
 
 const TONES: Record<MessageFlowEvent["outcome"], FlowTone> = {
     delivered: "delivered",
@@ -118,21 +96,16 @@ export function taskFlow(event: TaskFlowEvent): AtlasFlow | null {
 const SHOWN_MS: Record<AtlasFlow["kind"], number> = {
     message: MESSAGE_SHOWN_MS,
     task: TASK_SHOWN_MS,
-    review: PR_SHOWN_MS,
-    checks: PR_SHOWN_MS,
 };
 const MAX_SHOWN: Record<AtlasFlow["kind"], number> = {
     message: MAX_MESSAGES,
     task: MAX_TASKS,
-    review: MAX_PR_LINES,
-    checks: MAX_PR_LINES,
 };
 const shownMs = (flow: AtlasFlow) => SHOWN_MS[flow.kind];
 
 /**
- * `flows` at `now`: the ones whose time is up are gone, the ones in their last second are leaving, and a pull
- * request's line past its first minutes is dim. The same list is returned when nothing changed, so a tick that
- * changes nothing redraws nothing.
+ * `flows` at `now`: the ones whose time is up are gone, and the ones in their last second are leaving. The same list
+ * is returned when nothing changed, so a tick that changes nothing redraws nothing.
  */
 export function flowsAt(flows: readonly AtlasFlow[], now: number): readonly AtlasFlow[] {
     let changed = false;
@@ -144,23 +117,16 @@ export function flowsAt(flows: readonly AtlasFlow[], now: number): readonly Atla
             continue;
         }
         const leaving = age >= shownMs(flow) - LEAVING_MS;
-        const dim = isPrFlow(flow) && age >= PR_FRESH_MS;
-        const same = leaving === flow.leaving && dim === !!flow.dim;
+        const same = leaving === flow.leaving;
         if (!same) changed = true;
-        out.push(same ? flow : { ...flow, leaving, dim: dim || undefined });
+        out.push(same ? flow : { ...flow, leaving });
     }
     return changed ? out : flows;
 }
 
-/** `flows` without the lines of the pull request `pr`, which has ended; the same list when it has none. */
-export function withoutPr(flows: readonly AtlasFlow[], pr: string): readonly AtlasFlow[] {
-    return flows.some((f) => f.pr === pr) ? flows.filter((f) => f.pr !== pr) : flows;
-}
-
 /**
- * `flows` with `flow` added: it replaces an older drawing between the same two agents, or of the same pull request
- * (a line already drawn is not drawn twice), one srv reported before is left alone, and the oldest of its kind go
- * once there are too many.
+ * `flows` with `flow` added: it replaces an older drawing between the same two agents (a line already drawn is not
+ * drawn twice), one srv reported before is left alone, and the oldest of its kind go once there are too many.
  */
 export function withFlow(flows: readonly AtlasFlow[], flow: AtlasFlow, now: number): readonly AtlasFlow[] {
     if (now - flow.atMs >= shownMs(flow) || flows.some((f) => f.id === flow.id)) return flows;
@@ -178,8 +144,7 @@ export function withFlow(flows: readonly AtlasFlow[], flow: AtlasFlow, now: numb
  * Finds the node an end of a line names, among the agents drawn. The end's `agent` is the name messages reach it
  * by; its `host`, when srv knew it, says which computer. An agent of that name on that computer is the one; with
  * two there (two channels of one computer), this instance's own. With no host, the only agent of that name
- * anywhere. An end it cannot find, or cannot tell from another, is null: no line, never a wrong one. An end marked
- * `local` is this instance's own agent of that name and no other; an end that is a node of the map is that node.
+ * anywhere. An end it cannot find, or cannot tell from another, is null: no line, never a wrong one.
  */
 export function flowEndResolver(
     shown: readonly AtlasAgent[],
@@ -197,9 +162,7 @@ export function flowEndResolver(
         return own.length === 1 ? own[0].key : null;
     };
     return (end) => {
-        if ("node" in end) return end.node;
         const named = byRoute.get(lower(end.agent)) ?? [];
-        if (end.local) return one(named.filter((a) => !a.remote));
         const host = lower(end.host);
         if (!host) return one(named);
         if (hosts.some((m) => machineHost(m) === host)) return one(named.filter((a) => machineHost(machines.get(a.machine)) === host));
@@ -319,7 +282,7 @@ function labelBesideEnd(to: FlowNode, end: Placed, fromBelow: boolean, free: (p:
  * It also keeps clear of the labels in `taken`, as a label `halfW` wide each side of its point: on a clear stretch
  * that another label has (a line and its answer, close together), it goes next to that label.
  * `lane` is how many lines already run between the same two nodes the same way: each bows further out than the
- * one before, so two pull requests of one agent are two lines and not one.
+ * one before, so two tasks from one agent to another are two lines and not one.
  * Null for two nodes on top of each other.
  */
 export function flowCurve(

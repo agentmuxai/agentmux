@@ -124,6 +124,7 @@ function OptionRowView(props: DropupViewProps & { row: Extract<Row, { kind: "opt
                 active: !row.disabled && optIndex() === s.selectedOptIndex(),
                 "is-disabled": !!row.disabled,
                 "is-disclosure": !!row.disclosure,
+                "is-set-apart": !!row.setApart,
                 "is-nested": !!row.nested,
             }}
             role="option"

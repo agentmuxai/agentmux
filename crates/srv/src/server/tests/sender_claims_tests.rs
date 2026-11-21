@@ -128,10 +128,23 @@ async fn the_cross_channel_broadcast_forward_refuses_a_request_that_carries_an_a
     let (status, v) = post(&state, Some(&token), "/agentmux/agent/broadcast", body.clone()).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
     assert!(refused(&v), "{v}");
+    // Without a token the request is read, but it is the person's words only when the sending instance confirms it.
     let (status, v) = post(&state, None, "/agentmux/agent/broadcast", body).await;
-    assert_eq!(status, StatusCode::OK, "a server's forward is served as before: {v}");
+    assert_eq!(status, StatusCode::OK, "{v}");
     assert_eq!(v["success"], false);
     assert!(!refused(&v), "{v}");
+}
+
+/// Nothing sent from an instance that never sent it is confirmed, and an agent's token cannot ask.
+#[tokio::test]
+async fn a_forward_no_instance_sent_is_not_confirmed() {
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
+    let (state, token) = state_with_alpha();
+    let body = json!({ "block_id": "sc-blk", "body_sha256": crate::server::app_api::fleet::body_digest("x"), "msg_id": "sc-never-sent", "recipients": 1 });
+    let (status, v) = post(&state, None, "/agentmux/agent/broadcast/confirm", body.clone()).await;
+    assert_eq!((status, &v["confirmed"]), (StatusCode::OK, &json!(false)), "{v}");
+    let (status, v) = post(&state, Some(&token), "/agentmux/agent/broadcast/confirm", body).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
 }
 
 async fn rpc(state: &AppState, ctx: RpcContext, command: &str, data: Value) -> Result<Value, String> {
@@ -266,6 +279,8 @@ async fn a_global_memory_save_over_the_socket_is_recorded_as_whoever_made_it() {
     for (id, ctx, writer, source) in [
         ("sc-g-agent", RpcContext { agent_id: "sc-alpha".to_string(), ..Default::default() }, "sc-alpha", "agent"),
         ("sc-g-window", RpcContext::operator_for_tests(), "armory-ui", "human"),
+        // A connection that holds the instance key and proved nothing more is not the window.
+        ("sc-g-unproven", RpcContext::default(), "unproven", "unproven"),
     ] {
         let bundle = json!({ "id": id, "name": id, "instructions": "be kind", "is_global": true });
         rpc_bundle(&state, ctx, "upsertmemory", bundle).await.unwrap();
@@ -410,4 +425,30 @@ async fn the_self_keys_route_serves_only_the_keys_of_the_agent_its_token_names()
     assert_eq!(status, StatusCode::OK, "{v}");
     assert_eq!(v["slug"], "sc-alpha", "{v}");
     assert_eq!(v["uid"], "uid-sc-alpha", "{v}");
+}
+
+/// A Global Memory write or revert over HTTP needs the agent's token, is recorded as the agent that token proves, and
+/// cannot give itself the person's label: the labels srv uses for who wrote are not taken from the request.
+#[tokio::test]
+async fn global_memory_over_http_needs_a_token_and_cannot_be_labelled_as_the_person() {
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
+    let (state, token) = state_with_alpha();
+    let write = |provenance: Value| json!({ "agent_id": "sc-alpha", "name": "Rules", "content": "be kind", "provenance": provenance });
+
+    // No token: neither route does anything, and nothing was written.
+    let (_, v) = post(&state, None, "/api/v1/agent/globalmemory/write", write(json!({ "source": "agent_inferred" }))).await;
+    assert!(refused(&v), "a write with no token: {v}");
+    let (_, v) = post(&state, None, "/api/v1/agent/globalmemory/revert", json!({ "agent_id": "sc-alpha", "id": "g", "version_id": "v" })).await;
+    assert!(refused(&v), "a revert with no token: {v}");
+    assert!(state.id_store.bundle_list().unwrap().iter().all(|b| b.name != "Rules"), "a refused write writes nothing");
+
+    // With the token, a body that says `human` is recorded as the agent's note, never as the person's source.
+    let (_, v) = post(&state, Some(&token), "/api/v1/agent/globalmemory/write", write(json!({ "source": "human", "why": "slimming" }))).await;
+    assert!(!refused(&v), "an agent writes Global Memory as itself: {v}");
+    let entry = state.id_store.bundle_list().unwrap().into_iter().find(|b| b.name == "Rules").expect("the entry exists");
+    let version = &state.id_store.bundle_version_list(&entry.id).unwrap()[0];
+    assert_eq!(version.written_by, "sc-alpha");
+    assert_ne!(version.source, "human", "the body's label is not the person's");
+    assert!(version.source_detail.contains("claimed_source") && version.source_detail.contains("slimming"), "{}", version.source_detail);
+    assert!(!version.written_by_uid.is_empty(), "the writer is the token's agent");
 }

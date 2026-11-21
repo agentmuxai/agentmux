@@ -149,6 +149,21 @@ describe("usePendingMessageAcceptance — onTurnStartFromQueue", () => {
         dispose();
     });
 
+    it("takes a message sent again off the queue and adds no second copy to the conversation", () => {
+        hub.turnPhase = { kind: "Streaming", toolsActive: 0, bufferSize: 0, lastEventMs: 0 };
+        const pending: PendingMessage[] = [
+            { id: "again", text: "do the thing", resend: true } as PendingMessage,
+            { id: "fresh", text: "something new" } as PendingMessage,
+        ];
+        const { dispatched, pushedNodes, dispose } = setup(pending);
+        fire({ message_id: "again" });
+        expect(dispatched.some((c: any) => c.type === "PendingMessageAccepted" && c.id === "again")).toBe(true);
+        expect(pushedNodes).toEqual([]);
+        fire({ message_id: "fresh" });
+        expect(pushedNodes).toHaveLength(1);
+        dispose();
+    });
+
     it("ignores an accepted event for an unknown message id", () => {
         hub.turnPhase = { kind: "Done", outcome: "completed", finishedAt: 0 };
         const { dispatched, onTurnStartFromQueue, dispose } = setup([]);
