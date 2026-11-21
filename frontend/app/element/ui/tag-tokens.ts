@@ -35,3 +35,20 @@ export const TAG_NEUTRAL_EDGE_PCT = 80;
  */
 export const TAG_GROUPS = { action: 0, attention: 1, plan: 2, where: 3, fact: 4 } as const;
 export type TagGroup = keyof typeof TAG_GROUPS;
+
+/**
+ * The Swarm's coloured tags: a seat's role and a model's family each have a hue (a colour token in theme.scss and
+ * its `-edge`), which a Tag takes in place of a tone. The names are the tokens' (`--seat-leader`, `--model-opus`),
+ * so a call site says which, never a colour. docs/specs/SPEC_SWARM_MODEL_AND_SEAT_TAGS_2026_11_20.md §4.2 and §5.
+ */
+export const TAG_HUES = {
+    seat: ["seat-leader", "seat-super", "seat-specialist", "seat-platform-tester", "seat-analyst", "seat-worker"],
+    model: ["model-fable", "model-opus", "model-sonnet", "model-haiku", "model-gpt", "model-gemini", "model-other"],
+} as const;
+
+export type SeatHue = (typeof TAG_HUES.seat)[number];
+export type ModelHue = (typeof TAG_HUES.model)[number];
+export type TagHue = SeatHue | ModelHue;
+
+/** A hue's fill is its colour at this share over the surface, the coloured tones' share. */
+export const TAG_HUE_FILL_PCT = 14;

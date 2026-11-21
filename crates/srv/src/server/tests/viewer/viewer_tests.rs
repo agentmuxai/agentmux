@@ -507,6 +507,36 @@ async fn a_feed_starts_with_a_snapshot_then_follows_appends_in_order() {
     assert_eq!(id.as_deref(), Some(format!("{gen}:5").as_str()));
 }
 
+/// The canary on the device feed: a value srv holds secret is in neither the snapshot's lines (one stored earlier, one
+/// written after) nor in what the feed follows.
+#[tokio::test]
+async fn a_feed_shows_nothing_srv_holds_secret_in_the_snapshot_or_in_what_follows() {
+    use crate::backend::transcript::withhold;
+    let state = test_state();
+    let (_, token) = pair_device(&state, "Pixel");
+    let (name, block, _) = register_defined(&state, "viewer-withhold");
+    let (stored_before, written_after) = ("canary-feed-old-6620-AbCd", "canary-feed-new-3318-WxYz");
+    append(&state, &block, &user_line(&format!("env {stored_before}")));
+    withhold::register(stored_before);
+    withhold::register(written_after);
+
+    let (status, mut body) = open_feed(&state, &name, &token, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(next_chunk(&mut body).await.unwrap(), "retry: 3000\n\n");
+    let (event, _, snap) = next_event(&mut body).await.unwrap();
+    assert_eq!(event, "snapshot");
+    let snapshot = lines_of(&snap);
+    assert_eq!(snapshot.len(), 1);
+    assert!(!snapshot[0].contains(stored_before), "the snapshot shows a value: {}", snapshot[0]);
+    assert!(snapshot[0].contains(withhold::MARK));
+
+    append(&state, &block, &user_line(&format!("then {written_after}")));
+    let (event, _, appended) = next_event(&mut body).await.unwrap();
+    assert_eq!(event, "append");
+    let lines = lines_of(&appended);
+    assert!(!lines[0].contains(written_after) && lines[0].contains(withhold::MARK), "{}", lines[0]);
+}
+
 #[tokio::test]
 async fn a_reconnect_resumes_without_gaps_or_duplicates() {
     let state = test_state();

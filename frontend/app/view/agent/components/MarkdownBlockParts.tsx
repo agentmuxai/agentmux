@@ -8,6 +8,7 @@ import clsx from "clsx";
 import { Markdown } from "@/app/element/markdown";
 import { Button } from "@/app/element/ui/Button";
 import { Show, type Accessor, type JSX } from "solid-js";
+import { paneSurface } from "../agent-links";
 import type { useAgentMedia } from "../agent-media";
 import { PeekOverlay } from "./PeekOverlay";
 import { PeekMetaRow } from "./PeekMetaRow";
@@ -46,7 +47,7 @@ export function PeekedMarkdown(props: {
                     virtualized document, which owns the scroll. (It also avoided
                     the replaceChild crash, #1326, from the OverlayScrollbars that
                     scrollable markdown used before it was removed.) */}
-                <Markdown text={view().text} streaming={view().streaming} scrollable={false} media={props.media()} />
+                <Markdown text={view().text} streaming={view().streaming} scrollable={false} media={props.media()} entities={paneSurface(props.media())} />
             </div>
             {/* Peek overlay — see ToolBlock.tsx's identical pattern
                 and PeekOverlay.tsx. */}
@@ -95,6 +96,7 @@ export function FoldedMarkdown(props: {
                         streaming={isCanceled() ? undefined : view().streaming}
                         scrollable={false}
                         media={props.media()}
+                        entities={paneSurface(props.media())}
                     />
                 </div>
             </Show>

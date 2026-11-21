@@ -98,7 +98,14 @@ pub fn apply(env: &mut HashMap<String, String>, endpoint: &Endpoint, config_dir:
     env.insert("CLAUDE_CODE_OAUTH_TOKEN".to_string(), String::new());
     let value_of = |written: &Option<String>| {
         written.as_deref().and_then(|w| match agent_env::vault_ref(w) {
-            Some(id) => resolve_vault(id),
+            Some(id) => {
+                let value = resolve_vault(id);
+                // A Vault value handed to the agent's process is never written into its transcript.
+                if let Some(value) = &value {
+                    crate::backend::transcript::withhold::register(value);
+                }
+                value
+            }
             None => Some(w.to_string()),
         })
     };
@@ -409,8 +416,10 @@ mod tests {
     fn a_vault_reference_is_replaced_by_the_entrys_value_and_a_refused_one_by_nothing() {
         let endpoint = requested(&env(&[("ANTHROPIC_BASE_URL", "https://llm.example.com"), ("ANTHROPIC_AUTH_TOKEN", "vault:k1")])).unwrap();
         let mut spawn = account();
-        apply(&mut spawn, &endpoint, "/d", &|id| (id == "k1").then(|| "the-real-key".to_string()));
-        assert_eq!(spawn["ANTHROPIC_AUTH_TOKEN"], "the-real-key");
+        apply(&mut spawn, &endpoint, "/d", &|id| (id == "k1").then(|| "the-real-key-withhold-canary".to_string()));
+        assert_eq!(spawn["ANTHROPIC_AUTH_TOKEN"], "the-real-key-withhold-canary");
+        // The value handed to the agent's process is never written into its transcript.
+        assert_eq!(crate::backend::transcript::withhold::text("KEY=the-real-key-withhold-canary"), "KEY=[withheld]");
         let mut refused = account();
         apply(&mut refused, &endpoint, "/d", &none);
         assert_eq!(refused["ANTHROPIC_AUTH_TOKEN"], NO_KEY_PLACEHOLDER, "no value, and never the account's");

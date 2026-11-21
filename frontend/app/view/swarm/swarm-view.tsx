@@ -20,6 +20,7 @@ import { formatElapsedClock, formatTimeLeft } from "@/util/format-time";
 import { createMemo, createSignal, For, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { requestSubagentName } from "./subagent-naming";
 import { AgentCardHead, AgentCardLines } from "./swarm-agent-card";
+import { modelFactsForRow } from "./swarm-model-facts";
 import { useAgentRowActivation, useSummaryFlash } from "./swarm-agent-row-hooks";
 import { BackgroundTaskBucket, SubagentBackgroundTasks, visibleBackgroundTasks } from "./swarm-background-tasks";
 import { phaseToDisplayStatus, type AgentDisplayStatus } from "./swarm-display-status";
@@ -385,6 +386,7 @@ export function AgentRow({
 }): JSX.Element {
     const s = createRowState(node, model);
     const { activation, rowColors } = s;
+    const modelFacts = createMemo(() => modelFactsForRow(s.blockMeta()));
 
     return (
         <div class="swarm-agent-group" data-swarm-key={rowKey}>
@@ -432,6 +434,7 @@ export function AgentRow({
                     summaryFlash={s.summaryFlash}
                     blockMeta={s.blockMeta}
                     rowNow={s.rowNow}
+                    modelFacts={modelFacts}
                 />
             </div>
             <Show when={activation.openRefused()}>

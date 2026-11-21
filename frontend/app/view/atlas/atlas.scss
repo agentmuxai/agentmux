@@ -452,6 +452,14 @@
     white-space: nowrap;
 }
 
+// The seat as its coloured tag (agent-model/seat-tag.tsx), cut with an ellipsis inside the node's one line; the line
+// takes the tag's own tight height, so the node (a fixed height in atlas-layout.ts) does not grow.
+.atlas-node__sub .atlas-node__seat {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .atlas-node__dot {
     flex: none;
     width: 8px;

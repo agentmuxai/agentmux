@@ -312,3 +312,17 @@ async fn a_transcript_kept_only_in_the_agents_global_zone_is_watched() {
     let (_, tail) = call(&state, Some("wg-caller"), json!({ "agent": "wg-target", "after": first["next"] })).await;
     assert_eq!(lines(&tail), ["g3"]);
 }
+
+#[test]
+fn a_watch_shows_no_value_srv_holds_secret_in_a_line_stored_before_it_was_known() {
+    use crate::backend::transcript::withhold;
+    let value = "canary-watch-7741-QrSt";
+    let data = format!("{{\"n\":1,\"out\":\"env {value}\"}}\n{{\"n\":2}}\n");
+    let before = lines_of(data.as_bytes(), 0, false, false, 10);
+    assert!(before.lines[0].contains(value), "not registered yet: stored text is shown as stored");
+    withhold::register(value);
+    let after = lines_of(data.as_bytes(), 0, false, false, 10);
+    assert_eq!(after.lines.len(), 2, "a line is replaced, never dropped, so the cursor still counts it");
+    assert!(!after.lines[0].contains(value) && after.lines[0].contains(withhold::MARK), "{}", after.lines[0]);
+    assert_eq!(after.next, before.next);
+}
