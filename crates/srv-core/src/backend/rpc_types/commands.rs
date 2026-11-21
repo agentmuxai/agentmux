@@ -626,6 +626,10 @@ pub const COMMAND_APP_DESKTOP: &str = "app.desktop";
 pub const COMMAND_PRESENCE_STATUS: &str = "presence.status";
 /// Accepting the terms: the person's, from the AgentMux window alone.
 pub const COMMAND_CLIENT_AGREE_TOS: &str = "client.agreetos";
+/// Which container agents a host agent shares a folder with, and going ahead with one: the person's, from the
+/// AgentMux window alone.
+pub const COMMAND_FOLDER_OVERLAP_CHECK: &str = "folderoverlapcheck";
+pub const COMMAND_FOLDER_OVERLAP_ACCEPT: &str = "folderoverlapaccept";
 pub const COMMAND_PRESENCE_PUBLISH_NOW: &str = "presence.publish-now";
 
 // Tower, the read-only task manager pane (backend::tower::sampler). The

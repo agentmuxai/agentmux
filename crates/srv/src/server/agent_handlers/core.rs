@@ -385,6 +385,7 @@ async fn create_agent(
         seat: None,
         conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
     };
+    crate::backend::folder_overlap::check(&mstore, &agent, None).map_err(|e| format!("createagent: {e}"))?;
     mstore.agent_def_insert(&mut agent).map_err(|e| format!("createagent: {e}"))?;
     // Assign the agent its display color at creation
     // (SPEC_AGENT_COLOR_2026_08_08.md). Best-effort: a failure
@@ -429,6 +430,9 @@ async fn update_agent(
         None => old.model_vendor_base_url.clone(),
     };
     let mut agent = updated_definition(cmd, old, chosen_model_vendor_base_url);
+    if crate::backend::folder_overlap::folders_changed(old, &agent) {
+        crate::backend::folder_overlap::check(&mstore, &agent, None).map_err(|e| format!("updateagent: {e}"))?;
+    }
     let found = mstore.agent_def_update(&mut agent).map_err(|e| format!("updateagent: {e}"))?;
     if !found {
         return Err(format!("updateagent: agent {} not found", agent.id));

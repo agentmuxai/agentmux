@@ -1218,6 +1218,14 @@
             "method": "ClientAgreeTosCommand"
         },
         {
+            "command": "folderoverlapcheck",
+            "method": "FolderOverlapCheckCommand"
+        },
+        {
+            "command": "folderoverlapaccept",
+            "method": "FolderOverlapAcceptCommand"
+        },
+        {
             "command": "browsergrants.list",
             "method": "BrowserGrantsListCommand",
             "send": "data ?? {}"

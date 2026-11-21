@@ -3379,6 +3379,44 @@
     }
   },
   {
+    "command": "folderoverlapaccept",
+    "request": "agentmux_srv_core::backend::rpc_types::folder_overlap::CommandFolderOverlapAcceptData",
+    "requestName": "CommandFolderOverlapAcceptData",
+    "requestTs": {
+      "imports": [
+        "CommandFolderOverlapAcceptData"
+      ],
+      "name": "CommandFolderOverlapAcceptData"
+    },
+    "response": "agentmux_srv_core::backend::rpc_types::folder_overlap::FolderOverlapAcceptResult",
+    "responseName": "FolderOverlapAcceptResult",
+    "responseTs": {
+      "imports": [
+        "FolderOverlapAcceptResult"
+      ],
+      "name": "FolderOverlapAcceptResult"
+    }
+  },
+  {
+    "command": "folderoverlapcheck",
+    "request": "agentmux_srv_core::backend::rpc_types::folder_overlap::CommandFolderOverlapCheckData",
+    "requestName": "CommandFolderOverlapCheckData",
+    "requestTs": {
+      "imports": [
+        "CommandFolderOverlapCheckData"
+      ],
+      "name": "CommandFolderOverlapCheckData"
+    },
+    "response": "agentmux_srv_core::backend::rpc_types::folder_overlap::FolderOverlapCheckResult",
+    "responseName": "FolderOverlapCheckResult",
+    "responseTs": {
+      "imports": [
+        "FolderOverlapCheckResult"
+      ],
+      "name": "FolderOverlapCheckResult"
+    }
+  },
+  {
     "command": "forkagentdefinition",
     "request": "agentmux_srv_core::backend::rpc_types::agent::CommandForkAgentDefinitionData",
     "requestName": "CommandForkAgentDefinitionData",

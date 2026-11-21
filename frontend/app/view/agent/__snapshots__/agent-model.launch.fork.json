@@ -42,6 +42,13 @@
       }
     },
     {
+      "cmd": "FolderOverlapCheck",
+      "data": {
+        "agent_id": "agent-1",
+        "folder": "/srv/home/agents/korp-fork-1103c"
+      }
+    },
+    {
       "cmd": "WriteAgentConfig",
       "data": {
         "working_dir": "/srv/home/agents/korp-fork-1103c",

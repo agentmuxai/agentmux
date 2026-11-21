@@ -1,0 +1,47 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * The panel in the picker that is opening a host agent in a folder a container agent can write: names both, says what
+ * the shared folder means, and lets the person go ahead (kept for that pair of agents) or not open it
+ * (`shared-folder-ask.ts`).
+ */
+
+import { Button } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
+import type { Overlap } from "@/types/rpc/Overlap";
+import type { JSX } from "solid-js";
+
+export interface SharedFolderPanelProps {
+    hostName: string;
+    overlaps: Overlap[];
+    busy: boolean;
+    onGoAhead: () => void;
+    onKeepApart: () => void;
+}
+
+export function SharedFolderPanel(props: SharedFolderPanelProps): JSX.Element {
+    const containers = () => [...new Set(props.overlaps.map((pair) => pair.container_name))].join(", ");
+    return (
+        <div class="agent-shared-folder-panel" role="group" aria-label={t("agentPicker.sharedFolder.title")} data-testid="shared-folder-panel">
+            <div class="shared-folder-icon">
+                <i class="fa-solid fa-folder-open" />
+            </div>
+            <div class="shared-folder-content">
+                <div class="shared-folder-title">{t("agentPicker.sharedFolder.title")}</div>
+                <div class="shared-folder-text" data-testid="shared-folder-text">
+                    {t("agentPicker.sharedFolder.body", { containers: containers(), host: props.hostName })}
+                </div>
+                <div class="shared-folder-hint">{t("agentPicker.sharedFolder.hint")}</div>
+                <div class="shared-folder-actions">
+                    <Button tone="neutral" onClick={() => props.onKeepApart()} disabled={props.busy} data-testid="shared-folder-cancel">
+                        {t("agentPicker.sharedFolder.cancel")}
+                    </Button>
+                    <Button tone="accent" busy={props.busy} onClick={() => props.onGoAhead()} data-testid="shared-folder-go-ahead">
+                        {t("agentPicker.sharedFolder.goAhead")}
+                    </Button>
+                </div>
+            </div>
+        </div>
+    );
+}

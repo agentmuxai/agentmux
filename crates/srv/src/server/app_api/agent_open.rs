@@ -376,6 +376,8 @@ pub(super) async fn open_agent_inner(
     let _open_guard = open_lock.lock().await;
 
     steps::admit_open(state, &agent).await?;
+    let folder = crate::backend::base::expand_home_dir_safe(&steps::agent_work_dir(&agent));
+    crate::backend::folder_overlap::check_open(&mstore, &agent, Some(&folder)).map_err(|e| format!("FOLDER_SHARED: {e}"))?;
 
     // 2. Resolve provider
     let provider = providers::get_provider(&agent.provider)
