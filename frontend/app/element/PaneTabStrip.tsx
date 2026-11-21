@@ -164,6 +164,8 @@ export interface PaneTabStripProps<T> {
     /** Custom label content (e.g. an inline "Save As" path input) instead
      *  of the plain text label. */
     renderLabel?: (tab: T) => JSX.Element;
+    /** The tab type's own buttons, drawn in the selected tab only, right of its label: they leave when another tab is selected. */
+    renderActions?: (tab: T) => JSX.Element;
 
     /** The far-right `+` — omitted entirely when the pane type has no
      *  "add tab" action. Always pinned last regardless of tab count or
@@ -365,6 +367,7 @@ function StripTabs<T>(props: { strip: PaneTabStripProps<T> }): JSX.Element {
                     onClose={p.onClose}
                     onDoubleClick={p.onTabDoubleClick}
                     renderLabel={p.renderLabel}
+                    renderActions={p.renderActions}
                     onReorder={p.onReorder}
                     paneKey={p.paneKey}
                     sourceTabId={p.sourceTabId}
@@ -486,6 +489,7 @@ interface PaneTabStripItemProps<T> {
     onClose?: (id: string) => void;
     onDoubleClick?: (tab: T) => void;
     renderLabel?: (tab: T) => JSX.Element;
+    renderActions?: (tab: T) => JSX.Element;
     onReorder?: (blockId: string, targetId: string, position: "before" | "after") => boolean | void;
     paneKey?: string;
     sourceTabId?: string;
@@ -565,7 +569,7 @@ interface PillContentProps<T> {
     onCloseClick: (e: MouseEvent) => void;
 }
 
-/** The progress line and its words, the selected mark, the icon, the label and the close button, in that order. */
+/** The progress line and its words, the selected mark, the icon, the label, the selected tab's own buttons and the close button, in that order. */
 function PillContent<T>(p: PillContentProps<T>): JSX.Element {
     const item = p.item;
     const { lineState, lineLook, progressInfo, descriptionId } = p.progress;
@@ -603,6 +607,7 @@ function PillContent<T>(p: PillContentProps<T>): JSX.Element {
             ) : (
                 <span class="pane-tab-label">{item.getLabel(item.tab)}</span>
             )}
+            <Show when={item.active && item.renderActions}>{item.renderActions!(item.tab)}</Show>
             <Show when={item.onClose}>
                 {/* Always in the DOM for attention tabs (closing those may need confirmation); hover-shown
                     otherwise, purely via CSS opacity. */}

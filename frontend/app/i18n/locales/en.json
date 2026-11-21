@@ -1254,5 +1254,6 @@
     "drone.node.noteTask": "Note on task",
     "drone.node.noteTaskHint": "to add a note instead of filing a task: the number of a task this drone filed",
     "drone.node.note": "Note",
-    "drone.node.noteHint": "the line to add; used with a task number above"
+    "drone.node.noteHint": "the line to add; used with a task number above",
+    "pane.tab.actions": "Tab actions"
 }
