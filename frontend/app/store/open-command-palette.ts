@@ -25,15 +25,19 @@ let loading: Promise<PaletteCode> | null = null;
 
 /** Loads the palette's code, once. Called after startup, and by an open that came first. */
 export function preloadCommandPalette(): Promise<unknown> {
-    loading ??= Promise.all([import("@/app/modals/command-palette"), import("@/app/element/anchored-popover")]).then(
-        ([{ CommandPaletteModal }, { dismissAnchoredPopovers }]) => (code = { CommandPaletteModal, dismissAnchoredPopovers })
-    );
+    loading ??= Promise.all([import("@/app/modals/command-palette"), import("@/app/element/anchored-popover")])
+        .then(([{ CommandPaletteModal }, { dismissAnchoredPopovers }]) => (code = { CommandPaletteModal, dismissAnchoredPopovers }))
+        .catch((err: unknown) => {
+            // One failed load (a chunk that could not be fetched) must not be the answer to every later press: the next one tries again.
+            loading = null;
+            throw err;
+        });
     return loading;
 }
 
 /** Loads it when the window is idle (no wait where there is no idle callback to ask for, as in a test), within 5 s. */
 export function preloadCommandPaletteWhenIdle(): void {
-    if (typeof requestIdleCallback === "function") requestIdleCallback(() => void preloadCommandPalette(), { timeout: 5000 });
+    if (typeof requestIdleCallback === "function") requestIdleCallback(() => void preloadCommandPalette().catch(() => {}), { timeout: 5000 });
 }
 
 function toggle({ CommandPaletteModal, dismissAnchoredPopovers }: PaletteCode): void {
