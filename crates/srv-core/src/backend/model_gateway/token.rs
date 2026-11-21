@@ -52,7 +52,10 @@ fn digest(token: &str) -> [u8; 32] {
 }
 
 fn mint() -> String {
-    format!("{TOKEN_PREFIX}{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple())
+    let token = format!("{TOKEN_PREFIX}{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
+    // A token an agent's process holds is never written into a transcript.
+    crate::backend::transcript::withhold::register(&token);
+    token
 }
 
 /// The agent's token for `route`: minted on first use and reused after, so a relaunch of the same

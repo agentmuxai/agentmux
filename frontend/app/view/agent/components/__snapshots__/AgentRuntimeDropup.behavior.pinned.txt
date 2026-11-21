@@ -45,3 +45,4 @@ trigger "Plan · Opus 5.5 · low" class=[ui-button ui-tone-neutral ui-density-co
   - high {}
   - xhigh {}
   - max {}
+  - Start a fresh session / Off: the next model change resumes the conversation on the new model {}

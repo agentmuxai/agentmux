@@ -196,3 +196,27 @@ fn the_folder_readers_look_in_is_the_key_routes_folder_for_an_agent_on_a_key() {
     let default = crate::backend::providers::default_auth_dir(crate::backend::providers::get_provider("claude").unwrap()).unwrap();
     assert_eq!(folder, std::path::PathBuf::from(default), "the subagent watcher and the registration handler follow the spawn");
 }
+
+#[test]
+fn a_key_placed_in_an_agents_environment_is_withheld_from_transcripts() {
+    let key = ["made-up-openai-", "key-8842-QrStUvWx"].concat();
+    std::env::set_var("AMX_TEST_KEY_ROUTE_acct-openai-1", &key);
+    let _serial = serial();
+    let store = make_store();
+    let mut def = gate_def(0);
+    def.provider = "codex".to_string();
+    store.agent_def_insert(&mut def).unwrap();
+    let mut account = make_account("acct-openai-1", "openai", SecretRef::Env { env_var: "AMX_TEST_KEY_ROUTE_acct-openai-1".to_string() });
+    account.kind = "api_key".to_string();
+    store.identity_upsert(&account).unwrap();
+    store.agent_identity_link("def-1", &account.id, "openai").unwrap();
+    insert_block_for_agent(&store, "block-openai-1", "def-1");
+    store.instance_create(&make_instance("block-openai-1", "id-openai")).unwrap();
+
+    let (_, env) = spawn(&store, "block-openai-1", false);
+
+    assert_eq!(env.get("OPENAI_API_KEY"), Some(&key), "the key is in the agent's environment");
+    let printed = format!("OPENAI_API_KEY={key}");
+    let shown = crate::backend::transcript::withhold::text(&printed);
+    assert!(!shown.contains(&key) && shown.contains(crate::backend::transcript::withhold::MARK), "{shown}");
+}

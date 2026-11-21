@@ -7,7 +7,7 @@
     // The colour is the app's link colour (`a` in app.scss), so it follows the theme.
     text-decoration: underline dotted;
     text-underline-offset: 2px;
-    cursor: pointer;
+    cursor: var(--cursor-link);
 
     &:hover,
     &:focus-visible {
@@ -18,9 +18,11 @@
         text-decoration-style: solid;
     }
 
-    &--dead {
+    // A name that does not resolve is text, not a link. It still carries an href (the global `a[href]` rule is more
+    // specific than one class), so the arrow is set on both classes to win over it.
+    &.entity-link--dead {
         color: var(--secondary-text-color);
         text-decoration: none;
-        cursor: default;
+        cursor: var(--cursor-default);
     }
 }

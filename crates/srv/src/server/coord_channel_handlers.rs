@@ -19,7 +19,7 @@ use axum::response::{IntoResponse, Json, Response};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::backend::reactive::sanitize::is_sensitive_message;
+use crate::backend::reactive::sanitize::{post_refusal_help, post_refusal_reason};
 use crate::backend::storage::coord_posts::{CoordPost, RETENTION_MS};
 use crate::backend::storage::store::Store;
 use crate::backend::work_facts::cross_channel::own_channel;
@@ -125,12 +125,14 @@ pub(crate) async fn handle_post_to_channel(
     let repo = one_line(&p.repo, 200);
     let branch = one_line(&p.branch, 200);
     let topic = one_line(&p.topic, 120);
-    let everything = [Some(text.as_str()), path.as_deref(), branch.as_deref(), topic.as_deref()];
-    if everything.iter().flatten().any(|s| is_sensitive_message(s)) {
-        return bad_request(
-            "not posted: it looks like it is about credentials or a destructive action, which a shared channel \
-             must not hold. Send it to the one agent it concerns with Message send, where it is marked sensitive.",
-        );
+    let everything = [("message", Some(text.as_str())), ("path", path.as_deref()), ("branch", branch.as_deref()), ("topic", topic.as_deref())];
+    if let Some((field, word)) = everything.iter().find_map(|(f, s)| s.and_then(post_refusal_reason).map(|w| (*f, w))) {
+        return bad_request(&format!(
+            "not posted: the {field} has \"{word}\", which reads as being about credentials or a destructive action, \
+             and a shared channel must not hold that. Reword that part, or send it to the one agent it concerns with \
+             Message send, where it is marked sensitive.{}",
+            post_refusal_help(&word)
+        ));
     }
     let identified = caller.as_ref().is_some_and(|c| c.0.uid().is_some());
     let Some((author, uid, me_block)) =

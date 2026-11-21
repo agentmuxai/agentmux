@@ -343,9 +343,9 @@ async function caretArrives(blockId: string, ms = 500): Promise<boolean> {
  * (keybindings/app-api.ts). The host reaches it only in the window that
  * holds the calling agent's pane.
  */
-/** Why a command or key is held back while a prompt for the person is on screen. */
+/** Why a command or key is held back while a prompt for the person is on screen, and what the agent does instead. */
 export const OPERATOR_PROMPT_OPEN =
-    "a prompt for the user is open here (an approval or a grant); only they can answer it, so nothing but a cancel (Escape) is sent into this pane until it is closed";
+    "a prompt addressed to the person is open here (an answer, an approval or a grant): only they can answer it, so ask them; keys and commands are held back from this pane until it is closed";
 
 /**
  * An approval or grant addressed to the person is showing (`Modal` `operatorOnly`, a request marked `operatorOnly`)
@@ -362,9 +362,23 @@ export function operatorPromptOpen(blockId?: string | null): boolean {
     return false;
 }
 
-/** Cancelling is always open to the shortcut API: Escape closes what is open and answers none of it. */
+/** Escape stays open to the shortcut API, which closes what is open, except where it would answer for the person. */
 const CANCEL_COMMAND = "app:escape";
 const isCancelKey = (keys: string): boolean => keys.trim().toLowerCase() === "escape";
+
+/**
+ * Whether Escape would answer a prompt for the person instead of only closing something: focus is inside a prompt marked
+ * `data-operator-only`, or a card marked `data-operator-answers` (a question or a permission, whose Escape declines it)
+ * is open in pane `blockId` (any pane when none is given).
+ */
+export function escapeWouldAnswer(blockId?: string | null): boolean {
+    if (document.activeElement?.closest("[data-operator-only]:not([data-operator-item])")) return true;
+    for (const el of document.querySelectorAll("[data-operator-answers]")) {
+        const host = el.closest("[data-blockid]");
+        if (!host || !blockId || host.getAttribute("data-blockid") === blockId) return true;
+    }
+    return false;
+}
 
 export function installShortcutApi() {
     const focusedBlockId = (): string | null => getLayoutModelForStaticTab().focusedNode?.()?.data?.blockId ?? null;
@@ -377,13 +391,14 @@ export function installShortcutApi() {
     (window as unknown as { __agentmux_shortcuts: unknown }).__agentmux_shortcuts = {
         list: () => listShortcuts(keyPlatform()),
         run: (command: string, target?: string): RunResult | Promise<RunResult> =>
-            command !== CANCEL_COMMAND && operatorPromptOpen(target || focusedBlockId())
+            (command !== CANCEL_COMMAND ? operatorPromptOpen(target || focusedBlockId()) : escapeWouldAnswer(target || focusedBlockId()))
                 ? { ran: false, reason: OPERATOR_PROMPT_OPEN }
                 : runCommand(command, target || undefined, deps()),
         // PressKeys: what to send, after focusing `target`. The host then
         // sends the events and reads `last()`.
         plan: async (keys: string, target?: string): Promise<KeyPressPlan | { reason: string }> => {
-            if (!isCancelKey(keys) && operatorPromptOpen(target ?? focusedBlockId())) return { reason: OPERATOR_PROMPT_OPEN };
+            const inPane = target ?? focusedBlockId();
+            if (isCancelKey(keys) ? escapeWouldAnswer(inPane) : operatorPromptOpen(inPane)) return { reason: OPERATOR_PROMPT_OPEN };
             if (target) {
                 const focused = await focusPaneResult(target);
                 if (isFailure(focused)) return { reason: focusRefusal(target, focused) };

@@ -77,7 +77,7 @@ function page({ prompt } = {}) {
     let promptRoot = null;
     let install = null;
     if (prompt) {
-        promptRoot = body.add(new El("prompt", prompt === "marked" ? { "data-operator-only": "" } : {}));
+        promptRoot = body.add(new El("prompt", prompt === "marked" ? { "data-operator-only": "" } : prompt === "hinted" ? { "data-operator-only": "Use your own route." } : {}));
         install = promptRoot.add(new El("install", {}, { x: 300, y: 300, width: 40, height: 20 }));
     }
     // What is on top at a point: the prompt covers everything when it is open.
@@ -112,7 +112,14 @@ describe("what an agent's pane may reach on the shared page", () => {
         expect(p.win.__amq_allowed_for(p.promptRoot, "me")).toBe(false);
         expect(p.win.__amq_allowed_for(p.body, "me")).toBe(false);
         expect(p.win.__amq_query("install", 0, "me")).toEqual({ matches: [] });
-        expect(p.win.__amq_centroid_of("install", "me")).toBeNull();
+        // A click on it is refused as a prompt for the person (so the agent is told to ask them), not as nothing found.
+        expect(p.win.__amq_centroid_of("install", "me")).toEqual({ operatorOnly: true, hint: "" });
+        expect(p.win.__amq_centroid_of("no-such-element", "me")).toBeNull();
+    });
+
+    it("carries what the marker says an agent should do instead, in the refusal", () => {
+        const p = page({ prompt: "hinted" });
+        expect(p.win.__amq_centroid_of("install", "me")).toEqual({ operatorOnly: true, hint: "Use your own route." });
     });
 
     it("reaches an unmarked dialog as before", () => {

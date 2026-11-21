@@ -17,6 +17,7 @@
 //!
 //! The history line and the board event come with each.
 
+pub mod pr_events;
 pub mod prs;
 
 use std::collections::{HashMap, HashSet};
@@ -62,6 +63,12 @@ static CONTEXT: OnceLock<Context> = OnceLock::new();
 /// Turn the Kanban's background work on for this srv. Until this is called
 /// (and in tests) nothing here acts.
 pub fn install(mstore: Arc<Store>, identity: Arc<Store>, config: Arc<ConfigState>, broker: Arc<Broker>, http: reqwest::Client) {
+    // Cards from before a card listed all its pull requests get the one their address names.
+    match identity.work_card_prs_backfill(agentmux_common::time::now_ms()) {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(cards = n, "kanban: gave cards from before the list of pull requests their one"),
+        Err(e) => tracing::warn!(error = %e, "kanban: the list of pull requests was not filled in"),
+    }
     let _ = CONTEXT.set(Context { mstore, identity, config, broker, http });
 }
 
@@ -203,6 +210,7 @@ pub async fn run_reminder_loop() {
             let pruned = tokio::task::spawn_blocking(move || {
                 let _ = identity.work_deps_prune();
                 let _ = identity.work_prs_prune();
+                let _ = identity.work_card_prs_prune();
                 prune_media(&identity, now);
                 identity.work_events_prune(now)
             })
