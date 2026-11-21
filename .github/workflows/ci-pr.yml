@@ -1293,6 +1293,11 @@ jobs:
       - name: generated broker event types are current
         if: matrix.shard == 1
         run: node scripts/gen-mux-events.mjs --check
+      # frontend/app/deeplinks/registry.generated.ts, crates/common/src/deeplinks/registry.rs and
+      # docs/deep-links.md, from crates/common/deeplinks/destinations.json (the deep-link registry).
+      - name: generated deep-link tables are current
+        if: matrix.shard == 1
+        run: node scripts/gen-deeplinks.mjs --check
       # Three checks the bindings gate (check-rpc-bindings.sh, rust job) CANNOT make: it verifies a generated
       # file exists per type and is current with the Rust, which a file can be while still describing a wire
       # format nobody speaks. Each of these was written after the same defect got past review more than once.
