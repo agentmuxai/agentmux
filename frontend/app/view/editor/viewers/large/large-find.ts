@@ -82,8 +82,9 @@ export function largeSearchFor(encoding: string | undefined, text: string, o: Fi
     if (!text) return null;
     if (o.matchCase && !o.regex) {
         const p = largePatternFor(encoding, text);
-        if (!p || "error" in p) return p;
-        return { kind: "bytes", ...p };
+        if (!p) return null;
+        if ("error" in p) return { error: p.error };
+        return { kind: "bytes", hex: p.hex, length: p.length, align: p.align };
     }
     const enc = (encoding ?? "utf-8").toLowerCase();
     if (enc !== "utf-8" && enc !== "utf8") {
