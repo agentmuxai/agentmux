@@ -56,8 +56,10 @@ const tiles = [...document.querySelectorAll('.agent-recent-sessions-row')].map((
   const toggle = li.querySelector('.agent-recent-sessions-menu-toggle');
   const stamps = li.querySelector('.agent-recent-sessions-timestamps');
   const liBox = box(li), toggleBox = box(toggle), stampsBox = box(stamps);
+  const seatEl = li.querySelector('.agent-seat-badge');
   return {
     name: li.querySelector('.agent-recent-sessions-name')?.textContent,
+    seat: seatEl ? { ...box(seatEl), scrollWidth: seatEl.scrollWidth, clientWidth: seatEl.clientWidth, display: getComputedStyle(seatEl).display, overflowX: getComputedStyle(seatEl).overflowX, textOverflow: getComputedStyle(seatEl).textOverflow } : null,
     li: liBox, entry: box(entry), toggle: toggleBox, stamps: stampsBox,
     liBorderTop: parseFloat(getComputedStyle(li).borderTopWidth),
     hitCentre: hitAt(...centre(liBox)),
@@ -78,6 +80,7 @@ interface Box {
 }
 interface Tile {
     name: string;
+    seat: (Box & { scrollWidth: number; clientWidth: number; display: string; overflowX: string; textOverflow: string }) | null;
     li: Box;
     entry: Box;
     toggle: Box;
@@ -89,10 +92,14 @@ interface Tile {
 }
 
 function measureTiles(bodyHtml: string): Promise<Tile[]> {
-    const css = sass.compile(join(__dirname, "..", "styles", "_recent-sessions.scss")).css;
+    // The tag's own styles too: a seat badge is a `.ui-tag` (a flex box that does not clip its own text).
+    const css =
+        sass.compile(join(__dirname, "..", "styles", "_recent-sessions.scss")).css +
+        sass.compile(join(__dirname, "..", "..", "..", "element", "ui", "tag.scss")).css;
     return measureInBrowser<Tile[]>(
         BROWSER!,
-        `<!doctype html><meta charset="utf-8"><style>${TOKENS}\n${css}</style>` +
+        // The last tile (the long seat) is a narrow one, as in a narrow Agent pane, so the seat has to be cut.
+        `<!doctype html><meta charset="utf-8"><style>${TOKENS}\n${css}\n.agent-recent-sessions-row:last-child{max-width:240px}</style>` +
             `<div class="agent-view" style="width:1000px;padding:16px"><div class="agent-picker">${bodyHtml}</div></div>` +
             `<script>window.addEventListener("load",()=>{${MEASURE}})</script>`,
         { width: 1100, height: 1200 }
@@ -135,6 +142,16 @@ const rows = [
         node_count: 9,
         agent_type: "container",
     },
+    {
+        instance_id: "e",
+        instance_name: "Long seat",
+        definition_id: "def-e",
+        preview: "one line",
+        identity_name: "work@example.com",
+        node_count: 1,
+        // The longest qualifier the host accepts (40 characters).
+        seat: { role: "leader", qualifier: "Linux and a very long qualifier to cut ", lead: null, area: null },
+    },
 ];
 
 let tiles: Tile[] = [];
@@ -171,6 +188,19 @@ describe.skipIf(!BROWSER)("My Agents tile layout (real browser)", () => {
         expect(tiles).toHaveLength(rows.length);
     });
 
+    it("a long seat tag stays inside its tile and is cut with an ellipsis, its text inside its own outline", () => {
+        const t = tiles.find((x) => x.name === "Long seat")!;
+        expect(t.seat, "the seat badge is drawn").not.toBeNull();
+        expect(t.seat!.right).toBeLessThanOrEqual(t.li.right);
+        expect(t.seat!.right, "the badge never passes the entry").toBeLessThanOrEqual(t.entry.right);
+        // The seat is too long for the tile, and its text is clipped to the badge with an ellipsis instead of running on
+        // past the outline. A flex box does not clip its own text, so the badge has to be a block that does.
+        expect(t.seat!.scrollWidth).toBeGreaterThan(t.seat!.clientWidth);
+        expect(t.seat!.display).toBe("block");
+        expect(t.seat!.overflowX).toBe("hidden");
+        expect(t.seat!.textOverflow).toBe("ellipsis");
+    });
+
     it("the grid item owns the tile's border, so anything positioned against it is positioned against the visible tile", () => {
         for (const t of tiles) expect(t.liBorderTop, t.name).toBeGreaterThan(0);
     });
@@ -187,8 +217,10 @@ describe.skipIf(!BROWSER)("My Agents tile layout (real browser)", () => {
     });
 
     it("the chevron sits inside its own tile, the same distance from the bottom on every tile", () => {
-        const gaps = tiles.map((t) => t.li.bottom - t.toggle.bottom);
-        for (const [i, t] of tiles.entries()) {
+        // The tiles of the original fixture; the long-seat tile is in the fixture for its own test above.
+        const plain = tiles.filter((t) => t.name !== "Long seat");
+        const gaps = plain.map((t) => t.li.bottom - t.toggle.bottom);
+        for (const [i, t] of plain.entries()) {
             expect(t.toggle.top, t.name).toBeGreaterThanOrEqual(t.li.top);
             expect(t.toggle.right, t.name).toBeLessThanOrEqual(t.li.right);
             expect(gaps[i], t.name).toBeGreaterThanOrEqual(0);

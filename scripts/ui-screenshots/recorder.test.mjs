@@ -7,7 +7,7 @@
 // and ffmpeg, and isn't tested here.
 
 import { afterEach, describe, expect, it } from "vitest";
-import { concatList, filterFor, findFfmpeg } from "./lib/recorder.mjs";
+import { Screencast, concatList, filterFor, findFfmpeg } from "./lib/recorder.mjs";
 import { liveRedactExpression, stopLiveRedactionExpression } from "./redact.mjs";
 import { recordings, setup } from "./recordings.mjs";
 
@@ -48,6 +48,44 @@ describe("filterFor", () => {
             "fps=15,crop=801:600:10:0,scale=640:-2:flags=lanczos"
         );
         expect(filterFor({ fps: 12 })).toBe("fps=12");
+    });
+
+    it("scales nothing, and resamples nothing for a still, unless asked", () => {
+        expect(filterFor({ fps: 30, crop: { x: 0, y: 0, width: 2560, height: 1440 } })).toBe("fps=30,crop=2560:1440:0:0");
+        expect(filterFor({ crop: { x: 4, y: 6, width: 100, height: 80 } })).toBe("crop=100:80:4:6");
+        expect(filterFor({})).toBe("");
+    });
+});
+
+describe("Screencast", () => {
+    // A PNG header with the given size, base64: enough for readImageSize, which reads only the first 24 bytes.
+    const pngHeader = (w, h) => {
+        const b = Buffer.alloc(33);
+        b.writeUInt32BE(0x89504e47, 0);
+        b.writeUInt32BE(w, 16);
+        b.writeUInt32BE(h, 20);
+        return b.toString("base64");
+    };
+
+    it("asks for frames as large as the page is drawn, and reports the size the frames really have", async () => {
+        const sent = [];
+        const handlers = {};
+        const session = { on: (e, f) => (handlers[e] = f), off: () => {}, send: async (m, p) => void sent.push([m, p]) };
+        const cast = new Screencast(session);
+        await cast.start({ width: 2560, height: 1440 });
+        expect(sent[0]).toEqual(["Page.startScreencast", { format: "png", everyNthFrame: 1, maxWidth: 2560, maxHeight: 1440 }]);
+        // The browser's own report (deviceWidth) is not what the size is read from.
+        handlers["Page.screencastFrame"]({ data: pngHeader(2560, 1440), sessionId: 1, metadata: { timestamp: 1, deviceWidth: 1280, deviceHeight: 720 } });
+        const { frames, size } = await cast.stop();
+        expect(frames.length).toBe(1);
+        expect(size).toEqual({ width: 2560, height: 1440 });
+    });
+
+    it("has no size when nothing was painted", async () => {
+        const session = { on: () => {}, off: () => {}, send: async () => {} };
+        const cast = new Screencast(session);
+        await cast.start();
+        expect((await cast.stop()).size).toBeNull();
     });
 });
 

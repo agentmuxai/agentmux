@@ -312,6 +312,30 @@ describe("facts", () => {
         ]);
     });
 
+    it("checks the pane type table against the views of the default widgets", () => {
+        const widgets = JSON.stringify({
+            "defwidget@agent": { blockdef: { meta: { view: "agent" } } },
+            "defwidget@terminal": { blockdef: { meta: { view: "term" } } },
+            "defwidget@discord": { blockdef: { meta: { view: "browser" } } },
+            "defwidget@browser": { blockdef: { meta: { view: "browser" } } },
+            "defwidget@messengers": { blockdef: { meta: {} } },
+        });
+        const page = (rows) =>
+            `## Available Pane Types\n\n### Pin, keep in More\n\ntext\n\n| Pane | Icon | View ID | Description |\n|---|---|---|---|\n${rows}\n\n### Not pane types\n\n| Surface | How |\n|---|---|\n| **Identity** | \`view: "identity"\` |\n`;
+        const check = (rows) => {
+            const merged = { ...code, "crates/srv-core/src/config/widgets.json": widgets };
+            const root = tree(merged);
+            const folder = tree({ "pane-types.md": page(rows) });
+            return checkFacts(folder, root, Object.keys(merged)).map((f) => f.message);
+        };
+        const all = "| **Agent** | i | `agent` | d |\n| **Browser** | i | `browser` | d |\n| **Terminal** | i | `term` | d |";
+        expect(check(all)).toEqual([]);
+        expect(check("| **Agent** | i | `agent` | d |\n| **Browser** | i | `browser` | d |\n| **Old** | i | `old` | d |")).toEqual([
+            "pane types: `old` is documented but is not a view of the default widgets.json",
+            "pane types: `term` is a view of the default widgets.json but the page does not list it",
+        ]);
+    });
+
     it("finds nothing when the pages match the code", () => {
         expect(run(docs())).toEqual([]);
     });

@@ -78,10 +78,6 @@ export const BlockService = new BlockServiceType();
 
 // clientservice.ClientService (client)
 class ClientServiceType {
-    // @returns object updates
-    AgreeTos(): Promise<void> {
-        return MOS.callBackendService("client", "AgreeTos", Array.from(arguments))
-    }
     FocusWindow(arg2: string): Promise<void> {
         return MOS.callBackendService("client", "FocusWindow", Array.from(arguments))
     }
@@ -374,16 +370,6 @@ class WorkspaceServiceType {
     // Describe a workspace or layout file before Import… opens it.
     PreviewImport(path: string): Promise<WorkspaceImportPreview> {
         return MOS.callBackendService("workspace", "PreviewImport", Array.from(arguments))
-    }
-
-    // Open a workspace or layout file as a new workspace and switch to it.
-    // `runCommands` null means "as trusted". @returns object updates (the client)
-    ImportUserWorkspace(
-        path: string,
-        runCommands: boolean | null,
-        windowId: string
-    ): Promise<WorkspaceSwitched & { notes: string[] }> {
-        return MOS.callBackendService("workspace", "ImportUserWorkspace", Array.from(arguments))
     }
 
     // Move a block from one tab to another within the same workspace

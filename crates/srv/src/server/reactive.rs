@@ -839,7 +839,7 @@ pub(super) async fn try_cloud_relay(state: &AppState, req: &InjectionRequest, ca
             // (muxbus::relay_watch). The LAN peers go in the answer: the target is on none of them.
             crate::muxbus::relay_watch::watch(state.reactive_handler, source, &req.target_agent, &request_id);
             let peers = state.lan_discovery.get_instances().iter().map(crate::backend::lan::peer_words::describe_peer).collect();
-            let body = crate::muxbus::relay_watch::queued_answer(request_id.clone(), target_in_account, peers, now_unix_secs().max(0) as u64);
+            let body = super::name_resolution::with_did_you_mean(state, &req.target_agent, crate::muxbus::relay_watch::queued_answer(request_id.clone(), target_in_account, peers, now_unix_secs().max(0) as u64)).await;
             Some(flow_notes::queued(state, req, &request_id, body))
         }
         crate::muxbus::relay::RelayOutcome::Failed(e) => {
@@ -1371,7 +1371,7 @@ pub(super) async fn handle_reactive_transcript(
     // A bounded tail, off the async workers (transcript_tail.rs): the file can be hundreds of MB.
     let requested = params.max_lines.min(TRANSCRIPT_MAX_LINES_CAP).max(1);
     let (mstore, filestore, bid) = (state.mstore.clone(), state.filestore.clone(), block_id.clone());
-    let read = tokio::task::spawn_blocking(move || super::transcript_tail::tail_lines(&mstore, &filestore, &bid, requested)).await;
+    let read = tokio::task::spawn_blocking(move || super::transcript_tail::tail_lines_for_readers(&mstore, &filestore, &bid, requested)).await;
     let (lines, truncated) = match read {
         Ok(Ok(t)) => (t.lines, t.truncated),
         Ok(Err(e)) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("read_session_output: {e}")}))).into_response(),

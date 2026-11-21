@@ -558,14 +558,16 @@ fn global_memory_ui_diff(store: &Store, cmd: &CommandGlobalMemoryDiffData) -> Re
     Ok(GlobalMemoryDiffResult { diff: crate::server::app_api::bundle_version_diff(&from, &to) })
 }
 
-/// Who a window-side Global Memory write is recorded as: the agent when the
-/// connection registered as one, otherwise the window (`armory-ui`, with
-/// `window_source`).
+/// Who a websocket Global Memory write is recorded as: the agent when the connection registered as one, the window
+/// (`armory-ui`, with `window_source`) only when the connection is the person's proven window, and `unproven` for a
+/// connection that holds the instance key and proved nothing more. A write is never recorded as the person's unless their
+/// window made it.
 fn writer_of<'a>(ctx: &'a RpcContext, window_source: &'a str) -> (&'a str, &'a str) {
-    if ctx.agent_id.is_empty() {
-        ("armory-ui", window_source)
-    } else {
-        (ctx.agent_id.as_str(), "agent")
+    use crate::backend::rpc::actor::{actor_of, Actor};
+    match actor_of(ctx) {
+        Actor::Agent(_) => (ctx.agent_id.as_str(), "agent"),
+        Actor::Operator | Actor::Person(_) => ("armory-ui", window_source),
+        Actor::Unproven | Actor::Srv => ("unproven", "unproven"),
     }
 }
 
@@ -1056,6 +1058,7 @@ mod global_memory_ui_tests {
         let state = test_state();
         let (engine, mut rx) = WshRpcEngine::new();
         register(&engine, &state);
+        assert!(engine.mark_operator_proven());
         let id = create_entry(&engine, &mut rx, "Rules", "line one\n").await;
         ok::<Bundle>(&engine, &mut rx, COMMAND_UPSERT_MEMORY, json!({
             "id": id, "name": "Rules", "is_global": true, "instructions": "line one\nline two\n",
@@ -1130,6 +1133,7 @@ mod global_memory_ui_tests {
         let state = test_state();
         let (engine, mut rx) = WshRpcEngine::new();
         register(&engine, &state);
+        assert!(engine.mark_operator_proven());
         let id = create_entry(&engine, &mut rx, "Alpha", "the rules").await;
         let other = create_entry(&engine, &mut rx, "Zed", "other rules").await;
         ok::<Bundle>(&engine, &mut rx, COMMAND_UPSERT_MEMORY, json!({

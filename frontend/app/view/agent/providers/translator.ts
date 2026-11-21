@@ -67,6 +67,20 @@ export function recordOrigin(rawEvent: unknown): { origin: MessageOrigin; notes:
 }
 
 /**
+ * Whether srv says a container agent wrote the words of the stored record `rawEvent` (`amx.writer.runtime`): a line
+ * a container wrote and srv stamped, a line in a fork's copied history that may be a container's, or a message
+ * a container agent sent. It only ever says "container": no other value makes a record looser than its pane, so a
+ * record that claims anything else, or carries a malformed `amx`, reads as not marked.
+ */
+export function writtenInContainer(rawEvent: unknown): boolean {
+    const runtime = (rawEvent as { amx?: { writer?: { runtime?: unknown } } } | null)?.amx?.writer?.runtime;
+    return typeof runtime === "string" && WRITER_RUNTIMES_THAT_CONFINE.has(runtime);
+}
+
+/** The writer stamps srv writes (`amx.writer.runtime`) that confine a row; not an agent's mode, which `runtime-kind.ts` answers. */
+const WRITER_RUNTIMES_THAT_CONFINE: ReadonlySet<string> = new Set(["container"]);
+
+/**
  * The origin fields of a `user_message` event for the stored record `rawEvent`. `recorded`: the
  * provider is one srv writes the user record for (the CLIs, ACP and the Codex App Server), so a
  * record with no verified origin is untyped; for Gemini, whose CLI echoes the prompt, a record that has

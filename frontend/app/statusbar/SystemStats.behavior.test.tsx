@@ -37,7 +37,7 @@ vi.mock("./disk-volumes", () => ({
         return Array.from({ length: n }, (_, i) => ({ label: `v${i}` }));
     },
     diskTooltip: (volumes: unknown[]) => `${volumes.length} volumes`,
-    diskPillLabel: (pct: number) => `Disk ${Math.round(pct)}% free`,
+    diskPillLabel: (pct: number, gb?: number | null) => (gb == null ? `Disk ${Math.round(pct)}% free` : `Disk ${Math.round(pct)}%/${gb}GB free`),
     watchVolumeColor: (pct: number | null, managed: boolean | null) => `var(--watch-${pct}-${managed})`,
 }));
 vi.mock("./CpuCoresPopover", () => ({

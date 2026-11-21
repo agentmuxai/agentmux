@@ -18,8 +18,11 @@ import {
     checkSpawnerTier,
     logSrvVersion,
     parseArgs,
+    browsersPath,
+    renderBrowsers,
     renderInstances,
     renderLayout,
+    splitSampleFlag,
     renderMigrations,
     renderWork,
     splitChannelFlag,
@@ -641,5 +644,80 @@ describe("muxspect instances", () => {
         expect(uptimeString(5 * 3_600_000 + 12 * 60_000)).toBe("5h 12m");
         expect(uptimeString(2 * 86_400_000 + 3 * 3_600_000)).toBe("2d 3h");
         expect(uptimeString(undefined)).toBe("?");
+    });
+});
+
+describe("muxspect browsers", () => {
+    let logSpy;
+    beforeEach(() => {
+        logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    });
+    afterEach(() => {
+        logSpy.mockRestore();
+    });
+    const printed = () => logSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+
+    const answer = {
+        sample_secs: 3.02,
+        page_facts: true,
+        others: { processes: 4, cpu_pct: 14.25 },
+        browsers: [
+            { pid: 5128, label: "window-pool-3", role: "pool-window", title: "AgentMux (pre-warmed window)", answer: "answered", visibility: "visible", animations: 2, kinds: ["CSSAnimation:startup-spin"], frame: false, cpu_pct: 47.2 },
+            { pid: 7340, label: "pane-a", role: "browser-pane", origin: "https://example.com", answer: "answered", visibility: "hidden", animations: 0, frame: false, shared_with: ["pane-b"], cpu_pct: 2.1, main_thread_pct: { TaskDuration: 1.5, ScriptDuration: 0.5 } },
+            { pid: 6021, label: "pane-a", role: "browser-pane", origin: "https://example.com", answer: "answered", frame: true, cpu_pct: null, cpu_note: "started during the sample" },
+            { pid: null, label: "pane-z", role: "browser-pane", origin: "https://asleep.test", answer: "asleep", frame: false, cpu_pct: null },
+        ],
+    };
+
+    it("--sample and --detail are flags, never positionals", () => {
+        expect(splitSampleFlag(["browsers", "--sample", "5", "--json"])).toEqual({ sample: 5, rest: ["browsers", "--json"] });
+        expect(splitSampleFlag(["browsers", "--sample=2.5"]).sample).toBe(2.5);
+        expect(splitSampleFlag(["browsers"]).sample).toBeUndefined();
+        expect(Number.isNaN(splitSampleFlag(["browsers", "--sample", "soon"]).sample)).toBe(true);
+        // No value: not zero, and the next flag is left alone.
+        expect(Number.isNaN(splitSampleFlag(["browsers", "--sample"]).sample)).toBe(true);
+        expect(Number.isNaN(splitSampleFlag(["browsers", "--sample="]).sample)).toBe(true);
+        const swallowed = splitSampleFlag(["browsers", "--sample", "--json"]);
+        expect(Number.isNaN(swallowed.sample)).toBe(true);
+        expect(swallowed.rest).toEqual(["browsers", "--json"]);
+        const parsed = parseArgs(["browsers", "--sample", "5", "--detail", "--json"]);
+        expect(parsed).toMatchObject({ cmd: "browsers", sample: 5, detail: true, json: true, blockId: undefined });
+        expect(parseArgs(["browsers"]).detail).toBeUndefined();
+    });
+
+    it("the request carries the sample length and the detail flag only when asked", () => {
+        expect(browsersPath(undefined, undefined)).toBe("/api/v1/muxspect/browsers");
+        expect(browsersPath(5, true)).toBe("/api/v1/muxspect/browsers?sample=5&detail=1");
+    });
+
+    it("browsers is a read that can be asked of another instance", () => {
+        expect(channelProblem("browsers", undefined, "dev")).toBeNull();
+    });
+
+    it("prints one row per renderer, then the scale line", () => {
+        renderBrowsers(answer);
+        const out = printed();
+        expect(out).toMatch(/PID\s+CPU%\s+ROLE\s+PAGE\s+VISIBLE\s+ANIMATIONS \(running\)\s+SHARED/);
+        expect(out).toMatch(/5128\s+47\.2\s+pool-window\s+AgentMux \(pre-warmed window\)\s+visible\s+2 css: CSSAnimation:startup-spin/);
+        expect(out).toMatch(/7340\s+2\.1\s+browser-pane\s+https:\/\/example\.com\s+hidden\s+0\s+also pane-b/);
+        expect(out).toContain("https://example.com (frame)");
+        expect(out).toMatch(/-\s+-\s+browser-pane\s+https:\/\/asleep\.test\s+asleep/);
+        expect(out).toContain("pid 6021 (pane-a): no CPU figure, started during the sample");
+        expect(out).toContain("pid 7340 main thread: Task 1.5%  Script 0.5%");
+        expect(out).toContain("4 other AgentMux processes (GPU, network service, window host, srv, launcher): 14.3% together, for scale");
+        expect(out).toContain("CPU is percent of one core over 3.0 s.");
+    });
+
+    it("a page that gave no answer says so instead of a visibility", () => {
+        renderBrowsers({ sample_secs: 3, browsers: [{ pid: 9, label: "main", role: "app-window", answer: "no_answer", frame: false, cpu_pct: 90 }] });
+        expect(printed()).toContain("no answer 1.5 s");
+    });
+
+    it("says when the host gave no page facts, and when there is nothing to list", () => {
+        renderBrowsers({ sample_secs: 3, page_facts: false, browsers: [{ pid: 9, label: "main", role: "app-window", answer: "unknown", frame: false, cpu_pct: 1 }] });
+        expect(printed()).toContain("window host gave no page facts");
+        logSpy.mockClear();
+        renderBrowsers({ sample_secs: 3, browsers: [] });
+        expect(printed()).toContain("no browsers listed");
     });
 });

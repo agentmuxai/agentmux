@@ -284,6 +284,8 @@ impl BindingInjector<'_> {
                 return;
             }
         };
+        // A key placed in an agent's environment is never written into a transcript.
+        crate::backend::transcript::withhold::register(&secret);
         let env_key_count = env_keys.len();
         for key in env_keys {
             env_vars.insert(key.to_string(), secret.clone());

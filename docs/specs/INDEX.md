@@ -202,6 +202,12 @@ partial list.
 |---|---|---|---|---|
 | [`SPEC_AGENT_PREP_BEFORE_SESSION_RESTART_2026_11_14`](SPEC_AGENT_PREP_BEFORE_SESSION_RESTART_2026_11_14.md) | Spec: prepare, then proceed. An agent gets a window to reach a safe point before a user action restarts its session | active | 2026-11-14 |  |
 
+### agent pane
+
+| Spec | Title | Status | Date | Replaces / replaced by |
+|---|---|---|---|---|
+| [`SPEC_MESSAGES_CARRY_THE_RUNTIME_OF_THEIR_WRITER_2026_11_20`](SPEC_MESSAGES_CARRY_THE_RUNTIME_OF_THEIR_WRITER_2026_11_20.md) | Spec: a message carries the runtime of the agent that wrote it | active | 2026-11-20 |  |
+
 ### compaction
 
 | Spec | Title | Status | Date | Replaces / replaced by |
@@ -254,12 +260,15 @@ than none. Add the line when you touch one and know which area it belongs to.
 | Spec | Title | Status | Date | Replaces / replaced by |
 |---|---|---|---|---|
 | [`SPEC_BUTTON_PRESSED_AND_PENDING_FEEDBACK_2026_11_20`](SPEC_BUTTON_PRESSED_AND_PENDING_FEEDBACK_2026_11_20.md) | Spec: Every button answers the press at once and shows a spinner while its action runs | implemented | 2026-11-20 |  |
+| [`SPEC_LINKS_ON_EVERYTHING_2026_11_20`](SPEC_LINKS_ON_EVERYTHING_2026_11_20.md) | Links on nearly everything: one recognition layer that turns agent names, task numbers, files, pull requests and URLs into correct links | active | 2026-11-20 |  |
 | [`SPEC_MUXAPI_AGENT_LIVE_FACTS_2026_11_20`](SPEC_MUXAPI_AGENT_LIVE_FACTS_2026_11_20.md) | Spec: MuxAPI agent live facts (model and the rest), on this host and across the LAN | active | 2026-11-20 |  |
 | [`SPEC_REMOTE_PANES_WATCH_AND_DRIVE_AN_AGENT_ON_ANOTHER_COMPUTER_2026_11_20`](SPEC_REMOTE_PANES_WATCH_AND_DRIVE_AN_AGENT_ON_ANOTHER_COMPUTER_2026_11_20.md) | SPEC: Remote panes: open an agent that runs on another computer, see the same conversation live, and drive it, under a red "Remote" banner | active | 2026-11-20 |  |
 | [`SPEC_SETTINGS_WIDE_PANE_COLUMNS_2026_11_20`](SPEC_SETTINGS_WIDE_PANE_COLUMNS_2026_11_20.md) | SPEC: Settings fills a wide pane in several columns of readable width | implemented | 2026-11-20 |  |
 | [`SPEC_SKILLS_B6_PORTABLE_SKILL_FILES_2026_11_20`](SPEC_SKILLS_B6_PORTABLE_SKILL_FILES_2026_11_20.md) | Spec: Skills B6, portable skill files for non-Claude agents | implemented | 2026-11-20 |  |
+| [`SPEC_SWARM_MODEL_AND_SEAT_TAGS_2026_11_20`](SPEC_SWARM_MODEL_AND_SEAT_TAGS_2026_11_20.md) | Spec: Swarm, short colour-coded tags for each agent's model and seat | implemented | 2026-11-20 |  |
 | [`SPEC_UPGRADE_FLOOR_IN_SIGNED_MANIFEST_2026_11_20`](SPEC_UPGRADE_FLOOR_IN_SIGNED_MANIFEST_2026_11_20.md) | Spec: the upgrade floor is carried in the release's signed manifest | active | 2026-11-20 |  |
 | [`SPEC_WEBSITE_DOCS_MEDIA_REFRESH_2026_11_20`](SPEC_WEBSITE_DOCS_MEDIA_REFRESH_2026_11_20.md) | Spec: website and docs media refresh: crisp screenshots and workflow videos, shot together with the video series | active | 2026-11-20 |  |
+| [`SPEC_WINDOWS_HEADLESS_AS_A_SERVICE_2026_11_20`](SPEC_WINDOWS_HEADLESS_AS_A_SERVICE_2026_11_20.md) | Spec: Windows Headless as a real service: starts at boot, survives sign-out, installed by one documented command | active | 2026-11-20 |  |
 | [`SPEC_CONNECTORS_ONE_LIST_2026_11_19`](SPEC_CONNECTORS_ONE_LIST_2026_11_19.md) | Spec: Connectors is one list, one connector per line, details on click, open at startup | active | 2026-11-19 |  |
 | [`SPEC_CONTAINER_AGENT_PERSISTENT_CONTROLLER_2026_11_19`](SPEC_CONTAINER_AGENT_PERSISTENT_CONTROLLER_2026_11_19.md) | Spec: a container agent runs as one long-lived process, like a native agent | draft | 2026-11-19 |  |
 | [`SPEC_PICKED_COLOUR_IS_THE_COLOUR_SEEN_2026_11_18`](SPEC_PICKED_COLOUR_IS_THE_COLOUR_SEEN_2026_11_18.md) | SPEC: the colour you pick is the colour you see (tabs first), with the filters and overlays audited | active | 2026-11-18 |  |
@@ -290,6 +299,7 @@ than none. Add the line when you touch one and know which area it belongs to.
 | [`SPEC_ATLAS_AGENT_MAP_2026_11_13`](SPEC_ATLAS_AGENT_MAP_2026_11_13.md) | Spec: Atlas, a map of every agent across machines and tiers | active | 2026-11-13 |  |
 | [`SPEC_RELEASE_BUILD_BROWSER_PAGE_DIAGNOSTIC_2026_11_13`](SPEC_RELEASE_BUILD_BROWSER_PAGE_DIAGNOSTIC_2026_11_13.md) | Spec: `muxspect browsers`, the pages of a running release build with their CPU | active | 2026-11-13 |  |
 | [`SPEC_HEADLESS_SERVER_PACKAGE_AND_LOCAL_WEB_UI_2026_11_12`](SPEC_HEADLESS_SERVER_PACKAGE_AND_LOCAL_WEB_UI_2026_11_12.md) | Spec: AgentMux as a server-only package, with a free local web UI (task #2522, build #2523) | active | 2026-11-12 |  |
+| [`SPEC_WINDOW_TAB_SWITCH_DRAW_ON_INTENT_2026_11_12`](SPEC_WINDOW_TAB_SWITCH_DRAW_ON_INTENT_2026_11_12.md) | SPEC: A faster window-tab switch: draw a tab's agent panes while the pointer is on its pill, so every pane appears at once at its latest content | active | 2026-11-12 |  |
 | [`SPEC_DRONE_GENERAL_AUTOMATION_2026_11_11`](SPEC_DRONE_GENERAL_AUTOMATION_2026_11_11.md) | SPEC: Drone as a general automation tool: loops, state, sub-drones, a Run step, durable waits | active | 2026-11-11 |  |
 | [`SPEC_DRONE_REAL_WORLD_JOBS_2026_11_11`](SPEC_DRONE_REAL_WORLD_JOBS_2026_11_11.md) | SPEC: Drone for real-world jobs: triggers across tiers, cloud nodes, and Drone as a job action | active | 2026-11-11 |  |
 | [`SPEC_BROWSER_PANE_AGENT_ZOOM_2026_11_10`](SPEC_BROWSER_PANE_AGENT_ZOOM_2026_11_10.md) | Spec: an agent can zoom a browser pane it drives | active | 2026-11-10 |  |
@@ -302,6 +312,7 @@ than none. Add the line when you touch one and know which area it belongs to.
 | [`SPEC_PANE_HEADER_TWO_MINIMIZE_BUTTONS_2026_11_08`](SPEC_PANE_HEADER_TWO_MINIMIZE_BUTTONS_2026_11_08.md) | Spec: the pane header's two stacked minimize buttons | historical | 2026-11-08 |  |
 | [`SPEC_PANE_LOCATE_FLASH_ONE_FRAMEWORK_2026_11_08`](SPEC_PANE_LOCATE_FLASH_ONE_FRAMEWORK_2026_11_08.md) | Spec: the pane locate flash, one framework for every path that surfaces an existing pane | active | 2026-11-08 |  |
 | [`SPEC_VAULT_CARD_ENTRIES_FULL_CARD_DATA_AND_AUTOFILL_2026_11_08`](SPEC_VAULT_CARD_ENTRIES_FULL_CARD_DATA_AND_AUTOFILL_2026_11_08.md) | SPEC: Vault card entries hold a full card (number, expiry month and year, CVC, name, billing ZIP) that people and agents can store and fill | active | 2026-11-08 |  |
+| [`SPEC_AGENT_HARNESS_CURATION_FIRST_CLASS_AND_PREVIEW_2026_11_07`](SPEC_AGENT_HARNESS_CURATION_FIRST_CLASS_AND_PREVIEW_2026_11_07.md) | Spec: curate the agent-pane harnesses: eight first-class doors, everything else preview | active | 2026-11-07 |  |
 | [`SPEC_AGENT_PANE_CPU_MEMORY_READOUT_IN_COMPOSER_STRIP_2026_11_07`](SPEC_AGENT_PANE_CPU_MEMORY_READOUT_IN_COMPOSER_STRIP_2026_11_07.md) | Spec: the agent pane's top band is a priority layout, and the CPU and memory readout moves from it into the composer strip | active | 2026-11-07 |  |
 | [`SPEC_AGENT_MODEL_ROUTES_ANY_MODEL_SPAWN_AND_SWITCH_2026_11_06`](SPEC_AGENT_MODEL_ROUTES_ANY_MODEL_SPAWN_AND_SWITCH_2026_11_06.md) | Spec: an agent is a harness, a model route and a key: spawn on any model and switch the model in place | active | 2026-11-06 |  |
 | [`SPEC_AGENT_PANE_IMAGE_ARROWS_2026_11_06`](SPEC_AGENT_PANE_IMAGE_ARROWS_2026_11_06.md) | Spec: an image opened from an agent message steps through that message's other images with the arrow keys | implemented | 2026-11-06 |  |

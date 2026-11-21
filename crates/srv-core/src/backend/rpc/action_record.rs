@@ -78,6 +78,21 @@ pub fn target_of(data: &Value) -> Target {
     }
 }
 
+/// What a call of `command` acted on: [`target_of`], and for a settings write the names, never the values, of the
+/// settings it set; for a remote's settings, the connection and those names.
+fn target_for(command: &str, data: &Value) -> Target {
+    use crate::backend::rpc_types::{COMMAND_REMOTE_SET_CONFIG, COMMAND_SET_CONFIG};
+    let mut target = target_of(data);
+    if command == COMMAND_SET_CONFIG {
+        target.subject = data.as_object().map(|keys| format!("keys={}", crate::backend::settings_consent::key_names(keys)));
+    } else if command == COMMAND_REMOTE_SET_CONFIG {
+        let connection = data.get("connection").and_then(Value::as_str).unwrap_or_default();
+        let keys = data.get("values").and_then(Value::as_object).map(crate::backend::settings_consent::key_names);
+        target.subject = Some(format!("connection={} keys={}", connection.chars().take(MAX_FIELD).collect::<String>(), keys.unwrap_or_default()));
+    }
+    target
+}
+
 /// Commands that answer `{ "ok": false }` when they did nothing.
 const ANSWERS_OK_FLAG: &[&str] = &["agent.kill-process", "agent.kill-tree"];
 
@@ -98,7 +113,7 @@ pub fn after_call(command: &str, data: &Value, ctx: &RpcContext, request_id: &st
     let record = ActionRecord {
         actor,
         command: command.to_string(),
-        target: target_of(data),
+        target: target_for(command, data),
         request_id: request_id.to_string(),
         error: outcome.as_ref().err().map(|e| e.chars().take(MAX_FIELD).collect()),
     };
@@ -117,6 +132,24 @@ mod tests {
         assert_eq!(t.subject.as_deref(), Some("pid=42 signal=SIGKILL"));
         let t = target_of(&json!({"block_id": "b2", "id": "acme.widget"}));
         assert_eq!((t.block_id.as_deref(), t.subject.as_deref()), (Some("b2"), Some("id=acme.widget")));
+    }
+
+    #[test]
+    fn a_settings_write_is_recorded_with_the_names_of_the_settings_and_never_their_values() {
+        let write = json!({"messaging:telegram:token": "s3cret-value", "term:fontsize": 12});
+        let subject = target_for("setconfig", &write).subject.unwrap();
+        assert!(subject.starts_with("keys=") && subject.contains("messaging:telegram:token") && subject.contains("term:fontsize"));
+        assert!(!subject.contains("s3cret-value"), "{subject}");
+        assert_eq!(target_for("agent.stop", &json!({"agent_id": "a1"})).subject, None);
+    }
+
+    #[test]
+    fn a_remotes_settings_write_is_recorded_with_the_connection_and_the_names_and_never_the_values() {
+        let write = json!({"connection": "ops@build-host", "values": {"ssh:identityfile": "C:/keys/s3cret", "conn:wshenabled": true}});
+        let subject = target_for("remotesetconfig", &write).subject.unwrap();
+        assert!(subject.starts_with("connection=ops@build-host keys="), "{subject}");
+        assert!(subject.contains("ssh:identityfile") && subject.contains("conn:wshenabled"), "{subject}");
+        assert!(!subject.contains("s3cret") && !subject.contains("true"), "{subject}");
     }
 
     #[test]

@@ -93,7 +93,7 @@ fn lines_of(data: &[u8], from: u64, mid_line: bool, from_end: bool, max: usize) 
         let text = String::from_utf8_lossy(piece);
         let text = text.trim();
         if !text.is_empty() {
-            found.push((at, shown(text)));
+            found.push((at, shown(&crate::backend::transcript::withhold::text(text))));
         }
     }
     let more_than_max = found.len() > max;

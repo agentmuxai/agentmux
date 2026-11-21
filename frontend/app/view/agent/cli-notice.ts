@@ -28,9 +28,10 @@
  * - `agentmux_container_caches` — a container agent's cache volumes (a developer agent's cargo registry and build
  *   output) hold 20 GiB or more ("This agent's build caches hold 24.0 GB") with a "Container settings" button. Sent
  *   once per agent per run of srv.
- * - `agentmux_mcp_left_out` — a container agent can write the folder of this host agent, so it starts only the MCP
- *   servers set in AgentMux; the row names the ones its folder's own `.mcp.json` lists besides
- *   (`crates/srv-core/src/backend/mcp_folder_rule.rs`). Each frame is its own row.
+ * - `agentmux_mcp_left_out` — a container agent can write the folder of this host agent, so it takes its MCP
+ *   servers, settings, instructions and skills from AgentMux only; the row names the servers its folder's own
+ *   `.mcp.json` lists besides and counts the folder's other files, by kind
+ *   (`crates/srv-core/src/backend/mcp_folder_rule.rs`, `host_agent_files.rs`). Each frame is its own row.
  * - `agentmux_mcp_health` — the agent's AgentMux MCP server didn't connect and
  *   AgentMux is repairing it (`crates/srv-core/src/backend/mcp_health.rs`). Every
  *   frame of one episode shares an `episode`, so it is one row that updates.
@@ -243,19 +244,66 @@ export function parseCliNoticeFrame(rawEvent: unknown, now: number): CliNoticeNo
     return e.subtype === MCP_LEFT_OUT_SUBTYPE ? mcpLeftOutNode(e, provider, timestamp) : null;
 }
 
-/** The node for an `agentmux_mcp_left_out` frame, or `null` when it names no server or has no id. */
+const FOLDER_FILE_KINDS = ["settings", "instructions", "skills", "commands", "agents", "other"] as const;
+
+/** The node for an `agentmux_mcp_left_out` frame, or `null` when it has no id, or names no server and says
+ *  nothing of the folder's other files (the older form of the frame always names a server). */
 function mcpLeftOutNode(e: Record<string, unknown>, provider: string, timestamp: number): CliNoticeNode | null {
     const eventId = str(e.event_id);
-    const servers = Array.isArray(e.names) ? e.names.filter((n): n is string => typeof n === "string" && n.length > 0).slice(0, MOST_LEFT_OUT_NAMES) : [];
-    if (!eventId || servers.length === 0) return null;
+    const names = (v: unknown) => (Array.isArray(v) ? v.filter((n): n is string => typeof n === "string" && n.length > 0).slice(0, MOST_LEFT_OUT_NAMES) : []);
+    const servers = names(e.names);
+    const counted = typeof e.folder === "object" && e.folder !== null && !Array.isArray(e.folder) ? (e.folder as Record<string, unknown>) : null;
+    if (!eventId || (servers.length === 0 && !counted)) return null;
+    const count = (kind: string) => {
+        const n = counted?.[kind];
+        return typeof n === "number" && Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+    };
     return {
         type: "cli_notice",
         id: `mcp-left-out-${eventId}`,
         kind: "mcp_left_out",
         provider,
         servers,
+        folderFiles: counted ? (Object.fromEntries(FOLDER_FILE_KINDS.map((kind) => [kind, count(kind)])) as CliNoticeNode["folderFiles"]) : undefined,
+        serversWithNoPath: counted ? names(e.no_path) : undefined,
         blockId: str(e.block_id) ?? undefined,
         timestamp,
+    };
+}
+
+/** What the row of a host agent in a folder a container agent can write says. A row from before the agent's
+ *  settings, instructions and skills were kept to AgentMux's own (no `folderFiles`) names the servers alone. */
+function mcpLeftOutText(node: CliNoticeNode): { label: string; detail: string | null; tone: CliNoticeTone } {
+    const servers = node.servers ?? [];
+    const some = (n: number, one: string, many: string) => (n === 1 ? `1 ${one}` : `${n} ${many}`);
+    if (!node.folderFiles) {
+        return {
+            label: `${some(servers.length, "MCP server", "MCP servers")} of this folder not started: ${servers.join(", ")}`,
+            detail: "A container agent can write in this folder, so this agent starts only the MCP servers set in AgentMux. To use one of these, add it in the agent's own settings",
+            tone: "warn",
+        };
+    }
+    const f = node.folderFiles;
+    const parts = [
+        servers.length > 0 ? `${some(servers.length, "MCP server", "MCP servers")} (${servers.join(", ")})` : "",
+        f.settings > 0 ? some(f.settings, "settings file", "settings files") : "",
+        f.instructions > 0 ? some(f.instructions, "instruction file", "instruction files") : "",
+        f.skills > 0 ? some(f.skills, "skill", "skills") : "",
+        f.commands > 0 ? some(f.commands, "command", "commands") : "",
+        f.agents > 0 ? some(f.agents, "subagent", "subagents") : "",
+        f.other > 0 ? some(f.other, "other file", "other files") : "",
+    ].filter((part) => part.length > 0);
+    const noPath = node.serversWithNoPath ?? [];
+    const detail = [
+        "A container agent can write in this folder, so this agent takes its settings, hooks, instructions, skills and MCP servers from AgentMux only. To keep one of these, add it in the agent's own settings",
+        noPath.length > 0 ? `Not started, because its command is no program found outside this folder: ${noPath.join(", ")}. Give it by its full path, in a folder no container agent can write` : "",
+        "/loop and CronCreate are off here, because a scheduled prompt can be kept in the folder",
+        "What the agent itself runs in this folder, such as git and build scripts, still comes from the folder",
+    ].filter((sentence) => sentence.length > 0);
+    return {
+        label: parts.length > 0 ? `Not loaded from this folder: ${parts.join(", ")}` : "Nothing of this folder's own settings is loaded",
+        detail: detail.join(". "),
+        tone: "warn",
     };
 }
 
@@ -273,14 +321,7 @@ export function cliNoticeText(node: CliNoticeNode, appVersion?: string): { label
         return { label: `${name} couldn't compact the conversation`, detail: node.error ?? null, tone: "error" };
     }
     if (node.kind === "mcp_health") return mcpHealthText(node);
-    if (node.kind === "mcp_left_out") {
-        const servers = node.servers ?? [];
-        return {
-            label: `${servers.length === 1 ? "1 MCP server" : `${servers.length} MCP servers`} of this folder not started: ${servers.join(", ")}`,
-            detail: "A container agent can write in this folder, so this agent starts only the MCP servers set in AgentMux. To use one of these, add it in the agent's own settings",
-            tone: "warn",
-        };
-    }
+    if (node.kind === "mcp_left_out") return mcpLeftOutText(node);
     if (node.kind === "container_start") return containerStartText(node);
     if (node.kind === "container_image") return containerImageText(node, appVersion);
     if (node.kind === "container_limit") return containerLimitText(node);

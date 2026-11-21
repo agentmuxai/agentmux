@@ -283,3 +283,62 @@ async fn a_pane_in_the_workspace_an_import_replaced_does_not_block_the_agent() {
 
     assert!(!notes.iter().any(|n| n.contains("already has a pane")), "{notes:?}");
 }
+
+/// One `workspace.importuserworkspace` call on a fresh connection: not the window and not an agent (`None`, `false`), an
+/// agent's (`Some`), or the person's proven window (`None`, `true`).
+async fn import_command(state: &AppState, agent: Option<&str>, window: bool, data: serde_json::Value) -> (String, Option<serde_json::Value>) {
+    use crate::backend::rpc::engine::WshRpcEngine;
+    use crate::backend::rpc_types::{RpcContext, RpcMessage, COMMAND_WORKSPACE_IMPORT_USER_WORKSPACE};
+    let (engine, mut rx) = WshRpcEngine::new();
+    crate::server::app_api::workspace_import::register(&engine, state);
+    if let Some(agent) = agent {
+        engine.set_rpc_context(RpcContext { agent_id: agent.into(), ..Default::default() });
+    }
+    if window {
+        assert!(engine.mark_operator_proven());
+    }
+    engine.handle_message(RpcMessage { command: COMMAND_WORKSPACE_IMPORT_USER_WORKSPACE.into(), reqid: "r".into(), data: Some(data), ..Default::default() });
+    let resp = tokio::time::timeout(std::time::Duration::from_secs(20), rx.recv()).await.unwrap().unwrap();
+    (resp.error, resp.data)
+}
+
+#[tokio::test]
+async fn only_the_persons_window_imports_and_the_http_service_route_no_longer_does() {
+    let state = fresh_state().await;
+    let main = workspace_with_a_closed_window(&state).await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("Mine.agentmux-workspace.json");
+    export(&state.mstore, &path.to_string_lossy(), &ctx()).unwrap();
+    let request = |run: bool| json!({ "path": path.to_string_lossy(), "run_commands": run, "window_id": main.oid });
+    let workspaces = |state: &AppState| state.mstore.user_workspace_list().unwrap().len();
+    let before = workspaces(&state);
+
+    // An agent, even one that asks for the commands to run, and a connection that is neither it nor the window: refused,
+    // and nothing is imported.
+    for (who, agent) in [("an agent", Some("AgentX")), ("an unproven connection", None)] {
+        let (err, _) = import_command(&state, agent, false, request(true)).await;
+        assert!(err.starts_with("FORBIDDEN") && err.contains("ask the person to import"), "{who}: {err}");
+    }
+    assert_eq!(workspaces(&state), before, "a refused call imports nothing");
+
+    // The HTTP service route, which cannot tell who calls it, refuses with the command's name.
+    let http = WebCallType {
+        service: "workspace".into(),
+        method: "ImportUserWorkspace".into(),
+        uicontext: None,
+        args: vec![json!(path.to_string_lossy()), json!(true), json!(main.oid)],
+    };
+    let reply = crate::server::service::run_service_call(&state, &http).await;
+    let error = reply.error.unwrap_or_default();
+    assert!(!reply.success && error.starts_with("FORBIDDEN") && error.contains("ask the person to import"), "{error}");
+    assert_eq!(workspaces(&state), before, "a body that says run_commands changes nothing on the route");
+
+    // The person's proven window imports, and the answer is what the window shows.
+    let (err, data) = import_command(&state, None, true, request(false)).await;
+    assert_eq!(err, "", "the window's own import works");
+    let data = data.expect("the import answers");
+    assert_eq!(data["name"], "Default Workspace 2");
+    assert!(data["notes"].is_array() && data["closed"].is_array(), "{data}");
+    wait_for_switch().await;
+    assert_eq!(workspaces(&state), before + 1);
+}

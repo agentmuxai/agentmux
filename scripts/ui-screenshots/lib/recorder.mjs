@@ -12,6 +12,13 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
+import { readImageSize } from "./crisp.mjs";
+
+/** H.264 quality of a clip: CRF 18 keeps small type's edges (the spec asks for 20 or lower). */
+const MP4_CRF = "18";
+/** The widest and fastest a GIF or animated WebP gets without an explicit --width: twice the docs' content column. */
+export const ANIMATED_MAX_WIDTH = 1440;
+export const ANIMATED_MAX_FPS = 15;
 
 const CURSOR_ID = "amrec-cursor";
 
@@ -111,18 +118,25 @@ export class Screencast {
         };
     }
 
-    async start() {
+    /** `size` is the page's size in device pixels (CSS size times the capture scale): without it the browser may
+     *  send frames smaller than the page really is, and a clip cut from them is soft. */
+    async start(size) {
         this.frames = [];
         this.session.on("Page.screencastFrame", this.onFrame);
-        await this.session.send("Page.startScreencast", { format: "png", everyNthFrame: 1 });
+        const limit = size ? { maxWidth: Math.round(size.width), maxHeight: Math.round(size.height) } : {};
+        await this.session.send("Page.startScreencast", { format: "png", everyNthFrame: 1, ...limit });
     }
 
-    /** Stops, and returns the frames with the time the recording ended. */
+    /** Stops, and returns the frames with the time the recording ended, and the pixel size the frames really have
+     *  (read from the first frame's PNG header, not taken from the browser's report of it). */
     async stop() {
         const end = Date.now() / 1000;
         await this.session.send("Page.stopScreencast").catch(() => {});
         this.session.off("Page.screencastFrame", this.onFrame);
-        return { frames: this.frames, end };
+        const first = this.frames[0];
+        // A PNG's size is in its first 24 bytes; 36 base64 characters hold them.
+        const size = first ? readImageSize(Buffer.from(first.data.slice(0, 36), "base64")) : null;
+        return { frames: this.frames, end, size };
     }
 }
 
@@ -155,39 +169,53 @@ export function concatList(frames, end, endHoldS = 0) {
 /** Rounds the width and height down to even numbers (for H.264). */
 export const EVEN_DIMENSIONS = "scale=trunc(iw/2)*2:trunc(ih/2)*2";
 
-/** The ffmpeg filter for `crop` (CSS pixels of the frame), scaled to `width`. */
+/** The ffmpeg filter for `crop` (a box in the frame's own pixels), scaled to `width` when that is given and
+ *  resampled to `fps` when that is (a still takes neither). */
 export function filterFor({ crop, width, fps }) {
-    const parts = [`fps=${fps}`];
+    const parts = fps ? [`fps=${fps}`] : [];
     if (crop) parts.push(`crop=${Math.round(crop.width)}:${Math.round(crop.height)}:${Math.round(crop.x)}:${Math.round(crop.y)}`);
     if (width) parts.push(`scale=${width}:-2:flags=lanczos`);
     return parts.join(",");
 }
 
-/** Encodes `frames` into `out` + each extension in `formats` (gif, webp,
- *  mp4). Returns the files written. */
-export function encode({ frames, end, crop, out, formats = ["gif"], width = 800, fps = 15, endHoldS = 1.2, ffmpeg }) {
+/** Encodes `frames` into `out` + each extension in `formats` (mp4, gif, webp; `poster` writes `out`.poster.webp,
+ *  the clip's last frame). `crop` is in the frames' own pixels. With no `width` a clip keeps the size it was
+ *  captured at: it is never scaled up, and a `width` over the captured width is refused. Returns the files written. */
+export function encode({ frames, end, crop, out, formats = ["mp4"], width, fps = 30, sourceWidth, endHoldS = 1.2, ffmpeg }) {
     if (!frames.length) throw new Error("no frames were recorded");
     const dir = mkdtempSync(join(tmpdir(), "amrec-"));
     try {
         frames.forEach((f, i) => writeFileSync(join(dir, `frame_${String(i).padStart(5, "0")}.png`), Buffer.from(f.data, "base64")));
         writeFileSync(join(dir, "frames.txt"), concatList(frames, end, endHoldS));
         const base = filterFor({ crop, width, fps });
+        // A GIF or animated WebP at the full captured size and frame rate is tens of megabytes: with no --width they
+        // stop at twice the docs' content column (still 2x its slot) and 15 frames a second. The MP4 keeps it all.
+        const animated = filterFor({
+            crop,
+            width: width ?? (sourceWidth > ANIMATED_MAX_WIDTH ? ANIMATED_MAX_WIDTH : undefined),
+            fps: Math.min(fps, ANIMATED_MAX_FPS),
+        });
         const input = ["-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", join(dir, "frames.txt")];
         const written = [];
         for (const fmt of formats) {
-            const file = `${out}.${fmt}`;
+            let file = `${out}.${fmt}`;
             let args;
             if (fmt === "gif") {
                 // One palette for the whole clip; dithering only where frames change.
-                args = [...input, "-vf", `${base},split[a][b];[a]palettegen=stats_mode=diff:max_colors=192[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle`, "-loop", "0", file];
+                args = [...input, "-vf", `${animated},split[a][b];[a]palettegen=stats_mode=diff:max_colors=192[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle`, "-loop", "0", file];
             } else if (fmt === "webp") {
-                args = [...input, "-vf", base, "-c:v", "libwebp_anim", "-lossless", "0", "-q:v", "80", "-loop", "0", file];
+                args = [...input, "-vf", animated, "-c:v", "libwebp_anim", "-lossless", "0", "-q:v", "80", "-loop", "0", file];
             } else if (fmt === "mp4") {
                 // H.264 in yuv420p needs even dimensions; an odd --width or crop
                 // is rounded down a pixel (Codex on #4670).
-                args = [...input, "-vf", `${base},${EVEN_DIMENSIONS},format=yuv420p`, "-c:v", "libx264", "-crf", "24", "-preset", "slow", "-movflags", "+faststart", file];
+                args = [...input, "-vf", `${base},${EVEN_DIMENSIONS},format=yuv420p`, "-c:v", "libx264", "-crf", MP4_CRF, "-preset", "slow", "-movflags", "+faststart", file];
+            } else if (fmt === "poster") {
+                // The last frame, cropped like the clip, as one high-quality WebP.
+                const last = join(dir, `frame_${String(frames.length - 1).padStart(5, "0")}.png`);
+                file = `${out}.poster.webp`;
+                args = ["-hide_banner", "-loglevel", "error", "-y", "-i", last, "-vf", filterFor({ crop, width }) || "null", "-frames:v", "1", "-c:v", "libwebp", "-q:v", "90", file];
             } else {
-                throw new Error(`unknown format "${fmt}" (gif, webp, mp4)`);
+                throw new Error(`unknown format "${fmt}" (mp4, poster, gif, webp)`);
             }
             const r = spawnSync(ffmpeg, args, { encoding: "utf8" });
             if (r.status !== 0) throw new Error(`ffmpeg (${fmt}) failed: ${r.stderr || r.error?.message}`);

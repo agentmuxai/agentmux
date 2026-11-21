@@ -10,7 +10,7 @@ import type { ToolNode, ToolStreamingLog } from "./tool-types";
 /**
  * Document node types that make up the agent's markdown document
  */
-export type DocumentNode = (MarkdownNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | MemoryReinjectionNode | ContextDeliveryNode | JektMessageNode | SystemNoteNode | SessionOutcomeNode | CliNoticeNode | DayDividerNode | HistoryLinkNode | ResumePreflightNode | AmbientNarrationNode) & ViewModeTag | HiddenRunNode;
+export type DocumentNode = ((MarkdownNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | MemoryReinjectionNode | ContextDeliveryNode | JektMessageNode | SystemNoteNode | SessionOutcomeNode | CliNoticeNode | DayDividerNode | HistoryLinkNode | ResumePreflightNode | AmbientNarrationNode) & ViewModeTag & WriterTag) | HiddenRunNode;
 
 /**
  * How the pane's view (virtualization/verbosity.ts) asks a row to start: `collapsed` is a one-line
@@ -18,6 +18,14 @@ export type DocumentNode = (MarkdownNode | ToolNode | AgentMessageNode | UserMes
  * the view's derivation, never on the stored node; absent means the row's own rule (`auto`).
  */
 export type ViewMode = "expanded" | "collapsed";
+
+/**
+ * Where a row's words came from, when a container agent may have written them (`writtenInContainer`): what it names is
+ * shown only from the container's own folders, whatever pane the row is in. Absent for every other row.
+ */
+export interface WriterTag {
+    fromContainer?: true;
+}
 
 export interface ViewModeTag {
     viewMode?: ViewMode;
@@ -519,6 +527,11 @@ export interface CliNoticeNode {
     cacheBytes?: number;
     /** `mcp_left_out`: the MCP servers of the folder's own `.mcp.json` this host agent is not given, by name. */
     servers?: string[];
+    /** `mcp_left_out`: what else of the folder is not loaded, by kind and count. Absent on a row written before
+     *  the agent's settings, instructions and skills were also kept to AgentMux's own. */
+    folderFiles?: { settings: number; instructions: number; skills: number; commands: number; agents: number; other: number };
+    /** `mcp_left_out`: the agent's own MCP servers left out because their command has no path on this computer. */
+    serversWithNoPath?: string[];
     /** `mcp_health`: where the repair of the agent's AgentMux MCP server is. */
     mcpState?: "healing" | "restarting" | "ok" | "gave_up";
     /** `mcp_health`, while `healing`: which reconnect. */

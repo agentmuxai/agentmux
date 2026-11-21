@@ -128,10 +128,12 @@ pub fn resolve(i: &Inputs) -> ModelFacts {
         .or_else(|| i.meta_effort.map(str::to_string));
     let differs = source != ModelSource::Route
         && matches!((&id, i.definition_model), (Some(now), Some(asked)) if !same_model(now, asked));
+    // The model the change will run is what the pane now asks for (its meta); the event's `model` is what the
+    // running process was started with, which is the one being replaced.
     let pending_label = i
         .event
-        .filter(|e| e.restart_pending)
-        .and_then(|e| e.model.as_deref())
+        .filter(|e| e.restart_pending && source != ModelSource::Route)
+        .and(i.meta_model)
         .filter(|asked| id.as_deref().is_none_or(|now| !same_model(now, asked)))
         .map(label_of);
     let definition_label = i.definition_model.filter(|_| differs).map(label_of);
@@ -218,15 +220,30 @@ mod tests {
 
     #[test]
     fn a_switch_waiting_for_the_end_of_the_turn_is_flagged_and_the_effort_follows_the_report() {
-        let mut e = event(true, Some("opus"), Some("claude-sonnet-5-5"), true);
+        // The event's model is what the running process was started with (Sonnet); the model the change will run is
+        // what the pane now asks for (its meta), so that is the one named.
+        let mut e = event(true, Some("sonnet"), Some("claude-sonnet-5-5"), true);
         e.effective_effort = Some("high".to_string());
         e.effort = Some("low".to_string());
-        let m = resolve(&Inputs { event: Some(&e), running: true, ..Default::default() });
+        let m = resolve(&Inputs { event: Some(&e), meta_model: Some("opus"), running: true, ..Default::default() });
         assert!(m.pending_switch);
+        assert_eq!(m.label.as_deref(), Some("Sonnet 5.5"), "what it runs now is unchanged until the switch applies");
         assert_eq!(m.pending_label.as_deref(), Some("Opus"), "the model the change will run, by its short name");
-        let effort_only = event(true, Some("sonnet"), Some("claude-sonnet-5-5"), true);
-        let same = resolve(&Inputs { event: Some(&effort_only), running: true, ..Default::default() });
-        assert!(same.pending_switch && same.pending_label.is_none(), "an effort change names no model");
+        let effort_only = resolve(&Inputs { event: Some(&e), meta_model: Some("sonnet"), running: true, ..Default::default() });
+        assert!(effort_only.pending_switch && effort_only.pending_label.is_none(), "an effort change names no model");
+        let nothing_asked = resolve(&Inputs { event: Some(&e), running: true, ..Default::default() });
+        assert!(nothing_asked.pending_switch && nothing_asked.pending_label.is_none());
+        let applied = event(true, Some("opus"), Some("claude-opus-5-5"), false);
+        let done = resolve(&Inputs { event: Some(&applied), meta_model: Some("opus"), running: true, ..Default::default() });
+        assert!(!done.pending_switch && done.pending_label.is_none(), "once the switch applies nothing is pending");
+        let routed = resolve(&Inputs {
+            event: Some(&e),
+            route: Some(("example", "Example route", "example-large", "Example Large")),
+            meta_model: Some("opus"),
+            running: true,
+            ..Default::default()
+        });
+        assert!(routed.pending_label.is_none(), "an agent on a route runs the route's model whatever its pane asks for");
         let named = resolve(&Inputs { event: Some(&e), definition_model: Some("haiku"), running: true, ..Default::default() });
         assert_eq!(named.definition_label.as_deref(), Some("Haiku"));
         assert_eq!(m.definition_label, None);

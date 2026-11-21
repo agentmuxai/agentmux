@@ -157,6 +157,11 @@
     // memory; pauses under memory pressure.
     // "window:prewarmagenttabs": false,
 
+    // While the pointer rests on a window tab, draw the agent transcripts in it that changed
+    // since you last saw it, one pane at a time, so the tab shows every pane at once when you
+    // click it. Pauses while you type and under memory pressure.
+    // "window:drawtabonhover": true,
+
     // "window:dimensions": "",
     // "window:zoom": 1,
     // UI color theme. Options: default (dark grey + blue), midnight (deep navy), high-contrast
@@ -318,7 +323,8 @@
     // "notify:waiting:toast": true,
 
     // Play the falling shutdown chime when something other than you asked to shut an agent down
-    // and you have 15 seconds to keep it running. Default true.
+    // and you have 30 seconds to keep it running (15 when the agent is quitting itself).
+    // Default true.
     // "notify:sound:agent.shutdown.pending": true,
 
     // Independent gain for the waiting-for-input sound, 0.0 (silent) to 1.0. Layered below the

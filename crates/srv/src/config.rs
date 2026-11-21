@@ -274,6 +274,11 @@ impl Config {
         // matching the auth_key precedent costs nothing).
         let host_reg_secret = agentmux_common::secret_env::take("AGENTMUX_HOST_REG_SECRET").filter(|s| !s.is_empty());
 
+        // The instance's keys are never written into a transcript.
+        for key in [Some(&auth_key), Some(&lan_key), host_reg_secret.as_ref()].into_iter().flatten() {
+            crate::backend::transcript::withhold::register(key);
+        }
+
         Ok(Config {
             auth_key,
             lan_key,

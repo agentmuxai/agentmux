@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{ProviderConfig, ControllerType, InstructionDirScan};
+use super::{Tier, ProviderConfig, ControllerType, InstructionDirScan};
 
 // GitHub Copilot CLI — Microsoft's coding agent. Runs in ACP mode via
 // `--acp` so the existing ACP controller drives it. Non-interactive
@@ -9,6 +9,7 @@ use super::{ProviderConfig, ControllerType, InstructionDirScan};
 // #1046), hence ACP.
 pub(super) static COPILOT: ProviderConfig = ProviderConfig {
     id: "copilot",
+    tier: Tier::FirstClass,
     cli_command: "copilot",
     controller_type: ControllerType::Acp,
     app_server: None,

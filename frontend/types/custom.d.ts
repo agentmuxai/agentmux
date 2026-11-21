@@ -1404,6 +1404,8 @@ declare global {
         // Bootstrap flags (set before app init)
         __AGENTMUX_IPC_PORT__?: number;
         __AGENTMUX_IPC_TOKEN__?: string;
+        /** Whether the page carries the window opacity (menus solid at low opacity); see util/window-fade.ts. */
+        __AGENTMUX_PAGE_FADE__?: boolean;
         /**
          * The host's process-message lane for a command, put on an app
          * window's main frame by the host's renderer (crates/cef/src/ipc_query.rs).

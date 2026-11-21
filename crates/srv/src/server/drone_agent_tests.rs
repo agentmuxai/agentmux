@@ -77,6 +77,34 @@ async fn a_drone_that_could_act_on_the_payload_outside_agentmux_is_not_fired_by_
     assert_eq!(why_not_fireable(&read), None);
 }
 
+/// An agent's own `rundrone` call is held to the same rule as the Drone tool's `fire`: a drone that posts, reads a
+/// Vault credential, runs a command or calls another drone is refused and nothing starts. The window's own run, a
+/// drone an agent may fire, and a drone that does not exist (left for the run to report) are not refused.
+#[tokio::test]
+async fn an_agents_own_run_call_is_held_to_what_an_agent_may_fire() {
+    use crate::backend::rpc_types::RpcContext;
+    use crate::server::drone_handlers::run_allowed_for;
+    let state = crate::server::tests::test_state();
+    let agent = RpcContext { agent_id: "opaz".into(), ..Default::default() };
+    let window = RpcContext::operator_for_tests();
+    let posts = saved(&state, "posts", json!([node("p", json!({ "kind": "api", "method": "POST", "url": "https://example.com/hook" }))]));
+    let keyed = saved(
+        &state,
+        "keyed",
+        json!([node("g", json!({ "kind": "api", "method": "GET", "url": "https://example.com/x", "auth": { "vault": "some-entry", "as": "bearer" } }))]),
+    );
+    for d in [&posts, &keyed] {
+        let err = run_allowed_for(&state, &agent, &d.id).unwrap_err();
+        assert!(err.starts_with("FORBIDDEN") && err.contains("A person runs it from the Drone pane"), "{}: {err}", d.name);
+        assert!(run_allowed_for(&state, &window, &d.id).is_ok(), "{}: the window's own run is unchanged", d.name);
+    }
+    let harmless = saved(&state, "harmless", json!([node("v", json!({ "kind": "variables" }))]));
+    assert!(run_allowed_for(&state, &agent, &harmless.id).is_ok());
+    assert!(run_allowed_for(&state, &agent, "ghost").is_ok(), "a drone that does not exist is the run's error to give");
+    // The refusal is before any run starts (the check is not a run).
+    assert!(state.mstore.drone_runs_for(&posts.id, 10).unwrap().is_empty());
+}
+
 /// The payload is an object within the input limit; anything else is refused before a run starts.
 #[tokio::test]
 async fn the_payload_is_an_object_within_the_limit() {

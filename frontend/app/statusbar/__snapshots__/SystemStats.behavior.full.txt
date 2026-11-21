@@ -31,7 +31,7 @@ parseDiskVolumes 4
     <span class="stat-separator">
       "|"
     <button type="button" class="stat-mono stat-watch-disk stat-disk-button" aria-label="Free disk space, click for per-drive breakdown" aria-haspopup="dialog" style="color: var(--watch-61.4-true);" data-tip="4 volumes" aria-expanded="false">
-      "Disk 61% free"
+      "Disk 61%/120GB free"
     <span class="stat-separator">
       "|"
     <span class="stat-mono stat-net" data-tip="Network upload and download" aria-label="Network traffic">

@@ -13,6 +13,7 @@ import { contextCompactedNodeId } from "./compact-boundary";
 import { CompactionSummaryTracker } from "./context-delivery";
 import { interceptFrame, type FrameSink } from "./frame-intercepts";
 import { createTranslator } from "./providers/translator-factory";
+import { writtenInContainer } from "./providers/translator";
 import { sessionOutcomeNodeId } from "@/app/store/agent-document/session-outcome";
 import { buildMemoryInjectedNode, supersededCard } from "./memory-injected";
 import { ClaudeCodeStreamParser } from "./stream-parser";
@@ -115,6 +116,12 @@ export interface HistoryParserOptions {
     idFirstLine?: number;
     /** The transcript generation the lines belong to, when known: part of those ids. */
     idGen?: string;
+}
+
+/** `translator`'s events for `rawEvent`, with `parser` told whether a container agent wrote the record (`writtenInContainer`). */
+function translateAs(parser: ClaudeCodeStreamParser, translator: ReturnType<typeof createTranslator>, rawEvent: unknown) {
+    parser.setFromContainer(writtenInContainer(rawEvent));
+    return translator.translate(rawEvent);
 }
 
 /**
@@ -388,7 +395,7 @@ export class HistoryParser {
             if (interceptFrame(rawEvent, this, sink, stampFor(lineIdx))) continue;
 
             // Translate provider-specific envelope → StreamEvent[]
-            const streamEvents = translator.translate(rawEvent);
+            const streamEvents = translateAs(parser, translator, rawEvent);
 
             for (const event of streamEvents) {
                 if (event.type === "session_end") {

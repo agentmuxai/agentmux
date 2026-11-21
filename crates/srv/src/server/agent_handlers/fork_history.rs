@@ -45,12 +45,13 @@ pub(super) fn copy_fork_history(mstore: &Store, history: &HistoryService, cmd: &
     let gfs = crate::backend::agent_session::global_transcript_store()
         .ok_or_else(|| "copyforkhistory: no transcript store".to_string())?;
     let result = |copied: bool, reason: &str, bytes: u64| CopyForkHistoryResult { copied, reason: reason.to_string(), bytes };
-    let copied = match copy_parent_history(gfs, &cmd.source_id, &cmd.fork_id, &cmd.session_id, field)? {
+    let runtime = crate::backend::agent_session::fork_history::runtime_of_agent(mstore, &cmd.source_id);
+    let copied = match copy_parent_history(gfs, &cmd.source_id, &cmd.fork_id, &cmd.session_id, field, runtime)? {
         ForkHistory::Copied { bytes } => result(true, "", bytes),
         // Either way the session may be in the record: after a New conversation
         // the current zone is empty and the older sessions are in an archive.
-        ForkHistory::NoParentHistory => older_session(gfs, history, cmd, field, "no_parent_history")?,
-        ForkHistory::NotTheLastSession => older_session(gfs, history, cmd, field, "not_the_last_session")?,
+        ForkHistory::NoParentHistory => older_session(gfs, history, cmd, field, runtime, "no_parent_history")?,
+        ForkHistory::NotTheLastSession => older_session(gfs, history, cmd, field, runtime, "not_the_last_session")?,
         ForkHistory::ForkHasHistory => result(false, "fork_has_history", 0),
     };
     if copied.copied {
@@ -68,6 +69,7 @@ fn older_session(
     history: &HistoryService,
     cmd: &CommandCopyForkHistoryData,
     field: &str,
+    runtime: crate::backend::transcript::origin_sig::WriterRuntime,
     reason: &str,
 ) -> Result<CopyForkHistoryResult, String> {
     let not_last = || CopyForkHistoryResult { copied: false, reason: reason.to_string(), bytes: 0 };
@@ -75,7 +77,7 @@ fn older_session(
     let Some(session) = sessions.iter().find(|s| s.session_id == cmd.session_id && !s.zone.is_empty() && s.end_byte > 0) else {
         return Ok(not_last());
     };
-    Ok(match copy_older_session_history(gfs, &cmd.source_id, &cmd.fork_id, &cmd.session_id, field, &session.zone, session.end_byte as i64)? {
+    Ok(match copy_older_session_history(gfs, &cmd.source_id, &cmd.fork_id, &cmd.session_id, field, &session.zone, session.end_byte as i64, runtime)? {
         ForkHistory::Copied { bytes } => CopyForkHistoryResult { copied: true, reason: String::new(), bytes },
         ForkHistory::NoParentHistory => CopyForkHistoryResult { copied: false, reason: "no_parent_history".to_string(), bytes: 0 },
         ForkHistory::ForkHasHistory => CopyForkHistoryResult { copied: false, reason: "fork_has_history".to_string(), bytes: 0 },

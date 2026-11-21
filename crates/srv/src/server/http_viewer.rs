@@ -535,7 +535,7 @@ impl FeedSource {
             tail_bytes: tail.then_some(SNAPSHOT_TAIL_BYTES),
             archive_zone: None,
         };
-        let result = super::app_api::blockfile::read_range(
+        let mut result = super::app_api::blockfile::read_range(
             self.broker.clone(),
             self.filestore.clone(),
             self.global_store.clone(),
@@ -544,14 +544,18 @@ impl FeedSource {
         )
         .await
         .ok()?;
+        // What srv holds secret is not shown to a device, in a line written before it was withheld too.
+        crate::backend::transcript::withhold::in_place(&mut result.lines);
         (result.gen_mismatch != Some(true)).then_some(result)
     }
 
     /// `lines` of this feed's transcript as a device may be shown them: an
-    /// `amx` only as srv signed it (`origin_sig`).
+    /// `amx` only as srv signed it (`origin_sig`), and nothing srv holds secret
+    /// (`transcript::withhold`).
     fn vet(&self, lines: &mut [String]) {
         let owner = crate::backend::transcript::origin_sig::owner_for_block(&self.mstore, &self.block_id);
-        crate::backend::transcript::origin_sig::vet_lines(&owner, lines);
+        crate::backend::transcript::attribution::vet_for_viewer(&self.mstore, &self.filestore, &owner, lines);
+        crate::backend::transcript::withhold::in_place(lines);
     }
 
     async fn position(&self) -> Option<(String, String, u64)> {

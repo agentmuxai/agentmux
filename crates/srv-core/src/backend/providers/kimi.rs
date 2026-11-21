@@ -1,13 +1,14 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{ProviderConfig, ControllerType};
+use super::{Tier, ProviderConfig, ControllerType};
 
 // kimi: the Python `kimi-cli`, archived upstream (1.52.0 is its last release and
 // what the flags below were checked against). AgentMux installs that pin itself
 // through uv (`backend/cli_uv.rs`); the live product, Kimi Code CLI, is a separate task.
 pub(super) static KIMI: ProviderConfig = ProviderConfig {
     id: "kimi",
+    tier: Tier::FirstClass,
     cli_command: "kimi",
     controller_type: ControllerType::Subprocess,
     app_server: None,

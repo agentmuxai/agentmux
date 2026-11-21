@@ -1214,6 +1214,10 @@
             "method": "PresenceStatusCommand"
         },
         {
+            "command": "client.agreetos",
+            "method": "ClientAgreeTosCommand"
+        },
+        {
             "command": "browsergrants.list",
             "method": "BrowserGrantsListCommand",
             "send": "data ?? {}"
@@ -1960,6 +1964,10 @@
         {
             "command": "writeagentconfig",
             "method": "WriteAgentConfigCommand"
+        },
+        {
+            "command": "workspace.importuserworkspace",
+            "method": "WorkspaceImportUserWorkspaceCommand"
         },
         {
             "command": "writeeditorfile",

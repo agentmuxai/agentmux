@@ -91,6 +91,8 @@ pub const AGENT_ENV: &[EnvSpec] = &[
     spec("AGENTMUX_AGENT_WORKDIR", HostOnly, "the host path of the agent's workspace; srv sets it for host agents only"),
     spec("AGENTMUX_MCP_CONFIG", HostOnly, "the host path of the agent's MCP config; a container doctor uses the bind-mounted copy"),
     spec("CLAUDE_CODE_SHELL_PREFIX", HostOnly, "a host path; the image's own wrapper may predate prefix mode"),
+    spec("CLAUDE_CODE_DISABLE_CRON", HostOnly, "set for a host agent in a folder a container agent can write, whose CLI's scheduler is off there"),
+    spec("CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD", HostOnly, "set for a host agent in a folder a container agent can write, with the host path of its startup instructions"),
 ];
 
 /// Names that come in numbered or generated families.

@@ -29,7 +29,7 @@ vi.mock("@/app/util/reveal-block", () => ({
 }));
 vi.mock("@/app/store/command-registry", () => ({ commandRegistry: { run: vi.fn(() => false) } }));
 
-import { caretInBlock, focusPaneForApi, installShortcutApi, OPERATOR_PROMPT_OPEN, operatorPromptOpen } from "./keymodel-dispatch";
+import { caretInBlock, escapeWouldAnswer, focusPaneForApi, installShortcutApi, OPERATOR_PROMPT_OPEN, operatorPromptOpen } from "./keymodel-dispatch";
 
 /** A pane element for `blockId` with a focusable input inside. */
 function pane(blockId: string): HTMLInputElement {
@@ -150,7 +150,7 @@ describe("a prompt for the person", () => {
         expect(await api().set({}, "agent")).toEqual({ changed: false, reason: OPERATOR_PROMPT_OPEN });
     });
 
-    it("always lets a cancel through: the Escape command and the Escape key, in the pane that holds the prompt", async () => {
+    it("lets a cancel through that only closes something: the Escape command and key, in the pane that holds the prompt", async () => {
         installShortcutApi();
         h.inWindow.add("asking");
         pane("asking");
@@ -162,6 +162,32 @@ describe("a prompt for the person", () => {
         expect(await api().plan("Enter", "asking")).toEqual({ reason: OPERATOR_PROMPT_OPEN });
         expect(await api().plan("Escape+Enter", "asking")).toEqual({ reason: OPERATOR_PROMPT_OPEN });
         expect(await api().run("pane:close", "asking")).toEqual({ ran: false, reason: OPERATOR_PROMPT_OPEN });
+    });
+
+    it("holds Escape back where it would answer for the person: a card whose Escape declines it, or focus inside a prompt", async () => {
+        installShortcutApi();
+        h.inWindow.add("asking");
+        pane("asking");
+        const card = prompt("asking");
+        card.setAttribute("data-operator-answers", "");
+        expect(escapeWouldAnswer("asking")).toBe(true);
+        expect(escapeWouldAnswer("elsewhere")).toBe(false);
+        expect(await api().run("app:escape", "asking")).toEqual({ ran: false, reason: OPERATOR_PROMPT_OPEN });
+        expect(await api().plan("Escape", "asking")).toEqual({ reason: OPERATOR_PROMPT_OPEN });
+        // Said in words the agent can act on: the person answers it.
+        expect(OPERATOR_PROMPT_OPEN).toMatch(/ask them/);
+        card.remove();
+        // A prompt that Escape only closes, with focus inside it: the key would answer it for them, so it is held back.
+        const closable = prompt("asking");
+        const field = document.createElement("button");
+        closable.appendChild(field);
+        field.focus();
+        expect(document.activeElement).toBe(field);
+        expect(escapeWouldAnswer("asking")).toBe(true);
+        expect(await api().plan("Escape", "asking")).toEqual({ reason: OPERATOR_PROMPT_OPEN });
+        field.blur();
+        expect(escapeWouldAnswer("asking")).toBe(false);
+        closable.remove();
     });
 
     it("holds nothing back for the status bar's Vault badge: marked operator-only so agents cannot click it, but it is the person's control, not a prompt over the panes", async () => {
