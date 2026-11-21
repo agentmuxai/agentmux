@@ -159,6 +159,15 @@ pub(crate) fn keep_view_background_transparent(view: Option<&mut cef::View>, whi
     );
 }
 
+/// Experiment (#48092): set `AGENTMUX_OPACITY_FADE=page` and the window opacity is carried by the page, as on native
+/// Wayland, on every platform: every window is alpha-capable and nothing applies a whole-window alpha (Windows
+/// layered window, macOS `alphaValue`, X11 `_NET_WM_WINDOW_OPACITY`), so what the page paints opaque (a menu) stays
+/// opaque over the desktop. Off unless set; see `ui_tasks::post_page_fade`.
+pub(crate) fn page_fade_requested() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("AGENTMUX_OPACITY_FADE").map(|v| v == "page").unwrap_or(false))
+}
+
 /// Read `window:transparent` from the user's settings.json before CefInitialize.
 /// Gates the transparent-compositing command-line flags so non-transparent
 /// windows don't pay the LCD-text and opacity-flash penalties. Returns false

@@ -60,6 +60,12 @@ pub fn set_window_transparency(state: &Arc<AppState>, args: &serde_json::Value) 
     let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main").to_string();
     tracing::info!("set_window_transparency: label={} transparent={} opacity={}", label, transparent, opacity);
 
+    // Experiment (#48092): the page carries the opacity; no whole-window alpha is applied (see `set_window_opacity`).
+    if crate::app::window_settings::page_fade_requested() {
+        crate::ui_tasks::post_page_fade(state, &label, if transparent { opacity.clamp(0.0, 1.0) } else { 1.0 });
+        return Ok(serde_json::Value::Null);
+    }
+
     #[cfg(target_os = "windows")]
     {
         let hwnd_raw = state.window_hwnd(&label);
@@ -193,8 +199,18 @@ pub fn set_window_opacity(
     // windows semi-transparent after the user restored full opacity.
     // Match both arms.
     let changes = opacity_changes(&out.events);
+
+    // Experiment (#48092, `AGENTMUX_OPACITY_FADE=page`): the page carries the opacity on every platform and no
+    // whole-window alpha is applied, so a menu the page paints opaque stays opaque over the desktop.
+    let page_fade = crate::app::window_settings::page_fade_requested();
+    if page_fade {
+        for (ev_label, ev_opacity) in &changes {
+            crate::ui_tasks::post_page_fade(state, ev_label, ev_opacity.map_or(1.0, |o| o as f64));
+        }
+    }
+
     #[cfg(target_os = "windows")]
-    for (ev_label, ev_opacity) in &changes {
+    for (ev_label, ev_opacity) in changes.iter().filter(|_| !page_fade) {
         let hwnd_raw = state.window_hwnd(ev_label);
         match (hwnd_raw, ev_opacity) {
             (Some(raw), Some(opacity)) => {
@@ -218,7 +234,7 @@ pub fn set_window_opacity(
     // NSWindow.alphaValue on macOS; _NET_WM_WINDOW_OPACITY on X11, a CSS
     // page fade on native Wayland.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
-    for (ev_label, ev_opacity) in &changes {
+    for (ev_label, ev_opacity) in changes.iter().filter(|_| !page_fade) {
         crate::ui_tasks::post_set_window_alpha(state, ev_label, ev_opacity.map_or(1.0, |o| o as f64));
     }
 

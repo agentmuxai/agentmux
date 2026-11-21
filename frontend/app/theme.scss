@@ -772,10 +772,11 @@
 // - Backgrounds stay opaque: fading the alpha-aware `--window-opacity`
 //   backgrounds instead compounds through nested panes. `!important` beats
 //   the inline value AppSettingsUpdater sets.
-// - `opacity` goes on body, not html: a transparent html makes the body's
-//   background propagate to the canvas, which root opacity doesn't fade. So
-//   html and body are transparent and the page background is painted by
-//   body::before, inside the faded group.
+// - `opacity` goes on the app root (`#main`) and on the page background, not on html or body: a transparent html makes
+//   the body's background propagate to the canvas, which root opacity doesn't fade, so html and body are transparent
+//   and the page background is painted by body::before, faded with the app root. What a portal puts directly under
+//   body (a menu, a popover, a dialog) is outside that group: it is painted opaque and stays opaque over the desktop
+//   at any window opacity (#48092).
 :root.am-uniform-fade {
     --window-opacity: 1 !important;
     --am-window-fade: 1; // the host's inline value wins
@@ -783,6 +784,9 @@
 
     body {
         background: transparent !important;
+    }
+
+    #main {
         opacity: var(--am-window-fade);
     }
 
@@ -792,6 +796,7 @@
         z-index: var(--z-behind);
         pointer-events: none;
         background: var(--main-bg-color);
+        opacity: var(--am-window-fade);
     }
 }
 

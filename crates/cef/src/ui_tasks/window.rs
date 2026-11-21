@@ -1148,8 +1148,37 @@ wrap_task! {
     }
 }
 
+// ── Window opacity carried by the page, on every platform (experiment #48092) ─
+// With `AGENTMUX_OPACITY_FADE=page` (app/window_settings.rs `page_fade_requested`) every window is alpha-capable and
+// this is the only thing that applies the opacity: the page fades its own app root (theme.scss `am-uniform-fade`),
+// and what floats outside that root (a menu) is painted opaque and stays so over the desktop. Native Wayland already
+// works this way (`SetWindowAlphaTask`).
+wrap_task! {
+    pub struct PageFadeTask {
+        state: Arc<AppState>,
+        label: String,
+        alpha: f64,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let Some(frame) = self.state.get_browser(&self.label).and_then(|b| b.main_frame()) else {
+                tracing::warn!(label = %self.label, "[opacity] PageFadeTask: no browser for label");
+                return;
+            };
+            let code = CefString::from(uniform_fade_js(self.alpha).as_str());
+            frame.execute_java_script(Some(&code), Some(&CefString::from("")), 0);
+            tracing::info!(label = %self.label, alpha = self.alpha, "[opacity] applied page fade");
+        }
+    }
+}
+
+pub fn post_page_fade(state: &Arc<AppState>, label: &str, alpha: f64) {
+    let mut task = PageFadeTask::new(state.clone(), label.to_string(), alpha);
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
 /// Script that fades the whole page to `alpha` (or clears the fade at 1.0).
-#[cfg(target_os = "linux")]
 fn uniform_fade_js(alpha: f64) -> String {
     let alpha = alpha.clamp(0.0, 1.0);
     if alpha >= 1.0 {
@@ -2048,7 +2077,7 @@ pub fn post_hang_ui_thread(_state: &Arc<AppState>) {
     post_task(ThreadId::UI, Some(&mut task));
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 mod tests {
     use super::uniform_fade_js;
 
