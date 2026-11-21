@@ -375,7 +375,7 @@ fn ask_with_rfd(block_id: &str, id: u32, path: PathBuf, cb: &BeforeDownloadCallb
             if let Some(dir) = path.parent().filter(|d| d.is_dir()) {
                 spec = spec.dir(dir);
             }
-            let outcome = crate::commands::file_dialog::show(&spec);
+            let outcome = crate::commands::file_dialog::show_guarded(&spec);
             if let Outcome::Failed(why) = &outcome {
                 tracing::warn!(target: "pane-download", %block_id, id, %why, "the Save As dialog failed");
             }
