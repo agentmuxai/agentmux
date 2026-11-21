@@ -142,7 +142,37 @@ pub fn append_output_line(
     filestore: Option<&Arc<FileStore>>,
     global_output_zone: Option<&str>,
 ) {
-    let line_with_newline = origin_of_echo(block_id, line, global_output_zone).unwrap_or_else(|| format!("{line}\n"));
+    append_output_line_by(broker, block_id, line, filestore, global_output_zone, None);
+}
+
+/// [`append_output_line`] for a line an agent's process wrote: besides an echo's origin, it is stored with which
+/// runtime wrote it (`origin_sig::stamp_writer`), so a reader decides what the message may name by who wrote it.
+pub fn append_agent_output_line(
+    broker: &mps::Broker,
+    block_id: &str,
+    line: &str,
+    filestore: Option<&Arc<FileStore>>,
+    global_output_zone: Option<&str>,
+    runtime: origin_sig::WriterRuntime,
+) {
+    append_output_line_by(broker, block_id, line, filestore, global_output_zone, Some(runtime));
+}
+
+fn append_output_line_by(
+    broker: &mps::Broker,
+    block_id: &str,
+    line: &str,
+    filestore: Option<&Arc<FileStore>>,
+    global_output_zone: Option<&str>,
+    writer: Option<origin_sig::WriterRuntime>,
+) {
+    let line_with_newline = origin_of_echo(block_id, line, global_output_zone)
+        .or_else(|| {
+            let owner = origin_sig::owner_of_zone(global_output_zone.unwrap_or(block_id));
+            let stamped = origin_sig::stamp_writer(owner, line, writer?, agentmux_common::time::now_ms())?;
+            Some(format!("{stamped}\n"))
+        })
+        .unwrap_or_else(|| format!("{line}\n"));
     handle_append_block_file(
         broker,
         block_id,

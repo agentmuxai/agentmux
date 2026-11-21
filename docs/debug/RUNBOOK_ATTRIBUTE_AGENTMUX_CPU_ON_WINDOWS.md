@@ -66,6 +66,22 @@ $by.Values | Where-Object { $_['% processor time'] -gt 5 } | Sort-Object { $_['%
 
 ## 4. Which page a renderer draws
 
+Ask the running instance, release build or not, with no restart and no DevTools:
+
+```powershell
+node ~/.agentmux/shell/muxspect.mjs browsers              # CPU over 3 s, one row per renderer
+node ~/.agentmux/shell/muxspect.mjs browsers --sample 10 --detail   # a longer sample, and main-thread time by kind of work
+node ~/.agentmux/shell/muxspect.mjs browsers --json       # the same rows for a script
+```
+
+Each row is a renderer process: its pid as the OS lists it, its CPU as a percent of one core over the sample, its role (`app-window`, `pool-window` or `browser-pane`), the page, whether Chromium thinks it is visible, the animations running in it, and the other browsers that share the process (its CPU is the process's, not split). A renderer that serves only an iframe of a page is the page's row marked `(frame)`. An AgentMux window shows its title (a pool window reads `AgentMux (pre-warmed window)`); **a person's page shows its origin only**. A page the browser discarded or the window froze is listed as `asleep` or `frozen` and is never asked, and a page that gives no answer in 1.5 s says `no answer 1.5 s` with its pid and CPU, which is what a renderer stuck in script looks like. The last lines add up the AgentMux processes that serve no page (GPU, network service, window host, srv, launcher), for scale. Spec: `docs/specs/SPEC_RELEASE_BUILD_BROWSER_PAGE_DIAGNOSTIC_2026_11_13.md`.
+
+`--detail` reads each page's `Performance.getMetrics` at both ends of the sample and prints the share of the sample the main thread spent in task, script, layout and style work, which is §5's third bullet done for every page at once.
+
+### When the running instance cannot be queried
+
+An instance that predates `muxspect browsers`, or one whose srv is down, can't answer it. The way below needs DevTools, so it takes a second instance. The text is unchanged from before the command existed.
+
 **PIDs, `--renderer-client-id` order and start times don't tell you.** Chromium starts a spare renderer before it is needed, so a window's renderer can start before the host logs creating the window.
 
 The reliable way needs DevTools (CDP), which **release builds don't start** (#3681). The port the host listens on (`IPC HTTP server started on 127.0.0.1:<port>` in its log) is the frontend asset server, not DevTools. To get DevTools, start a separate instance with `AGENTMUX_CDP_PORT` set. Don't restart the user's instance for it: you would lose the state you want to look at.
@@ -101,7 +117,7 @@ process.exit(0);   // exiting right after ws.close() trips a libuv assertion on 
 
 ## 5. What a page is doing
 
-Through the page's `webSocketDebuggerUrl`:
+`muxspect browsers` (§4) shows the first three of these for every page at once: the `ANIMATIONS (running)` and `VISIBLE` columns, and `--detail` for the main-thread time. The rest, and any page `muxspect` can't reach, go through the page's `webSocketDebuggerUrl`:
 
 - **Running animations:** `Runtime.evaluate` of `document.getAnimations().filter(a => a.playState === "running").map(a => a.animationName ?? a.constructor.name)`.
 - **Visibility as Chromium sees it:** `document.visibilityState`. A hidden pool window can still report `visible`.

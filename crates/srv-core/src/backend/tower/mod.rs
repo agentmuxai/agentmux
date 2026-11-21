@@ -5,6 +5,7 @@
 //! this machine's panes, and the other computers it can show.
 
 pub mod agentmux;
+pub mod browsers;
 pub mod kind;
 pub mod memory;
 pub mod memory_ledger;

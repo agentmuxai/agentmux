@@ -151,15 +151,18 @@ if (-not $canSign) {
     $testKeys = "t1:" + [Convert]::ToBase64String($pubBytes[($pubBytes.Length - 32)..($pubBytes.Length - 1)])
 
     # A release: a stand-in installer, its manifest, the envelope and the signature, in the shape release-manifest.mjs writes.
-    function New-Release([string]$Dir, [string]$Tag, [string]$Listed) {
+    function New-Release([string]$Dir, [string]$Tag, [string]$Listed, [string]$UpgradeJson = "") {
         if (-not $Listed) { $Listed = $name }
+        # With $UpgradeJson, the manifest also carries an `upgrade` object, as a release made since the signed floor does.
+        $up = ""
+        if ($UpgradeJson) { $up = ",`n  `"upgrade`": $UpgradeJson" }
         New-Item -ItemType Directory -Path $Dir -Force | Out-Null
         $bytes = New-Object byte[] 4096
         (New-Object Random 7).NextBytes($bytes)
         [IO.File]::WriteAllBytes((Join-Path $Dir $name), $bytes)
         $size = (Get-Item (Join-Path $Dir $name)).Length
         $sha = (Get-FileHash -LiteralPath (Join-Path $Dir $name) -Algorithm SHA256).Hash.ToLowerInvariant()
-        $manifest = "{`n  `"format`": 1,`n  `"version`": `"$ver`",`n  `"tag`": `"$Tag`",`n  `"files`": [`n    {`n      `"name`": `"$Listed`",`n      `"size`": $size,`n      `"sha256`": `"$sha`"`n    }`n  ]`n}`n"
+        $manifest = "{`n  `"format`": 1,`n  `"version`": `"$ver`",`n  `"tag`": `"$Tag`",`n  `"files`": [`n    {`n      `"name`": `"$Listed`",`n      `"size`": $size,`n      `"sha256`": `"$sha`"`n    }`n  ]$up`n}`n"
         [IO.File]::WriteAllText((Join-Path $Dir "AgentMux-$ver-manifest.json"), $manifest, $utf8)
         $msha = (Get-FileHash -LiteralPath (Join-Path $Dir "AgentMux-$ver-manifest.json") -Algorithm SHA256).Hash.ToLowerInvariant()
         $envelope = "{`n  `"format`": 1,`n  `"tag`": `"$Tag`",`n  `"manifest_sha256`": `"$msha`",`n  `"created_at`": `"2026-11-04T00:00:00Z`"`n}`n"
@@ -182,6 +185,10 @@ if (-not $canSign) {
         $good = Join-Path $work "good-$sh"
         New-Release $good "v$ver" ""
         Expect "a good release is accepted" 0 "matches the signed manifest" $sh (Run-Release $sh $good $testKeys) $dl
+        # A manifest with an `upgrade` object (the floor, the rollout flag, a field this script has never heard of) is read the same way.
+        $withup = Join-Path $work "withupgrade-$sh"
+        New-Release $withup "v$ver" "" '{"floor": "0.55.0", "shared_store_changed": true, "future": {"a": 1}}'
+        Expect "a release whose manifest carries an upgrade object is accepted" 0 "matches the signed manifest" $sh (Run-Release $sh $withup $testKeys) $dl
         Expect "its signature is checked" 0 "signature of the release checked" $sh (Run-Release $sh $good $testKeys) $dl
         Expect "-RequireSignature accepts a checked one" 0 "matches the signed manifest" $sh (Run-Release $sh $good $testKeys) ($dl + "-RequireSignature")
 

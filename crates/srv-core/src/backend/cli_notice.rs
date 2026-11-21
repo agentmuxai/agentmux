@@ -253,9 +253,11 @@ pub fn container_caches_frame(provider: &str, block_id: &str, agent: (&str, &str
 }
 
 /// An `agentmux_mcp_left_out` frame: a container agent can write the folder of the host agent on `block_id`, so
-/// the agent starts only the servers AgentMux writes, and `names` are the ones its folder's own `.mcp.json`
-/// lists besides (`mcp_folder_rule`).
-pub fn mcp_left_out_frame(provider: &str, block_id: &str, names: &[String]) -> Value {
+/// the agent takes nothing of the folder's own configuration (`mcp_folder_rule`, `host_agent_files`). `names`
+/// are the servers its folder's own `.mcp.json` lists besides the agent's, `folder` is what else of the folder
+/// is not loaded, by kind and count, and `no_path` are the agent's own servers left out because their command
+/// has no path outside the folder.
+pub fn mcp_left_out_frame(provider: &str, block_id: &str, names: &[String], folder: &crate::backend::host_agent_files::LeftOut, no_path: &[String]) -> Value {
     json!({
         "type": "system",
         "subtype": MCP_LEFT_OUT_SUBTYPE,
@@ -263,6 +265,8 @@ pub fn mcp_left_out_frame(provider: &str, block_id: &str, names: &[String]) -> V
         "block_id": block_id,
         "event_id": uuid::Uuid::new_v4().to_string(),
         "names": names,
+        "folder": folder,
+        "no_path": no_path,
         "timestamp": chrono::Utc::now().to_rfc3339(),
     })
 }
