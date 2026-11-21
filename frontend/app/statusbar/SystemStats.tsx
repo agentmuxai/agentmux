@@ -79,7 +79,7 @@ const SystemStats = (): JSX.Element => {
                             aria-haspopup="dialog"
                             aria-expanded={diskPanelOpen()}
                         >
-                            {diskPillLabel(s().watchVolumeFreePct!)}
+                            {diskPillLabel(s().watchVolumeFreePct!, s().watchVolumeFreeGb)}
                         </button>
                         <Show when={diskPanelOpen()}>
                             <DiskVolumesPopover
