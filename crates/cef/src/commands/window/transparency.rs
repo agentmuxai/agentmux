@@ -13,7 +13,11 @@
 // sibling `lifecycle` module (the fallback when a label's HWND hasn't been
 // captured yet).
 //
-// Platform mechanisms (uniform whole-window alpha, post-render, stock-CEF-safe):
+// The default, on every platform: the page carries the opacity (ui_tasks::post_page_fade fades the app root with CSS
+// on an alpha-capable window) and no whole-window alpha is applied, so a menu painted opaque stays solid.
+//
+// The escape hatch, AGENTMUX_OPACITY_FADE=window, gives the platform mechanisms (uniform whole-window alpha,
+// post-render, stock-CEF-safe):
 //   Windows — WS_EX_LAYERED + SetLayeredWindowAttributes(LWA_ALPHA), inline
 //             (Win32 window-style ops are safe from any thread).
 //   macOS   — [NSWindow setAlphaValue:], via ui_tasks::post_set_window_alpha
@@ -242,9 +246,9 @@ pub fn set_window_opacity(
         }
     }
 
-    // macOS and Linux: SetWindowAlphaTask applies it on the UI thread —
-    // NSWindow.alphaValue on macOS; _NET_WM_WINDOW_OPACITY on X11, a CSS
-    // page fade on native Wayland.
+    // macOS and Linux with AGENTMUX_OPACITY_FADE=window (`native_changes` is empty by default, where the page fade
+    // above carries the opacity): SetWindowAlphaTask applies it on the UI thread — NSWindow.alphaValue on macOS;
+    // _NET_WM_WINDOW_OPACITY on X11, a CSS page fade on native Wayland.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     for (ev_label, ev_opacity) in native_changes(&changes, page_fade) {
         crate::ui_tasks::post_set_window_alpha(state, ev_label, ev_opacity.map_or(1.0, |o| o as f64));

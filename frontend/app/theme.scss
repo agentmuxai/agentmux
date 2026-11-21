@@ -775,8 +775,10 @@
 // - `opacity` goes on the app root (`#main`), not on html or body: a transparent html makes the body's background
 //   propagate to the canvas, which root opacity doesn't fade, so html and body are transparent and the page background
 //   is painted by `#main::before`, inside the root, faded with it. What a portal puts directly under body (a menu, a
-//   popover, a dialog) is outside that group: it is painted opaque and stays opaque over the desktop at any window
-//   opacity (#48092).
+//   popover, a window-scope dialog) is outside that group: it is painted opaque and stays opaque over the desktop at
+//   any window opacity (#48092). A dialog with scope "tab" or "pane" is mounted inside the tab or pane, under `#main`,
+//   so it fades with the window, as it did under the whole-window alpha; mounting those outside the group is a
+//   separate change.
 :root.am-uniform-fade {
     --window-opacity: 1 !important;
     --am-window-fade: 1; // the host's inline value wins

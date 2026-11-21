@@ -1087,6 +1087,7 @@ unsafe fn macos_set_window_alpha_by_number(wnum: isize, alpha: f64) -> bool {
 }
 
 // ── Window alpha (Linux/X11 uniform whole-window opacity) ────────────────
+// Used only with AGENTMUX_OPACITY_FADE=window; by default the page carries the opacity (`post_page_fade`).
 // Track 1 of SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01, Linux arm: the EWMH
 // analogue of Win32 LWA_ALPHA / NSWindow.alphaValue. The compositor (Mutter,
 // KWin, picom, xfwm4) fades the finished window over the desktop — including
@@ -1112,7 +1113,7 @@ wrap_task! {
             // on_window_created and stays valid for the window's lifetime.
             // Native Wayland has no uniform-alpha protocol, but every window
             // there is alpha-capable (app/mod.rs `alpha_capable`), so the page can
-            // fade itself: CSS `opacity` on the body (theme.scss
+            // fade itself: CSS `opacity` on the app root `#main` (theme.scss
             // `am-uniform-fade`) gives the same uniform whole-window fade as
             // _NET_WM_WINDOW_OPACITY below. Fading the
             // translucent `--window-opacity` backgrounds instead compounds
