@@ -47,13 +47,22 @@ pub(super) async fn handle_resolve_agent_name(
         // tool call instead of sending a bare name that a same-named live
         // agent could take (Codex P1 on #3563).
         Ok(Err(e)) => (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": e }))),
-        Ok(Ok(resolution)) => (
-            StatusCode::OK,
-            Json(
-                serde_json::to_value(&resolution)
-                    .unwrap_or_else(|_| json!({ "resolution": "none" })),
-            ),
-        ),
+        Ok(Ok(resolution)) => {
+            let mut body = serde_json::to_value(&resolution).unwrap_or_else(|_| json!({ "resolution": "none" }));
+            // A name nobody answers to: the ids it most likely meant, so the refusal can offer them.
+            if matches!(resolution, crate::backend::name_resolution::NameResolution::None) {
+                let (mstore, registry) = (state.mstore.clone(), state.reactive_handler);
+                let typed = req.name.clone();
+                let close = tokio::task::spawn_blocking(move || {
+                    let ids = crate::backend::name_resolution::known_agent_ids(&mstore, registry);
+                    crate::backend::name_resolution::closest_ids(&typed, &ids)
+                })
+                .await
+                .unwrap_or_default();
+                body["did_you_mean"] = json!(close);
+            }
+            (StatusCode::OK, Json(body))
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": format!("resolve task failed: {e}") })),
