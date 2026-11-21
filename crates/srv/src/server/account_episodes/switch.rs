@@ -268,19 +268,6 @@ fn actor_named(caller: &str) -> String {
     if caller.is_empty() { "operator".to_string() } else { crate::backend::rpc::actor::Actor::Agent(caller.to_string()).label() }
 }
 
-#[cfg(test)]
-mod actor_tests {
-    use super::actor_named;
-
-    #[test]
-    fn an_agent_is_named_with_its_prefix_whatever_it_is_called() {
-        assert_eq!(actor_named(""), "operator");
-        assert_eq!(actor_named("wren"), "agent:wren");
-        assert_eq!(actor_named("operator"), "agent:operator");
-        assert_eq!(actor_named("failover"), "agent:failover");
-        assert_ne!(actor_named("operator"), actor_named(""));
-    }
-}
 
 /// `agent.account.switch`. `caller` is the connection's agent slug, empty for the window.
 /// BLOCKING (store reads, link writes, restarts).
@@ -463,5 +450,19 @@ pub(super) fn apply_pending(state: &AppState) {
             continue;
         };
         apply(state, &by, &def_id, &to, &provider, &blocks, &accounts, false);
+    }
+}
+
+#[cfg(test)]
+mod actor_tests {
+    use super::actor_named;
+
+    #[test]
+    fn an_agent_is_named_with_its_prefix_whatever_it_is_called() {
+        assert_eq!(actor_named(""), "operator");
+        assert_eq!(actor_named("wren"), "agent:wren");
+        assert_eq!(actor_named("operator"), "agent:operator");
+        assert_eq!(actor_named("failover"), "agent:failover");
+        assert_ne!(actor_named("operator"), actor_named(""));
     }
 }

@@ -529,10 +529,10 @@ fn may_act_on(state: &AppState, caller: Option<&Caller>, job: &CronJob) -> bool 
         return job.created_by_uid == uid;
     }
     match state.mstore.agent_def_get(uid) {
-        // A creator that reads as the person or the system is never an agent's slug, whatever the agent is called.
+        // The person's own mark on a job is never an agent's slug, whatever the agent is called.
         Ok(Some(def)) => {
             !job.created_by.is_empty()
-                && crate::backend::reserved_names::check(&job.created_by).is_none()
+                && !job.created_by.eq_ignore_ascii_case(jobs::BY_OPERATOR)
                 && def.slug.eq_ignore_ascii_case(&job.created_by)
         }
         _ => false,
@@ -1056,6 +1056,10 @@ mod tests {
         job.created_by = "creator-agent".to_string();
         assert!(may_act_on(&state, Some(&nickname), &job));
         assert!(!may_act_on(&state, Some(&reserved), &job));
+        // An agent whose slug is another reserved word, from before the rule, still acts on its own job.
+        let legacy = seed("uid-legacy", "swarm");
+        job.created_by = "swarm".to_string();
+        assert!(may_act_on(&state, Some(&legacy), &job));
     }
 
     #[test]

@@ -428,17 +428,6 @@ pub fn tell_one(uid: &str, note: &str) -> bool {
     }
 }
 
-#[cfg(test)]
-mod approver_label_tests {
-    use super::approver_label;
-
-    #[test]
-    fn an_approving_agent_is_named_with_its_prefix_and_the_fallback_keeps_its_words() {
-        assert_eq!(approver_label("opaz"), "agent:opaz");
-        assert_eq!(approver_label("operator"), "agent:operator");
-        assert_eq!(approver_label("no super agent"), "no super agent");
-    }
-}
 
 /// How an audit row names the approver: an agent with its prefix, so none can read as the person; the
 /// fallback's own words stay as they are.
@@ -474,3 +463,15 @@ pub(crate) static TEST_RUNNER_TURN: Mutex<()> = Mutex::new(());
 #[cfg(test)]
 #[path = "sensitive_window_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod approver_label_tests {
+    use super::approver_label;
+
+    #[test]
+    fn an_approving_agent_is_named_with_its_prefix_and_the_fallback_keeps_its_words() {
+        assert_eq!(approver_label("opaz"), "agent:opaz");
+        assert_eq!(approver_label("operator"), "agent:operator");
+        assert_eq!(approver_label("no super agent"), "no super agent");
+    }
+}

@@ -273,6 +273,16 @@ mod reserved_names {
     }
 
     #[tokio::test]
+    async fn an_agent_that_already_has_a_reserved_name_may_be_given_it_again_but_not_another() {
+        let state = test_state();
+        let mut old = test_agent_def("old-admin", "Admin", "claude", "agent", 1, "");
+        old.slug = "admin-legacy".to_string();
+        state.mstore.agent_def_insert(&mut old).unwrap();
+        assert!(crate::server::agent_handlers::rename::rename_title(&state, "old-admin", "Admin", true).await.is_ok());
+        assert!(crate::server::agent_handlers::rename::rename_title(&state, "old-admin", "Operator", true).await.is_err());
+    }
+
+    #[tokio::test]
     async fn import_from_a_workspace_refuses_a_reserved_name() {
         let state = test_state();
         let dir = std::env::temp_dir().join(format!("reserved-names-{}", uuid::Uuid::new_v4().simple()));
