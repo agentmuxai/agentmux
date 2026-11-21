@@ -13,32 +13,14 @@ import { tip } from "@/app/element/tip";
 import { followAgentNames } from "@/app/store/agent-names";
 import { pushNotification } from "@/app/store/global";
 import { takeFloatRequest } from "@/app/store/float-modifier";
-import { pullUrl } from "./entities/kinds/pull";
 import { linkify } from "./entities/linkify";
 import { openEntity } from "./entities/registry";
-import type { Destination, Segment } from "./entities/types";
+import type { Segment } from "./entities/types";
+import { hrefOf, webUrlOf } from "./entity-href";
 import { linkContext, type SurfaceContext } from "./link-context";
 import "./linkified.scss";
 
 type LinkSegment = Extract<Segment, { type: "link" }>;
-
-/** The address a link shows and copies: the page itself, or the app's own address for a place in it. */
-function hrefOf(dest: Destination): string {
-    switch (dest.kind) {
-        case "url":
-            return dest.url;
-        case "pull":
-            return pullUrl(dest);
-        case "task":
-            return `agentmux://task/${dest.number}`;
-        case "agent":
-            return `agentmux://agent/${encodeURIComponent(dest.id)}`;
-    }
-}
-
-function webUrlOf(dest: Destination): string | null {
-    return dest.kind === "url" ? dest.url : dest.kind === "pull" ? pullUrl(dest) : null;
-}
 
 function press(seg: LinkSegment, e: MouseEvent): void {
     e.stopPropagation();

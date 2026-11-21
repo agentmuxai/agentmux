@@ -1,0 +1,42 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// The tags line under a Swarm row's header (swarm-model-tag.tsx; docs/specs/SPEC_SWARM_MODEL_AND_SEAT_TAGS_2026_11_20.md §3.1
+// and §6.2). One nowrap line, indented as the summary under it is, so it lines up with the name at every zoom: the sizes
+// are the kit's (`--text-xs`, `--space-*`, `1lh`, 1 px borders), nothing a fixed width.
+
+.swarm-tags-line {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    overflow: hidden;
+    // The summary line's own padding, so the indent follows the name.
+    padding: 0 10px var(--space-1) 30px;
+}
+
+// The tag shrinks by cutting its words with an ellipsis, down to its glyph and four letters; the tooltip has them all.
+.swarm-tags-line .ui-tag-anchor {
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+// A rounded rectangle, where the seat's tag is a pill, so a Leader tag and an Opus tag in near colours still differ by
+// shape and place, not by hue alone.
+.swarm-tags-line .swarm-model-tag {
+    min-width: 0;
+    border-radius: var(--radius-sm);
+}
+
+.swarm-model-tag__text {
+    min-width: 4ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+// Under 120 px the line under the row is one clipped line (swarm-view.scss): the tags line goes with it, whole or not at
+// all, like the seat badge's slot.
+@container swarm-tree (max-width: 120px) {
+    .swarm-tree .swarm-tags-line {
+        display: none;
+    }
+}

@@ -22,6 +22,8 @@ import { LOCAL_PROVIDER_UNKNOWN, SwarmProviderIcon } from "./swarm-provider-icon
 import { SpendChip } from "@/app/view/agent/components/SpendChip";
 import { BuildSlotNote, LongToolNote, RowStateNotes, UnavailableChip } from "./swarm-row-notes";
 import { RegistrationBadge, type RegistrationFlag } from "./swarm-row-registration";
+import type { ModelFacts } from "@/app/agent-model/model-tag";
+import { SwarmTagsLine } from "./swarm-model-tag";
 import { SwarmSeatBadge } from "./swarm-seats";
 import { AgentStatusChip } from "./swarm-status-chip";
 import { setSupervisorMode, SupervisorChip } from "./swarm-supervisor";
@@ -168,13 +170,17 @@ export type AgentCardLinesProps = {
     summaryFlash: Accessor<boolean>;
     blockMeta: Accessor<Block["meta"] | undefined>;
     rowNow: () => number;
+    /** What the runtime says the agent is running; with none there is no tags line. */
+    modelFacts?: Accessor<ModelFacts | null>;
 };
 
-/** The lines under the header: the summary, the Kanban task the agent is on, and the call in flight. */
+/** The lines under the header: the tags line (a known model), the summary, the Kanban task the agent is on, and the call in flight. */
 export function AgentCardLines(props: AgentCardLinesProps): JSX.Element {
     const { node, unavailable, rowNow } = props;
     return (
         <>
+            {/* The model the agent is running, when the runtime knows it: its own line, so the header keeps its width. */}
+            <Show when={props.modelFacts}>{(facts) => <SwarmTagsLine facts={facts()} />}</Show>
             {/* Never empty: the generated title, or a fallback shown muted
                 with a tooltip saying it is one (store/swarm-line.ts). */}
             <div

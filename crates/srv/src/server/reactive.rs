@@ -1371,7 +1371,7 @@ pub(super) async fn handle_reactive_transcript(
     // A bounded tail, off the async workers (transcript_tail.rs): the file can be hundreds of MB.
     let requested = params.max_lines.min(TRANSCRIPT_MAX_LINES_CAP).max(1);
     let (mstore, filestore, bid) = (state.mstore.clone(), state.filestore.clone(), block_id.clone());
-    let read = tokio::task::spawn_blocking(move || super::transcript_tail::tail_lines(&mstore, &filestore, &bid, requested)).await;
+    let read = tokio::task::spawn_blocking(move || super::transcript_tail::tail_lines_for_readers(&mstore, &filestore, &bid, requested)).await;
     let (lines, truncated) = match read {
         Ok(Ok(t)) => (t.lines, t.truncated),
         Ok(Err(e)) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("read_session_output: {e}")}))).into_response(),

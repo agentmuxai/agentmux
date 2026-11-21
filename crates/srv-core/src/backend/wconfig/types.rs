@@ -372,6 +372,13 @@ pub struct SettingsType {
     #[serde(rename = "window:prewarmagenttabs", default, skip_serializing_if = "Option::is_none")]
     pub window_prewarm_agent_tabs: Option<bool>,
 
+    /// While the pointer rests on a window tab, draw the agent transcripts in it
+    /// that changed since the person last saw it, one pane at a time, so the tab
+    /// shows every pane at once at the click. On unless `false`; see
+    /// docs/specs/SPEC_WINDOW_TAB_SWITCH_DRAW_ON_INTENT_2026_11_12.md.
+    #[serde(rename = "window:drawtabonhover", default, skip_serializing_if = "Option::is_none")]
+    pub window_draw_tab_on_hover: Option<bool>,
+
     #[serde(rename = "window:dimensions", default, skip_serializing_if = "String::is_empty")]
     pub window_dimensions: String,
 

@@ -17,8 +17,8 @@
 
 import { getApi } from "@/util/app-api";
 import { TITLE_FALLBACK } from "@/app/store/browser-pane-state";
+import { noteTabArrival, noteTabLeave, noteTabPress, setTabIntent, tabIntentId } from "@/app/store/tab-intent";
 import { getSettingsKeyAtom } from "@/store/global";
-import { createSignal } from "solid-js";
 
 /** Block meta: present while the pane is asleep or waking (spec §4). */
 export const SLEEP_META_KEY = "browser:sleep";
@@ -148,28 +148,31 @@ export const HOVER_WAKE_GIVE_UP_MS = 10_000;
 /** A shown pane's wake that has not ended this long after it began ends anyway: its card must never outlast it. */
 export const WAKE_STUCK_MS = 120_000;
 
-const [prewakeTab, setPrewakeTab] = createSignal<string | null>(null);
-/** The window tab whose sleeping browser panes should start waking. */
-export const prewakeTabId = prewakeTab;
+/** The window tab whose sleeping browser panes should start waking: the window's tab intent (store/tab-intent.ts),
+ *  which the agent panes of the tab also draw ahead on. */
+export const prewakeTabId = tabIntentId;
 
 let dwell: ReturnType<typeof setTimeout> | undefined;
 
 /** The pointer entered a window tab's pill. */
 export function hoverTabPill(tabId: string): void {
     clearTimeout(dwell);
-    dwell = setTimeout(() => setPrewakeTab(tabId), HOVER_WAKE_DWELL_MS);
+    noteTabArrival(tabId);
+    dwell = setTimeout(() => setTabIntent(tabId), HOVER_WAKE_DWELL_MS);
 }
 
 /** The pointer pressed a window tab's pill: wake at once. */
 export function pressTabPill(tabId: string): void {
     clearTimeout(dwell);
-    setPrewakeTab(tabId);
+    noteTabPress(tabId);
+    setTabIntent(tabId);
 }
 
 /** The pointer left a window tab's pill. */
 export function leaveTabPill(tabId: string): void {
     clearTimeout(dwell);
-    if (prewakeTab() === tabId) setPrewakeTab(null);
+    noteTabLeave(tabId);
+    if (tabIntentId() === tabId) setTabIntent(null);
 }
 
 // ── When a hidden pane sleeps (spec §5) ────────────────────────────────────

@@ -227,7 +227,7 @@
     }
 
     .stat-watch-disk {
-        min-width: 13ch; // fits "Disk 100% free"
+        min-width: 18ch; // fits "Disk 100%/999GB free" (the widest it reads, 17ch of text), so the digits changing do not move the items beside it
     }
 
     .stat-disk {
