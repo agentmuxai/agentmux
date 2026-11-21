@@ -22,7 +22,8 @@
     }
 }
 
-// The filled tone keeps its text and fill and presses darker, not into the accent line.
+// The filled tone keeps its text and fill and presses a step toward the text colour (darker on a light theme, lighter
+// on a dark one), not into the accent line.
 .ui-button.ui-tone-attention:active:not(:disabled, [aria-disabled="true"]) {
     color: var(--attention-text-color);
     border-color: var(--attention-color);
