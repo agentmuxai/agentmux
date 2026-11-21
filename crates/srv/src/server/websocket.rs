@@ -16,7 +16,7 @@ use serde_json::json;
 
 use crate::backend::blockcontroller;
 use crate::backend::rpc::engine::WshRpcEngine;
-use crate::backend::rpc_types::{CommandBlockInputData, RpcMessage, COMMAND_CONTROLLER_INPUT};
+use crate::backend::rpc_types::{CommandBlockInputData, RpcContext, RpcMessage, COMMAND_CONTROLLER_INPUT};
 use crate::backend::obj::TermSize;
 
 use super::AppState;
@@ -661,39 +661,9 @@ async fn handle_incoming_text(
                     tracing::warn!("ws: rpc wscommand missing message field");
                 }
             }
-            "blockinput" => {
-                if let Some(ref block_id) = incoming.blockid {
-                    if let Some(ref data64) = incoming.inputdata64 {
-                        if !data64.is_empty() {
-                            match base64::engine::general_purpose::STANDARD.decode(data64) {
-                                Ok(data) => {
-                                    if let Err(e) = dispatch_blockinput(block_id, data) {
-                                        tracing::debug!("ws: blockinput error: {}", e);
-                                    }
-                                }
-                                Err(e) => {
-                                    tracing::warn!("ws: blockinput base64 decode error: {}", e);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            "setblocktermsize" => {
-                if let Some(ref block_id) = incoming.blockid {
-                    if let Some(ref ts_val) = incoming.termsize {
-                        match serde_json::from_value::<TermSize>(ts_val.clone()) {
-                            Ok(ts) => {
-                                let input = blockcontroller::BlockInputUnion::resize(ts);
-                                if let Err(e) = blockcontroller::send_input(block_id, input, None) {
-                                    tracing::debug!("ws: setblocktermsize error: {}", e);
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!("ws: setblocktermsize parse error: {}", e);
-                            }
-                        }
-                    }
+            "blockinput" | "setblocktermsize" => {
+                if input_command(wscommand, &incoming, engine, socket).await.is_err() {
+                    return Err(true);
                 }
             }
             other => {
@@ -703,6 +673,55 @@ async fn handle_incoming_text(
     }
 
     Ok(None)
+}
+
+/// The window's input commands (`blockinput` keystrokes, `setblocktermsize`, and `controllerinput`'s Stop and resize)
+/// are the person's hands: typed into a block they read as the person's own words. A connection registered as an
+/// agent (the agent's own token, proven at `bus:register`) writes into no block through them. An agent writes into
+/// its own terminal with the Terminal tool (the PtyShell API checks that the shell is its own) and reaches another
+/// agent with Message send. Everything else is as before: this is a guard against an agent's mistake, not a boundary
+/// against a process that can read the instance key (a native agent can; a container agent's token cannot open `/ws`).
+pub(super) fn refuse_agent_input(ctx: &RpcContext) -> Result<(), String> {
+    if ctx.agent_id.is_empty() {
+        Ok(())
+    } else {
+        Err("FORBIDDEN: an agent writes into its own terminal with the Terminal tool and talks to another agent with Message send".to_string())
+    }
+}
+
+/// `blockinput` and `setblocktermsize`: a payload for a block's controller from this connection. A refusal is sent back
+/// as a `bus:error` frame (the one agent clients already read); a closed socket is the only `Err`.
+async fn input_command(wscommand: &str, incoming: &WSIncoming, engine: &Arc<WshRpcEngine>, socket: &mut WebSocket) -> Result<(), ()> {
+    let Some(block_id) = incoming.blockid.as_deref() else { return Ok(()) };
+    let ctx = engine.rpc_context();
+    let result = if wscommand == "blockinput" {
+        let Some(data64) = incoming.inputdata64.as_deref().filter(|d| !d.is_empty()) else { return Ok(()) };
+        match base64::engine::general_purpose::STANDARD.decode(data64) {
+            Ok(data) => dispatch_blockinput(&ctx, block_id, data),
+            Err(e) => {
+                tracing::warn!("ws: blockinput base64 decode error: {}", e);
+                return Ok(());
+            }
+        }
+    } else {
+        let Some(ts_val) = incoming.termsize.as_ref() else { return Ok(()) };
+        match serde_json::from_value::<TermSize>(ts_val.clone()) {
+            Ok(ts) => refuse_agent_input(&ctx)
+                .and_then(|()| blockcontroller::send_input(block_id, blockcontroller::BlockInputUnion::resize(ts), None)),
+            Err(e) => {
+                tracing::warn!("ws: setblocktermsize parse error: {}", e);
+                return Ok(());
+            }
+        }
+    };
+    if let Err(e) = result {
+        tracing::debug!("ws: {wscommand} error: {e}");
+        if e.starts_with("FORBIDDEN") {
+            let frame = serde_json::to_string(&json!({ "type": "bus:error", "error": e })).unwrap_or_default();
+            socket.send(Message::Text(frame.into())).await.map_err(|_| ())?;
+        }
+    }
+    Ok(())
 }
 
 /// Route a decoded `blockinput` payload — the actual human-keystroke path
@@ -719,7 +738,8 @@ async fn handle_incoming_text(
 /// same PTY. The frontend's `agentLocked()` gate is still the primary UX
 /// layer (stops it before it's even sent), but it is eventually consistent;
 /// this is the synchronous backstop against this handler's own state.
-fn dispatch_blockinput(block_id: &str, data: Vec<u8>) -> Result<(), String> {
+fn dispatch_blockinput(ctx: &RpcContext, block_id: &str, data: Vec<u8>) -> Result<(), String> {
+    refuse_agent_input(ctx)?;
     if blockcontroller::agent_lock::is_locked(block_id) {
         tracing::debug!(block_id = %block_id, "blockinput: dropped — agent lock active");
         return Ok(());
@@ -978,7 +998,7 @@ mod tests {
     fn blockinput_is_dropped_while_an_agent_lock_is_active() {
         let locked_id = "ws-blockinput-lock-test-locked";
         blockcontroller::agent_lock::lock_until(locked_id, agentmux_common::time::now_ms() + 60_000);
-        let result = dispatch_blockinput(locked_id, b"y".to_vec());
+        let result = dispatch_blockinput(&RpcContext::default(), locked_id, b"y".to_vec());
         assert!(
             result.is_ok(),
             "a locked blockinput call must be dropped cleanly, not forwarded to send_input: {result:?}"
@@ -986,12 +1006,63 @@ mod tests {
         blockcontroller::agent_lock::release(locked_id);
 
         let unlocked_id = "ws-blockinput-lock-test-unlocked";
-        let result = dispatch_blockinput(unlocked_id, b"y".to_vec());
+        let result = dispatch_blockinput(&RpcContext::default(), unlocked_id, b"y".to_vec());
         assert_eq!(
             result,
             Err(format!("no controller for block {unlocked_id}")),
             "an unlocked blockinput call must still reach send_input for real"
         );
+    }
+
+    /// An agent's connection writes into no block through the window's input commands, whatever block it names (another
+    /// agent's pane, or a shell of its own: its own shell has the Terminal tool). The window's connection, and one
+    /// that is not registered as an agent, reach the controller as before.
+    #[test]
+    fn blockinput_is_refused_for_a_connection_registered_as_an_agent() {
+        let agent = RpcContext { agent_id: "agent9".to_string(), ..Default::default() };
+        let someone_elses_pane = "ws-blockinput-agent-test-other-agents-pane";
+        let refused = dispatch_blockinput(&agent, someone_elses_pane, b"rm -rf\n".to_vec());
+        assert!(refused.as_ref().is_err_and(|e| e.starts_with("FORBIDDEN") && e.contains("Message send")), "{refused:?}");
+        assert!(refuse_agent_input(&agent).is_err());
+        // The window (proven) and a connection with no agent registration are not refused: they reach send_input.
+        for person in [RpcContext::operator_for_tests(), RpcContext::default()] {
+            assert_eq!(
+                dispatch_blockinput(&person, someone_elses_pane, b"y".to_vec()),
+                Err(format!("no controller for block {someone_elses_pane}"))
+            );
+        }
+    }
+
+    /// `controllerinput` (Stop, resize) and its refusal for an agent's connection, through a real engine: the agent is
+    /// refused with the reason before the controller is looked up, the window reaches it.
+    #[tokio::test]
+    async fn controllerinput_is_refused_for_a_connection_registered_as_an_agent() {
+        use crate::backend::rpc::engine::WshRpcEngine;
+        use crate::server::tests::test_state;
+
+        async fn call(ctx: RpcContext, block_id: &str) -> RpcMessage {
+            let (engine, mut output_rx) = WshRpcEngine::new();
+            register_handlers(&engine, test_state(), "test-conn-agent-input".to_string());
+            engine.set_rpc_context(ctx);
+            engine.handle_message(RpcMessage {
+                command: COMMAND_CONTROLLER_INPUT.to_string(),
+                reqid: uuid::Uuid::new_v4().to_string(),
+                data: Some(serde_json::json!({ "blockid": block_id, "signame": "SIGINT" })),
+                ..Default::default()
+            });
+            tokio::time::timeout(std::time::Duration::from_secs(2), output_rx.recv())
+                .await
+                .expect("handler should respond within 2s")
+                .expect("response channel should not close")
+        }
+
+        let agent = RpcContext { agent_id: "agent9".to_string(), ..Default::default() };
+        let resp = call(agent, "ci-other-agents-controller").await;
+        assert!(resp.error.starts_with("FORBIDDEN") && resp.error.contains("Terminal tool"), "{}", resp.error);
+        for person in [RpcContext::operator_for_tests(), RpcContext::default()] {
+            let resp = call(person, "ci-other-agents-controller").await;
+            assert!(resp.error.contains("no controller"), "the window still reaches the controller: {}", resp.error);
+        }
     }
 
     /// The lease must stop dropping input the moment it lapses, with nobody
