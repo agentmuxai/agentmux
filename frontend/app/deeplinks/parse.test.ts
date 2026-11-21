@@ -33,7 +33,7 @@ describe("the conformance file", () => {
         const link = textOf(c.link);
         it(`reads ${link.slice(0, 80)}`, () => {
             const got = parseLink(link);
-            if (!got.ok) throw new Error(`${link}: refused with ${got.code}`);
+            if ("code" in got) throw new Error(`${link}: refused with ${got.code}`);
             const ok = c.ok as { view: string; place: string | null; values: Record<string, Written>; params: Record<string, Written>; anchor: string | null };
             expect(got.link.view).toBe(ok.view);
             expect(got.link.place).toBe(ok.place);
@@ -48,8 +48,9 @@ describe("the conformance file", () => {
         const link = textOf(c.link);
         it(`refuses ${link.slice(0, 80)} as ${c.error}`, () => {
             const got = parseLink(link);
-            expect(got.ok ? `parsed as ${got.link.canonical}` : got.code).toBe(c.error);
-            if (!got.ok) expect(got.reason).toBe(DEEPLINKS.errors[c.error!]);
+            // `in`, not `ok`, narrows the result whatever the compiler's strictness.
+            expect("code" in got ? got.code : `parsed as ${got.link.canonical}`).toBe(c.error);
+            if ("code" in got) expect(got.reason).toBe(DEEPLINKS.errors[c.error!]);
         });
     }
 });
