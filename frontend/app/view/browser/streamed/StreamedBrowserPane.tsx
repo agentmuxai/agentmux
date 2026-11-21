@@ -1,10 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { t } from "@/app/i18n/i18n";
-import { Button, IconButton, Notice, TextInput } from "@/app/element/ui";
+import { Button, CloseButton, IconButton, Notice, Tabs, TextInput } from "@/app/element/ui";
 import type { BrowserViewModel } from "../browser-model";
 import { createFramePainter } from "./frame-painter";
 import { attachStageInput } from "./stage-input";
@@ -68,31 +68,23 @@ function StreamedBar(props: { pane: StreamedPane }): JSX.Element {
     );
 }
 
-/** The windows of the pane, as tabs, while a page has opened one: each says which site it is on, and a pop-up can be closed. */
+/** The windows of the pane, as tabs, while a page has opened one: each says which site it is on; the shown pop-up can be closed. */
 function StreamedWindows(props: { pane: StreamedPane }): JSX.Element {
     const state = () => props.pane.windows();
+    const shown = () => state()?.windows.find((w) => w.id === state()?.active);
     return (
         <Show when={(state()?.windows.length ?? 0) > 1}>
-            <div class="streamed-windows" role="tablist" aria-label={t("browser.streamed.windows")}>
-                <For each={state()?.windows ?? []}>
-                    {(w) => (
-                        <div class="streamed-window" classList={{ active: w.id === state()?.active }}>
-                            <button
-                                type="button"
-                                role="tab"
-                                class="streamed-window-label"
-                                aria-selected={w.id === state()?.active}
-                                title={w.url || w.title}
-                                onClick={() => props.pane.showWindow(w.id)}
-                            >
-                                {windowLabel(w)}
-                            </button>
-                            <Show when={w.closable}>
-                                <IconButton icon="xmark" label={t("browser.streamed.closeWindow")} onClick={() => props.pane.closeWindow(w.id)} />
-                            </Show>
-                        </div>
-                    )}
-                </For>
+            <div class="streamed-windows">
+                <Tabs
+                    idPrefix="streamed-windows"
+                    ariaLabel={t("browser.streamed.windows")}
+                    items={(state()?.windows ?? []).map((w) => ({ id: String(w.id), label: windowLabel(w), tooltip: w.url || w.title }))}
+                    value={String(state()?.active ?? 0)}
+                    onChange={(id) => props.pane.showWindow(Number(id))}
+                />
+                <Show when={shown()?.closable}>
+                    <CloseButton size="sm" label={t("browser.streamed.closeWindow")} onClick={() => props.pane.closeWindow(state()?.active ?? 0)} />
+                </Show>
             </div>
         </Show>
     );
