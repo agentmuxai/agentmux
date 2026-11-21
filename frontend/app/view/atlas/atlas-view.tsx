@@ -24,7 +24,7 @@ import { SwarmFilterBar } from "../swarm/swarm-filter-bar";
 import { CardFacts } from "./atlas-card-facts";
 import { inContainer } from "./atlas-containers";
 import { edgePath } from "./atlas-edge-path";
-import { ExtraCard, ExtraNodes, ServicesRegion } from "./atlas-extras";
+import { ExtraCard, ExtraNodes } from "./atlas-extras";
 import { AtlasFleetBar } from "./atlas-fleet-bar";
 import { flowEndResolver, labelKeepOut } from "./atlas-flow";
 import { AtlasFlowLayer } from "./atlas-flow-layer";
@@ -35,7 +35,6 @@ import {
     layoutBySeat,
     NODE_H,
     NODE_W,
-    SERVICES_REGION,
     type AtlasLayout,
     type RegionBox as RegionBoxLayout,
 } from "./atlas-layout";
@@ -281,9 +280,6 @@ function AtlasMap(props: {
                     </Show>
                 )}
             </For>
-            <Show when={props.layout.regions.find((box) => box.key === SERVICES_REGION)}>
-                {(box) => <ServicesRegion box={box()} />}
-            </Show>
             <svg class="atlas-edges" width={props.layout.width} height={props.layout.height} aria-hidden="true">
                 <For each={props.data.graph().edges}>
                     {(edge) => {

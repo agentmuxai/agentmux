@@ -1,6 +1,6 @@
 -- a leader
 <div>
-  <div class="agent-primitive-modal-detail agent-seat-panel" data-testid="agent-seat-panel">
+  <div class="agent-primitive-modal-detail agent-seat-panel" data-testid="agent-seat-panel" data-operator-only="An agent sets a seat as itself with Agents set_seat.">
     <div class="agent-primitive-modal-readonly">
       <p class="agent-primitive-modal-global-note">
         "AgentX"
@@ -50,7 +50,7 @@
 -- a lead this machine can't name
 -- an unknown lead
 <div>
-  <div class="agent-primitive-modal-detail agent-seat-panel" data-testid="agent-seat-panel">
+  <div class="agent-primitive-modal-detail agent-seat-panel" data-testid="agent-seat-panel" data-operator-only="An agent sets a seat as itself with Agents set_seat.">
     <div class="agent-primitive-modal-readonly">
       <p class="agent-primitive-modal-global-note">
         "AgentX"
@@ -99,7 +99,7 @@
 -- from spawn
 -- from spawn
 <div>
-  <div class="agent-primitive-modal-detail agent-seat-panel" data-testid="agent-seat-panel">
+  <div class="agent-primitive-modal-detail agent-seat-panel" data-testid="agent-seat-panel" data-operator-only="An agent sets a seat as itself with Agents set_seat.">
     <div class="agent-primitive-modal-readonly">
       <p class="agent-primitive-modal-global-note">
         "AgentX"
@@ -148,7 +148,7 @@
 -- no seat
 -- no seat yet
 <div>
-  <div class="agent-primitive-modal-detail agent-seat-panel" data-testid="agent-seat-panel">
+  <div class="agent-primitive-modal-detail agent-seat-panel" data-testid="agent-seat-panel" data-operator-only="An agent sets a seat as itself with Agents set_seat.">
     <div class="agent-primitive-modal-readonly">
       <p class="agent-primitive-modal-global-note">
         "AgentX"

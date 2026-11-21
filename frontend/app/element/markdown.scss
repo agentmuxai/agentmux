@@ -241,7 +241,8 @@
             }
 
             .toc-item {
-                cursor: default;
+                // An anchor with no href that jumps to a heading: a link, so the link hand.
+                cursor: var(--cursor-link);
                 --indent-factor: 1;
                 // The offset in the padding will ensure that when the text in the item wraps, it indents slightly.
                 // The indent factor is set in the React code and denotes the depth of the item in the TOC tree.

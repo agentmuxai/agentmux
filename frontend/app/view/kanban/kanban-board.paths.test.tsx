@@ -422,7 +422,7 @@ describe("KanbanBoard: cancelled tasks under Merged", () => {
 });
 
 describe("KanbanBoard: the narrow list", () => {
-    it("folds Merged and Released until opened, and no other column", () => {
+    it("can fold every section, and starts with Merged and Released folded and the others open", () => {
         mount({
             narrow: true,
             tasks: [task(8, "done"), task(9, "done", {}, { pr: { released_in: "v1" } }), task(7, "review")],
@@ -438,11 +438,11 @@ describe("KanbanBoard: the narrow list", () => {
         }
         for (const label of ["Backlog", "In Research", "Spec'd", "In progress", "Needs you", "Review"]) {
             const h = head(label);
-            expect(h).not.toHaveAttribute("role");
-            expect(h).not.toHaveAttribute("tabindex");
-            expect(h).not.toHaveAttribute("aria-expanded");
-            expect(h).not.toHaveClass("kanban-column__head--foldable");
-            expect(h.querySelector("i")).toBeNull();
+            expect(h).toHaveAttribute("role", "button");
+            expect(h).toHaveAttribute("tabindex", "0");
+            expect(h).toHaveAttribute("aria-expanded", "true");
+            expect(h).toHaveClass("kanban-column__head--foldable");
+            expect(h.querySelector("i")).toHaveClass("fa-chevron-down");
             expect(column(label)).not.toHaveClass("kanban-column--folded");
         }
     });
@@ -498,8 +498,18 @@ describe("KanbanBoard: the narrow list", () => {
         expect(column("Merged")).toHaveClass("kanban-column--folded");
     });
 
-    it("does nothing on a click or key in a column that isn't foldable", () => {
+    it("folds a section that starts open from a click, and opens it again", () => {
         mount({ narrow: true, tasks: [task(7, "review")] });
+        fireEvent.click(head("Review"));
+        expect(head("Review")).toHaveAttribute("aria-expanded", "false");
+        expect(column("Review")).toHaveClass("kanban-column--folded");
+        fireEvent.keyDown(head("Review"), { key: "Enter" });
+        expect(head("Review")).toHaveAttribute("aria-expanded", "true");
+        expect(column("Review")).not.toHaveClass("kanban-column--folded");
+    });
+
+    it("has no foldable header in the wide layout, and a click or key there does nothing", () => {
+        mount({ narrow: false, tasks: [task(7, "review")] });
         fireEvent.click(head("Review"));
         fireEvent.keyDown(head("Review"), { key: "Enter" });
         expect(head("Review")).not.toHaveAttribute("aria-expanded");

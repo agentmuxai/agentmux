@@ -2812,6 +2812,74 @@ fn test_keyword_match_whole_word_avoids_substring_false_positives() {
 }
 
 #[test]
+fn test_a_post_is_refused_for_a_credential_word_and_says_which() {
+    for (msg, why) in [
+        ("the deploy password is in the old note", "password"),
+        ("rotate the Credentials today", "credential"),
+        ("use an API_KEY here", "api_key"),
+        ("do a force-push to main", "force-push"),
+        ("the pat expired", "pat"),
+    ] {
+        assert_eq!(post_refusal_reason(msg).as_deref(), Some(why), "{msg:?}");
+        assert!(is_sensitive_message(msg), "{msg:?}");
+    }
+}
+
+#[test]
+fn test_a_post_with_token_outside_a_usage_is_refused_and_the_word_is_named() {
+    for (msg, why) in [
+        ("paste the access token here", "token"),
+        ("the Bearer  Token is stale", "token"),
+        ("rotate the github tokens", "tokens"),
+        ("it reads token=abc", "token"),
+        ("a refresh token\nand more", "token"),
+        ("the access-token is stale", "token"),
+        ("token: abc123", "token"),
+        ("{\"token\": \"abc\"}", "token"),
+        ("my token is abc123", "token"),
+        ("the token abc123", "token"),
+        ("a slack token", "token"),
+        ("access\ntoken", "token"),
+        ("your token", "token"),
+        ("copy of token abc123", "token"),
+        ("the value of token abc123", "token"),
+        ("context token ghp_abc", "token"),
+        ("max token abc123", "token"),
+        ("token and abc123", "token"),
+        ("token or abc123", "token"),
+        ("input token: abc123", "token"),
+        ("cache token abc123", "token"),
+        ("2fa token: 123456", "token"),
+        ("1password token abc", "token"),
+    ] {
+        assert_eq!(post_refusal_reason(msg).as_deref(), Some(why), "{msg:?}");
+    }
+}
+
+#[test]
+fn test_a_post_about_tokens_as_usage_units_is_let_through_but_a_jekt_tier_still_escalates() {
+    for msg in [
+        "ways to save tokens",
+        "Token savers and workflow kinks go on the board",
+        "It cost 40k tokens. API calls were few.",
+        "about 5,000 tokens and seven turns",
+        "the token budget for this turn",
+        "fewer tokens or turns",
+        "tokens saved on every call",
+        "1.5m tokens",
+        "10 million tokens",
+        "tokenize the input",
+    ] {
+        assert_eq!(post_refusal_reason(msg), None, "refused: {msg:?}");
+    }
+    // The bare word still escalates a jekt's tier: only the post filter reads it by its context.
+    assert!(is_sensitive_message("ways to save tokens"));
+    // Invisible characters and fullwidth letters do not hide a credential word from the post filter either.
+    assert_eq!(post_refusal_reason("the pass\u{200B}word").as_deref(), Some("password"));
+    assert_eq!(post_refusal_reason("the ｔｏｋｅｎ").as_deref(), Some("token"));
+}
+
+#[test]
 fn test_keyword_match_whole_word_case_insensitive() {
     for msg in ["TOKEN", "Token", "tOkEn", "SECRET", "Secret"] {
         assert!(is_sensitive_message(msg), "expected sensitive: {msg:?}");

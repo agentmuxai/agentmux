@@ -415,6 +415,7 @@ pub(crate) fn copy_definition(
     } else {
         branch_label.to_string()
     };
+    if !branch_label.is_empty() { crate::backend::reserved_names::check_all(&[&fork_name]).map_err(|e| format!("forkagentdefinition: {e}"))?; }
     let label = if branch_label.is_empty() {
         fork_name.clone()
     } else {
@@ -432,7 +433,6 @@ pub(crate) fn copy_definition(
     let effective_provider = id_store.resolve_effective_provider_id(&source);
     let mut fork = AgentDefinition {
         id: uuid::Uuid::new_v4().to_string(),
-        // Empty slug → agent_def_insert derives + resolves collisions.
         slug: fork_slug,
         name: fork_name,
         icon: source.icon.clone(),
