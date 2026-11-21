@@ -1,6 +1,6 @@
 # Spec: Windows Headless as a real service: starts at boot, survives sign-out, installed by one documented command
 
-**Status:** approved, revised 2026-11-20 with the security review's answers (the three questions answered yes, with the conditions now written into B.1, B.3, C, D.2 and F). Written against agentmux `origin/main` 351954ee87 (2026-11-20).
+**Status:** active (approved; being built), revised 2026-11-20 with the security review's answers (the three questions answered yes, with the conditions now written into B.1, B.3, C, D.2 and F). Written against agentmux `origin/main` 351954ee87 (2026-11-20).
 **Requirement (restated):** a person can install AgentMux Headless on Windows, have it start as a Windows service with nobody signed in (and keep running after they sign out), and open a browser that is connected to it.
 **Sources:** the code (`crates/srv/src/agentmux_cli/service.rs`, `setup.rs`, `crates/srv/src/agentmuxw.rs`, `crates/srv/src/server/local_session.rs`, `crates/srv/src/headless.rs`), `docs/specs/SPEC_HEADLESS_RENAME_AND_PER_PLATFORM_2026_11_16.md` (sections 5.1 and 6), and a test of the published 0.60.36 on a Windows test host. **Nothing in this spec was run on Windows by its author.** Statements about how Windows behaves that the code and Posa's test do not show are marked *(to prove)*: step 1 of the build (section G) proves each on a real machine before anything depends on it.
 
