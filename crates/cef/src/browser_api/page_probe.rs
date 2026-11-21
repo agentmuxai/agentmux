@@ -131,14 +131,18 @@ pub struct ProbeReq {
     pub detail: bool,
 }
 
-/// What a browser is.
+/// What a browser is. AgentMux's own page only when the browser positively is one (a window srv
+/// knows, or an unpromoted pool window); anything else, such as a pane that is closing or not yet
+/// registered, is treated as a person's page and gets the expression that reads no text.
 pub fn role_of(kind: &BrowserKind) -> Role {
     if kind.block_id.is_some() {
         Role::BrowserPane
     } else if kind.pool {
         Role::PoolWindow
-    } else {
+    } else if kind.window_id.is_some() {
         Role::AppWindow
+    } else {
+        Role::BrowserPane
     }
 }
 
@@ -313,15 +317,23 @@ pub async fn page_probe_route(
 mod tests {
     use super::*;
 
-    fn kind(block_id: Option<&str>, pool: bool) -> BrowserKind {
-        BrowserKind { label: "x".into(), browser_id: 1, block_id: block_id.map(Into::into), pool, window_id: None }
+    fn kind(block_id: Option<&str>, pool: bool, window_id: Option<&str>) -> BrowserKind {
+        BrowserKind { label: "x".into(), browser_id: 1, block_id: block_id.map(Into::into), pool, window_id: window_id.map(Into::into) }
     }
 
     #[test]
     fn a_pane_is_a_pane_before_it_is_anything_else() {
-        assert_eq!(role_of(&kind(Some("b1"), false)), Role::BrowserPane);
-        assert_eq!(role_of(&kind(None, true)), Role::PoolWindow);
-        assert_eq!(role_of(&kind(None, false)), Role::AppWindow);
+        assert_eq!(role_of(&kind(Some("b1"), false, None)), Role::BrowserPane);
+        assert_eq!(role_of(&kind(None, true, None)), Role::PoolWindow);
+        assert_eq!(role_of(&kind(None, false, Some("w1"))), Role::AppWindow);
+    }
+
+    #[test]
+    fn a_browser_that_is_not_positively_agentmuxs_own_is_read_as_a_pane() {
+        // A pane that is closing, or not registered yet, has no block id, no window and is not pool-side.
+        let unknown = kind(None, false, None);
+        assert_eq!(role_of(&unknown), Role::BrowserPane);
+        assert_eq!(expression_for(role_of(&unknown)), PANE_EXPRESSION);
     }
 
     #[test]
