@@ -40,6 +40,7 @@ node ~/.agentmux/shell/muxspect.mjs conversations
 node ~/.agentmux/shell/muxspect.mjs conversation <agent>
 node ~/.agentmux/shell/muxspect.mjs find <block_id_or_agent>
 node ~/.agentmux/shell/muxspect.mjs instances
+node ~/.agentmux/shell/muxspect.mjs browsers [--sample <seconds>] [--detail]
 node ~/.agentmux/shell/muxspect.mjs --channel <name> list
 node ~/.agentmux/shell/muxspect.mjs help
 ```
@@ -138,7 +139,7 @@ muxspect --channel dev-posa-fix dock <block_id>
 ```
 
 `--channel <name>` runs a read against that instance instead of yours. It
-works for `list`, `describe`, `watch`, `dock`, `layout` and
+works for `list`, `describe`, `watch`, `dock`, `layout`, `browsers` and
 `verify-sender`; the instance you are in forwards the request, minus the
 channel, to the other one's own route and returns its answer. `dock clear`
 never takes it, and neither do `find`, `conversations`, `conversation`,
@@ -273,6 +274,26 @@ Scope: this instance's own data dir (`AGENTMUX_DATA_DIR`) and the shared store
 it resolves — the same single-instance limitation as everything except `work`.
 To doctor a different channel, run the CLI against its data dir per the
 runbook.
+
+## Which page each renderer draws (`browsers`)
+
+```bash
+node ~/.agentmux/shell/muxspect.mjs browsers                      # CPU over 3 s
+node ~/.agentmux/shell/muxspect.mjs browsers --sample 10 --detail # longer, with main-thread time by kind of work
+node ~/.agentmux/shell/muxspect.mjs browsers --json
+```
+
+The question "which renderer is busy, and why" on a running instance, release build or not, with no
+DevTools and no restart. One row per renderer process (and one per browser that has none): its pid
+as the OS lists it, CPU as a percent of one core over the sample, role (`app-window`, `pool-window`,
+`browser-pane`), the page, whether Chromium thinks it is visible, the animations running in it, and the
+other browsers that share the process. The window host answers what only it knows (which renderer
+serves which page, and the page's facts); srv samples the process table twice and joins them.
+
+A person's page shows its origin only, never a title, path or animation name. A page the browser
+discarded or the window froze is listed as `asleep` or `frozen` and is not asked (asking would wake
+it); a page with no answer in 1.5 s says so, with its pid and CPU. `--channel <name>` works for it.
+Read-only and stateless. How to use it for a CPU question: `docs/debug/RUNBOOK_ATTRIBUTE_AGENTMUX_CPU_ON_WINDOWS.md`.
 
 ## What it can and can't see
 
