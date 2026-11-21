@@ -155,6 +155,23 @@ pub async fn run_agent(
     run_agent_with_bin(&bin, agent_ref, task, tx).await
 }
 
+/// The folder a step starts in: the one it names, made absolute against srv's own folder when it is relative;
+/// srv's own folder when it names none.
+fn resolved_folder(named: &str) -> std::io::Result<PathBuf> {
+    if !named.is_empty() && std::path::Path::new(named).is_absolute() {
+        return Ok(PathBuf::from(named));
+    }
+    std::env::current_dir().map(|own| resolved_in(named, &own))
+}
+
+fn resolved_in(named: &str, own: &std::path::Path) -> PathBuf {
+    if named.is_empty() {
+        own.to_path_buf()
+    } else {
+        own.join(named)
+    }
+}
+
 /// The one question asked of every start of a harness on this computer in a folder: where a container agent can
 /// write or has run, nothing of the folder may run, and this start has no flags to keep the CLI to AgentMux's
 /// config. Asked of the folder the CLI really starts in (srv's own, when the step names none). The check reads
@@ -179,11 +196,7 @@ pub(crate) async fn run_agent_with_bin(
     task: AgentTask,
     tx: mpsc::UnboundedSender<AgentEvent>,
 ) -> Result<AgentRunHandle, AgentError> {
-    let working_dir = if agent_ref.working_directory.is_empty() {
-        std::env::current_dir().map_err(|e| AgentError::Spawn(format!("cwd: {e}")))?
-    } else {
-        PathBuf::from(&agent_ref.working_directory)
-    };
+    let working_dir = resolved_folder(&agent_ref.working_directory).map_err(|e| AgentError::Spawn(format!("cwd: {e}")))?;
     refuse_in_a_container_agents_folder(&working_dir).await?;
 
     // `claude --print` runs in non-interactive mode and exits when
@@ -725,6 +738,38 @@ mod tests {
         }
         assert!(matches!(run(&bound.path().join("inside")).await, Err(AgentError::FolderRule(_))), "a folder in it");
         assert!(matches!(run(own.path()).await, Err(AgentError::Spawn(_))), "any other folder goes on to the spawn");
+    }
+
+    /// The rule is asked of the folder the process really starts in: a relative folder is taken against srv's own
+    /// folder, and a link to a folder is the folder it leads to.
+    #[test]
+    fn the_rule_is_asked_of_where_a_relative_or_linked_folder_resolves() {
+        let (parent, own) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let bound = parent.path().join("agent");
+        std::fs::create_dir_all(bound.join("inside")).unwrap();
+        crate::backend::fs_ops::container_folders::add_for_test(&bound, "agentmux-runner-rule-resolved", "/workspace");
+        let rule = |dir: &std::path::Path| crate::backend::mcp_folder_rule::workflow_refusal(dir).is_some();
+
+        assert_eq!(resolved_in("", own.path()), own.path(), "no folder named: srv's own");
+        assert_eq!(resolved_in("sub", own.path()), own.path().join("sub"));
+        // Relative to srv's own folder, the path leads out of it into the agent's.
+        let relative = format!("../{}/agent/inside", parent.path().file_name().unwrap().to_string_lossy());
+        assert!(!rule(own.path()));
+        assert!(rule(&resolved_in(&relative, own.path())), "a relative folder is asked where it leads");
+        assert!(!rule(&resolved_in("elsewhere", own.path())), "and a relative folder that leads nowhere near it is not refused");
+
+        // A link, from a folder of the person's, to the agent's folder.
+        let link = own.path().join("link");
+        #[cfg(unix)]
+        let linked = std::os::unix::fs::symlink(&bound, &link).is_ok();
+        #[cfg(windows)]
+        let linked = std::os::windows::fs::symlink_dir(&bound, &link).is_ok();
+        if linked {
+            assert!(rule(&link), "a link to the agent's folder is the agent's folder");
+            assert!(rule(&link.join("inside")), "and so is a folder in it");
+        } else {
+            eprintln!("no link could be made here: a linked folder is not tried");
+        }
     }
 
     #[tokio::test]

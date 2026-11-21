@@ -4,10 +4,9 @@
 //! A start of a program in an agent's folder that is not a harness's start must say so here.
 //!
 //! The folder rule (`mcp_folder_rule`) keeps a harness started on this computer from reading a folder a
-//! container agent can write. A start that bypasses it was found by reading, not by a test: the workflow Agent
-//! block. This test reads the sources of srv and srv-core and finds every file that starts a process and names
-//! an agent's working folder; each one either asks the rule or is listed below with the reason it starts no
-//! harness. A new such file fails here, so whoever adds it reads the rule first.
+//! container agent can write. This test reads the sources of srv and srv-core and finds every file that starts a
+//! process and names an agent's working folder; each one either asks the rule or is listed below with the reason
+//! it starts no harness. A new such file fails here, so whoever adds it reads the rule first.
 //!
 //! What it reaches: a file that has both a process start (`Command::new`, `CommandBuilder::new`) and a name for
 //! an agent's folder. The pane controllers that start a harness through a shared builder are asked the rule by
