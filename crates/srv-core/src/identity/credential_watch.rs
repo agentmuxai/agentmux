@@ -13,7 +13,7 @@
 //! rewriting the file can leave it unreadable for a moment, so a signed-out reading counts only
 //! when a look at least [`LOOK_GAP_MS`] later says the same; then it logs once, marks the account `needs_reauth`
 //! (Connectors shows Reconnect) and tells the account list to reload. An account it marked that
-//! reads signed in again is put back. It never reads a token value, never writes the credentials
+//! reads signed in again is put back. It never logs a token value (the probe it calls withholds them from transcripts), never writes the credentials
 //! file, and does not start a sign-in.
 
 use std::collections::HashMap;
