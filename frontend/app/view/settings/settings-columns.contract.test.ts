@@ -52,7 +52,7 @@ describe("settings.scss columns", () => {
         const wide = css.indexOf("@container settings (min-width: 56rem)");
         const header = css.indexOf(".settings-section-body:not(.settings-section-body--single) > .settings-subheader {", wide);
         expect(header).toBeGreaterThan(wide);
-        expect(css.slice(header, css.indexOf("}", header))).toMatch(/margin-top: var\(--space-4\)[\s\S]*padding-top: 0/);
+        expect(css.slice(header, css.indexOf("}", header))).toMatch(/margin-top: var\(--space-2\)[\s\S]*padding-top: var\(--space-2\)/);
         const last = css.indexOf(".setting-row:has(+ .settings-subheader)", wide);
         expect(last).toBeGreaterThan(wide);
         expect(css.slice(last, css.indexOf("}", last))).toContain("break-before: avoid");
