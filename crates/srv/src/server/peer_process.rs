@@ -125,7 +125,9 @@ mod os {
 
     pub(super) fn owner_of(peer: SocketAddrV4, _server: SocketAddrV4) -> Option<u32> {
         let arg = format!("TCP@127.0.0.1:{}", peer.port());
-        let out = std::process::Command::new("lsof").args(["-nP", "-a", "-i", &arg, "-sTCP:ESTABLISHED", "-Fp"]).output().ok()?;
+        let mut lsof = std::process::Command::new("lsof");
+        crate::backend::pane_env::sanitize_external_std_command(&mut lsof);
+        let out = lsof.args(["-nP", "-a", "-i", &arg, "-sTCP:ESTABLISHED", "-Fp"]).output().ok()?;
         let own = std::process::id();
         pids_in_lsof(&String::from_utf8_lossy(&out.stdout)).into_iter().find(|p| *p != own)
     }
