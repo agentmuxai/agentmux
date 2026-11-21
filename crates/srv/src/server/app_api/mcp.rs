@@ -244,14 +244,17 @@ fn register_mcp_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// actually speaks the protocol — distinct from `mcp.upsert`'s "is this
 /// valid JSON" check, which tells you nothing about reachability.
 fn register_mcp_probe(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let actor_store = state.mstore.clone();
     let mstore = state.mstore.clone();
     let identity_store = state.identity_store.clone();
     engine.register_typed(
         COMMAND_MCP_PROBE,
         move |req: McpAgentItemData, ctx| {
+            let actor_store = actor_store.clone();
             let mstore = mstore.clone();
             let identity_store = identity_store.clone();
             async move {
+                super::mcp_actor::refuse_container_agent(&actor_store, &ctx, COMMAND_MCP_PROBE)?;
                 check_s1(&mstore, &ctx, &req.agent_id)?;
                 if !mstore.mcp_server_is_accessible_to(&identity_store, &req.agent_id, &req.id)
                     .map_err(|e| format!("mcp.probe: {e}"))?
@@ -286,14 +289,17 @@ fn register_mcp_catalog_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 fn register_mcp_catalog_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let actor_store = state.mstore.clone();
     let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_typed(
         COMMAND_MCP_CATALOG_UPSERT,
-        move |req: CommandMcpCatalogUpsertData, _ctx| {
+        move |req: CommandMcpCatalogUpsertData, ctx| {
+            let actor_store = actor_store.clone();
             let identity_store = identity_store.clone();
             let broker = broker.clone();
             async move {
+                super::mcp_actor::refuse_container_agent(&actor_store, &ctx, COMMAND_MCP_CATALOG_UPSERT)?;
 
                 match serde_json::from_str::<serde_json::Value>(&req.config) {
                     Ok(serde_json::Value::Object(_)) => {}
@@ -358,16 +364,19 @@ fn register_mcp_catalog_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
 // *other* agent ids), which nobody asked for.
 // See docs/reports/REPORT_ARMORY_SKILLS_MARKDOWN_AND_BIND_BUG_2026_07_27.md.
 fn register_mcp_catalog_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let actor_store = state.mstore.clone();
     let mstore = state.mstore.clone();
     let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_typed(
         COMMAND_MCP_CATALOG_BIND,
-        move |req: McpAgentBindingData, _ctx| {
+        move |req: McpAgentBindingData, ctx| {
+            let actor_store = actor_store.clone();
             let mstore = mstore.clone();
             let identity_store = identity_store.clone();
             let broker = broker.clone();
             async move {
+                super::mcp_actor::refuse_container_agent(&actor_store, &ctx, COMMAND_MCP_CATALOG_BIND)?;
                 // Only global servers (or ones already bound) may be bound, so
                 // the catalog surface can't be used to bootstrap read access
                 // to another agent's private server config — same rule as
@@ -437,16 +446,19 @@ fn register_mcp_catalog_list_for_agent(engine: &Arc<WshRpcEngine>, state: &AppSt
 /// today — defense in depth over relying solely on UUID secrecy.
 /// reagentx P1 on PR #2329 (round 2).
 fn register_mcp_catalog_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let actor_store = state.mstore.clone();
     let mstore = state.mstore.clone();
     let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_typed(
         COMMAND_MCP_CATALOG_UNBIND,
-        move |req: McpAgentBindingData, _ctx| {
+        move |req: McpAgentBindingData, ctx| {
+            let actor_store = actor_store.clone();
             let mstore = mstore.clone();
             let identity_store = identity_store.clone();
             let broker = broker.clone();
             async move {
+                super::mcp_actor::refuse_container_agent(&actor_store, &ctx, COMMAND_MCP_CATALOG_UNBIND)?;
                 match identity_store.mcp_server_get(&req.mcp_id)
                     .map_err(|e| format!("mcp.catalog.unbind: {e}"))?
                 {
@@ -468,16 +480,19 @@ fn register_mcp_catalog_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 fn register_mcp_catalog_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let actor_store = state.mstore.clone();
     let mstore = state.mstore.clone();
     let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_typed(
         COMMAND_MCP_CATALOG_DELETE,
-        move |req: McpCatalogItemData, _ctx| {
+        move |req: McpCatalogItemData, ctx| {
+            let actor_store = actor_store.clone();
             let mstore = mstore.clone();
             let identity_store = identity_store.clone();
             let broker = broker.clone();
             async move {
+                super::mcp_actor::refuse_container_agent(&actor_store, &ctx, COMMAND_MCP_CATALOG_DELETE)?;
                 if let Some(existing) = identity_store.mcp_server_get(&req.id)
                     .map_err(|e| format!("mcp.catalog.delete: {e}"))?
                 {
@@ -501,14 +516,17 @@ fn register_mcp_catalog_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// The switches live in the identity store beside the catalog, so they
 /// survive an upgrade (SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10.md §2.1).
 fn register_mcp_catalog_set_reach(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let actor_store = state.mstore.clone();
     let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_typed(
         COMMAND_MCP_CATALOG_SET_REACH,
-        move |req: CommandMcpCatalogSetReachData, _ctx| {
+        move |req: CommandMcpCatalogSetReachData, ctx| {
+            let actor_store = actor_store.clone();
             let identity_store = identity_store.clone();
             let broker = broker.clone();
             async move {
+                super::mcp_actor::refuse_container_agent(&actor_store, &ctx, COMMAND_MCP_CATALOG_SET_REACH)?;
                 match identity_store.mcp_server_get(&req.id).map_err(|e| format!("mcp.catalog.set_reach: {e}"))? {
                     Some(s) if s.is_global => {}
                     Some(_) => return Err("FORBIDDEN: a private MCP server has no catalog reach".to_string()),
@@ -629,12 +647,15 @@ fn observed_agents(
 /// connected/error status per row before any agent has bound the server.
 /// See SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08.md §4.4.
 fn register_mcp_catalog_probe(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let actor_store = state.mstore.clone();
     let identity_store = state.identity_store.clone();
     engine.register_typed(
         COMMAND_MCP_CATALOG_PROBE,
-        move |req: McpCatalogItemData, _ctx| {
+        move |req: McpCatalogItemData, ctx| {
+            let actor_store = actor_store.clone();
             let identity_store = identity_store.clone();
             async move {
+                super::mcp_actor::refuse_container_agent(&actor_store, &ctx, COMMAND_MCP_CATALOG_PROBE)?;
                 let server = identity_store.mcp_server_get(&req.id)
                     .map_err(|e| format!("mcp.catalog.probe: {e}"))?
                     .ok_or_else(|| "mcp.catalog.probe: MCP server not found".to_string())?;
