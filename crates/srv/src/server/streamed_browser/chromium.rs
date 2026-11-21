@@ -253,26 +253,21 @@ async fn start() -> Result<Arc<Cdp>, String> {
     tracing::info!(sandbox = !no_sandbox, "streamed browser: Chromium started with its sandbox {}", if no_sandbox { "OFF" } else { "ON" });
     // Downloads are refused in the demo (spec §8); a later PR gives them a place.
     let _ = cdp.call("Browser.setDownloadBehavior", serde_json::json!({ "behavior": "deny" }), None).await;
-    close_popups(&cdp).await;
+    route_windows(&cdp).await;
     Ok(cdp)
 }
 
-/// A window a page opens (a target with an opener) is closed as it appears: the demo has no place for it.
+/// The browser's new and ended pages are told to the pane that owns them (`popups`): a window a pane's page opens is shown by that pane.
+/// A window nobody owns (its opener is not a pane's) is closed as it appears.
 #[cfg(unix)]
-async fn close_popups(cdp: &Arc<Cdp>) {
+async fn route_windows(cdp: &Arc<Cdp>) {
     let mut events = cdp.browser_events();
     let _ = cdp.call("Target.setDiscoverTargets", serde_json::json!({ "discover": true }), None).await;
     let cdp = cdp.clone();
     tokio::spawn(async move {
         while let Some(event) = events.recv().await {
-            if event.method != "Target.targetCreated" {
-                continue;
-            }
-            let info = &event.params["targetInfo"];
-            if info["type"] == "page" && info.get("openerId").is_some_and(|o| !o.is_null()) {
-                if let Some(id) = info["targetId"].as_str() {
-                    cdp.send("Target.closeTarget", serde_json::json!({ "targetId": id }), None);
-                }
+            if let Some(target) = super::popups::route(&event.method, &event.params) {
+                cdp.send("Target.closeTarget", serde_json::json!({ "targetId": target }), None);
             }
         }
     });
