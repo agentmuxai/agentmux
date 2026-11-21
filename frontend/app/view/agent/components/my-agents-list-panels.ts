@@ -20,6 +20,7 @@ import { eventBelongsToPaneOf } from "@/util/focusutil";
 import { Logger } from "@/util/logger";
 import { batch, createEffect, createSignal, on, onCleanup, type Accessor, type Setter } from "solid-js";
 import { forgetOpenHere, requestOpenHere } from "../failure/open-here";
+import { markOpenHerePane, unmarkOpenHerePane } from "../failure/open-here-mark";
 import { requestShutdown } from "../shutdown/shut-down-agent";
 import { createEnvDraft, type EnvDraft } from "./AgentEnvPanel";
 import { columnsForWidth, gridMetrics, type GridMetrics } from "./my-agents-grid-columns";
@@ -227,10 +228,12 @@ async function handleOpenHere(s: RowPanelsState, row: RecentSessionRow): Promise
     }
     requestOpenHere(blockId);
     try {
+        await markOpenHerePane(blockId);
         await s.props.onReattach(row);
     } catch (e) {
         // The launch reports its own failure on the pane (finishAgentOpen); only the mark is left to drop.
         forgetOpenHere(blockId);
+        void unmarkOpenHerePane(blockId);
         Logger.warn("agent-picker", `Open here failed: ${errorDetail(e)}`);
     }
 }
