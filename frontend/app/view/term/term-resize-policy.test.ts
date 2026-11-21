@@ -2,7 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { createRefitScheduler, LIVE_REFIT_LARGE_BUFFER_LINES, liveRefit } from "./term-resize-policy";
+import {
+    createRefitScheduler,
+    LIVE_REFIT_LARGE_BUFFER_LINES,
+    LIVE_REFIT_QUIET_MS,
+    liveRefit,
+} from "./term-resize-policy";
 
 describe("liveRefit (SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md §4.1)", () => {
     const cur = { cols: 80, rows: 24 };
@@ -24,6 +29,10 @@ describe("liveRefit (SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md §4.1)", ()
         expect(liveRefit({ cols: 100, rows: 30 }, cur, LIVE_REFIT_LARGE_BUFFER_LINES + 1)).toBe("throttle");
     });
 });
+
+// The scheduler's quiet-timer, for the tests that do not look at it: never fires, nothing to clear.
+const never = () => 0;
+const noop = () => {};
 
 describe("createRefitScheduler", () => {
     // A fake frame clock: `frame()` runs what was requested for the next frame.
@@ -120,9 +129,9 @@ describe("createRefitScheduler", () => {
         expect(ran).toBe(6);
     });
 
-    it("runs at most one costly refit a frame, and about one every other frame", () => {
+    it("runs at most one costly refit a frame, and about one every few frames", () => {
         const c = timedClock();
-        const s = createRefitScheduler(2, c.request, c.now);
+        const s = createRefitScheduler(2, c.request, c.now, never, noop);
         const perFrame: number[] = [];
         let ran = 0;
         const job = () => {
@@ -132,16 +141,63 @@ describe("createRefitScheduler", () => {
         const keys = Array.from({ length: 8 }, () => ({}));
         keys.forEach((k) => s.schedule(k, job));
         perFrame.push(ran);
-        for (let i = 0; i < 40 && ran < keys.length; i++) {
+        for (let i = 0; i < 80 && ran < keys.length; i++) {
             const before = ran;
             c.frame();
             perFrame.push(ran - before);
         }
         expect(Math.max(...perFrame)).toBe(1);
         expect(ran).toBe(keys.length);
-        // 8 refits of 7.5 ms at a quarter of the time take ~14 frames, not 4.
-        expect(perFrame.length).toBeGreaterThan(12);
-        expect(perFrame.length).toBeLessThan(18);
+        // 8 refits of 7.5 ms at 8% of the time take ~40 frames, not 4 (and not the ~14 of a 25% share).
+        expect(perFrame.length).toBeGreaterThan(30);
+        expect(perFrame.length).toBeLessThan(50);
+    });
+
+    it("runs every waiting refit at once when no refit has been asked for a while: a drag ends on the exact size", () => {
+        const c = timedClock();
+        let pending = null as { cb: () => void; ms: number } | null;
+        const s = createRefitScheduler(
+            2,
+            c.request,
+            c.now,
+            (cb, ms) => (pending = { cb, ms }),
+            () => {
+                pending = null;
+            }
+        );
+        const sizes = new Map<object, number>();
+        const keys = Array.from({ length: 8 }, () => ({}));
+        const refit = (k: object, size: number) => () => {
+            sizes.set(k, size);
+            c.spend(7.5);
+        };
+        // The drag's last size is 7; nobody is refitted at it yet except those the credit allowed.
+        keys.forEach((k) => s.schedule(k, refit(k, 7)));
+        expect(sizes.size).toBeLessThan(keys.length);
+        expect(pending?.ms).toBe(LIVE_REFIT_QUIET_MS);
+        pending?.cb();
+        expect([...sizes.values()]).toEqual(keys.map(() => 7));
+        expect(sizes.size).toBe(keys.length);
+    });
+
+    it("waits for the quiet again whenever another refit is asked for", () => {
+        const c = timedClock();
+        let timers = 0;
+        let cleared = 0;
+        const s = createRefitScheduler(
+            2,
+            c.request,
+            c.now,
+            () => ++timers,
+            () => {
+                cleared++;
+            }
+        );
+        s.schedule({}, () => {});
+        s.schedule({}, () => {});
+        s.schedule({}, () => {});
+        expect(timers).toBe(3);
+        expect(cleared).toBe(2); // each new request cancels the timer before it
     });
 
     it("lets credit build up only to a limit while idle", () => {
