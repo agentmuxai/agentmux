@@ -192,10 +192,10 @@ pub fn turn_refusal(meta: &MetaMapType) -> Option<String> {
 }
 
 /// What a pane is told when [`refusal`] stops its agent.
-pub const REFUSAL: &str = "A container agent can write in this agent's folder, or has run in it, so this agent is not started on this computer there: an agent that runs as a terminal or as a session can't be kept to the MCP servers set in AgentMux. Run this agent in a container, or give it a folder no container agent can write.";
+pub const REFUSAL: &str = "A container agent can write in this agent's folder, or has run in it, so this agent is not started on this computer there: an agent that runs as a terminal or as a session can't be kept to the settings and MCP servers set in AgentMux. Run this agent in a container, or give it a folder no container agent can write.";
 
 /// What a pane is told when [`turn_refusal`] stops its agent's turn.
-pub const TURN_REFUSAL: &str = "A container agent can write in this agent's folder, or has run in it, so this agent is not started on this computer there: only Claude Code can be kept to the MCP servers set in AgentMux. Run this agent in a container, or give it a folder no container agent can write.";
+pub const TURN_REFUSAL: &str = "A container agent can write in this agent's folder, or has run in it, so this agent is not started on this computer there: only Claude Code can be kept to the settings and MCP servers set in AgentMux. Run this agent in a container, or give it a folder no container agent can write.";
 
 /// Whether `exe` may be named as a command in the config of a host agent in the folder spelled `folder`: an
 /// absolute path that is not in that folder and that no container agent can write.
@@ -206,21 +206,55 @@ fn outside(exe: &Path, folder: &[String]) -> bool {
         && matches!(place(&parent.to_string_lossy()), Place::Host)
 }
 
-/// `config` (the text of an MCP config) with its `agentmux` entry's command made `exe`; with no `exe`, the
-/// entry is taken out. A config that is not a JSON object with servers is returned as it is.
-fn by_path(config: &str, exe: Option<&Path>) -> String {
-    let Ok(mut doc) = serde_json::from_str::<Value>(config) else { return config.to_string() };
-    let Some(servers) = doc.get_mut("mcpServers").and_then(Value::as_object_mut) else { return config.to_string() };
-    match (servers.get_mut("agentmux").and_then(Value::as_object_mut), exe) {
-        (None, _) => return config.to_string(),
-        (Some(entry), Some(exe)) => {
-            entry.insert("command".to_string(), Value::String(exe.to_string_lossy().into_owned()));
-        }
-        (Some(_), None) => {
-            servers.remove("agentmux");
+/// Whether `exe` may be named as a command to a host agent of `work_dir` ([`outside`]).
+pub fn is_outside(exe: &Path, work_dir: &str) -> bool {
+    outside(exe, &spellings(&expanded(work_dir)))
+}
+
+/// `config` (the text of an MCP config) with every command named by a path: the `agentmux` entry's is `exe`,
+/// and any other server's bare name is what `found` answers for it. An entry whose command has no such path
+/// is taken out, and its name is returned. A command already written as an absolute path is the person's own
+/// choice and stays. A config that is not a JSON object with servers is returned as it is.
+fn by_path(config: &str, exe: Option<&Path>, found: &dyn Fn(&str) -> Option<PathBuf>) -> (String, Vec<String>) {
+    let Ok(was) = serde_json::from_str::<Value>(config) else { return (config.to_string(), Vec::new()) };
+    let mut doc = was.clone();
+    let Some(servers) = doc.get_mut("mcpServers").and_then(Value::as_object_mut) else { return (config.to_string(), Vec::new()) };
+    let mut taken_out = Vec::new();
+    for (name, entry) in servers.iter_mut() {
+        let Some(entry) = entry.as_object_mut() else { continue };
+        let path = if name == "agentmux" {
+            exe.map(Path::to_path_buf)
+        } else {
+            match entry.get("command").and_then(Value::as_str) {
+                // A server reached over the network has no command to name.
+                None => continue,
+                Some(command) if Path::new(command).is_absolute() => continue,
+                Some(command) => found(command),
+            }
+        };
+        match path {
+            Some(path) => {
+                entry.insert("command".to_string(), Value::String(path.to_string_lossy().into_owned()));
+            }
+            None => taken_out.push(name.clone()),
         }
     }
-    serde_json::to_string_pretty(&doc).unwrap_or_else(|_| config.to_string())
+    for name in &taken_out {
+        servers.remove(name);
+    }
+    if doc == was {
+        return (config.to_string(), taken_out);
+    }
+    (serde_json::to_string_pretty(&doc).unwrap_or_else(|_| config.to_string()), taken_out)
+}
+
+/// The program a bare command name stands for on this computer, looked up on srv's own `PATH` and never in a
+/// working folder; `None` for a name with a folder in it (a relative path) or one that is not found.
+fn on_path(command: &str) -> Option<PathBuf> {
+    if command.contains(['/', '\\']) {
+        return None;
+    }
+    which::which_in(command, std::env::var_os("PATH"), std::env::temp_dir()).ok().filter(|path| path.is_absolute())
 }
 
 /// `config` (the text of a host agent's MCP config) as it is written for `work_dir`, a folder the rule holds
@@ -228,22 +262,37 @@ fn by_path(config: &str, exe: Option<&Path>) -> String {
 /// install, never a name. Where no such file ships outside the folder, the entry is taken out: no server
 /// rather than one found by name.
 pub fn with_the_command_by_path(config: &str, work_dir: &str) -> String {
+    with_commands_by_path(config, work_dir).0
+}
+
+/// [`with_the_command_by_path`], and the same for every other server of the config: a server the person set
+/// with a bare command (`npx`, `uvx`) is named by the path that name has on this computer's `PATH`, outside
+/// the folder. A server whose command has no such path is taken out, and the names of those are returned
+/// (the `agentmux` entry is not among them: it is AgentMux's own).
+pub fn with_commands_by_path(config: &str, work_dir: &str) -> (String, Vec<String>) {
     let folder = spellings(&expanded(work_dir));
     let exe = crate::backend::mcp_rewrite::shipped_exe().filter(|exe| outside(exe, &folder));
     if exe.is_none() {
         tracing::warn!(work_dir, "no agentmux-mcp ships outside this folder: the agent's config is written without the agentmux server");
     }
-    by_path(config, exe.as_deref())
+    let (text, mut taken_out) = by_path(config, exe.as_deref(), &|command| on_path(command).filter(|path| outside(path, &folder)));
+    taken_out.retain(|name| name != "agentmux");
+    if !taken_out.is_empty() {
+        tracing::warn!(work_dir, count = taken_out.len(), "MCP servers set with a command that has no path outside this folder are left out of the agent's config");
+    }
+    (text, taken_out)
 }
 
-/// Whether `config` (the text of an MCP config) names its `agentmux` command by an absolute path, or has no
-/// such entry: what a host turn in a folder the rule holds for is given, and nothing else.
+/// Whether `config` (the text of an MCP config) names every command it has by an absolute path (a server
+/// reached over the network has none): what a host turn in a folder the rule holds for is given, and nothing
+/// else.
 pub fn names_the_command_by_path(config: &str) -> bool {
     let Ok(doc) = serde_json::from_str::<Value>(config) else { return false };
-    match doc.pointer("/mcpServers/agentmux") {
+    let Some(servers) = doc.get("mcpServers").and_then(Value::as_object) else { return true };
+    servers.values().all(|entry| match entry.get("command") {
         None => true,
-        Some(entry) => entry.get("command").and_then(Value::as_str).is_some_and(|command| Path::new(command).is_absolute()),
-    }
+        Some(command) => command.as_str().is_some_and(|command| Path::new(command).is_absolute()),
+    })
 }
 
 /// The text of `folder`'s own `.mcp.json` for a host agent that is defined from the folder (an import), which
@@ -519,19 +568,39 @@ mod tests {
         assert!(!outside(&writable, &the_folder), "one a container agent can write");
         assert!(!outside(Path::new(name), &the_folder), "a bare name");
 
-        let written: Value = serde_json::from_str(&by_path(config, Some(&shipped))).unwrap();
+        // The person's own server, set with a bare name: `git-mcp` is on the PATH here, `gone-mcp` is not.
+        let git = tools.path().join(if cfg!(windows) { "git-mcp.exe" } else { "git-mcp" });
+        let found = |command: &str| (command == "git-mcp").then(|| git.clone());
+        let config = &config.replace(r#""git":{"command":"git-mcp"}"#, r#""git":{"command":"git-mcp","args":["--x"]},"gone":{"command":"gone-mcp"},"web":{"type":"http","url":"https://example.invalid/mcp"}"#);
+
+        let (text, taken_out) = by_path(config, Some(&shipped), &found);
+        let written: Value = serde_json::from_str(&text).unwrap();
         assert_eq!(written["mcpServers"]["agentmux"]["command"], json!(shipped.to_string_lossy()));
         assert_eq!(written["mcpServers"]["agentmux"]["env"]["AGENTMUX_AGENT_ID"], "aria", "the rest of the entry stays");
-        assert_eq!(written["mcpServers"]["git"]["command"], "git-mcp", "another server is left as it is");
-        assert!(names_the_command_by_path(&by_path(config, Some(&shipped))));
+        assert_eq!(written["mcpServers"]["git"]["command"], json!(git.to_string_lossy()), "a bare name becomes the path it has on the PATH");
+        assert_eq!(written["mcpServers"]["git"]["args"], json!(["--x"]));
+        assert!(written["mcpServers"].get("gone").is_none(), "a name with no path is not kept as a name");
+        assert_eq!(taken_out, vec!["gone".to_string()]);
+        assert_eq!(written["mcpServers"]["web"]["url"], "https://example.invalid/mcp", "a server with no command stays");
+        assert!(names_the_command_by_path(&text));
 
-        let without: Value = serde_json::from_str(&by_path(config, None)).unwrap();
+        let (text, taken_out) = by_path(config, None, &found);
+        let without: Value = serde_json::from_str(&text).unwrap();
         assert!(without["mcpServers"].get("agentmux").is_none(), "with none that ships outside the folder: no entry, not a name");
-        assert!(names_the_command_by_path(&by_path(config, None)));
+        assert_eq!(taken_out, vec!["agentmux".to_string(), "gone".to_string()]);
+        assert!(names_the_command_by_path(&text));
+
+        // A command the person wrote as a path is theirs and stays; so does a config with nothing to change.
+        let by_hand = r#"{"mcpServers":{"own":{"command":"/opt/own/server"}}}"#;
+        let by_hand = &if cfg!(windows) { by_hand.replace("/opt/own/server", "C:\\\\own\\\\server.exe") } else { by_hand.to_string() };
+        assert_eq!(by_path(by_hand, Some(&shipped), &found), (by_hand.clone(), Vec::new()));
 
         assert!(!names_the_command_by_path(config), "a bare name is not handed to a turn there");
+        assert!(!names_the_command_by_path(r#"{"mcpServers":{"agentmux":{"command":"/abs/agentmux-mcp"},"git":{"command":"git-mcp"}}}"#), "nor is any other server's");
         assert!(!names_the_command_by_path("not json"));
-        assert_eq!(by_path("not json", Some(&shipped)), "not json");
+        assert_eq!(by_path("not json", Some(&shipped), &found).0, "not json");
+        assert_eq!(on_path("bin/tool"), None, "a relative path is not looked up");
+        assert_eq!(on_path("no-such-program-agentmux-test"), None);
 
         // As a writer calls it: whatever ships on this computer, the result never names the command barely,
         // and never by a path in the folder.
