@@ -304,6 +304,24 @@ const ARC_LANE = 8;
 /** The most it rises: less than the gap between two rows, so it stays out of the row above. */
 const ARC_MAX = 30;
 
+/** The least an arc rises, however little room there is above the row. */
+const ARC_MIN = 4;
+
+/**
+ * How far above `top` the nearest thing above the span `left` to `right` ends: a card of the row above, a region's
+ * title, the edge of the map. Infinity when nothing is above it.
+ */
+function roomAbove(top: number, left: number, right: number, nodes: readonly FlowNode[]): number {
+    let room = Infinity;
+    for (const n of nodes) {
+        const w = n.w ?? NODE_W;
+        const bottom = n.y + (n.h ?? NODE_H) + (n.pad ?? 0);
+        if (bottom > top + 1 || n.x + w < left || n.x > right) continue;
+        room = Math.min(room, top - bottom);
+    }
+    return room;
+}
+
 /** Whether `from` and `to` stand in one row with an agent's card between them. */
 function blockedInRow(from: Placed, to: Placed, nodes: readonly FlowNode[]): boolean {
     if (Math.abs(to.y - from.y) >= NODE_H / 2) return false;
@@ -353,7 +371,10 @@ export function flowCurve(
     // Two agents in one row with another between them: a straight line would run behind that card, and only its
     // two ends would show. It leaves the top of one card and arcs over the row to the top of the other.
     const arced = blockedInRow(from, to, nodes);
-    const rise = Math.min(ARC_MAX, ARC_RISE + (dx < 0 ? ARC_ANSWER : 0) + lane * ARC_LANE);
+    const wanted = Math.min(ARC_MAX, ARC_RISE + (dx < 0 ? ARC_ANSWER : 0) + lane * ARC_LANE);
+    // Never more than half the room above the row, so in a dense grid the arc stays clear of the cards over it.
+    const room = arced ? roomAbove(Math.min(from.y, to.y), Math.min(ax, bx), Math.max(ax, bx), nodes) : Infinity;
+    const rise = Math.max(ARC_MIN, Math.min(wanted, room / 2));
     const x1 = arced ? ax : ax + dx * reach;
     const y1 = arced ? from.y : ay + dy * reach;
     const x2 = arced ? bx : bx - dx * reach;

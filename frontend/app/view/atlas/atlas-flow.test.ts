@@ -295,6 +295,20 @@ describe("a line between agents of one row with another between them", () => {
         expect(Math.min(...tops)).toBeGreaterThan(-35);
     });
 
+    it("rises by no more than half the room above the row, so in a dense grid it stays clear of the cards over it", () => {
+        // A row of cards 17 px under another, as the 49-agent grid has them.
+        const above = [0, 154, 308].map((x) => ({ x, y: 0 }));
+        const under = [0, 154, 308].map((x) => ({ x, y: NODE_H + 17 }));
+        const curve = flowCurve(under[0], under[2], [...above, ...under])!;
+        const top = Math.min(...curve.samples.map((p) => p.y));
+        // The row above ends at y 36; the arc stays at least half the gap below it.
+        expect(top).toBeGreaterThanOrEqual(NODE_H + 8);
+        expect(top).toBeLessThan(NODE_H + 17);
+        // With the row above further away it rises as before.
+        const far = flowCurve(under[0], under[2], under)!;
+        expect(Math.min(...far.samples.map((p) => p.y))).toBeLessThan(NODE_H + 17 - 12);
+    });
+
     it("is a straight line when nothing stands between, or when the ends are not in one row", () => {
         expect(flowCurve(first, row[1], row)!.d.startsWith(`M${NODE_W},${NODE_H / 2} Q`)).toBe(true);
         const lower = { x: 308, y: 40 };
