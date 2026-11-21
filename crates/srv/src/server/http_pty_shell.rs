@@ -6,6 +6,31 @@
 
 use super::*;
 
+/// A `ptyshell` handler that acts for the caller's own pane: the pane comes from the caller's token (or signed
+/// identity), a pane named in the request that differs is refused, and the rest of the handler runs on the proven one.
+macro_rules! own_pane_handler {
+    ($name:ident, $inner:ident, $req:ty) => {
+        pub(super) async fn $name(
+            State(state): State<AppState>,
+            caller: Option<axum::Extension<super::caller::Caller>>,
+            Json(mut req): Json<$req>,
+        ) -> axum::response::Response {
+            match own_pane(&state, caller.as_deref(), &req.agent_block_id, None) {
+                Ok(pane) => {
+                    req.agent_block_id = pane;
+                    $inner(State(state), Json(req)).await.into_response()
+                }
+                Err(refusal) => refusal,
+            }
+        }
+    };
+}
+own_pane_handler!(handle_pty_shell_input, pty_shell_input, PtyShellInputRequest);
+own_pane_handler!(handle_pty_shell_resize, pty_shell_resize, PtyShellResizeRequest);
+own_pane_handler!(handle_pty_shell_read, pty_shell_read, PtyShellReadRequest);
+own_pane_handler!(handle_pty_shell_status, pty_shell_status, PtyShellStatusRequest);
+own_pane_handler!(handle_pty_shell_stop, pty_shell_stop, PtyShellStopRequest);
+
 /// `POST /api/v1/ptyshell/create` — attach to (creating if needed) "this
 /// pane's one shell."
 ///
@@ -23,8 +48,13 @@ use super::*;
 /// returns; a UI viewer for it is optional, not a prerequisite.
 pub(super) async fn handle_pty_shell_create(
     State(state): State<AppState>,
-    Json(req): Json<PtyShellCreateRequest>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
+    Json(mut req): Json<PtyShellCreateRequest>,
 ) -> axum::response::Response {
+    match own_pane(&state, caller.as_deref(), &req.agent_block_id, req.auth.as_ref()) {
+        Ok(pane) => req.agent_block_id = pane,
+        Err(refusal) => return refusal,
+    }
     match create_steps::create_pty_shell(&state, &req).await {
         Ok(resp) | Err(resp) => resp,
     }
@@ -112,7 +142,7 @@ pub(super) async fn answer_conpty_handshake_if_seen(state: &AppState, block_id: 
 /// instead of interrupting just the foreground command, the opposite of
 /// what it advertised. Real signal delivery through a PTY is the raw
 /// control byte, handled here, not a separate primitive.
-pub(super) async fn handle_pty_shell_input(
+async fn pty_shell_input(
     State(state): State<AppState>,
     Json(req): Json<PtyShellInputRequest>,
 ) -> impl IntoResponse {
@@ -180,7 +210,7 @@ pub(super) fn lock_shell_for_agent(state: &AppState, shell_id: &str) {
 
 /// `POST /api/v1/ptyshell/resize` — resize the PTY. Some TUIs render
 /// differently or wrap badly at the fallback geometry (25x200).
-pub(super) async fn handle_pty_shell_resize(
+async fn pty_shell_resize(
     State(state): State<AppState>,
     Json(req): Json<PtyShellResizeRequest>,
 ) -> impl IntoResponse {
@@ -224,7 +254,7 @@ pub(super) async fn handle_pty_shell_resize(
 /// whole-file read + in-memory tail is simpler and correct. This is a raw
 /// line log, not a rendered-screen snapshot — see the type's own doc
 /// comment in `api_types.rs`.
-pub(super) async fn handle_pty_shell_read(
+async fn pty_shell_read(
     State(state): State<AppState>,
     Json(req): Json<PtyShellReadRequest>,
 ) -> impl IntoResponse {
@@ -308,7 +338,7 @@ fn incomplete_tail(bytes: &[u8]) -> usize {
 }
 
 /// `POST /api/v1/ptyshell/status` — query whether the shell is still running.
-pub(super) async fn handle_pty_shell_status(
+async fn pty_shell_status(
     State(state): State<AppState>,
     Json(req): Json<PtyShellStatusRequest>,
 ) -> impl IntoResponse {
@@ -336,7 +366,7 @@ pub(super) async fn handle_pty_shell_status(
 /// `PtyShellStopResponse`'s doc comment in `api_types.rs` for why: this
 /// shell is a shared, pane-scoped resource now, not a private one this API
 /// owns outright).
-pub(super) async fn handle_pty_shell_stop(
+async fn pty_shell_stop(
     State(state): State<AppState>,
     Json(req): Json<PtyShellStopRequest>,
 ) -> impl IntoResponse {

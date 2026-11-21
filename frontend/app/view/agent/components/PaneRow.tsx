@@ -62,6 +62,8 @@ export interface PaneRowAction {
     primary?: boolean;
     /** Disable the button (e.g. a Retry mid-flight). */
     disabled?: boolean;
+    /** The button speaks for the person (it sends a person-only command): it marks itself `data-operator-only`, which agents' UI click and key presses refuse. */
+    operatorOnly?: boolean;
 }
 
 export interface PaneRowProps {
@@ -135,6 +137,7 @@ export const PaneRow = (props: PaneRowProps): JSX.Element => {
                             title={action.title}
                             aria-label={action.title}
                             disabled={action.disabled}
+                            data-operator-only={action.operatorOnly ? "" : undefined}
                             // stopPropagation so an action never also fires onActivate.
                             onClick={(e) => { e.stopPropagation(); action.onClick(e); }}
                         >

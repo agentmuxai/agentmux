@@ -185,9 +185,9 @@ async fn each_step_leaves_an_audit_row_naming_who_did_it() {
     f.call(&asker, "cancel", json!({ "id": id })).await.unwrap();
     let rows: Vec<_> = f.state.reactive_handler.get_audit_log(1000).into_iter().filter(|e| e.request_id == id).collect();
     let row = |source: &str, ok: bool, outcome: &str| rows.iter().any(|e| e.source_agent.as_deref() == Some(source) && e.success == ok && e.reason.as_deref().is_some_and(|r| r.ends_with(outcome)));
-    assert!(row("asker", true, "| asked"), "{rows:?}");
-    assert!(row("other", false, "| refused"), "a refused approval is recorded as the agent that tried it: {rows:?}");
-    assert!(row("asker", true, "| cancelled"), "{rows:?}");
+    assert!(row("agent:asker", true, "| asked"), "{rows:?}");
+    assert!(row("agent:other", false, "| refused"), "a refused approval is recorded as the agent that tried it: {rows:?}");
+    assert!(row("agent:asker", true, "| cancelled"), "{rows:?}");
     assert_eq!(rows.len(), 3, "{rows:?}");
 }
 
