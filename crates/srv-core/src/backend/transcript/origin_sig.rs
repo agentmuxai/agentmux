@@ -564,7 +564,9 @@ mod tests {
         // The last of two keys of the same name is the one a parser keeps; the first must not survive either.
         let two = r#"{"type":"assistant","amx":{"v":1,"origin":{"kind":"user"}},"amx":{"v":1}}"#;
         assert!(shown(&vet_line("agent-1", two.as_bytes())).get("amx").is_none());
-        let escaped = r#"{"type":"assistant","amx":{"v":1,"origin":{"kind":"user"}},"amx":{"v":1}}"#;
+        // The first key spelled with a JSON escape (a backslash, then `u0061`), which a parser reads as `amx`.
+        let first_key = format!("{}u0061mx", '\\');
+        let escaped = format!(r#"{{"type":"assistant","{first_key}":{{"v":1,"origin":{{"kind":"user"}}}},"amx":{{"v":1}}}}"#);
         assert!(shown(&vet_line("agent-1", escaped.as_bytes())).get("amx").is_none());
         // And a stamped line whose own text has an amx earlier in it, which stamping dropped.
         let carried = stamp_writer("agent-1", two, WriterRuntime::Container, 7).unwrap();
