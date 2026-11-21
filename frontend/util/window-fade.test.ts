@@ -5,10 +5,9 @@ import { describe, expect, it } from "vitest";
 import { pageCarriesWindowFade } from "./window-fade";
 
 describe("pageCarriesWindowFade", () => {
-    it("is true only for an alpha-capable window, as the host says in the page's address", () => {
-        expect(pageCarriesWindowFade("?ipc_port=1&window_transparent=1")).toBe(true);
-        expect(pageCarriesWindowFade("?ipc_port=1&window_transparent=0")).toBe(false);
-        expect(pageCarriesWindowFade("?ipc_port=1")).toBe(false);
-        expect(pageCarriesWindowFade("")).toBe(false);
+    it("is true only when the host says the page carries the window opacity", () => {
+        expect(pageCarriesWindowFade({ __AGENTMUX_PAGE_FADE__: true })).toBe(true);
+        expect(pageCarriesWindowFade({ __AGENTMUX_PAGE_FADE__: false })).toBe(false);
+        expect(pageCarriesWindowFade({})).toBe(false);
     });
 });
