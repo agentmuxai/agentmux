@@ -458,12 +458,13 @@ impl SubprocessController {
                             // production filter is info, so this is now
                             // suppressed unless RUST_LOG=debug is set.
                             tracing::debug!(block_id = %block_id_read, line = %trimmed, "subprocess stdout → blockfile");
-                            crate::backend::transcript::append::append_output_line(
+                            crate::backend::transcript::append::append_agent_output_line(
                                 broker,
                                 &block_id_read,
                                 trimmed,
                                 filestore_read.as_ref(),
                                 global_output_zone.as_deref(),
+                                crate::backend::transcript::origin_sig::WriterRuntime::Host,
                             );
                         }
                     }
