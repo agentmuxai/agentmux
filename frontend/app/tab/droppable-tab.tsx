@@ -97,6 +97,12 @@ function bindTabPresses(el: HTMLElement, props: DroppableTabProps): void {
     });
 }
 
+/** A click on the pill: the lead the pointer gave the window is noted, then the tab is selected (store/tab-intent.ts). */
+function selectTab(props: DroppableTabProps): void {
+    if (!props.isActive) reportTabSwitch(props.tabId);
+    props.onSelect();
+}
+
 export function DroppableTab(props: DroppableTabProps): JSX.Element {
     let tabWrapRef!: HTMLDivElement;
     const isDragging = () => draggedWindowTabId() === props.tabId;
@@ -369,11 +375,7 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                 isDragging={isDragging()}
                 tabWidth={0}
                 isNew={false}
-                onSelect={() => {
-                    // The lead the pointer gave the window before this switch (store/tab-intent.ts).
-                    if (!props.isActive) reportTabSwitch(props.tabId);
-                    props.onSelect();
-                }}
+                onSelect={() => selectTab(props)}
                 onClose={props.onClose}
                 onDragStart={() => {}}
                 onLoaded={() => {}}
