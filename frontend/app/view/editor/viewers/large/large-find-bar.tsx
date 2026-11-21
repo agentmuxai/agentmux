@@ -4,7 +4,7 @@
 /** The Large text viewer's find strip: a text, next and previous, and what the search found. */
 
 import { tip } from "@/app/element/tip";
-import { CloseButton, FilterInput, IconButton } from "@/app/element/ui";
+import { Button, CloseButton, FilterInput, IconButton } from "@/app/element/ui";
 import { keyLabel } from "@/app/keybindings";
 import { Show, type JSX } from "solid-js";
 import type { LargeFind } from "./large-find-state";
@@ -37,6 +37,26 @@ export function LargeFindBar(props: { find: LargeFind }): JSX.Element {
                 testId="large-text-find"
             />
             <div class="large-text-find-nav">
+                <Button
+                    density="compact"
+                    class="large-text-find-toggle"
+                    pressed={f.matchCase()}
+                    aria-label="Match case"
+                    {...tip("Match case (turn off to ignore case: UTF-8 files)")}
+                    onClick={f.toggleCase}
+                >
+                    Aa
+                </Button>
+                <Button
+                    density="compact"
+                    class="large-text-find-toggle"
+                    pressed={f.regex()}
+                    aria-label="Regular expression"
+                    {...tip("Regular expression (UTF-8 files)")}
+                    onClick={f.toggleRegex}
+                >
+                    .*
+                </Button>
                 <IconButton icon="chevron-up" density="compact" label="Previous match (Shift+Enter)" disabled={!f.canSearch()} onClick={f.previous} />
                 <IconButton icon="chevron-down" density="compact" label="Next match (Enter)" disabled={!f.canSearch()} onClick={f.next} />
                 {/* Nothing to say yet: the close button travels with the arrows, so a narrow strip never leaves it alone. */}

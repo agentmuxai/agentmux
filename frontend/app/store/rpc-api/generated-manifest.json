@@ -1300,6 +1300,10 @@
             "method": "FileSearchBytesCommand"
         },
         {
+            "command": "filesearchtext",
+            "method": "FileSearchTextCommand"
+        },
+        {
             "command": "readeditorfile",
             "method": "ReadEditorFileCommand"
         },

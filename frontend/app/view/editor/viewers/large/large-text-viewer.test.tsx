@@ -23,8 +23,11 @@ const indexLines = vi.hoisted(() => vi.fn());
 vi.mock("@/app/element/local-media", async (actual) => ({ ...(await actual<object>()), fetchMediaRange }));
 vi.mock("@/app/store/global", () => ({ pushNotification: vi.fn() }));
 const searchBytes = vi.hoisted(() => vi.fn());
+const searchText = vi.hoisted(() => vi.fn());
 
-vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { FileIndexLinesCommand: indexLines, FileSearchBytesCommand: searchBytes } }));
+vi.mock("@/app/store/rpc-api", () => ({
+    RpcApi: { FileIndexLinesCommand: indexLines, FileSearchBytesCommand: searchBytes, FileSearchTextCommand: searchText },
+}));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 const VIEW_LINES = 10;
@@ -46,6 +49,14 @@ function serve(text: string) {
         const hay = String.fromCharCode(...bytes);
         const offset = req.backward ? hay.lastIndexOf(needle, req.from) : hay.indexOf(needle, req.from);
         return { found: offset >= 0, offset: Math.max(0, offset), length: needle.length, done: offset < 0, next_from: 0 };
+    });
+    // srv's text search: a literal or a regular expression, either case, as filesearchtext does (forward only here).
+    searchText.mockImplementation(async (_c: unknown, req: { query: string; regex: boolean; ignore_case: boolean; from: number; backward: boolean }) => {
+        const hay = String.fromCharCode(...bytes);
+        const re = new RegExp(req.regex ? req.query : req.query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), req.ignore_case ? "gim" : "gm");
+        re.lastIndex = req.from;
+        const m = re.exec(hay);
+        return { found: !!m, offset: m?.index ?? 0, length: m?.[0].length ?? 0, done: !m, next_from: 0 };
     });
     fetchMediaRange.mockImplementation(async (_path: string, start: number, end: number) => ({
         blob: { arrayBuffer: async () => bytes.slice(start, end + 1).buffer } as unknown as Blob,
@@ -90,6 +101,7 @@ describe("the Large text viewer", () => {
         fetchMediaRange.mockReset();
         indexLines.mockReset();
         searchBytes.mockReset();
+        searchText.mockReset();
         serve(FILE);
         clientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
         Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get: () => ROW_H * VIEW_LINES });
@@ -282,6 +294,50 @@ describe("the Large text viewer", () => {
         fireEvent.keyDown(findBox(), { key: "Enter", shiftKey: true });
         await settle();
         expect(markedLine()).toBe("50");
+    });
+
+    it("ignores case when Match case is off: srv is asked for text, and the match is marked as it is written in the line", async () => {
+        await mount();
+        key("f", { ctrlKey: true });
+        await settle();
+        const matchCase = screen.getByRole("button", { name: "Match case" });
+        expect(matchCase.getAttribute("aria-pressed")).toBe("true");
+        fireEvent.click(matchCase);
+        expect(matchCase.getAttribute("aria-pressed")).toBe("false");
+        fireEvent.input(findBox(), { target: { value: "LINE 5" } });
+        fireEvent.keyDown(findBox(), { key: "Enter" });
+        await settle();
+        expect(searchBytes).not.toHaveBeenCalled();
+        expect(searchText).toHaveBeenLastCalledWith({}, { path: "C:/logs/big.log", query: "LINE 5", regex: false, ignore_case: true, from: 0, backward: false });
+        expect(markedLine()).toBe("5");
+        expect(document.querySelector(".large-text-hit")?.textContent).toBe("line 5");
+    });
+
+    it("finds a regular expression on srv and marks what it matched", async () => {
+        await mount();
+        key("f", { ctrlKey: true });
+        await settle();
+        fireEvent.click(screen.getByRole("button", { name: "Regular expression" }));
+        fireEvent.input(findBox(), { target: { value: "line 9\\d$" } });
+        fireEvent.keyDown(findBox(), { key: "Enter" });
+        await settle();
+        expect(searchText).toHaveBeenLastCalledWith({}, { path: "C:/logs/big.log", query: "line 9\\d$", regex: true, ignore_case: false, from: 0, backward: false });
+        expect(markedLine()).toBe("90");
+        expect(document.querySelector(".large-text-hit")?.textContent).toBe("line 90");
+    });
+
+    it("says a UTF-16 file can't be searched by expression, without asking srv; turning the option off searches again", async () => {
+        await mount({ encoding: "utf-16le" });
+        key("f", { ctrlKey: true });
+        await settle();
+        fireEvent.click(screen.getByRole("button", { name: "Regular expression" }));
+        fireEvent.input(findBox(), { target: { value: "a+" } });
+        fireEvent.keyDown(findBox(), { key: "Enter" });
+        await settle();
+        expect(document.querySelector(".large-text-find-status")?.textContent).toBe("A regular expression can only search a UTF-8 file; this one is in utf-16le");
+        expect(searchText).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole("button", { name: "Regular expression" }));
+        expect(document.querySelector(".large-text-find-status")?.textContent ?? "").not.toContain("UTF-8");
     });
 
     it("finds a match far from the screen and scrolls to it", async () => {
