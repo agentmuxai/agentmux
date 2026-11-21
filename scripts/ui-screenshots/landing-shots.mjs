@@ -7,6 +7,7 @@
 // Terminal text is drawn on a canvas, which redaction can't reach. So terminal shots only run
 // fixed, read-only commands in the demo project, and their verify reads the terminal buffers
 // back and refuses the shot if anything but the expected output is on screen.
+import { CAPTURE_SCALE } from "./lib/crisp.mjs";
 import { openNewTab, openWidget, closeTab, VISIBLE_BLOCK_IDS } from "./widget-shots.mjs";
 import { demoPathProblem } from "./demo-env.mjs";
 
@@ -64,7 +65,7 @@ function landingTerminals() {
         prep: async (session) => {
             const problem = demoPathProblem(DEMO);
             if (problem) throw new Error(`DEMO_DIR: ${problem}`);
-            await session.setViewport({ width: 1280, height: 800, scale: 1 });
+            await session.setViewport({ width: 1280, height: 800, scale: CAPTURE_SCALE });
             await session.pressKey("Escape");
             tab.tabId = null;
             await openNewTab(session, tab);
@@ -172,7 +173,7 @@ function landingWorkspace() {
             const problem = demoPathProblem(DEMO);
             if (problem) throw new Error(`DEMO_DIR: ${problem}`);
             // 1440 x 900: five columns at 1280 left the agent picker ~318 px, too narrow to show its agents' names.
-            await session.setViewport({ width: 1440, height: 900, scale: 1 });
+            await session.setViewport({ width: 1440, height: 900, scale: CAPTURE_SCALE });
             // The terminal's CPU and memory readout would sit over the end of the typed command in a pane this narrow.
             await session.evaluate(`RpcApi.SetConfigCommand(TabRpcClient, { "term:showstatsbadge": false })`);
             await session.pressKey("Escape");

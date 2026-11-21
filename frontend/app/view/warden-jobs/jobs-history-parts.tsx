@@ -8,8 +8,10 @@ import { For, Show, type JSX } from "solid-js";
 
 import { Button, CloseButton, Pill } from "@/app/element/ui";
 import { tip } from "@/app/element/tip";
+import { t } from "@/app/i18n/i18n";
 import { openLink } from "@/app/store/global";
 import { revealBlock } from "@/app/util/reveal-block";
+import { openDroneGraph } from "@/app/view/drone/open-drone";
 import { openWarden } from "@/app/view/warden/open-warden";
 import { vaultAvailable, vaultEntries } from "@/app/view/vault/vault-store";
 import type { JobRunRow } from "@/types/rpc/JobRunRow";
@@ -203,6 +205,11 @@ export function HistoryActions(part: { props: JobHistoryProps; h: JobHistoryStat
                         {u().approved ? `Update to ${u().version}` : `Review ${u().version}`}
                     </Button>
                 )}
+            </Show>
+            <Show when={props.job.source === "drone"}>
+                <Button density="compact" icon="diagram-project" title={t("jobs.openGraphTip")} onClick={() => void openDroneGraph(props.job.id)}>
+                    {t("jobs.openGraph")}
+                </Button>
             </Show>
             <Show when={props.job.owner_block_id}>
                 {(b) => (

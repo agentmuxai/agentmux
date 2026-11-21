@@ -683,6 +683,9 @@ pub const COMMAND_IDENTITY_SELF_UNLINK: &str = "identity.self.unlink";
 /// The open account episodes: agents out of quota or signed out, grouped by
 /// account (`server::account_episodes`). The operator's window only.
 pub const COMMAND_IDENTITY_ACCOUNT_AVAILABILITY: &str = "identity.account.availability";
+/// Every signed-in account here with how much of each usage window is used (`server::account_episodes`).
+/// The operator's window, and any registered agent: it names no credential.
+pub const COMMAND_IDENTITY_ACCOUNT_USAGE: &str = "identity.account.usage";
 /// The messages held for agents, by agent and reason, as counts (`server::jekt_held_summary`). The operator's window,
 /// and any registered agent: it names no sender and no body.
 pub const COMMAND_JEKT_HELD_SUMMARY: &str = "jekt.held.summary";

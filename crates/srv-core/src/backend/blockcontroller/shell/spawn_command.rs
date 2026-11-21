@@ -23,6 +23,12 @@ pub(super) struct SpawnPlan<'a> {
     pub(super) pane_cwd: &'a str,
 }
 
+/// The `AGENTMUX_LOG_DIR` a pane gets: the instance's log folder. An instance with no log folder
+/// (srv run without its launcher) gets none: a made-up folder would send `muxlog` to a place no log is in.
+fn log_dir_env(logs_dir: Option<&std::path::Path>) -> Option<(&'static str, &std::ffi::OsStr)> {
+    logs_dir.map(|dir| ("AGENTMUX_LOG_DIR", dir.as_os_str()))
+}
+
 impl ShellController {
     /// The command for the pane: WSL, SSH, a container, a program, a shell-wrapped
     /// command or the login shell, in that order.
@@ -203,13 +209,13 @@ impl ShellController {
         c.env("AGENTMUX_TABID", &self.tab_id);
         c.env("AGENTMUX_VERSION", env!("CARGO_PKG_VERSION"));
 
-        // Inject log directory so agents can find logs without guessing.
-        // Always ~/.agentmux/logs/ — matches both host and sidecar.
-        let log_dir = dirs::home_dir()
-            .unwrap_or_default()
-            .join(".agentmux")
-            .join("logs");
-        c.env("AGENTMUX_LOG_DIR", log_dir.to_string_lossy().as_ref());
+        // The log folder, so agents and `muxlog` find the logs without guessing: this instance's,
+        // as the launcher resolved it (per version and channel, under a home override too), the
+        // same folder the host and srv write to and `app.logs.tail` reads.
+        let logs_dir = agentmux_common::DataPaths::from_env().map(|p| p.logs_dir);
+        if let Some((key, value)) = log_dir_env(logs_dir.as_deref()) {
+            c.env(key, value);
+        }
 
         // AGENTMUX_LOCAL_URL / AGENTMUX_AUTH_KEY are set for every kind of command
         // in `apply_pane_env`, not here.
@@ -350,5 +356,22 @@ fn wire_tool_dirs(c: &mut CommandBuilder) {
         crate::backend::tool_store::UserToolsPrecedence::AfterExisting,
     ) {
         c.env("PATH", path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn the_pane_gets_the_instances_log_folder_not_the_launchers_home_folder() {
+        let logs = Path::new("/tmp/am-home/channels/stable/versions/9.9.9/logs");
+        assert_eq!(log_dir_env(Some(logs)), Some(("AGENTMUX_LOG_DIR", logs.as_os_str())));
+    }
+
+    #[test]
+    fn an_instance_with_no_log_folder_gets_none() {
+        assert_eq!(log_dir_env(None), None);
     }
 }

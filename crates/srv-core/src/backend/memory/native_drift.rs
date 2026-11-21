@@ -53,6 +53,37 @@ const SWEEP_INTERVAL: Duration = Duration::from_secs(30);
 /// memory file's live content.
 const MAX_MEMORY_FILE_BYTES: u64 = 10 * 1024 * 1024;
 
+/// The ids of the agents running in this process now. The agent roster and the identity folders are
+/// shared by every channel on the host, but a channel looks at an agent's memory folder only while that
+/// agent runs in it: a second channel starting beside a populated one (a headless start next to a
+/// desktop) reads nothing of the others' agents, records nothing about them, and logs nothing about
+/// them. An agent that is not running is brought up to date when it next spawns (the reconcile before
+/// spawn, `reconcile.rs`).
+pub type OwnedAgents = Arc<dyn Fn() -> HashSet<String> + Send + Sync>;
+
+/// The roster's memory directories of the agents running in this process. An agent is matched by the id
+/// the roster and its memory directory are keyed by (`AgentDefinition::id`).
+pub fn owned_targets(mstore: &Store, owned: &OwnedAgents) -> Vec<(String, PathBuf)> {
+    let own = owned();
+    if own.is_empty() {
+        return Vec::new();
+    }
+    let mut targets = list_all_memory_targets(mstore);
+    targets.retain(|(agent_id, _)| own.contains(agent_id));
+    targets
+}
+
+/// What the sweep knows across ticks about files that have a recorded history.
+#[derive(Default)]
+pub(crate) struct DeletionWatch {
+    /// Files this process has itself found on disk. Only one of these can be "deleted": a file with
+    /// history that this process never saw is one it cannot find (a directory resolved another way,
+    /// a store another channel filled), not one that was removed.
+    seen: HashSet<(String, String)>,
+    /// Deletions already reported, so a file that stays gone is reported once, not every tick.
+    reported: HashSet<(String, String)>,
+}
+
 /// Compare `live_content` against the latest recorded version of
 /// `(agent_id, filename)`; if different (including "no version recorded
 /// yet"), insert a new version tagged `source: "external_fs_write"` with
@@ -197,23 +228,25 @@ pub(crate) fn read_memory_file_lossy(path: &Path) -> std::io::Result<String> {
 /// arrives to prompt the frontend's own "the selected file is now gone"
 /// handling to fire.
 ///
-/// `deleted_notified` is this sweep's own persistent, cross-tick state
+/// `watch` is this sweep's own persistent, cross-tick state
 /// (threaded in from `spawn_slow_path`'s loop, same pattern the fast path's
 /// `watched_dirs`/`dir_to_agent` already use) — without it, a file that
 /// STAYS deleted would republish an event every single 30s tick forever,
 /// since "missing from disk" is true on every subsequent sweep too, not
-/// just the first one. A filename is removed from this set again the
+/// just the first one. A filename leaves the reported set again the
 /// moment it reappears on disk (recreated with new content), so a later
 /// re-deletion is detected fresh rather than staying permanently suppressed.
+/// A file is only ever called deleted after this process saw it on disk ([`DeletionWatch`]).
+///
+/// `targets` are the directories this process may look at ([`owned_targets`]); nothing else is read.
 pub(crate) fn reconciliation_sweep_once(
-    mstore: &Store,
+    targets: &[(String, PathBuf)],
     id_store: &Store,
     broker: &crate::backend::mps::Broker,
-    deleted_notified: &mut HashSet<(String, String)>,
+    watch: &mut DeletionWatch,
 ) -> usize {
     let mut drifted = 0;
-    let targets = list_all_memory_targets(mstore);
-    for (agent_id, memory_dir) in &targets {
+    for (agent_id, memory_dir) in targets {
         drifted += sweep_one_agent_dir(id_store, agent_id, memory_dir, "reconciliation_sweep", broker);
     }
 
@@ -234,10 +267,14 @@ pub(crate) fn reconciliation_sweep_once(
         };
         let key = (agent_id.clone(), filename.clone());
         if memory_dir.join(&filename).is_file() {
-            deleted_notified.remove(&key);
+            watch.reported.remove(&key);
+            watch.seen.insert(key);
             continue;
         }
-        if deleted_notified.insert(key) {
+        if !watch.seen.contains(&key) {
+            continue;
+        }
+        if watch.reported.insert(key) {
             tracing::info!(agent_id = %agent_id, filename = %filename, "native_memory_drift: detected an out-of-band deletion");
             broker.publish_event_for::<crate::backend::mps_events::AgentMemoryChanged>(&agent_id, &(), vec![], 0);
         }
@@ -322,7 +359,8 @@ fn sweep_one_agent_dir(
 }
 
 /// Start both layers. Call once at server startup with a fully-built
-/// `AppState`'s `fs_watch_pool`/`mstore`/`id_store`. Returns immediately —
+/// `AppState`'s `fs_watch_pool`/`mstore`/`id_store`, and `owned`: the agents running
+/// in this process, the only ones either layer looks at ([`OwnedAgents`]). Returns immediately —
 /// both loops run as spawned background tasks for the lifetime of the
 /// process (no shutdown handle; srv itself owns the process lifetime).
 pub fn spawn(
@@ -330,24 +368,26 @@ pub fn spawn(
     mstore: Arc<Store>,
     id_store: Arc<Store>,
     broker: Arc<crate::backend::mps::Broker>,
+    owned: OwnedAgents,
 ) {
-    spawn_fast_path(fs_watch_pool, mstore.clone(), id_store.clone(), broker.clone());
-    spawn_slow_path(mstore, id_store, broker);
+    spawn_fast_path(fs_watch_pool, mstore.clone(), id_store.clone(), broker.clone(), owned.clone());
+    spawn_slow_path(mstore, id_store, broker, owned);
 }
 
-fn spawn_slow_path(mstore: Arc<Store>, id_store: Arc<Store>, broker: Arc<crate::backend::mps::Broker>) {
+fn spawn_slow_path(mstore: Arc<Store>, id_store: Arc<Store>, broker: Arc<crate::backend::mps::Broker>, owned: OwnedAgents) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(SWEEP_INTERVAL);
         // Persistent across ticks, same pattern as the fast path's own
         // watched_dirs/dir_to_agent — see reconciliation_sweep_once's own
         // doc comment on why this can't just be a fresh HashSet per call.
-        let mut deleted_notified: HashSet<(String, String)> = HashSet::new();
+        let mut watch = DeletionWatch::default();
         // Agents whose directory has had its first-sight backfill.
         let mut backfilled: HashSet<String> = HashSet::new();
         loop {
             tick.tick().await;
-            backfill_newly_verified(&id_store, &list_all_memory_targets(&mstore), &mut backfilled);
-            reconciliation_sweep_once(&mstore, &id_store, &broker, &mut deleted_notified);
+            let targets = owned_targets(&mstore, &owned);
+            backfill_newly_verified(&id_store, &targets, &mut backfilled);
+            reconciliation_sweep_once(&targets, &id_store, &broker, &mut watch);
         }
     });
 }
@@ -368,6 +408,7 @@ fn spawn_fast_path(
     mstore: Arc<Store>,
     id_store: Arc<Store>,
     broker: Arc<crate::backend::mps::Broker>,
+    owned: OwnedAgents,
 ) {
     tokio::spawn(async move {
         let mut events = fs_watch_pool.events();
@@ -378,7 +419,7 @@ fn spawn_fast_path(
         loop {
             tokio::select! {
                 _ = tick.tick() => {
-                    refresh_subscriptions(&fs_watch_pool, &mstore, &id_store, &mut watched_dirs, &mut dir_to_agent);
+                    refresh_subscriptions(&fs_watch_pool, &owned_targets(&mstore, &owned), &id_store, &mut watched_dirs, &mut dir_to_agent);
                 }
                 event = events.recv() => {
                     let event = match event {
@@ -392,57 +433,74 @@ fn spawn_fast_path(
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                     };
-                    if !matches!(event.kind, FsWatchEventKind::Created | FsWatchEventKind::Modified) {
-                        continue;
-                    }
-                    let Some(filename) = event.path.file_name().and_then(|n| n.to_str()) else { continue };
-                    if !filename.ends_with(".md") {
-                        continue;
-                    }
-                    let Some(parent) = event.path.parent() else { continue };
-                    let Some(agent_id) = dir_to_agent.get(parent).cloned() else { continue };
-
-                    let content = match read_memory_file_lossy(&event.path) {
-                        Ok(c) => c,
-                        Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
-                            tracing::warn!(agent_id, filename, error = %e, "native_memory_drift: fast path: file exceeds size cap, skipping (not recording truncated content)");
-                            continue;
-                        }
-                        // TOCTOU-deleted or transient I/O between the event
-                        // and this read — non-fatal, the reconciliation
-                        // sweep covers it if the write actually stuck.
-                        Err(_) => continue,
-                    };
-                    // Restructured from `if let Err(...) {} else {}` to a full
-                    // match while adding the publish below: the old `else`
-                    // branch fired on Ok(false) too (content already matched,
-                    // nothing recorded), logging "recorded an out-of-band
-                    // write" for a no-op — a pre-existing log inaccuracy
-                    // fixed as a side effect of needing this branch anyway.
-                    capture_into_record(&agent_id, parent);
-                    match check_and_record_drift(&id_store, &agent_id, filename, &content, "fs_watch") {
-                        Ok(true) => {
-                            tracing::info!(agent_id, filename, "native_memory_drift: fast path recorded an out-of-band write");
-                            // Reactive Memory updates (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md).
-                            broker.publish_event_for::<crate::backend::mps_events::AgentMemoryChanged>(&agent_id, &(), vec![], 0);
-                        }
-                        Ok(false) => {}
-                        Err(e) => tracing::warn!(agent_id, filename, error = %e, "native_memory_drift: fast path: check_and_record_drift failed"),
-                    }
+                    handle_fs_event(&event, &dir_to_agent, &owned, &id_store, &broker);
                 }
             }
         }
     });
 }
 
+/// One fs-watch event on a watched memory folder. A folder stays watched for the life of the process once
+/// first seen, so the agent is asked about again here: a write is looked at only while the agent runs in
+/// this process. One that stopped here and runs in another channel now is that channel's, and a write
+/// of its last moments is recorded by the reconcile before its next spawn.
+fn handle_fs_event(
+    event: &crate::backend::fs_watch::FsWatchEvent,
+    dir_to_agent: &std::collections::HashMap<PathBuf, String>,
+    owned: &OwnedAgents,
+    id_store: &Store,
+    broker: &crate::backend::mps::Broker,
+) {
+    if !matches!(event.kind, FsWatchEventKind::Created | FsWatchEventKind::Modified) {
+        return;
+    }
+    let Some(filename) = event.path.file_name().and_then(|n| n.to_str()) else { return };
+    if !filename.ends_with(".md") {
+        return;
+    }
+    let Some(parent) = event.path.parent() else { return };
+    let Some(agent_id) = dir_to_agent.get(parent).cloned() else { return };
+    if !owned().contains(&agent_id) {
+        return;
+    }
+
+    let content = match read_memory_file_lossy(&event.path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+            tracing::warn!(agent_id, filename, error = %e, "native_memory_drift: fast path: file exceeds size cap, skipping (not recording truncated content)");
+            return;
+        }
+        // TOCTOU-deleted or transient I/O between the event
+        // and this read — non-fatal, the reconciliation
+        // sweep covers it if the write actually stuck.
+        Err(_) => return,
+    };
+    // Restructured from `if let Err(...) {} else {}` to a full
+    // match while adding the publish below: the old `else`
+    // branch fired on Ok(false) too (content already matched,
+    // nothing recorded), logging "recorded an out-of-band
+    // write" for a no-op — a pre-existing log inaccuracy
+    // fixed as a side effect of needing this branch anyway.
+    capture_into_record(&agent_id, parent);
+    match check_and_record_drift(id_store, &agent_id, filename, &content, "fs_watch") {
+        Ok(true) => {
+            tracing::info!(agent_id, filename, "native_memory_drift: fast path recorded an out-of-band write");
+            // Reactive Memory updates (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md).
+            broker.publish_event_for::<crate::backend::mps_events::AgentMemoryChanged>(&agent_id, &(), vec![], 0);
+        }
+        Ok(false) => {}
+        Err(e) => tracing::warn!(agent_id, filename, error = %e, "native_memory_drift: fast path: check_and_record_drift failed"),
+    }
+}
+
 fn refresh_subscriptions(
     fs_watch_pool: &Arc<FsWatchPool>,
-    mstore: &Store,
+    targets: &[(String, PathBuf)],
     id_store: &Store,
     watched_dirs: &mut HashSet<PathBuf>,
     dir_to_agent: &mut std::collections::HashMap<PathBuf, String>,
 ) {
-    for (agent_id, memory_dir) in list_all_memory_targets(mstore) {
+    for (agent_id, memory_dir) in targets.iter().cloned() {
         // subscribe_dir canonicalizes internally; canonicalize here too so
         // watched_dirs/dir_to_agent key on the same form an incoming
         // event's path will actually have (events report canonical paths —
@@ -539,7 +597,7 @@ mod tests {
         let pool = FsWatchPool::new();
         let mut watched = HashSet::new();
         let mut dir_to_agent = std::collections::HashMap::new();
-        refresh_subscriptions(&pool, &mstore, &id_store, &mut watched, &mut dir_to_agent);
+        refresh_subscriptions(&pool, &list_all_memory_targets(&mstore), &id_store, &mut watched, &mut dir_to_agent);
 
         let v = id_store.agent_native_memory_version_latest(&def.id, "MEMORY.md").unwrap().unwrap();
         assert_eq!(v.source, "agent_inferred");
@@ -785,8 +843,8 @@ mod tests {
         }
 
         let broker = crate::backend::mps::Broker::new();
-        let mut deleted_notified = HashSet::new();
-        let drifted = reconciliation_sweep_once(&state.mstore, &id_store, &broker, &mut deleted_notified);
+        let mut watch = DeletionWatch::default();
+        let drifted = reconciliation_sweep_once(&list_all_memory_targets(&state.mstore), &id_store, &broker, &mut watch);
         assert_eq!(drifted, 2, "sweep must cover every agent with a working directory");
         assert_eq!(id_store.agent_native_memory_version_list("sweep-agent-a", "MEMORY.md").unwrap().len(), 1);
         assert_eq!(id_store.agent_native_memory_version_list("sweep-agent-b", "MEMORY.md").unwrap().len(), 1);
@@ -863,43 +921,244 @@ mod tests {
         std::fs::write(&file_path, "content").unwrap();
 
         let (broker, client) = crate::test_support::broker_recording("agent:memory:changed:sweep-delete-agent");
-        let mut deleted_notified = HashSet::new();
+        let mut watch = DeletionWatch::default();
 
         // Sweep 1: file present — establishes the recorded version (and
         // publishes once, from ordinary content-drift, not deletion logic).
-        reconciliation_sweep_once(&state.mstore, &id_store, &broker, &mut deleted_notified);
+        reconciliation_sweep_once(&list_all_memory_targets(&state.mstore), &id_store, &broker, &mut watch);
         assert_eq!(client.received_events().len(), 1);
 
         // Delete the file out of band (not through write_file/revert).
         std::fs::remove_file(&file_path).unwrap();
 
         // Sweep 2: first sweep to observe the deletion — must publish.
-        reconciliation_sweep_once(&state.mstore, &id_store, &broker, &mut deleted_notified);
+        reconciliation_sweep_once(&list_all_memory_targets(&state.mstore), &id_store, &broker, &mut watch);
         assert_eq!(client.received_events().len(), 2, "the sweep that first observes a deletion must publish");
 
         // Sweep 3: file still gone — must NOT publish again (suppressed;
         // otherwise a permanently-deleted file would fire an event every
         // 30s tick forever).
-        reconciliation_sweep_once(&state.mstore, &id_store, &broker, &mut deleted_notified);
+        reconciliation_sweep_once(&list_all_memory_targets(&state.mstore), &id_store, &broker, &mut watch);
         assert_eq!(client.received_events().len(), 2, "a repeat sweep over an already-reported deletion must not re-publish");
 
         // Recreate the file — content-drift detects it as a new version
         // (publish #3) and clears the deletion-suppression for this file.
         std::fs::write(&file_path, "recreated content").unwrap();
-        reconciliation_sweep_once(&state.mstore, &id_store, &broker, &mut deleted_notified);
+        reconciliation_sweep_once(&list_all_memory_targets(&state.mstore), &id_store, &broker, &mut watch);
         assert_eq!(client.received_events().len(), 3);
 
         // Delete it again — must be detected as a FRESH deletion (publish
         // #4), proving the suppression state was actually cleared on
         // recreation, not permanently stuck once a file is ever deleted once.
         std::fs::remove_file(&file_path).unwrap();
-        reconciliation_sweep_once(&state.mstore, &id_store, &broker, &mut deleted_notified);
+        reconciliation_sweep_once(&list_all_memory_targets(&state.mstore), &id_store, &broker, &mut watch);
         assert_eq!(client.received_events().len(), 4, "a re-deletion after recreation must be detected as a fresh event");
 
         match prev_shared_dir {
             Some(v) => std::env::set_var("AGENTMUX_SHARED_DIR", v),
             None => std::env::remove_var("AGENTMUX_SHARED_DIR"),
         }
+    }
+}
+
+/// A channel starting beside a populated one (a headless start next to a desktop) shares the agent roster
+/// and the identity folders with it, and must leave the other channel's agents' memory alone.
+#[cfg(test)]
+mod ownership_tests {
+    use super::*;
+    use crate::backend::memory::native_files::memory_dir_for_agent_by_id;
+    use std::sync::Mutex;
+
+    #[derive(Clone, Default)]
+    struct Capture(Arc<Mutex<Vec<u8>>>);
+    impl std::io::Write for Capture {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Capture {
+        type Writer = Capture;
+        fn make_writer(&'a self) -> Capture {
+            self.clone()
+        }
+    }
+
+    /// Runs `f` and returns everything it logged, at every level.
+    fn logged(f: impl FnOnce()) -> String {
+        let out = Capture::default();
+        let subscriber = tracing_subscriber::fmt().with_writer(out.clone()).with_max_level(tracing::Level::TRACE).finish();
+        tracing::subscriber::with_default(subscriber, f);
+        let text = String::from_utf8(out.0.lock().unwrap().clone()).unwrap();
+        text
+    }
+
+    /// One roster agent with a memory file already on disk and in the shared store's history, as the
+    /// channel that runs it left them.
+    fn populated(mstore: &Store, id_store: &Store, id: &str, file: &str, body: &str, config: &Path) -> PathBuf {
+        let mut def = crate::backend::storage::agents::test_agent_def(id, id, "claude", "agent", 1, "");
+        def.working_directory = format!("/work/{id}");
+        mstore.agent_def_insert(&mut def).unwrap();
+        mstore
+            .agent_content_set(&crate::backend::storage::AgentContent {
+                agent_id: def.id.clone(),
+                content_type: "env".to_string(),
+                content: format!("CLAUDE_CONFIG_DIR={}\n", config.display()),
+                updated_at: 0,
+            })
+            .unwrap();
+        let dir = memory_dir_for_agent_by_id(mstore, &def).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(file), body).unwrap();
+        id_store.agent_native_memory_version_insert(id, file, body, "agent_inferred", "{}", "").unwrap();
+        dir
+    }
+
+    /// Every file under `dir` with its bytes and modified time.
+    fn snapshot(dir: &Path) -> Vec<(String, Vec<u8>, std::time::SystemTime)> {
+        let mut out: Vec<_> = std::fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|e| (e.file_name().to_string_lossy().into_owned(), std::fs::read(e.path()).unwrap(), e.metadata().unwrap().modified().unwrap()))
+            .collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+
+    fn isolated() -> (std::sync::MutexGuard<'static, ()>, Option<std::ffi::OsString>, tempfile::TempDir) {
+        let guard = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var_os("AGENTMUX_SHARED_DIR");
+        let shared = tempfile::tempdir().unwrap();
+        std::env::set_var("AGENTMUX_SHARED_DIR", shared.path());
+        (guard, prev, shared)
+    }
+
+    fn restore(prev: Option<std::ffi::OsString>) {
+        match prev {
+            Some(v) => std::env::set_var("AGENTMUX_SHARED_DIR", v),
+            None => std::env::remove_var("AGENTMUX_SHARED_DIR"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_channel_running_none_of_the_agents_touches_none_of_their_memory_and_logs_nothing() {
+        let (_guard, prev, _shared) = isolated();
+        let mstore = Store::open_in_memory().unwrap();
+        let id_store = Store::open_shared(Path::new(":memory:")).unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let dirs: Vec<PathBuf> = ["roster-a", "roster-b", "roster-c"]
+            .iter()
+            .map(|id| populated(&mstore, &id_store, id, "secret-topic-notes.md", "what the agent knows", config.path()))
+            .collect();
+        // One file changed since the other channel recorded it: a running channel would record that.
+        std::fs::write(dirs[1].join("secret-topic-notes.md"), "changed since").unwrap();
+        let before: Vec<_> = dirs.iter().map(|d| snapshot(d)).collect();
+        let versions_before = id_store.agent_native_memory_version_list("roster-b", "secret-topic-notes.md").unwrap().len();
+
+        let (broker, client) = crate::test_support::broker_recording("agent:memory:changed:roster-b");
+        let owned: OwnedAgents = Arc::new(HashSet::new);
+        let pool = FsWatchPool::new();
+        let text = logged(|| {
+            let targets = owned_targets(&mstore, &owned);
+            assert!(targets.is_empty(), "no agent runs here, so no folder is looked at");
+            let mut watch = DeletionWatch::default();
+            let mut backfilled = HashSet::new();
+            for _ in 0..3 {
+                backfill_newly_verified(&id_store, &targets, &mut backfilled);
+                assert_eq!(reconciliation_sweep_once(&targets, &id_store, &broker, &mut watch), 0);
+                refresh_subscriptions(&pool, &targets, &id_store, &mut HashSet::new(), &mut std::collections::HashMap::new());
+            }
+        });
+
+        let after: Vec<_> = dirs.iter().map(|d| snapshot(d)).collect();
+        assert_eq!(before, after, "every file is byte-identical, with the same modified time");
+        let versions_after = id_store.agent_native_memory_version_list("roster-b", "secret-topic-notes.md").unwrap().len();
+        assert_eq!(versions_before, versions_after, "nothing is recorded in the shared store for them");
+        assert!(client.received_events().is_empty(), "no change is announced for them");
+        for word in ["roster-a", "roster-b", "roster-c", "secret-topic-notes", "native_memory_drift"] {
+            assert!(!text.contains(word), "the log names {word}: {text}");
+        }
+        restore(prev);
+    }
+
+    #[tokio::test]
+    async fn a_channel_looks_only_at_the_agents_running_in_it() {
+        let (_guard, prev, _shared) = isolated();
+        let mstore = Store::open_in_memory().unwrap();
+        let id_store = Store::open_shared(Path::new(":memory:")).unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let mine = populated(&mstore, &id_store, "mine", "notes.md", "one", config.path());
+        let theirs = populated(&mstore, &id_store, "theirs", "notes.md", "one", config.path());
+        std::fs::write(mine.join("notes.md"), "mine changed").unwrap();
+        std::fs::write(theirs.join("notes.md"), "theirs changed").unwrap();
+
+        let owned: OwnedAgents = Arc::new(|| HashSet::from(["mine".to_string()]));
+        let targets = owned_targets(&mstore, &owned);
+        assert_eq!(targets.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(), vec!["mine"]);
+        let broker = crate::backend::mps::Broker::new();
+        assert_eq!(reconciliation_sweep_once(&targets, &id_store, &broker, &mut DeletionWatch::default()), 1);
+        assert_eq!(id_store.agent_native_memory_version_list("mine", "notes.md").unwrap().len(), 2);
+        assert_eq!(id_store.agent_native_memory_version_list("theirs", "notes.md").unwrap().len(), 1);
+        restore(prev);
+    }
+
+    /// A folder stays watched once subscribed; a write in it counts only while its agent runs here.
+    #[test]
+    fn the_fast_path_ignores_a_write_in_the_folder_of_an_agent_that_no_longer_runs_here() {
+        let id_store = Store::open_shared(Path::new(":memory:")).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        id_store.agent_native_memory_version_insert("was-mine", "notes.md", "one", "agent_inferred", "{}", "").unwrap();
+        std::fs::write(dir.path().join("notes.md"), "two, written by another channel's run of it").unwrap();
+        let mut dir_to_agent = std::collections::HashMap::new();
+        dir_to_agent.insert(dir.path().to_path_buf(), "was-mine".to_string());
+        let event = crate::backend::fs_watch::FsWatchEvent { path: dir.path().join("notes.md"), kind: FsWatchEventKind::Modified };
+        let (broker, client) = crate::test_support::broker_recording("agent:memory:changed:was-mine");
+        let history = || id_store.agent_native_memory_version_list("was-mine", "notes.md").unwrap().len();
+
+        let stopped: OwnedAgents = Arc::new(HashSet::new);
+        let text = logged(|| handle_fs_event(&event, &dir_to_agent, &stopped, &id_store, &broker));
+        assert_eq!(history(), 1, "nothing is recorded for it");
+        assert!(client.received_events().is_empty() && text.is_empty(), "nothing is announced or logged: {text}");
+
+        let running: OwnedAgents = Arc::new(|| HashSet::from(["was-mine".to_string()]));
+        handle_fs_event(&event, &dir_to_agent, &running, &id_store, &broker);
+        assert_eq!(history(), 2, "while it runs here, the write is recorded");
+        assert_eq!(client.received_events().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_file_this_process_never_saw_is_not_reported_deleted_but_one_it_saw_is() {
+        let (_guard, prev, _shared) = isolated();
+        let mstore = Store::open_in_memory().unwrap();
+        let id_store = Store::open_shared(Path::new(":memory:")).unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let dir = populated(&mstore, &id_store, "mine", "kept.md", "kept", config.path());
+        // History for a file that is not in this folder (another channel's, or a folder resolved another way).
+        id_store.agent_native_memory_version_insert("mine", "elsewhere.md", "not here", "agent_inferred", "{}", "").unwrap();
+
+        let owned: OwnedAgents = Arc::new(|| HashSet::from(["mine".to_string()]));
+        let (broker, client) = crate::test_support::broker_recording("agent:memory:changed:mine");
+        let mut watch = DeletionWatch::default();
+        let text = logged(|| {
+            reconciliation_sweep_once(&owned_targets(&mstore, &owned), &id_store, &broker, &mut watch);
+            reconciliation_sweep_once(&owned_targets(&mstore, &owned), &id_store, &broker, &mut watch);
+        });
+        assert!(!text.contains("deletion") && !text.contains("elsewhere"), "{text}");
+        assert!(client.received_events().is_empty());
+
+        // A file this process has seen and that is then removed is reported, once.
+        std::fs::remove_file(dir.join("kept.md")).unwrap();
+        let text = logged(|| {
+            for _ in 0..3 {
+                reconciliation_sweep_once(&owned_targets(&mstore, &owned), &id_store, &broker, &mut watch);
+            }
+        });
+        assert_eq!(text.matches("out-of-band deletion").count(), 1, "{text}");
+        assert_eq!(client.received_events().len(), 1);
+        restore(prev);
     }
 }
 

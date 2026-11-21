@@ -10,12 +10,15 @@
 //
 // width/height are the whole window's CSS pixels; a maximized pane fills it
 // less the top bar and status bar. `scale` is the device pixel ratio of the
-// PNG (2 = sharp on high-DPI screens, at four times the file size).
+// PNG: every size is captured at CAPTURE_SCALE (2), so a picture is crisp on a high-DPI screen at the width the
+// page shows it; the file is four times the pixels (docs/specs/SPEC_WEBSITE_DOCS_MEDIA_REFRESH_2026_11_20.md §5).
+import { CAPTURE_SCALE } from "./lib/crisp.mjs";
+
 
 export const SIZES = {
-    small: { width: 800, height: 600, scale: 1 },
-    medium: { width: 1280, height: 800, scale: 1 },
-    large: { width: 1920, height: 1080, scale: 1 },
+    small: { width: 800, height: 600, scale: CAPTURE_SCALE },
+    medium: { width: 1280, height: 800, scale: CAPTURE_SCALE },
+    large: { width: 1920, height: 1080, scale: CAPTURE_SCALE },
 };
 
 /** Parses `--sizes small,large` (or `all`) against SIZES; throws on an unknown name. */

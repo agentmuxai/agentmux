@@ -1,7 +1,7 @@
 showOpenFileDialog null
 -- dialog cancelled
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"
@@ -29,7 +29,7 @@ showOpenFileDialog null
 WidgetsInstall {"path":"C:/src/acme.notes/widget.json","replace":false}
 -- install in flight
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"
@@ -55,7 +55,7 @@ WidgetsInstall {"path":"C:/src/acme.notes/widget.json","replace":false}
         "No widgets installed."
 -- installed, asking
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"
@@ -118,7 +118,7 @@ showOpenFileDialog null
 WidgetsInstall {"path":"C:/src/acme.notes/widget.json","replace":false}
 -- already installed
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"
@@ -187,7 +187,7 @@ WidgetsInstall {"path":"C:/src/acme.notes/widget.json","replace":false}
 WidgetsInstall {"path":"C:/src/acme.notes/widget.json","replace":true}
 -- replaced
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"
@@ -250,7 +250,7 @@ showOpenFileDialog null
 WidgetsInstall {"path":"C:/src/acme.notes/widget.json","replace":false}
 -- replace dropped
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"
@@ -313,7 +313,7 @@ showOpenFileDialog null
 WidgetsInstall {"path":"C:/src/acme.notes/widget.json","replace":false}
 -- install failed
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"
@@ -379,7 +379,7 @@ WidgetsInstall {"path":"C:/src/acme.notes/widget.json","replace":false}
 WidgetsInstall {"path":"C:/src/acme.notes/widget.json","replace":true}
 -- replace failed
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"
