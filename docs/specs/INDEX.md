@@ -253,6 +253,7 @@ than none. Add the line when you touch one and know which area it belongs to.
 
 | Spec | Title | Status | Date | Replaces / replaced by |
 |---|---|---|---|---|
+| [`SPEC_LINKS_ON_EVERYTHING_2026_11_20`](SPEC_LINKS_ON_EVERYTHING_2026_11_20.md) | Links on nearly everything: one recognition layer that turns agent names, task numbers, files, pull requests and URLs into correct links | active | 2026-11-20 |  |
 | [`SPEC_SKILLS_B6_PORTABLE_SKILL_FILES_2026_11_20`](SPEC_SKILLS_B6_PORTABLE_SKILL_FILES_2026_11_20.md) | Spec: Skills B6, portable skill files for non-Claude agents | implemented | 2026-11-20 |  |
 | [`SPEC_CONNECTORS_ONE_LIST_2026_11_19`](SPEC_CONNECTORS_ONE_LIST_2026_11_19.md) | Spec: Connectors is one list, one connector per line, details on click, open at startup | active | 2026-11-19 |  |
 | [`SPEC_CONTAINER_AGENT_PERSISTENT_CONTROLLER_2026_11_19`](SPEC_CONTAINER_AGENT_PERSISTENT_CONTROLLER_2026_11_19.md) | Spec: a container agent runs as one long-lived process, like a native agent | draft | 2026-11-19 |  |
