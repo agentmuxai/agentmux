@@ -10,7 +10,7 @@ export type EntityKindId = "address" | "pull" | "task" | "agent";
 
 /** Where a click goes. Built by a kind from the entity it resolved; the text never supplies one. */
 export type Destination =
-    | { kind: "agent"; id: string; computer?: string }
+    | { kind: "agent"; id: string; name: string; computer?: string }
     | { kind: "task"; number: number; board?: string }
     | { kind: "pull"; repo: string; number: number; issue: boolean }
     | { kind: "url"; url: string };

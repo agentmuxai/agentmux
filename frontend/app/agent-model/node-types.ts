@@ -519,6 +519,11 @@ export interface CliNoticeNode {
     cacheBytes?: number;
     /** `mcp_left_out`: the MCP servers of the folder's own `.mcp.json` this host agent is not given, by name. */
     servers?: string[];
+    /** `mcp_left_out`: what else of the folder is not loaded, by kind and count. Absent on a row written before
+     *  the agent's settings, instructions and skills were also kept to AgentMux's own. */
+    folderFiles?: { settings: number; instructions: number; skills: number; commands: number; agents: number; other: number };
+    /** `mcp_left_out`: the agent's own MCP servers left out because their command has no path on this computer. */
+    serversWithNoPath?: string[];
     /** `mcp_health`: where the repair of the agent's AgentMux MCP server is. */
     mcpState?: "healing" | "restarting" | "ok" | "gave_up";
     /** `mcp_health`, while `healing`: which reconnect. */

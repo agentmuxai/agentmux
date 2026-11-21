@@ -59,6 +59,15 @@ pub fn refresh_for_block(meta: &MetaMapType, mstore: &Store, identity_store: &St
     let wanted = managed_skill_file_paths(all.iter().map(|f| f.filename.as_str()));
     let files: Vec<_> = all.iter().filter(|f| wanted.contains(&f.filename)).collect();
 
+    // A host agent in a folder a container agent can write is given its skills from outside the folder: nothing here
+    // is written into it.
+    if crate::backend::mcp_folder_rule::folder_of(meta).is_some() {
+        let given = files.iter().map(|f| (f.filename.as_str(), f.content.as_str()));
+        if let Err(e) = crate::backend::host_agent_files::refresh_skills(&work_dir, given) {
+            tracing::warn!(agent_id = %agent.id, error = %e, "skill files: could not refresh the skills kept outside the folder");
+        }
+        return 0;
+    }
     let Ok(wd) = crate::backend::workdir_fs::Workdir::open(base_path) else {
         tracing::warn!(agent_id = %agent.id, work_dir = %work_dir, "skill files: could not open the working directory");
         return 0;

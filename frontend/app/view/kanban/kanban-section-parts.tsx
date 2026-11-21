@@ -112,7 +112,7 @@ function AgentStripChip(props: { agent: KanbanAgent; model: KanbanModel; onOpenA
             title={`${agentLabel(props.agent)}: ${agentStateWords(props.agent.state)}. Drop a waiting task here to start it on ${agentLabel(props.agent)}; click to open it.`}
             onClick={() => props.onOpenAgent(props.agent.block_id)}
         >
-            <AgentChip name={props.agent.name} agent={props.agent} />
+            <AgentChip name={props.agent.name} agent={props.agent} plain />
         </Button>
     );
 }
