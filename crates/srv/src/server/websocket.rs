@@ -679,8 +679,7 @@ async fn handle_incoming_text(
 /// are the person's hands: typed into a block they read as the person's own words. A connection registered as an
 /// agent (the agent's own token, proven at `bus:register`) writes into no block through them. An agent writes into
 /// its own terminal with the Terminal tool (the PtyShell API checks that the shell is its own) and reaches another
-/// agent with Message send. Everything else is as before: this is a guard against an agent's mistake, not a boundary
-/// against a process that can read the instance key (a native agent can; a container agent's token cannot open `/ws`).
+/// agent with Message send. Everything else is as before.
 pub(super) fn refuse_agent_input(ctx: &RpcContext) -> Result<(), String> {
     if ctx.agent_id.is_empty() {
         Ok(())
