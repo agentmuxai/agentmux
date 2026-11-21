@@ -1,6 +1,6 @@
 # Spec: Swarm, short colour-coded tags for each agent's model and seat
 
-**Status:** implemented in part: PR A is this build PR (#48220); PR B, the wiring to #48222's fields, follows when #48222 P1 has merged. Approved with D1 to D5 as recommended, 2026-11-20. Task #48219 (spec), build #48220. Author: Agent1@narko; build: Tansy@narko.
+**Status:** implemented: PR A (the seat colours, the tag component and its colour tests; #7956) and PR B (the Swarm row reads the model facts #48222 P1 added to the runtime row, so the model tag shows). Other instances' agents get a model tag when #48222 P2 returns their facts, with no frontend change beyond reading the same fields. Approved with D1 to D5 as recommended, 2026-11-20. Task #48219 (spec), build #48220. Author: Agent1@narko; build: Tansy@narko.
 Depends for data on #48221 (MuxAPI agent live facts, `SPEC_MUXAPI_AGENT_LIVE_FACTS_2026_11_20.md`, build #48222 P1).
 
 ## 1. Requirement
@@ -78,9 +78,9 @@ One colour per family, one family per Claude tier, because the question people a
 
 The tag follows `agentruntime:changed:<agent id>`, which #48221 fires when the model, effort, turn state or account change. There is no timer of its own.
 
-### 4.4 Until #48221's P1 ships
+### 4.4 Where the facts come from
 
-The Swarm shows no model tag at all (rows have no model data). The seat colour ships first and does not wait. The per-pane `agentruntime` event already carries an effective model for some local panes; the build does not read it as an interim, because it is local-only, control-protocol-only and a second source of the same fact (#48221's principle is one builder). The model tag component, the family table and the tests land with fake data in the first PR, and the wiring is a small second PR once #48222 P1 has merged.
+The Swarm reads the model from the runtime row (`model_id`, `model_label`, `model_source`, `effort`, `pending_switch`, `definition_model_label`, #48222 P1), through `readModelFacts`, the one place it does. The per-pane `agentruntime` event's effective model is not read as a second source of the same fact (#48221's principle is one builder). A row with neither a label nor an id draws no tag.
 
 ### 4.5 Other instances' agents
 
