@@ -65,8 +65,15 @@ pub(crate) fn replay_for(state: &AppState, c: &Checkpoint) -> Result<Option<Arc<
     Ok(Some(Arc::new(Replay { fork, original, bits })))
 }
 
-/// `replaydronerun`.
+/// `replaydronerun`, started by the person's window.
+#[cfg(test)]
 pub(crate) async fn replay_drone_run(state: &AppState, cmd: ReplayRunReq) -> Result<ReplayRunResp, String> {
+    replay_drone_run_as(state, cmd, None).await
+}
+
+/// `replaydronerun`. `by` is who the new run's ledger row says started it, `None` for the person's window (the
+/// operator); the registered handler takes it from the connection, so an agent's replay is shown as that agent's.
+pub(crate) async fn replay_drone_run_as(state: &AppState, cmd: ReplayRunReq, by: Option<&str>) -> Result<ReplayRunResp, String> {
     let why = |e: String| format!("replaydronerun: {e}");
     let rows = state.mstore.drone_checkpoints_for(&cmd.run_id).map_err(|e| why(format!("its checkpoints cannot be read: {e}")))?;
     let newest = load(&rows).map_err(|e| why(format!("its checkpoints are unusable: {e}")))?.ok_or_else(|| why("it kept no checkpoints, so there is nothing to start from".to_string()))?;
@@ -95,7 +102,8 @@ pub(crate) async fn replay_drone_run(state: &AppState, cmd: ReplayRunReq) -> Res
     let started_at = now_ms();
     crate::server::drone_handlers::insert_run_placeholder(state, &run_id, &drone_id, started_at).map_err(why)?;
     let ledger = state.cron_scheduler.runs().cloned();
-    let ledger_run = ledger.and_then(|l| l.drone_started(&run_id, &drone_id, &wf.name, started_at, &trigger).map(|id| (l, id)));
+    let by = by.unwrap_or(crate::backend::jobs::BY_OPERATOR);
+    let ledger_run = ledger.and_then(|l| l.drone_started_by(&run_id, &drone_id, &wf.name, started_at, &trigger, by).map(|id| (l, id)));
     spawn_run_drain(state, handle, drone_id, started_at, ledger_run);
     Ok(ReplayRunResp { run_id, forked_from: cmd.run_id, from_step: cmd.from_step, real: cmd.do_it_for_real })
 }

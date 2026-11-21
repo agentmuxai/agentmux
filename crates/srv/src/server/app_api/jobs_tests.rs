@@ -130,6 +130,30 @@ async fn a_drone_that_has_run_is_listed_from_the_store_the_drone_pane_reads() {
     assert_eq!(list.jobs.iter().filter(|j| j.source == "drone").count(), 1, "a drone with no run is not a job: {:?}", list.jobs.iter().map(|j| &j.name).collect::<Vec<_>>());
 }
 
+/// A drone run is on the ledger as the connection that started it: an agent's as that agent's, never the operator's,
+/// the person's window as the operator's, and a connection that has proved nothing as that.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_drone_run_is_recorded_as_the_connection_that_started_it() {
+    use crate::backend::rpc_types::RpcContext;
+    use crate::server::drone_handlers::{run_started_by, start_drone_run_as, upsert_drone, RunDroneReq};
+    let (state, _) = state();
+    let def: crate::drone::types::DroneDefinition =
+        serde_json::from_value(json!({ "id": "", "name": "Who ran it", "created_at": 0, "updated_at": 0, "graph": { "nodes": [], "edges": [] } })).unwrap();
+    let drone = upsert_drone(&state, def).unwrap();
+    let agent = RpcContext { agent_id: "opaz".into(), ..Default::default() };
+    let mut started = Vec::new();
+    for (who, ctx) in [("opaz", &agent), ("window", &RpcContext::operator_for_tests()), ("unproven", &RpcContext::default())] {
+        let by = run_started_by(ctx);
+        let resp = start_drone_run_as(&state, RunDroneReq { drone_id: drone.id.clone(), input: None }, by.as_deref()).await.unwrap();
+        started.push((who, resp.run_id));
+    }
+    let rows = ledger_of(&state).store().job_runs_for_job(&drone.id, 10, None).unwrap();
+    let by_of = |run_id: &str| rows.iter().find(|r| r.links["drone_run_id"] == run_id).map(|r| r.triggered_by.clone());
+    assert_eq!(by_of(&started[0].1).as_deref(), Some("agent:opaz"));
+    assert_eq!(by_of(&started[1].1).as_deref(), Some("operator"));
+    assert_eq!(by_of(&started[2].1).as_deref(), Some("unproven"));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failure_stays_failing_behind_more_skips_than_the_strip_shows_until_a_success() {
     let (state, _) = state();

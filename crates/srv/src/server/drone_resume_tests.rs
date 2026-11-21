@@ -13,7 +13,8 @@ use crate::drone::executor::run_drone;
 use crate::drone::recorder::MemorySink;
 use crate::drone::types::{DroneDefinition, FlowEdge, FlowNode, NodePosition, RunStatus};
 use crate::drone::versions::Pin;
-use crate::server::drone_handlers::{resolve_drone_run, resume_drone_wait, upsert_drone, ResolveRunReq, ResumeWaitReq};
+use crate::backend::rpc_types::RpcContext;
+use crate::server::drone_handlers::{resolve_drone_run, resolve_drone_run_as, resume_drone_wait, upsert_drone, ResolveRunReq, ResumeWaitReq};
 
 fn node(id: &str, data: Value) -> FlowNode {
     FlowNode { id: id.to_string(), position: NodePosition::default(), data, node_type: None }
@@ -212,6 +213,36 @@ async fn a_run_told_to_run_the_step_again_runs_it_and_ends_as_that_ends() {
     let row = ended(&state, &c).await;
     assert_eq!(row.status, RunStatus::Failed.as_str());
     assert!(row.error.contains("block call failed"), "it was run: {}", row.error);
+}
+
+/// Only the person's proven window answers a run that needs attention. An agent's call, with or without an output for
+/// the step, and a connection that has proved nothing are refused with a line that says to ask the person, and the run
+/// keeps waiting; the window's answer works.
+#[tokio::test(flavor = "multi_thread")]
+async fn only_the_persons_window_answers_a_run_that_needs_attention() {
+    let state = crate::server::tests::test_state();
+    let c = marked_run(&state).await;
+    assert_eq!(resume_runs(&state, None).await.len(), 1);
+    has_status(&state, &c, "needs_attention").await;
+
+    let agent = RpcContext { agent_id: "opaz".into(), ..Default::default() };
+    let unproven = RpcContext::default();
+    let ask = |ctx: &RpcContext, action: &str, output: Option<Value>| {
+        resolve_drone_run_as(ctx, ResolveRunReq { run_id: c.run_id.clone(), action: action.to_string(), output }).map(|_| ())
+    };
+    for (who, ctx) in [("an agent", &agent), ("a connection with no proof", &unproven)] {
+        for (action, output) in [("skip", Some(json!({ "value": "forged" }))), ("run_again", None), ("cancel", None)] {
+            let err = ask(ctx, action, output).unwrap_err();
+            assert!(err.starts_with("FORBIDDEN") && err.contains("ask the person"), "{who}, {action}: {err}");
+        }
+    }
+    let row = has_status(&state, &c, "needs_attention").await;
+    assert!(row.ended_at == 0 && row.block_states.get("call").is_none_or(|b| b.output.is_none()), "nothing was answered: {row:?}");
+
+    ask(&RpcContext::operator_for_tests(), "skip", Some(json!({ "value": "given" }))).unwrap();
+    let row = ended(&state, &c).await;
+    assert_eq!(row.status, RunStatus::Done.as_str(), "{row:?}");
+    assert_eq!(row.block_states["call"].output, Some(json!({ "value": "given" })), "the window's output, not the agent's");
 }
 
 #[tokio::test]
