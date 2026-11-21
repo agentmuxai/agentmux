@@ -78,6 +78,11 @@ fn resolve_workdir(cmd: &CommandWriteAgentConfigData) -> Result<String, String> 
 }
 
 fn write_files(files: &[AgentConfigFile], base_path: &Path, on_host: bool) -> Result<(), String> {
+    // A host agent in a folder a container agent can write is given its files from outside the folder
+    // (`host_agent_files`), as `agent.open` gives them: nothing is written into the folder.
+    if on_host && crate::backend::host_agent_files::write(&base_path.to_string_lossy(), files.iter().map(|f| (f.path.as_str(), f.content.as_str())))? {
+        return Ok(());
+    }
     // The base is canonicalized ONCE (it exists: allocate_agent_workdir or the explicit-path mkdir -p created
     // it). The per-file symlink-escape verifier uses it to catch a symlinked ancestor like
     // `<base>/.claude -> /tmp/outside` before fs::write follows it.
@@ -175,4 +180,42 @@ fn write_file(wd: &crate::backend::workdir_fs::Workdir, base_path: &Path, canoni
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn files() -> Vec<AgentConfigFile> {
+        [("CLAUDE.md", "be kind"), (".claude/settings.json", "{\"hooks\":{}}"), (".claude/skills/review/SKILL.md", "body"), (".mcp.json", "{\"mcpServers\":{}}")]
+            .into_iter()
+            .map(|(path, content)| AgentConfigFile { path: path.to_string(), content: content.to_string() })
+            .collect()
+    }
+
+    /// The window's Launch, for a host agent in a folder a container agent has run in: every file goes to the
+    /// agent's own folder outside it, as `agent.open` writes them, and nothing into the folder. The container
+    /// agent's own launch there, and a host launch into any other folder, write into the folder as before.
+    #[test]
+    fn a_host_launch_into_a_container_agents_folder_writes_outside_it() {
+        let (data, folder, plain) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let dir = folder.path().to_string_lossy().into_owned();
+        let in_folder = |root: &Path, name: &str| root.join(name).exists();
+        crate::backend::mcp_config_file::with_data_home(data.path(), || {
+            crate::backend::mcp_folder_rule::mark(&dir);
+            write_files(&files(), folder.path(), true).unwrap();
+            assert!(std::fs::read_dir(folder.path()).unwrap().next().is_none(), "nothing is written into the folder");
+            let own = crate::backend::host_agent_files::dir_of(&dir).unwrap();
+            assert!(crate::backend::host_agent_files::settings_path(&own).is_file());
+            assert!(crate::backend::host_agent_files::instructions_path(&own).is_file());
+            assert!(crate::backend::host_agent_files::plugin_dir(&own).join("skills").join("review").join("SKILL.md").is_file());
+
+            write_files(&files(), folder.path(), false).unwrap();
+            assert!(in_folder(folder.path(), "CLAUDE.md") && in_folder(folder.path(), ".claude/settings.json"), "the container agent's own launch writes its folder");
+
+            write_files(&files(), plain.path(), true).unwrap();
+            assert!(in_folder(plain.path(), "CLAUDE.md") && in_folder(plain.path(), ".claude/settings.json") && in_folder(plain.path(), ".claude/skills/review/SKILL.md"), "a folder no container agent has to do with: as before");
+            assert_eq!(crate::backend::host_agent_files::dir_of(&plain.path().to_string_lossy()), None);
+        });
+    }
 }

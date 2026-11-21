@@ -115,7 +115,7 @@ fn refresh_running(state: &AppState) {
 fn refresh_panes(state: &AppState, panes: &[String]) -> usize {
     let (mut written, mut seen_dirs) = (0usize, std::collections::HashSet::new());
     for block_id in panes {
-        let Some(cwd) = pane_cwd(&state.mstore, block_id) else { continue };
+        let Some(cwd) = startup_file_key(&state.mstore, block_id) else { continue };
         if seen_dirs.contains(&cwd) {
             continue;
         }
@@ -139,6 +139,16 @@ fn pane_cwd(mstore: &Store, block_id: &str) -> Option<String> {
     (!raw.is_empty()).then(|| crate::backend::base::expand_home_dir_safe(raw).to_string_lossy().into_owned())
 }
 
+/// What names the startup file a pane's agent reads: its folder, and whether the file is kept outside it (a host
+/// agent in a folder a container agent can write, `host_agent_files`). A container agent's pane on the same
+/// folder reads the folder's own file, which is another one.
+fn startup_file_key(mstore: &Store, block_id: &str) -> Option<String> {
+    let cwd = pane_cwd(mstore, block_id)?;
+    let block = mstore.get::<Block>(block_id).ok().flatten()?;
+    let outside = crate::backend::mcp_folder_rule::folder_of(&block.meta).is_some();
+    Some(if outside { format!("{cwd} (outside)") } else { cwd })
+}
+
 /// Re-renders the pane's startup file from the agent's definition, the way its launch did, through the writer that
 /// never touches a file AgentMux does not own.
 pub(crate) fn refresh_pane(state: &AppState, block_id: &str) -> Refresh {
@@ -151,7 +161,9 @@ pub(crate) fn refresh_pane(state: &AppState, block_id: &str) -> Refresh {
         return Refresh::NotClaude;
     }
     let dir = Path::new(&dir);
-    if !has_an_agentmux_startup_file(dir) {
+    // A host agent in a folder a container agent can write reads its startup file from outside the folder.
+    let outside = crate::backend::mcp_folder_rule::folder_of(&block.meta).is_some();
+    if !outside && !has_an_agentmux_startup_file(dir) {
         return Refresh::NotOurs;
     }
     // The name the pane was launched under fills `{{AGENT}}` and `{{AGENT_DISPLAY}}`, as it did when the file was
@@ -166,6 +178,16 @@ pub(crate) fn refresh_pane(state: &AppState, block_id: &str) -> Refresh {
         }
     };
     let Some(claude_md) = files.into_iter().find(|f| f.path == "CLAUDE.md") else { return Refresh::NotOurs };
+    if outside {
+        return match crate::backend::host_agent_files::refresh_instructions(&dir.to_string_lossy(), &claude_md.content) {
+            Ok(true) => Refresh::Written,
+            Ok(false) => Refresh::NotOurs,
+            Err(e) => {
+                tracing::warn!(agent_id = %agent_id, error = %e, "startup refresh: could not write the startup file kept outside the folder");
+                Refresh::Failed
+            }
+        };
+    }
     match crate::backend::agent_config::write_claude_md_respecting_ownership(dir, &claude_md.content) {
         Ok(()) => Refresh::Written,
         Err(e) => {
