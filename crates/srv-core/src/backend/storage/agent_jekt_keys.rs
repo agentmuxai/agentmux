@@ -108,7 +108,15 @@ impl Store {
     ///
     /// A key older than `JEKT_KEY_TTL_SECS` is rotated here rather than
     /// returned as-is — see docs/specs/SPEC_JEKT_HOST_KEY_TTL_ROTATION_2026_09_14.md.
+    ///
+    /// The key is withheld from transcripts from here on (`transcript::withhold`).
     pub fn agent_jekt_key_ensure(&self, agent_id: &str) -> Result<Vec<u8>, StoreError> {
+        let key = self.agent_jekt_key_ensure_unwithheld(agent_id)?;
+        crate::backend::transcript::withhold::register(&BASE64.encode(&key));
+        Ok(key)
+    }
+
+    fn agent_jekt_key_ensure_unwithheld(&self, agent_id: &str) -> Result<Vec<u8>, StoreError> {
         let key = agent_id.to_lowercase();
         if let Some((existing, created_at)) = self.agent_jekt_key_load_with_created_at(&key)? {
             if now_secs() - created_at < JEKT_KEY_TTL_SECS {
