@@ -48,7 +48,8 @@ export function parseServerMessage(text: string): ServerMsg | null {
         case "windows":
             return parseWindows(m);
         case "notice":
-            return { t: "notice", message: String(m.message ?? "") };
+            // The server already cleaned what a page wrote; this is the second guard, so a hidden or reordering character never shows.
+            return { t: "notice", message: plainText(String(m.message ?? "")) };
         case "size":
             return typeof m.w === "number" && typeof m.h === "number" ? { t: "size", w: m.w, h: m.h } : null;
         case "error":
@@ -72,15 +73,32 @@ function parseWindows(m: Record<string, unknown>): ServerMsg | null {
     return { t: "windows", active: m.active, windows };
 }
 
-/** The site a window is on, as the tab names it: the host, else the title, else a placeholder. */
+/** Characters a person cannot see, or that change how the text around them reads: controls, bidi marks, zero-width ones. */
+// eslint-disable-next-line no-control-regex
+const HIDDEN = /[\u0000-\u001F\u007F-\u009F\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF\u{E0000}-\u{E007F}]/gu;
+
+/** Words a page wrote, as one line with nothing hidden in it. */
+export function plainText(text: string): string {
+    // Line breaks and tabs become spaces first (they are controls, but they only separate words); then what is hidden goes.
+    // (JavaScript's \s also matches the byte-order mark, so it must not run before the hidden characters are removed.)
+    return text.replace(/[\t\n\r\v\f]+/g, " ").replace(HIDDEN, "").replace(/\s+/g, " ").trim();
+}
+
+/** The most characters of a site in a tab. */
+export const LABEL_MAX = 24;
+
+/** The site a window is on, as the tab names it: the host, else the title, else a placeholder. A long host is cut from the left, so
+ * the end of it (the part that says whose site it is) stays visible; a title is cut at its end. */
 export function windowLabel(w: Pick<WindowInfo, "url" | "title">): string {
     try {
-        const host = new URL(w.url).host;
-        if (host) return host;
+        const host = plainText(new URL(w.url).host);
+        if (host) return host.length > LABEL_MAX ? `…${host.slice(-(LABEL_MAX - 1))}` : host;
     } catch {
         // not an address: fall through to the title
     }
-    return w.title || "…";
+    const title = plainText(w.title);
+    if (!title) return "…";
+    return title.length > LABEL_MAX ? `${title.slice(0, LABEL_MAX - 1)}…` : title;
 }
 
 export type Modifiers = { altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean };

@@ -14,6 +14,10 @@ use serde_json::{json, Value};
 
 /// At most this many windows in one pane, the first included.
 pub const MAX_WINDOWS: usize = 4;
+/// After the shown window changes without the person choosing it (a page opened one, or one closed itself), keys the person
+/// types are dropped for this long: a key meant for one window must not land in another (a password typed into a page the
+/// person had not yet seen). Pointer input is not held.
+pub const KEY_GAP: Duration = Duration::from_millis(500);
 /// The window id of the page a pane starts with. It is never closed by the person or by a page.
 pub const FIRST: WindowId = 0;
 
@@ -30,6 +34,8 @@ pub struct Entry {
     pub opener: Option<WindowId>,
     pub url: String,
     pub title: String,
+    /// While the window was not shown it went from one site to another: (the site the person last saw, the site it is on now).
+    pub moved: Option<(String, String)>,
 }
 
 /// What `remove` changed.
@@ -49,7 +55,7 @@ pub struct Windows {
 impl Windows {
     /// The pane's first window, which is the shown one.
     pub fn starting(target: String, session: String) -> Windows {
-        let first = Entry { id: FIRST, target, session, opener: None, url: String::new(), title: String::new() };
+        let first = Entry { id: FIRST, target, session, opener: None, url: String::new(), title: String::new(), moved: None };
         Windows { list: vec![first], active: FIRST, next: FIRST + 1 }
     }
 
@@ -88,7 +94,7 @@ impl Windows {
         }
         let id = self.next;
         self.next += 1;
-        self.list.push(Entry { id, target, session, opener: opener.filter(|o| self.get(*o).is_some()), url: String::new(), title: String::new() });
+        self.list.push(Entry { id, target, session, opener: opener.filter(|o| self.get(*o).is_some()), url: String::new(), title: String::new(), moved: None });
         self.active = id;
         Some(id)
     }
@@ -125,10 +131,24 @@ impl Windows {
     }
 
     pub fn set_location(&mut self, id: WindowId, url: String, title: String) {
+        let shown = self.active == id;
         if let Some(w) = self.list.iter_mut().find(|w| w.id == id) {
+            if !shown {
+                // A window the person is not looking at went to another site: remember where it was when they last saw it.
+                let (was, now) = (site_of(&w.url), site_of(&url));
+                if was != now && was != NO_SITE {
+                    let from = w.moved.take().map(|(from, _)| from).unwrap_or(was);
+                    w.moved = if from == now { None } else { Some((from, now)) };
+                }
+            }
             w.url = url;
             w.title = title;
         }
+    }
+
+    /// What the person has not yet been told about `id`: it changed site while it was not shown. Said once.
+    pub fn take_moved(&mut self, id: WindowId) -> Option<(String, String)> {
+        self.list.iter_mut().find(|w| w.id == id).and_then(|w| w.moved.take())
     }
 
     /// The `windows` message: every window with its address, which is shown, and which the person may close.
@@ -142,13 +162,26 @@ impl Windows {
     }
 }
 
+/// What a line says for an address that has no host.
+const NO_SITE: &str = "a page";
+
 /// The site an address belongs to, for a line the person reads: the host, or "a page" when there is none.
 pub fn site_of(url: &str) -> String {
-    url::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_string)).filter(|h| !h.is_empty()).unwrap_or_else(|| "a page".to_string())
+    url::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_string)).filter(|h| !h.is_empty()).unwrap_or_else(|| NO_SITE.to_string())
 }
 
+/// A character a person cannot see or that changes how the text around it reads: controls, the marks that reorder text
+/// (bidi), and the ones that have no width (zero-width, joiners, the byte-order mark, soft hyphen, tag characters).
+fn is_hidden(c: char) -> bool {
+    c.is_control()
+        || matches!(c as u32, 0x061C | 0x00AD | 0x180E | 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x206F | 0xFEFF | 0xE0000..=0xE007F)
+}
+
+/// Words a page wrote, made safe to show inside a line of ours: one line, nothing hidden, at most `max` characters.
 fn shorten(text: &str, max: usize) -> String {
-    let one_line: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    // Line breaks and tabs become one space first, then every hidden character goes.
+    let one_line: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().filter(|c| !is_hidden(*c)).collect();
+    let one_line = one_line.split_whitespace().collect::<Vec<_>>().join(" ");
     if one_line.chars().count() <= max {
         return one_line;
     }
@@ -179,6 +212,11 @@ pub fn dialog_dismissed(page_url: &str, kind: &str, message: &str) -> String {
 /// The line for a window the pane could not show because the page opened it before the browser would let the pane see it.
 pub fn window_not_shown(opener_url: &str) -> String {
     format!("{} opened a window that could not be shown, so it was closed.", site_of(opener_url))
+}
+
+/// The line for a window that went to another site while the person was not looking at it, said when they come back to it.
+pub fn window_changed_site(from: &str, to: &str) -> String {
+    format!("This window went from {from} to {to} while it was not shown.")
 }
 
 /// Google's page that says it will not sign in this browser. Matched on its address (host and path), never on what the page says.
@@ -354,6 +392,53 @@ mod tests {
         }
         let line = provider_refusal("https://accounts.google.com/v3/signin/rejected").unwrap();
         assert!(line.starts_with("Google refused"), "{line}");
+    }
+
+    #[test]
+    fn what_a_page_wrote_is_shown_with_nothing_hidden_in_it_and_after_the_site() {
+        // Control, bidi (right-to-left override and isolates), zero-width and tag characters are removed; the words stay.
+        let nasty = "Sign\u{202E}in\u{200B} to\u{2066} pay\u{FEFF}\u{7}\u{E0041} now\u{061C}\u{00AD}";
+        let line = dialog_dismissed("https://a.example/", "alert", nasty);
+        assert_eq!(line, "a.example opened a message box (“Signin to pay now”). It was dismissed.");
+        for c in line.chars() {
+            assert!(!is_hidden(c), "{:?} is still in the line", c);
+        }
+        // The site comes first, so the person reads who is speaking before what they say.
+        assert!(line.starts_with("a.example opened"), "{line}");
+        // A message of nothing but hidden characters says nothing, as an empty one does.
+        assert_eq!(dialog_dismissed("https://a.example/", "alert", "\u{200B}\u{202E}\n\t"), "a.example opened a message box. It was dismissed.");
+        // Text that looks like an address stays text: the line is words, with no markup for a link.
+        let link = dialog_dismissed("https://a.example/", "alert", "go to https://evil.example/login now");
+        assert!(link.contains("https://evil.example/login") && !link.contains('<') && !link.contains("]("), "{link}");
+    }
+
+    #[test]
+    fn a_window_that_changed_site_while_not_shown_is_told_once_on_return() {
+        let mut w = pane();
+        w.set_location(FIRST, "https://app.example/".into(), "App".into());
+        let a = open(&mut w, 1, Some(FIRST));
+        // The pop-up is shown, so the first window is the one not shown now.
+        w.set_location(a, "https://idp.example/auth".into(), "Sign in".into());
+        assert_eq!(w.take_moved(a), None, "the shown window changing site is not news");
+        w.set_location(FIRST, "https://app.example/other".into(), "App".into());
+        assert_eq!(w.take_moved(FIRST), None, "same site, nothing to say");
+        w.set_location(FIRST, "https://evil.example/".into(), "x".into());
+        w.set_location(FIRST, "https://evil.example/again".into(), "x".into());
+        assert_eq!(w.take_moved(FIRST), Some(("app.example".to_string(), "evil.example".to_string())));
+        assert_eq!(w.take_moved(FIRST), None, "said once");
+        // Back to the site the person last saw: nothing to say.
+        w.set_location(FIRST, "https://other.example/".into(), "x".into());
+        w.set_location(FIRST, "https://evil.example/".into(), "x".into());
+        w.take_moved(FIRST);
+        w.set_location(FIRST, "https://a2.example/".into(), "x".into());
+        w.set_location(FIRST, "https://evil.example/".into(), "x".into());
+        assert_eq!(w.take_moved(FIRST), None);
+        assert_eq!(window_changed_site("a.example", "b.example"), "This window went from a.example to b.example while it was not shown.");
+    }
+
+    #[test]
+    fn keys_are_held_for_half_a_second() {
+        assert_eq!(KEY_GAP, Duration::from_millis(500));
     }
 
     #[test]

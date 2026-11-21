@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { addressToUrl, clampSide } from "./use-streamed-pane";
-import { buttonName, frameBytes, isPasteChord, keyMessage, modifiers, mouseMessage, parseServerMessage, typedText, wheelMessage, windowLabel } from "./streamed-protocol";
+import { buttonName, frameBytes, isPasteChord, keyMessage, LABEL_MAX, modifiers, mouseMessage, parseServerMessage, plainText, typedText, wheelMessage, windowLabel } from "./streamed-protocol";
 
 const none = { altKey: false, ctrlKey: false, metaKey: false, shiftKey: false };
 
@@ -113,5 +113,32 @@ describe("windows and notices", () => {
         expect(windowLabel({ url: "http://127.0.0.1:8080/x", title: "" })).toBe("127.0.0.1:8080");
         expect(windowLabel({ url: "about:blank", title: "Untitled" })).toBe("Untitled");
         expect(windowLabel({ url: "", title: "" })).toBe("…");
+    });
+
+    it("cuts a long host from the left, so the end that says whose site it is stays visible", () => {
+        const long = "accounts.google.com.sign-in.verify-your-identity.evil-example.net";
+        const label = windowLabel({ url: `https://${long}/login`, title: "Sign in" });
+        expect(label.length).toBeLessThanOrEqual(LABEL_MAX);
+        expect(label.startsWith("…")).toBe(true);
+        expect(label.endsWith("evil-example.net")).toBe(true);
+        expect(long.endsWith(label.slice(1))).toBe(true);
+        // A host that fits is shown whole.
+        expect(windowLabel({ url: "https://accounts.google.com/", title: "" })).toBe("accounts.google.com");
+    });
+
+    it("shows a title in a tab with nothing hidden in it, cut at its end", () => {
+        expect(windowLabel({ url: "about:blank", title: "Pay\u202Epal\u200B now" })).toBe("Paypal now");
+        const cut = windowLabel({ url: "about:blank", title: "x".repeat(100) });
+        expect(cut.length).toBeLessThanOrEqual(LABEL_MAX);
+        expect(cut.endsWith("…")).toBe(true);
+    });
+
+    it("shows what a page wrote in a notice with control, reordering and zero-width characters removed", () => {
+        const text = "a.example opened a message box (\u201CSign\u202Ein\u200B to\u2066 pay\u0007\uFEFF\u201D). It was dismissed.";
+        expect(parseServerMessage(JSON.stringify({ t: "notice", message: text }))).toEqual({
+            t: "notice",
+            message: "a.example opened a message box (“Signin to pay”). It was dismissed.",
+        });
+        expect(plainText("one\n  two\tthree")).toBe("one two three");
     });
 });
