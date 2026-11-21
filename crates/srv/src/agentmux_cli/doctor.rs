@@ -67,6 +67,25 @@ pub struct Facts {
 
 const MIB: u64 = 1024 * 1024;
 
+/// `agentmux doctor [--port N]`: the checks, for the port asked, else the one `setup` kept (a running server is judged on the
+/// port it runs on). Prints them as lines or as JSON; 1 when one failed.
+pub fn command(paths: &crate::DataPaths, json: bool, port: Option<u16>) -> i32 {
+    let port = match (port, crate::settings::read(&paths.instance_dir)) {
+        (Some(port), _) => port,
+        (None, Ok(s)) => s.port,
+        (None, Err(e)) => return crate::fail(&e),
+    };
+    let checks = crate::said(evaluate(&crate::facts(paths, port, None, None)));
+    if json {
+        println!("{}", serde_json::json!({ "ok": !failed(&checks), "checks": checks }));
+    } else {
+        for line in lines(&checks) {
+            println!("{line}");
+        }
+    }
+    if failed(&checks) { 1 } else { 0 }
+}
+
 pub fn evaluate(f: &Facts) -> Vec<Check> {
     let mut out = Vec::new();
     let supported = (matches!(f.os, "linux" | "macos") && matches!(f.arch, "x86_64" | "aarch64")) || (f.os == "windows" && f.arch == "x86_64");

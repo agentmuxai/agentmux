@@ -139,6 +139,10 @@ enum Cmd {
     Doctor {
         #[arg(long)]
         json: bool,
+        /// Check this web port (the websocket port is the next one) instead of the one `setup` kept, else 7380. A server
+        /// that is running is judged on the port it runs on.
+        #[arg(long, value_parser = clap::value_parser!(u16).range(1024..=65534))]
+        port: Option<u16>,
     },
     /// Is AgentMux Headless running, and where.
     Status {
@@ -229,7 +233,7 @@ fn dispatch(cli: Cli) -> i32 {
             }
         }
         Cmd::Setup(args) => cmd_setup(&paths, &args),
-        Cmd::Doctor { json } => cmd_doctor(&paths, json),
+        Cmd::Doctor { json, port } => doctor::command(&paths, json, port),
         Cmd::Status { json } => cmd_status(&paths, json),
         Cmd::Open { print, origin } => cmd_client(&paths, "open", &client_args(print, origin)),
         Cmd::Logout => cmd_client(&paths, "logout", &[]),
@@ -894,22 +898,6 @@ fn said(checks: Vec<doctor::Check>) -> Vec<doctor::Check> {
     checks.into_iter().map(|c| doctor::Check { fix: c.fix.map(|f| say_as(&f)), ..c }).collect()
 }
 
-fn cmd_doctor(paths: &DataPaths, json: bool) -> i32 {
-    let port = match settings::read(&paths.instance_dir) {
-        Ok(s) => s.port,
-        Err(e) => return fail(&e),
-    };
-    let checks = said(doctor::evaluate(&facts(paths, port, None, None)));
-    if json {
-        println!("{}", serde_json::json!({ "ok": !doctor::failed(&checks), "checks": checks }));
-    } else {
-        for line in doctor::lines(&checks) {
-            println!("{line}");
-        }
-    }
-    if doctor::failed(&checks) { 1 } else { 0 }
-}
-
 fn cmd_setup(paths: &DataPaths, args: &setup::SetupArgs) -> i32 {
     let current = match settings::read(&paths.instance_dir) {
         Ok(s) => s,
@@ -1214,6 +1202,13 @@ mod tests {
     }
 
     #[test]
+    fn doctor_checks_the_port_it_is_given() {
+        assert!(matches!(parse(&["doctor", "--port", "7500"]).unwrap().command, Cmd::Doctor { port: Some(7500), .. }));
+        assert!(matches!(parse(&["doctor"]).unwrap().command, Cmd::Doctor { port: None, .. }));
+        assert!(parse(&["doctor", "--port", "80"]).is_err(), "a port below 1024 is refused, as for start and setup");
+    }
+
+    #[test]
     fn every_command_of_the_package_parses() {
         for args in [
             vec!["run"],
@@ -1222,6 +1217,7 @@ mod tests {
             vec!["restart"],
             vec!["status", "--json"],
             vec!["doctor", "--json"],
+            vec!["doctor", "--port", "7500"],
             vec!["setup", "--yes", "--port", "7380", "--secret-store", "file", "--service", "--no-open"],
             vec!["run", "--secret-store", "keychain", "--public-origin", "http://127.0.0.1:8080"],
             vec!["open", "--print"],
