@@ -2920,6 +2920,25 @@
     }
   },
   {
+    "command": "deeplink.open.done",
+    "request": "agentmux_srv::sagas::deeplink_open::CommandDeepLinkOpenDoneData",
+    "requestName": "CommandDeepLinkOpenDoneData",
+    "requestTs": {
+      "imports": [
+        "CommandDeepLinkOpenDoneData"
+      ],
+      "name": "CommandDeepLinkOpenDoneData"
+    },
+    "response": "agentmux_srv::sagas::deeplink_open::DeepLinkOpenDoneResult",
+    "responseName": "DeepLinkOpenDoneResult",
+    "responseTs": {
+      "imports": [
+        "DeepLinkOpenDoneResult"
+      ],
+      "name": "DeepLinkOpenDoneResult"
+    }
+  },
+  {
     "command": "deleteagent",
     "request": "agentmux_srv_core::backend::rpc_types::agent::CommandDeleteAgentDefinitionData",
     "requestName": "CommandDeleteAgentDefinitionData",
