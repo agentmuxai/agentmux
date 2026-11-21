@@ -510,7 +510,8 @@ mod fresh_on_a_model_change {
         let block = pane_of(&state, &target, "container").await;
         let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "model": PRO, "fresh": true })).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-        assert!(body["error"].as_str().unwrap().contains("unsupported in containers"), "{body}");
+        let said = body["error"].as_str().unwrap();
+        assert!(said.contains("not built for container agents yet") && said.contains("compact the conversation first"), "it says why and what to do instead: {body}");
         assert_eq!(model_of(&state, &target), before, "a refusal changes nothing");
         assert_eq!(session_of(&state, &block), "sess-old");
     }

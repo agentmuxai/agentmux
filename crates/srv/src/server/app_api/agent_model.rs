@@ -314,10 +314,19 @@ pub(crate) fn check_fresh(state: &AppState, def_id: &str, handoff: &str) -> Resu
         return Err(format!("the handoff is over {} characters: shorten it, with the next step in it", super::agent_context::HANDOFF_MAX_CHARS));
     }
     for block in crate::server::account_episodes::panes_of(state, def_id) {
-        super::agent_context::fresh_refusal(state, &block.oid)
-            .map_err(|why| format!("a fresh session is not possible for this agent ({why}): change the model without fresh, which resumes the conversation"))?;
+        super::agent_context::fresh_refusal(state, &block.oid).map_err(fresh_refused)?;
     }
     Ok(())
+}
+
+/// What a refused fresh session says: why, and what to do instead. A container agent can't start a fresh session yet
+/// (its turns run on a per-turn exec controller that has no session to end); what it can do is compact first.
+fn fresh_refused(why: &str) -> String {
+    if why.contains("containers") {
+        "a fresh session is not built for container agents yet, so this model change was not made: compact the conversation first (Agents compact, or Compact, then switch in the model panel) and change the model after, or change it without fresh to resume the conversation as it is".to_string()
+    } else {
+        format!("a fresh session is not possible for this agent ({why}), so this model change was not made: change it without fresh to resume the conversation, or compact it first")
+    }
 }
 
 /// Starts the fresh sessions of a model change. A running pane ends its session when its turn ends and starts the new one
