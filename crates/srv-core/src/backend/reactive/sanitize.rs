@@ -241,17 +241,94 @@ fn contains_whole_word(haystack: &str, needle: &str, allow_plural: bool) -> bool
     false
 }
 
+/// What a text posted for others to read (a bulletin, a channel post) is read as: the text a model reads (invisibles
+/// dropped, fullwidth letters as ASCII), lower-cased.
+fn as_read(msg: &str) -> String {
+    msg.chars()
+        .filter(|&c| !is_invisible(c) && !matches!(c, '\u{200C}' | '\u{200D}'))
+        .map(fold)
+        .collect::<String>()
+        .to_lowercase()
+}
+
+/// Words that make "token" a credential when they come right before it ("an access token", "the bearer token"); on
+/// its own the word is also the unit a model's usage is counted in, and that is what most posts mean by it.
+const CREDENTIAL_TOKEN_QUALIFIERS: &[&str] = &[
+    "access", "auth", "authentication", "authorization", "api", "bearer", "oauth", "refresh", "session", "login",
+    "github", "gh", "personal", "bot", "id", "secret", "private", "signing", "jwt", "vault", "npm", "deploy",
+    "service", "csrf", "sso", "pat", "app", "installation", "agent", "master", "admin", "root", "ssh", "aws",
+];
+
+/// Whether the word "token" (or "tokens") at `start..end` of `lower` reads as a credential: a credential word
+/// right before it, or an assignment right after it (`token=...`).
+fn token_reads_as_credential(lower: &str, start: usize, end: usize) -> bool {
+    let before = lower[..start].trim_end_matches([' ', '\t', '-']);
+    let prev = before.rsplit(|c: char| is_word_boundary(c)).next().unwrap_or("");
+    if CREDENTIAL_TOKEN_QUALIFIERS.contains(&prev) {
+        return true;
+    }
+    lower[end..].trim_start_matches(' ').starts_with('=')
+}
+
+/// The spots of `lower` where `needle` stands as a whole word (one trailing "s" allowed), as byte ranges.
+fn whole_word_spots<'a>(lower: &'a str, needle: &'a str) -> impl Iterator<Item = (usize, usize)> + 'a {
+    let mut from = 0;
+    std::iter::from_fn(move || {
+        while let Some(at) = lower[from..].find(needle) {
+            let start = from + at;
+            let mut end = start + needle.len();
+            from = end;
+            let before_ok = start == 0 || is_word_boundary(lower[..start].chars().next_back().unwrap());
+            if !before_ok {
+                continue;
+            }
+            if lower[end..].chars().next().map_or(true, is_word_boundary) {
+                return Some((start, end));
+            }
+            if lower[end..].starts_with('s') && lower[end + 1..].chars().next().map_or(true, is_word_boundary) {
+                end += 1;
+                return Some((start, end));
+            }
+        }
+        None
+    })
+}
+
+/// Why a text posted for others to read (a bulletin or a channel post) is refused as being about credentials or a
+/// destructive action, or `None` when it may be posted: the word or phrase that matched, as it stands in the text.
+///
+/// Like `is_sensitive_message`, except that "token" alone is not a credential here: it is also the unit a model's
+/// usage is counted in ("save tokens"), so it counts only after a credential word ("access token") or before an
+/// assignment ("token=..."). A jekt's tier still escalates on the bare word, as `is_sensitive_message` says.
+pub fn post_refusal_reason(msg: &str) -> Option<String> {
+    let lower = as_read(msg);
+    if let Some(kw) = SENSITIVE_SUBSTRING_KEYWORDS.iter().find(|kw| lower.contains(**kw)) {
+        return Some((*kw).to_string());
+    }
+    for (kw, allow_plural) in SENSITIVE_WHOLE_WORD_KEYWORDS {
+        if *kw == "token" {
+            if let Some((start, end)) = whole_word_spots(&lower, kw).find(|&(s, e)| token_reads_as_credential(&lower, s, e)) {
+                // The word before it too when that is what made it one, so the poster sees which phrase it was.
+                let before = lower[..start].trim_end_matches([' ', '\t', '-']);
+                let from = before.char_indices().rev().find(|&(_, c)| is_word_boundary(c)).map_or(0, |(i, c)| i + c.len_utf8());
+                if CREDENTIAL_TOKEN_QUALIFIERS.contains(&&before[from..]) {
+                    return Some(format!("{} {}", &before[from..], &lower[start..end]));
+                }
+                return Some(format!("{}=", &lower[start..end]));
+            }
+        } else if contains_whole_word(&lower, kw, *allow_plural) {
+            return Some((*kw).to_string());
+        }
+    }
+    None
+}
+
 /// Returns true if the message body contains keywords indicating a sensitive operation.
 pub fn is_sensitive_message(msg: &str) -> bool {
     // Matched on what a model reads, not the code points sent: joiners and
     // other invisibles dropped, fullwidth letters as ASCII, so "pass<ZWJ>word"
     // and "ｔｏｋｅｎ" still escalate.
-    let lower: String = msg
-        .chars()
-        .filter(|&c| !is_invisible(c) && !matches!(c, '\u{200C}' | '\u{200D}'))
-        .map(fold)
-        .collect::<String>()
-        .to_lowercase();
+    let lower = as_read(msg);
     SENSITIVE_SUBSTRING_KEYWORDS.iter().any(|kw| lower.contains(kw))
         || SENSITIVE_WHOLE_WORD_KEYWORDS
             .iter()

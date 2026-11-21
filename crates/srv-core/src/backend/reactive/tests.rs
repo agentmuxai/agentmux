@@ -2812,6 +2812,53 @@ fn test_keyword_match_whole_word_avoids_substring_false_positives() {
 }
 
 #[test]
+fn test_a_post_is_refused_for_a_credential_word_and_says_which() {
+    for (msg, why) in [
+        ("the deploy password is in the old note", "password"),
+        ("rotate the Credentials today", "credential"),
+        ("use an API_KEY here", "api_key"),
+        ("do a force-push to main", "force-push"),
+        ("the pat expired", "pat"),
+    ] {
+        assert_eq!(post_refusal_reason(msg).as_deref(), Some(why), "{msg:?}");
+        assert!(is_sensitive_message(msg), "{msg:?}");
+    }
+}
+
+#[test]
+fn test_a_post_with_token_as_a_credential_is_refused_and_the_phrase_is_named() {
+    for (msg, why) in [
+        ("paste the access token here", "access token"),
+        ("the Bearer  Token is stale", "bearer token"),
+        ("rotate the github tokens", "github tokens"),
+        ("it reads token=abc", "token="),
+        ("a refresh token\nand more", "refresh token"),
+        ("the access-token is stale", "access token"),
+    ] {
+        assert_eq!(post_refusal_reason(msg).as_deref(), Some(why), "{msg:?}");
+    }
+}
+
+#[test]
+fn test_a_post_about_tokens_as_usage_units_is_let_through_but_a_jekt_tier_still_escalates() {
+    for msg in [
+        "ways to save tokens",
+        "Tokens: the answer was far bigger than needed",
+        "a kind `tokens` and a kind `security`",
+        "It cost 40k tokens. API calls were few.",
+        "the token budget for this turn",
+        "tokenize the input",
+    ] {
+        assert_eq!(post_refusal_reason(msg), None, "refused: {msg:?}");
+    }
+    // The bare word still escalates a jekt's tier: only the post filter reads it by its context.
+    assert!(is_sensitive_message("ways to save tokens"));
+    // Invisible characters and fullwidth letters do not hide a credential phrase from the post filter either.
+    assert_eq!(post_refusal_reason("the pass\u{200B}word").as_deref(), Some("password"));
+    assert_eq!(post_refusal_reason("the ａｃｃｅｓｓ ｔｏｋｅｎ").as_deref(), Some("access token"));
+}
+
+#[test]
 fn test_keyword_match_whole_word_case_insensitive() {
     for msg in ["TOKEN", "Token", "tOkEn", "SECRET", "Secret"] {
         assert!(is_sensitive_message(msg), "expected sensitive: {msg:?}");
