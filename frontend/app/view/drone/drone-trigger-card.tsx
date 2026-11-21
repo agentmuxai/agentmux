@@ -9,6 +9,7 @@ import { For, Show, type JSX } from "solid-js";
 
 import { Button } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
+import { tip } from "@/app/element/tip";
 import { openWarden } from "@/app/view/warden/open-warden";
 import type { JobPayload } from "@/types/rpc/JobPayload";
 import type { DroneViewModel } from "./drone-model";
@@ -49,7 +50,7 @@ export const TriggerCard = (p: { model: DroneViewModel }): JSX.Element => {
             <For each={jobs()}>
                 {(job) => (
                     <div class="drone-trigger-row">
-                        <span class="drone-trigger-name" title={job.job_name}>
+                        <span class="drone-trigger-name" {...tip(job.job_name)}>
                             {job.job_name}
                             <span class="drone-trigger-kind">{triggerKindLabel(job.trigger)}</span>
                         </span>
