@@ -23,6 +23,8 @@ import {
     BACK_VALUE,
     disclosureRow,
     disclosureValue,
+    freshRow,
+    FRESH_VALUE,
     parseCompactValue,
     parseDisclosureValue,
     parseRouteValue,
@@ -110,6 +112,7 @@ function addRoutesSection(s: DropupState, rows: Row[], options: OptionRow[]) {
     const panel = s.routes.panel();
     if (!panel) return;
     const add = adder(rows, options);
+    add(freshRow(s.routes.fresh()));
     for (const { route, rows: routeModels } of routeRows(panel, s.props.contextTokens)) {
         const expanded = s.routes.isExpanded(route.id);
         add(disclosureRow(route, expanded));
@@ -246,6 +249,10 @@ export function createDropupActions(s: DropupState, a: DropupAgreement) {
             setRouteOpen(route, !s.routes.isExpanded(route));
             return;
         }
+        if (choice.value === FRESH_VALUE) {
+            s.routes.setFresh(!s.routes.fresh());
+            return;
+        }
         if (choice.section === "mode") await s.updateRuntime({ permissionMode: choice.value as PermissionMode });
         else if (choice.section === "model") await pickModel(choice.value);
         else await s.updateRuntime({ effort: choice.value as EffortLevel });
@@ -257,6 +264,7 @@ export function createDropupActions(s: DropupState, a: DropupAgreement) {
             return;
         }
         s.routes.collapseAll();
+        s.routes.resetFresh();
         const { options } = build();
         const idx = options.findIndex((o) => o.section === "mode" && o.current);
         s.setSelectedOptIndex(idx >= 0 ? idx : 0);

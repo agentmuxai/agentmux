@@ -169,6 +169,39 @@ describe("the model panel's routes", () => {
         expect(patchRuntime).not.toHaveBeenCalled();
     });
 
+    it("starts a fresh session on the model picked after the choice is turned on, and only for that panel opening", async () => {
+        panelCommand.mockResolvedValue(panelOf());
+        mount(plain);
+        await openPanel();
+        expect(option(/Start a fresh session/).getAttribute("aria-selected")).toBe("false");
+        expect(option(/Start a fresh session/).textContent).toContain("resumes the conversation");
+        fireEvent.click(option(/Start a fresh session/));
+        await flush();
+        expect(option(/Start a fresh session/).getAttribute("aria-selected")).toBe("true");
+        expect(switchCommand).not.toHaveBeenCalled();
+        await openRoute();
+        fireEvent.click(option(/DeepSeek V4 Pro/));
+        await flush();
+        expect(switchCommand).toHaveBeenCalledWith({}, { blockid: "block-1", route: "openrouter", model: PRO, restart: true, fresh: true, handoff: null }, { timeout: 120000 });
+        // Closed and opened again, the choice is off.
+        await openPanel();
+        await openPanel();
+        expect(option(/Start a fresh session/).getAttribute("aria-selected")).toBe("false");
+    });
+
+    it("shows srv's reason when a fresh session is refused and the model change was not made", async () => {
+        panelCommand.mockResolvedValue(panelOf());
+        switchCommand.mockRejectedValueOnce(new Error("FORBIDDEN: a fresh session is not built for container agents yet, so this model change was not made: compact the conversation first"));
+        mount(plain);
+        await openPanel();
+        fireEvent.click(option(/Start a fresh session/));
+        await flush();
+        await openRoute();
+        fireEvent.click(option(/DeepSeek V4 Pro/));
+        await flush();
+        expect(document.body.innerHTML).toContain("not built for container agents yet");
+    });
+
     it("leaves the route first when a harness model is picked on a route, and lets the runtime change do the restart", async () => {
         panelCommand.mockResolvedValue(panelOf());
         mount(onRoute);
