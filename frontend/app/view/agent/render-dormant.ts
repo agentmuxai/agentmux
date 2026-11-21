@@ -39,10 +39,11 @@ export function useWindowHidden(): Accessor<boolean> {
 /**
  * The pane's dormancy for rendering: its tab hidden, or its window. With
  * `blockId`, a pane in a window tab nobody has opened yet draws ahead of the
- * visit while it holds the prewarm lease (store/agent-prewarm.ts).
+ * visit while it holds the prewarm lease (store/agent-prewarm.ts), and so does one in a tab the pointer rests on
+ * when its document changed while the tab was hidden (`changes` says what it holds now).
  */
-export function useRenderDormant(paneHidden: Accessor<boolean>, blockId?: string): Accessor<boolean> {
+export function useRenderDormant(paneHidden: Accessor<boolean>, blockId?: string, changes?: () => unknown): Accessor<boolean> {
     const hiddenWindow = useWindowHidden();
-    const prewarming = blockId ? usePrewarm(blockId) : () => false;
+    const prewarming = blockId ? usePrewarm(blockId, changes) : () => false;
     return () => (paneHidden() && !prewarming()) || hiddenWindow();
 }

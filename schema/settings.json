@@ -533,6 +533,12 @@
           "description": "Draw the agent transcripts of window tabs you have not opened yet while the window is idle, one pane at a time, so the first visit shows the whole tab at once. Uses more memory; pauses under memory pressure.",
           "x-section": "Window"
         },
+        "window:drawtabonhover": {
+          "type": "boolean",
+          "default": true,
+          "description": "While the pointer rests on a window tab, draw the agent transcripts in it that changed since you last saw it, one pane at a time, so the tab shows every pane at once when you click it. Pauses while you type and under memory pressure.",
+          "x-section": "Window"
+        },
         "window:dimensions": {
           "type": "string",
           "x-section": "Window",
@@ -756,7 +762,7 @@
         "notify:sound:agent.shutdown.pending": {
           "type": "boolean",
           "default": true,
-          "description": "Play the falling shutdown chime when something other than you asked to shut an agent down and you have 15 seconds to keep it running. Default true.",
+          "description": "Play the falling shutdown chime when something other than you asked to shut an agent down and you have 30 seconds to keep it running (15 when the agent is quitting itself). Default true.",
           "x-section": "Notifications"
         },
         "notify:sounds:waiting:volume": {

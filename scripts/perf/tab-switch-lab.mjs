@@ -6,7 +6,7 @@
 // the agent panes of a window tab in the frames after the switch to it, before and after a change.
 //
 //   node scripts/perf/tab-switch-lab.mjs --home .dev-home/5302 --patch <change.patch> [--repeat 2] [--out DIR]
-//        [--cases A,B,C] [--lines 3000] [--hidden-s 45] [--settle-s 30]
+//        [--cases A,B,C] [--lines 3000] [--hidden-s 45] [--settle-s 30] [--lead-ms 0]
 //
 // Drives a `task dev` build on its own isolated home, over CDP (never the machine's own instance): a first window
 // tab with one scripted agent and a second with three, each given a transcript of --lines lines by playing the fake
@@ -35,10 +35,14 @@ import { connect, installScript } from "./memory-lab/lib/driver.mjs";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const PROBE_MS = 3500;
 
-/** The in-page probe: `__tabLab.run(blockIds, tabSelector, ms)` clicks the tab and samples every frame. */
+/**
+ * The in-page probe: `__tabLab.run(blockIds, tabSelector, ms, leadMs)` clicks the tab and samples every frame. With a
+ * `leadMs` the pointer first "arrives" on the pill (a `pointerenter`, which the tab strip reads as a hover) and the click
+ * follows `leadMs` later, the lead the draw on intent works in (docs/specs/SPEC_WINDOW_TAB_SWITCH_DRAW_ON_INTENT_2026_11_12.md §7).
+ */
 export const PROBE = `(() => {
   const lab = (window.__tabLab = {});
-  lab.run = (blockIds, tabSelector, ms) =>
+  lab.run = (blockIds, tabSelector, ms, leadMs = 0) =>
     new Promise((resolve) => {
       const frames = blockIds.map(() => []);
       const longTasks = [];
@@ -51,7 +55,7 @@ export const PROBE = `(() => {
       console.info = function (...a) {
         try {
           const s = a.map(String).join(" ");
-          if (/pane-cover|agent-open-rest|prewarm/.test(s)) logs.push({ at: Math.round(performance.now() - origin), s: s.slice(0, 160) });
+          if (/pane-cover|agent-open-rest|prewarm|tab-intent/.test(s)) logs.push({ at: Math.round(performance.now() - origin), s: s.slice(0, 160) });
         } catch {}
         return info.apply(this, a);
       };
@@ -92,11 +96,17 @@ export const PROBE = `(() => {
           resolve({ frames, longTasks, logs });
         }
       };
-      requestAnimationFrame(() => {
-        origin = performance.now();
-        document.querySelector(tabSelector).click();
-        tick();
-      });
+      const go = () =>
+        requestAnimationFrame(() => {
+          origin = performance.now();
+          document.querySelector(tabSelector).click();
+          tick();
+        });
+      if (leadMs > 0) {
+        // The strip listens on the tab's wrapper, and a pointerenter does not bubble: tell the tab and its nearest ancestors.
+        for (let el = document.querySelector(tabSelector), i = 0; el && i < 3; el = el.parentElement, i++) el.dispatchEvent(new PointerEvent("pointerenter"));
+        setTimeout(go, leadMs);
+      } else go();
     });
   return true;
 })()`;
@@ -208,6 +218,7 @@ function parseArgs(argv) {
     hiddenS: Number(get("--hidden-s", 45)),
     settleS: Number(get("--settle-s", 30)),
     record: !argv.includes("--no-record"),
+    leadMs: Number(get("--lead-ms", 0)),
   };
 }
 
@@ -256,11 +267,11 @@ async function reload(d, settleS) {
 const tabSelector = (id) => `.tab[data-tab-id="${id}"]`;
 
 /** Takes one measurement: the state set up by `prep`, the switch, 3.5 s of frames. */
-async function switchTo(d, tab2, panes) {
+async function switchTo(d, tab2, panes, leadMs = 0) {
   if ((await d.eval("document.visibilityState")) !== "visible") throw new Error("the lab window is hidden (minimized or covered): it paints no frames, so nothing can be measured");
   await d.eval(PROBE);
   await d.eval(`window.__agentmuxOneWay && window.__agentmuxOneWay.reset()`);
-  const raw = await d.eval(`window.__tabLab.run(${JSON.stringify(panes.map((a) => a.blockId))}, ${JSON.stringify(tabSelector(tab2))}, ${PROBE_MS})`);
+  const raw = await d.eval(`window.__tabLab.run(${JSON.stringify(panes.map((a) => a.blockId))}, ${JSON.stringify(tabSelector(tab2))}, ${PROBE_MS}, ${leadMs})`);
   const oneWay = await d.eval(`(window.__agentmuxOneWay ? window.__agentmuxOneWay.snapshot() : []).map((s) => ({ pane: s.pane, down: s.down, overshoot: s.overshoot, tight: s.tight, blankFrames: s.blankFrames, byCause: s.byCause }))`);
   return {
     panes: raw.frames.map(summarizePane),
@@ -298,7 +309,7 @@ async function runCase(d, name, args, tab1, tab2, panes) {
     await d.send(working.map((a) => a.blockId));
     await sleep(1500);
   }
-  const m = await switchTo(d, tab2, panes);
+  const m = await switchTo(d, tab2, panes, args.leadMs);
   await d.eval(`document.querySelector(${JSON.stringify(tabSelector(tab1))}).click()`);
   await sleep(1500);
   return { ...m, heap, valid: m.panes.every((p) => p.shown && !p.startedVisible) };
