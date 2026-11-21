@@ -114,6 +114,23 @@ const TemplateList = (p: {
     </Show>
 );
 
+/** Run `work` with the panel busy and no old refusal; a refusal from it is shown in the panel, not thrown. */
+async function guarded(
+    setBusy: (busy: boolean) => void,
+    setFailure: (message: string | null) => void,
+    work: () => Promise<void>
+): Promise<void> {
+    setBusy(true);
+    setFailure(null);
+    try {
+        await work();
+    } catch (e) {
+        setFailure(String(e));
+    } finally {
+        setBusy(false);
+    }
+}
+
 /** The panel's state and what its buttons do: list, approve, choose, make. */
 function usePicker(p: { model: DroneViewModel; onClose: () => void }) {
     const [templates, setTemplates] = createSignal<JobTemplateInfo[]>([]);
@@ -149,9 +166,7 @@ function usePicker(p: { model: DroneViewModel; onClose: () => void }) {
     const approve = async () => {
         const info = approving();
         if (!info) return;
-        setBusy(true);
-        setFailure(null);
-        try {
+        await guarded(setBusy, setFailure, async () => {
             const res = await RpcApi.JobsTemplatesApproveCommand(TabRpcClient, {
                 id: info.id,
                 hash: info.hash,
@@ -159,11 +174,7 @@ function usePicker(p: { model: DroneViewModel; onClose: () => void }) {
             });
             setTemplates(droneTemplatesIn(res.templates));
             setApproving(null);
-        } catch (e) {
-            setFailure(String(e));
-        } finally {
-            setBusy(false);
-        }
+        });
     };
 
     const make = async () => {
@@ -173,9 +184,7 @@ function usePicker(p: { model: DroneViewModel; onClose: () => void }) {
         const { params, errors: bad } = paramsFromForm(manifest, values());
         setErrors(bad);
         if (Object.keys(bad).length > 0) return;
-        setBusy(true);
-        setFailure(null);
-        try {
+        await guarded(setBusy, setFailure, async () => {
             const made = await RpcApi.JobsTemplatesMakeDroneCommand(TabRpcClient, {
                 id: info.id,
                 version: manifest.version,
@@ -185,11 +194,16 @@ function usePicker(p: { model: DroneViewModel; onClose: () => void }) {
             await p.model.openDrone(made.drone.id);
             void p.model.refreshList();
             p.onClose();
-        } catch (e) {
-            setFailure(String(e));
-        } finally {
-            setBusy(false);
-        }
+        });
+    };
+
+    const cancelApproval = () => {
+        setApproving(null);
+        setFailure(null);
+    };
+    const back = () => {
+        setChosen(null);
+        setFailure(null);
     };
 
     return {
@@ -199,7 +213,6 @@ function usePicker(p: { model: DroneViewModel; onClose: () => void }) {
         approving,
         setApproving,
         chosen,
-        setChosen,
         values,
         setValues,
         errors,
@@ -209,6 +222,8 @@ function usePicker(p: { model: DroneViewModel; onClose: () => void }) {
         choose,
         approve,
         make,
+        cancelApproval,
+        back,
     };
 }
 
@@ -220,7 +235,6 @@ export const DroneTemplatePicker = (p: { model: DroneViewModel; onClose: () => v
         approving,
         setApproving,
         chosen,
-        setChosen,
         values,
         setValues,
         errors,
@@ -230,6 +244,8 @@ export const DroneTemplatePicker = (p: { model: DroneViewModel; onClose: () => v
         choose,
         approve,
         make,
+        cancelApproval,
+        back,
     } = usePicker(p);
     return (
         <section class="drone-templates" aria-label={t("drone.templates.title")}>
@@ -240,19 +256,28 @@ export const DroneTemplatePicker = (p: { model: DroneViewModel; onClose: () => v
                 </Button>
             </div>
             <Show when={failure()}>
-                <div class="drone-templates-error" role="alert">
-                    {failure()}
-                </div>
+                {(message) => (
+                    // A refusal is brought into view: the person may have pressed a button at the bottom of a scrolled panel.
+                    <div
+                        class="drone-templates-error"
+                        role="alert"
+                        ref={(el) => queueMicrotask(() => el.scrollIntoView?.({ block: "nearest" }))}
+                    >
+                        {message()}
+                    </div>
+                )}
             </Show>
             <Show when={approving()}>
                 {(info) => (
-                    <TemplateApproval
-                        info={info()}
-                        busy={busy()}
-                        error={null}
-                        onApprove={() => void approve()}
-                        onCancel={() => setApproving(null)}
-                    />
+                    <div data-operator-only="">
+                        <TemplateApproval
+                            info={info()}
+                            busy={busy()}
+                            error={null}
+                            onApprove={() => void approve()}
+                            onCancel={cancelApproval}
+                        />
+                    </div>
                 )}
             </Show>
             <Show when={!approving() && chosen()}>
@@ -266,7 +291,7 @@ export const DroneTemplatePicker = (p: { model: DroneViewModel; onClose: () => v
                         onName={setName}
                         onChange={(key, value) => setValues({ ...values(), [key]: value })}
                         onMake={() => void make()}
-                        onBack={() => setChosen(null)}
+                        onBack={back}
                     />
                 )}
             </Show>

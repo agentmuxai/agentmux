@@ -113,6 +113,8 @@ describe("New from a template", () => {
         const { container } = render(() => <DroneTemplatePicker model={model!} onClose={() => {}} />);
         await waitFor(() => expect(button(container, "Review and approve")).toBeTruthy());
         fireEvent.click(button(container, "Review and approve"));
+        // The approval is the person's own answer: the UI tool's click and key paths refuse what is inside this marker.
+        expect(button(container, "Approve").closest("[data-operator-only]")).not.toBeNull();
         fireEvent.click(button(container, "Approve"));
         await waitFor(() =>
             expect(rpc.approve).toHaveBeenCalledWith({ id: pending.id, hash: pending.hash, signer: "" })
@@ -165,5 +167,36 @@ describe("New from a template", () => {
         await waitFor(() => expect(container.querySelector(".drone-stage > .drone-templates")).toBeTruthy());
         fireEvent.click(button(container, "Close"));
         expect(container.querySelector(".drone-templates")).toBeNull();
+    });
+});
+
+describe("a refusal", () => {
+    it("is brought into view when it arrives, because the button pressed may be at the bottom of a scrolled panel", async () => {
+        const scroll = vi.fn();
+        Element.prototype.scrollIntoView = scroll;
+        rpc.makeDrone.mockRejectedValue(new Error("template changed"));
+        const { container } = render(() => <DroneTemplatePicker model={model!} onClose={() => {}} />);
+        await waitFor(() => expect(button(container, "Use")).toBeTruthy());
+        fireEvent.click(button(container, "Use"));
+        fireEvent.click(button(container, "Make the drone"));
+        await waitFor(() => expect(scroll).toHaveBeenCalledWith({ block: "nearest" }));
+        expect(scroll.mock.contexts[0]).toBe(container.querySelector("[role=alert]"));
+    });
+
+    it("is gone when the person goes back to the list, so it does not head the list", async () => {
+        rpc.approve.mockRejectedValue(new Error("template changed since you reviewed it"));
+        const { container } = render(() => <DroneTemplatePicker model={model!} onClose={() => {}} />);
+        await waitFor(() => expect(button(container, "Review and approve")).toBeTruthy());
+        fireEvent.click(button(container, "Review and approve"));
+        fireEvent.click(button(container, "Approve"));
+        await waitFor(() => expect(container.querySelector("[role=alert]")).toBeTruthy());
+        fireEvent.click(button(container, "Cancel"));
+        expect(container.querySelector("[role=alert]")).toBeNull();
+        fireEvent.click(button(container, "Use"));
+        rpc.makeDrone.mockRejectedValue(new Error("refused"));
+        fireEvent.click(button(container, "Make the drone"));
+        await waitFor(() => expect(container.querySelector("[role=alert]")).toBeTruthy());
+        fireEvent.click(button(container, "Back"));
+        expect(container.querySelector("[role=alert]")).toBeNull();
     });
 });
