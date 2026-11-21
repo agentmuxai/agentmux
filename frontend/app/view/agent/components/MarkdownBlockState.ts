@@ -12,10 +12,11 @@ import { createEffect, createMemo, createSignal, onCleanup, type Accessor } from
 import { useTick } from "@/app/hook/useTick";
 import { useNodePeek } from "../hooks/useNodePeek";
 import { useAgentDormant } from "../agent-dormancy";
+import type { WriterTag } from "../../../agent-model/node-types";
 import type { MarkdownNode, ViewModeTag } from "../../../agent-model/types";
 
 export interface MarkdownBlockProps {
-    node: MarkdownNode & ViewModeTag;
+    node: MarkdownNode & ViewModeTag & WriterTag;
     /** A foldable thought (canceled, or folded by the pane's view): the user opened it (`documentState.pinnedNodes`). */
     pinned?: boolean;
     /** A foldable thought: toggle `pinned` (the header click). */
