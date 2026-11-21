@@ -48,6 +48,7 @@ export const GATES = [
     { id: "ligature-fonts", name: "ligature font gate", cmd: ["bash", "scripts/check-ligature-fonts.sh"] },
     { id: "bundled-tools", name: "bundled tools gate", cmd: ["bash", "scripts/check-bundled-tools.sh"] },
     { id: "taskfile-target-dir", name: "Taskfile target directory", cmd: ["bash", "scripts/check-taskfile-target-dir.sh"] },
+    { id: "taskfile-dev-cargo-env", name: "Taskfile dev cargo environment", cmd: ["bash", "scripts/check-taskfile-dev-cargo-env.sh"] },
     { id: "hash-from-stdin", name: "hash files from stdin", cmd: ["bash", "scripts/check-hash-from-stdin.sh"] },
     { id: "input-handler-layout-reads", name: "input handlers read no layout", cmd: ["bash", "tools/lint/check-input-handler-layout-reads.sh"] },
     { id: "muxbus-credential-store", name: "muxbus credential store", cmd: ["bash", "scripts/check-muxbus-credential-store.sh"] },
@@ -105,6 +106,7 @@ export const NOT_RUN = Object.fromEntries(
         "scripts/build-slot/build-slot.test.sh",
         "scripts/ci-nextest-run.test.sh",
         "scripts/check-taskfile-target-dir.test.sh",
+        "scripts/check-taskfile-dev-cargo-env.test.sh",
     ].map((script) => [script, "self-test of a build, packaging or CI script; it only matters to a PR that edits that script, and CI runs it"]),
 );
 
