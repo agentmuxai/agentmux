@@ -33,6 +33,7 @@ const OPERATOR_COMMANDS: ReadonlySet<string> = new Set([
     "identity.account.availability",
     "identity.account.move_agents",
     "identity.account.signed_in",
+    "identity.account.usage",
     "jobs.act",
     "jobs.save",
     "jobs.templates.approve",

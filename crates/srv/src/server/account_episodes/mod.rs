@@ -55,7 +55,7 @@ use crate::backend::eventbus::EventBus;
 use crate::backend::mps::MuxEvent;
 use crate::backend::obj::{self, Block, Tab};
 use crate::backend::rpc::engine::WshRpcEngine;
-use crate::backend::rpc_types::{NoArgsReq, COMMAND_IDENTITY_ACCOUNT_AVAILABILITY, COMMAND_AGENT_ACCOUNT_SWITCH, COMMAND_IDENTITY_ACCOUNT_MOVE_AGENTS, COMMAND_IDENTITY_ACCOUNT_SET_FAILOVER, COMMAND_IDENTITY_ACCOUNT_SIGNED_IN};
+use crate::backend::rpc_types::{NoArgsReq, COMMAND_IDENTITY_ACCOUNT_AVAILABILITY, COMMAND_IDENTITY_ACCOUNT_USAGE, COMMAND_AGENT_ACCOUNT_SWITCH, COMMAND_IDENTITY_ACCOUNT_MOVE_AGENTS, COMMAND_IDENTITY_ACCOUNT_SET_FAILOVER, COMMAND_IDENTITY_ACCOUNT_SIGNED_IN};
 use crate::backend::storage::store::Store;
 use crate::server::AppState;
 
@@ -700,6 +700,17 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 ctx.operator_only("only the AgentMux window or an agent sees which accounts can't run")?;
             }
             tokio::task::spawn_blocking(move || availability(&s)).await.map_err(|e| e.to_string())
+        }
+    });
+    // The usage is as open as the availability: accounts and how much of their windows is used, never a credential.
+    let s = state.clone();
+    engine.register_typed(COMMAND_IDENTITY_ACCOUNT_USAGE, move |_req: Option<NoArgsReq>, ctx| {
+        let s = s.clone();
+        async move {
+            if ctx.agent_id.is_empty() {
+                ctx.operator_only("only the AgentMux window or an agent sees how much of an account is used")?;
+            }
+            identity_accounts(s).await
         }
     });
     let s = state.clone();

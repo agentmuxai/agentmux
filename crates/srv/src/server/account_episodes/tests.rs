@@ -1103,6 +1103,27 @@ async fn identity_accounts_shows_usage_windows_or_that_the_provider_reports_none
     assert_eq!(json["windows"]["five_hour"]["used_percent"], 60.0);
 }
 
+/// The usage is read through `identity.account.usage` by the proven window and by a registered
+/// agent, and not by a connection nobody proved.
+#[tokio::test]
+async fn the_usage_call_is_open_to_the_window_and_to_agents_but_not_to_an_unproven_connection() {
+    use crate::backend::rpc_types::COMMAND_IDENTITY_ACCOUNT_USAGE;
+    let state = test_state();
+    let id = format!("use-{}", uuid::Uuid::new_v4());
+    state.id_store.identity_upsert(&mail(&id, "valid", "r@x.com")).unwrap();
+    let frame = json!({"type": "rate_limit_event", "rate_limit_info": {"status": "allowed", "unifiedWindows": {
+        "five_hour": {"utilization": 0.25, "resetsAt": (agentmux_common::time::now_ms_u64() / 1000) + 3_600}}}});
+    crate::backend::account_usage::observe(&id, &crate::backend::account_usage::windows_of_frame(&frame), agentmux_common::time::now_ms_u64());
+    for who in [None, Some("loap-3")] {
+        let seen = call(&state, who, COMMAND_IDENTITY_ACCOUNT_USAGE, json!({})).await.unwrap();
+        let mine = seen["accounts"].as_array().unwrap().iter().find(|a| a["account_id"] == json!(id)).unwrap();
+        assert_eq!(mine["usage"]["status"], "reported");
+        assert_eq!(mine["usage"]["windows"]["five_hour"]["used_percent"], 25.0);
+    }
+    let e = call_with(&state, Default::default(), COMMAND_IDENTITY_ACCOUNT_USAGE, json!({})).await.unwrap_err();
+    assert!(e.starts_with("FORBIDDEN"), "{e}");
+}
+
 /// `any with quota` skips the account the agent is on and the ones out of quota or signed out,
 /// and refuses with the list when nothing is left.
 #[tokio::test]
