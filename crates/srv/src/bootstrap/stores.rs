@@ -130,6 +130,9 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     let id_store = pick_id_store(&shared_store, &mstore);
     adopt_earlier_auth(&shared_store, &id_store);
     let identity_store = open_identity_store(&mstore);
+    // Every key stored for an agent is withheld from transcripts from the start, whether or not its agent launches.
+    let withheld_keys = crate::boot_timing::time("withhold_stored_keys", || mstore.withhold_stored_keys());
+    tracing::info!(withheld_keys, "withhold: the stored agent keys are registered");
     let (work_store, cron_store) = open_work_store(&identity_store, shared_store.clone(), &db_dir);
     backend::work_store_handle::attach(work_store.clone());
     // Which folders a container agent can write is read from the panes here: named before anything asks.

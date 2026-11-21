@@ -13,6 +13,7 @@ pub mod agent_tokens;
 pub mod agent_lan_keys;
 pub mod agent_uid_keys;
 pub mod agent_wan_keys;
+pub mod stored_keys_withheld;
 pub mod db_copy;
 pub mod drone_store;
 pub mod drone_types;

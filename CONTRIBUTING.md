@@ -75,6 +75,10 @@ Guidelines:
 - For anything but minor fixes, include tests and documentation updates.
 - Reference the relevant issue in the PR body.
 
+### Check before you push
+
+Run `node scripts/preflight.mjs` from the repository root before the push. It runs every check CI runs on a PR that needs no build (the size and ratchet checks, the docs and spec checks, the changeset, and `tsc` plus the generated-types checks when the branch changes what they read) and prints one line per check, then the output of the first failure. The light checks run in parallel; `tsc` and the generated-types checks wait for the build slot once. It checks the branch as it is in your working tree against `origin/main`, so the answer is the same before and after `git commit`; `git add` a new spec or changeset so it counts (the summary names files git does not track). `--list` shows the checks, `--only <id,id>` runs some, `--all` runs `tsc` whatever changed, and `--rust` adds `cargo check --tests` on the crates CI compiles. Run the tests of the code you changed yourself (`npx vitest run <files>`, `cargo nextest run -p <crate>`): preflight does not run them.
+
 ## Project Structure
 
 AgentMux is a **four-process Rust desktop application** running a bundled Chromium (CEF) host.

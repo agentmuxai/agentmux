@@ -15,7 +15,7 @@ import { requestComposerFocus } from "@/app/agent-model/composer-focus";
 import { resizeFocusedInDirection, swapFocusedInDirection } from "@/layout/lib/layoutKeyboard";
 import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import { modalsModel } from "./modalmodel";
-import { openCommandPalette } from "@/app/store/open-command-palette";
+import { openCommandPalette, preloadCommandPaletteWhenIdle } from "@/app/store/open-command-palette";
 import { ReplacePaneConfirm } from "@/app/modals/replace-pane-confirm";
 import { openPaneModal, paneRequests } from "@/app/store/pane-requests";
 import { handleCmdN, handleSplitHorizontal, handleSplitVertical } from "./keymodel-blockcreate";
@@ -54,6 +54,8 @@ const run = (fn: () => void): KeyHandler => () => {
 /** General. */
 function registerGeneralKeys() {
     on("view:command-palette", run(() => void openCommandPalette()));
+    // The key that opens it finds its code in memory (open-command-palette.ts).
+    preloadCommandPaletteWhenIdle();
     on("app:settings", run(() => void openOrFocusPaneByView("settings")));
     on("help:shortcuts", run(() => void openOrFocusPaneByView("help")));
     on("app:escape", () => {

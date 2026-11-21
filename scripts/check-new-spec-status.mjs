@@ -71,7 +71,8 @@
 // Usage:
 //   node scripts/check-new-spec-status.mjs          # added-vs-origin/main
 //   node scripts/check-new-spec-status.mjs --list   # report, never fails
-import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { changedRows } from "./lib/branch-changes.mjs";
 import { isMain } from "./lib/is-main.mjs";
 
 const args = process.argv.slice(2);
@@ -79,10 +80,6 @@ const LIST_ONLY = args.includes("--list");
 
 const UNBUILT = new Set(["draft", "proposed"]);
 const SOURCE_EXTS = new Set(["rs", "ts", "tsx", "mjs", "cjs", "js"]);
-
-function git(...a) {
-    return execFileSync("git", a, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-}
 
 /** First word of the first `**Status:**` line, lowercased, letters only. */
 export function statusOf(text) {
@@ -115,29 +112,21 @@ export function isViolation({ status, citingSources }) {
     return citingSources.length > 0;
 }
 
-function baseRef() {
-    const base = process.env.GITHUB_BASE_REF || "main";
+/** A changed file's text as it is in the working tree (the same as HEAD once committed), or null when it is gone. */
+function readWorking(path) {
     try {
-        git("rev-parse", "--verify", "--quiet", `origin/${base}`);
-        return `origin/${base}`;
+        return readFileSync(path, "utf8");
     } catch {
-        return base;
+        return null;
     }
 }
 
 function main() {
-    let mergeBase;
-    try {
-        mergeBase = git("merge-base", baseRef(), "HEAD").trim();
-    } catch {
+    const status = changedRows();
+    if (status === null) {
         console.error("check-new-spec-status: no merge base; nothing to check.");
         return 0;
     }
-
-    const status = git("diff", "--name-status", "-M", `${mergeBase}...HEAD`)
-        .split("\n")
-        .filter(Boolean)
-        .map((l) => l.split("\t"));
 
     // Renames are NOT additions. #2920 moved 60-odd specs from `specs/` into
     // `docs/specs/` in one commit; treating those as new would fail a PR for
@@ -158,21 +147,14 @@ function main() {
     // Read each source once, not once per doc.
     const sourceText = new Map();
     for (const f of changedSources) {
-        try {
-            sourceText.set(f, git("show", `HEAD:${f}`));
-        } catch {
-            /* deleted or unreadable in HEAD */
-        }
+        const text = readWorking(f);
+        if (text !== null) sourceText.set(f, text);
     }
 
     const violations = [];
     for (const doc of addedDocs) {
-        let text;
-        try {
-            text = git("show", `HEAD:${doc}`);
-        } catch {
-            continue;
-        }
+        const text = readWorking(doc);
+        if (text === null) continue;
         const name = docName(doc);
         const citingSources = [...sourceText]
             .filter(([, body]) => body.includes(name))
@@ -202,7 +184,8 @@ function main() {
         }
         console.error("Give it a Status that matches what this PR does — `implemented`, citing");
         console.error("this PR, or `active` saying what shipped and what is left. The vocabulary");
-        console.error("is in docs/specs/README.md.");
+        console.error("is in docs/specs/README.md; a **Status:** line starts with one of:");
+        console.error("draft, proposed, active, implemented, living, historical, superseded, retro, analysis.");
         console.error("");
         console.error("If the spec really is still a proposal and the naming overlap is a");
         console.error("coincidence, rename the doc or drop the citation — a source file naming a");
