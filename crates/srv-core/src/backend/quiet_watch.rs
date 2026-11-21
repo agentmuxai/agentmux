@@ -41,8 +41,6 @@ const NUDGE_SPACING_MS: u64 = 60 * 60_000;
 const RETELL_MS: u64 = 60 * 60_000;
 /// How often the sweep looks.
 const SWEEP_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
-/// At most this many Kanban rows are read for the tasks agents hold (as the Swarm's facts do).
-const BOARD_ROWS: usize = 500;
 
 /// The three times, from settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,7 +116,6 @@ impl Watch {
         let may_tell = |ep: &Episode| ep.told_at.map_or(true, |t| now_ms.saturating_sub(t) >= RETELL_MS);
         if reading.turn_active {
             if idle >= lim.running_ms.saturating_add(lim.escalate_ms) && may_tell(ep) {
-                ep.told_at = Some(now_ms);
                 return Some(Action::Tell { running: true, idle_ms: idle });
             }
             return None;
@@ -138,10 +135,18 @@ impl Watch {
         }
         let due = ep.nudge_skipped || ep.nudged_at.is_some_and(|at| now_ms.saturating_sub(at) >= lim.escalate_ms);
         if due && may_tell(ep) {
-            ep.told_at = Some(now_ms);
             return Some(Action::Tell { running: false, idle_ms: idle });
         }
         None
+    }
+
+    /// The watchers of `key` were told at `now_ms`: it is not told again for an hour. Called only once a note went
+    /// out, so a note nobody could receive (no watcher open) or that the one-a-minute gap held is tried again at the
+    /// next sweep.
+    pub fn mark_told(&mut self, key: &str, now_ms: u64) {
+        if let Some(ep) = self.episodes.get_mut(key) {
+            ep.told_at = Some(now_ms);
+        }
     }
 
     /// Forget every agent not in `keep` (it owes nothing now, or cannot be called quiet): its next episode starts
@@ -197,9 +202,11 @@ pub fn owed_by(claimed: &HashMap<String, Vec<OwedTask>>, def: &AgentDefinition) 
     tasks
 }
 
-/// The board's rows, read once for a sweep or a note. Empty when the read fails.
-pub fn read_board(work: &Store, now_ms: i64) -> Vec<crate::backend::storage::work_board::BoardTask> {
-    work.work_board_list(now_ms - crate::backend::kanban::FINISHED_WINDOW_MS, BOARD_ROWS, now_ms).unwrap_or_default()
+/// Every claimed task, on every board and with no row limit, read once for a sweep or a note: a limit on the
+/// board's rows would cut off the oldest, which are the tasks of the agents that have been quiet longest. Empty
+/// when the read fails.
+pub fn read_claimed(work: &Store, now_ms: i64) -> Vec<crate::backend::storage::work_board::BoardTask> {
+    work.work_claimed_list(now_ms).unwrap_or_default()
 }
 
 /// The first open pane of each agent definition.
@@ -301,7 +308,7 @@ pub fn sweep(watch: &mut Watch, mstore: &Store, work: &Store, filestore: &FileSt
     let defs = mstore.agent_def_list().unwrap_or_default();
     let panes = first_pane_by_def(mstore);
     notes::absorb(&crate::backend::reactive::get_global_handler().get_audit_log(usize::MAX));
-    let claimed = claimed_by_holder(&read_board(work, now_ms as i64));
+    let claimed = claimed_by_holder(&read_claimed(work, now_ms as i64));
     let mut keep = HashSet::new();
     for def in &defs {
         let Some(block_id) = panes.get(&def.id) else { continue };
@@ -315,7 +322,11 @@ pub fn sweep(watch: &mut Watch, mstore: &Store, work: &Store, filestore: &FileSt
         match watch.step(&def.id, reading, &lim, now_ms) {
             None => {}
             Some(Action::Nudge) => nudge(&def.id, block_id, &tasks, lim.quiet_ms / 60_000),
-            Some(Action::Tell { running, idle_ms }) => tell(mstore, filestore, config, def, block_id, &tasks, running, idle_ms / 60_000, now_ms),
+            Some(Action::Tell { running, idle_ms }) => {
+                if tell(mstore, filestore, config, def, block_id, &tasks, running, idle_ms / 60_000, now_ms) {
+                    watch.mark_told(&def.id, now_ms);
+                }
+            }
         }
     }
     watch.retain(&keep);
@@ -345,22 +356,20 @@ fn nudge(def_id: &str, block_id: &str, tasks: &[OwedTask], quiet_minutes: u64) {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn tell(mstore: &Store, filestore: &FileStore, config: &ConfigState, def: &AgentDefinition, block_id: &str, tasks: &[OwedTask], running: bool, idle_minutes: u64, now_ms: u64) {
+fn tell(mstore: &Store, filestore: &FileStore, config: &ConfigState, def: &AgentDefinition, block_id: &str, tasks: &[OwedTask], running: bool, idle_minutes: u64, now_ms: u64) -> bool {
     let filers: Vec<String> = tasks.iter().map(|t| t.filer_uid.clone()).collect();
     let watchers = watcher_panes(mstore, &def.id, &filers);
     if watchers.is_empty() {
-        return;
+        return false;
     }
     let words = if running { String::new() } else { notes::last_words_of(mstore, filestore, block_id) };
     let is_worker = crate::backend::agent_seat::worker_of(mstore, &def.id).is_some();
     let body = quiet_body(&def.name, is_worker, tasks, idle_minutes, running, &words);
-    let Some(body) = notes::admit(&def.id, body, now_ms) else { return };
+    let Some(body) = notes::admit(&def.id, body, now_ms) else { return false };
     let text = format!("[AgentMux] {}", crate::backend::reactive::sanitize::quote_in_system_note(&body));
     let key = format!("quiet:{}", def.id);
-    for leader in &watchers {
-        // Information that asks nothing: a cold leader hears it at its next turn.
-        notes::deliver(mstore, config, leader, &text, Some(&key));
-    }
+    // Information that asks nothing: a cold leader hears it at its next turn. Told when any watcher took it.
+    watchers.iter().fold(false, |told, leader| notes::deliver(mstore, config, leader, &text, Some(&key)) || told)
 }
 
 #[cfg(test)]

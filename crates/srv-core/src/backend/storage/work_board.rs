@@ -425,6 +425,33 @@ impl Store {
         Ok(out)
     }
 
+    /// Every task held under a lease (state `claimed`), with its card, on every board and with no row limit: who holds
+    /// what, for the quiet watch. Without the board's attachments (after, PR, media), which it does not read.
+    pub fn work_claimed_list(&self, now_ms: i64) -> Result<Vec<BoardTask>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        number_unboarded(&conn)?;
+        let mut stmt = conn.prepare(
+            "SELECT id FROM db_work_queue WHERE state = 'claimed' AND id NOT IN (SELECT work_id FROM db_work_cards)",
+        )?;
+        let missing = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+        drop(stmt);
+        for id in &missing {
+            ensure_card(&conn, id, now_ms)?;
+        }
+        let sql = format!(
+            "SELECT {q}, {CARD_COLS} FROM db_work_queue q JOIN db_work_cards c ON c.work_id = q.id WHERE q.state = '{claimed}'",
+            q = q_cols(),
+            claimed = work_state::CLAIMED,
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map([], |r| Ok(BoardTask { item: row_to_item(r)?, card: row_to_card(r)? }))?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
     /// The newest change to any task, for a board in another instance that
     /// didn't hear the event (`0` when there are none).
     pub fn work_board_stamp(&self) -> Result<i64, StoreError> {

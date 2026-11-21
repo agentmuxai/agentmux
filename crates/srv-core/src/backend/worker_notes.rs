@@ -133,6 +133,7 @@ pub fn install(
     filestore: Arc<FileStore>,
     config: Arc<crate::backend::wconfig::ConfigState>,
 ) {
+    let _ = WORK.set(work.clone());
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<WorkerEvent>();
     let observer_tx = tx.clone();
     // Observers run inside `Broker::publish`, under its locks: parse and hand off only.
@@ -238,7 +239,7 @@ fn watched_of_block(mstore: &Store, work: Option<&Store>, block_id: &str) -> Opt
     let tasks = work
         .map(|w| {
             let now = agentmux_common::time::now_ms();
-            crate::backend::quiet_watch::owed_by(&crate::backend::quiet_watch::claimed_by_holder(&crate::backend::quiet_watch::read_board(w, now)), &def)
+            crate::backend::quiet_watch::owed_by(&crate::backend::quiet_watch::claimed_by_holder(&crate::backend::quiet_watch::read_claimed(w, now)), &def)
         })
         .unwrap_or_default();
     if !is_worker && tasks.is_empty() {
@@ -255,6 +256,9 @@ fn named_for(body: String, is_worker: bool) -> String {
         _ => body,
     }
 }
+
+/// The Kanban store, kept at install so `already_tells_its_leader` can tell which agents hold a task.
+static WORK: std::sync::OnceLock<Arc<Store>> = std::sync::OnceLock::new();
 
 /// A worker pane's worker and leader, as srv knows them.
 #[derive(Debug, Clone)]
@@ -275,16 +279,22 @@ fn worker_of_block(mstore: &Store, block_id: &str) -> Option<Worker> {
     Some(Worker { slug: def.slug, leader_def_id })
 }
 
-/// Whether this block's own note already tells `sender` (an agent slug or id) about an exit of it: it is a
-/// worker whose registered leader is `sender`, and that leader has an open pane to be told in. `sender_failure_note`
-/// skips telling the same agent again, less richly, about the same exit (#2627).
+/// Whether this block's own note already tells `sender` (an agent slug or id) about an exit of it: the sender is one
+/// of the watchers of the agent (a worker's leader or seat lead, or the filer of a task it holds) and has an open
+/// pane to be told in. `sender_failure_note` skips telling the same agent again, less richly, about the same exit
+/// (#2627).
 pub(crate) fn already_tells_its_leader(mstore: &Store, block_id: &str, sender: &str) -> bool {
-    let Some(worker) = worker_of_block(mstore, block_id) else { return false };
+    already_tells(mstore, WORK.get().map(|w| &**w), block_id, sender)
+}
+
+pub(crate) fn already_tells(mstore: &Store, work: Option<&Store>, block_id: &str, sender: &str) -> bool {
+    let Some(watched) = watched_of_block(mstore, work, block_id) else { return false };
     let Ok(defs) = mstore.agent_def_list() else { return false };
     let Some(sender_id) = defs.iter().find(|d| d.slug == sender || d.id == sender).map(|d| d.id.clone()) else { return false };
-    // The same check `note_for` makes: a worker's own leader is told only through its live pane, by the ad-hoc
-    // `agent:worker_of` relationship (not the formal Seats table `leader_pane_of` reads for a general seat lead).
-    if sender_id != worker.leader_def_id || live_panes_of(mstore, &worker.leader_def_id).is_empty() {
+    // The same check `note_for` makes: the sender is one of the panes its note goes to (the worker's leader or seat
+    // lead, or the filer of a task the agent holds) and has one open.
+    let sender_panes = live_panes_of(mstore, &sender_id);
+    if !watched.watchers.iter().any(|p| sender_panes.contains(p)) {
         return false;
     }
     // Only suppressed when that note was actually admitted, not held by the one-note-a-minute throttle just
@@ -585,20 +595,22 @@ pub fn tell_leader(mstore: &Store, def_id: &str, body: &str) -> bool {
     crate::backend::reactive::get_global_handler().deliver_system_note(&target, &text).is_ok()
 }
 
-pub(crate) fn deliver(mstore: &Store, config: &crate::backend::wconfig::ConfigState, leader_block: &str, text: &str, wait_key: Option<&str>) {
+/// Whether the note was delivered or kept for the leader's next turn.
+pub(crate) fn deliver(mstore: &Store, config: &crate::backend::wconfig::ConfigState, leader_block: &str, text: &str, wait_key: Option<&str>) -> bool {
     let handler = crate::backend::reactive::get_global_handler();
     let target = note_target(leader_block);
     let Some(target) = target else {
         tracing::debug!(leader_block, "worker note: the leader's pane isn't registered");
-        return;
+        return false;
     };
     let sent = match wait_key {
         Some(key) => crate::backend::cold_hold::note_or_wait_if_cold(mstore, &config.get_settings().extra, leader_block, &target, key, text),
         None => handler.deliver_system_note(&target, text),
     };
-    if let Err(e) = sent {
+    if let Err(e) = &sent {
         tracing::warn!(leader_block, error = %e, "worker note not delivered");
     }
+    sent.is_ok()
 }
 
 #[cfg(test)]

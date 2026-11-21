@@ -51,8 +51,11 @@ fn an_idle_agent_is_nudged_at_the_quiet_time_and_its_watchers_told_five_minutes_
     assert_eq!(w.step("a", idle(T0), &l, T0 + 16 * MIN), None, "nudged once");
     assert_eq!(w.step("a", idle(T0), &l, T0 + 19 * MIN), None, "the grace is not over");
     assert_eq!(w.step("a", idle(T0), &l, T0 + 20 * MIN), Some(Action::Tell { running: false, idle_ms: 20 * MIN }));
+    // A note nobody could receive (no watcher open, or the one-a-minute gap held it) is tried again at the next sweep.
+    assert_eq!(w.step("a", idle(T0), &l, T0 + 20 * MIN + 30_000), Some(Action::Tell { running: false, idle_ms: 20 * MIN + 30_000 }), "not delivered: again");
+    w.mark_told("a", T0 + 20 * MIN + 30_000);
     assert_eq!(w.step("a", idle(T0), &l, T0 + 40 * MIN), None, "told once");
-    assert_eq!(w.step("a", idle(T0), &l, T0 + 80 * MIN), Some(Action::Tell { running: false, idle_ms: 80 * MIN }), "an hour later, still quiet");
+    assert_eq!(w.step("a", idle(T0), &l, T0 + 81 * MIN), Some(Action::Tell { running: false, idle_ms: 81 * MIN }), "an hour later, still quiet");
 }
 
 /// The nudge is allowed once an hour: an agent that answers it and goes quiet again within the hour is not
@@ -87,6 +90,7 @@ fn a_running_turn_is_quiet_after_the_running_time_and_is_not_nudged() {
     assert_eq!(w.step("a", running(T0), &l, T0 + 15 * MIN), None, "a long build is healthy at 15");
     assert_eq!(w.step("a", running(T0), &l, T0 + 34 * MIN), None);
     assert_eq!(w.step("a", running(T0), &l, T0 + 35 * MIN), Some(Action::Tell { running: true, idle_ms: 35 * MIN }));
+    w.mark_told("a", T0 + 35 * MIN);
     assert_eq!(w.step("a", running(T0), &l, T0 + 50 * MIN), None, "told once");
 }
 
@@ -169,7 +173,7 @@ fn an_agent_owes_the_tasks_it_holds_claimed_and_no_others() {
 
     let def = test_agent_def("uid-helper", "Helper", "claude", "host", 1, "");
     let other = test_agent_def("uid-other", "Other", "claude", "host", 1, "");
-    let claimed = claimed_by_holder(&read_board(&work, now));
+    let claimed = claimed_by_holder(&read_claimed(&work, now));
     let owed = owed_by(&claimed, &def);
     assert_eq!(owed.len(), 1, "{owed:?}: only the claimed one");
     assert_eq!(owed[0].filer_uid, "uid-filer");
@@ -280,6 +284,55 @@ async fn an_agent_holding_a_claimed_task_is_watched_by_its_filer() {
     assert_eq!(to, vec![filer_pane]);
     assert_eq!(wait, None);
     assert!(text.starts_with(&format!("[AgentMux] Your agent {} stopped with an error: Not authenticated.", holder.name)), "{text}");
+}
+
+/// The filer of a task a non-worker agent holds is told by the agent's own failure note, so the separate note the
+/// sender's failure would add is skipped; an agent that did not file it still gets that one.
+#[tokio::test]
+async fn the_filers_own_failure_note_stands_in_for_the_senders() {
+    let state = crate::test_support::core_parts();
+    let (work, _dir) = work_store();
+    let tab = tab(&state).await;
+    let id = uuid::Uuid::new_v4().to_string();
+    let (holder_id, filer_id, other_id) = (format!("holder-{id}"), format!("filer-{id}"), format!("other-{id}"));
+    let mut holder = test_agent_def(&holder_id, &format!("Holder {}", &id[..8]), "claude", "host", 1, "");
+    let mut filer = test_agent_def(&filer_id, &format!("Filer {}", &id[..8]), "claude", "host", 1, "");
+    let mut other = test_agent_def(&other_id, &format!("Other {}", &id[..8]), "claude", "host", 1, "");
+    for d in [&mut holder, &mut filer, &mut other] {
+        state.mstore.agent_def_insert(d).unwrap();
+    }
+    pane(&state, &tab, &filer_id).await;
+    pane(&state, &tab, &other_id).await;
+    let holder_pane = pane(&state, &tab, &holder_id).await;
+    work.work_queue_enqueue(&item("t1", &filer_id)).unwrap();
+    let claim = ClaimFilter { agent_id: holder.slug.clone(), agent_uid: holder_id.clone(), ..ClaimFilter::default() };
+    work.work_queue_claim(&claim, agentmux_common::time::now_ms(), 120_000).unwrap().expect("claimed");
+
+    crate::backend::worker_failure_note::record_failure_admission(&holder_pane, true);
+    assert!(notes::already_tells(&state.mstore, Some(&work), &holder_pane, &filer.slug), "the filer is a watcher whose note went out");
+    assert!(!notes::already_tells(&state.mstore, Some(&work), &holder_pane, &other.slug), "another agent is not");
+    crate::backend::worker_failure_note::record_failure_admission(&holder_pane, false);
+    assert!(!notes::already_tells(&state.mstore, Some(&work), &holder_pane, &filer.slug), "the note was held by the gap: the sender's own goes through");
+}
+
+/// A claimed task is found however many newer rows the board has: a row limit would cut off the oldest, which are
+/// the tasks of the agents that have been quiet longest.
+#[test]
+fn an_old_claimed_task_is_found_among_many_newer_rows() {
+    let (work, _dir) = work_store();
+    let now = 2_000_000_000_000i64;
+    work.work_queue_enqueue(&item("old", "uid-filer")).unwrap();
+    let holder = ClaimFilter { agent_id: "helper".into(), agent_uid: "uid-helper".into(), ..ClaimFilter::default() };
+    work.work_queue_claim(&holder, now, 120_000).unwrap().expect("claimed");
+    for n in 0..620 {
+        let mut newer = item(&format!("newer-{n}"), "uid-filer");
+        newer.updated_at = now + 1_000_000 + n;
+        newer.created_at = newer.updated_at;
+        work.work_queue_enqueue(&newer).unwrap();
+    }
+    let def = test_agent_def("uid-helper", "Helper", "claude", "host", 1, "");
+    let owed = owed_by(&claimed_by_holder(&read_claimed(&work, now)), &def);
+    assert_eq!(owed.len(), 1, "{owed:?}");
 }
 
 fn delivery(source: &str, block: &str, at: u64) -> AuditLogEntry {
