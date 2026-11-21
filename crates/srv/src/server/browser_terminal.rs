@@ -508,6 +508,165 @@ async fn terminal_grant(state: &AppState, block_id: &str, pane: &str, agent: &st
     crate::server::browser_standing::activate_at(state, pane, agent, &url).filter(|g| g.allows_terminal())
 }
 
+/// How long a call waits for the terminal's output: what the agent asked, at most [`MAX_WAIT_SECS`].
+fn wait_for(req: &agentmux_common::api_types::UiBrowserTerminalRequest) -> Duration {
+    Duration::from_secs(req.timeout_seconds.unwrap_or(DEFAULT_WAIT_SECS).min(MAX_WAIT_SECS))
+}
+
+/// The keys a call types: its text, then an Enter (default: yes when text is given) unless the text
+/// ended in one, then its named keys. Checked before anything is typed.
+fn steps_for_request(
+    req: &agentmux_common::api_types::UiBrowserTerminalRequest,
+    typed: &str,
+) -> Result<Vec<KeyStep>, (StatusCode, String)> {
+    if typed.chars().count() > MAX_CHARS {
+        return Err((StatusCode::BAD_REQUEST, format!("`text` is over {MAX_CHARS} characters: send a shorter script, or split it")));
+    }
+    let mut steps = steps_for_text(typed).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    if !typed.is_empty() && req.enter.unwrap_or(true) && !typed.ends_with('\n') && !typed.ends_with('\r') {
+        steps.push(enter());
+    }
+    for name in req.keys.as_deref().unwrap_or_default() {
+        steps.push(step_for_key(name).map_err(|e| (StatusCode::BAD_REQUEST, e))?);
+    }
+    let lines = steps.iter().filter(|k| k.key == "Enter").count();
+    if lines > MAX_LINES {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "that is {lines} lines and a call takes at most {MAX_LINES} (each waits for the screen to be checked before the next): \
+                 send them in several calls"
+            ),
+        ));
+    }
+    Ok(steps)
+}
+
+/// How far typing a script got, and why it stopped short, if it did.
+struct Typing {
+    sent: usize,
+    stopped: Option<String>,
+    /// It stopped because the terminal asked for something only the person types.
+    secret_stop: bool,
+}
+
+/// The host could not type a chunk, after `sent` keys had gone in.
+struct HostFailure {
+    code: StatusCode,
+    error: String,
+    sent: usize,
+}
+
+/// Whether the call must stop before typing chunk `n` of `parts`, and why (with whether it is a
+/// secret prompt): over the time one call may type, the person paused the pane or ended the grant,
+/// or, from the second chunk, the page or terminal no longer passes (after a line, once the screen
+/// has caught up with it).
+async fn stop_before(
+    state: &AppState,
+    block_id: &str,
+    (pane, agent): (&str, &str),
+    grant: &bypass::Grant,
+    started: Instant,
+    parts: &[&[KeyStep]],
+    n: usize,
+) -> Option<(String, bool)> {
+    if over_budget(started.elapsed()) {
+        return Some((budget_stop(), false));
+    }
+    if crate::server::browser_actions::not_paused(block_id).is_err() {
+        return Some((
+            "the user paused this pane, so the rest was not typed; your calls on it wait until they resume it".to_string(),
+            false,
+        ));
+    }
+    if !bypass::active_for(pane, agent).is_some_and(|g| g.id == grant.id) {
+        return Some(("the person ended the grant".to_string(), false));
+    }
+    if n == 0 {
+        return None;
+    }
+    if parts[n - 1].last().is_some_and(|k| k.key == "Enter") {
+        let_screen_catch_up(state, block_id).await;
+    }
+    match check_target(state, block_id, grant).await {
+        Ok(_) => None,
+        Err(Refusal::Plain(_, why)) => Some((format!("{why}; the rest was not typed"), false)),
+        Err(Refusal::Secret(why)) => Some((format!("{why}; the rest was not typed"), true)),
+    }
+}
+
+/// Types `steps` a line at a time (or a chunk of a long one), with the brakes, the grant, the page
+/// and the prompt checked between pieces.
+async fn type_steps(
+    state: &AppState,
+    block_id: &str,
+    who: (&str, &str),
+    grant: &bypass::Grant,
+    steps: &[KeyStep],
+) -> Result<Typing, HostFailure> {
+    let parts = pieces(steps, CHUNK);
+    let started = Instant::now();
+    let mut typing = Typing { sent: 0, stopped: None, secret_stop: false };
+    for (n, chunk) in parts.iter().enumerate() {
+        if let Some((why, secret)) = stop_before(state, block_id, who, grant, started, &parts, n).await {
+            typing.stopped = Some(why);
+            typing.secret_stop = secret;
+            break;
+        }
+        let keys = json!({
+            "block_id": block_id,
+            "keys": chunk,
+            // The host checks these against the terminal it picks, at the moment it types.
+            "allowed_origins": grant.origins,
+        });
+        match proxy_value(state, "terminal_keys", keys, Duration::from_secs(20)).await {
+            Ok(_) => typing.sent += chunk.len(),
+            Err((code, error)) => return Err(HostFailure { code, error, sent: typing.sent }),
+        }
+    }
+    Ok(typing)
+}
+
+/// Reads what the terminal printed, once it settles, logs the call and answers it.
+async fn finish_typing(
+    state: &AppState,
+    block_id: &str,
+    (pane, agent, origin): (&str, &str, &str),
+    req: &agentmux_common::api_types::UiBrowserTerminalRequest,
+    what: String,
+    total: usize,
+    typing: Typing,
+) -> axum::response::Response {
+    let Typing { sent, stopped, secret_stop } = typing;
+    let (rows, screen_reader) = if sent == 0 {
+        (None, true)
+    } else {
+        settle(state, block_id, wait_for(req), req.until_text.as_deref()).await
+    };
+
+    let how = log_how(sent, secret_stop, stopped.as_deref());
+    let detail = match &stopped {
+        // The rest of the text may be what the prompt was for: it is not logged.
+        Some(_) if secret_stop => {
+            format!("(stopped after {sent} of {total} keys: the terminal asked for something only the person types)")
+        }
+        Some(_) => format!("{what} (stopped after {sent} of {total} keys)"),
+        None => what,
+    };
+    note(pane, agent, Kind::Terminal).detail(&detail).how(how).record(state);
+    tracing::info!(
+        agent_id = %agent, pane = %pane, origin = %origin, keys = sent, of = total,
+        "[browser-terminal] typed into a web terminal under the person's grant"
+    );
+
+    let mut data = json!({ "sent": sent, "of": total });
+    if let Some(why) = stopped {
+        data["stopped"] = json!(why);
+    }
+    output_fields(&mut data, rows, screen_reader, sent);
+    (StatusCode::OK, Json(json!({ "ok": true, "data": data }))).into_response()
+}
+
 /// `POST /api/v1/ui/browser/terminal` — backs `Browser`'s `terminal` action.
 pub(crate) async fn handle_ui_browser_terminal(
     State(state): State<AppState>,
@@ -534,42 +693,10 @@ pub(crate) async fn handle_ui_browser_terminal(
             "give `text` to type, `keys` to press, or both".to_string(),
         );
     }
-    if typed.chars().count() > MAX_CHARS {
-        return log(what).fail(
-            &state,
-            StatusCode::BAD_REQUEST,
-            format!("`text` is over {MAX_CHARS} characters: send a shorter script, or split it"),
-        );
-    }
-    let mut steps = match steps_for_text(&typed) {
-        Ok(s) => s,
-        Err(e) => return log(what).fail(&state, StatusCode::BAD_REQUEST, e),
+    let steps = match steps_for_request(&req, &typed) {
+        Ok(steps) => steps,
+        Err((code, e)) => return log(what).fail(&state, code, e),
     };
-    // `enter` (default: yes when text is given) presses Enter after the text, unless the text ended in one.
-    if !typed.is_empty()
-        && req.enter.unwrap_or(true)
-        && !typed.ends_with('\n')
-        && !typed.ends_with('\r')
-    {
-        steps.push(enter());
-    }
-    for name in req.keys.as_deref().unwrap_or_default() {
-        match step_for_key(name) {
-            Ok(s) => steps.push(s),
-            Err(e) => return log(what).fail(&state, StatusCode::BAD_REQUEST, e),
-        }
-    }
-    let lines = steps.iter().filter(|k| k.key == "Enter").count();
-    if lines > MAX_LINES {
-        return log(what).fail(
-            &state,
-            StatusCode::BAD_REQUEST,
-            format!(
-                "that is {lines} lines and a call takes at most {MAX_LINES} (each waits for the screen to be checked before the next): \
-                 send them in several calls"
-            ),
-        );
-    }
     if credential_line(&typed) {
         return log(String::new()).fail(
             &state,
@@ -602,11 +729,7 @@ pub(crate) async fn handle_ui_browser_terminal(
                 .fail(&state, StatusCode::FORBIDDEN, e)
         }
     };
-    let origin = seen
-        .get("origin")
-        .and_then(|o| o.as_str())
-        .unwrap_or("")
-        .to_string();
+    let origin = seen.get("origin").and_then(|o| o.as_str()).unwrap_or("").to_string();
 
     // A grant that asks about each line has the person answer for it before Enter.
     if grant.asks_each_line() {
@@ -618,7 +741,7 @@ pub(crate) async fn handle_ui_browser_terminal(
             typed: &typed,
             reason: req.reason.as_deref().unwrap_or(""),
             what,
-            wait: Duration::from_secs(req.timeout_seconds.unwrap_or(DEFAULT_WAIT_SECS).min(MAX_WAIT_SECS)),
+            wait: wait_for(&req),
             until: req.until_text.as_deref(),
             rows_before: rows_of(&seen).unwrap_or_default(),
             owner: crate::server::browser_owner::owner_of(&pane),
@@ -626,104 +749,11 @@ pub(crate) async fn handle_ui_browser_terminal(
         .await;
     }
 
-    // Type a line at a time (or a chunk of a long one), with the brakes, the
-    // grant, the page and the prompt checked between pieces.
     let total = steps.len();
-    let mut sent = 0usize;
-    let mut stopped: Option<String> = None;
-    let mut secret_stop = false;
-    let parts = pieces(&steps, CHUNK);
-    let started = Instant::now();
-    for (n, chunk) in parts.iter().enumerate() {
-        if over_budget(started.elapsed()) {
-            stopped = Some(budget_stop());
-            break;
-        }
-        if crate::server::browser_actions::not_paused(&block_id).is_err() {
-            stopped = Some(
-                "the user paused this pane, so the rest was not typed; your calls on it wait until they resume it"
-                    .to_string(),
-            );
-            break;
-        }
-        if !bypass::active_for(&pane, &agent).is_some_and(|g| g.id == grant.id) {
-            stopped = Some("the person ended the grant".to_string());
-            break;
-        }
-        if n > 0 {
-            if parts[n - 1].last().is_some_and(|k| k.key == "Enter") {
-                let_screen_catch_up(&state, &block_id).await;
-            }
-            match check_target(&state, &block_id, &grant).await {
-                Ok(_) => {}
-                Err(Refusal::Plain(_, why)) => {
-                    stopped = Some(format!("{why}; the rest was not typed"));
-                    break;
-                }
-                Err(Refusal::Secret(why)) => {
-                    stopped = Some(format!("{why}; the rest was not typed"));
-                    secret_stop = true;
-                    break;
-                }
-            }
-        }
-        match proxy_value(
-            &state,
-            "terminal_keys",
-            json!({
-                "block_id": block_id,
-                "keys": chunk,
-                // The host checks these against the terminal it picks, at the moment it types.
-                "allowed_origins": grant.origins,
-            }),
-            Duration::from_secs(20),
-        )
-        .await
-        {
-            Ok(_) => sent += chunk.len(),
-            Err((code, e)) => {
-                return log(format!("{what} (stopped after {sent} of {total} keys)"))
-                    .fail(&state, code, e);
-            }
-        }
+    match type_steps(&state, &block_id, (&pane, &agent), &grant, &steps).await {
+        Ok(typing) => finish_typing(&state, &block_id, (&pane, &agent, &origin), &req, what, total, typing).await,
+        Err(failed) => log(format!("{what} (stopped after {} of {total} keys)", failed.sent)).fail(&state, failed.code, failed.error),
     }
-
-    // Then read what it printed, once it settles.
-    let wait = Duration::from_secs(
-        req.timeout_seconds
-            .unwrap_or(DEFAULT_WAIT_SECS)
-            .min(MAX_WAIT_SECS),
-    );
-    let (rows, screen_reader) = if sent == 0 {
-        (None, true)
-    } else {
-        settle(&state, &block_id, wait, req.until_text.as_deref()).await
-    };
-
-    let how = log_how(sent, secret_stop, stopped.as_deref());
-    let detail = match &stopped {
-        // The rest of the text may be what the prompt was for: it is not logged.
-        Some(_) if secret_stop => {
-            format!("(stopped after {sent} of {total} keys: the terminal asked for something only the person types)")
-        }
-        Some(_) => format!("{what} (stopped after {sent} of {total} keys)"),
-        None => what,
-    };
-    note(&pane, &agent, Kind::Terminal)
-        .detail(&detail)
-        .how(how)
-        .record(&state);
-    tracing::info!(
-        agent_id = %agent, pane = %pane, origin = %origin, keys = sent, of = total,
-        "[browser-terminal] typed into a web terminal under the person's grant"
-    );
-
-    let mut data = json!({ "sent": sent, "of": total });
-    if let Some(why) = stopped {
-        data["stopped"] = json!(why);
-    }
-    output_fields(&mut data, rows, screen_reader, sent);
-    (StatusCode::OK, Json(json!({ "ok": true, "data": data }))).into_response()
 }
 
 /// What a call tells the agent about the terminal's output: the rows when they
