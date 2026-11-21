@@ -25,8 +25,14 @@ function openInApp(href: string, floating: boolean, owner?: MediaOwner): boolean
         case "task":
             void import("./link-destinations").then((d) => d.openTaskLink(target.num, { floating })).catch(failed);
             return true;
+        case "agent":
+            // The agent's pane: shown if open, else opened (the palette's and the Swarm's way).
+            void import("@/app/links/entities/openers").then((o) => o.openAgentEntity({ kind: "agent", id: target.id, name: target.id })).then((r) => {
+                if ("reason" in r) failed(r.reason);
+            });
+            return true;
         case "blocked":
-            // An `agentmux:` URL that isn't a task link: a link only navigates, so the OS never gets it.
+            // An `agentmux:` URL that isn't a task or agent link: a link only navigates, so the OS never gets it.
             return true;
         default:
             return false;
