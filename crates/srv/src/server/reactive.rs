@@ -839,18 +839,7 @@ pub(super) async fn try_cloud_relay(state: &AppState, req: &InjectionRequest, ca
             // (muxbus::relay_watch). The LAN peers go in the answer: the target is on none of them.
             crate::muxbus::relay_watch::watch(state.reactive_handler, source, &req.target_agent, &request_id);
             let peers = state.lan_discovery.get_instances().iter().map(crate::backend::lan::peer_words::describe_peer).collect();
-            let mut body = crate::muxbus::relay_watch::queued_answer(request_id.clone(), target_in_account, peers, now_unix_secs().max(0) as u64);
-            // A name that answers to no agent here: the ids it most likely meant (a typo, a workspace folder's form).
-            let (mstore, registry, typed) = (state.mstore.clone(), state.reactive_handler, req.target_agent.clone());
-            let close = tokio::task::spawn_blocking(move || {
-                let ids = crate::backend::name_resolution::known_agent_ids(&mstore, registry);
-                crate::backend::name_resolution::closest_ids(&typed, &ids)
-            })
-            .await
-            .unwrap_or_default();
-            if !close.is_empty() {
-                body["did_you_mean"] = serde_json::json!(close);
-            }
+            let body = super::name_resolution::with_did_you_mean(state, &req.target_agent, crate::muxbus::relay_watch::queued_answer(request_id.clone(), target_in_account, peers, now_unix_secs().max(0) as u64)).await;
             Some(flow_notes::queued(state, req, &request_id, body))
         }
         crate::muxbus::relay::RelayOutcome::Failed(e) => {
