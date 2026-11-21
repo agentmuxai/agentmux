@@ -420,7 +420,7 @@ fn service_shell_and_vault_routes() -> Router<AppState> {
         .route("/docsite/*path", get(files::handle_docsite))
         .route("/schema/*path", get(files::handle_schema))
         .route("/api/lan-instances", get(handle_lan_instances))
-        .route("/agentmux/discovery", get(handle_discovery))
+        .route("/agentmux/discovery", get(super::live_facts::handler::handle))
         .route("/agentmux/old-versions", get(super::old_versions_handlers::handle_get).post(super::old_versions_handlers::handle_post))
         .route("/agentmux/reactive/availability", get(super::availability_view::handle_availability))
         .route("/agentmux/diag/sagas", get(handle_diag_sagas))
@@ -659,6 +659,8 @@ fn forwardable_muxspect_routes() -> Router<AppState> {
         .route("/api/v1/muxspect/list", get(muxspect_handlers::handle_muxspect_list))
         .route("/api/v1/muxspect/layout", get(muxspect_handlers::handle_muxspect_layout))
         .route("/api/v1/muxspect/describe", get(muxspect_handlers::handle_muxspect_describe))
+        // Which page each renderer draws, with CPU and what the page is doing (SPEC_RELEASE_BUILD_BROWSER_PAGE_DIAGNOSTIC_2026_11_13.md).
+        .route("/api/v1/muxspect/browsers", get(muxspect_browsers::handle_muxspect_browsers))
         // Dock: the cached ToolNode status snapshot (2026-08-06 dock diagnosis spec).
         .route("/api/v1/muxspect/dock", get(muxspect_handlers::handle_muxspect_dock))
         // Durable declared-background task registry (see the handler for why it is not the dock).

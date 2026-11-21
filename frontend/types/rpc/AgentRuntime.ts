@@ -43,4 +43,29 @@ blocked?: string,
  * Where it runs: from its pane's `agentMode` when it has a block, else from its definition's
  * `agent_type`, so a stopped agent says it too. Anything unknown is `host`.
  */
-runtime: RuntimeKind, };
+runtime: RuntimeKind, 
+/**
+ * The model it runs, as its harness names it, when anything says (live facts spec §4.1).
+ */
+model_id?: string, 
+/**
+ * The short form of `model_id` (`Sonnet 5.5`), or the route's own label.
+ */
+model_label?: string, 
+/**
+ * Where the model is known from: `effective` (the CLI reported it), `observed`, `route`,
+ * `requested` or `unknown`. A `requested` or `unknown` one is shown muted.
+ */
+model_source?: string, 
+/**
+ * The effort level it runs at, when it is known.
+ */
+effort?: string, 
+/**
+ * The short name of the model it switches to at the end of the turn, when a model change waits.
+ */
+pending_switch?: string, 
+/**
+ * The short name of the model its definition asks for, when that is not the one it runs.
+ */
+definition_model_label?: string, };

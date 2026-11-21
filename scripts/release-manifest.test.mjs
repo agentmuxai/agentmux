@@ -6,17 +6,21 @@
 // same fixed key, so the two sides are held to one format.
 
 import { createPrivateKey, createPublicKey } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
     buildRelease,
     checkImages,
+    checkUpgrade,
     envelopeName,
     listFiles,
     manifestName,
     parseImageArg,
+    readFloorFile,
     selfCheck,
     sha256Hex,
     signWithKey,
@@ -239,5 +243,137 @@ describe("the container images a release names", () => {
         expect(make([{ ...IMAGE, digest: "sha256:zz" }])).toThrow(/digest/);
         expect(make([IMAGE, IMAGE])).toThrow(/listed twice/);
         expect(make({ name: "agent-base" })).toThrow(/isn't a list/);
+    });
+});
+
+// The `upgrade` object: the floor (and the rollout flag) a release signs (SPEC_UPGRADE_FLOOR_IN_SIGNED_MANIFEST).
+describe("the upgrade object a release signs", () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const script = join(here, "release-manifest.mjs");
+    const withUpgrade = (upgrade, seed = 7) => {
+        const files = listFiles(dir);
+        const { manifest, envelope } = buildRelease({ files, tag: TAG, createdAt: "2026-10-25T12:00:00Z", upgrade });
+        return { files, manifest, envelope, signatures: signWithKey(envelope, pemOf(seed), "k1") };
+    };
+    // A manifest with whatever `upgrade` says, signed, the way a pipeline bug could make one.
+    const forged = (upgrade) => {
+        const m = JSON.parse(release().manifest);
+        m.upgrade = upgrade;
+        const manifest = JSON.stringify(m, null, 2) + "\n";
+        const envelope = JSON.stringify({ format: 1, tag: TAG, manifest_sha256: sha256Hex(manifest), created_at: "x" });
+        return { envelope, signatures: signWithKey(envelope, pemOf(7), "k1"), manifest };
+    };
+
+    it("is written into the manifest, verifies, and covers a release with no upgrade object as before", () => {
+        const r = withUpgrade({ floor: "0.55.0" });
+        expect(JSON.parse(r.manifest).upgrade).toEqual({ floor: "0.55.0" });
+        expect(verify(r, { files: r.files }).upgrade).toEqual({ floor: "0.55.0" });
+        const flagged = withUpgrade({ floor: "0.55.0", shared_store_changed: true });
+        expect(JSON.parse(flagged.manifest).upgrade).toEqual({ floor: "0.55.0", shared_store_changed: true });
+        expect(verify(flagged).upgrade.shared_store_changed).toBe(true);
+        // No upgrade object: the manifest is byte for byte what it was before this change.
+        expect(Object.keys(JSON.parse(release().manifest))).toEqual(["format", "version", "tag", "files"]);
+    });
+
+    it("a floor at the release's own version is allowed; one above it is refused, at build and at verify", () => {
+        expect(() => withUpgrade({ floor: "0.60.1" })).not.toThrow();
+        expect(() => withUpgrade({ floor: "0.60.2" })).toThrow(/above the release's own version/);
+        const f = forged({ floor: "0.61.0" });
+        expect(() => verify(f)).toThrow(/above the release's own version/);
+    });
+
+    it("refuses a floor that is not a plain version, and a rollout flag that is not true or false", () => {
+        for (const floor of ["soon", "0.55", "0.55.0.1", "v0.55.0", "0.55.0-rc1", "", 55, null, undefined]) {
+            expect(() => checkUpgrade({ floor }, "0.60.1"), String(floor)).toThrow(/plain version/);
+        }
+        for (const bad of ["yes", 1, null, "true"]) expect(() => checkUpgrade({ floor: "0.55.0", shared_store_changed: bad }, "0.60.1"), String(bad)).toThrow(/true or false/);
+        for (const notObject of [null, "0.55.0", 5, [], true]) expect(() => checkUpgrade(notObject, "0.60.1")).toThrow(/isn't an object/);
+        expect(() => verify(forged({ floor: "0.55.0", shared_store_changed: "yes" }))).toThrow(/true or false/);
+    });
+
+    it("leaves a field it does not know alone", () => {
+        expect(() => checkUpgrade({ floor: "0.55.0", future_field: { a: 1 } }, "0.60.1")).not.toThrow();
+        expect(() => verify(forged({ floor: "0.55.0", future_field: [1, 2] }))).not.toThrow();
+    });
+
+    it("a changed floor after signing is refused: the manifest's hash no longer matches", () => {
+        const r = withUpgrade({ floor: "0.55.0" });
+        const tampered = r.manifest.replace('"floor": "0.55.0"', '"floor": "0.40.0"');
+        expect(tampered).not.toBe(r.manifest);
+        expect(() => verify({ ...r, manifest: tampered })).toThrow(/manifest/i);
+    });
+
+    it("the envelope is unchanged by it: same fields, and the manifest is named only by its hash", () => {
+        const r = withUpgrade({ floor: "0.55.0" });
+        const plain = release();
+        expect(Object.keys(JSON.parse(r.envelope))).toEqual(Object.keys(JSON.parse(plain.envelope)));
+        expect(r.envelope.length).toBe(plain.envelope.length);
+    });
+
+    describe("the build command", () => {
+        const outDir = () => join(dir, "out");
+        const build = (floorFileContents, extra = []) => {
+            const args = ["build", "--dir", dir, "--tag", TAG, "--out", outDir(), "--created-at", "2026-10-25T12:00:00Z", ...extra];
+            if (floorFileContents !== undefined) {
+                writeFileSync(join(dir, "..", `floor-${process.pid}.txt`), floorFileContents);
+                args.push("--floor-file", join(dir, "..", `floor-${process.pid}.txt`));
+            }
+            return spawnSync(process.execPath, [script, ...args], { encoding: "utf8" });
+        };
+        afterEach(() => rmSync(join(dir, "..", `floor-${process.pid}.txt`), { force: true }));
+
+        it("writes the floor from the floor file, so it is the file the notes' floor line is written from", () => {
+            const r = build("0.55.0\n");
+            expect(r.status, r.stderr).toBe(0);
+            expect(JSON.parse(readFileSync(join(outDir(), manifestName(TAG)), "utf8")).upgrade).toEqual({ floor: "0.55.0" });
+        });
+
+        it("writes the rollout flag when it is given, and refuses one that is not true or false", () => {
+            const r = build("0.55.0\n", ["--shared-store-changed", "false"]);
+            expect(r.status, r.stderr).toBe(0);
+            expect(JSON.parse(readFileSync(join(outDir(), manifestName(TAG)), "utf8")).upgrade).toEqual({ floor: "0.55.0", shared_store_changed: false });
+            const bad = build("0.55.0\n", ["--shared-store-changed", "maybe"]);
+            expect(bad.status).not.toBe(0);
+        });
+
+        it("fails, with no file written, when the floor file is missing, malformed or above the release", () => {
+            const missing = spawnSync(process.execPath, [script, "build", "--dir", dir, "--tag", TAG, "--out", outDir(), "--floor-file", join(dir, "no-such-floor")], { encoding: "utf8" });
+            expect(missing.status).not.toBe(0);
+            expect(missing.stderr).toMatch(/can't be read/);
+            const malformed = build("soon\n");
+            expect(malformed.status).not.toBe(0);
+            expect(malformed.stderr).toMatch(/must hold one version/);
+            const above = build("0.99.0\n");
+            expect(above.status).not.toBe(0);
+            expect(above.stderr).toMatch(/above the release's own version/);
+            expect(existsSync(outDir())).toBe(false);
+        });
+
+        it("by default reads the repository's own UPGRADE_FLOOR, which is a plain version", () => {
+            const repoFloor = readFloorFile(join(here, "..", "UPGRADE_FLOOR"));
+            expect(repoFloor).toMatch(/^\d+\.\d+\.\d+$/);
+            const r = spawnSync(process.execPath, [script, "build", "--dir", dir, "--tag", "v99.0.0", "--out", outDir()], { encoding: "utf8" });
+            expect(r.status, r.stderr).toBe(0);
+            expect(JSON.parse(readFileSync(join(outDir(), "AgentMux-99.0.0-manifest.json"), "utf8")).upgrade.floor).toBe(repoFloor);
+        });
+
+        it("the notes' floor line and the signed floor are the same value for one floor file", () => {
+            const floorFile = join(dir, "..", `floor-${process.pid}.txt`);
+            const history = join(dir, "..", `history-${process.pid}.md`);
+            writeFileSync(history, "## 0.60.1\n\n- something\n");
+            try {
+                const built = build("0.58.3\n");
+                expect(built.status, built.stderr).toBe(0);
+                const notes = spawnSync("bash", [join(here, "extract-changelog.sh"), "0.60.1"], {
+                    encoding: "utf8",
+                    env: { ...process.env, VERSION_HISTORY_FILE: history, UPGRADE_FLOOR_FILE: floorFile },
+                });
+                expect(notes.status, notes.stderr).toBe(0);
+                const line = /<!-- agentmux:min-upgrade-from=(\S+) -->/.exec(notes.stdout);
+                expect(line?.[1]).toBe(JSON.parse(readFileSync(join(outDir(), manifestName(TAG)), "utf8")).upgrade.floor);
+            } finally {
+                rmSync(history, { force: true });
+            }
+        });
     });
 });

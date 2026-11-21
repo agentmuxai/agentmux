@@ -55,8 +55,10 @@ function pane(name: string, width: number, zoom: number, body: string, bodyClass
     );
 }
 
-// A classic scrollbar that takes room from the scroller, as on Windows and Linux, whatever the machine running the test.
-const SCROLLBAR = `.classic-scrollbar .settings-scroll{overflow-y:scroll}.classic-scrollbar .settings-scroll::-webkit-scrollbar{width:15px}`;
+// A classic scrollbar takes 15px from the scroller's width, as on Windows and Linux. The harness browser hides scrollbars
+// (layout-browser.ts passes --hide-scrollbars), so a styled one takes no room here: the room is taken with padding, which
+// narrows what the section and its rows have in just the same way.
+const SCROLLBAR = `.classic-scrollbar .settings-scroll{box-sizing:border-box;padding-right:15px}`;
 
 const MEASURE = `
 const out = {};
@@ -73,12 +75,26 @@ for (const pane of document.querySelectorAll("[data-case]")) {
         const next = h.nextElementSibling;
         return next ? Math.abs(next.getBoundingClientRect().left - h.getBoundingClientRect().left) > 1 : false;
     }).length;
+    // Each column's first item sits level with the first column's (a header's space above is a margin a break truncates).
+    const firstTops = [...xs].map((x) => Math.min(...items.filter((el) => Math.round(el.getBoundingClientRect().left) === x).map((el) => el.getBoundingClientRect().top)));
+    const topSpread = Math.max(...firstTops) - Math.min(...firstTops);
+    // A group's last row alone at the top of a column: first in its column, after a row (so not its header's neighbour),
+    // before a header or the end, in a group of two or more.
+    const loneLast = items.filter((el, i) => {
+        if (!el.classList.contains("setting-row") || i === 0) return false;
+        const prev = items[i - 1], next = items[i + 1];
+        if (!prev.classList.contains("setting-row")) return false;
+        if (next && !next.classList.contains("settings-subheader")) return false;
+        return Math.abs(el.getBoundingClientRect().left - prev.getBoundingClientRect().left) > 1;
+    }).length;
     const widget = pane.querySelector(".setting-widget-color");
     const swatches = widget && widget.querySelector(".palette-swatches");
     out[pane.dataset.case] = {
         columns: xs.size,
         split,
         aloneHeaders,
+        topSpread: Math.round(topSpread * 10) / 10,
+        loneLast,
         rows: rows.length,
         colWidth: Math.round(colWidth * 100) / 100,
         // "100%" is the stacked control (the narrow rule); an inline field control's own basis is "auto".
@@ -95,6 +111,8 @@ interface Measured {
     columns: number;
     split: number;
     aloneHeaders: number;
+    topSpread: number;
+    loneLast: number;
     rows: number;
     colWidth: number;
     basis: string | null;
@@ -145,6 +163,8 @@ describe.skipIf(!BROWSER)("settings columns", () => {
             expect(r[`w${w}`].rows, `${w}px`).toBe(30);
             expect(r[`w${w}`].split, `${w}px: a row in two pieces`).toBe(0);
             expect(r[`w${w}`].aloneHeaders, `${w}px: a header ending a column`).toBe(0);
+            expect(r[`w${w}`].topSpread, `${w}px: column tops level`).toBeLessThanOrEqual(1);
+            expect(r[`w${w}`].loneLast, `${w}px: a group's last row alone at a column top`).toBe(0);
         }
     }, 60_000);
 

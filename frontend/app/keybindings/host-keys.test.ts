@@ -107,11 +107,34 @@ describe("host-keys.json", () => {
             expect(vk("F15")).toBe(0x7e);
         });
 
-        it("does not forward a key limited to where the person types, or a chord", () => {
-            const keys = keysOf([{ command: "tab:new", key: "ctrl+alt+u", when: "textInputFocus" }, { command: "tab:new", key: "ctrl+k ctrl+u" }]);
+        it("does not forward a key limited to where the person types", () => {
+            const keys = keysOf([{ command: "tab:new", key: "ctrl+alt+u", when: "textInputFocus" }]);
             expect(keys.join()).not.toContain("ctrl+alt+u");
-            expect(keys.join()).not.toContain("ctrl+k");
         });
+
+        it("forwards a chord of theirs with its second key, which may be a bare letter, but not one that starts on a key the page types", () => {
+            const keys = hostKeysOf(
+                compileRows("other", [{ command: "tab:new", key: "ctrl+shift+y q" }, { command: "tab:new", key: "a b" }, { command: "tab:new", key: "ctrl+k ctrl+u" }] as never),
+                "other",
+            );
+            expect(keys.find((k) => k.source === "ctrl+shift+y q")).toMatchObject({ vk: 0x59, ctrl: true, shift: true, second: { vk: 0x51, ctrl: false, shift: false } });
+            expect(keys.find((k) => k.source === "ctrl+k ctrl+u")?.second).toMatchObject({ vk: 0x55, ctrl: true });
+            expect(keys.map((k) => k.source).join()).not.toContain("a b");
+        });
+    });
+
+    it("forwards the app's chords: Ctrl+Shift+O then a letter, and the split chord", () => {
+        const keys = hostKeys("other");
+        const chord = (source: string) => keys.find((k) => k.source === source);
+        expect(chord("ctrl+shift+o l")).toBeUndefined(); // there is no "l" row; the letters are t f s k v h i c m
+        expect(chord("ctrl+shift+o t")).toEqual({
+            command: "open:terminal", source: "ctrl+shift+o t", ctrl: true, shift: true, alt: false, meta: false, vk: 0x4f,
+            second: { ctrl: false, shift: false, alt: false, meta: false, vk: 0x54 },
+        });
+        expect(chord("ctrl+shift+s ArrowDown")?.second?.vk).toBe(0x28);
+        expect(keys.filter((k) => k.source.startsWith("ctrl+shift+o ")).map((k) => k.command)).toHaveLength(9);
+        // On a Mac the open chord starts with the Command key.
+        expect(hostKeys("mac").find((k) => k.source === "meta+shift+o t")).toMatchObject({ meta: true, shift: true, second: { vk: 0x54 } });
     });
 
     it("uses Windows virtual-key codes", () => {

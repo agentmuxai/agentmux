@@ -205,12 +205,22 @@ pub struct RendererMapData {
     pub renderers: Vec<RendererEntry>,
 }
 
-/// Every browser whose renderer has reported, and what that browser is.
-pub fn snapshot(state: &AppState) -> Vec<RendererEntry> {
-    let pids: HashMap<i32, BrowserPids> = pids().lock().clone();
-    if pids.is_empty() {
-        return Vec::new();
-    }
+/// One browser the host holds and what it is, whether or not a renderer serves it now (a page the
+/// browser discarded has none).
+#[derive(Debug, Clone, PartialEq)]
+pub struct BrowserKind {
+    pub label: String,
+    pub browser_id: i32,
+    /// A live browser pane's block id.
+    pub block_id: Option<String>,
+    /// An unpromoted pool window: kept ready, not shown yet.
+    pub pool: bool,
+    /// An app window's srv window id.
+    pub window_id: Option<String>,
+}
+
+/// Every browser the host holds, and what each is.
+pub fn browser_kinds(state: &AppState) -> Vec<BrowserKind> {
     // Pool-side browsers: the unpromoted sets, the pool flag set at creation,
     // and the pane pool's label prefix (the same signals orphan_reconcile.rs
     // combines). One still counts as idle only while it has no srv window:
@@ -226,14 +236,33 @@ pub fn snapshot(state: &AppState) -> Vec<RendererEntry> {
         .filter(|(_, e)| e.lifecycle == BrowserPaneLifecycle::Live)
         .map(|(block_id, e)| (e.label.clone(), block_id.clone()))
         .collect();
-    let mut out: Vec<RendererEntry> = state
+    state
         .list_browsers()
         .into_iter()
-        .flat_map(|(label, browser)| {
-            let served = pids.get(&browser.identifier()).cloned().unwrap_or_default();
+        .map(|(label, browser)| {
             let window_id = state.backend_window_id(&label);
             let pool_side = pool.contains(&label) || label.starts_with("floating-pool-");
-            let block_id = panes.get(&label).cloned();
+            BrowserKind {
+                browser_id: browser.identifier(),
+                block_id: panes.get(&label).cloned(),
+                pool: pool_side && window_id.is_none(),
+                window_id,
+                label,
+            }
+        })
+        .collect()
+}
+
+/// Every browser whose renderer has reported, and what that browser is.
+pub fn snapshot(state: &AppState) -> Vec<RendererEntry> {
+    let pids: HashMap<i32, BrowserPids> = pids().lock().clone();
+    if pids.is_empty() {
+        return Vec::new();
+    }
+    let mut out: Vec<RendererEntry> = browser_kinds(state)
+        .into_iter()
+        .flat_map(|kind| {
+            let served = pids.get(&kind.browser_id).cloned().unwrap_or_default();
             // One entry per renderer serving the browser: its own, then each
             // of its frames' (SPEC_TOWER_PANES_VIEW_2026_10_21.md §6.1).
             served
@@ -242,10 +271,10 @@ pub fn snapshot(state: &AppState) -> Vec<RendererEntry> {
                 .map(|pid| RendererEntry {
                     pid,
                     main: served.main.map_or(true, |m| m == pid),
-                    block_id: block_id.clone(),
-                    pool: pool_side && window_id.is_none(),
-                    window_id: window_id.clone(),
-                    label: label.clone(),
+                    block_id: kind.block_id.clone(),
+                    pool: kind.pool,
+                    window_id: kind.window_id.clone(),
+                    label: kind.label.clone(),
                 })
                 .collect::<Vec<_>>()
         })

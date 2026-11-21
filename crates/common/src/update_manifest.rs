@@ -101,9 +101,70 @@ pub struct Manifest {
     pub files: Vec<ManifestFile>,
     #[serde(default)]
     pub images: Vec<ManifestImage>,
+    /// What the release says about upgrading to it: `floor` (the oldest version that may upgrade straight to it) and
+    /// `shared_store_changed` (whether it changes a shared store's schema). Optional, under format 1, and kept as the
+    /// JSON the pipeline signed: a field that isn't usable is read as absent by [`Manifest::signed_floor`] and
+    /// [`Manifest::shared_store_changed`], never a reason to refuse the files (`SPEC_UPGRADE_FLOOR_IN_SIGNED_MANIFEST`).
+    /// An app older than the field ignores it.
+    #[serde(default)]
+    pub upgrade: Option<serde_json::Value>,
+}
+
+/// The upgrade floor a verified manifest carries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SignedFloor {
+    /// The manifest says nothing about a floor: today's behaviour (the build's floor, and the notes' or the floor file's).
+    Absent,
+    /// A plain `X.Y.Z` that is not above the release's own version.
+    Valid(String),
+    /// The manifest has a floor that can't be used, and why: treated as absent, and logged by the caller.
+    Unusable(String),
+}
+
+/// Whether the release changes a shared store's schema (`upgrade.shared_store_changed`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SharedStoreChanged {
+    /// Not said: not known, treated as no warning.
+    Absent,
+    /// `true` or `false`.
+    Known(bool),
+    /// Present but not a boolean: treated as absent, and logged by the caller.
+    Unusable,
+}
+
+/// `<digits>.<digits>.<digits>` and nothing else (each part at most nine digits).
+pub fn is_plain_version(s: &str) -> bool {
+    let mut parts = s.split('.');
+    let number = |p: Option<&str>| p.is_some_and(|p| !p.is_empty() && p.len() <= 9 && p.bytes().all(|b| b.is_ascii_digit()));
+    number(parts.next()) && number(parts.next()) && number(parts.next()) && parts.next().is_none()
 }
 
 impl Manifest {
+    /// The floor this manifest signs for its release. It does not refuse anything by itself: the pipeline refuses to sign a
+    /// bad floor, so an unusable one is a bug there, and the app falls back to the floor it would use without one.
+    pub fn signed_floor(&self) -> SignedFloor {
+        let Some(upgrade) = &self.upgrade else { return SignedFloor::Absent };
+        let Some(object) = upgrade.as_object() else { return SignedFloor::Unusable("upgrade isn't an object".into()) };
+        let Some(floor) = object.get("floor") else { return SignedFloor::Absent };
+        let Some(floor) = floor.as_str().filter(|f| is_plain_version(f)) else {
+            return SignedFloor::Unusable("upgrade.floor isn't a plain version".into());
+        };
+        match (version_core(floor), version_core(&self.version)) {
+            (Some(f), Some(v)) if f > v => SignedFloor::Unusable(format!("upgrade.floor {floor} is above the release's own version {}", self.version)),
+            (Some(_), _) => SignedFloor::Valid(floor.to_string()),
+            (None, _) => SignedFloor::Unusable("upgrade.floor isn't a plain version".into()),
+        }
+    }
+
+    /// `upgrade.shared_store_changed`, as the pipeline signed it.
+    pub fn shared_store_changed(&self) -> SharedStoreChanged {
+        match self.upgrade.as_ref().and_then(|u| u.as_object()).and_then(|o| o.get("shared_store_changed")) {
+            None => SharedStoreChanged::Absent,
+            Some(serde_json::Value::Bool(b)) => SharedStoreChanged::Known(*b),
+            Some(_) => SharedStoreChanged::Unusable,
+        }
+    }
+
     /// The release file called `name`, if the manifest lists it.
     pub fn file(&self, name: &str) -> Option<&ManifestFile> {
         self.files.iter().find(|f| f.name == name)
@@ -357,19 +418,27 @@ pub enum Outcome {
 /// The decision, given what was fetched (`None`: the release has no signed
 /// manifest) and the file called `name` that has `size` bytes and hashes to `sha256`.
 pub fn judge_file(keys: &[UpdateKey], tag: &str, fetched: Option<(&[u8], &str, &[u8])>, name: &str, size: u64, sha256: &str) -> Outcome {
+    judge_file_and_floor(keys, tag, fetched, name, size, sha256).0
+}
+
+/// [`judge_file`], and the upgrade floor the manifest signs. The floor is read from the same verified manifest the file is
+/// judged against, so a download can refuse on it without trusting what an earlier check saw; it is `Absent` whenever the
+/// manifest did not verify (the outcome says why).
+pub fn judge_file_and_floor(keys: &[UpdateKey], tag: &str, fetched: Option<(&[u8], &str, &[u8])>, name: &str, size: u64, sha256: &str) -> (Outcome, SignedFloor) {
     let Some((envelope, signatures, manifest)) = fetched else {
-        return Outcome::Unsigned;
+        return (Outcome::Unsigned, SignedFloor::Absent);
     };
     let manifest: Manifest = match verify_release(keys, tag, envelope, signatures, manifest) {
         Ok(m) => m,
-        Err(e) => return Outcome::Failed(e.to_string()),
+        Err(e) => return (Outcome::Failed(e.to_string()), SignedFloor::Absent),
     };
-    match manifest.file(name) {
+    let outcome = match manifest.file(name) {
         None => Outcome::NotListed(format!("{name} isn't in the signed manifest")),
         Some(f) if f.size != size => Outcome::Disagrees(format!("size {} in the manifest, {size} in the file", f.size)),
         Some(f) if !f.sha256.eq_ignore_ascii_case(sha256) => Outcome::Disagrees("the manifest's SHA-256 differs from the file's".into()),
         Some(_) => Outcome::Verified,
-    }
+    };
+    (outcome, manifest.signed_floor())
 }
 
 /// What to do about `outcome` for `version`: `Ok` to go on, or the message to show (spec §7).
@@ -787,5 +856,143 @@ mod tests {
         assert!(matches!(judged("AgentMux_0.60.1_amd64.deb", 100, &"0".repeat(64)), Outcome::Disagrees(_)));
         assert!(matches!(judged("AgentMux-0.60.1-1.x86_64.rpm", 100, hash), Outcome::NotListed(_)));
         assert_eq!(judge_file(&[k], TAG, None, "x", 1, hash), Outcome::Unsigned);
+    }
+
+    // A release that carries an `upgrade` object, as `scripts/release-manifest.mjs build` makes it (the floor from
+    // UPGRADE_FLOOR, and `--shared-store-changed true`), signed with the same seed-7 test key, copied byte for byte.
+    const UPGRADE_PUBLIC_KEY_B64: &str = "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=";
+    const UPGRADE_SIGNATURES: &str = "k1 wf8ru0NTcp3G7GCZff/1dX9O2SEd7nSHuacY058sSrcQHFkpidkkwklrjqb1hJOr61diLh/2rRGg32Gnn5whDw==
+";
+    const UPGRADE_ENVELOPE: &str = "{
+  \"format\": 1,
+  \"tag\": \"v0.60.1\",
+  \"manifest_sha256\": \"2038d37391a59d7b22bb0bee89eb31b6f94df10d4730389b79808fb32a52272f\",
+  \"created_at\": \"2026-10-25T12:00:00Z\"
+}
+";
+    const UPGRADE_MANIFEST: &str = "{
+  \"format\": 1,
+  \"version\": \"0.60.1\",
+  \"tag\": \"v0.60.1\",
+  \"files\": [
+    {
+      \"name\": \"AgentMux-0.60.1-x64-setup.exe\",
+      \"size\": 5,
+      \"sha256\": \"8fb6d5f37e8055ce720bd0b1d56587f88c0071f285966ba17e72b2b12672aa73\"
+    },
+    {
+      \"name\": \"agentmux-0.60.1-x64-portable.7z\",
+      \"size\": 8,
+      \"sha256\": \"01e782826ae5182220bd6158f883d01ceb1bce659dc020e7c511f802a9aa7737\"
+    }
+  ],
+  \"upgrade\": {
+    \"floor\": \"0.55.0\",
+    \"shared_store_changed\": true
+  }
+}
+";
+
+    fn upgrade_keys() -> [UpdateKey; 1] {
+        let public: [u8; 32] = BASE64.decode(UPGRADE_PUBLIC_KEY_B64).unwrap().try_into().unwrap();
+        [UpdateKey { id: "k1", public }]
+    }
+
+    #[test]
+    fn a_release_with_an_upgrade_object_made_by_the_script_verifies_and_gives_its_floor() {
+        let m = verify_release(&upgrade_keys(), "v0.60.1", UPGRADE_ENVELOPE.as_bytes(), UPGRADE_SIGNATURES, UPGRADE_MANIFEST.as_bytes()).unwrap();
+        assert_eq!(m.files.len(), 2);
+        assert_eq!(m.signed_floor(), SignedFloor::Valid("0.55.0".into()));
+        assert_eq!(m.shared_store_changed(), SharedStoreChanged::Known(true));
+    }
+
+    #[test]
+    fn a_floor_changed_after_signing_is_refused() {
+        // The floor is covered: the manifest's hash is in the signed envelope, so one changed byte fails verification.
+        let lowered = UPGRADE_MANIFEST.replace("\"floor\": \"0.55.0\"", "\"floor\": \"0.40.0\"");
+        assert_ne!(lowered, UPGRADE_MANIFEST);
+        assert_eq!(verify_release(&upgrade_keys(), "v0.60.1", UPGRADE_ENVELOPE.as_bytes(), UPGRADE_SIGNATURES, lowered.as_bytes()), Err(VerifyError::ManifestMismatch));
+        let stripped = UPGRADE_MANIFEST.replace("\"shared_store_changed\": true", "\"shared_store_changed\": false");
+        assert_eq!(verify_release(&upgrade_keys(), "v0.60.1", UPGRADE_ENVELOPE.as_bytes(), UPGRADE_SIGNATURES, stripped.as_bytes()), Err(VerifyError::ManifestMismatch));
+    }
+
+    #[test]
+    fn an_app_that_does_not_know_the_field_reads_the_same_release() {
+        // The manifest and envelope shapes as they were before `upgrade` existed, frozen here: they ignore what they do not
+        // know, so an installed app keeps verifying a release that carries it.
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct OldManifest {
+            format: u32,
+            version: String,
+            tag: String,
+            files: Vec<ManifestFile>,
+            #[serde(default)]
+            images: Vec<ManifestImage>,
+        }
+        let old: OldManifest = serde_json::from_str(UPGRADE_MANIFEST).unwrap();
+        assert_eq!((old.format, old.version.as_str(), old.tag.as_str(), old.files.len(), old.images.len()), (1, "0.60.1", "v0.60.1", 2, 0));
+        let _: Envelope = serde_json::from_str(UPGRADE_ENVELOPE).unwrap();
+    }
+
+    fn manifest_with_upgrade(upgrade: &str) -> Manifest {
+        let text = format!(r#"{{"format":1,"version":"0.60.1","tag":"v0.60.1","files":[{{"name":"a.exe","size":1,"sha256":"{}"}}]{upgrade}}}"#, "0".repeat(64));
+        serde_json::from_str(&text).unwrap()
+    }
+
+    #[test]
+    fn the_signed_floor_is_valid_only_as_a_plain_version_not_above_the_release() {
+        let floor = |u: &str| manifest_with_upgrade(&format!(r#","upgrade":{u}"#)).signed_floor();
+        assert_eq!(manifest_with_upgrade("").signed_floor(), SignedFloor::Absent);
+        assert_eq!(floor(r#"{"floor":"0.55.0"}"#), SignedFloor::Valid("0.55.0".into()));
+        // At the release's own version is allowed; one above it is not.
+        assert_eq!(floor(r#"{"floor":"0.60.1"}"#), SignedFloor::Valid("0.60.1".into()));
+        assert!(matches!(floor(r#"{"floor":"0.60.2"}"#), SignedFloor::Unusable(why) if why.contains("above the release")));
+        for bad in [r#"{"floor":"soon"}"#, r#"{"floor":"0.55"}"#, r#"{"floor":"v0.55.0"}"#, r#"{"floor":"0.55.0-rc1"}"#, r#"{"floor":""}"#, r#"{"floor":55}"#, r#"{"floor":null}"#, r#"{"floor":["0.55.0"]}"#, r#""0.55.0""#, "5", "[]", "true"] {
+            assert!(matches!(floor(bad), SignedFloor::Unusable(_)), "{bad}");
+        }
+        // An object with no floor says nothing about it; a field this build does not know is ignored.
+        assert_eq!(floor(r#"{"shared_store_changed":true}"#), SignedFloor::Absent);
+        assert_eq!(floor(r#"{"floor":"0.55.0","future":{"a":1}}"#), SignedFloor::Valid("0.55.0".into()));
+    }
+
+    #[test]
+    fn shared_store_changed_is_true_false_or_absent_and_never_touches_the_floor() {
+        let read = |u: &str| manifest_with_upgrade(&format!(r#","upgrade":{u}"#));
+        assert_eq!(manifest_with_upgrade("").shared_store_changed(), SharedStoreChanged::Absent);
+        assert_eq!(read(r#"{"floor":"0.55.0"}"#).shared_store_changed(), SharedStoreChanged::Absent);
+        assert_eq!(read(r#"{"floor":"0.55.0","shared_store_changed":true}"#).shared_store_changed(), SharedStoreChanged::Known(true));
+        assert_eq!(read(r#"{"floor":"0.55.0","shared_store_changed":false}"#).shared_store_changed(), SharedStoreChanged::Known(false));
+        for bad in [r#""yes""#, "1", "null", "[]"] {
+            let m = read(&format!(r#"{{"floor":"0.55.0","shared_store_changed":{bad}}}"#));
+            assert_eq!(m.shared_store_changed(), SharedStoreChanged::Unusable, "{bad}");
+            // A bad flag never changes the floor.
+            assert_eq!(m.signed_floor(), SignedFloor::Valid("0.55.0".into()), "{bad}");
+        }
+        // And a bad floor never changes the flag.
+        let m = read(r#"{"floor":"soon","shared_store_changed":true}"#);
+        assert_eq!(m.shared_store_changed(), SharedStoreChanged::Known(true));
+        assert!(matches!(m.signed_floor(), SignedFloor::Unusable(_)));
+    }
+
+    #[test]
+    fn a_bad_floor_does_not_fail_the_verification_of_the_files() {
+        let manifest = UPGRADE_MANIFEST.replace("\"floor\": \"0.55.0\"", "\"floor\": \"soon\"");
+        let envelope = UPGRADE_ENVELOPE.replace("2038d37391a59d7b22bb0bee89eb31b6f94df10d4730389b79808fb32a52272f", &hex(&Sha256::digest(manifest.as_bytes())));
+        // Signed by the test key (seed 7) the way a pipeline bug could have signed it.
+        let sig_line = format!("k1 {}", BASE64.encode(ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]).sign(envelope.as_bytes()).to_bytes()));
+        let m = verify_release(&upgrade_keys(), "v0.60.1", envelope.as_bytes(), &sig_line, manifest.as_bytes()).unwrap();
+        assert!(matches!(m.signed_floor(), SignedFloor::Unusable(_)));
+        assert_eq!(m.file("AgentMux-0.60.1-x64-setup.exe").map(|f| f.size), Some(5));
+    }
+
+    #[test]
+    fn a_plain_version_is_three_numbers_and_nothing_else() {
+        for ok in ["0.55.0", "1.2.3", "10.20.300"] {
+            assert!(is_plain_version(ok), "{ok}");
+        }
+        for bad in ["", "1", "1.2", "1.2.3.4", "v1.2.3", "1.2.3-rc1", "1.2.x", " 1.2.3", "1.2.3\n", "1..3", "1234567890.1.1"] {
+            assert!(!is_plain_version(bad), "{bad:?}");
+        }
     }
 }
