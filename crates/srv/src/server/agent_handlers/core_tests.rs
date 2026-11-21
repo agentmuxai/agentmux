@@ -283,6 +283,18 @@ mod reserved_names {
     }
 
     #[tokio::test]
+    async fn a_bulk_import_names_the_agent_with_a_reserved_name_and_imports_the_rest() {
+        let state = test_state();
+        let body = serde_json::json!({ "agents": [import_row("op", "Operator"), import_row("fine", "Winny"), import_row("sys", "System")] });
+        let result: ImportAgentDefinitionsResult = answer(&call(&state, COMMAND_IMPORT_AGENTS, body).await);
+        assert_eq!(result.imported, vec!["Winny".to_string()]);
+        assert_eq!(result.failed.len(), 2, "{:?}", result.failed);
+        assert!(result.failed[0].starts_with("Operator: ") && result.failed[0].contains("reserved"), "{:?}", result.failed);
+        assert!(result.failed[1].starts_with("System: ") && result.failed[1].contains("reserved"), "{:?}", result.failed);
+        assert!(names(&state).contains(&"Winny".to_string()) && !names(&state).contains(&"Operator".to_string()));
+    }
+
+    #[tokio::test]
     async fn import_from_a_workspace_refuses_a_reserved_name() {
         let state = test_state();
         let dir = std::env::temp_dir().join(format!("reserved-names-{}", uuid::Uuid::new_v4().simple()));
