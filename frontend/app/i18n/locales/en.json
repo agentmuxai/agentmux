@@ -1281,5 +1281,19 @@
     "drone.trigger.kindFileWatch": "file change",
     "drone.trigger.kindWebhook": "local webhook",
     "drone.trigger.kindPoll": "poll",
-    "drone.trigger.kindExpect": "expect"
+    "drone.trigger.kindExpect": "expect",
+    "drone.templates.open": "From a template…",
+    "drone.templates.title": "New from a template",
+    "drone.templates.close": "Close",
+    "drone.templates.approved": "Approved",
+    "drone.templates.needsApproval": "Needs approval",
+    "drone.templates.changed": "Changed since approved",
+    "drone.templates.invalid": "Invalid",
+    "drone.templates.name": "Name",
+    "drone.templates.make": "Make the drone",
+    "drone.templates.back": "Back",
+    "drone.templates.loading": "Loading templates…",
+    "drone.templates.none": "No Drone templates are installed.",
+    "drone.templates.use": "Use",
+    "drone.templates.review": "Review and approve"
 }
