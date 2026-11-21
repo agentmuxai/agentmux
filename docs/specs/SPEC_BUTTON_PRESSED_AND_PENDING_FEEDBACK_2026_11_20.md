@@ -1,6 +1,6 @@
 # Spec: Every button answers the press at once and shows a spinner while its action runs
 
-Status: implemented in part (PR A, the shared Button; PR B, the sweep, and PR C, the guard, follow), 2026-11-20. Task #48232 (spec), build #48233. Author: Agent1@narko.
+**Status:** implemented in part (PR A, the shared Button; PR B, the sweep, and PR C, the guard, follow), 2026-11-20. Task #48232 (spec), build #48233. Author: Agent1@narko.
 Related: #48231 (minimize delay, Loap-3), `SPEC_PANE_CLOSING_INDICATOR_AND_FASTER_CLOSE_2026_10_28.md` (the close X).
 
 ## 1. Requirement
