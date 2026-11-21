@@ -102,13 +102,41 @@ async function runPool(items, jobs, fn) {
     return results;
 }
 
+/** The value of the first `type:` line between the first two `---` lines, as changeset.yml and scripts/release.sh read it. */
+export function changesetType(text) {
+    let fences = 0;
+    for (const line of text.split("\n").map((l) => l.replace(/\r$/, ""))) {
+        if (line === "---") fences++;
+        else if (fences === 1 && line.startsWith("type:")) return (line.split(/\s+/)[1] ?? "").trim();
+    }
+    return "";
+}
+
+/** The text after the second `---` line, without whitespace. */
+function changesetText(text) {
+    let fences = 0;
+    const out = [];
+    for (const line of text.split("\n").map((l) => l.replace(/\r$/, ""))) {
+        if (line === "---") fences++;
+        else if (fences === 2) out.push(line);
+    }
+    return out.join("").replace(/\s/g, "");
+}
+
+/** The files a release PR updates; one that also removes a changeset consumes them and needs no new one. */
+const RELEASE_FILES = ["VERSION_HISTORY.md", "package.json"];
+
 /**
- * The changeset gate (.github/workflows/changeset.yml): the branch adds one `.changesets/<ts>-<slug>.md` with a
- * description. A release PR, which consumes changesets, needs none. Pure, so it can be tested.
+ * The changeset gate (.github/workflows/changeset.yml): the branch adds one `.changesets/<ts>-<slug>.md` whose front
+ * matter has a first `type:` of patch, minor or major, and a description. A release PR (it modifies every release
+ * file and removes a changeset) needs none. Pure, so it can be tested.
  */
 export function changesetVerdict(rows, untracked, readText) {
     const isChangeset = (p) => /^\.changesets\/[0-9]+-[^/]+\.md$/.test(p);
-    if (rows.some((r) => r[0][0] === "D" && isChangeset(r[r.length - 1]))) return { ok: true, note: "release PR: changesets consumed" };
+    const modified = new Set(rows.filter((r) => r[0][0] === "M").map((r) => r[r.length - 1]));
+    if (RELEASE_FILES.every((f) => modified.has(f)) && rows.some((r) => r[0][0] === "D" && isChangeset(r[r.length - 1]))) {
+        return { ok: true, note: "release PR: changesets consumed" };
+    }
     const added = pathsOf(rows, "A").filter(isChangeset);
     if (added.length === 0) {
         const loose = untracked.filter(isChangeset);
@@ -119,10 +147,19 @@ export function changesetVerdict(rows, untracked, readText) {
     }
     for (const f of added) {
         const text = readText(f) ?? "";
-        const body = text.replace(/^---[\s\S]*?\n---\s*/, "").trim();
-        if (!body) return { ok: false, reason: `${f} has no description after the front matter` };
+        const type = changesetType(text);
+        if (!["patch", "minor", "major"].includes(type)) {
+            return { ok: false, reason: `${f}: the front matter needs a first 'type: patch', 'type: minor' or 'type: major' line between two '---' lines (found: '${type}')` };
+        }
+        if (!changesetText(text)) return { ok: false, reason: `${f} has no description after the front matter` };
     }
     return { ok: true };
+}
+
+/** The ids given to `--only` that name no gate. */
+export function unknownIds(only) {
+    const known = new Set([...GATES, ...HEAVY_GATES].map((g) => g.id).concat(["changeset", "cargo-check"]));
+    return (only ?? []).filter((id) => !known.has(id));
 }
 
 /** Whether a heavy gate is worth running for these changed paths. */
@@ -219,6 +256,8 @@ async function main() {
         console.log(`${"changeset".padEnd(28)} the branch adds a changeset`);
         return;
     }
+    const unknown = unknownIds(opts.only);
+    if (unknown.length) throw new Error(`no gate named ${unknown.join(", ")} (node scripts/preflight.mjs --list shows the ids)`);
     process.chdir(ROOT);
     const ref = baseRef(ROOT);
     const rows = ref ? changedRows({ root: ROOT, ref }) : null;

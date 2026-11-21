@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { GATES, HEAVY_GATES, NOT_RUN } from "./lib/preflight-gates.mjs";
-import { changesetVerdict, heavyWanted, parseArgs, reasonOf } from "./preflight.mjs";
+import { changesetVerdict, heavyWanted, parseArgs, reasonOf, unknownIds } from "./preflight.mjs";
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -67,12 +67,37 @@ describe("preflight runner", () => {
     });
 
     it("wants a changeset the branch adds, and says how to get one", () => {
-        const text = (p) => (p.endsWith("empty.md") ? "---\nbump: patch\n---\n" : "---\nbump: patch\n---\nA change.\n");
+        const files = {
+            ".changesets/1-empty.md": "---\ntype: patch\n---\n",
+            ".changesets/2-notype.md": "---\nbump: patch\n---\nA change.\n",
+            ".changesets/3-badtype.md": "---\ntype: huge\n---\nA change.\n",
+            ".changesets/4-nospace.md": "---\ntype:minor\n---\nA change.\n",
+            ".changesets/5-crlf.md": "---\r\ntype: major\r\n---\r\nA change.\r\n",
+        };
+        const text = (p) => files[p] ?? "---\ntype: patch\n---\nA change.\n";
         const cs = ".changesets/1795279465-x-abcd.md";
         expect(changesetVerdict([["A", cs]], [], text)).toEqual({ ok: true });
-        expect(changesetVerdict([["A", ".changesets/1-empty.md"]], [], text).ok).toBe(false);
+        expect(changesetVerdict([["A", ".changesets/5-crlf.md"]], [], text)).toEqual({ ok: true });
+        expect(changesetVerdict([["A", ".changesets/1-empty.md"]], [], text).reason).toMatch(/no description/);
+        for (const bad of ["2-notype", "3-badtype", "4-nospace"]) {
+            expect(changesetVerdict([["A", `.changesets/${bad}.md`]], [], text).reason).toMatch(/needs a first 'type: patch'/);
+        }
         expect(changesetVerdict([["M", "a.rs"]], [], text).reason).toMatch(/scripts\/changeset\.sh/);
         expect(changesetVerdict([["M", "a.rs"]], [cs], text).reason).toBe(`${cs} is not added to git: run git add ${cs}`);
-        expect(changesetVerdict([["D", cs], ["M", "VERSION"]], [], text).ok).toBe(true);
+    });
+
+    it("treats only a PR that updates the release files and removes a changeset as a release", () => {
+        const cs = ".changesets/1795279465-x-abcd.md";
+        const release = [["D", cs], ["M", "VERSION_HISTORY.md"], ["M", "package.json"]];
+        expect(changesetVerdict(release, [], () => "").ok).toBe(true);
+        expect(changesetVerdict([["D", cs]], [], () => "").ok).toBe(false);
+        expect(changesetVerdict([["D", cs], ["M", "package.json"]], [], () => "").ok).toBe(false);
+        expect(changesetVerdict([["M", "VERSION_HISTORY.md"], ["M", "package.json"]], [], () => "").ok).toBe(false);
+    });
+
+    it("refuses an --only id that names no gate", () => {
+        expect(unknownIds(["tsc", "changeset", "cargo-check", "doc-status"])).toEqual([]);
+        expect(unknownIds(["docs-statuss", "tsc"])).toEqual(["docs-statuss"]);
+        expect(unknownIds(null)).toEqual([]);
     });
 });
