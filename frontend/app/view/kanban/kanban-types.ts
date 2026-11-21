@@ -306,6 +306,10 @@ export interface KanbanActRequest {
         | "reassign"
         | "media_remove"
         | "ui_change"
+        | "pr_link"
+        | "pr_unlink"
+        | "pr_unmatched"
+        | "pr_dismiss"
         | "board_create"
         | "board_edit"
         | "board_archive"
@@ -335,6 +339,9 @@ export interface KanbanActRequest {
     followers?: "cancel" | "hold";
     /** media_remove: the file to take off the task. */
     media_id?: number;
+    /** pr_link, pr_unlink, pr_dismiss: the pull request, as an address or `owner/repo#12`; or give `repo` and `number`. */
+    pr?: string;
+    number?: number;
     /** ui_change: whether the task changes the UI. */
     ui_change?: boolean;
     /** create: the board to file on; move: the board to move the task to; board_*: the board acted on (name or slug). */
@@ -359,4 +366,24 @@ export interface KanbanActResult {
     id?: string;
     num?: number;
     attempt?: number;
+    /** pr_link, pr_unlink, pr_dismiss: whether anything changed (false when it was already so). */
+    changed?: boolean;
+    /** pr_unmatched: the pull requests no card has, newest first. */
+    unmatched?: KanbanUnmatchedPr[];
+}
+
+/** A pull request that no card claimed: shown for a person to link to a task or dismiss. */
+export interface KanbanUnmatchedPr {
+    repo: string;
+    number: number;
+    url: string;
+    state: "open" | "merged" | "closed";
+    /** The agent the tag named, when it is one of this computer's. */
+    agent_id: string;
+    /** The task reference the pull request carried, as written. */
+    task_ref: string;
+    /** Why no card matched, in words. */
+    why: string;
+    updated_at: number;
+    last_seen: number;
 }

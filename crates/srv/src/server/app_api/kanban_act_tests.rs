@@ -515,3 +515,99 @@ async fn an_edit_that_names_who_it_is_for_is_refused_and_changes_nothing() {
     act(&state, json!({"action": "edit", "id": id, "title": "new title"})).await.unwrap();
     assert_eq!(board_task(&state, &id).item.title, "new title");
 }
+
+// ---- a card's pull requests ----
+
+fn pr_numbers(state: &AppState, id: &str) -> Vec<u64> {
+    let mut n: Vec<u64> = board_task(state, id).card.prs.iter().map(|p| p.number).collect();
+    n.sort();
+    n
+}
+
+#[tokio::test]
+async fn the_operator_puts_a_pull_request_on_a_card_by_address_or_by_repository_and_number() {
+    let state = test_state();
+    let id = file(&state, "Several pull requests").await;
+    let linked = act(&state, json!({"action": "pr_link", "id": id, "pr": "https://github.com/o/r/pull/7"})).await.unwrap();
+    assert_eq!((linked["ok"].as_bool(), linked["changed"].as_bool()), (Some(true), Some(true)));
+    act(&state, json!({"action": "pr_link", "id": id, "repo": "O/Other", "number": 9})).await.unwrap();
+    let card = board_task(&state, &id).card;
+    assert_eq!(card.prs.len(), 2, "in every repository");
+    assert!(card.prs.iter().all(|p| p.source == "person" && p.may_close()), "a person's link is the task's own");
+    assert!(has_event(&state, &id, "pr_linked", "operator", "operator"));
+
+    let again = act(&state, json!({"action": "pr_link", "id": id, "pr": "o/r#7"})).await.unwrap();
+    assert_eq!(again["changed"], false, "already on the card");
+
+    for bad in [json!({"pr": "not a pull request"}), json!({}), json!({"repo": "local:/x", "number": 3}), json!({"repo": "o/r", "number": 0})] {
+        let mut req = json!({"action": "pr_link", "id": id});
+        req.as_object_mut().unwrap().extend(bad.as_object().unwrap().clone());
+        assert!(act(&state, req.clone()).await.is_err(), "{req}");
+    }
+    assert_eq!(pr_numbers(&state, &id), [7, 9]);
+}
+
+#[tokio::test]
+async fn a_pull_request_the_operator_takes_off_stays_off_and_says_so_once() {
+    let state = test_state();
+    let id = file(&state, "Wrong link").await;
+    act(&state, json!({"action": "pr_link", "id": id, "pr": "https://github.com/o/r/pull/7"})).await.unwrap();
+    let first = act(&state, json!({"action": "pr_unlink", "id": id, "pr": "o/r#7"})).await.unwrap();
+    assert_eq!(first["changed"], true);
+    assert!(pr_numbers(&state, &id).is_empty());
+    let events = events_of(&state, &id).iter().filter(|(k, ..)| k == "pr_unlinked").count();
+    assert_eq!(events, 1);
+    let second = act(&state, json!({"action": "pr_unlink", "id": id, "pr": "o/r#7"})).await.unwrap();
+    assert_eq!(second["changed"], false);
+    assert_eq!(events_of(&state, &id).iter().filter(|(k, ..)| k == "pr_unlinked").count(), 1, "nothing changed, nothing recorded");
+    // A report that arrives later does not put it back; the operator linking it again does.
+    let report = crate::backend::storage::work_card_prs::PrReport {
+        repo: "o/r".into(),
+        number: 7,
+        state: crate::backend::storage::work_card_prs::CardPrState::Merged,
+        head: None,
+        opened_at: None,
+        merged_at: Some(5),
+        updated_at: 5,
+    };
+    let applied = state.work_store.work_card_pr_apply(&id, &report, crate::backend::storage::work_card_prs::PrSource::Event, 10).unwrap();
+    assert!(!applied.changed);
+    act(&state, json!({"action": "pr_link", "id": id, "pr": "o/r#7"})).await.unwrap();
+    assert_eq!(pr_numbers(&state, &id), [7]);
+}
+
+#[tokio::test]
+async fn the_unmatched_list_is_read_linked_from_and_dismissed_by_the_operator() {
+    use crate::backend::storage::work_pr_match::Why;
+    let state = test_state();
+    let id = file(&state, "Owner of an unmatched one").await;
+    let store = &state.work_store;
+    store.work_pr_unmatched_note("o/r", 21, "open", "pell", "#12", Why::Ambiguous, "sha", 10, 100).unwrap();
+    store.work_pr_unmatched_note("o/r", 22, "merged", "pell", "#13", Why::NoTask, "sha", 10, 101).unwrap();
+    let listed = act(&state, json!({"action": "pr_unmatched"})).await.unwrap();
+    let numbers: Vec<u64> = listed["unmatched"].as_array().unwrap().iter().map(|u| u["number"].as_u64().unwrap()).collect();
+    assert_eq!(numbers, [22, 21], "newest first");
+    assert_eq!(listed["unmatched"][1]["url"], "https://github.com/o/r/pull/21");
+
+    // Linking it to a task takes it off the list.
+    act(&state, json!({"action": "pr_link", "id": id, "repo": "o/r", "number": 21})).await.unwrap();
+    assert_eq!(pr_numbers(&state, &id), [21]);
+    let left = act(&state, json!({"action": "pr_unmatched"})).await.unwrap();
+    assert_eq!(left["unmatched"].as_array().unwrap().len(), 1);
+    // Dismissing one links nothing.
+    let gone = act(&state, json!({"action": "pr_dismiss", "pr": "o/r#22"})).await.unwrap();
+    assert_eq!(gone["changed"], true);
+    assert!(act(&state, json!({"action": "pr_unmatched"})).await.unwrap()["unmatched"].as_array().unwrap().is_empty());
+    assert_eq!(pr_numbers(&state, &id), [21]);
+}
+
+#[tokio::test]
+async fn an_agent_changes_a_tasks_pull_requests_with_tasks_update_not_here() {
+    let state = test_state();
+    let id = file(&state, "Not for an agent here").await;
+    for action in ["pr_link", "pr_unlink", "pr_unmatched", "pr_dismiss"] {
+        let err = act_as(&state, json!({"action": action, "id": id, "pr": "o/r#7"}), &Actor::agent("loap")).await.unwrap_err();
+        assert!(err.contains("Tasks update") && err.contains("links.unpr"), "{action}: {err}");
+    }
+    assert!(pr_numbers(&state, &id).is_empty());
+}
