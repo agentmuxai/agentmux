@@ -14,6 +14,7 @@
 // widget's pane so it fills the tab, and crops to that pane. The tab is closed
 // afterwards, so shots don't affect each other.
 
+import { CAPTURE_SCALE } from "./lib/crisp.mjs";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -178,7 +179,7 @@ export async function closeTab(session, tabId) {
     const tab = `.tab[data-tab-id="${tabId}"]`;
     if (!(await session.evaluate(`!!document.querySelector(${JSON.stringify(tab)})`))) return;
     // A wide viewport keeps the tab's close button clear of the window buttons.
-    await session.setViewport({ width: 1920, height: 800, scale: 1 });
+    await session.setViewport({ width: 1920, height: 800, scale: CAPTURE_SCALE });
     await session.clickSelector(`${tab} .ui-close--tab`);
     await session.wait(400);
     const confirm = await session.evaluate(visibleCenter(".modal-backdrop ~ * button, [role=dialog] button"));
@@ -252,7 +253,7 @@ function widgetShot(w) {
         settleMs: o.settleMs ?? 800,
         containsWorkspaceData: o.containsWorkspaceData ?? "review",
         prep: async (session) => {
-            await session.setViewport({ width: 1280, height: 800, scale: 1 });
+            await session.setViewport({ width: 1280, height: 800, scale: CAPTURE_SCALE });
             await session.pressKey("Escape");
             tab.tabId = null;
             await openNewTab(session, tab);

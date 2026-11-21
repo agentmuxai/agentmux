@@ -255,6 +255,7 @@ than none. Add the line when you touch one and know which area it belongs to.
 |---|---|---|---|---|
 | [`SPEC_SETTINGS_WIDE_PANE_COLUMNS_2026_11_20`](SPEC_SETTINGS_WIDE_PANE_COLUMNS_2026_11_20.md) | SPEC: Settings fills a wide pane in several columns of readable width | implemented | 2026-11-20 |  |
 | [`SPEC_SKILLS_B6_PORTABLE_SKILL_FILES_2026_11_20`](SPEC_SKILLS_B6_PORTABLE_SKILL_FILES_2026_11_20.md) | Spec: Skills B6, portable skill files for non-Claude agents | implemented | 2026-11-20 |  |
+| [`SPEC_WEBSITE_DOCS_MEDIA_REFRESH_2026_11_20`](SPEC_WEBSITE_DOCS_MEDIA_REFRESH_2026_11_20.md) | Spec: website and docs media refresh: crisp screenshots and workflow videos, shot together with the video series | active | 2026-11-20 |  |
 | [`SPEC_CONNECTORS_ONE_LIST_2026_11_19`](SPEC_CONNECTORS_ONE_LIST_2026_11_19.md) | Spec: Connectors is one list, one connector per line, details on click, open at startup | active | 2026-11-19 |  |
 | [`SPEC_CONTAINER_AGENT_PERSISTENT_CONTROLLER_2026_11_19`](SPEC_CONTAINER_AGENT_PERSISTENT_CONTROLLER_2026_11_19.md) | Spec: a container agent runs as one long-lived process, like a native agent | draft | 2026-11-19 |  |
 | [`SPEC_PICKED_COLOUR_IS_THE_COLOUR_SEEN_2026_11_18`](SPEC_PICKED_COLOUR_IS_THE_COLOUR_SEEN_2026_11_18.md) | SPEC: the colour you pick is the colour you see (tabs first), with the filters and overlays audited | active | 2026-11-18 |  |
