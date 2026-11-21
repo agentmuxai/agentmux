@@ -81,7 +81,7 @@ function MyAgentsTier(part: { s: AgentPickerState; props: AgentPickerProps }): J
                 paneBlockId={props.model.blockId}
                 sortBy={sortBy}
                 onReattach={launch.handleReattach}
-                runtimeOf={(id) => launch.runtimeById().get(id)}
+                runtimeOf={launch.runtimeOf}
                 onAttach={launch.handleAttach}
                 openDefinitions={openDefinitions}
                 openLocations={openLocations}
