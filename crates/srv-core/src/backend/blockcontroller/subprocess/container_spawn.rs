@@ -386,7 +386,14 @@ impl SubprocessController {
                     crate::backend::transcript::append::append_output_line(broker, block_id, &notice, filestore.as_ref(), global_output_zone);
                 }
             }
-            crate::backend::transcript::append::append_output_line(broker, block_id, trimmed, filestore.as_ref(), global_output_zone);
+            crate::backend::transcript::append::append_agent_output_line(
+                broker,
+                block_id,
+                trimmed,
+                filestore.as_ref(),
+                global_output_zone,
+                crate::backend::transcript::origin_sig::WriterRuntime::Container,
+            );
         }
     }
 }

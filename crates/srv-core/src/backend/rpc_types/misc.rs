@@ -251,6 +251,9 @@ impl RpcContext {
     pub fn operator_only(&self, why: &str) -> Result<(), String> {
         if !self.agent_id.is_empty() {
             Err(format!("FORBIDDEN: {why}"))
+        } else if self.operator_proven && !self.operator_proven_now() {
+            // The marker "isn't the AgentMux window" is what the app matches to prove the connection again.
+            Err(format!("FORBIDDEN: {why} (this connection isn't the AgentMux window: its sign-in with the host has ended, reconnect to it)"))
         } else if !self.operator_proven_now() {
             Err(format!("FORBIDDEN: {why} (this connection isn't the AgentMux window)"))
         } else {
