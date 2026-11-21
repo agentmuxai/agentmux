@@ -62,19 +62,19 @@ export const HEAVY_GATES = [
         id: "tsc",
         name: "tsc --noEmit",
         cmd: ["node", "node_modules/typescript/bin/tsc", "--noEmit", "-p", "tsconfig.citypecheck.json"],
-        paths: ["frontend/", "tsconfig", "package.json", "package-lock.json"],
+        paths: ["frontend/", "test/", "tsconfig", "package.json", "package-lock.json"],
     },
     {
         id: "rpc-stubs",
         name: "RPC stubs are current",
         cmd: ["node", "scripts/gen-rpc-stubs.mjs", "--check"],
-        paths: ["frontend/types/", "frontend/app/store/rpc-api/", "crates/", "scripts/gen-rpc-stubs.mjs"],
+        paths: ["frontend/", "crates/", "scripts/gen-rpc-stubs.mjs"],
     },
     {
         id: "mux-events",
         name: "mux events are current",
         cmd: ["node", "scripts/gen-mux-events.mjs", "--check"],
-        paths: ["frontend/types/", "crates/", "scripts/gen-mux-events.mjs"],
+        paths: ["frontend/", "crates/", "scripts/gen-mux-events.mjs"],
     },
 ];
 

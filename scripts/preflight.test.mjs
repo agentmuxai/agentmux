@@ -64,6 +64,11 @@ describe("preflight runner", () => {
         expect(heavyWanted(tsc, ["crates/srv/src/a.rs"], false)).toBe(false);
         expect(heavyWanted(tsc, ["frontend/app/a.tsx"], false)).toBe(true);
         expect(heavyWanted(tsc, [], true)).toBe(true);
+        expect(heavyWanted(tsc, ["test/contract/a.ts"], false)).toBe(true);
+        // Both generators walk every .ts and .tsx file under frontend/.
+        for (const id of ["rpc-stubs", "mux-events"]) {
+            expect(heavyWanted(HEAVY_GATES.find((g) => g.id === id), ["frontend/app/foo.tsx"], false)).toBe(true);
+        }
     });
 
     it("wants a changeset the branch adds, and says how to get one", () => {
