@@ -118,7 +118,13 @@ impl Store {
     /// Revoke a device. False when there was no such device.
     pub fn viewer_device_delete(&self, device_id: &str) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
+        let hash: Option<String> =
+            conn.query_row("SELECT token_hash FROM db_viewer_devices WHERE device_id = ?1", params![device_id], |row| row.get(0)).ok();
         let rows = conn.execute("DELETE FROM db_viewer_devices WHERE device_id = ?1", params![device_id])?;
+        // The token no longer works, so it is no longer withheld.
+        if let Some(hash) = hash {
+            crate::backend::transcript::withhold::release(&crate::backend::viewer::pairing::withhold_owner(&hash));
+        }
         Ok(rows > 0)
     }
 

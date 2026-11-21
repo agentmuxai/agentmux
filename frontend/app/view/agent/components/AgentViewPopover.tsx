@@ -10,10 +10,17 @@
 
 import { For, Show, type JSX } from "solid-js";
 import { AnchoredPopover } from "@/app/element/anchored-popover";
+import { tip } from "@/app/element/tip";
 import { Button, SegmentedControl } from "@/app/element/ui";
 import type { AgentViewControls } from "../agent-view-controls";
 import { presetOf, SWITCH_KEYS, SWITCH_LABEL, type AgentView } from "../virtualization/verbosity";
-import { PRESET_OPTIONS, switchOptions } from "../virtualization/view-options";
+import {
+    FOLLOW_DEFAULT_TIP,
+    MAKE_DEFAULT_DONE_TIP,
+    MAKE_DEFAULT_TIP,
+    PRESET_OPTIONS,
+    switchOptions,
+} from "../virtualization/view-options";
 import "./AgentViewPopover.scss";
 
 export interface AgentViewPopoverProps {
@@ -30,6 +37,7 @@ export function AgentViewPopover(props: AgentViewPopoverProps): JSX.Element {
     const followsDefault = () => controls.resolved().source === "default";
     // The pane already says what the default says, whether it follows it or happens to match it.
     const matchesDefault = () => SWITCH_KEYS.every((k) => view()[k] === controls.defaultView()[k]);
+    const nothingToMake = () => followsDefault() && matchesDefault();
 
     return (
         <AnchoredPopover
@@ -72,15 +80,16 @@ export function AgentViewPopover(props: AgentViewPopoverProps): JSX.Element {
                     when={!followsDefault()}
                     fallback={<span class="agent-view-popover-note">Follows the default</span>}
                 >
-                    <Button variant="link" onClick={() => controls.followDefault()}>
+                    <Button variant="link" {...tip(FOLLOW_DEFAULT_TIP, { instant: true })} onClick={() => controls.followDefault()}>
                         Follow default
                     </Button>
                 </Show>
+                {/* Not `disabled`: a disabled button gets no hover or focus, and its tip says why there is nothing to do. */}
                 <Button
                     variant="link"
-                    disabled={followsDefault() && matchesDefault()}
-                    title="Every pane that follows the default shows this view"
-                    onClick={() => controls.makeDefault()}
+                    aria-disabled={nothingToMake() ? "true" : undefined}
+                    {...tip(nothingToMake() ? MAKE_DEFAULT_DONE_TIP : MAKE_DEFAULT_TIP, { instant: true })}
+                    onClick={() => !nothingToMake() && controls.makeDefault()}
                 >
                     Make this the default
                 </Button>
