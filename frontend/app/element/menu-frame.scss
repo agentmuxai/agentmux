@@ -11,8 +11,15 @@
 // A theme that sets no `--menu-*` colours (an imported one) falls back to `--modal-bg-color` and `--border-color`,
 // which are opaque too.
 
-@mixin menu-surface {
+/// Only the opaque fill of the surface, for a floating panel or tooltip that keeps its own border and shape. Anything
+/// that floats over a pane paints this (or the surface mixin below), never `--main-bg-color`, which follows the
+/// window opacity.
+@mixin menu-fill {
     background: var(--menu-bg-color, var(--modal-bg-color));
+}
+
+@mixin menu-surface {
+    @include menu-fill;
     border: 1px solid var(--menu-edge-color, var(--border-color));
     border-radius: 0;
     box-shadow: 0 0 0 1px var(--menu-ring-color), var(--menu-shadow);
