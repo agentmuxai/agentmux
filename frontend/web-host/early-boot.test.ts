@@ -84,6 +84,14 @@ describe("the splash's words while a start waits", () => {
         expect(shown(headline)).toBe(false);
     });
 
+    it.each(["?pool=1", "?pane-pool=1"])("leaves a pre-warmed window alone from its first load (%s), before the app has marked it", (search) => {
+        const { headline } = page();
+        load(search);
+        vi.advanceTimersByTime(20000);
+        expect(shown(headline)).toBe(false);
+        expect(headline.textContent).toBe("Restoring session…");
+    });
+
     it("leaves a window opened to restore a session to its own headline", () => {
         const { headline } = page();
         load("?restoring=1");
