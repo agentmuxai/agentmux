@@ -227,7 +227,7 @@ export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<Swarm
     };
 
     return (
-        <div class="swarm-broadcast-dock">
+        <div class="swarm-broadcast-dock" data-operator-only="">
             <TextArea
                 class="swarm-broadcast-input"
                 ref={watch}

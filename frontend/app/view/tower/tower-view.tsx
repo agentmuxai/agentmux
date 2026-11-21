@@ -280,7 +280,7 @@ function PairForm(props: { model: TowerViewModel; onDone: () => void }) {
         }
     };
     return (
-        <div class="tower-pair" data-testid="tower-pair">
+        <div class="tower-pair" data-testid="tower-pair" data-operator-only="">
             <div class="tower-muted">
                 On the other computer, open <b>Pair a device</b> in the status bar, choose <b>Copy link</b>, and paste
                 it here. It works once, for two minutes. That computer shows its processes only if its user turns on
