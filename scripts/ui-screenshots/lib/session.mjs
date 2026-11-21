@@ -8,6 +8,8 @@
 // dependencies.
 
 
+import { CAPTURE_SCALE } from "./crisp.mjs";
+
 export async function findMainTarget(port) {
     const res = await fetch(`http://127.0.0.1:${port}/json`);
     const targets = await res.json();
@@ -214,13 +216,22 @@ export class CdpSession {
 
     /** Lays the page out at `width`×`height` CSS pixels (and `scale` device
      *  pixels per CSS pixel) without resizing the real window. */
-    async setViewport({ width, height, scale = 1 }) {
+    async setViewport({ width, height, scale = CAPTURE_SCALE }) {
         await this.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: scale, mobile: false });
         await this.wait(300);
     }
 
+    /** Captures at CAPTURE_SCALE from here on, at whatever size the window really is (a width and height of 0 leave
+     *  the size alone), so a shot with no viewport of its own is as crisp as one with. `clearViewport` then goes back
+     *  to this rather than to the display's own scale, which a Windows or Linux host often has at 1. */
+    async applyBaseScale() {
+        this.baseScale = CAPTURE_SCALE;
+        await this.send("Emulation.setDeviceMetricsOverride", { width: 0, height: 0, deviceScaleFactor: CAPTURE_SCALE, mobile: false });
+    }
+
     async clearViewport() {
         await this.send("Emulation.clearDeviceMetricsOverride");
+        if (this.baseScale) await this.applyBaseScale();
     }
 
     /** Presses one key (a single character, or a name such as "Enter",

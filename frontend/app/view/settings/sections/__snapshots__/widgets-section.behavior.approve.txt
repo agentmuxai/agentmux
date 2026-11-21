@@ -1,6 +1,6 @@
 -- asking about notes
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"
@@ -115,7 +115,7 @@
 decideWidget ["acme.notes","abc123",true,""]
 -- approved
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"
@@ -215,7 +215,7 @@ decideWidget ["acme.notes","abc123",true,""]
               "Uninstall"
 -- asking about the changed one
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"

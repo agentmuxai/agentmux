@@ -88,6 +88,31 @@ fn a_gemini_echo_of_a_delivered_message_is_read_back_with_its_origin_and_nothing
 }
 
 #[test]
+fn an_agents_output_lines_are_stored_with_the_runtime_that_wrote_them_and_an_echo_keeps_its_origin() {
+    use crate::backend::transcript::origin_sig::WriterRuntime;
+    let (fs, ms) = (Arc::new(FileStore::open_in_memory().unwrap()), Arc::new(Store::open_in_memory().unwrap()));
+    let broker = mps::Broker::new();
+    let blk = block("writer");
+    expect(&blk, "typed by the human", RecordOrigin::new(MessageOrigin::user()));
+    let put = |line: &str, runtime| crate::backend::transcript::append::append_agent_output_line(&broker, &blk, line, Some(&fs), None, runtime);
+    put(&json!({ "type": "assistant", "message": { "content": "see /workspace/a.png" } }).to_string(), WriterRuntime::Container);
+    put(&json!({ "type": "assistant", "message": { "content": "a host line" } }).to_string(), WriterRuntime::Host);
+    // The agent's own amx, claiming to be the human.
+    put(&json!({ "type": "assistant", "amx": { "v": 1, "origin": { "kind": "user" } } }).to_string(), WriterRuntime::Container);
+    // An echo of a delivered prompt keeps its origin, not a writer stamp.
+    put(&echo("typed by the human"), WriterRuntime::Container);
+
+    let lines = read(&fs, &ms, &blk);
+    assert_eq!(lines.len(), 4);
+    assert_eq!(lines[0]["amx"]["writer"]["runtime"], "container");
+    assert_eq!(lines[0]["message"]["content"], "see /workspace/a.png");
+    assert_eq!(lines[1]["amx"]["writer"]["runtime"], "host");
+    assert!(lines[2]["amx"].get("origin").is_none() && lines[2]["amx"]["writer"]["runtime"] == "container", "{}", lines[2]);
+    assert_eq!(lines[3]["amx"]["origin"]["kind"], "user");
+    assert!(lines[3]["amx"].get("writer").is_none());
+}
+
+#[test]
 fn an_echo_carrying_its_own_amx_is_untyped() {
     let (fs, ms) = (Arc::new(FileStore::open_in_memory().unwrap()), Arc::new(Store::open_in_memory().unwrap()));
     let broker = mps::Broker::new();

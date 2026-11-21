@@ -225,13 +225,13 @@ mod tests {
         use super::super::service::{render_plist, render_task_xml, render_unit};
         let (log, home) = (Path::new("/l/x.log"), Path::new("/home/a"));
         let percent = Path::new("/home/a%b/.agentmux/headless");
-        let unit = render_unit(&percent.join("current/bin/agentmux"), "stable", log, "/usr/bin", home);
+        let unit = render_unit(&percent.join("current/bin/agentmux"), "stable", log, "/usr/bin", home, None);
         assert!(text_names_under(&unit, percent), "{unit}");
         let ampersand = Path::new("/Users/a&b/.agentmux/headless");
-        let plist = render_plist(&ampersand.join("current/bin/agentmux"), "stable", log, "/usr/bin", home);
+        let plist = render_plist(&ampersand.join("current/bin/agentmux"), "stable", log, "/usr/bin", home, None);
         assert!(text_names_under(&plist, ampersand), "{plist}");
         let task_base = Path::new(r"C:\Users\a&b\AppData\Local\AgentMux\Headless");
-        let xml = render_task_xml(&task_base.join(r"current\bin\agentmux.exe"), "stable", None);
+        let xml = render_task_xml(&task_base.join(r"current\bin\agentmux.exe"), "stable", None, None);
         assert!(text_names_under(&xml, task_base), "{xml}");
         assert!(!text_names_under(&unit, ampersand), "another install's path is still not this one");
     }

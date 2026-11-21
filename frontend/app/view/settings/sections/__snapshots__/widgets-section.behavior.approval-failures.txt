@@ -1,7 +1,7 @@
 decideWidget ["acme.notes","abc123",true,"99:99"]
 -- decision in flight
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"
@@ -62,7 +62,7 @@ decideWidget ["acme.notes","abc123",true,"99:99"]
               "Uninstall"
 -- decision failed
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"
@@ -126,7 +126,7 @@ decideWidget ["acme.notes","abc123",true,"99:99"]
 decideWidget ["acme.notes","abc123",false,"99:99"]
 -- cancelled
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"
@@ -177,7 +177,7 @@ decideWidget ["acme.notes","abc123",false,"99:99"]
 decideWidget ["acme.notes","abc123",false,"99:99"]
 -- cancel that failed
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"

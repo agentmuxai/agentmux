@@ -320,14 +320,15 @@ export function chordLeaderOf(e: KeyEventLike, platform: KeyPlatform): string | 
 const BROWSER_PANE_CONTEXT: KeyContext = { textInputFocus: false, textInputFilled: false, terminalFocus: false, viewType: "browser", docTabsHost: false };
 
 /**
- * The global command a single key forwarded from a browser pane runs in the
- * effective table (user keys first), or null.
+ * The global command a key forwarded from a browser pane runs in the effective
+ * table (user keys first), or null. `source` is one key, or both steps of a chord
+ * ("ctrl+shift+o l") once the host has seen the second.
  */
 export function commandForKey(source: string, platform: KeyPlatform): string | null {
     const steps = source.trim().split(/\s+/).map((s) => parseKey(s, platform));
-    if (steps.length !== 1) return null;
+    if (steps.length < 1 || steps.length > 2) return null;
     for (const c of rowsFor(platform)) {
-        if (c.row.pane || c.steps.length !== 1 || !sameKey(c.steps[0], steps[0])) continue;
+        if (c.row.pane || c.steps.length !== steps.length || !steps.every((s, i) => sameKey(c.steps[i], s))) continue;
         if (!evalWhen(c.row.when, BROWSER_PANE_CONTEXT)) continue;
         return c.row.command;
     }

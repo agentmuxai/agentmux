@@ -29,7 +29,7 @@ function agentClip(def) {
     const tab = { tabId: null };
     const state = { pane: null };
     return {
-        viewport: AGENT_VIEWPORT,
+        viewport: { ...AGENT_VIEWPORT, scale: 1 }, // clips stay at 1x until the recorder moves to 2x frames
         ...def,
         prep: async (session) => {
             tab.tabId = null;
