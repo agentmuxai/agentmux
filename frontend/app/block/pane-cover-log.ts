@@ -19,6 +19,7 @@
  * second and `cleared` lines under the same tag, so a pane that went blank says which of the three it was.
  */
 import { createEffect, createMemo, on, onCleanup, untrack } from "solid-js";
+import { takeDrawnAhead } from "@/app/store/agent-prewarm";
 import { isParkedMeta } from "@/app/store/agent-parked";
 import type { PaneReadiness, PaneReadinessPhase } from "@/app/store/pane-readiness";
 
@@ -185,6 +186,16 @@ export function logCoverPhases(
             )
         )
     );
+}
+
+/** The line for a show that needed no cover because an intent draw had the pane current (`tab-intent` in agent-prewarm.ts). */
+export function skippedLine(blockId: string, agent?: string): string {
+    return `${head(blockId, agent)} show-cover skipped (drawn ahead)`;
+}
+
+/** At a show of a following pane: says when an intent draw spared its cover, and clears the note that it was drawn ahead. */
+export function logDrawnAheadShow(blockId: string | undefined, covered: boolean, agent: () => string | undefined): void {
+    if (blockId && takeDrawnAhead(blockId) && !covered) console.info("[pane-cover]", skippedLine(blockId, agent()));
 }
 
 /** What `thing` writes: `shown`, then `still-shown` once a second, then `cleared` (`thing` is the covering element's name). */
