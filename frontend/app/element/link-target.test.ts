@@ -46,6 +46,14 @@ describe("classifyHref", () => {
         }
     });
 
+    it("reads an agent link, and blocks every other form of it", () => {
+        expect(classifyHref("agentmux://agent/opaz-0909m")).toEqual({ kind: "agent", id: "opaz-0909m" });
+        expect(classifyHref("agentmux://agent/a%20b/")).toEqual({ kind: "agent", id: "a b" });
+        for (const href of ["agentmux://agent/", "agentmux://agent/x/stop", "agentmux://agent/x?do=stop", "agentmux://agent/a b"]) {
+            expect(classifyHref(href)).toEqual({ kind: "blocked" });
+        }
+    });
+
     it("leaves everything else to the system handler", () => {
         for (const href of ["mailto:a@b.co", "ssh://host", "vscode://file/x", "docs/readme.md", "//cdn.example.com/x.js", "#top", "", "  "]) {
             expect(classifyHref(href)).toEqual({ kind: "other" });
