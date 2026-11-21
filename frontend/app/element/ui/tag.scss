@@ -62,6 +62,25 @@
         --tag-edge: var(--accent-edge);
     }
 
+    // ── Hues: a seat's role and a model's family (tag-tokens.ts TAG_HUES; theme.scss) ──────
+    // The same fill share as the coloured tones, the colour's own token and its edge token.
+    @each $hue in seat-leader, seat-super, seat-specialist, seat-platform-tester, seat-analyst, seat-worker, model-fable,
+        model-opus, model-sonnet, model-haiku, model-gpt, model-gemini, model-other
+    {
+        &--#{$hue} {
+            --tag-tone: var(--#{$hue});
+            --tag-edge: var(--#{$hue}-edge);
+        }
+    }
+
+    // A request not yet confirmed (a model asked for and not yet running): the outline dashed, no fill, the words
+    // quiet; the glyph keeps the hue, so the family still reads.
+    &--muted {
+        --tag-fill-pct: 0%;
+        border-style: dashed;
+        color: var(--secondary-text-color);
+    }
+
     // ── Sizes ────────────────────────────────────────────────────────────────
     &--sm {
         font-size: var(--text-xs);

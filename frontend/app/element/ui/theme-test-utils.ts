@@ -38,6 +38,29 @@ export function contrast(a: Rgb, b: Rgb): number {
     return (hi + 0.05) / (lo + 0.05);
 }
 
+const linear = (c: number) => {
+    const v = c / 255;
+    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+};
+
+function toOklab([r, g, b]: Rgb): Rgb {
+    const [R, G, B] = [linear(r), linear(g), linear(b)];
+    const l = Math.cbrt(0.4122214708 * R + 0.5363325363 * G + 0.0514459929 * B);
+    const m = Math.cbrt(0.2119034982 * R + 0.6806995451 * G + 0.1073969566 * B);
+    const s = Math.cbrt(0.0883024619 * R + 0.2817188376 * G + 0.6299787005 * B);
+    return [
+        0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+        1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+        0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+    ];
+}
+
+/** How far apart two colours look: the distance in OKLab, times 100 (the Kanban stages and the Tower's kinds use it). */
+export function apartOklab(a: Rgb, b: Rgb): number {
+    const [x, y] = [toOklab(a), toOklab(b)];
+    return 100 * Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2]);
+}
+
 /** `top` laid over `under` at `alpha` (what `color-mix(in srgb, top alpha, transparent)` paints over `under`). */
 export function over(top: Rgb, under: Rgb, alpha: number): Rgb {
     return top.map((c, i) => Math.round(c * alpha + under[i] * (1 - alpha))) as Rgb;

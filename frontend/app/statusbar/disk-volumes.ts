@@ -67,12 +67,32 @@ export function parseDiskVolumes(vals: Record<string, number>): DiskVolume[] {
 }
 
 /**
- * The words of the status bar's Disk pill: "Disk 98% free". The figure is the FREE share of the watched volume, so the
- * word is on the pill: a bare "Disk 98%" reads as 98% used, and a nearly empty disk reads as healthy the other way round.
+ * The free space as the status bar's Disk pill words it: "45GB", "8.4GB", "1.2TB". Whole GB from 10 GB up, one decimal
+ * under 10 GB, and TB (one decimal) from 1000 GB. `freeGb` is srv's `disk:watch:free_gb`, which is counted in 1024-based
+ * units (2^30 bytes) and called GB, as the low-disk notice (`formatFreeGb`) calls it; the TB step divides by 1024 like
+ * `formatDiskGb`, so the bar, the drive panel and the notice always agree.
+ */
+export function formatDiskFreeShort(freeGb: number): string {
+    const gb = Math.max(0, freeGb);
+    const tb = (): string => `${(gb / 1024).toFixed(1)}TB`;
+    if (gb >= 1000) return tb();
+    if (gb >= 9.95) {
+        const whole = Math.round(gb);
+        return whole >= 1000 ? tb() : `${whole}GB`;
+    }
+    return `${gb.toFixed(1)}GB`;
+}
+
+/**
+ * The words of the status bar's Disk pill: "Disk 13%/45GB free", or "Disk 13% free" where the free bytes are not
+ * known (a host that reports only a percent). The figure is the FREE share of the watched volume, so the word is on
+ * the pill: a bare "Disk 98%" reads as 98% used, and a nearly empty disk reads as healthy the other way round.
  * The colour (watchVolumeColor) turns on LOW free space, as before.
  */
-export function diskPillLabel(freePct: number): string {
-    return t("statusBar.diskFree", { pct: Math.round(freePct) });
+export function diskPillLabel(freePct: number, freeGb?: number | null): string {
+    const pct = Math.round(freePct);
+    if (freeGb == null || !Number.isFinite(freeGb)) return t("statusBar.diskFree", { pct });
+    return t("statusBar.diskFreeAmount", { pct, free: formatDiskFreeShort(freeGb) });
 }
 
 /** Free-space size for humans: 1.5T / 320.4G / 512M. */

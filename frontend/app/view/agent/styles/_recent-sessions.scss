@@ -329,9 +329,15 @@
         max-width: 100%;
     }
 
+    // A long seat ("Platform tester · " and a 40-character qualifier) is cut with an ellipsis inside the tile: a flex
+    // tag does not clip its own text, so the badge is a block that does (the same as the Atlas node's seat).
     .agent-seat-badge {
         flex-shrink: 0;
         align-self: center;
+        display: block;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .agent-recent-sessions-preview {
