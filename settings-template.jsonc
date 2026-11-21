@@ -323,7 +323,8 @@
     // "notify:waiting:toast": true,
 
     // Play the falling shutdown chime when something other than you asked to shut an agent down
-    // and you have 15 seconds to keep it running. Default true.
+    // and you have 30 seconds to keep it running (15 when the agent is quitting itself).
+    // Default true.
     // "notify:sound:agent.shutdown.pending": true,
 
     // Independent gain for the waiting-for-input sound, 0.0 (silent) to 1.0. Layered below the

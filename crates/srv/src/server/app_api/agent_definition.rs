@@ -61,6 +61,11 @@ pub(crate) struct UpdateRequest {
     spend_cap_usd: Option<Value>,
     /// Zero the agent's spend counted for today.
     reset_spend_today: Option<bool>,
+    /// With `route` or `model` on a model route: start a new session on the new model instead of resuming the
+    /// conversation, with `handoff` as its first message.
+    fresh: Option<bool>,
+    /// With `fresh`: what the next session must know. Empty: it reads its task list.
+    handoff: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -117,9 +122,11 @@ fn route_change(state: &AppState, agent: &AgentDefinition, req: &UpdateRequest) 
         }
         let harness = state.id_store.resolve_effective_provider_id(agent);
         switch::agent_switch_allowed(&agent.id).map_err(bad)?;
+        // Before the agent moves: a fresh session that can't be started must not leave it moved.
+        let fresh = fresh_message(state, agent, req, &harness, "", "")?;
         switch::move_to(&state.mstore, &agent.id, &harness, Target::OwnLogin, |_| true).map_err(bad)?;
         switch::count_agent_switch(&agent.id);
-        restart_on_new_model(state, agent);
+        restart_on_new_model(state, agent, fresh);
         return Ok(vec!["route"]);
     }
     let Some(current) = current else {
@@ -136,16 +143,32 @@ fn route_change(state: &AppState, agent: &AgentDefinition, req: &UpdateRequest) 
     }
     switch::agent_switch_allowed(&agent.id).map_err(bad)?;
     let key_present = |r: &crate::backend::model_gateway::catalog::Route| crate::backend::vault::route_key::present(&state.identity_store, r.key_label);
+    let fresh = fresh_message(state, agent, req, &harness, target, wanted)?;
     switch::move_to(&state.mstore, &agent.id, &harness, Target::Route { route: target, model: wanted }, key_present).map_err(bad)?;
     switch::count_agent_switch(&agent.id);
-    restart_on_new_model(state, agent);
+    restart_on_new_model(state, agent, fresh);
     Ok(vec!["model"])
 }
 
+/// The first message of the fresh session `fresh: true` asks for, once it is known to be possible: None when the request
+/// does not ask for one. Checked before the agent moves, so a refusal leaves it where it was.
+fn fresh_message(state: &AppState, agent: &AgentDefinition, req: &UpdateRequest, harness: &str, route: &str, model: &str) -> Result<Option<String>, Refusal> {
+    if req.fresh != Some(true) {
+        return Ok(None);
+    }
+    let handoff = req.handoff.as_deref().map(str::trim).unwrap_or_default();
+    super::agent_model::check_fresh(state, &agent.id, handoff).map_err(bad)?;
+    Ok(Some(super::agent_context::switch_message(&super::agent_model::place_label(harness, route, model), handoff)))
+}
+
 /// The choice is read at every launch, so the agent's panes are restarted, with their conversation, at the end of
-/// the turn they are in. A pane that cannot be restarted starts on it the next time it opens.
-fn restart_on_new_model(state: &AppState, agent: &AgentDefinition) {
-    let (_, failed) = super::agent_model::restart_panes(state, &agent.id);
+/// the turn they are in. A pane that cannot be restarted starts on it the next time it opens. With `fresh_message` they
+/// start a new session instead, its first message that one.
+fn restart_on_new_model(state: &AppState, agent: &AgentDefinition, fresh_message: Option<String>) {
+    let (_, failed) = match fresh_message {
+        Some(message) => super::agent_model::start_fresh_panes(state, &agent.id, &message),
+        None => super::agent_model::restart_panes(state, &agent.id),
+    };
     for why in failed {
         tracing::warn!(agent = %agent.slug, why, "Agents update: a pane was not restarted on the new model");
     }
@@ -213,7 +236,12 @@ struct Updated {
     changed: Vec<&'static str>,
     spend_done: Vec<String>,
     applied: Option<serde_json::Value>,
+    /// What the caller should know about the change it made, beyond that it was made.
+    warning: Option<&'static str>,
 }
+
+/// Said when a model change resumes the conversation: the one case where the new model reads what another wrote.
+const RESUMED_WARNING: &str = "The conversation was resumed on the new model. A model that did not write a long conversation can read it badly (one fell into a loop of thinking on its first turn). Pass fresh: true, with a handoff, to start a new session on the new model instead.";
 
 /// Apply the fields `req` gives to the agent's stored definition. Returns the names of the fields changed, and what
 /// the audit row says beyond them.
@@ -255,6 +283,7 @@ fn update(state: &AppState, actor_uid: &str, req: &UpdateRequest) -> Result<Upda
         changed.push("idle_timeout_minutes");
     }
     let mut applied = None;
+    let mut warning = None;
     let on_route = crate::backend::model_gateway::launch::choice_of(&state.mstore, &agent.id).is_some();
     if req.effort.is_some() && on_route {
         return Err(bad("the agent is on a model route, which sets its model and thinking: its effort is set in the pane's model panel"));
@@ -267,7 +296,11 @@ fn update(state: &AppState, actor_uid: &str, req: &UpdateRequest) -> Result<Upda
         changed.extend(["model", "effort"].into_iter().filter(|f| if *f == "model" { picked.model.is_some() } else { picked.effort.is_some() }));
         applied = Some(picked.to_json());
     } else if req.route.is_some() || req.model.is_some() {
-        changed.extend(route_change(state, &agent, req)?);
+        let done = route_change(state, &agent, req)?;
+        if !done.is_empty() && req.fresh != Some(true) {
+            warning = Some(RESUMED_WARNING);
+        }
+        changed.extend(done);
     }
     let spend_done = spend_apply(state, &target.agent_id, &plan)?;
     if changed.is_empty() && spend_done.is_empty() {
@@ -280,7 +313,7 @@ fn update(state: &AppState, actor_uid: &str, req: &UpdateRequest) -> Result<Upda
         }
         publish_changed(state);
     }
-    Ok(Updated { agent_id: target.agent_id, changed, spend_done, applied })
+    Ok(Updated { agent_id: target.agent_id, changed, spend_done, applied, warning })
 }
 
 fn bundles(state: &AppState, req: &BundlesRequest) -> Result<Value, Refusal> {
@@ -351,7 +384,7 @@ where
 
 /// `Agents update`: the change, and what the answer and the audit row say about it.
 fn update_response(s: &AppState, actor: &str, req: &UpdateRequest) -> Result<(Value, String), Refusal> {
-    let Updated { agent_id, changed, spend_done, applied } = update(s, actor, req)?;
+    let Updated { agent_id, changed, spend_done, applied, warning } = update(s, actor, req)?;
     let mut parts: Vec<String> = Vec::new();
     if !changed.is_empty() {
         parts.push(format!("changed {} of {agent_id}", changed.join(", ")));
@@ -367,6 +400,9 @@ fn update_response(s: &AppState, actor: &str, req: &UpdateRequest) -> Result<(Va
     let mut body = json!({ "agent_id": agent_id, "changed": changed, "note": shown });
     if let Some(applied) = applied {
         body["applied"] = applied;
+    }
+    if let Some(warning) = warning {
+        body["warning"] = json!(warning);
     }
     Ok((body, note))
 }

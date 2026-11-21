@@ -122,7 +122,8 @@
     max-width: 100%;
     max-height: calc((100vh - #{2 * 24px}) / var(--zoomfactor));  // 2 × --space-6 literal; avoid var() in calc mult
     overflow: auto;
-    background: var(--main-bg-color);
+    // Opaque at any window opacity (a per-theme literal): the dialog floats over the pane and the command palette is one.
+    background: var(--modal-bg-color);
     color: var(--main-text-color);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);

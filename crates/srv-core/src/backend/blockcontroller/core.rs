@@ -171,6 +171,13 @@ pub(crate) fn persist_session_id(
     }
 }
 
+/// Forget the session a pane would resume, for a pane with no controller (a stopped agent): its next start has no id
+/// to resume and begins a new session. A running pane's controller does this itself in `start_fresh_session`, which
+/// also stops its process; this is for the pane that has nothing to stop.
+pub fn forget_saved_session(block_id: &str, mstore: &Arc<Store>, event_bus: &Arc<EventBus>) {
+    persist_session_id(block_id, "", &Some(mstore.clone()), &Some(event_bus.clone()));
+}
+
 /// Write `sid` into the `db_agent_instances` row for `block_id`, if one
 /// exists. Best-effort — no-ops (with a debug log, not a warn — most turns
 /// on a block with no matching instance row are expected, e.g. terminal

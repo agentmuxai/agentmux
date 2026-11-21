@@ -22,6 +22,9 @@ function resetSettings(): void {
 
 const focusState = { focusedBlockId: null as string | null, windowFocused: true };
 
+// The device is opened in idle time after the first frame (open-when-idle.ts); these tests are about what comes after it.
+vi.mock("../open-when-idle", () => ({ whenIdleAfterFirstPaint: () => () => undefined }));
+
 vi.mock("@/app/store/global", () => ({
     getSettingsKeyAtom: (key: string) => () => settings[key],
 }));

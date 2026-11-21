@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{ControllerType, ProviderConfig};
+use super::{Tier, ControllerType, ProviderConfig};
 
 // Crush (Charm): no ACP in this version and no JSON output, so it runs in a
 // terminal pane with its own UI (the terminal tier). Installed from Charm's
@@ -10,6 +10,7 @@ use super::{ControllerType, ProviderConfig};
 // (SPEC_NINE_NEW_HARNESSES_2026_10_14.md §7.8).
 pub(super) static CRUSH: ProviderConfig = ProviderConfig {
     id: "crush",
+    tier: Tier::Preview,
     cli_command: "crush",
     controller_type: ControllerType::Terminal,
     app_server: None,
