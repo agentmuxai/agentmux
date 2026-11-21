@@ -18,6 +18,7 @@
 
 import { registerContextMenuRegion } from "@/app/block/context-menu-region";
 import { PaneTabStrip } from "@/app/element/PaneTabStrip";
+import { t as translate } from "@/app/i18n/i18n";
 import { onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { DocTab } from "./doc-tabs";
 import type { DocTabsModel } from "./doc-tabs-controller";
@@ -130,7 +131,7 @@ export function DocTabStrip<P>(props: {
                         getLabel={(t) => t.title}
                         getIcon={(t) => (
                             <>
-                                {t.pinned && <i class="fa fa-thumbtack doc-tab-pin-mark" aria-label="Pinned" role="img" />}
+                                {t.pinned && <i class="fa fa-thumbtack doc-tab-pin-mark" aria-label={translate("docTabs.pinned")} role="img" />}
                                 {t.icon ? <i class={`fa fa-${t.icon}`} aria-hidden="true" /> : <></>}
                             </>
                         )}
