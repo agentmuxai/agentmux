@@ -278,13 +278,17 @@
             background: transparent;
         }
 
-        // A model route's row, the last of the panel: it opens its models in place. A line above it sets the
-        // routes apart from the Effort rows, which stay with the harness's own models.
-        &.is-disclosure {
+        // The first row of the routes section (the fresh-session choice) and each model route's row, the last
+        // of the panel: a line above sets them apart from the Effort rows, which stay with the harness's own models.
+        &.is-disclosure,
+        &.is-set-apart {
             margin-top: var(--space-0-5);
             padding-top: var(--space-1);
             border-top: 1px solid var(--border-color);
+        }
 
+        // A model route's row: it opens its models in place.
+        &.is-disclosure {
             .label {
                 font-weight: 600;
             }

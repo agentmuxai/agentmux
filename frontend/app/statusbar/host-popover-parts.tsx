@@ -67,6 +67,7 @@ export function ProcessRows(props: StateProps): JSX.Element {
                     Spec: SPEC_STATUSBAR_HOST_POPOVER_INSTANCE_AND_OPEN_DATA_DIR_2026_09_25.md §4 */}
                 <Button
                     variant="link"
+                    opens
                     class="status-bar-popover-mono status-bar-popover-link"
                     style={{ "font-size": "0.85em" }}
                     data-tip={t.fileManagerLabel()}

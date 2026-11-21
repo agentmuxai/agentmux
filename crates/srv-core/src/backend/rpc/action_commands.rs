@@ -32,7 +32,7 @@ pub const ALWAYS: &[&str] = &[
     "auth.start", "auth.submitcallback", "browser.signin_fill", "browser.signin_offer_answer", "browser.signin_stop", "browser.signup_password", "browser_profiles.create", "browser_profiles.delete",
     "browser_profiles.update", "browser_start_page.set", "browsergrants.pauseall", "browsergrants.permissionrevoke", "browsergrants.permissionset", "browsergrants.powers", "browsergrants.preset",
     "browsergrants.revoke", "browsergrants.set", "bundle.delete", "bundle.import", "bundle.import.commit",
-    "bundle.import_for_agent", "bundle.upsert", "connconnect", "conndisconnect", "connensure", "connsessionend",
+    "bundle.import_for_agent", "bundle.upsert", "client.agreetos", "connconnect", "conndisconnect", "connensure", "connsessionend",
     "copyforkhistory", "createagent", "createagentinstance", "createagentskill", "createeditordir",
     "createeditorfile", "createscratchfile", "deleteagent", "deleteagentinstance", "deleteagentskill", "deletedrone",
     "deleteeditorfile", "deleteidentityaccount", "deletememory", "deletesystemmemory", "fleet.broadcast",
@@ -60,7 +60,7 @@ pub const ALWAYS: &[&str] = &[
     "updateagentinstance", "updateagentskill", "upsertdrone", "upsertidentityaccount", "upsertmemory",
     "upsertsystemmemory", "viewer.pair-start", "viewer.revoke", "widget.api", "widgets.call",
     "widgets.catalog.install", "widgets.install", "widgets.rescan", "widgets.session", "widgets.setenabled",
-    "widgets.uninstall", "writeagentconfig", "writeeditorfile",
+    "widgets.uninstall", "workspace.importuserworkspace", "writeagentconfig", "writeeditorfile",
     "updatecontainer", "setcontainerlimits", "clearcontainercaches",
     "identity.account.set_failover", "identity.account.signed_in", "identity.account.validate",
 ];

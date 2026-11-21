@@ -52,10 +52,13 @@ impl Store {
         };
         match encoded {
             None => Ok(None),
-            Some(encoded) => BASE64
-                .decode(&encoded)
-                .map(Some)
-                .map_err(|e| StoreError::Other(format!("agent_jekt_key: stored key is not valid base64: {e}"))),
+            Some(encoded) => {
+                crate::backend::transcript::withhold::register(&encoded);
+                BASE64
+                    .decode(&encoded)
+                    .map(Some)
+                    .map_err(|e| StoreError::Other(format!("agent_jekt_key: stored key is not valid base64: {e}")))
+            }
         }
     }
 
@@ -108,7 +111,15 @@ impl Store {
     ///
     /// A key older than `JEKT_KEY_TTL_SECS` is rotated here rather than
     /// returned as-is — see docs/specs/SPEC_JEKT_HOST_KEY_TTL_ROTATION_2026_09_14.md.
+    ///
+    /// The key is withheld from transcripts from here on (`transcript::withhold`).
     pub fn agent_jekt_key_ensure(&self, agent_id: &str) -> Result<Vec<u8>, StoreError> {
+        let key = self.agent_jekt_key_ensure_unwithheld(agent_id)?;
+        crate::backend::transcript::withhold::register(&BASE64.encode(&key));
+        Ok(key)
+    }
+
+    fn agent_jekt_key_ensure_unwithheld(&self, agent_id: &str) -> Result<Vec<u8>, StoreError> {
         let key = agent_id.to_lowercase();
         if let Some((existing, created_at)) = self.agent_jekt_key_load_with_created_at(&key)? {
             if now_secs() - created_at < JEKT_KEY_TTL_SECS {
@@ -169,6 +180,20 @@ mod tests {
         let new = store.agent_jekt_key_load("agentx").unwrap().unwrap();
         assert_ne!(old, new);
         assert_eq!(new.len(), 32);
+    }
+
+    #[test]
+    fn a_stored_key_is_withheld_when_it_is_only_read() {
+        let store = object_store();
+        // Written by an earlier run: nothing in this process has ensured it.
+        let stored = ["stored-jekt-key-0415-", "QwErTyUiOpAsDf=="].concat();
+        store.conn.lock().unwrap().execute(
+            "INSERT INTO db_agent_jekt_keys (agent_id, hmac_key, created_at) VALUES ('load-only', ?1, ?2)",
+            params![stored, now_secs()],
+        ).unwrap();
+        assert_eq!(crate::backend::transcript::withhold::text(&stored), stored, "not registered yet");
+        store.agent_jekt_key_load("load-only").ok();
+        assert_eq!(crate::backend::transcript::withhold::text(&stored), crate::backend::transcript::withhold::MARK);
     }
 
     #[test]
