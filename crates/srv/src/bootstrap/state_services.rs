@@ -79,9 +79,7 @@ pub fn install_state_hooks(state: &AppState) {
         state.mstore.clone(),
         state.id_store.clone(),
         state.broker.clone(),
-        std::sync::Arc::new(move || {
-            crate::server::agent_lifecycle::live_agents(&drift_state).into_iter().map(|l| l.uid).collect()
-        }),
+        std::sync::Arc::new(move || crate::server::agent_lifecycle::running_agent_ids(&drift_state)),
     );
 
     // Retention/GC for native-memory version history — see

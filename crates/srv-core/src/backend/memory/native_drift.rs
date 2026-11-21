@@ -61,8 +61,9 @@ const MAX_MEMORY_FILE_BYTES: u64 = 10 * 1024 * 1024;
 /// spawn, `reconcile.rs`).
 pub type OwnedAgents = Arc<dyn Fn() -> HashSet<String> + Send + Sync>;
 
-/// The roster's memory directories of the agents running in this process.
-fn owned_targets(mstore: &Store, owned: &OwnedAgents) -> Vec<(String, PathBuf)> {
+/// The roster's memory directories of the agents running in this process. An agent is matched by the id
+/// the roster and its memory directory are keyed by (`AgentDefinition::id`).
+pub fn owned_targets(mstore: &Store, owned: &OwnedAgents) -> Vec<(String, PathBuf)> {
     let own = owned();
     if own.is_empty() {
         return Vec::new();
@@ -432,47 +433,64 @@ fn spawn_fast_path(
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                     };
-                    if !matches!(event.kind, FsWatchEventKind::Created | FsWatchEventKind::Modified) {
-                        continue;
-                    }
-                    let Some(filename) = event.path.file_name().and_then(|n| n.to_str()) else { continue };
-                    if !filename.ends_with(".md") {
-                        continue;
-                    }
-                    let Some(parent) = event.path.parent() else { continue };
-                    let Some(agent_id) = dir_to_agent.get(parent).cloned() else { continue };
-
-                    let content = match read_memory_file_lossy(&event.path) {
-                        Ok(c) => c,
-                        Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
-                            tracing::warn!(agent_id, filename, error = %e, "native_memory_drift: fast path: file exceeds size cap, skipping (not recording truncated content)");
-                            continue;
-                        }
-                        // TOCTOU-deleted or transient I/O between the event
-                        // and this read — non-fatal, the reconciliation
-                        // sweep covers it if the write actually stuck.
-                        Err(_) => continue,
-                    };
-                    // Restructured from `if let Err(...) {} else {}` to a full
-                    // match while adding the publish below: the old `else`
-                    // branch fired on Ok(false) too (content already matched,
-                    // nothing recorded), logging "recorded an out-of-band
-                    // write" for a no-op — a pre-existing log inaccuracy
-                    // fixed as a side effect of needing this branch anyway.
-                    capture_into_record(&agent_id, parent);
-                    match check_and_record_drift(&id_store, &agent_id, filename, &content, "fs_watch") {
-                        Ok(true) => {
-                            tracing::info!(agent_id, filename, "native_memory_drift: fast path recorded an out-of-band write");
-                            // Reactive Memory updates (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md).
-                            broker.publish_event_for::<crate::backend::mps_events::AgentMemoryChanged>(&agent_id, &(), vec![], 0);
-                        }
-                        Ok(false) => {}
-                        Err(e) => tracing::warn!(agent_id, filename, error = %e, "native_memory_drift: fast path: check_and_record_drift failed"),
-                    }
+                    handle_fs_event(&event, &dir_to_agent, &owned, &id_store, &broker);
                 }
             }
         }
     });
+}
+
+/// One fs-watch event on a watched memory folder. A folder stays watched for the life of the process once
+/// first seen, so the agent is asked about again here: a write is looked at only while the agent runs in
+/// this process. One that stopped here and runs in another channel now is that channel's, and a write
+/// of its last moments is recorded by the reconcile before its next spawn.
+fn handle_fs_event(
+    event: &crate::backend::fs_watch::FsWatchEvent,
+    dir_to_agent: &std::collections::HashMap<PathBuf, String>,
+    owned: &OwnedAgents,
+    id_store: &Store,
+    broker: &crate::backend::mps::Broker,
+) {
+    if !matches!(event.kind, FsWatchEventKind::Created | FsWatchEventKind::Modified) {
+        return;
+    }
+    let Some(filename) = event.path.file_name().and_then(|n| n.to_str()) else { return };
+    if !filename.ends_with(".md") {
+        return;
+    }
+    let Some(parent) = event.path.parent() else { return };
+    let Some(agent_id) = dir_to_agent.get(parent).cloned() else { return };
+    if !owned().contains(&agent_id) {
+        return;
+    }
+
+    let content = match read_memory_file_lossy(&event.path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+            tracing::warn!(agent_id, filename, error = %e, "native_memory_drift: fast path: file exceeds size cap, skipping (not recording truncated content)");
+            return;
+        }
+        // TOCTOU-deleted or transient I/O between the event
+        // and this read — non-fatal, the reconciliation
+        // sweep covers it if the write actually stuck.
+        Err(_) => return,
+    };
+    // Restructured from `if let Err(...) {} else {}` to a full
+    // match while adding the publish below: the old `else`
+    // branch fired on Ok(false) too (content already matched,
+    // nothing recorded), logging "recorded an out-of-band
+    // write" for a no-op — a pre-existing log inaccuracy
+    // fixed as a side effect of needing this branch anyway.
+    capture_into_record(&agent_id, parent);
+    match check_and_record_drift(id_store, &agent_id, filename, &content, "fs_watch") {
+        Ok(true) => {
+            tracing::info!(agent_id, filename, "native_memory_drift: fast path recorded an out-of-band write");
+            // Reactive Memory updates (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md).
+            broker.publish_event_for::<crate::backend::mps_events::AgentMemoryChanged>(&agent_id, &(), vec![], 0);
+        }
+        Ok(false) => {}
+        Err(e) => tracing::warn!(agent_id, filename, error = %e, "native_memory_drift: fast path: check_and_record_drift failed"),
+    }
 }
 
 fn refresh_subscriptions(
@@ -1085,6 +1103,30 @@ mod ownership_tests {
         assert_eq!(id_store.agent_native_memory_version_list("mine", "notes.md").unwrap().len(), 2);
         assert_eq!(id_store.agent_native_memory_version_list("theirs", "notes.md").unwrap().len(), 1);
         restore(prev);
+    }
+
+    /// A folder stays watched once subscribed; a write in it counts only while its agent runs here.
+    #[test]
+    fn the_fast_path_ignores_a_write_in_the_folder_of_an_agent_that_no_longer_runs_here() {
+        let id_store = Store::open_shared(Path::new(":memory:")).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        id_store.agent_native_memory_version_insert("was-mine", "notes.md", "one", "agent_inferred", "{}", "").unwrap();
+        std::fs::write(dir.path().join("notes.md"), "two, written by another channel's run of it").unwrap();
+        let mut dir_to_agent = std::collections::HashMap::new();
+        dir_to_agent.insert(dir.path().to_path_buf(), "was-mine".to_string());
+        let event = crate::backend::fs_watch::FsWatchEvent { path: dir.path().join("notes.md"), kind: FsWatchEventKind::Modified };
+        let (broker, client) = crate::test_support::broker_recording("agent:memory:changed:was-mine");
+        let history = || id_store.agent_native_memory_version_list("was-mine", "notes.md").unwrap().len();
+
+        let stopped: OwnedAgents = Arc::new(HashSet::new);
+        let text = logged(|| handle_fs_event(&event, &dir_to_agent, &stopped, &id_store, &broker));
+        assert_eq!(history(), 1, "nothing is recorded for it");
+        assert!(client.received_events().is_empty() && text.is_empty(), "nothing is announced or logged: {text}");
+
+        let running: OwnedAgents = Arc::new(|| HashSet::from(["was-mine".to_string()]));
+        handle_fs_event(&event, &dir_to_agent, &running, &id_store, &broker);
+        assert_eq!(history(), 2, "while it runs here, the write is recorded");
+        assert_eq!(client.received_events().len(), 1);
     }
 
     #[tokio::test]
