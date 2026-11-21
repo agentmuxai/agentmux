@@ -66,6 +66,8 @@ export interface OptionRow {
     disclosure?: { expanded: boolean };
     /** A row of such a list: set in from the rows above it. */
     nested?: boolean;
+    /** The first row of the routes section: a line above it sets the section apart from the Effort rows. */
+    setApart?: boolean;
 }
 
 export type Row =

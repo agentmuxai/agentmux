@@ -176,6 +176,8 @@ describe("the model panel's routes", () => {
         await openPanel();
         expect(option(/Start a fresh session/).getAttribute("aria-selected")).toBe("false");
         expect(option(/Start a fresh session/).textContent).toContain("resumes the conversation");
+        // A line above it sets the routes section apart from the Effort rows, so it does not read as one more effort level.
+        expect(option(/Start a fresh session/).classList.contains("is-set-apart")).toBe(true);
         fireEvent.click(option(/Start a fresh session/));
         await flush();
         expect(option(/Start a fresh session/).getAttribute("aria-selected")).toBe("true");

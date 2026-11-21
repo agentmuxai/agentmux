@@ -51,6 +51,7 @@ export function freshRow(on: boolean): OptionRow {
             : "Off: the next model change resumes the conversation on the new model",
         detail: "A model that did not write a long conversation can read it badly. A fresh session starts the new model without it, with a note that says where to find it.",
         current: on,
+        setApart: true,
     };
 }
 
