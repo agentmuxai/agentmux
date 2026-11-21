@@ -403,7 +403,10 @@ pub fn on_pane_resized(state: &Arc<AppState>, block_id: &str, size: (i32, i32)) 
     if ZOOMED.lock().is_empty() && APPLYING.lock().is_empty() {
         return;
     }
-    let Some(label) = state.live_browser_pane_label(block_id) else { return };
+    let Some(label) = state.live_browser_pane_label(block_id) else {
+        tracing::warn!(%block_id, "[zoom] a pane was resized but has no live browser: its zoom, if it has one, was not refitted");
+        return;
+    };
     // Being fitted right now: that pass looks again when it is done.
     if let Some(applying) = APPLYING.lock().get_mut(&label) {
         applying.resized = true;
@@ -411,9 +414,13 @@ pub fn on_pane_resized(state: &Arc<AppState>, block_id: &str, size: (i32, i32)) 
     }
     let generation = next_generation();
     let Some(()) = ZOOMED.lock().get_mut(&label).map(|e| e.generation = generation) else {
+        // Not a zoomed pane: nothing to refit.
         return;
     };
-    let Some(rt) = crate::browser_pane::auth::runtime() else { return };
+    let Some(rt) = crate::browser_pane::auth::runtime() else {
+        tracing::warn!(%block_id, "[zoom] a zoomed pane was resized but there is no runtime to refit it on: its zoom was left at the old size");
+        return;
+    };
     let (state, block_id) = (state.clone(), block_id.to_string());
     rt.spawn(async move {
         tokio::time::sleep(RESIZE_SETTLE).await;
