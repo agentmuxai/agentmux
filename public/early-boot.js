@@ -36,7 +36,11 @@
 // a person can do. It only adds words: nothing here changes how long the start waits or what it waits for. A window
 // that is opened to restore a session has its own headline, and a pre-warmed pool window waits hidden, for hours.
 (function () {
-    if (new URLSearchParams(location.search).get("restoring") === "1") return;
+    var query = new URLSearchParams(location.search);
+    if (query.get("restoring") === "1") return;
+    // A pre-warmed window carries its mode in the address from the first load; the attribute below is set only after
+    // the app has booted, which can be later than the first line.
+    if (query.get("pool") === "1" || query.get("pane-pool") === "1") return;
     function say(text) {
         var splash = document.getElementById("startup-loading");
         var headline = document.getElementById("startup-loading-headline");
