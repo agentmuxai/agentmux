@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::test_data_env::DataEnv;
+use crate::data_env_tests::DataEnv;
 
 #[test]
 fn agy_probes_run_without_the_clis_own_update() {

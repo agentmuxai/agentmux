@@ -6,7 +6,7 @@
 //! because the function reads the data directories and sets `AGENTMUX_LOCAL_URL`.
 
 use super::*;
-use crate::test_data_env::DataEnv;
+use crate::data_env_tests::DataEnv;
 
 fn test_config() -> config::Config {
     config::Config {
