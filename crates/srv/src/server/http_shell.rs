@@ -5,6 +5,7 @@
 //! Split out of server/mod.rs unchanged (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §4.1).
 
 use super::*;
+use super::app_api::connections::{self, AgentTarget};
 
 /// What a command's Vault entries come to once checked and asked for: the values it is given, and what its
 /// output is stored as (with the labels of the entries nobody answered for).
@@ -49,23 +50,16 @@ pub(super) async fn handle_shell_create(
     create_shell(state, caller.as_deref(), req, None).await
 }
 
-/// Starts a shell for `req`. `preapproved`: the person approved its secrets with a
-/// rotation (`Vault` `rotate`), which runs its commands through here.
-pub(super) async fn create_shell(
-    state: AppState, caller: Option<&super::caller::Caller>,
-    req: ShellCreateRequest,
-    preapproved: Option<&super::shell_secrets::Preapproved>,
-) -> Response {
-    // Where it runs. Checked before anything is published, so a refused
-    // connection (no ssh, a distro that isn't installed, a bad name) fails the
-    // call with its reason instead of running the command here.
-    use super::app_api::connections::{self, AgentTarget};
-    let target = match connections::for_agent(&state.broker, req.connection.as_deref()).await {
-        Ok(t) => t,
-        Err(e) => {
-            return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
-        }
-    };
+/// A JSON `{ "error": .. }` reply with `status`.
+fn refuse(status: StatusCode, error: impl serde::Serialize) -> Response {
+    (status, Json(json!({ "error": error }))).into_response()
+}
+
+/// Where the command runs, and for an SSH host the agent that asked. Checked before anything is
+/// published, so a refused connection (no ssh, a distro that isn't installed, a bad name) fails the
+/// call with its reason instead of running the command here.
+async fn resolve_target(state: &AppState, req: &ShellCreateRequest) -> Result<(AgentTarget, String), Response> {
+    let target = connections::for_agent(&state.broker, req.connection.as_deref()).await.map_err(|e| refuse(StatusCode::BAD_REQUEST, e))?;
     // An SSH host runs with the user's identity: their consent first (asked
     // once, or remembered as "always"), then every ssh prompt goes to them
     // through the askpass bridge, never to the agent.
@@ -75,27 +69,149 @@ pub(super) async fn create_shell(
         // consent (or an "always") given for it would be given for nothing.
         if crate::backend::remote::askpass::program().is_none() {
             let e = "this AgentMux has no askpass helper (agentmux-bashwrap) to run an agent's SSH command with";
-            return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
+            return Err(refuse(StatusCode::BAD_REQUEST, e));
         }
-        ssh_agent = match connections::verified_agent(&state, &req.agent_block_id, req.auth.as_ref()) {
-            Ok(a) => a,
-            Err(e) => return (StatusCode::FORBIDDEN, Json(json!({ "error": e }))).into_response(),
-        };
+        ssh_agent = connections::verified_agent(state, &req.agent_block_id, req.auth.as_ref()).map_err(|e| refuse(StatusCode::FORBIDDEN, e))?;
         let connection = dest.name();
-        if let Err(e) = connections::consent_for_ssh(&state, &req.agent_block_id, &ssh_agent, &connection, &req.cmd).await {
-            return (StatusCode::FORBIDDEN, Json(json!({ "error": e }))).into_response();
+        connections::consent_for_ssh(state, &req.agent_block_id, &ssh_agent, &connection, &req.cmd).await.map_err(|e| refuse(StatusCode::FORBIDDEN, e))?;
+    }
+    Ok((target, ssh_agent))
+}
+
+/// Where the command starts. If cwd wasn't supplied by the caller, fall back to the agent block's
+/// cmd:cwd — the working directory the agent pane was launched with. Without this, ShellNodeRunner
+/// would inherit agentmux-srv's cwd (typically the portable runtime/ dir) instead of the project dir.
+///
+/// In WSL or over SSH the cwd is a path on the other side, given as is, and the agent's own
+/// directory is no fallback for it: the remote home is. A local one is normalized before it reaches
+/// the spawner: agents on Windows run inside a bash shell and emit MSYS paths like
+/// `/c/Users/user/project`, which `Command::current_dir` rejects with os error 267
+/// (ERROR_DIRECTORY); this converts them to native form and expands `~`.
+fn effective_cwd(req: &ShellCreateRequest, agent_block: Option<&crate::backend::obj::Block>, remote: bool) -> Option<String> {
+    if remote {
+        return req.cwd.clone();
+    }
+    let block_cwd = || {
+        agent_block.and_then(|block| {
+            let cwd = crate::backend::obj::meta_get_string(&block.meta, "cmd:cwd", "");
+            if cwd.is_empty() { None } else { Some(cwd.to_string()) }
+        })
+    };
+    req.cwd.clone().or_else(block_cwd).and_then(|c| crate::backend::base::normalize_working_dir(&c))
+}
+
+/// Env parity with the agent CLI: start from the agent block's stored cmd:env (the per-agent env
+/// the agent process is launched with — same shape app_api/agent_io.rs / agent_handlers/input.rs
+/// read), then let the caller-supplied req.env override on top (explicit Shell env wins).
+///
+/// NOT forwarded here: the dynamic identity bindings (identity/resolver/inject.rs) and the bundled
+/// tools/bin PATH prefix that `build_persistent_spawn_env` (agent_handlers/input.rs) and
+/// blockcontroller/shell/lifecycle.rs inject at agent-CLI spawn time — those are resolved live per
+/// spawn, not stored in cmd:env. The MCP server (agentmux-mcp) is itself launched by the agent CLI
+/// through the bundled tools/bin, so tools it spawns inherit that PATH; shells created here run
+/// from agentmux-srv's env plus cmd:env + req.env.
+fn base_env(req: &ShellCreateRequest, agent_block: Option<&crate::backend::obj::Block>) -> std::collections::HashMap<String, String> {
+    let mut env = agent_block.map(|block| crate::backend::blockcontroller::cmd_env_of(&block.meta)).unwrap_or_default();
+    env.extend(req.env.iter().flatten().map(|(k, v)| (k.clone(), v.clone())));
+    env
+}
+
+/// What the Vault secrets given to the command leave for its runner to hold.
+struct SecretRuntime {
+    scrubber: Option<Arc<crate::backend::vault::scrub::Scrubber>>,
+    stdin_once: Option<zeroize::Zeroizing<String>>,
+    secret_dir: Option<crate::backend::vault::files::SecretDir>,
+}
+
+/// Puts the injected Vault values into `env` (after the caller's, so the agent can't name a value
+/// of its own over one) and their private files in a folder of their own, removed when the runner
+/// ends (or at the next start).
+fn apply_injected(
+    injected: Option<super::shell_secrets::Injected>,
+    env: &mut std::collections::HashMap<String, String>,
+    went_ahead: &mut Vec<String>,
+) -> Result<SecretRuntime, Response> {
+    let Some(i) = injected else {
+        return Ok(SecretRuntime { scrubber: None, stdin_once: None, secret_dir: None });
+    };
+    went_ahead.extend(i.went_ahead);
+    env.extend(i.env);
+    let mut secret_dir = None;
+    if !i.files.is_empty() {
+        let dir = crate::backend::vault::files::SecretDir::create().map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        for (name, value) in &i.files {
+            let path = dir.write(name, value).map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+            env.insert(name.clone(), path.to_string_lossy().into_owned());
+        }
+        secret_dir = Some(dir);
+    }
+    Ok(SecretRuntime { scrubber: Some(Arc::new(i.scrubber)), stdin_once: i.stdin, secret_dir })
+}
+
+/// The program and arguments that run the command on the other side of a WSL or SSH `target`
+/// (`None` runs it here), and for SSH the askpass secret its prompts are answered through.
+fn launch_for(
+    state: &AppState,
+    req: &ShellCreateRequest,
+    target: &AgentTarget,
+    ssh_agent: &str,
+    env: &mut std::collections::HashMap<String, String>,
+    cwd_there: &str,
+) -> Result<(Option<(String, Vec<String>)>, Option<String>), Response> {
+    match target {
+        AgentTarget::Local => Ok((None, None)),
+        // WSL passes on only what WSLENV names: the caller's own variables and the gh guard, never
+        // the rest of the agent's env.
+        AgentTarget::Wsl(distro) => {
+            // Whether the distro has an identity of its own (a gh-agent there) is not known from
+            // here, and the guard above looked at this machine: keep the person's gh login from
+            // a shell in the distro, as every spawn did before the guard became conditional.
+            crate::backend::gh_guard::apply_gh_guard_in(env, &crate::backend::gh_guard::guard_config_home());
+            let caller_keys: Vec<String> = req.env.iter().flat_map(|e| e.keys().cloned()).collect();
+            let wslenv = shell_wslenv(&std::env::var("WSLENV").unwrap_or_default(), &caller_keys, env);
+            env.insert("WSLENV".to_string(), wslenv);
+            let args = crate::backend::remote::wsl::launch(distro, &req.cmd, &[], cwd_there).args;
+            Ok((Some(("wsl.exe".to_string(), args)), None))
+        }
+        AgentTarget::Ssh(dest) => {
+            use crate::backend::remote::{askpass, ssh};
+            let (Some(ssh_path), Some(askpass_program)) = (ssh::binary(), askpass::program()) else {
+                let e = "this AgentMux has no ssh or no askpass helper (agentmux-bashwrap) to run an agent's SSH command with";
+                return Err(refuse(StatusCode::BAD_REQUEST, e));
+            };
+            // Named from AgentMux's own record of the agent and host, never
+            // from the request, whose env the agent controls.
+            let secret = askpass::grant(askpass::AskpassGrant {
+                agent_block_id: req.agent_block_id.clone(),
+                agent: ssh_agent.to_string(),
+                connection: dest.name(),
+                user_pane: false,
+            });
+            let local_url = std::env::var("AGENTMUX_LOCAL_URL").unwrap_or_default();
+            env.extend(askpass::ssh_env(&secret, &askpass_program, &local_url, &state.auth_key));
+            let args = ssh::launch_exec(dest, &req.cmd, cwd_there, ssh::shared_control_dir().as_deref());
+            Ok((Some((ssh_path.to_string_lossy().into_owned(), args)), Some(secret)))
         }
     }
-    let wsl_distro = match &target {
-        AgentTarget::Wsl(d) => Some(d.clone()),
-        _ => None,
+}
+
+/// Starts a shell for `req`. `preapproved`: the person approved its secrets with a
+/// rotation (`Vault` `rotate`), which runs its commands through here.
+pub(super) async fn create_shell(
+    state: AppState, caller: Option<&super::caller::Caller>,
+    req: ShellCreateRequest,
+    preapproved: Option<&super::shell_secrets::Preapproved>,
+) -> Response {
+    let (target, ssh_agent) = match resolve_target(&state, &req).await {
+        Ok(resolved) => resolved,
+        Err(refused) => return refused,
     };
     let remote = !matches!(target, AgentTarget::Local);
 
     // stdin is closed once a Vault value is written to it, so nothing can type there after.
     if req.capture_stdin == Some(true) && req.stdin_secret.as_deref().is_some_and(|s| !s.trim().is_empty()) {
         let e = "stdin_secret and capture_stdin can't be used together: stdin is closed once the value is written";
-        return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
+        return refuse(StatusCode::BAD_REQUEST, e);
     }
     // Vault secrets for this command: the person is asked first, and the values go into this one process (its
     // environment, stdin or private files, further down) and out of its output.
@@ -105,130 +221,19 @@ pub(super) async fn create_shell(
     };
     let shell_id = uuid::Uuid::new_v4().to_string();
     let title = req.title.as_deref().unwrap_or(&req.cmd).to_string();
-    let now_ms = agentmux_common::time::now_ms_u64();
 
-    // Read the agent block once for both the cwd and env fallbacks below.
-    let agent_block = state.mstore
-        .get::<crate::backend::obj::Block>(&req.agent_block_id)
-        .ok()
-        .flatten();
-
-    // If cwd wasn't supplied by the caller, fall back to the agent block's
-    // cmd:cwd — the working directory the agent pane was launched with.
-    // Without this, ShellNodeRunner would inherit agentmux-srv's cwd
-    // (typically the portable runtime/ dir) instead of the project dir.
-    //
-    // In WSL or over SSH the cwd is a path on the other side, given as is, and
-    // the agent's own directory is no fallback for it: the remote home is.
-    let effective_cwd = if remote {
-        req.cwd.clone()
-    } else {
-        req.cwd.clone().or_else(|| {
-        agent_block.as_ref().and_then(|block| {
-            let cwd = crate::backend::obj::meta_get_string(&block.meta, "cmd:cwd", "");
-            if cwd.is_empty() { None } else { Some(cwd.to_string()) }
-        })
-        })
-    };
-
-    // Normalize the cwd before it reaches the spawner. Agents on Windows run
-    // inside a bash shell and emit MSYS paths like `/c/Users/user/project`;
-    // passing those straight to `Command::current_dir` fails with os error 267
-    // (ERROR_DIRECTORY). This converts them to native form and expands `~`.
-    let effective_cwd = if remote {
-        effective_cwd
-    } else {
-        effective_cwd.and_then(|c| crate::backend::base::normalize_working_dir(&c))
-    };
-
-    // Env parity with the agent CLI: start from the agent block's stored
-    // cmd:env (the per-agent env the agent process is launched with — same
-    // shape app_api/agent_io.rs / agent_handlers/input.rs read), then let the
-    // caller-supplied req.env override on top (explicit Shell env wins). This
-    // forwards the concrete per-agent env so `Shell(...)` runs with the same
-    // env the agent itself sees, mirroring the cmd:cwd fallback above.
-    //
-    // NOT forwarded here: the dynamic identity bindings
-    // (identity/resolver/inject.rs) and the bundled tools/bin PATH prefix
-    // that `build_persistent_spawn_env` (agent_handlers/input.rs) and
-    // blockcontroller/shell/lifecycle.rs inject at agent-CLI spawn
-    // time — those are resolved live per spawn, not stored in cmd:env. The
-    // MCP server (agentmux-mcp) is itself launched by the agent CLI through
-    // the bundled tools/bin, so tools it spawns inherit that PATH; shells
-    // created here run from agentmux-srv's env plus cmd:env + req.env.
-    let mut effective_env: std::collections::HashMap<String, String> = agent_block
-        .as_ref()
-        .map(|block| crate::backend::blockcontroller::cmd_env_of(&block.meta))
-        .unwrap_or_default();
-    let caller_keys: Vec<String> = req.env.iter().flat_map(|e| e.keys().cloned()).collect();
-    if let Some(req_env) = req.env {
-        effective_env.extend(req_env);
-    }
-    // After the caller's env, so the agent can't name a value of its own over one.
-    let mut stdin_once = None;
-    let mut secret_dir = None;
-    let scrubber = match injected {
-        Some(i) => {
-            went_ahead.extend(i.went_ahead);
-            effective_env.extend(i.env);
-            if !i.files.is_empty() {
-                // A folder of its own, removed when the runner ends (or at the next start).
-                let dir = match crate::backend::vault::files::SecretDir::create() {
-                    Ok(d) => d,
-                    Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))).into_response(),
-                };
-                for (name, value) in &i.files {
-                    match dir.write(name, value) {
-                        Ok(path) => {
-                            effective_env.insert(name.clone(), path.to_string_lossy().into_owned());
-                        }
-                        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))).into_response(),
-                    }
-                }
-                secret_dir = Some(dir);
-            }
-            stdin_once = i.stdin;
-            Some(Arc::new(i.scrubber))
-        }
-        None => None,
+    // Read the agent block once for both the cwd and env fallbacks.
+    let agent_block = state.mstore.get::<crate::backend::obj::Block>(&req.agent_block_id).ok().flatten();
+    let effective_cwd = effective_cwd(&req, agent_block.as_ref(), remote);
+    let mut effective_env = base_env(&req, agent_block.as_ref());
+    let secrets = match apply_injected(injected, &mut effective_env, &mut went_ahead) {
+        Ok(secrets) => secrets,
+        Err(refused) => return refused,
     };
     reserve_agent_env(&state.mstore, &req.agent_block_id, &mut effective_env);
-    // WSL passes on only what WSLENV names: the caller's own variables and the
-    // gh guard, never the rest of the agent's env.
-    let cwd_there = effective_cwd.as_deref().unwrap_or_default();
-    let mut askpass_secret = None;
-    let launch = match &target {
-        AgentTarget::Local => None,
-        AgentTarget::Wsl(distro) => {
-            // Whether the distro has an identity of its own (a gh-agent there) is not known from
-            // here, and the guard above looked at this machine: keep the person's gh login from
-            // a shell in the distro, as every spawn did before the guard became conditional.
-            crate::backend::gh_guard::apply_gh_guard_in(&mut effective_env, &crate::backend::gh_guard::guard_config_home());
-            let wslenv = shell_wslenv(&std::env::var("WSLENV").unwrap_or_default(), &caller_keys, &effective_env);
-            effective_env.insert("WSLENV".to_string(), wslenv);
-            let args = crate::backend::remote::wsl::launch(distro, &req.cmd, &[], cwd_there).args;
-            Some(("wsl.exe".to_string(), args))
-        }
-        AgentTarget::Ssh(dest) => {
-            use crate::backend::remote::{askpass, ssh};
-            let (Some(ssh_path), Some(askpass_program)) = (ssh::binary(), askpass::program()) else {
-                let e = "this AgentMux has no ssh or no askpass helper (agentmux-bashwrap) to run an agent's SSH command with";
-                return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
-            };
-            // Named from AgentMux's own record of the agent and host, never
-            // from the request, whose env the agent controls.
-            let secret = askpass::grant(askpass::AskpassGrant {
-                agent_block_id: req.agent_block_id.clone(),
-                agent: ssh_agent.clone(),
-                connection: dest.name(),
-                user_pane: false,
-            });
-            let local_url = std::env::var("AGENTMUX_LOCAL_URL").unwrap_or_default();
-            effective_env.extend(askpass::ssh_env(&secret, &askpass_program, &local_url, &state.auth_key));
-            askpass_secret = Some(secret);
-            let args = ssh::launch_exec(dest, &req.cmd, cwd_there, ssh::shared_control_dir().as_deref());
-            Some((ssh_path.to_string_lossy().into_owned(), args))
-        }
+    let (launch, askpass_secret) = match launch_for(&state, &req, &target, &ssh_agent, &mut effective_env, effective_cwd.as_deref().unwrap_or_default()) {
+        Ok(launched) => launched,
+        Err(refused) => return refused,
     };
 
     tracing::info!(
@@ -236,7 +241,7 @@ pub(super) async fn create_shell(
         shell_id = %shell_id,
         cmd = %req.cmd,
         cwd = ?effective_cwd,
-        wsl = ?wsl_distro,
+        wsl = ?(if let AgentTarget::Wsl(distro) = &target { Some(distro) } else { None }),
         ssh = matches!(target, AgentTarget::Ssh(_)),
         "shell.create"
     );
@@ -254,7 +259,7 @@ pub(super) async fn create_shell(
         cmd: req.cmd.clone(),
         cwd: effective_cwd.clone(),
         title: title.clone(),
-        timestamp: now_ms,
+        timestamp: agentmux_common::time::now_ms_u64(),
     };
     state.broker.publish_event::<crate::backend::mps_events::ShellNodeCreate>(&created, vec![format!("block:{}", req.agent_block_id)], 64);
 
@@ -271,9 +276,9 @@ pub(super) async fn create_shell(
         broker: Arc::clone(&state.broker),
         registry: Arc::clone(&state.shell_sessions),
         capture_stdin: req.capture_stdin.unwrap_or(false),
-        scrubber,
-        stdin_once,
-        secret_dir,
+        scrubber: secrets.scrubber,
+        stdin_once: secrets.stdin_once,
+        secret_dir: secrets.secret_dir,
         capture,
     };
     tokio::spawn(runner.run());
@@ -814,3 +819,7 @@ mod shared_shell_tests {
         assert!(connection_conflict(&shell("area54", true), "local").is_some(), "another connection");
     }
 }
+
+#[cfg(test)]
+#[path = "http_shell_create_tests.rs"]
+mod create_tests;
