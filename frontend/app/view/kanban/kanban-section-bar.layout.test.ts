@@ -63,14 +63,18 @@ for (const c of document.querySelectorAll('.kanban-container')) {
   const before = { barTop: bar.getBoundingClientRect().top - board.getBoundingClientRect().top, barHeight: bar.getBoundingClientRect().height, linkHeight: link.getBoundingClientRect().height };
   board.scrollTop = 400;
   const boardRect = board.getBoundingClientRect(), barRect = bar.getBoundingClientRect();
-  const heads = [...c.querySelectorAll('.kanban-column__head')].map((h) => h.getBoundingClientRect());
-  // The head that is stuck at the top: the one with the greatest top that is still at or above the bar's bottom + 1.
-  const stuck = heads.filter((h) => h.top <= barRect.bottom + 1 && h.bottom > boardRect.top);
+  const barAfter = bar.getBoundingClientRect();
+  // A section whose top is 40px above the bar's bottom edge and whose end is far below: its head is stuck, so it
+  // must sit at the bar's bottom edge (a head at the list's top edge would be behind the bar).
+  const target = c.querySelectorAll('.kanban-column')[3];
+  board.scrollTop += target.getBoundingClientRect().top - barAfter.bottom + 40;
+  const head = target.querySelector('.kanban-column__head').getBoundingClientRect();
+  const headGap = head.top - bar.getBoundingClientRect().bottom;
   result[c.id] = {
     ...before,
     scrolled: board.scrollTop > 0,
     barTopAfter: barRect.top - boardRect.top,
-    stuckHeadsBehindBar: stuck.filter((h) => h.top < barRect.bottom - 0.5).length,
+    headGap,
     sideways: board.scrollWidth - board.clientWidth,
   };
 }
@@ -82,7 +86,7 @@ interface Measured {
     linkHeight: number;
     scrolled: boolean;
     barTopAfter: number;
-    stuckHeadsBehindBar: number;
+    headGap: number;
     sideways: number;
 }
 
@@ -116,7 +120,7 @@ describe.skipIf(!BROWSER)("Kanban section bar", () => {
         for (const [w, z] of CASES) expect(measured[`w${w}z${z}`].sideways, `${w}px, zoom ${z}`).toBeLessThanOrEqual(1);
     });
 
-    it("keeps the sections' own heads under it, not behind it", () => {
-        for (const [w, z] of CASES) expect(measured[`w${w}z${z}`].stuckHeadsBehindBar, `${w}px, zoom ${z}`).toBe(0);
+    it("keeps a section's stuck head just under it, not behind it", () => {
+        for (const [w, z] of CASES) expect(Math.abs(measured[`w${w}z${z}`].headGap), `head's top against the bar's bottom at ${w}px, zoom ${z}`).toBeLessThanOrEqual(1);
     });
 });
