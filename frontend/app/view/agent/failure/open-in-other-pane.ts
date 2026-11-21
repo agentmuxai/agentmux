@@ -13,6 +13,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { revealBlock } from "@/app/util/reveal-block";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
+import { closeHolderAfterMove, closeHolderPane } from "./open-here";
 import { refusedSendOf } from "./refused-send";
 
 /** srv waits up to 25 s for the other pane's agent to let go. */
@@ -32,6 +33,12 @@ export function openInOtherPaneActions(opts: {
             opts.log("agent", "Move here — asking the other pane to let this agent go");
             const r = await RpcApi.AgentMoveHereCommand(TabRpcClient, { block_id: opts.blockId }, { timeout: MOVE_HERE_TIMEOUT_MS });
             opts.log("agent", r.from_block ? `Move here — released by ${r.from_block}` : "Move here — nobody else was running it");
+            // Opened here from the picker: the pane that held the agent is not wanted any more.
+            if (closeHolderAfterMove(opts.blockId) && r.from_block) {
+                void closeHolderPane(r.from_block).then((closed) => {
+                    opts.log("agent", closed ? `Open here — closed ${r.from_block}` : `Open here — ${r.from_block} is in another window and stays open`);
+                });
+            }
             // The kept message stays until this pane's send is accepted (`sendMessage` forgets it
             // then); a resend that fails leaves it in the row, so Move here can be tried again.
             const refused = refusedSendOf(opts.blockId);

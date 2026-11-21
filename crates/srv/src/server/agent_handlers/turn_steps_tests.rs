@@ -292,6 +292,7 @@ async fn a_turn_for_a_block_with_no_controller_is_refused_before_anything_is_rea
         origin,
         Vec::new(),
         None,
+        false,
     )
     .await
     .unwrap_err();

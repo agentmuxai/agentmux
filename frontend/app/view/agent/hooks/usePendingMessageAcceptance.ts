@@ -124,6 +124,8 @@ export function usePendingMessageAcceptance(opts: UsePendingMessageAcceptanceOpt
             // it as a regular user message (the full Markdown
             // wall, not the collapsed summary).
             // Codex P1 round 2 on PR #1020.
+            // A message sent again (a Retry) is the conversation's already: taken off the queue, it adds no node.
+            if (pending.resend) return;
             const node: UserMessageNode = {
                 type: "user_message",
                 id: pending.id,

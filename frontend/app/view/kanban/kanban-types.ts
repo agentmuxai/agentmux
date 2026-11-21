@@ -50,6 +50,40 @@ export interface KanbanPr {
     released_at?: number | null;
 }
 
+/** One pull request of a card (`WorkCardPr` in crates/srv-core/src/backend/storage/work_card_prs.rs). */
+export interface KanbanCardPr {
+    repo: string;
+    number: number;
+    /** Built by srv from `repo` and `number`. */
+    url: string;
+    /** `closed` is closed without merging. */
+    state: "open" | "merged" | "closed";
+    head?: string;
+    review: "none" | "approved" | "changes_requested";
+    checks: "none" | "pending" | "passing" | "failing";
+    opened_at?: number | null;
+    merged_at?: number | null;
+    updated_at: number;
+    /** Where the link came from: `holder`, `hand_in`, `event`, `read` or `person`. */
+    source: string;
+    /** Taken off the card by the holder or a person (srv keeps it so no event puts it back). */
+    unlinked?: boolean;
+    /** Whether srv follows it (false: a private repository with no GitHub connection). */
+    followed?: boolean;
+}
+
+/** What srv derived from a card's pull requests (`pr_rollup`): the UI never recomputes the rule. */
+export interface KanbanPrRollup {
+    total: number;
+    open: number;
+    merged: number;
+    closed_unmerged: number;
+    state: "none" | "open" | "merged" | "closed";
+    follow_up_open: boolean;
+    /** A held task whose pull requests have all merged. */
+    all_merged_waiting: boolean;
+}
+
 export interface KanbanCardFields {
     /** Its number on its board. */
     num: number;
@@ -79,6 +113,9 @@ export interface KanbanCardFields {
     followers?: KanbanAfter[];
     /** Its PR's merge and release, once srv has seen them. */
     pr?: KanbanPr | null;
+    /** Every pull request it lists, newest first, and what they add up to (absent from an older srv). */
+    prs?: KanbanCardPr[];
+    pr_rollup?: KanbanPrRollup;
     /** The path of the spec or report it wrote (`links.doc`), empty when none. */
     doc?: string;
     /** The files it carries and the UI-change flag (absent from an older srv). */
@@ -269,6 +306,10 @@ export interface KanbanActRequest {
         | "reassign"
         | "media_remove"
         | "ui_change"
+        | "pr_link"
+        | "pr_unlink"
+        | "pr_unmatched"
+        | "pr_dismiss"
         | "board_create"
         | "board_edit"
         | "board_archive"
@@ -298,6 +339,9 @@ export interface KanbanActRequest {
     followers?: "cancel" | "hold";
     /** media_remove: the file to take off the task. */
     media_id?: number;
+    /** pr_link, pr_unlink, pr_dismiss: the pull request, as an address or `owner/repo#12`; or give `repo` and `number`. */
+    pr?: string;
+    number?: number;
     /** ui_change: whether the task changes the UI. */
     ui_change?: boolean;
     /** create: the board to file on; move: the board to move the task to; board_*: the board acted on (name or slug). */
@@ -322,4 +366,24 @@ export interface KanbanActResult {
     id?: string;
     num?: number;
     attempt?: number;
+    /** pr_link, pr_unlink, pr_dismiss: whether anything changed (false when it was already so). */
+    changed?: boolean;
+    /** pr_unmatched: the pull requests no card has, newest first. */
+    unmatched?: KanbanUnmatchedPr[];
+}
+
+/** A pull request that no card claimed: shown for a person to link to a task or dismiss. */
+export interface KanbanUnmatchedPr {
+    repo: string;
+    number: number;
+    url: string;
+    state: "open" | "merged" | "closed";
+    /** The agent the tag named, when it is one of this computer's. */
+    agent_id: string;
+    /** The task reference the pull request carried, as written. */
+    task_ref: string;
+    /** Why no card matched, in words. */
+    why: string;
+    updated_at: number;
+    last_seen: number;
 }
