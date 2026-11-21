@@ -327,6 +327,58 @@
     white-space: nowrap;
 }
 
+// "New from a template": a panel in the stage above the canvas (not floating over it). It scrolls when it is long.
+.drone-templates {
+    display: flex;
+    flex-direction: column;
+    flex: none;
+    gap: 8px;
+    max-height: 60%;
+    overflow-y: auto;
+    padding: 8px 10px;
+    background: var(--main-bg-color);
+    border-bottom: 1px solid var(--border-color);
+    font-size: var(--text-sm);
+}
+
+.drone-templates-head,
+.drone-templates-item-head,
+.drone-templates-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.drone-templates-head {
+    justify-content: space-between;
+}
+
+.drone-templates-title {
+    margin: 0;
+    font-size: var(--text-sm);
+    font-weight: 600;
+}
+
+.drone-templates-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.drone-templates-item,
+.drone-templates-form {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.drone-templates-note {
+    color: var(--secondary-text-color);
+}
+
 .drone-controls {
     position: absolute;
     left: 8px;
