@@ -756,7 +756,7 @@
         "notify:sound:agent.shutdown.pending": {
           "type": "boolean",
           "default": true,
-          "description": "Play the falling shutdown chime when something other than you asked to shut an agent down and you have 15 seconds to keep it running. Default true.",
+          "description": "Play the falling shutdown chime when something other than you asked to shut an agent down and you have 30 seconds to keep it running (15 when the agent is quitting itself). Default true.",
           "x-section": "Notifications"
         },
         "notify:sounds:waiting:volume": {
