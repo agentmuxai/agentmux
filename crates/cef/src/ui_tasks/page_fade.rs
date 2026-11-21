@@ -47,11 +47,8 @@ wrap_task! {
                 // The renderer's own base background is opaque (CefBrowserSettings.background_color is not honoured
                 // for a windowed browser), so even a clear NSWindow shows black behind a faded page. Making it
                 // transparent through DevTools is what lets the backdrop show through the faded panes.
-                if let Some(host) = self.state.get_browser(&self.label).and_then(|b| b.host()) {
-                    let message = renderer_background_override(self.alpha);
-                    if host.send_dev_tools_message(Some(message.as_bytes())) == 0 {
-                        tracing::warn!(label = %self.label, "[opacity] renderer background override was refused");
-                    }
+                if let Some(browser) = self.state.get_browser(&self.label) {
+                    keep_renderer_background(&browser, &self.label, self.alpha);
                 }
             }
             let Some(frame) = self.state.get_browser(&self.label).and_then(|b| b.main_frame()) else {
@@ -82,6 +79,58 @@ fn renderer_background_override(alpha: f64) -> String {
             r#"{{"id":{ID},"method":"Emulation.setDefaultBackgroundColorOverride","params":{{"color":{{"r":0,"g":0,"b":0,"a":0}}}}}}"#
         )
     }
+}
+
+#[cfg(target_os = "macos")]
+thread_local! {
+    /// The fade each browser carries, by browser id, and the observer that watches its DevTools sessions (UI thread
+    /// only; dropping a `Registration` removes the observer).
+    static FADES: std::cell::RefCell<std::collections::HashMap<i32, f64>> = Default::default();
+    static WATCHERS: std::cell::RefCell<std::collections::HashMap<i32, Registration>> = Default::default();
+}
+
+#[cfg(target_os = "macos")]
+wrap_dev_tools_message_observer! {
+    struct BackgroundWatcher {}
+
+    impl DevToolsMessageObserver {
+        // Chromium drops a renderer background override together with the DevTools session that set it, so another
+        // client (an agent's Browser tool, DevTools, a test driver) attaching and detaching turned the faded panes
+        // opaque again until the next opacity change. Send it again when a session ends.
+        fn on_dev_tools_agent_detached(&self, browser: Option<&mut Browser>) {
+            let Some(browser) = browser else { return };
+            let alpha = FADES.with(|fades| fades.borrow().get(&browser.identifier()).copied());
+            if let (Some(alpha), Some(host)) = (alpha, browser.host()) {
+                let message = renderer_background_override(alpha);
+                host.send_dev_tools_message(Some(message.as_bytes()));
+            }
+        }
+    }
+}
+
+/// Make the renderer's default background transparent for a fade below 1.0 and keep it so, or give it back at 1.0.
+#[cfg(target_os = "macos")]
+fn keep_renderer_background(browser: &Browser, label: &str, alpha: f64) {
+    let Some(host) = browser.host() else { return };
+    if host.send_dev_tools_message(Some(renderer_background_override(alpha).as_bytes())) == 0 {
+        tracing::warn!(label = %label, "[opacity] renderer background override was refused");
+    }
+    let id = browser.identifier();
+    if alpha >= 1.0 {
+        FADES.with(|fades| fades.borrow_mut().remove(&id));
+        WATCHERS.with(|watchers| watchers.borrow_mut().remove(&id));
+        return;
+    }
+    FADES.with(|fades| fades.borrow_mut().insert(id, alpha));
+    WATCHERS.with(|watchers| {
+        let mut watchers = watchers.borrow_mut();
+        if !watchers.contains_key(&id) {
+            let mut observer = BackgroundWatcher::new();
+            if let Some(registration) = host.add_dev_tools_message_observer(Some(&mut observer)) {
+                watchers.insert(id, registration);
+            }
+        }
+    });
 }
 
 /// Script that fades the whole page to `alpha` (or clears the fade at 1.0).
