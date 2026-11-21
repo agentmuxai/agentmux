@@ -45,7 +45,7 @@
 | The Swarm's LAN rows | Listed with liveness and a seen-ago time, stale after 60 s. A remote row has **no click**. `Agents open` with `host` opens the agent in a tab **on the peer**, not on the caller's screen | `crates/srv-core/src/backend/swarm_remote.rs:40,289,316`, `frontend/app/view/swarm/swarm-view.tsx:112-174`, `crates/srv/src/server/app_api/agent_open_remote.rs:1-9,80-90` |
 | Banners on the host | None for a viewer. The nearest is the sensitive-operation countdown banner | `frontend/app/view/agent/sensitive/SensitiveBanner.tsx` |
 
-**Not found:** a viewer route for history paging beyond the snapshot, answers, stop, settings or attachments; a server copy of queued messages; a per-device agent scope (hiding is per agent, for every device). **To check before any viewer code ships:** what can reach the feed from image blocks, tool output and the hidden memory re-injection turn; phase 0b settles it with a canary test and writes the answers into section 5.3. **Draft, not built:** the live-facts operation (#48221, #48222).
+**Not found:** a viewer route for history paging beyond the snapshot, answers, stop, settings or attachments; a server copy of queued messages; a per-device agent scope (phase 4; hiding is per agent today). **Draft, not built:** the live-facts operation (#48221, #48222).
 
 ## 2. Principles
 
@@ -213,7 +213,7 @@ The history path (`parseHistoryLines`) makes no calls, so history is safe as it 
 | Phase | Contents | Tests | Rough cost | Seat |
 |---|---|---|---|---|
 | **0a** (now, its own PR) | Gate `agentanswer`, `agentcancel`, `tooldecision` with `ctx.operator_only`; record a stop from the window and from a paired computer | The five cases of 5.5 | 0.5 day | platform |
-| **0b** | Settle the three unverified secret questions (image blocks, a Vault value or token in tool output, re-injection persisted in the zone) with a canary test; write the answers into 5.3 | The canary test | 1 day | platform |
+| **0b** | The canary test of section 5.3, written before any viewer code: seeded values must not reach a viewer | The canary test | 1 day | platform |
 | **1** (host side) | The "computer" device kind and the host's own switch, the history, attachment and `pending` additions, the signed feed open, the stream filter, the "being viewed" strip and chip, the Settings row with Can drive and its text, the Audit rows, the `hello` capability. **Does not merge without the filter and the canary test** | The two-srv suite for everything read-only; the canary test | 4 to 5 days | LAN, history store, Audit |
 | **2** (viewer side), in parallel with 1 | The viewing srv's channel and ring (the paired-computer store generalised from Tower's), the source adapter, the remote flag (7.1), the banner, the Swarm click and the pairing panel, `Agents open view`, tab restore, the offline states | A pane test per state; the call list; look checks | 4 to 5 days | agent pane, Swarm |
 | **3** | The stop, answer, cancel, settings and attachment-upload routes, the Drive control, `via: "viewer"` with the user name and its label, the "driving" indicator, the one-step "both ways" pairing | The two-srv suite for each action and each refusal | 3 days | both |
