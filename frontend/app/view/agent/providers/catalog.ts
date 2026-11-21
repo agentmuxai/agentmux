@@ -72,6 +72,7 @@ const NPM_PREREQ: SystemPrereq = {
 export const PROVIDERS: Record<string, ProviderDefinition> = {
     claude: {
         id: "claude",
+        tier: "first_class",
         displayName: "Claude Code",
         cliCommand: "claude",
         defaultArgs: [],
@@ -191,6 +192,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     },
     codex: {
         id: "codex",
+        tier: "first_class",
         displayName: "Codex CLI",
         cliCommand: "codex",
         defaultArgs: [],
@@ -237,6 +239,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     // npm: @agentmuxai/muxcode
     muxcode: {
         id: "muxcode",
+        tier: "preview",
         displayName: "Mux Code",
         cliCommand: "muxcode",
         defaultArgs: [],
@@ -272,6 +275,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     },
     gemini: {
         id: "gemini",
+        tier: "first_class",
         displayName: "Gemini CLI",
         cliCommand: "gemini",
         defaultArgs: [],
@@ -318,6 +322,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     // would validate the bound env key directly in the api-key flow.
     qwen: {
         id: "qwen",
+        tier: "first_class",
         displayName: "Qwen Code",
         cliCommand: "qwen",
         defaultArgs: [],
@@ -358,6 +363,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     // `openclaw models auth login --provider <provider>`).
     openclaw: {
         id: "openclaw",
+        tier: "preview",
         displayName: "OpenClaw",
         cliCommand: "openclaw",
         defaultArgs: [],
@@ -410,6 +416,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     // Python-based CLI (not npm). Supports stream-json output and OpenAI-style tool calls.
     kimi: {
         id: "kimi",
+        tier: "first_class",
         displayName: "Kimi Code CLI",
         cliCommand: "kimi",
         defaultArgs: [],
@@ -447,6 +454,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     // discussion #493 (research-cli-context-files-2026-04-22).
     copilot: {
         id: "copilot",
+        tier: "first_class",
         displayName: "GitHub Copilot CLI",
         cliCommand: "copilot",
         defaultArgs: [],
@@ -477,6 +485,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     // Ideal when users want a fast, self-contained coding agent without the full OpenClaw stack.
     pi: {
         id: "pi",
+        tier: "preview",
         displayName: "Pi",
         // pi speaks no ACP itself; the pi-acp adapter does, driving the pi
         // CLI installed beside it (`companionNpmPackages`). Mirrors
@@ -529,6 +538,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     // Mirrors crates/srv-core/src/backend/providers.rs `static ANTIGRAVITY`.
     antigravity: {
         id: "antigravity",
+        tier: "preview",
         displayName: "Antigravity (AGY)",
         cliCommand: "agy",
         defaultArgs: [],
@@ -580,6 +590,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     },
     kilo: {
         id: "kilo",
+        tier: "preview",
         displayName: "Kilo Code CLI",
         // `kilo acp`: ACP over stdio. Mirrors crates/srv-core/src/backend/providers/kilo.rs.
         cliCommand: "kilo",
@@ -614,6 +625,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     },
     cline: {
         id: "cline",
+        tier: "preview",
         displayName: "Cline CLI",
         // `cline --acp`: ACP over stdio. Mirrors crates/srv-core/src/backend/providers/cline.rs.
         cliCommand: "cline",
@@ -647,6 +659,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     },
     opencode: {
         id: "opencode",
+        tier: "preview",
         displayName: "OpenCode",
         // `opencode acp`: ACP over stdio (the V1 line upstream's installer and docs
         // ship). Mirrors crates/srv-core/src/backend/providers/opencode.rs.
@@ -682,6 +695,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     },
     goose: {
         id: "goose",
+        tier: "preview",
         displayName: "goose",
         // `goose acp`: ACP over stdio. Not on npm: AgentMux downloads the pinned
         // release itself (managedInstall); the install command below is for a copy the
@@ -719,6 +733,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     },
     grok: {
         id: "grok",
+        tier: "first_class",
         displayName: "Grok Build",
         // `grok agent stdio`: ACP over stdio. Not on npm: AgentMux downloads the pinned
         // release itself (managedInstall); the install command below is for a copy the
@@ -772,6 +787,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     },
     dsh: {
         id: "dsh",
+        tier: "preview",
         displayName: "DeepSeek Harness",
         // `dsh --profile acp`: ACP over stdio. A prerelease upstream, shown as a
         // preview. Mirrors crates/srv-core/src/backend/providers/dsh.rs.
@@ -808,6 +824,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     },
     aider: {
         id: "aider",
+        tier: "preview",
         displayName: "Aider",
         // Terminal tier: Aider's own UI in a terminal pane. Not on npm: AgentMux
         // installs the pinned release itself (managedInstall), through uv. Mirrors crates/srv-core/src/backend/providers/aider.rs.
@@ -842,6 +859,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     },
     crush: {
         id: "crush",
+        tier: "preview",
         displayName: "Crush",
         // Terminal tier: Crush's own UI in a terminal pane (no ACP in this version).
         // Installed from Charm's own npm package, never bundled (its license).
@@ -876,6 +894,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     },
     muse: {
         id: "muse",
+        tier: "first_class",
         displayName: "Muse Code",
         // An agent pane over Muse's own protocol, MSP (`muse serve`; it has no
         // ACP), driven by srv's MspController. Not on npm: AgentMux downloads the

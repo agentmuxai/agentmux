@@ -30,6 +30,20 @@ fn canonical_ids_resolve() {
     assert!(get_provider("antigravity").is_some());
 }
 
+/// The first-class harnesses are the lab doors the curation names, and never more than ten; every other provider is
+/// preview. A provider added later must be one or the other on purpose, and the eleventh first-class one fails here.
+#[test]
+fn the_first_class_harnesses_are_the_eight_lab_doors_and_at_most_ten() {
+    let mut first_class: Vec<&str> = all_providers().filter(|p| p.tier == Tier::FirstClass).map(|p| p.id).collect();
+    first_class.sort_unstable();
+    assert!(first_class.len() <= 10, "more than ten first-class harnesses: {first_class:?}");
+    assert_eq!(first_class, ["claude", "codex", "copilot", "gemini", "grok", "kimi", "muse", "qwen"]);
+    for id in ["antigravity", "aider", "cline", "crush", "opencode", "kilo", "openclaw", "dsh", "muxcode", "goose", "pi"] {
+        assert_eq!(get_provider(id).map(|p| p.tier), Some(Tier::Preview), "{id} is preview");
+    }
+    assert_eq!((Tier::FirstClass.as_str(), Tier::Preview.as_str()), ("first_class", "preview"));
+}
+
 #[test]
 fn antigravity_drives_the_real_agy_cli() {
     let p = get_provider("antigravity").unwrap();

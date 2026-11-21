@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{ControllerType, ProviderConfig};
+use super::{Tier, ControllerType, ProviderConfig};
 
 // Muse Code (Meta): no ACP, but a typed protocol of its own, MSP (`muse
 // serve`), which the `msp` controller drives in an agent pane. Closed source:
@@ -13,6 +13,7 @@ use super::{ControllerType, ProviderConfig};
 // after diffing `muse schema generate-ts` (additive) and an MSP `initialize`.
 pub(super) static MUSE: ProviderConfig = ProviderConfig {
     id: "muse",
+    tier: Tier::FirstClass,
     cli_command: "muse",
     controller_type: ControllerType::Msp,
     app_server: None,
