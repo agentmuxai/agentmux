@@ -346,6 +346,39 @@
     --kanban-stage-merged: var(--process-kind-shells);
     --kanban-stage-released: var(--process-kind-runtimes);
 
+    // The Swarm's tags (element/ui Tag `hue`): a seat's role and a model's family, one colour each, the words
+    // carrying the meaning (docs/specs/SPEC_SWARM_MODEL_AND_SEAT_TAGS_2026_11_20.md §4.2 and §5). Aliases of tokens
+    // every theme already tunes, so a theme overrides one only where two meet or an edge is under 3:1, as
+    // element/ui/tag-hues.test.ts measures (the colours 9 apart in each set, the outline 3:1 against the surfaces).
+    --seat-leader: var(--accent-color);
+    --seat-super: var(--attention-color);
+    --seat-specialist: var(--conn-icon-color-4);
+    --seat-platform-tester: var(--term-bright-yellow);
+    --seat-analyst: var(--info-color);
+    --seat-worker: var(--conn-icon-color-8);
+    --model-fable: var(--conn-icon-color-3);
+    --model-opus: var(--conn-icon-color-6);
+    --model-sonnet: var(--conn-icon-color-5);
+    --model-haiku: var(--conn-icon-color-7);
+    --model-gpt: var(--conn-icon-color-8);
+    --model-gemini: var(--conn-icon-color-2);
+    --model-other: var(--secondary-text-color);
+    // The outline: the colour taken toward the text colour, which keeps it 3:1 on a dark surface; the light
+    // polarity takes it further (below).
+    --seat-leader-edge: color-mix(in srgb, var(--seat-leader) 60%, var(--main-text-color));
+    --seat-super-edge: color-mix(in srgb, var(--seat-super) 60%, var(--main-text-color));
+    --seat-specialist-edge: color-mix(in srgb, var(--seat-specialist) 60%, var(--main-text-color));
+    --seat-platform-tester-edge: color-mix(in srgb, var(--seat-platform-tester) 60%, var(--main-text-color));
+    --seat-analyst-edge: color-mix(in srgb, var(--seat-analyst) 60%, var(--main-text-color));
+    --seat-worker-edge: color-mix(in srgb, var(--seat-worker) 60%, var(--main-text-color));
+    --model-fable-edge: color-mix(in srgb, var(--model-fable) 60%, var(--main-text-color));
+    --model-opus-edge: color-mix(in srgb, var(--model-opus) 60%, var(--main-text-color));
+    --model-sonnet-edge: color-mix(in srgb, var(--model-sonnet) 60%, var(--main-text-color));
+    --model-haiku-edge: color-mix(in srgb, var(--model-haiku) 60%, var(--main-text-color));
+    --model-gpt-edge: color-mix(in srgb, var(--model-gpt) 60%, var(--main-text-color));
+    --model-gemini-edge: color-mix(in srgb, var(--model-gemini) 60%, var(--main-text-color));
+    --model-other-edge: color-mix(in srgb, var(--model-other) 60%, var(--main-text-color));
+
 
     // term colors (16 + 6) form the base terminal theme
     // for consistency these colors should be used by plugins/applications
@@ -807,6 +840,20 @@
 // Light-family override for the `color-scheme` fix above — same marker
 // window-controls.win32.scss already uses for dark/light chrome decisions.
 [data-theme-polarity="light"] {
+    // The Swarm's tag outlines, deeper toward the text colour on a light surface (element/ui/tag-hues.test.ts).
+    --seat-leader-edge: color-mix(in srgb, var(--seat-leader) 40%, var(--main-text-color));
+    --seat-super-edge: color-mix(in srgb, var(--seat-super) 40%, var(--main-text-color));
+    --seat-specialist-edge: color-mix(in srgb, var(--seat-specialist) 40%, var(--main-text-color));
+    --seat-platform-tester-edge: color-mix(in srgb, var(--seat-platform-tester) 40%, var(--main-text-color));
+    --seat-analyst-edge: color-mix(in srgb, var(--seat-analyst) 40%, var(--main-text-color));
+    --seat-worker-edge: color-mix(in srgb, var(--seat-worker) 40%, var(--main-text-color));
+    --model-fable-edge: color-mix(in srgb, var(--model-fable) 40%, var(--main-text-color));
+    --model-opus-edge: color-mix(in srgb, var(--model-opus) 40%, var(--main-text-color));
+    --model-sonnet-edge: color-mix(in srgb, var(--model-sonnet) 40%, var(--main-text-color));
+    --model-haiku-edge: color-mix(in srgb, var(--model-haiku) 40%, var(--main-text-color));
+    --model-gpt-edge: color-mix(in srgb, var(--model-gpt) 40%, var(--main-text-color));
+    --model-gemini-edge: color-mix(in srgb, var(--model-gemini) 40%, var(--main-text-color));
+    --model-other-edge: color-mix(in srgb, var(--model-other) 40%, var(--main-text-color));
     color-scheme: light;
     // A light page takes a lighter shadow, as VS Code's widget shadow does.
     --menu-shadow: 0 8px 24px rgba(0, 0, 0, 0.25), 0 1px 3px rgba(0, 0, 0, 0.18);

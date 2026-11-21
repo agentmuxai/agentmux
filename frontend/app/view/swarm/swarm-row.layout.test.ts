@@ -41,7 +41,7 @@ function row(id: string, width: number, parked: boolean): string {
 <span class="swarm-agent-expand-spacer"></span>
 <span class="swarm-agent-icon"><i style="display:inline-block;width:14px;height:14px;background:#888"></i></span>
 <span class="swarm-agent-label">Quill</span>
-<span class="swarm-seat-slot"><span class="ui-pill swarm-seat-badge">Worker</span></span>
+<span class="swarm-seat-slot"><span class="ui-tag ui-tag--seat-worker swarm-seat-badge"><span class="ui-tag-sr">Seat </span>Worker</span></span>
 ${mark}
 <span class="swarm-ctx-size">63k</span>
 <span class="swarm-last-active">1m ago</span>
