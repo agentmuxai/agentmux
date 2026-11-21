@@ -206,3 +206,19 @@ async fn update_can_add_the_stub_a_definition_lacks() {
     assert!(updated.instance_stub_id.is_some());
     assert_eq!(stub_name(&state, &created.definition_id), "late-stub-agent");
 }
+
+#[tokio::test]
+async fn a_reserved_name_is_refused_for_a_new_definition_and_an_existing_one_is_left_alone() {
+    let state = test_state();
+    for name in ["operator", "User", "ADMIN", "System", "agentmux", "unproven", "unknown", "window", "host", "github-consumer", "muxreview", "Op3rator"] {
+        let err = define(&state, json!({ "name": name })).await.unwrap_err();
+        assert!(err.starts_with("agent.define: the name") && err.contains("reserved") && err.contains("nickname"), "{name}: {err}");
+        assert!(!names(&state).contains(&name.to_string()), "{name} was made");
+    }
+    assert!(define(&state, json!({ "name": "Winny" })).await.is_ok());
+    // One that has the name already (from before the rule) is not refused when it is defined again.
+    let mut old = crate::backend::storage::agents::test_agent_def("old-admin", "Admin", "claude", "agent", 1, "");
+    old.slug = "admin".to_string();
+    state.mstore.agent_def_insert(&mut old).unwrap();
+    assert!(define(&state, json!({ "name": "Admin" })).await.is_ok());
+}

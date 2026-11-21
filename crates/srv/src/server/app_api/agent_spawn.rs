@@ -166,6 +166,9 @@ async fn spawn_with(
         if n.chars().count() > MAX_NAME_CHARS || n.chars().any(char::is_control) {
             return Err(refuse(StatusCode::BAD_REQUEST, format!("INVALID_ARG: a name is at most {MAX_NAME_CHARS} characters, on one line")));
         }
+        if let Err(e) = crate::backend::reserved_names::check_all(&[n]) {
+            return Err(refuse(StatusCode::BAD_REQUEST, format!("INVALID_ARG: {e}")));
+        }
     }
     let (provider, mut runtime) = route::choose(state, &leader, &req.route, req.model.as_deref(), req.effort.as_deref())?;
     runtime.placement = container::decide_here(state, &req.container, &leader.def, &leader.def, &provider).await?;
