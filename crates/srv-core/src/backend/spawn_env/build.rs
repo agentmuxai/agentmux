@@ -153,10 +153,18 @@ pub async fn build_persistent_spawn_env(
     // them back: these are reserved variables, not defaults.
     crate::backend::gh_guard::apply_gh_guard(&mut env_vars);
     crate::backend::account_login_guard::strip_account_login(&mut env_vars);
-    // AgentMux agents message each other through jekt: the CLI's separate messaging is off by default.
-    crate::backend::cli_messaging::apply_for_spawn(&mut env_vars, block_meta);
+    apply_cli_switches(&mut env_vars, block_meta);
 
     Ok(env_vars)
+}
+
+/// The switches of the agent's CLI that AgentMux sets through its environment, over the agent's own values.
+fn apply_cli_switches(env_vars: &mut std::collections::HashMap<String, String>, block_meta: &crate::backend::obj::MetaMapType) {
+    // AgentMux agents message each other through jekt: the CLI's separate messaging is off by default.
+    crate::backend::cli_messaging::apply_for_spawn(env_vars, block_meta);
+    // A host agent in a folder a container agent can write: its CLI's scheduler is off, and it reads the
+    // startup instructions AgentMux keeps for it outside the folder.
+    crate::backend::host_agent_files::apply_for_spawn(env_vars, block_meta);
 }
 
 /// The models an agent runs on: an agent on a model route is pointed at the gateway, then the sub-agent model

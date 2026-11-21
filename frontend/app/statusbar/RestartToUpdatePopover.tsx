@@ -11,7 +11,8 @@
  *
  * While srv waits, the panel names who it waits for and offers Cancel and
  * Restart anyway; once the wait ends the restart starts by itself and the
- * panel says "Restarting now". A wait for nobody is never shown: it is not a
+ * panel says "Restarting into v<version>" (and on a .deb or .rpm install that the system may ask for a
+ * password). A wait for nobody is never shown: it is not a
  * wait.
  * docs/specs/SPEC_BACKGROUND_UPDATES_ONE_CLICK_RESTART_2026_11_03.md §4.3.
  */
@@ -19,17 +20,14 @@
 import { createEffect, createSignal, For, Show, type JSX } from "solid-js";
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { Button } from "@/app/element/ui";
-import { cancelUpgrade, releaseDownload, releaseNotesUrl, stagedRelease, upgradeAndRestart } from "@/store/app-update";
+import { cancelUpgrade, releaseDownload, releaseNotesUrl, stagedRelease, upgradeAndRestart, viaPackage } from "@/store/app-update";
 import { openLink } from "@/store/global";
-import { updateWait } from "./update-wait";
+import { restartingLine, updateWait } from "./update-wait";
 
 interface RestartToUpdatePopoverProps {
     anchor: PopoverAnchor;
     onClose: () => void;
 }
-
-/** What the panel says once the launcher has been asked: only its dialog decides from here. */
-export const RESTARTING_LINE = "Restarting now: answer the AgentMux dialog (No cancels).";
 
 let saidWaitsForNobody = false;
 
@@ -81,7 +79,7 @@ export const RestartToUpdatePopover = (props: RestartToUpdatePopoverProps): JSX.
                 <div class="update-popover-note">The restart starts by itself then. {wait()!.interrupts}</div>
             </Show>
             <Show when={restarting()}>
-                <div class="update-popover-wait">{RESTARTING_LINE}</div>
+                <div class="update-popover-wait">{restartingLine(staged()?.version, viaPackage())}</div>
             </Show>
             <Show when={error()}>
                 <div class="update-popover-error">{error()}</div>

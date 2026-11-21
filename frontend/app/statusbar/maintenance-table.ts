@@ -7,9 +7,10 @@
 // function of the section's state (maintenance-state.ts) that returns the rows to show: none, or one or more, each a
 // message and its buttons. maintenance-rows.tsx draws every row the same way; nothing here knows about layout.
 
-import { appUpdate, releaseNotesUrl, storeProgress, storeProgressLine, storeClosesLine, storeDownloadedLine, storeRestartAsk, storeStayed, storeStayedLine, storeTargetVersion, upgradeUnderWay, viaStore } from "@/store/app-update";
+import { appUpdate, releaseNotesUrl, storeProgress, storeProgressLine, storeClosesLine, storeDownloadedLine, storeRestartAsk, storeStayed, storeStayedLine, storeTargetVersion, upgradeUnderWay, viaPackage, viaStore } from "@/store/app-update";
 import { openLink } from "@/store/global";
 import type { MaintenanceState } from "./maintenance-state";
+import { restartingLine } from "./update-wait";
 
 /** What to do with a Store install older than the release's upgrade floor. */
 export const STORE_MOVE_OFF_URL = "https://docs.agentmux.ai/installation/#moving-off-the-microsoft-store-build";
@@ -99,11 +100,21 @@ const waiting = (m: MaintenanceState): RowSpec[] => {
     });
 };
 
-/** Only the launcher's dialog can stop it now: No there cancels. */
-const restarting = (m: MaintenanceState): RowSpec[] =>
-    m.download()?.state === "restarting"
-        ? one({ icon: { glyph: "↑", tone: "working" }, tone: "dim", text: "Restarting: answer the AgentMux dialog (No cancels)", actions: [] })
-        : none;
+/**
+ * A restart that is decided is sent to the launcher as confirmed, and the launcher restarts without asking again, so no
+ * dialog of ours opens at this step and nothing here can cancel it. The one thing that can still be asked is on a
+ * `.deb` or `.rpm` install: the system's own permission prompt for the install, which refusing (or leaving
+ * unanswered) turns into a restart that did not happen.
+ */
+const restarting = (m: MaintenanceState): RowSpec[] => {
+    if (m.download()?.state !== "restarting") return none;
+    return one({
+        icon: { glyph: "↑", tone: "working" },
+        tone: "dim",
+        text: restartingLine(m.updaterVersion(), viaPackage()),
+        actions: [],
+    });
+};
 
 /** The host updater's own "ready" state, when srv has no download of it. */
 const hostReady = (m: MaintenanceState): RowSpec[] =>

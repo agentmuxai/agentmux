@@ -10,6 +10,17 @@
 
 import type { WaitingOn } from "@/types/rpc/WaitingOn";
 
+/**
+ * What a restart that is decided says once the launcher has been asked. No dialog of ours opens at this step and
+ * nothing here can cancel it; only a `.deb` or `.rpm` install still has the system's own permission prompt for the
+ * install (`crates/launcher/src/upgrade_restart.rs`), which refusing turns into a restart that did not happen.
+ * `passwordAsked` is that install kind, from srv's `install` (never guessed from the platform).
+ */
+export function restartingLine(version: string | undefined, passwordAsked: boolean): string {
+    const into = version ? `Restarting into v${version}…` : "Restarting…";
+    return passwordAsked ? `${into} Your system may ask for your password to install it; refusing cancels the restart.` : into;
+}
+
 /** Agents are named one by one up to this many; more are counted. */
 const NAMED_AT_MOST = 3;
 

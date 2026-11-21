@@ -139,7 +139,7 @@ rpc AppUpdateStatus
       <span aria-hidden="true" class="maintenance-icon maintenance-icon--working">
         "↑"
       <span class="maintenance-row-text maintenance-row-text--dim">
-        "Restarting: answer the AgentMux dialog (No cancels)"
+        "Restarting into v0.59.27…"
   <div class="maintenance-row">
     <div class="maintenance-message">
       <span class="maintenance-row-text maintenance-row-text--warn">
