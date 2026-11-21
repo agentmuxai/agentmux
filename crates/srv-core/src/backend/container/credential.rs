@@ -42,11 +42,14 @@ fn digest(token: &str) -> [u8; 32] {
 }
 
 fn mint() -> String {
-    format!(
+    let token = format!(
         "{TOKEN_PREFIX}{}{}",
         uuid::Uuid::new_v4().simple(),
         uuid::Uuid::new_v4().simple()
-    )
+    );
+    // A token an agent's process holds is never written into a transcript.
+    crate::backend::transcript::withhold::register(&token);
+    token
 }
 
 /// The block's container token: minted on first use, reused on later turns,

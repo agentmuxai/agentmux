@@ -162,8 +162,9 @@ fn kinds(drone: &DroneDefinition) -> Vec<String> {
     out
 }
 
-/// Why an agent may not fire this drone, or `None` when it may.
-fn why_not_fireable(drone: &DroneDefinition) -> Option<String> {
+/// Why an agent may not fire this drone, or `None` when it may. The Drone tool and an agent's own `rundrone` call
+/// both ask it.
+pub(crate) fn why_not_fireable(drone: &DroneDefinition) -> Option<String> {
     let summary = graph::summarize(&drone.graph);
     if !summary.writes_outside.is_empty() {
         return Some(format!("it writes outside AgentMux ({})", summary.writes_outside.join("; ")));

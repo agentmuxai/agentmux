@@ -73,6 +73,9 @@ async fn create(state: &AppState, caller: Option<&crate::server::caller::Caller>
     if name.is_empty() || name.chars().count() > MAX_NAME_CHARS || name.chars().any(char::is_control) {
         return Err(refuse(StatusCode::BAD_REQUEST, format!("INVALID_ARG: a name is required, at most {MAX_NAME_CHARS} characters, on one line")));
     }
+    if let Err(e) = crate::backend::reserved_names::check_all(&[name]) {
+        return Err(refuse(StatusCode::BAD_REQUEST, format!("INVALID_ARG: {e}")));
+    }
     let template = find_template(state, &req.template)?;
     let provider = state.id_store.resolve_effective_provider_id(&template);
     let placement = container::decide_here(state, &req.container, &leader.def, &template, &provider).await?;

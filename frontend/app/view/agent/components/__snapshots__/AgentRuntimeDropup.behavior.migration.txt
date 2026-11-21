@@ -52,6 +52,7 @@ trigger "Default · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-dens
   - high {current}
   - xhigh {}
   - max {}
+  - Start a fresh session / Off: the next model change resumes the conversation on the new model {}
 -- an unrecognised id is left alone
 trigger "Default · some-unknown-model · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--main-text-color)
   title: Mode / Model / Effort — applies on the next turn
@@ -75,6 +76,7 @@ trigger "Default · some-unknown-model · high" class=[ui-button ui-tone-neutral
   - high {current}
   - xhigh {}
   - max {}
+  - Start a fresh session / Off: the next model change resumes the conversation on the new model {}
 -- no model named
 trigger "Default · CLI default · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--main-text-color)
   title: Mode / Model / Effort — applies on the next turn
@@ -98,3 +100,4 @@ trigger "Default · CLI default · high" class=[ui-button ui-tone-neutral ui-den
   - high {current}
   - xhigh {}
   - max {}
+  - Start a fresh session / Off: the next model change resumes the conversation on the new model {}
