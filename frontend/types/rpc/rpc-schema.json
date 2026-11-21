@@ -2539,6 +2539,25 @@
     }
   },
   {
+    "command": "client.agreetos",
+    "request": "core::option::Option<agentmux_srv_core::backend::rpc_types::websocket::NoArgsReq>",
+    "requestName": "core::option::Option<agentmux_srv_core::backend::rpc_types::websocket::NoArgsReq>",
+    "requestTs": {
+      "imports": [
+        "NoArgsReq"
+      ],
+      "name": "NoArgsReq | null"
+    },
+    "response": "agentmux_srv_core::backend::rpc_types::client_terms::ClientAgreeTosResult",
+    "responseName": "ClientAgreeTosResult",
+    "responseTs": {
+      "imports": [
+        "ClientAgreeTosResult"
+      ],
+      "name": "ClientAgreeTosResult"
+    }
+  },
+  {
     "command": "connconnect",
     "request": "serde_json::value::Value",
     "requestName": "Value",

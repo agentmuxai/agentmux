@@ -93,6 +93,7 @@ import type { BundleImportPreviewResponse } from "@/types/rpc/BundleImportPrevie
 import type { CancelProviderAuthReq } from "@/types/rpc/CancelProviderAuthReq";
 import type { CheckCliAuthResult } from "@/types/rpc/CheckCliAuthResult";
 import type { ClaudeGlobalConfig } from "@/types/rpc/ClaudeGlobalConfig";
+import type { ClientAgreeTosResult } from "@/types/rpc/ClientAgreeTosResult";
 import type { CommandActivitySummaryData } from "@/types/rpc/CommandActivitySummaryData";
 import type { CommandAgentAnswerData } from "@/types/rpc/CommandAgentAnswerData";
 import type { CommandAgentApiRetryData } from "@/types/rpc/CommandAgentApiRetryData";
@@ -2325,6 +2326,10 @@ export const GeneratedApi = {
   // command "presence.status"
   PresenceStatusCommand(client: RpcClient, opts?: RpcOpts): Promise<PresenceStatusResult> {
     return client.rpcCall("presence.status", {}, opts);
+  },
+  // command "client.agreetos"
+  ClientAgreeTosCommand(client: RpcClient, opts?: RpcOpts): Promise<ClientAgreeTosResult> {
+    return client.rpcCall("client.agreetos", {}, opts);
   },
   // command "browsergrants.list"
   BrowserGrantsListCommand(
