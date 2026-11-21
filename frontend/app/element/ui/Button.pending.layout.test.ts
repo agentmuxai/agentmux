@@ -124,7 +124,7 @@ describe("the press", () => {
     it("shows in the frame of the mouse-down: a pressed look with no transition, for every tone but the filled one", () => {
         const press = rule(/^\s*\.ui-button:active:not\(/);
         expect(press, "a :active rule for the kit's button").not.toBe("");
-        expect(press).toContain("transition-duration: 0s");
+        expect(press).toContain("transition: none");
         expect(press).toContain("var(--accent-color)");
         expect(rule(/\.ui-button\.ui-tone-attention:active/)).toContain("color-mix");
     });
@@ -132,6 +132,6 @@ describe("the press", () => {
     it("drops a chrome icon to the disabled step at once", () => {
         const press = rule(/\.ui-button--chrome:active/);
         expect(press).toContain("opacity: 0.45");
-        expect(press).toContain("transition-duration: 0s");
+        expect(press).toContain("transition: none");
     });
 });

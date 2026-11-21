@@ -18,7 +18,7 @@
     // keeps its own pressed look; a disabled button shows nothing.
     &:active:not(:disabled, [aria-disabled="true"], [aria-pressed="true"], [aria-checked="true"], [aria-selected="true"]) {
         @include line.pressed-look;
-        transition-duration: 0s;
+        transition: none;
     }
 }
 
@@ -57,7 +57,7 @@
     align-items: center;
     justify-content: center;
     -webkit-text-fill-color: currentColor;
-    font-size: var(--ui-icon-size, 1em);
+    font-size: var(--ui-icon-size);
 }
 
 // Said to a screen reader when an action runs longer than a second; never seen.
@@ -174,7 +174,7 @@
     // A press drops to the disabled step and back, in the frame of the mouse-down. A toggle shows its state alone.
     &:active:not(:disabled, .ui-button--toggle) {
         opacity: 0.45;
-        transition-duration: 0s;
+        transition: none;
     }
 
     &.ui-button--toggle {
