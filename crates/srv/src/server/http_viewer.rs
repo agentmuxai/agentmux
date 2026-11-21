@@ -554,7 +554,7 @@ impl FeedSource {
     /// (`transcript::withhold`).
     fn vet(&self, lines: &mut [String]) {
         let owner = crate::backend::transcript::origin_sig::owner_for_block(&self.mstore, &self.block_id);
-        crate::backend::transcript::origin_sig::vet_lines(&owner, lines);
+        crate::backend::transcript::attribution::vet_for_viewer(&self.mstore, &self.filestore, &owner, lines);
         crate::backend::transcript::withhold::in_place(lines);
     }
 
@@ -864,4 +864,4 @@ pub(crate) fn feed_stream(
 
 #[cfg(test)]
 #[path = "tests/viewer/viewer_tests.rs"]
-mod tests;
+pub(crate) mod tests;

@@ -4,6 +4,8 @@
 // PaneSizeBadge — bottom-left `WxH` overlay during pane resize.
 // Spec: SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md.
 
+@use "../element/menu-frame";
+
 // tag: fixed - a hard-cornered mono readout over the pane while it is dragged, not a label on a card
 .pane-size-badge {
     position: absolute;
@@ -19,10 +21,9 @@
     line-height: 1.4;
     letter-spacing: 0.02em;
     color: var(--main-text-color);
-    background: color-mix(in srgb, var(--main-bg-color) 80%, transparent);
+    @include menu-frame.menu-fill;   // opaque at any window opacity, so the pane under it never shows through
     border: 1px solid var(--border-color);
     border-radius: 0;             // hard-corners design (SPEC_HARD_CORNERS_2026_05_26)
-    backdrop-filter: blur(2px);   // legibility over busy content
     pointer-events: none;         // never blocks pane interactions
     user-select: none;
     white-space: nowrap;

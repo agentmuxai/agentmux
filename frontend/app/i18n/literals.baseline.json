@@ -365,7 +365,7 @@
     "frontend/app/view/toolchain/ProviderUninstallInline.tsx": 5,
     "frontend/app/view/toolchain/ProviderUpdateInline.tsx": 8,
     "frontend/app/view/toolchain/SystemToolInstallInline.tsx": 3,
-    "frontend/app/view/toolchain/toolchain-view.tsx": 30,
+    "frontend/app/view/toolchain/toolchain-view.tsx": 31,
     "frontend/app/view/toolchain/UsePathToggle.tsx": 2,
     "frontend/app/view/toolchain/WidgetPortField.tsx": 2,
     "frontend/app/view/tower/tower-agents.tsx": 25,

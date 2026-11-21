@@ -63,9 +63,9 @@ async fn run_work_enqueue(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String>
         match resolve_agent_target_at_boundary(&client, local_url, auth_key, target_agent).await? {
             // A name nobody answers to would file a task no agent can
             // claim (#1257): say so instead.
-            crate::identity::BoundaryResolution::NoSuchAgent => anyhow::bail!(
+            crate::identity::BoundaryResolution::NoSuchAgent(close) => anyhow::bail!(
                 "{}",
-                no_such_target(target_agent)
+                no_such_target(target_agent, &close)
             ),
             r => r.uid(),
         }
@@ -556,7 +556,7 @@ async fn run_work_edit(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Resul
             serde_json::json!("")
         } else {
             match resolve_agent_target_at_boundary(&client, local_url, auth_key, target).await? {
-                crate::identity::BoundaryResolution::NoSuchAgent => anyhow::bail!("{}", no_such_target(target)),
+                crate::identity::BoundaryResolution::NoSuchAgent(close) => anyhow::bail!("{}", no_such_target(target, &close)),
                 r => serde_json::json!(r.uid().unwrap_or_else(|| target.to_string())),
             }
         };
@@ -1134,10 +1134,15 @@ fn finished_text(id: &str, v: &Value) -> String {
     out
 }
 
-/// Why `Tasks enqueue` refuses a target no agent answers to (#1257).
-fn no_such_target(name: &str) -> String {
+/// Why `Tasks enqueue` refuses a target no agent answers to (#1257), and which ids it may have meant.
+fn no_such_target(name: &str, did_you_mean: &[String]) -> String {
+    let meant = match did_you_mean {
+        [] => String::new(),
+        [one] => format!(" Did you mean \"{one}\"?"),
+        many => format!(" Did you mean one of: {}?", many.iter().map(|i| format!("\"{i}\"")).collect::<Vec<_>>().join(", ")),
+    };
     format!(
-        "No agent on this computer is called \"{name}\", so nobody could take this task. \
+        "No agent on this computer is called \"{name}\", so nobody could take this task.{meant} \
          Name it by its AGENTMUX_AGENT_ID (Agents list shows each one), its display name, the \
          display name's route form (\"Loap-3\" for \"Loap #3\"), or its uid; or leave \
          target_agent out to file it for anyone."
@@ -1229,8 +1234,18 @@ mod tests {
 
     #[test]
     fn a_target_nobody_answers_to_is_refused_with_how_to_name_one() {
-        let msg = no_such_target("Naki-9");
+        let msg = no_such_target("Naki-9", &[]);
         assert!(msg.contains("\"Naki-9\"") && msg.contains("AGENTMUX_AGENT_ID") && msg.contains("for anyone"), "{msg}");
         assert!(!msg.contains("  "), "no source indentation in the text: {msg}");
+        assert!(!msg.contains("Did you mean"), "nothing close, nothing offered: {msg}");
+    }
+
+    #[test]
+    fn a_refusal_for_a_target_names_the_id_it_most_likely_meant() {
+        let one = no_such_target("agent2-0630f", &["agent2".to_string()]);
+        assert!(one.contains("Did you mean \"agent2\"?"), "{one}");
+        let two = no_such_target("agent", &["agent2".to_string(), "agenty".to_string()]);
+        assert!(two.contains("Did you mean one of: \"agent2\", \"agenty\"?"), "{two}");
+        assert!(!one.contains("  "), "no source indentation in the text: {one}");
     }
 }

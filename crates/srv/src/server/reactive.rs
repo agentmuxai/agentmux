@@ -839,7 +839,7 @@ pub(super) async fn try_cloud_relay(state: &AppState, req: &InjectionRequest, ca
             // (muxbus::relay_watch). The LAN peers go in the answer: the target is on none of them.
             crate::muxbus::relay_watch::watch(state.reactive_handler, source, &req.target_agent, &request_id);
             let peers = state.lan_discovery.get_instances().iter().map(crate::backend::lan::peer_words::describe_peer).collect();
-            let body = crate::muxbus::relay_watch::queued_answer(request_id.clone(), target_in_account, peers, now_unix_secs().max(0) as u64);
+            let body = super::name_resolution::with_did_you_mean(state, &req.target_agent, crate::muxbus::relay_watch::queued_answer(request_id.clone(), target_in_account, peers, now_unix_secs().max(0) as u64)).await;
             Some(flow_notes::queued(state, req, &request_id, body))
         }
         crate::muxbus::relay::RelayOutcome::Failed(e) => {

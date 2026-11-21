@@ -17,6 +17,32 @@ use crate::backend::audience::{Audience, HostCap, RuntimeCaps};
 use super::managed::{ManagedResource, Owner};
 use super::store::Store;
 
+/// Words in the name of an `env` or `headers` entry that say its value is a secret.
+const SECRET_WORDS: [&str; 9] = ["token", "key", "secret", "password", "passwd", "auth", "credential", "bearer", "cookie"];
+
+/// A server config's secret `env` and `headers` values (an entry whose name holds a word of [`SECRET_WORDS`]) are never
+/// written into a transcript (`transcript::withhold`). A header
+/// value that starts with a scheme word (`Bearer abc`) is withheld as it is and without the word.
+pub(crate) fn withhold_secrets_of(config: &str) {
+    let Ok(config) = serde_json::from_str::<serde_json::Value>(config) else { return };
+    for section in ["env", "headers"] {
+        let Some(entries) = config.get(section).and_then(|v| v.as_object()) else { continue };
+        for (name, value) in entries {
+            let name = name.to_ascii_lowercase();
+            if !SECRET_WORDS.iter().any(|w| name.contains(w)) {
+                continue;
+            }
+            let Some(value) = value.as_str() else { continue };
+            crate::backend::transcript::withhold::register(value);
+            if let Some((scheme, rest)) = value.trim().split_once(' ') {
+                if scheme.chars().all(|c| c.is_ascii_alphabetic()) {
+                    crate::backend::transcript::withhold::register(rest);
+                }
+            }
+        }
+    }
+}
+
 /// A standalone MCP Server primitive (v1 composable model).
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -191,6 +217,7 @@ impl Store {
                 (item.bound_to_agent || r.all_agents) && r.audience().permits(RuntimeCaps::of(container))
             })
             .map(|item| item.server)
+            .inspect(|server| withhold_secrets_of(&server.config))
             .collect()
     }
 

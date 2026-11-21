@@ -82,7 +82,7 @@ pub fn tail_lines(
 ) -> Result<TailLines, String> {
     let mut found = unvetted_tail_lines(mstore, filestore, block_id, requested)?;
     let owner = crate::backend::transcript::origin_sig::owner_for_block(mstore, block_id);
-    crate::backend::transcript::origin_sig::vet_lines(&owner, &mut found.lines);
+    crate::backend::transcript::attribution::vet_for_viewer(mstore, filestore, &owner, &mut found.lines);
     Ok(found)
 }
 

@@ -123,7 +123,18 @@ impl Store {
     /// M4d-2). One critical section: the row is re-read inside the lock, so a
     /// row purged since the caller read it gets nothing (`Ok(None)`) and no
     /// private key is left without an owner.
+    ///
+    /// The private keys are withheld from transcripts from here on (`transcript::withhold`).
     pub fn agent_uid_keys_ensure(&self, uid: &str) -> Result<Option<(AgentUidKeys, [UidKeyOrigin; 2])>, StoreError> {
+        let ensured = self.agent_uid_keys_ensure_unwithheld(uid)?;
+        if let Some((keys, _)) = &ensured {
+            crate::backend::transcript::withhold::register(&keys.lan.private_key);
+            crate::backend::transcript::withhold::register(&keys.wan.private_key);
+        }
+        Ok(ensured)
+    }
+
+    fn agent_uid_keys_ensure_unwithheld(&self, uid: &str) -> Result<Option<(AgentUidKeys, [UidKeyOrigin; 2])>, StoreError> {
         let uid = uid.trim();
         if uid.is_empty() {
             return Ok(None);

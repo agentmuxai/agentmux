@@ -39,7 +39,6 @@ vi.mock("@/app/store/services", () => ({
         DeleteUserWorkspace: svc("delete", () => undefined),
         ExportUserWorkspace: svc("export", () => ({ path: h.dialogPath, warnings: [] })),
         PreviewImport: svc("preview", () => ({ name: "Ops", trusted: false, windows: 2, closed: 1, tabs: [{ name: "t", panes: [] }], commands: [], notes: [] })),
-        ImportUserWorkspace: svc("import", () => ({ ...h.switched, notes: [] })),
     },
 }));
 vi.mock("@/app/store/user-workspace", () => ({
@@ -80,6 +79,9 @@ vi.mock("@/store/global", () => ({
 }));
 vi.mock("@/store/rpc-api", () => ({
     RpcApi: {
+        // The import is a websocket command (srv runs a file's commands only for the person's own window).
+        WorkspaceImportUserWorkspaceCommand: (_c: unknown, data: Record<string, unknown>) =>
+            svc("import", () => ({ ...h.switched, notes: [] }))(data.path, data.run_commands, data.window_id),
         SetConfigCommand: async (_c: unknown, patch: Record<string, unknown>) => {
             h.calls.push(`config:${JSON.stringify(patch)}`);
         },
