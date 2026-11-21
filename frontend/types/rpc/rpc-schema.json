@@ -8634,6 +8634,25 @@
     }
   },
   {
+    "command": "workspace.importuserworkspace",
+    "request": "agentmux_srv_core::backend::rpc_types::workspace_import::CommandWorkspaceImportUserWorkspaceData",
+    "requestName": "CommandWorkspaceImportUserWorkspaceData",
+    "requestTs": {
+      "imports": [
+        "CommandWorkspaceImportUserWorkspaceData"
+      ],
+      "name": "CommandWorkspaceImportUserWorkspaceData"
+    },
+    "response": "agentmux_srv_core::backend::rpc_types::workspace_import::WorkspaceImportUserWorkspaceResult",
+    "responseName": "WorkspaceImportUserWorkspaceResult",
+    "responseTs": {
+      "imports": [
+        "WorkspaceImportUserWorkspaceResult"
+      ],
+      "name": "WorkspaceImportUserWorkspaceResult"
+    }
+  },
+  {
     "command": "writeagentconfig",
     "request": "agentmux_srv_core::backend::rpc_types::block::CommandWriteAgentConfigData",
     "requestName": "CommandWriteAgentConfigData",

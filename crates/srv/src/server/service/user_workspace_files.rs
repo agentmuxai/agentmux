@@ -28,6 +28,7 @@ use crate::backend::obj::{self, Block, Tab, Workspace};
 use crate::backend::service::{self, WebCallType, WebReturnType};
 use crate::backend::storage::store::Store;
 use crate::server::app_api::agent_io::agent_panes_of;
+use crate::backend::rpc_types::{CommandWorkspaceImportUserWorkspaceData, WorkspaceClosedWindow, WorkspaceImportUserWorkspaceResult};
 use crate::server::AppState;
 
 use super::user_workspace::current_id;
@@ -42,7 +43,7 @@ pub(crate) struct ImportTrust {
 }
 
 impl ImportTrust {
-    fn live() -> Self {
+    pub(crate) fn live() -> Self {
         let shared = crate::registry::shared_guard::shared_dir();
         ImportTrust {
             own_instance: crate::backend::storage::wan_identity::global()
@@ -346,20 +347,28 @@ pub(crate) async fn handle_preview(state: &AppState, call: &WebCallType) -> WebR
     }
 }
 
-/// `workspace.ImportUserWorkspace(path, runCommands, windowId)`: the reply of
-/// `SwitchUserWorkspace` plus `notes`.
-pub(crate) async fn handle_import(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let path: String = service::get_arg(&call.args, 0).unwrap_or_default();
-    let run: Option<bool> = service::get_optional_arg(&call.args, 1).ok().flatten();
-    let window_id: String = service::get_arg(&call.args, 2).unwrap_or_default();
-    match import(state, &path, run, &window_id, &ImportTrust::live()).await {
-        Ok((switched, notes)) => {
-            let mut data = switched.to_json();
-            data["notes"] = json!(notes);
-            WebReturnType::success_data_updates(data, super::user_workspace_switch::client_update(&state.mstore))
-        }
-        Err(e) => WebReturnType::error(e),
-    }
+/// `workspace.ImportUserWorkspace` on the HTTP service route: refused. Whether the file's commands run and its agents
+/// start is the person's answer in the preview, and this route cannot tell the person's window from any other caller, so
+/// the import is the websocket command `workspace.importuserworkspace`, which only the window may call.
+pub(crate) async fn handle_import(_state: &AppState, _call: &WebCallType) -> WebReturnType {
+    WebReturnType::error(
+        "FORBIDDEN: importing a workspace is the person's own action: it runs only from the AgentMux window (the websocket command workspace.importuserworkspace)"
+            .to_string(),
+    )
+}
+
+/// `workspace.importuserworkspace`, after the caller was proven to be the person's window: the switch plus `notes`, and the
+/// client's new state sent to every window (the service route's reply carried it back to the caller itself).
+pub(crate) async fn import_for_window(state: &AppState, req: CommandWorkspaceImportUserWorkspaceData) -> Result<WorkspaceImportUserWorkspaceResult, String> {
+    let (switched, notes) = import(state, &req.path, req.run_commands, &req.window_id, &ImportTrust::live()).await?;
+    state.event_bus.broadcast_mux_obj_updates(&super::user_workspace_switch::client_update(&state.mstore));
+    Ok(WorkspaceImportUserWorkspaceResult {
+        id: switched.id,
+        name: switched.name,
+        closed: switched.closed.into_iter().map(|(window_id, label)| WorkspaceClosedWindow { window_id, label }).collect(),
+        beside: u32::try_from(switched.beside).unwrap_or(u32::MAX),
+        notes,
+    })
 }
 
 #[cfg(test)]

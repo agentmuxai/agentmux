@@ -176,8 +176,14 @@ async fn write_records_a_version_with_the_trusted_agent_id_as_written_by() {
 
     let history = state.id_store.bundle_version_list(&id).unwrap();
     assert_eq!(history.len(), 1);
-    assert_eq!(history[0].source, "human", "caller-supplied annotation, kept as-is");
+    assert_eq!(history[0].source, "agent_inferred", "a label that names who wrote is srv's to give, never the caller's");
+    assert!(history[0].source_detail.contains(r#""claimed_source":"human""#), "the claim is kept as a claim: {}", history[0].source_detail);
     assert_eq!(history[0].written_by, "the-real-writer", "trusted identity, not the caller's own claim");
+
+    // A label that is only the caller's own note is kept as given.
+    let noted = global_memory_write_impl(&state, "the-real-writer", "", None, "Noted", "v1", Some(GlobalMemoryWriteProvenance { source: "import:notes.md", detail: "{}" })).unwrap();
+    let noted_id = noted.get("id").and_then(|v| v.as_str()).unwrap().to_string();
+    assert_eq!(state.id_store.bundle_version_list(&noted_id).unwrap()[0].source, "import:notes.md");
 }
 
 /// codex P2, PR #3237: editing an existing Global Memory entry must

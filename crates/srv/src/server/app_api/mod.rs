@@ -128,6 +128,7 @@ mod bookmarks;
 mod browser_profiles;
 mod browser_grants;
 mod pins;
+pub(crate) mod workspace_import;
 pub(crate) use browser_profiles::ensure_agent_profile as browser_ensure_agent_profile;
 pub(crate) use browser_profiles::list as browser_profiles_list;
 mod layout;
@@ -187,6 +188,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     crate::server::browser_signup::register(engine, state);
     crate::server::browser_signin::register(engine);
     pins::register(engine, state);
+    workspace_import::register(engine, state);
     browser_grants::register(engine, state);
     layout::register(engine, state);
     other_build_layouts::register(engine, state);

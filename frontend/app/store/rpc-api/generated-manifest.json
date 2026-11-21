@@ -1962,6 +1962,10 @@
             "method": "WriteAgentConfigCommand"
         },
         {
+            "command": "workspace.importuserworkspace",
+            "method": "WorkspaceImportUserWorkspaceCommand"
+        },
+        {
             "command": "writeeditorfile",
             "method": "WriteEditorFileCommand"
         },
