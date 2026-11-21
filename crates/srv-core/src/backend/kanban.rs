@@ -17,6 +17,7 @@
 //!
 //! The history line and the board event come with each.
 
+pub mod pr_events;
 pub mod prs;
 
 use std::collections::{HashMap, HashSet};

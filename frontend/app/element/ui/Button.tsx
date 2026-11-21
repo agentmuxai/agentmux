@@ -37,6 +37,11 @@ export interface ButtonProps extends Omit<JSX.ButtonHTMLAttributes<HTMLButtonEle
      * set) never goes pending.
      */
     pending?: PendingMode;
+    /**
+     * The button reads as text and opens something (a pane, a file or folder, a page), so it shows the link hand.
+     * Leave it off for a button that acts or toggles: that keeps the arrow.
+     */
+    opens?: boolean;
     class?: string;
 }
 
@@ -57,6 +62,7 @@ export function Button(props: ButtonProps): JSX.Element {
         "busy",
         "pressed",
         "pending",
+        "opens",
         "class",
         "children",
         "disabled",
@@ -84,6 +90,7 @@ export function Button(props: ButtonProps): JSX.Element {
                           "ui-button",
                           toneClass(local.tone ?? (local.variant ? "quiet" : undefined)),
                           local.variant && `ui-button--${local.variant}`,
+                          local.opens && "ui-button--opens",
                           densityClass(local.density),
                       ],
                 overlay() && "ui-button--spin-over",

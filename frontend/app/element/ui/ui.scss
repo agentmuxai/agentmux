@@ -146,6 +146,11 @@
     text-underline-offset: 2px;
 }
 
+// A button that opens something (`opens`) shows the link hand, like a link does. Disabled keeps its own cursor.
+.ui-button.ui-button--opens:not(:disabled, [aria-disabled="true"]) {
+    cursor: var(--cursor-link);
+}
+
 // An icon in a pane's header or a search bar (variant "chrome"). It has none of the
 // line-control recipe above: no line, padding, tint or focus ring of its own. It
 // takes its colour and size from where it sits, so a header rule can set either;
