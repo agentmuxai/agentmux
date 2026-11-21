@@ -42,6 +42,13 @@
       }
     },
     {
+      "cmd": "FolderOverlapCheck",
+      "data": {
+        "agent_id": "agent-1",
+        "folder": "/work/mine"
+      }
+    },
+    {
       "cmd": "WriteAgentConfig",
       "data": {
         "working_dir": "/work/mine",
@@ -195,6 +202,13 @@
       "cmd": "EnsureProviderAuthDir",
       "data": {
         "provider_id": "claude"
+      }
+    },
+    {
+      "cmd": "FolderOverlapCheck",
+      "data": {
+        "agent_id": "agent-1",
+        "folder": "/srv/home/agents/korp"
       }
     },
     {
