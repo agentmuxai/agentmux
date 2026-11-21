@@ -24,6 +24,7 @@ async fn post_create(state: &AppState, body: serde_json::Value) -> (StatusCode, 
         .uri("/api/v1/shell/create")
         .header("X-AuthKey", "test-secret-key")
         .header("content-type", "application/json")
+        .header("X-Agent-Token", crate::server::tests::token_on_block(state, body["agent_block_id"].as_str().unwrap_or_default()))
         .body(Body::from(body.to_string()))
         .unwrap();
     let call = crate::server::routes::build_router(state.clone()).oneshot(req);
