@@ -73,6 +73,22 @@ export function useAgentMedia(): Accessor<MarkdownMediaOpts | undefined> {
 }
 
 /**
+ * `media`, for a row a container agent may have written (`fromContainer`, from srv's `amx.writer`) in a pane that is not
+ * a container's: nothing it names is read as a path of this computer or from this pane, so the row is shown as in a
+ * confined pane with no pane to ask (the fail-closed case above). In a pane already confined, or for any other row,
+ * `media` as it is.
+ */
+export function mediaForRow(
+    media: Accessor<MarkdownMediaOpts | undefined>,
+    fromContainer: () => boolean | undefined
+): Accessor<MarkdownMediaOpts | undefined> {
+    return () => {
+        const m = media();
+        return m && fromContainer() && !m.confined ? { ...m, confined: true, blockId: undefined } : m;
+    };
+}
+
+/**
  * The agent pane's render-path contexts in one place: dormancy, the
  * working directory its own messages resolve images against — the actual
  * launch cwd (`cmd:cwd`) first, else the

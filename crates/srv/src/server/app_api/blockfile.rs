@@ -288,7 +288,7 @@ async fn read_range_once(
     }
     // A transcript's `amx` is shown only as srv signed it (`origin_sig`).
     let owner = transcript.then(|| crate::backend::transcript::origin_sig::owner_for_read(&mstore, &cmd.block_id, &read_block));
-    let range = read_steps::RangeRead { cmd: &cmd, offset, stream, owner, gen_before };
+    let range = read_steps::RangeRead { cmd: &cmd, stores: (&mstore, &filestore), offset, stream, owner, gen_before };
 
     // Fast path: output.idx — a lazily-built, self-validating byte-offset
     // index of every non-blank line in `output`. It lets us seek directly

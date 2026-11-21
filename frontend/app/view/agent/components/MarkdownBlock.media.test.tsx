@@ -65,3 +65,29 @@ describe("MarkdownBlock inline media", () => {
         expect(h.fetch).not.toHaveBeenCalled();
     });
 });
+
+describe("a message a container agent may have written, in a pane that is not a container's", () => {
+    const host = { oid: "b1", meta: { "cmd:cwd": "D:/launched" } };
+    const agent = { agent_type: "claude", working_directory: "D:/defined" };
+
+    it("reads nothing as a path of this computer", () => {
+        const marked = { ...node, fromContainer: true as const };
+        const { container } = render(() => (
+            <AgentPaneProviders dormant={() => false} block={() => host} agent={() => agent}>
+                <MarkdownBlock node={marked} />
+            </AgentPaneProviders>
+        ));
+        expect(container.querySelector("img")).toBeNull();
+        expect(h.fetch).not.toHaveBeenCalled();
+    });
+
+    it("leaves a message that is not marked as it was", async () => {
+        const { container } = render(() => (
+            <AgentPaneProviders dormant={() => false} block={() => host} agent={() => agent}>
+                <MarkdownBlock node={node} />
+            </AgentPaneProviders>
+        ));
+        await waitFor(() => expect(container.querySelector("img")).not.toBeNull());
+        expect(h.fetch).toHaveBeenCalledTimes(1);
+    });
+});
