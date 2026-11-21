@@ -13,7 +13,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { revealBlock } from "@/app/util/reveal-block";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import type { RecentSessionRow } from "@/types/rpc/RecentSessionRow";
-import { createMemo, createSignal, type Accessor } from "solid-js";
+import { createSignal, type Accessor } from "solid-js";
 import { resolveEffectiveLaunchProvider } from "../agent-launch-env";
 import type { AgentViewModel } from "../agent-model";
 import { realAccountIdOrEmpty } from "../identity-carry-over";
@@ -113,11 +113,11 @@ export function createPickerLaunch(
         }
     };
 
-    // Each agent's runtime state, shared with the status bar and the Swarm.
-    const runtimeRows = sharedAgentRuntime().rows;
-    const runtimeById = createMemo(() => new Map(runtimeRows().map((r) => [r.agent_id, r] as const)));
+    // Each agent's runtime state, shared with the status bar and the Swarm; one agent's row wakes only what reads it.
+    const runtimeStore = sharedAgentRuntime();
+    const runtimeOf = (agentId: string) => runtimeStore.rowOf(agentId);
     // An agent that runs but that no window shows: attach to it rather than start another process (attach-target.ts).
-    const handleAttach = (row: RecentSessionRow): Promise<void> => attachRunningAgent(row, runtimeById().get(row.definition_id));
+    const handleAttach = (row: RecentSessionRow): Promise<void> => attachRunningAgent(row, runtimeOf(row.definition_id));
     const handleFork = async (row: RecentSessionRow, branchLabel: string): Promise<void> => {
         const def = agents().find((a) => a.id === row.definition_id);
         if (!def) return;
@@ -249,7 +249,7 @@ export function createPickerLaunch(
         setNodejsError,
         launchError,
         busy,
-        runtimeById,
+        runtimeOf,
         handleReattach,
         handleAttach,
         handleFork,

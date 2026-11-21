@@ -19,6 +19,7 @@ mod disk_ops;
 pub(crate) mod fleet_sync;
 mod google_ops;
 pub(crate) mod identity_ops;
+mod live_facts_ops;
 pub(crate) mod memory;
 pub(crate) mod op;
 mod disk_cleanup_op;
@@ -176,6 +177,9 @@ pub(crate) fn lookup(op: &str) -> Option<Op> {
         // service on or off for an agent here. `connect` has no remote form: the sign-in is the person's.
         "google.status" => Op::read_personal(|state, caller, params| Box::pin(google_ops::status(state, caller, params))),
         "google.grant" => Op::write(|state, caller, params| Box::pin(google_ops::grant(state, caller, params))),
+        // Which agents run on what, and in what state, with no message text, prompt or account email: a read for an
+        // approved install, like the account listing.
+        "agents.status" => Op::read_personal(|state, caller, params| Box::pin(live_facts_ops::status(state, caller, params))),
         "agents.start" => Op::write(|state, caller, params| Box::pin(agent_ops::start(state, caller, params))),
         "agents.open" => Op::write(|state, caller, params| Box::pin(agent_ops::open(state, caller, params))),
         "agents.stop" => Op::write(|state, caller, params| Box::pin(agent_ops::stop(state, caller, params))),
