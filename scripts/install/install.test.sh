@@ -144,7 +144,9 @@ else
         size="$(wc -c < "$d/$file" | tr -d ' ')"
         sha="$(sha256_hex < "$d/$file")"
         # The same shape release-manifest.mjs writes: indented JSON, each file as name, size, sha256.
-        printf '{\n  "format": 1,\n  "version": "%s",\n  "tag": "%s",\n  "files": [\n    {\n      "name": "%s",\n      "size": %s,\n      "sha256": "%s"\n    }\n  ]\n}\n' "$VER" "$tag" "$listed" "$size" "$sha" > "$d/AgentMux-$VER-manifest.json"
+        # With UPGRADE_JSON set, the manifest also carries an `upgrade` object, as a release made since the signed floor does.
+        up=""; [ -z "${UPGRADE_JSON:-}" ] || up="$(printf ',\n  "upgrade": %s' "$UPGRADE_JSON")"
+        printf '{\n  "format": 1,\n  "version": "%s",\n  "tag": "%s",\n  "files": [\n    {\n      "name": "%s",\n      "size": %s,\n      "sha256": "%s"\n    }\n  ]%s\n}\n' "$VER" "$tag" "$listed" "$size" "$sha" "$up" > "$d/AgentMux-$VER-manifest.json"
         msha="$(sha256_hex < "$d/AgentMux-$VER-manifest.json")"
         printf '{\n  "format": 1,\n  "tag": "%s",\n  "manifest_sha256": "%s",\n  "created_at": "2026-11-04T00:00:00Z"\n}\n' "$tag" "$msha" > "$d/AgentMux-$VER-envelope.json"
         printf 't1 %s\n' "$(openssl pkeyutl -sign -inkey "$W/priv.pem" -rawin -in "$d/AgentMux-$VER-envelope.json" | openssl base64 -A)" > "$d/AgentMux-$VER-envelope.json.sig"
@@ -159,6 +161,11 @@ else
     make_release "$W/good" "v$VER"
     expect "a good release installs" 0 "matches the signed manifest" run_install "$W/good"
     [ -x "$W/h/.local/share/agentmux/AgentMux/agentmux.sh" ] && [ -L "$W/h/.local/bin/agentmux" ] && pass "the portable copy and the agentmux link exist" || fail "the portable copy and the agentmux link exist"
+
+    # A manifest with an `upgrade` object (the floor, the rollout flag, a field this script has never heard of) is read the same way.
+    UPGRADE_JSON='{"floor": "0.55.0", "shared_store_changed": true, "future": {"a": 1}}'; make_release "$W/withupgrade" "v$VER"; UPGRADE_JSON=""
+    grep -q '"upgrade"' "$W/withupgrade/AgentMux-$VER-manifest.json" && pass "the test release's manifest carries an upgrade object" || fail "the test release's manifest carries an upgrade object"
+    expect "a release whose manifest carries an upgrade object installs the same" 0 "matches the signed manifest" run_install "$W/withupgrade"
 
     cp -r "$W/good" "$W/badsize"; printf 'x' >> "$W/badsize/$NAME"
     expect "a changed file is refused" 1 "bytes, the manifest says" run_install "$W/badsize"

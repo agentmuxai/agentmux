@@ -23,6 +23,9 @@ export interface HostKey {
     meta: boolean;
     /** Windows virtual-key code; CEF reports these on every platform. */
     vk: number;
+    /** A chord: the key that follows this one. The fields above are its first key, which the host keeps from the
+     *  page and waits on; `source` is both steps ("ctrl+shift+o l"). */
+    second?: { ctrl: boolean; shift: boolean; alt: boolean; meta: boolean; vk: number };
 }
 
 const NAMED_VK: Record<string, number> = {
@@ -87,8 +90,8 @@ function holdsInBrowserPane(term: string): boolean {
 
 /**
  * Rows worth forwarding: global (not a pane's), allowed in a terminal too
- * (`skipShell`, so they don't take a key a page commonly needs), single-key,
- * not find or zoom (a page has its own), and not scoped to typing or to a
+ * (`skipShell`, so they don't take a key a page commonly needs), one key or a
+ * two-key chord (the host waits for the second), not find or zoom (a page has its own), and not scoped to typing or to a
  * terminal: the host can't tell whether the page has a text field focused.
  */
 function forwards(row: KeyBindingRow): boolean {
@@ -118,11 +121,21 @@ export function hostKeysOf(rows: { row: KeyBindingRow; source: string; user?: bo
     const out: HostKey[] = [];
     for (const { row, source, user } of rows) {
         if (!forwards(row)) continue;
-        if (source.includes(" ")) continue; // chords
-        const k = parseKey(source, platform);
+        const steps = source.trim().split(/\s+/);
+        if (steps.length > 2) continue;
+        const k = parseKey(steps[0], platform);
         const vk = vkOf(k, user === true);
         if (vk == null || (user && !notTyping(k, vk, platform))) continue;
-        out.push({ command: row.command, source, ctrl: k.ctrl, shift: k.shift, alt: k.alt, meta: k.meta, vk });
+        const key: HostKey = { command: row.command, source, ctrl: k.ctrl, shift: k.shift, alt: k.alt, meta: k.meta, vk };
+        if (steps.length === 2) {
+            // A chord's first key is kept from the page like any forwarded key, so it must be one the page can't be
+            // typing (above); its second key is typed after that, and may be a bare letter.
+            const k2 = parseKey(steps[1], platform);
+            const vk2 = vkOf(k2, true);
+            if (vk2 == null) continue;
+            key.second = { ctrl: k2.ctrl, shift: k2.shift, alt: k2.alt, meta: k2.meta, vk: vk2 };
+        }
+        out.push(key);
     }
     return out;
 }

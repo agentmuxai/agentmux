@@ -1,7 +1,7 @@
 store.follow
 -- three devices
 <div>
-  <div class="settings-section-body">
+  <div class="settings-section-body settings-section-body--single">
     <h3 data-stand="SectionHeader">
       "Paired devices"
     <div class="setting-row" id="setting-devices.paired">

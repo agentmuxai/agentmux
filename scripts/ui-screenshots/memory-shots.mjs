@@ -18,12 +18,13 @@
 // Each shot opens the pane it needs in a window tab of its own, maximized,
 // and closes the tab afterwards.
 
+import { CAPTURE_SCALE } from "./lib/crisp.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setup as agentSetup } from "./agent-shots.mjs";
 import { closeTab, openNewTab, openWidget } from "./widget-shots.mjs";
 
-const VIEWPORT = { width: 1100, height: 760, scale: 1 };
+const VIEWPORT = { width: 1100, height: 760, scale: CAPTURE_SCALE };
 
 const SAMPLE_WIDGET = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "docs", "examples", "widgets", "notes");
 export const SAMPLE_WIDGET_ID = "agentmux.notes";

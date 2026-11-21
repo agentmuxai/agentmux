@@ -320,7 +320,7 @@ export function BrowserSection(): JSX.Element {
     };
 
     return (
-        <div class="settings-section-body">
+        <div class="settings-section-body settings-section-body--single">
             <SettingRow
                 settingKey="browser:searchsuggestions"
                 id={BROWSER_SETTINGS.searchSuggestions.id}

@@ -1,8 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! No container runtime socket, pipe or control folder is reachable through any mount of a container agent, or a folder that
-//! holds one, whichever field the mount comes from (its volumes list, its workspace folder) and whoever wrote it (the
+//! No container runtime socket, pipe or control folder, and no AgentMux data folder (the root `~/.agentmux`, its shared
+//! folder, every channel's and dev build's data, config, logs and runtime folders), is reachable through any mount of a
+//! container agent, or a folder that holds one (a home folder, the AgentMux root), whichever field the mount comes from (its volumes list, its workspace folder) and whoever wrote it (the
 //! definition, a template, a block's launch settings, another channel's registry). Sources are
 //! compared case-insensitively, with `\` as `/`, `.` and `..` resolved, and a link followed where the path exists.
 //! [`refused_mount`] is asked once, before an existing container is reused or a new one made; definitions that come in from
@@ -65,8 +66,11 @@ const DATA: &[&str] = &["docker", "dockerdesktop", "docker desktop"];
 /// The first of a container agent's volumes, or its workspace folder, that it may not mount, as the source (or, for a pipe,
 /// the whole entry): a host folder the CLI keeps its sessions in, or a container runtime's socket, pipe or folder.
 pub fn refused_mount(volumes: &[String], workspace: Option<&str>) -> Option<String> {
-    let (homes, data) = (homes(), data_dirs());
-    refused_in(volumes, &homes, &data).or_else(|| workspace.map(str::trim).filter(|w| !w.is_empty()).and_then(|w| refused_entry(w, w, &homes, &data)))
+    refused_mount_in(volumes, workspace, &homes(), &data_dirs())
+}
+
+fn refused_mount_in(volumes: &[String], workspace: Option<&str>, homes: &[PathBuf], data: &[PathBuf]) -> Option<String> {
+    refused_in(volumes, homes, data).or_else(|| workspace.map(str::trim).filter(|w| !w.is_empty()).and_then(|w| refused_entry(w, w, homes, data)))
 }
 
 /// [`refused_mount`] for a volumes list alone.
@@ -113,7 +117,86 @@ fn refused_entry(spec: &str, source: &str, homes: &[PathBuf], data: &[PathBuf]) 
         // A pipe is named by its path; a form that does not split into a path (`npipe:`) by the whole entry.
         return Some(if source.starts_with(['/', '\\']) { source.to_string() } else { spec.to_string() });
     }
-    (is_host_path(source) && names_runtime(source, homes, data)).then(|| source.to_string())
+    (is_host_path(source) && (names_runtime(source, homes, data) || reaches_agentmux_data(source, homes))).then(|| source.to_string())
+}
+
+/// The AgentMux roots a mount is compared with: `.agentmux` in each home folder, and the root this instance runs in.
+fn agentmux_roots(homes: &[PathBuf]) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = homes.iter().map(|h| h.join(".agentmux")).collect();
+    roots.extend(agentmux_common::data_paths::agentmux_root().ok());
+    roots
+}
+
+/// A path as the forms a drive path takes across Windows, WSL and a POSIX shell (`c:/x`, `/mnt/c/x`, `/c/x`), so a mount
+/// spelled one way is compared with a folder spelled another. A path that is no drive path is its own only form.
+fn drive_forms(p: &str) -> Vec<String> {
+    let rest_of = |s: &str| s.strip_prefix('/').unwrap_or(s).to_string();
+    let drive = |s: &str| -> Option<(char, String)> {
+        let b = s.as_bytes();
+        if b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b.len() == 2 || b[2] == b'/') {
+            return Some((b[0] as char, s[2..].to_string()));
+        }
+        let wsl = s.strip_prefix("/mnt/").or_else(|| s.strip_prefix('/'))?;
+        let mut chars = wsl.chars();
+        let letter = chars.next().filter(char::is_ascii_alphabetic)?;
+        let tail = chars.as_str();
+        (tail.is_empty() || tail.starts_with('/')).then(|| (letter, tail.to_string()))
+    };
+    let mut forms = vec![p.to_string()];
+    if let Some((letter, tail)) = drive(p) {
+        let tail = if tail.is_empty() { String::new() } else { format!("/{}", rest_of(&tail)) };
+        forms.extend([format!("{letter}:{tail}"), format!("/mnt/{letter}{tail}"), format!("/{letter}{tail}")]);
+    }
+    forms.sort();
+    forms.dedup();
+    forms
+}
+
+/// Every form of `source` that reaches somewhere: as written, spelled across drive conventions, and where a link leads.
+fn forms_of(source: &str, homes: &[PathBuf]) -> Vec<String> {
+    let mut paths = vec![comparable(source, homes)];
+    if let Ok(real) = std::fs::canonicalize(source.trim()) {
+        paths.push(comparable(&real.to_string_lossy(), &[]));
+    }
+    paths.iter().flat_map(|p| drive_forms(p)).collect()
+}
+
+/// The folders an instance keeps beside its `agents` folder: none of them is a clone's name.
+const INSTANCE_FOLDERS: [&str; 6] = ["data", "config", "logs", "runtime", "cef-cache", "agents"];
+
+/// Whether `rel`, a path inside an AgentMux root, is inside an agent's own workspace folder (`agents/<name>`, or the same
+/// under a channel or a dev build), where a container agent's workspace is made. The `agents` folder itself holds the others.
+fn in_a_workspace(rel: &str) -> bool {
+    let parts: Vec<&str> = rel.split('/').collect();
+    let after = match parts.as_slice() {
+        ["agents", rest @ ..] => rest,
+        ["channels", _, "agents", rest @ ..] | ["dev", _, "agents", rest @ ..] => rest,
+        // A dev build with a clone id: `dev/<branch>/<clone>/agents/<name>`. The clone is not one of an instance's own folders.
+        ["dev", _, clone, "agents", rest @ ..] if !INSTANCE_FOLDERS.contains(clone) => rest,
+        _ => return false,
+    };
+    !after.is_empty()
+}
+
+/// Whether a mount source is an AgentMux root, a folder holding one (a home folder), or inside a root anywhere but an
+/// agent's own workspace folder: its data, config, logs, runtime and shared folders, whatever channel or dev build.
+fn reaches_agentmux_data(source: &str, homes: &[PathBuf]) -> bool {
+    // Each root with whether it is there: a folder holding one is refused only where it is, as for a runtime's own folders.
+    let roots: Vec<(String, bool)> = agentmux_roots(homes)
+        .iter()
+        .flat_map(|r| {
+            let there = r.exists();
+            forms_of(&r.to_string_lossy(), homes).into_iter().map(move |form| (form, there))
+        })
+        .collect();
+    forms_of(source, homes).iter().any(|p| {
+        roots.iter().any(|(root, there)| {
+            if p == root || (*there && above(p, root)) {
+                return true;
+            }
+            p.strip_prefix(root.as_str()).and_then(|rest| rest.strip_prefix('/')).is_some_and(|rel| !in_a_workspace(rel))
+        })
+    })
 }
 
 /// Whether a volume source is a path on the host (a bind mount), not a named volume.
@@ -256,6 +339,142 @@ mod tests {
         assert!(!check(without.path(), ""), "a home folder with none of them in it");
         assert!(!check(without.path(), ".docker"), "nor the folder above one that is not there");
         assert!(!check(without.path(), "projects"));
+    }
+
+    /// The sources a container may not have, for a person whose home folder is `home`.
+    fn refused_at(home: &Path, spec: &str) -> bool {
+        refused_in(&[spec.to_string()], &[home.to_path_buf()], &[]).is_some()
+    }
+
+    /// `p` with `/` separators and none at the end.
+    fn slashed(p: &Path) -> String {
+        p.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/").trim_end_matches('/').to_string()
+    }
+
+    #[test]
+    fn the_agentmux_data_folders_and_the_folders_holding_them_are_never_mounted() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join(".agentmux/channels/stable/data")).unwrap();
+        let h = slashed(home.path());
+        for rel in [
+            "",
+            "/.agentmux",
+            "/.agentmux/shared",
+            "/.agentmux/shared/identities",
+            "/.agentmux/channels",
+            "/.agentmux/channels/stable",
+            "/.agentmux/channels/stable/data",
+            "/.agentmux/channels/stable/data/objects.db",
+            "/.agentmux/channels/local-main/config",
+            "/.agentmux/channels/stable/runtime",
+            "/.agentmux/dev/main/data",
+            "/.agentmux/dev/main/clone-1",
+            "/.agentmux/dev/main/clone-1/data",
+            "/.agentmux/dev/main/clone-1/agents",
+            "/.agentmux/dev/main/data/agents/aria",
+            "/.agentmux/dev/main/runtime/agents/aria",
+            "/.agentmux/dev/main/config/agents/aria",
+            "/.agentmux/agents",
+            "/.agentmux/channels/stable/agents",
+            "/.agentmux/something-else",
+        ] {
+            for spec in [format!("{h}{rel}:/x"), format!("{h}{rel}:/x:ro"), format!("{}:/x", format!("{h}{rel}").to_uppercase())] {
+                assert!(refused_at(home.path(), &spec), "{spec}");
+            }
+        }
+        assert!(refused_at(home.path(), &format!("{h}/.agentmux/channels/stable/agents/../data:/x")), "dots resolved");
+        // A home folder with no AgentMux root in it holds nothing to protect.
+        let bare = tempfile::tempdir().unwrap();
+        assert!(!refused_at(bare.path(), &format!("{}:/x", slashed(bare.path()))));
+        assert!(refused_at(bare.path(), &format!("{}/.agentmux/shared:/x", slashed(bare.path()))), "but a path inside the root is refused wherever it is");
+    }
+
+    #[test]
+    fn an_agents_own_workspace_and_ordinary_folders_are_left_alone() {
+        let home = tempfile::tempdir().unwrap();
+        let h = slashed(home.path());
+        for rel in [
+            "/.agentmux/agents/aria",
+            "/.agentmux/agents/aria/repo/src",
+            "/.agentmux/channels/stable/agents/aria",
+            "/.agentmux/dev/main/agents/aria/repo",
+            "/.agentmux/dev/main/clone-1/agents/aria",
+            "/.agentmux/dev/main/clone-1/agents/aria/repo/src",
+            "/projects/app",
+            "/.agentmux-notes",
+            "/.agentmuxer/x",
+        ] {
+            assert!(!refused_at(home.path(), &format!("{h}{rel}:/work")), "{rel}");
+        }
+        assert!(!refused_at(home.path(), "data:/d"), "a named volume");
+    }
+
+    #[test]
+    fn a_mount_spelled_across_windows_wsl_and_a_shell_is_the_same_mount() {
+        let home = PathBuf::from("C:\\Users\\Me");
+        // The folders are not on this machine, so only the paths inside the root are tested for.
+        for spec in [
+            "C:\\Users\\Me\\.agentmux:/x",
+            "c:/users/me/.agentmux/shared:/x",
+            "/mnt/c/users/me/.AgentMux/channels/stable/data:/x",
+            "/c/Users/Me/.agentmux:/x",
+        ] {
+            assert!(refused_at(&home, spec), "{spec}");
+        }
+        assert!(!refused_at(&home, "/mnt/c/Users/Me/.agentmux/agents/aria:/x"));
+        assert!(!refused_at(&home, "C:\\Users\\Me\\work:/x"));
+    }
+
+    #[test]
+    fn a_drive_path_has_each_spelling_it_takes_on_windows_wsl_and_a_shell() {
+        let forms = drive_forms("c:/users/me");
+        assert_eq!(forms, ["/c/users/me", "/mnt/c/users/me", "c:/users/me"]);
+        assert_eq!(drive_forms("/mnt/c"), ["/c", "/mnt/c", "c:"]);
+        assert_eq!(drive_forms("/home/me/.agentmux"), ["/home/me/.agentmux"], "a POSIX path is its own only form");
+        assert_eq!(drive_forms("/tmp/x"), ["/tmp/x"]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_home_folder_on_a_drive_is_refused_in_every_spelling_when_the_root_is_in_it() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join(".agentmux/shared")).unwrap();
+        let plain = slashed(home.path());
+        let lower = plain.to_lowercase();
+        let wsl = format!("/mnt/{}/{}", &lower[..1], lower[3..].trim_start_matches('/'));
+        for spec in [format!("{plain}:/x"), format!("{lower}:/x"), format!("{wsl}:/x"), format!("{}:/x", plain.replace('/', "\\"))] {
+            assert!(refused_at(home.path(), &spec), "{spec}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_from_a_workspace_to_the_data_folder_is_followed() {
+        let home = tempfile::tempdir().unwrap();
+        let data = home.path().join(".agentmux/channels/stable/data");
+        std::fs::create_dir_all(&data).unwrap();
+        let workspace = home.path().join(".agentmux/agents/aria");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let link = workspace.join("innocent");
+        std::os::unix::fs::symlink(&data, &link).unwrap();
+        assert!(refused_at(home.path(), &format!("{}:/x", link.to_string_lossy())));
+        assert!(!refused_at(home.path(), &format!("{}:/x", workspace.to_string_lossy())));
+    }
+
+    #[test]
+    fn the_workspace_folder_is_held_to_the_data_rule_too() {
+        // A container agent whose workspace is a home folder that holds an AgentMux root, or the root, is refused; one in
+        // its own folder is not. A home folder of its own here, with a root in it, so nothing of this machine's is read.
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join(".agentmux/agents/aria")).unwrap();
+        let h = slashed(home.path());
+        let homes = [home.path().to_path_buf()];
+        let workspace = |path: &str| refused_mount_in(&[], Some(path), &homes, &[]);
+        assert_eq!(workspace(&h).as_deref(), Some(h.as_str()), "the home folder");
+        assert!(workspace(&format!("{h}/.agentmux")).is_some(), "the root");
+        assert!(workspace(&format!("{h}/.agentmux/shared")).is_some());
+        assert!(workspace(&format!("{h}/.agentmux/agents/aria")).is_none(), "an agent's own folder");
+        assert!(workspace("").is_none() && refused_mount_in(&[], None, &homes, &[]).is_none());
     }
 
     #[test]

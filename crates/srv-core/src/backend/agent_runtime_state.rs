@@ -81,4 +81,29 @@ pub struct AgentRuntime {
     /// `agent_type`, so a stopped agent says it too. Anything unknown is `host`.
     #[serde(default)]
     pub runtime: RuntimeKind,
+    /// The model it runs, as its harness names it, when anything says (live facts spec §4.1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub model_id: Option<String>,
+    /// The short form of `model_id` (`Sonnet 5.5`), or the route's own label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub model_label: Option<String>,
+    /// Where the model is known from: `effective` (the CLI reported it), `observed`, `route`,
+    /// `requested` or `unknown`. A `requested` or `unknown` one is shown muted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub model_source: Option<String>,
+    /// The effort level it runs at, when it is known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub effort: Option<String>,
+    /// The short name of the model it switches to at the end of the turn, when a model change waits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub pending_switch: Option<String>,
+    /// The short name of the model its definition asks for, when that is not the one it runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub definition_model_label: Option<String>,
 }

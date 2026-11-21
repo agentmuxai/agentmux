@@ -23,13 +23,14 @@
 // pane's "Use dev@acme.example". Cleanup closes the tab, which stops the
 // agent, and deletes it.
 
+import { CAPTURE_SCALE } from "./lib/crisp.mjs";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homeProblem, installFakeClaude } from "./install-fake-claude.mjs";
 import { closeTab, openNewTab, visibleCenter } from "./widget-shots.mjs";
 
 /** The agent pane at a size that reads well in a docs column. */
-export const VIEWPORT = { width: 960, height: 760, scale: 1 };
+export const VIEWPORT = { width: 960, height: 760, scale: CAPTURE_SCALE };
 
 export const DEMO_ACCOUNT = { id: "6f1d2c3b-0a9e-4c7d-8b5a-acme00000001", email: "dev@acme.example" };
 /** Agents kept for the picker's My Agents, each with one short session. */
@@ -491,7 +492,7 @@ export const shots = [
         id: "swarm-agent-working",
         title: "Swarm following an agent",
         description: "The whole window: an agent mid-turn on the left, and Swarm showing it working, with its current step.",
-        viewport: { width: 1280, height: 800, scale: 1 },
+        viewport: { width: 1280, height: 800, scale: CAPTURE_SCALE },
         maximized: false,
         inPane: async (session, pane) => {
             await send(session, pane, MESSAGES.total);

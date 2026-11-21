@@ -91,6 +91,10 @@ pub mod mcp_seed;
 pub mod layout;
 pub mod project_instructions;
 pub mod agent_runtime;
+/// The latest `agentruntime` event of each pane, readable without subscribing (the live facts).
+pub mod agent_runtime_latest;
+/// A short name for a model id ("Sonnet 5.5").
+pub mod model_label;
 pub mod agent_context_usage;
 pub mod agent_api_retry;
 pub mod providers;

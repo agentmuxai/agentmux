@@ -289,6 +289,29 @@ describe("facts", () => {
         return checkFacts(folder, root, Object.keys(code)).map((f) => `${f.page}: ${f.message}`);
     };
 
+    it("checks the provider table against the providers: the binaries and each controller", () => {
+        const providers = {
+            "crates/srv-core/src/backend/providers/claude.rs": 'static C: P = P {\n    cli_command: "claude",\n    controller_type: ControllerType::Persistent,\n};\n',
+            "crates/srv-core/src/backend/providers/codex.rs": 'static X: P = P {\n    cli_command: "codex",\n    controller_type: ControllerType::AppServer,\n    fallback_controller: ControllerType::Subprocess,\n};\n',
+            "crates/srv-core/src/backend/providers/tests.rs": 'cli_command: "ignored"\n',
+        };
+        const table = (rows) => `## Supported providers\n\n| Provider | CLI binary | npm package | Controller type | Output format |\n|---|---|---|---|---|\n${rows}\n`;
+        const check = (rows) => {
+            const merged = { ...code, ...providers };
+            const root = tree(merged);
+            const folder = tree({ "internals/provider-cli-integration.md": table(rows) });
+            return checkFacts(folder, root, Object.keys(merged)).map((f) => f.message);
+        };
+        expect(check("| Claude | `claude` | x | `persistent` | y |\n| Codex | `codex` | x | `subprocess` | y |")).toEqual([]);
+        expect(check("| Claude | `claude` | x | `subprocess` | y |\n| Codex | `codex` | x | `subprocess` | y |")).toEqual([
+            "providers: the page gives `claude` the controller `subprocess`, the code gives `persistent`",
+        ]);
+        expect(check("| Claude | `claude` | x | `persistent` | y |\n| Other | `other` | x | `acp` | y |")).toEqual([
+            "providers: `other` is documented but is not a provider in providers/*.rs",
+            "providers: `codex` is a provider in providers/*.rs but the page does not list it",
+        ]);
+    });
+
     it("finds nothing when the pages match the code", () => {
         expect(run(docs())).toEqual([]);
     });

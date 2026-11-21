@@ -57,6 +57,10 @@ pub struct ContextReading {
     pub calls_since_compaction: u64,
     /// When the last compaction finished (unix ms).
     pub last_compaction_ms: Option<u64>,
+    /// Compactions finished since this pane's reading began (kept in memory, as the rest is).
+    pub compactions: u64,
+    /// When the tokens were last read (unix ms).
+    pub observed_ms: Option<u64>,
     /// When the agent last asked to compact itself (unix ms).
     #[serde(skip)]
     pub last_self_compact_ms: Option<u64>,
@@ -152,6 +156,7 @@ pub fn observe_claude_frame(block_id: &str, frame: &Value) {
                     r.compacting = false;
                     r.calls_since_compaction = 0;
                     r.last_compaction_ms = Some(agentmux_common::time::now_ms_u64());
+                    r.compactions += 1;
                     r.tokens = None;
                 });
                 // A held hint about the old size is stale now.
@@ -192,6 +197,7 @@ pub fn observe_claude_frame(block_id: &str, frame: &Value) {
         }
         r.last_message_id = id;
         r.tokens = Some(tokens);
+        r.observed_ms = Some(agentmux_common::time::now_ms_u64());
         if model.is_some() {
             r.model = model;
         }
@@ -465,6 +471,21 @@ mod tests {
         let r = get(&b).unwrap();
         assert!(!r.compacting && r.calls_since_compaction == 0 && r.last_compaction_ms.is_some() && r.tokens.is_none());
         forget(&b);
+    }
+
+    #[test]
+    fn each_compaction_is_counted_and_a_token_read_says_when_it_was_made() {
+        let b = block();
+        observe_claude_frame(&b, &call("m1", 100_000));
+        let first = get(&b).unwrap();
+        assert_eq!(first.compactions, 0, "nothing has compacted yet");
+        assert!(first.observed_ms.is_some(), "a token read is stamped");
+        observe_claude_frame(&b, &json!({"type": "system", "subtype": "compact_boundary"}));
+        observe_claude_frame(&b, &call("m2", 20_000));
+        observe_claude_frame(&b, &json!({"type": "system", "subtype": "compact_boundary"}));
+        assert_eq!(get(&b).unwrap().compactions, 2);
+        forget(&b);
+        assert!(get(&b).is_none(), "forgotten with its pane");
     }
 
     fn reading(tokens: u64) -> ContextReading {
