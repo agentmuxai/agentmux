@@ -4,6 +4,7 @@
 //! Agent transcript writing.
 
 pub mod append;
+pub mod attribution;
 pub mod counting;
 pub mod damage;
 pub mod framer;

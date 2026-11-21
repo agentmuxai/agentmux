@@ -21,6 +21,7 @@ import { codeDoc, markdownBodyText } from "../../preview-text/docs";
 import type { PreviewDoc } from "../../preview-text/types";
 import type { ResultFileFacts } from "../../providers/claude-translator";
 import { fileRangeOf, formatFileRangeLong } from "../../../../agent-model/file-range";
+import type { WriterTag } from "../../../../agent-model/node-types";
 import type { ToolNode } from "../../../../agent-model/types";
 import { BashOutputViewer } from "../BashOutputViewer";
 import { CompactResult } from "../CompactResult";
@@ -203,7 +204,7 @@ function renderRead(node: ToolNode): JSX.Element {
                 </div>
             </Show>
             <Show when={images.length > 0}>
-                <ResultImages images={images} path={filePath || undefined} width={file?.width} height={file?.height} />
+                <ResultImages images={images} path={filePath || undefined} width={file?.width} height={file?.height} fromContainer={(node as WriterTag).fromContainer} />
             </Show>
             <Show
                 when={doc}
@@ -349,7 +350,7 @@ export function renderCompactDefault(node: ToolNode): JSX.Element {
     const text = (node.result as { content?: unknown }).content;
     return (
         <div class="agent-tool-media-result">
-            <ResultImages images={images} />
+            <ResultImages images={images} fromContainer={(node as WriterTag).fromContainer} />
             <Show when={typeof text === "string" && text.trim() !== ""}>
                 <CompactResult
                     tool={node.tool}

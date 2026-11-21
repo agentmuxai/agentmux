@@ -12,6 +12,7 @@ import { getObjectValue, makeORef } from "@/app/store/mos";
 import { noteToolCall, noteToolResult } from "@/app/store/touched-files";
 import { blockRoleColor, isLightThemeActive } from "@/app/block/pane-identity";
 import { createTranslator } from "./providers/translator-factory";
+import { writtenInContainer } from "./providers/translator";
 import { modelTurnCommand } from "./model-turn-signal";
 import {
     mainAgentRequestStarted,
@@ -484,8 +485,14 @@ function processFrame(p: StreamPipeline, rawEvent: any): void {
     // goes to the sink.
     if (interceptFrame(rawEvent, st, p.sink, Date.now())) return;
     observeUsage(p, rawEvent);
-    for (const event of st.translator.translate(rawEvent)) {
-        handleStreamEvent(p, event, rawEvent);
+    // What this record's nodes say about who wrote them; cleared when it is done.
+    st.parser.setFromContainer(writtenInContainer(rawEvent));
+    try {
+        for (const event of st.translator.translate(rawEvent)) {
+            handleStreamEvent(p, event, rawEvent);
+        }
+    } finally {
+        st.parser.setFromContainer(false);
     }
 }
 
