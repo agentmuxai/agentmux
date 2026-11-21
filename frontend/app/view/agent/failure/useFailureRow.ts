@@ -38,7 +38,7 @@ export function useFailureRow(opts: {
         model: paneModel,
         failure: () => paneModel.state.failure,
         // What srv says about this agent's account: a sign-in or limit row ends when it can work again.
-        liveAccount: () => accountStateOf(sharedAgentRuntime().rows().find((r) => r.block_id === model.blockId)?.state),
+        liveAccount: () => accountStateOf(sharedAgentRuntime().rowOfBlock(model.blockId)?.state),
         onRetry: opts.retryLastTurn,
         reconnect: opts.offline.recovery,
         // live_elsewhere: take the agent over from the other AgentMux instance running it, then

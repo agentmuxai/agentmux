@@ -54,6 +54,25 @@ pub struct AppServerConfig {
     pub fallback_output_format: &'static str,
 }
 
+/// How far AgentMux stands behind a harness: the lab's own door (`FirstClass`), or one that is installable and works
+/// but is not promised (`Preview`). It decides the picker, the defaults and the docs, and nothing about containers.
+/// An agent already running a preview harness is unaffected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tier {
+    FirstClass,
+    Preview,
+}
+
+impl Tier {
+    /// The name the frontend catalog and block metadata use.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Tier::FirstClass => "first_class",
+            Tier::Preview => "preview",
+        }
+    }
+}
+
 // ─── ProviderConfig ──────────────────────────────────────────────────────────
 
 /// All configuration needed to launch, authenticate, and stream output from
@@ -62,6 +81,8 @@ pub struct AppServerConfig {
 pub struct ProviderConfig {
     /// Canonical provider identifier (e.g. `"claude"`).
     pub id: &'static str,
+    /// First-class door or preview harness (`Tier`). Kept equal to the frontend catalog's `tier`.
+    pub tier: Tier,
     /// Executable name on PATH (e.g. `"claude"`).
     pub cli_command: &'static str,
     /// Whether the provider keeps a persistent subprocess or spawns per turn.

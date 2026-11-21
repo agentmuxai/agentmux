@@ -7,8 +7,9 @@
  * Spec: docs/specs/SPEC_SOUND_NOTIFICATIONS_2026_06_05.md §4.6.
  *
  * Responsibilities:
- *   1. Prime the AudioContext on the first user gesture (autoplay
- *      policy).
+ *   1. Open the AudioContext once the app has drawn and is idle, never
+ *      with sounds off, and resume it on the first user gesture (autoplay
+ *      policy). A gesture that arrives first opens it as before.
  *   2. Hold the SoundPlayer and route every sound event through it.
  *   3. Track which agent-pane events translate to which sound IDs
  *      (subscribed via the agent-pane-state-store multicast).
@@ -32,6 +33,7 @@ import { notify, subscribeSoundEvents, type SoundEvent } from "./sound-events";
 import { mayPlayFromBus, SOUNDS, type SoundDef, type SoundId } from "./sounds";
 import { SoundPlayer } from "./sound-player";
 import { afterGesture } from "./after-gesture";
+import { whenIdleAfterFirstPaint } from "./open-when-idle";
 import { noteSound } from "./sound-history";
 import { audibleFlashDelayMs, flashPatternForCategory, flashPatternForSyllable } from "./flash-patterns";
 import { paramsForTool } from "./tool-tones";
@@ -86,14 +88,39 @@ function busSound(ev: SoundEvent): SoundDef | null {
     return null;
 }
 
-/** Open the audio context, then hook the tool tones and any waiting players into it and its master gain. */
-async function primeNow(): Promise<void> {
-    await player.prime();
+/** Whether sounds are on. The audio device is opened for nothing else, so it is never opened with this off. */
+function soundsEnabled(): boolean {
+    return getSettingsKeyAtom("notify:sounds:enabled")() !== false;
+}
+
+/** Why the device was opened, for the one `[perf]` line that says what it cost. */
+type OpenWhy = "idle" | "gesture";
+
+/** Whether the page has had a user gesture, after which a suspended context may be resumed. */
+function pageHasHadAGesture(): boolean {
+    return typeof navigator !== "undefined" && navigator.userActivation?.hasBeenActive === true;
+}
+
+/**
+ * Open the audio context (the slow part: it blocks the page for as long as the machine's audio stack takes, so the
+ * time is written to the log as one `[perf]` line), then hook the tool tones and any waiting players into it and its
+ * master gain. With sounds off it does nothing. The context made before any gesture stays suspended until `resume`.
+ */
+async function primeNow(why: OpenWhy, resume: boolean): Promise<void> {
+    if (!soundsEnabled()) return;
+    const opening = player.getAudioContext() === null;
+    const startedAt = nowMs();
+    const primed = player.prime();
+    // `prime()` runs up to its first await at once: the constructor, which is the part that blocks.
+    if (opening && player.getAudioContext() !== null) {
+        console.warn(`[perf] audio-open ${Math.round(nowMs() - startedAt)}ms why=${why}`);
+    }
+    await primed;
     const ctx = player.getAudioContext();
     const master = player.getMasterGain();
     if (!ctx || !master) return;
-    // Made after the gesture, not inside it: the page's earlier gesture unlocks it, but make sure it is running.
-    if (ctx.state === "suspended") void ctx.resume?.().catch(() => {});
+    // A context made without a gesture is suspended; the page's gesture lets it run.
+    if (resume && ctx.state === "suspended") void ctx.resume?.().catch(() => {});
     if (!toolTones.isAttached()) toolTones.attach(ctx, master);
     // Attach any waiting players that were created before prime.
     for (const wp of waitingTones.values()) {
@@ -122,7 +149,8 @@ function makePrimeOnce(): (e: Event) => Promise<void> {
     // gated on isTrusted, so an untrusted event leaves both listeners armed
     // for the next real one.
     //
-    // The priming itself waits until the gesture is over (after-gesture.ts). Opening the audio device blocks
+    // The device is normally open already (`bindIdleOpen`), and this only lets it run. When the gesture comes
+    // first, the priming waits until the gesture is over (after-gesture.ts): opening the audio device blocks
     // the page for as long as the machine's audio stack takes (16 s once, on a debug build), and run inside
     // the press it froze the pane drag that press was starting. The page has had its user gesture by then, and
     // that is what the autoplay policy asks for.
@@ -131,10 +159,31 @@ function makePrimeOnce(): (e: Event) => Promise<void> {
         document.removeEventListener("pointerdown", primeOnce, true);
         document.removeEventListener("keydown", primeOnce, true);
         return new Promise<void>((resolve) => {
-            afterGesture(e, () => void primeNow().finally(resolve));
+            afterGesture(e, () => void primeNow("gesture", true).finally(resolve));
         });
     };
     return primeOnce;
+}
+
+/**
+ * Open the audio device while the page is idle after its first frame, not in the middle of the first press or key.
+ * Runs again when sounds are turned on after being off. Nothing is opened while they are off, and the check is made
+ * again when the idle time comes, since the settings may not have been in when this was asked.
+ */
+function bindIdleOpen(): () => void {
+    let cancel: (() => void) | null = null;
+    createEffect(() => {
+        if (!soundsEnabled()) return;
+        if (cancel || player.getAudioContext() !== null) return;
+        cancel = whenIdleAfterFirstPaint(() => {
+            cancel = null;
+            void primeNow("idle", pageHasHadAGesture());
+        });
+    });
+    return () => {
+        cancel?.();
+        cancel = null;
+    };
 }
 
 /**
@@ -261,7 +310,9 @@ export function installSoundService(): () => void {
     document.addEventListener("pointerdown", primeOnce, { capture: true });
     document.addEventListener("keydown", primeOnce, { capture: true });
 
+    let cancelIdleOpen: () => void = () => undefined;
     const volumeDispose = createRoot((dispose) => {
+        cancelIdleOpen = bindIdleOpen();
         bindVolumeEffects();
         bindWaitingOffEffect();
         bindWaitingFocusEffect(windowFocused);
@@ -279,6 +330,7 @@ export function installSoundService(): () => void {
     return () => {
         busUnsub();
         paneUnsub();
+        cancelIdleOpen();
         volumeDispose();
         document.removeEventListener("pointerdown", primeOnce, true);
         document.removeEventListener("keydown", primeOnce, true);
@@ -534,6 +586,7 @@ function shouldPlay(ev: SoundEvent, windowFocused: () => boolean): boolean {
 // ── Test helpers (NEVER call from production) ─────────────────────────
 
 export function __resetSoundService(): void {
+    player.__reset();
     installed = false;
     replayMode = false;
     windowFocusedSignal = null;

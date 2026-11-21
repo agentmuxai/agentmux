@@ -17,9 +17,7 @@ export function modelFactsForRow(meta: Record<string, unknown> | undefined): Mod
     const agentId = agentUidOfBlockMeta(meta);
     if (!agentId) return null;
     try {
-        const row = sharedAgentRuntime()
-            .rows()
-            .find((r) => r.agent_id === agentId);
+        const row = sharedAgentRuntime().rowOf(agentId);
         return row ? readModelFacts(row) : null;
     } catch {
         return null;

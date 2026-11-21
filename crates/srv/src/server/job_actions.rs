@@ -170,6 +170,22 @@ pub(crate) fn file_task_as(
     kind: &str,
     title: &str,
     payload: &str,
+    target: (String, String),
+    first_line: &str,
+) -> Result<(String, i64), crate::backend::storage::StoreError> {
+    file_task_by(store, filed_by, "", kind, title, payload, target, first_line)
+}
+
+/// [`file_task_as`], with the task's `created_by_uid` set to `filed_by_uid`: a tag the code that filed it can find it
+/// by later (a drone's Task block, to add a note only to a task that drone filed). Nothing authorises on it.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn file_task_by(
+    store: &Store,
+    filed_by: &str,
+    filed_by_uid: &str,
+    kind: &str,
+    title: &str,
+    payload: &str,
     (target, target_uid): (String, String),
     first_line: &str,
 ) -> Result<(String, i64), crate::backend::storage::StoreError> {
@@ -192,7 +208,7 @@ pub(crate) fn file_task_as(
         attempts: 0,
         max_attempts: 3,
         created_by: filed_by.to_string(),
-        created_by_uid: String::new(),
+        created_by_uid: filed_by_uid.to_string(),
         created_at: now,
         updated_at: now,
         not_before: None,

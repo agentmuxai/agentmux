@@ -261,7 +261,7 @@ pub fn stamp_writer(owner: &str, line: &str, runtime: WriterRuntime, ts_ms: i64)
 }
 
 /// Whether `line` is a streaming delta, as the History reader tells them apart: it names its type near the start.
-fn is_stream_delta(line: &[u8]) -> bool {
+pub(crate) fn is_stream_delta(line: &[u8]) -> bool {
     let start = &line[..line.len().min(48)];
     start.windows(14).any(|w| w == b"\"stream_event\"")
 }

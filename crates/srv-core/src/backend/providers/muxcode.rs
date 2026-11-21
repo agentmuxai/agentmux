@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{ProviderConfig, ControllerType};
+use super::{Tier, ProviderConfig, ControllerType};
 
 // Mux Code — AgentMux's first-party agentic coding CLI.
 // Local GGUF inference via llama-server or cloud APIs (Anthropic,
@@ -11,6 +11,7 @@ use super::{ProviderConfig, ControllerType};
 // session.  npm: `@agentmuxai/muxcode`.
 pub(super) static MUX_CODE: ProviderConfig = ProviderConfig {
     id: "muxcode",
+    tier: Tier::Preview,
     cli_command: "muxcode",
     controller_type: ControllerType::Subprocess,
     app_server: None,

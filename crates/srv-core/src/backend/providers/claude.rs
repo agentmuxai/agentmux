@@ -1,10 +1,11 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{ProviderConfig, ControllerType};
+use super::{Tier, ProviderConfig, ControllerType};
 
 pub(super) static CLAUDE: ProviderConfig = ProviderConfig {
     id: "claude",
+    tier: Tier::FirstClass,
     cli_command: "claude",
     // Persistent (bidirectional stream-json) + the Agent SDK CONTROL PROTOCOL is
     // the only way AskUserQuestion (and interactive tool-permission) works headless.
