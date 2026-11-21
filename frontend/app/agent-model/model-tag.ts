@@ -9,6 +9,7 @@
  */
 
 import type { ModelHue } from "@/app/element/ui/tag-tokens";
+import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 
 /**
  * How sure the runtime is of the model (#48222's `model_source`). `route` is an agent on a model route: its gateway's
@@ -139,30 +140,26 @@ export function modelTag(facts: ModelFacts): ModelTag | null {
 }
 
 /**
- * The model facts a runtime row carries (#48222: `model_id`, `model_label`, `model_source`, `effort`, `pending_switch`
- * as the short label of the model it switches to, `definition_model_label`), all optional and omitted when unknown, read
- * defensively: a row from a build or a peer without them gives null, so no tag is drawn. This is the one place the Swarm
- * reads them from.
+ * The model facts a runtime row carries (live facts spec #48221, `agentruntime.list`): `model_id`, `model_label`,
+ * `model_source`, `effort`, `pending_switch` (the short label of the model it switches to at the end of the turn) and
+ * `definition_model_label`, all optional and omitted when unknown. A row with neither a label nor an id gives null, so
+ * no tag is drawn. This is the one place the Swarm reads them from.
  */
-export function readModelFacts(row: unknown, definitionLabel?: string | null): ModelFacts | null {
-    if (row == null || typeof row !== "object") return null;
-    const r = row as Record<string, unknown>;
-    const text = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
-    const label = text(r.model_label);
-    const id = text(r.model_id) ?? text(r.model);
+export function readModelFacts(
+    row: Pick<AgentRuntime, "provider" | "model_id" | "model_label" | "model_source" | "effort" | "pending_switch" | "definition_model_label">
+): ModelFacts | null {
+    const label = text(row.model_label);
+    const id = text(row.model_id);
     if (!label && !id) return null;
-    const pending = r.pending_switch;
-    const pendingTo =
-        pending != null && typeof pending === "object"
-            ? text((pending as Record<string, unknown>).to_label) ?? text((pending as Record<string, unknown>).to)
-            : text(pending);
     return {
         label,
         id,
-        provider: text(r.provider),
-        source: text(r.model_source),
-        pendingTo,
-        definitionLabel: text(r.definition_model_label) ?? definitionLabel ?? null,
-        effort: text(r.effort),
+        provider: text(row.provider),
+        source: text(row.model_source),
+        pendingTo: text(row.pending_switch),
+        definitionLabel: text(row.definition_model_label),
+        effort: text(row.effort),
     };
 }
+
+const text = (v: string | undefined): string | null => (v && v.trim() ? v.trim() : null);
