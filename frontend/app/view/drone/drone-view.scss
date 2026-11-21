@@ -379,6 +379,14 @@
     color: var(--secondary-text-color);
 }
 
+// A refusal in the panel: in the flow of the panel, so it is never clipped.
+.drone-templates-error {
+    background: var(--error-bg);
+    color: var(--error-text-color);
+    padding: 4px 8px;
+    font-size: var(--text-xs);
+}
+
 .drone-controls {
     position: absolute;
     left: 8px;

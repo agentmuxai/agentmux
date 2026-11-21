@@ -130,6 +130,8 @@ describe("New from a template", () => {
         fireEvent.click(button(container, "Use"));
         fireEvent.click(button(container, "Make the drone"));
         await waitFor(() => expect(container.querySelector("[role=alert]")?.textContent).toContain("template changed"));
+        // In the panel's own flow: the bar's absolutely placed banner class would be clipped by the stage.
+        expect(container.querySelector("[role=alert]")?.className).toBe("drone-templates-error");
         expect(onClose).not.toHaveBeenCalled();
     });
 

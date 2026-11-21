@@ -5,6 +5,7 @@
 // approved before first use exactly as a job template is (what it writes, its credentials, its caps), its settings,
 // and a drone made from it that opens on the canvas. It is a panel inside the pane, never a window modal. Making a
 // drone starts nothing.
+// reactive-coverage: one-shot the panel is opened afresh each time, reads the templates when it opens, and reads them again from the answer to each approval; the templates change only by a person's action in this panel or outside AgentMux
 
 import { createSignal, For, onMount, Show, type JSX } from "solid-js";
 
@@ -117,7 +118,7 @@ export const DroneTemplatePicker = (p: { model: DroneViewModel; onClose: () => v
                 </Button>
             </div>
             <Show when={failure()}>
-                <div class="drone-error" role="alert">
+                <div class="drone-templates-error" role="alert">
                     {failure()}
                 </div>
             </Show>
