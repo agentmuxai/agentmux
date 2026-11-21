@@ -31,7 +31,7 @@ export function BrowserSigninOffer(props: {
     return (
         <Show when={!props.covered() && offer()}>
             {(o) => (
-                <div class="browser-signin-offer" role="region" aria-label="Save sign-in to the Vault">
+                <div class="browser-signin-offer" role="region" aria-label="Save sign-in to the Vault" data-operator-only="">
                     <i class="fa-solid fa-key" aria-hidden="true" />
                     <span class="browser-signin-offer-question">{signinOfferQuestion(o())}</span>
                     <div class="browser-signin-offer-actions">
@@ -75,7 +75,7 @@ export function BrowserSigninPending(props: { blockId: string; meta: () => Recor
     return (
         <Show when={pending()}>
             {(p) => (
-                <div class="browser-signin-offer browser-signin-pending" role="alert" aria-label="An agent is signing in">
+                <div class="browser-signin-offer browser-signin-pending" role="alert" aria-label="An agent is signing in" data-operator-only="">
                     <i class="fa-solid fa-key" aria-hidden="true" />
                     <span class="browser-signin-offer-question">{signinPendingText({ ...p(), agent: agentDisplayName(p().agent) }, now())}</span>
                     <div class="browser-signin-offer-actions">

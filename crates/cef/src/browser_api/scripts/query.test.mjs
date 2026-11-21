@@ -112,7 +112,9 @@ describe("what an agent's pane may reach on the shared page", () => {
         expect(p.win.__amq_allowed_for(p.promptRoot, "me")).toBe(false);
         expect(p.win.__amq_allowed_for(p.body, "me")).toBe(false);
         expect(p.win.__amq_query("install", 0, "me")).toEqual({ matches: [] });
-        expect(p.win.__amq_centroid_of("install", "me")).toBeNull();
+        // A click on it is refused as a prompt for the person (so the agent is told to ask them), not as nothing found.
+        expect(p.win.__amq_centroid_of("install", "me")).toEqual({ operatorOnly: true });
+        expect(p.win.__amq_centroid_of("no-such-element", "me")).toBeNull();
     });
 
     it("reaches an unmarked dialog as before", () => {

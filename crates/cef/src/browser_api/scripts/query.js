@@ -115,7 +115,14 @@
     let nodes;
     try { nodes = document.querySelectorAll(selector); } catch (e) { return null; }
     const el = Array.from(nodes).find((e) => window.__amq_allowed_for(e, blockId));
-    if (!el) return null;
+    if (!el) {
+      // Nothing allowed matched. When what matched is a prompt addressed to the person, say so: the caller tells the
+      // agent to ask them, instead of that nothing matched.
+      if (blockId && Array.from(nodes).some((e) => e.closest('[data-operator-only]') || e.querySelector('[data-operator-only]'))) {
+        return { operatorOnly: true };
+      }
+      return null;
+    }
     // Scroll into view so the centroid is actually clickable. Chromium
     // silently drops dispatchMouseEvent events that land outside the
     // visible viewport; without the scroll, an off-screen selector

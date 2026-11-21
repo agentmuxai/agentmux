@@ -584,6 +584,15 @@ pub async fn click_element(
         )));
     }
 
+    if cent.get("operatorOnly").and_then(|v| v.as_bool()) == Some(true) {
+        let _ = cdp.close().await;
+        return ok_body(ApiResponse::err(format!(
+            "selector {:?} is part of a prompt addressed to the person (an answer, an approval or a grant): \
+             the click was not sent. Ask the person to answer it.",
+            req.selector
+        )));
+    }
+
     if cent.get("covered").and_then(|v| v.as_bool()) == Some(true) {
         let _ = cdp.close().await;
         return ok_body(ApiResponse::err(format!(
