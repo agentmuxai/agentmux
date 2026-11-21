@@ -368,6 +368,42 @@ pub fn installed(user_home: &Path, channel: &str) -> bool {
     }
 }
 
+/// Does the text of a service's definition start the server on `data_home` (the default root when it is `None`)? Read the
+/// way each manager's file spells the flag, with the folder as that file writes it.
+pub fn carries_home(definition: &str, data_home: Option<&Path>) -> bool {
+    let Some(home) = data_home else { return !definition.contains("--home") };
+    spellings(&home.to_string_lossy()).iter().any(|s| {
+        definition.contains(&format!("--home \"{s}\""))
+            || definition.contains(&format!("--home &quot;{s}&quot;"))
+            || definition.contains(&format!("<string>--home</string>\n\t\t<string>{s}</string>"))
+    })
+}
+
+/// The service file or kept registration of this channel, when the channel has a service at all.
+fn definition(user_home: &Path, channel: &str) -> Option<String> {
+    let manager = manager()?;
+    installed(user_home, channel).then(|| read_text(&file_path(manager, user_home, channel))).flatten()
+}
+
+/// Is there a service of this channel that starts the server on `data_home`? A service is named by its channel alone, so
+/// one that starts a server on another folder is not this server's: it is not started, stopped or replaced from here.
+pub fn installed_on(user_home: &Path, channel: &str, data_home: Option<&Path>) -> bool {
+    match definition(user_home, channel) {
+        Some(text) => carries_home(&text, data_home),
+        // A service whose file cannot be read is taken to be the default root's, as every service was before `--home`.
+        None => data_home.is_none() && installed(user_home, channel),
+    }
+}
+
+/// Is there a service of this channel that starts a server on a folder other than `data_home`?
+pub fn runs_elsewhere(user_home: &Path, channel: &str, data_home: Option<&Path>) -> bool {
+    match definition(user_home, channel) {
+        Some(text) => !carries_home(&text, data_home),
+        // A task the scheduler has but whose kept registration is gone cannot be told: it is not called foreign.
+        None => false,
+    }
+}
+
 /// Does this channel's login service start a program from under `base`? Read from the service's own definition (the
 /// unit, the plist or the scheduled task's XML), so a channel whose service runs a program from somewhere else (a package
 /// unpacked by hand, the folder the install script used before the rename) does not count as using `base`.
@@ -635,6 +671,24 @@ mod tests {
         assert!(plist.contains("<string>work</string>\n\t\t<string>--home</string>\n\t\t<string>/srv/a&amp;b</string>\n\t\t<string>run</string>"), "{plist}");
         let task = render_task_xml(Path::new(r"C:\u\agentmuxw.exe"), "work", None, Some(Path::new(r"D:\am data\")));
         assert!(task.contains(r"<Arguments>--channel work --home &quot;D:\am data\\&quot;</Arguments>"), "a folder ending in a backslash does not escape the closing quote: {task}");
+    }
+
+    /// A service is named by its channel alone, so which folder it starts the server on is read from its definition: the
+    /// commands that start, stop, replace or remove a service act on it only when it is this run's.
+    #[test]
+    fn a_services_folder_is_read_from_its_definition_in_every_manager() {
+        let (mine, other) = (Path::new("/srv/my am"), Path::new("/srv/other"));
+        let (default_unit, unit) = (
+            render_unit(Path::new("/h/agentmux"), "work", Path::new("/l"), "/p", Path::new("/home/u"), None),
+            render_unit(Path::new("/h/agentmux"), "work", Path::new("/l"), "/p", Path::new("/home/u"), Some(mine)),
+        );
+        let plist = render_plist(Path::new("/h/agentmux"), "work", Path::new("/l"), "/p", Path::new("/Users/u"), Some(mine));
+        let task = render_task_xml(Path::new(r"C:\u\agentmuxw.exe"), "work", None, Some(Path::new(r"D:\am data")));
+        assert!(carries_home(&default_unit, None) && !carries_home(&default_unit, Some(mine)), "a service made without --home is the default root's");
+        assert!(carries_home(&unit, Some(mine)) && !carries_home(&unit, Some(other)) && !carries_home(&unit, None));
+        assert!(carries_home(&plist, Some(mine)) && !carries_home(&plist, Some(other)) && !carries_home(&plist, None));
+        assert!(carries_home(&task, Some(Path::new(r"D:\am data"))) && !carries_home(&task, Some(other)) && !carries_home(&task, None));
+        assert!(!carries_home(&default_unit, Some(Path::new("/home/u"))), "the person's own home folder in the unit's environment is not a --home");
     }
 
     #[test]
