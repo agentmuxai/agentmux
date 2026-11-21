@@ -78,6 +78,7 @@ pub mod google_grants;
 pub mod work_deps;
 pub mod work_media;
 pub mod work_card_prs;
+pub mod work_pr_match;
 pub mod work_prs;
 pub mod work_queue;
 
