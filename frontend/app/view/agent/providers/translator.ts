@@ -73,9 +73,12 @@ export function recordOrigin(rawEvent: unknown): { origin: MessageOrigin; notes:
  * record that claims anything else, or carries a malformed `amx`, reads as not marked.
  */
 export function writtenInContainer(rawEvent: unknown): boolean {
-    const writer = (rawEvent as { amx?: { writer?: { runtime?: unknown } } } | null)?.amx?.writer;
-    return writer?.runtime === "container";
+    const runtime = (rawEvent as { amx?: { writer?: { runtime?: unknown } } } | null)?.amx?.writer?.runtime;
+    return typeof runtime === "string" && WRITER_RUNTIMES_THAT_CONFINE.has(runtime);
 }
+
+/** The writer stamps srv writes (`amx.writer.runtime`) that confine a row; not an agent's mode, which `runtime-kind.ts` answers. */
+const WRITER_RUNTIMES_THAT_CONFINE: ReadonlySet<string> = new Set(["container"]);
 
 /**
  * The origin fields of a `user_message` event for the stored record `rawEvent`. `recorded`: the
