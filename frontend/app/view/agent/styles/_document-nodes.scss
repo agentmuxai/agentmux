@@ -2393,7 +2393,8 @@ $tool-name-colors: (
         font-size: var(--text-xs);
         font-weight: 600;
         color: var(--accent-color);
-        cursor: var(--cursor-interactive);
+        // Text that opens the History: a link-like opener, so the link hand (the row or card around a CTA keeps the arrow).
+        cursor: var(--cursor-link);
 
         &:hover,
         &:focus-visible {

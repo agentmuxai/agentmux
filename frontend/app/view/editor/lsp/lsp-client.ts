@@ -34,6 +34,10 @@ export type LspState =
 /** What `lspstart` answers for a file in a folder a container agent can write (srv's `LspError::ContainerAgentFolder`). */
 export const NOT_ON_HOST_ERROR = "no_host_server_for_container_agent_folder";
 
+/** The method of the message srv sends, as a message of the server, when it stops a running server because its project
+ *  folder came to be one a container agent can write (srv's `NOT_ON_HOST_NOTICE`). */
+export const NOT_ON_HOST_NOTICE = "agentmux/notOnHost";
+
 type DiagnosticsHandler = (params: LspPublishDiagnosticsParams) => void;
 
 export class LspClient {
@@ -241,10 +245,9 @@ export class LspClient {
             message: { jsonrpc: "2.0", method, params },
         }).catch((e: unknown) => {
             if (this.state.kind === "ready") {
-                this.setState({
-                    kind: "crashed",
-                    error: e instanceof Error ? e.message : String(e),
-                });
+                const error = e instanceof Error ? e.message : String(e);
+                // srv refuses a file that is a container agent's, even on a server that is already running.
+                this.setState(error.includes(NOT_ON_HOST_ERROR) ? { kind: "notOnHost" } : { kind: "crashed", error });
             }
         });
     }
@@ -272,6 +275,13 @@ export class LspClient {
     }
 
     private handleNotification(method: string, params: unknown): void {
+        if (method === NOT_ON_HOST_NOTICE) {
+            // srv stopped the server: no more is sent to it, and the Editor shows the folder as a container agent's.
+            if (this.state.kind === "ready" || this.state.kind === "initializing") {
+                this.setState({ kind: "notOnHost" });
+            }
+            return;
+        }
         if (method === "textDocument/publishDiagnostics") {
             const p = params as LspPublishDiagnosticsParams;
             if (this.diagnosticsHandler && p?.uri === this.openedFileUri) {

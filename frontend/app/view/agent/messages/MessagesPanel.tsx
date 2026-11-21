@@ -405,7 +405,7 @@ function MessageRow(props: {
                     {/* The Audit's row of this message is found by the marker's MSGID, so a message without one has none. */}
                     <Show when={props.node.msgId}>
                         {(msgId) => (
-                            <Button variant="link" onClick={() => void openAuditAtMessage(msgId(), deliveredAt(props.node))}>
+                            <Button variant="link" opens onClick={() => void openAuditAtMessage(msgId(), deliveredAt(props.node))}>
                                 Open in Audit
                             </Button>
                         )}

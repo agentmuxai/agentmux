@@ -79,6 +79,12 @@ export interface DocTabsModel<P> {
     close(id: string): boolean;
     /** A preview tab kept (double-click). */
     promote(id: string): void;
+    /** Pin a tab (kept at the left, spared by Close Others and Close to the Right) or unpin it. */
+    pin(id: string, pinned: boolean): void;
+    /** Close every unpinned tab but `id` and show `id`. A tab with unsaved changes may ask first. */
+    closeOthers(id: string): void;
+    /** Close the unpinned tabs to the right of `id`. A tab with unsaved changes may ask first. */
+    closeToRight(id: string): void;
     cycle(delta: number): void;
     move(id: string, delta: number): void;
     /** A tab dragged to just before or after another. False when nothing moved. */

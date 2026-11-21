@@ -37,6 +37,53 @@ async fn prepare_secrets(
     tokio::try_join!(injecting, capturing).map_err(|(code, why)| (code, Json(json!({ "error": why }))).into_response())
 }
 
+/// The pane a shell call acts for: the caller's own, from its token or, without one, its signed identity, never a
+/// field of the request. `Err` is the refusal to send.
+pub(super) fn calling_pane(
+    state: &AppState,
+    caller: Option<&super::caller::Caller>,
+    auth: Option<&agentmux_common::api_types::UiAutomationAuth>,
+) -> Result<String, String> {
+    if let Some(uid) = caller.and_then(super::caller::Caller::uid) {
+        return crate::backend::reactive::handler::get_global_handler()
+            .block_for_uid(uid)
+            .ok_or_else(|| "this agent has no pane registered".to_string());
+    }
+    match auth {
+        Some(auth) => crate::server::ui_handlers::verified_block_id(state, caller, auth)
+            .map_err(|e| format!("could not verify which agent is asking: {e}")),
+        None => Err("a shell call needs the calling agent's token or signed identity, which this call did not carry".to_string()),
+    }
+}
+
+/// [`calling_pane`] for a request that also names a pane: the proven pane, or the response that refuses the call
+/// (the caller could not be proven, or the request names another pane).
+pub(super) fn own_pane(
+    state: &AppState,
+    caller: Option<&super::caller::Caller>,
+    named: &str,
+    auth: Option<&agentmux_common::api_types::UiAutomationAuth>,
+) -> Result<String, Response> {
+    let refuse = |why: &str| (StatusCode::FORBIDDEN, Json(json!({ "error": why }))).into_response();
+    let pane = calling_pane(state, caller, auth).map_err(|e| refuse(&e))?;
+    if !named.is_empty() && named != pane {
+        return Err(refuse("this request names another agent's pane: a shell call acts on your own pane, so use your own pane's shell, or message that agent"));
+    }
+    Ok(pane)
+}
+
+/// The refusal when `shell_id` is a shell another pane started; `None` for the caller's own shell, and for an id no
+/// shell holds (there is nothing there to act on).
+fn refuse_foreign_shell(state: &AppState, caller: Option<&super::caller::Caller>, shell_id: &str) -> Option<Response> {
+    let pane = match own_pane(state, caller, "", None) {
+        Ok(pane) => pane,
+        Err(refusal) => return Some(refusal),
+    };
+    let owner = state.shell_sessions.get_status(shell_id).block_id;
+    (!owner.is_empty() && owner != pane)
+        .then(|| (StatusCode::FORBIDDEN, Json(json!({ "error": "this shell belongs to another agent's pane: use your own pane's shell, or message that agent" }))).into_response())
+}
+
 /// `POST /api/v1/shell/create` — start a persistent background shell.
 ///
 /// Called by `agentmux-mcp`'s `Shell` tool. Returns immediately with a
@@ -45,8 +92,12 @@ async fn prepare_secrets(
 pub(super) async fn handle_shell_create(
     State(state): State<AppState>,
     caller: Option<axum::Extension<super::caller::Caller>>,
-    Json(req): Json<ShellCreateRequest>,
+    Json(mut req): Json<ShellCreateRequest>,
 ) -> Response {
+    match own_pane(&state, caller.as_deref(), &req.agent_block_id, req.auth.as_ref()) {
+        Ok(pane) => req.agent_block_id = pane,
+        Err(refusal) => return refusal,
+    }
     create_shell(state, caller.as_deref(), req, None).await
 }
 
@@ -294,11 +345,15 @@ pub(super) async fn create_shell(
 /// — false if the id is unknown (never started or already exited).
 pub(super) async fn handle_shell_stop(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<ShellStopRequest>,
-) -> impl IntoResponse {
+) -> Response {
+    if let Some(refusal) = refuse_foreign_shell(&state, caller.as_deref(), &req.shell_id) {
+        return refusal;
+    }
     let stopped = state.shell_sessions.stop(&req.shell_id);
     tracing::info!(shell_id = %req.shell_id, stopped, "shell.stop");
-    (StatusCode::OK, Json(json!({ "stopped": stopped })))
+    (StatusCode::OK, Json(json!({ "stopped": stopped }))).into_response()
 }
 
 /// `POST /api/v1/shell/input` — write text to a running shell's stdin (Phase 3b).
@@ -308,8 +363,12 @@ pub(super) async fn handle_shell_stop(
 /// shell is not running or the write fails (e.g. the process closed its stdin).
 pub(super) async fn handle_shell_input(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<ShellInputRequest>,
-) -> impl IntoResponse {
+) -> Response {
+    if let Some(refusal) = refuse_foreign_shell(&state, caller.as_deref(), &req.shell_id) {
+        return refusal;
+    }
     // Non-blocking send to the stdin relay task — no mutex, no risk of
     // blocking if the child's pipe buffer is full (the relay owns that concern).
     // resolve_stdin distinguishes "not running" from "running but no captured
@@ -334,7 +393,7 @@ pub(super) async fn handle_shell_input(
             (false, Some(failure))
         }
     };
-    (StatusCode::OK, Json(ShellInputResponse { written, reason }))
+    (StatusCode::OK, Json(ShellInputResponse { written, reason })).into_response()
 }
 
 /// `POST /api/v1/shell/status` — query a shell's running state (Phase 3b).
@@ -344,14 +403,19 @@ pub(super) async fn handle_shell_input(
 /// `exit_code` is absent.
 pub(super) async fn handle_shell_status(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<ShellStatusRequest>,
-) -> impl IntoResponse {
+) -> Response {
+    if let Some(refusal) = refuse_foreign_shell(&state, caller.as_deref(), &req.shell_id) {
+        return refusal;
+    }
     let s = state.shell_sessions.get_status(&req.shell_id);
     (StatusCode::OK, Json(ShellStatusResponse {
         running: s.running,
         exit_code: s.exit_code,
         line_count: s.line_count,
     }))
+    .into_response()
 }
 
 /// `POST /api/v1/shell/output` - the cleaned output of a job that was given Vault

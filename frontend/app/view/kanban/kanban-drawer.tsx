@@ -19,6 +19,7 @@ import { KanbanAfterSection } from "./kanban-after";
 import { moveEntries } from "./kanban-board-picker";
 import { refOf } from "./kanban-boards";
 import { DrawerMedia } from "./kanban-media";
+import { DrawerPrs } from "./kanban-prs";
 import { Linkified } from "@/app/links/linkified";
 import { agentStateWords, AgentChip } from "./kanban-card";
 import { surfaceOf } from "./kanban-links";
@@ -269,6 +270,7 @@ function DrawerFacts(props: { m: DrawerState }): JSX.Element {
                     </span>
                 )}
             </Show>
+            <DrawerPrs card={t().card} now={m.props.now} />
         </div>
     );
 }

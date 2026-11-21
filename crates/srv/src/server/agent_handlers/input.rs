@@ -161,12 +161,13 @@ pub async fn run_agent_turn(
     from: crate::backend::message_origin::MessageOrigin,
     attachments: Vec<AttachmentRef>,
 ) -> Result<(), String> {
-    run_agent_turn_joining(deps, block_id, message, message_id, registration, from, attachments, None).await
+    run_agent_turn_joining(deps, block_id, message, message_id, registration, from, attachments, None, false).await
 }
 
 /// [`run_agent_turn`] for a message the pane held while turn `joins_turn`
 /// ran: if that turn is still settling (or only just ended), the message
 /// joins it rather than starting a new one (turn-model spec §4.3, J3).
+/// `resend`: the pane sends the message again, so it is delivered but not recorded a second time.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_agent_turn_joining(
     deps: &AgentTurnDeps,
@@ -177,6 +178,7 @@ pub async fn run_agent_turn_joining(
     from: crate::backend::message_origin::MessageOrigin,
     attachments: Vec<AttachmentRef>,
     joins_turn: Option<u64>,
+    resend: bool,
 ) -> Result<(), String> {
     let origin = from.turn_origin();
 
@@ -216,7 +218,7 @@ pub async fn run_agent_turn_joining(
 
     let (message, inline_images, image_paths) = steps::prepare_attachments(deps, &ctrl, &block, &block_id, message, attachments).await?;
     let (message, held_notes) = crate::backend::reactive::held_notes::attach_for_turn(&block_id, &message, origin);
-    let record = crate::backend::message_origin::RecordOrigin { origin: from.clone(), notes: held_notes.note_texts() };
+    let record = crate::backend::message_origin::RecordOrigin { origin: from.clone(), notes: held_notes.note_texts(), resend };
     let turn = steps::Turn { deps, block: &block, block_id: &block_id, base, env_vars, session_id_field, message, message_id, from, joins_turn, record, inline_images, image_paths };
 
     if let Some(app_server_ctrl) =
@@ -398,6 +400,7 @@ pub(crate) async fn agent_input(deps: &AgentTurnDeps, ctx: &RpcContext, cmd: Com
         crate::backend::message_origin::MessageOrigin::from_composer(origin),
         cmd.attachments.unwrap_or_default(),
         cmd.joins_turn,
+        cmd.resend.unwrap_or(false),
     )
     .await?;
     // Right after the hidden message's own transcript line: replay

@@ -6,7 +6,7 @@
  * (SPEC_CLOSING_PARKS_AGENTS_SHUTDOWN_IS_EXPLICIT §4.4). Closing a pane, tab or window
  * only detaches it.
  *
- * srv does the work (`ObjectService.ShutdownAgent`, the same teardown as `/shutdown`).
+ * srv does the work (`AgentShutdownCommand`, the same teardown as `/shutdown`).
  * It asks first only when something would be lost: a turn in progress, work the agent
  * has claimed, or cron jobs that target it. An idle agent shuts down on one click, since
  * its conversation is kept.
@@ -15,6 +15,8 @@
 import { errorDetail } from "@/app/notification/toast-debug";
 import { pushNotification } from "@/app/store/flash-notifications";
 import * as services from "@/store/services";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { quitNoticeMessage, type QuitSummary } from "../commands/global/quit";
 import { openPaneModal } from "@/app/store/pane-requests";
 import { beginShutdownLog, endShutdownLog } from "./shutdown-log";
@@ -48,7 +50,7 @@ export function shutdownConfirmText(name: string, p: ShutdownPreview): { title: 
 async function shutDown(blockId: string, name: string, stopBackground: boolean): Promise<void> {
     beginShutdownLog(blockId);
     try {
-        const summary = (await services.ObjectService.ShutdownAgent(blockId, stopBackground)) as QuitSummary;
+        const summary = (await RpcApi.AgentShutdownCommand(TabRpcClient, { blockid: blockId, stop_background: stopBackground })) as QuitSummary;
         if (summary?.status === "already_quitting") return;
         pushNotification({
             icon: "fa-power-off",
