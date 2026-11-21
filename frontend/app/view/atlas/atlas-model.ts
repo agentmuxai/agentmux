@@ -12,15 +12,14 @@ import { readSeatMeta } from "@/app/agent-model/seat-format";
 import { unavailableOfMeta } from "@/app/store/agent-unavailable";
 import { sharedContainerStatus } from "@/app/store/container-status-live";
 import { MOS } from "@/app/store/global";
-import { clockTime } from "@/app/store/muxbus-delivery";
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { awaitsBrowserAnswer, isAwaitingUser } from "@/app/store/swarm-line";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import { parseRuntimeKind, runtimeKindOfBlockMeta } from "@/util/runtime-kind";
 import { createMemo, type Accessor } from "solid-js";
 import { containerRuntimeNote, containersByAgent, orphanContainers } from "./atlas-containers";
-import { isPrFlow, type AtlasFlow } from "./atlas-flow";
-import { useAtlasFlows, useCloudPaused } from "./atlas-flow-store";
+import type { AtlasFlow } from "./atlas-flow";
+import { useAtlasFlows } from "./atlas-flow-store";
 import {
     buildAtlasGraph,
     type AtlasAgent,
@@ -29,7 +28,6 @@ import {
     type AtlasMachine,
     type AtlasState,
 } from "./atlas-graph";
-import { prServices } from "./atlas-pr";
 import { useSwarmAgents, type SwarmAgents } from "../swarm/swarm-agent-list";
 import { phaseToDisplayStatus } from "../swarm/swarm-display-status";
 import { remoteAgentKey } from "../swarm/swarm-fleet-targets";
@@ -175,8 +173,6 @@ function remoteAgent(row: RemoteRow, key: string, agentId: string | null, seat: 
     };
 }
 
-const sameItems = <T>(a: readonly T[], b: readonly T[]) => a.length === b.length && a.every((item, i) => item === b[i]);
-
 export interface AtlasData {
     graph: Accessor<AtlasGraph>;
     /** The Swarm's model: its selection and fleet actions are the map's too. */
@@ -186,7 +182,7 @@ export interface AtlasData {
     /** Every agent, by key, for the card. */
     agents: Accessor<Map<string, AtlasAgent>>;
     machines: Accessor<Map<string, AtlasMachine>>;
-    /** The messages, task hand-overs and pull request lines on show now, as srv reports them. */
+    /** The messages and task hand-overs on show now, as srv reports them. */
     flows: Accessor<readonly AtlasFlow[]>;
     /** srv's last read of the account's other machines failed: the cloud tier shown may be old, or missing. */
     cloudUnavailable: Accessor<boolean>;
@@ -253,12 +249,8 @@ export function useAtlasData(model: SwarmViewModel, ctx: PaneTabHostContext): At
     const orphans = createMemo(() => (swarm.filter.shown() ? [] : orphanContainers(containerStatus.containers(), LOCAL_MACHINE)));
 
     const live = useAtlasFlows();
-    const paused = useCloudPaused();
-    // The same lines as before is the same list: a message's line coming or going does not rebuild the graph.
-    const prLines = createMemo<readonly AtlasFlow[]>(() => live.flows().filter(isPrFlow), undefined, { equals: sameItems });
-    const services = createMemo(() => prServices(prLines(), { lastNoticeAtMs: live.lastPrNoticeAtMs(), paused: paused() }, clockTime));
 
-    const graph = createMemo(() => buildAtlasGraph(notedMachines(), agentList(), { orphans: orphans(), services: services() }));
+    const graph = createMemo(() => buildAtlasGraph(notedMachines(), agentList(), { orphans: orphans() }));
     const agents = createMemo(() => new Map(agentList().map((a) => [a.key, a] as const)));
     const machineMap = createMemo(() => new Map(machines().map((m) => [m.key, m] as const)));
     const cloudUnavailable = () => model.otherInstancesAtom()?.cloud === "unavailable";

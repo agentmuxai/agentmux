@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { SeatSummary } from "@/types/rpc/SeatSummary";
-import { buildAtlasGraph, type AtlasAgent, type AtlasMachine, type AtlasOrphan, type AtlasService, type AtlasState } from "./atlas-graph";
+import { buildAtlasGraph, type AtlasAgent, type AtlasMachine, type AtlasOrphan, type AtlasState } from "./atlas-graph";
 
 const machine = (key: string, title = key): AtlasMachine => ({
     key,
@@ -135,7 +135,6 @@ describe("what is not an agent", () => {
         image: "agentmux/agent:1",
         sinceMs: 1_000,
     });
-    const service = (key: string): AtlasService => ({ key, name: key, icon: "robot", state: "ok", sub: "", lines: [] });
 
     it("puts a container no agent uses in its machine's region, and keeps a machine that has nothing else", () => {
         const g = buildAtlasGraph([machine("a"), machine("b"), machine("c")], [agent("x", "a")], {
@@ -145,12 +144,5 @@ describe("what is not an agent", () => {
             "a: 1 agents, agentmux-1",
             "b: 0 agents, agentmux-2",
         ]);
-    });
-
-    it("carries the review bot and CI, and has neither when none is given", () => {
-        expect(buildAtlasGraph([machine("a")], [agent("x", "a")]).services).toEqual([]);
-        const g = buildAtlasGraph([machine("a")], [agent("x", "a")], { services: [service("service:review"), service("service:checks")] });
-        expect(g.services.map((s) => s.key)).toEqual(["service:review", "service:checks"]);
-        expect(g.regions[0].orphans).toEqual([]);
     });
 });
