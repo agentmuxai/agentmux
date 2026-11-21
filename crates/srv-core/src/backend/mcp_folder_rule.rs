@@ -191,6 +191,17 @@ pub fn turn_refusal(meta: &MetaMapType) -> Option<String> {
     refusal(meta).map(|_| TURN_REFUSAL.to_string())
 }
 
+/// Why a step of a workflow that runs an agent in `work_dir` is not started on this computer: the rule holds for
+/// the folder, and the step's Claude Code is started with no flags of AgentMux's, so nothing keeps it to AgentMux's
+/// settings, servers and instructions. `work_dir` is the folder the step starts in, as it is: the caller gives the
+/// working folder of the process when the step names none. `None` for every other folder.
+pub fn workflow_refusal(work_dir: &Path) -> Option<String> {
+    holds_in(&work_dir.to_string_lossy()).then(|| WORKFLOW_REFUSAL.to_string())
+}
+
+/// What a workflow step is told when [`workflow_refusal`] stops its agent.
+pub const WORKFLOW_REFUSAL: &str = "A container agent can write in this step's folder, or has run in it, so this step's agent is not started on this computer there: it can't be kept to the settings, servers and instructions set in AgentMux. Run the step where its agent runs in a container, or give it a folder no container agent can write.";
+
 /// What a pane is told when [`refusal`] stops its agent.
 pub const REFUSAL: &str = "A container agent can write in this agent's folder, or has run in it, so this agent is not started on this computer there: an agent that runs as a terminal or as a session can't be kept to the MCP servers set in AgentMux. Run this agent in a container, or give it a folder no container agent can write.";
 
@@ -392,6 +403,34 @@ mod tests {
             assert_eq!(turn_refusal(&pane("host", "", bound.path())), None);
             assert_eq!(folder_of(&pane("host", "claude", bound.path())).map(PathBuf::from), Some(PathBuf::from(expanded(&bound.path().to_string_lossy()))));
             assert_eq!(folder_of(&pane("container", "claude", bound.path())), None);
+        });
+    }
+
+    #[test]
+    fn a_workflow_step_is_refused_in_each_state_of_the_folder_the_rule_knows_and_nowhere_else() {
+        let (data, bound, own, holder, was) = (
+            tempfile::tempdir().unwrap(),
+            tempfile::tempdir().unwrap(),
+            tempfile::tempdir().unwrap(),
+            tempfile::tempdir().unwrap(),
+            tempfile::tempdir().unwrap(),
+        );
+        add_for_test(bound.path(), "agentmux-rule-wf-a", "/workspace");
+        let beneath = holder.path().join("agent");
+        std::fs::create_dir_all(&beneath).unwrap();
+        add_for_test(&beneath, "agentmux-rule-wf-b", "/workspace");
+        with_data_home(data.path(), || {
+            let marks = tempfile::tempdir().unwrap();
+            let before = set_marks_dir_for_test(Some(marks.path().to_path_buf()));
+            assert_eq!(workflow_refusal(bound.path()).as_deref(), Some(WORKFLOW_REFUSAL), "a folder a container agent can write");
+            assert_eq!(workflow_refusal(&beneath.join("sub")).as_deref(), Some(WORKFLOW_REFUSAL), "a folder in one");
+            assert_eq!(workflow_refusal(holder.path()).as_deref(), Some(WORKFLOW_REFUSAL), "a folder that holds one");
+            assert_eq!(workflow_refusal(own.path()), None, "a folder no container agent has to do with");
+            assert_eq!(workflow_refusal(was.path()), None, "before it carries the mark");
+            mark(&was.path().to_string_lossy());
+            assert_eq!(workflow_refusal(was.path()).as_deref(), Some(WORKFLOW_REFUSAL), "a folder a container agent has run in");
+            assert_eq!(workflow_refusal(&was.path().join("deeper")).as_deref(), Some(WORKFLOW_REFUSAL), "a folder in it");
+            set_marks_dir_for_test(before);
         });
     }
 

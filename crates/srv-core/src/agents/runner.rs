@@ -64,6 +64,10 @@ pub struct AgentRunHandle {
 pub enum AgentError {
     #[error("agent runner: spawn failed: {0}")]
     Spawn(String),
+    /// A container agent can write the folder the agent would start in, or has run in it
+    /// (`mcp_folder_rule::workflow_refusal`): nothing is started there.
+    #[error("agent runner: {0}")]
+    FolderRule(String),
     /// System commit headroom is below the reserve required to safely start
     /// another agent. Refusing here prevents a new `claude.exe` from tipping the
     /// system commit charge into its limit, where a failed allocation aborts the
@@ -151,6 +155,18 @@ pub async fn run_agent(
     run_agent_with_bin(&bin, agent_ref, task, tx).await
 }
 
+/// The one question asked of every start of a harness on this computer in a folder: where a container agent can
+/// write or has run, nothing of the folder may run, and this start has no flags to keep the CLI to AgentMux's
+/// config. Asked of the folder the CLI really starts in (srv's own, when the step names none). The check reads
+/// the disk and the store, so it runs off the async workers.
+async fn refuse_in_a_container_agents_folder(working_dir: &std::path::Path) -> Result<(), AgentError> {
+    let asked = working_dir.to_path_buf();
+    let refusal = tokio::task::spawn_blocking(move || crate::backend::mcp_folder_rule::workflow_refusal(&asked))
+        .await
+        .unwrap_or_else(|_| Some(crate::backend::mcp_folder_rule::WORKFLOW_REFUSAL.to_string()));
+    refusal.map_or(Ok(()), |why| Err(AgentError::FolderRule(why)))
+}
+
 /// Internal entry point — same as `run_agent` but takes the `claude`
 /// binary path explicitly. Lets tests inject a known-nonexistent
 /// path to exercise the spawn-failure path without touching env vars
@@ -164,11 +180,11 @@ pub(crate) async fn run_agent_with_bin(
     tx: mpsc::UnboundedSender<AgentEvent>,
 ) -> Result<AgentRunHandle, AgentError> {
     let working_dir = if agent_ref.working_directory.is_empty() {
-        std::env::current_dir()
-            .map_err(|e| AgentError::Spawn(format!("cwd: {e}")))?
+        std::env::current_dir().map_err(|e| AgentError::Spawn(format!("cwd: {e}")))?
     } else {
         PathBuf::from(&agent_ref.working_directory)
     };
+    refuse_in_a_container_agents_folder(&working_dir).await?;
 
     // `claude --print` runs in non-interactive mode and exits when
     // done. `--output-format=stream-json` emits one JSON object per
@@ -688,6 +704,27 @@ mod tests {
         let (result_tx, result_rx) = oneshot::channel::<u32>();
         tokio::spawn(finish_or_abandon(result_tx, async { 7 }));
         assert_eq!(result_rx.await.unwrap(), 7);
+    }
+
+    /// A step in a folder a container agent can write starts nothing: the answer is the rule's, not the spawn's,
+    /// even for a program that does not exist (which would otherwise be a spawn failure). A folder no container
+    /// agent has to do with goes on to the spawn.
+    #[tokio::test]
+    async fn a_step_in_a_container_agents_folder_starts_nothing() {
+        let (bound, own) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        crate::backend::fs_ops::container_folders::add_for_test(bound.path(), "agentmux-runner-rule", "/workspace");
+        let run = |dir: &std::path::Path| {
+            let (tx, _rx) = mpsc::unbounded_channel();
+            let agent = AgentRef { working_directory: dir.to_string_lossy().into_owned(), ..AgentRef::default() };
+            let task = AgentTask { prompt: "hi".to_string(), context: serde_json::Map::new(), max_turns: None };
+            async move { run_agent_with_bin("/definitely/does/not/exist/claude-xyz-test", agent, task, tx).await }
+        };
+        match run(bound.path()).await {
+            Err(AgentError::FolderRule(why)) => assert_eq!(why, crate::backend::mcp_folder_rule::WORKFLOW_REFUSAL),
+            other => panic!("expected the rule's refusal, got {:?}", other.err()),
+        }
+        assert!(matches!(run(&bound.path().join("inside")).await, Err(AgentError::FolderRule(_))), "a folder in it");
+        assert!(matches!(run(own.path()).await, Err(AgentError::Spawn(_))), "any other folder goes on to the spawn");
     }
 
     #[tokio::test]
