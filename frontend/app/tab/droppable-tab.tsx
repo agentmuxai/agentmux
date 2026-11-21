@@ -38,6 +38,7 @@ import { setTabGrabOffset } from "./tab-grab-offset";
 import { armWindowTabDrag } from "./tab-live-follow";
 import { prewarmWindowTabSnapshot } from "@/app/drag/tearoff-snapshot";
 import { hoverTabPill, leaveTabPill, pressTabPill } from "@/app/view/browser/hibernation";
+import { reportTabSwitch } from "@/app/store/tab-intent";
 
 /** What dropping a whole pane takes to another window tab: every one of its tabs, the visible one kept. */
 function tileMove(payload: { sourceTabId?: string; node: { data?: TabLayoutData } }) {
@@ -368,7 +369,11 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                 isDragging={isDragging()}
                 tabWidth={0}
                 isNew={false}
-                onSelect={props.onSelect}
+                onSelect={() => {
+                    // The lead the pointer gave the window before this switch (store/tab-intent.ts).
+                    if (!props.isActive) reportTabSwitch(props.tabId);
+                    props.onSelect();
+                }}
                 onClose={props.onClose}
                 onDragStart={() => {}}
                 onLoaded={() => {}}

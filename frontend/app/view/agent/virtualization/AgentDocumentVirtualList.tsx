@@ -67,7 +67,7 @@ import { useScrollMemo } from "./scroll-memo";
 import { useListZoomAnchor } from "./zoom-anchor-adapter";
 import { inFlowState, ROW_GAP_PX, type ExpansionState } from "@/app/store/agent-pane-layout/types";
 import { blockAgentName } from "@/app/block/block-agent-name";
-import { liftedEarlyLine, logShowCover } from "@/app/block/pane-cover-log";
+import { liftedEarlyLine, logDrawnAheadShow, logShowCover } from "@/app/block/pane-cover-log";
 import { useSearchPaint } from "../search/search-paint";
 import { partitionKeepingHead } from "./stable-head";
 import {
@@ -1109,6 +1109,7 @@ function useOneWayFlow(props: AgentDocumentVirtualListProps, s: ListState): Acce
         onLift: (why, frames, ms) => {
             if (why !== "still" && props.blockId) console.info("[pane-cover]", liftedEarlyLine(props.blockId, why, frames, ms, agentName()));
         },
+        onShow: (covered) => logDrawnAheadShow(props.blockId, covered, agentName),
     });
     s.showCoveredNow = () => untrack(showCovered);
     logShowCover(props.blockId, showCovered, agentName);
