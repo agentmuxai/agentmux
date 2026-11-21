@@ -1,6 +1,6 @@
 -- confirm
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"
@@ -79,7 +79,7 @@
               "Show folder"
 -- kept
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"
@@ -153,7 +153,7 @@
 WidgetsUninstall {"id":"acme.notes"}
 -- deleted
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"

@@ -6,8 +6,11 @@
 // settings one to one, `docs/specs/SPEC_SETTINGS_JSON_EVERY_KEY_ONE_TO_ONE_2026_11_01.md` §5.3.
 //
 // What it fails on:
-//   read-not-in-schema  a key the code reads (srv's typed settings and `extra` reads, the frontend's settings atom
-//                       and bracket reads) that the schema does not list
+//   read-not-in-schema  a key the code reads (srv's typed settings, `extra` reads and `SETTING_*` / `KEY_*` constants, the
+//                       frontend's settings atom and bracket reads) that the schema does not list as an entry of its own:
+//                       an `ns:*` family accepts unknown keys, but does not stand in for a key the code reads
+//   prefix-not-in-schema  a key family the code builds from a prefix constant (`ns:thing:` plus an id) of which the schema
+//                       lists no entry
 //   schema-not-read     a schema key that no production source reads: by its name, or through its typed field in srv
 //                       (declaring the field does not count). Mark one that is read another way `x-unread`.
 //   no-description / no-default / no-section / secret-default / bad-platform
@@ -43,7 +46,12 @@ const SRV_READS = [
     new RegExp(String.raw`\.extra(?:_\w+)?\.get\(\s*${KEY}`, "g"),
     new RegExp(String.raw`\bextra_\w+\(\s*${KEY}`, "g"),
     new RegExp(String.raw`\bsetting_\w+\(\s*[^,()]*,\s*${KEY}`, "g"),
+    // A settings module names its keys as constants: `SETTING_X`, `KEY_X`, `X_SETTING` or `SETTING`, and reads them through
+    // the constant, so the name is what is left to find. `META_KEY` constants (block and agent meta) do not match.
+    new RegExp(String.raw`\bconst\s+(?:(?:SETTING|KEY)_\w+|\w+_SETTING|SETTING)\s*:\s*&(?:'static\s+)?str\s*=\s*${KEY}\s*;`, "g"),
 ];
+/** A settings constant that is a prefix, `"ns:thing:"`, to which the code adds an id to make a key. */
+const PREFIX_CONST = new RegExp(String.raw`\bconst\s+(?:(?:SETTING|KEY)_\w+|\w+_SETTING|SETTING)\s*:\s*&(?:'static\s+)?str\s*=\s*"([a-z][a-z0-9_]*(?::[A-Za-z0-9_.-]+)+:)"\s*;`, "g");
 const SETTINGS_STRUCT = "pub struct SettingsType {";
 const TYPED_FIELD = new RegExp(String.raw`#\[serde\([^\]]*rename\s*=\s*${KEY}[^\]]*\]\s*(?:#\[[^\]]*\]\s*)*pub\s+(\w+)\s*:`, "g");
 
@@ -133,11 +141,13 @@ function withoutSettingsStruct(text) {
 export function readKeys(sources) {
     const frontend = new Set();
     const srv = new Set();
+    const prefixes = new Set();
     const typed = new Map();
     for (const { path, text } of sources) {
         if (path.endsWith(".rs")) {
             const prod = withoutTestModules(text);
             for (const k of matches(prod, SRV_READS)) srv.add(k);
+            for (const k of matches(prod, [PREFIX_CONST])) prefixes.add(k);
             for (const [k, field] of typedKeys(prod)) {
                 srv.add(k);
                 typed.set(k, field);
@@ -146,7 +156,7 @@ export function readKeys(sources) {
             for (const k of matches(text, FRONTEND_READS)) frontend.add(k);
         }
     }
-    return { frontend, srv, typed };
+    return { frontend, srv, typed, prefixes };
 }
 
 /** The schema's entries: `{ key: entry }` for a real setting, and the `ns:` prefixes of its `ns:*` families. */
@@ -163,14 +173,16 @@ export function schemaEntries(schema) {
 
 /** Every finding as `{ kind, key, detail }`, sorted. */
 export function check(schema, sources) {
-    const { keys, families } = schemaEntries(schema);
-    const { frontend, srv, typed } = readKeys(sources);
+    const { keys } = schemaEntries(schema);
+    const { frontend, srv, typed, prefixes } = readKeys(sources);
     const out = [];
     const add = (kind, key, detail = "") => out.push({ kind, key, detail });
     if (frontend.size < FLOORS.frontend) add("floor", "frontend", `${frontend.size} keys found, at least ${FLOORS.frontend} expected`);
     if (srv.size < FLOORS.srv) add("floor", "srv", `${srv.size} keys found, at least ${FLOORS.srv} expected`);
-    const inSchema = (k) => k in keys || families.some((f) => k.startsWith(f));
+    // A family (`ns:*`) is not enough: the key must be an entry of its own, with its type and default.
+    const inSchema = (k) => k in keys;
     for (const k of new Set([...frontend, ...srv])) if (!inSchema(k)) add("read-not-in-schema", k);
+    for (const prefix of prefixes) if (!Object.keys(keys).some((k) => k.startsWith(prefix))) add("prefix-not-in-schema", prefix);
     // A key is read when production code names it, or uses its typed field; the struct that declares the fields does not count.
     const text = sources.map((s) => (s.path.endsWith(".rs") ? withoutSettingsStruct(withoutTestModules(s.text)) : s.text)).join("\n");
     const isRead = (k) => text.includes(`"${k}"`) || (typed.has(k) && new RegExp(String.raw`\.${typed.get(k)}\b`).test(text));

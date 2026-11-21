@@ -63,9 +63,19 @@ describe("check-settings-keys", () => {
         expect(check(s, sources)).toEqual([]);
     });
 
-    it("accepts a key under a schema family", () => {
+    it("does not let a schema family stand in for a key the code reads", () => {
         const { schema: s, sources } = padded([ts("frontend/d.ts", 'getSettingsKeyAtom("fam:thing")')], { "fam:*": { type: "object" } });
-        expect(check(s, sources)).toEqual([]);
+        expect(kinds(check(s, sources))).toEqual(["read-not-in-schema fam:thing"]);
+        const listed = padded([ts("frontend/d.ts", 'getSettingsKeyAtom("fam:thing")')], { "fam:*": { type: "object" }, "fam:thing": entry() });
+        expect(check(listed.schema, listed.sources)).toEqual([]);
+    });
+
+    it("reads a key a settings module names as a constant, and a prefix constant's family", () => {
+        const consts = 'pub const KEY_A: &str = "buildcache:a";\npub const SETTING: &str = "term:b";\npub const ROUTE_CAP_SETTING: &str = "model:cap:";\npub const META_KEY_X: &str = "pane:meta";\n';
+        const { schema: s, sources } = padded([ts("crates/srv-core/src/backend/consts.rs", consts)]);
+        expect(kinds(check(s, sources))).toEqual(["prefix-not-in-schema model:cap:", "read-not-in-schema buildcache:a", "read-not-in-schema term:b"]);
+        const ok = padded([ts("crates/srv-core/src/backend/consts.rs", consts)], { "buildcache:a": entry(), "term:b": entry(), "model:cap:one": entry() });
+        expect(check(ok.schema, ok.sources).filter((f) => f.kind !== "schema-not-read")).toEqual([]);
     });
 
     it("fails a schema key nothing reads, unless it says x-unread", () => {
