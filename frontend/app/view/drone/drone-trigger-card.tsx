@@ -1,9 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The Trigger card: what starts this drone, at the left of the canvas. It is a view, not a node of the graph and
-// not a second scheduler: the jobs that run the drone own their triggers (real-world jobs spec §3.1), so the card
-// lists them and opens the Jobs pane; "By hand" is the run the bar's Run button also makes.
+// The Trigger card: what starts this drone, a strip above the canvas (so it never covers a node). It is a view, not
+// a node of the graph and not a second scheduler: the jobs that run the drone own their triggers (real-world jobs
+// spec §3.1), so the card lists them and opens the Jobs pane; "By hand" is the run the bar's Run button also makes.
 
 import { For, Show, type JSX } from "solid-js";
 
@@ -52,8 +52,8 @@ export const TriggerCard = (p: { model: DroneViewModel }): JSX.Element => {
                     <div class="drone-trigger-row">
                         <span class="drone-trigger-name" {...tip(job.job_name)}>
                             {job.job_name}
-                            <span class="drone-trigger-kind">{triggerKindLabel(job.trigger)}</span>
                         </span>
+                        <span class="drone-trigger-kind">{triggerKindLabel(job.trigger)}</span>
                         <Button class="drone-btn" onClick={() => void openWarden("jobs")}>
                             {t("drone.trigger.openJob")}
                         </Button>

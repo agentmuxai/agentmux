@@ -40,9 +40,11 @@ export const DroneView = (props: { model: DroneViewModel }): JSX.Element => {
         <div class="drone-pane">
             <NodeTypeBar model={m} />
             <div class="drone-stage">
-                <Canvas model={m} />
                 <TriggerCard model={m} />
-                <RunPanel model={m} />
+                <div class="drone-stage-body">
+                    <Canvas model={m} />
+                    <RunPanel model={m} />
+                </div>
             </div>
         </div>
     );
