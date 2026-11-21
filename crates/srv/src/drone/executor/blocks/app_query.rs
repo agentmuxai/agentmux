@@ -12,10 +12,19 @@
 //!       - `tasks`   Kanban tasks, filtered by `holder`, `state` and `pr` (each optional).
 //!       - `lan_peers`  the other machines this one sees on the LAN, and whether each answered lately.
 //!       - `jobs`    recent job runs: one job's with `job`, else the newest run of every job.
-//!   * `agent`, `job`   the agent's or the job's name (a job's id works too). Never a `{{reference}}`:
-//!               a value from outside must not pick whose state the graph reads (§6.2).
+//!       - `memory`  one Global Memory entry, by id or name (`entry`), read-only. Needs `entry`, written in
+//!                   the graph. An entry of the system tier is not offered. Nothing here writes Memory.
+//!       - `presence`  which agents on this machine are working on a repository, a path or a branch
+//!                   (`repo`, `path`, `branch`; at least one), from their own work facts. Names, state and how
+//!                   each matched; no goals, no file names, and claims and posts are not read.
+//!   * `agent`, `job`, `entry`   the agent's, the job's or the Memory entry's name (a job's or an entry's id
+//!               works too). Never a `{{reference}}`: a value from outside must not pick whose state the
+//!               graph reads (§6.2).
 //!   * `holder`, `state`, `pr`   task filters. They only find tasks, so each may be built from a
 //!               `{{reference}}` (a PR url from the trigger). `pr` matches a task's PR link exactly.
+//!   * `repo`, `path`, `branch`   the `presence` filters. They only find who is working there, so each may be
+//!               built from a `{{reference}}`.
+//!   * `max_chars`   `memory`, how much of the entry to return (default 4000, at most 20000).
 //!   * `limit`   tasks and jobs, how many to return (tasks: default 50, at most 200; jobs: default 20, at most 100).
 //!
 //! Output, by query:
@@ -35,6 +44,12 @@
 //!               "summary", "started_ms", "ended_ms"?, "cost_usd"? }], "last_ok"? }`; `found` is false for a `job` that
 //!               matches none. With a `job`, `last_ok` is that job's newest run that finished with outcome `ok` or
 //!               `findings` (a run row, or null when there is none), found whatever `limit` cuts `runs` to.
+//!   * `memory`: `{ "found": bool, "id"?, "name"?, "content"?, "chars"?, "truncated"? }`; `found` is false for
+//!               an entry nobody has (or the system tier), with `ambiguous` when two entries share the name.
+//!   * `presence`: `{ "count": N, "agents": [{ "agent", "status", "repo"?, "branch"?, "matched": ["claim", "dirty", ...] }] }`.
+//!
+//! Every answer of this block is outside text to the run (the taint bits): what an entry or an agent's
+//! branch says is not the graph's own.
 
 use serde_json::{json, Value};
 
@@ -59,6 +74,11 @@ const MAX_RUNS: usize = 100;
 const ANSWERED_WITHIN_SECS: u64 = 120;
 /// A run's summary is cut to this many characters.
 const RUN_SUMMARY_CHARS: usize = 200;
+/// A Memory entry is cut to this many characters when the node gives no `max_chars`, and never to more than the cap.
+const DEFAULT_MEMORY_CHARS: usize = 4_000;
+const MAX_MEMORY_CHARS: usize = 20_000;
+/// The most agents a `presence` query lists.
+const MAX_PRESENCE: usize = 50;
 
 /// What the block asks.
 #[derive(Debug, PartialEq)]
@@ -69,6 +89,23 @@ pub(crate) enum Query {
     Tasks(TaskFilter),
     LanPeers,
     Jobs(JobsFilter),
+    Memory(MemoryFilter),
+    Presence(PresenceFilter),
+}
+
+/// The filters of a `memory` query: one Global Memory entry, by id or name, and how much of it to return.
+#[derive(Debug, PartialEq, Default)]
+pub(crate) struct MemoryFilter {
+    pub entry: String,
+    pub max_chars: usize,
+}
+
+/// The filters of a `presence` query: what to ask who is working on; at least one is not empty.
+#[derive(Debug, PartialEq, Default)]
+pub(crate) struct PresenceFilter {
+    pub repo: String,
+    pub path: String,
+    pub branch: String,
 }
 
 /// The filters of a `jobs` query: one job by name or id (empty is every job) and how many runs.
@@ -114,6 +151,20 @@ pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, Strin
             tokio::task::spawn_blocking(move || jobs_answer(&jobs, ledger.store(), &filter))
                 .await
                 .map_err(|e| format!("app query: {e}"))?
+        }
+        Query::Memory(filter) => {
+            let state = crate::drone::host::state()?.clone();
+            tokio::task::spawn_blocking(move || {
+                let entries = state.id_store.bundle_list_global().map_err(|e| format!("app query: couldn't read Global Memory: {e}"))?;
+                Ok(memory_answer(&entries, &filter))
+            })
+            .await
+            .map_err(|e| format!("app query: {e}"))?
+        }
+        Query::Presence(filter) => {
+            let state = crate::drone::host::state()?;
+            let facts = crate::server::work_facts_handlers::local_facts(state).await;
+            presence_answer(&facts, &filter)
         }
         Query::Tasks(filter) => {
             let state = crate::drone::host::state()?;
@@ -180,8 +231,30 @@ pub(crate) fn plan(node: &FlowNode, scope: &ExecutionScope) -> Result<Query, Str
             };
             Ok(Query::Jobs(JobsFilter { job: job.to_string(), limit }))
         }
+        "memory" => {
+            let entry = text("entry");
+            if entry.is_empty() {
+                return Err("app query: the `memory` query needs `entry`".to_string());
+            }
+            if entry.contains("{{") {
+                return Err("app query: `entry` must name a Global Memory entry, not a {{reference}}".to_string());
+            }
+            let max_chars = match node.data.get("max_chars").and_then(|v| v.as_u64()) {
+                Some(n) => (n as usize).clamp(1, MAX_MEMORY_CHARS),
+                None => DEFAULT_MEMORY_CHARS,
+            };
+            Ok(Query::Memory(MemoryFilter { entry: entry.to_string(), max_chars }))
+        }
+        "presence" => {
+            let resolved = |key: &str| scope.resolve(text(key)).trim().to_string();
+            let filter = PresenceFilter { repo: resolved("repo"), path: resolved("path"), branch: resolved("branch") };
+            if filter.repo.is_empty() && filter.path.is_empty() && filter.branch.is_empty() {
+                return Err("app query: the `presence` query needs `repo`, `path` or `branch`".to_string());
+            }
+            Ok(Query::Presence(filter))
+        }
         "" => Err("app query block missing `query`".to_string()),
-        other => Err(format!("app query: unknown query {other:?}; this AgentMux has muxbus, agents, agent, tasks, lan_peers and jobs")),
+        other => Err(format!("app query: unknown query {other:?}; this AgentMux has muxbus, agents, agent, tasks, lan_peers, jobs, memory and presence")),
     }
 }
 
@@ -340,6 +413,48 @@ pub(crate) fn jobs_answer(jobs: &crate::backend::storage::store::Store, ledger: 
     }
 }
 
+/// `memory`: the Global Memory entry whose id is `f.entry`, or whose name is (without regard to case), cut to
+/// `f.max_chars`. An entry of the system tier is not offered, and two entries with one name are not guessed between.
+pub(crate) fn memory_answer(entries: &[crate::backend::storage::bundles::Bundle], f: &MemoryFilter) -> Value {
+    let want = f.entry.to_lowercase();
+    let mut hits = entries.iter().filter(|b| b.is_global && !b.is_system && (b.id == f.entry || b.name.to_lowercase() == want));
+    match (hits.next(), hits.next()) {
+        (Some(b), None) => {
+            let chars = b.instructions.chars().count();
+            let content: String = b.instructions.chars().take(f.max_chars).collect();
+            json!({ "found": true, "id": b.id, "name": b.name, "content": content, "chars": chars, "truncated": chars > f.max_chars })
+        }
+        (Some(_), Some(_)) => json!({ "found": false, "ambiguous": true }),
+        _ => json!({ "found": false }),
+    }
+}
+
+/// `presence`: the agents whose own work facts (their clones' uncommitted changes, recent edits, branch and repository)
+/// touch what is asked. Claims and posts are not read. Only what `Presence who` shows of each agent that a graph needs:
+/// its name, its state and how it matched; no goal, no file names. Pure over the facts, so a test can hand it some.
+pub(crate) fn presence_answer(facts: &[crate::backend::work_facts::WorkFacts], f: &PresenceFilter) -> Result<Value, String> {
+    use crate::backend::work_facts::matching;
+    let asked = matching::WhoQuery { path: Some(f.path.clone()), repo: Some(f.repo.clone()), branch: Some(f.branch.clone()), query: None };
+    let target = matching::resolve(&asked, None, facts).map_err(|e| format!("app query: {e}"))?;
+    let found = matching::who_is_working_on(&target, facts);
+    let agents: Vec<Value> = found
+        .iter()
+        .take(MAX_PRESENCE)
+        .map(|r| {
+            let matched: Vec<Value> = r.matches.iter().map(|m| serde_json::to_value(m.kind).unwrap_or(Value::Null)).collect();
+            let mut row = json!({ "agent": r.agent, "status": r.status, "matched": matched });
+            if let Some(repo) = &r.repo {
+                row["repo"] = json!(repo);
+            }
+            if let Some(branch) = &r.branch {
+                row["branch"] = json!(branch);
+            }
+            row
+        })
+        .collect();
+    Ok(json!({ "count": found.len(), "agents": agents }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -365,7 +480,7 @@ mod tests {
         let s = ExecutionScope::new();
         assert_eq!(plan(&node(json!({ "query": "muxbus" })), &s).unwrap(), Query::MuxBus);
         let err = plan(&node(json!({ "query": "weather" })), &s).unwrap_err();
-        assert!(err.contains("muxbus, agents, agent, tasks, lan_peers and jobs"), "{err}");
+        assert!(err.contains("muxbus, agents, agent, tasks, lan_peers, jobs, memory and presence"), "{err}");
         assert!(plan(&node(json!({})), &s).is_err());
     }
 
@@ -388,6 +503,117 @@ mod tests {
         );
         let q = plan(&node(json!({ "query": "tasks" })), &s).unwrap();
         assert_eq!(q, Query::Tasks(TaskFilter { limit: DEFAULT_LIMIT, ..Default::default() }));
+    }
+
+    fn entry(id: &str, name: &str, text: &str, system: bool) -> crate::backend::storage::bundles::Bundle {
+        crate::backend::storage::bundles::Bundle {
+            id: id.to_string(),
+            name: name.to_string(),
+            description: String::new(),
+            is_blank: false,
+            is_global: true,
+            provider: String::new(),
+            model: String::new(),
+            instructions: text.to_string(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+            is_system: system,
+        }
+    }
+
+    #[test]
+    fn the_memory_entry_is_named_in_the_graph_and_never_by_a_reference() {
+        let s = ExecutionScope::new();
+        assert_eq!(
+            plan(&node(json!({ "query": "memory", "entry": " Release rules " })), &s).unwrap(),
+            Query::Memory(MemoryFilter { entry: "Release rules".to_string(), max_chars: DEFAULT_MEMORY_CHARS })
+        );
+        assert!(plan(&node(json!({ "query": "memory" })), &s).is_err(), "an entry is required");
+        let err = plan(&node(json!({ "query": "memory", "entry": "{{trigger.name}}" })), &s).unwrap_err();
+        assert!(err.contains("not a {{reference}}"), "{err}");
+        let capped = plan(&node(json!({ "query": "memory", "entry": "x", "max_chars": 999_999 })), &s).unwrap();
+        assert_eq!(capped, Query::Memory(MemoryFilter { entry: "x".to_string(), max_chars: MAX_MEMORY_CHARS }));
+    }
+
+    #[test]
+    fn a_memory_entry_is_read_by_id_or_name_and_cut_to_the_limit() {
+        let all = vec![entry("b1", "Release rules", "one two three four", false), entry("b2", "Other", "x", false)];
+        let f = |e: &str, n: usize| MemoryFilter { entry: e.to_string(), max_chars: n };
+        let by_name = memory_answer(&all, &f("release RULES", 100));
+        assert_eq!((by_name["found"].clone(), by_name["id"].clone(), by_name["content"].clone()), (json!(true), json!("b1"), json!("one two three four")));
+        assert_eq!(by_name["truncated"], json!(false));
+        let cut = memory_answer(&all, &f("b1", 7));
+        assert_eq!((cut["content"].clone(), cut["chars"].clone(), cut["truncated"].clone()), (json!("one two"), json!(18), json!(true)));
+        assert_eq!(memory_answer(&all, &f("nothing", 10)), json!({ "found": false }));
+    }
+
+    #[test]
+    fn the_system_tier_and_an_ambiguous_name_are_not_offered() {
+        let all = vec![entry("s1", "Baseline", "secret rules", true), entry("b1", "Notes", "a", false), entry("b2", "notes", "b", false)];
+        let f = |e: &str| MemoryFilter { entry: e.to_string(), max_chars: 100 };
+        assert_eq!(memory_answer(&all, &f("Baseline")), json!({ "found": false }), "a system entry is not found by name");
+        assert_eq!(memory_answer(&all, &f("s1")), json!({ "found": false }), "nor by id");
+        assert_eq!(memory_answer(&all, &f("Notes")), json!({ "found": false, "ambiguous": true }));
+        assert_eq!(memory_answer(&all, &f("b2"))["found"], json!(true), "an id still picks one of two same-named entries");
+    }
+
+    #[test]
+    fn a_memory_entry_is_cut_on_characters_not_bytes() {
+        let all = vec![entry("b1", "N", "h\u{e9}llo w\u{f6}rld", false)];
+        let out = memory_answer(&all, &MemoryFilter { entry: "N".to_string(), max_chars: 4 });
+        assert_eq!(out["content"], json!("h\u{e9}ll"));
+    }
+
+    #[test]
+    fn presence_needs_something_to_look_for_and_its_filters_may_be_references() {
+        let s = ExecutionScope::with_trigger(json!({ "branch": "loap/fix" }));
+        let err = plan(&node(json!({ "query": "presence" })), &s).unwrap_err();
+        assert!(err.contains("needs `repo`, `path` or `branch`"), "{err}");
+        let blank = ExecutionScope::with_trigger(json!({ "branch": "" }));
+        assert!(plan(&node(json!({ "query": "presence", "branch": "{{trigger.branch}}" })), &blank).is_err(), "a reference that is empty is nothing to look for");
+        assert_eq!(
+            plan(&node(json!({ "query": "presence", "repo": " a/b ", "branch": "{{trigger.branch}}" })), &s).unwrap(),
+            Query::Presence(PresenceFilter { repo: "a/b".to_string(), path: String::new(), branch: "loap/fix".to_string() })
+        );
+    }
+
+    fn facts(agent: &str, repo: &str, branch: &str, status: &str) -> crate::backend::work_facts::WorkFacts {
+        crate::backend::work_facts::WorkFacts {
+            agent: agent.to_string(),
+            repo: Some(repo.to_string()),
+            branch: Some(branch.to_string()),
+            status: status.to_string(),
+            goal: Some("a goal the graph must not see".to_string()),
+            dirty_files: vec!["secret/file.rs".to_string()],
+            dirty_count: 1,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn presence_lists_who_is_on_the_repo_and_branch_without_goals_or_file_names() {
+        let all = vec![facts("loap", "a/b", "loap/fix", "busy"), facts("opaz", "a/b", "main", "idle"), facts("other", "c/d", "main", "idle")];
+        let f = |repo: &str, branch: &str| PresenceFilter { repo: repo.to_string(), path: String::new(), branch: branch.to_string() };
+        let on_repo = presence_answer(&all, &f("a/b", "")).unwrap();
+        assert_eq!(on_repo["count"], json!(2));
+        let names: Vec<_> = on_repo["agents"].as_array().unwrap().iter().map(|a| a["agent"].as_str().unwrap().to_string()).collect();
+        assert!(names.contains(&"loap".to_string()) && names.contains(&"opaz".to_string()) && !names.contains(&"other".to_string()), "{names:?}");
+        let text = on_repo.to_string();
+        assert!(!text.contains("a goal the graph must not see") && !text.contains("secret/file.rs"), "{text}");
+        let on_branch = presence_answer(&all, &f("a/b", "loap/fix")).unwrap();
+        assert!(on_branch["agents"].as_array().unwrap().iter().any(|a| a["agent"] == "loap" && a["matched"].as_array().is_some_and(|m| !m.is_empty())));
+    }
+
+    #[test]
+    fn a_relative_path_with_no_repository_is_an_error_not_an_empty_answer() {
+        let all = vec![facts("loap", "a/b", "main", "idle")];
+        let f = PresenceFilter { repo: String::new(), path: "src/lib.rs".to_string(), branch: String::new() };
+        assert!(presence_answer(&all, &f).unwrap_err().starts_with("app query: "));
     }
 
     #[test]

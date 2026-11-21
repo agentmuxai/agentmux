@@ -28,7 +28,9 @@ use crate::backend::rpc_types::{
     COMMAND_GET_DRONE_PAYLOAD_SCHEMA, COMMAND_LIST_DRONE_RUNS, COMMAND_REPLAY_DRONE_RUN, COMMAND_RESOLVE_DRONE_RUN, COMMAND_RESUME_DRONE_WAIT, COMMAND_RUN_DRONE, COMMAND_UPSERT_DRONE,
 };
 use crate::server::AppState;
+use crate::backend::rpc::actor::{actor_of, Actor};
 use crate::backend::rpc::engine::WshRpcEngine;
+use crate::backend::rpc_types::RpcContext;
 use crate::backend::drone_decision::{self, Decision};
 use crate::drone::executor::{run_drone, RunEvent};
 use crate::drone::storage::DroneStore;
@@ -124,8 +126,32 @@ pub(crate) fn get_drone(state: &AppState, cmd: GetDroneReq) -> Result<Option<Dro
     Ok(row)
 }
 
-/// `upsertdrone`: stamps the times, mints an id for a new drone, and echoes the row back.
-pub(crate) fn upsert_drone(state: &AppState, mut cmd: DroneDefinition) -> Result<DroneDefinition, String> {
+/// Who the record names for a call, taken from the connection and never from the request: the person's window
+/// is `operator`, an agent is `agent:<id>` (so no agent id can read as `operator`), and a connection that is
+/// neither says what it is.
+pub(crate) fn recorded_as(ctx: &RpcContext) -> String {
+    actor_of(ctx).label()
+}
+
+/// The starter a run's ledger row names, when it is not the person's window: that window is the ledger's own
+/// default (the operator).
+pub(crate) fn run_started_by(ctx: &RpcContext) -> Option<String> {
+    match actor_of(ctx) {
+        Actor::Operator => None,
+        other => Some(other.label()),
+    }
+}
+
+/// `upsertdrone` for a save the person's own client makes, or one no caller asked for (a template installed on
+/// the person's say): its version is the operator's.
+pub(crate) fn upsert_drone(state: &AppState, cmd: DroneDefinition) -> Result<DroneDefinition, String> {
+    upsert_drone_as(state, cmd, crate::backend::jobs::BY_OPERATOR)
+}
+
+/// `upsertdrone`: stamps the times, mints an id for a new drone, and echoes the row back. The version is saved
+/// as `saved_by`, which the registered handler takes from the connection (an agent's drone is shown as that
+/// agent's).
+pub(crate) fn upsert_drone_as(state: &AppState, mut cmd: DroneDefinition, saved_by: &str) -> Result<DroneDefinition, String> {
     let now = now_ms();
     if cmd.created_at == 0 {
         cmd.created_at = now;
@@ -136,9 +162,8 @@ pub(crate) fn upsert_drone(state: &AppState, mut cmd: DroneDefinition) -> Result
     }
     // The definition and its version are one immediate transaction, so a
     // concurrent save cannot leave the stored definition on a graph newer than
-    // the one `Latest` returns. The request does not carry who is saving yet,
-    // so the version is the operator's.
-    match state.id_store.drone_save_with_version(&cmd, "operator", now) {
+    // the one `Latest` returns.
+    match state.id_store.drone_save_with_version(&cmd, saved_by, now) {
         Ok(Ok(_)) => {}
         // A failed version save must not undo the definition: a drone that
         // cannot be edited is worse than one missing its latest version.
@@ -354,19 +379,26 @@ pub(crate) const MAX_INPUT_BYTES: usize = 64 * 1024;
 /// `rundrone`: reads the drone definition from id_store (global), writes the
 /// run rows to mstore (per-channel).
 pub(crate) async fn start_drone_run(state: &AppState, cmd: RunDroneReq) -> Result<RunResp, String> {
-    let run_id = launch_run(state, &cmd.drone_id, cmd.input.unwrap_or_default(), None, None, None).await?;
+    start_drone_run_as(state, cmd, None).await
+}
+
+/// `rundrone` with the run's starter named: `by` is who the ledger row says started it, `None` for the person's
+/// window (the operator). The registered handler takes it from the connection.
+pub(crate) async fn start_drone_run_as(state: &AppState, cmd: RunDroneReq, by: Option<&str>) -> Result<RunResp, String> {
+    let run_id = launch_run(state, &cmd.drone_id, cmd.input.unwrap_or_default(), None, None, by).await?;
     Ok(RunResp { run_id })
 }
 
 /// Start a run an agent fires with `Drone` `fire`: the ledger row says which agent did it (`by_agent`
-/// is the agent's id), not the operator.
+/// is the agent's id), as `agent:<id>` like every other path, so no agent id can read as the operator.
 pub(crate) async fn start_agent_drone_run(
     state: &AppState,
     drone_id: &str,
     input: serde_json::Value,
     by_agent: &str,
 ) -> Result<String, String> {
-    launch_run(state, drone_id, input, None, None, Some(by_agent)).await
+    let by = Actor::Agent(by_agent.to_string()).label();
+    launch_run(state, drone_id, input, None, None, Some(&by)).await
 }
 
 /// Start the run a job's `drone` action asks for. `job_run_id` is the job
@@ -470,6 +502,14 @@ pub struct ResolveRunResp {
     pub action: String,
 }
 
+/// The answer to a step that waits for the person, as `resolvedronerun` takes it: from the person's proven
+/// window only. An agent's call, and a connection that has proved nothing, is refused whatever it carries,
+/// including the output a `skip` would give the step.
+pub(crate) fn resolve_drone_run_as(ctx: &RpcContext, cmd: ResolveRunReq) -> Result<ResolveRunResp, String> {
+    ctx.operator_only("only the person answers a run that needs attention: ask the person (a run that waits is shown in the Drone pane and the Jobs tab)")?;
+    resolve_drone_run(cmd)
+}
+
 /// `resolvedronerun`: answer a run that is waiting, `needs_attention`, for what to
 /// do with the step that was running when AgentMux stopped.
 pub(crate) fn resolve_drone_run(cmd: ResolveRunReq) -> Result<ResolveRunResp, String> {
@@ -554,9 +594,9 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     });
 
     let s = state.clone();
-    engine.register_typed(COMMAND_UPSERT_DRONE, move |cmd: DroneDefinition, _ctx| {
+    engine.register_typed(COMMAND_UPSERT_DRONE, move |cmd: DroneDefinition, ctx| {
         let s = s.clone();
-        async move { upsert_drone(&s, cmd) }
+        async move { upsert_drone_as(&s, cmd, &recorded_as(&ctx)) }
     });
 
     let s = state.clone();
@@ -566,17 +606,23 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     });
 
     let s = state.clone();
-    engine.register_typed(COMMAND_RUN_DRONE, move |cmd: RunDroneReq, _ctx| {
+    engine.register_typed(COMMAND_RUN_DRONE, move |cmd: RunDroneReq, ctx| {
         let s = s.clone();
-        async move { start_drone_run(&s, cmd).await }
+        async move {
+            let by = run_started_by(&ctx);
+            start_drone_run_as(&s, cmd, by.as_deref()).await
+        }
     });
 
-    engine.register_typed(COMMAND_RESOLVE_DRONE_RUN, move |cmd: ResolveRunReq, _ctx| async move { resolve_drone_run(cmd) });
+    engine.register_typed(COMMAND_RESOLVE_DRONE_RUN, move |cmd: ResolveRunReq, ctx| async move { resolve_drone_run_as(&ctx, cmd) });
     engine.register_typed(COMMAND_RESUME_DRONE_WAIT, move |cmd: ResumeWaitReq, _ctx| async move { resume_drone_wait(cmd) });
     let s = state.clone();
-    engine.register_typed(COMMAND_REPLAY_DRONE_RUN, move |cmd: crate::server::drone_replay::ReplayRunReq, _ctx| {
+    engine.register_typed(COMMAND_REPLAY_DRONE_RUN, move |cmd: crate::server::drone_replay::ReplayRunReq, ctx| {
         let s = s.clone();
-        async move { crate::server::drone_replay::replay_drone_run(&s, cmd).await }
+        async move {
+            let by = run_started_by(&ctx);
+            crate::server::drone_replay::replay_drone_run_as(&s, cmd, by.as_deref()).await
+        }
     });
 
     let s = state.clone();
@@ -745,6 +791,37 @@ mod tests {
         assert_eq!(list(2).len(), 2);
         assert_eq!(list(-5).len(), 0, "a negative limit is clamped to none, not an error");
         assert_eq!(list(i64::MAX).len(), 3, "a huge limit is capped, and still returns what exists");
+    }
+
+    /// The record names the connection's own identity: the person's window is `operator`, an agent is `agent:<id>`
+    /// (and no agent id can read as `operator`), and a connection that has proved nothing is not the operator.
+    #[test]
+    fn a_call_is_recorded_as_its_connection_and_never_as_what_it_claims() {
+        let agent = RpcContext { agent_id: "opaz".into(), ..Default::default() };
+        let named_operator = RpcContext { agent_id: "operator".into(), operator_proven: true, ..Default::default() };
+        assert_eq!(recorded_as(&RpcContext::operator_for_tests()), "operator");
+        assert_eq!(recorded_as(&agent), "agent:opaz");
+        assert_eq!(recorded_as(&named_operator), "agent:operator", "an agent called operator is still an agent, proof flag or not");
+        assert_eq!(recorded_as(&RpcContext::default()), "unproven");
+        assert_eq!(run_started_by(&RpcContext::operator_for_tests()), None, "the window is the ledger's default, the operator");
+        assert_eq!(run_started_by(&agent).as_deref(), Some("agent:opaz"));
+        assert_eq!(run_started_by(&named_operator).as_deref(), Some("agent:operator"));
+        assert_eq!(run_started_by(&RpcContext::default()).as_deref(), Some("unproven"));
+    }
+
+    /// A drone an agent saves has a version that says so, and one the window saves says `operator`.
+    #[tokio::test]
+    async fn a_drone_an_agent_saves_is_shown_as_that_agents() {
+        let state = crate::server::tests::test_state();
+        let agent = RpcContext { agent_id: "opaz".into(), ..Default::default() };
+        let by_agent = upsert_drone_as(&state, drone_named("agents drone"), &recorded_as(&agent)).unwrap();
+        let by_window = upsert_drone_as(&state, drone_named("windows drone"), &recorded_as(&RpcContext::operator_for_tests())).unwrap();
+        let saved_by = |id: &str| state.id_store.version_resolve(id, Pin::Latest).unwrap().expect("a version").saved_by;
+        assert_eq!(saved_by(&by_agent.id), "agent:opaz");
+        assert_eq!(saved_by(&by_window.id), "operator");
+        // A save with no caller behind it (a template the person installed) is the operator's, as before.
+        let plain = upsert_drone(&state, drone_named("installed")).unwrap();
+        assert_eq!(saved_by(&plain.id), "operator");
     }
 
     #[tokio::test]
