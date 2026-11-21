@@ -124,6 +124,9 @@ pub(crate) fn record_broadcast(state: &AppState, block_id: &str, text: &str) {
     }
 }
 
+/// What a history entry or a draft is: what the person typed, so only their window writes one.
+const TYPED_BY_THE_PERSON: &str = "only the person's own typing is kept as typed by them: ask the person to send it from the AgentMux window";
+
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let s = state.clone();
     engine.register_typed(COMMAND_AGENT_INPUT_HISTORY, move |cmd: CommandInputHistoryData, _ctx| {
@@ -132,9 +135,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     });
 
     let s = state.clone();
-    engine.register_typed(COMMAND_AGENT_INPUT_HISTORY_APPEND, move |cmd: CommandInputHistoryAppendData, _ctx| {
+    engine.register_typed(COMMAND_AGENT_INPUT_HISTORY_APPEND, move |cmd: CommandInputHistoryAppendData, ctx| {
         let s = s.clone();
-        async move { input_history_append(&s, cmd) }
+        async move {
+            ctx.operator_only(TYPED_BY_THE_PERSON)?;
+            input_history_append(&s, cmd)
+        }
     });
 
     let s = state.clone();
@@ -168,9 +174,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     });
 
     let s = state.clone();
-    engine.register_typed(COMMAND_AGENT_INPUT_DRAFT, move |cmd: CommandInputDraftData, _ctx| {
+    engine.register_typed(COMMAND_AGENT_INPUT_DRAFT, move |cmd: CommandInputDraftData, ctx| {
         let s = s.clone();
-        async move { input_draft(&s, cmd) }
+        async move {
+            if cmd.text.is_some() {
+                ctx.operator_only(TYPED_BY_THE_PERSON)?;
+            }
+            input_draft(&s, cmd)
+        }
     });
 }
 

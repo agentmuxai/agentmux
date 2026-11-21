@@ -215,6 +215,75 @@ pub fn resolve_name_to_uid(
     }
 }
 
+/// How many ids a refusal offers.
+const MOST_SUGGESTIONS: usize = 3;
+
+/// Edits (insert, delete, change one letter, swap two neighbours) between two short strings.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    let mut d = vec![vec![0usize; b.len() + 1]; a.len() + 1];
+    for (i, row) in d.iter_mut().enumerate() {
+        row[0] = i;
+    }
+    for j in 0..=b.len() {
+        d[0][j] = j;
+    }
+    for i in 1..=a.len() {
+        for j in 1..=b.len() {
+            let same = usize::from(a[i - 1] != b[j - 1]);
+            d[i][j] = (d[i - 1][j - 1] + same).min(d[i - 1][j] + 1).min(d[i][j - 1] + 1);
+            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
+                d[i][j] = d[i][j].min(d[i - 2][j - 2] + 1);
+            }
+        }
+    }
+    d[a.len()][b.len()]
+}
+
+/// Which of `ids` a typed name nobody answers to most likely meant, best first, at most three: the id it
+/// starts with (an agent's workspace folder is its id and a suffix, "agent2-0630f" for `agent2`), the id that
+/// starts with it (a name cut short), or one a typo or two away. Case and a leading `@` do not count.
+pub fn closest_ids(typed: &str, ids: &[String]) -> Vec<String> {
+    let typed = typed.trim().trim_start_matches('@').to_lowercase();
+    if typed.len() < 2 {
+        return Vec::new();
+    }
+    let mut scored: Vec<(usize, &String)> = ids
+        .iter()
+        .filter_map(|id| {
+            let low = id.to_lowercase();
+            let rank = if low == typed {
+                0
+            } else if typed.starts_with(&format!("{low}-")) || typed.starts_with(&format!("{low}_")) {
+                1
+            } else if low.starts_with(&typed) && typed.len() >= 3 {
+                2
+            } else {
+                let d = edit_distance(&typed, &low);
+                if d <= (typed.len().min(low.len()) / 4).max(1) { 2 + d } else { return None }
+            };
+            Some((rank, id))
+        })
+        .collect();
+    scored.sort();
+    scored.dedup_by(|a, b| a.1 == b.1);
+    scored.into_iter().take(MOST_SUGGESTIONS).map(|(_, id)| id.clone()).collect()
+}
+
+/// The ids (the names an agent is addressed by) of the agents this computer knows, running or not: the ones a
+/// name that nobody answers to is offered back from. Only agents a name may mean, as `agents_matching_name` holds.
+pub fn known_agent_ids(store: &Store, registry: &ReactiveHandler) -> Vec<String> {
+    let mut ids: Vec<String> = store
+        .agent_def_list()
+        .map(|defs| defs.into_iter().filter(|d| d.is_seeded == 0 && d.user_hidden == 0).map(|d| d.slug).collect())
+        .unwrap_or_default();
+    ids.extend(registry.list_agents().into_iter().map(|r| r.agent_id));
+    ids.retain(|id| !id.is_empty());
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
 /// The definitions, in any channel, that `typed` names: the one whose slug
 /// it is, else every one whose current title routes to it, else the one it
 /// is a former name of. Only agents a name may mean: never a template, never
@@ -291,6 +360,31 @@ mod tests {
 
     fn registry() -> ReactiveHandler {
         ReactiveHandler::new()
+    }
+
+    #[test]
+    fn a_name_nobody_answers_to_is_offered_the_closest_ids() {
+        let ids: Vec<String> = ["agent2", "agent20", "agenty", "wren", "loap-3", "Naki-2"].iter().map(|s| s.to_string()).collect();
+        // The workspace folder's form: the id and a suffix.
+        assert_eq!(closest_ids("agent2-0630f", &ids), ["agent2"]);
+        // Case and a leading @.
+        assert_eq!(closest_ids("@WREN", &ids), ["wren"]);
+        // A name cut short, and a typo.
+        assert_eq!(closest_ids("loap", &ids), ["loap-3"]);
+        assert_eq!(closest_ids("wern", &ids), ["wren"]);
+        assert_eq!(closest_ids("agentx", &ids), ["agent2", "agenty"]);
+        // Nobody is close: no suggestion rather than a bad one.
+        assert!(closest_ids("zzzzzz", &ids).is_empty());
+        assert!(closest_ids("a", &ids).is_empty());
+    }
+
+    #[test]
+    fn the_known_ids_feed_the_suggestions() {
+        let store = store_with(&[(UID_Y, "AgentY", "agenty")]);
+        let reg = registry();
+        let ids = known_agent_ids(&store, &reg);
+        assert!(ids.contains(&"agenty".to_string()));
+        assert_eq!(closest_ids("agenty-77aa1", &ids), ["agenty"]);
     }
 
     #[test]

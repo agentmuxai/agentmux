@@ -251,6 +251,9 @@ mod peer_veto_tests;
 #[path = "tests/mcp_actor_tests.rs"]
 mod mcp_actor_tests;
 #[cfg(test)]
+#[path = "tests/person_only_ws_tests.rs"]
+mod person_only_ws_tests;
+#[cfg(test)]
 #[path = "tests/rpc_attribution_tests.rs"]
 mod rpc_attribution_tests;
 #[cfg(test)]
