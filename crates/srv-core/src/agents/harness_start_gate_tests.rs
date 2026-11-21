@@ -8,7 +8,7 @@
 //! process and names an agent's working folder; each one either asks the rule or is listed below with the reason
 //! it starts no harness. A new such file fails here, so whoever adds it reads the rule first.
 //!
-//! What it reaches: a file that has both a process start (`Command::new`, `CommandBuilder::new`) and a name for
+//! What it reaches: a file that has both a process start (a `Command` or a pty command builder) and a name for
 //! an agent's folder. The pane controllers that start a harness through a shared builder are asked the rule by
 //! their own tests (`mcp_folder_rule`, `agent_runtime`).
 
