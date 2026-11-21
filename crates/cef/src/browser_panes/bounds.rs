@@ -754,6 +754,12 @@ wrap_task! {
     }
 }
 
+/// The size a pane's zoom is told it now has: its rect's width and height, or none for a pane laid out at
+/// 0×0 (on a tab that is not shown, which has no size to fit a zoom to; it is fitted when it is shown again).
+fn zoom_follow_size(r: &PaneBounds) -> Option<(i32, i32)> {
+    (r.width > 0 && r.height > 0).then_some((r.width, r.height))
+}
+
 /// Apply on the UI thread: only live panes that still belong to `window_label`.
 /// Each pane's base is installed with its rect (`note_layout_base`).
 fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option<LayoutBase>)]) {
@@ -770,6 +776,14 @@ fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option
     }
     if live.is_empty() {
         return;
+    }
+    // An agent's zoom of a pane follows the pane's size. This batch is how the page moves every pane, so
+    // the follower hears of the new size here (the per-pane `resize` it was first wired to is no longer
+    // what the page calls).
+    for (r, _) in &live {
+        if let Some(size) = zoom_follow_size(r) {
+            crate::browser_api::zoom::on_pane_resized(state, &r.block_id, size);
+        }
     }
     let views = crate::pane_backend::window_is_views(state, window_label);
     #[cfg(target_os = "windows")]
@@ -1371,5 +1385,31 @@ mod tests {
         }
         assert!(rx1.try_recv().is_ok());
         assert!(rx2.try_recv().is_ok());
+    }
+
+    #[test]
+    fn a_zoom_is_told_the_size_of_a_pane_that_has_one_and_not_of_a_collapsed_one() {
+        let pane = |width, height| PaneBounds { block_id: "b".into(), x: 0, y: 0, width, height };
+        assert_eq!(zoom_follow_size(&pane(900, 1400)), Some((900, 1400)));
+        assert_eq!(zoom_follow_size(&pane(0, 0)), None, "a pane on a tab that is not shown has no size to fit to");
+        assert_eq!(zoom_follow_size(&pane(900, 0)), None);
+        assert_eq!(zoom_follow_size(&pane(0, 1400)), None);
+    }
+
+    /// The page moves every pane through `apply` (one batch per window), so that is where an agent's
+    /// zoom has to hear of a new size: it once was only told by the per-pane `resize`, which the page no
+    /// longer calls, and a `zoom width` then stayed at the size of the pane it was made on.
+    #[test]
+    fn the_batch_that_moves_panes_tells_the_zoom_their_new_size() {
+        let source = include_str!("bounds.rs");
+        let body = source.split("
+fn apply(").nth(1).expect("fn apply is in this file");
+        let body = body.split("
+}
+").next().unwrap_or(body);
+        assert!(
+            body.contains("browser_api::zoom::on_pane_resized") && body.contains("zoom_follow_size"),
+            "apply must hand each pane's new size to the zoom's follower"
+        );
     }
 }
