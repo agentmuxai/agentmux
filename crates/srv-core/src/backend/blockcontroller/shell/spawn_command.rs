@@ -23,6 +23,14 @@ pub(super) struct SpawnPlan<'a> {
     pub(super) pane_cwd: &'a str,
 }
 
+/// Sets `AGENTMUX_LOG_DIR` to the instance's log folder. An instance with no log folder (srv run
+/// without its launcher) sets nothing: a made-up folder would send `muxlog` to a place no log is in.
+pub(super) fn apply_log_dir(cmd: &mut CommandBuilder, logs_dir: Option<&std::path::Path>) {
+    if let Some(dir) = logs_dir {
+        cmd.env("AGENTMUX_LOG_DIR", dir);
+    }
+}
+
 impl ShellController {
     /// The command for the pane: WSL, SSH, a container, a program, a shell-wrapped
     /// command or the login shell, in that order.
@@ -203,13 +211,10 @@ impl ShellController {
         c.env("AGENTMUX_TABID", &self.tab_id);
         c.env("AGENTMUX_VERSION", env!("CARGO_PKG_VERSION"));
 
-        // Inject log directory so agents can find logs without guessing.
-        // Always ~/.agentmux/logs/ — matches both host and sidecar.
-        let log_dir = dirs::home_dir()
-            .unwrap_or_default()
-            .join(".agentmux")
-            .join("logs");
-        c.env("AGENTMUX_LOG_DIR", log_dir.to_string_lossy().as_ref());
+        // The log folder, so agents and `muxlog` find the logs without guessing: this instance's,
+        // as the launcher resolved it (per version and channel, under a home override too), the
+        // same folder the host and srv write to and `app.logs.tail` reads.
+        apply_log_dir(&mut c, agentmux_common::DataPaths::from_env().map(|p| p.logs_dir).as_deref());
 
         // AGENTMUX_LOCAL_URL / AGENTMUX_AUTH_KEY are set for every kind of command
         // in `apply_pane_env`, not here.
@@ -350,5 +355,28 @@ fn wire_tool_dirs(c: &mut CommandBuilder) {
         crate::backend::tool_store::UserToolsPrecedence::AfterExisting,
     ) {
         c.env("PATH", path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn the_pane_gets_the_instances_log_folder_not_the_launchers_home_folder() {
+        let mut cmd = CommandBuilder::new("sh");
+        let logs = Path::new("/tmp/am-home/channels/stable/versions/9.9.9/logs");
+        apply_log_dir(&mut cmd, Some(logs));
+        assert_eq!(cmd.get_env("AGENTMUX_LOG_DIR").map(Path::new), Some(logs));
+    }
+
+    #[test]
+    fn an_instance_with_no_log_folder_sets_nothing() {
+        let mut cmd = CommandBuilder::new("sh");
+        // A builder starts from this process's env, which a test run inside AgentMux has the variable in.
+        cmd.env_clear();
+        apply_log_dir(&mut cmd, None);
+        assert!(cmd.get_env("AGENTMUX_LOG_DIR").is_none());
     }
 }
