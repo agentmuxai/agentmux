@@ -51,13 +51,31 @@ export function windowRange(starts: readonly number[], top: number, bottom: numb
     return { first, last: Math.max(lo, Math.min(n, first + 1)) };
 }
 
-/** The nearest ancestor the person scrolls: the list in a wide pane, the whole board in a narrow one. */
+/**
+ * The nearest ancestor the person scrolls: the list in a wide pane, the whole board in a narrow one, the
+ * lanes in the lanes view. An ancestor that may scroll but has no more content than room (the board in
+ * the lanes view grows to its content) is passed over for one that does; if none overflows yet, the
+ * nearest that may scroll.
+ */
 function scrollerOf(el: HTMLElement): HTMLElement | null {
+    let first: HTMLElement | null = null;
     for (let p = el.parentElement; p; p = p.parentElement) {
         const o = getComputedStyle(p).overflowY;
-        if (o === "auto" || o === "scroll" || o === "overlay") return p;
+        if (o !== "auto" && o !== "scroll" && o !== "overlay") continue;
+        if (p.scrollHeight > p.clientHeight + 1) return p;
+        first ??= p;
     }
-    return null;
+    return first;
+}
+
+/**
+ * How many screen pixels a layout pixel is here. A pane zoomed with CSS `zoom` reports rectangles in
+ * screen pixels, while card heights, spacers and `scrollTop` are in layout pixels; the list's own width, in
+ * both, gives the ratio (1 where nothing is zoomed, or where the browser reports layout pixels already).
+ */
+function zoomOf(el: HTMLElement, rect: DOMRect): number {
+    const z = el.offsetWidth > 0 ? rect.width / el.offsetWidth : 1;
+    return Number.isFinite(z) && z > 0 ? z : 1;
 }
 
 interface Props<T> {
@@ -129,14 +147,17 @@ function createLayout<T>(props: Props<T>) {
 /** What ties the layout to the page: the scrolling ancestor, the band in view, and each card's height. */
 function createPageSync(wrap: () => HTMLElement, layout: ReturnType<typeof createLayout>) {
     let scroller: HTMLElement | null = null;
+    // Screen pixels to a layout pixel, as the last update found them.
+    let zoom = 1;
     const update = () => {
         const el = wrap();
         if (!el) return;
         scroller = scrollerOf(el);
         const w = el.getBoundingClientRect();
+        zoom = zoomOf(el, w);
         const s = scroller ? scroller.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
         layout.setGap(parseFloat(getComputedStyle(el).rowGap) || 0);
-        layout.setView({ top: s.top - w.top, bottom: s.bottom - w.top });
+        layout.setView({ top: (s.top - w.top) / zoom, bottom: (s.bottom - w.top) / zoom });
     };
     let queued = false;
     const later = () => {
@@ -167,7 +188,7 @@ function createPageSync(wrap: () => HTMLElement, layout: ReturnType<typeof creat
         }
         layout.relayout();
         if (anchor?.isConnected && scroller) {
-            const moved = anchor.getBoundingClientRect().top - before;
+            const moved = (anchor.getBoundingClientRect().top - before) / zoom;
             if (Math.abs(moved) >= 1) scroller.scrollTop += moved;
         }
     };

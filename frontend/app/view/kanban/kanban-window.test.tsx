@@ -90,3 +90,73 @@ describe("WindowedList", () => {
         expect(above + shown.length * 96 + below).toBe(500 * 96);
     });
 });
+
+describe("WindowedList in a zoomed pane and in the lanes view", () => {
+    afterEach(() => {
+        cleanup();
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+    });
+
+    const items = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `t${i}` }));
+    const rows = (c: HTMLElement) => [...c.querySelectorAll(".row")].map((r) => r.textContent);
+
+    it("reads the band in layout pixels when the pane is zoomed 1.5 times", () => {
+        let scrollTop = 0;
+        vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+            cb(0);
+            return 0;
+        });
+        // Rectangles are in screen pixels (1.5 a layout pixel); offsetWidth, scrollTop and heights are layout pixels.
+        vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (this: HTMLElement) {
+            return this.classList.contains("kanban-window") ? 300 : 0;
+        });
+        vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+            const scroller = this.classList.contains("scroller");
+            const top = scroller ? 0 : this.classList.contains("kanban-window") ? -scrollTop * 1.5 : 0;
+            return { top, bottom: top + (scroller ? 500 * 1.5 : 0), left: 0, right: 0, width: this.classList.contains("kanban-window") ? 450 : 0, height: 0 } as DOMRect;
+        });
+        const { container } = render(() => (
+            <div class="scroller" style={{ "overflow-y": "auto" }}>
+                <WindowedList items={items(500)} keyOf={(t) => t.id} each={(t) => <span class="row">{t.id}</span>} />
+            </div>
+        ));
+        scrollTop = 24_000;
+        container.querySelector(".scroller")!.dispatchEvent(new Event("scroll"));
+        // The same cards as the unzoomed list at 24000 px: the card ending past 24000 - 800 px is the 242nd.
+        expect(rows(container)[0]).toBe("t241");
+        expect(rows(container).length).toBeLessThan(40);
+    });
+
+    it("uses the ancestor that overflows, not a nearer one that grows to its content", () => {
+        vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+            cb(0);
+            return 0;
+        });
+        let scrollTop = 0;
+        // The board (inner) has room for all of it; the lanes (outer) scroll.
+        vi.spyOn(Element.prototype, "scrollHeight", "get").mockImplementation(function (this: Element) {
+            return this.classList.contains("lanes") ? 50_000 : 100;
+        });
+        vi.spyOn(Element.prototype, "clientHeight", "get").mockImplementation(function (this: Element) {
+            return this.classList.contains("lanes") ? 500 : 100;
+        });
+        vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+            const lanes = this.classList.contains("lanes");
+            const top = lanes ? 0 : this.classList.contains("kanban-window") ? -scrollTop : 0;
+            return { top, bottom: top + (lanes ? 500 : 0), left: 0, right: 0, width: 0, height: 0 } as DOMRect;
+        });
+        const { container } = render(() => (
+            <div class="lanes" style={{ "overflow-y": "auto" }}>
+                <div class="board" style={{ "overflow-y": "auto" }}>
+                    <WindowedList items={items(500)} keyOf={(t) => t.id} each={(t) => <span class="row">{t.id}</span>} />
+                </div>
+            </div>
+        ));
+        // The first screen draws 14 cards, as it does in the other lists, not all 500.
+        expect(rows(container)).toHaveLength(14);
+        scrollTop = 24_000;
+        container.querySelector(".lanes")!.dispatchEvent(new Event("scroll"));
+        expect(rows(container)[0]).toBe("t241");
+    });
+});
