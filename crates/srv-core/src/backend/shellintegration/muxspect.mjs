@@ -95,6 +95,17 @@ Usage:
                                   reports what is PERSISTED, which can lag
                                   what the frontend is currently rendering.
                                   Exits non-zero if any tree has violations.
+  muxspect browsers [--sample <seconds>] [--detail] [--json]
+                                  which page each renderer of this instance
+                                  draws, with CPU over the sample (default 3 s),
+                                  whether Chromium thinks the page is visible,
+                                  and what animations run: the question 'which
+                                  renderer is busy, and why' with no DevTools
+                                  and no restart, on a release build too. A
+                                  person's page shows its origin only. --detail
+                                  adds each page's main-thread time by kind of
+                                  work. A page the browser discarded or the
+                                  window froze is listed as such, never asked.
   muxspect work [state] [--json]  the Muxqueue backlog — the shared work queue
                                   any agent can add to and any agent can claim
                                   (REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md).
@@ -131,8 +142,8 @@ Usage:
   muxspect --channel <name> <command>
                                   run a read against another instance on this
                                   machine instead of the one you are in. For
-                                  list, describe, watch, dock, layout and
-                                  verify-sender; name it as 'muxspect
+                                  list, describe, watch, dock, layout, browsers
+                                  and verify-sender; name it as 'muxspect
                                   instances' shows it. Never dock clear.
   muxspect help                   this message
 
@@ -190,7 +201,7 @@ export function logSrvVersion(resp) {
 
 // The commands `--channel` can aim at another instance: the read routes the
 // server forwards (`forwardable_muxspect_routes` in server/routes.rs).
-export const CHANNEL_COMMANDS = ["list", "describe", "watch", "dock", "layout", "verify-sender"];
+export const CHANNEL_COMMANDS = ["list", "describe", "watch", "dock", "layout", "verify-sender", "browsers"];
 
 // Set from `--channel` for the whole run; every apiGet then names it.
 let activeChannel;
@@ -775,7 +786,9 @@ export function renderLayout(data) {
  */
 export function parseArgs(argv) {
     const { channel, rest } = splitChannelFlag(argv);
-    argv = rest;
+    const { sample, rest: args } = splitSampleFlag(rest);
+    argv = args;
+    const detail = argv.includes("--detail") ? true : undefined;
     const json = argv.includes("--json");
     const help = argv.includes("--help") || argv.includes("-h");
     const positional = argv.filter((a) => !a.startsWith("-"));
@@ -788,7 +801,7 @@ export function parseArgs(argv) {
     } else {
         blockId = positional[1];
     }
-    return { cmd, sub, blockId, nodeId, json, help, channel };
+    return { cmd, sub, blockId, nodeId, json, help, channel, sample, detail };
 }
 
 /**
@@ -828,6 +841,112 @@ export function channelProblem(cmd, sub, channel) {
     return null;
 }
 
+/**
+ * Pull `--sample <seconds>` (or `--sample=<seconds>`) out of argv so its value is never read as a
+ * positional. `sample` is `undefined` when absent and `NaN` when the value is not a number (the
+ * caller reports that).
+ */
+export function splitSampleFlag(argv) {
+    const rest = [];
+    let sample;
+    const seconds = (text) => (text.trim() === "" ? NaN : Number(text));
+    for (let i = 0; i < argv.length; i++) {
+        const a = argv[i];
+        if (a === "--sample") {
+            // A missing value, or the next flag, is not a number: and the flag is not swallowed.
+            const value = argv[i + 1];
+            if (value === undefined || value.startsWith("-")) {
+                sample = NaN;
+            } else {
+                sample = seconds(value);
+                i++;
+            }
+        } else if (a.startsWith("--sample=")) {
+            sample = seconds(a.slice("--sample=".length));
+        } else {
+            rest.push(a);
+        }
+    }
+    return { sample, rest };
+}
+
+/** The request path for `muxspect browsers`: the sample length and whether to read the counters. */
+export function browsersPath(sample, detail) {
+    const params = [];
+    if (sample !== undefined) params.push(`sample=${encodeURIComponent(String(sample))}`);
+    if (detail) params.push("detail=1");
+    return `/api/v1/muxspect/browsers${params.length ? `?${params.join("&")}` : ""}`;
+}
+
+/** What the VISIBLE column says: the page's own answer, or why it gave none. */
+function browserVisible(r) {
+    switch (r.answer) {
+        case "answered":
+            return r.visibility ?? "-";
+        case "no_answer":
+            return "no answer 1.5 s";
+        case "failed":
+            return `failed${r.error ? `: ${r.error}` : ""}`;
+        default:
+            return r.answer; // asleep, frozen, unknown
+    }
+}
+
+/** The PAGE column: AgentMux's own page by its title, a person's page by its origin only. */
+function browserPage(r) {
+    const name = r.role === "browser-pane" ? r.origin || "(no address)" : r.title || r.label;
+    return r.frame ? `${name} (frame)` : name;
+}
+
+function browserAnimations(r) {
+    if (r.animations === undefined || r.animations === null) return "-";
+    const kinds = (r.kinds ?? []).length ? ` css: ${r.kinds.join(", ")}` : "";
+    return `${r.animations}${kinds}`;
+}
+
+/**
+ * Render `muxspect browsers`: one row per renderer (and one per browser with no page), busiest
+ * first, then the rest of the instance for scale. Exported for muxspect.test.mjs.
+ */
+export function renderBrowsers(data) {
+    if (data.error) {
+        console.error(`browsers: ${data.error}`);
+        return;
+    }
+    const rows = data.browsers ?? [];
+    if (!rows.length) {
+        console.log("no browsers listed (the window host has none, or none has reported a renderer yet)");
+        return;
+    }
+    const cols = ["PID", "CPU%", "ROLE", "PAGE", "VISIBLE", "ANIMATIONS (running)", "SHARED"];
+    const table = rows.map((r) => [
+        r.pid == null ? "-" : String(r.pid),
+        r.cpu_pct == null ? (r.pid == null ? "-" : "?") : r.cpu_pct.toFixed(1),
+        r.role,
+        browserPage(r),
+        browserVisible(r),
+        browserAnimations(r),
+        (r.shared_with ?? []).length ? `also ${r.shared_with.join(", ")}` : "-",
+    ]);
+    const widths = cols.map((c, i) => Math.max(c.length, ...table.map((t) => t[i].length)));
+    const line = (cells) => cells.map((c, i) => c.padEnd(widths[i])).join("  ").trimEnd();
+    console.log(line(cols));
+    for (const t of table) console.log(line(t));
+    for (const r of rows.filter((x) => x.cpu_note)) console.log(`  pid ${r.pid ?? "-"} (${r.label}): no CPU figure, ${r.cpu_note}`);
+    for (const r of rows.filter((x) => x.main_thread_pct)) {
+        const parts = Object.entries(r.main_thread_pct).map(([k, v]) => `${k.replace(/Duration$/, "")} ${v.toFixed(1)}%`);
+        console.log(`  pid ${r.pid ?? "-"} main thread: ${parts.join("  ")}`);
+    }
+    if (data.others) {
+        console.log(
+            `${data.others.processes} other AgentMux processes (GPU, network service, window host, srv, launcher): ` +
+                `${data.others.cpu_pct.toFixed(1)}% together, for scale`,
+        );
+    }
+    if (data.page_facts === false) console.log("note: the window host gave no page facts (an older build?), so pages are shown by role only");
+    console.log(`CPU is percent of one core over ${Number(data.sample_secs).toFixed(1)} s.`);
+}
+
 /** A long uptime as days, hours and minutes: '2d 3h', '5h 12m', '40s'. */
 export function uptimeString(ms) {
     if (!Number.isFinite(ms) || ms < 0) return "?";
@@ -862,7 +981,7 @@ export function renderInstances(data) {
 }
 
 async function main() {
-    const { cmd, sub, blockId, nodeId, json, help, channel } = parseArgs(process.argv.slice(2));
+    const { cmd, sub, blockId, nodeId, json, help, channel, sample, detail } = parseArgs(process.argv.slice(2));
 
     if (cmd === "help" || help) {
         console.log(USAGE);
@@ -893,6 +1012,15 @@ async function main() {
     }
 
     const { url, authKey } = requireEnv();
+
+    if (cmd === "browsers") {
+        if (Number.isNaN(sample)) fail("--sample needs a number of seconds, for example 'muxspect browsers --sample 5'");
+        const data = await apiGet(url, authKey, browsersPath(sample, detail));
+        if (json) console.log(JSON.stringify(data, null, 2));
+        else renderBrowsers(data);
+        if (data.error) process.exitCode = 1;
+        return;
+    }
 
     if (cmd === "instances") {
         const data = await apiGet(url, authKey, "/api/v1/muxspect/instances");

@@ -381,7 +381,7 @@ impl ContainerError {
             ),
             Self::KeyRoute(reason) => reason.clone(),
             Self::VolumeRefused { path } => format!(
-                "This agent's volumes list {path}, which a container may not mount (a container runtime's socket or pipe or a folder holding one, or a folder the CLI keeps its sessions in): remove it from the agent's volumes. An agent that needs to run containers has to run on this machine, not in a container."
+                "This agent's workspace or volumes list {path}, which a container may not mount (a container runtime's socket or pipe or a folder holding one, a folder the CLI keeps its sessions in, or the AgentMux folders or a folder that holds them, such as a home folder): remove it from the agent's volumes, or give the agent a folder of its own as its workspace. An agent that needs to run containers has to run on this machine, not in a container."
             ),
         }
     }

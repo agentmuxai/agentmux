@@ -108,6 +108,11 @@ export function viaStore(s: AppUpdateStatus | null = appUpdate()): boolean {
     return s?.install === "windows-store";
 }
 
+/** A `.deb` or `.rpm` install: its restart asks the system's own permission prompt (a password) before it goes on. */
+export function viaPackage(s: AppUpdateStatus | null = appUpdate()): boolean {
+    return s?.install === "linux-package";
+}
+
 /** Whether dotted numeric version `a` is newer than `b` (numbers, not text: 0.60.100 is newer than 0.60.17); a missing part counts as 0. */
 function isNewer(a: string, b: string): boolean {
     const pa = a.split(".").map((n) => Number.parseInt(n, 10) || 0);
@@ -499,7 +504,8 @@ export async function startAppUpdateDownload(): Promise<void> {
 
 /**
  * Restart into the staged release: once agents finish their turn, or `now`.
- * The launcher then asks the user in a dialog of its own.
+ * The restart is then decided: the launcher restarts without asking again (only a `.deb` or `.rpm` install still shows
+ * the system's own permission prompt).
  */
 export async function upgradeAndRestart(now: boolean): Promise<void> {
     await hostAction("restart", now);

@@ -104,3 +104,56 @@ async fn a_status_push_that_is_not_a_background_launch_records_no_task() {
     dock_node_status(&state, dock("node-2", &block, false)).unwrap();
     assert!(list_background_tasks(&state, req(serde_json::json!({ "blockid": block }))).unwrap().is_empty());
 }
+
+// Answering a question or a permission an agent put to the person is the person's: only the AgentMux window,
+// proven through the host, may. Each of the three calls is checked through an engine, since the guard is in
+// the registration, ahead of the handler the tests above call directly.
+async fn answer_call(ctx: RpcContext, command: &str, data: serde_json::Value) -> Result<(), String> {
+    let (engine, mut rx) = WshRpcEngine::new();
+    let state = test_state();
+    register_tool_decision_and_narration(&engine, &state);
+    register_agent_questions(&engine, &state);
+    engine.set_rpc_context(ctx);
+    engine.handle_message(crate::backend::rpc_types::RpcMessage {
+        command: command.to_string(),
+        reqid: "req-answer".to_string(),
+        data: Some(data),
+        ..Default::default()
+    });
+    let resp = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv()).await.unwrap().unwrap();
+    if resp.error.is_empty() { Ok(()) } else { Err(resp.error) }
+}
+
+/// Each call with arguments that get past the guard to the handler's own first error.
+fn answer_calls() -> Vec<(&'static str, serde_json::Value, &'static str)> {
+    vec![
+        (COMMAND_TOOL_DECISION, serde_json::json!({ "blockid": "no-such-block", "request_id": "tu-1", "outcome": "allow", "scope": "once" }), "tooldecision: no controller for block no-such-block"),
+        (COMMAND_AGENT_ANSWER, serde_json::json!({ "blockid": "b", "tool_use_id": "", "answers": {} }), "agent.answer: MISSING_ARG: tool_use_id"),
+        (COMMAND_AGENT_CANCEL, serde_json::json!({ "blockid": "no-such-block", "tool_use_id": "tu-1" }), "agent.cancel: no controller for block no-such-block"),
+    ]
+}
+
+#[tokio::test]
+async fn the_answer_calls_pass_the_window_to_the_handler() {
+    for (command, data, reaches) in answer_calls() {
+        let err = answer_call(RpcContext::operator_for_tests(), command, data).await.unwrap_err();
+        assert_eq!(err, reaches, "{command}: the window gets as far as the handler");
+    }
+}
+
+#[tokio::test]
+async fn the_answer_calls_refuse_a_connection_registered_as_an_agent_even_with_the_proof() {
+    for (command, data, _) in answer_calls() {
+        let agent = RpcContext { agent_id: "AgentX".into(), operator_proven: true, ..Default::default() };
+        let err = answer_call(agent, command, data).await.unwrap_err();
+        assert!(err.starts_with("FORBIDDEN: only the person answers"), "{command}: {err}");
+    }
+}
+
+#[tokio::test]
+async fn the_answer_calls_refuse_a_connection_that_is_not_the_window() {
+    for (command, data, _) in answer_calls() {
+        let err = answer_call(RpcContext::default(), command, data).await.unwrap_err();
+        assert!(err.contains("isn't the AgentMux window"), "{command}: {err}");
+    }
+}

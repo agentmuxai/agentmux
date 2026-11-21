@@ -7,9 +7,15 @@
 //
 //   build  --dir <files> --tag vX.Y.Z --out <dir> [--created-at <iso>]
 //          [--image <name>=<registry path>@sha256:<64 hex>]...
+//          [--floor-file <path>] [--shared-store-changed <true|false>]
 //       writes AgentMux-<v>-manifest.json (every file in <files>, with its size
 //       and SHA-256; with --image, also the container images the release
-//       published, each by the digest of the pushed image) and
+//       published, each by the digest of the pushed image; and an `upgrade`
+//       object: `floor`, the oldest version that may upgrade straight to this
+//       release, read from the repository's UPGRADE_FLOOR (or --floor-file),
+//       and `shared_store_changed` when given. The build stops, and nothing is
+//       signed, when the floor file is missing, isn't a plain X.Y.Z, or is
+//       above this release's version) and
 //       AgentMux-<v>-envelope.json (the release's tag and the manifest's
 //       SHA-256: the small document that is signed) into <dir>.
 //   sign-kms --envelope <file> --key-id <alias|arn> --id <k1> --out <file>
@@ -31,7 +37,8 @@
 //       checks what the app checks (crates/common/src/update_manifest.rs): the
 //       signature of the envelope, its tag, the manifest's hash and format; with
 //       --files, also that every file in <files> is in the manifest with that
-//       size and hash, and that the manifest lists nothing else. --keys-file
+//       size and hash, and that the manifest lists nothing else; an `upgrade`
+//       object, when there is one, must be well formed. --keys-file
 //       is crates/common/update-keys.json, the keys the app pins. The SSH
 //       signature (.sshsig) is checked when it is there, and must be there for
 //       a release from SSHSIG_FLOOR on: with this script's own parser and with
@@ -150,12 +157,45 @@ export function checkImages(images) {
     }
 }
 
-/** The manifest and envelope texts for a release's files (and images, when it published any). */
-export function buildRelease({ files, tag, createdAt, images }) {
+// The `upgrade` object a manifest may carry (SPEC_UPGRADE_FLOOR_IN_SIGNED_MANIFEST). Optional, under format 1: an app that
+// does not know it ignores it. The app (crates/common/src/update_manifest.rs, `Manifest::signed_floor`) enforces the same rules.
+const PLAIN_VERSION_RE = /^\d+\.\d+\.\d+$/;
+
+/** The floor in `UPGRADE_FLOOR` (a plain `X.Y.Z` and a newline). Throws when the file is missing or holds anything else. */
+export function readFloorFile(path) {
+    let text;
+    try {
+        text = readFileSync(path, "utf8");
+    } catch (e) {
+        throw new Error(`the upgrade floor file ${path} can't be read: ${e.code ?? e.message}`);
+    }
+    const floor = text.trim();
+    if (!PLAIN_VERSION_RE.test(floor)) throw new Error(`the upgrade floor file ${path} must hold one version (X.Y.Z), not ${JSON.stringify(floor)}`);
+    return floor;
+}
+
+/**
+ * Throws unless `upgrade` is a usable `upgrade` object for the release `version`: `floor` a plain `X.Y.Z` that is not above
+ * the release's own version, and `shared_store_changed`, when present, a boolean. Fields it does not know are left alone.
+ */
+export function checkUpgrade(upgrade, version) {
+    if (upgrade === null || typeof upgrade !== "object" || Array.isArray(upgrade)) throw new Error("upgrade isn't an object");
+    if (typeof upgrade.floor !== "string" || !PLAIN_VERSION_RE.test(upgrade.floor)) throw new Error(`upgrade.floor ${JSON.stringify(upgrade.floor)} isn't a plain version (X.Y.Z)`);
+    if (!versionAtLeast(version, upgrade.floor)) throw new Error(`upgrade.floor ${upgrade.floor} is above the release's own version ${version}`);
+    if (upgrade.shared_store_changed !== undefined && typeof upgrade.shared_store_changed !== "boolean") throw new Error("upgrade.shared_store_changed isn't true or false");
+}
+
+/** The manifest and envelope texts for a release's files (and images and `upgrade`, when it has any). */
+export function buildRelease({ files, tag, createdAt, images, upgrade }) {
     const body = { format: MANIFEST_FORMAT, version: versionOfTag(tag), tag, files };
     if (images?.length) {
         checkImages(images);
         body.images = images.map(({ name, ref, digest }) => ({ name, ref, digest }));
+    }
+    if (upgrade !== undefined) {
+        checkUpgrade(upgrade, body.version);
+        body.upgrade = { floor: upgrade.floor };
+        if (upgrade.shared_store_changed !== undefined) body.upgrade.shared_store_changed = upgrade.shared_store_changed;
     }
     const manifest = JSON.stringify(body, null, 2) + "\n";
     if (Buffer.byteLength(manifest) > MAX_MANIFEST_BYTES) throw new Error("the manifest is too large");
@@ -414,6 +454,7 @@ export function verifyRelease({ envelope, signatures, manifest, tag, publicKeyB6
         seen.add(f.name);
     }
     if (m.images !== undefined) checkImages(m.images);
+    if (m.upgrade !== undefined) checkUpgrade(m.upgrade, m.version);
     if (files) {
         const real = new Map(files.map((f) => [f.name, f]));
         for (const f of m.files) {
@@ -427,6 +468,7 @@ export function verifyRelease({ envelope, signatures, manifest, tag, publicKeyB6
 }
 
 const defaultKeysFile = join(dirname(fileURLToPath(import.meta.url)), "..", "crates", "common", "update-keys.json");
+const defaultFloorFile = join(dirname(fileURLToPath(import.meta.url)), "..", "UPGRADE_FLOOR");
 
 /** The base64 raw public key pinned for `id` in the app's keys file. */
 function pinnedKey(keysFile, id) {
@@ -468,11 +510,19 @@ function main(argv) {
     switch (command) {
         case "build": {
             need(args, "dir", "tag", "out");
+            // The floor comes from the repository's UPGRADE_FLOOR, the file the release notes' floor line is also written from, so the
+            // two cannot differ. A missing or malformed file, or a floor above this release, stops the build: nothing is signed.
+            const upgrade = { floor: readFloorFile(args["floor-file"] ?? defaultFloorFile) };
+            if (args["shared-store-changed"] !== undefined) {
+                if (!["true", "false"].includes(args["shared-store-changed"])) throw new Error("--shared-store-changed must be true or false");
+                upgrade.shared_store_changed = args["shared-store-changed"] === "true";
+            }
             const { manifest, envelope } = buildRelease({
                 files: listFiles(args.dir),
                 tag: args.tag,
                 createdAt: args["created-at"],
                 images: (args.images ?? []).map(parseImageArg),
+                upgrade,
             });
             mkdirSync(args.out, { recursive: true });
             writeFileSync(join(args.out, manifestName(args.tag)), manifest);

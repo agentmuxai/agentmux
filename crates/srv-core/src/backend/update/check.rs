@@ -293,6 +293,25 @@ impl Release {
         }
     }
 
+    /// The release with `floor` as its upgrade floor, in place of whatever its notes said: the one floor line the status reads
+    /// (`status_for`) is replaced, so the check and the download, which follow the status, see the same floor.
+    pub(crate) fn with_floor(mut self, floor: &str) -> Release {
+        let kept = self.body.as_deref().map(without_floor).filter(|b| !b.is_empty());
+        let line = format!("{FLOOR_MARKER}{floor} -->");
+        self.body = Some(match kept {
+            Some(b) => format!("{b}\n{line}"),
+            None => line,
+        });
+        self
+    }
+
+    /// The release with `body` as its notes (a test's way to set them).
+    #[cfg(test)]
+    pub(crate) fn with_body(mut self, body: &str) -> Release {
+        self.body = Some(body.to_string());
+        self
+    }
+
     /// Whether it lists a file called `name`.
     #[cfg(test)]
     pub(crate) fn has_signed_file(&self, name: &str) -> bool {
@@ -404,6 +423,12 @@ pub(crate) fn status_for_arch(current: &str, channel: &str, release: &Release, n
         download: None,
         rev: 0,
     }
+}
+
+/// What a person is told when this install is older than the latest release can upgrade from: the one message the check
+/// and the download both give, naming the version to install first.
+pub(crate) fn install_first_message(current: &str, latest: &str, floor: &str) -> String {
+    format!("This AgentMux ({current}) is older than {latest} can upgrade from; install {floor} first, then upgrade.")
 }
 
 static STATUS: OnceLock<RwLock<AppUpdateStatus>> = OnceLock::new();
@@ -534,7 +559,7 @@ fn limited_message(until_ms: i64) -> String {
 }
 
 /// A release known only by its tag.
-fn release_from_tag(tag: &str, note: Option<String>) -> Release {
+pub(crate) fn release_from_tag(tag: &str, note: Option<String>) -> Release {
     Release {
         tag_name: tag.to_string(),
         html_url: format!("{RELEASE_PAGE_PREFIX}{tag}"),
@@ -590,6 +615,11 @@ async fn api_get(client: &reqwest::Client, etag: Option<&str>, now_ms: i64) -> R
 /// release's is lower.
 const BUILD_FLOOR: &str = include_str!("../../../../../UPGRADE_FLOOR");
 
+/// [`BUILD_FLOOR`] when it is a version.
+pub(crate) fn build_floor() -> Option<&'static str> {
+    Some(BUILD_FLOOR.trim()).filter(|f| version_core(f).is_some())
+}
+
 /// The oldest version known to upgrade in place: this build's own floor, or a later one an answer from the API
 /// carried. A signed manifest doesn't carry one.
 fn known_floor() -> Option<String> {
@@ -610,9 +640,27 @@ async fn release_without_api(client: &reqwest::Client, tag: &str, limited_until_
     }
 }
 
+/// The latest release as the check sees it: from GitHub ([`fetch_latest_from_github`]), with its upgrade floor taken from
+/// its signed manifest when that carries a usable one (`SPEC_UPGRADE_FLOOR_IN_SIGNED_MANIFEST`): the higher of the signed
+/// floor and this build's, with the notes' floor line not consulted. A release no newer than this build, or one whose
+/// manifest has no usable floor, is left as GitHub said.
+async fn fetch_latest(client: &reqwest::Client, web: &reqwest::Client) -> Result<Release, String> {
+    use crate::backend::update::signed_source::{newer_than, signed_floor_for, signed_floor_in_force};
+    let release = fetch_latest_from_github(client, web).await?;
+    let current = env!("CARGO_PKG_VERSION");
+    if !newer_than(&release.tag_name, current) {
+        return Ok(release);
+    }
+    let signed = signed_floor_for(client, &release.tag_name, agentmux_common::time::now_ms()).await;
+    Ok(match signed_floor_in_force(build_floor(), &signed) {
+        Some(floor) => release.with_floor(&floor),
+        None => release,
+    })
+}
+
 /// The latest release, with as few calls to GitHub's API as possible (see the
 /// module doc). The error is what the person is told.
-async fn fetch_latest(client: &reqwest::Client, web: &reqwest::Client) -> Result<Release, String> {
+async fn fetch_latest_from_github(client: &reqwest::Client, web: &reqwest::Client) -> Result<Release, String> {
     let now_ms = agentmux_common::time::now_ms();
     let tag = match latest_tag(web).await {
         Ok(t) => Some(t),

@@ -41,14 +41,19 @@ pub(crate) fn show(spec: &DialogSpec) -> Outcome {
     }
 }
 
+/// [`show`] with the host's floating panes out of the way for as long as the dialog is open: the dialog is
+/// unowned, and on Windows an "Always on top" floater would otherwise hide it (`host_dialog_guard`). Every
+/// native file dialog goes through here.
+pub(crate) fn show_guarded(spec: &DialogSpec) -> Outcome {
+    let _guard = super::platform::host_dialog_guard();
+    show(spec)
+}
+
 /// Show a dialog from a command without holding a runtime worker, and without the host's floating panes in the way
 /// (`host_dialog_guard`): `Some(path)` when the person chose, `None` when they closed it, and an error in words
 /// when it could not open (shown to the person, not taken for a cancel). `what` names the command in that error.
 pub(crate) async fn ask(spec: DialogSpec, what: &str) -> Result<Option<PathBuf>, String> {
-    let outcome = tokio::task::spawn_blocking(move || {
-        let _guard = super::platform::host_dialog_guard();
-        show(&spec)
-    })
+    let outcome = tokio::task::spawn_blocking(move || show_guarded(&spec))
     .await
     .map_err(|e| format!("{what}: {e}"))?;
     match outcome {

@@ -146,3 +146,25 @@ fn the_launched_name_fills_the_skill_templates_and_a_home_relative_folder_is_exp
         assert!(wrote, "a folder written as {rel} is refreshed");
     }
 }
+
+#[test]
+fn a_resume_of_a_host_agent_in_a_folder_a_container_agent_can_write_keeps_its_skills_outside_it() {
+    let s = store();
+    agent(&s, "a1", "host");
+    s.skill_upsert_unique_global(&skill("s1", "tidy-disk")).unwrap();
+    s.skill_bind(&s, "a1", "s1").unwrap();
+    let (data, dir) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let work_dir = dir.path().to_string_lossy().into_owned();
+    crate::backend::mcp_config_file::with_data_home(data.path(), || {
+        crate::backend::mcp_folder_rule::mark(&work_dir);
+        assert_eq!(refresh_for_block(&meta_for("a1", dir.path()), &s, &s), 0);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0, "nothing is written into the folder");
+        let own = crate::backend::host_agent_files::dir_of(&work_dir).unwrap();
+        let text = std::fs::read_to_string(crate::backend::host_agent_files::plugin_dir(&own).join("skills/tidy-disk/SKILL.md")).unwrap();
+        assert!(text.contains("steps of tidy-disk"), "{text}");
+        // A skill unbound since is gone from the plugin the next start.
+        s.skill_unbind("a1", "s1").unwrap();
+        refresh_for_block(&meta_for("a1", dir.path()), &s, &s);
+        assert!(!crate::backend::host_agent_files::plugin_dir(&own).join("skills/tidy-disk").exists());
+    });
+}

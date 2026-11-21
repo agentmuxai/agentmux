@@ -106,7 +106,7 @@ async fn a_fork_with_its_parents_history_resumes_the_parents_session_as_a_fork()
     let new_file = (crate::backend::storage::filestore::FileMeta::new(), crate::backend::storage::filestore::FileOpts::default());
     gfs.make_file(&parent_zone, "output", new_file.0, new_file.1).unwrap();
     gfs.append_lines(&parent_zone, "output", line.as_bytes()).unwrap();
-    fork_history::copy_parent_history(gfs, &parent_def, &fork_def, &sid, "session_id").unwrap();
+    fork_history::copy_parent_history(gfs, &parent_def, &fork_def, &sid, "session_id", crate::backend::transcript::origin_sig::WriterRuntime::Host).unwrap();
 
     let store = Arc::new(Store::open_in_memory().unwrap());
     let fork_block = format!("fork-block-{}", uuid::Uuid::new_v4());

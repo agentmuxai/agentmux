@@ -213,7 +213,9 @@ fn the_lease_is_short_and_lapses() {
         ..Default::default()
     };
     assert!(!lapsed.operator_proven_now());
-    assert!(lapsed.operator_only("probe").is_err());
+    // The refusal says to reconnect, and keeps the marker the app matches to prove the connection again.
+    let refusal = lapsed.operator_only("probe").unwrap_err();
+    assert!(refusal.starts_with("FORBIDDEN: probe") && refusal.contains("isn't the AgentMux window") && refusal.contains("reconnect"), "{refusal}");
     assert_eq!(actor_of(&lapsed), Actor::Unproven);
     let live = RpcContext { operator_proof_until: Some(agentmux_common::time::now_secs_u64() + 60), ..lapsed };
     assert!(live.operator_only("probe").is_ok());
