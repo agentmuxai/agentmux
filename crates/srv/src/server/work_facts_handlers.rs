@@ -36,7 +36,7 @@ const NOTE: &str = "Informational only: nothing is locked or blocked. If someone
                     thing, message them (Message send) before you change it.";
 
 /// This srv's own agents' facts. Store reads, so off the async workers.
-pub(super) async fn local_facts(state: &AppState) -> Vec<WorkFacts> {
+pub(crate) async fn local_facts(state: &AppState) -> Vec<WorkFacts> {
     let regs = state.reactive_handler.list_agents();
     let store = state.mstore.clone();
     let channel = own_channel();

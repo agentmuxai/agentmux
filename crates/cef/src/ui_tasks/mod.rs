@@ -23,6 +23,7 @@ use cef::*;
 use crate::state::AppState;
 
 mod window;
+mod page_fade;
 #[cfg(target_os = "windows")]
 mod main_focus;
 pub(crate) mod focus;
@@ -41,6 +42,7 @@ mod platform_macos;
 pub(crate) mod stall_watch;
 
 pub use window::*;
+pub use page_fade::post_page_fade;
 #[cfg(not(target_os = "windows"))]
 pub use window_maximized::*;
 pub use drag::*;

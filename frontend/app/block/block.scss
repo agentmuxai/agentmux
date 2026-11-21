@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 @use "../mixins.scss";
+@use "../element/menu-frame";
 
 .block {
     @include mixins.flex-center;
@@ -413,7 +414,7 @@
     .block-error-fallback-copied {
         position: fixed;
         pointer-events: none;
-        background: var(--main-bg-color);
+        @include menu-frame.menu-fill;
         border: 1px solid var(--border-color);
         color: var(--secondary-text-color);
         font-size: var(--text-xs);

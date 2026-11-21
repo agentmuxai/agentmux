@@ -86,7 +86,9 @@ fn the_parameters_are_read_and_a_wrong_one_says_what_is_allowed() {
     assert_eq!(Params::from_map(&map(&[]), "this-box").unwrap().limit, None);
     assert!(Params::from_map(&map(&[("host", "all")]), "this-box").is_ok());
     let other = Params::from_map(&map(&[("host", "elsewhere")]), "this-box").unwrap_err();
-    assert!(other.contains("not this machine") && other.contains("LAN call"), "{other}");
+    assert!(other.contains("not this machine") && other.contains("host argument"), "{other}");
+    assert!(Params::from_map(&map(&[("host", "all")]), "this-box").unwrap().all_hosts);
+    assert!(!Params::from_map(&map(&[("host", "this-box")]), "this-box").unwrap().all_hosts);
     assert!(Params::from_map(&map(&[("fields", "bogus")]), "h").unwrap_err().contains("the groups are model, runtime"));
     assert!(Params::from_map(&map(&[("limit", "many")]), "h").unwrap_err().contains("whole number"));
     assert!(Params::from_map(&map(&[("group_by", "colour")]), "h").unwrap_err().contains("group_by"));

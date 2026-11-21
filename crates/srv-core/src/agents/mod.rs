@@ -12,6 +12,8 @@
 //! This is Phase 1.5 PR 0: types + skeleton. PR 1 wires the agent
 //! pane through this module; PR 2 wires the drone Agent block.
 
+#[cfg(test)]
+mod harness_start_gate_tests;
 pub mod failure;
 pub mod limit_reset;
 pub mod loop_guard;

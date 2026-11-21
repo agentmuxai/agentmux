@@ -4,6 +4,7 @@
 import { atoms, getApi } from "@/store/global";
 import { createTab } from "@/store/tab-actions";
 import { hostHas } from "@/util/host-caps";
+import { OPACITY_MENUS_NOTE, pageCarriesWindowFade } from "@/util/window-fade";
 import { fireAndForget } from "@/util/util";
 import { openCommandPalette } from "@/app/store/open-command-palette";
 import {
@@ -83,6 +84,12 @@ function buildOpacityItems(): MenuItem[] {
                 setWindowOpacityFor({ label, windowId: windowId() || null }, value, "commit");
             },
         });
+    }
+
+    // This session fades the whole window with the operating system (the app started opaque, which keeps sharp text
+    // at 100%), so menus fade with it; the next start carries the opacity in the page. Said where the choice is made.
+    if (!pageCarriesWindowFade()) {
+        items.push({ label: "", divider: true, keepOpen: true }, { label: OPACITY_MENUS_NOTE, keepOpen: true });
     }
 
     return items;

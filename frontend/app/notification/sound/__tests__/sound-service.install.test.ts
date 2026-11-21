@@ -45,6 +45,9 @@ const h = (() => {
     };
 })();
 
+// The device is opened in idle time after the first frame (open-when-idle.ts); these tests are about what comes after it.
+vi.mock("../open-when-idle", () => ({ whenIdleAfterFirstPaint: () => () => undefined }));
+
 vi.mock("@/app/store/global", () => ({
     getSettingsKeyAtom: (key: string) => () => h.setting(key)[0](),
 }));

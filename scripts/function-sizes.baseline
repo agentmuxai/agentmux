@@ -129,7 +129,7 @@
 222 crates/procstats/examples/memtree.rs::main
 144 crates/remote/src/daemon.rs::attach
 159 crates/remote/src/serve.rs::handle
-113 crates/srv-core/src/agents/runner.rs::run_agent_with_bin
+109 crates/srv-core/src/agents/runner.rs::run_agent_with_bin
 104 crates/srv-core/src/ambient/cli.rs::invoke_haiku
 124 crates/srv-core/src/ambient/digest.rs::extract_digest_parts
 124 crates/srv-core/src/backend/agent_config.rs::build_config_files
@@ -230,7 +230,6 @@
 109 crates/srv-core/src/registry/migrate.rs::backfill_source_bases_once
 131 crates/srv-core/src/registry/migrate.rs::migrate_from_sqlite_once
 102 crates/srv/src/bootstrap/logging.rs::init_logging
-234 crates/srv/src/bootstrap/network.rs::bind_listeners_and_network
 143 crates/srv/src/bootstrap/plumbing.rs::build_app_state
 102 crates/srv/src/bootstrap/stores.rs::prepare_in_process
 113 crates/srv/src/bootstrap/watchers.rs::start_parent_watcher
@@ -286,7 +285,6 @@
 188 crates/srv/src/server/vault_handlers.rs::handle_host_vault
 120 crates/srv/src/server/vault_rotate.rs::handle_vault_rotate
 180 crates/srv/src/server/websocket.rs::handle_incoming_text
-233 crates/srv/src/server/websocket.rs::handle_ws_connection
 111 crates/srv/src/server/widget_agent_handlers.rs::handle_widgets_install
 104 crates/srv/src/server/work_queue.rs::enqueue_core
 120 crates/srv/src/server/work_queue.rs::handle_work_claim
