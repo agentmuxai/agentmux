@@ -246,34 +246,8 @@ fn dispatch(cli: Cli) -> i32 {
         }
         Cmd::Uninstall { remove_data, yes } => cmd_uninstall(&paths, remove_data, yes),
         Cmd::Version { .. } => unreachable!("answered above"),
-        Cmd::Service { command: ServiceCmd::Run(args) } => cmd_service_run(&paths, &args),
+        Cmd::Service { command: ServiceCmd::Run(args) } => winservice::command(&paths, &args),
     }
-}
-
-/// `agentmux service run`: the program the Windows service manager starts. It hosts what `run` does (the same server, from
-/// the same saved settings) and turns the manager's stop into the stop `agentmux stop` asks for.
-#[cfg(windows)]
-fn cmd_service_run(paths: &DataPaths, args: &ServerArgs) -> i32 {
-    if !winservice::channel_is_valid(&paths.channel) {
-        return fail(&format!("channel {:?} cannot be the name of a Windows service (letters, digits, - _ . only)", paths.channel));
-    }
-    let name = winservice::service_name(&paths.channel);
-    let (serve_paths, serve_args) = (paths.clone(), args.clone());
-    let (stop_paths, up_paths) = (paths.clone(), paths.clone());
-    winservice::run(
-        &name,
-        move || cmd_run(&serve_paths, &serve_args),
-        // `agentmux stop --force`: ask, wait, and end the server at once if it did not leave. The code is what that says.
-        move || cmd_stop(&stop_paths, true),
-        // Answering, not merely started: the record names the server's process as soon as it is spawned, before it listens,
-        // and a server that dies on a busy port would be reported running. SCM is told running only when `/health` answers.
-        move || state::read(&up_paths.instance_dir).is_some_and(|s| process::is_server(s.pid) && process::health_ok(s.web_port)),
-    )
-}
-
-#[cfg(not(windows))]
-fn cmd_service_run(_paths: &DataPaths, _args: &ServerArgs) -> i32 {
-    fail("`service run` is the program the Windows service manager starts: it does nothing on this system")
 }
 
 impl ServerArgs {

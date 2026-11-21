@@ -153,6 +153,32 @@ pub fn after_stop(stop_code: i32, ended: Option<i32>) -> i32 {
     }
 }
 
+/// `agentmux service run`: the program the Windows service manager starts. It hosts what `run` does (the same server, from
+/// the same saved settings) and turns the manager's stop into `agentmux stop --force`.
+#[cfg(windows)]
+pub fn command(paths: &crate::DataPaths, args: &crate::ServerArgs) -> i32 {
+    if !channel_is_valid(&paths.channel) {
+        return crate::fail(&format!("channel {:?} cannot be the name of a Windows service (letters, digits, - _ . only)", paths.channel));
+    }
+    let name = service_name(&paths.channel);
+    let (serve_paths, serve_args) = (paths.clone(), args.clone());
+    let (stop_paths, up_paths) = (paths.clone(), paths.clone());
+    run(
+        &name,
+        move || crate::cmd_run(&serve_paths, &serve_args),
+        // `agentmux stop --force`: ask, wait, and end the server at once if it did not leave. The code is what that says.
+        move || crate::cmd_stop(&stop_paths, true),
+        // Answering, not merely started: the record names the server's process as soon as it is spawned, before it listens,
+        // and a server that dies on a busy port would be reported running. SCM is told running only when `/health` answers.
+        move || crate::state::read(&up_paths.instance_dir).is_some_and(|s| crate::process::is_server(s.pid) && crate::process::health_ok(s.web_port)),
+    )
+}
+
+#[cfg(not(windows))]
+pub fn command(_paths: &crate::DataPaths, _args: &crate::ServerArgs) -> i32 {
+    crate::fail("`service run` is the program the Windows service manager starts: it does nothing on this system")
+}
+
 #[cfg(windows)]
 pub use imp::run;
 
