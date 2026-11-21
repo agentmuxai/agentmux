@@ -262,6 +262,12 @@ function pickTabId(workspace: Workspace): string {
     return tabId;
 }
 
+/** The guards that keep a press, and the selection it starts, where it began (a text field's drag; a pane's selection). */
+function installPointerGuards(): void {
+    installTextDragGuard();
+    installPaneSelectGuard();
+}
+
 /** Apply dev window title — task dev TITLE="agentx: PR #1780". */
 function applyDevWindowTitle(windowId: string): void {
     // Only runs in Vite dev mode; VITE_DEV_TITLE is empty string in prod builds.
@@ -1162,8 +1168,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     registerChordCapture();
     registerHostShortcuts();
     installShortcutApi();
-    installTextDragGuard();
-    installPaneSelectGuard();
+    installPointerGuards();
     registerLinkInPaneListener();
     installFloatModifier();
     tlog("registerKeys", t);
