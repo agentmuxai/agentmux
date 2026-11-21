@@ -682,6 +682,7 @@
     "agentNotice.githubRefused": "GitHub access refused",
     "agentNotice.awsRefused": "AWS access refused",
     "statusBar.diskFree": "Disk {{pct}}% free",
+    "statusBar.diskFreeAmount": "Disk {{pct}}%/{{free}} free",
     "healthRecord.label": "Long-run record",
     "healthRecord.stalls.window": "AgentMux's window stopped responding {{n}} times for 5 s or more within one hour (the longest {{secs}} s).",
     "healthRecord.stalls.backend": "AgentMux's backend stopped responding {{n}} times for 5 s or more within one hour (the longest {{secs}} s).",
