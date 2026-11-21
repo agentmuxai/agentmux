@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{ProviderConfig, ControllerType};
+use super::{Tier, ProviderConfig, ControllerType};
 
 // Qwen Code — Alibaba's open-source coding agent, a fork of Gemini CLI.
 // Same stream-json headless surface, so it reuses the Gemini translator.
@@ -9,6 +9,7 @@ use super::{ProviderConfig, ControllerType};
 // + OPENAI_API_KEY/OPENAI_MODEL), so it runs any OpenRouter model.
 pub(super) static QWEN: ProviderConfig = ProviderConfig {
     id: "qwen",
+    tier: Tier::FirstClass,
     cli_command: "qwen",
     controller_type: ControllerType::Subprocess,
     app_server: None,

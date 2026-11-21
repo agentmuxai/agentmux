@@ -57,8 +57,14 @@ export interface ProviderModel {
     defaultEffort?: string;
 }
 
+/** How far AgentMux stands behind a harness: the lab's own door, or one that is installable and works but is not promised.
+ *  Mirrors srv's `Tier`; catalog-parity.test.ts keeps them equal. */
+export type ProviderTier = "first_class" | "preview";
+
 export interface ProviderDefinition {
     id: string;
+    /** Decides the picker, the defaults and the docs, and nothing about containers. */
+    tier: ProviderTier;
     displayName: string;
     cliCommand: string;
     defaultArgs: string[];
