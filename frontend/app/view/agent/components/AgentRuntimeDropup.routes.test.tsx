@@ -59,7 +59,7 @@ const onRoute = {
 };
 const plain = { "agent:runtime": { model: "sonnet", permissionMode: "default", effort: "high" } };
 
-function mount(meta: Record<string, unknown>, contextTokens?: number, conversationImages?: () => number) {
+function mount(meta: Record<string, unknown>, contextTokens?: number, conversationImages?: () => number, compactThenSwitch?: (route: string, model: string) => Promise<void>) {
     render(() => (
         <AgentRuntimeDropup
             blockId="block-1"
@@ -67,6 +67,7 @@ function mount(meta: Record<string, unknown>, contextTokens?: number, conversati
             providerId="claude"
             contextTokens={contextTokens}
             conversationImages={conversationImages}
+            compactThenSwitch={compactThenSwitch}
         />
     ));
 }
@@ -167,6 +168,76 @@ describe("the model panel's routes", () => {
         await flush();
         expect(switchCommand).toHaveBeenCalledWith({}, { blockid: "block-1", route: "openrouter", model: PRO, restart: true, fresh: false, handoff: null }, { timeout: 120000 });
         expect(patchRuntime).not.toHaveBeenCalled();
+    });
+
+    it("starts a fresh session on the model picked after the choice is turned on, and only for that change", async () => {
+        panelCommand.mockResolvedValue(panelOf());
+        mount(plain);
+        await openPanel();
+        expect(option(/Start a fresh session/).getAttribute("aria-selected")).toBe("false");
+        expect(option(/Start a fresh session/).textContent).toContain("resumes the conversation");
+        // A line above it sets the routes section apart from the Effort rows, so it does not read as one more effort level.
+        expect(option(/Start a fresh session/).classList.contains("is-set-apart")).toBe(true);
+        fireEvent.click(option(/Start a fresh session/));
+        await flush();
+        expect(option(/Start a fresh session/).getAttribute("aria-selected")).toBe("true");
+        expect(switchCommand).not.toHaveBeenCalled();
+        await openRoute();
+        fireEvent.click(option(/DeepSeek V4 Pro/));
+        await flush();
+        expect(switchCommand).toHaveBeenLastCalledWith({}, { blockid: "block-1", route: "openrouter", model: PRO, restart: true, fresh: true, handoff: null }, { timeout: 120000 });
+        // The choice was for that change: the next pick in the same opening resumes the conversation.
+        expect(option(/Start a fresh session/).getAttribute("aria-selected")).toBe("false");
+        fireEvent.click(option(/DeepSeek V4.1 Flash/));
+        await flush();
+        expect(switchCommand).toHaveBeenLastCalledWith({}, { blockid: "block-1", route: "openrouter", model: FLASH, restart: true, fresh: false, handoff: null }, { timeout: 120000 });
+        // Closed and opened again, the choice is off.
+        fireEvent.click(option(/Start a fresh session/));
+        await flush();
+        await openPanel();
+        await openPanel();
+        expect(option(/Start a fresh session/).getAttribute("aria-selected")).toBe("false");
+    });
+
+    it("does not start a fresh session when a harness model is picked from a route, and keeps the choice on", async () => {
+        panelCommand.mockResolvedValue(panelOf());
+        mount(onRoute);
+        await openPanel();
+        fireEvent.click(option(/Start a fresh session/));
+        await flush();
+        fireEvent.click(option(/Opus/));
+        await flush();
+        expect(switchCommand).toHaveBeenCalledWith({}, { blockid: "block-1", route: "", model: "", restart: false, fresh: false, handoff: null }, { timeout: 120000 });
+        expect(patchRuntime.mock.calls[0][2]).toEqual({ model: "opus" });
+        expect(option(/Start a fresh session/).getAttribute("aria-selected")).toBe("true");
+    });
+
+    it("starts a fresh session instead of compacting first when the choice is on", async () => {
+        const why = "the conversation (100K) is larger than this model's context (64K)";
+        panelCommand.mockResolvedValue(panelOf({}, [model(PRO, "DeepSeek V4 Pro", { compact_first: why })]));
+        const compactThenSwitch = vi.fn().mockResolvedValue(undefined);
+        mount(plain, 100_000, undefined, compactThenSwitch);
+        await openPanel();
+        fireEvent.click(option(/Start a fresh session/));
+        await flush();
+        await openRoute();
+        fireEvent.click(option(/Compact, then switch/));
+        await flush();
+        expect(compactThenSwitch).not.toHaveBeenCalled();
+        expect(switchCommand).toHaveBeenCalledWith({}, { blockid: "block-1", route: "openrouter", model: PRO, restart: true, fresh: true, handoff: null }, { timeout: 120000 });
+    });
+
+    it("shows srv's reason when a fresh session is refused and the model change was not made", async () => {
+        panelCommand.mockResolvedValue(panelOf());
+        switchCommand.mockRejectedValueOnce(new Error("FORBIDDEN: a fresh session is not built for container agents yet, so this model change was not made: compact the conversation first"));
+        mount(plain);
+        await openPanel();
+        fireEvent.click(option(/Start a fresh session/));
+        await flush();
+        await openRoute();
+        fireEvent.click(option(/DeepSeek V4 Pro/));
+        await flush();
+        expect(document.body.innerHTML).toContain("not built for container agents yet");
     });
 
     it("leaves the route first when a harness model is picked on a route, and lets the runtime change do the restart", async () => {

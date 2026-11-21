@@ -617,7 +617,7 @@ describe("AgentRuntimeDropup — a pick doesn't resize the panel (SPEC_REMOTES_I
         renderLive();
         await openPanel();
         const before = lines();
-        const effortRows = () => Array.from(document.querySelectorAll(".agent-runtime-dropup-row")).slice(-5);
+        const effortRows = () => Array.from(document.querySelectorAll(".agent-runtime-dropup-row")).filter((r) => /^(low|medium|high|xhigh|max)$/.test(r.textContent ?? ""));
         expect(effortRows().map((r) => r.textContent)).toEqual(["low", "medium", "high", "xhigh", "max"]);
         setModel("haiku");
         expect(effortRows().every((r) => r.getAttribute("aria-disabled") === "true")).toBe(true);
