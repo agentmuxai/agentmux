@@ -349,6 +349,15 @@ fn install_turn_outcome_notes(state: &AppState) {
         Arc::clone(&state.broker),
         state.srv_events_tx.subscribe(),
         Arc::clone(&state.mstore),
+        Arc::clone(&state.work_store),
+        Arc::clone(&state.filestore),
+        Arc::clone(&state.config_watcher),
+    );
+    // An agent that owes work and has gone quiet is nudged once, then its watchers are told
+    // (SPEC_LEADER_TOLD_WHEN_AN_AGENT_GOES_QUIET_2026_11_21.md).
+    backend::quiet_watch::install(
+        Arc::clone(&state.mstore),
+        Arc::clone(&state.work_store),
         Arc::clone(&state.filestore),
         Arc::clone(&state.config_watcher),
     );

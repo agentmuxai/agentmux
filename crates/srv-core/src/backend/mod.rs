@@ -287,7 +287,8 @@ pub mod route_credits;
 pub mod sender_failure_note;
 /// What a leader is told about why a worker's turn failed, and what happens next.
 pub mod worker_failure_note;
-/// A leader hears when its workers end a turn without reporting, fail or stop.
+/// A leader hears when its workers (and the agents that hold its tasks) fail, stop or wait on a question.
 pub mod worker_notes;
+pub mod quiet_watch;
 
 pub use oref::ORef;

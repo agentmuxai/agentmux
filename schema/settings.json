@@ -1437,6 +1437,27 @@
           "description": "Load the signed-in claude.ai account's connectors (Gmail, Calendar, Drive, Docs) into Claude agents. Off, agents use AgentMux's own Google tools, which the person turns on per agent in Connectors. Takes effect at an agent's next launch.",
           "x-section": "Agents"
         },
+        "agents:quietminutes": {
+          "type": "number",
+          "default": 15,
+          "description": "Minutes an agent that owes work (it holds a claimed task, or is a worker that has not reported to its leader) may do nothing between turns before it is nudged once and, five minutes after, the agents that watch it (its lead, the filer of its task) are told. 0 turns the quiet watch off.",
+          "x-section": "Agents",
+          "minimum": 0
+        },
+        "agents:quietrunningminutes": {
+          "type": "number",
+          "default": 30,
+          "description": "Minutes a turn that is still running may write nothing before the agents that watch it are told (a long build can write nothing for a while and be healthy, so this is longer than the time between turns).",
+          "x-section": "Agents",
+          "minimum": 0
+        },
+        "agents:quietescalateminutes": {
+          "type": "number",
+          "default": 5,
+          "description": "Minutes after a quiet agent was nudged (or, for a running turn, after its quiet time) before the agents that watch it are told.",
+          "x-section": "Agents",
+          "minimum": 0
+        },
         "jekt:cold_hold_minutes": {
           "type": "number",
           "default": 55,
