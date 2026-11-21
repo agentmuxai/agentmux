@@ -387,6 +387,13 @@ fn sent_text(to: &str, result: &Value, id: &str) -> Result<String> {
         }
         None => String::new(),
     };
+    // The ids srv found closest to a name that answers to no agent here: a typo, or the workspace folder's form.
+    let close: Vec<&str> = result.get("did_you_mean").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|i| i.as_str()).collect()).unwrap_or_default();
+    let meant = match close.as_slice() {
+        [] => String::new(),
+        [one] => format!(" Did you mean \"{one}\"? It is an agent on this machine."),
+        many => format!(" Did you mean one of: {}? They are agents on this machine.", many.iter().map(|i| format!("\"{i}\"")).collect::<Vec<_>>().join(", ")),
+    };
     Ok(format!(
         "QUEUED for {to} via the cloud relay (unconfirmed, expires in 30 min) — NOT yet \
          delivered. The relay accepted it; their AgentMux picks it up when it next syncs, \
@@ -394,7 +401,7 @@ fn sent_text(to: &str, result: &Value, id: &str) -> Result<String> {
          that instance stays offline). If {to} has not written to you by then, you get a note \
          that it was never confirmed. You get this same result for an agent name that \
          does not exist anywhere, so check the spelling against Agents list if you \
-         expected local delivery.{nowhere_near}{not_yours}{id}"
+         expected local delivery.{meant}{nowhere_near}{not_yours}{id}"
     ))
 }
 
