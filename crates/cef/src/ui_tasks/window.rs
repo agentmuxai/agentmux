@@ -10,6 +10,8 @@ use std::sync::Arc;
 use cef::*;
 use crate::state::AppState;
 use super::get_window_on_ui;
+#[cfg(target_os = "linux")]
+use super::page_fade::uniform_fade_js;
 #[cfg(target_os = "windows")]
 use super::main_focus::{find_main_render_widget, main_focus_already_held, pane_outer_hwnds, reclaim_allowed};
 
@@ -972,37 +974,35 @@ wrap_task! {
                 return;
             }
 
-            // Codex P2 on #1895: browser-pane overlays are separate
-            // NativeWidgetMacNSWindow instances layered over this window
-            // (browser_pane/creation_views.rs) — child NSWindows do NOT
-            // inherit the parent's alphaValue, so without this a faded host
-            // window keeps fully-opaque pane rectangles floating on top.
-            // Resolve each overlay belonging to this window_label via the
-            // cached window numbers and fade it to the same alpha.
-            // try_lock (matching the overlay-wnum cache writers): missing a
-            // beat here only delays an overlay fade until the next opacity
-            // event, which beats risking a UI-thread stall.
-            let overlay_wnums: Vec<isize> = {
-                let (Some(overlays), Some(wnums)) = (
-                    self.state.browser_pane_overlays.try_lock(),
-                    self.state.browser_pane_overlay_wnums.try_lock(),
-                ) else {
-                    tracing::warn!(label = %self.label, "[opacity] overlay maps busy; pane overlays not faded this pass");
-                    return;
-                };
-                overlays
-                    .iter()
-                    .filter(|(_, (window_label, _))| window_label == &self.label)
-                    .filter_map(|(pane_label, _)| wnums.get(pane_label).copied())
-                    .collect()
-            };
-            for wnum in overlay_wnums {
-                if unsafe { macos_set_window_alpha_by_number(wnum, self.alpha) } {
-                    tracing::info!(label = %self.label, wnum, alpha = self.alpha, "[opacity] applied alphaValue to pane overlay window");
-                } else {
-                    tracing::warn!(label = %self.label, wnum, "[opacity] pane overlay NSWindow not found for wnum");
-                }
-            }
+            macos_fade_pane_overlays(&self.state, &self.label, self.alpha);
+        }
+    }
+}
+
+/// Fade the browser-pane overlay windows of `label` to `alpha` (#1895). They are separate
+/// NativeWidgetMacNSWindow instances layered over the host window (browser_pane/creation_views.rs); child NSWindows
+/// do NOT inherit the parent window's alphaValue, so without this a faded host keeps fully opaque pane rectangles
+/// floating on top. Each overlay of the label is resolved through the cached window numbers. try_lock (matching the
+/// overlay-wnum cache writers): missing a beat only delays an overlay fade until the next opacity event, which beats
+/// risking a UI-thread stall. UI/main thread only.
+#[cfg(target_os = "macos")]
+pub(super) fn macos_fade_pane_overlays(state: &Arc<AppState>, label: &str, alpha: f64) {
+    let overlay_wnums: Vec<isize> = {
+        let (Some(overlays), Some(wnums)) = (state.browser_pane_overlays.try_lock(), state.browser_pane_overlay_wnums.try_lock()) else {
+            tracing::warn!(label = %label, "[opacity] overlay maps busy; pane overlays not faded this pass");
+            return;
+        };
+        overlays
+            .iter()
+            .filter(|(_, (window_label, _))| window_label == label)
+            .filter_map(|(pane_label, _)| wnums.get(pane_label).copied())
+            .collect()
+    };
+    for wnum in overlay_wnums {
+        if unsafe { macos_set_window_alpha_by_number(wnum, alpha) } {
+            tracing::info!(label = %label, wnum, alpha, "[opacity] applied alphaValue to pane overlay window");
+        } else {
+            tracing::warn!(label = %label, wnum, "[opacity] pane overlay NSWindow not found for wnum");
         }
     }
 }
@@ -1086,7 +1086,7 @@ unsafe fn macos_set_window_alpha_by_number(wnum: isize, alpha: f64) -> bool {
     true
 }
 
-// ── Window alpha (Linux/X11 uniform whole-window opacity) ────────────────
+// ── Window alpha (Linux/X11; where the process is not alpha-capable, else `post_page_fade`) ──
 // Track 1 of SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01, Linux arm: the EWMH
 // analogue of Win32 LWA_ALPHA / NSWindow.alphaValue. The compositor (Mutter,
 // KWin, picom, xfwm4) fades the finished window over the desktop — including
@@ -1112,7 +1112,7 @@ wrap_task! {
             // on_window_created and stays valid for the window's lifetime.
             // Native Wayland has no uniform-alpha protocol, but every window
             // there is alpha-capable (app/mod.rs `alpha_capable`), so the page can
-            // fade itself: CSS `opacity` on the body (theme.scss
+            // fade itself: CSS `opacity` on the app root `#main` (theme.scss
             // `am-uniform-fade`) gives the same uniform whole-window fade as
             // _NET_WM_WINDOW_OPACITY below. Fading the
             // translucent `--window-opacity` backgrounds instead compounds
@@ -1145,22 +1145,6 @@ wrap_task! {
                 Err(e) => tracing::warn!(label = %self.label, "[opacity] X11 property set failed: {e}"),
             }
         }
-    }
-}
-
-/// Script that fades the whole page to `alpha` (or clears the fade at 1.0).
-#[cfg(target_os = "linux")]
-fn uniform_fade_js(alpha: f64) -> String {
-    let alpha = alpha.clamp(0.0, 1.0);
-    if alpha >= 1.0 {
-        "(function(){var r=document.documentElement;r.classList.remove('am-uniform-fade');\
-         r.style.removeProperty('--am-window-fade');})()"
-            .to_string()
-    } else {
-        format!(
-            "(function(){{var r=document.documentElement;r.classList.add('am-uniform-fade');\
-             r.style.setProperty('--am-window-fade','{alpha}');}})()"
-        )
     }
 }
 
@@ -2046,24 +2030,4 @@ wrap_task! {
 pub fn post_hang_ui_thread(_state: &Arc<AppState>) {
     let mut task = HangUiThreadTask::new();
     post_task(ThreadId::UI, Some(&mut task));
-}
-
-#[cfg(all(test, target_os = "linux"))]
-mod tests {
-    use super::uniform_fade_js;
-
-    #[test]
-    fn uniform_fade_js_sets_and_clears_the_fade() {
-        let on = uniform_fade_js(0.6);
-        assert!(on.contains("classList.add('am-uniform-fade')"));
-        assert!(on.contains("setProperty('--am-window-fade','0.6')"));
-
-        for alpha in [1.0, 1.5] {
-            let off = uniform_fade_js(alpha);
-            assert!(off.contains("classList.remove('am-uniform-fade')"));
-            assert!(off.contains("removeProperty('--am-window-fade')"));
-        }
-
-        assert!(uniform_fade_js(-1.0).contains("'--am-window-fade','0'"));
-    }
 }

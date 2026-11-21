@@ -1482,6 +1482,49 @@ mod with_history_tests {
     }
 
     #[tokio::test]
+    async fn an_exported_session_holds_no_value_srv_holds_secret() {
+        use base64::Engine as _;
+        use std::io::Read as _;
+        let value = "canary-export-8863-PqRs";
+        let state = test_state();
+        let config_dir = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+        make_bundle(&state, "bundle-1", "Be helpful.");
+        link_agent_to_identity(&state, "agent-1", "acct-mine");
+        let session_dir = tempfile::tempdir().unwrap();
+        let session_path = session_dir.path().join("sess-1.jsonl");
+        std::fs::write(&session_path, format!("{{\"role\":\"user\",\"out\":\"env {value}\"}}\n")).unwrap();
+        crate::backend::transcript::withhold::register(value);
+        let index = SessionIndex::with_isolated_roots(
+            vec![Box::new(MockAdapter {
+                files: vec![DiscoveredFile { file_path: session_path.to_string_lossy().into_owned(), mtime_ms: 1 }],
+                identity_id: "acct-mine".to_string(),
+            })],
+            vec![session_dir.path().to_path_buf()],
+        );
+        let result = bundle_export_for_agent_with_history_impl(
+            state.id_store.clone(),
+            state.identity_store.clone(),
+            &state.mstore,
+            std::sync::Arc::new(HistoryService::from_index(index)),
+            ExportForAgentWithHistoryReq { bundle_id: "bundle-1".to_string(), agent_id: "agent-1".to_string() },
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.history_session_count, 1);
+        let bytes = base64::engine::general_purpose::STANDARD.decode(&result.zip_base64).unwrap();
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let name = (0..archive.len())
+            .map(|i| archive.by_index(i).unwrap().name().to_string())
+            .find(|n| n.ends_with("history/mock/sess-1.jsonl"))
+            .unwrap();
+        let mut content = String::new();
+        archive.by_name(&name).unwrap().read_to_string(&mut content).unwrap();
+        assert!(!content.contains(value), "a value reached the archive: {content}");
+        assert!(content.contains(crate::backend::transcript::withhold::MARK), "{content}");
+    }
+
+    #[tokio::test]
     async fn omits_the_history_component_when_no_session_was_included() {
         // Absence already means "none"; an empty array would assert
         // "this archive has an empty history", which is a different claim.

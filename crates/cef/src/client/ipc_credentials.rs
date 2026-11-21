@@ -23,6 +23,16 @@ pub(super) fn may_inject_at_start(kind: Option<&BrowserKind>) -> bool {
     matches!(kind, Some(BrowserKind::TopLevel { .. } | BrowserKind::Floater { .. }))
 }
 
+/// The script that sets the page's host globals: the IPC port and token, and whether the page carries the window
+/// opacity itself (`page_fade`), which the Opacity menu reads to say if menus are solid at low opacity (#48092). The
+/// address cannot say it: only the main window's carries a hint, and native Wayland is alpha-capable whatever the setting.
+fn credentials_js(ipc_port: impl std::fmt::Display, ipc_token: &str, page_fade: bool) -> String {
+    format!(
+        "window.__AGENTMUX_IPC_PORT__ = {ipc_port}; window.__AGENTMUX_IPC_TOKEN__ = '{ipc_token}'; \
+         window.__AGENTMUX_PAGE_FADE__ = {page_fade};"
+    )
+}
+
 impl AgentMuxHandler {
     /// Injects `window.__AGENTMUX_IPC_PORT__` / `__AGENTMUX_IPC_TOKEN__` into the
     /// browser's main frame when it shows the frontend. `at_start`: called as the
@@ -70,10 +80,7 @@ impl AgentMuxHandler {
         }
         if should_inject {
             let ipc_token = &self.state.ipc_token;
-            let js = format!(
-                "window.__AGENTMUX_IPC_PORT__ = {}; window.__AGENTMUX_IPC_TOKEN__ = '{}';",
-                ipc_port, ipc_token
-            );
+            let js = credentials_js(ipc_port, ipc_token, crate::app::window_settings::page_carries_fade());
             let code = CefString::from(js.as_str());
             let empty = CefString::from("");
             frame.execute_java_script(Some(&code), Some(&empty), 0);
@@ -90,6 +97,15 @@ impl AgentMuxHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_credentials_script_says_whether_the_page_carries_the_window_opacity() {
+        assert_eq!(
+            credentials_js(4321, "tok", true),
+            "window.__AGENTMUX_IPC_PORT__ = 4321; window.__AGENTMUX_IPC_TOKEN__ = 'tok'; window.__AGENTMUX_PAGE_FADE__ = true;"
+        );
+        assert!(credentials_js(1, "t", false).ends_with("window.__AGENTMUX_PAGE_FADE__ = false;"));
+    }
 
     #[test]
     fn only_a_registered_app_window_gets_the_credentials_as_the_page_starts() {
