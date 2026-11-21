@@ -78,6 +78,16 @@ pub fn target_of(data: &Value) -> Target {
     }
 }
 
+/// What a call of `command` acted on: [`target_of`], and for a settings write the names, never the values, of the
+/// settings it set.
+fn target_for(command: &str, data: &Value) -> Target {
+    let mut target = target_of(data);
+    if command == crate::backend::rpc_types::COMMAND_SET_CONFIG {
+        target.subject = data.as_object().map(|keys| format!("keys={}", crate::backend::settings_consent::key_names(keys)));
+    }
+    target
+}
+
 /// Commands that answer `{ "ok": false }` when they did nothing.
 const ANSWERS_OK_FLAG: &[&str] = &["agent.kill-process", "agent.kill-tree"];
 
@@ -98,7 +108,7 @@ pub fn after_call(command: &str, data: &Value, ctx: &RpcContext, request_id: &st
     let record = ActionRecord {
         actor,
         command: command.to_string(),
-        target: target_of(data),
+        target: target_for(command, data),
         request_id: request_id.to_string(),
         error: outcome.as_ref().err().map(|e| e.chars().take(MAX_FIELD).collect()),
     };
@@ -117,6 +127,15 @@ mod tests {
         assert_eq!(t.subject.as_deref(), Some("pid=42 signal=SIGKILL"));
         let t = target_of(&json!({"block_id": "b2", "id": "acme.widget"}));
         assert_eq!((t.block_id.as_deref(), t.subject.as_deref()), (Some("b2"), Some("id=acme.widget")));
+    }
+
+    #[test]
+    fn a_settings_write_is_recorded_with_the_names_of_the_settings_and_never_their_values() {
+        let write = json!({"messaging:telegram:token": "s3cret-value", "term:fontsize": 12});
+        let subject = target_for("setconfig", &write).subject.unwrap();
+        assert!(subject.starts_with("keys=") && subject.contains("messaging:telegram:token") && subject.contains("term:fontsize"));
+        assert!(!subject.contains("s3cret-value"), "{subject}");
+        assert_eq!(target_for("agent.stop", &json!({"agent_id": "a1"})).subject, None);
     }
 
     #[test]
