@@ -118,8 +118,9 @@
     if (!el) {
       // Nothing allowed matched. When what matched is a prompt addressed to the person, say so: the caller tells the
       // agent to ask them, instead of that nothing matched.
-      if (blockId && Array.from(nodes).some((e) => e.closest('[data-operator-only]') || e.querySelector('[data-operator-only]'))) {
-        return { operatorOnly: true };
+      for (const e of Array.from(nodes)) {
+        const marked = blockId && (e.closest('[data-operator-only]') || e.querySelector('[data-operator-only]'));
+        if (marked) return { operatorOnly: true, hint: marked.getAttribute('data-operator-only') || '' };
       }
       return null;
     }

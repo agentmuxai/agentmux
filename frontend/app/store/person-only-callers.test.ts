@@ -23,6 +23,10 @@ const PROMPTS: Record<string, string[]> = {
     "app/view/browser/browser-signin-key.tsx": ["app/view/browser/browser-signin-key.tsx"],
     "app/view/browser/browser-signin-list.tsx": ["app/view/browser/browser-signin-list.tsx"],
     "app/view/browser/browser-signin-offer.tsx": ["app/view/browser/browser-signin-offer.tsx"],
+    "app/view/agent/components/AgentSeatPanelState.ts": ["app/view/agent/components/AgentSeatPanel.tsx"],
+    "app/view/agent/components/SeatRosterImport.tsx": ["app/view/agent/components/AgentSeatPanel.tsx"],
+    "app/view/agent/failure/takeover.ts": ["app/view/agent/failure/failure-accessory.ts"],
+    "app/view/agent/failure/open-in-other-pane.ts": ["app/view/agent/failure/failure-accessory.ts"],
 };
 
 const READ = "reads state for a view; answers nothing for the person";
@@ -43,11 +47,7 @@ const CONTROLS: Record<string, string> = {
     "app/view/agent/agent-model.ts": "writes the agent's own config on launch",
     "app/view/agent/commands/dispatch.ts": SEND,
     "app/view/agent/commands/types.ts": SEND,
-    "app/view/agent/components/AgentSeatPanelState.ts": OWN_VIEW,
-    "app/view/agent/components/SeatRosterImport.tsx": OWN_VIEW,
     "app/view/agent/defaults/instance-slug.ts": "writes the agent's own config on launch",
-    "app/view/agent/failure/open-in-other-pane.ts": "a recovery action on a failed agent row, not an approval",
-    "app/view/agent/failure/takeover.ts": "a recovery action on a failed agent row, not an approval",
     "app/view/agent/flows/launch-flow.ts": SEND,
     "app/view/agent/flows/register-seeded-account.ts": "records a sign-in the person just completed",
     "app/view/agent/history/HistoryNavigator.tsx": READ,

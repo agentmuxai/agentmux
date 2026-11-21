@@ -504,6 +504,29 @@ async fn hidden_boxes(cdp: &mut CdpSession, clip: &serde_json::Value) -> Option<
     serde_json::from_value(reply.get("result")?.get("value")?.clone()).ok()
 }
 
+/// Why a click on `selector` is not sent, from the page's answer about it (`None`: send it). A prompt addressed to
+/// the person is named as such, with whatever its marker says an agent should do instead.
+fn centroid_refusal(cent: &serde_json::Value, selector: &str) -> Option<String> {
+    if cent.is_null() {
+        return Some(format!("selector {selector:?} matched no element"));
+    }
+    if cent.get("operatorOnly").and_then(|v| v.as_bool()) == Some(true) {
+        let hint = cent.get("hint").and_then(|v| v.as_str()).filter(|h| !h.is_empty());
+        return Some(format!(
+            "selector {selector:?} is part of a prompt addressed to the person (an answer, an approval or a grant): \
+             the click was not sent. Ask the person to answer it.{}",
+            hint.map(|h| format!(" {h}")).unwrap_or_default()
+        ));
+    }
+    if cent.get("covered").and_then(|v| v.as_bool()) == Some(true) {
+        return Some(format!(
+            "selector {selector:?} is covered by something else at that point (a dialog or a prompt \
+             for the user); the click was not sent"
+        ));
+    }
+    None
+}
+
 /// `POST /agentmux/browser/click_element` — synthesize a real mouse
 /// click on the first element matching `selector`. Dispatches
 /// `Input.dispatchMouseEvent` (mousePressed + mouseReleased) at the
@@ -576,30 +599,9 @@ pub async fn click_element(
         .and_then(|r| r.get("value"))
         .cloned()
         .unwrap_or(serde_json::Value::Null);
-    if cent.is_null() {
+    if let Some(msg) = centroid_refusal(&cent, &req.selector) {
         let _ = cdp.close().await;
-        return ok_body(ApiResponse::err(format!(
-            "selector {:?} matched no element",
-            req.selector
-        )));
-    }
-
-    if cent.get("operatorOnly").and_then(|v| v.as_bool()) == Some(true) {
-        let _ = cdp.close().await;
-        return ok_body(ApiResponse::err(format!(
-            "selector {:?} is part of a prompt addressed to the person (an answer, an approval or a grant): \
-             the click was not sent. Ask the person to answer it.",
-            req.selector
-        )));
-    }
-
-    if cent.get("covered").and_then(|v| v.as_bool()) == Some(true) {
-        let _ = cdp.close().await;
-        return ok_body(ApiResponse::err(format!(
-            "selector {:?} is covered by something else at that point (a dialog or a prompt \
-             for the user); the click was not sent",
-            req.selector
-        )));
+        return ok_body(ApiResponse::err(msg));
     }
 
     let at = |k: &str| cent.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0);

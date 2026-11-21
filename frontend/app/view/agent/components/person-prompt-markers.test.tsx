@@ -14,6 +14,7 @@ import { resetQuestionTimersForTests } from "@/app/store/question-timer";
 import type { ToolNode } from "../../../agent-model/types";
 import { AgentDecisionPanel } from "./AgentDecisionPanel";
 import { AgentQuestionPanel } from "./AgentQuestionPanel";
+import { PaneRow } from "./PaneRow";
 
 afterEach(() => {
     cleanup();
@@ -83,5 +84,20 @@ describe("the cards that take the person's answer", () => {
             expect(el!.closest("[data-operator-only]")).toBe(card);
         }
         expect(document.querySelector(".ordinary")!.closest("[data-operator-only]")).toBeNull();
+    });
+
+    it("marks a row's button that speaks for the person, and no other button on the row", () => {
+        render(() => (
+            <PaneRow
+                sigil="x"
+                title="Failed"
+                actions={[
+                    { label: "Move here", title: "Move here", onClick: () => {}, operatorOnly: true },
+                    { label: "Go there", title: "Go there", onClick: () => {} },
+                ]}
+            />
+        ));
+        const marked = [...document.querySelectorAll("button")].filter((b) => b.hasAttribute("data-operator-only"));
+        expect(marked.map((b) => b.textContent)).toEqual(["Move here"]);
     });
 });
