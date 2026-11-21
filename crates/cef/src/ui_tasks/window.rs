@@ -1214,6 +1214,15 @@ wrap_task! {
                     _ => tracing::warn!(label = %self.label, "[opacity] PageFadeTask: no window for label"),
                 }
                 macos_fade_pane_overlays(&self.state, &self.label, self.alpha);
+                // The renderer's own base background is opaque (CefBrowserSettings.background_color is not honoured
+                // for a windowed browser), so even a clear NSWindow shows black behind a faded page. Making it
+                // transparent through DevTools is what lets the backdrop show through the faded panes.
+                if let Some(host) = self.state.get_browser(&self.label).and_then(|b| b.host()) {
+                    let message = renderer_background_override(self.alpha);
+                    if host.send_dev_tools_message(Some(message.as_bytes())) == 0 {
+                        tracing::warn!(label = %self.label, "[opacity] renderer background override was refused");
+                    }
+                }
             }
             let Some(frame) = self.state.get_browser(&self.label).and_then(|b| b.main_frame()) else {
                 tracing::warn!(label = %self.label, "[opacity] PageFadeTask: no browser for label");
@@ -1229,6 +1238,20 @@ wrap_task! {
 pub fn post_page_fade(state: &Arc<AppState>, label: &str, alpha: f64) {
     let mut task = PageFadeTask::new(state.clone(), label.to_string(), alpha);
     post_task(ThreadId::UI, Some(&mut task));
+}
+
+/// The DevTools message that makes the renderer's default background transparent while the page carries a fade, and
+/// gives it back at full opacity. Its id is far above the ids `browser_api::cdp` hands out, and the reply is ignored.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn renderer_background_override(alpha: f64) -> String {
+    const ID: i32 = 2_000_000_000;
+    if alpha >= 1.0 {
+        format!(r#"{{"id":{ID},"method":"Emulation.setDefaultBackgroundColorOverride"}}"#)
+    } else {
+        format!(
+            r#"{{"id":{ID},"method":"Emulation.setDefaultBackgroundColorOverride","params":{{"color":{{"r":0,"g":0,"b":0,"a":0}}}}}}"#
+        )
+    }
 }
 
 /// Script that fades the whole page to `alpha` (or clears the fade at 1.0).
@@ -2132,7 +2155,17 @@ pub fn post_hang_ui_thread(_state: &Arc<AppState>) {
 
 #[cfg(test)]
 mod tests {
-    use super::uniform_fade_js;
+    use super::{renderer_background_override, uniform_fade_js};
+
+    #[test]
+    fn renderer_background_override_is_transparent_under_a_fade_and_cleared_at_full() {
+        let on: serde_json::Value = serde_json::from_str(&renderer_background_override(0.35)).unwrap();
+        assert_eq!(on["method"], "Emulation.setDefaultBackgroundColorOverride");
+        assert_eq!(on["params"]["color"]["a"], 0);
+        let off: serde_json::Value = serde_json::from_str(&renderer_background_override(1.0)).unwrap();
+        assert_eq!(off["method"], "Emulation.setDefaultBackgroundColorOverride");
+        assert!(off.get("params").is_none());
+    }
 
     #[test]
     fn uniform_fade_js_sets_and_clears_the_fade() {
