@@ -8,6 +8,7 @@ import { draggable } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { type Accessor, createMemo, For, type JSX, onCleanup, onMount, Show } from "solid-js";
 
 import { seatTooltipLine } from "@/app/agent-model/seat-format";
+import { t as tr } from "@/app/i18n/i18n";
 import { AgentLink, Linkified } from "@/app/links/linkified";
 import { kanbanCardItemType } from "@/app/drag/drag-types";
 import { Button, Pill, StatusDot, type StatusTone } from "@/app/element/ui";
@@ -31,6 +32,7 @@ import {
 import { refOf } from "./kanban-boards";
 import { surfaceOf } from "./kanban-links";
 import { CardMedia } from "./kanban-media";
+import { PrChip, prChip, WaitingOnLine } from "./kanban-prs";
 import { seatOf, useSeatIndex } from "./kanban-seats";
 import type { KanbanAfter, KanbanAgent, KanbanAgentState, KanbanTask } from "./kanban-types";
 
@@ -233,6 +235,18 @@ export function KanbanCard(props: KanbanCardProps): JSX.Element {
                 </span>
             </div>
             <ReasonOrNote s={s} />
+            <WaitingOnLine
+                card={t().card}
+                holder={() => (
+                    <Show when={s.who()} fallback={tr("kanban.prs.itsHolder")}>
+                        {(w) => (
+                            <Show when={w().uid} fallback={w().display || w().name}>
+                                {(id) => <AgentLink id={id()} name={w().display || w().name} />}
+                            </Show>
+                        )}
+                    </Show>
+                )}
+            />
             <CardMedia task={t()} />
             <div class="kanban-card__meta">
                 <WhoChip s={s} />
@@ -370,10 +384,17 @@ function FactPills({ s }: { s: CardState }) {
                 )}
             </Show>
             <Show when={checklistProgress(t())}>{(p) => <Pill icon="list-check">{p()}</Pill>}</Show>
-            <Show when={t().card.pr_url}>
-                <Pill icon="code-pull-request" tone="accent" title={t().card.pr_url}>
-                    {prLabel(t().card.pr_url)}
-                </Pill>
+            <Show
+                when={prChip(t().card)}
+                fallback={
+                    <Show when={t().card.pr_url}>
+                        <Pill icon="code-pull-request" tone="accent" title={t().card.pr_url}>
+                            {prLabel(t().card.pr_url)}
+                        </Pill>
+                    </Show>
+                }
+            >
+                <PrChip card={t().card} />
             </Show>
             <Show when={t().attempts > 1}>
                 <Pill title={`Taken ${t().attempts} times; it is parked as failed after ${t().max_attempts} attempts`}>
