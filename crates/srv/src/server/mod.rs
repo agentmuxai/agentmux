@@ -254,6 +254,9 @@ mod mcp_actor_tests;
 #[path = "tests/person_only_ws_tests.rs"]
 mod person_only_ws_tests;
 #[cfg(test)]
+#[path = "tests/quit_window_only_tests.rs"]
+mod quit_window_only_tests;
+#[cfg(test)]
 #[path = "tests/rpc_attribution_tests.rs"]
 mod rpc_attribution_tests;
 #[cfg(test)]

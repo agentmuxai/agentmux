@@ -5,7 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const quitAgent = vi.fn();
 const pushNotification = vi.fn();
-vi.mock("@/store/services", () => ({ ObjectService: { QuitAgent: (...a: unknown[]) => quitAgent(...a) } }));
+vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { AgentQuitCommand: (_client: unknown, data: { blockid: string }) => quitAgent(data.blockid) } }));
+vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/flash-notifications", () => ({ pushNotification: (n: unknown) => pushNotification(n) }));
 const beginShutdownLog = vi.fn();
 const endShutdownLog = vi.fn();

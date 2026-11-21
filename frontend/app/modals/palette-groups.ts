@@ -15,13 +15,17 @@ function categoryRank(category: string): number {
     return i === -1 ? CATEGORY_ORDER.length : i;
 }
 
+// One collator for every comparison: `a.localeCompare(b)` builds the locale's rules again on each call, which for a few
+// thousand entries was most of the sort's time. Same order as `localeCompare` with no arguments.
+const collator = new Intl.Collator();
+
 /** Commands in category order, then by name; a category outside the order sorts by its name, so its rows stay together. */
 export function sortCommands(cmds: CommandEntry[]): CommandEntry[] {
     return [...cmds].sort((a, b) => {
         const rank = categoryRank(a.category) - categoryRank(b.category);
         if (rank !== 0) return rank;
-        const category = a.category.localeCompare(b.category);
-        return category !== 0 ? category : a.label.localeCompare(b.label);
+        const category = collator.compare(a.category, b.category);
+        return category !== 0 ? category : collator.compare(a.label, b.label);
     });
 }
 
@@ -49,12 +53,17 @@ export const OTHER_GROUP = "other commands";
 export function arrangeRecent(cmds: CommandEntry[], recentIds: string[], typing: boolean): { cmds: CommandEntry[]; recent: number } {
     const byId = new Map(cmds.map((c) => [c.id, c]));
     const lead: CommandEntry[] = [];
+    const led = new Set<CommandEntry>();
     for (const id of recentIds) {
         const cmd = byId.get(id);
-        if (cmd && !lead.includes(cmd)) lead.push(cmd);
+        if (cmd && !led.has(cmd)) {
+            lead.push(cmd);
+            led.add(cmd);
+        }
         if (!typing && lead.length === RECENT_SHOWN) break;
     }
-    return { cmds: [...lead, ...cmds.filter((c) => !lead.includes(c))], recent: lead.length };
+    if (lead.length === 0) return { cmds, recent: 0 };
+    return { cmds: [...lead, ...cmds.filter((c) => !led.has(c))], recent: lead.length };
 }
 
 /**
