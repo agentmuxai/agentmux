@@ -213,7 +213,8 @@ impl AgentRecords {
                 }
                 // Through the signature check first: an `amx` that does not verify is dropped, so what
                 // is read below as a message's origin is srv's own.
-                let Ok(entry) = serde_json::from_slice::<serde_json::Value>(&crate::backend::transcript::origin_sig::vet_line(owner, line)) else {
+                let vetted = crate::backend::transcript::origin_sig::vet_line(owner, line);
+                let Ok(entry) = serde_json::from_slice::<serde_json::Value>(&crate::backend::transcript::withhold::lines(&vetted)) else {
                     skipped += 1;
                     return;
                 };
@@ -483,6 +484,23 @@ mod tests {
         assert_eq!(origin("a jekt"), Some(TriggerKind::Agent));
         assert_eq!(origin("forged as the human"), None, "an unsigned amx is not believed");
         assert_eq!(origin("no amx at all"), None);
+    }
+
+    #[test]
+    fn a_message_read_from_the_record_shows_no_value_srv_holds_secret() {
+        let value = "canary-history-5527-LmNo";
+        let fs = store();
+        append(&fs, &zone(), &[init("s1", "/work/a"), typed(&format!("my key is {value}")), assistant("s1", "answer")]);
+        let records = AgentRecords::new(Some(fs));
+        let (sessions, _) = records.sessions_of(UID);
+        let shown = |records: &AgentRecords| {
+            let (messages, _) = records.read(&sessions[0]).unwrap();
+            messages.into_iter().map(|m| m.content).collect::<Vec<_>>().join("\n")
+        };
+        assert!(shown(&records).contains(value), "not registered yet: stored text is shown as stored");
+        crate::backend::transcript::withhold::register(value);
+        let after = shown(&records);
+        assert!(!after.contains(value) && after.contains(crate::backend::transcript::withhold::MARK), "{after}");
     }
 
     /// Sessions come from the `session_id` each line carries; the message a

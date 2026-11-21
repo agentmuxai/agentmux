@@ -3,6 +3,8 @@
 
 // SidePanel: a panel along the right edge of its pane. Sizes and colours come from theme tokens only.
 
+@use "../menu-frame";
+
 .ui-side-panel {
     position: absolute;
     // Over a narrow list's sticky section heads (--z-tab-name).
@@ -16,7 +18,8 @@
     gap: var(--space-3);
     padding: var(--space-3);
     overflow-y: auto;
-    background: var(--main-bg-color);
+    // Opaque at any window opacity: it floats over the pane's content.
+    @include menu-frame.menu-fill;
     border-left: 1px solid var(--border-color);
     box-shadow: -8px 0 24px rgb(0 0 0 / 25%);
 }

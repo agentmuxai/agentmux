@@ -5,6 +5,7 @@
 // idle in the success colour, a limit or a sign-in in the warning colour, stopped muted.
 
 @use "../../mixins.scss";
+@use "../../element/menu-frame";
 
 .atlas {
     display: flex;
@@ -518,7 +519,7 @@
     list-style: none;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
-    background: var(--main-bg-color);
+    @include menu-frame.menu-fill;
 
     li {
         display: flex;
@@ -561,7 +562,7 @@
     overflow-y: auto;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
-    background: var(--main-bg-color);
+    @include menu-frame.menu-fill;
     cursor: default;
     user-select: text;
     z-index: var(--z-map-card);

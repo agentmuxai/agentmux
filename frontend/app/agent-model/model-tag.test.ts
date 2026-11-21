@@ -122,27 +122,37 @@ describe("modelTag", () => {
 
 describe("readModelFacts", () => {
     it("is null for a runtime row without the facts, so no tag is drawn", () => {
-        expect(readModelFacts({ agent_id: "a1", state: "running", provider: "claude" })).toBeNull();
-        expect(readModelFacts(null)).toBeNull();
-        expect(readModelFacts("x")).toBeNull();
+        expect(readModelFacts({ provider: "claude" })).toBeNull();
+        expect(readModelFacts({ provider: "claude", model_label: "  ", model_source: "effective" })).toBeNull();
     });
 
-    it("reads the label, source and a pending switch from a row that has them", () => {
+    it("reads the label, source, a pending switch and the definition's model from a row that has them", () => {
         const facts = readModelFacts({
-            agent_id: "a1",
             provider: "claude",
             model_label: "Opus 5.5",
             model_source: "effective",
+            effort: "high",
             pending_switch: "Fable 5.2",
             definition_model_label: "Haiku 5.5",
         });
-        expect(facts).toMatchObject({
+        expect(facts).toEqual({
             label: "Opus 5.5",
+            id: null,
+            provider: "claude",
             source: "effective",
             pendingTo: "Fable 5.2",
-            provider: "claude",
             definitionLabel: "Haiku 5.5",
+            effort: "high",
         });
         expect(modelTag(facts!)).toMatchObject({ family: "opus", muted: true, glyph: "arrow-right" });
+    });
+
+    it("takes a row that has only the id, and a route's own label", () => {
+        expect(modelTag(readModelFacts({ provider: "claude", model_id: "claude-sonnet-5-5" })!)).toMatchObject({ text: "Sonnet 5.5", family: "sonnet" });
+        expect(modelTag(readModelFacts({ provider: "openrouter", model_label: "Qwen3 Coder", model_source: "route" })!)).toMatchObject({
+            text: "Qwen3 Coder",
+            family: "other",
+            muted: false,
+        });
     });
 });
