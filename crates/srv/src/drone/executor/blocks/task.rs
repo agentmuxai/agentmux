@@ -16,6 +16,17 @@
 //!
 //! Output: `{ "filed": bool, "task": <number>, "work_id": "<id>" }`; `filed` is false when the
 //! run added a line to an open task with the same key.
+//!
+//! A task this block files carries the drone's tag (`created_by_uid`, `drone:<id>`), which is what
+//! the note mode below finds it by.
+//!
+//! Note mode: with `note_task` in the config the block adds a line to a task instead of filing one.
+//!   * `note_task`  the task's number (`12` or `#12`), which may be a `{{reference}}`: it only finds a
+//!                  task, and the block adds to a task **this drone filed** and to no other (a task
+//!                  filed by another drone, an agent or a person is refused, whatever number is given).
+//!   * `note`       required, the line's text; each `{{...}}` value is quoted data (§6.2).
+//!
+//! Output: `{ "updated": true, "task": <number>, "work_id": "<id>" }`; any refusal fails the block.
 
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -49,14 +60,92 @@ pub(crate) struct TaskSpec {
 }
 
 pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, String> {
+    if is_note(node) {
+        let spec = compose_note(node, scope)?;
+        let state = crate::drone::host::state()?;
+        return add_note(&crate::server::cron::work_store(state), &scope.drone_id, &spec);
+    }
     let spec = compose(node, scope)?;
     let state = crate::drone::host::state()?;
-    file_or_repeat(state, &spec)
+    file_or_repeat(state, &spec, &scope.drone_id)
+}
+
+/// Whether the node adds a note instead of filing a task: it has a `note_task` with something in it (the editor
+/// leaves an empty one behind when the field is cleared).
+fn is_note(node: &FlowNode) -> bool {
+    match node.data.get("note_task") {
+        None | Some(Value::Null) => false,
+        Some(Value::String(s)) => !s.trim().is_empty(),
+        Some(_) => true,
+    }
+}
+
+/// The tag a task carries when the drone `drone_id` filed it. A scope outside a saved drone has none.
+fn owner_tag(drone_id: &str) -> String {
+    if drone_id.is_empty() {
+        String::new()
+    } else {
+        format!("drone:{drone_id}")
+    }
+}
+
+/// The note a block adds to a task its drone filed.
+#[derive(Debug, PartialEq)]
+pub(crate) struct NoteSpec {
+    pub num: i64,
+    pub text: String,
+}
+
+/// The note the node describes. Pure, so the number and the quoting are testable without a server.
+pub(crate) fn compose_note(node: &FlowNode, scope: &ExecutionScope) -> Result<NoteSpec, String> {
+    let raw = match node.data.get("note_task") {
+        Some(Value::String(t)) => scope.resolve(t),
+        Some(Value::Number(n)) => n.to_string(),
+        _ => String::new(),
+    };
+    let digits = raw.trim().trim_start_matches('#');
+    let num: i64 = digits
+        .parse()
+        .ok()
+        .filter(|n| *n > 0 && digits.bytes().all(|b| b.is_ascii_digit()))
+        .ok_or_else(|| "task block: `note_task` is a task number (12 or #12)".to_string())?;
+    let note_t = node.data.get("note").and_then(|v| v.as_str()).unwrap_or("");
+    if note_t.trim().is_empty() {
+        return Err("task block missing `note`".to_string());
+    }
+    Ok(NoteSpec { num, text: quoted_text(note_t, scope) })
+}
+
+/// Add the note to the task, which must be one this drone filed. Every refusal is an error, so a graph that tries to
+/// write on another's task fails at that block instead of carrying on.
+fn add_note(store: &crate::backend::storage::store::Store, drone_id: &str, spec: &NoteSpec) -> Result<Value, String> {
+    let tag = owner_tag(drone_id);
+    if tag.is_empty() {
+        return Err("task block: a note is added only by a run of a saved drone".to_string());
+    }
+    let found = store.work_board_get(&format!("#{}", spec.num)).map_err(|e| format!("task block: {e}"))?;
+    let Some(task) = found else {
+        return Err(format!("task block: there is no task #{}", spec.num));
+    };
+    if task.item.kind != TASK_KIND || task.item.created_by_uid != tag {
+        return Err(format!("task block: task #{} was not filed by this drone, so it takes no note from it", spec.num));
+    }
+    let line = WorkEvent {
+        work_id: task.item.id.clone(),
+        at: agentmux_common::time::now_ms(),
+        actor: FILED_BY.to_string(),
+        actor_kind: "system".to_string(),
+        kind: "updated".to_string(),
+        body: crate::server::work_tasks::clean(&spec.text),
+        ..Default::default()
+    };
+    store.work_event_add(&line).map_err(|e| format!("task block: {e}"))?;
+    Ok(json!({ "updated": true, "task": spec.num, "work_id": task.item.id }))
 }
 
 /// File the task, or add a line to the open one with the same key. Synchronous end to end, so the
 /// lock covers the lookup and the insert and is never held across an await.
-fn file_or_repeat(state: &crate::server::AppState, spec: &TaskSpec) -> Result<Value, String> {
+fn file_or_repeat(state: &crate::server::AppState, spec: &TaskSpec, drone_id: &str) -> Result<Value, String> {
     let store = crate::server::cron::work_store(state);
     let _one_at_a_time = DEDUPE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
 
@@ -84,7 +173,7 @@ fn file_or_repeat(state: &crate::server::AppState, spec: &TaskSpec) -> Result<Va
         Some(key) => format!("{KEY_PREFIX}{key}\n{}", spec.body),
         None => spec.body.clone(),
     };
-    let (work_id, num) = crate::server::job_actions::file_task_as(&store, FILED_BY, TASK_KIND, &spec.title, &text, target, "Filed by a drone.")
+    let (work_id, num) = crate::server::job_actions::file_task_by(&store, FILED_BY, &owner_tag(drone_id), TASK_KIND, &spec.title, &text, target, "Filed by a drone.")
         .map_err(|e| format!("task block: couldn't file the task: {e}"))?;
     Ok(json!({ "filed": true, "task": num, "work_id": work_id }))
 }
@@ -302,5 +391,74 @@ mod tests {
         assert!(find_open(&[item("job", "open", &text)], key).is_none(), "other kinds are not ours");
         assert!(find_open(&[item("drone", "open", &format!("{KEY_PREFIX}other\nbody"))], key).is_none());
         assert!(find_open(&[item("drone", "open", &format!("body\n{KEY_PREFIX}{key}"))], key).is_none(), "the key line opens the text");
+    }
+
+    #[test]
+    fn a_note_names_its_task_by_number_or_by_an_earlier_blocks_output_and_quotes_its_values() {
+        let scope = scope_with("file", json!({ "task": 7, "cause": "a flaky test" }));
+        let note = |data: Value| compose_note(&node(data), &scope);
+        assert_eq!(note(json!({ "note_task": "12", "note": "x" })).unwrap().num, 12);
+        assert_eq!(note(json!({ "note_task": " #12 ", "note": "x" })).unwrap().num, 12);
+        assert_eq!(note(json!({ "note_task": "{{file.task}}", "note": "x" })).unwrap().num, 7);
+        let quoted = note(json!({ "note_task": "7", "note": "Cause: {{file.cause}}" })).unwrap();
+        assert!(quoted.text.starts_with(STANDING_LINE), "{}", quoted.text);
+        assert!(quoted.text.ends_with("Cause: \u{201c}a flaky test\u{201d}"), "{}", quoted.text);
+    }
+
+    #[test]
+    fn a_note_needs_a_task_number_and_a_text() {
+        let scope = scope_with("file", json!({ "task": "abc" }));
+        for bad in ["", "abc", "0", "-3", "1.5", "+5", "work#12", "12 13", "{{file.task}}", "{{file.nothing}}"] {
+            let err = compose_note(&node(json!({ "note_task": bad, "note": "x" })), &scope).unwrap_err();
+            assert!(err.contains("`note_task` is a task number"), "{bad:?}: {err}");
+        }
+        let err = compose_note(&node(json!({ "note_task": "12", "note": "  " })), &scope).unwrap_err();
+        assert!(err.contains("`note`"), "{err}");
+    }
+
+    #[test]
+    fn a_note_goes_only_to_a_task_this_drone_filed() {
+        use crate::backend::storage::store::Store;
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open_identity_store(&dir.path().join("identity-store.db")).unwrap();
+        let file = |uid: &str, kind: &str| {
+            crate::server::job_actions::file_task_by(&store, FILED_BY, uid, kind, "t", "body", (String::new(), String::new()), "test").unwrap()
+        };
+        let (mine_id, mine) = file(&owner_tag("d1"), TASK_KIND);
+        let (_, other_drones) = file(&owner_tag("d2"), TASK_KIND);
+        let (_, untagged) = file("", TASK_KIND);
+        let (_, wrong_kind) = file(&owner_tag("d1"), "job");
+        let note = |drone: &str, num: i64| add_note(&store, drone, &NoteSpec { num, text: "the run saw it again".to_string() });
+
+        let done = note("d1", mine).unwrap();
+        assert_eq!(done, json!({ "updated": true, "task": mine, "work_id": mine_id }));
+        let history = store.work_events(&mine_id, 10).unwrap();
+        assert_eq!(history.last().map(|e| e.body.as_str()), Some("the run saw it again"));
+        assert_eq!(history.last().map(|e| (e.kind.as_str(), e.actor.as_str())), Some(("updated", FILED_BY)));
+
+        for (what, num) in [("another drone's task", other_drones), ("an untagged task", untagged), ("a task of another kind", wrong_kind)] {
+            let err = note("d1", num).unwrap_err();
+            assert!(err.contains("was not filed by this drone"), "{what}: {err}");
+        }
+        assert!(note("d1", 9999).unwrap_err().contains("there is no task #9999"));
+        assert!(note("", mine).unwrap_err().contains("only by a run of a saved drone"), "a scope with no drone adds no note, even to a tagged task's number");
+    }
+
+    #[test]
+    fn a_node_is_a_note_only_when_its_note_task_has_something_in_it() {
+        assert!(!is_note(&node(json!({ "title": "x" }))));
+        assert!(!is_note(&node(json!({ "title": "x", "note_task": "" }))), "a cleared field is not a note");
+        assert!(!is_note(&node(json!({ "title": "x", "note_task": "  " }))));
+        assert!(!is_note(&node(json!({ "title": "x", "note_task": null }))));
+        assert!(is_note(&node(json!({ "note_task": "12", "note": "x" }))));
+        assert!(is_note(&node(json!({ "note_task": 12, "note": "x" }))));
+        assert_eq!(compose_note(&node(json!({ "note_task": 12, "note": "x" })), &ExecutionScope::new()).unwrap().num, 12);
+    }
+
+    #[test]
+    fn a_task_the_block_files_carries_its_drones_tag_and_no_other_does() {
+        assert_eq!(owner_tag("d1"), "drone:d1");
+        assert_eq!(owner_tag(""), "");
+        assert_ne!(owner_tag("d1"), owner_tag("d2"));
     }
 }

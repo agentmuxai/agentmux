@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{ProviderConfig, ControllerType};
+use super::{Tier, ProviderConfig, ControllerType};
 
 // Pi runs through `pi-acp`, an ACP adapter that drives `pi --mode rpc`: pi
 // itself speaks no ACP (`pi --json` was never an option, so no Pi launch ever
@@ -10,6 +10,7 @@ use super::{ProviderConfig, ControllerType};
 // SPEC_PI_HARNESS_VIA_PI_ACP_2026_10_06.md.
 pub(super) static PI: ProviderConfig = ProviderConfig {
     id: "pi",
+    tier: Tier::Preview,
     cli_command: "pi-acp",
     controller_type: ControllerType::Acp,
     app_server: None,

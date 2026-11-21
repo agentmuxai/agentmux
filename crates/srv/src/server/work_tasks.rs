@@ -431,6 +431,7 @@ fn card_update(req: &UpdateRequest) -> CardUpdate {
         }),
         branch: one(&req.branch),
         pr_url: one(&req.pr_url),
+        pr_source: None,
         doc: one(&req.doc),
     }
 }

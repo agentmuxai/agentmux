@@ -59,7 +59,7 @@ vi.mock("@/app/hook/useTick", () => ({
     useTick: (ms: number) => (log(`useTick ${ms}`), () => (log("tick read"), h.tick[0]())),
 }));
 vi.mock("../agent-dormancy", () => ({ useAgentDormant: () => () => h.dormant[0]() }));
-vi.mock("../agent-media", () => ({ useAgentMedia: () => () => h.media[0]() }));
+vi.mock("../agent-media", () => ({ useAgentMedia: () => () => h.media[0](), mediaForRow: (media: () => unknown) => media }));
 vi.mock("@/util/format-time", () => ({
     formatPeekTime: (ts: number) => `exact(${ts}) · ago(${ts})`,
 }));

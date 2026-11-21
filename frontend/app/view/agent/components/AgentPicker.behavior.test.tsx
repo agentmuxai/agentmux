@@ -233,7 +233,7 @@ function fake(init: { agents?: any[]; loading?: boolean; zoom?: number } = {}) {
         launch: {
             launching, busy, launchError, nodejsError,
             setNodejsError: (v: unknown) => (log(`setNodejsError ${v}`), setNodejsError(v as null)),
-            runtimeById: () => new Map([["a1", "runtime-a1"]]),
+            runtimeOf: (id: string) => (id === "a1" ? "runtime-a1" : undefined),
             handleReattach: press("handleReattach"), handleAttach: press("handleAttach"), handleFork: press("handleFork"),
             handleSwitchToExisting: press("handleSwitchToExisting"), handleViewHistory: press("handleViewHistory"),
             launchCreated: (a: { id: string }, c: { id: string }) => log(`launchCreated ${a.id} ${c.id}`),

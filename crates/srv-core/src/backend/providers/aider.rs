@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{ControllerType, ProviderConfig};
+use super::{Tier, ControllerType, ProviderConfig};
 
 // Aider: no ACP, MCP or JSON output, so it runs in a terminal pane with its own
 // UI (the terminal tier). Not on npm: AgentMux installs the pinned release
@@ -10,6 +10,7 @@ use super::{ControllerType, ProviderConfig};
 // (SPEC_NINE_NEW_HARNESSES_2026_10_14.md §7.9).
 pub(super) static AIDER: ProviderConfig = ProviderConfig {
     id: "aider",
+    tier: Tier::Preview,
     cli_command: "aider",
     controller_type: ControllerType::Terminal,
     app_server: None,

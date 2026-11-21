@@ -168,7 +168,7 @@ An edge fan-out starts every successor at once, up to `parallelism` per run (def
 
 ### 3.8 The Tool step
 
-A **Tool** node calls an MCP tool agents already have, with no agent turn. **Option, with a recommendation:** adopt it narrowly, and list it **per action, not per tool**, because a tool's actions differ in what they reach. It is the generic form of the Message, Task and Spawn nodes (those keep their own typed nodes for the UI); it is not a way to reach the dangerous tools.
+**Amended in the build (E4b).** Decision G7 approved a generic **Tool** node that calls an MCP tool agents already have, with no agent turn, under an allowlist **per action, not per tool** (a tool's actions differ in what they reach). The build is narrower: **there is no generic Tool node.** Each allowed action is offered by the typed block that already carries its rules, and the actions no typed block had are added to the App query and Task blocks (the second table below). A generic node is added only when a graph needs an MCP tool the typed blocks do not cover, and it takes the allowlist below as it stands. It is not a way to reach the dangerous tools.
 
 | Tool | Actions offered | Not offered, and why |
 |---|---|---|
@@ -178,7 +178,22 @@ A **Tool** node calls an MCP tool agents already have, with no agent turn. **Opt
 | `Memory` | `read` | any write with a tainted value, ever (below) |
 | `Agents`, `Pane` | `list` | `spawn` (use the Spawn node), `open`, `set_seat`, and every other action that changes something |
 
-**Memory is a special sink.** Global and Personal Memory are loaded into agents' startup instructions, so a tainted value written there is a stored prompt injection, quoted or not. **No tainted value goes into a Memory write, ever**: the validator refuses it at turn-on, and an Approval does not lift the refusal. A Global Memory write with typed-clean values is allowed, counts as *writes outside* and is listed in the turn-on prompt; Personal Memory writes are not offered.
+Where each allowed action is offered:
+
+| Action | Offered by |
+|---|---|
+| `Tasks` `list` | The App query `tasks` |
+| `Tasks` `enqueue` | The Task block |
+| `Tasks` `update` (a note on a task this drone filed) | The Task block with `note_task` (the task's number, which may come from an earlier block) and `note` (quoted data). A task the block files carries its drone's tag; a note goes only to a task with that tag. Any other task, a number with no task, and a run with no saved drone each fail the block |
+| `Message` `send` | The Message block |
+| `Presence` `who` | The App query `presence`: `repo`, `path` and `branch` (at least one; each may come from the trigger). It answers from the agents' own work facts on this machine with each agent's name, state and how it matched; no goal and no file names, and claims and posts are not read |
+| `Memory` `read` | The App query `memory`: one Global Memory entry by id or name, **written in the graph** and never a `{{reference}}`, cut to `max_chars` (4000 by default, 20,000 at most). The system tier is not offered, and two entries with one name are not guessed between |
+| `Agents` `list` | The App query `agents` and `agent` |
+| `Pane` `list` | Not offered |
+
+An App query's answer is outside text to the run, so what a Memory entry or an agent's branch says is tainted wherever it goes.
+
+**Memory is a special sink.** Global and Personal Memory are loaded into agents' startup instructions, so a tainted value written there is a stored prompt injection, quoted or not. **No step writes Memory**, so no tainted value can reach it. If a Global Memory write is ever added, it takes the rule that no tainted value goes into a Memory write, whatever an Approval says, and counts as *writes outside*.
 
 **Not offered at all:** `Terminal`, `Browser`, `Vault`, `App`, `Stop`, `Desktop` and `Google` (their actions write outside or act as the person), and **`Schedule` and `Widget`**, because they create something that runs later, outliving the review that approved the drone: a stored job with its own trigger, or an installed widget. A drone that needs another timer uses its own Trigger node. Arguments follow the same rules as the typed nodes: tainted values only as quoted data, never in a target, a path or a name.
 
@@ -269,7 +284,7 @@ Measured against the six phases of the real-world spec (§10 there).
 | E1 | **Engine, part 1** | The step scheduler over a state object; reducers; guarded cycles; for-each with a sub-drone body stubbed to a single-node body until E3; caps across iterations; the visible cap reasons; the Transform node; the validator rules for cycles and concurrent writers | L |
 | E2 | **Engine, part 2** | Checkpoints; resume; `needs_attention`; Wait; cancel; timeouts; retries; error edges; the new run events | L |
 | E3 | **Sub-drones, parallel branches, joins** | The Drone node and typed boundaries; Join; parallelism; the nested view in the Jobs tab | M |
-| E4 | **The Run step and the Tool step** | argv, container and host modes, the allowance in the turn-on prompt, the Tool allowlist | M |
+| E4 | **The Run step and the Tool step** | argv, container and host modes, the allowance in the turn-on prompt, the Tool allowlist (built as the allowed actions of the typed blocks, §3.8) | M |
 | E5 | **Versions and replay** | `db_drone_versions`; pinned versions; replay and time travel with stubbed effects | M |
 | 2, 3 | Local events and actions; secrets and polling | As in the real-world spec; independent of the engine; a second builder may take them | M each |
 | 4 | Approval and the validator | After E2 and phase 3 | M |
@@ -309,13 +324,13 @@ E1 and E2 are the bulk of the risk. The block interface rule (§0) is what lets 
 - Versions and replay: editing a drone does not change a running run; a job pinned to version 3 runs version 3; replay from step 4 starts a new run with the same state, effects stubbed; "do it for real" repeats them and says so.
 - Sub-drones: a type mismatch is refused at turn-on; a callee's cost counts against the caller; a call cycle is refused; a `clean` output the validator cannot prove is treated as tainted; an Approval in a child shows on the parent.
 - Run step: a tainted value in `command`, `cwd` or `env` is refused at turn-on and at run time; a container run has no write outside its mounts; a host Run needs the allowance; a container agent cannot create one; the output is tainted; a non-zero exit fails the node unless allowed.
-- Tool step: an allowlisted tool works; `Terminal` is refused at turn-on.
+- Allowlisted actions (§3.8): the `memory` query reads an entry by id or name, cuts it to `max_chars`, and offers neither the system tier nor a `{{reference}}` entry; `presence` needs one filter, may take them from the trigger, and shows no goal or file name; a note goes only to a task its own drone filed, and every other task, a missing task and a run with no saved drone fail the block.
 - Transform: each operation on a small list and object; chained operations; an input over 10,000 items, an evaluation over 100,000 operations and an output over 256 KB each fail naming the bound; a hostile `matches` pattern cannot stall it; `count` over a tainted list is clean, `map` over one is tainted; there is no way to write a loop or call out.
 - Taint: a variable tainted in iteration 1 is tainted in iteration 2; `in_set` at the use clears that use only; a sub-drone's tainted output reaching an outside write with no Approval is refused.
 - Derived values: a Transform `count` over a tainted list that gates a Run step is refused without an Approval; the same count used as a numeric argument needs a declared range, which the turn-on prompt shows and run time enforces; a field typed by the trigger's own schema gating the same step is accepted.
 - Control flow: a Run step behind a Condition over an Agent verdict is refused without an Approval; the turn-on prompt lists each outside write with its maximum count; acceptance (b) is accepted with no Approval and its prompt states the rate limit and `Once`.
 - Host Run step: the SHA-256 pin of the executable and of a marked script argument; a changed script stops the run as `needs_attention`; editing argv makes a new version needing a new allowance; a host step does not run through `run_on` on a machine that did not give the allowance; a Vault value is accepted in `env` and refused in argv; a granted value in stdout is redacted before state, checkpoint and ledger.
-- Tool step: each offered action works; every action not in the table (`Message` `broadcast`, `Tasks` `cancel`, `Schedule`, a Memory write with a tainted value) is refused at turn-on.
+- Tool actions: there is no step that broadcasts, cancels or moves a task, writes Memory, or reaches `Schedule`, `Terminal`, `Browser`, `Vault`, `App`, `Stop`, `Desktop`, `Google` or `Widget`: a node of any kind the build does not have is refused.
 - Retention: state bodies are replaced by hash and size 30 days after a run ends; step metadata remains; replay of an older run is refused with the reason.
 - Wait on an event key: a wrong or guessed key does not resume the run; the resuming payload is tainted.
 - Ledger: one row per job run with the summed cost across iterations and sub-drones; the child runs nest; a failure opens one incident.

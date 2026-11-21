@@ -22,6 +22,7 @@ trigger "Bypass · Sonnet 5.5 · high ⚠" class=[ui-button ui-tone-neutral ui-d
   - high {current}
   - xhigh {}
   - max {}
+  - Start a fresh session / Off: the next model change resumes the conversation on the new model {}
 patchRuntime rejects with a string
 -- after a second failure
 trigger "Bypass · Sonnet 5.5 · high ⚠" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger agent-runtime-dropup-trigger--error] expanded=true width=- border=3px solid var(--error-color)
@@ -46,6 +47,7 @@ trigger "Bypass · Sonnet 5.5 · high ⚠" class=[ui-button ui-tone-neutral ui-d
   - high {current}
   - xhigh {}
   - max {}
+  - Start a fresh session / Off: the next model change resumes the conversation on the new model {}
 patchRuntime(block-1, claude, {"model":"sonnet"}, undefined) meta=undefined
 -- after one that works
 trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-density-compact agent-runtime-dropup-trigger] expanded=true width=- border=3px solid var(--error-color)
@@ -70,3 +72,4 @@ trigger "Bypass · Sonnet 5.5 · high" class=[ui-button ui-tone-neutral ui-densi
   - high {current}
   - xhigh {}
   - max {}
+  - Start a fresh session / Off: the next model change resumes the conversation on the new model {}

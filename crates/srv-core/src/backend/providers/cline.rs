@@ -1,13 +1,14 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{ControllerType, ProviderConfig};
+use super::{Tier, ControllerType, ProviderConfig};
 
 // Cline CLI: `cline --acp` speaks ACP over stdio. It refuses `session/new`
 // until signed in ("Authentication required") and has no status command.
 // Checked against 3.0.71 on 2026-10-14 (SPEC_NINE_NEW_HARNESSES_2026_10_14.md §7.3).
 pub(super) static CLINE: ProviderConfig = ProviderConfig {
     id: "cline",
+    tier: Tier::Preview,
     cli_command: "cline",
     controller_type: ControllerType::Acp,
     app_server: None,

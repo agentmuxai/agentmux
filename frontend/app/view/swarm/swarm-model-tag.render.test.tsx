@@ -25,7 +25,7 @@ vi.mock("@/app/util/reveal-block", () => ({ revealBlock: () => {} }));
 const runtime = vi.hoisted(() => ({ read: (): Record<string, unknown>[] => [] }));
 vi.mock("@/app/store/agent-runtime-live", () => ({
     openAgentInActiveTab: vi.fn(),
-    sharedAgentRuntime: () => ({ rows: () => runtime.read() }),
+    sharedAgentRuntime: () => ({ rows: () => runtime.read(), rowOf: (id: string) => runtime.read().find((r) => r.agent_id === id) }),
 }));
 
 import { __resetAllSlots, registerPane } from "@/app/store/agent-document-store";
