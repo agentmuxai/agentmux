@@ -258,6 +258,36 @@ const RULES = [
         },
     },
     {
+        what: "providers",
+        page: "internals/provider-cli-integration.md",
+        run(text, code, files) {
+            const body = section(text, /^## Supported providers/);
+            const sources = files.filter((f) => /^crates\/srv-core\/src\/backend\/providers\/[a-z_]+\.rs$/.test(f) && !/tests?\.rs$|_tests\.rs$/.test(f));
+            if (!body || !sources.length) return [];
+            // A provider's CLI binary and the controller it runs under; an app-server provider runs under its fallback.
+            const inCode = new Map();
+            for (const f of sources) {
+                const src = read(code, f);
+                const bin = src && /\bcli_command:\s*"([^"]+)"/.exec(src)?.[1];
+                let kind = src && /\bcontroller_type:\s*ControllerType::(\w+)/.exec(src)?.[1];
+                if (kind === "AppServer") kind = /\bfallback_controller:\s*ControllerType::(\w+)/.exec(src)?.[1];
+                if (bin && kind) inCode.set(bin, kind.toLowerCase());
+            }
+            const names = new Map();
+            const out = [];
+            for (const { n, cells } of tableRows(body)) {
+                const bin = backticked(cells[1] ?? "")[0];
+                if (!bin) continue;
+                names.set(bin, n);
+                const kind = backticked(cells[3] ?? "")[0];
+                if (inCode.has(bin) && kind && kind !== inCode.get(bin)) {
+                    out.push({ page: "internals/provider-cli-integration.md", kind: "fact", text: `provider controller:${bin}`, line: n, message: `providers: the page gives \`${bin}\` the controller \`${kind}\`, the code gives \`${inCode.get(bin)}\`` });
+                }
+            }
+            return [...sameNames("internals/provider-cli-integration.md", "providers", names, new Set(inCode.keys()), "a provider in providers/*.rs"), ...out];
+        },
+    },
+    {
         what: "pane env allow-list",
         page: "internals/env-vars.md",
         run(text, code) {
