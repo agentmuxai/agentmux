@@ -48,6 +48,16 @@ describe("settings.scss columns", () => {
         expect(css).not.toMatch(/\.settings-section-body \{[^}]*max-width: 720px/);
     });
 
+    it("levels the headers that start a column, and keeps a group's last row with the row before it, from 56rem", () => {
+        const wide = css.indexOf("@container settings (min-width: 56rem)");
+        const header = css.indexOf(".settings-section-body:not(.settings-section-body--single) > .settings-subheader {", wide);
+        expect(header).toBeGreaterThan(wide);
+        expect(css.slice(header, css.indexOf("}", header))).toMatch(/margin-top: var\(--space-4\)[\s\S]*padding-top: 0/);
+        const last = css.indexOf(".setting-row:has(+ .settings-subheader)", wide);
+        expect(last).toBeGreaterThan(wide);
+        expect(css.slice(last, css.indexOf("}", last))).toContain("break-before: avoid");
+    });
+
     it("keeps the pane-keyed narrow rules as they were, for every section", () => {
         // A pane under 56rem is one column: its controls stack at 479px of pane, its swatches wrap at 639, 459 and 259.
         for (const width of [479, 639, 459, 259]) expect(css).toContain(`@container settings (max-width: ${width}px)`);
