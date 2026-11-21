@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
-import { createRoot } from "solid-js";
+import { createEffect, createRoot } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
 import { createAgentRuntimeStore, runtimeCounts } from "./agent-runtime";
 
@@ -159,5 +159,130 @@ describe("runtimeCounts", () => {
         ];
         expect(runtimeCounts(rows)).toEqual({ running: 7, waiting: 2 });
         expect(runtimeCounts([])).toEqual({ running: 0, waiting: 0 });
+    });
+});
+
+describe("what an event wakes", () => {
+    const AGENTS = 25;
+    const ids = Array.from({ length: AGENTS }, (_, i) => `a${i}`);
+    const start = async (dispose: () => void) => {
+        const f = fakeDeps(ids.map((id, i) => row(id, "idle", { block_id: `blk${i}` })));
+        const store = createAgentRuntimeStore(f.deps);
+        await store.load();
+        return { f, store, dispose };
+    };
+
+    it("wakes the readers of the agent that changed, and no other agent's", async () => {
+        await createRoot(async (dispose) => {
+            const { f, store } = await start(dispose);
+            const runs = new Map<string, number>();
+            ids.forEach((id) =>
+                createEffect(() => {
+                    store.rowOf(id);
+                    runs.set(id, (runs.get(id) ?? 0) + 1);
+                })
+            );
+            await Promise.resolve();
+            f.handlers.get("a3")!(row("a3", "working", { block_id: "blk3" }));
+            await Promise.resolve();
+            expect(runs.get("a3")).toBe(2);
+            for (const id of ids.filter((x) => x !== "a3")) expect(runs.get(id), id).toBe(1);
+            dispose();
+        });
+    });
+
+    it("wakes nothing for an event that says what the row already says", async () => {
+        await createRoot(async (dispose) => {
+            const { f, store } = await start(dispose);
+            let one = 0;
+            let all = 0;
+            createEffect(() => (store.rowOf("a1"), one++));
+            createEffect(() => (store.rows(), all++));
+            await Promise.resolve();
+            f.handlers.get("a1")!(row("a1", "idle", { block_id: "blk1" }));
+            await Promise.resolve();
+            expect([one, all]).toEqual([1, 1]);
+            dispose();
+        });
+    });
+
+    it("wakes the readers of the list once per event, and a pane's reader only for its own agent", async () => {
+        await createRoot(async (dispose) => {
+            const { f, store } = await start(dispose);
+            let all = 0;
+            let pane = 0;
+            createEffect(() => (store.rows(), all++));
+            createEffect(() => (store.rowOfBlock("blk7"), pane++));
+            await Promise.resolve();
+            f.handlers.get("a2")!(row("a2", "working", { block_id: "blk2" }));
+            await Promise.resolve();
+            expect([all, pane]).toEqual([2, 1]);
+            f.handlers.get("a7")!(row("a7", "working", { block_id: "blk7" }));
+            await Promise.resolve();
+            expect([all, pane]).toEqual([3, 2]);
+            dispose();
+        });
+    });
+
+    it("moves a pane's reader to the agent now in that pane", async () => {
+        await createRoot(async (dispose) => {
+            const { f, store } = await start(dispose);
+            const seen: (string | undefined)[] = [];
+            createEffect(() => seen.push(store.rowOfBlock("blk-new")?.agent_id));
+            await Promise.resolve();
+            f.handlers.get("a4")!(row("a4", "idle", { block_id: "blk-new" }));
+            await Promise.resolve();
+            expect(seen).toEqual([undefined, "a4"]);
+            dispose();
+        });
+    });
+
+    it("says nothing for an agent the list does not have, then has it when the list does", async () => {
+        const f = fakeDeps([row("a", "idle")]);
+        await createRoot(async (dispose) => {
+            const store = createAgentRuntimeStore(f.deps);
+            await store.load();
+            const seen: (string | undefined)[] = [];
+            createEffect(() => seen.push(store.rowOf("later")?.state));
+            await Promise.resolve();
+            f.setRows([row("a", "idle"), row("later", "working")]);
+            await store.load();
+            await Promise.resolve();
+            expect(seen).toEqual([undefined, "working"]);
+            f.setRows([row("a", "idle")]);
+            await store.load();
+            await Promise.resolve();
+            expect(seen).toEqual([undefined, "working", undefined]);
+            dispose();
+        });
+    });
+
+    // The frame budget (Loap-3): a message costs at most 16 ms, and a burst of one from every agent at most 50 ms, with
+    // 25 agents streaming and a reader on each (a row of My Agents, a Swarm card), the status bar's and the pane's.
+    it("costs under 16 ms a message and 50 ms a burst with 25 agents streaming", async () => {
+        await createRoot(async (dispose) => {
+            const { f, store } = await start(dispose);
+            ids.forEach((id, i) => {
+                createEffect(() => store.rowOf(id));
+                createEffect(() => store.rowOfBlock(`blk${i}`));
+            });
+            createEffect(() => runtimeCounts(store.rows()));
+            await Promise.resolve();
+            const states: AgentRuntime["state"][] = ["working", "idle", "waiting_on_user", "working"];
+            let worstMessage = 0;
+            let worstBurst = 0;
+            for (let round = 0; round < 40; round++) {
+                const burst = performance.now();
+                ids.forEach((id, i) => {
+                    const t = performance.now();
+                    f.handlers.get(id)!(row(id, states[(round + i) % states.length], { block_id: `blk${i}`, detail: `step ${round}` }));
+                    worstMessage = Math.max(worstMessage, performance.now() - t);
+                });
+                worstBurst = Math.max(worstBurst, performance.now() - burst);
+            }
+            expect(worstMessage).toBeLessThan(16);
+            expect(worstBurst).toBeLessThan(50);
+            dispose();
+        });
     });
 });
