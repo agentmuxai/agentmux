@@ -1359,5 +1359,7 @@
     "drone.templates.loading": "Loading templates…",
     "drone.templates.none": "No Drone templates are installed.",
     "drone.templates.use": "Use",
-    "drone.templates.review": "Review and approve"
+    "drone.templates.review": "Review and approve",
+    "jobs.droneTemplate.pill": "Drone",
+    "jobs.droneTemplate.make": "Make a drone"
 }
