@@ -161,6 +161,9 @@ fn forms_of(source: &str, homes: &[PathBuf]) -> Vec<String> {
     paths.iter().flat_map(|p| drive_forms(p)).collect()
 }
 
+/// The folders an instance keeps beside its `agents` folder: none of them is a clone's name.
+const INSTANCE_FOLDERS: [&str; 6] = ["data", "config", "logs", "runtime", "cef-cache", "agents"];
+
 /// Whether `rel`, a path inside an AgentMux root, is inside an agent's own workspace folder (`agents/<name>`, or the same
 /// under a channel or a dev build), where a container agent's workspace is made. The `agents` folder itself holds the others.
 fn in_a_workspace(rel: &str) -> bool {
@@ -168,6 +171,8 @@ fn in_a_workspace(rel: &str) -> bool {
     let after = match parts.as_slice() {
         ["agents", rest @ ..] => rest,
         ["channels", _, "agents", rest @ ..] | ["dev", _, "agents", rest @ ..] => rest,
+        // A dev build with a clone id: `dev/<branch>/<clone>/agents/<name>`. The clone is not one of an instance's own folders.
+        ["dev", _, clone, "agents", rest @ ..] if !INSTANCE_FOLDERS.contains(clone) => rest,
         _ => return false,
     };
     !after.is_empty()
@@ -363,6 +368,12 @@ mod tests {
             "/.agentmux/channels/local-main/config",
             "/.agentmux/channels/stable/runtime",
             "/.agentmux/dev/main/data",
+            "/.agentmux/dev/main/clone-1",
+            "/.agentmux/dev/main/clone-1/data",
+            "/.agentmux/dev/main/clone-1/agents",
+            "/.agentmux/dev/main/data/agents/aria",
+            "/.agentmux/dev/main/runtime/agents/aria",
+            "/.agentmux/dev/main/config/agents/aria",
             "/.agentmux/agents",
             "/.agentmux/channels/stable/agents",
             "/.agentmux/something-else",
@@ -387,6 +398,8 @@ mod tests {
             "/.agentmux/agents/aria/repo/src",
             "/.agentmux/channels/stable/agents/aria",
             "/.agentmux/dev/main/agents/aria/repo",
+            "/.agentmux/dev/main/clone-1/agents/aria",
+            "/.agentmux/dev/main/clone-1/agents/aria/repo/src",
             "/projects/app",
             "/.agentmux-notes",
             "/.agentmuxer/x",
