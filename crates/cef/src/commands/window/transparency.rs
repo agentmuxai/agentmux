@@ -150,6 +150,26 @@ unsafe fn remove_window_opacity(hwnd: *mut std::ffi::c_void) {
     }
 }
 
+/// Layer the window (or clear it) the way the OS fades a whole window: `Some` fades it to that opacity, `None`
+/// restores it fully opaque.
+#[cfg(target_os = "windows")]
+unsafe fn apply_native_opacity(hwnd: *mut std::ffi::c_void, opacity: Option<f32>) {
+    match opacity {
+        Some(opacity) => apply_window_opacity(hwnd, opacity as f64),
+        None => remove_window_opacity(hwnd),
+    }
+}
+
+/// The changes the OS applies as a whole-window alpha. None while the page carries the fade: a window the OS
+/// fades fades its menus with it, so the page must be the only thing that fades (#48092).
+fn native_changes(changes: &[(String, Option<f32>)], page_fade: bool) -> &[(String, Option<f32>)] {
+    if page_fade {
+        &[]
+    } else {
+        changes
+    }
+}
+
 /// The `(label, opacity)` of each opacity event: `Some` for
 /// `WindowOpacityApplied`, `None` for `WindowOpacityCleared` (fully opaque).
 fn opacity_changes(events: &[crate::reducer::HostEvent]) -> Vec<(String, Option<f32>)> {
@@ -210,17 +230,9 @@ pub fn set_window_opacity(
     }
 
     #[cfg(target_os = "windows")]
-    for (ev_label, ev_opacity) in changes.iter().filter(|_| !page_fade) {
-        let hwnd_raw = state.window_hwnd(ev_label);
-        match (hwnd_raw, ev_opacity) {
-            (Some(raw), Some(opacity)) => {
-                let hwnd = raw as *mut std::ffi::c_void;
-                unsafe { apply_window_opacity(hwnd, *opacity as f64); }
-            }
-            (Some(raw), None) => {
-                let hwnd = raw as *mut std::ffi::c_void;
-                unsafe { remove_window_opacity(hwnd); }
-            }
+    for (ev_label, ev_opacity) in native_changes(&changes, page_fade) {
+        match (state.window_hwnd(ev_label), ev_opacity) {
+            (Some(raw), opacity) => unsafe { apply_native_opacity(raw as *mut std::ffi::c_void, *opacity) },
             (None, Some(_)) => {
                 tracing::warn!("[opacity] set_window_opacity: no hwnd for label={}", ev_label);
             }
@@ -234,7 +246,7 @@ pub fn set_window_opacity(
     // NSWindow.alphaValue on macOS; _NET_WM_WINDOW_OPACITY on X11, a CSS
     // page fade on native Wayland.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
-    for (ev_label, ev_opacity) in changes.iter().filter(|_| !page_fade) {
+    for (ev_label, ev_opacity) in native_changes(&changes, page_fade) {
         crate::ui_tasks::post_set_window_alpha(state, ev_label, ev_opacity.map_or(1.0, |o| o as f64));
     }
 
@@ -316,4 +328,71 @@ pub async fn get_window_opacity(
         None => 1.0,
     };
     Ok(serde_json::json!(opacity))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn changes() -> Vec<(String, Option<f32>)> {
+        vec![("main".to_string(), Some(0.35)), ("win2".to_string(), None)]
+    }
+
+    #[test]
+    fn the_os_fades_the_window_unless_the_page_carries_the_fade() {
+        let all = changes();
+        assert_eq!(native_changes(&all, false), all.as_slice());
+        assert!(native_changes(&all, true).is_empty(), "no whole-window alpha while the page carries the fade");
+    }
+
+    /// A real window, as the host creates one: while the page carries the fade it is never layered, at any
+    /// opacity from 35% to 100%, so a menu the page paints opaque is opaque over the desktop. Without the
+    /// page fade the same change layers it (the control: the test can fail).
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn a_real_window_is_not_layered_while_the_page_carries_the_fade() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+        let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
+        let hwnd = unsafe {
+            CreateWindowExW(
+                0,
+                class.as_ptr(),
+                class.as_ptr(),
+                WS_POPUP,
+                0,
+                0,
+                10,
+                10,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+            )
+        };
+        assert!(!hwnd.is_null(), "the test window is created");
+        let layered = || unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_LAYERED as isize != 0 };
+
+        let apply = |page_fade: bool, opacity: Option<f32>| {
+            let change = vec![("main".to_string(), opacity)];
+            for (_, o) in native_changes(&change, page_fade) {
+                unsafe { apply_native_opacity(hwnd, *o) };
+            }
+        };
+
+        assert!(!layered(), "a new window is not layered");
+        for percent in [35, 50, 65, 80, 99] {
+            apply(true, Some(percent as f32 / 100.0));
+            assert!(!layered(), "the page carries a fade to {percent}%: the window is not layered");
+        }
+        apply(true, None);
+        assert!(!layered(), "back to 100% with the page fade");
+
+        apply(false, Some(0.35));
+        assert!(layered(), "control: the OS fade layers the window");
+        apply(false, None);
+        assert!(!layered(), "control: 100% clears it");
+
+        unsafe { DestroyWindow(hwnd) };
+    }
 }

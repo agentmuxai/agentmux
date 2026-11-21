@@ -972,39 +972,75 @@ wrap_task! {
                 return;
             }
 
-            // Codex P2 on #1895: browser-pane overlays are separate
-            // NativeWidgetMacNSWindow instances layered over this window
-            // (browser_pane/creation_views.rs) — child NSWindows do NOT
-            // inherit the parent's alphaValue, so without this a faded host
-            // window keeps fully-opaque pane rectangles floating on top.
-            // Resolve each overlay belonging to this window_label via the
-            // cached window numbers and fade it to the same alpha.
-            // try_lock (matching the overlay-wnum cache writers): missing a
-            // beat here only delays an overlay fade until the next opacity
-            // event, which beats risking a UI-thread stall.
-            let overlay_wnums: Vec<isize> = {
-                let (Some(overlays), Some(wnums)) = (
-                    self.state.browser_pane_overlays.try_lock(),
-                    self.state.browser_pane_overlay_wnums.try_lock(),
-                ) else {
-                    tracing::warn!(label = %self.label, "[opacity] overlay maps busy; pane overlays not faded this pass");
-                    return;
-                };
-                overlays
-                    .iter()
-                    .filter(|(_, (window_label, _))| window_label == &self.label)
-                    .filter_map(|(pane_label, _)| wnums.get(pane_label).copied())
-                    .collect()
-            };
-            for wnum in overlay_wnums {
-                if unsafe { macos_set_window_alpha_by_number(wnum, self.alpha) } {
-                    tracing::info!(label = %self.label, wnum, alpha = self.alpha, "[opacity] applied alphaValue to pane overlay window");
-                } else {
-                    tracing::warn!(label = %self.label, wnum, "[opacity] pane overlay NSWindow not found for wnum");
-                }
-            }
+            macos_fade_pane_overlays(&self.state, &self.label, self.alpha);
         }
     }
+}
+
+/// Fade the browser-pane overlay windows of `label` to `alpha` (Codex P2 on #1895). They are separate
+/// NativeWidgetMacNSWindow instances layered over the host window (browser_pane/creation_views.rs); child NSWindows
+/// do NOT inherit the parent window's alphaValue, so without this a faded host keeps fully opaque pane rectangles
+/// floating on top. Each overlay of the label is resolved through the cached window numbers. try_lock (matching the
+/// overlay-wnum cache writers): missing a beat only delays an overlay fade until the next opacity event, which beats
+/// risking a UI-thread stall. UI/main thread only.
+#[cfg(target_os = "macos")]
+fn macos_fade_pane_overlays(state: &Arc<AppState>, label: &str, alpha: f64) {
+    let overlay_wnums: Vec<isize> = {
+        let (Some(overlays), Some(wnums)) = (state.browser_pane_overlays.try_lock(), state.browser_pane_overlay_wnums.try_lock()) else {
+            tracing::warn!(label = %label, "[opacity] overlay maps busy; pane overlays not faded this pass");
+            return;
+        };
+        overlays
+            .iter()
+            .filter(|(_, (window_label, _))| window_label == label)
+            .filter_map(|(pane_label, _)| wnums.get(pane_label).copied())
+            .collect()
+    };
+    for wnum in overlay_wnums {
+        if unsafe { macos_set_window_alpha_by_number(wnum, alpha) } {
+            tracing::info!(label = %label, wnum, alpha, "[opacity] applied alphaValue to pane overlay window");
+        } else {
+            tracing::warn!(label = %label, wnum, "[opacity] pane overlay NSWindow not found for wnum");
+        }
+    }
+}
+
+/// Make the host NSWindow see-through where the page is: non-opaque with a clear background, so the page's own
+/// transparent pixels (and the faded app root) show the desktop. A stock NSWindow is opaque and paints its own
+/// backing under a transparent page, so a page fade only darkens toward black (macOS look check on #48092). Done
+/// once per window: setting it again makes the window server recomposite the whole window (it flickered a menu
+/// open in `pane_hole_mask.rs`). Also re-casts the shadow, which follows the window's pixels. UI/main thread only.
+/// Returns false when the NSView has no NSWindow yet.
+#[cfg(target_os = "macos")]
+unsafe fn macos_make_window_clear(nsview: *mut std::ffi::c_void) -> bool {
+    use std::ffi::{c_char, c_void};
+    use std::sync::Mutex;
+    type Id = *mut c_void;
+    type Sel = *const c_void;
+    extern "C" {
+        fn sel_registerName(name: *const c_char) -> Sel;
+        fn objc_getClass(name: *const c_char) -> Id;
+        fn objc_msgSend();
+    }
+    static PREPARED: Mutex<Option<std::collections::HashSet<usize>>> = Mutex::new(None);
+
+    let get_id: extern "C" fn(Id, Sel) -> Id = std::mem::transmute(objc_msgSend as *const c_void);
+    let set_id: extern "C" fn(Id, Sel, Id) = std::mem::transmute(objc_msgSend as *const c_void);
+    let set_bool: extern "C" fn(Id, Sel, u8) = std::mem::transmute(objc_msgSend as *const c_void);
+    let call_void: extern "C" fn(Id, Sel) = std::mem::transmute(objc_msgSend as *const c_void);
+
+    let nswindow = get_id(nsview, sel_registerName(b"window\0".as_ptr() as _));
+    if nswindow.is_null() {
+        return false;
+    }
+    let mut guard = PREPARED.lock().unwrap_or_else(|p| p.into_inner());
+    if guard.get_or_insert_with(Default::default).insert(nswindow as usize) {
+        set_bool(nswindow, sel_registerName(b"setOpaque:\0".as_ptr() as _), 0);
+        let clear = get_id(objc_getClass(b"NSColor\0".as_ptr() as _), sel_registerName(b"clearColor\0".as_ptr() as _));
+        set_id(nswindow, sel_registerName(b"setBackgroundColor:\0".as_ptr() as _), clear);
+    }
+    call_void(nswindow, sel_registerName(b"invalidateShadow\0".as_ptr() as _));
+    true
 }
 
 #[cfg(target_os = "macos")]
@@ -1162,6 +1198,23 @@ wrap_task! {
 
     impl Task {
         fn execute(&self) {
+            // macOS: the host window must be see-through where the page is, and the browser-pane overlays (separate
+            // windows the page cannot fade) are faded to the same alpha, as the OS fade does.
+            #[cfg(target_os = "macos")]
+            {
+                let nsview = get_window_on_ui(&self.state, &self.label).map(|w| w.window_handle() as *mut std::ffi::c_void);
+                match nsview {
+                    Some(v) if !v.is_null() => {
+                        if unsafe { macos_make_window_clear(v) } {
+                            tracing::info!(label = %self.label, "[opacity] host NSWindow made non-opaque with a clear background");
+                        } else {
+                            tracing::warn!(label = %self.label, "[opacity] PageFadeTask: NSView has no NSWindow yet");
+                        }
+                    }
+                    _ => tracing::warn!(label = %self.label, "[opacity] PageFadeTask: no window for label"),
+                }
+                macos_fade_pane_overlays(&self.state, &self.label, self.alpha);
+            }
             let Some(frame) = self.state.get_browser(&self.label).and_then(|b| b.main_frame()) else {
                 tracing::warn!(label = %self.label, "[opacity] PageFadeTask: no browser for label");
                 return;
