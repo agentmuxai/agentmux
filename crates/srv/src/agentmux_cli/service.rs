@@ -4,7 +4,8 @@
 //! The server as a service of the person's own login: a systemd user unit on Linux, a launchd agent
 //! on macOS. The unit runs `agentmux --channel <channel> run`, which reads the port and the secret
 //! store from the channel's settings, so changing either is `agentmux setup` and a restart, never an
-//! edit of a service file. Nothing here needs root: both live under the person's home.
+//! edit of a service file. A server kept on a folder of its own (`--home`) is started by the unit with the same
+//! `--home`. Nothing here needs root: both live under the person's home.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -85,9 +86,10 @@ pub fn inside_profile(program: &Path, home: &Path) -> bool {
 }
 
 /// The task's registration. It runs as the person who made it, only while they are signed in (`InteractiveToken`), with
-/// the least privilege and no stored password, starts `program --channel <channel>` once at their logon, and is not
-/// ended by the scheduler's own time limit; a failed server is started again.
-pub fn render_task_xml(program: &Path, channel: &str, user: Option<&str>) -> String {
+/// the least privilege and no stored password, starts `program --channel <channel>` once at their logon (with
+/// `--home <folder>` when the server keeps its data in a folder of its own), and is not ended by the scheduler's own
+/// time limit; a failed server is started again.
+pub fn render_task_xml(program: &Path, channel: &str, user: Option<&str>, data_home: Option<&Path>) -> String {
     let user_id = user.map(|u| format!("      <UserId>{}</UserId>\n", xml_escape(u))).unwrap_or_default();
     format!(
         r#"<?xml version="1.0" encoding="UTF-16"?>
@@ -133,7 +135,7 @@ pub fn render_task_xml(program: &Path, channel: &str, user: Option<&str>) -> Str
   <Actions Context="Author">
     <Exec>
       <Command>"{program}"</Command>
-      <Arguments>--channel {channel}</Arguments>
+      <Arguments>--channel {channel}{home_args}</Arguments>
     </Exec>
   </Actions>
 </Task>
@@ -141,7 +143,16 @@ pub fn render_task_xml(program: &Path, channel: &str, user: Option<&str>) -> Str
         name = xml_escape(&task_name(channel)),
         channel = xml_escape(channel),
         program = xml_escape(&program.to_string_lossy()),
+        home_args = data_home.map(|h| format!(" --home {}", xml_escape(&windows_arg(h)))).unwrap_or_default(),
     )
+}
+
+/// A folder as one word of a Windows command line: quoted, with the backslashes that end it doubled so they do not
+/// escape the closing quote.
+fn windows_arg(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    let trailing = text.len() - text.trim_end_matches('\\').len();
+    format!("\"{text}{}\"", "\\".repeat(trailing))
 }
 
 /// The text of a task's kept registration (UTF-16, as the scheduler reads it) or of a unit or agent's file (UTF-8).
@@ -155,7 +166,7 @@ pub fn read_text(path: &Path) -> Option<String> {
 
 /// Register the logon task: the program must be in the person's profile and be there; the registration is written
 /// beside the others the product keeps and handed to the scheduler, which replaces a task of the same name.
-fn install_task(user_home: &Path, exe: &Path, channel: &str) -> Result<PathBuf, String> {
+fn install_task(user_home: &Path, exe: &Path, channel: &str, data_home: Option<&Path>) -> Result<PathBuf, String> {
     if channel.is_empty() || !channel.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) {
         return Err(format!("the channel name {channel:?} cannot be part of a task's name: use letters, digits, - _ and ."));
     }
@@ -175,7 +186,7 @@ fn install_task(user_home: &Path, exe: &Path, channel: &str) -> Result<PathBuf, 
     let dir = path.parent().unwrap_or(user_home);
     std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     let mut bytes: Vec<u8> = vec![0xFF, 0xFE];
-    for unit in render_task_xml(&program, channel, user.as_deref()).encode_utf16() {
+    for unit in render_task_xml(&program, channel, user.as_deref(), data_home).encode_utf16() {
         bytes.extend_from_slice(&unit.to_le_bytes());
     }
     std::fs::write(&path, bytes).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
@@ -258,7 +269,7 @@ pub fn service_path(manager: Manager, exe: &Path, tool_dirs: &[String]) -> Strin
 }
 
 /// The text of the systemd user unit.
-pub fn render_unit(exe: &Path, channel: &str, log: &Path, path_env: &str, home: &Path) -> String {
+pub fn render_unit(exe: &Path, channel: &str, log: &Path, path_env: &str, home: &Path, data_home: Option<&Path>) -> String {
     format!(
         "[Unit]\n\
          Description=AgentMux server (channel {channel})\n\
@@ -266,7 +277,7 @@ pub fn render_unit(exe: &Path, channel: &str, log: &Path, path_env: &str, home: 
          \n\
          [Service]\n\
          Type=simple\n\
-         ExecStart={exe} --channel {channel_arg} run\n\
+         ExecStart={exe} --channel {channel_arg}{home_args} run\n\
          Environment={path}\n\
          Environment={home_var}\n\
          Restart=on-failure\n\
@@ -279,6 +290,7 @@ pub fn render_unit(exe: &Path, channel: &str, log: &Path, path_env: &str, home: 
          WantedBy=default.target\n",
         exe = systemd_quote(&exe.to_string_lossy()),
         channel_arg = systemd_quote(channel),
+        home_args = data_home.map(|h| format!(" --home {}", systemd_quote(&h.to_string_lossy()))).unwrap_or_default(),
         path = systemd_quote(&format!("PATH={path_env}")),
         home_var = systemd_quote(&format!("HOME={}", home.display())),
         log = log.display().to_string().replace('%', "%%"),
@@ -290,7 +302,7 @@ fn xml_escape(text: &str) -> String {
 }
 
 /// The text of the launchd agent.
-pub fn render_plist(exe: &Path, channel: &str, log: &Path, path_env: &str, home: &Path) -> String {
+pub fn render_plist(exe: &Path, channel: &str, log: &Path, path_env: &str, home: &Path, data_home: Option<&Path>) -> String {
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
          <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
@@ -302,6 +314,7 @@ pub fn render_plist(exe: &Path, channel: &str, log: &Path, path_env: &str, home:
          \t\t<string>{exe}</string>\n\
          \t\t<string>--channel</string>\n\
          \t\t<string>{channel}</string>\n\
+         {home_args}\
          \t\t<string>run</string>\n\
          \t</array>\n\
          \t<key>EnvironmentVariables</key>\n\
@@ -319,6 +332,7 @@ pub fn render_plist(exe: &Path, channel: &str, log: &Path, path_env: &str, home:
         label = xml_escape(&label(channel)),
         exe = xml_escape(&exe.to_string_lossy()),
         channel = xml_escape(channel),
+        home_args = data_home.map(|h| format!("\t\t<string>--home</string>\n\t\t<string>{}</string>\n", xml_escape(&h.to_string_lossy()))).unwrap_or_default(),
         path = xml_escape(path_env),
         home = xml_escape(&home.to_string_lossy()),
         log = xml_escape(&log.to_string_lossy()),
@@ -390,17 +404,18 @@ fn uid() -> u32 {
     0
 }
 
-/// Write the service's file and have the manager run it from now on and at every login.
-pub fn install(user_home: &Path, exe: &Path, channel: &str, log: &Path) -> Result<PathBuf, String> {
+/// Write the service's file and have the manager run it from now on and at every login. With `data_home` the service
+/// starts the server on that folder (`--home`), which is not `~/.agentmux`.
+pub fn install(user_home: &Path, exe: &Path, channel: &str, log: &Path, data_home: Option<&Path>) -> Result<PathBuf, String> {
     let manager = manager().ok_or_else(|| "a service is for Linux, macOS and Windows".to_string())?;
     if manager == Manager::Task {
-        return install_task(user_home, exe, channel);
+        return install_task(user_home, exe, channel, data_home);
     }
     let path = file_path(manager, user_home, channel);
     let path_env = service_path(manager, exe, &agentmux_common::toolchain_path::well_known_tool_dirs());
     let text = match manager {
-        Manager::Systemd => render_unit(exe, channel, log, &path_env, user_home),
-        Manager::Launchd => render_plist(exe, channel, log, &path_env, user_home),
+        Manager::Systemd => render_unit(exe, channel, log, &path_env, user_home, data_home),
+        Manager::Launchd => render_plist(exe, channel, log, &path_env, user_home, data_home),
         Manager::Task => unreachable!("a task is installed above"),
     };
     std::fs::create_dir_all(path.parent().unwrap_or(user_home)).map_err(|e| format!("cannot create {}: {e}", path.parent().unwrap_or(user_home).display()))?;
@@ -500,7 +515,7 @@ mod tests {
 
     #[test]
     fn the_task_runs_as_the_person_with_least_privilege_and_no_password() {
-        let xml = render_task_xml(Path::new(r"C:\Users\sam\AppData\Local\AgentMux\Headless\current\bin\agentmuxw.exe"), "headless", Some(r"HOME\sam"));
+        let xml = render_task_xml(Path::new(r"C:\Users\sam\AppData\Local\AgentMux\Headless\current\bin\agentmuxw.exe"), "headless", Some(r"HOME\sam"), None);
         for needed in [
             "<LogonTrigger>",
             "<LogonType>InteractiveToken</LogonType>",
@@ -522,7 +537,7 @@ mod tests {
     fn a_channels_task_has_its_own_name_and_never_the_desktops() {
         assert_eq!(task_name("headless"), "AgentMux Headless");
         assert_eq!(task_name("work"), "AgentMux Headless (work)");
-        assert!(render_task_xml(Path::new(r"C:\u\agentmuxw.exe"), "work", None).contains(r"<URI>\AgentMux Headless (work)</URI>"));
+        assert!(render_task_xml(Path::new(r"C:\u\agentmuxw.exe"), "work", None, None).contains(r"<URI>\AgentMux Headless (work)</URI>"));
         // The desktop's own task is called `AgentMux`.
         assert_ne!(task_name(DEFAULT_CHANNEL), "AgentMux");
         assert_eq!(file_path(Manager::Task, Path::new(r"C:\Users\sam"), "work"), Path::new(r"C:\Users\sam").join(".agentmux").join("headless-tasks").join("AgentMux Headless (work).xml"));
@@ -530,7 +545,7 @@ mod tests {
 
     #[test]
     fn a_name_that_could_break_the_registration_is_escaped() {
-        let xml = render_task_xml(Path::new(r"C:\Users\a&b\agentmuxw.exe"), "x<y", Some("D\\u\"er"));
+        let xml = render_task_xml(Path::new(r"C:\Users\a&b\agentmuxw.exe"), "x<y", Some("D\\u\"er"), None);
         assert!(xml.contains("a&amp;b") && xml.contains("x&lt;y") && xml.contains("D\\u&quot;er"), "{xml}");
     }
 
@@ -587,7 +602,7 @@ mod tests {
 
     #[test]
     fn the_unit_runs_the_command_for_its_channel_and_restarts_on_failure_only() {
-        let text = render_unit(Path::new("/home/u/.agentmux/server/0.60.26/bin/agentmux"), "headless", Path::new("/home/u/.agentmux/channels/headless/server.log"), "/usr/local/bin:/usr/bin", Path::new("/home/u"));
+        let text = render_unit(Path::new("/home/u/.agentmux/server/0.60.26/bin/agentmux"), "headless", Path::new("/home/u/.agentmux/channels/headless/server.log"), "/usr/local/bin:/usr/bin", Path::new("/home/u"), None);
         assert!(text.contains("ExecStart=\"/home/u/.agentmux/server/0.60.26/bin/agentmux\" --channel \"headless\" run\n"), "{text}");
         assert!(text.contains("Environment=\"PATH=/usr/local/bin:/usr/bin\"\n"));
         assert!(text.contains("Environment=\"HOME=/home/u\"\n"), "{text}");
@@ -598,19 +613,33 @@ mod tests {
 
     #[test]
     fn a_path_with_a_space_a_quote_or_a_percent_cannot_break_the_unit() {
-        let text = render_unit(Path::new("/home/my user/100%/agentmux"), "headless", Path::new("/l/x%y.log"), "/a b:/c\"d", Path::new("/home/my user"));
+        let text = render_unit(Path::new("/home/my user/100%/agentmux"), "headless", Path::new("/l/x%y.log"), "/a b:/c\"d", Path::new("/home/my user"), None);
         assert!(text.contains("ExecStart=\"/home/my user/100%%/agentmux\" "), "{text}");
         assert!(text.contains("Environment=\"PATH=/a b:/c\\\"d\"\n"), "{text}");
         assert!(text.contains("append:/l/x%%y.log\n"), "{text}");
         assert!(!text.contains("\n\n\n"), "no stray line");
-        let hostile = render_unit(Path::new("/x/agentmux"), "headless", Path::new("/l"), "/a\nExecStart=/bin/evil", Path::new("/h\nExecStart=/bin/evil2"));
+        let hostile = render_unit(Path::new("/x/agentmux"), "headless", Path::new("/l"), "/a\nExecStart=/bin/evil", Path::new("/h\nExecStart=/bin/evil2"), None);
         let settings = hostile.lines().filter(|l| l.starts_with("ExecStart=")).count();
         assert_eq!(settings, 1, "a newline in the PATH starts no second setting: {hostile}");
     }
 
+    /// A server kept on a folder of its own is started by its service on that folder, in every service manager, and a
+    /// server on the default folder gets no flag (the other tests pin that).
+    #[test]
+    fn a_service_for_a_server_on_its_own_folder_starts_it_there() {
+        let unit = render_unit(Path::new("/h/agentmux"), "work", Path::new("/l"), "/p", Path::new("/home/u"), Some(Path::new("/srv/my am")));
+        assert!(unit.contains("ExecStart=\"/h/agentmux\" --channel \"work\" --home \"/srv/my am\" run\n"), "{unit}");
+        let hostile = render_unit(Path::new("/h/agentmux"), "work", Path::new("/l"), "/p", Path::new("/home/u"), Some(Path::new("/h\nExecStart=/bin/evil")));
+        assert_eq!(hostile.lines().filter(|l| l.starts_with("ExecStart=")).count(), 1, "a newline in the folder starts no second setting: {hostile}");
+        let plist = render_plist(Path::new("/h/agentmux"), "work", Path::new("/l"), "/p", Path::new("/Users/u"), Some(Path::new("/srv/a&b")));
+        assert!(plist.contains("<string>work</string>\n\t\t<string>--home</string>\n\t\t<string>/srv/a&amp;b</string>\n\t\t<string>run</string>"), "{plist}");
+        let task = render_task_xml(Path::new(r"C:\u\agentmuxw.exe"), "work", None, Some(Path::new(r"D:\am data\")));
+        assert!(task.contains(r"<Arguments>--channel work --home &quot;D:\am data\\&quot;</Arguments>"), "a folder ending in a backslash does not escape the closing quote: {task}");
+    }
+
     #[test]
     fn the_agent_restarts_after_a_crash_but_not_after_a_clean_stop() {
-        let text = render_plist(Path::new("/Users/u/.agentmux/server/bin/agentmux"), "headless", Path::new("/Users/u/.agentmux/channels/headless/server.log"), "/opt/homebrew/bin:/usr/bin", Path::new("/Users/u"));
+        let text = render_plist(Path::new("/Users/u/.agentmux/server/bin/agentmux"), "headless", Path::new("/Users/u/.agentmux/channels/headless/server.log"), "/opt/homebrew/bin:/usr/bin", Path::new("/Users/u"), None);
         assert!(text.contains("<key>Label</key><string>ai.agentmux.server</string>"));
         assert!(text.contains("<string>/Users/u/.agentmux/server/bin/agentmux</string>\n\t\t<string>--channel</string>\n\t\t<string>headless</string>\n\t\t<string>run</string>"), "{text}");
         assert!(text.contains("<key>SuccessfulExit</key><false/>") && text.contains("<key>RunAtLoad</key><true/>"));
@@ -619,21 +648,21 @@ mod tests {
 
     #[test]
     fn the_agent_file_escapes_what_xml_would_read() {
-        let text = render_plist(Path::new("/Users/a&b/<x>/agentmux"), "headless", Path::new("/l"), "/p\"q", Path::new("/Users/a&b"));
+        let text = render_plist(Path::new("/Users/a&b/<x>/agentmux"), "headless", Path::new("/l"), "/p\"q", Path::new("/Users/a&b"), None);
         assert!(text.contains("/Users/a&amp;b/&lt;x&gt;/agentmux") && text.contains("/p&quot;q"), "{text}");
         assert!(!text.contains("a&b"));
     }
 
     #[test]
     fn the_agent_gets_the_home_it_was_installed_for_and_the_unit_too() {
-        let plist = render_plist(Path::new("/Users/u/.agentmux/server/bin/agentmux"), "headless", Path::new("/l"), "/p", Path::new("/Users/u"));
+        let plist = render_plist(Path::new("/Users/u/.agentmux/server/bin/agentmux"), "headless", Path::new("/l"), "/p", Path::new("/Users/u"), None);
         assert!(plist.contains("<key>HOME</key><string>/Users/u</string>") && plist.contains("<key>PATH</key><string>/p</string>"), "{plist}");
         let env_start = plist.find("<key>EnvironmentVariables</key>").unwrap();
         let env_end = env_start + plist[env_start..].find("</dict>").unwrap();
         assert!(plist[env_start..env_end].contains("HOME") && plist[env_start..env_end].contains("PATH"), "both live in EnvironmentVariables: {plist}");
-        let unit = render_unit(Path::new("/h/agentmux"), "headless", Path::new("/l"), "/p", Path::new("/home/my user"));
+        let unit = render_unit(Path::new("/h/agentmux"), "headless", Path::new("/l"), "/p", Path::new("/home/my user"), None);
         assert!(unit.contains("Environment=\"HOME=/home/my user\"\n"), "{unit}");
-        let hostile = render_unit(Path::new("/h/agentmux"), "headless", Path::new("/l"), "/p", Path::new("/h\nExecStart=/bin/evil"));
+        let hostile = render_unit(Path::new("/h/agentmux"), "headless", Path::new("/l"), "/p", Path::new("/h\nExecStart=/bin/evil"), None);
         assert_eq!(hostile.lines().filter(|l| l.starts_with("ExecStart=")).count(), 1, "a newline in the home starts no second setting: {hostile}");
     }
 
@@ -687,9 +716,9 @@ mod tests {
     #[test]
     fn a_file_names_the_program_it_runs_in_either_form() {
         let exe = Path::new("/home/my user/agentmux");
-        assert!(file_names_exe(&render_unit(exe, "headless", Path::new("/l"), "/p", Path::new("/h")), exe));
-        assert!(file_names_exe(&render_plist(exe, "headless", Path::new("/l"), "/p", Path::new("/h")), exe));
-        assert!(!file_names_exe(&render_unit(Path::new("/old/agentmux"), "headless", Path::new("/l"), "/p", Path::new("/h")), exe));
+        assert!(file_names_exe(&render_unit(exe, "headless", Path::new("/l"), "/p", Path::new("/h"), None), exe));
+        assert!(file_names_exe(&render_plist(exe, "headless", Path::new("/l"), "/p", Path::new("/h"), None), exe));
+        assert!(!file_names_exe(&render_unit(Path::new("/old/agentmux"), "headless", Path::new("/l"), "/p", Path::new("/h"), None), exe));
     }
 
     /// The task is refused, before the scheduler is asked, for a program that is not there, one outside the person's
@@ -702,14 +731,14 @@ mod tests {
         std::fs::create_dir_all(home.join("bin")).unwrap();
         std::fs::create_dir_all(elsewhere.join("bin")).unwrap();
         let (inside, outside) = (home.join("bin").join("agentmux.exe"), elsewhere.join("bin").join("agentmux.exe"));
-        let missing = install_task(&home, &inside, "headless").unwrap_err();
+        let missing = install_task(&home, &inside, "headless", None).unwrap_err();
         assert!(missing.contains("agentmuxw.exe") && missing.contains("install the package again"), "{missing}");
         std::fs::write(elsewhere.join("bin").join("agentmuxw.exe"), b"x").unwrap();
-        let away = install_task(&home, &outside, "headless").unwrap_err();
+        let away = install_task(&home, &outside, "headless", None).unwrap_err();
         assert!(away.contains("not inside your own profile folder"), "{away}");
         std::fs::write(home.join("bin").join("agentmuxw.exe"), b"x").unwrap();
         for channel in ["", "a b", r"x\y", "a\"b", "../c"] {
-            assert!(install_task(&home, &inside, channel).unwrap_err().contains("cannot be part of a task's name"), "{channel:?}");
+            assert!(install_task(&home, &inside, channel, None).unwrap_err().contains("cannot be part of a task's name"), "{channel:?}");
         }
         assert!(!file_path(Manager::Task, &home, "headless").exists(), "nothing was registered or kept");
     }

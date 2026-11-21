@@ -70,6 +70,8 @@ macro_rules! tell {
     ($($arg:tt)*) => { println!("{}", say_as(&format!($($arg)*))) };
 }
 const DEFAULT_CHANNEL: &str = "headless";
+/// The environment variable that moves the whole data root (`channels/` and `shared/`) off `~/.agentmux`.
+const HOME_VAR: &str = "AGENTMUX_HOME_OVERRIDE";
 /// The server's key file name inside its data folder.
 const KEY_FILE_NAME: &str = "srv-auth-key";
 /// How long `start` waits for the server to answer, which includes preparing the data of a new version.
@@ -80,9 +82,15 @@ const STOP_WAIT: Duration = Duration::from_secs(30);
 #[derive(Parser, Debug)]
 #[command(name = "agentmux", version, about = "Run and manage AgentMux Headless on this machine")]
 struct Cli {
-    /// The server's channel: its own data, settings and agents, apart from a desktop AgentMux's.
+    /// The server's channel: its own settings, log, ports, workspaces and windows, apart from a desktop AgentMux's. Agents, their
+    /// memory, accounts and history are shared by every channel of this folder.
     #[arg(long, global = true, default_value = DEFAULT_CHANNEL)]
     channel: String,
+    /// Keep everything in this folder instead of `~/.agentmux`: this server's own data, and the agents, accounts and
+    /// history that servers on the same folder share. A server given a folder of its own shares nothing with the
+    /// AgentMux on this machine. The login service made by `setup` carries the same folder.
+    #[arg(long, global = true, value_name = "DIR")]
+    home: Option<PathBuf>,
     #[command(subcommand)]
     command: Cmd,
 }
@@ -184,7 +192,7 @@ fn dispatch(cli: Cli) -> i32 {
     if let Cmd::Version { json } = cli.command {
         return cmd_version(&cli.channel, json);
     }
-    let paths = match context(&cli.channel) {
+    let paths = match context(&cli.channel, cli.home.as_deref()) {
         Ok(p) => p,
         Err(e) => return fail(&e),
     };
@@ -258,15 +266,35 @@ fn fail(message: &str) -> i32 {
 
 /// The channel's paths. The environment of the shell this runs in is not trusted to say anything about
 /// the server: a terminal inside a desktop AgentMux carries that instance's variables, which would
-/// point the server at the desktop's data. Only the test root override is kept.
-fn context(channel: &str) -> Result<DataPaths, String> {
+/// point the server at the desktop's data. Only the root override is kept, and `--home` sets it: the server this
+/// starts and the programs it starts inherit it, so one folder holds all of it.
+fn context(channel: &str, home: Option<&Path>) -> Result<DataPaths, String> {
     for (key, _) in std::env::vars_os() {
-        if key.to_string_lossy().starts_with("AGENTMUX_") && key != "AGENTMUX_HOME_OVERRIDE" {
+        if key.to_string_lossy().starts_with("AGENTMUX_") && key != HOME_VAR {
             std::env::remove_var(key);
         }
     }
+    if let Some(home) = home {
+        std::env::set_var(HOME_VAR, checked_home(home)?);
+    }
     std::env::set_var("AGENTMUX_CHANNEL", channel);
     DataPaths::resolve(VERSION, &RuntimeMode::Installed).map_err(|e| format!("channel {channel:?}: {e}"))
+}
+
+/// The folder `--home` names, as a full path (a service and the server it starts have another working folder), and
+/// one a service file can carry whole: no quote or line break in it.
+fn checked_home(home: &Path) -> Result<PathBuf, String> {
+    let text = home.to_string_lossy();
+    if text.is_empty() || text.contains(['"', '\n', '\r']) {
+        return Err(format!("--home {text:?} is not a folder name (it is empty, or has a quote or a line break in it)"));
+    }
+    std::path::absolute(home).map_err(|e| format!("--home {text:?}: {e}"))
+}
+
+/// The folder this run keeps everything in when it is not `~/.agentmux`: `--home`, or the root override in the
+/// environment. A login service made by `setup` is given the same.
+fn data_home_override() -> Option<PathBuf> {
+    std::env::var_os(HOME_VAR).filter(|v| !v.is_empty()).map(PathBuf::from)
 }
 
 fn client_args(print: bool, origin: Option<String>) -> Vec<String> {
@@ -883,7 +911,7 @@ fn cmd_setup(paths: &DataPaths, args: &setup::SetupArgs) -> i32 {
         Err(e) => return fail(&e),
     };
     if plan.service {
-        let installed = stable_exe().and_then(|exe| service::install(&home, &exe, &paths.channel, &state::log_path(&paths.instance_dir)));
+        let installed = stable_exe().and_then(|exe| service::install(&home, &exe, &paths.channel, &state::log_path(&paths.instance_dir), data_home_override().as_deref()));
         match installed {
             Ok(file) => {
                 println!("The service is installed ({}): AgentMux starts at every login.", file.display());
@@ -918,7 +946,8 @@ fn cmd_setup(paths: &DataPaths, args: &setup::SetupArgs) -> i32 {
     // A start has already said how to sign in.
     let sign_in = if plan.start { "" } else { "Start it with `agentmux start`, and sign in with `agentmux open`. " };
     tell!("{sign_in}Models sign in where their command-line tools do: run the tool (for example `claude`) in a terminal pane once.");
-    println!("Agents, tasks and Global Memory of this server live in {}.", paths.instance_dir.display());
+    println!("This server's settings, log, workspaces and windows are in {}.", paths.instance_dir.display());
+    tell!("Your agents, their memory, tasks, accounts and history are in {}, shared with every AgentMux on this machine. To keep this server apart from them, run it with `agentmux --home <folder> setup`.", paths.shared_dir.display());
     0
 }
 
@@ -1159,6 +1188,12 @@ mod tests {
             vec!["logs", "--since", "1h"],
             vec!["logs", "--since", "30m", "--lines", "20"],
             vec!["version", "--json"],
+            vec!["--home", "/data/am", "start"],
+            vec!["status", "--home", "/data/am", "--json"],
+            vec!["setup", "--yes", "--home", "/data/am", "--no-service"],
+            vec!["--channel", "work", "--home", "/data/am", "doctor"],
+            vec!["stop", "--home", "/data/am"],
+            vec!["open", "--home", "/data/am", "--print"],
         ] {
             assert!(parse(&args).is_ok(), "{args:?}");
         }
@@ -1176,13 +1211,13 @@ mod tests {
         std::env::set_var("AGENTMUX_CHANNEL", "stable");
         std::env::set_var("AGENTMUX_DATA_DIR", "/the/desktops/data");
         std::env::set_var("AGENTMUX_AUTH_KEY", "a key of the desktop's");
-        let paths = context("headless").unwrap();
+        let paths = context("headless", None).unwrap();
         assert_eq!(paths.channel, "headless");
         assert_eq!(paths.instance_dir, home.path().join("channels").join("headless"));
         assert!(paths.data_dir.starts_with(home.path().join("channels").join("headless").join("versions")));
         assert!(std::env::var_os("AGENTMUX_DATA_DIR").is_none(), "the desktop's variables are dropped");
         assert!(std::env::var_os("AGENTMUX_AUTH_KEY").is_none());
-        assert_eq!(context("work").unwrap().instance_dir, home.path().join("channels").join("work"));
+        assert_eq!(context("work", None).unwrap().instance_dir, home.path().join("channels").join("work"));
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
         std::env::remove_var("AGENTMUX_CHANNEL");
     }
@@ -1193,10 +1228,38 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("AGENTMUX_HOME_OVERRIDE", home.path());
         for bad in ["..", "a/b", "shared", "channels"] {
-            assert!(context(bad).is_err(), "{bad}");
+            assert!(context(bad, None).is_err(), "{bad}");
         }
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
         std::env::remove_var("AGENTMUX_CHANNEL");
+    }
+
+    /// `--home` moves the whole root: this server's channel folder and the shared folder (agents, accounts, history) are
+    /// under it, so a server given its own folder shares nothing with another. The server and the programs it starts
+    /// inherit the variable, so the one flag is enough.
+    #[test]
+    fn a_home_flag_moves_the_channel_and_the_shared_folder_and_reaches_the_server() {
+        let _lock = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let (desktop, own) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", desktop.path());
+        let paths = context("headless", Some(own.path())).unwrap();
+        assert_eq!(paths.home_dir, own.path(), "the flag wins over the environment");
+        assert_eq!(paths.instance_dir, own.path().join("channels").join("headless"));
+        assert!(!paths.shared_dir.starts_with(desktop.path()), "the shared folder is not the other root's");
+        assert!(paths.shared_dir.starts_with(own.path()), "{:?}", paths.shared_dir);
+        assert_eq!(data_home_override().as_deref(), Some(own.path()), "a service made by setup is given the same folder");
+        assert_eq!(std::env::var_os("AGENTMUX_HOME_OVERRIDE").map(PathBuf::from).as_deref(), Some(own.path()), "the server inherits it");
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        std::env::remove_var("AGENTMUX_CHANNEL");
+        assert_eq!(data_home_override(), None, "no flag and no variable: the default root, and a service with no --home");
+    }
+
+    #[test]
+    fn a_home_that_is_relative_or_cannot_be_written_into_a_service_file_is_dealt_with() {
+        assert!(checked_home(Path::new("data/am")).unwrap().is_absolute(), "a service and the server start elsewhere");
+        for bad in ["", "a\"b", "a\nb", "a\rb"] {
+            assert!(checked_home(Path::new(bad)).is_err(), "{bad:?}");
+        }
     }
 
     #[test]
@@ -1268,7 +1331,7 @@ mod tests {
         let _lock = ENV.lock().unwrap_or_else(|e| e.into_inner());
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("AGENTMUX_HOME_OVERRIDE", home.path());
-        let paths = context("headless").unwrap();
+        let paths = context("headless", None).unwrap();
         paths.ensure_dirs().unwrap();
         let out = f(&paths);
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
