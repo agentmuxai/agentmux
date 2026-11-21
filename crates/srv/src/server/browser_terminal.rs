@@ -1058,3 +1058,7 @@ mod tests {
     }
 
 }
+
+#[cfg(test)]
+#[path = "browser_terminal_handler_tests.rs"]
+mod handler_tests;
