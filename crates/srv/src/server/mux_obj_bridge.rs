@@ -781,3 +781,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "mux_obj_bridge_tests.rs"]
+mod bridge_tests;
