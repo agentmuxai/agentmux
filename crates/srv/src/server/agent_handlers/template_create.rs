@@ -146,8 +146,7 @@ pub(crate) fn create_from_template(
     crate::backend::reserved_names::check_all(&[&name]).map_err(|e| format!("agentdefcreatefromtemplate: {e}"))?;
     let mut new_def = AgentDefinition {
         id: uuid::Uuid::new_v4().to_string(),
-        // agent_def_insert derives a unique slug from the
-        // name when this is empty + collision-resolves.
+        // agent_def_insert derives a unique slug from the name when this is empty + collision-resolves.
         slug: String::new(),
         name: name.clone(),
         icon: template.icon.clone(),
