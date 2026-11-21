@@ -1,6 +1,6 @@
 # Spec: website and docs media refresh: crisp screenshots and workflow videos, shot together with the video series
 
-**Status:** draft
+**Status:** active — the capture standard (§5) shipped in part in PR #7945 (capture at scale 2, a blurry capture refused, `check-crisp.mjs`); the clip recorder at 1080p, 1x and 2x web files, the docs retake and the pipeline are not started; the workflow list (§3) and the other decisions (§10) are not approved
 
 Date: 2026-11-20 · Task: Spec #48240, build #48241 · Author: Loap. The capture and export standard (§5) is approved by the operator; the workflow list (§3) is not yet, and the other decisions (§10) wait for the operator.
 Written against agentmux `09ad1d53c6`, agentmux-docs `84aa5fe` and the landing site at `2dac5aa` (all current main on 2026-11-20).
