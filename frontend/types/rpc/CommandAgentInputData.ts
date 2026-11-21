@@ -58,8 +58,7 @@ attachments?: Array<AttachmentRef>,
  */
 joins_turn?: number, 
 /**
- * The pane sends this message again: its Retry, or a usage limit's resend after the reset. The agent receives it,
- * but the transcript already holds it from the first send, so srv records no second copy. Never set for a fresh send.
+ * The pane sends this message again (its Retry, or a usage limit's resend): the transcript holds it already, so srv records no second copy.
  */
 resend?: boolean, 
 /**

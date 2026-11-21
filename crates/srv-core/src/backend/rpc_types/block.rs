@@ -438,11 +438,8 @@ pub struct CommandAgentInputData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "number")]
     pub joins_turn: Option<u64>,
-    /// The pane sends this message again: its Retry, or a usage limit's resend after the reset. The agent receives it,
-    /// but the transcript already holds it from the first send, so srv records no second copy. Never set for a fresh send.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub resend: Option<bool>,
+    /// The pane sends this message again (its Retry, or a usage limit's resend): the transcript holds it already, so srv records no second copy.
+    #[serde(default, skip_serializing_if = "Option::is_none")] #[ts(optional)] pub resend: Option<bool>,
     /// Not a message: begin a new container agent's start (image, container, CLI) in the background so its
     /// first message finds it ready. Does nothing for any other agent, or for a pane that has run a turn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
