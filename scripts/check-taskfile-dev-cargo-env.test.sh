@@ -37,8 +37,30 @@ fixture() { # fixture <file> <dev env line> <build line> <dev:serve passes? 1|0>
 GOOD_ENV="    DEV_CARGO_ENV: 'export CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 CARGO_PROFILE_RELEASE_OPT_LEVEL=1; '"
 GOOD_BUILD="- '{{.CARGO_ENV}}cargo build --release -p agentmux-srv'"
 
-# The repo's own Taskfile.
+# The repo's own Taskfile, once and then 20 times: a gate that fails now and then on a correct file is worse than none (an
+# early `grep -q` under pipefail did exactly that on the real, large dev:serve body).
 expect pass "the repo's Taskfile.yml" "$REPO_ROOT/Taskfile.yml"
+flaky=0
+for _ in $(seq 1 20); do bash "$GATE" "$REPO_ROOT/Taskfile.yml" >/dev/null 2>&1 || flaky=$((flaky + 1)); done
+if [ "$flaky" -eq 0 ]; then
+    echo "ok   - the repo's Taskfile.yml, 20 runs in a row"
+else
+    echo "FAIL - the repo's Taskfile.yml failed $flaky of 20 runs" >&2
+    failures=$((failures + 1))
+fi
+
+# The same with a large dev:serve body, the shape that exposed it: the passing line near the top, 3000 lines below it (the
+# filler goes in just before the next task's header).
+fixture "$TMP/large.yml" "$GOOD_ENV" "- '{{.CARGO_ENV}}cargo build --release -p agentmux-srv'" 1
+awk '/^    build:backend:/ { for (i = 0; i < 3000; i++) print "            - echo filler line " i } { print }' "$TMP/large.yml" > "$TMP/large2.yml"
+flaky=0
+for _ in $(seq 1 20); do bash "$GATE" "$TMP/large2.yml" >/dev/null 2>&1 || flaky=$((flaky + 1)); done
+if [ "$flaky" -eq 0 ]; then
+    echo "ok   - a 3000-line dev:serve body, 20 runs in a row"
+else
+    echo "FAIL - a 3000-line dev:serve body failed $flaky of 20 runs" >&2
+    failures=$((failures + 1))
+fi
 
 fixture "$TMP/clean.yml" "$GOOD_ENV" "$GOOD_BUILD" 1
 expect pass "a clean fixture" "$TMP/clean.yml"

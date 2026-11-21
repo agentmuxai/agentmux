@@ -65,9 +65,15 @@ for t in dev dev:standalone dev:serve; do
     if [ -z "$body" ]; then
         echo "check-taskfile-dev-cargo-env: task $t not found in $FILE." >&2
         fail=1
-    elif ! printf '%s\n' "$body" | grep -vE '^[[:space:]]*#' | grep -qF "CARGO_ENV: '{{.DEV_CARGO_ENV}}'"; then
-        echo "check-taskfile-dev-cargo-env: task $t does not pass CARGO_ENV: '{{.DEV_CARGO_ENV}}' to what it builds." >&2
-        fail=1
+    else
+        # Never `grep -q` at the end of a pipeline here: grep exits at its first match, the writer before it can die with
+        # SIGPIPE, and under `pipefail` the pipeline then reports failure on a correct Taskfile (a large body makes it
+        # frequent). Capture the matches in a variable instead.
+        passes="$(printf '%s\n' "$body" | grep -vE '^[[:space:]]*#' | grep -F "CARGO_ENV: '{{.DEV_CARGO_ENV}}'" || true)"
+        if [ -z "$passes" ]; then
+            echo "check-taskfile-dev-cargo-env: task $t does not pass CARGO_ENV: '{{.DEV_CARGO_ENV}}' to what it builds." >&2
+            fail=1
+        fi
     fi
 done
 
