@@ -394,6 +394,30 @@ pub async fn zoom_route(
 
 // ── When the pane changes under the zoom ────────────────────────────────────
 
+/// Why a resized pane has no live browser to refit.
+#[derive(Debug, PartialEq, Eq)]
+enum NoBrowser {
+    /// Its close is under way: expected.
+    Closing,
+    /// It holds no zoom, so there is nothing to refit: expected.
+    NoZoom,
+    /// It holds a zoom but has no live browser and is not closing: the zoom outlived its pane.
+    ZoomLeftBehind,
+}
+
+fn no_browser_reason(closing: bool, holds_zoom: bool) -> NoBrowser {
+    match (closing, holds_zoom) {
+        (true, _) => NoBrowser::Closing,
+        (false, false) => NoBrowser::NoZoom,
+        (false, true) => NoBrowser::ZoomLeftBehind,
+    }
+}
+
+/// Whether an agent's zoom is kept for this pane.
+fn holds_zoom(block_id: &str) -> bool {
+    ZOOMED.lock().values().any(|e| e.block_id == block_id)
+}
+
 /// The pane was given a rect of `size` DIP: if that is a new size, fit the zoom to it once it has held still.
 pub fn on_pane_resized(state: &Arc<AppState>, block_id: &str, size: (i32, i32)) {
     // A move that keeps the size is not a resize, and a refit would reflow the page under the agent.
@@ -404,7 +428,11 @@ pub fn on_pane_resized(state: &Arc<AppState>, block_id: &str, size: (i32, i32)) 
         return;
     }
     let Some(label) = state.live_browser_pane_label(block_id) else {
-        tracing::warn!(%block_id, "[zoom] a pane was resized but has no live browser: its zoom, if it has one, was not refitted");
+        match no_browser_reason(state.browser_pane_is_closing(block_id), holds_zoom(block_id)) {
+            NoBrowser::Closing => tracing::debug!(%block_id, "[zoom] a pane that is closing was resized: nothing to refit"),
+            NoBrowser::NoZoom => tracing::debug!(%block_id, "[zoom] a pane with no live browser was resized: it has no zoom to refit"),
+            NoBrowser::ZoomLeftBehind => tracing::warn!(%block_id, "[zoom] a pane with a zoom was resized but has no live browser: the zoom was not refitted"),
+        }
         return;
     };
     // Being fitted right now: that pass looks again when it is done.
@@ -463,6 +491,20 @@ mod tests {
 
     fn p(pane_w: f64, pane_h: f64, ask: Ask, content_w: f64) -> Plan {
         plan(pane_w, pane_h, ask, content_w).expect("a plan")
+    }
+
+    /// Only a zoom that outlived its pane is worth a warning; a pane that is closing, or has no zoom, is expected.
+    #[test]
+    fn a_resized_pane_without_a_browser_warns_only_when_its_zoom_was_left_behind() {
+        assert_eq!(no_browser_reason(true, true), NoBrowser::Closing, "a closing pane, even one that still holds a zoom");
+        assert_eq!(no_browser_reason(true, false), NoBrowser::Closing);
+        assert_eq!(no_browser_reason(false, false), NoBrowser::NoZoom);
+        assert_eq!(no_browser_reason(false, true), NoBrowser::ZoomLeftBehind);
+    }
+
+    #[test]
+    fn a_pane_holds_a_zoom_only_while_one_is_kept_for_it() {
+        assert!(!holds_zoom("a-pane-nobody-zoomed"));
     }
 
     #[test]
