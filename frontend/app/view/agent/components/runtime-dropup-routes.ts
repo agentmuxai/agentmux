@@ -210,10 +210,10 @@ export function createRoutePanel(props: AgentRuntimeDropupProps) {
         }
     };
 
-    /** Moves the agent to `route`/`model` (an empty route is the harness's own sign-in). The agent restarts after its turn. */
-    const moveTo = async (route: string, model: string, restart: boolean): Promise<AgentModelSwitchResult> => {
+    /** Moves the agent to `route`/`model` (an empty route is the harness's own sign-in). The agent restarts after its turn; with `fresh` it starts a new session on the new model instead. */
+    const moveTo = async (route: string, model: string, restart: boolean, fresh = false): Promise<AgentModelSwitchResult> => {
         // srv counts the conversation's images before it moves, which reads a big transcript whole the first time: more than the default 5 s.
-        const result = await RpcApi.AgentModelSwitchCommand(TabRpcClient, { blockid: props.blockId, route, model, restart, fresh: fresh(), handoff: null }, { timeout: SWITCH_TIMEOUT_MS });
+        const result = await RpcApi.AgentModelSwitchCommand(TabRpcClient, { blockid: props.blockId, route, model, restart, fresh, handoff: null }, { timeout: SWITCH_TIMEOUT_MS });
         await refresh();
         return result;
     };
