@@ -276,6 +276,13 @@ fn replace_trailing_amx(body: &[u8], amx: &Value, shown: Option<&Map<String, Val
     if *last != b'}' || &serde_json::from_slice::<Value>(span).ok()? != amx {
         return None;
     }
+    // Only when that is the line's one `amx`: an earlier one (a second key of the same name, or its escaped
+    // spelling) is the agent's own and would stay in the bytes, so such a line is written again without any.
+    let mut head = body[..start].to_vec();
+    head.push(b'}');
+    if serde_json::from_slice::<Value>(&head).ok()?.as_object()?.contains_key("amx") {
+        return None;
+    }
     let mut out = body[..start].to_vec();
     if let Some(shown) = shown {
         out.extend_from_slice(KEY);
@@ -550,6 +557,20 @@ mod tests {
     #[test]
     fn a_streaming_delta_is_stored_as_it_is() {
         assert!(stamp_writer("agent-1", DELTA, WriterRuntime::Container, 7).is_none());
+    }
+
+    #[test]
+    fn an_amx_written_twice_by_the_agent_leaves_no_amx_to_the_viewer() {
+        // The last of two keys of the same name is the one a parser keeps; the first must not survive either.
+        let two = r#"{"type":"assistant","amx":{"v":1,"origin":{"kind":"user"}},"amx":{"v":1}}"#;
+        assert!(shown(&vet_line("agent-1", two.as_bytes())).get("amx").is_none());
+        let escaped = r#"{"type":"assistant","amx":{"v":1,"origin":{"kind":"user"}},"amx":{"v":1}}"#;
+        assert!(shown(&vet_line("agent-1", escaped.as_bytes())).get("amx").is_none());
+        // And a stamped line whose own text has an amx earlier in it, which stamping dropped.
+        let carried = stamp_writer("agent-1", two, WriterRuntime::Container, 7).unwrap();
+        let v = shown(&vet_line("agent-1", carried.as_bytes()));
+        assert_eq!(v["amx"]["writer"]["runtime"], "container");
+        assert!(v["amx"].get("origin").is_none(), "{v}");
     }
 
     #[test]
