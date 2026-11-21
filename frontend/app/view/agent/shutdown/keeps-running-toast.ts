@@ -11,7 +11,7 @@
  *     -> "Quen was shut down"  (expires as any toast)  |  "Couldn't shut down Quen" with the reason  [Retry]
  *
  * Shutdown is the person's own click, so it takes the path their Shut down elsewhere takes
- * (`ObjectService.ShutdownPreview` / `ShutdownAgent`, shut-down-agent.ts) with no agent-stop countdown. An agent
+ * (`ObjectService.ShutdownPreview` / `AgentShutdownCommand`, shut-down-agent.ts) with no agent-stop countdown. An agent
  * that was opened again, or is already stopped, by the time of the click is told so instead of failing.
  */
 
@@ -21,6 +21,8 @@ import { isParkedMeta } from "@/app/store/agent-parked";
 import { openAgentInActiveTab, sharedAgentRuntime } from "@/app/store/agent-runtime-live";
 import { pushNotification } from "@/app/store/flash-notifications";
 import * as services from "@/store/services";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import * as MOS from "@/store/mos";
 import { quitNoticeDetails, quitNoticeMessage, type QuitSummary } from "../commands/global/quit";
 import { needsConfirm, shutdownConfirmText, type ShutdownPreview } from "./shut-down-agent";
@@ -119,7 +121,7 @@ async function shutDown(all: ParkedAgent[], targets: Target[], left: string[]): 
     const outcomes = await Promise.all(
         targets.map(async (t) => {
             try {
-                const summary = (await services.ObjectService.ShutdownAgent(t.blockId, false)) as QuitSummary;
+                const summary = (await RpcApi.AgentShutdownCommand(TabRpcClient, { blockid: t.blockId, stop_background: false })) as QuitSummary;
                 return { target: t, summary };
             } catch (e) {
                 return { target: t, error: e };
