@@ -13,11 +13,11 @@
 // sibling `lifecycle` module (the fallback when a label's HWND hasn't been
 // captured yet).
 //
-// The default, on every platform: the page carries the opacity (ui_tasks::post_page_fade fades the app root with CSS
-// on an alpha-capable window) and no whole-window alpha is applied, so a menu painted opaque stays solid.
-//
-// The escape hatch, AGENTMUX_OPACITY_FADE=window, gives the platform mechanisms (uniform whole-window alpha,
-// post-render, stock-CEF-safe):
+// In a process that started alpha-capable (app/mod.rs: the transparency setting, or a window was below 100% last
+// time), on every platform: the page carries the opacity (ui_tasks::post_page_fade fades the app root with CSS) and no
+// whole-window alpha is applied, so a menu painted opaque stays solid. A process that started opaque, which keeps
+// sub-pixel text smoothing at 100%, and AGENTMUX_OPACITY_FADE=window use the platform mechanisms (uniform
+// whole-window alpha, post-render, stock-CEF-safe):
 //   Windows — WS_EX_LAYERED + SetLayeredWindowAttributes(LWA_ALPHA), inline
 //             (Win32 window-style ops are safe from any thread).
 //   macOS   — [NSWindow setAlphaValue:], via ui_tasks::post_set_window_alpha
@@ -65,7 +65,7 @@ pub fn set_window_transparency(state: &Arc<AppState>, args: &serde_json::Value) 
     tracing::info!("set_window_transparency: label={} transparent={} opacity={}", label, transparent, opacity);
 
     // #48092: the page carries the opacity; no whole-window alpha is applied (see `set_window_opacity`).
-    if crate::app::window_settings::page_fade_requested() {
+    if crate::app::window_settings::page_carries_fade() {
         crate::ui_tasks::post_page_fade(state, &label, if transparent { opacity.clamp(0.0, 1.0) } else { 1.0 });
         return Ok(serde_json::Value::Null);
     }
@@ -224,9 +224,14 @@ pub fn set_window_opacity(
     // Match both arms.
     let changes = opacity_changes(&out.events);
 
-    // #48092 (the default; `AGENTMUX_OPACITY_FADE=window` turns it off): the page carries the opacity on every platform
-    // and no whole-window alpha is applied, so a menu the page paints opaque stays opaque over the desktop.
-    let page_fade = crate::app::window_settings::page_fade_requested();
+    // #48092: in a process that started alpha-capable (the default once a window has been below 100%; not with
+    // `AGENTMUX_OPACITY_FADE=window`) the page carries the opacity and no whole-window alpha is applied, so a menu the
+    // page paints opaque stays opaque over the desktop. A process that started opaque, to keep sub-pixel text
+    // smoothing at 100%, fades the window with the OS for that session; the next start is alpha-capable.
+    if crate::app::window_settings::page_fade_requested() {
+        crate::app::window_settings::sync_opacity_marker(!state.host_state.lock().window_opacities.is_empty());
+    }
+    let page_fade = crate::app::window_settings::page_carries_fade();
     if page_fade {
         for (ev_label, ev_opacity) in &changes {
             crate::ui_tasks::post_page_fade(state, ev_label, ev_opacity.map_or(1.0, |o| o as f64));
@@ -246,8 +251,8 @@ pub fn set_window_opacity(
         }
     }
 
-    // macOS and Linux with AGENTMUX_OPACITY_FADE=window (`native_changes` is empty by default, where the page fade
-    // above carries the opacity): SetWindowAlphaTask applies it on the UI thread — NSWindow.alphaValue on macOS;
+    // macOS and Linux where the OS fades the window (`native_changes` is empty where the page fade above carries the
+    // opacity): SetWindowAlphaTask applies it on the UI thread — NSWindow.alphaValue on macOS;
     // _NET_WM_WINDOW_OPACITY on X11, a CSS page fade on native Wayland.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     for (ev_label, ev_opacity) in native_changes(&changes, page_fade) {

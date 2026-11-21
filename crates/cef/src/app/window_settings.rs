@@ -159,14 +159,82 @@ pub(crate) fn keep_view_background_transparent(view: Option<&mut cef::View>, whi
     );
 }
 
-/// The window opacity is carried by the page, as on native Wayland, on every platform (#48092): every window is
+/// The window opacity can be carried by the page, as on native Wayland, on every platform (#48092): the window is
 /// alpha-capable and nothing applies a whole-window alpha (Windows layered window, macOS `alphaValue`, X11
 /// `_NET_WM_WINDOW_OPACITY`), so what the page paints opaque (a menu, a popover) stays opaque over the desktop at any
 /// opacity. On unless `AGENTMUX_OPACITY_FADE=window`, which gives back the whole-window alpha of the OS (menus fade
-/// with it); see `ui_tasks::post_page_fade`.
+/// with it); see `ui_tasks::post_page_fade`. Whether this process IS alpha-capable is `WINDOW_ALPHA_ENABLED`.
 pub(crate) fn page_fade_requested() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| !std::env::var("AGENTMUX_OPACITY_FADE").is_ok_and(|v| v == "window"))
+}
+
+/// The page carries the opacity in this process: the page fade is wanted and the process started alpha-capable.
+/// Alpha-capable is a process-wide start-up choice (it turns off sub-pixel text smoothing), so a window that starts
+/// opaque is faded by the OS for that session instead.
+pub(crate) fn page_carries_fade() -> bool {
+    page_fade_requested() && WINDOW_ALPHA_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Whether this start is alpha-capable, which costs sub-pixel text smoothing: only when asked for, by the
+/// transparency setting or because a window was below 100% opacity last time so the page can carry it (#48092).
+pub(crate) fn starts_alpha_capable() -> bool {
+    read_window_transparent_setting() || (page_fade_requested() && opacity_marker_present())
+}
+
+const OPACITY_MARKER: &str = "window-opacity-fade.marker";
+
+fn opacity_marker_path() -> Option<std::path::PathBuf> {
+    Some(crate::sidecar::settings_file()?.parent()?.join(OPACITY_MARKER))
+}
+
+/// True when some window's opacity was below 100% when the app last ran, so this start is alpha-capable and the page
+/// can carry the opacity (menus solid). At 100% everywhere it is absent and the windows keep sub-pixel text smoothing.
+pub(crate) fn opacity_marker_present() -> bool {
+    opacity_marker_path().is_some_and(|p| p.exists())
+}
+
+/// Keep the marker in step with the windows: present while any window is below 100% opacity. Called after each
+/// opacity change; touches the disk only when the answer changes (a slider drag calls it on every tick).
+pub(crate) fn sync_opacity_marker(any_window_below_full: bool) {
+    use std::sync::atomic::{AtomicU8, Ordering};
+    static LAST: AtomicU8 = AtomicU8::new(2); // 2 = not written yet this run
+    if LAST.swap(any_window_below_full as u8, Ordering::Relaxed) == any_window_below_full as u8 {
+        return;
+    }
+    let Some(path) = opacity_marker_path() else { return };
+    if let Err(e) = write_marker(&path, any_window_below_full) {
+        tracing::warn!(error = %e, "[opacity] could not update the window-opacity marker");
+    }
+}
+
+fn write_marker(path: &std::path::Path, present: bool) -> std::io::Result<()> {
+    if present {
+        return std::fs::write(path, b"");
+    }
+    match std::fs::remove_file(path) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod opacity_marker_tests {
+    use super::write_marker;
+
+    #[test]
+    fn the_marker_is_present_while_a_window_is_below_full_and_gone_after() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("window-opacity-fade.marker");
+        write_marker(&path, false).unwrap(); // nothing to remove is not an error
+        assert!(!path.exists());
+        write_marker(&path, true).unwrap();
+        assert!(path.exists());
+        write_marker(&path, true).unwrap(); // again is fine
+        assert!(path.exists());
+        write_marker(&path, false).unwrap();
+        assert!(!path.exists());
+    }
 }
 
 /// Read `window:transparent` from the user's settings.json before CefInitialize.

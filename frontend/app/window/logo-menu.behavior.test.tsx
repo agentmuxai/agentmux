@@ -41,6 +41,8 @@ vi.mock("@/store/global", () => ({
     }),
 }));
 vi.mock("@/store/tab-actions", () => ({ createTab: () => log("createTab") }));
+// The snapshots are of a window whose page carries the opacity; the Opacity note for the other kind is in logo-menu.test.tsx.
+vi.mock("@/util/window-fade", () => ({ OPACITY_MENUS_NOTE: "", pageCarriesWindowFade: () => true }));
 vi.mock("@/util/host-caps", () => ({ hostHas: (cap: string) => (log(`hostHas ${cap}`), h.caps[cap] ?? false) }));
 vi.mock("@/util/util", () => ({
     fireAndForget: (f: () => unknown) => {

@@ -1018,7 +1018,7 @@ wrap_app! {
                 // the frontend via the URL query string (early opacity hint).
                 // Only runs in the browser process (process_type == None).
                 let is_transparent = if process_type.is_none() {
-                    let t = read_window_transparent_setting() || window_settings::page_fade_requested();
+                    let t = window_settings::starts_alpha_capable();
                     self.state.window_transparent.store(t, std::sync::atomic::Ordering::Relaxed);
                     tracing::info!("window:transparent={}", t);
                     t

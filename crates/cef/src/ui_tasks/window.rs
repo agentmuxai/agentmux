@@ -1086,7 +1086,7 @@ unsafe fn macos_set_window_alpha_by_number(wnum: isize, alpha: f64) -> bool {
     true
 }
 
-// ── Window alpha (Linux/X11; only with AGENTMUX_OPACITY_FADE=window, else `post_page_fade`) ──
+// ── Window alpha (Linux/X11; where the process is not alpha-capable, else `post_page_fade`) ──
 // Track 1 of SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01, Linux arm: the EWMH
 // analogue of Win32 LWA_ALPHA / NSWindow.alphaValue. The compositor (Mutter,
 // KWin, picom, xfwm4) fades the finished window over the desktop — including

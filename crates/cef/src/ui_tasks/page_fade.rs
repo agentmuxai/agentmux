@@ -3,10 +3,10 @@
 
 //! Window opacity carried by the page, on every platform (#48092).
 //!
-//! Unless `AGENTMUX_OPACITY_FADE=window` (app/window_settings.rs `page_fade_requested`) every window is alpha-capable and
-//! this is the only thing that applies the opacity: the page fades its own app root (theme.scss `am-uniform-fade`), and
-//! what floats outside that root (a menu) is painted opaque and stays so over the desktop. Native Wayland already works
-//! this way (`SetWindowAlphaTask`).
+//! In a process that started alpha-capable (app/mod.rs `alpha_capable`; app/window_settings.rs `page_carries_fade`) this
+//! is the only thing that applies the opacity: the page fades its own app root (theme.scss `am-uniform-fade`), and what
+//! floats outside that root (a menu) is painted opaque and stays so over the desktop. Native Wayland already works this
+//! way (`SetWindowAlphaTask`). A process that started opaque, to keep sub-pixel text smoothing, never gets here.
 
 use std::sync::Arc;
 
