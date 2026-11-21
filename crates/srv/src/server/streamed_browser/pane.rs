@@ -954,10 +954,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    #[ignore = "needs a Chromium: AGENTMUX_STREAMED_BROWSER_BIN, or one on the PATH"]
     async fn real_chromium_a_sign_in_window_returns_its_result_to_the_page_and_the_pane_goes_back() {
-        let _serial = serial().await;
         super::super::chromium::use_profile_root(std::env::temp_dir().join(format!("amx-pane-test-{}", std::process::id())));
         let port = sign_in_site().await;
         let lease = super::super::chromium::lease().await.expect("a browser for the pane");
@@ -1074,10 +1071,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    #[ignore = "needs a Chromium: AGENTMUX_STREAMED_BROWSER_BIN, or one on the PATH"]
     async fn real_chromium_a_page_that_opens_a_window_straight_to_a_refused_address_gets_nothing_on_its_first_request() {
-        let _serial = serial().await;
         super::super::chromium::use_profile_root(std::env::temp_dir().join(format!("amx-pane-test-{}", std::process::id())));
         // Something the policy refuses (a port of this server's own), a local file, and one of the browser's own pages.
         let (secret_port, hits) = secret_server().await;
@@ -1085,7 +1079,7 @@ mod tests {
         let marker = std::env::temp_dir().join(format!("amx-secret-{}.txt", std::process::id()));
         std::fs::write(&marker, "SECRET-MARKER-FILE").unwrap();
         let (refused, file, own) = (format!("http://127.0.0.1:{secret_port}/secret"), format!("file://{}", marker.display()), "chrome://version/".to_string());
-        let button = |top: u32, address: &str| format!("<button style='position:absolute;left:10px;top:{top}px;width:300px;height:60px' onclick=\"open('{address}')\">open</button>");
+        let button = |top: u32, address: &str| format!("<button style='position:absolute;left:10px;top:{top}px;width:300px;height:60px' onclick=\"window.open('{address}')\">open</button>");
         let site = static_site(format!("<title>App</title>{}{}{}", button(10, &refused), button(90, &file), button(170, &own))).await;
 
         let lease = super::super::chromium::lease().await.expect("a browser for the pane");
@@ -1144,10 +1138,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
     }
 
-    #[tokio::test]
-    #[ignore = "needs a Chromium: AGENTMUX_STREAMED_BROWSER_BIN, or one on the PATH"]
     async fn real_chromium_the_engine_alone_refuses_a_page_s_window_to_every_address_the_blocked_list_names() {
-        let _serial = serial().await;
         super::super::chromium::use_profile_root(std::env::temp_dir().join(format!("amx-pane-test-{}", std::process::id())));
         let marker = std::env::temp_dir().join(format!("amx-secret-engine-{}.txt", std::process::id()));
         std::fs::write(&marker, "SECRET-MARKER-FILE").unwrap();
@@ -1191,10 +1182,7 @@ mod tests {
         drop(lease);
     }
 
-    #[tokio::test]
-    #[ignore = "needs a Chromium: AGENTMUX_STREAMED_BROWSER_BIN, or one on the PATH"]
     async fn real_chromium_a_page_can_open_a_window_only_on_a_gesture() {
-        let _serial = serial().await;
         super::super::chromium::use_profile_root(std::env::temp_dir().join(format!("amx-pane-test-{}", std::process::id())));
         let site = static_site("<title>App</title>".to_string()).await;
         let lease = super::super::chromium::lease().await.expect("a browser");
@@ -1214,5 +1202,28 @@ mod tests {
         let _ = lease.cdp.call("Target.closeTarget", json!({ "targetId": opener }), None).await;
         popups::release(&opener);
         drop(lease);
+    }
+
+    /// The real-Chromium scenarios, one after the other in one test. The browser, its address proxy and its profile belong to the
+    /// process and are started on the runtime that is running the first one: a test of its own would run on a runtime of its own, and
+    /// find the browser the one before it started stopped with that runtime. A scenario that fails does not stop the ones after it.
+    #[tokio::test]
+    #[ignore = "needs a Chromium: AGENTMUX_STREAMED_BROWSER_BIN, or one on the PATH"]
+    async fn real_chromium_scenarios() {
+        let _serial = serial().await;
+        let mut failed: Vec<String> = Vec::new();
+        macro_rules! scenario {
+            ($name:ident) => {{
+                eprintln!("== {}", stringify!($name));
+                if let Err(e) = tokio::spawn($name()).await {
+                    failed.push(format!("{}: {e}", stringify!($name)));
+                }
+            }};
+        }
+        scenario!(real_chromium_a_sign_in_window_returns_its_result_to_the_page_and_the_pane_goes_back);
+        scenario!(real_chromium_a_page_that_opens_a_window_straight_to_a_refused_address_gets_nothing_on_its_first_request);
+        scenario!(real_chromium_the_engine_alone_refuses_a_page_s_window_to_every_address_the_blocked_list_names);
+        scenario!(real_chromium_a_page_can_open_a_window_only_on_a_gesture);
+        assert!(failed.is_empty(), "scenarios that failed: {failed:?}");
     }
 }
