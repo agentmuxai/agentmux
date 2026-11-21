@@ -162,6 +162,20 @@ a[href] {
     cursor: var(--cursor-link);
 }
 
+// Link-like elements that are not an `<a href>` get the same hand: an anchor with no href (an in-page jump) and
+// any element that says it is a link with `role="link"` (a search result or a fetched page that opens an address).
+// A link that is switched off (`aria-disabled`) or that names something which does not resolve keeps the arrow.
+// A component's own rule must not set another cursor on these: `link-cursor.test.ts` fails when one does.
+a:not([href]),
+[role="link"] {
+    cursor: var(--cursor-link);
+}
+
+a[aria-disabled="true"],
+[role="link"][aria-disabled="true"] {
+    cursor: var(--cursor-default);
+}
+
 a {
     color: var(--accent-color);
 }
