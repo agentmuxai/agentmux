@@ -184,6 +184,13 @@ fn send_message_outcome_names_the_state_and_the_id() {
     assert!(t.ends_with(" id=inj-43") && !t.contains("  "), "{t:?}");
     let t = ok(json!({ "success": true, "request_id": "inj-44", "target_in_account": true }));
     assert!(!t.contains("signed in from your account"), "{t}");
+    // srv says which agents here the name was closest to: the sender can send it again to the right id.
+    let t = ok(json!({ "success": true, "request_id": "inj-46", "did_you_mean": ["agent2"] }));
+    assert!(t.contains("Did you mean \"agent2\"? It is an agent on this machine."), "{t}");
+    let t = ok(json!({ "success": true, "request_id": "inj-47", "did_you_mean": ["agent2", "agenty"] }));
+    assert!(t.contains("Did you mean one of: \"agent2\", \"agenty\"?"), "{t}");
+    let t = ok(json!({ "success": true, "request_id": "inj-48", "did_you_mean": [] }));
+    assert!(!t.contains("Did you mean"), "{t}");
     // srv says which LAN peers it saw: the sender can tell at once the target is not on any of them.
     let t = ok(json!({ "success": true, "request_id": "inj-45", "lan_peers": ["Area54/stable (Microsoft Store, no agents)", "charlie/stable"] }));
     assert!(t.contains("Camper is not running on this machine or on any LAN peer"), "{t}");
@@ -1103,8 +1110,14 @@ fn an_ambiguous_name_is_refused_with_its_candidates() {
 #[test]
 fn resolve_detail_tells_no_such_agent_from_name_only() {
     let none = r#"{"resolution":"none"}"#;
-    assert_eq!(interpret_resolve_detail(S::OK, none, "Naki-9").unwrap(), BoundaryResolution::NoSuchAgent);
+    assert_eq!(interpret_resolve_detail(S::OK, none, "Naki-9").unwrap(), BoundaryResolution::NoSuchAgent(vec![]));
     assert_eq!(interpret_resolve_response(S::OK, none, "Naki-9").unwrap(), None);
+    // The ids srv says it most likely meant come with it.
+    let close = r#"{"resolution":"none","did_you_mean":["agent2","agent20"]}"#;
+    assert_eq!(
+        interpret_resolve_detail(S::OK, close, "agent2-0630f").unwrap(),
+        BoundaryResolution::NoSuchAgent(vec!["agent2".into(), "agent20".into()])
+    );
     let unidentified = r#"{"resolution":"unidentified","candidate":{"name":"Scratch"}}"#;
     assert_eq!(interpret_resolve_detail(S::OK, unidentified, "Scratch").unwrap(), BoundaryResolution::NameOnly);
     // An srv that predates the endpoint can't say: the name goes through.

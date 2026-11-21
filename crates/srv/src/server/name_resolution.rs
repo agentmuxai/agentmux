@@ -47,18 +47,41 @@ pub(super) async fn handle_resolve_agent_name(
         // tool call instead of sending a bare name that a same-named live
         // agent could take (Codex P1 on #3563).
         Ok(Err(e)) => (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": e }))),
-        Ok(Ok(resolution)) => (
-            StatusCode::OK,
-            Json(
-                serde_json::to_value(&resolution)
-                    .unwrap_or_else(|_| json!({ "resolution": "none" })),
-            ),
-        ),
+        Ok(Ok(resolution)) => {
+            let mut body = serde_json::to_value(&resolution).unwrap_or_else(|_| json!({ "resolution": "none" }));
+            // A name nobody answers to: the ids it most likely meant, so the refusal can offer them.
+            if matches!(resolution, crate::backend::name_resolution::NameResolution::None) {
+                body["did_you_mean"] = json!(did_you_mean(&state, &req.name).await);
+            }
+            (StatusCode::OK, Json(body))
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": format!("resolve task failed: {e}") })),
         ),
     }
+}
+
+/// The ids of the agents on this computer that a typed name nobody answers to most likely meant, best first.
+async fn did_you_mean(state: &AppState, typed: &str) -> Vec<String> {
+    let (mstore, registry, typed) = (state.mstore.clone(), state.reactive_handler, typed.to_string());
+    // A synchronous store read, so off the async worker (incident #1782).
+    tokio::task::spawn_blocking(move || {
+        let ids = crate::backend::name_resolution::known_agent_ids(&mstore, registry);
+        crate::backend::name_resolution::closest_ids(&typed, &ids)
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// A message `body` queued at the relay for `typed`, with the ids `typed` most likely meant when it is a name
+/// that answers to no agent here (a typo, a workspace folder's form), for the sender to send it again to.
+pub(crate) async fn with_did_you_mean(state: &AppState, typed: &str, mut body: Value) -> Value {
+    let close = did_you_mean(state, typed).await;
+    if !close.is_empty() {
+        body["did_you_mean"] = json!(close);
+    }
+    body
 }
 
 /// The same resolution for a name typed by an agent of another machine in a remote operation
