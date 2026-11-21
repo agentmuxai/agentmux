@@ -15,6 +15,40 @@
         border-bottom: 1px solid var(--border-color);
     }
 
+    .streamed-windows {
+        display: flex;
+        align-items: center;
+        gap: var(--space-1);
+        padding: 0 var(--space-2);
+        background: var(--main-bg-color);
+        border-bottom: 1px solid var(--border-color);
+        overflow-x: auto;
+    }
+
+    .streamed-window {
+        display: flex;
+        align-items: center;
+        min-width: 0;
+        border-bottom: 2px solid transparent;
+
+        &.active {
+            border-bottom-color: var(--accent-color);
+        }
+    }
+
+    .streamed-window-label {
+        max-width: 16em;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        padding: var(--space-1) var(--space-2);
+        background: none;
+        border: 0;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+    }
+
     .streamed-bar-address {
         flex: 1;
         min-width: 0;

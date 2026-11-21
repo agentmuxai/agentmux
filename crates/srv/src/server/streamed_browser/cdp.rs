@@ -29,7 +29,9 @@ pub struct Event {
 }
 
 type Pending = Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>;
-type Sessions = Mutex<HashMap<String, mpsc::UnboundedSender<Event>>>;
+/// Where a session's events go: a function, so a pane can have the events of all its windows arrive on one queue, each tagged.
+type Deliver = Box<dyn Fn(Event) + Send + Sync>;
+type Sessions = Mutex<HashMap<String, Deliver>>;
 
 pub struct Cdp {
     out: mpsc::UnboundedSender<Vec<u8>>,
@@ -141,8 +143,8 @@ impl Cdp {
         let event = Event { method: method.to_string(), params: value.get("params").cloned().unwrap_or(Value::Null) };
         match value.get("sessionId").and_then(Value::as_str) {
             Some(session) => {
-                if let Some(tx) = self.sessions.lock().unwrap().get(session) {
-                    let _ = tx.send(event);
+                if let Some(deliver) = self.sessions.lock().unwrap().get(session) {
+                    deliver(event);
                 }
             }
             None => {
@@ -156,8 +158,15 @@ impl Cdp {
     /// The events of one session, from now on.
     pub fn subscribe(&self, session: &str) -> mpsc::UnboundedReceiver<Event> {
         let (tx, rx) = mpsc::unbounded_channel();
-        self.sessions.lock().unwrap().insert(session.to_string(), tx);
+        self.subscribe_with(session, move |event| {
+            let _ = tx.send(event);
+        });
         rx
+    }
+
+    /// The events of one session, from now on, handed to `deliver` in the order they arrive (it must not block).
+    pub fn subscribe_with(&self, session: &str, deliver: impl Fn(Event) + Send + Sync + 'static) {
+        self.sessions.lock().unwrap().insert(session.to_string(), Box::new(deliver));
     }
 
     pub fn unsubscribe(&self, session: &str) {

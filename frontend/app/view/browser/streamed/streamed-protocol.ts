@@ -8,8 +8,13 @@
 /** First byte of a binary message: a JPEG frame follows. */
 export const FRAME_KIND = 1;
 
+/** One window of the pane: the page it started with, or a window a page opened (a sign-in pop-up, a link to a new tab). */
+export type WindowInfo = { id: number; url: string; title: string; opener: number | null; closable: boolean };
+
 export type ServerMsg =
     | { t: "nav"; url: string; title: string; canGoBack: boolean; canGoForward: boolean; loading: boolean }
+    | { t: "windows"; active: number; windows: WindowInfo[] }
+    | { t: "notice"; message: string }
     | { t: "size"; w: number; h: number }
     | { t: "error"; message: string }
     | { t: "closed" };
@@ -40,6 +45,10 @@ export function parseServerMessage(text: string): ServerMsg | null {
                 canGoForward: m.canGoForward === true,
                 loading: m.loading === true,
             };
+        case "windows":
+            return parseWindows(m);
+        case "notice":
+            return { t: "notice", message: String(m.message ?? "") };
         case "size":
             return typeof m.w === "number" && typeof m.h === "number" ? { t: "size", w: m.w, h: m.h } : null;
         case "error":
@@ -49,6 +58,29 @@ export function parseServerMessage(text: string): ServerMsg | null {
         default:
             return null;
     }
+}
+
+function parseWindows(m: Record<string, unknown>): ServerMsg | null {
+    if (typeof m.active !== "number" || !Array.isArray(m.windows)) return null;
+    const windows: WindowInfo[] = [];
+    for (const w of m.windows) {
+        if (typeof w !== "object" || w === null) return null;
+        const e = w as Record<string, unknown>;
+        if (typeof e.id !== "number") return null;
+        windows.push({ id: e.id, url: String(e.url ?? ""), title: String(e.title ?? ""), opener: typeof e.opener === "number" ? e.opener : null, closable: e.closable === true });
+    }
+    return { t: "windows", active: m.active, windows };
+}
+
+/** The site a window is on, as the tab names it: the host, else the title, else a placeholder. */
+export function windowLabel(w: Pick<WindowInfo, "url" | "title">): string {
+    try {
+        const host = new URL(w.url).host;
+        if (host) return host;
+    } catch {
+        // not an address: fall through to the title
+    }
+    return w.title || "…";
 }
 
 export type Modifiers = { altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean };

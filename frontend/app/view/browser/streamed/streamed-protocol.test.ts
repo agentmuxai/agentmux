@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { addressToUrl, clampSide } from "./use-streamed-pane";
-import { buttonName, frameBytes, isPasteChord, keyMessage, modifiers, mouseMessage, parseServerMessage, typedText, wheelMessage } from "./streamed-protocol";
+import { buttonName, frameBytes, isPasteChord, keyMessage, modifiers, mouseMessage, parseServerMessage, typedText, wheelMessage, windowLabel } from "./streamed-protocol";
 
 const none = { altKey: false, ctrlKey: false, metaKey: false, shiftKey: false };
 
@@ -76,5 +76,42 @@ describe("the pane's own numbers and address", () => {
         expect(addressToUrl("localhost:3000")).toBe("https://localhost:3000");
         expect(addressToUrl("file:///etc/passwd")).toBe("file:///etc/passwd");
         expect(addressToUrl("")).toBe("");
+    });
+});
+
+
+describe("windows and notices", () => {
+    const windowsMsg = {
+        t: "windows",
+        active: 1,
+        windows: [
+            { id: 0, url: "https://app.example/", title: "App", opener: null, closable: false },
+            { id: 1, url: "https://idp.example/auth", title: "Sign in", opener: 0, closable: true },
+        ],
+    };
+
+    it("reads the windows of the pane and which one is shown", () => {
+        expect(parseServerMessage(JSON.stringify(windowsMsg))).toEqual(windowsMsg);
+    });
+
+    it("refuses a windows message that is not well formed", () => {
+        expect(parseServerMessage(JSON.stringify({ ...windowsMsg, active: "1" }))).toBeNull();
+        expect(parseServerMessage(JSON.stringify({ ...windowsMsg, windows: "none" }))).toBeNull();
+        expect(parseServerMessage(JSON.stringify({ ...windowsMsg, windows: [{ url: "x" }] }))).toBeNull();
+        expect(parseServerMessage(JSON.stringify({ ...windowsMsg, windows: [null] }))).toBeNull();
+    });
+
+    it("reads a notice as the words the server gave", () => {
+        expect(parseServerMessage('{"t":"notice","message":"a.example opened a message box. It was dismissed."}')).toEqual({
+            t: "notice",
+            message: "a.example opened a message box. It was dismissed.",
+        });
+    });
+
+    it("names a window by its site, so the person sees who is asking", () => {
+        expect(windowLabel({ url: "https://login.example.com/a?b=1", title: "Sign in" })).toBe("login.example.com");
+        expect(windowLabel({ url: "http://127.0.0.1:8080/x", title: "" })).toBe("127.0.0.1:8080");
+        expect(windowLabel({ url: "about:blank", title: "Untitled" })).toBe("Untitled");
+        expect(windowLabel({ url: "", title: "" })).toBe("…");
     });
 });
