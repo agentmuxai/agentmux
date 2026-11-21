@@ -395,8 +395,19 @@ async fn the_pane_is_told_the_turn_started_and_ended_and_gets_each_output_line()
         .filter_map(|b64| base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64).ok())
         .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
         .collect();
+    // Each line arrives as the agent wrote it, stored with the runtime that wrote it (a container's).
+    let got: Vec<serde_json::Value> = appended.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
     for line in [INIT, ANSWER, RESULT_OK] {
-        assert!(appended.contains(line), "the pane gets {line}: {appended}");
+        let want: serde_json::Value = serde_json::from_str(line).unwrap();
+        let stored = got
+            .iter()
+            .find(|v| {
+                let mut bare = (*v).clone();
+                bare.as_object_mut().unwrap().remove("amx");
+                bare == want
+            })
+            .unwrap_or_else(|| panic!("the pane gets {line}: {appended}"));
+        assert_eq!(stored["amx"]["writer"]["runtime"], "container", "{stored}");
     }
 }
 

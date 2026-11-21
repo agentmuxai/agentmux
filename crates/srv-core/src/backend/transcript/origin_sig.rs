@@ -149,7 +149,17 @@ pub fn echoed_prompt(line: &str) -> Option<String> {
 /// The MAC over what a viewer will believe. `amx` is the object without its
 /// `sig` and `verified`.
 fn mac(owner: &str, record: &Value, amx: &Map<String, Value>) -> Vec<u8> {
-    let content = content_of(record).unwrap_or(&Value::Null);
+    // A user record's words; any other record (an agent's own line) is bound whole, minus its `amx`, so a stamp can't
+    // be copied onto other content.
+    let own;
+    let content = match content_of(record) {
+        Some(content) => content,
+        None if !is_user_record(record) => {
+            own = without_amx(record);
+            &own
+        }
+        None => &Value::Null,
+    };
     let content_hash = Sha256::digest(canonical(content).as_bytes());
     let mut m = HmacSha256::new_from_slice(key()).expect("hmac takes any key length");
     m.update(b"amx-v1\0");
@@ -159,6 +169,14 @@ fn mac(owner: &str, record: &Value, amx: &Map<String, Value>) -> Vec<u8> {
     m.update(b"\0");
     m.update(canonical(&Value::Object(amx.clone())).as_bytes());
     m.finalize().into_bytes().to_vec()
+}
+
+fn without_amx(record: &Value) -> Value {
+    let mut whole = record.clone();
+    if let Some(map) = whole.as_object_mut() {
+        map.remove("amx");
+    }
+    whole
 }
 
 fn without_signature(amx: &Map<String, Value>) -> Map<String, Value> {
@@ -188,16 +206,51 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 /// `line` with `ts_ms` and `sig` added to its `amx`, for `owner`. A line with
 /// no `amx` object (or that isn't a JSON object) is returned as it is.
 pub fn sign_line(owner: &str, line: &[u8], ts_ms: i64) -> Vec<u8> {
-    rewrite(line, |record| {
-        let amx = record.get_mut("amx")?.as_object_mut()?;
-        amx.remove("sig");
-        amx.remove("verified");
-        amx.insert("ts_ms".to_string(), Value::from(ts_ms));
-        let body = amx.clone();
-        let sig = hex(&mac(owner, &*record, &body));
-        record["amx"].as_object_mut()?.insert("sig".to_string(), Value::String(sig));
-        Some(())
-    })
+    rewrite(line, |record| sign_in_place(owner, record, ts_ms))
+}
+
+/// `record`'s `amx` with `ts_ms` and `sig` added, for `owner`; `None` when it has no `amx` object.
+fn sign_in_place(owner: &str, record: &mut Value, ts_ms: i64) -> Option<()> {
+    let amx = record.get_mut("amx")?.as_object_mut()?;
+    amx.remove("sig");
+    amx.remove("verified");
+    amx.insert("ts_ms".to_string(), Value::from(ts_ms));
+    let body = amx.clone();
+    let sig = hex(&mac(owner, &*record, &body));
+    record["amx"].as_object_mut()?.insert("sig".to_string(), Value::String(sig));
+    Some(())
+}
+
+/// Which runtime wrote the lines of an agent's output.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WriterRuntime {
+    Host,
+    Container,
+}
+
+impl WriterRuntime {
+    fn as_str(self) -> &'static str {
+        match self {
+            WriterRuntime::Host => "host",
+            WriterRuntime::Container => "container",
+        }
+    }
+}
+
+/// `line`, an output line an agent's process wrote, as srv stores it: with `amx.writer` saying which runtime wrote
+/// it, and which agent, signed for `owner`. Whatever `amx` the line already carries is the agent's own words and is
+/// dropped first, never kept or merged. `None` for a line that isn't a JSON object, which is stored as it is.
+pub fn stamp_writer(owner: &str, line: &str, runtime: WriterRuntime, ts_ms: i64) -> Option<String> {
+    let mut record: Value = serde_json::from_str(line).ok()?;
+    let map = record.as_object_mut()?;
+    map.insert("amx".to_string(), serde_json::json!({ "v": 1, "writer": { "runtime": runtime.as_str(), "agent": owner } }));
+    sign_in_place(owner, &mut record, ts_ms)?;
+    serde_json::to_string(&record).ok()
+}
+
+/// Whether `record`'s `amx` claims a writer runtime srv knows (it is believed only if it verifies).
+fn writer_stamped(record: &Value) -> bool {
+    record.pointer("/amx/writer/runtime").and_then(Value::as_str).is_some_and(|r| matches!(r, "host" | "container"))
 }
 
 /// Parse `line` (a trailing newline kept), let `f` change it, and serialize it
@@ -240,12 +293,18 @@ pub fn vet_line<'a>(owner: &str, line: &'a [u8]) -> Cow<'a, [u8]> {
     if !map.contains_key("amx") {
         return Cow::Borrowed(line);
     }
-    let signed = is_user_record(&Value::Object(map.clone())) && is_signed(owner, &Value::Object(map.clone()));
+    let whole = Value::Object(map.clone());
+    let user = is_user_record(&whole);
+    let signed = (user || writer_stamped(&whole)) && is_signed(owner, &whole);
     let amx = map.remove("amx");
     if signed {
         let mut shown = without_signature(amx.as_ref().and_then(Value::as_object).expect("signed means an object"));
         shown.remove("ts_ms");
         shown.insert("verified".to_string(), Value::Bool(true));
+        // An agent's own line shows who wrote it and nothing that says where a message came from.
+        if !user {
+            shown.retain(|k, _| matches!(k.as_str(), "v" | "writer" | "verified"));
+        }
         map.insert("amx".to_string(), Value::Object(shown));
     }
     let Ok(mut out) = serde_json::to_vec(&record) else { return blank() };
@@ -388,6 +447,73 @@ mod tests {
     fn a_signed_line_copied_to_another_owner_does_not_verify() {
         let signed = sign_line("agent-1", &line(user_amx(), "hi"), 1);
         assert!(shown(&vet_line("agent-2", &signed)).get("amx").is_none());
+    }
+
+    fn assistant_line(text: &str) -> String {
+        json!({ "type": "assistant", "message": { "role": "assistant", "content": [{ "type": "text", "text": text }] } }).to_string()
+    }
+
+    fn writer_of(vetted: &[u8]) -> Option<(String, String)> {
+        let v = shown(vetted);
+        let w = v.get("amx")?.get("writer")?;
+        Some((w["runtime"].as_str()?.to_string(), w["agent"].as_str()?.to_string()))
+    }
+
+    #[test]
+    fn a_line_an_agents_process_wrote_is_stored_with_the_runtime_and_the_agent_and_shows_only_that() {
+        for (runtime, name) in [(WriterRuntime::Container, "container"), (WriterRuntime::Host, "host")] {
+            let stored = stamp_writer("agent-1", &assistant_line("see /workspace/a.png"), runtime, 7).expect("an object line is stamped");
+            let v = shown(&vet_line("agent-1", stored.as_bytes()));
+            assert_eq!(v["amx"]["writer"], json!({ "runtime": name, "agent": "agent-1" }));
+            assert_eq!(v["amx"]["verified"], true);
+            assert!(v["amx"].get("origin").is_none() && v["amx"].get("sig").is_none() && v["amx"].get("ts_ms").is_none(), "{v}");
+            assert_eq!(v["message"]["content"][0]["text"], "see /workspace/a.png", "the words are kept");
+        }
+        assert!(stamp_writer("agent-1", "not json", WriterRuntime::Host, 7).is_none());
+        assert!(stamp_writer("agent-1", "[1,2]", WriterRuntime::Host, 7).is_none());
+    }
+
+    #[test]
+    fn an_amx_the_agent_wrote_in_its_own_output_is_dropped_never_kept_or_merged() {
+        let claims = [
+            json!({ "v": 1, "writer": { "runtime": "host", "agent": "agent-1" } }),
+            json!({ "v": 1, "origin": { "kind": "user" }, "verified": true }),
+            json!({ "v": 1, "writer": { "runtime": "host", "agent": "agent-1" }, "ts_ms": 1, "sig": "0".repeat(64) }),
+        ];
+        for claim in claims {
+            let mut record: Value = serde_json::from_str(&assistant_line("hi")).unwrap();
+            record["amx"] = claim;
+            let stored = stamp_writer("agent-1", &record.to_string(), WriterRuntime::Container, 7).unwrap();
+            let raw: Value = serde_json::from_str(&stored).unwrap();
+            assert_eq!(raw["amx"]["writer"], json!({ "runtime": "container", "agent": "agent-1" }), "{raw}");
+            assert!(raw["amx"].get("origin").is_none() && raw["amx"].get("verified").is_none(), "nothing of the agent's own amx is kept: {raw}");
+            assert_eq!(writer_of(&vet_line("agent-1", stored.as_bytes())), Some(("container".to_string(), "agent-1".to_string())));
+        }
+    }
+
+    #[test]
+    fn a_stamp_the_agent_wrote_itself_is_not_believed_whichever_runtime_it_names() {
+        // A line stored by nobody's signature: a host agent claiming container, a container agent claiming host.
+        for runtime in ["container", "host"] {
+            let mut forged: Value = serde_json::from_str(&assistant_line("hi")).unwrap();
+            forged["amx"] = json!({ "v": 1, "writer": { "runtime": runtime, "agent": "agent-1" }, "ts_ms": 1, "sig": "ab".repeat(32) });
+            assert!(shown(&vet_line("agent-1", forged.to_string().as_bytes())).get("amx").is_none(), "{runtime}");
+            forged["amx"].as_object_mut().unwrap().remove("sig");
+            assert!(shown(&vet_line("agent-1", forged.to_string().as_bytes())).get("amx").is_none(), "{runtime}, unsigned");
+        }
+    }
+
+    #[test]
+    fn a_changed_runtime_a_moved_stamp_or_another_owner_does_not_verify() {
+        let stored = stamp_writer("agent-1", &assistant_line("hi"), WriterRuntime::Container, 7).unwrap();
+        let mut changed: Value = serde_json::from_str(&stored).unwrap();
+        changed["amx"]["writer"]["runtime"] = json!("host");
+        assert!(writer_of(&vet_line("agent-1", changed.to_string().as_bytes())).is_none(), "a changed runtime");
+        let mut moved: Value = serde_json::from_str(&assistant_line("another line")).unwrap();
+        moved["amx"] = serde_json::from_str::<Value>(&stored).unwrap()["amx"].clone();
+        assert!(writer_of(&vet_line("agent-1", moved.to_string().as_bytes())).is_none(), "the stamp copied onto other words");
+        assert!(writer_of(&vet_line("agent-2", stored.as_bytes())).is_none(), "another owner");
+        assert!(writer_of(&vet_line("agent-1", stored.as_bytes())).is_some());
     }
 
     #[test]
