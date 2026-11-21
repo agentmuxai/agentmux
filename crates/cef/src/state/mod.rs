@@ -1347,15 +1347,6 @@ impl AppState {
             .any(|e| matches!(e.lifecycle, BrowserPaneLifecycle::Closing { .. }))
     }
 
-    /// Whether this pane's close was requested and CEF has not finished tearing it down.
-    pub fn browser_pane_is_closing(&self, block_id: &str) -> bool {
-        self.host_state
-            .lock()
-            .browser_panes
-            .get(block_id)
-            .is_some_and(|e| matches!(e.lifecycle, BrowserPaneLifecycle::Closing { .. }))
-    }
-
     /// H.7 gate for a top-level window creator: refuses while any pane is
     /// mid-close (see [`Self::any_browser_pane_closing`]), logging under
     /// `wfr:gate` as `caller`. The frontend retries on this error string

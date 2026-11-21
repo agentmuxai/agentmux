@@ -413,6 +413,12 @@ fn no_browser_reason(closing: bool, holds_zoom: bool) -> NoBrowser {
     }
 }
 
+/// Whether this pane's close was requested and CEF has not finished tearing it down.
+fn is_closing(state: &AppState, block_id: &str) -> bool {
+    use crate::state::BrowserPaneLifecycle;
+    state.host_state.lock().browser_panes.get(block_id).is_some_and(|e| matches!(e.lifecycle, BrowserPaneLifecycle::Closing { .. }))
+}
+
 /// Whether an agent's zoom is kept for this pane.
 fn holds_zoom(block_id: &str) -> bool {
     ZOOMED.lock().values().any(|e| e.block_id == block_id)
@@ -428,7 +434,7 @@ pub fn on_pane_resized(state: &Arc<AppState>, block_id: &str, size: (i32, i32)) 
         return;
     }
     let Some(label) = state.live_browser_pane_label(block_id) else {
-        match no_browser_reason(state.browser_pane_is_closing(block_id), holds_zoom(block_id)) {
+        match no_browser_reason(is_closing(state, block_id), holds_zoom(block_id)) {
             NoBrowser::Closing => tracing::debug!(%block_id, "[zoom] a pane that is closing was resized: nothing to refit"),
             NoBrowser::NoZoom => tracing::debug!(%block_id, "[zoom] a pane with no live browser was resized: it has no zoom to refit"),
             NoBrowser::ZoomLeftBehind => tracing::warn!(%block_id, "[zoom] a pane with a zoom was resized but has no live browser: the zoom was not refitted"),
