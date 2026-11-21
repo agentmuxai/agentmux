@@ -304,7 +304,7 @@ async fn handle_pending(headers: HeaderMap, body: Bytes) -> Response {
 /// not, is recorded with how it arrived ([`super::confirm_peer`]).
 async fn handle_confirm(
     State(state): State<AppState>,
-    peer: Option<ConnectInfo<std::net::SocketAddr>>,
+    conn: Option<ConnectInfo<super::confirm_peer::Conn>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -314,7 +314,10 @@ async fn handle_confirm(
     };
     let Ok(ConfirmBody { code, accept }) = serde_json::from_slice(&body) else { return refuse("/auth/confirm", Reason::Code).await };
     if accept {
-        let how = confirm_how(&state, peer.map(|p| p.0));
+        let how = match conn {
+            Some(ConnectInfo(conn)) => super::confirm_peer::classify(&state, conn).await,
+            None => ConfirmHow::Unknown,
+        };
         let refused = matches!(how, ConfirmHow::Refused(_));
         let found = store().note_confirm(&code, how.clone(), Instant::now());
         if refused {
@@ -325,16 +328,6 @@ async fn handle_confirm(
     let found = store().decide(&code, accept, Instant::now());
     tracing::info!(accepted = accept && found, found, "local sign-in answered");
     proved(&admitted, json!({ "found": found }))
-}
-
-/// Where the process that sent a confirm stands: unknown when the connection carries no peer address or srv's own address is
-/// not known.
-fn confirm_how(state: &AppState, peer: Option<std::net::SocketAddr>) -> ConfirmHow {
-    let server = SHAPE.get().and_then(|s| s.bound().parse::<std::net::SocketAddr>().ok());
-    match (peer, server) {
-        (Some(peer), Some(server)) => super::confirm_peer::classify(state, peer, server),
-        _ => ConfirmHow::Unknown,
-    }
 }
 
 /// `POST /auth/logout`: end every browser session.

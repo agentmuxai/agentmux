@@ -98,7 +98,8 @@ impl Open {
     async fn ask_from(&mut self, router: &Router, path: &str, body: &str, how: ConfirmHow) -> String {
         crate::server::confirm_peer::hook::set(how);
         let (mut req, seq) = self.command(path, body);
-        req.extensions_mut().insert(ConnectInfo("127.0.0.1:50123".parse::<std::net::SocketAddr>().unwrap()));
+        let (peer, local) = ("127.0.0.1:50123".parse().unwrap(), HOST.parse().unwrap());
+        req.extensions_mut().insert(ConnectInfo(crate::server::confirm_peer::Conn { peer, local: Some(local) }));
         let (status, hs, answer) = call(router, req).await;
         assert_eq!(status, 200, "{path}: {answer}");
         let proof = hs.get(local_proof::PROOF_HEADER).expect("the answer carries a proof").to_str().unwrap();
