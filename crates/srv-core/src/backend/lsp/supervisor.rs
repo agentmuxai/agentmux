@@ -64,6 +64,10 @@ pub enum LspError {
     #[error("not a file: {0}")]
     NotAFile(String),
 
+    /// A message that would give a running server a folder was sent to it.
+    #[error("not allowed: {0}")]
+    NotAllowed(String),
+
     #[error("spawn failed: {0}")]
     SpawnFailed(String),
 
@@ -83,7 +87,16 @@ impl LspError {
 struct ServerHandle {
     stdin: Mutex<ChildStdin>,
     refcount: std::sync::atomic::AtomicUsize,
-    _child: Mutex<Child>, // hold ownership; kill_on_drop fires on supervisor drop
+    child: Mutex<Child>, // hold ownership; kill_on_drop fires when the last holder lets go
+}
+
+impl ServerHandle {
+    /// Ends the process now. Taking the handle out of the map is not enough: a `send` that is writing to the
+    /// server holds the handle too (and may wait on a server that reads nothing), and the child lives as long
+    /// as any holder does.
+    async fn end(&self) {
+        let _ = self.child.lock().await.kill().await;
+    }
 }
 
 pub struct LspSupervisor {
@@ -113,8 +126,20 @@ const RECHECK_EVERY: Duration = Duration::from_secs(5);
 /// every client of that server hears it.
 pub const NOT_ON_HOST_NOTICE: &str = "agentmux/notOnHost";
 
+/// The messages the Editor's client sends a server are `initialize` (with the root srv gave it), `initialized`,
+/// and `textDocument/didOpen`, `didChange` and `didClose`: none of them hands the server a folder or a file
+/// other than by `didOpen`. A client that adds a folder to a running server is refused here.
+const FOLDER_MESSAGES: [&str; 1] = ["workspace/didChangeWorkspaceFolders"];
+
 /// The file a `textDocument/didOpen` message opens, which is what a server is given to serve: `None` for any
 /// other message, `Some(None)` for a document whose address is not a file's path.
+fn adds_a_folder(message_json: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(message_json)
+        .ok()
+        .and_then(|m| m.get("method").and_then(serde_json::Value::as_str).map(|m| FOLDER_MESSAGES.contains(&m)))
+        .unwrap_or(false)
+}
+
 fn opened_document(message_json: &str) -> Option<Option<PathBuf>> {
     let message: serde_json::Value = serde_json::from_str(message_json).ok()?;
     if message.get("method")?.as_str()? != "textDocument/didOpen" {
@@ -230,7 +255,7 @@ impl LspSupervisor {
         let handle = Arc::new(ServerHandle {
             stdin: Mutex::new(stdin),
             refcount: std::sync::atomic::AtomicUsize::new(1),
-            _child: Mutex::new(child),
+            child: Mutex::new(child),
         });
 
         // Re-check under the second lock — a concurrent start() for the same
@@ -263,6 +288,9 @@ impl LspSupervisor {
         // A server is given a file only by `didOpen`, and a running server is shared by every file under its
         // root: the file is asked about here, as `start` asks about the first one, so a file that is a link
         // into a container agent's folder is refused whichever client opens it.
+        if adds_a_folder(message_json) {
+            return Err(LspError::NotAllowed(server_id.to_string()));
+        }
         if let Some(opened) = opened_document(message_json) {
             let file = opened.ok_or_else(|| LspError::NotAFile(server_id.to_string()))?;
             let root = PathBuf::from(&key.0);
@@ -303,8 +331,11 @@ impl LspSupervisor {
                 .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
             if prev <= 1 {
                 tracing::info!(server_id = %server_id, "LSP: shutting down (refcount=0)");
-                servers.remove(&key);
-                // Drop fires kill_on_drop → process exits.
+                let ended = servers.remove(&key);
+                drop(servers);
+                if let Some(handle) = ended {
+                    handle.end().await;
+                }
             }
         }
         Ok(())
@@ -322,9 +353,9 @@ impl LspSupervisor {
             let root = PathBuf::from(&key.0);
             // Where it can't be told, the server is not kept.
             let on_host = tokio::task::spawn_blocking(move || super::workspace::served_on_host(&root, &root)).await.unwrap_or(false);
-            if on_host || self.servers.lock().await.remove(&key).is_none() {
-                continue;
-            }
+            let removed = if on_host { None } else { self.servers.lock().await.remove(&key) };
+            let Some(handle) = removed else { continue };
+            handle.end().await;
             let server_id = make_server_id(&key.0, &key.1);
             tracing::warn!(server_id = %server_id, "LSP: stopped, its project folder is now one a container agent can write");
             let notice = serde_json::json!({ "jsonrpc": "2.0", "method": NOT_ON_HOST_NOTICE, "params": {} });
@@ -546,13 +577,13 @@ mod tests {
     }
 
     /// A server for `root` that is already running, as `start` leaves one.
-    async fn running(supervisor: &LspSupervisor, root: &std::path::Path, language: &str) -> ServerId {
+    async fn running(supervisor: &LspSupervisor, root: &std::path::Path, language: &str) -> (ServerId, Arc<ServerHandle>) {
         let mut child = quiet_child();
         let stdin = child.stdin.take().unwrap();
-        let handle = Arc::new(ServerHandle { stdin: Mutex::new(stdin), refcount: std::sync::atomic::AtomicUsize::new(1), _child: Mutex::new(child) });
+        let handle = Arc::new(ServerHandle { stdin: Mutex::new(stdin), refcount: std::sync::atomic::AtomicUsize::new(1), child: Mutex::new(child) });
         let root = root.to_string_lossy().into_owned();
-        supervisor.servers.lock().await.insert((root.clone(), language.to_string()), handle);
-        make_server_id(&root, language)
+        supervisor.servers.lock().await.insert((root.clone(), language.to_string()), handle.clone());
+        (make_server_id(&root, language), handle)
     }
 
     fn a_project(root: &std::path::Path) {
@@ -581,7 +612,7 @@ mod tests {
         a_project(&own);
         crate::backend::fs_ops::container_folders::add_for_test(&ws, &format!("lsp-{}", uuid::Uuid::new_v4().simple()), "/workspace");
         let supervisor = LspSupervisor::new(Arc::new(EventBus::new()));
-        let id = running(&supervisor, &own, "typescript").await;
+        let (id, _handle) = running(&supervisor, &own, "typescript").await;
 
         // A plain file of the project: the running server takes it.
         assert!(supervisor.send(&id, &did_open(&own.join("src").join("a.ts"))).await.is_ok());
@@ -601,9 +632,24 @@ mod tests {
         // A file written as a path inside the agent's folder is refused too, whatever the server's root.
         let refused = supervisor.send(&id, &did_open(&ws.join("src").join("a.ts"))).await;
         assert!(matches!(refused, Err(LspError::ContainerAgentFolder)), "{:?}", refused.err());
+        // A message that gives the server a folder is refused, whatever the folder.
+        let adds = r#"{"jsonrpc":"2.0","method":"workspace/didChangeWorkspaceFolders","params":{"event":{"added":[{"uri":"file:///x","name":"x"}],"removed":[]}}}"#;
+        assert!(matches!(supervisor.send(&id, adds).await, Err(LspError::NotAllowed(_))));
         // A document that is no file is not given to a server.
         let not_a_file = r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"untitled:one","languageId":"typescript","version":1,"text":""}}}"#;
         assert!(matches!(supervisor.send(&id, not_a_file).await, Err(LspError::NotAFile(_))));
+    }
+
+    #[tokio::test]
+    async fn the_last_client_to_stop_ends_the_process_even_while_a_send_holds_the_handle() {
+        let tmp = tempfile::tempdir().unwrap();
+        let own = tmp.path().join("own");
+        a_project(&own);
+        let supervisor = LspSupervisor::new(Arc::new(EventBus::new()));
+        let (id, held) = running(&supervisor, &own, "typescript").await;
+        supervisor.stop(&id).await.unwrap();
+        assert!(supervisor.servers.lock().await.is_empty());
+        assert!(held.child.lock().await.try_wait().unwrap().is_some(), "the process has ended");
     }
 
     #[tokio::test]
@@ -615,8 +661,9 @@ mod tests {
         let bus = Arc::new(EventBus::new());
         let mut heard = bus.register_ws("lsp-recheck", "lsp-recheck-tab");
         let supervisor = LspSupervisor::new(bus);
-        let id_a = running(&supervisor, &a, "typescript").await;
-        let id_b = running(&supervisor, &b, "typescript").await;
+        // A holder of a's handle that outlives the stop, as a `send` that is writing to the server does.
+        let (id_a, held_a) = running(&supervisor, &a, "typescript").await;
+        let (id_b, held_b) = running(&supervisor, &b, "typescript").await;
 
         assert!(supervisor.stop_where_not_on_host().await.is_empty(), "nothing has changed");
         assert_eq!(supervisor.servers.lock().await.len(), 2);
@@ -627,6 +674,8 @@ mod tests {
         assert_eq!(supervisor.stop_where_not_on_host().await, vec![id_a.clone()]);
         let left: Vec<String> = supervisor.servers.lock().await.keys().map(|(root, _)| root.clone()).collect();
         assert_eq!(left, vec![b.to_string_lossy().into_owned()], "the one beside it keeps running");
+        assert!(held_a.child.lock().await.try_wait().unwrap().is_some(), "the stopped server's process has ended, though a holder of its handle is still there");
+        assert!(held_b.child.lock().await.try_wait().unwrap().is_none(), "the one beside it is still running");
         assert!(supervisor.send(&id_a, &did_open(&a.join("src").join("a.ts"))).await.is_err(), "a stopped server takes nothing");
         assert!(supervisor.send(&id_b, &did_open(&b.join("src").join("a.ts"))).await.is_ok());
 

@@ -97,6 +97,19 @@ describe("a running language server that may no longer serve a file", () => {
         expect(client.getState()).toEqual({ kind: "notOnHost" });
     });
 
+    it("sends a server only the messages srv checks: none of them gives it a folder", async () => {
+        aServer();
+        const client = await aReadyClient();
+        await client.didOpen("/proj/src/a.ts", "", "typescript");
+        await client.didChange("/proj/src/a.ts", "x");
+        await client.didClose("/proj/src/a.ts");
+        await client.dispose();
+        const methods = send.mock.calls.map((call) => (call[1] as { message: Sent }).message.method);
+        expect(new Set(methods)).toEqual(
+            new Set(["initialize", "initialized", "textDocument/didOpen", "textDocument/didChange", "textDocument/didClose"]),
+        );
+    });
+
     it("sends nothing more to a server srv stopped", async () => {
         aServer();
         const client = await aReadyClient();
