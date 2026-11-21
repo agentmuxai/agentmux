@@ -1,8 +1,9 @@
+// @vitest-environment jsdom
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The coverage test (docs/specs/SPEC_DEEP_LINKS_ONE_FRAMEWORK_2026_11_20.md R13): every pane view the app registers
+ * The coverage test (it registers the app's pane views, whose modules need a DOM) (docs/specs/SPEC_DEEP_LINKS_ONE_FRAMEWORK_2026_11_20.md R13): every pane view the app registers
  * has a destination, every destination names a view that exists, every place and parameter has a label, and a
  * sectioned pane's sections are the registry's (until §5 moves the section lists into the registry).
  */
