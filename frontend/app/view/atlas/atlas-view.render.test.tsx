@@ -479,9 +479,26 @@ describe("messages and tasks on the map", () => {
 
     it("runs the lines behind the nodes, so a line that passes a node does not cross its name", () => {
         const { container } = rig(fleet(), {}, [flow({})]);
-        const layer = container.querySelector(".atlas-flows")!;
+        const layer = container.querySelector(".atlas-flows:not(.atlas-flows--over)")!;
         const node = container.querySelector(".atlas-node")!;
         expect(layer.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("draws a faint copy of each line over the nodes, the same path with no number or end, so a line behind a card can be followed", () => {
+        const task = flow({ id: "t1", kind: "task", tone: "task", label: "#12" });
+        const { container } = rig(fleet(), {}, [flow({}), task, flow({ id: "r1", from: { agent: "github-consumer" } })]);
+        const over = container.querySelector(".atlas-flows--over")!;
+        const paths = [...over.querySelectorAll("[data-testid=atlas-flow-over] .atlas-flow__line")].map((p) => p.getAttribute("d"));
+        const behind = [...container.querySelectorAll("[data-testid=atlas-flow] .atlas-flow__line")].map((p) => p.getAttribute("d"));
+        // A message and a task have a curve; the ring of a message with one end on the map has none.
+        expect(paths).toHaveLength(2);
+        expect(paths).toEqual(behind);
+        expect(over.querySelector(".atlas-flow__label, .atlas-flow__end, .atlas-flow__ping")).toBeNull();
+    });
+
+    it("marks the faint copy of a line in its last second as leaving, with the line", () => {
+        const { container } = rig(fleet(), {}, [flow({ leaving: true })]);
+        expect(container.querySelector("[data-testid=atlas-flow-over]")!.classList.contains("atlas-flow--leaving")).toBe(true);
     });
 
     it("marks a line in its last second as leaving", () => {

@@ -6,6 +6,10 @@
  * sender to the receiver as it happens and gone a few seconds later, and a task one agent handed another, dotted
  * and numbered, for a few minutes (atlas-flow.ts). A message with one end on the map only (its other agent is
  * stopped, filtered out, or not an agent of any machine listed) is a ring round the end that is.
+ *
+ * The lines run behind the nodes, so a line that passes a node does not cross its name. A second, faint copy of
+ * each line (only the line, no number or end) is drawn over the nodes, so that a line that passes behind a card
+ * can still be followed from one end to the other, in a dense grid or along a row.
  */
 
 import { createMemo, For, Show, type JSX } from "solid-js";
@@ -94,6 +98,23 @@ function FlowMark(props: { flow: AtlasFlow; mark: Mark | undefined }): JSX.Eleme
     );
 }
 
+/** The faint copy of a line, over the nodes. */
+function OverMark(props: { flow: AtlasFlow; mark: Mark | undefined }): JSX.Element {
+    return (
+        <Show when={props.mark?.curve}>
+            {(curve) => (
+                <g
+                    class={`atlas-flow atlas-flow--${props.flow.tone}`}
+                    classList={{ "atlas-flow--leaving": props.flow.leaving }}
+                    data-testid="atlas-flow-over"
+                >
+                    <path class="atlas-flow__line" d={curve().d} pathLength={props.flow.kind === "message" ? 1 : undefined} />
+                </g>
+            )}
+        </Show>
+    );
+}
+
 export function AtlasFlowLayer(props: {
     flows: readonly AtlasFlow[];
     /** The node an end of a line names, by its key, or null (atlas-flow.ts `flowEndResolver`). */
@@ -115,14 +136,25 @@ export function AtlasFlowLayer(props: {
         flowMarks(props.flows, props.resolve, props.nodes, props.framed ?? NO_FRAMES, props.avoid ?? [], props.frameOut ?? CONTAINER_FRAME_OUT)
     );
     return (
-        <svg class="atlas-flows" width={props.width} height={props.height} aria-hidden="true">
-            <For each={ids()}>
-                {(id) => (
-                    <Show when={byId().get(id)}>
-                        {(flow) => <FlowMark flow={flow()} mark={marks().get(id)} />}
-                    </Show>
-                )}
-            </For>
-        </svg>
+        <>
+            <svg class="atlas-flows" width={props.width} height={props.height} aria-hidden="true">
+                <For each={ids()}>
+                    {(id) => (
+                        <Show when={byId().get(id)}>
+                            {(flow) => <FlowMark flow={flow()} mark={marks().get(id)} />}
+                        </Show>
+                    )}
+                </For>
+            </svg>
+            <svg class="atlas-flows atlas-flows--over" width={props.width} height={props.height} aria-hidden="true">
+                <For each={ids()}>
+                    {(id) => (
+                        <Show when={byId().get(id)}>
+                            {(flow) => <OverMark flow={flow()} mark={marks().get(id)} />}
+                        </Show>
+                    )}
+                </For>
+            </svg>
+        </>
     );
 }

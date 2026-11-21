@@ -195,6 +195,13 @@
     top: 0;
     overflow: visible;
     pointer-events: none;
+
+    // The faint copy of each line that is drawn over the nodes (atlas-flow-layer.tsx): a line behind a card
+    // shows through it as a dim stroke, so its two ends can be followed, while the card's name stays readable.
+    &--over {
+        z-index: var(--z-over-content);
+        opacity: 0.4;
+    }
 }
 
 .atlas-flow {
@@ -280,7 +287,7 @@
     border: 1px solid var(--border-color);
     border-left-width: 3px;
     border-radius: var(--radius-sm);
-    // Always opaque: the message and task lines run behind the nodes and must not show through one.
+    // Always opaque: the message and task lines run behind the nodes and must not show through one (a faint copy runs over them, `.atlas-flows--over`).
     --atlas-node-bg: var(--main-bg-color);
     background: var(--atlas-node-bg);
     color: var(--main-text-color);
