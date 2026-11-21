@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { For, Show, type JSX } from "solid-js";
+import { createEffect, For, on, Show, type JSX } from "solid-js";
 import { Dynamic } from "solid-js/web";
 
 import { Button, TabbedPane, type TabItem } from "@/app/element/ui";
@@ -95,6 +95,15 @@ const SECTION_VIEWS: Record<SettingsSection, (p: { model: SettingsViewModel }) =
 // docs/specs/SPEC_SETTINGS_PANE_SEARCH_2026_09_21.md §3.5.
 const SEARCH_HIGHLIGHT_MS = DURATION_LINGER_MS; // --duration-linger, which the fade runs for
 const SEARCH_HIGHLIGHT_CLASS = "setting-row--search-highlight";
+/** How long a link's setting row is waited for before the section is left at its top (§8 of the deep-links spec). */
+const REVEAL_WAIT_MS = 5000;
+
+/** Scroll to a setting row and mark it, as a search result does. */
+function markRow(el: HTMLElement): void {
+    el.scrollIntoView({ block: "center" });
+    el.classList.add(SEARCH_HIGHLIGHT_CLASS);
+    setTimeout(() => el.classList.remove(SEARCH_HIGHLIGHT_CLASS), SEARCH_HIGHLIGHT_MS);
+}
 
 export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
     const section = () => props.model.activeSection();
@@ -124,12 +133,38 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
         // uses for its own post-mount focus() (command-palette.tsx).
         queueMicrotask(() => {
             const el = document.getElementById(`setting-${entry.id}`);
-            if (!el) return;
-            el.scrollIntoView({ block: "center" });
-            el.classList.add(SEARCH_HIGHLIGHT_CLASS);
-            setTimeout(() => el.classList.remove(SEARCH_HIGHLIGHT_CLASS), SEARCH_HIGHLIGHT_MS);
+            if (el) markRow(el);
         });
     }
+
+    // A link to a setting (agentmux://settings/<section>#<id>): the same reveal as a search result, once the section
+    // has drawn the row; a row that never appears within REVEAL_WAIT_MS leaves the section at its top.
+    createEffect(
+        on(
+            // Keyed by the ask, so another change to the pane's meta is not a new ask.
+            () => {
+                const r = props.model.revealRequest();
+                return r ? `${r.ask}:${r.id}` : null;
+            },
+            (key) => {
+                const req = key ? props.model.revealRequest() : null;
+                if (!req) return;
+                const until = performance.now() + REVEAL_WAIT_MS;
+                const tryReveal = () => {
+                    const el = document.getElementById(`setting-${req.id}`);
+                    if (el) {
+                        markRow(el);
+                        props.model.clearReveal();
+                    } else if (performance.now() < until) {
+                        requestAnimationFrame(tryReveal);
+                    } else {
+                        props.model.clearReveal();
+                    }
+                };
+                queueMicrotask(tryReveal);
+            }
+        )
+    );
 
     return (
         <div
