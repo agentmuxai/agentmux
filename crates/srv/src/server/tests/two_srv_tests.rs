@@ -5,7 +5,7 @@
 //! certificate, a feed read off a real socket, a wrong pin, a revoked token, and a signed or unsigned send.
 //! Names that start with `gap_` pin what the listener does not do yet, so the change that adds it has a test to turn.
 
-use super::two_srv::{start_host, start_viewer, start_viewer_pinned_to};
+use super::two_srv::{start_host, start_viewer, start_viewer_pinned_to, Next};
 
 fn user_line(text: &str) -> String {
     serde_json::json!({ "type": "user", "message": { "role": "user", "content": text } }).to_string()
@@ -63,7 +63,7 @@ async fn a_revoked_devices_token_is_refused_and_its_open_feed_ends() {
     assert_eq!(viewer.get(&device, "/agentmux/viewer/hello").await.unwrap().status(), 200);
 
     host.revoke(&device);
-    assert!(feed.next_event().await.is_none(), "the feed ends");
+    assert!(matches!(feed.next().await, Next::Ended), "the host closes the feed when the device is revoked");
     assert_eq!(viewer.get(&device, "/agentmux/viewer/hello").await.unwrap().status(), 401);
 }
 

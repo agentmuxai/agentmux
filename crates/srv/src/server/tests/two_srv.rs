@@ -26,8 +26,12 @@ use tokio_util::sync::CancellationToken;
 use crate::backend::viewer::{client, signing};
 use crate::server::AppState;
 
-/// How long a read from the host may take before a test gives up on it.
+/// How long the host may say nothing on an open feed before a test gives up on it.
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The viewer client's total time for one request, which a feed's whole stream counts against. Far longer than any
+/// test, so only [`READ_TIMEOUT`] ends a feed a test is waiting on.
+const CLIENT_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// The host: an srv state with its viewer listener bound on loopback.
 pub(crate) struct Host {
@@ -116,7 +120,7 @@ pub(crate) fn start_viewer(host: &Host) -> Viewer {
 pub(crate) fn start_viewer_pinned_to(host: &Host, fingerprint: &str) -> Viewer {
     Viewer {
         state: crate::server::tests::test_state(),
-        client: client::pinned_client(fingerprint, READ_TIMEOUT).unwrap(),
+        client: client::pinned_client(fingerprint, CLIENT_TIMEOUT).unwrap(),
         base: format!("https://{}", host.addr),
     }
 }
@@ -200,12 +204,22 @@ pub(crate) struct Feed {
     buf: String,
 }
 
+/// What the next read of a feed gave.
+pub(crate) enum Next {
+    Event(String, Option<String>, serde_json::Value),
+    /// The host closed the stream cleanly.
+    Ended,
+    /// The stream failed, or the host said nothing for [`READ_TIMEOUT`]; the text says which.
+    Failed(String),
+}
+
 impl Feed {
-    /// The next event: `(name, id, data)`, heartbeats skipped. `None` when the host ends the feed or says nothing
-    /// for [`READ_TIMEOUT`].
-    pub(crate) async fn next_event(&mut self) -> Option<(String, Option<String>, serde_json::Value)> {
+    /// The next event, heartbeats skipped, or how the feed stopped.
+    pub(crate) async fn next(&mut self) -> Next {
         loop {
-            if let Some(end) = self.buf.find("\n\n") {
+            if let Some(end) = self.buf.find("
+
+") {
                 let frame: String = self.buf.drain(..end + 2).collect();
                 if frame.starts_with(':') || frame.starts_with("retry:") {
                     continue;
@@ -220,10 +234,23 @@ impl Feed {
                         data = serde_json::from_str(v).unwrap_or(serde_json::Value::Null);
                     }
                 }
-                return Some((name, id, data));
+                return Next::Event(name, id, data);
             }
-            let chunk = tokio::time::timeout(READ_TIMEOUT, self.resp.chunk()).await.ok()?.ok()??;
-            self.buf.push_str(&String::from_utf8_lossy(&chunk));
+            match tokio::time::timeout(READ_TIMEOUT, self.resp.chunk()).await {
+                Err(_) => return Next::Failed(format!("the host said nothing for {READ_TIMEOUT:?}")),
+                Ok(Err(e)) => return Next::Failed(format!("the stream failed: {e}")),
+                Ok(Ok(None)) => return Next::Ended,
+                Ok(Ok(Some(chunk))) => self.buf.push_str(&String::from_utf8_lossy(&chunk)),
+            }
+        }
+    }
+
+    /// The next event: `(name, id, data)`. `None` when the feed ended or failed; a test that must tell those
+    /// apart reads [`Feed::next`].
+    pub(crate) async fn next_event(&mut self) -> Option<(String, Option<String>, serde_json::Value)> {
+        match self.next().await {
+            Next::Event(name, id, data) => Some((name, id, data)),
+            Next::Ended | Next::Failed(_) => None,
         }
     }
 }
