@@ -251,7 +251,7 @@ function compactThenSwitchFor(
                 boundaryAt: () => paneModel.state.lastCompactionBoundaryAt,
                 turnBusy: () => isWorking(paneModel.state),
                 switchTo: async () => {
-                    const { failed } = await RpcApi.AgentModelSwitchCommand(TabRpcClient, { blockid: blockId, route, model: modelId, restart: true });
+                    const { failed } = await RpcApi.AgentModelSwitchCommand(TabRpcClient, { blockid: blockId, route, model: modelId, restart: true, fresh: false, handoff: null });
                     // Saved, but a pane that could not restart still runs the old model: the card stays and says so.
                     if (failed.length > 0) throw new Error(`Saved, but the running pane did not switch: ${failed.join("; ")}`);
                 },

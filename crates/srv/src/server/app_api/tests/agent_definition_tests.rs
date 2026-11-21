@@ -450,3 +450,82 @@ mod runtime_pick {
         assert!(state.mstore.agent_last_runtime_get(&def.id).unwrap().is_empty(), "nothing was remembered over the operator's flag");
     }
 }
+
+// `fresh` on a model change: a new session on the new model, not the old conversation resumed.
+mod fresh_on_a_model_change {
+    use super::*;
+    use crate::backend::obj::{meta_get_string, Block};
+    use crate::sagas::park_agents_tests::{seed_block, seed_workspace};
+
+    const PRO: &str = "deepseek/deepseek-v4-pro-0813";
+
+    /// A pane of `who` that holds a saved session, on the host or in a container.
+    async fn pane_of(state: &AppState, who: &AgentDefinition, mode: &str) -> String {
+        let (_ws, tabs) = seed_workspace(state, 1).await;
+        seed_block(state, &tabs[0], json!({ "view": "agent", "agentId": who.id, "agentProvider": "claude", "agentMode": mode, "agent:sessionid": "sess-old" })).await
+    }
+
+    fn session_of(state: &AppState, block: &str) -> String {
+        meta_get_string(&state.mstore.must_get::<Block>(block).unwrap().meta, "agent:sessionid", "")
+    }
+
+    fn model_of(state: &AppState, who: &AgentDefinition) -> String {
+        crate::backend::model_gateway::launch::choice_of(&state.mstore, &who.id).unwrap().model
+    }
+
+    #[tokio::test]
+    async fn a_change_without_fresh_warns_that_the_conversation_is_resumed() {
+        let state = test_state();
+        let (me, target) = (agent(&state, "Editor"), agent(&state, "Routed"));
+        on_route(&state, &target);
+        with_route_key(&state);
+        let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "model": PRO })).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let warning = body["warning"].as_str().unwrap_or_default();
+        assert!(warning.contains("resumed") && warning.contains("fresh: true"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn fresh_changes_the_model_and_a_stopped_pane_forgets_the_session_it_would_resume() {
+        let state = test_state();
+        let (me, target) = (agent(&state, "Editor"), agent(&state, "Routed"));
+        on_route(&state, &target);
+        with_route_key(&state);
+        let block = pane_of(&state, &target, "host").await;
+        let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "model": PRO, "fresh": true, "handoff": "Task 31427: the next step is the card." })).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["changed"], json!(["model"]));
+        assert!(body.get("warning").is_none(), "a fresh session has no conversation to warn about: {body}");
+        assert_eq!(model_of(&state, &target), PRO);
+        assert_eq!(session_of(&state, &block), "", "nothing is left for its next start to resume");
+    }
+
+    #[tokio::test]
+    async fn a_container_pane_cannot_start_fresh_and_the_model_stays_where_it_was() {
+        let state = test_state();
+        let (me, target) = (agent(&state, "Editor"), agent(&state, "Routed"));
+        on_route(&state, &target);
+        with_route_key(&state);
+        let before = model_of(&state, &target);
+        let block = pane_of(&state, &target, "container").await;
+        let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "model": PRO, "fresh": true })).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(body["error"].as_str().unwrap().contains("unsupported in containers"), "{body}");
+        assert_eq!(model_of(&state, &target), before, "a refusal changes nothing");
+        assert_eq!(session_of(&state, &block), "sess-old");
+    }
+
+    #[tokio::test]
+    async fn a_handoff_over_the_limit_is_refused_before_the_model_changes() {
+        let state = test_state();
+        let (me, target) = (agent(&state, "Editor"), agent(&state, "Routed"));
+        on_route(&state, &target);
+        with_route_key(&state);
+        let before = model_of(&state, &target);
+        let long = "x".repeat(4_001);
+        let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "model": PRO, "fresh": true, "handoff": long })).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(body["error"].as_str().unwrap().contains("4000") || body["error"].as_str().unwrap().contains("4,000"), "{body}");
+        assert_eq!(model_of(&state, &target), before);
+    }
+}

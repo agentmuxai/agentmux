@@ -171,7 +171,7 @@ pub(crate) async fn handle_fresh_self(
         return refused(why);
     }
     tracing::info!(block_id = %block_id, provider = %provider, handoff_chars = handoff.len(), "fresh session scheduled");
-    tokio::spawn(fresh_when_turn_ends(state, block_id, handoff));
+    tokio::spawn(fresh_when_turn_ends(state, block_id, handoff_message(&handoff)));
     Json(json!({ "status": "scheduled", "runs": "when your current turn ends" })).into_response()
 }
 
@@ -182,6 +182,37 @@ pub(crate) fn handoff_message(handoff: &str) -> String {
         "[AgentMux] This is the fresh session you asked for. Nothing of the previous conversation is in your \
          context; it is in your record (Agents search_history finds it). Your handoff:\n\n{handoff}"
     )
+}
+
+/// The first message of the fresh session a model change starts (`agent.model.switch` and `Agents update` with
+/// `fresh`): where the agent was moved to, that the earlier conversation is in its record and not in its context, and
+/// what the caller said its next session must know (none: where to look for what it was doing).
+pub(crate) fn switch_message(place: &str, handoff: &str) -> String {
+    let said = match handoff.trim() {
+        "" => "Read your task list (Tasks list) and your last status to see what you were doing, then carry on.",
+        h => h,
+    };
+    format!(
+        "[AgentMux] You were moved to {place} and this is a fresh session: nothing of the earlier conversation is in your \
+         context, because a model that did not write a long conversation can read it badly. It is in your record \
+         (Agents search_history finds it).\n\n{said}"
+    )
+}
+
+/// Why the pane of a model change can't start a fresh session, or nothing: the test `Agents fresh` applies to its own pane.
+pub(crate) fn fresh_refusal(state: &AppState, block_id: &str) -> Result<(), &'static str> {
+    let (provider, container) = provider_of(state, block_id).ok_or("the pane can't be read")?;
+    fresh_supported(&provider, container)
+}
+
+/// Start `block_id`'s fresh session after a model change: when its turn ends its session ends, and `first_message`
+/// starts the new one on the model the agent is set to now. `false` when there is no async runtime to run it on.
+pub(crate) fn start_fresh_after_switch(state: &AppState, block_id: &str, first_message: String) -> bool {
+    let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+        return false;
+    };
+    runtime.spawn(fresh_when_turn_ends(state.clone(), block_id.to_string(), first_message));
+    true
 }
 
 /// Tries a fresh session makes when a message queued behind the turn starts
@@ -215,9 +246,9 @@ fn end_session(block_id: &str) -> Result<(), &'static str> {
     })
 }
 
-/// Wait for the turn to end, end the session, then send the handoff as
+/// Wait for the turn to end, end the session, then send `first_message` as
 /// AgentMux's own turn, which starts the new session.
-async fn fresh_when_turn_ends(state: AppState, block_id: String, handoff: String) {
+async fn fresh_when_turn_ends(state: AppState, block_id: String, first_message: String) {
     let mut ended = Err("the turn didn't end within 30 minutes");
     // A message queued behind the turn can start the next one between the wait
     // and the stop: wait again, a few times, before giving up.
@@ -253,7 +284,7 @@ async fn fresh_when_turn_ends(state: AppState, block_id: String, handoff: String
     let outcome = crate::server::agent_handlers::run_agent_turn(
         &deps,
         block_id.clone(),
-        handoff_message(&handoff),
+        first_message,
         None,
         crate::server::agent_handlers::TurnRegistration::Register,
         crate::backend::message_origin::MessageOrigin::system(),
