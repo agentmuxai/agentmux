@@ -32,6 +32,9 @@ fn an_agents_signing_keys_are_withheld_once_srv_hands_them_out() {
     withheld(&store.agent_lan_key_load("withhold-slug").unwrap().unwrap().private_key);
     let (uid_keys, _) = store.agent_uid_keys_ensure("withhold-uid-1").unwrap().expect("the agent has a row");
     withheld(&uid_keys.lan.private_key);
+    withheld(&uid_keys.wan.private_key);
+    withheld(&store.agent_wan_key_ensure("withhold-slug").unwrap().private_key);
+    withheld(&store.agent_wan_key_load("withhold-slug").unwrap().unwrap().private_key);
 }
 
 #[test]

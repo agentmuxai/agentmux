@@ -86,7 +86,10 @@ impl Store {
                 key_version: row.get(2)?,
             })
         }) {
-            Ok(v) => Ok(Some(v)),
+            Ok(v) => {
+                crate::backend::transcript::withhold::register(&v.private_key);
+                Ok(Some(v))
+            }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
         }
@@ -111,7 +114,14 @@ impl Store {
     /// in the spec's §3.6 (a new key signed by its predecessor) to be
     /// distinguishable from a registry rewrite; rotating before that exists
     /// would trade one gap for a worse one.
+    /// The private key is withheld from transcripts from here on (`transcript::withhold`).
     pub fn agent_wan_key_ensure(&self, agent_id: &str) -> Result<AgentWanKeypair, StoreError> {
+        let pair = self.agent_wan_key_ensure_unwithheld(agent_id)?;
+        crate::backend::transcript::withhold::register(&pair.private_key);
+        Ok(pair)
+    }
+
+    fn agent_wan_key_ensure_unwithheld(&self, agent_id: &str) -> Result<AgentWanKeypair, StoreError> {
         let key = agent_id.to_lowercase();
         if let Some(existing) = self.agent_wan_key_load(&key)? {
             return Ok(existing);
