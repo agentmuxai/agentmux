@@ -31,12 +31,49 @@
     overflow: hidden;
 }
 
-.settings-section-body {
+// The scroller: the one thing in the pane that scrolls vertically. A section that flows into columns sits in it with
+// an auto height; a single section (below) keeps its own scroll, as it always had.
+.settings-scroll {
     flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
-    padding: var(--space-3) var(--space-4);
     display: flex;
     flex-direction: column;
+}
+
+// A section body flows into columns. The browser picks the number from the width (each column at least 26rem, 2rem
+// apart, so n columns fit from a pane of n x 28rem) and grows them to fill the pane, so one column below 56rem is
+// exactly the single column that was here before. Each direct child (a row with its description, a larger component)
+// stays whole, a group header stays with the first thing under it, and the DOM order is the reading order.
+// SPEC_SETTINGS_WIDE_PANE_COLUMNS_2026_11_20.md 3.2.
+.settings-section-body {
+    padding: var(--space-3) var(--space-4);
+    column-width: 26rem;
+    column-gap: 2rem;
+    column-fill: balance;
+
+    > * {
+        break-inside: avoid;
+    }
+
+    > .settings-subheader {
+        break-after: avoid;
+    }
+}
+
+// A section that is one block, not a flow of rows: Keyboard, Kanban stages, Animations, Widgets, Devices and Browser.
+// One column, its own scroll, capped in a wide pane (below).
+.settings-section-body--single {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    column-width: auto;
+    column-gap: normal;
+
+    > * {
+        break-inside: auto;
+    }
 }
 
 .settings-subheader {
@@ -354,15 +391,17 @@
 // ── Responsive ────────────────────────────────────────────────────────────────
 // The section tabs are TabbedPane's job; these only size the content.
 
-// Wide: cap the section width for comfortable reading.
+// Wide: a single section keeps one column, capped for comfortable reading. A section that flows into columns has no cap:
+// its columns are the width that reads well.
 @container settings (min-width: 1024px) {
-    .settings-section-body {
+    .settings-section-body--single {
         max-width: 720px;
     }
 }
 
 // Narrow: rows have already stacked (Field wraps on its own); let the
-// controls take the full width.
+// controls take the full width. Keyed to the pane, as it always was: below 56rem a section is one column, so a row is
+// as wide as the pane less its padding, and these rules fire at the pane widths they always did.
 @container settings (max-width: 479px) {
     .setting-select,
     .setting-text {
@@ -410,6 +449,96 @@
 @container settings (max-width: 259px) {
     .setting-widget-color .palette-swatches.palette-swatches {
         --palette-cols: 5;
+    }
+}
+
+// From 56rem a section that flows has two or more columns, and a row has its column's width, not the pane's: the same
+// rules then ask the row, which is its own query container. A column is at least 26rem; a row that is indented
+// (padding-left 24px) has that much less, and its rules are lowered by the same. Only these rows are containers, and
+// only in a pane this wide, so a narrow pane has none of this and is exactly as it was. Nothing here asks the pane's
+// width less a scrollbar, which a row cannot know.
+// SPEC_SETTINGS_WIDE_PANE_COLUMNS_2026_11_20.md 3.5.
+@container settings (min-width: 56rem) {
+    .settings-section-body:not(.settings-section-body--single) > .setting-row {
+        container-type: inline-size;
+        container-name: setting-row;
+    }
+
+    // The ancestor goes in :where() so a rule's weight is what it was when it asked the pane.
+    @container setting-row (max-width: 447px) {
+        :where(.setting-row:not(.setting-row--indent)) {
+            .setting-select,
+            .setting-text {
+                width: 100%;
+                min-width: 0;
+            }
+
+            .setting-slider {
+                width: 100%;
+
+                input[type="range"] {
+                    flex: 1 1 auto;
+                    width: auto;
+                    min-width: 80px;
+                }
+            }
+        }
+
+        :where(.setting-row:not(.setting-row--indent)) .ui-field-control.ui-field-control {
+            flex: 1 1 100%;
+            align-items: stretch;
+        }
+    }
+
+    @container setting-row (max-width: 423px) {
+        :where(.setting-row--indent) {
+            .setting-select,
+            .setting-text {
+                width: 100%;
+                min-width: 0;
+            }
+
+            .setting-slider {
+                width: 100%;
+
+                input[type="range"] {
+                    flex: 1 1 auto;
+                    width: auto;
+                    min-width: 80px;
+                }
+            }
+        }
+
+        :where(.setting-row--indent) .ui-field-control.ui-field-control {
+            flex: 1 1 100%;
+            align-items: stretch;
+        }
+    }
+
+    // Widget colors: the pane's 639, 459 and 259, less the indent and the 2 x 1rem the pane's rules do not count.
+    @container setting-row (max-width: 583px) {
+        .setting-widget-color {
+            > .ui-button {
+                order: 2;
+            }
+
+            .palette-swatches.palette-swatches {
+                order: 3;
+                flex: 1 0 100%;
+            }
+        }
+    }
+
+    @container setting-row (max-width: 403px) {
+        .setting-widget-color .palette-swatches.palette-swatches {
+            --palette-cols: 8;
+        }
+    }
+
+    @container setting-row (max-width: 203px) {
+        .setting-widget-color .palette-swatches.palette-swatches {
+            --palette-cols: 5;
+        }
     }
 }
 

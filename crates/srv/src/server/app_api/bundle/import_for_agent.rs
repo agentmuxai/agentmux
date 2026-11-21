@@ -224,7 +224,7 @@ fn rollback_skills(
 }
 
 /// `msg`, plus a note naming the skills a rollback could not delete.
-fn with_rollback_note(mut msg: String, rollback_errors: Vec<String>) -> String {
+pub(super) fn with_rollback_note(mut msg: String, rollback_errors: Vec<String>) -> String {
     if !rollback_errors.is_empty() {
         msg.push_str(&format!(
             "; additionally, rollback of {} previously-created skill(s) failed and may have left orphaned global skill row(s): {}",
