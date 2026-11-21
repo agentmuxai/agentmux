@@ -260,6 +260,9 @@ describe("operator proof", () => {
             "agent.pane.unregister",
             "agent.takeover",
             "agent.move-here",
+            "agentanswer",
+            "agentcancel",
+            "tooldecision",
         ]) {
             expect(isOperatorCommand(c)).toBe(true);
         }
