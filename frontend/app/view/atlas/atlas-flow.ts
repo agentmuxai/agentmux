@@ -205,6 +205,8 @@ export interface FlowCurve {
     d: string;
     end: Placed;
     label: Placed;
+    /** Points along the curve (a polyline), for another line's label to keep clear of where the two cross. */
+    samples: Placed[];
 }
 
 const round = (n: number) => Math.round(n * 10) / 10;
@@ -217,6 +219,26 @@ const LABEL_HALF_W = 20;
 const LABEL_HALF_H = 9;
 /** Half the height of the label's own glyphs: what it needs with no room to spare, in the gap between two rows. */
 const LABEL_TIGHT_H = 7;
+/** How near another line a label may not be: on a crossing it could read as that line's. */
+const CROSS_CLEAR = 12;
+/** How many stretches a curve is sampled in, for the crossings. */
+const SAMPLES = 24;
+
+/** How far `p` is from the polyline `line`, along its straight pieces. */
+export function distanceToLine(line: readonly Placed[], p: Placed): number {
+    let best = Infinity;
+    for (let i = 1; i < line.length; i++) {
+        const a = line[i - 1];
+        const b = line[i];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const len2 = dx * dx + dy * dy;
+        const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
+        best = Math.min(best, Math.hypot(a.x + t * dx - p.x, a.y + t * dy - p.y));
+    }
+    return best;
+}
+
 /** Where along a line its label is tried: the middle first, then further out on either side. */
 const LABEL_STOPS = [0.5, 0.45, 0.55, 0.4, 0.6, 0.35, 0.65, 0.3, 0.7, 0.25, 0.75, 0.2, 0.8, 0.15, 0.85];
 
@@ -291,7 +313,8 @@ export function flowCurve(
     nodes: readonly FlowNode[] = [],
     taken: readonly PlacedLabel[] = [],
     halfW = LABEL_HALF_W,
-    lane = 0
+    lane = 0,
+    others: readonly (readonly Placed[])[] = []
 ): FlowCurve | null {
     const ax = from.x + NODE_W / 2;
     const ay = from.y + NODE_H / 2;
@@ -316,12 +339,15 @@ export function flowCurve(
     });
     const end = { x: round(x2), y: round(y2) };
     const free = (halfH: number) => (p: Placed) =>
-        !nodes.some((node) => hidesLabel(node, p, halfH, halfW)) && !taken.some((label) => onLabel(label, p, halfW));
+        !nodes.some((node) => hidesLabel(node, p, halfH, halfW)) &&
+        !taken.some((label) => onLabel(label, p, halfW)) &&
+        !others.some((o) => distanceToLine(o, p) < CROSS_CLEAR);
     const clear = LABEL_STOPS.map((t) => nextToLabel(taken, at(t), halfW)).find(free(LABEL_HALF_H));
     return {
         d: `M${round(x1)},${round(y1)} Q${round(cx)},${round(cy)} ${round(x2)},${round(y2)}`,
         end,
         label: clear ?? labelBesideEnd(to, end, cy >= y2, free(LABEL_TIGHT_H)) ?? at(0.5),
+        samples: Array.from({ length: SAMPLES + 1 }, (_, i) => at(i / SAMPLES)),
     };
 }
 
@@ -339,18 +365,30 @@ export interface FlowLine {
  * two nodes.
  */
 export function flowCurves(lines: readonly FlowLine[], nodes: readonly FlowNode[]): Map<string, FlowCurve> {
+    const laneOf = new Map<string, number>();
+    const lanes = lines.map((line) => {
+        const pair = `${line.from.x},${line.from.y}>${line.to.x},${line.to.y}`;
+        const lane = laneOf.get(pair) ?? 0;
+        laneOf.set(pair, lane + 1);
+        return lane;
+    });
+    const halfWs = lines.map((line) => (line.label ? labelHalfWidth(line.label) : LABEL_HALF_W));
+    // The lines first, with no labels' worth of care: where a line runs does not depend on its label.
+    const bare = lines.map((line, i) => flowCurve(line.from, line.to, nodes, [], halfWs[i], lanes[i]));
+    // The same two nodes, either way round: a line and its answer, or tasks between them, run side by side
+    // and share a gap for their numbers (above); they do not cross.
+    const pairOf = (line: FlowLine) => [`${line.from.x},${line.from.y}`, `${line.to.x},${line.to.y}`].sort().join(">");
     const taken: PlacedLabel[] = [];
     const curves = new Map<string, FlowCurve>();
-    const lanes = new Map<string, number>();
-    for (const line of lines) {
-        const pair = `${line.from.x},${line.from.y}>${line.to.x},${line.to.y}`;
-        const lane = lanes.get(pair) ?? 0;
-        lanes.set(pair, lane + 1);
-        const halfW = line.label ? labelHalfWidth(line.label) : LABEL_HALF_W;
-        const curve = flowCurve(line.from, line.to, nodes, line.label ? taken : [], halfW, lane);
-        if (!curve) continue;
+    lines.forEach((line, i) => {
+        if (!bare[i]) return;
+        // A label keeps clear of the crossings with the lines between other pairs of nodes, so it reads as its own line's.
+        const mine = pairOf(line);
+        const others = bare.flatMap((c, j) => (j !== i && c && pairOf(lines[j]) !== mine ? [c.samples] : []));
+        const curve = flowCurve(line.from, line.to, nodes, line.label ? taken : [], halfWs[i], lanes[i], others);
+        if (!curve) return;
         curves.set(line.id, curve);
-        if (line.label) taken.push({ ...curve.label, halfW });
-    }
+        if (line.label) taken.push({ ...curve.label, halfW: halfWs[i] });
+    });
     return curves;
 }

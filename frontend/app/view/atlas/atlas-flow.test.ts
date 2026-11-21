@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { MessageFlowEvent } from "@/types/rpc/MessageFlowEvent";
 import type { TaskFlowEvent } from "@/types/rpc/TaskFlowEvent";
 import {
+    distanceToLine,
     flowCurve,
     flowCurves,
     flowEndResolver,
@@ -372,6 +373,40 @@ describe("flowCurves", () => {
         );
         expect(there).toEqual(flowCurve(left, right, [left, right])!.label);
         expect(back).toEqual(flowCurve(right, left, [left, right])!.label);
+    });
+
+    it("keeps a label off the crossing with a line between other nodes, so it reads as its own line's", () => {
+        const a = { id: "a", from: { x: 0, y: 0 }, to: { x: 600, y: 0 }, label: "#1" };
+        const near = (p: { x: number; y: number }, c: { samples: { x: number; y: number }[] }) => distanceToLine(c.samples, p);
+        const lone = flowCurves([a], [a.from, a.to]).get("a")!;
+        // A line down through the middle of the first, as near its number as the bow of the two lets it be.
+        const down = (shift: number) => ({
+            id: "b",
+            from: { x: lone.label.x - 70 + shift, y: -300 },
+            to: { x: lone.label.x - 70 + shift, y: 300 },
+            label: "#2",
+        });
+        const shift = [0, -14, 14, -28, 28, -7, 7].find((s) => near(lone.label, flowCurves([down(s)], [down(s).from, down(s).to]).get("b")!) < 12);
+        expect(shift).toBeDefined();
+        const b = down(shift!);
+        const curves = flowCurves([a, b], [a.from, a.to, b.from, b.to]);
+        // On the crossing alone; off it with the other line there.
+        expect(curves.get("a")!.label).not.toEqual(lone.label);
+        expect(near(curves.get("a")!.label, curves.get("b")!)).toBeGreaterThanOrEqual(12);
+        expect(near(curves.get("b")!.label, curves.get("a")!)).toBeGreaterThanOrEqual(12);
+    });
+
+    it("does not count the lines between the same two nodes as crossings: their numbers sit side by side", () => {
+        const left = { x: 0, y: 0 };
+        const right = { x: 600, y: 0 };
+        const pair = flowCurves(
+            [
+                { id: "a", from: left, to: right, label: "#1" },
+                { id: "b", from: right, to: left, label: "#2" },
+            ],
+            [left, right]
+        );
+        expect(pair.get("a")!.label).toEqual(flowCurve(left, right, [left, right])!.label);
     });
 
     it("places no label for a line without one, and leaves out a line with no curve", () => {

@@ -263,14 +263,16 @@
     }
 }
 
-// In the text colour, not the line's: a small number in the line's green is dim on the dark theme.
+// A task's number sits on a chip in the line's own colour, so on a crossing it reads as that line's; its text is the
+// background's colour, which is dark on the dark theme's light green and light on the light theme's dark green.
+.atlas-flow__chip {
+    fill: currentColor;
+}
+
 .atlas-flow__label {
-    fill: var(--main-text-color);
-    stroke: var(--main-bg-color);
-    stroke-width: 3px;
-    paint-order: stroke;
+    fill: var(--main-bg-color);
     font-size: var(--text-2xs);
-    font-weight: 600;
+    font-weight: 700;
     text-anchor: middle;
     dominant-baseline: central;
 }

@@ -13,8 +13,12 @@
  */
 
 import { createMemo, For, Show, type JSX } from "solid-js";
-import { flowCurves, type AtlasFlow, type FlowCurve, type FlowEnd, type FlowLine, type FlowNode } from "./atlas-flow";
+import { flowCurves, labelHalfWidth, type AtlasFlow, type FlowCurve, type FlowEnd, type FlowLine, type FlowNode } from "./atlas-flow";
 import { CONTAINER_FRAME_OUT, NODE_H, NODE_W, type Placed } from "./atlas-layout";
+
+/** The chip a task's number sits on is this much taller than its text's half-height, each side, and as much wider than the text. */
+const CHIP_H = 8;
+const CHIP_PAD = 4;
 
 /** How far outside a node its ring is drawn. */
 const RING_GAP = 3;
@@ -73,9 +77,22 @@ function FlowMark(props: { flow: AtlasFlow; mark: Mark | undefined }): JSX.Eleme
                                 <path class="atlas-flow__line" d={curve().d} pathLength={props.flow.kind === "message" ? 1 : undefined} />
                                 <circle class="atlas-flow__end" cx={curve().end.x} cy={curve().end.y} r="3.5" />
                                 <Show when={props.flow.label}>
-                                    <text class="atlas-flow__label" x={curve().label.x} y={curve().label.y}>
-                                        {props.flow.label}
-                                    </text>
+                                    {(label) => (
+                                        <>
+                                            {/* In the line's own colour, so a number on a crossing is read as that line's. */}
+                                            <rect
+                                                class="atlas-flow__chip"
+                                                x={curve().label.x - labelHalfWidth(label()) - CHIP_PAD}
+                                                y={curve().label.y - CHIP_H}
+                                                width={(labelHalfWidth(label()) + CHIP_PAD) * 2}
+                                                height={CHIP_H * 2}
+                                                rx="4"
+                                            />
+                                            <text class="atlas-flow__label" x={curve().label.x} y={curve().label.y}>
+                                                {label()}
+                                            </text>
+                                        </>
+                                    )}
                                 </Show>
                             </>
                         )}

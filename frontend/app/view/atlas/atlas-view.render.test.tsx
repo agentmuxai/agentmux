@@ -474,6 +474,9 @@ describe("messages and tasks on the map", () => {
         expect(rest).toHaveLength(0);
         expect(mark.dataset.kind).toBe("task");
         expect(mark.querySelector(".atlas-flow__label")!.textContent).toBe("#12");
+        // On a chip in the line's own colour, behind the text, so a number on a crossing reads as that line's.
+        const chip = mark.querySelector(".atlas-flow__chip")!;
+        expect(chip.compareDocumentPosition(mark.querySelector(".atlas-flow__label")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
         expect(mark.querySelector(".atlas-flow__line")!.hasAttribute("pathLength")).toBe(false);
     });
 

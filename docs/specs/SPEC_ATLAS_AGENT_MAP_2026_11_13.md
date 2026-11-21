@@ -182,7 +182,9 @@ Both carry ids, hosts and times only, so the map shows that something passed bet
 - **Lines run behind the nodes.** A line between two agents that are not neighbours passes behind the nodes in
   between, so it never crosses a name; its ends show at the two nodes' edges. A faint copy of the line (the stroke
   only, at 40% of its strength) is also drawn over the nodes, so that in a big fleet a line that runs behind a card
-  can still be followed from one end to the other (the Linux look check on PR 8038, 49 agents). A task's number sits on the stretch
+  can still be followed from one end to the other (the Linux look check on PR 8038, 49 agents). A task's number
+  sits on a chip in its line's own colour and keeps 12 px clear of the lines between other pairs of nodes, so on a
+  crossing it is not read as the other line's (the macOS look check on PR 8038). A task's number sits on the stretch
   of its line nearest the middle that no node covers, in the text colour (the look checks on macOS and Linux both
   found a number landing on another node's name, and dim on the dark theme, with the lines in front). Agents side
   by side in a row leave no such stretch (the gap between two is narrower than a number, and the line is behind
