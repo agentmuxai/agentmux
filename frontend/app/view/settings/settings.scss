@@ -464,6 +464,26 @@
         container-name: setting-row;
     }
 
+    // Where a column starts: a group header's 16px above it is 8px of margin and 8px of padding. A column break
+    // truncates the margin and keeps the padding, so a header at the top of a column has the same 8px above its text
+    // that a row has (its Field's own padding-top), and the columns' first lines sit level, whichever of the two starts
+    // them. Between rows the two add up to the 16px it always was.
+    .settings-section-body:not(.settings-section-body--single) > .settings-subheader {
+        margin-top: var(--space-2);
+        padding-top: var(--space-2);
+
+        &:first-child {
+            margin-top: 0;
+        }
+    }
+
+    // The last row of a group stays with the row before it: a group is not split to leave one row alone at the top of
+    // the next column, away from its header.
+    .settings-section-body:not(.settings-section-body--single) > .setting-row:has(+ .settings-subheader),
+    .settings-section-body:not(.settings-section-body--single) > .setting-row:last-child {
+        break-before: avoid;
+    }
+
     // The ancestor goes in :where() so a rule's weight is what it was when it asked the pane.
     @container setting-row (max-width: 447px) {
         :where(.setting-row:not(.setting-row--indent)) {

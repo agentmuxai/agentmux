@@ -300,6 +300,33 @@ const RULES = [
             return sameNames("internals/env-vars.md", "pane env allow-list", names, new Set(keep), "on PANE_ENV_KEEP");
         },
     },
+    {
+        what: "pane types",
+        page: "pane-types.md",
+        run(text, code) {
+            const src = read(code, "crates/srv-core/src/config/widgets.json");
+            const body = section(text, /^## Available Pane Types/, /^### Not pane types/);
+            if (!src || !body) return [];
+            let widgets;
+            try {
+                widgets = JSON.parse(src);
+            } catch {
+                return [];
+            }
+            // The panes the widget bar opens by default: each entry's view. A messenger entry opens a browser pane, so it adds none.
+            const inCode = new Set();
+            for (const w of Object.values(widgets)) {
+                const view = w?.blockdef?.meta?.view;
+                if (typeof view === "string") inCode.add(view);
+            }
+            const names = new Map();
+            for (const { n, cells } of tableRows(body)) {
+                const id = backticked(cells[2] ?? "")[0];
+                if (id) names.set(id, n);
+            }
+            return sameNames("pane-types.md", "pane types", names, inCode, "a view of the default widgets.json");
+        },
+    },
 ];
 
 /** The string arms (`"name" =>`, `"a" | "b" =>`) of `match cmd` in `route_command`, as a Set. */

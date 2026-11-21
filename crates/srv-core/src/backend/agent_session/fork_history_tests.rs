@@ -36,7 +36,7 @@ fn a_fork_of_the_last_session_gets_the_parents_history_exactly() {
     let gfs = FileStore::open_in_memory().unwrap();
     let data = parent_with(&gfs, "sess-b");
 
-    let out = copy_parent_history(&gfs, PARENT, FORK, "sess-b", "session_id").unwrap();
+    let out = copy_parent_history(&gfs, PARENT, FORK, "sess-b", "session_id", WriterRuntime::Host).unwrap();
 
     let parent = agent_current_zone(PARENT);
     let sidecars = read_all(&gfs, &parent, TSIDX_FILE).len() + read_all(&gfs, &parent, SNAPSHOT_FILE).len();
@@ -58,7 +58,7 @@ fn a_last_event_larger_than_the_tail_window_still_names_its_session() {
     gfs.make_file(&zone, OUTPUT_FILE, FileMeta::new(), FileOpts::default()).unwrap();
     gfs.append_lines(&zone, OUTPUT_FILE, format!("{}{big}", line("sess-big", 0)).as_bytes()).unwrap();
 
-    let out = copy_parent_history(&gfs, PARENT, FORK, "sess-big", "session_id").unwrap();
+    let out = copy_parent_history(&gfs, PARENT, FORK, "sess-big", "session_id", WriterRuntime::Host).unwrap();
 
     assert!(matches!(out, ForkHistory::Copied { .. }), "got {out:?}");
 }
@@ -68,7 +68,7 @@ fn a_fork_of_an_older_session_copies_nothing() {
     let gfs = FileStore::open_in_memory().unwrap();
     parent_with(&gfs, "sess-b");
 
-    let out = copy_parent_history(&gfs, PARENT, FORK, "older-session", "session_id").unwrap();
+    let out = copy_parent_history(&gfs, PARENT, FORK, "older-session", "session_id", WriterRuntime::Host).unwrap();
 
     assert_eq!(out, ForkHistory::NotTheLastSession);
     assert!(gfs.stat(&agent_current_zone(FORK), OUTPUT_FILE).unwrap().is_none());
@@ -83,7 +83,7 @@ fn a_fork_with_history_of_its_own_keeps_it() {
     gfs.make_file(&fork, OUTPUT_FILE, FileMeta::new(), FileOpts::default()).unwrap();
     gfs.append_lines(&fork, OUTPUT_FILE, line("fork-session", 0).as_bytes()).unwrap();
 
-    let out = copy_parent_history(&gfs, PARENT, FORK, "sess-b", "session_id").unwrap();
+    let out = copy_parent_history(&gfs, PARENT, FORK, "sess-b", "session_id", WriterRuntime::Host).unwrap();
 
     assert_eq!(out, ForkHistory::ForkHasHistory);
     assert_eq!(read_all(&gfs, &fork, OUTPUT_FILE), line("fork-session", 0).into_bytes());
@@ -92,10 +92,10 @@ fn a_fork_with_history_of_its_own_keeps_it() {
 #[test]
 fn nothing_to_copy_without_parent_history_or_a_session() {
     let gfs = FileStore::open_in_memory().unwrap();
-    assert_eq!(copy_parent_history(&gfs, PARENT, FORK, "sess-b", "session_id").unwrap(), ForkHistory::NoParentHistory);
-    assert!(copy_parent_history(&gfs, PARENT, FORK, "", "session_id").is_err());
-    assert!(copy_parent_history(&gfs, PARENT, PARENT, "sess-b", "session_id").is_err());
-    assert!(copy_parent_history(&gfs, PARENT, FORK, "sess-b", "").is_err());
+    assert_eq!(copy_parent_history(&gfs, PARENT, FORK, "sess-b", "session_id", WriterRuntime::Host).unwrap(), ForkHistory::NoParentHistory);
+    assert!(copy_parent_history(&gfs, PARENT, FORK, "", "session_id", WriterRuntime::Host).is_err());
+    assert!(copy_parent_history(&gfs, PARENT, PARENT, "sess-b", "session_id", WriterRuntime::Host).is_err());
+    assert!(copy_parent_history(&gfs, PARENT, FORK, "sess-b", "", WriterRuntime::Host).is_err());
 }
 
 
@@ -123,7 +123,7 @@ fn a_fork_of_an_older_session_gets_the_history_up_to_where_it_ends() {
     let parent = agent_current_zone(PARENT);
     let fork = agent_current_zone(FORK);
 
-    let out = copy_older_session_history(&gfs, PARENT, FORK, "older-session", "session_id", &parent, end as i64).unwrap();
+    let out = copy_older_session_history(&gfs, PARENT, FORK, "older-session", "session_id", &parent, end as i64, WriterRuntime::Host).unwrap();
 
     assert!(matches!(out, ForkHistory::Copied { bytes } if bytes > end as u64), "got {out:?}");
     assert_eq!(read_all(&gfs, &fork, OUTPUT_FILE), &data[..end]);
@@ -149,10 +149,10 @@ fn a_cut_that_does_not_end_in_the_session_is_undone() {
     let parent = agent_current_zone(PARENT);
     // A stale record: the cut lands in the middle of a line, then at the end
     // of a line of the later session.
-    let out = copy_older_session_history(&gfs, PARENT, FORK, "older-session", "session_id", &parent, end as i64 + 1).unwrap();
+    let out = copy_older_session_history(&gfs, PARENT, FORK, "older-session", "session_id", &parent, end as i64 + 1, WriterRuntime::Host).unwrap();
     assert_eq!(out, ForkHistory::NotTheLastSession);
     let second = end + line("sess-b", 3).len();
-    let out = copy_older_session_history(&gfs, PARENT, FORK, "older-session", "session_id", &parent, second as i64).unwrap();
+    let out = copy_older_session_history(&gfs, PARENT, FORK, "older-session", "session_id", &parent, second as i64, WriterRuntime::Host).unwrap();
 
     assert_eq!(out, ForkHistory::NotTheLastSession);
     assert!(gfs.stat(&agent_current_zone(FORK), OUTPUT_FILE).unwrap().is_none());
@@ -162,10 +162,10 @@ fn a_cut_that_does_not_end_in_the_session_is_undone() {
 fn an_older_session_needs_a_transcript_a_session_and_a_place_to_end() {
     let gfs = FileStore::open_in_memory().unwrap();
     let parent = agent_current_zone(PARENT);
-    assert_eq!(copy_older_session_history(&gfs, PARENT, FORK, "s", "session_id", &parent, 10).unwrap(), ForkHistory::NoParentHistory);
-    assert!(copy_older_session_history(&gfs, PARENT, FORK, "", "session_id", &parent, 10).is_err());
-    assert!(copy_older_session_history(&gfs, PARENT, FORK, "s", "session_id", &parent, 0).is_err());
-    assert!(copy_older_session_history(&gfs, PARENT, PARENT, "s", "session_id", &parent, 10).is_err());
+    assert_eq!(copy_older_session_history(&gfs, PARENT, FORK, "s", "session_id", &parent, 10, WriterRuntime::Host).unwrap(), ForkHistory::NoParentHistory);
+    assert!(copy_older_session_history(&gfs, PARENT, FORK, "", "session_id", &parent, 10, WriterRuntime::Host).is_err());
+    assert!(copy_older_session_history(&gfs, PARENT, FORK, "s", "session_id", &parent, 0, WriterRuntime::Host).is_err());
+    assert!(copy_older_session_history(&gfs, PARENT, PARENT, "s", "session_id", &parent, 10, WriterRuntime::Host).is_err());
 }
 
 #[test]
@@ -178,8 +178,8 @@ fn a_fork_of_a_session_in_an_archived_conversation_copies_from_the_archive() {
     gfs.make_file(archive, OUTPUT_FILE, FileMeta::new(), FileOpts::default()).unwrap();
     gfs.append_lines(archive, OUTPUT_FILE, data.as_bytes()).unwrap();
 
-    assert_eq!(copy_parent_history(&gfs, PARENT, FORK, "archived-session", "session_id").unwrap(), ForkHistory::NoParentHistory);
-    let out = copy_older_session_history(&gfs, PARENT, FORK, "archived-session", "session_id", archive, data.len() as i64).unwrap();
+    assert_eq!(copy_parent_history(&gfs, PARENT, FORK, "archived-session", "session_id", WriterRuntime::Host).unwrap(), ForkHistory::NoParentHistory);
+    let out = copy_older_session_history(&gfs, PARENT, FORK, "archived-session", "session_id", archive, data.len() as i64, WriterRuntime::Host).unwrap();
 
     assert!(matches!(out, ForkHistory::Copied { .. }), "got {out:?}");
     assert_eq!(read_all(&gfs, &agent_current_zone(FORK), OUTPUT_FILE), data.as_bytes());
@@ -205,7 +205,7 @@ fn a_fork_shows_the_parents_human_messages_as_the_humans() {
     gfs.make_file(&zone, OUTPUT_FILE, FileMeta::new(), FileOpts::default()).unwrap();
     gfs.append_lines_stamped(&zone, OUTPUT_FILE, &[line("sess-b", 0).as_bytes(), &signed, &forged].concat(), TSIDX_FILE).unwrap();
 
-    let out = copy_parent_history(&gfs, PARENT, FORK, "sess-b", "session_id").unwrap();
+    let out = copy_parent_history(&gfs, PARENT, FORK, "sess-b", "session_id", WriterRuntime::Host).unwrap();
     assert!(matches!(out, ForkHistory::Copied { .. }));
 
     let copied = read_all(&gfs, &agent_current_zone(FORK), OUTPUT_FILE);
@@ -289,7 +289,7 @@ summary {n}"),
     let cap = 6_000;
     assert!(data.len() > 4 * cap as usize);
 
-    let out = copy_parent_history_capped(&gfs, PARENT, FORK, "sess-b", "session_id", cap).unwrap();
+    let out = copy_parent_history_capped(&gfs, PARENT, FORK, "sess-b", "session_id", WriterRuntime::Host, cap).unwrap();
 
     let fork = agent_current_zone(FORK);
     let copied = read_all(&gfs, &fork, OUTPUT_FILE);
@@ -335,7 +335,7 @@ fn a_transcript_at_the_cap_is_copied_whole_as_before() {
     gfs.append_lines(&zone, OUTPUT_FILE, data.as_bytes()).unwrap();
     write_zone_file(&gfs, &zone, SNAPSHOT_FILE, b"{\"highWaterMark\":20}").unwrap();
 
-    let out = copy_parent_history_capped(&gfs, PARENT, FORK, "sess-b", "session_id", data.len() as i64).unwrap();
+    let out = copy_parent_history_capped(&gfs, PARENT, FORK, "sess-b", "session_id", WriterRuntime::Host, data.len() as i64).unwrap();
 
     assert!(matches!(out, ForkHistory::Copied { .. }));
     let fork = agent_current_zone(FORK);
@@ -356,7 +356,7 @@ fn a_window_with_no_turn_start_begins_at_a_whole_line() {
     gfs.make_file(&zone, OUTPUT_FILE, FileMeta::new(), FileOpts::default()).unwrap();
     gfs.append_lines(&zone, OUTPUT_FILE, data.as_bytes()).unwrap();
 
-    let out = copy_parent_history_capped(&gfs, PARENT, FORK, "sess-b", "session_id", 5_000).unwrap();
+    let out = copy_parent_history_capped(&gfs, PARENT, FORK, "sess-b", "session_id", WriterRuntime::Host, 5_000).unwrap();
 
     assert!(matches!(out, ForkHistory::Copied { .. }), "got {out:?}");
     let copied = read_all(&gfs, &agent_current_zone(FORK), OUTPUT_FILE);
@@ -378,7 +378,7 @@ fn a_fork_of_an_older_session_over_the_cap_gets_the_newest_part_up_to_where_it_e
     write_zone_file(&gfs, &zone, SNAPSHOT_FILE, b"{\"highWaterMark\":999}").unwrap();
     let cap = 6_000;
 
-    let out = copy_older_session_history_capped(&gfs, PARENT, FORK, "older-session", "session_id", &zone, older.len() as i64, cap).unwrap();
+    let out = copy_older_session_history_capped(&gfs, PARENT, FORK, "older-session", "session_id", &zone, older.len() as i64, WriterRuntime::Host, cap).unwrap();
 
     assert!(matches!(out, ForkHistory::Copied { .. }), "got {out:?}");
     let fork = agent_current_zone(FORK);
@@ -413,7 +413,7 @@ fn the_human_messages_in_a_capped_copy_are_the_humans_in_the_fork() {
     gfs.make_file(&zone, OUTPUT_FILE, FileMeta::new(), FileOpts::default()).unwrap();
     gfs.append_lines(&zone, OUTPUT_FILE, &data).unwrap();
 
-    let out = copy_parent_history_capped(&gfs, PARENT, FORK, "sess-b", "session_id", 4_000).unwrap();
+    let out = copy_parent_history_capped(&gfs, PARENT, FORK, "sess-b", "session_id", WriterRuntime::Host, 4_000).unwrap();
 
     assert!(matches!(out, ForkHistory::Copied { .. }), "got {out:?}");
     let copied = read_all(&gfs, &agent_current_zone(FORK), OUTPUT_FILE);
@@ -424,4 +424,131 @@ fn the_human_messages_in_a_capped_copy_are_the_humans_in_the_fork() {
     let humans: Vec<&[u8]> = copied.split(|b| *b == b'\n').filter(|l| l.windows(13).any(|w| w == b"\"type\":\"user\"")).collect();
     assert!(humans.len() > 3);
     assert!(humans.iter().all(|l| kind(FORK, l).as_deref() == Some("user") && kind(PARENT, l).is_none()), "signed for the fork, not the parent");
+}
+
+// --- Where a fork's copied history came from (the mark's cover, and the stamped lines re-signed for the fork) ---
+
+use crate::backend::transcript::origin_sig::{stamp_writer, vet_line};
+
+fn writer(vetted: &[u8]) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_slice(vetted.strip_suffix(b"\n").unwrap_or(vetted)).ok()?;
+    v.pointer("/amx/writer/runtime")?.as_str().map(str::to_string)
+}
+
+/// A parent whose transcript holds one line its container wrote and stamped, one written before there were stamps,
+/// and the session `sess-b` at the end.
+fn stamped_parent(gfs: &FileStore, runtime: WriterRuntime) -> Vec<u8> {
+    let zone = agent_current_zone(PARENT);
+    let stamped = stamp_writer(PARENT, &line("sess-b", 1).trim_end().to_string(), runtime, 7).unwrap();
+    let data = format!("{}{}\n{}", line("sess-b", 0), stamped, line("sess-b", 2));
+    gfs.make_file(&zone, OUTPUT_FILE, FileMeta::new(), FileOpts::default()).unwrap();
+    gfs.append_lines_stamped(&zone, OUTPUT_FILE, data.as_bytes(), TSIDX_FILE).unwrap();
+    data.into_bytes()
+}
+
+#[test]
+fn a_fork_keeps_its_parents_stamped_lines_verifying_for_the_fork_and_its_mark_says_where_the_copy_came_from() {
+    for runtime in [WriterRuntime::Container, WriterRuntime::Host] {
+        let gfs = FileStore::open_in_memory().unwrap();
+        let data = stamped_parent(&gfs, runtime);
+        assert!(matches!(copy_parent_history(&gfs, PARENT, FORK, "sess-b", "session_id", runtime).unwrap(), ForkHistory::Copied { .. }));
+
+        let fork = agent_current_zone(FORK);
+        let copied = read_all(&gfs, &fork, OUTPUT_FILE);
+        assert_eq!(copied.len(), data.len(), "the offsets did not move");
+        let lines: Vec<&[u8]> = copied.split_inclusive(|b| *b == b'\n').collect();
+        let name = if runtime == WriterRuntime::Container { "container" } else { "host" };
+        assert_eq!(writer(&vet_line(FORK, lines[1])).as_deref(), Some(name), "the stamped line verifies for the fork");
+        assert!(writer(&vet_line(PARENT, lines[1])).is_none(), "and no longer for the parent");
+        assert!(writer(&vet_line(FORK, lines[0])).is_none() && writer(&vet_line(FORK, lines[2])).is_none(), "a line nobody stamped is not stamped by a copy");
+
+        let cover = fork_history_cover(&gfs, &fork).expect("the mark is sealed");
+        assert_eq!((cover.parent.as_str(), cover.runtime, cover.upto), (PARENT, runtime, copied.len() as u64));
+        assert_eq!(inherited_session(&gfs, &fork).as_deref(), Some("sess-b"), "the mark still says which session it ends in");
+    }
+}
+
+#[test]
+fn a_newest_part_copy_is_sealed_with_the_length_of_what_it_holds() {
+    let gfs = FileStore::open_in_memory().unwrap();
+    let zone = agent_current_zone(PARENT);
+    let mut data = String::new();
+    for n in 0..40 {
+        data += &line("sess-b", n);
+    }
+    gfs.make_file(&zone, OUTPUT_FILE, FileMeta::new(), FileOpts::default()).unwrap();
+    gfs.append_lines_stamped(&zone, OUTPUT_FILE, data.as_bytes(), TSIDX_FILE).unwrap();
+    copy_parent_history_capped(&gfs, PARENT, FORK, "sess-b", "session_id", WriterRuntime::Container, 400).unwrap();
+    let fork = agent_current_zone(FORK);
+    let held = read_all(&gfs, &fork, OUTPUT_FILE).len() as u64;
+    assert!(held > 0 && (held as usize) < data.len());
+    let cover = fork_history_cover(&gfs, &fork).unwrap();
+    assert_eq!((cover.runtime, cover.upto), (WriterRuntime::Container, held));
+}
+
+#[test]
+fn a_mark_that_was_changed_or_made_before_covers_nothing() {
+    let gfs = FileStore::open_in_memory().unwrap();
+    stamped_parent(&gfs, WriterRuntime::Container);
+    copy_parent_history(&gfs, PARENT, FORK, "sess-b", "session_id", WriterRuntime::Container).unwrap();
+    let fork = agent_current_zone(FORK);
+    let mut mark: serde_json::Value = serde_json::from_slice(&read_all(&gfs, &fork, FORK_MARK_FILE)).unwrap();
+    mark["runtime"] = serde_json::json!("host");
+    write_zone_file(&gfs, &fork, FORK_MARK_FILE, mark.to_string().as_bytes()).unwrap();
+    assert!(fork_history_cover(&gfs, &fork).is_none(), "a runtime changed after it was signed");
+    assert!(fork_history_cover(&gfs, &agent_current_zone(PARENT)).is_none(), "a zone that is no fork's");
+}
+
+#[test]
+fn a_fork_made_before_its_mark_said_so_is_sealed_once_with_the_runtime_it_is_given() {
+    let gfs = FileStore::open_in_memory().unwrap();
+    let data = stamped_parent(&gfs, WriterRuntime::Container);
+    // A fork as an earlier build made it: the copy and a mark with no runtime.
+    let fork = agent_current_zone(FORK);
+    gfs.make_file(&fork, OUTPUT_FILE, FileMeta::new(), FileOpts::default()).unwrap();
+    gfs.append_lines(&fork, OUTPUT_FILE, &data).unwrap();
+    write_zone_file(&gfs, &fork, FORK_MARK_FILE, br#"{"from":"parent-def","session_id":"sess-b","at_ms":1}"#).unwrap();
+    assert!(fork_history_cover(&gfs, &fork).is_none());
+
+    assert!(seal_existing_fork(&gfs, FORK, PARENT, WriterRuntime::Container));
+    let cover = fork_history_cover(&gfs, &fork).unwrap();
+    assert_eq!((cover.parent.as_str(), cover.runtime, cover.upto), (PARENT, WriterRuntime::Container, data.len() as u64));
+    assert_eq!(inherited_session(&gfs, &fork).as_deref(), Some("sess-b"));
+    assert!(!seal_existing_fork(&gfs, FORK, PARENT, WriterRuntime::Host), "already sealed: nothing is written, and nothing is loosened");
+    assert_eq!(fork_history_cover(&gfs, &fork).unwrap().runtime, WriterRuntime::Container);
+    // A zone with no mark at all is no fork's.
+    assert!(!seal_existing_fork(&gfs, "other-def", PARENT, WriterRuntime::Host));
+}
+
+#[test]
+fn the_pass_over_existing_forks_takes_each_runtime_from_srvs_own_record_and_the_less_trusted_of_two() {
+    use crate::backend::storage::agents::test_agent_def;
+    use crate::backend::storage::store::Store;
+    let (gfs, store) = (FileStore::open_in_memory().unwrap(), Store::open_in_memory().unwrap());
+    let fork_of = |id: &str, parent: &str, kind: &str| {
+        let mut def = test_agent_def(id, id, "claude", kind, 1, "");
+        def.parent_id = parent.to_string();
+        def.branch_label = "fork".to_string();
+        store.agent_def_insert(&mut def).unwrap();
+        let zone = agent_current_zone(id);
+        gfs.make_file(&zone, OUTPUT_FILE, FileMeta::new(), FileOpts::default()).unwrap();
+        gfs.append_lines(&zone, OUTPUT_FILE, line("s", 0).as_bytes()).unwrap();
+        write_zone_file(&gfs, &zone, FORK_MARK_FILE, format!("{{\"from\":\"{parent}\",\"session_id\":\"s\",\"at_ms\":1}}").as_bytes()).unwrap();
+    };
+    for (id, kind) in [("host-parent", "host"), ("container-parent", "container")] {
+        let mut def = test_agent_def(id, id, "claude", kind, 1, "");
+        store.agent_def_insert(&mut def).unwrap();
+    }
+    fork_of("fork-hh", "host-parent", "host");
+    fork_of("fork-hc", "host-parent", "container");
+    fork_of("fork-ch", "container-parent", "host");
+    fork_of("fork-gone", "no-such-parent", "host");
+
+    assert_eq!(seal_existing_forks(&gfs, &store), 4);
+    let runtime = |id: &str| fork_history_cover(&gfs, &agent_current_zone(id)).unwrap().runtime;
+    assert_eq!(runtime("fork-hh"), WriterRuntime::Host);
+    assert_eq!(runtime("fork-hc"), WriterRuntime::Container, "its own runtime is the container's");
+    assert_eq!(runtime("fork-ch"), WriterRuntime::Container, "its parent was one");
+    assert_eq!(runtime("fork-gone"), WriterRuntime::Container, "a parent srv has no record of");
+    assert_eq!(seal_existing_forks(&gfs, &store), 0, "a second pass changes nothing");
 }

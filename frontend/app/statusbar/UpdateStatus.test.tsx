@@ -82,8 +82,8 @@ import {
 } from "@/app/store/app-update";
 import { notifications, setNotifications } from "@/app/store/flash-notifications";
 import { MaintenanceSection } from "./MaintenanceSection";
-import { RESTARTING_LINE } from "./RestartToUpdatePopover";
 import { UpdateStatus } from "./UpdateStatus";
+import { restartingLine } from "./update-wait";
 
 const AVAILABLE = {
     state: "available",
@@ -295,10 +295,19 @@ describe("UpdateStatus chip, once srv has staged the release by itself", () => {
         warn.mockRestore();
     });
 
+    it("on a .deb or .rpm install the panel also says the system may ask for a password, and nowhere says a dialog", async () => {
+        await openOn("waiting", { waiting_for: 1, waiting_on: on("Vmer") });
+        acceptAppUpdate({ ...download("restarting", { folder: "C:/apps/x" }), install: "linux-package" });
+        const line = restartingLine("0.59.27", true);
+        expect(line).toContain("Your system may ask for your password");
+        expect(await screen.findByText(line)).toBeTruthy();
+        expect(screen.queryByText(/dialog/i)).toBeNull();
+    });
+
     it("when the wait ends the panel says Restarting now, with nothing left to press but What's new", async () => {
         await openOn("waiting", { waiting_for: 1, waiting_on: on("Vmer") });
         acceptAppUpdate(download("restarting", { folder: "C:/apps/x" }));
-        expect(await screen.findByText(RESTARTING_LINE)).toBeTruthy();
+        expect(await screen.findByText(restartingLine("0.59.27", false))).toBeTruthy();
         expect(screen.queryByText(/Waiting for/)).toBeNull();
         for (const name of ["Cancel", "Restart anyway", "Restart now", "Later"]) expect(screen.queryByRole("button", { name })).toBeNull();
         expect(screen.getByRole("button", { name: "What's new" })).toBeTruthy();
@@ -333,12 +342,12 @@ describe("UpdateStatus chip, once srv has staged the release by itself", () => {
         fireEvent.click(await screen.findByText("Restart to update"));
         fireEvent.click(await screen.findByRole("button", { name: "Restart now" }));
         acceptAppUpdate({ ...download("restarting", { folder: "C:/apps/x" }), rev: 1_002 });
-        expect(await screen.findByText(RESTARTING_LINE)).toBeTruthy();
+        expect(await screen.findByText(restartingLine("0.59.27", false))).toBeTruthy();
         answer({ ...download("waiting", { folder: "C:/apps/x", waiting_for: 0 }), rev: 1_001 });
         await Promise.resolve();
         await Promise.resolve();
         expect(appUpdate()?.download?.state).toBe("restarting");
-        expect(screen.getByText(RESTARTING_LINE)).toBeTruthy();
+        expect(screen.getByText(restartingLine("0.59.27", false))).toBeTruthy();
         expect(screen.queryByRole("button", { name: "Restart anyway" })).toBeNull();
     });
 
@@ -496,8 +505,8 @@ describe("Maintenance: Upgrade & restart", () => {
         upgradeRestart.mockResolvedValue(download("restarting", FOLDER));
         fireEvent.click(screen.getByRole("button", { name: "Restart now" }));
         expect(upgradeRestart).toHaveBeenLastCalledWith(true);
-        expect(await screen.findByText("Restarting: answer the AgentMux dialog (No cancels)")).toBeTruthy();
-        // Only the dialog can stop it now.
+        expect(await screen.findByText("Restarting into v0.59.27…")).toBeTruthy();
+        // The restart is decided and nothing opens a dialog: there is nothing left to press.
         expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
         expect(installAppUpdate).not.toHaveBeenCalled();
     });
