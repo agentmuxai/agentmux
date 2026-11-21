@@ -64,6 +64,20 @@ fn state_provider_runtime_account_and_seat_filters_each_narrow_and_all_together_
 }
 
 #[test]
+fn the_seat_filter_matches_what_a_seat_says_not_its_key_names() {
+    let seat = json!({ "role": "worker", "qualifier": "spawned", "lead": { "id": "agenty", "name": "AgentY" }, "area": "platform" });
+    let words = seat_words(&seat);
+    assert_eq!(words, "worker spawned AgentY agenty platform");
+    assert_eq!(seat_words(&json!(null)), "", "no seat, no words");
+    let s = sonnet();
+    let mut c = cheap(&s, "idle");
+    c.seat = &words;
+    let by = |t: &str| Filter { seat: Some(t.into()), ..Default::default() };
+    assert!(wanted(&by("platform"), &c) && wanted(&by("AGENTY"), &c) && wanted(&by("worker"), &c));
+    assert!(!wanted(&by("lead"), &c) && !wanted(&by("role"), &c) && !wanted(&by("area"), &c), "a key name is not something a seat says");
+}
+
+#[test]
 fn the_parameters_are_read_and_a_wrong_one_says_what_is_allowed() {
     let map = |pairs: &[(&str, &str)]| pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect::<HashMap<_, _>>();
     let p = Params::from_map(&map(&[("fields", "model, turn"), ("model", "!sonnet"), ("limit", "5"), ("offset", "2"), ("host", "THIS-box")]), "this-box").unwrap();

@@ -380,9 +380,19 @@ fn account_of(ctx: &Ctx, block: Option<&Block>) -> Option<(AccountFacts, Option<
     let acct = ctx.accounts.iter().find(|a| a.id == id)?;
     let facts = AccountFacts {
         stable_id: crate::identity::stable_account::stable_account_id(acct),
-        label: crate::server::app_api::agent_spawn::account_label_in(acct, &ctx.accounts),
+        label: safe_label(acct),
     };
     Some((facts, Some(AccountUsage::of(&acct.provider, id, ctx.now_ms))))
+}
+
+/// The account's name for a reader of the fleet: its display name or its name, never an email (a name can be one, and the
+/// account's own label falls back to the email) and never read from its context.
+fn safe_label(a: &IdentityAccount) -> String {
+    [a.display_name.as_str(), a.name.as_str()]
+        .into_iter()
+        .map(str::trim)
+        .find(|s| !s.is_empty() && !s.contains('@'))
+        .map_or_else(|| format!("{} account", a.provider), str::to_string)
 }
 
 fn task_of(ctx: &Ctx, a: &Agent) -> Option<TaskFacts> {

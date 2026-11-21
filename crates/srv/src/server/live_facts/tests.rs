@@ -126,6 +126,28 @@ async fn the_compact_status_has_a_line_per_agent_counts_and_groups() {
     blocks.iter().for_each(|b| crate::backend::agent_runtime_latest::forget(b));
 }
 
+#[test]
+fn an_account_is_named_by_its_display_name_or_name_and_never_by_an_email() {
+    use crate::backend::storage::identities::{IdentityAccount, SecretRef};
+    let account = |display: &str, name: &str| IdentityAccount {
+        id: "a".into(),
+        name: name.into(),
+        provider: "claude".into(),
+        kind: "oauth".into(),
+        display_name: display.into(),
+        secret_ref: SecretRef::OAuthConfigDir { dir: String::new() },
+        context: json!({ "email": "person@example.com" }),
+        status: "valid".into(),
+        created_at: 0,
+        updated_at: 0,
+    };
+    assert_eq!(safe_label(&account("Work", "w")), "Work");
+    assert_eq!(safe_label(&account("", "Home")), "Home");
+    assert_eq!(safe_label(&account("", "person@example.com")), "claude account", "a name that is an email is not shown");
+    assert_eq!(safe_label(&account("person@example.com", "")), "claude account", "nor a display name that is one");
+    assert_eq!(safe_label(&account("", "")), "claude account", "and the email in its context is never read");
+}
+
 #[tokio::test]
 async fn no_fact_carries_a_credential_a_prompt_or_a_message() {
     let state = test_state();

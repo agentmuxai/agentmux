@@ -134,6 +134,12 @@ fn agent_of(row: &Value) -> Option<Agent<'_>> {
     })
 }
 
+/// What a seat says, as words to match against: its role, qualifier, lead (name and id) and area. Not its JSON, whose
+/// key names would match every agent that has a seat.
+fn seat_words(seat: &Value) -> String {
+    ["/role", "/qualifier", "/lead/name", "/lead/id", "/area"].iter().filter_map(|p| seat.pointer(p).and_then(Value::as_str)).collect::<Vec<_>>().join(" ")
+}
+
 /// One kept agent: its row, and what was read to keep it.
 struct Kept {
     row: Value,
@@ -150,7 +156,7 @@ fn filtered(ctx: &Ctx, rows: Vec<Value>, p: &Params) -> Vec<Kept> {
             let block = block_of(ctx, &a);
             let model = model_of(ctx, &a, block.as_ref());
             let account = p.filter.account.as_ref().and_then(|_| super::account_of(ctx, block.as_ref()));
-            let seat = row.get("seat").filter(|s| !s.is_null()).map(Value::to_string).unwrap_or_default();
+            let seat = row.get("seat").map(seat_words).unwrap_or_default();
             let cheap = Cheap {
                 state: a.state,
                 model: &model,
