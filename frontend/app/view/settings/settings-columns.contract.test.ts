@@ -48,14 +48,22 @@ describe("settings.scss columns", () => {
         expect(css).not.toMatch(/\.settings-section-body \{[^}]*max-width: 720px/);
     });
 
-    it("makes a flow section's rows containers, and asks them at the pane's old thresholds minus 32px", () => {
+    it("keeps the pane-keyed narrow rules as they were, for every section", () => {
+        // A pane under 56rem is one column: its controls stack at 479px of pane, its swatches wrap at 639, 459 and 259.
+        for (const width of [479, 639, 459, 259]) expect(css).toContain(`@container settings (max-width: ${width}px)`);
+        expect(css).toContain(".setting-row .ui-field-control {");
+    });
+
+    it("asks the row only from a pane of 56rem, where a section has columns, so a narrow pane has no new containers", () => {
+        const wide = css.indexOf("@container settings (min-width: 56rem)");
+        expect(wide).toBeGreaterThan(-1);
+        // The row container is declared inside that query, never outside it.
+        expect(css.indexOf("container-name: setting-row")).toBeGreaterThan(wide);
         expect(css).toContain(".settings-section-body:not(.settings-section-body--single) > .setting-row");
-        expect(css).toContain("container-name: setting-row");
-        // 479 (controls fill the row) and 639, 459, 259 (widget-color swatches), each less the body's 2 x 16px; the
-        // widget-color row is indented 24px, so its thresholds are lower by that as well: 583, 403, 203.
-        for (const width of [447, 423, 583, 403, 203]) expect(css).toContain(`@container setting-row (max-width: ${width}px)`);
-        // The pane-keyed rules that remain are the single sections', the device cards and the widget list's.
-        expect(css.match(/@container settings \(max-width: 479px\)/g)?.length).toBe(2);
-        expect(css).not.toContain("@container settings (max-width: 639px)");
+        // The rules that ask it: a column's controls stack under 447px (423px for an indented row, which has 24px
+        // less), and the widget-color swatches wrap at the pane's 639, 459 and 259 less that indent and the padding.
+        for (const width of [447, 423, 583, 403, 203]) {
+            expect(css.indexOf(`@container setting-row (max-width: ${width}px)`), `${width}px`).toBeGreaterThan(wide);
+        }
     });
 });

@@ -399,82 +399,35 @@
     }
 }
 
-// A row in a section that flows into columns is its own query container: inside a column the width a row has is the
-// column's, not the pane's, so the rules below ask the row. A one-column pane gives a row the pane's width minus the
-// body's 2 x 1rem padding, so each rule fires at the same pane width as it did when it asked the pane; a row that is
-// indented (padding-left 24px) has that much less, and its rule is lowered by the same. The rows of a single section are
-// not containers and keep the pane-keyed rules (second block).
-// SPEC_SETTINGS_WIDE_PANE_COLUMNS_2026_11_20.md 3.5.
-.settings-section-body:not(.settings-section-body--single) > .setting-row {
-    container-type: inline-size;
-    container-name: setting-row;
-}
-
 // Narrow: rows have already stacked (Field wraps on its own); let the
-// controls take the full width. The ancestor goes in :where() so a rule's weight is what it was when it asked the pane.
-@mixin narrow-controls($row) {
-    :where(#{$row}) {
-        .setting-select,
-        .setting-text {
-            width: 100%;
-            min-width: 0;
-        }
-
-        .setting-slider {
-            width: 100%;
-
-            input[type="range"] {
-                flex: 1 1 auto;
-                width: auto;
-                min-width: 80px;
-            }
-        }
+// controls take the full width. Keyed to the pane, as it always was: below 56rem a section is one column, so a row is
+// as wide as the pane less its padding, and these rules fire at the pane widths they always did.
+@container settings (max-width: 479px) {
+    .setting-select,
+    .setting-text {
+        width: 100%;
+        min-width: 0;
     }
 
-    :where(#{$row}) .ui-field-control.ui-field-control {
+    .setting-row .ui-field-control {
         flex: 1 1 100%;
         align-items: stretch;
     }
-}
 
-@container setting-row (max-width: 447px) {
-    @include narrow-controls(".setting-row:not(.setting-row--indent)");
-}
+    .setting-slider {
+        width: 100%;
 
-@container setting-row (max-width: 423px) {
-    @include narrow-controls(".setting-row--indent");
-}
-
-// A single section's rows are not containers: its pane-keyed rule, as it was.
-@container settings (max-width: 479px) {
-    :where(.settings-section-body--single) {
-        .setting-select,
-        .setting-text {
-            width: 100%;
-            min-width: 0;
-        }
-
-        .setting-row .ui-field-control {
-            flex: 1 1 100%;
-            align-items: stretch;
-        }
-
-        .setting-slider {
-            width: 100%;
-
-            input[type="range"] {
-                flex: 1 1 auto;
-                width: auto;
-                min-width: 80px;
-            }
+        input[type="range"] {
+            flex: 1 1 auto;
+            width: auto;
+            min-width: 80px;
         }
     }
 }
 
-// Widget colors: the swatches under the chip (Reset beside it) once the row is under the width it needs;
+// Widget colors: the swatches under the chip (Reset beside it) once the pane is under the width the whole row needs;
 // 15 swatches in a line need about 400 px; then 8 per line (the picker's own two rows, about 240 px), and below that 5.
-// The row is indented 24px, so these are the pane's 639, 459 and 259 minus 56.
-@container setting-row (max-width: 583px) {
+@container settings (max-width: 639px) {
     .setting-widget-color {
         > .ui-button {
             order: 2;
@@ -487,15 +440,105 @@
     }
 }
 
-@container setting-row (max-width: 403px) {
+@container settings (max-width: 459px) {
     .setting-widget-color .palette-swatches.palette-swatches {
         --palette-cols: 8;
     }
 }
 
-@container setting-row (max-width: 203px) {
+@container settings (max-width: 259px) {
     .setting-widget-color .palette-swatches.palette-swatches {
         --palette-cols: 5;
+    }
+}
+
+// From 56rem a section that flows has two or more columns, and a row has its column's width, not the pane's: the same
+// rules then ask the row, which is its own query container. A column is at least 26rem; a row that is indented
+// (padding-left 24px) has that much less, and its rules are lowered by the same. Only these rows are containers, and
+// only in a pane this wide, so a narrow pane has none of this and is exactly as it was. Nothing here asks the pane's
+// width less a scrollbar, which a row cannot know.
+// SPEC_SETTINGS_WIDE_PANE_COLUMNS_2026_11_20.md 3.5.
+@container settings (min-width: 56rem) {
+    .settings-section-body:not(.settings-section-body--single) > .setting-row {
+        container-type: inline-size;
+        container-name: setting-row;
+    }
+
+    // The ancestor goes in :where() so a rule's weight is what it was when it asked the pane.
+    @container setting-row (max-width: 447px) {
+        :where(.setting-row:not(.setting-row--indent)) {
+            .setting-select,
+            .setting-text {
+                width: 100%;
+                min-width: 0;
+            }
+
+            .setting-slider {
+                width: 100%;
+
+                input[type="range"] {
+                    flex: 1 1 auto;
+                    width: auto;
+                    min-width: 80px;
+                }
+            }
+        }
+
+        :where(.setting-row:not(.setting-row--indent)) .ui-field-control.ui-field-control {
+            flex: 1 1 100%;
+            align-items: stretch;
+        }
+    }
+
+    @container setting-row (max-width: 423px) {
+        :where(.setting-row--indent) {
+            .setting-select,
+            .setting-text {
+                width: 100%;
+                min-width: 0;
+            }
+
+            .setting-slider {
+                width: 100%;
+
+                input[type="range"] {
+                    flex: 1 1 auto;
+                    width: auto;
+                    min-width: 80px;
+                }
+            }
+        }
+
+        :where(.setting-row--indent) .ui-field-control.ui-field-control {
+            flex: 1 1 100%;
+            align-items: stretch;
+        }
+    }
+
+    // Widget colors: the pane's 639, 459 and 259, less the indent and the 2 x 1rem the pane's rules do not count.
+    @container setting-row (max-width: 583px) {
+        .setting-widget-color {
+            > .ui-button {
+                order: 2;
+            }
+
+            .palette-swatches.palette-swatches {
+                order: 3;
+                flex: 1 0 100%;
+            }
+        }
+    }
+
+    @container setting-row (max-width: 403px) {
+        .setting-widget-color .palette-swatches.palette-swatches {
+            --palette-cols: 8;
+        }
+    }
+
+    @container setting-row (max-width: 203px) {
+        .setting-widget-color .palette-swatches.palette-swatches {
+            --palette-cols: 5;
+        }
     }
 }
 

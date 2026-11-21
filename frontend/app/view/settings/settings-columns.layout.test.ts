@@ -47,13 +47,16 @@ function flowSection(rows = 24): string {
 }
 
 /** One pane: the container the section is queried against, at `width` screen px under Settings zoom `zoom`. */
-function pane(name: string, width: number, zoom: number, body: string, bodyClass = "settings-section-body"): string {
+function pane(name: string, width: number, zoom: number, body: string, bodyClass = "settings-section-body", paneClass = ""): string {
     return (
-        `<div class="settings-view-container" data-case="${name}" style="width:${width / zoom}px;height:auto;zoom:${zoom};` +
+        `<div class="settings-view-container ${paneClass}" data-case="${name}" style="width:${width / zoom}px;height:auto;zoom:${zoom};` +
         `overflow:hidden;margin-bottom:8px"><div class="settings-body"><div class="settings-scroll">` +
         `<div class="${bodyClass}">${body}</div></div></div></div>`
     );
 }
+
+// A classic scrollbar that takes room from the scroller, as on Windows and Linux, whatever the machine running the test.
+const SCROLLBAR = `.classic-scrollbar .settings-scroll{overflow-y:scroll}.classic-scrollbar .settings-scroll::-webkit-scrollbar{width:15px}`;
 
 const MEASURE = `
 const out = {};
@@ -78,6 +81,8 @@ for (const pane of document.querySelectorAll("[data-case]")) {
         aloneHeaders,
         rows: rows.length,
         colWidth: Math.round(colWidth * 100) / 100,
+        // "100%" is the stacked control (the narrow rule); an inline field control's own basis is "auto".
+        basis: rows[0] ? getComputedStyle(rows[0].querySelector(".ui-field-control")).flexBasis : null,
         order: swatches ? getComputedStyle(swatches).order : null,
         cols: swatches ? getComputedStyle(swatches).getPropertyValue("--palette-cols").trim() : null,
         tops: items.slice(0, 3).map((el) => Math.round((el.getBoundingClientRect().top - pane.getBoundingClientRect().top) * 10) / 10),
@@ -92,6 +97,7 @@ interface Measured {
     aloneHeaders: number;
     rows: number;
     colWidth: number;
+    basis: string | null;
     order: string | null;
     cols: string | null;
     tops: number[];
@@ -99,7 +105,7 @@ interface Measured {
 
 async function measure(panes: string[]): Promise<Record<string, Measured>> {
     const html =
-        `<!doctype html><meta charset="utf-8"><style>${TOKENS}\n${ui}\n${settings}</style>${panes.join("")}` +
+        `<!doctype html><meta charset="utf-8"><style>${TOKENS}\n${ui}\n${settings}\n${SCROLLBAR}</style>${panes.join("")}` +
         `<script>window.addEventListener("load",()=>{${MEASURE}})</script>`;
     return measureInBrowser<Record<string, Measured>>(BROWSER!, html, { width: 3600, height: 4000 });
 }
@@ -164,6 +170,23 @@ describe.skipIf(!BROWSER)("settings columns", () => {
         expect(r.column.order).toBe("3");
         expect(r.column.cols).toBe("8");
         expect(r.narrow.order).toBe("3");
+    }, 60_000);
+
+    // A narrow pane is exactly as it was, whatever the scrollbar takes: the controls stack when the pane is 479px or
+    // less, not when the row, which a classic scrollbar narrows, is 447px or less.
+    it("stacks the controls at the pane's own 479px, with or without a scrollbar", async () => {
+        const widths = [400, 479, 480, 483, 487, 494, 520];
+        const r = await measure(
+            widths.flatMap((w) => [
+                pane(`plain${w}`, w, 1, flowSection(6)),
+                pane(`bar${w}`, w, 1, flowSection(6), "settings-section-body", "classic-scrollbar"),
+            ])
+        );
+        for (const w of widths) {
+            const stacked = w <= 479 ? "100%" : "auto";
+            expect(r[`plain${w}`].basis, `${w}px`).toBe(stacked);
+            expect(r[`bar${w}`].basis, `${w}px with a scrollbar`).toBe(stacked);
+        }
     }, 60_000);
 
     it("keeps the rows above a row that grows where they were", async () => {
