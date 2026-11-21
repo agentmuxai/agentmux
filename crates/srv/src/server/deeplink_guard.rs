@@ -19,7 +19,7 @@
 //! - G9: every open is recorded as the agent, refused and queued ones too, with the outcome and the reason.
 //! - G12: everything is checked now, when the open happens.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -132,6 +132,7 @@ pub(crate) fn check_rules(link: &mut ParsedLink, who: &CallerFacts) -> Result<()
         }
         AgentRule::Yes => {}
     }
+    let mut fill: Vec<&'static str> = Vec::new();
     for (name, held) in own_values(link) {
         match held {
             Some(v) if v.to_string() != who.agent_id => {
@@ -144,10 +145,13 @@ pub(crate) fn check_rules(link: &mut ParsedLink, who: &CallerFacts) -> Result<()
             Some(_) => {}
             None => {
                 if link.place.is_some_and(|p| p.params.iter().any(|x| x.name == name)) {
-                    link.params.insert(name.to_string(), Value::Text(who.agent_id.clone()));
+                    fill.push(name);
                 }
             }
         }
+    }
+    for name in fill {
+        link.params.insert(name.to_string(), Value::Text(who.agent_id.clone()));
     }
     if who.container && view.sensitivity == Sensitivity::Path {
         return Err(refusal(
