@@ -10,9 +10,10 @@
 import { createMemo, For, Show, untrack, type Accessor, type JSX } from "solid-js";
 
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
-import { Pill, SegmentedControl } from "@/app/element/ui";
+import { SegmentedControl } from "@/app/element/ui";
 import { MOS } from "@/app/store/global";
-import { readSeatMeta, seatBadgeText, seatTooltipLine } from "@/app/agent-model/seat-format";
+import { readSeatMeta, seatTooltipLine } from "@/app/agent-model/seat-format";
+import { SeatTag } from "@/app/agent-model/seat-tag";
 import type { SeatSummary } from "@/types/rpc/SeatSummary";
 import type { RemoteRow } from "./swarm-remote";
 import {
@@ -42,9 +43,7 @@ export function SwarmSeatPill(props: { seat: SeatSummary | null | undefined }): 
         <Show when={props.seat}>
             {(s) => (
                 <span class="swarm-seat-slot">
-                    <Pill class="swarm-seat-badge" title={seatTooltipLine(s())}>
-                        {seatBadgeText(s())}
-                    </Pill>
+                    <SeatTag class="swarm-seat-badge" seat={s()} title={seatTooltipLine(s())} />
                 </span>
             )}
         </Show>

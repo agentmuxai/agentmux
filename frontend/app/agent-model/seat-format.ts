@@ -8,6 +8,7 @@
  * so a seat reads the same on every surface.
  */
 
+import type { SeatHue } from "@/app/element/ui/tag-tokens";
 import type { AgentSeat } from "@/types/rpc/AgentSeat";
 import type { SeatLead } from "@/types/rpc/SeatLead";
 import type { SeatSummary } from "@/types/rpc/SeatSummary";
@@ -38,6 +39,23 @@ export function isSeatRole(role: unknown): role is SeatRole {
 /** "Platform tester"; a role this build doesn't know shows as written. */
 export function roleLabel(role: string): string {
     return SEAT_ROLES.find((r) => r.value === role)?.label ?? role;
+}
+
+const SEAT_HUE: Record<SeatRole, SeatHue> = {
+    leader: "seat-leader",
+    worker: "seat-worker",
+    specialist: "seat-specialist",
+    platform_tester: "seat-platform-tester",
+    analyst: "seat-analyst",
+    super: "seat-super",
+};
+
+/**
+ * The colour a role's tag takes (a `Tag` hue), so a seat reads the same colour on every surface. A role this
+ * build doesn't know has none: its tag is neutral and shows the role as written.
+ */
+export function seatHue(role: string): SeatHue | null {
+    return isSeatRole(role) ? SEAT_HUE[role] : null;
 }
 
 /** The badge: "Leader · product", or just "Specialist". */

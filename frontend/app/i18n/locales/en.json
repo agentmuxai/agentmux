@@ -1030,6 +1030,8 @@
     "swarm.broadcast.progress": "Sent {{sent}} of {{total}}…",
     "swarm.select.host": "Select all on host",
     "swarm.select.hostTitle": "Select only the agents of this computer, not those on LAN or cloud machines",
+    "swarm.tag.seat": "Seat",
+    "swarm.tag.model": "Model",
     "accountForm.addAccount": "Add Account",
     "accountForm.editAccount": "Edit Account",
     "accountForm.save": "Save",
