@@ -29,7 +29,7 @@ function onComputer(agent: AgentEntry, computer: string, ctx: LinkContext): bool
 }
 
 function followedByName(text: string, end: number): boolean {
-    // `Opaz.md`, `Opaz/x` and `Opaz@` are not the agent: a file, a path, an address.
+    // `Name.md`, `Name/x` and `Name@` are not the agent: a file, a path, an address.
     return /^(?:\.[A-Za-z0-9]|\/|@)/.test(text.slice(end, end + 2));
 }
 
@@ -53,7 +53,7 @@ export const agentKind: EntityKind = {
     },
     resolve(candidate) {
         const { id, name, computer } = candidate.data;
-        return { destination: { kind: "agent", id, ...(computer ? { computer } : {}) }, state: "ready", name: `Open agent ${name}` };
+        return { destination: { kind: "agent", id, name, ...(computer ? { computer } : {}) }, state: "ready", name: `Open agent ${name}` };
     },
     open(destination) {
         if (destination.kind !== "agent") return Promise.resolve({ ok: false, reason: "not an agent" });

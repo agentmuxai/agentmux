@@ -1,0 +1,26 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// A link made from text (spec §8): it reads as part of the sentence. An agent, a task and a pull request get a
+// dotted underline; a web address keeps the solid one. Size and colour follow the text around it.
+.entity-link {
+    // The colour is the app's link colour (`a` in app.scss), so it follows the theme.
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+    cursor: pointer;
+
+    &:hover,
+    &:focus-visible {
+        text-decoration-style: solid;
+    }
+
+    &--address {
+        text-decoration-style: solid;
+    }
+
+    &--dead {
+        color: var(--secondary-text-color);
+        text-decoration: none;
+        cursor: default;
+    }
+}

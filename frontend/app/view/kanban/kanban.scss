@@ -513,6 +513,11 @@ $kanban-narrow: 760px;
 .kanban-agent-chip__name {
     font-weight: 500;
     color: var(--kanban-agent-text, inherit);
+
+    // The name is the agent's link: it keeps the agent's colour.
+    .entity-link {
+        color: inherit;
+    }
 }
 
 .kanban-new {
