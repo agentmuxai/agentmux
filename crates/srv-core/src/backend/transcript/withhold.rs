@@ -95,6 +95,11 @@ pub fn text(text: &str) -> Cow<'_, str> {
     }
 }
 
+/// Whether `text` holds a registered value, in any of its spellings: the same matcher [`text`] replaces with.
+pub fn holds(text: &str) -> bool {
+    matcher().is_some_and(|matcher| matcher.is_match(text))
+}
+
 /// [`text`] over transcript bytes (NDJSON lines); bytes that are not UTF-8 are left as they are.
 pub fn lines(data: &[u8]) -> Cow<'_, [u8]> {
     let Ok(as_text) = std::str::from_utf8(data) else { return Cow::Borrowed(data) };
