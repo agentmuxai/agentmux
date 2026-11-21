@@ -6,6 +6,8 @@
 // below it (`--kanban-bar-h`, kanban.scss). Sizes are the kit's, so it follows the pane's zoom; it wraps, and never
 // scrolls sideways.
 
+@use "../../mixins.scss";
+
 .kanban-section-bar {
     // Above the list's first section, which `order: -1` puts first.
     order: -2;
@@ -61,8 +63,7 @@
     }
 
     &:focus-visible {
-        outline: 2px solid var(--accent-color);
-        outline-offset: 1px;
+        @include mixins.focus-ring;
     }
 
     // The section you are in, said by its outline as well as its colour.
