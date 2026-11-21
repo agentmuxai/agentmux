@@ -12,7 +12,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { createEffect, createMemo, createSignal, on, onCleanup, type Accessor } from "solid-js";
 import { findMatch, type SearchCall } from "../hex/hex-find";
-import { largeSearchFor, matcherFor, type LineMatcher } from "./large-find";
+import { largeSearchFor, matcherFor, type LargeSearch, type LineMatcher } from "./large-find";
 
 const searchOnSrv: SearchCall = (req) => RpcApi.FileSearchBytesCommand(TabRpcClient, req);
 
@@ -61,22 +61,61 @@ async function searchFrom(
     return cancelled() ? null : { offset: r.offset, length: r.length, line, wrapped: r.wrapped };
 }
 
+type Ask = Exclude<LargeSearch, { error: string } | null>;
+
+/** What srv is asked for `p`: the call, and the pattern and alignment it is given (hex bytes for bytes, the typed text for text). */
+function askFor(o: LargeFindParts, p: Ask): { pattern: string; align: 1 | 2; call: SearchCall } {
+    if (p.kind === "bytes") return { pattern: p.hex, align: p.align, call: o.call ?? searchOnSrv };
+    return { pattern: p.query, align: 1, call: (o.textCall ?? textSearchOnSrv)(p.regex, p.ignoreCase) };
+}
+
+/**
+ * The cursor a search goes on from: the match on show. A search of text goes on past the whole match, not one byte in
+ * (`\d+` in "123" would find "23" next); going back, or for bytes, it is the match's start.
+ */
+function cursorFrom(p: Ask, kept: { offset: number; end: number }, backward: boolean): number {
+    return p.kind === "text" && !backward ? kept.end - 1 : kept.offset;
+}
+
+/** srv's answer names its command ("filesearchtext: not a valid expression: …"): the reason is for the reader. */
+function reasonOf(e: unknown): string {
+    return (e instanceof Error ? e.message : String(e)).replace(/^filesearch(?:text|bytes):\s*/, "");
+}
+
+/** "Aa" (exact case, on) and ".*" (the text is a regular expression, off). A change of either calls `onChange`. */
+function createFindOptions(onChange: () => void) {
+    const [matchCase, setMatchCase] = createSignal(true);
+    const [regex, setRegex] = createSignal(false);
+    return {
+        matchCase,
+        regex,
+        get: () => ({ matchCase: matchCase(), regex: regex() }),
+        toggleCase: () => {
+            onChange();
+            setMatchCase((v) => !v);
+        },
+        toggleRegex: () => {
+            onChange();
+            setRegex((v) => !v);
+        },
+    };
+}
+
 export function createLargeFind(o: LargeFindParts) {
     const [open, setOpen] = createSignal(false);
     const [text, setText] = createSignal("");
     const [status, setStatus] = createSignal("");
     const [busy, setBusy] = createSignal(false);
-    /** "Aa": exact case. ".*": the text is a regular expression. */
-    const [matchCase, setMatchCase] = createSignal(true);
-    const [regex, setRegex] = createSignal(false);
+    // A change of how the text is read ends the search on show: its match was of another question.
+    const opts = createFindOptions(() => reset());
     /** What marks the match on show in its line (its text, or an expression); "" when none. */
     const [needle, setNeedle] = createSignal<LineMatcher>("");
     /** Where the match on show starts: the next search goes on from it. `key` is the text and options it was found with. */
     let at: { offset: number; end: number; key: string } | null = null;
     let input: HTMLInputElement | undefined;
     let run = 0;
-    const options = () => ({ matchCase: matchCase(), regex: regex() });
-    const key = () => `${matchCase() ? "A" : "a"}${regex() ? "r" : "t"}:${text()}`;
+    const options = opts.get;
+    const key = () => `${opts.matchCase() ? "A" : "a"}${opts.regex() ? "r" : "t"}:${text()}`;
     const pattern = createMemo(() => largeSearchFor(o.encoding(), text(), options()));
     const error = (): string => {
         const p = pattern();
@@ -95,15 +134,6 @@ export function createLargeFind(o: LargeFindParts) {
         reset();
         setText(next);
     };
-    // A change of how the text is read ends the search on show: its match was of another question.
-    const toggleCase = () => {
-        reset();
-        setMatchCase((v) => !v);
-    };
-    const toggleRegex = () => {
-        reset();
-        setRegex((v) => !v);
-    };
     const go = async (backward: boolean): Promise<void> => {
         const p = pattern();
         if (!p || "error" in p || !o.size() || !o.path()) return;
@@ -113,11 +143,8 @@ export function createLargeFind(o: LargeFindParts) {
         try {
             const kept = at && at.key === key() ? at : null;
             // From the match on show, else from the top of the screen.
-            // A search of text goes on past the whole match, not one byte in: `\d+` in "123" would find "23" next.
-            const top = kept ? (p.kind === "text" && !backward ? kept.end - 1 : kept.offset) : (await o.topOffset()) - (backward ? 0 : 1);
-            const call: SearchCall =
-                p.kind === "bytes" ? (o.call ?? searchOnSrv) : (o.textCall ?? textSearchOnSrv)(p.regex, p.ignoreCase);
-            const r = await searchFrom(o, { pattern: p.kind === "bytes" ? p.hex : p.query, align: p.kind === "bytes" ? p.align : 1, call }, top, backward, () => mine !== run);
+            const top = kept ? cursorFrom(p, kept, backward) : (await o.topOffset()) - (backward ? 0 : 1);
+            const r = await searchFrom(o, askFor(o, p), top, backward, () => mine !== run);
             if (mine !== run || !r) return;
             if (r === "none") {
                 // The line marked from an earlier match would look like this search's answer.
@@ -136,8 +163,7 @@ export function createLargeFind(o: LargeFindParts) {
             o.show(r.line + 1, r.offset);
             setStatus(`Line ${(r.line + 1).toLocaleString("en-US")}${r.wrapped ? ", from the other end of the file" : ""}`);
         } catch (e) {
-            // srv's answer names its command ("filesearchtext: not a valid expression: …"): the reason is for the reader.
-            if (mine === run) setStatus(`Couldn't search: ${(e instanceof Error ? e.message : String(e)).replace(/^filesearch(?:text|bytes):\s*/, "")}`);
+            if (mine === run) setStatus(`Couldn't search: ${reasonOf(e)}`);
         } finally {
             if (mine === run) setBusy(false);
         }
@@ -164,10 +190,10 @@ export function createLargeFind(o: LargeFindParts) {
         error,
         canSearch: () => !!o.path() && o.size() > 0,
         edit,
-        matchCase,
-        regex,
-        toggleCase,
-        toggleRegex,
+        matchCase: opts.matchCase,
+        regex: opts.regex,
+        toggleCase: opts.toggleCase,
+        toggleRegex: opts.toggleRegex,
         next: () => void go(false),
         previous: () => void go(true),
         openStrip,
