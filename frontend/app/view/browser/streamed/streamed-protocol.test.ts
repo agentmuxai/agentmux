@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { addressToUrl, clampSide } from "./use-streamed-pane";
-import { buttonName, frameBytes, isPasteChord, keyMessage, modifiers, mouseMessage, parseServerMessage, typedText, wheelMessage } from "./streamed-protocol";
+import { buttonName, frameBytes, isPasteChord, keyMessage, LABEL_MAX, modifiers, mouseMessage, parseServerMessage, plainText, typedText, wheelMessage, windowLabel } from "./streamed-protocol";
 
 const none = { altKey: false, ctrlKey: false, metaKey: false, shiftKey: false };
 
@@ -76,5 +76,69 @@ describe("the pane's own numbers and address", () => {
         expect(addressToUrl("localhost:3000")).toBe("https://localhost:3000");
         expect(addressToUrl("file:///etc/passwd")).toBe("file:///etc/passwd");
         expect(addressToUrl("")).toBe("");
+    });
+});
+
+
+describe("windows and notices", () => {
+    const windowsMsg = {
+        t: "windows",
+        active: 1,
+        windows: [
+            { id: 0, url: "https://app.example/", title: "App", opener: null, closable: false },
+            { id: 1, url: "https://idp.example/auth", title: "Sign in", opener: 0, closable: true },
+        ],
+    };
+
+    it("reads the windows of the pane and which one is shown", () => {
+        expect(parseServerMessage(JSON.stringify(windowsMsg))).toEqual(windowsMsg);
+    });
+
+    it("refuses a windows message that is not well formed", () => {
+        expect(parseServerMessage(JSON.stringify({ ...windowsMsg, active: "1" }))).toBeNull();
+        expect(parseServerMessage(JSON.stringify({ ...windowsMsg, windows: "none" }))).toBeNull();
+        expect(parseServerMessage(JSON.stringify({ ...windowsMsg, windows: [{ url: "x" }] }))).toBeNull();
+        expect(parseServerMessage(JSON.stringify({ ...windowsMsg, windows: [null] }))).toBeNull();
+    });
+
+    it("reads a notice as the words the server gave", () => {
+        expect(parseServerMessage('{"t":"notice","message":"a.example opened a message box. It was dismissed."}')).toEqual({
+            t: "notice",
+            message: "a.example opened a message box. It was dismissed.",
+        });
+    });
+
+    it("names a window by its site, so the person sees who is asking", () => {
+        expect(windowLabel({ url: "https://login.example.com/a?b=1", title: "Sign in" })).toBe("login.example.com");
+        expect(windowLabel({ url: "http://127.0.0.1:8080/x", title: "" })).toBe("127.0.0.1:8080");
+        expect(windowLabel({ url: "about:blank", title: "Untitled" })).toBe("Untitled");
+        expect(windowLabel({ url: "", title: "" })).toBe("…");
+    });
+
+    it("cuts a long host from the left, so the end that says whose site it is stays visible", () => {
+        const long = "accounts.google.com.sign-in.verify-your-identity.evil-example.net";
+        const label = windowLabel({ url: `https://${long}/login`, title: "Sign in" });
+        expect(label.length).toBeLessThanOrEqual(LABEL_MAX);
+        expect(label.startsWith("…")).toBe(true);
+        expect(label.endsWith("evil-example.net")).toBe(true);
+        expect(long.endsWith(label.slice(1))).toBe(true);
+        // A host that fits is shown whole.
+        expect(windowLabel({ url: "https://accounts.google.com/", title: "" })).toBe("accounts.google.com");
+    });
+
+    it("shows a title in a tab with nothing hidden in it, cut at its end", () => {
+        expect(windowLabel({ url: "about:blank", title: "Pay\u202Epal\u200B now" })).toBe("Paypal now");
+        const cut = windowLabel({ url: "about:blank", title: "x".repeat(100) });
+        expect(cut.length).toBeLessThanOrEqual(LABEL_MAX);
+        expect(cut.endsWith("…")).toBe(true);
+    });
+
+    it("shows what a page wrote in a notice with control, reordering and zero-width characters removed", () => {
+        const text = "a.example opened a message box (\u201CSign\u202Ein\u200B to\u2066 pay\u0007\uFEFF\u201D). It was dismissed.";
+        expect(parseServerMessage(JSON.stringify({ t: "notice", message: text }))).toEqual({
+            t: "notice",
+            message: "a.example opened a message box (“Signin to pay”). It was dismissed.",
+        });
+        expect(plainText("one\n  two\tthree")).toBe("one two three");
     });
 });
