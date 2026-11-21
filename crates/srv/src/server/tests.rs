@@ -34,6 +34,15 @@ pub(crate) fn actor_in(body: &serde_json::Value) -> String {
     ["agent_id", "created_by"].iter().find_map(|k| body[k].as_str().filter(|s| !s.is_empty())).unwrap_or("tester").to_string()
 }
 
+/// The token of an agent registered on the pane `block_id`, as a shell call's own agent proves itself.
+pub(crate) fn token_on_block(state: &AppState, block_id: &str) -> String {
+    let name = format!("shellcaller-{block_id}");
+    let token = token_for(state, &name);
+    let uid = format!("uid-{name}");
+    let _ = backend_reactive::get_global_handler().register_agent_full(&name, block_id, None, 0, Some(&name), Some(&uid), "test.shell");
+    token
+}
+
 pub(crate) fn test_state() -> AppState {
     // The store, file store, event bus and broker come from the core fixture, which core tests use
     // by themselves. This one store backs mstore/id_store/identity_store below and carries both
@@ -4081,6 +4090,121 @@ async fn post_json(app: &Router, uri: &str, body: serde_json::Value) -> (StatusC
     (status, json)
 }
 
+/// `post_json` as the agent that owns the shell call: the pane the body names, else the pane the shell belongs to.
+async fn post_shell(state: &AppState, app: &Router, uri: &str, body: serde_json::Value) -> (StatusCode, serde_json::Value) {
+    let shell = body["shell_id"].as_str().unwrap_or_default();
+    let pane = match body["agent_block_id"].as_str().filter(|b| !b.is_empty()) {
+        Some(named) => named.to_string(),
+        None => match state.mstore.get::<crate::backend::obj::Block>(shell).ok().flatten() {
+            Some(block) => block.parentoref.trim_start_matches("block:").to_string(),
+            None => state.shell_sessions.get_status(shell).block_id,
+        },
+    };
+    post_json_with(app, uri, body, &[("X-Agent-Token", token_on_block(state, &pane).as_str())]).await
+}
+
+async fn post_json_with(app: &Router, uri: &str, body: serde_json::Value, headers: &[(&str, &str)]) -> (StatusCode, serde_json::Value) {
+    let mut req = Request::builder().uri(uri).method(Method::POST).header("X-AuthKey", "test-secret-key").header("Content-Type", "application/json");
+    for (k, v) in headers {
+        req = req.header(*k, *v);
+    }
+    let resp = app.clone().oneshot(req.body(Body::from(body.to_string())).unwrap()).await.unwrap();
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null))
+}
+
+/// Every shell and PTY shell call, naming `pane` where the request has a field for it.
+fn shell_calls(pane: &str, shell: &str) -> Vec<(&'static str, serde_json::Value)> {
+    vec![
+        ("/api/v1/ptyshell/create", serde_json::json!({ "agent_block_id": pane })),
+        ("/api/v1/ptyshell/input", serde_json::json!({ "shell_id": shell, "agent_block_id": pane, "text": "x" })),
+        ("/api/v1/ptyshell/resize", serde_json::json!({ "shell_id": shell, "agent_block_id": pane, "rows": 30, "cols": 100 })),
+        ("/api/v1/ptyshell/read", serde_json::json!({ "shell_id": shell, "agent_block_id": pane })),
+        ("/api/v1/ptyshell/status", serde_json::json!({ "shell_id": shell, "agent_block_id": pane })),
+        ("/api/v1/ptyshell/stop", serde_json::json!({ "shell_id": shell, "agent_block_id": pane })),
+        ("/api/v1/shell/create", serde_json::json!({ "agent_block_id": pane, "cmd": "echo hi" })),
+        ("/api/v1/shell/input", serde_json::json!({ "shell_id": shell, "text": "x" })),
+        ("/api/v1/shell/stop", serde_json::json!({ "shell_id": shell })),
+        ("/api/v1/shell/status", serde_json::json!({ "shell_id": shell })),
+    ]
+}
+
+#[tokio::test]
+async fn a_shell_call_that_does_not_carry_its_agents_token_is_refused() {
+    let state = test_state();
+    let app = build_router(state.clone());
+    for (uri, body) in shell_calls("pane-without-a-token", "some-shell") {
+        let (status, json) = post_json_with(&app, uri, body, &[]).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{uri}: {json}");
+        assert!(json["error"].as_str().unwrap_or("").contains("token or signed identity"), "{uri}: {json}");
+    }
+}
+
+#[tokio::test]
+async fn a_shell_call_that_names_another_agents_pane_is_refused() {
+    let state = test_state();
+    let app = build_router(state.clone());
+    let unique = uuid::Uuid::new_v4().simple().to_string();
+    let (attacker, victim) = (format!("pane-attacker-{unique}"), format!("pane-victim-{unique}"));
+    let token = token_on_block(&state, &attacker);
+    for (uri, body) in shell_calls(&victim, "some-shell") {
+        // Only the calls that name a pane have another one to name.
+        if body.get("agent_block_id").is_none() {
+            continue;
+        }
+        let (status, json) = post_json_with(&app, uri, body, &[("X-Agent-Token", token.as_str())]).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{uri}: {json}");
+        assert!(json["error"].as_str().unwrap_or("").contains("another agent's pane"), "{uri}: {json}");
+    }
+    // The same calls naming its own pane are not refused.
+    for (uri, body) in shell_calls(&attacker, "some-shell") {
+        if body.get("agent_block_id").is_none() || uri.ends_with("/create") {
+            continue;
+        }
+        let (status, json) = post_json_with(&app, uri, body, &[("X-Agent-Token", token.as_str())]).await;
+        assert_eq!(status, StatusCode::OK, "{uri}: {json}");
+    }
+}
+
+#[tokio::test]
+async fn a_shell_call_on_a_shell_another_pane_started_is_refused() {
+    let state = test_state();
+    let app = build_router(state.clone());
+    let unique = uuid::Uuid::new_v4().simple().to_string();
+    let (owner, other, shell) = (format!("pane-owner-{unique}"), format!("pane-other-{unique}"), format!("shell-{unique}"));
+    let (stop_tx, _stop_rx) = tokio::sync::oneshot::channel();
+    let (stdin_tx, mut stdin_rx) = tokio::sync::mpsc::unbounded_channel();
+    let info = crate::backend::shell_node::ShellStatusInfo { running: true, block_id: owner.clone(), ..Default::default() };
+    state.shell_sessions.register_full(shell.clone(), stop_tx, Some(stdin_tx), std::sync::Arc::new(parking_lot::Mutex::new(info)));
+
+    let other_token = token_on_block(&state, &other);
+    for (uri, body) in [
+        ("/api/v1/shell/input", serde_json::json!({ "shell_id": shell, "text": "echo nope" })),
+        ("/api/v1/shell/status", serde_json::json!({ "shell_id": shell })),
+        ("/api/v1/shell/stop", serde_json::json!({ "shell_id": shell })),
+    ] {
+        let (status, json) = post_json_with(&app, uri, body, &[("X-Agent-Token", other_token.as_str())]).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{uri}: {json}");
+    }
+    assert!(stdin_rx.try_recv().is_err(), "nothing was written to the other pane's shell");
+    assert!(state.shell_sessions.get_status(&shell).running, "it was not stopped");
+
+    // The pane that started it still drives it.
+    let owner_token = token_on_block(&state, &owner);
+    let (status, json) = post_json_with(
+        &app,
+        "/api/v1/shell/input",
+        serde_json::json!({ "shell_id": shell, "text": "echo mine" }),
+        &[("X-Agent-Token", owner_token.as_str())],
+    )
+    .await;
+    assert_eq!((status, &json["written"]), (StatusCode::OK, &serde_json::json!(true)), "{json}");
+    assert_eq!(stdin_rx.try_recv().unwrap(), "echo mine\n");
+    let (status, json) = post_json_with(&app, "/api/v1/shell/status", serde_json::json!({ "shell_id": shell }), &[("X-Agent-Token", owner_token.as_str())]).await;
+    assert_eq!((status, &json["running"]), (StatusCode::OK, &serde_json::json!(true)), "{json}");
+}
+
 /// `#[ignore]` (2026-09-15): this test's own comment below already notes it
 /// spawns "a REAL, persistent interactive shell process (unlike every other
 /// non-`#[ignore]`d test in this file, which never spawns one at all)" — it
@@ -4125,7 +4249,8 @@ async fn ptyshell_create_returns_a_shell_id_and_inserts_a_real_term_block() {
     };
     state.mstore.insert(&mut agent_block).expect("insert agent block");
 
-    let (status, json) = post_json(
+    let (status, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/create",
         serde_json::json!({ "agent_block_id": agent_block_id }),
@@ -4237,7 +4362,8 @@ async fn ptyshell_create_reuses_the_pane_s_existing_shell_instead_of_spawning_a_
     )
     .expect("point agent block at the human's shell");
 
-    let (status, json) = post_json(
+    let (status, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/create",
         serde_json::json!({ "agent_block_id": agent_block_id }),
@@ -4291,7 +4417,8 @@ async fn ptyshell_rejects_operating_on_a_block_outside_the_calling_agents_own_pa
     };
     state.mstore.insert(&mut foreign).expect("insert foreign block");
 
-    let (_, json) = post_json(
+    let (_, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/input",
         serde_json::json!({ "shell_id": "someone-elses-real-pane", "agent_block_id": "attacking-agent", "text": "hi" }),
@@ -4300,7 +4427,8 @@ async fn ptyshell_rejects_operating_on_a_block_outside_the_calling_agents_own_pa
     assert_eq!(json["written"], serde_json::json!(false));
     assert!(json["error"].as_str().unwrap_or("").contains("not a shell belonging to this agent's own pane"));
 
-    let (_, json) = post_json(
+    let (_, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/resize",
         serde_json::json!({ "shell_id": "someone-elses-real-pane", "agent_block_id": "attacking-agent", "rows": 30, "cols": 100 }),
@@ -4308,7 +4436,8 @@ async fn ptyshell_rejects_operating_on_a_block_outside_the_calling_agents_own_pa
     .await;
     assert_eq!(json["resized"], serde_json::json!(false));
 
-    let (_, json) = post_json(
+    let (_, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/read",
         serde_json::json!({ "shell_id": "someone-elses-real-pane", "agent_block_id": "attacking-agent" }),
@@ -4316,7 +4445,8 @@ async fn ptyshell_rejects_operating_on_a_block_outside_the_calling_agents_own_pa
     .await;
     assert_eq!(json["content"], serde_json::json!(""));
 
-    let (_, json) = post_json(
+    let (_, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/stop",
         serde_json::json!({ "shell_id": "someone-elses-real-pane", "agent_block_id": "attacking-agent" }),
@@ -4331,7 +4461,8 @@ async fn ptyshell_rejects_operating_on_a_block_outside_the_calling_agents_own_pa
 
     // The LEGITIMATE owner (matching agent_block_id) can still act on it —
     // proves the rejection above is about ownership, not a broken check.
-    let (_, json) = post_json(
+    let (_, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/resize",
         serde_json::json!({ "shell_id": "someone-elses-real-pane", "agent_block_id": "someone-elses-agent", "rows": 30, "cols": 100 }),
@@ -4366,7 +4497,8 @@ async fn ptyshell_create_defaults_cwd_from_the_agent_block() {
     };
     state.mstore.insert(&mut agent_block).expect("insert agent block");
 
-    let (status, json) = post_json(
+    let (status, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/create",
         serde_json::json!({ "agent_block_id": "agent-with-a-cwd" }),
@@ -4388,8 +4520,10 @@ async fn ptyshell_create_defaults_cwd_from_the_agent_block() {
 
 #[tokio::test]
 async fn ptyshell_status_on_unknown_id_is_a_plain_not_running_answer() {
-    let app = test_router();
-    let (status, json) = post_json(
+    let state = test_state();
+    let app = build_router(state.clone());
+    let (status, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/status",
         serde_json::json!({ "shell_id": "no-such-shell", "agent_block_id": "whoever" }),
@@ -4402,8 +4536,10 @@ async fn ptyshell_status_on_unknown_id_is_a_plain_not_running_answer() {
 
 #[tokio::test]
 async fn ptyshell_input_on_unknown_id_reports_written_false_with_a_reason() {
-    let app = test_router();
-    let (status, json) = post_json(
+    let state = test_state();
+    let app = build_router(state.clone());
+    let (status, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/input",
         serde_json::json!({ "shell_id": "no-such-shell", "agent_block_id": "whoever", "text": "hello" }),
@@ -4419,8 +4555,10 @@ async fn ptyshell_input_on_unknown_id_reports_written_false_with_a_reason() {
 
 #[tokio::test]
 async fn ptyshell_stop_on_unknown_id_reports_not_released() {
-    let app = test_router();
-    let (status, json) = post_json(
+    let state = test_state();
+    let app = build_router(state.clone());
+    let (status, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/stop",
         serde_json::json!({ "shell_id": "no-such-shell", "agent_block_id": "whoever" }),
@@ -4465,7 +4603,8 @@ async fn ptyshell_input_locks_the_shell_and_stop_releases_it_early() {
     state.mstore.insert(&mut shell).expect("insert shell block");
 
     let before = agentmux_common::time::now_ms();
-    let (_, json) = post_json(
+    let (_, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/input",
         serde_json::json!({ "shell_id": shell_id, "agent_block_id": agent_block_id, "text": "hi" }),
@@ -4485,7 +4624,8 @@ async fn ptyshell_input_locks_the_shell_and_stop_releases_it_early() {
     assert!(until > before, "lock expiry must be in the future");
     assert!(until <= before + AGENT_LOCK_WINDOW_MS + 1000, "lock window should be short, not indefinite");
 
-    let (_, json) = post_json(
+    let (_, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/stop",
         serde_json::json!({ "shell_id": shell_id, "agent_block_id": agent_block_id }),
@@ -4536,7 +4676,8 @@ async fn ptyshell_create_input_read_stop_round_trips_through_a_real_pty() {
     };
     state.mstore.insert(&mut agent_block).expect("insert agent block");
 
-    let (status, json) = post_json(
+    let (status, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/create",
         serde_json::json!({ "agent_block_id": "test-agent-block" }),
@@ -4549,7 +4690,8 @@ async fn ptyshell_create_input_read_stop_round_trips_through_a_real_pty() {
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     let marker = "ptyshell-live-test-marker-4f9a";
-    let (status, json) = post_json(
+    let (status, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/input",
         serde_json::json!({ "shell_id": shell_id, "agent_block_id": "test-agent-block", "text": format!("echo {marker}\r\n") }),
@@ -4573,15 +4715,17 @@ async fn ptyshell_create_input_read_stop_round_trips_through_a_real_pty() {
     let mut content = String::new();
     for i in 0..40 {
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-        let (_, json) = post_json(
-            &app,
+        let (_, json) = post_shell(
+        &state,
+        &app,
             "/api/v1/ptyshell/read",
             serde_json::json!({ "shell_id": shell_id, "agent_block_id": "test-agent-block" }),
         )
         .await;
         content = json["content"].as_str().unwrap_or("").to_string();
-        let (_, status_json) = post_json(
-            &app,
+        let (_, status_json) = post_shell(
+        &state,
+        &app,
             "/api/v1/ptyshell/status",
             serde_json::json!({ "shell_id": shell_id, "agent_block_id": "test-agent-block" }),
         )
@@ -4598,7 +4742,8 @@ async fn ptyshell_create_input_read_stop_round_trips_through_a_real_pty() {
 
     // `since`: a read from the returned end has only what came after it
     // (Terminal's read and wait, SPEC_AGENT_TERMINAL_DRIVING_2026_10_15.md §4.2).
-    let (_, json) = post_json(
+    let (_, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/read",
         serde_json::json!({ "shell_id": shell_id, "agent_block_id": "test-agent-block" }),
@@ -4607,7 +4752,8 @@ async fn ptyshell_create_input_read_stop_round_trips_through_a_real_pty() {
     let end = json["end"].as_u64().expect("read returns end");
     assert!(end > 0);
     let second = "ptyshell-live-test-second-7c21";
-    post_json(
+    post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/input",
         serde_json::json!({ "shell_id": shell_id, "agent_block_id": "test-agent-block", "text": format!("echo {second}\r") }),
@@ -4616,8 +4762,9 @@ async fn ptyshell_create_input_read_stop_round_trips_through_a_real_pty() {
     let mut since_content = String::new();
     for _ in 0..40 {
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-        let (_, json) = post_json(
-            &app,
+        let (_, json) = post_shell(
+        &state,
+        &app,
             "/api/v1/ptyshell/read",
             serde_json::json!({ "shell_id": shell_id, "agent_block_id": "test-agent-block", "since": end }),
         )
@@ -4631,7 +4778,8 @@ async fn ptyshell_create_input_read_stop_round_trips_through_a_real_pty() {
     assert!(since_content.contains(second), "since read: {since_content:?}");
     assert!(!since_content.contains(marker), "since read must not repeat earlier output: {since_content:?}");
 
-    let (status, json) = post_json(
+    let (status, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/status",
         serde_json::json!({ "shell_id": shell_id, "agent_block_id": "test-agent-block" }),
@@ -4642,7 +4790,8 @@ async fn ptyshell_create_input_read_stop_round_trips_through_a_real_pty() {
 
     // stop() releases the lock but must NOT kill the shell — it's shared
     // with whatever human drawer might attach to it later.
-    let (status, json) = post_json(
+    let (status, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/stop",
         serde_json::json!({ "shell_id": shell_id, "agent_block_id": "test-agent-block" }),
@@ -4651,7 +4800,8 @@ async fn ptyshell_create_input_read_stop_round_trips_through_a_real_pty() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["released"], serde_json::json!(true));
 
-    let (_, json) = post_json(
+    let (_, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/status",
         serde_json::json!({ "shell_id": shell_id, "agent_block_id": "test-agent-block" }),
@@ -4696,7 +4846,8 @@ async fn ptyshell_create_does_not_respawn_a_shell_that_already_exited() {
     };
     state.mstore.insert(&mut agent_block).expect("insert agent block");
 
-    let (status, json) = post_json(
+    let (status, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/create",
         serde_json::json!({ "agent_block_id": "test-agent-block" }),
@@ -4708,7 +4859,8 @@ async fn ptyshell_create_does_not_respawn_a_shell_that_already_exited() {
     // Give the PTY a moment to spawn its shell before typing into it.
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-    let (status, json) = post_json(
+    let (status, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/input",
         serde_json::json!({ "shell_id": first_shell_id, "agent_block_id": "test-agent-block", "text": "exit\r\n" }),
@@ -4729,8 +4881,9 @@ async fn ptyshell_create_does_not_respawn_a_shell_that_already_exited() {
     let mut done = false;
     for _ in 0..60 {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        let (_, status_json) = post_json(
-            &app,
+        let (_, status_json) = post_shell(
+        &state,
+        &app,
             "/api/v1/ptyshell/status",
             serde_json::json!({ "shell_id": first_shell_id, "agent_block_id": "test-agent-block" }),
         )
@@ -4744,7 +4897,8 @@ async fn ptyshell_create_does_not_respawn_a_shell_that_already_exited() {
 
     // The pane's one shell already exited — a subsequent PtyShellCreate
     // must create a fresh shell, not respawn the dead one in place.
-    let (status, json) = post_json(
+    let (status, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/create",
         serde_json::json!({ "agent_block_id": "test-agent-block" }),
@@ -4794,7 +4948,8 @@ async fn a_running_ptyshell_on_another_connection_is_refused_and_left_running() 
     };
     state.mstore.insert(&mut agent_block).expect("insert agent block");
 
-    let (status, json) = post_json(
+    let (status, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/create",
         serde_json::json!({ "agent_block_id": "conn-agent-block" }),
@@ -4813,7 +4968,8 @@ async fn a_running_ptyshell_on_another_connection_is_refused_and_left_running() 
     state.mstore.update(&mut shell_block).expect("relabel the shell");
 
     // Running on wsl://Fake: a local request is refused with a remedy that works.
-    let (status, json) = post_json(
+    let (status, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/create",
         serde_json::json!({ "agent_block_id": "conn-agent-block" }),
@@ -4824,7 +4980,8 @@ async fn a_running_ptyshell_on_another_connection_is_refused_and_left_running() 
     assert!(error.contains("wsl://Fake") && error.contains("exit"), "{error}");
 
     // Refused, not touched: the same shell still runs.
-    let (_, status_json) = post_json(
+    let (_, status_json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/status",
         serde_json::json!({ "shell_id": first_shell_id, "agent_block_id": "conn-agent-block" }),
@@ -4915,7 +5072,8 @@ async fn an_agents_ssh_shell_without_consent_never_starts() {
     );
     state.mstore.insert(&mut agent_block).expect("insert agent block");
 
-    let (status, json) = post_json(
+    let (status, json) = post_shell(
+        &state,
         &app,
         "/api/v1/shell/create",
         serde_json::json!({
@@ -4956,7 +5114,8 @@ async fn an_agents_ptyshell_has_the_gh_guard() {
     );
     state.mstore.insert(&mut agent_block).expect("insert agent block");
 
-    let (status, json) = post_json(
+    let (status, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/create",
         serde_json::json!({ "agent_block_id": "guard-agent-block" }),
@@ -4967,7 +5126,8 @@ async fn an_agents_ptyshell_has_the_gh_guard() {
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     let echo = if cfg!(windows) { "echo GH=[%GH_CONFIG_DIR%]\r\n" } else { "echo GH=[$GH_CONFIG_DIR]\n" };
-    let (status, _) = post_json(
+    let (status, _) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/input",
         serde_json::json!({ "shell_id": shell_id, "agent_block_id": "guard-agent-block", "text": echo }),
@@ -4983,8 +5143,9 @@ async fn an_agents_ptyshell_has_the_gh_guard() {
     let mut content = String::new();
     for _ in 0..40 {
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-        let (_, json) = post_json(
-            &app,
+        let (_, json) = post_shell(
+        &state,
+        &app,
             "/api/v1/ptyshell/read",
             serde_json::json!({ "shell_id": shell_id, "agent_block_id": "guard-agent-block" }),
         )
@@ -5034,7 +5195,8 @@ async fn a_concurrent_ptyshell_on_another_connection_leaves_the_winner_alone() {
     );
     state.mstore.insert(&mut agent_block).expect("insert agent block");
 
-    let (status, json) = post_json(
+    let (status, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/create",
         serde_json::json!({ "agent_block_id": "race-agent-block" }),
@@ -5090,7 +5252,8 @@ async fn a_pre_restart_ptyshell_on_another_connection_is_replaced() {
     );
     state.mstore.insert(&mut agent_block).expect("insert agent block");
 
-    let (status, json) = post_json(
+    let (status, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/create",
         serde_json::json!({ "agent_block_id": "restart-agent-block" }),
@@ -5146,7 +5309,8 @@ async fn an_exited_shell_does_not_keep_the_agent_lease() {
     };
     state.mstore.insert(&mut agent_block).expect("insert agent block");
 
-    let (status, json) = post_json(
+    let (status, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/create",
         serde_json::json!({ "agent_block_id": "lease-exit-agent-block" }),
@@ -5161,7 +5325,8 @@ async fn an_exited_shell_does_not_keep_the_agent_lease() {
     // real lease through the production path (`lock_shell_for_agent`) as a
     // side effect — proving the lease is genuinely live at the moment the
     // shell starts going away, not just something this test invented.
-    let (status, json) = post_json(
+    let (status, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/input",
         serde_json::json!({ "shell_id": shell_id, "agent_block_id": "lease-exit-agent-block", "text": "exit\r\n" }),
@@ -5180,8 +5345,9 @@ async fn an_exited_shell_does_not_keep_the_agent_lease() {
     let mut done = false;
     for _ in 0..60 {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        let (_, status_json) = post_json(
-            &app,
+        let (_, status_json) = post_shell(
+        &state,
+        &app,
             "/api/v1/ptyshell/status",
             serde_json::json!({ "shell_id": shell_id, "agent_block_id": "lease-exit-agent-block" }),
         )
@@ -5245,7 +5411,8 @@ async fn ptyshell_create_does_not_close_the_parented_shell_pane_after_exit() {
     };
     state.mstore.insert(&mut agent_block).expect("insert agent block");
 
-    let (status, json) = post_json(
+    let (status, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/create",
         serde_json::json!({ "agent_block_id": "test-agent-block" }),
@@ -5271,7 +5438,8 @@ async fn ptyshell_create_does_not_close_the_parented_shell_pane_after_exit() {
     // Give the PTY a moment to spawn its shell before typing into it.
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-    let (status, json) = post_json(
+    let (status, json) = post_shell(
+        &state,
         &app,
         "/api/v1/ptyshell/input",
         serde_json::json!({ "shell_id": shell_id, "agent_block_id": "test-agent-block", "text": "exit\r\n" }),
