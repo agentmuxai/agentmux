@@ -3,7 +3,7 @@ Button "Revoke" click
 ViewerRevokeCommand {"device_id":"d2"}
 -- revoking Tablet
 <div>
-  <div class="settings-section-body">
+  <div class="settings-section-body settings-section-body--single">
     <h3 data-stand="SectionHeader">
       "Paired devices"
     <div class="setting-row" id="setting-devices.paired">
@@ -83,7 +83,7 @@ Button "Revoking…" click
 store.set [{"device_id":"d1","device_name":"Pixel 9","created_ms":1799992800000,"last_seen_ms":1799999400000,"has_key":true,"can_send":true},{"device_id":"d3","device_name":"Old phone","created_ms":1799999700000,"last_seen_ms":1799999980000,"has_key":false,"can_send":false}]
 -- Tablet revoked
 <div>
-  <div class="settings-section-body">
+  <div class="settings-section-body settings-section-body--single">
     <h3 data-stand="SectionHeader">
       "Paired devices"
     <div class="setting-row" id="setting-devices.paired">
@@ -151,7 +151,7 @@ Button "Revoke" click
 ViewerRevokeCommand {"device_id":"d1"}
 -- the revoke failed
 <div>
-  <div class="settings-section-body">
+  <div class="settings-section-body settings-section-body--single">
     <h3 data-stand="SectionHeader">
       "Paired devices"
     <div class="setting-row" id="setting-devices.paired">
@@ -221,7 +221,7 @@ Button "Revoke" click
 ViewerRevokeCommand {"device_id":"d1"}
 -- a plain refusal
 <div>
-  <div class="settings-section-body">
+  <div class="settings-section-body settings-section-body--single">
     <h3 data-stand="SectionHeader">
       "Paired devices"
     <div class="setting-row" id="setting-devices.paired">
@@ -292,7 +292,7 @@ ViewerRevokeCommand {"device_id":"d1"}
 store.set [{"device_id":"d3","device_name":"Old phone","created_ms":1799999700000,"last_seen_ms":1799999980000,"has_key":false,"can_send":false}]
 -- revoked, the error gone
 <div>
-  <div class="settings-section-body">
+  <div class="settings-section-body settings-section-body--single">
     <h3 data-stand="SectionHeader">
       "Paired devices"
     <div class="setting-row" id="setting-devices.paired">
