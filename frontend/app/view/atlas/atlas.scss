@@ -200,6 +200,7 @@
     // shows through it as a dim stroke, so its two ends can be followed, while the card's name stays readable.
     &--over {
         z-index: var(--z-over-content);
+        // On top of the line's own 0.9: about 36% of its strength, which is what the look checks judged.
         opacity: 0.4;
     }
 }
