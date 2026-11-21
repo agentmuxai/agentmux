@@ -77,7 +77,12 @@ export type LinkContext = {
 export type Range = { start: number; end: number };
 
 /** What a kind's recogniser found: a range of the text and what it read there. */
-export type Candidate = Range & { kind: EntityKindId; data: Record<string, string> };
+export type Candidate = Range & {
+    kind: EntityKindId;
+    data: Record<string, string>;
+    /** Names its kind outright (`PR 5`, `task 5`): with no entity behind it, it still keeps lower candidates out of its words. */
+    claims?: boolean;
+};
 
 export type Resolved = {
     /** The kind the link is drawn as, when it is not the recogniser's own (a bare `#N` that is a pull request). */

@@ -8,7 +8,7 @@
 
 import type { AgentEntry, AgentIndex, TaskEntry, TaskIndex } from "./types";
 
-/** Names that are also ordinary words. Written alone they are not linked (D3): only `Name@computer`, or the slug. */
+/** Names that are also ordinary words. Written alone, in any case, they are not linked (D3): only `Name@computer`, or an id that is more than the word. */
 const NEVER_ALONE_WORDS = ["will", "mark", "grace", "hope", "rose", "sage", "patch", "pulp", "ace", "art", "wren", "may", "bill"];
 
 export type AgentIndexOptions = { localComputer?: string; neverAlone?: string[]; version?: number };
@@ -35,7 +35,7 @@ export function buildAgentIndex(agents: AgentEntry[], options: AgentIndexOptions
         version: options.version ?? 0,
         localComputer: options.localComputer,
         find: (written) => byName.get(written) ?? byKey.get(written.toLowerCase()),
-        neverAlone: (written) => never.has(written.toLowerCase()) && !byKey.has(written),
+        neverAlone: (written) => never.has(written.toLowerCase()),
         startsWith: (char) => firsts.has(char),
     };
 }

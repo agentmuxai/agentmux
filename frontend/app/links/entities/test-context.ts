@@ -14,6 +14,7 @@ export const ROSTER: AgentEntry[] = [
     { id: "naki-2-09169", slug: "naki-2", name: "Naki-2" },
     { id: "will-7", slug: "will-7", name: "Will" },
     { id: "pulp", slug: "pulp", name: "Pulp" },
+    { id: "mark-1", slug: "mark", name: "Mark" },
     { id: "clare-3", slug: "clare", name: "Clare", computer: "starpower" },
 ];
 

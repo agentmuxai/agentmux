@@ -3,25 +3,29 @@
 
 /**
  * The resolver (spec §4.1): `linkify(text, context) -> Segment[]`. Pure, the same on every surface, and faithful: the
- * segments' labels joined are the input, byte for byte. The steps are protect, recognise, choose, resolve, emit.
+ * segments' labels joined are the input, byte for byte. The steps are protect, recognise, resolve, choose, emit.
  */
 
-import { findProtected, insideAny, overlaps, type Protected } from "./protect";
+import { findProtected, type Protected } from "./protect";
+import { RangeSet } from "./range-set";
 import { KINDS } from "./registry";
 import { taskKind } from "./kinds/task";
-import type { Candidate, EntityKind, LinkContext, Range, Segment, TraceLine } from "./types";
+import type { Candidate, EntityKind, LinkContext, Range, Resolved, Segment, TraceLine } from "./types";
 
 /** A text longer than this is left as it is: no surface shows an agent message this long to read links in. */
 const MAX_LENGTH = 200_000;
 
-const BIDI_AND_CONTROL = /[\u200B-\u200F\u2028-\u202E\u2066-\u2069\uFEFF]/;
+/** Soft hyphen, Arabic letter mark, Mongolian vowel separator, zero-width and direction marks and overrides and
+ *  isolates, invisible operators, the byte order mark, and the control characters other than tab and line breaks. */
+const INVISIBLE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u00AD\u061C\u180E\u200B-\u200F\u2028-\u202E\u2060-\u206F\uFEFF]/;
 
 const CODE_SPAN_TASK = /^#\d{1,7}$/;
 
-type Considered = { cand: Candidate; kind: EntityKind; skip?: string };
+type Considered = { cand: Candidate; kind: EntityKind; resolved: Resolved | null; skip?: string };
 
-function changedByStripping(text: string, range: Range): boolean {
-    return BIDI_AND_CONTROL.test(text.slice(Math.max(0, range.start - 1), Math.min(text.length, range.end + 1)));
+/** A candidate with an invisible character in it or touching it is not linked: stripping them would change what it is. */
+function touchesInvisible(text: string, range: Range): boolean {
+    return INVISIBLE.test(text.slice(Math.max(0, range.start - 1), Math.min(text.length, range.end + 1)));
 }
 
 /** A code span that is wholly one task number is read by the task kind (D4). */
@@ -30,8 +34,7 @@ function codeSpanTasks(text: string, spans: Range[], ctx: LinkContext): Candidat
     for (const span of spans) {
         const ticks = /^`+/.exec(text.slice(span.start, span.end))?.[0].length ?? 1;
         const start = span.start + ticks;
-        const end = span.end - ticks;
-        const inner = text.slice(start, end);
+        const inner = text.slice(start, span.end - ticks);
         if (!CODE_SPAN_TASK.test(inner)) continue;
         for (const c of taskKind.recognise(inner, ctx)) {
             if (c.start === 0 && c.end === inner.length) found.push({ ...c, start: start + c.start, end: start + c.end });
@@ -40,56 +43,59 @@ function codeSpanTasks(text: string, spans: Range[], ctx: LinkContext): Candidat
     return found;
 }
 
+function skipReason(text: string, cand: Candidate, ctx: LinkContext, prot: Protected): string | undefined {
+    if (prot.ranges.find(cand) !== undefined) return "protected: inside code or an existing link";
+    if (touchesInvisible(text, cand)) return "control or direction characters";
+    if (!ctx.final && cand.end === text.length) return "touches the end of text still arriving";
+    return undefined;
+}
+
+/** Recognise, then resolve: a candidate with no entity is dropped here, so it cannot hide a lower one that has. */
 function recogniseAll(text: string, ctx: LinkContext, prot: Protected): Considered[] {
     const out: Considered[] = [];
-    for (const kind of KINDS) {
-        for (const cand of kind.recognise(text, ctx)) {
-            const skip = insideAny(cand, prot.ranges)
-                ? "protected: inside code or an existing link"
-                : changedByStripping(text, cand)
-                  ? "control or direction characters"
-                  : !ctx.final && cand.end === text.length
-                    ? "touches the end of text still arriving"
-                    : undefined;
-            out.push({ cand, kind, skip });
-        }
-    }
-    for (const cand of codeSpanTasks(text, prot.codeSpans, ctx)) out.push({ cand, kind: taskKind });
+    const add = (kind: EntityKind, cand: Candidate, allowedInCode: boolean) => {
+        const skip = allowedInCode ? undefined : skipReason(text, cand, ctx, prot);
+        out.push({ cand, kind, skip, resolved: skip ? null : kind.resolve(cand, ctx) });
+    };
+    for (const kind of KINDS) for (const cand of kind.recognise(text, ctx)) add(kind, cand, false);
+    for (const cand of codeSpanTasks(text, prot.codeSpans, ctx)) add(taskKind, cand, true);
     return out;
 }
 
-/** Overlaps are settled by priority, then the longer match, then the earlier. */
-function choose(considered: Considered[]): { chosen: Considered[]; lost: Map<Considered, string> } {
-    const live = considered.filter((c) => !c.skip);
-    live.sort((a, b) => b.kind.priority - a.kind.priority || b.cand.end - b.cand.start - (a.cand.end - a.cand.start) || a.cand.start - b.cand.start);
-    const chosen: Considered[] = [];
-    const lost = new Map<Considered, string>();
-    for (const c of live) {
-        const winner = chosen.find((w) => overlaps(w.cand, c.cand));
-        if (winner) lost.set(c, `overlapped by a ${winner.kind.id}`);
-        else chosen.push(c);
+/** Overlaps are settled by priority, then the longer match, then the earlier. A candidate with no entity that names
+ *  its kind outright (`PR 5`, `task 5`) still claims its words, so a number that is no pull request is not a task. */
+function choose(considered: Considered[]): { chosen: Considered[]; outcome: Map<Considered, string> } {
+    const outcome = new Map<Considered, string>();
+    const live: Considered[] = [];
+    for (const c of considered) {
+        if (c.skip) outcome.set(c, c.skip);
+        else if (!c.resolved && !c.cand.claims) outcome.set(c, "no such entity");
+        else live.push(c);
     }
-    chosen.sort((a, b) => a.cand.start - b.cand.start);
-    return { chosen, lost };
-}
-
-export type LinkifyRun = { segments: Segment[]; trace: TraceLine[] };
-
-function emit(text: string, chosen: Considered[], ctx: LinkContext, trace: Map<Considered, string>): Segment[] {
-    const segments: Segment[] = [];
-    let at = 0;
-    const plain = (to: number) => {
-        if (to > at) segments.push({ type: "text", text: text.slice(at, to) });
-        at = to;
-    };
-    for (const c of chosen) {
-        const resolved = c.kind.resolve(c.cand, ctx);
-        if (!resolved) {
-            trace.set(c, "no such entity");
+    live.sort((a, b) => b.kind.priority - a.kind.priority || b.cand.end - b.cand.start - (a.cand.end - a.cand.start) || a.cand.start - b.cand.start);
+    const taken = new RangeSet<Considered>();
+    const chosen: Considered[] = [];
+    for (const c of live) {
+        const winner = taken.find(c.cand);
+        if (winner) {
+            outcome.set(c, `overlapped by a ${winner.kind.id}`);
             continue;
         }
-        plain(c.cand.start);
-        const link: Segment = {
+        taken.add(c.cand, c);
+        if (c.resolved) chosen.push(c);
+        else outcome.set(c, "no such entity");
+    }
+    chosen.sort((a, b) => a.cand.start - b.cand.start);
+    return { chosen, outcome };
+}
+
+function emit(text: string, chosen: Considered[], outcome: Map<Considered, string>): Segment[] {
+    const segments: Segment[] = [];
+    let at = 0;
+    for (const c of chosen) {
+        const resolved = c.resolved as Resolved;
+        if (c.cand.start > at) segments.push({ type: "text", text: text.slice(at, c.cand.start) });
+        segments.push({
             type: "link",
             kind: resolved.kind ?? c.kind.id,
             label: text.slice(c.cand.start, c.cand.end),
@@ -97,23 +103,21 @@ function emit(text: string, chosen: Considered[], ctx: LinkContext, trace: Map<C
             state: resolved.state,
             name: resolved.name,
             ...(resolved.reason ? { reason: resolved.reason } : {}),
-        };
-        segments.push(link);
+        });
         at = c.cand.end;
-        trace.set(c, "linked");
+        outcome.set(c, "linked");
     }
-    plain(text.length);
+    if (at < text.length) segments.push({ type: "text", text: text.slice(at) });
     return segments;
 }
 
-export function runLinkify(text: string, ctx: LinkContext): LinkifyRun {
+type LinkifyRun = { segments: Segment[]; trace: TraceLine[] };
+
+function runLinkify(text: string, ctx: LinkContext): LinkifyRun {
     if (!text || text.length > MAX_LENGTH) return { segments: text ? [{ type: "text", text }] : [], trace: [] };
     const considered = recogniseAll(text, ctx, findProtected(text));
-    const { chosen, lost } = choose(considered);
-    const outcome = new Map<Considered, string>();
-    for (const c of considered) if (c.skip) outcome.set(c, c.skip);
-    for (const [c, why] of lost) outcome.set(c, why);
-    const segments = emit(text, chosen, ctx, outcome);
+    const { chosen, outcome } = choose(considered);
+    const segments = emit(text, chosen, outcome);
     const trace = considered.map((c) => ({ kind: c.kind.id, start: c.cand.start, end: c.cand.end, text: text.slice(c.cand.start, c.cand.end), outcome: outcome.get(c) ?? "" }));
     return { segments, trace };
 }

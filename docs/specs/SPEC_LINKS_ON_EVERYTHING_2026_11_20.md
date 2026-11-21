@@ -40,7 +40,7 @@ One row per kind of thing the recogniser knows. The kind is a file in a registry
 | Agent | A roster name or slug as a whole word (`Quill`), a name with its computer (`Quill@charlie`), an agent id | The roster index (§4.3) | That agent's pane: reveal it if open, else open it (the deep-links `agent` destination) | Plain text |
 | Task | `#N`, `task #N`, `task N`, `work#N` (a named board), `agentmux://task/N` | The task index (§4.3): the number on a board the viewer can see | The Kanban at that card (`kanban/task/N`) | Plain text |
 | Pull request or issue | `PR 123`, `PR #123`, `pull 123`, `owner/repo#123`, a `github.com/.../pull/N` or `/issues/N` address | The repository the surface knows (§3.1), never one written in the text | A browser page (D1) | Plain text |
-| File | A name with a known extension (`findings.md`), a relative path (`docs/specs/X.md`), an absolute path, with an optional `:line` | The author's workspace (§6) | The Editor at the file (and line) | A muted word with a reason on hover (§5) |
+| File | A name with a known extension (`findings.md`), a relative path (`src/notes/plan.md`), an absolute path, with an optional `:line` | The author's workspace (§6) | The Editor at the file (and line) | A muted word with a reason on hover (§5) |
 | Address | `http://` or `https://`, and the bare domains `linkify-it` finds today | Scheme allowlist: http and https only (§6) | A browser page, or the person's browser by the framework's rules | Plain text |
 | Tab | "tab 2", "the other tab", only when the surface can say which window it is in | The window's tabs | That tab | Plain text. Later build (D8) |
 | Commit | 7 to 40 hex characters next to the word `commit`, or `owner/repo@sha` | The surface's repository | A browser page | Plain text. Later build (D8) |
@@ -176,7 +176,7 @@ Each is a PR with a changeset. Build 1 needs the deep-links framework's typed wr
 |---|---|---|
 | D1 | A pull request or address opens in an in-app Browser pane, or the person's own browser? | The person's browser by default (what a web link does now); middle click and Ctrl or Cmd click open the Browser pane. A setting later if wanted |
 | D2 | A bare `#N` that is both a task and a pull request? | The task, with the pull request reachable from the card; the accessible name says which |
-| D3 | An agent whose name is an ordinary word (a first name or a common word)? | Link a name only when written with its capital as in the roster, as a whole word; add a short "never alone" list of names that are also ordinary words, which link only in the `Name@computer` form or when written with the agent's slug |
+| D3 | An agent whose name is an ordinary word (a first name or a common word)? | Link a name only when written with its capital as in the roster, as a whole word; add a short "never alone" list of names that are also ordinary words, which, in any case, link only in the `Name@computer` form or by an id that is more than the word |
 | D4 | Inline code spans? | Not linkified, except a span that is wholly one verified path or one task number |
 | D5 | The look: dotted underline for entity links, solid for web addresses? | Yes; an icon per kind is not added in the first build |
 | D6 | When a file is checked: on hover only, or a batched check of the visible messages when a message completes? | Hover and focus first; the batch if the quiet-then-muted change is too slow to notice in use |

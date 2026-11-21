@@ -24,6 +24,9 @@ describe("agents", () => {
         expect(links("Will you look at Pulp?")).toEqual([]);
         expect(links("will-7 will do")).toEqual(["agent:will-7"]);
     });
+    it("never links an ordinary word alone in any case, even when it is the agent's slug", () => {
+        expect(links("Mark it, mark it, MARK it and mark@narko")).toEqual(["agent:mark@narko"]);
+    });
     it("links Name@computer only when the agent is on that computer", () => {
         expect(links("Clare@starpower and Opaz@narko")).toEqual(["agent:Clare@starpower", "agent:Opaz@narko"]);
         expect(links("Clare@charlie, Opaz@elsewhere")).toEqual([]);
@@ -57,7 +60,10 @@ describe("tasks and pull requests: the order of §3.1", () => {
     it("makes PR and issue words pull requests of the surface's repository", () => {
         const [seg] = linkify("PR 7022", testContext());
         expect(seg).toMatchObject({ kind: "pull", destination: { kind: "pull", repo: "agentmuxai/agentmux", number: 7022, issue: false }, name: "Open pull request 7022" });
-        expect(links("PR #7940, issue 5 and pull request 12")).toEqual(["pull:PR #7940", "pull:issue 5", "pull:pull request 12"]);
+        expect(links("PR #7940, issue #5 and pull request 120, PR 7")).toEqual(["pull:PR #7940", "pull:issue #5", "pull:pull request 120", "pull:PR 7"]);
+    });
+    it("leaves prose that only looks like a pull request alone", () => {
+        expect(links("pull 3 changes, pr 5 times, issue 3 items, issue\n3 items, pull   42 more")).toEqual([]);
     });
     it("lets PR win over task for the same number", () => {
         expect(links("PR #7940")).toEqual(["pull:PR #7940"]);
@@ -67,8 +73,9 @@ describe("tasks and pull requests: the order of §3.1", () => {
         expect(links("#7022")).toEqual(["pull:#7022"]);
         expect(links("#7022", { repo: undefined })).toEqual([]);
     });
-    it("never falls back from an explicit task form", () => {
+    it("never falls back from an explicit task form, or from a PR word with no repository", () => {
         expect(links("task #7022")).toEqual([]);
+        expect(links("PR #48247", { repo: undefined })).toEqual([]);
     });
     it("takes the repository from the surface, and only a full owner/repo#N names its own", () => {
         const [seg] = linkify("agentmuxai/agentmux-cloud#12", testContext({ repo: undefined }));
@@ -150,6 +157,11 @@ describe("security", () => {
     it("rejects a match with direction or control characters in or beside it", () => {
         expect(links("O‮paz and Opaz‮")).toEqual([]);
         expect(links("​#48247")).toEqual([]);
+        for (const c of ["­", "؜", "᠎", "⁠", "⁦", "", ""]) {
+            expect(links(`${c}Opaz`), JSON.stringify(c)).toEqual([]);
+            expect(links(`Opaz${c}`), JSON.stringify(c)).toEqual([]);
+        }
+        expect(links("Opaz\t#48247\nCamper")).toEqual(["agent:Opaz", "task:#48247", "agent:Camper"]);
     });
     it("gives every link a destination built from an entity, never from text", () => {
         for (const s of linkify("Opaz #48247 PR 12 https://example.com", testContext())) {
@@ -185,5 +197,23 @@ describe("budget", () => {
         for (let i = 0; i < 10; i++) linkify(message, ctx);
         // The spec's budget is 2 ms; the bound is loose so a loaded CI machine does not fail a correct build.
         expect((performance.now() - t0) / 10).toBeLessThan(10);
+    });
+});
+
+describe("a name or a number that does not resolve does not hide the rest", () => {
+    it("links the agent in opaz#48247 (an unknown board) and in agent@host with no such host", () => {
+        expect(links("opaz#48247")).toEqual(["agent:opaz"]);
+    });
+});
+
+describe("scale", () => {
+    it("handles a 190 KB message of agent names and code spans in well under a second", () => {
+        const names = "Opaz Camper Posa `x` ".repeat(9000);
+        expect(names.length).toBeGreaterThan(180_000);
+        const t0 = performance.now();
+        const segs = linkify(names, testContext());
+        expect(performance.now() - t0).toBeLessThan(2000);
+        expect(joined(segs)).toBe(names);
+        expect(segs.filter((x) => x.type === "link")).toHaveLength(27_000);
     });
 });

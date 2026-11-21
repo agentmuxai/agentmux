@@ -24,7 +24,9 @@ function find(text: string, pattern: RegExp, form: Form, numberAt: number, into:
     for (const m of text.matchAll(pattern)) {
         const data: Record<string, string> = { form, number: m[numberAt] };
         if (form === "board") data.board = m[1];
-        into.push({ kind: "task", start: m.index, end: m.index + m[0].length, data });
+        // `task 5` and `agentmux://task/5` say what they are; `x#5` and `#5` might be something else (a name, a pull request).
+        const claims = form === "scheme" || form === "word";
+        into.push({ kind: "task", start: m.index, end: m.index + m[0].length, data, claims });
     }
 }
 

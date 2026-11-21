@@ -9,7 +9,8 @@
 import { openUrlEntity } from "../openers";
 import type { Candidate, Destination, EntityKind } from "../types";
 
-const WORD_FORM = /(?<![\w/#-])(pull request|pull|PR|issue)\s*#?(\d{1,7})(?![\w-])/gi;
+// `PR` is written in capitals; the other words need a `#` or three digits, so "pull 3 changes" and "issue 3 items" are prose.
+const WORD_FORM = /(?<![\w/#-])(?:(PR)[ \t]*#?(\d{1,7})|((?:[Pp]ull request|[Pp]ull|[Ii]ssue))(?:[ \t]*#(\d{1,7})|[ \t]+(\d{3,7})))(?![\w-])/g;
 const FULL_FORM = /(?<![\w/.-])([A-Za-z0-9_.-]{1,39})\/([A-Za-z0-9_.-]{1,100})#(\d{1,7})(?![\w-])/g;
 const REPO = /^[A-Za-z0-9_.-]{1,39}\/[A-Za-z0-9_.-]{1,100}$/;
 
@@ -28,11 +29,12 @@ export const pullKind: EntityKind = {
     recognise(text) {
         const found: Candidate[] = [];
         for (const m of text.matchAll(WORD_FORM)) {
-            const issue = m[1].toLowerCase() === "issue";
-            found.push({ kind: "pull", start: m.index, end: m.index + m[0].length, data: { number: m[2], issue: String(issue) } });
+            const issue = m[3]?.toLowerCase() === "issue";
+            const number = m[2] ?? m[4] ?? m[5];
+            found.push({ kind: "pull", start: m.index, end: m.index + m[0].length, data: { number, issue: String(issue) }, claims: true });
         }
         for (const m of text.matchAll(FULL_FORM)) {
-            found.push({ kind: "pull", start: m.index, end: m.index + m[0].length, data: { number: m[3], repo: `${m[1]}/${m[2]}`, issue: "false" } });
+            found.push({ kind: "pull", start: m.index, end: m.index + m[0].length, data: { number: m[3], repo: `${m[1]}/${m[2]}`, issue: "false" }, claims: true });
         }
         return found;
     },
