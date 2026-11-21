@@ -9,6 +9,7 @@
  *  - `file`: a local path, written as `C:/…`, `C:\…`, `/…`, `~/…`, `\\host\share\…` or a `file:` URL
  *    (opened in the Editor, or in Files when it is a folder).
  *  - `task`: `agentmux://task/<n>`, the Kanban card for task #n.
+ *  - `agent`: `agentmux://agent/<id>`, an agent's pane.
  *  - `blocked`: any other `agentmux:` URL. A link may only navigate, so it is never handed to the OS.
  *  - `other`: everything else (mailto:, ssh:, a relative link), left to the system handler as before.
  */
@@ -16,10 +17,12 @@ export type LinkTarget =
     | { kind: "web"; url: string }
     | { kind: "file"; path: string }
     | { kind: "task"; num: number }
+    | { kind: "agent"; id: string }
     | { kind: "blocked" }
     | { kind: "other" };
 
 const TASK_LINK = /^agentmux:\/\/task\/(\d{1,9})\/?$/i;
+const AGENT_LINK = /^agentmux:\/\/agent\/([^/?#\s]{1,200})\/?$/i;
 const DRIVE_PATH = /^[A-Za-z]:(?:[\\/]|%5C)/i;
 const UNC_PATH = /^\\\\[^\\/]/;
 
@@ -51,7 +54,9 @@ export function classifyHref(href: string | null | undefined): LinkTarget {
     if (/^https?:\/\//i.test(text)) return { kind: "web", url: text };
     if (/^agentmux:/i.test(text)) {
         const task = TASK_LINK.exec(text);
-        return task ? { kind: "task", num: Number(task[1]) } : { kind: "blocked" };
+        if (task) return { kind: "task", num: Number(task[1]) };
+        const agent = AGENT_LINK.exec(text);
+        return agent ? { kind: "agent", id: decode(agent[1]) } : { kind: "blocked" };
     }
     if (/^file:/i.test(text)) {
         const path = pathOfFileUrl(text);

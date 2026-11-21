@@ -7,6 +7,7 @@
  */
 
 import { Show, type JSX } from "solid-js";
+import { followTasks } from "@/app/view/kanban/kanban-task-feed";
 import { useAgentMedia } from "../agent-media";
 import { rowDisclosure } from "../virtualization/disclosure";
 import { createMarkdownPeek, createStreamedView, type MarkdownBlockProps } from "./MarkdownBlockState";
@@ -37,6 +38,7 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
     const view = createStreamedView(props);
     // The agent's own text: local images may show inline (agent-media.tsx).
     const media = useAgentMedia();
+    followTasks();
     const peek = createMarkdownPeek(props);
 
     return (
