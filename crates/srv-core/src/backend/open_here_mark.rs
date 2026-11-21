@@ -29,13 +29,26 @@ pub fn expected_for_block(store: &Store, block_id: &str, message: &str) -> bool 
         .is_ok_and(|block| is_expected_open_here_refusal(&block.meta, message))
 }
 
-/// Drop the mark: the agent has moved here, so every refusal after this one is news again.
-pub fn clear(block_id: &str, store: &std::sync::Arc<Store>, event_bus: &Option<std::sync::Arc<crate::backend::eventbus::EventBus>>) {
-    let mut update = MetaMapType::new();
-    update.insert(META_OPEN_HERE.to_string(), serde_json::Value::Null);
+/// The agent has moved into this pane. Drop the mark, so every refusal after this one is news again,
+/// and the "open in another pane" failure that asked for the move: it is no longer true, and left in
+/// the pane's meta it brings the recovery row back when the pane reloads.
+pub fn settle_after_move(block_id: &str, store: &std::sync::Arc<Store>, event_bus: &Option<std::sync::Arc<crate::backend::eventbus::EventBus>>) {
     let written = store.with_tx(|tx| {
         let mut block = tx.must_get::<crate::backend::obj::Block>(block_id)?;
-        if !block.meta.contains_key(META_OPEN_HERE) {
+        let mut update = MetaMapType::new();
+        if block.meta.contains_key(META_OPEN_HERE) {
+            update.insert(META_OPEN_HERE.to_string(), serde_json::Value::Null);
+        }
+        let refused = block
+            .meta
+            .get(crate::backend::blockcontroller::core::META_LAST_FAILURE)
+            .and_then(|f| f.get("code"))
+            .and_then(|c| c.as_str())
+            == Some("open_in_other_pane");
+        if refused {
+            update.insert(crate::backend::blockcontroller::core::META_LAST_FAILURE.to_string(), serde_json::Value::Null);
+        }
+        if update.is_empty() {
             return Ok(false);
         }
         block.meta = crate::backend::obj::merge_meta(&block.meta, &update, true);
@@ -49,7 +62,7 @@ pub fn clear(block_id: &str, store: &std::sync::Arc<Store>, event_bus: &Option<s
             }
         }
         Ok(false) => {}
-        Err(e) => tracing::warn!(block_id = %block_id, error = %e, "could not clear agent:open_here"),
+        Err(e) => tracing::warn!(block_id = %block_id, error = %e, "could not settle the pane after the move"),
     }
 }
 
