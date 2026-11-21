@@ -17,7 +17,7 @@ use serde_json::json;
 
 use crate::backend::agent_status::{decide, Decision, Intent};
 use crate::backend::bulletin::{self, DEFAULT_EXPIRES_MINUTES, MAX_EXPIRES_MINUTES, MAX_LIVE, MAX_PER_HOUR};
-use crate::backend::reactive::sanitize::{post_refusal_reason, route_name};
+use crate::backend::reactive::sanitize::{post_refusal_help, post_refusal_reason, route_name};
 use crate::backend::storage::bulletins::Bulletin;
 
 use super::availability_view::status_of;
@@ -165,7 +165,8 @@ pub(crate) async fn handle_post_bulletin(
         return bad_request(&format!(
             "not posted: the {field} has \"{word}\", which reads as being about credentials or a destructive action, \
              and a bulletin must not carry that. Reword that part, or send it to the one agent it concerns with Message \
-             send, where it is marked sensitive."
+             send, where it is marked sensitive.{}",
+            post_refusal_help(&word)
         ));
     }
     if !caller.as_ref().is_some_and(|c| c.0.uid().is_some()) {
@@ -319,7 +320,7 @@ mod tests {
         let error = b["error"].as_str().unwrap();
         assert!(error.contains("the message has \"password\""), "{error}");
         let (_, b) = posted("hello", Some("access-token")).await;
-        assert!(b["error"].as_str().unwrap().contains("the key has \"access token\""), "{b}");
+        assert!(b["error"].as_str().unwrap().contains("the key has \"token\"") && b["error"].as_str().unwrap().contains("Use the word only about usage"), "{b}");
         let (_, b) = posted("run rm -rf on the cache", None).await;
         assert!(b["error"].as_str().unwrap().contains("\"rm -rf\""), "{b}");
     }

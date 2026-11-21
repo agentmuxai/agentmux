@@ -251,23 +251,42 @@ fn as_read(msg: &str) -> String {
         .to_lowercase()
 }
 
-/// Words that make "token" a credential when they come right before it ("an access token", "the bearer token"); on
-/// its own the word is also the unit a model's usage is counted in, and that is what most posts mean by it.
-const CREDENTIAL_TOKEN_QUALIFIERS: &[&str] = &[
-    "access", "auth", "authentication", "authorization", "api", "bearer", "oauth", "refresh", "session", "login",
-    "github", "gh", "personal", "bot", "id", "secret", "private", "signing", "jwt", "vault", "npm", "deploy",
-    "service", "csrf", "sso", "pat", "app", "installation", "agent", "master", "admin", "root", "ssh", "aws",
+/// Words right before "token" that make it the unit a model's usage is counted in ("save tokens", "fewer
+/// tokens", "40k tokens"; a number before it counts too).
+const USAGE_WORDS_BEFORE: &[&str] = &[
+    "save", "saves", "saved", "saving", "spend", "spends", "spent", "spending", "waste", "wastes", "wasted", "fewer",
+    "fewest", "more", "less", "many", "much", "few", "count", "counts", "counted", "input", "output", "thinking",
+    "reasoning", "cached", "cache", "context", "max", "total", "per", "of", "million", "thousand", "billion",
 ];
 
-/// Whether the word "token" (or "tokens") at `start..end` of `lower` reads as a credential: a credential word
-/// right before it, or an assignment right after it (`token=...`).
-fn token_reads_as_credential(lower: &str, start: usize, end: usize) -> bool {
-    let before = lower[..start].trim_end_matches([' ', '\t', '-']);
-    let prev = before.rsplit(|c: char| is_word_boundary(c)).next().unwrap_or("");
-    if CREDENTIAL_TOKEN_QUALIFIERS.contains(&prev) {
+/// Words right after "token" that make it a usage unit ("token budget", "tokens saved", "token savers").
+const USAGE_WORDS_AFTER: &[&str] = &[
+    "budget", "budgets", "usage", "count", "counts", "limit", "limits", "saver", "savers", "saving", "savings",
+    "cost", "costs", "spend", "window", "windows", "quota", "use", "used", "per", "saved", "wasted", "waste",
+    "estimate", "estimates", "or", "and",
+];
+
+/// The word that ends `text` (separators of space, tab, newline and hyphen skipped first), or "".
+fn word_before(text: &str) -> &str {
+    let text = text.trim_end_matches(|c: char| c.is_whitespace() || c == '-');
+    text.rsplit(|c: char| is_word_boundary(c)).next().unwrap_or("")
+}
+
+/// The word that starts `text` after spaces, or "" when something else (a colon, a quote, an equals sign) comes first.
+fn word_after(text: &str) -> &str {
+    let text = text.trim_start_matches(|c: char| c == ' ' || c == '\t');
+    text.split(|c: char| is_word_boundary(c)).next().unwrap_or("")
+}
+
+/// Whether the word "token" (or "tokens") at `start..end` of `lower` is clearly the unit a model's usage is counted
+/// in: a number or a usage word right before it, or a usage word right after. Anything else (`token: ...`,
+/// `the token ...`, `slack token`, `token=...`) is read as a credential.
+fn token_reads_as_usage_unit(lower: &str, start: usize, end: usize) -> bool {
+    let prev = word_before(&lower[..start]);
+    if prev.chars().next().is_some_and(|c| c.is_ascii_digit()) || USAGE_WORDS_BEFORE.contains(&prev) {
         return true;
     }
-    lower[end..].trim_start_matches(' ').starts_with('=')
+    USAGE_WORDS_AFTER.contains(&word_after(&lower[end..]))
 }
 
 /// The spots of `lower` where `needle` stands as a whole word (one trailing "s" allowed), as byte ranges.
@@ -297,9 +316,10 @@ fn whole_word_spots<'a>(lower: &'a str, needle: &'a str) -> impl Iterator<Item =
 /// Why a text posted for others to read (a bulletin or a channel post) is refused as being about credentials or a
 /// destructive action, or `None` when it may be posted: the word or phrase that matched, as it stands in the text.
 ///
-/// Like `is_sensitive_message`, except that "token" alone is not a credential here: it is also the unit a model's
-/// usage is counted in ("save tokens"), so it counts only after a credential word ("access token") or before an
-/// assignment ("token=..."). A jekt's tier still escalates on the bare word, as `is_sensitive_message` says.
+/// Like `is_sensitive_message`, except for the word "token", which is also the unit a model's usage is counted in:
+/// it is let through only when it is clearly that (a number or a usage word beside it: "40k tokens", "save
+/// tokens", "token budget"); in any other place it is refused. A jekt's tier still escalates on the bare word, as
+/// `is_sensitive_message` says.
 pub fn post_refusal_reason(msg: &str) -> Option<String> {
     let lower = as_read(msg);
     if let Some(kw) = SENSITIVE_SUBSTRING_KEYWORDS.iter().find(|kw| lower.contains(**kw)) {
@@ -307,20 +327,24 @@ pub fn post_refusal_reason(msg: &str) -> Option<String> {
     }
     for (kw, allow_plural) in SENSITIVE_WHOLE_WORD_KEYWORDS {
         if *kw == "token" {
-            if let Some((start, end)) = whole_word_spots(&lower, kw).find(|&(s, e)| token_reads_as_credential(&lower, s, e)) {
-                // The word before it too when that is what made it one, so the poster sees which phrase it was.
-                let before = lower[..start].trim_end_matches([' ', '\t', '-']);
-                let from = before.char_indices().rev().find(|&(_, c)| is_word_boundary(c)).map_or(0, |(i, c)| i + c.len_utf8());
-                if CREDENTIAL_TOKEN_QUALIFIERS.contains(&&before[from..]) {
-                    return Some(format!("{} {}", &before[from..], &lower[start..end]));
-                }
-                return Some(format!("{}=", &lower[start..end]));
+            if let Some((start, end)) = whole_word_spots(&lower, kw).find(|&(s, e)| !token_reads_as_usage_unit(&lower, s, e)) {
+                return Some(lower[start..end].to_string());
             }
         } else if contains_whole_word(&lower, kw, *allow_plural) {
             return Some((*kw).to_string());
         }
     }
     None
+}
+
+/// What a refusal adds for the word it names, so the poster knows how to get past it: "token" is let through
+/// when it is about usage.
+pub fn post_refusal_help(word: &str) -> &'static str {
+    if word.starts_with("token") {
+        " Use the word only about usage (\"40k tokens\", \"save tokens\", \"token budget\"); a credential is sent to the one agent it concerns with Message send."
+    } else {
+        ""
+    }
 }
 
 /// Returns true if the message body contains keywords indicating a sensitive operation.

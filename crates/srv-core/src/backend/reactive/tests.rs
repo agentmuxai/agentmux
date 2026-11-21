@@ -2826,14 +2826,21 @@ fn test_a_post_is_refused_for_a_credential_word_and_says_which() {
 }
 
 #[test]
-fn test_a_post_with_token_as_a_credential_is_refused_and_the_phrase_is_named() {
+fn test_a_post_with_token_outside_a_usage_is_refused_and_the_word_is_named() {
     for (msg, why) in [
-        ("paste the access token here", "access token"),
-        ("the Bearer  Token is stale", "bearer token"),
-        ("rotate the github tokens", "github tokens"),
-        ("it reads token=abc", "token="),
-        ("a refresh token\nand more", "refresh token"),
-        ("the access-token is stale", "access token"),
+        ("paste the access token here", "token"),
+        ("the Bearer  Token is stale", "token"),
+        ("rotate the github tokens", "tokens"),
+        ("it reads token=abc", "token"),
+        ("a refresh token\nand more", "token"),
+        ("the access-token is stale", "token"),
+        ("token: abc123", "token"),
+        ("{\"token\": \"abc\"}", "token"),
+        ("my token is abc123", "token"),
+        ("the token abc123", "token"),
+        ("a slack token", "token"),
+        ("access\ntoken", "token"),
+        ("your token", "token"),
     ] {
         assert_eq!(post_refusal_reason(msg).as_deref(), Some(why), "{msg:?}");
     }
@@ -2843,19 +2850,21 @@ fn test_a_post_with_token_as_a_credential_is_refused_and_the_phrase_is_named() {
 fn test_a_post_about_tokens_as_usage_units_is_let_through_but_a_jekt_tier_still_escalates() {
     for msg in [
         "ways to save tokens",
-        "Tokens: the answer was far bigger than needed",
-        "a kind `tokens` and a kind `security`",
+        "Token savers and workflow kinks go on the board",
         "It cost 40k tokens. API calls were few.",
+        "about 5,000 tokens and seven turns",
         "the token budget for this turn",
+        "fewer tokens or turns",
+        "tokens saved per call",
         "tokenize the input",
     ] {
         assert_eq!(post_refusal_reason(msg), None, "refused: {msg:?}");
     }
     // The bare word still escalates a jekt's tier: only the post filter reads it by its context.
     assert!(is_sensitive_message("ways to save tokens"));
-    // Invisible characters and fullwidth letters do not hide a credential phrase from the post filter either.
+    // Invisible characters and fullwidth letters do not hide a credential word from the post filter either.
     assert_eq!(post_refusal_reason("the pass\u{200B}word").as_deref(), Some("password"));
-    assert_eq!(post_refusal_reason("the ａｃｃｅｓｓ ｔｏｋｅｎ").as_deref(), Some("access token"));
+    assert_eq!(post_refusal_reason("the ｔｏｋｅｎ").as_deref(), Some("token"));
 }
 
 #[test]

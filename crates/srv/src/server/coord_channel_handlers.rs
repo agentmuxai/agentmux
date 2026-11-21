@@ -19,7 +19,7 @@ use axum::response::{IntoResponse, Json, Response};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::backend::reactive::sanitize::post_refusal_reason;
+use crate::backend::reactive::sanitize::{post_refusal_help, post_refusal_reason};
 use crate::backend::storage::coord_posts::{CoordPost, RETENTION_MS};
 use crate::backend::storage::store::Store;
 use crate::backend::work_facts::cross_channel::own_channel;
@@ -130,7 +130,8 @@ pub(crate) async fn handle_post_to_channel(
         return bad_request(&format!(
             "not posted: the {field} has \"{word}\", which reads as being about credentials or a destructive action, \
              and a shared channel must not hold that. Reword that part, or send it to the one agent it concerns with \
-             Message send, where it is marked sensitive."
+             Message send, where it is marked sensitive.{}",
+            post_refusal_help(&word)
         ));
     }
     let identified = caller.as_ref().is_some_and(|c| c.0.uid().is_some());
