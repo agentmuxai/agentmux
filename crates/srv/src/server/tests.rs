@@ -15,6 +15,8 @@ mod container_listener_tests;
 mod listener_itest;
 mod tower_peers_tests;
 mod turn_itest;
+pub(crate) mod two_srv;
+mod two_srv_tests;
 
 /// A token for the agent whose slug is `name`, creating its row on first use:
 /// what a test attaches to a request that acts for an agent.
