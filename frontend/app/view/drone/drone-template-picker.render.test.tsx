@@ -31,8 +31,8 @@ vi.mock("@/app/store/rpc-api", () => ({
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/view/warden/open-warden", () => ({ openWarden: () => Promise.resolve() }));
 
-import { DroneTemplatePicker, droneTemplatesIn } from "./drone-template-picker";
 import { DroneViewModel } from "./drone-model";
+import { DroneTemplatePicker, droneTemplatesIn } from "./drone-template-picker";
 import { DroneView } from "./drone-view";
 
 vi.stubGlobal(
@@ -46,7 +46,19 @@ vi.stubGlobal(
 
 function droneTemplate(id: string, name: string, over: Partial<JobTemplateInfo> = {}): JobTemplateInfo {
     const base = mkTemplate();
-    return { ...base, id, hash: `hash-${id}`, manifest: { ...base.manifest!, id, name, kind: "drone", params: { type: "object", properties: {}, required: [] } }, ...over };
+    return {
+        ...base,
+        id,
+        hash: `hash-${id}`,
+        manifest: {
+            ...base.manifest!,
+            id,
+            name,
+            kind: "drone",
+            params: { type: "object", properties: {}, required: [] },
+        },
+        ...over,
+    };
 }
 
 const approved = droneTemplate("agentmux.drone.one", "Check and file");
@@ -54,8 +66,10 @@ const pending = droneTemplate("agentmux.drone.two", "Triage failures", { state: 
 const aJob = mkTemplate({ id: "agentmux.job.one" });
 
 let model: DroneViewModel | null = null;
-const names = (root: HTMLElement) => [...root.querySelectorAll(".drone-templates-item-head strong")].map((e) => e.textContent);
-const button = (root: HTMLElement, label: string) => [...root.querySelectorAll("button")].find((b) => b.textContent?.trim() === label) as HTMLButtonElement;
+const names = (root: HTMLElement) =>
+    [...root.querySelectorAll(".drone-templates-item-head strong")].map((e) => e.textContent);
+const button = (root: HTMLElement, label: string) =>
+    [...root.querySelectorAll("button")].find((b) => b.textContent?.trim() === label) as HTMLButtonElement;
 
 beforeEach(() => {
     rpc.list.mockResolvedValue({ templates: [aJob, approved, pending] });
@@ -100,9 +114,13 @@ describe("New from a template", () => {
         await waitFor(() => expect(button(container, "Review and approve")).toBeTruthy());
         fireEvent.click(button(container, "Review and approve"));
         fireEvent.click(button(container, "Approve"));
-        await waitFor(() => expect(rpc.approve).toHaveBeenCalledWith({ id: pending.id, hash: pending.hash, signer: "" }));
+        await waitFor(() =>
+            expect(rpc.approve).toHaveBeenCalledWith({ id: pending.id, hash: pending.hash, signer: "" })
+        );
         await waitFor(() => expect(container.querySelectorAll(".drone-templates-item")).toHaveLength(2));
-        expect([...container.querySelectorAll(".drone-templates-item")].every((i) => i.textContent?.includes("Use"))).toBe(true);
+        expect(
+            [...container.querySelectorAll(".drone-templates-item")].every((i) => i.textContent?.includes("Use"))
+        ).toBe(true);
     });
 
     it("makes a drone from an approved template and opens it, without running anything", async () => {
@@ -117,7 +135,12 @@ describe("New from a template", () => {
         fireEvent.input(nameInput, { target: { value: "  My check  " } });
         fireEvent.click(button(container, "Make the drone"));
         await waitFor(() => expect(onClose).toHaveBeenCalled());
-        expect(rpc.makeDrone).toHaveBeenCalledWith({ id: approved.id, version: approved.manifest!.version, params: {}, name: "My check" });
+        expect(rpc.makeDrone).toHaveBeenCalledWith({
+            id: approved.id,
+            version: approved.manifest!.version,
+            params: {},
+            name: "My check",
+        });
         expect(open).toHaveBeenCalledWith("d-new");
         expect(refresh).toHaveBeenCalled();
     });

@@ -32,7 +32,90 @@ const STATE_PILL: Record<string, { label: () => string; tone: PillTone }> = {
     invalid: { label: () => t("drone.templates.invalid"), tone: "error" },
 };
 
-export const DroneTemplatePicker = (p: { model: DroneViewModel; onClose: () => void }): JSX.Element => {
+/** A chosen template's name and settings, and the button that makes the drone. */
+const TemplateForm = (p: {
+    info: JobTemplateInfo;
+    name: string;
+    values: Record<string, ParamValue>;
+    errors: Record<string, string>;
+    busy: boolean;
+    onName: (name: string) => void;
+    onChange: (key: string, value: ParamValue) => void;
+    onMake: () => void;
+    onBack: () => void;
+}): JSX.Element => (
+    <div class="drone-templates-form">
+        <Field label={t("drone.templates.name")} layout="stacked">
+            <TextInput value={p.name} maxLength={200} onInput={(e) => p.onName(e.currentTarget.value)} />
+        </Field>
+        <Show when={p.info.manifest}>
+            {(manifest) => (
+                <JobParamsForm
+                    manifest={manifest()}
+                    values={p.values}
+                    errors={p.errors}
+                    onChange={p.onChange}
+                    vault={null}
+                />
+            )}
+        </Show>
+        <div class="drone-templates-actions">
+            <Button tone="accent" busy={p.busy} onClick={() => p.onMake()}>
+                {t("drone.templates.make")}
+            </Button>
+            <Button tone="quiet" disabled={p.busy} onClick={() => p.onBack()}>
+                {t("drone.templates.back")}
+            </Button>
+        </div>
+    </div>
+);
+
+/** The templates, each with its state and what can be done with it: use it, or review it first. */
+const TemplateList = (p: {
+    templates: JobTemplateInfo[];
+    loading: boolean;
+    onUse: (info: JobTemplateInfo) => void;
+    onReview: (info: JobTemplateInfo) => void;
+}): JSX.Element => (
+    <Show when={!p.loading} fallback={<div class="drone-templates-note">{t("drone.templates.loading")}</div>}>
+        <Show
+            when={p.templates.length > 0}
+            fallback={<div class="drone-templates-note">{t("drone.templates.none")}</div>}
+        >
+            <ul class="drone-templates-list">
+                <For each={p.templates}>
+                    {(info) => {
+                        const pill = STATE_PILL[info.state] ?? STATE_PILL.invalid;
+                        return (
+                            <li class="drone-templates-item">
+                                <div class="drone-templates-item-head">
+                                    <strong>{info.manifest?.name ?? info.id}</strong>
+                                    <Pill tone={pill.tone}>{pill.label()}</Pill>
+                                </div>
+                                <div class="drone-templates-note">{info.manifest?.description ?? info.error}</div>
+                                <div class="drone-templates-actions">
+                                    <Show when={info.state === "approved"}>
+                                        <Button density="compact" onClick={() => p.onUse(info)}>
+                                            {t("drone.templates.use")}
+                                        </Button>
+                                    </Show>
+                                    <Show when={info.state === "needs_approval" || info.state === "changed"}>
+                                        <Button density="compact" onClick={() => p.onReview(info)}>
+                                            {t("drone.templates.review")}
+                                        </Button>
+                                    </Show>
+                                </div>
+                            </li>
+                        );
+                    }}
+                </For>
+            </ul>
+        </Show>
+    </Show>
+);
+
+/** The panel's state and what its buttons do: list, approve, choose, make. */
+function usePicker(p: { model: DroneViewModel; onClose: () => void }) {
     const [templates, setTemplates] = createSignal<JobTemplateInfo[]>([]);
     const [loading, setLoading] = createSignal(true);
     const [failure, setFailure] = createSignal<string | null>(null);
@@ -109,6 +192,45 @@ export const DroneTemplatePicker = (p: { model: DroneViewModel; onClose: () => v
         }
     };
 
+    return {
+        templates,
+        loading,
+        failure,
+        approving,
+        setApproving,
+        chosen,
+        setChosen,
+        values,
+        setValues,
+        errors,
+        name,
+        setName,
+        busy,
+        choose,
+        approve,
+        make,
+    };
+}
+
+export const DroneTemplatePicker = (p: { model: DroneViewModel; onClose: () => void }): JSX.Element => {
+    const {
+        templates,
+        loading,
+        failure,
+        approving,
+        setApproving,
+        chosen,
+        setChosen,
+        values,
+        setValues,
+        errors,
+        name,
+        setName,
+        busy,
+        choose,
+        approve,
+        make,
+    } = usePicker(p);
     return (
         <section class="drone-templates" aria-label={t("drone.templates.title")}>
             <div class="drone-templates-head">
@@ -135,65 +257,21 @@ export const DroneTemplatePicker = (p: { model: DroneViewModel; onClose: () => v
             </Show>
             <Show when={!approving() && chosen()}>
                 {(info) => (
-                    <div class="drone-templates-form">
-                        <Field label={t("drone.templates.name")} layout="stacked">
-                            <TextInput value={name()} maxLength={200} onInput={(e) => setName(e.currentTarget.value)} />
-                        </Field>
-                        <Show when={info().manifest}>
-                            {(manifest) => (
-                                <JobParamsForm
-                                    manifest={manifest()}
-                                    values={values()}
-                                    errors={errors()}
-                                    onChange={(key, value) => setValues({ ...values(), [key]: value })}
-                                    vault={null}
-                                />
-                            )}
-                        </Show>
-                        <div class="drone-templates-actions">
-                            <Button tone="accent" busy={busy()} onClick={() => void make()}>
-                                {t("drone.templates.make")}
-                            </Button>
-                            <Button tone="quiet" disabled={busy()} onClick={() => setChosen(null)}>
-                                {t("drone.templates.back")}
-                            </Button>
-                        </div>
-                    </div>
+                    <TemplateForm
+                        info={info()}
+                        name={name()}
+                        values={values()}
+                        errors={errors()}
+                        busy={busy()}
+                        onName={setName}
+                        onChange={(key, value) => setValues({ ...values(), [key]: value })}
+                        onMake={() => void make()}
+                        onBack={() => setChosen(null)}
+                    />
                 )}
             </Show>
             <Show when={!approving() && !chosen()}>
-                <Show when={!loading()} fallback={<div class="drone-templates-note">{t("drone.templates.loading")}</div>}>
-                    <Show when={templates().length > 0} fallback={<div class="drone-templates-note">{t("drone.templates.none")}</div>}>
-                        <ul class="drone-templates-list">
-                            <For each={templates()}>
-                                {(info) => {
-                                    const pill = STATE_PILL[info.state] ?? STATE_PILL.invalid;
-                                    return (
-                                        <li class="drone-templates-item">
-                                            <div class="drone-templates-item-head">
-                                                <strong>{info.manifest?.name ?? info.id}</strong>
-                                                <Pill tone={pill.tone}>{pill.label()}</Pill>
-                                            </div>
-                                            <div class="drone-templates-note">{info.manifest?.description ?? info.error}</div>
-                                            <div class="drone-templates-actions">
-                                                <Show when={info.state === "approved"}>
-                                                    <Button density="compact" onClick={() => choose(info)}>
-                                                        {t("drone.templates.use")}
-                                                    </Button>
-                                                </Show>
-                                                <Show when={info.state === "needs_approval" || info.state === "changed"}>
-                                                    <Button density="compact" onClick={() => setApproving(info)}>
-                                                        {t("drone.templates.review")}
-                                                    </Button>
-                                                </Show>
-                                            </div>
-                                        </li>
-                                    );
-                                }}
-                            </For>
-                        </ul>
-                    </Show>
-                </Show>
+                <TemplateList templates={templates()} loading={loading()} onUse={choose} onReview={setApproving} />
             </Show>
         </section>
     );
