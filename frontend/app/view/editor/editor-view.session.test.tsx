@@ -1202,7 +1202,12 @@ describe("renaming a file from its tab", () => {
             expect(itemOf(v, b, "Close to the Right").enabled).toBe(false);
         });
 
-        it("a tab with unsaved changes asks before Close Others closes it, and Keep leaves it open", async () => {
+        const press = async (label: RegExp) => {
+            fireEvent.click([...document.body.querySelectorAll("button")].find((b) => label.test(b.textContent ?? ""))!);
+            await settle();
+        };
+
+        it("Close Others asks about a tab with unsaved changes before it closes anything, and Cancel leaves every tab open", async () => {
             const v = await mountView();
             await open(v.model, "/home/u/a.ts");
             await type(v.model, 0, "x");
@@ -1210,16 +1215,36 @@ describe("renaming a file from its tab", () => {
             const c = await open(v.model, "/home/u/c.ts");
             itemOf(v, c, "Close Others").click!();
             await settle();
-            // The clean tab closed at once; the edited one waits for an answer.
-            expect(paths(v)).toEqual(["/home/u/a.ts", "/home/u/c.ts"]);
-            fireEvent.click([...document.body.querySelectorAll("button")].find((b) => /cancel/i.test(b.textContent ?? ""))!);
-            await settle();
-            expect(paths(v)).toEqual(["/home/u/a.ts", "/home/u/c.ts"]);
+            // Nothing closes, not even the clean tab, until the edited one is answered.
+            expect(paths(v)).toEqual(["/home/u/a.ts", "/home/u/b.ts", "/home/u/c.ts"]);
+            await press(/cancel/i);
+            expect(paths(v)).toEqual(["/home/u/a.ts", "/home/u/b.ts", "/home/u/c.ts"]);
             itemOf(v, c, "Close Others").click!();
             await settle();
-            fireEvent.click([...document.body.querySelectorAll("button")].find((b) => /discard/i.test(b.textContent ?? ""))!);
-            await settle();
+            await press(/discard/i);
             expect(paths(v)).toEqual(["/home/u/c.ts"]);
+        });
+
+        it("with two tabs of unsaved changes it asks about each, and closes only when both are confirmed", async () => {
+            const v = await mountView();
+            const a = await open(v.model, "/home/u/a.ts");
+            await type(v.model, 0, "x");
+            const b = await open(v.model, "/home/u/b.ts");
+            await type(v.model, 0, "y");
+            const c = await open(v.model, "/home/u/c.ts");
+            itemOf(v, c, "Close Others").click!();
+            await settle();
+            await press(/discard/i);
+            // The first is confirmed, the second asks: still nothing closed.
+            expect(paths(v)).toEqual(["/home/u/a.ts", "/home/u/b.ts", "/home/u/c.ts"]);
+            await press(/cancel/i);
+            expect(paths(v)).toEqual(["/home/u/a.ts", "/home/u/b.ts", "/home/u/c.ts"]);
+            itemOf(v, c, "Close Others").click!();
+            await settle();
+            await press(/discard/i);
+            await press(/discard/i);
+            expect(paths(v)).toEqual(["/home/u/c.ts"]);
+            expect([a, b]).not.toContain(c);
         });
     });
 
