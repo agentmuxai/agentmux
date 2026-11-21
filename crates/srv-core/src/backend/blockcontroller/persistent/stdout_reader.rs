@@ -305,12 +305,13 @@ impl StdoutReader {
                     );
                 }
             }
-            crate::backend::transcript::append::append_output_line(
+            crate::backend::transcript::append::append_agent_output_line(
                 broker,
                 &self.block_id_read,
                 &line,
                 self.filestore_read.as_ref(),
                 crate::backend::agent_admission::fenced_zone(self.global_output_zone.as_deref(), &self.record_fence),
+                crate::backend::transcript::origin_sig::WriterRuntime::Host,
             );
         } else {
             tracing::warn!(block_id = %self.block_id_read, "persistent stdout: no broker available");

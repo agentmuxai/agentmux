@@ -151,6 +151,13 @@ pub(crate) fn live_agents(state: &AppState) -> Vec<Live> {
     lives
 }
 
+/// The ids of the agents running in this process: the only ones whose memory folders it looks at
+/// (`native_drift::OwnedAgents`). `Live::uid` is the `db_agents` row id, the same id as the agent
+/// definition and the memory roster (`AgentInstance::id == definition_id`, `row.rs`).
+pub(crate) fn running_agent_ids(state: &AppState) -> std::collections::HashSet<String> {
+    live_agents(state).into_iter().map(|l| l.uid).collect()
+}
+
 /// Why this agent is not stopped even when idle: it holds a claimed Kanban task, has a message held
 /// for it, or holds the build slot. `None`: nothing keeps it.
 pub(crate) fn exempt(state: &AppState, live: &Live) -> Option<&'static str> {

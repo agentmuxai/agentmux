@@ -967,6 +967,41 @@ fn env_vars_round_trip() {
     });
 }
 
+/// The log folder a terminal pane is given (`AGENTMUX_LOG_DIR`, read back with `from_env`) is the instance's own
+/// `logs_dir`, whatever the home, the channel or the mode: under a home override, in a non-stable channel and in a dev
+/// build. A pane sets nothing of its own (it was a hard-coded `~/.agentmux/logs`).
+#[test]
+fn the_log_dir_a_pane_gets_is_the_instances_in_every_home_channel_and_mode() {
+    with_home_override(|root| {
+        let cases: [(&str, Option<&str>, RuntimeMode); 3] = [
+            ("stable", None, RuntimeMode::Installed),
+            ("beta", Some("beta"), RuntimeMode::Installed),
+            ("stable", None, RuntimeMode::Dev { branch: "main".into(), clone_id: None }),
+        ];
+        for (channel, env_channel, mode) in cases {
+            match env_channel {
+                Some(c) => std::env::set_var("AGENTMUX_CHANNEL", c),
+                None => clear_channel_env(),
+            }
+            let p = DataPaths::resolve("0.33.639", &mode).unwrap();
+            assert!(p.logs_dir.starts_with(root), "{mode:?}: the log folder follows the home override, not ~/.agentmux");
+            if matches!(mode, RuntimeMode::Installed) {
+                assert_eq!(p.channel, channel);
+                assert!(p.logs_dir.starts_with(root.join("channels").join(channel)), "{channel}: {:?}", p.logs_dir);
+            }
+            for (k, v) in p.to_env_vars() {
+                std::env::set_var(k, v);
+            }
+            let got = DataPaths::from_env().expect("round-trip").logs_dir;
+            for (k, _) in p.to_env_vars() {
+                std::env::remove_var(k);
+            }
+            clear_channel_env();
+            assert_eq!(got, p.logs_dir, "{mode:?} in {channel}");
+        }
+    });
+}
+
 #[test]
 fn resolve_rejects_dev_branch_traversal() {
     // Even if a caller manages to construct a Dev variant with an
