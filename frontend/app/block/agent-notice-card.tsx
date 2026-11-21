@@ -134,7 +134,7 @@ export function AgentNoticeLine(props: { notice: NoticeView } & PaneRequestProps
             </p>
             {/* GitHub is connected, and its sign-in kept, in Connectors; an AWS login is the person's to renew on the host. */}
             <Show when={n.kind === "github"}>
-                <Button variant="link" class="agent-notice-line-link" onClick={() => void openConnectors("accounts")}>
+                <Button variant="link" opens class="agent-notice-line-link" onClick={() => void openConnectors("accounts")}>
                     {t("agentNotice.openConnectors")}
                 </Button>
             </Show>
