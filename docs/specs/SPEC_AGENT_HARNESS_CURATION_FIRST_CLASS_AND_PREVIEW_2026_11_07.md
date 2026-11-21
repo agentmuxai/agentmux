@@ -1,7 +1,7 @@
 # Spec: curate the agent-pane harnesses: eight first-class doors, everything else preview
 
 **Date:** 2026-11-07, revised 2026-11-08 (task #29362; the build is #29363)
-**Status:** active — the recommended keep and demote lists (section 9) were approved; the tier field is the first build step.
+**Status:** active — the recommended keep and demote lists (section 9) are approved. Step 1, the tier field and the Tools pane groups, is PR #7993; the picker's collapsed Preview section and the docs and billing wording remain.
 **Revised 2026-11-20 (Wren@charlie, task #48203); signed off by the author (Agent5@narko) with the four flags answered below**, against `origin/main` at `61acd3b5` (v0.60.36). The decisions, the keep and demote lists and the intent are the author's as written. Only statements that main has made untrue are changed; each changed passage is marked **[REV n]** and listed in "Changes since the draft" below. A correction that touches a decision the operator is asked is flagged (F1 to F4), not decided.
 **Author:** Agent5@narko
 **Read from:** `origin/main` at `ad233144b` (v0.60.20); the auth classes in section 3 re-read from `identity/resolver/provider.rs` and `providers/*.rs` on 2026-11-08. Facts about other products are marked where they were not verified.
