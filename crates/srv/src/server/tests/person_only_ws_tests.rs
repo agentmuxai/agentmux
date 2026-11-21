@@ -49,6 +49,7 @@ async fn a_connection_registered_as_an_agent_is_refused_even_with_the_proof() {
         let agent = RpcContext { agent_id: "korp".into(), operator_proven: true, ..Default::default() };
         let error = error_of(agent, command, data.clone()).await;
         assert!(error.starts_with("FORBIDDEN: only the person"), "{command} {data}: {error:?}");
+        assert!(error.contains("ask the person"), "{command} {data}: what to do instead: {error:?}");
     }
 }
 

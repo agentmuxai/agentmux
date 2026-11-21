@@ -912,7 +912,7 @@ fn register_agent_questions(engine: &Arc<WshRpcEngine>, state: &AppState) {
         move |cmd: CommandAgentShutdownKeepData, ctx| {
             let state = state_keep.clone();
             async move {
-                ctx.operator_only("only the person keeps an agent running that is about to stop")?;
+                ctx.operator_only("only the person keeps an agent running that is about to stop: ask the person to press Keep running in the AgentMux window")?;
                 let outcome = crate::sagas::pending_shutdown::keep(&state, &cmd.blockid, &cmd.request_id);
                 Ok(AgentShutdownKeepResult { outcome: outcome.to_string() })
             }

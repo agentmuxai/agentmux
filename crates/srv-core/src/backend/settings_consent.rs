@@ -1,9 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! The settings that waive or widen what a person has agreed to: which programs may run, who may be reached, what is
-//! shared with other devices, and how freely agents start agents. An agent may change any other setting, recorded as
-//! that agent; these it never changes, because a change would be counted as the person's own choice. Only the
+//! The settings that waive or widen what a person has agreed to: whether agents may start agents, which programs may
+//! run, who may be reached, and what is shared with other devices. An agent may change any other setting, recorded
+//! as that agent; these it never changes, because a change would be counted as the person's own choice. Only the
 //! AgentMux window, proven through its host, passes (`RpcContext::operator_only`).
 
 use serde_json::{Map, Value};
@@ -14,7 +14,6 @@ use super::supervisor::settings::KEYS as SUPERVISOR_KEYS;
 /// Every setting that is the person's alone to change, besides the Supervisor's own keys.
 pub const PERSON_ONLY: &[&str] = &[
     "agent:maystartagents",
-    "agents:start_per_minute",
     "desktop:enabled",
     "desktop:allowlist",
     "desktop:blocklist",
@@ -54,8 +53,15 @@ pub fn refuse_unless_person(ctx: &RpcContext, keys: &Map<String, Value>) -> Resu
     if held.is_empty() {
         return Ok(());
     }
-    ctx.operator_only(&format!("only the person changes {}", held.join(", ")))
+    let mut why = format!("only the person changes {}: ask the person to change it in the AgentMux window", held.join(", "));
+    if held.contains(&ENV_KEY) {
+        why.push_str(". An agent sets its own environment variables with Agents env_set");
+    }
+    ctx.operator_only(&why)
 }
+
+/// The setting for the environment every command starts with; an agent's own variables go through `Agents env_set`.
+const ENV_KEY: &str = "cmd:env";
 
 /// The names of the keys a settings write sets (never their values), for the record of who changed what.
 pub fn key_names(keys: &Map<String, Value>) -> String {
@@ -93,15 +99,24 @@ mod tests {
         let agent = RpcContext { agent_id: "korp".into(), operator_proven: true, ..Default::default() };
         let error = refuse_unless_person(&agent, write).unwrap_err();
         assert!(error.starts_with("FORBIDDEN: only the person changes agent:maystartagents"), "{error}");
-        assert!(!error.contains("term:fontsize"), "{error}");
+        assert!(error.contains("ask the person to change it in the AgentMux window"), "{error}");
+        assert!(!error.contains("term:fontsize") && !error.contains("env_set"), "{error}");
         assert!(refuse_unless_person(&RpcContext::default(), write).unwrap_err().contains("isn't the AgentMux window"));
         assert!(refuse_unless_person(&RpcContext::operator_for_tests(), write).is_ok());
     }
 
     #[test]
-    fn an_agent_still_changes_any_other_setting() {
+    fn an_agent_still_changes_any_other_setting_including_how_fast_agents_start() {
         let agent = RpcContext { agent_id: "korp".into(), ..Default::default() };
-        assert!(refuse_unless_person(&agent, json!({"term:fontsize": 12, "app:startatlogin": false}).as_object().unwrap()).is_ok());
+        let write = json!({"term:fontsize": 12, "app:startatlogin": false, "agents:start_per_minute": 30});
+        assert!(refuse_unless_person(&agent, write.as_object().unwrap()).is_ok());
+    }
+
+    #[test]
+    fn a_refused_environment_write_names_the_route_an_agent_has_for_its_own() {
+        let agent = RpcContext { agent_id: "korp".into(), ..Default::default() };
+        let error = refuse_unless_person(&agent, json!({"cmd:env": {"A": "b"}}).as_object().unwrap()).unwrap_err();
+        assert!(error.contains("Agents env_set"), "{error}");
     }
 
     #[test]

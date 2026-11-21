@@ -125,7 +125,7 @@ pub(crate) fn record_broadcast(state: &AppState, block_id: &str, text: &str) {
 }
 
 /// What a history entry or a draft is: what the person typed, so only their window writes one.
-const TYPED_BY_THE_PERSON: &str = "only the person's own typing is kept as typed by them";
+const TYPED_BY_THE_PERSON: &str = "only the person's own typing is kept as typed by them: ask the person to send it from the AgentMux window";
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let s = state.clone();
