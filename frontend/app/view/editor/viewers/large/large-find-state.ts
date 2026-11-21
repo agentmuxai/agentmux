@@ -51,14 +51,14 @@ async function searchFrom(
     cursor: number,
     backward: boolean,
     cancelled: () => boolean
-): Promise<{ offset: number; line: number; wrapped: boolean } | "none" | "changed" | null> {
+): Promise<{ offset: number; length: number; line: number; wrapped: boolean } | "none" | "changed" | null> {
     // `hex` is the pattern the call is given: hex bytes for a search of bytes, the typed text for a search of text.
     const r = await findMatch({ call: p.call, path: o.path(), hex: p.pattern, size: o.size(), cursor, backward, align: p.align, cancelled });
     if (!r) return null;
     if (!r.found) return "none";
     if (r.offset >= o.size()) return "changed";
     const line = await o.lineOf(r.offset);
-    return cancelled() ? null : { offset: r.offset, line, wrapped: r.wrapped };
+    return cancelled() ? null : { offset: r.offset, length: r.length, line, wrapped: r.wrapped };
 }
 
 export function createLargeFind(o: LargeFindParts) {
@@ -72,7 +72,7 @@ export function createLargeFind(o: LargeFindParts) {
     /** What marks the match on show in its line (its text, or an expression); "" when none. */
     const [needle, setNeedle] = createSignal<LineMatcher>("");
     /** Where the match on show starts: the next search goes on from it. `key` is the text and options it was found with. */
-    let at: { offset: number; key: string } | null = null;
+    let at: { offset: number; end: number; key: string } | null = null;
     let input: HTMLInputElement | undefined;
     let run = 0;
     const options = () => ({ matchCase: matchCase(), regex: regex() });
@@ -113,7 +113,8 @@ export function createLargeFind(o: LargeFindParts) {
         try {
             const kept = at && at.key === key() ? at : null;
             // From the match on show, else from the top of the screen.
-            const top = kept ? kept.offset : (await o.topOffset()) - (backward ? 0 : 1);
+            // A search of text goes on past the whole match, not one byte in: `\d+` in "123" would find "23" next.
+            const top = kept ? (p.kind === "text" && !backward ? kept.end - 1 : kept.offset) : (await o.topOffset()) - (backward ? 0 : 1);
             const call: SearchCall =
                 p.kind === "bytes" ? (o.call ?? searchOnSrv) : (o.textCall ?? textSearchOnSrv)(p.regex, p.ignoreCase);
             const r = await searchFrom(o, { pattern: p.kind === "bytes" ? p.hex : p.query, align: p.kind === "bytes" ? p.align : 1, call }, top, backward, () => mine !== run);
@@ -130,12 +131,13 @@ export function createLargeFind(o: LargeFindParts) {
                 setStatus("The file changed; search again");
                 return;
             }
-            at = { offset: r.offset, key: key() };
+            at = { offset: r.offset, end: r.offset + r.length, key: key() };
             setNeedle(matcherFor(text(), options()));
             o.show(r.line + 1, r.offset);
             setStatus(`Line ${(r.line + 1).toLocaleString("en-US")}${r.wrapped ? ", from the other end of the file" : ""}`);
         } catch (e) {
-            if (mine === run) setStatus(`Couldn't search: ${e instanceof Error ? e.message : String(e)}`);
+            // srv's answer names its command ("filesearchtext: not a valid expression: …"): the reason is for the reader.
+            if (mine === run) setStatus(`Couldn't search: ${(e instanceof Error ? e.message : String(e)).replace(/^filesearch(?:text|bytes):\s*/, "")}`);
         } finally {
             if (mine === run) setBusy(false);
         }

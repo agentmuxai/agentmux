@@ -38,7 +38,7 @@ const BUDGET_TIME: Duration = Duration::from_millis(1500);
 /// The most memory a compiled expression may take.
 const REGEX_SIZE_LIMIT: usize = 8 << 20;
 
-/// The expression for a query: a literal text is escaped; `^` and `$` match at each line.
+/// The expression for a query: a literal text is escaped; `^` and `$` match at each line (a line ends at `\n` or `\r\n`).
 pub fn compile(query: &str, regex: bool, ignore_case: bool) -> Result<Regex, String> {
     if query.is_empty() {
         return Err("nothing to find".into());
@@ -50,6 +50,7 @@ pub fn compile(query: &str, regex: bool, ignore_case: bool) -> Result<Regex, Str
     RegexBuilder::new(&source)
         .case_insensitive(ignore_case)
         .multi_line(true)
+        .crlf(true)
         .unicode(true)
         .size_limit(REGEX_SIZE_LIMIT)
         .build()
@@ -77,17 +78,21 @@ fn first_in(re: &Regex, hay: &[u8], from: usize, to: usize) -> Option<(usize, us
     None
 }
 
-/// The last non-empty match that starts in `hay[from..=to]`.
+/// The last non-empty match that starts in `hay[from..=to]`, among the matches found one after another (each
+/// begins where the one before ended), as a viewer marks them. The walk begins at the start of the line that
+/// holds `from`, so which matches there are does not depend on where a block happens to begin.
 fn last_in(re: &Regex, hay: &[u8], from: usize, to: usize) -> Option<(usize, usize)> {
     let mut best = None;
-    let mut pos = from;
+    let mut pos = memchr::memrchr(b'\n', &hay[..from]).map_or(0, |i| i + 1);
     while pos <= to && pos <= hay.len() {
         let Some(m) = re.find_at(hay, pos) else { break };
         if m.start() > to {
             break;
         }
         if m.end() > m.start() {
-            best = Some((m.start(), m.end()));
+            if m.start() >= from {
+                best = Some((m.start(), m.end()));
+            }
             pos = m.end();
         } else {
             pos = m.end() + 1;
@@ -229,6 +234,40 @@ mod tests {
         assert!(run(data, "ab", false, false, 2, true).found);
         let r = run(data, "zz", false, false, 7, true);
         assert!(!r.found && r.done);
+    }
+
+    #[test]
+    fn backward_goes_by_whole_matches_never_to_the_tail_of_one() {
+        // "foo123 456": the matches of \d+ are 123 (at 3) and 456 (at 7); "23" and "3" are not matches.
+        let data = b"foo123 456\n78\n";
+        assert_eq!(run(data, r"\d+", true, false, 6, true).offset, 3);
+        assert_eq!(run(data, r"\d+", true, false, 6, true).length, 3);
+        assert_eq!(run(data, r"\d+", true, false, 9, true).offset, 7);
+        // From the start of 123, no match before it.
+        assert!(!run(data, r"\d+", true, false, 2, true).found);
+        // Forward from the end of a match goes to the next whole one.
+        assert_eq!(run(data, r"\d+", true, false, 6, false).offset, 7);
+    }
+
+    #[test]
+    fn a_backward_walk_starts_at_a_line_start_whichever_block_it_is_in() {
+        // "aaaaa" starting a line: the matches of "aa" are at 0 and 2 of it, never at 1 or 3. The first block of a
+        // backward search begins at the 2nd character (`size - BLOCK`), mid-match: the walk still starts at the line.
+        let edge = BLOCK as usize;
+        let mut data = vec![b'\n'; edge * 2 + 7];
+        data[edge + 6..edge + 11].copy_from_slice(b"aaaaa");
+        let line = (edge + 6) as u64;
+        assert_eq!(run(&data, "aa", false, false, data.len() as u64, true).offset, line + 2);
+    }
+
+    #[test]
+    fn a_line_ending_is_crlf_as_well_as_lf() {
+        let data = b"foo\r\nbar\r\nfoo\n";
+        let r = run(data, "^foo$", true, false, 0, false);
+        assert_eq!((r.offset, r.length), (0, 3));
+        let r = run(data, "^foo$", true, false, 1, false);
+        assert_eq!((r.offset, r.length), (10, 3));
+        assert_eq!(run(data, "^bar$", true, false, 0, false).offset, 5);
     }
 
     #[test]

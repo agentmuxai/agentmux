@@ -326,6 +326,36 @@ describe("the Large text viewer", () => {
         expect(document.querySelector(".large-text-hit")?.textContent).toBe("line 90");
     });
 
+    it("shows the reason srv gave for a bad expression, without its command name", async () => {
+        await mount();
+        key("f", { ctrlKey: true });
+        await settle();
+        fireEvent.click(screen.getByRole("button", { name: "Regular expression" }));
+        searchText.mockRejectedValueOnce(new Error("filesearchtext: not a valid expression: unclosed group"));
+        fireEvent.input(findBox(), { target: { value: "Err(" } });
+        fireEvent.keyDown(findBox(), { key: "Enter" });
+        await settle();
+        expect(document.querySelector(".large-text-find-status")?.textContent).toBe("Couldn't search: not a valid expression: unclosed group");
+    });
+
+    it("goes on past the whole match of an expression, never to the tail of the match on show", async () => {
+        await mount();
+        key("f", { ctrlKey: true });
+        await settle();
+        fireEvent.click(screen.getByRole("button", { name: "Regular expression" }));
+        fireEvent.input(findBox(), { target: { value: "\\d+" } });
+        for (let line = 1; line <= 10; line++) {
+            fireEvent.keyDown(findBox(), { key: "Enter" });
+            await settle();
+            expect(markedLine()).toBe(String(line));
+        }
+        // On "line 10" the match is "10": the next one is on line 11, not "0" of line 10.
+        expect(document.querySelector(".large-text-hit-current")?.textContent).toBe("10");
+        fireEvent.keyDown(findBox(), { key: "Enter" });
+        await settle();
+        expect(markedLine()).toBe("11");
+    });
+
     it("says a UTF-16 file can't be searched by expression, without asking srv; turning the option off searches again", async () => {
         await mount({ encoding: "utf-16le" });
         key("f", { ctrlKey: true });
