@@ -296,7 +296,7 @@ function mcpLeftOutText(node: CliNoticeNode): { label: string; detail: string | 
     const noPath = node.serversWithNoPath ?? [];
     const detail = [
         "A container agent can write in this folder, so this agent takes its settings, hooks, instructions, skills and MCP servers from AgentMux only. To keep one of these, add it in the agent's own settings",
-        noPath.length > 0 ? `Not started, because the command is not found on this computer: ${noPath.join(", ")}. Give it by its full path` : "",
+        noPath.length > 0 ? `Not started, because its command is no program found outside this folder: ${noPath.join(", ")}. Give it by its full path, in a folder no container agent can write` : "",
         "/loop and CronCreate are off here, because a scheduled prompt can be kept in the folder",
         "What the agent itself runs in this folder, such as git and build scripts, still comes from the folder",
     ].filter((sentence) => sentence.length > 0);

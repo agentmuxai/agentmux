@@ -507,7 +507,7 @@ describe("the MCP servers a host agent is not given from its folder's own file",
     it("names the agent's own servers whose command has no path, and what to do", () => {
         const row = parseCliNoticeFrame(counted({}, { no_path: ["search", 4] }), 0) as CliNoticeNode;
         expect(row.serversWithNoPath).toEqual(["search"]);
-        expect(cliNoticeText(row).detail).toContain("Not started, because the command is not found on this computer: search. Give it by its full path");
+        expect(cliNoticeText(row).detail).toContain("Not started, because its command is no program found outside this folder: search. Give it by its full path, in a folder no container agent can write");
         expect(cliNoticeText(parseCliNoticeFrame(counted({}), 0) as CliNoticeNode).detail).not.toContain("Not started");
     });
 });

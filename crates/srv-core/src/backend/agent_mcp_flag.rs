@@ -129,8 +129,9 @@ fn with_nothing_of_the_folder(args: Vec<String>, work_dir: &str) -> Vec<String> 
     }
 
     out.push(STRICT.to_string());
-    // Only a config that names its commands by their paths is handed over.
-    if std::fs::read_to_string(&config).is_ok_and(|text| crate::backend::mcp_folder_rule::names_the_command_by_path(&text)) {
+    // Only a config whose every command is a path outside the folder, in none a container agent can write, is
+    // handed over.
+    if std::fs::read_to_string(&config).is_ok_and(|text| crate::backend::mcp_folder_rule::names_every_command_outside(&text, work_dir)) {
         out.extend([CONFIG.to_string(), config.to_string_lossy().into_owned()]);
     }
     out.extend([SOURCES.to_string(), "user".to_string()]);

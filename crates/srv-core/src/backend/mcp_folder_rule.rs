@@ -213,9 +213,10 @@ pub fn is_outside(exe: &Path, work_dir: &str) -> bool {
 
 /// `config` (the text of an MCP config) with every command named by a path: the `agentmux` entry's is `exe`,
 /// and any other server's bare name is what `found` answers for it. An entry whose command has no such path
-/// is taken out, and its name is returned. A command already written as an absolute path is the person's own
-/// choice and stays. A config that is not a JSON object with servers is returned as it is.
-fn by_path(config: &str, exe: Option<&Path>, found: &dyn Fn(&str) -> Option<PathBuf>) -> (String, Vec<String>) {
+/// is taken out, and its name is returned. A command already written as an absolute path stays when `allowed`
+/// says so of it (it is outside the folder and no container agent can write it), and is taken out as one with
+/// no path when not. A config that is not a JSON object with servers is returned as it is.
+fn by_path(config: &str, exe: Option<&Path>, found: &dyn Fn(&str) -> Option<PathBuf>, allowed: &dyn Fn(&Path) -> bool) -> (String, Vec<String>) {
     let Ok(was) = serde_json::from_str::<Value>(config) else { return (config.to_string(), Vec::new()) };
     let mut doc = was.clone();
     let Some(servers) = doc.get_mut("mcpServers").and_then(Value::as_object_mut) else { return (config.to_string(), Vec::new()) };
@@ -228,7 +229,7 @@ fn by_path(config: &str, exe: Option<&Path>, found: &dyn Fn(&str) -> Option<Path
             match entry.get("command").and_then(Value::as_str) {
                 // A server reached over the network has no command to name.
                 None => continue,
-                Some(command) if Path::new(command).is_absolute() => continue,
+                Some(command) if Path::new(command).is_absolute() => Some(PathBuf::from(command)).filter(|path| allowed(path)),
                 Some(command) => found(command),
             }
         };
@@ -275,7 +276,7 @@ pub fn with_commands_by_path(config: &str, work_dir: &str) -> (String, Vec<Strin
     if exe.is_none() {
         tracing::warn!(work_dir, "no agentmux-mcp ships outside this folder: the agent's config is written without the agentmux server");
     }
-    let (text, mut taken_out) = by_path(config, exe.as_deref(), &|command| on_path(command).filter(|path| outside(path, &folder)));
+    let (text, mut taken_out) = by_path(config, exe.as_deref(), &|command| on_path(command).filter(|path| outside(path, &folder)), &|path| outside(path, &folder));
     taken_out.retain(|name| name != "agentmux");
     if !taken_out.is_empty() {
         tracing::warn!(work_dir, count = taken_out.len(), "MCP servers set with a command that has no path outside this folder are left out of the agent's config");
@@ -287,11 +288,24 @@ pub fn with_commands_by_path(config: &str, work_dir: &str) -> (String, Vec<Strin
 /// reached over the network has none): what a host turn in a folder the rule holds for is given, and nothing
 /// else.
 pub fn names_the_command_by_path(config: &str) -> bool {
+    commands_all(config, &|command| Path::new(command).is_absolute())
+}
+
+/// [`names_the_command_by_path`], and every command is a path outside `work_dir` that no container agent can
+/// write ([`outside`]): what a host turn in a folder the rule holds for is given.
+pub fn names_every_command_outside(config: &str, work_dir: &str) -> bool {
+    let folder = spellings(&expanded(work_dir));
+    commands_all(config, &|command| outside(Path::new(command), &folder))
+}
+
+/// Whether every server of `config` that has a command has one `ok` says yes to; false for text that is not a
+/// config.
+fn commands_all(config: &str, ok: &dyn Fn(&str) -> bool) -> bool {
     let Ok(doc) = serde_json::from_str::<Value>(config) else { return false };
     let Some(servers) = doc.get("mcpServers").and_then(Value::as_object) else { return true };
     servers.values().all(|entry| match entry.get("command") {
         None => true,
-        Some(command) => command.as_str().is_some_and(|command| Path::new(command).is_absolute()),
+        Some(command) => command.as_str().is_some_and(ok),
     })
 }
 
@@ -573,7 +587,8 @@ mod tests {
         let found = |command: &str| (command == "git-mcp").then(|| git.clone());
         let config = &config.replace(r#""git":{"command":"git-mcp"}"#, r#""git":{"command":"git-mcp","args":["--x"]},"gone":{"command":"gone-mcp"},"web":{"type":"http","url":"https://example.invalid/mcp"}"#);
 
-        let (text, taken_out) = by_path(config, Some(&shipped), &found);
+        let allowed = |path: &Path| outside(path, &the_folder);
+        let (text, taken_out) = by_path(config, Some(&shipped), &found, &allowed);
         let written: Value = serde_json::from_str(&text).unwrap();
         assert_eq!(written["mcpServers"]["agentmux"]["command"], json!(shipped.to_string_lossy()));
         assert_eq!(written["mcpServers"]["agentmux"]["env"]["AGENTMUX_AGENT_ID"], "aria", "the rest of the entry stays");
@@ -584,21 +599,39 @@ mod tests {
         assert_eq!(written["mcpServers"]["web"]["url"], "https://example.invalid/mcp", "a server with no command stays");
         assert!(names_the_command_by_path(&text));
 
-        let (text, taken_out) = by_path(config, None, &found);
+        let (text, taken_out) = by_path(config, None, &found, &allowed);
         let without: Value = serde_json::from_str(&text).unwrap();
         assert!(without["mcpServers"].get("agentmux").is_none(), "with none that ships outside the folder: no entry, not a name");
         assert_eq!(taken_out, vec!["agentmux".to_string(), "gone".to_string()]);
         assert!(names_the_command_by_path(&text));
 
-        // A command the person wrote as a path is theirs and stays; so does a config with nothing to change.
-        let by_hand = r#"{"mcpServers":{"own":{"command":"/opt/own/server"}}}"#;
-        let by_hand = &if cfg!(windows) { by_hand.replace("/opt/own/server", "C:\\\\own\\\\server.exe") } else { by_hand.to_string() };
-        assert_eq!(by_path(by_hand, Some(&shipped), &found), (by_hand.clone(), Vec::new()));
+        // A command the person wrote as a path outside the folder stays; so does a config with nothing to change.
+        let own = tools.path().join(if cfg!(windows) { "own-server.exe" } else { "own-server" });
+        let by_hand = &json!({ "mcpServers": { "own": { "command": own.to_string_lossy() } } }).to_string();
+        assert_eq!(by_path(by_hand, Some(&shipped), &found, &allowed), (by_hand.clone(), Vec::new()));
+        // One written as a path in the folder, beneath it, or in a folder a container agent can write is not a
+        // path outside: it is taken out and named, like a bare name with none.
+        let inside = json!({ "mcpServers": {
+            "in-folder": { "command": planted.to_string_lossy() },
+            "beneath": { "command": folder.path().join("bin").join("srv").to_string_lossy() },
+            "writable": { "command": writable.to_string_lossy() },
+            "own": { "command": own.to_string_lossy() },
+        } })
+        .to_string();
+        let (text, mut taken_out) = by_path(&inside, Some(&shipped), &found, &allowed);
+        taken_out.sort();
+        let written: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(taken_out, vec!["beneath".to_string(), "in-folder".to_string(), "writable".to_string()]);
+        assert_eq!(written["mcpServers"].as_object().unwrap().keys().collect::<Vec<_>>(), vec!["own"]);
+        let dir = folder.path().to_string_lossy().into_owned();
+        assert!(names_every_command_outside(&text, &dir));
+        assert!(!names_every_command_outside(&inside, &dir), "a turn is not given a config that names one");
+        assert!(!names_every_command_outside(config, &dir), "nor one with a bare name");
 
         assert!(!names_the_command_by_path(config), "a bare name is not handed to a turn there");
         assert!(!names_the_command_by_path(r#"{"mcpServers":{"agentmux":{"command":"/abs/agentmux-mcp"},"git":{"command":"git-mcp"}}}"#), "nor is any other server's");
         assert!(!names_the_command_by_path("not json"));
-        assert_eq!(by_path("not json", Some(&shipped), &found).0, "not json");
+        assert_eq!(by_path("not json", Some(&shipped), &found, &allowed).0, "not json");
         assert_eq!(on_path("bin/tool"), None, "a relative path is not looked up");
         assert_eq!(on_path("no-such-program-agentmux-test"), None);
 

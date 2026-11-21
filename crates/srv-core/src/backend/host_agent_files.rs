@@ -305,44 +305,21 @@ fn is_markdown(path: &Path) -> bool {
     path.extension().is_some_and(|x| x.eq_ignore_ascii_case("md"))
 }
 
-/// The skill and command files AgentMux itself wrote into `folder` at an earlier launch, as its manifest there
-/// lists them: they are AgentMux's own, given from outside now, and not counted as the folder's.
-fn written_by_agentmux(folder: &Path) -> Vec<PathBuf> {
-    std::fs::read_to_string(folder.join(crate::backend::agent_config::MANAGED_SKILL_FILES_MANIFEST))
-        .ok()
-        .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
-        .unwrap_or_default()
-        .into_iter()
-        .take(MOST_COUNTED)
-        .map(|rel| folder.join(rel))
-        .collect()
-}
-
-/// What of `folder`'s own files a host agent there is not given. A file AgentMux wrote there itself (its
-/// startup file, its settings, the skills its manifest lists) is not counted: the agent is given that from
-/// outside. Only looks at names, and at the first bytes of two files to tell AgentMux's own.
+/// What of `folder`'s own files a host agent there is not given, every one counted: the agent is given
+/// AgentMux's own settings, instructions, skills and commands from outside, so none of these is read, a file
+/// AgentMux wrote there at an earlier launch included. A file can't be told for AgentMux's by what it says,
+/// since a container agent can write that too. Only looks at names.
 pub fn left_out(folder: &str) -> LeftOut {
     let folder = Path::new(folder);
     let claude = folder.join(".claude");
-    let ours = written_by_agentmux(folder);
-    let theirs = |path: &Path| !ours.iter().any(|own| own == path);
-    let starts_with = |path: &Path, marker: &str| {
-        use std::io::Read;
-        let mut head = vec![0u8; marker.len()];
-        std::fs::File::open(path).and_then(|mut file| file.read_exact(&mut head)).is_ok() && head == marker.as_bytes()
-    };
-    let own_settings = |path: &Path| std::fs::read_to_string(path).is_ok_and(|text| text.len() < 1 << 20 && text.contains(WRAPPER));
-
     let mut out = LeftOut::default();
-    let settings = claude.join("settings.json");
-    out.settings = usize::from(settings.is_file() && !own_settings(&settings)) + usize::from(claude.join("settings.local.json").is_file());
-    let startup = folder.join("CLAUDE.md");
-    out.instructions = usize::from(startup.is_file() && !starts_with(&startup, crate::backend::agent_config::CLAUDE_MD_MANAGED_MARKER))
+    out.settings = usize::from(claude.join("settings.json").is_file()) + usize::from(claude.join("settings.local.json").is_file());
+    out.instructions = usize::from(folder.join("CLAUDE.md").is_file())
         + usize::from(claude.join("CLAUDE.md").is_file())
         + usize::from(folder.join("CLAUDE.local.md").is_file())
         + count_under(&claude.join("rules"), &is_markdown);
-    out.skills = count_under(&claude.join("skills"), &|path| path.file_name().is_some_and(|n| n == "SKILL.md") && theirs(path));
-    out.commands = count_under(&claude.join("commands"), &|path| is_markdown(path) && theirs(path));
+    out.skills = count_under(&claude.join("skills"), &|path| path.file_name().is_some_and(|n| n == "SKILL.md"));
+    out.commands = count_under(&claude.join("commands"), &is_markdown);
     out.agents = count_under(&claude.join("agents"), &is_markdown);
     out.other = count_under(&claude.join("output-styles"), &is_markdown)
         + count_under(&claude.join("workflows"), &|_| true)

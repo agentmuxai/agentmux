@@ -110,7 +110,16 @@ mod tests {
             let own = crate::backend::mcp_config_file::host_config_path(&dir);
             assert!(!own.starts_with(folder.path()), "the agent's config is outside the folder");
             crate::backend::mcp_config_file::write_relocated(&own, r#"{"mcpServers":{"agentmux":{"command":"agentmux-mcp"}}}"#).unwrap();
-            assert_eq!(not_given(&pane("host")).unwrap().servers, vec!["theirs".to_string()]);
+            // A file just written can be unreadable for a moment on Windows (a scanner holds it): ask again.
+            let mut after = not_given(&pane("host")).unwrap();
+            for _ in 0..20 {
+                if after.servers == vec!["theirs".to_string()] {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                after = not_given(&pane("host")).unwrap();
+            }
+            assert_eq!(after.servers, vec!["theirs".to_string()], "own config {}: {:?}", own.display(), std::fs::read_to_string(&own).map(|text| text.len()));
             assert_eq!(not_given(&pane("container")), None, "the container agent itself is not a host agent");
         });
     }

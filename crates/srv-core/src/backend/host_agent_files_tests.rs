@@ -181,7 +181,7 @@ fn agentmuxs_hooks_name_the_wrapper_by_its_path_or_are_left_out() {
 }
 
 #[test]
-fn what_is_left_out_is_counted_by_kind_and_agentmuxs_own_files_are_not_the_folders() {
+fn what_is_left_out_is_counted_by_kind_and_every_file_is_counted() {
     let folder = tempfile::tempdir().unwrap();
     let put = |rel: &str, text: &str| {
         let path = folder.path().join(rel);
@@ -191,13 +191,19 @@ fn what_is_left_out_is_counted_by_kind_and_agentmuxs_own_files_are_not_the_folde
     let dir = folder.path().to_string_lossy().into_owned();
     assert!(left_out(&dir).is_empty(), "an empty folder");
 
-    // What AgentMux itself wrote there at an earlier launch.
+    // A file that says it is AgentMux's is counted like any other: a container agent can write that too, and
+    // the agent is given AgentMux's own from outside, so none of these is read.
     put("CLAUDE.md", &format!("{}\n\nmine", crate::backend::agent_config::CLAUDE_MD_MANAGED_MARKER));
     put(".claude/settings.json", r#"{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"agentmux-bashwrap hook"}]}]}}"#);
     put(".claude/skills/given/SKILL.md", "x");
     put(".claude/commands/given.md", "x");
     put(crate::backend::agent_config::MANAGED_SKILL_FILES_MANIFEST, r#"[".claude/skills/given/SKILL.md",".claude/commands/given.md"]"#);
-    assert!(left_out(&dir).is_empty(), "AgentMux's own startup file, settings and skills are given from outside: {:?}", left_out(&dir));
+    assert_eq!(left_out(&dir), LeftOut { settings: 1, instructions: 1, skills: 1, commands: 1, ..LeftOut::default() });
+    for rel in ["CLAUDE.md", ".claude/settings.json", ".claude/skills", ".claude/commands"] {
+        let path = folder.path().join(rel);
+        if path.is_dir() { std::fs::remove_dir_all(path).unwrap() } else { std::fs::remove_file(path).unwrap() }
+    }
+    assert!(left_out(&dir).is_empty());
 
     // The folder's own, one kind at a time.
     put(".claude/settings.local.json", "{}");
