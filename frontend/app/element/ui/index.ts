@@ -8,6 +8,7 @@
 
 export { Button, IconButton, type ButtonProps, type ButtonVariant, type IconButtonProps } from "./Button";
 export { CloseButton, type CloseButtonProps, type CloseButtonSize } from "./CloseButton";
+export { PENDING_SPINNER_DELAY_MS, type PendingMode } from "./pending-press";
 export { Card, type CardProps } from "./Card";
 export { CardGrid, columnsFor, rowEnd, type CardGridProps } from "./CardGrid";
 export { Field, useField, type FieldProps } from "./Field";

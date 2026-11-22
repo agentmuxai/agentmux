@@ -11,6 +11,8 @@
 //! - [`register`] keeps a value for the life of the process;
 //! - [`hold`] keeps a value for an owner, until its expiry, until the owner is [`release`]d (its token revoked, its
 //!   container removed, its device unpaired) or until the owner holds another value in its place;
+//! - [`hold_until`] keeps a value that works until a given time, and keeps it until then even when a renewed one
+//!   follows it: the value that was replaced still works, so it stays hidden until it expires;
 //! - a batch of registrations ([`register_all`]) costs one rebuild of the matcher, made when a line next needs it.
 
 use std::borrow::Cow;
@@ -79,6 +81,17 @@ impl Registry {
         self.reindex();
     }
 
+    /// Drops what `owner` holds, and what it holds with [`hold_until`].
+    fn release_all(&mut self, owner: &str) {
+        let until = format!("{owner}#");
+        let before = self.entries.len();
+        self.entries.retain(|e| e.owner.as_deref().map_or(true, |o| o != owner && !o.starts_with(&until)));
+        if self.entries.len() != before {
+            self.stale = true;
+            self.reindex();
+        }
+    }
+
     fn release(&mut self, owner: &str) {
         let before = self.entries.len();
         self.entries.retain(|e| e.owner.as_deref() != Some(owner));
@@ -144,9 +157,21 @@ pub fn hold(owner: &str, value: &str, expires_at: Option<i64>) {
     write().add(Some(owner), value, expires_at);
 }
 
+/// Withholds `value` for `owner` until `expires_at` (unix ms), when it stops working. A renewed value the owner holds
+/// next with [`hold_until`] does not take its place: the value that was replaced still works until its own expiry,
+/// so it stays withheld until then. Holding the same value and expiry again changes nothing.
+pub fn hold_until(owner: &str, value: &str, expires_at: i64) {
+    write().add(Some(&format!("{owner}#{expires_at}")), value, Some(expires_at));
+}
+
 /// Stops withholding what `owner` holds: its value no longer works.
 pub fn release(owner: &str) {
     write().release(owner);
+}
+
+/// [`release`] for what `owner` holds and what it holds with [`hold_until`].
+pub fn release_all(owner: &str) {
+    write().release_all(owner);
 }
 
 /// One matcher for every value in every spelling, longest first so a spelling that contains another is
@@ -344,6 +369,33 @@ mod tests {
         assert_eq!(registry.entries.len(), 1);
         assert!(!shows(&mut registry, 2_000, "canary-again-0001-token"));
         assert!(shows(&mut registry, 5_000, "canary-again-0001-token"));
+    }
+
+    #[test]
+    fn a_renewed_value_does_not_end_the_withholding_of_the_one_it_replaced_before_that_one_expires() {
+        let mut registry = Registry::default();
+        // What hold_until does: one owner per expiry.
+        registry.add(Some("github:a#3600"), "canary-renew-0001-first", Some(3_600));
+        registry.add(Some("github:a#7200"), "canary-renew-0002-second", Some(7_200));
+        assert!(!shows(&mut registry, 3_599, "canary-renew-0001-first"), "the replaced one still works");
+        assert!(!shows(&mut registry, 3_599, "canary-renew-0002-second"));
+        assert!(shows(&mut registry, 3_600, "canary-renew-0001-first"), "dropped at its own expiry");
+        assert!(!shows(&mut registry, 3_600, "canary-renew-0002-second"));
+        assert_eq!(registry.entries.len(), 1, "the registry holds only what can still be used");
+        assert!(shows(&mut registry, 7_200, "canary-renew-0002-second"));
+        assert!(registry.entries.is_empty());
+    }
+
+    #[test]
+    fn release_all_drops_every_value_an_owner_holds_and_no_other_owners() {
+        let mut registry = Registry::default();
+        registry.add(Some("acct:a#100"), "canary-all-0001-first", Some(100));
+        registry.add(Some("acct:a#200"), "canary-all-0002-second", Some(200));
+        registry.add(Some("acct:a"), "canary-all-0003-plain", None);
+        registry.add(Some("acct:ab#200"), "canary-all-0004-other", Some(200));
+        registry.release_all("acct:a");
+        assert_eq!(registry.entries.len(), 1, "another owner whose name starts the same stays");
+        assert!(!shows(&mut registry, 0, "canary-all-0004-other"));
     }
 
     #[test]

@@ -66,15 +66,19 @@ fn sign_in_owner(dir: &str, what: &str) -> String {
 }
 
 /// Keeps the tokens in a sign-in file just read out of every transcript: the CLI reads the file itself and renews both
-/// tokens while an agent runs, so each look at the file holds what is there now. The access token is withheld until
-/// its expiry; the refresh token until the file holds another. A look that finds no token (a sign-out) leaves what
-/// was held, so a token an agent may still hold stays withheld until it is replaced.
+/// tokens while an agent runs, so each look at the file holds what is there now. An access token is withheld until
+/// its own expiry, even after a renewed one is in the file (the old one still works); the refresh token until the
+/// file holds another. A look that finds no token (a sign-out) leaves what was held, so a token an agent may still
+/// hold stays withheld.
 fn withhold_sign_in(dir: &str, json: &serde_json::Value) {
     let oauth = json.get("claudeAiOauth").unwrap_or(json);
     let text = |keys: [&str; 2]| keys.iter().find_map(|k| oauth.get(k).and_then(|v| v.as_str())).filter(|s| !s.is_empty());
     let expires_at = oauth.get("expiresAt").and_then(|v| v.as_i64());
     if let Some(access) = text(["accessToken", "access_token"]) {
-        crate::backend::transcript::withhold::hold(&sign_in_owner(dir, "access"), access, expires_at);
+        match expires_at {
+            Some(at) => crate::backend::transcript::withhold::hold_until(&sign_in_owner(dir, "access"), access, at),
+            None => crate::backend::transcript::withhold::hold(&sign_in_owner(dir, "access"), access, None),
+        }
     }
     if let Some(refresh) = text(["refreshToken", "refresh_token"]) {
         crate::backend::transcript::withhold::hold(&sign_in_owner(dir, "refresh"), refresh, None);
@@ -400,12 +404,13 @@ mod tests {
         assert_eq!(withhold::text("a canary-signin-access-0001"), format!("a {}", withhold::MARK));
         assert_eq!(withhold::text("r canary-signin-refresh-0001"), format!("r {}", withhold::MARK));
 
-        // The CLI renews both: the next look withholds the new pair, and the replaced ones are dropped.
-        write_sign_in(tmp.path(), "canary-signin-access-0002", "canary-signin-refresh-0002", now + 3_600_000);
+        // The CLI renews both: the next look withholds the new pair. The replaced refresh token is dropped; the
+        // replaced access token still works until it expires, so it stays withheld.
+        write_sign_in(tmp.path(), "canary-signin-access-0002", "canary-signin-refresh-0002", now + 7_200_000);
         probe_oauth_status("claude", dir, now);
         assert_eq!(withhold::text("a canary-signin-access-0002"), format!("a {}", withhold::MARK));
         assert_eq!(withhold::text("r canary-signin-refresh-0002"), format!("r {}", withhold::MARK));
-        assert_eq!(withhold::text("a canary-signin-access-0001"), "a canary-signin-access-0001");
+        assert_eq!(withhold::text("a canary-signin-access-0001"), format!("a {}", withhold::MARK));
         assert_eq!(withhold::text("r canary-signin-refresh-0001"), "r canary-signin-refresh-0001");
 
         // A sign-out leaves what was held: an agent may still hold the refresh token.

@@ -13,6 +13,57 @@
 
 .ui-button {
     @include line.line-control;
+
+    // Pressed: the press shows in the frame of the mouse-down (no transition), whatever the action does next. A toggle
+    // keeps its own pressed look; a disabled button shows nothing.
+    &:active:not(:disabled, [aria-disabled="true"], [aria-pressed="true"], [aria-checked="true"], [aria-selected="true"]) {
+        @include line.pressed-look;
+        transition: none;
+    }
+}
+
+// The filled tone keeps its text and fill and presses a step toward the text colour (darker on a light theme, lighter
+// on a dark one), not into the accent line.
+.ui-button.ui-tone-attention:active:not(:disabled, [aria-disabled="true"]) {
+    color: var(--attention-text-color);
+    border-color: var(--attention-color);
+    background: color-mix(in srgb, var(--attention-color) 70%, var(--main-text-color));
+    box-shadow: none;
+}
+
+// Inline text has no box to press: it dims.
+.ui-button.ui-button--link:active:not(:disabled, [aria-disabled="true"]) {
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+    opacity: 0.6;
+}
+
+// While its action runs after the spinner delay, a button with no icon of its own shows the spinner over its label and
+// keeps the label's room, so the box does not change (a button with an icon swaps the icon for the spinner). The
+// label is hidden with the text fill, not the colour, so the spinner keeps the button's own colour.
+.ui-button--spin-over {
+    position: relative;
+    -webkit-text-fill-color: transparent;
+
+    > *:not(.ui-button-spinner, .ui-button-working) {
+        visibility: hidden;
+    }
+}
+
+.ui-button-spinner {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    -webkit-text-fill-color: currentColor;
+    font-size: var(--ui-icon-size);
+}
+
+// Said to a screen reader when an action runs longer than a second; never seen.
+.ui-button-working {
+    @include mixins.sr-only;
 }
 
 .ui-tone-accent {
@@ -124,6 +175,12 @@
     &:disabled:hover {
         cursor: default;
         opacity: 0.45;
+    }
+
+    // A press drops to the disabled step and back, in the frame of the mouse-down. A toggle shows its state alone.
+    &:active:not(:disabled, .ui-button--toggle) {
+        opacity: 0.45;
+        transition: none;
     }
 
     &.ui-button--toggle {

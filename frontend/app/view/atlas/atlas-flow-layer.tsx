@@ -6,11 +6,19 @@
  * sender to the receiver as it happens and gone a few seconds later, and a task one agent handed another, dotted
  * and numbered, for a few minutes (atlas-flow.ts). A message with one end on the map only (its other agent is
  * stopped, filtered out, or not an agent of any machine listed) is a ring round the end that is.
+ *
+ * The lines run behind the nodes, so a line that passes a node does not cross its name. A second, faint copy of
+ * each line (only the line, no number or end) is drawn over the nodes, so that a line that passes behind a card
+ * can still be followed from one end to the other, in a dense grid or along a row.
  */
 
 import { createMemo, For, Show, type JSX } from "solid-js";
-import { flowCurves, type AtlasFlow, type FlowCurve, type FlowEnd, type FlowLine, type FlowNode } from "./atlas-flow";
+import { flowCurves, labelHalfWidth, type AtlasFlow, type FlowCurve, type FlowEnd, type FlowLine, type FlowNode } from "./atlas-flow";
 import { CONTAINER_FRAME_OUT, NODE_H, NODE_W, type Placed } from "./atlas-layout";
+
+/** The chip a task's number sits on is this much taller than its text's half-height, each side, and as much wider than the text. */
+const CHIP_H = 8;
+const CHIP_PAD = 4;
 
 /** How far outside a node its ring is drawn. */
 const RING_GAP = 3;
@@ -29,7 +37,8 @@ function flowMarks(
     nodes: ReadonlyMap<string, Placed>,
     framed: ReadonlySet<string>,
     avoid: readonly FlowNode[],
-    frameOut: number
+    frameOut: number,
+    edges: readonly (readonly Placed[])[]
 ): Map<string, Mark> {
     const node = (key: string): FlowNode | undefined => {
         const p = nodes.get(key);
@@ -49,7 +58,7 @@ function flowMarks(
         else if (one && flow.kind === "message") marks.set(flow.id, { curve: null, ring: one });
     }
     const all = [...[...nodes.keys()].flatMap((key) => node(key) ?? []), ...avoid];
-    for (const [id, curve] of flowCurves(lines, all)) marks.set(id, { curve, ring: null });
+    for (const [id, curve] of flowCurves(lines, all, edges)) marks.set(id, { curve, ring: null });
     return marks;
 }
 
@@ -69,9 +78,22 @@ function FlowMark(props: { flow: AtlasFlow; mark: Mark | undefined }): JSX.Eleme
                                 <path class="atlas-flow__line" d={curve().d} pathLength={props.flow.kind === "message" ? 1 : undefined} />
                                 <circle class="atlas-flow__end" cx={curve().end.x} cy={curve().end.y} r="3.5" />
                                 <Show when={props.flow.label}>
-                                    <text class="atlas-flow__label" x={curve().label.x} y={curve().label.y}>
-                                        {props.flow.label}
-                                    </text>
+                                    {(label) => (
+                                        <>
+                                            {/* In the line's own colour, so a number on a crossing is read as that line's. */}
+                                            <rect
+                                                class="atlas-flow__chip"
+                                                x={curve().label.x - labelHalfWidth(label()) - CHIP_PAD}
+                                                y={curve().label.y - CHIP_H}
+                                                width={(labelHalfWidth(label()) + CHIP_PAD) * 2}
+                                                height={CHIP_H * 2}
+                                                rx="4"
+                                            />
+                                            <text class="atlas-flow__label" x={curve().label.x} y={curve().label.y}>
+                                                {label()}
+                                            </text>
+                                        </>
+                                    )}
                                 </Show>
                             </>
                         )}
@@ -94,6 +116,23 @@ function FlowMark(props: { flow: AtlasFlow; mark: Mark | undefined }): JSX.Eleme
     );
 }
 
+/** The faint copy of a line, over the nodes. */
+function OverMark(props: { flow: AtlasFlow; mark: Mark | undefined }): JSX.Element {
+    return (
+        <Show when={props.mark?.curve}>
+            {(curve) => (
+                <g
+                    class={`atlas-flow atlas-flow--${props.flow.tone}`}
+                    classList={{ "atlas-flow--leaving": props.flow.leaving }}
+                    data-testid="atlas-flow-over"
+                >
+                    <path class="atlas-flow__line" d={curve().d} pathLength={props.flow.kind === "message" ? 1 : undefined} />
+                </g>
+            )}
+        </Show>
+    );
+}
+
 export function AtlasFlowLayer(props: {
     flows: readonly AtlasFlow[];
     /** The node an end of a line names, by its key, or null (atlas-flow.ts `flowEndResolver`). */
@@ -103,6 +142,8 @@ export function AtlasFlowLayer(props: {
     framed?: ReadonlySet<string>;
     /** What else a label keeps clear of (atlas-flow.ts `labelKeepOut`). */
     avoid?: readonly FlowNode[];
+    /** The lines of reports-to, as polylines: a task's number keeps clear of them. */
+    edges?: readonly (readonly Placed[])[];
     /** How far a frame reaches past its node: the layout's (`AtlasLayout.gaps.frame`), which closes in with its gaps. */
     frameOut?: number;
     width: number;
@@ -112,17 +153,28 @@ export function AtlasFlowLayer(props: {
     const ids = createMemo(() => props.flows.map((f) => f.id));
     const byId = createMemo(() => new Map(props.flows.map((f) => [f.id, f] as const)));
     const marks = createMemo(() =>
-        flowMarks(props.flows, props.resolve, props.nodes, props.framed ?? NO_FRAMES, props.avoid ?? [], props.frameOut ?? CONTAINER_FRAME_OUT)
+        flowMarks(props.flows, props.resolve, props.nodes, props.framed ?? NO_FRAMES, props.avoid ?? [], props.frameOut ?? CONTAINER_FRAME_OUT, props.edges ?? [])
     );
     return (
-        <svg class="atlas-flows" width={props.width} height={props.height} aria-hidden="true">
-            <For each={ids()}>
-                {(id) => (
-                    <Show when={byId().get(id)}>
-                        {(flow) => <FlowMark flow={flow()} mark={marks().get(id)} />}
-                    </Show>
-                )}
-            </For>
-        </svg>
+        <>
+            <svg class="atlas-flows" width={props.width} height={props.height} aria-hidden="true">
+                <For each={ids()}>
+                    {(id) => (
+                        <Show when={byId().get(id)}>
+                            {(flow) => <FlowMark flow={flow()} mark={marks().get(id)} />}
+                        </Show>
+                    )}
+                </For>
+            </svg>
+            <svg class="atlas-flows atlas-flows--over" width={props.width} height={props.height} aria-hidden="true">
+                <For each={ids()}>
+                    {(id) => (
+                        <Show when={byId().get(id)}>
+                            {(flow) => <OverMark flow={flow()} mark={marks().get(id)} />}
+                        </Show>
+                    )}
+                </For>
+            </svg>
+        </>
     );
 }

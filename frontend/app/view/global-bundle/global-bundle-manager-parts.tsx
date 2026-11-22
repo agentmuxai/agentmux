@@ -208,7 +208,7 @@ export function FullViewPane(part: { s: GlobalBundleManagerState; view: Accessor
             {/* The Personal Memory back/breadcrumb header
                 (native-memory-manager.tsx), one level deep here. */}
             <div class="native-memory-manager-header">
-                <UiButton class="native-memory-manager-back" density="compact" onClick={back}>
+                <UiButton class="native-memory-manager-back" density="compact" pending={false} onClick={back}>
                     ← All global memory
                 </UiButton>
                 <span class="native-memory-manager-crumbs">
