@@ -271,6 +271,7 @@ pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 11;
 pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
     conn.execute_batch(store_schema::IDENTITY_STORE_TABLES_SQL)?;
     conn.execute_batch(super::vault::VAULT_SCHEMA)?; // The Vault's tables, no version bump: storage/vault.rs.
+    conn.execute_batch(super::vault_sync::SCHEMA)?; // What a shared Vault keeps besides: storage/vault_sync.rs.
     store_schema::seed_identity_blank_bundle(conn)?;
     store_schema::add_identity_store_columns(conn)?;
 

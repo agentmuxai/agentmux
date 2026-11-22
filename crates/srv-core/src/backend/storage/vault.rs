@@ -305,6 +305,12 @@ impl Store {
         let tx = conn.unchecked_transaction()?;
         tx.execute("DELETE FROM db_vault_grants WHERE entry_id = ?1", params![id])?;
         tx.execute("DELETE FROM db_vault_versions WHERE entry_id = ?1", params![id])?;
+        // The ids that opened it are kept for good as retired, so none is given to another entry.
+        tx.execute(
+            "INSERT OR IGNORE INTO db_vault_link_retired (link_id) SELECT link_id FROM db_vault_link_ids WHERE entry_id = ?1 UNION SELECT link_id FROM db_vault_link_aliases WHERE entry_id = ?1",
+            params![id],
+        )?;
+        tx.execute("DELETE FROM db_vault_link_aliases WHERE entry_id = ?1", params![id])?;
         tx.execute("DELETE FROM db_vault_link_ids WHERE entry_id = ?1", params![id])?;
         let n = tx.execute("DELETE FROM db_vault_entries WHERE id = ?1", params![id])?;
         tx.commit()?;
@@ -594,7 +600,7 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         Ok(conn
             .query_row(
-                "SELECT l.entry_id FROM db_vault_link_ids l JOIN db_vault_entries e ON e.id = l.entry_id WHERE l.link_id = ?1",
+                "SELECT l.entry_id FROM (SELECT entry_id, link_id FROM db_vault_link_ids UNION ALL SELECT entry_id, link_id FROM db_vault_link_aliases) l JOIN db_vault_entries e ON e.id = l.entry_id WHERE l.link_id = ?1",
                 params![link_id],
                 |r| r.get(0),
             )
