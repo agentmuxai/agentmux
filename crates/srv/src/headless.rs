@@ -348,6 +348,17 @@ pub(crate) fn publish_port(port: u16) {
     use std::io::Write;
     if let Err(e) = opts.open(&path).and_then(|mut f| f.write_all(format!("{port}\n").as_bytes())) {
         tracing::warn!(file = %path.display(), error = %e, "could not write the web port file; `agentmux-srv open` needs --port");
+        return;
+    }
+    // As a Windows service, the person who installed it reads the port as well as the key (`agentmux open` finds the server by it).
+    #[cfg(windows)]
+    {
+        let readers = agentmux_common::owner_only::key_readers();
+        if !readers.is_empty() {
+            if let Err(e) = agentmux_common::owner_only::restrict_to_user_and_readers(&path, &readers) {
+                tracing::warn!(file = %path.display(), error = %e, "could not let the person who installed the service read the web port file; `agentmux open` needs --port");
+            }
+        }
     }
 }
 
@@ -434,7 +445,8 @@ fn write_generated_key(dir: &Path) -> Result<(String, PathBuf), String> {
     // Windows has no mode bits: the file's own access list gives it to the user and the system only, whatever the
     // folder it is in lets others do.
     #[cfg(windows)]
-    agentmux_common::owner_only::restrict_to_user(&path).map_err(|e| format!("the auth key at {} could not be limited to you: {e}", path.display()))?;
+    agentmux_common::owner_only::restrict_to_user_and_readers(&path, &agentmux_common::owner_only::key_readers())
+        .map_err(|e| format!("the auth key at {} could not be limited to you: {e}", path.display()))?;
     Ok((key, path))
 }
 
