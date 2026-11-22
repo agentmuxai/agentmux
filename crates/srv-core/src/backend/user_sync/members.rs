@@ -340,6 +340,25 @@ impl Chain {
         Ok(state)
     }
 
+    /// The entries beside the head that this machine has seen and not outgrown.
+    pub fn forks(&self) -> &[Entry] {
+        &self.contested
+    }
+
+    /// A chain read back from the store: the entries are checked in order, and each fork entry must be one that was
+    /// valid beside the head.
+    pub fn restore(collection: &str, entries: Vec<Entry>, forks: Vec<Entry>) -> Result<Chain, MemberError> {
+        Chain::replay(collection, &entries)?;
+        if !forks.is_empty() {
+            let before = entries.split_last().map(|(_, rest)| rest).ok_or(MemberError::DoesNotExtend)?;
+            for f in &forks {
+                let mut state = Chain::replay(collection, before)?;
+                state.apply(f)?;
+            }
+        }
+        Ok(Chain { entries, contested: forks })
+    }
+
     /// A chain from entries received whole: every one is checked in order.
     pub fn from_entries(collection: &str, entries: Vec<Entry>) -> Result<Chain, MemberError> {
         Chain::replay(collection, &entries)?;

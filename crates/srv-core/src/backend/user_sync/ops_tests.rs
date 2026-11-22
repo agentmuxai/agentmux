@@ -12,6 +12,7 @@ use rusqlite::Connection;
 use zeroize::Zeroizing;
 
 use super::adapter::NewestWins;
+use super::chain_store::{self, LoadError};
 use super::hlc::Clock;
 use super::log::{self, Outcome, Refused, Signer};
 use super::members::{Change, Chain, Entry, MemberError, Policy, Subject, Taken};
@@ -544,4 +545,56 @@ fn an_approval_with_no_key_to_give_adds_nobody_and_keeps_the_request_waiting() {
     assert_eq!((a.pending.len(), a.chains[C].entries.len()), (1, 1));
     a.keys = true;
     assert!(ops::approve(&mut a.ctx(), C, &b.id).is_ok());
+}
+
+#[test]
+fn the_chains_come_back_after_a_restart_with_their_removals_and_unsettled_forks() {
+    let (mut a, mut b, c) = three("kanban");
+    a.found("board.2", "kanban", Policy::Approve);
+    assert_eq!(chain_store::load_all(&a.conn).unwrap(), a.chains);
+    // A fork not yet outgrown, and a removal: both are read back.
+    ops::change(&mut a.ctx(), C, Change::SetPolicy { policy: Policy::Approve }).unwrap();
+    let gone = ended(&[(&a, 0), (&b, 0)]);
+    let remove = ops::change(&mut b.ctx(), C, Change::Remove { id: c.id.clone(), ended: gone }).unwrap();
+    ops::members(&mut a.ctx(), &b.id, &MembersReq { collection: C.into(), have_n: 3, offered: vec![remove] }).unwrap();
+    assert!(!ops::may_seal(&a.ctx(), C));
+    let back = chain_store::load_all(&a.conn).unwrap();
+    assert_eq!(back, a.chains);
+    assert!(back[C].epoch_contested(), "the fork is still unsettled after a restart");
+    let bb = chain_store::load_all(&b.conn).unwrap();
+    assert_eq!(bb[C].state(C).unwrap().epoch, 1);
+}
+
+#[test]
+fn a_stored_chain_that_was_altered_is_an_error_not_a_shorter_collection() {
+    let (a, _, _) = three("kanban");
+    let altered = |sql: &str| {
+        let copy = Connection::open_in_memory().unwrap();
+        log::init(&copy).unwrap();
+        for (slot, idx, text) in a.conn.prepare("SELECT slot, idx, entry FROM db_sync_chain").unwrap().query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?))).unwrap().map(|r| r.unwrap()) {
+            copy.execute("INSERT INTO db_sync_chain (collection, slot, idx, entry) VALUES (?1, ?2, ?3, ?4)", rusqlite::params![C, slot, idx, text]).unwrap();
+        }
+        copy.execute(sql, []).unwrap();
+        chain_store::load(&copy, C)
+    };
+    assert!(chain_store::load(&a.conn, C).unwrap().is_some());
+    assert!(matches!(altered("DELETE FROM db_sync_chain WHERE idx = 1"), Err(LoadError::Unsound(_))), "a middle entry gone");
+    assert!(matches!(altered("UPDATE db_sync_chain SET entry = replace(entry, '\"n\":2', '\"n\":3') WHERE idx = 1"), Err(LoadError::Unsound(_))));
+    assert!(matches!(altered("UPDATE db_sync_chain SET entry = 'not json' WHERE idx = 2"), Err(LoadError::Unreadable)));
+}
+
+#[test]
+fn a_joiner_keeps_the_chain_it_took_and_its_epoch_follows_it() {
+    let (mut a, mut b, c) = three("kanban");
+    let gone = ended(&[(&a, 0), (&b, 0)]);
+    ops::change(&mut a.ctx(), C, Change::Remove { id: c.id.clone(), ended: gone }).unwrap();
+    let mut d = node(4);
+    let req = JoinReq { collection: C.into(), subject: d.subject.clone() };
+    let Joined::Added { entries, .. } = ops::join(&mut a.ctx(), &d.id, &req).unwrap() else { panic!("added") };
+    let a_id = a.id.clone();
+    let chain = ops::take_join(C, &d.id, entries, &|m| m == a_id).unwrap();
+    ops::adopt(&d.conn, &mut d.chains, C, "kanban", chain, NOW).unwrap();
+    assert_eq!(log::collection_epoch(&d.conn, C).unwrap(), Some(1));
+    assert_eq!(chain_store::load_all(&d.conn).unwrap(), d.chains);
+    let _ = &mut b;
 }

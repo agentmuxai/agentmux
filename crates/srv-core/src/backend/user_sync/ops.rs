@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use rusqlite::Connection;
 
 use super::adapter::Adapter;
+use super::chain_store;
 use super::hlc::Clock;
 use super::log::{self, Outcome, Refused, Signer, SyncError, Vector};
 use super::members::{Chain, Change, Entry, Kind, MemberError, Policy, State, Subject, Taken};
@@ -316,6 +317,7 @@ pub fn members(ctx: &mut Ctx, caller: &str, req: &MembersReq) -> Result<MembersA
         let chain = ctx.chains.get_mut(&req.collection).ok_or(OpError::NotMember)?;
         taken = req.offered.iter().map(|e| chain.take(&req.collection, e.clone())).collect();
         sync_epoch(ctx.conn, &req.collection, chain)?;
+        chain_store::save(ctx.conn, &req.collection, chain)?;
     }
     // What the caller may read is decided after its offers are taken: one that removes the caller itself ends what it sees.
     let still_current = matches!(standing(ctx, &req.collection, caller), Standing::Current(_));
@@ -358,6 +360,7 @@ pub fn change(ctx: &mut Ctx, collection: &str, change: Change) -> Result<Entry, 
     let entry = chain.next(ctx.me.private, collection, ctx.me.id, change).ok_or(OpError::Bad)?;
     chain.take(collection, entry.clone()).map_err(|_| OpError::Bad)?;
     sync_epoch(ctx.conn, collection, chain)?;
+    chain_store::save(ctx.conn, collection, chain)?;
     Ok(entry)
 }
 
@@ -475,6 +478,17 @@ pub fn found(conn: &Connection, chains: &mut BTreeMap<String, Chain>, collection
     log::ensure_collection(conn, collection, kind, now_ms)?;
     let first = Entry::sign(private, collection, 1, None, Change::Found { member: me.clone(), policy }, &me.id).ok_or(OpError::Bad)?;
     let chain = Chain::from_entries(collection, vec![first]).map_err(|_| OpError::Bad)?;
+    chain_store::save(conn, collection, &chain)?;
+    chains.insert(collection.to_string(), chain);
+    Ok(())
+}
+
+/// A joiner keeps the chain it took ([`take_join`]): the collection in the log, the chain in the store, and the log's
+/// key epoch where the chain says it is.
+pub fn adopt(conn: &Connection, chains: &mut BTreeMap<String, Chain>, collection: &str, kind: &str, chain: Chain, now_ms: i64) -> Result<(), OpError> {
+    log::ensure_collection(conn, collection, kind, now_ms)?;
+    sync_epoch(conn, collection, &chain)?;
+    chain_store::save(conn, collection, &chain)?;
     chains.insert(collection.to_string(), chain);
     Ok(())
 }
