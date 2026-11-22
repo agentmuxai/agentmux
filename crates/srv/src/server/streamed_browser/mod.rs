@@ -25,6 +25,8 @@ mod pane;
 #[cfg_attr(not(unix), allow(dead_code))]
 mod popups;
 mod protocol;
+#[cfg(target_os = "linux")]
+mod screen;
 #[cfg_attr(not(unix), allow(dead_code))]
 mod windows;
 
@@ -62,6 +64,8 @@ pub(in crate::server) struct Params {
     url: Option<String>,
     w: Option<u32>,
     h: Option<u32>,
+    /// `screen`: an ordinary Chrome on a virtual screen, with nothing attached (`screen`, on when `AGENTMUX_STREAMED_BROWSER_SCREEN=1`).
+    mode: Option<String>,
 }
 
 /// The pane's start: a web address (or none) and a size within the limits.
@@ -97,7 +101,24 @@ pub(in crate::server) async fn handle(
         Err(e) => return (StatusCode::BAD_REQUEST, e).into_response(),
     };
     let session = session.map(|Extension(s)| s);
+    if params.mode.as_deref() == Some("screen") {
+        return screen_pane(ws, start, session_ended(session));
+    }
     upgrade(ws, start, session_ended(session))
+}
+
+/// A screen-mode pane, when this server has that mode on.
+#[cfg(target_os = "linux")]
+fn screen_pane(ws: WebSocketUpgrade, start: pane::Start, ended: impl std::future::Future<Output = ()> + Send + 'static) -> Response {
+    if !screen::enabled() {
+        return (StatusCode::NOT_FOUND, "screen mode is not on in this server").into_response();
+    }
+    screen::upgrade(ws, start, ended)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn screen_pane(_ws: WebSocketUpgrade, _start: pane::Start, _ended: impl std::future::Future<Output = ()> + Send + 'static) -> Response {
+    (StatusCode::NOT_FOUND, "screen mode needs a Linux server").into_response()
 }
 
 /// Upgrade to the pane's WebSocket and run the pane until it ends (or `ended` does).
@@ -129,7 +150,7 @@ mod tests {
 
     #[test]
     fn a_pane_starts_with_a_web_address_or_a_blank_page_and_a_size_in_range() {
-        let p = |url: Option<&str>, w, h| Params { url: url.map(str::to_string), w, h };
+        let p = |url: Option<&str>, w, h| Params { url: url.map(str::to_string), w, h, mode: None };
         let s = start_from(&p(None, None, None)).unwrap();
         assert_eq!((s.url.as_str(), s.w, s.h), ("about:blank", 1024, 640));
         assert_eq!(start_from(&p(Some("https://example.com"), Some(800), Some(600))).unwrap().url, "https://example.com/");
