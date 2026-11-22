@@ -54,6 +54,7 @@ mod close;
 pub(crate) mod discard;
 pub(crate) mod media_grants;
 pub(crate) mod media_prompt;
+pub(crate) mod overlay_holes;
 mod navigation;
 #[cfg(not(target_os = "macos"))]
 pub(crate) mod views_clip;

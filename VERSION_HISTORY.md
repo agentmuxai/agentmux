@@ -1,5 +1,119 @@
 # AgentMux Version History
 
+## 0.60.38 — 2026-11-21
+
+- On macOS a toast over a browser pane no longer takes the page's keyboard or makes the whole pane ignore clicks: the page keeps both, and the mouse goes to the toast only over its own pixels
+- A message re-sent after a failure shows once in the conversation, and a rate-limit wording or a later usage-limit reset no longer misleads the wait
+- New keys: Ctrl+Shift+O (⌘⇧O) then a letter opens Terminal, Files, Swarm, Kanban, Vault, History, System Info, Connectors or Memory; Back and Forward to the panes you focused.
+- A host Claude Code agent whose folder a container agent can write takes its settings, hooks, instructions and skills only from AgentMux, and its scheduled prompts are off there
+- Account usage: how much of each usage window is used, with its reset time, in an account's panel and at the top of the Swarm
+- The record's flags are said: a quiet Long-run record note in the status bar's performance notices and one held note for each steward agent
+- Rows just past the edge of a long transcript's drawn window show as empty boxes of their own height, so a fast scroll no longer meets blank space
+- The agent pane's composer and its other controls (the permission and question panels, the queue, the banners, the activity dock, the composer strip, the find bar) now follow the app's chrome zoom, while the conversation keeps the pane's zoom
+- Settings > Kanban: dragging a stage shows a readable picture of the row in a dark theme
+- shortcuts verifier: Escape is tried on the replace-pane confirmation again
+- The status bar's panels (the version and instance panel, host, backend, CPU, disk, GPU, usage and update panels) stay inside the window at a large chrome zoom or a short window: a panel taller than the room scrolls inside itself, so its top rows are no longer cut off
+- Save As offers a free file name when the default one already exists, so Return never opens the replace prompt (macOS stray popup)
+- The Jobs tab's Open graph button opens a Drone job's graph in the Drone pane
+- A second AgentMux started beside another no longer reads, records or logs the memory of agents it does not run
+- Connectors: the filter stays in the list's block on wide panes, opened accounts keep a readable width, the agents with no Connect get their own heading, and the add section has one heading
+- The Jobs tab lists a Drone graph that has run (it read the wrong store for the drones)
+- Only the AgentMux window can answer a question an agent asked the person or answer a tool permission: an agent's connection, or one that is not the window, is refused
+- Settings fills a wide pane with several columns of readable width; a narrow pane is unchanged
+- Key chords (Ctrl+Shift+O then a letter, the split chord) now work while a Browser pane has focus
+- Screenshots are captured at twice the pixel density, a capture below that is refused, and check-crisp.mjs fails an image that is under twice its slot (Spec: docs/specs/SPEC_WEBSITE_DOCS_MEDIA_REFRESH_2026_11_20.md)
+- fix(browser pane): an agent's zoom of a pane follows the pane's size again when the pane is resized (the follower was only called by a path the page no longer uses), and a skipped refit is logged
+- Menus, submenus, popovers and drop-downs stay fully solid at any window opacity on Windows, macOS and Linux: the window opacity is carried by the page's own backgrounds instead of a whole-window alpha, and floating panels paint the opaque menu fill. Text keeps its sharp sub-pixel smoothing at 100% opacity: the page carries the opacity from the start only after a window has been below 100%, and a window lowered in a session that started at 100% fades with the system until the next start, which the Opacity menu says
+- agentmux --home <folder> keeps a headless server's whole data root (its own and the shared agents, accounts and history) in a folder of its own, for the CLI, the server and its login service; setup and the spec now say what a channel shares
+- An agent's output lines are stored with a signed stamp of the runtime that wrote them
+- Settings schema lists every key the code reads; the settings-key check no longer lets a family stand in for a key
+- Links: one recognition layer that finds agent names, task numbers, pull requests and web addresses in text and builds their links from the entity, never from the text (no surface uses it yet)
+- A window tab's agent panes are drawn while the pointer rests on its pill, so the tab shows every pane at its latest content when you click it (setting window:drawtabonhover, on by default); spec: docs/specs/SPEC_WINDOW_TAB_SWITCH_DRAW_ON_INTENT_2026_11_12.md
+- Swarm: a coloured tag for each agent's seat, and the model tag component (shown once the runtime reports the model)
+- A model change on a route agent can start a fresh session with a handoff (fresh and handoff on Agents update and agent.model.switch), and one that resumes the conversation says so
+- Split handle_misc_service into named per-namespace handlers and cover its methods with tests (#436)
+- A terminal pane's AGENTMUX_LOG_DIR is the instance's own log folder, not the launcher's home folder
+- Split bundle_import_commit_impl into named helpers and cover the commit response with tests (#436)
+- docs/linux.md says where AGENTMUX_LOG_DIR points; a test pins the log folder a pane gets to the instance's own
+- The upgrade floor is now signed in a release's manifest, and an update check or download that reads the signed files uses it
+- Settings columns: a header that starts a column sits level with the rest, a group's last row stays with the row before it, and the scrollbar test guards the narrow rule
+- Split agent_define_core into named helpers and cover its if_exists and stub handling with tests (#436)
+- Clips are recorded from frames at twice the page's size and kept at it: an H.264 file of at least 1080 lines plus a WebP poster, a clip that is too small or would be enlarged fails, and check-crisp checks a recordings manifest
+- The Editor's disk-conflict test no longer races the fake disk read on a slow runner
+- The docs reference check compares the provider table of the Provider CLI page with the providers in the code
+- Agents can read what each agent on this machine actually runs on: Agents list gains model fields, filters and paging, and Agents status gives a compact glance (spec: docs/specs/SPEC_MUXAPI_AGENT_LIVE_FACTS_2026_11_20.md)
+- Kanban: agent names, task numbers, pull requests and web addresses in a card's text are links, and the holder's name on a card opens its pane
+- A container agent's workspace and volumes may not be the AgentMux folders or a folder that holds them
+- A running release build can list each browser's page role, visibility and running animations through a new host route, the first step of muxspect browsers
+- muxspect browsers shows which page each renderer draws, with its CPU, visibility and running animations, on a running release build
+- On Windows the first Save As for a pane download opens in Downloads, as it does on macOS and Linux
+- A fork's copied history is signed for the fork, and its mark records which runtime wrote the copied part
+- Swarm: the model tag shows each agent's running model, read from the runtime row's live facts
+- An agent's connection can no longer type into a terminal or send Stop and resize to a pane through the window's input commands: it is refused with what to use instead (the Terminal tool, Message send)
+- docs check: the pane type table in the docs is compared with the views of the default widgets
+- A running language server no longer opens a file that resolves into a folder a container agent can write, and is stopped when its project folder comes to hold one
+- The update row no longer tells you to answer a dialog while the app restarts: it says what is true for the install
+- Values AgentMux holds secret (its keys, an agent's token, a Vault value handed to an agent's process) are never written into an agent's conversation record or shown from one to a paired device: each is replaced by a mark
+- The status bar's disk item shows the free amount as well as the percent: Disk 13%/45GB free
+- A workflow step that runs an agent in a folder a container agent can write, or has run in, is not started on this computer
+- A message a container agent wrote reads only that agent's folders in any pane: the runtime of a line's writer reaches the viewer, and a fork of a container agent's history is attributed to it
+- Agent names, task numbers and pull requests in an agent's messages are links to their pane, the Kanban card or the pull request
+- A container agent is refused the MCP server commands that would start a program on this computer
+- The streamed Browser pane shows a window a page opens (a sign-in pop-up), with its own address, and tells you when it closes a window or dismisses a message box
+- Each agent harness now has a tier: the eight first-class ones, and the rest as Preview, shown in a separate group in Tools.
+- settings: the shutdown chime's description gives the 30 second window (15 when an agent quits itself)
+- Split dispatch_event in the object-update bridge into per-object handlers and pin its frames with tests (#436)
+- Links and link-like openers show the hand pointer: anchors without an href, role=link elements and text-styled buttons that open something; a name that does not resolve keeps the arrow
+- A long Kanban column draws only the cards near the view, so a board with thousands of tasks stays fast
+- A conversation read from the record and a session exported with an agent never hold the values AgentMux keeps secret: they are replaced by [withheld]
+- Kanban, narrow layout: a bar at the top of the list links to each section with its count and colour, and Collapse all folds every section
+- Agents list and Agents status can ask another machine: host names a LAN peer or all, each peer answers a new read-only agents.status op, and a peer that does not answer is listed by liveness only (spec: docs/specs/SPEC_MUXAPI_AGENT_LIVE_FACTS_2026_11_20.md)
+- feat(headless): agentmux service run, the Windows service entry (hidden), and the spec for Headless as a Windows service
+- Split bind_listeners_and_network into named startup steps and cover its startup effects with tests (#436)
+- A drone saved, run or replayed by an agent is recorded as that agent, only the person's window answers a run that needs attention, and a drone can read a Global Memory entry or see who works on a repository and add a note to a task it filed
+- A Swarm broadcast sent to an agent on another channel of the same install reaches it as the person's words only when the sending channel confirms the person's window sent it; anything else arrives as an ordinary agent message. Upgrade note: both channels need this version for a cross-channel broadcast to arrive as the person's words; from an older channel it arrives as an ordinary message.
+- A fresh agent pane's picker offers Open here for an idle agent that is open in another pane: it moves into this pane with its session kept, and the old pane closes
+- Posting a bulletin or a channel post is no longer refused for the word tokens used as usage units, and a refusal says which word or phrase it matched
+- A task or message to an agent name nobody answers to now offers the closest agent ids, such as the id behind a workspace folder name
+- An agent's own run call is held to what an agent may fire, a Drone delete and a wait's end are logged as the connection that made them
+- Windows builds: the Taskfile's backend, host, bundle and dev steps read cargo's output from CARGO_TARGET_DIR when it is set (a target folder on another drive works), and a CI gate keeps a literal target/release out of the Taskfile
+- The model panel has a Start a fresh session choice: turn it on and the next model change starts the new model without the earlier conversation
+- Split the WebSocket connection loop into per-branch methods and cover it with live-socket tests
+- The Drone pane shows a Trigger card at the left of the canvas: a run by hand and each job that runs the drone, with its trigger and a way to open the Jobs pane
+- sound: the audio device is opened once the app has drawn and is idle, never with sounds off, and the open's cost is logged
+- Split create_shell into named steps and cover it with router-level tests
+- Only the person's window changes the settings that waive or widen consent, keeps a stopping agent running, or writes typed history and drafts; an agent's call is refused and recorded as that agent
+- An agent's UI click or key press is refused on a prompt that asks the person (a question, a tool permission, a sign-in save), and the refusal tells it to ask them
+- An agent cannot be created, renamed or defined with a name that reads as the person or as AgentMux, and the account-switch, sensitive-window and cron records name an agent with its prefix
+- The agent runtime store keeps a signal for each agent, so an event for one agent re-runs only what reads that agent, and an event that changes nothing re-runs nothing
+- A model switch asked for during a turn shows on the agent's runtime row as the model it is switching to, until it applies
+- Fix: dragging a text selection out of the agent pane's composer (or any text field) now selects to where the pointer is, in any pane, instead of collapsing
+- On Windows a Browser pane fades with the window when the window is below 100% opacity, instead of staying a solid rectangle while everything around it fades
+- Split create_default_contents into named steps and cover it with direct tests
+- More of the values srv makes for an agent's process or files are withheld from transcripts and the paired-device feed
+- Kanban: a card keeps a list of all its pull requests, in every repository, each with its state; the poll and every link write to it
+- A Kanban card with several pull requests shows how many have merged, lists them in its drawer, and says when it waits on its holder
+- A workspace file's run-commands answer now comes only from the person's own window, and a Global Memory write is recorded as the person's only when their window made it
+- A shell or PTY shell call acts only on the calling agent's own pane: the pane comes from the caller's token or signed identity, never from a field of the request
+- feat(editor): a document tab's menu pins and unpins it, copies its path, and closes the other tabs or those to its right
+- Split the browser terminal handler into named steps and cover it with handler-level tests
+- On macOS a window that is below 100% opacity keeps its see-through panes after another debugging client, such as an agent browsing, connects and disconnects
+- task dev: a CI gate fails when a cargo build line in the Taskfile loses the dev settings (LTO off), so task dev cannot silently build full LTO
+- Only the person's window accepts the terms; a service call with no agent credential is recorded as unproven; a remote's settings write is recorded with the connection and key names
+- Kanban: a pull request is matched to exactly one card by its task reference and agent tag, or listed as unmatched; the intake of pull request events trusts only the integration's own signed events
+- The Drone's trigger card and trigger-field checks read the jobs that run a drone from the store jobs live in, so they no longer fail on a home without a jobs table in its own store
+- A two-srv test harness: a second srv instance with its own state and viewer listener that a paired viewer can pair with, read the feed from and send through, over the pinned certificate
+- The command palette opens in the key press's own task and a typed character costs only the rows that changed
+- The agent runtime store's test counts how many readers an event wakes, not how long it takes, so it does not depend on the speed of a shared runner
+- Kanban: the operator links, unlinks and dismisses pull requests on a card (kanban.act pr_link, pr_unlink, pr_unmatched, pr_dismiss); a task's holder takes one off with Tasks update links.unpr
+- The Atlas no longer draws the Pull requests node (the review bot and CI) or any line to or from it: the map is agents, their containers and what passes between them
+- Open Agent History and Open in Audit show the link hand pointer
+- A bulletin or channel post that holds a value AgentMux knows to be a secret, or a credential name such as access_token with a value after it, is refused, and the refusal names the rule and never the value
+- A message from the relay no longer starts a turn for an agent that is out of quota or signed out: it goes back to the relay and is delivered after the reset
+- The values srv hides from transcripts are now dropped when they stop working (expired, revoked, replaced), the GitHub and AWS session values it hands an agent are hidden until they expire, every stored agent key is hidden from start-up, and a Claude sign-in file's tokens are hidden each time the file is read
+- The agent pane's View panel shows an instant tooltip on every button and link, saying what choosing it does, on hover and on keyboard focus
+- Only the person's window shuts an agent down from its composer or menu; the service route opens the stop countdown in the caller's name instead
+
 ## 0.60.37 — 2026-11-20
 
 - Connectors is one list of cards, one per connector, with Connect on each; a connected card opens its accounts in place, and the cards reflow from a thin pane to a very wide one

@@ -178,6 +178,15 @@ impl HostLanKeys {
         })
     }
 
+    /// The private half of every key the host holds, for the transcript withhold registry.
+    pub fn private_keys(&self) -> Result<Vec<String>, StoreError> {
+        self.with(|conn| {
+            let mut stmt = conn.prepare("SELECT private_key FROM db_host_lan_keys")?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+            rows.collect()
+        })
+    }
+
     /// Drop the host's keys for `subjects`: an agent that was deleted. A channel that still has the agent
     /// publishes its own key again the next time it asks.
     pub fn forget(&self, kind: HostKeyKind, subjects: &[String]) -> Result<usize, StoreError> {

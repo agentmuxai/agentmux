@@ -5,9 +5,7 @@
  * The lines of the Atlas map that are not "reports to": a message from one agent to another, drawn from the
  * sender to the receiver as it happens and gone a few seconds later, and a task one agent handed another, dotted
  * and numbered, for a few minutes (atlas-flow.ts). A message with one end on the map only (its other agent is
- * stopped, filtered out, or not an agent of any machine listed) is a ring round the end that is. A review of a
- * pull request, and its checks, are dashed lines from the review bot's node and CI's to the pull request's agent
- * (atlas-pr.ts), with its number: bright at first, then dim for as long as the pull request is open.
+ * stopped, filtered out, or not an agent of any machine listed) is a ring round the end that is.
  */
 
 import { createMemo, For, Show, type JSX } from "solid-js";
@@ -61,7 +59,7 @@ function FlowMark(props: { flow: AtlasFlow; mark: Mark | undefined }): JSX.Eleme
             {(m) => (
                 <g
                     class={`atlas-flow atlas-flow--${props.flow.tone}`}
-                    classList={{ "atlas-flow--leaving": props.flow.leaving, "atlas-flow--dim": !!props.flow.dim }}
+                    classList={{ "atlas-flow--leaving": props.flow.leaving }}
                     data-testid="atlas-flow"
                     data-kind={props.flow.kind}
                 >

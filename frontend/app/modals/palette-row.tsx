@@ -4,9 +4,12 @@
 // One row of the command palette (SPEC_COMMAND_PALETTE_TOP_CENTRE_2026_11_17.md R9 to R14): the icon when the
 // command has one, the label, the detail in muted text, and at the right the shortcut as key caps and, on the first
 // row of a group, the group's name. A row with no shortcut has nothing at the right.
+//
+// A row is built once for its command and then updated in place (the list keys its rows by command id), so nothing
+// here measures or observes anything: the tooltip a cut label gets is set by `palette-cut-labels.ts` for the whole
+// list at once, after the frame that drew it.
 
-import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
-import { tip } from "@/app/element/tip";
+import { createMemo, For, Show, type JSX } from "solid-js";
 import { Kbd } from "@/app/element/ui";
 import { shortcutFor } from "@/app/keybindings";
 import { keyCaps, keyCapsWords } from "@/app/keybindings/caps";
@@ -42,27 +45,16 @@ export function PaletteRow(props: {
     onPick: (e: MouseEvent) => void;
 }): JSX.Element {
     const cmd = () => props.row.cmd;
-    // A label the row cuts is the one whose full text the tooltip gives (R14); a whole one needs no tooltip.
-    let labelRef!: HTMLSpanElement;
-    const [cut, setCut] = createSignal(false);
-    onMount(() => {
-        const measure = () => setCut(labelRef.scrollWidth > labelRef.clientWidth);
-        measure();
-        // A window resized with the palette open cuts other labels, and whole ones that were cut.
-        if (typeof ResizeObserver === "undefined") return;
-        const observer = new ResizeObserver(measure);
-        observer.observe(labelRef);
-        onCleanup(() => observer.disconnect());
-    });
+    // Looked up once per change of command, not once per use (the name, the caps and the test for them each need it).
+    const shortcut = createMemo(() => shortcutFor(cmd().id));
     return (
         <div
             id={props.id}
             role="option"
             aria-selected={props.selected}
-            aria-label={rowName(cmd(), shortcutFor(cmd().id))}
+            aria-label={rowName(cmd(), shortcut())}
             class="command-palette-item"
             classList={{ selected: props.selected, "group-start": props.row.divider }}
-            {...tip(cut() ? cmd().label : undefined)}
             onClick={(e) => props.onPick(e)}
         >
             <Show when={cmd().icon}>
@@ -72,14 +64,12 @@ export function PaletteRow(props: {
                 />
             </Show>
             <span class="command-palette-item-text">
-                <span ref={labelRef} class="command-palette-item-label">
-                    {cmd().label}
-                </span>
+                <span class="command-palette-item-label">{cmd().label}</span>
                 <Show when={cmd().detail}>
                     <span class="command-palette-item-detail">{cmd().detail}</span>
                 </Show>
             </span>
-            <Show when={shortcutFor(cmd().id)}>{(k) => <ShortcutCaps label={k()} />}</Show>
+            <Show when={shortcut()}>{(k) => <ShortcutCaps label={k()} />}</Show>
             <Show when={props.groupColumn}>
                 <span class="command-palette-item-group">{props.row.group}</span>
             </Show>

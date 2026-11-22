@@ -136,6 +136,14 @@
             "method": "AgentShutdownKeepCommand"
         },
         {
+            "command": "agentquit",
+            "method": "AgentQuitCommand"
+        },
+        {
+            "command": "agentshutdown",
+            "method": "AgentShutdownCommand"
+        },
+        {
             "command": "agentshutdownnow",
             "method": "AgentShutdownNowCommand"
         },
@@ -1216,6 +1224,14 @@
         {
             "command": "client.agreetos",
             "method": "ClientAgreeTosCommand"
+        },
+        {
+            "command": "folderoverlapcheck",
+            "method": "FolderOverlapCheckCommand"
+        },
+        {
+            "command": "folderoverlapaccept",
+            "method": "FolderOverlapAcceptCommand"
         },
         {
             "command": "browsergrants.list",

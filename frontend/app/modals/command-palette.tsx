@@ -15,9 +15,11 @@ import { t } from "@/app/i18n/i18n";
 import { Modal } from "@/element/modal";
 import { searchCommands } from "./command-palette-search";
 import { usePaletteAgents } from "./palette-agents";
-import { arrangeRecent, paletteRows, paletteSegments, sortCommands } from "./palette-groups";
+import { arrangeRecent, paletteRows, paletteSegments, sortCommands, type PaletteRowModel } from "./palette-groups";
+import { watchCutLabels } from "./palette-cut-labels";
 import { PaletteRow } from "./palette-row";
-import { createMemo, createSignal, createUniqueId, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { markEnd, markStart } from "@/perf/marks";
+import { batch, createEffect, createMemo, createSignal, createUniqueId, For, on, onCleanup, onMount, Show, type JSX } from "solid-js";
 import "./command-palette.scss";
 
 /**
@@ -69,6 +71,43 @@ function keyIntent(e: KeyboardEvent, i: number, last: number, list: HTMLElement)
     return e.key === "Enter" ? { kind: "run", forceNew: e.shiftKey } : null;
 }
 
+/** The palette's budgets: a press to the painted palette, and a typed character to its rows (script time). */
+const OPEN_BUDGET_MS = 50;
+const KEYSTROKE_BUDGET_MS = 16;
+
+/** The measures are in the performance panel and the HUD; one over its budget is also a line in the log. */
+function reportOver(name: string, ms: number | null, budget: number): void {
+    if (ms != null && ms > budget) console.warn(`[perf] ${name} ${ms.toFixed(1)}ms, over its ${budget}ms budget`);
+}
+
+/** From the press that asked for the palette to the frame that shows it: the first frame after this task, which a timer queued from the frame callback follows. */
+function markOpenPainted(): void {
+    requestAnimationFrame(() => setTimeout(() => reportOver("palette-open", markEnd("palette-open", "painted"), OPEN_BUDGET_MS), 0));
+}
+
+/** The script time of `typed`, from the typed character to the rows it leaves (they are in the document when it returns). */
+function timeKeystroke(typed: () => void): void {
+    markStart("palette-keystroke");
+    typed();
+    reportOver("palette-keystroke", markEnd("palette-keystroke", "rows"), KEYSTROKE_BUDGET_MS);
+}
+
+/** A typed character: the new query, the first row selected and shown, and the rows built again from the first chunk. */
+function applyQuery(
+    value: string,
+    list: HTMLElement,
+    state: { setQuery: (q: string) => void; setSelectedIdx: (i: number) => void; restart: () => void }
+): void {
+    timeKeystroke(() => {
+        batch(() => {
+            state.setQuery(value);
+            state.setSelectedIdx(0);
+            state.restart();
+        });
+        list.scrollTop = 0;
+    });
+}
+
 /** Runs what the person picked: remembered as recently used (R29), and run after the palette has closed so it doesn't interfere. */
 function runPicked(cmd: CommandEntry, forceNew: boolean): void {
     rememberCommand(cmd.id);
@@ -79,13 +118,17 @@ function runPicked(cmd: CommandEntry, forceNew: boolean): void {
 function usePaletteResults(query: () => string, selectedIdx: () => number) {
     // The agents AgentMux knows, listed after the commands and found by name, seat or state.
     const agents = usePaletteAgents();
+    // What can run now, in browsing order. It does not read the query: a keystroke only searches this list and never
+    // sorts it again.
+    const available = createMemo(() =>
+        sortCommands([...commandRegistry.all(), ...agents()].filter((c) => !c.hidden && isCommandAvailable(c)))
+    );
     const arranged = createMemo(() => {
         const q = query().trim();
-        const all = sortCommands([...commandRegistry.all(), ...agents()].filter((c) => !c.hidden && isCommandAvailable(c)));
         // Browsing, unfiltered: category+label order. Ranked while actively searching: the exact command first, then
         // commands containing what was typed (category+label order among equals); fuzzy only for a typo. See
         // command-palette-search.ts. Either way the ones the person ran from here lead (R30).
-        return arrangeRecent(q ? searchCommands(all, q) : all, recentCommandIds(), q !== "");
+        return arrangeRecent(q ? searchCommands(available(), q) : available(), recentCommandIds(), q !== "");
     });
     const filtered = () => arranged().cmds;
     const clampedIdx = createMemo(() => Math.min(selectedIdx(), Math.max(filtered().length - 1, 0)));
@@ -93,6 +136,43 @@ function usePaletteResults(query: () => string, selectedIdx: () => number) {
     // A group's name has room at the right of its first row, and the shortcuts line up beside it.
     const hasGroups = createMemo(() => rows().some((r) => r.group !== undefined));
     return { filtered, clampedIdx, rows, hasGroups };
+}
+
+/** How many rows are built at once. The rest follow a frame at a time, so a list of thousands costs one chunk a press. */
+export const ROW_CHUNK = 60;
+
+/**
+ * The rows built so far: the first `ROW_CHUNK` at once, then another chunk each frame until the list is whole. A keystroke
+ * starts over from the first chunk (rows that stay are kept), and a key that moves the selection past the built rows
+ * builds through it before it is shown.
+ */
+function useBuiltRows(rows: () => PaletteRowModel[]) {
+    const [built, setBuilt] = createSignal(ROW_CHUNK);
+    let frame = 0;
+    const grow = (): void => {
+        if (frame || built() >= rows().length) return;
+        frame = requestAnimationFrame(() => {
+            frame = 0;
+            setBuilt(built() + ROW_CHUNK);
+            grow();
+        });
+    };
+    // The rows past the first chunk, a chunk a frame: from the start, and again whenever the list grows past what is built
+    // (an agent starts while the palette is open), not only when a character is typed.
+    createEffect(on(() => rows().length, grow));
+    onCleanup(() => cancelAnimationFrame(frame));
+    return {
+        segments: createMemo(() => paletteSegments(rows().slice(0, built()))),
+        /** The list changed: build from the first chunk again, and the rest in the frames after. */
+        restart: () => {
+            setBuilt(ROW_CHUNK);
+            grow();
+        },
+        /** Row `idx` is about to be shown: it, and a chunk after it, are built. */
+        buildThrough: (idx: number) => {
+            if (idx >= built()) setBuilt(idx + ROW_CHUNK);
+        },
+    };
 }
 
 /** The listbox: the rows in their groups (each group a screen-reader group, the unnamed first one none). */
@@ -105,24 +185,57 @@ function PaletteList(props: {
     optionId: (i: number) => string;
     onPick: (row: number, shift: boolean) => void;
 }): JSX.Element {
+    // Groups are told apart by their name and rows by their command's id (both are the same text from one keystroke to
+    // the next), so a keystroke adds the rows that now match, removes the ones that no longer do and updates the rest in
+    // place. Keyed by the row objects instead, every row would be torn down and built again on every keystroke.
+    const groupKeys = createMemo(() => props.segments.map((s) => s.label ?? ""));
+    const groupByKey = createMemo(() => new Map(props.segments.map((s) => [s.label ?? "", s])));
+    const rowById = createMemo(() => new Map(props.segments.flatMap((s) => s.rows).map((r) => [r.cmd.id, r])));
+    let listEl!: HTMLDivElement;
+    const cutLabels = { current: null as ReturnType<typeof watchCutLabels> | null };
+    onMount(() => (cutLabels.current = watchCutLabels(listEl)));
+    onCleanup(() => cutLabels.current?.stop());
+    // The rows changed: which labels are cut is read again after the frame that draws them.
+    createEffect(() => {
+        groupKeys();
+        rowById();
+        cutLabels.current?.schedule();
+    });
     return (
-        <div class="command-palette-list" ref={props.ref} id={props.id} role="listbox" aria-label={t("palette.listLabel")}>
-            <For each={props.segments}>
-                {(segment) => (
-                    <div role={segment.label ? "group" : undefined} aria-label={segment.label}>
-                        <For each={segment.rows}>
-                            {(row) => (
-                                <PaletteRow
-                                    row={row}
-                                    id={props.optionId(row.index)}
-                                    selected={row.index === props.selectedIdx}
-                                    groupColumn={props.groupColumn}
-                                    onPick={(e) => props.onPick(row.index, e.shiftKey)}
-                                />
-                            )}
-                        </For>
-                    </div>
-                )}
+        <div
+            class="command-palette-list"
+            ref={(el) => {
+                listEl = el;
+                props.ref(el);
+            }}
+            id={props.id}
+            role="listbox"
+            aria-label={t("palette.listLabel")}
+        >
+            <For each={groupKeys()}>
+                {(key) => {
+                    const rowIds = createMemo(() => groupByKey().get(key)?.rows.map((r) => r.cmd.id) ?? []);
+                    return (
+                        <div role={key ? "group" : undefined} aria-label={key || undefined}>
+                            <For each={rowIds()}>
+                                {(id) => {
+                                    // A row that is leaving can be asked once more before it is gone: it keeps its last model.
+                                    let last = rowById().get(id)!;
+                                    const row = () => (last = rowById().get(id) ?? last);
+                                    return (
+                                        <PaletteRow
+                                            row={row()}
+                                            id={props.optionId(row().index)}
+                                            selected={row().index === props.selectedIdx}
+                                            groupColumn={props.groupColumn}
+                                            onPick={(e) => props.onPick(row().index, e.shiftKey)}
+                                        />
+                                    );
+                                }}
+                            </For>
+                        </div>
+                    );
+                }}
             </For>
         </div>
     );
@@ -134,9 +247,9 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
     let inputRef!: HTMLInputElement;
     let listRef!: HTMLDivElement;
     const { filtered, clampedIdx, rows, hasGroups } = usePaletteResults(query, selectedIdx);
+    const { segments, restart, buildThrough } = useBuiltRows(rows);
     const listId = `command-palette-list-${createUniqueId()}`;
     const optionId = (i: number) => `${listId}-option-${i}`;
-    const segments = createMemo(() => paletteSegments(rows()));
 
     onMount(() => {
         disableGlobalKeybindings();
@@ -144,15 +257,14 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
         // (the search input). Keep a defensive explicit focus() in case
         // the order of focusable elements ever changes.
         queueMicrotask(() => inputRef?.focus());
+        markOpenPainted();
     });
 
     onCleanup(() => {
         enableGlobalKeybindings();
     });
 
-    function close() {
-        props.close();
-    }
+    const close = () => props.close();
 
     function executeSelected(forceNew = false) {
         const cmds = filtered();
@@ -171,14 +283,13 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
         e.preventDefault();
         if (intent.kind === "close") return close();
         if (intent.kind === "run") return executeSelected(intent.forceNew);
+        buildThrough(intent.to);
         setSelectedIdx(intent.to);
         keepRowInView(listRef, intent.to);
     }
 
     function handleInput(e: InputEvent) {
-        setQuery((e.target as HTMLInputElement).value);
-        setSelectedIdx(0);
-        listRef.scrollTop = 0; // the first row is selected again: show it
+        applyQuery((e.target as HTMLInputElement).value, listRef, { setQuery, setSelectedIdx, restart });
     }
 
     return (

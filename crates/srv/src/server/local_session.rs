@@ -38,6 +38,8 @@ const MAX_HELD: usize = 64;
 pub(crate) const MAX_FAILURES: usize = 1000;
 /// This many refusals in a minute are logged one by one; after them, one line says the rest are only counted.
 pub(crate) const LOGGED_FAILURES: usize = 5;
+/// Most confirms remembered at once; the oldest goes first.
+const MAX_CONFIRMS: usize = 32;
 
 type Digest32 = [u8; 32];
 
@@ -100,6 +102,36 @@ struct Pending {
     cookie: Option<Digest32>,
 }
 
+/// How a confirm was made: where the process that sent it stands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ConfirmHow {
+    /// The sending process is in no agent's process tree.
+    Outside,
+    /// The sending process could not be found (the lookup failed, or the peer is a proxy or a tunnel); the confirm went through.
+    Unknown,
+    /// The sending process is in this agent's tree (`agent:<id>`); the confirm was not taken.
+    Refused(String),
+}
+
+impl ConfirmHow {
+    pub(crate) fn label(&self) -> String {
+        match self {
+            ConfirmHow::Outside => "peer outside agent trees".to_string(),
+            ConfirmHow::Unknown => "peer unknown".to_string(),
+            ConfirmHow::Refused(who) => format!("refused: {who}"),
+        }
+    }
+}
+
+/// One confirm of a session, as `status` shows it. It holds no value of a code, cookie or token: the session is named by its
+/// check phrase, which the person saw.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Confirm {
+    pub at_unix_ms: u64,
+    pub session: String,
+    pub how: ConfirmHow,
+}
+
 struct Session {
     token: Digest32,
     last_seen: Instant,
@@ -116,6 +148,8 @@ struct Inner {
     /// Keyed by the cookie's digest.
     sessions: HashMap<Digest32, Session>,
     failures: VecDeque<Instant>,
+    /// Oldest first.
+    confirms: VecDeque<Confirm>,
 }
 
 pub(crate) struct SessionStore {
@@ -219,6 +253,27 @@ impl SessionStore {
             .values()
             .find(|p| p.code == code && matches!(p.outcome, Outcome::Waiting))
             .map_or(CodeState::Gone, |p| CodeState::Entered { phrase: p.phrase.clone() })
+    }
+
+    /// Record how the confirm of the session made from `code` arrived. False when no pending session of that code waits.
+    pub(crate) fn note_confirm(&self, code: &str, how: ConfirmHow, now: Instant) -> bool {
+        let mut inner = self.lock();
+        prune(&mut inner, now);
+        let code = digest(code);
+        let Some(session) = inner.pending.values().find(|p| p.code == code && matches!(p.outcome, Outcome::Waiting)).map(|p| p.phrase.clone())
+        else {
+            return false;
+        };
+        if inner.confirms.len() >= MAX_CONFIRMS {
+            inner.confirms.pop_front();
+        }
+        inner.confirms.push_back(Confirm { at_unix_ms: agentmux_common::time::now_secs_u64().saturating_mul(1000), session, how });
+        true
+    }
+
+    /// The confirms remembered, oldest first.
+    pub(crate) fn confirms(&self) -> Vec<Confirm> {
+        self.lock().confirms.iter().cloned().collect()
     }
 
     /// The person's answer for the session made from `code`. True when a pending session of that

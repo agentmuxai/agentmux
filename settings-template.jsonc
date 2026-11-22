@@ -701,6 +701,21 @@
     // agent in Connectors. Takes effect at an agent's next launch.
     // "agent:claudeaiconnectors": false,
 
+    // Minutes an agent that owes work (it holds a claimed task, or is a worker that has not
+    // reported to its leader) may do nothing between turns before it is nudged once and, five
+    // minutes after, the agents that watch it (its lead, the filer of its task) are told. 0
+    // turns the quiet watch off.
+    // "agents:quietminutes": 15,
+
+    // Minutes a turn that is still running may write nothing before the agents that watch it
+    // are told (a long build can write nothing for a while and be healthy, so this is longer
+    // than the time between turns).
+    // "agents:quietrunningminutes": 30,
+
+    // Minutes after a quiet agent was nudged (or, for a running turn, after its quiet time)
+    // before the agents that watch it are told.
+    // "agents:quietescalateminutes": 5,
+
     // Minutes of quiet after which an agent's session counts as cold: a message that can wait
     // is then held until the agent is next active, so it does not start a turn that pays for
     // the whole context again. 0 turns the hold off.

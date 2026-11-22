@@ -373,6 +373,9 @@ pub(super) struct UpdateRequest {
     pub branch: Option<String>,
     #[serde(default)]
     pub pr_url: Option<String>,
+    /// A pull request to take off the card (`links.unpr`): the holder's alone.
+    #[serde(default)]
+    pub unpr: Option<String>,
     /// The path of the document the task wrote (`links.doc`).
     #[serde(default)]
     pub doc: Option<String>,
@@ -486,6 +489,17 @@ pub(super) async fn handle_work_update(
     if let Some(why) = doc_problem(&req) {
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": why })));
     }
+    // The address to take off is checked before anything is written, so a bad one leaves the card as it was.
+    let unpr = match req.unpr.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        None => None,
+        Some(addr) => {
+            let repo = state.work_store.work_board_get(&id).ok().flatten().map(|t| t.card.repo).unwrap_or_default();
+            match crate::backend::storage::work_card_prs::parse_pr_ref(addr, &repo) {
+                Some(found) => Some(found),
+                None => return (StatusCode::BAD_REQUEST, Json(json!({ "error": "links.unpr is not a pull request address" }))),
+            }
+        }
+    };
     let now = now_ms();
     let _ = state.work_store.work_card_ensure(&id, now);
     let attached = match super::work_media::apply(&state, &item, &req.agent_id, holder_uid(caller), &req.media_call()) {
@@ -510,6 +524,11 @@ pub(super) async fn handle_work_update(
             .collect::<Vec<_>>()
             .join(" ");
         record(&state, &id, &req.agent_id, "agent", "linked", &item.state, &item.state, &link);
+    }
+    if let Some((repo, number)) = unpr {
+        if state.work_store.work_card_pr_unlink(&id, &repo, number, now).unwrap_or(false) {
+            record(&state, &id, &req.agent_id, "agent", "pr_unlinked", &item.state, &item.state, &crate::backend::storage::work_card_prs::pr_url(&repo, number));
+        }
     }
     let mut answer = json!({ "ok": true });
     if !attached.is_empty() {
@@ -563,6 +582,9 @@ fn annotate(state: &AppState, caller: Option<&Caller>, id: &str, req: &UpdateReq
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": why })));
     }
     let mut u = card_update(req);
+    if req.unpr.is_some() {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "links.unpr is the holder's: only the task's holder takes a pull request off its card" })));
+    }
     if u.note.is_none() && u.branch.is_none() && u.pr_url.is_none() && u.doc.is_none() {
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "nothing to write: give a note or links (pr, branch, doc)" })));
     }
