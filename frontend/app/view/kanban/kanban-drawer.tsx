@@ -270,7 +270,7 @@ function DrawerFacts(props: { m: DrawerState }): JSX.Element {
                     </span>
                 )}
             </Show>
-            <DrawerPrs card={t().card} now={m.props.now} />
+            <DrawerPrs card={t().card} now={m.props.now} act={m.act} />
         </div>
     );
 }
