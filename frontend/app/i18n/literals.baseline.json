@@ -278,7 +278,7 @@
     "frontend/app/view/kanban/kanban-needs-badge.tsx": 2,
     "frontend/app/view/kanban/kanban-new-task.tsx": 13,
     "frontend/app/view/kanban/kanban-seats.tsx": 1,
-    "frontend/app/view/kanban/kanban-section-parts.tsx": 19,
+    "frontend/app/view/kanban/kanban-section-parts.tsx": 18,
     "frontend/app/view/kanban/kanban-section.tsx": 1,
     "frontend/app/view/mcp/mcp-in-use.tsx": 4,
     "frontend/app/view/mcp/mcp-manager-cards.tsx": 7,
