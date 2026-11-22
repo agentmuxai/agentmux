@@ -71,6 +71,8 @@ fn command(program: &Path, args: &[String], display: Option<&str>) -> Command {
 pub async fn start(w: u32, h: u32, url: &str) -> Result<Session, String> {
     let xvfb_bin = which::which("Xvfb").map_err(|_| "this server has no Xvfb to make a virtual screen with".to_string())?;
     let chrome_bin = chromium::find_binary()?;
+    // What the browser may open is its managed policy: nothing starts without it.
+    super::policy::ensure(&chrome_bin)?;
     // The one way out for the browser, as for every pane: if the proxy cannot start, nothing runs.
     let proxy_port = super::super::address_proxy::start().await.map_err(|e| format!("the browser's address proxy did not start: {e}"))?;
 

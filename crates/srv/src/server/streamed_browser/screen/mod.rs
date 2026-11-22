@@ -9,6 +9,7 @@
 
 mod frames;
 mod keymap;
+mod policy;
 mod session;
 mod x;
 
@@ -35,6 +36,25 @@ const MAX_TYPED: usize = 4000;
 
 static OPEN: AtomicUsize = AtomicUsize::new(0);
 
+/// A place among the open sessions, given back when it is dropped (however the session ended).
+struct Place;
+
+impl Place {
+    fn take() -> Option<Self> {
+        if OPEN.fetch_add(1, Ordering::SeqCst) >= MAX_SESSIONS {
+            OPEN.fetch_sub(1, Ordering::SeqCst);
+            return None;
+        }
+        Some(Place)
+    }
+}
+
+impl Drop for Place {
+    fn drop(&mut self) {
+        OPEN.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 pub fn enabled() -> bool {
     std::env::var(ENABLE_ENV).is_ok_and(|v| v == "1")
 }
@@ -42,13 +62,11 @@ pub fn enabled() -> bool {
 /// Upgrade to the pane's WebSocket and run a screen session until it ends (or `ended` does).
 pub fn upgrade(ws: WebSocketUpgrade, start: Start, ended: impl std::future::Future<Output = ()> + Send + 'static) -> Response {
     ws.protocols([WS_PROTOCOL]).on_upgrade(move |mut socket| async move {
-        if OPEN.fetch_add(1, Ordering::SeqCst) >= MAX_SESSIONS {
-            OPEN.fetch_sub(1, Ordering::SeqCst);
+        let Some(_place) = Place::take() else {
             let _ = socket.send(error(&format!("the server's browser is busy ({MAX_SESSIONS} panes are open)"))).await;
             return;
-        }
+        };
         run(socket, start, ended).await;
-        OPEN.fetch_sub(1, Ordering::SeqCst);
     })
 }
 

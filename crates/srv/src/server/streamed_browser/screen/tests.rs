@@ -81,6 +81,14 @@ async fn screen_mode_real() {
     let other = "data:text/html,<body style=\"background:blue\"></body>";
     navigate(&screen, Go::Url, other).await.unwrap();
     wait_for_colour(&screen, px, py, [255, 0, 0], 10).await.expect("the typed address loaded");
+    // A local file typed into the address bar does not open: the managed policy blocks it (the page would be green).
+    let file = std::env::temp_dir().join("agentmux-screen-mode-blocked.html");
+    std::fs::write(&file, "<body style=\"background:lime\"></body>").unwrap();
+    navigate(&screen, Go::Url, &format!("file://{}", file.display())).await.unwrap();
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let now = pixel(&screen, &screen.grab().unwrap(), px, py);
+    let _ = std::fs::remove_file(&file);
+    assert!(now.iter().zip([0u8, 255, 0]).any(|(a, w)| a.abs_diff(w) >= 40), "the local file opened: {now:?}");
 }
 
 fn chromium_missing() -> bool {
