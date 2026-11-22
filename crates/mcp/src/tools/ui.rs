@@ -147,7 +147,6 @@ fn record_text(result: &UiRecordResponse, in_container: bool, dir: &std::path::P
 }
 
 async fn run_capture_window(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
-    let ToolCtx { local_url, auth_key, client, .. } = *cx;
     // `index` stays an Option all the way into capture_window_impl —
     // NOT defaulted to 0 here. Defaulting it here is exactly what
     // let an ambiguous match silently capture the wrong (and once,
@@ -187,18 +186,64 @@ async fn run_capture_window(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Strin
     // happened) is the honest, shippable Phase-1 answer while the
     // real gate is tracked separately (operator-confirmed).
     let mut resolved: Option<(CaptureTier, String)> = None;
-    // Fail closed: if srv can't say, treat the Vault as showing.
-    let vault_on_screen = if local_url.is_empty() || auth_key.is_empty() {
-        true
-    } else {
-        crate::srv_http::srv_get_json(client, &format!("{}/api/v1/vault/on_screen", local_url.trim_end_matches('/')), auth_key, &[], "Vault on screen")
-            .await
-            .map(|v| v.get("on_screen").and_then(Value::as_bool).unwrap_or(true))
-            .unwrap_or(true)
-    };
-    let outcome = capture_window_impl(title_contains.as_deref(), index, pid, &mut resolved, vault_on_screen);
+    let outcome = capture_blacked_out(title_contains.as_deref(), index, pid, &mut resolved, cx).await;
     audit_log_capture_window(&query_desc, &outcome, &resolved);
-    return outcome.map(|c| c.message);
+    outcome.map(|c| c.message)
+}
+
+/// The capture, with an AgentMux window's private and secret panes blacked out (`window_blackout`): srv asks the
+/// windows for their rectangles just before the frame and just after, and anything that doesn't match refuses it.
+async fn capture_blacked_out(
+    title_contains: Option<&str>,
+    index: Option<usize>,
+    pid: Option<u32>,
+    resolved: &mut Option<(CaptureTier, String)>,
+    cx: &ToolCtx<'_>,
+) -> Result<CaptureOutcome> {
+    use crate::window_blackout as wb;
+    if crate::self_keys::in_container() {
+        anyhow::bail!(wb::IN_CONTAINER);
+    }
+    let target = resolve_window(title_contains, index, pid, resolved)?;
+    if !target.is_agentmux {
+        let (image, unrendered) = capture_frame(&target)?;
+        return finish_capture(&target, &image, unrendered, false);
+    }
+    if !target.is_self {
+        anyhow::bail!(wb::OTHER_INSTANCE);
+    }
+    let capture_id = uuid::Uuid::new_v4().to_string();
+    let begins = capture_masks(cx, &capture_id, "begin").await?;
+    let begin = wb::before(&begins, &target.title)?.clone();
+    let (mut image, unrendered) = capture_frame(&target)?;
+    let ends = capture_masks(cx, &capture_id, "end").await?;
+    wb::after(&begin, &ends, image.width(), image.height())?;
+    wb::black_out(&mut image, &begin);
+    finish_capture(&target, &image, unrendered, true)
+}
+
+/// Every window's answer to one ask of srv's `capture_mask`.
+async fn capture_masks(cx: &ToolCtx<'_>, capture_id: &str, phase: &str) -> Result<Vec<crate::window_blackout::WindowMask>> {
+    let ToolCtx { local_url, auth_key, client, .. } = *cx;
+    if local_url.is_empty() || auth_key.is_empty() {
+        anyhow::bail!("AgentMux windows can't be captured without srv, which gives the rectangles of their private panes");
+    }
+    let url = format!("{}/api/v1/ui/capture_mask", local_url.trim_end_matches('/'));
+    let resp = client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, auth_key)
+        .json(&json!({ "capture_id": capture_id, "phase": phase }))
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("the rectangles of the window's private panes could not be read, so it is not captured: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or_else(|_| json!({}));
+    if !status.is_success() {
+        anyhow::bail!("{}", body.get("error").and_then(Value::as_str).unwrap_or("the rectangles of the window's private panes could not be read, so it is not captured"));
+    }
+    serde_json::from_value(body.get("masks").cloned().unwrap_or_else(|| json!([])))
+        .map_err(|e| anyhow::anyhow!("srv's answer for the window's private panes was not understood, so it is not captured: {e}"))
 }
 
 async fn run_discover_windows(arguments: &Value, _cx: &ToolCtx<'_>) -> Result<String> {

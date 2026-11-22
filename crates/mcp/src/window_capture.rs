@@ -207,6 +207,8 @@ pub(crate) struct CaptureOutcome {
     pub(crate) target: String,
     /// Hex SHA-256 of the saved PNG; `None` if hashing failed (best-effort).
     pub(crate) image_sha256: Option<String>,
+    /// Whether the private and secret panes of an AgentMux window were blacked out (`window_blackout`).
+    pub(crate) redacted: bool,
 }
 
 /// One top-level window visible to this process, with the metadata both
@@ -386,12 +388,9 @@ pub(crate) fn candidate_label(w: &impl WindowFacts) -> String {
     }
 }
 
-/// The actual `CaptureWindow` logic — window enumeration, own-instance and
-/// third-party-app exclusion, targeting (by pid or by title), capture, and
-/// save. Extracted to its own function (rather than living inline in the
-/// `"CaptureWindow" =>` match arm) so its `Result` can be captured once and
-/// unconditionally audit-logged by the caller before propagating — see
-/// `audit_log_capture_window`.
+/// The window `CaptureWindow` was asked for, found among every window and checked against its tier. Holds no OS
+/// window, so the caller can ask srv for the window's private rectangles before the frame is taken
+/// (`window_blackout`) without holding one across a wait.
 ///
 /// `index: None` with more than one `title_contains` match is an error
 /// listing every candidate, NOT a silent pick of match 0 — see
@@ -400,7 +399,17 @@ pub(crate) fn candidate_label(w: &impl WindowFacts) -> String {
 /// unrelated, sensitive window) this specifically fixes. `index: Some(i)`
 /// is still honored directly against whatever matched, unchanged from the
 /// original behavior, for callers who already disambiguate explicitly.
-pub(crate) fn capture_window_impl(
+pub(crate) struct ResolvedWindow {
+    /// The OS window's id, to find it again for the frame.
+    pub(crate) id: u32,
+    pub(crate) pid: u32,
+    pub(crate) title: String,
+    pub(crate) tier: CaptureTier,
+    pub(crate) is_agentmux: bool,
+    pub(crate) is_self: bool,
+}
+
+pub(crate) fn resolve_window(
     title_contains: Option<&str>,
     index: Option<usize>,
     pid: Option<u32>,
@@ -410,34 +419,44 @@ pub(crate) fn capture_window_impl(
     // Without it the log cannot tell "no such window" apart from "blocked
     // cross-user attempt", which is the entry a reviewer most wants to find.
     resolved: &mut Option<(CaptureTier, String)>,
-    // An AgentMux on this computer shows the Vault (srv's
-    // `/api/v1/vault/on_screen`): no AgentMux window is captured meanwhile
-    // (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5.3).
-    vault_on_screen: bool,
-) -> Result<CaptureOutcome> {
+) -> Result<ResolvedWindow> {
     let all = enumerate_agentmux_windows()?;
     let target = select_target(&all, title_contains, index, pid, resolved)?;
     *resolved = Some((target.tier, audit_target_label(target)));
+    Ok(ResolvedWindow {
+        id: target.window.id().map_err(|e| anyhow::anyhow!("the window has no id to capture it by: {e}"))?,
+        pid: target.pid,
+        title: target.title.clone(),
+        tier: target.tier,
+        is_agentmux: target.is_agentmux,
+        is_self: target.is_self,
+    })
+}
 
-    if vault_on_screen && target.is_agentmux {
-        anyhow::bail!(
-            "the Vault is on screen in AgentMux, so AgentMux windows can't be captured until the person closes it or hides it; UI screenshot of your own pane still works"
-        );
-    }
+/// The frame of `target`, found again by its id; the second is whether it still looks unpainted.
+pub(crate) fn capture_frame(target: &ResolvedWindow) -> Result<(image::RgbaImage, bool)> {
+    let windows = xcap::Window::all().map_err(|e| anyhow::anyhow!("failed to enumerate windows: {e}"))?;
+    let window = windows
+        .iter()
+        .find(|w| w.id().ok() == Some(target.id))
+        .ok_or_else(|| anyhow::anyhow!("window pid={} closed before it was captured", target.pid))?;
+    capture_settled(window)
+}
 
-    let title = target.title.clone();
-    let (image, likely_unrendered) = capture_settled(&target.window)?;
+/// Save a captured frame and say what was captured.
+pub(crate) fn finish_capture(target: &ResolvedWindow, image: &image::RgbaImage, likely_unrendered: bool, redacted: bool) -> Result<CaptureOutcome> {
     let dir = capture_window_dir()
         .map_err(|e| anyhow::anyhow!("cannot resolve the AgentMux root for captures: {e}"))?;
-    let path = save_capture(&image, &dir)?;
+    let path = save_capture(image, &dir)?;
     Ok(CaptureOutcome {
-        message: outcome_message(&title, &path, likely_unrendered),
+        message: outcome_message(&target.title, &path, likely_unrendered),
         tier: target.tier,
         // The resolved target, not the query string — an audit reviewer needs
         // to know WHAT was captured, which a `title_contains` substring does
         // not tell them.
         target: format!("pid={} title={:?}", target.pid, target.title),
         image_sha256: sha256_file(&path),
+        redacted,
     })
 }
 
@@ -766,7 +785,7 @@ pub(crate) fn audit_log_capture_window(
     query_desc: &str,
     outcome: &Result<CaptureOutcome>,
     // Resolved target/tier for the FAILURE paths — on success the outcome
-    // carries its own. See capture_window_impl's `resolved` param.
+    // carries its own. See resolve_window's `resolved` param.
     resolved: &Option<(CaptureTier, String)>,
 ) {
     let entry = serde_json::json!({
@@ -793,10 +812,8 @@ pub(crate) fn audit_log_capture_window(
             .or_else(|| resolved.as_ref().map(|(_, t)| t.clone())),
         // Traces a leaked screenshot back to the call that produced it.
         "image_sha256": outcome.as_ref().ok().and_then(|c| c.image_sha256.clone()),
-        // Phase 1 never redacts — recorded explicitly so an unredacted T2/T4
-        // capture is distinguishable at review time once Phase 3 lands, rather
-        // than the field's absence being ambiguous between "no" and "old entry".
-        "redacted": false,
+        // Whether an AgentMux window's private and secret panes were blacked out (`window_blackout`).
+        "redacted": outcome.as_ref().map(|c| c.redacted).unwrap_or(false),
         "outcome": match outcome {
             Ok(c) => serde_json::json!({"result": "success", "detail": c.message}),
             Err(e) => serde_json::json!({"result": "error", "detail": e.to_string()}),
