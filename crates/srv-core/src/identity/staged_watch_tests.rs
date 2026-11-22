@@ -134,6 +134,42 @@ async fn a_staging_tree_that_does_not_exist_yet_is_created_and_followed() {
 }
 
 #[test]
+fn a_value_too_large_to_be_a_token_is_not_withheld_and_the_rest_of_the_copy_is() {
+    let tmp = tempfile::tempdir().unwrap();
+    let file = folder(tmp.path(), "container-big", "h1", "cfg");
+    let big = format!("canary-big-{}", "x".repeat(crate::identity::resolver::oauth_probe::MAX_SIGN_IN_VALUE));
+    std::fs::write(&file, copy_body(&big, "canary-big-refresh-0001")).unwrap();
+    look(&file);
+    assert!(hidden("canary-big-refresh-0001"));
+    assert!(!hidden(&big), "an oversized value is not withheld");
+    // A copy over the size a real one has is not read at all.
+    let huge = tmp.path().join("container-big").join("h2");
+    std::fs::create_dir_all(&huge).unwrap();
+    let body = serde_json::json!({ "claudeAiOauth": { "refreshToken": "canary-huge-refresh-0001", "pad": "y".repeat(100_000) } });
+    std::fs::write(huge.join(COPY_FILE), body.to_string()).unwrap();
+    look(&huge.join(COPY_FILE));
+    assert!(!hidden("canary-huge-refresh-0001"));
+}
+
+#[tokio::test]
+async fn a_credentials_file_outside_the_staging_tree_is_not_registered() {
+    let tmp = tempfile::tempdir().unwrap();
+    let tree = tmp.path().join(STAGING_ROOT);
+    let outside = tmp.path().join("elsewhere");
+    std::fs::create_dir_all(&outside).unwrap();
+    let pool = FsWatchPool::new();
+    let _watched = pool.subscribe_dir(&outside);
+    start_at(pool, tree);
+    let file = outside.join(COPY_FILE);
+    let body = copy_body("canary-outside-access-0001", "canary-outside-refresh-0001");
+    for _ in 0..15 {
+        std::fs::write(&file, &body).unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(!hidden("canary-outside-refresh-0001"), "only files under the staging tree are staged copies");
+}
+
+#[test]
 fn a_half_written_copy_withholds_nothing() {
     let tmp = tempfile::tempdir().unwrap();
     let half = folder(tmp.path(), "container-b", "h2", "acct-config-half");

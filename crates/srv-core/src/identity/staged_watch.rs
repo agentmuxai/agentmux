@@ -46,10 +46,17 @@ pub fn withhold_copy(folder: &Path, json: &serde_json::Value) {
     withhold_sign_in(&format!("staged:{}", folder.to_string_lossy()), &json);
 }
 
+/// The largest copy that is read (bytes): a container can write its copy, and a real one is a few hundred bytes.
+const MAX_COPY_BYTES: u64 = 64 * 1024;
+
 /// Withholds the values in the staged copy at `file` (a `.credentials.json` in a container's staging folder). An
-/// unreadable copy (it can be mid-write) withholds nothing; the next change reads it again.
+/// unreadable copy (it can be mid-write) or one over [`MAX_COPY_BYTES`] withholds nothing; the next change reads it
+/// again.
 fn look(file: &Path) {
     let Some(folder) = file.parent() else { return };
+    if std::fs::metadata(file).map_or(true, |m| m.len() > MAX_COPY_BYTES) {
+        return;
+    }
     let Ok(text) = std::fs::read_to_string(file) else { return };
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
         withhold_copy(folder, &json);
@@ -66,8 +73,9 @@ fn look_at_all(tree: &Path) {
     }
 }
 
-fn is_copy(path: &Path) -> bool {
-    path.file_name().is_some_and(|name| name == COPY_FILE)
+/// Whether `path` is a staged copy: the file name, inside the staging tree (the pool's events come from every watch).
+fn is_copy(path: &Path, trees: &[PathBuf]) -> bool {
+    path.file_name().is_some_and(|name| name == COPY_FILE) && trees.iter().any(|tree| path.starts_with(tree))
 }
 
 /// The staging tree exists (private to the user) before it is watched, so a first container's copy is seen.
@@ -87,6 +95,8 @@ async fn run(pool: Arc<FsWatchPool>, tree: PathBuf) {
     let mut events = pool.events();
     ensure_tree(&tree);
     let _subscription = pool.subscribe_dir_recursive(&tree);
+    // The pool reports paths under the canonical directory it watches.
+    let trees: Vec<PathBuf> = tree.canonicalize().into_iter().chain([tree.clone()]).collect();
     // What the copies hold now: after a restart nothing is registered yet, and a copy that does not change is
     // never announced.
     let scan_tree = tree.clone();
@@ -95,7 +105,7 @@ async fn run(pool: Arc<FsWatchPool>, tree: PathBuf) {
         let mut changed: HashSet<PathBuf> = HashSet::new();
         let mut all = false;
         match events.recv().await {
-            Ok(e) if is_copy(&e.path) && matches!(e.kind, FsWatchEventKind::Created | FsWatchEventKind::Modified | FsWatchEventKind::Other) => {
+            Ok(e) if is_copy(&e.path, &trees) && matches!(e.kind, FsWatchEventKind::Created | FsWatchEventKind::Modified | FsWatchEventKind::Other) => {
                 changed.insert(e.path);
             }
             Ok(_) => continue,
@@ -106,7 +116,7 @@ async fn run(pool: Arc<FsWatchPool>, tree: PathBuf) {
         tokio::time::sleep(SETTLE).await;
         loop {
             match events.try_recv() {
-                Ok(e) if is_copy(&e.path) => {
+                Ok(e) if is_copy(&e.path, &trees) => {
                     changed.insert(e.path);
                 }
                 Ok(_) => {}

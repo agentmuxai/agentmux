@@ -70,6 +70,10 @@ pub fn sign_in_file(provider: &str, dir: &Path) -> Option<std::path::PathBuf> {
     }
 }
 
+/// The longest sign-in value that is withheld (bytes). A file a container can write could hold a value so large that
+/// the matcher of every withheld value no longer builds, so a longer one is not withheld.
+pub const MAX_SIGN_IN_VALUE: usize = 8 * 1024;
+
 /// Who holds a sign-in file's access or refresh token in the transcript withhold registry, named by the config dir.
 pub(super) fn sign_in_owner(dir: &str, what: &str) -> String {
     format!("sign-in:{dir}:{what}")
@@ -88,7 +92,9 @@ pub fn release_sign_in(dir: &str) {
 /// token (a sign-out) leaves what was held.
 pub fn withhold_sign_in(dir: &str, json: &serde_json::Value) {
     let oauth = json.get("claudeAiOauth").unwrap_or(json);
-    let text = |keys: [&str; 2]| keys.iter().find_map(|k| oauth.get(k).and_then(|v| v.as_str())).filter(|s| !s.is_empty());
+    let text = |keys: [&str; 2]| {
+        keys.iter().find_map(|k| oauth.get(k).and_then(|v| v.as_str())).filter(|s| !s.is_empty() && s.len() <= MAX_SIGN_IN_VALUE)
+    };
     let expires_at = oauth.get("expiresAt").and_then(|v| v.as_i64());
     if let Some(access) = text(["accessToken", "access_token"]) {
         match expires_at {
