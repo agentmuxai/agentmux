@@ -6,6 +6,12 @@
 //! Split out of the single ~2193-line `resolver.rs` (pure relocation, no
 //! behavior change).
 
+use std::collections::BTreeMap;
+use std::sync::{Mutex, PoisonError};
+use std::time::{Duration, Instant};
+
+use zeroize::Zeroizing;
+
 use crate::backend::storage::store::{SecretRef, Store};
 use crate::backend::vault::aws_import::{self, Source};
 use crate::identity::aws_broker::mint::{HostRunner, Runner};
@@ -72,10 +78,34 @@ pub fn resolve_account_secret(
 /// An AWS Secrets Manager secret's text (or the field `json_path` names in a JSON one), read with the host's own AWS
 /// login by the reader the Vault's backed entries use (`vault::aws_import::read_value_blocking`). On the blocking thread
 /// the injection already runs on.
+///
+/// The model gateway asks for an account's key on every request, and each ask here is a run of the AWS CLI and a
+/// billed Secrets Manager call, so a value read is kept for [`SM_CACHE_TTL`]: a rotation reaches the next request
+/// within that time. A failed read is not kept. (A Vault backed entry reads at each use and keeps nothing.)
 fn secrets_manager_value<R: Runner>(runner: &R, path: &str, json_path: Option<&str>) -> Result<String, ResolverError> {
+    secrets_manager_value_at(runner, path, json_path, Instant::now())
+}
+
+/// How long a value read from Secrets Manager is reused by the resolver.
+const SM_CACHE_TTL: Duration = Duration::from_secs(30);
+
+type SmCache = BTreeMap<(String, Option<String>), (Instant, Zeroizing<String>)>;
+static SM_CACHE: Mutex<SmCache> = Mutex::new(BTreeMap::new());
+
+fn secrets_manager_value_at<R: Runner>(runner: &R, path: &str, json_path: Option<&str>, now: Instant) -> Result<String, ResolverError> {
+    let place = (path.to_string(), json_path.map(str::to_string));
+    if let Some((read_at, value)) = SM_CACHE.lock().unwrap_or_else(PoisonError::into_inner).get(&place) {
+        if now.saturating_duration_since(*read_at) < SM_CACHE_TTL {
+            return Ok(value.to_string());
+        }
+    }
     let source = Source { aws_secret_id: path.to_string(), key: json_path.map(str::to_string), ..Default::default() };
     let source = aws_import::check_source(&source).map_err(ResolverError::SecretsManagerRead)?;
-    aws_import::read_value_blocking(runner, &source).map(|value| value.to_string()).map_err(ResolverError::SecretsManagerRead)
+    let value = aws_import::read_value_blocking(runner, &source).map_err(ResolverError::SecretsManagerRead)?;
+    let mut cache = SM_CACHE.lock().unwrap_or_else(PoisonError::into_inner);
+    cache.retain(|_, (read_at, _)| now.saturating_duration_since(*read_at) < SM_CACHE_TTL);
+    cache.insert(place, (now, value.clone()));
+    Ok(value.to_string())
 }
 
 fn resolve_stored(secret_ref: &SecretRef) -> Result<String, ResolverError> {
@@ -179,6 +209,27 @@ mod tests {
         assert!(matches!(&missing, Err(ResolverError::SecretsManagerRead(why)) if why.contains("AWS has no secret")), "{missing:?}");
         // The id goes to the CLI as an argument: one that isn't a secret's name never gets there.
         assert!(matches!(secrets_manager_value(&aws, "--query x", None), Err(ResolverError::SecretsManagerRead(_))));
+    }
+
+    /// The model gateway asks for a key on every request: a value read is reused for 30 s, then read again, and a
+    /// failed read is not kept.
+    #[test]
+    fn resolve_secrets_manager_reuses_a_read_for_a_short_while() {
+        use crate::backend::vault::backed::tests::Aws;
+        let aws = Aws::with(&[("svc/rotating-key", Ok("first-from-aws"))]);
+        let t0 = Instant::now();
+        assert_eq!(secrets_manager_value_at(&aws, "svc/rotating-key", None, t0).unwrap(), "first-from-aws");
+        aws.change("svc/rotating-key", "second-from-aws");
+        assert_eq!(secrets_manager_value_at(&aws, "svc/rotating-key", None, t0 + Duration::from_secs(10)).unwrap(), "first-from-aws");
+        assert_eq!(aws.reads(), 1, "a second ask within the time costs no call");
+        assert_eq!(secrets_manager_value_at(&aws, "svc/rotating-key", None, t0 + Duration::from_secs(31)).unwrap(), "second-from-aws");
+        assert_eq!(aws.reads(), 2);
+
+        let down = Aws::with(&[]);
+        assert!(secrets_manager_value_at(&down, "svc/not-yet-there", None, t0).is_err());
+        assert_eq!(down.reads(), 1);
+        assert!(secrets_manager_value_at(&down, "svc/not-yet-there", None, t0).is_err());
+        assert_eq!(down.reads(), 2, "a failed read is asked again, not kept");
     }
 
     #[test]

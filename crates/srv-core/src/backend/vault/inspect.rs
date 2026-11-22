@@ -75,9 +75,13 @@ pub struct Shown {
     pub updated_at: i64,
     /// 0 when it was never used.
     pub last_used_at: i64,
-    /// The entry is a link: it holds no value, and its fields say where the key lives and who reads it.
+    /// The entry is a link: it holds no value, and its fields say where the key lives and who reads it. A use of it is
+    /// refused.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub link_only: bool,
+    /// The entry is backed by AWS Secrets Manager: the Vault keeps no value, and each use reads it there.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub backed: bool,
     /// The newest check of the place its fields name, when there is one of the entry as it is now.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checked: Option<source_link::VaultSourceCheck>,
@@ -118,7 +122,8 @@ pub fn show_as(store: &Store, id: &str, (agent, uid): (Option<&str>, Option<&str
     let kept_versions = store.vault_versions(&row.id, row.created_at).map_err(|e| e.to_string())?.len();
     let vault = store.vault_info(&row.vault_id).map_err(|e| e.to_string())?.map(|v| v.name).unwrap_or_default();
     Ok(Shown {
-        link_only: linked::is_linked_row(&row),
+        link_only: linked::is_linked_row(&row) && !linked::is_backed_row(&row),
+        backed: linked::is_backed_row(&row),
         checked: Link::of_row(&row).and_then(|link| source_link::last_check(store, &row, &link)),
         fields: source_link::fields_for_agent(fields_of(&row)),
         tags: serde_json::from_str(&row.tags).unwrap_or_default(),
@@ -208,7 +213,7 @@ fn apply_fields(kind: &kinds::Kind, now: &BTreeMap<String, String>, asked: &BTre
         };
     }
     source_link::settle_kind(&mut fields, asked);
-    if linked::is_linked(&fields) != linked::is_linked(now) {
+    if linked::mark(&fields) != linked::mark(now) {
         return Err(linked::SET_WHEN_MADE.into());
     }
     Ok(fields)

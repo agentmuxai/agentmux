@@ -575,7 +575,7 @@ pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
         None => fields.remove(shares::SHARED),
     };
     validate(kind, &change.label, &fields, &change.tags, &change.parts)?;
-    if linked::is_linked(&fields) != linked::is_linked(&old_fields) {
+    if linked::mark(&fields) != linked::mark(&old_fields) {
         return Err(linked::SET_WHEN_MADE.into());
     }
     if change.clear.iter().any(|p| p == kind.parts[0]) {

@@ -67,6 +67,12 @@ pub fn is_linked(fields: &BTreeMap<String, String>) -> bool {
     fields.get(LINK).is_some_and(|v| v == ONLY || v == BACKED)
 }
 
+/// The link mark an entry's fields carry: `only`, `backed` or none. Whether an entry is a link, and which kind, is set
+/// when it is made, so a change of this value is refused (`SET_WHEN_MADE`), `only` to `backed` and back included.
+pub fn mark(fields: &BTreeMap<String, String>) -> Option<&str> {
+    fields.get(LINK).map(|v| v.trim()).filter(|v| !v.is_empty())
+}
+
 /// Whether the entry with these fields is backed: its value is read from AWS Secrets Manager each time it is used.
 pub fn is_backed(fields: &BTreeMap<String, String>) -> bool {
     fields.get(LINK).is_some_and(|v| v == BACKED)

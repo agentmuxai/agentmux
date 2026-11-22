@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use super::*;
 use crate::backend::storage::store::Store;
+use crate::backend::vault::inspect;
 use crate::backend::vault::linked::{BACKED, LINK, ONLY};
 use crate::backend::vault::source_link::{AWS_SECRET, GITHUB_SECRET, KEY, KIND, LOCATION, REGION};
 use crate::backend::vault::{command_target, create, fill_target, seal, value_for_command, value_for_fill, NewEntry, Parts};
@@ -32,7 +33,7 @@ impl Aws {
     }
 
     /// The secret as it is now in AWS: what the next read gets.
-    fn change(&self, id: &str, text: &str) {
+    pub(crate) fn change(&self, id: &str, text: &str) {
         for (name, said) in self.secrets.lock().unwrap().iter_mut() {
             if name == id {
                 *said = Ok(text.to_string());
@@ -40,7 +41,7 @@ impl Aws {
         }
     }
 
-    fn reads(&self) -> usize {
+    pub(crate) fn reads(&self) -> usize {
         self.reads.lock().unwrap().len()
     }
 }
@@ -173,6 +174,44 @@ fn a_use_of_a_backed_entry_is_allowed_where_a_link_only_entry_is_refused() {
     let previous = command_target(&s, &format!("{id}@previous"), None).unwrap();
     assert!(value_for_command(&s, &previous).unwrap_err().contains("keeps no earlier value"));
     assert!(value_for_fill(&s, &id, row.created_at, "extra").unwrap_err().contains("has no extra saved"));
+}
+
+#[test]
+fn whether_an_entry_is_backed_is_set_when_it_is_made() {
+    use crate::backend::vault::inspect::UpdateRequest;
+    use crate::backend::vault::{update, EntryChange};
+    use linked::SET_WHEN_MADE;
+
+    let s = store();
+    let (backed, _) = backed_entry(&s);
+    let only = made_as(&s, "Recorded only", &place(ONLY)).unwrap();
+    // The person's edit: `only` to `backed` and `backed` to `only` are both refused, the place unchanged.
+    let change = |id: &str, f: &[(&str, &str)]| {
+        let label = s.vault_get(id).unwrap().unwrap().label;
+        update(&s, EntryChange { id: id.into(), label, fields: fields(f), tags: vec![], parts: Parts::default(), clear: vec![] })
+    };
+    assert_eq!(change(&only, &place(BACKED)), Err(SET_WHEN_MADE.into()));
+    assert_eq!(change(&backed, &place(ONLY)), Err(SET_WHEN_MADE.into()));
+    assert_eq!(change(&backed, &place(BACKED)), Ok(()));
+    // An agent's edit, however it words it: one that flips the mark is refused before the person is asked.
+    let asked = |id: &str, mark: &str| UpdateRequest { id: id.into(), label: None, fields: fields(&[(LINK, mark)]), tags: None, reason: Some("see whether it can be read".into()) };
+    assert_eq!(inspect::link_change(&s, &asked(&only, BACKED), "builder"), Err(SET_WHEN_MADE.into()));
+    assert_eq!(inspect::link_change(&s, &asked(&backed, ONLY), "builder"), Err(SET_WHEN_MADE.into()));
+}
+
+#[test]
+fn an_agent_can_tell_a_backed_entry_from_a_link_only_one() {
+    let s = store();
+    let backed = backed_entry(&s).0;
+    let only = made_as(&s, "Recorded only", &place(ONLY)).unwrap();
+    let today = chrono::NaiveDate::from_ymd_opt(2026, 11, 22).unwrap();
+    let show = |id: &str| inspect::show(&s, id, None, &seal::key(false), today).unwrap();
+    let (b, o) = (show(&backed), show(&only));
+    assert!(b.backed && !b.link_only, "a backed entry can be used: it is not link-only");
+    assert!(o.link_only && !o.backed);
+    let links = |id: &str| crate::backend::vault::source_link::for_agent(&s, &s.vault_get(id).unwrap().unwrap()).unwrap();
+    assert!(links(&backed).backed && !links(&backed).link_only);
+    assert!(links(&only).link_only && !links(&only).backed);
 }
 
 #[test]
