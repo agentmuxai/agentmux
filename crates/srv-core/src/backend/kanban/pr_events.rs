@@ -56,41 +56,18 @@ pub struct PrEvent {
     /// GitHub's own time for the change: epoch milliseconds, or an RFC 3339 string.
     #[serde(default)]
     pub updated_at: Value,
-    /// One per change, so a replay is ignored (also read from `id`).
-    #[serde(default, alias = "id")]
+    /// One per change, so a replay is ignored (`id` is read as it when `delivery` is absent).
+    #[serde(default)]
     pub delivery: String,
     /// The task reference read from the pull request (`#12`, `board#12`).
     #[serde(default)]
     pub task_ref: Option<String>,
-    /// The same, as a board and a number.
-    #[serde(default)]
-    pub task: Option<TaskOf>,
     /// The agent tag read from the pull request: an agent id.
     #[serde(default)]
     pub agent: Option<String>,
-    /// Whether AgentMux's own GitHub identity opened the pull request (also read from `by_app`).
-    #[serde(default, alias = "by_app")]
+    /// Whether AgentMux's own GitHub identity opened the pull request (`by_app` is read as it when it is absent).
+    #[serde(default)]
     pub by_agentmux: bool,
-}
-
-/// The task a pull request names, by board and number.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct TaskOf {
-    #[serde(default)]
-    pub board: String,
-    #[serde(default)]
-    pub n: u64,
-}
-
-impl PrEvent {
-    /// The task reference as text for [`TaskRef::parse`]: `task_ref`, else the board and number of `task`.
-    pub fn task_ref_text(&self) -> Option<String> {
-        if let Some(r) = self.task_ref.as_ref().filter(|r| !r.is_empty()) {
-            return Some(r.clone());
-        }
-        let t = self.task.as_ref().filter(|t| t.n > 0)?;
-        Some(if t.board.is_empty() { t.n.to_string() } else { format!("{}#{}", t.board, t.n) })
-    }
 }
 
 /// The `pr_event` a verified signed text carries, or `None` when its kind is not that or it is malformed.
@@ -99,7 +76,35 @@ pub fn parse_pr_event(text: &str) -> Option<PrEvent> {
     if v.get("kind").and_then(Value::as_str) != Some("pr_event") {
         return None;
     }
-    serde_json::from_value(v).ok()
+    serde_json::from_value(with_our_names(v)).ok()
+}
+
+/// `v` with the fields an event may name another way written as ours, where ours is absent (or null): `id` as
+/// `delivery`, `by_app` as `by_agentmux`, and `task` (a board and a number, either null) as `task_ref`. Ours wins
+/// when both are there, and a value of another type is left for the parse to refuse, as it is for any field.
+fn with_our_names(mut v: Value) -> Value {
+    let Some(obj) = v.as_object_mut() else { return v };
+    let absent = |obj: &serde_json::Map<String, Value>, k: &str| obj.get(k).is_none_or(Value::is_null);
+    if absent(obj, "delivery") {
+        if let Some(id) = obj.get("id").filter(|i| i.is_string()).cloned() {
+            obj.insert("delivery".into(), id);
+        }
+    }
+    if absent(obj, "by_agentmux") {
+        if let Some(flag) = obj.get("by_app").filter(|f| f.is_boolean()).cloned() {
+            obj.insert("by_agentmux".into(), flag);
+        }
+    }
+    if absent(obj, "task_ref") {
+        let task = obj.get("task").and_then(Value::as_object);
+        let n = task.and_then(|t| t.get("n")).and_then(Value::as_u64).filter(|n| *n > 0);
+        let board = task.and_then(|t| t.get("board")).and_then(Value::as_str).filter(|b| !b.is_empty());
+        if let Some(n) = n {
+            let text = board.map_or_else(|| n.to_string(), |b| format!("{b}#{n}"));
+            obj.insert("task_ref".into(), Value::String(text));
+        }
+    }
+    v
 }
 
 fn time_ms(v: &Value) -> Option<i64> {
@@ -187,7 +192,7 @@ impl Intake {
         };
         let updated_at = time_ms(&ev.updated_at).unwrap_or(now_ms);
         let agent = ev.agent.as_deref().and_then(agent_of);
-        let task_ref = ev.task_ref_text().as_deref().and_then(TaskRef::parse);
+        let task_ref = ev.task_ref.as_deref().and_then(TaskRef::parse);
         let Ok(matched) = identity.work_pr_match(&repo, ev.number, task_ref.as_ref(), agent.as_ref(), now_ms) else {
             return self.drop_with("the store did not answer");
         };
@@ -222,7 +227,7 @@ impl Intake {
                     ev.number,
                     state.as_str(),
                     &a.id,
-                    ev.task_ref_text().as_deref().unwrap_or(""),
+                    ev.task_ref.as_deref().unwrap_or(""),
                     why,
                     ev.head.as_deref().unwrap_or(""),
                     updated_at,

@@ -67,7 +67,6 @@ fn event(number: u64, action: PrAction, task_ref: &str, agent: &str, by_agentmux
         updated_at: json!(at),
         delivery: delivery.into(),
         task_ref: Some(task_ref.into()),
-        task: None,
         agent: Some(agent.into()),
         by_agentmux,
     }
@@ -108,15 +107,24 @@ fn the_other_field_names_are_read_as_ours() {
     });
     let ev = parse_pr_event(&text.to_string()).unwrap();
     assert_eq!((ev.delivery.as_str(), ev.by_agentmux, ev.agent.as_deref()), ("dlv-9", true, Some("pell")));
-    assert_eq!(ev.task_ref_text().as_deref(), Some("work#7"));
+    assert_eq!(ev.task_ref.as_deref(), Some("work#7"));
     assert_eq!(TaskRef::parse("work#7"), Some(TaskRef::Board { board: "work".into(), num: 7 }));
-    // A number with no board is a bare one; no task at all is none; our own `task_ref` wins when both are there.
-    let bare = json!({ "kind": "pr_event", "repo": "o/r", "number": 1, "action": "opened", "task": { "n": 3 } });
-    assert_eq!(parse_pr_event(&bare.to_string()).unwrap().task_ref_text().as_deref(), Some("3"));
-    let none = json!({ "kind": "pr_event", "repo": "o/r", "number": 1, "action": "opened" });
-    assert_eq!(parse_pr_event(&none.to_string()).unwrap().task_ref_text(), None);
-    let both = json!({ "kind": "pr_event", "repo": "o/r", "number": 1, "action": "opened", "task_ref": "#5", "task": { "n": 3 } });
-    assert_eq!(parse_pr_event(&both.to_string()).unwrap().task_ref_text().as_deref(), Some("#5"));
+    let read = |extra: serde_json::Value| {
+        let mut e = json!({ "kind": "pr_event", "repo": "o/r", "number": 1, "action": "opened" });
+        e.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        parse_pr_event(&e.to_string())
+    };
+    // A number with no board is a bare one, whether the board is missing, null or empty; no task is none.
+    assert_eq!(read(json!({ "task": { "n": 3 } })).unwrap().task_ref.as_deref(), Some("3"));
+    assert_eq!(read(json!({ "task": { "board": null, "n": 3 } })).unwrap().task_ref.as_deref(), Some("3"));
+    assert_eq!(read(json!({ "task": { "board": "", "n": 3 } })).unwrap().task_ref.as_deref(), Some("3"));
+    assert_eq!(read(json!({})).unwrap().task_ref, None);
+    assert_eq!(read(json!({ "task": null })).unwrap().task_ref, None);
+    assert_eq!(read(json!({ "task": { "board": "work", "n": null } })).unwrap().task_ref, None, "a null number is no task, and not a dropped event");
+    // Ours wins when both names are there, and an event that carries both is still read.
+    assert_eq!(read(json!({ "task_ref": "#5", "task": { "n": 3 } })).unwrap().task_ref.as_deref(), Some("#5"));
+    let both = read(json!({ "delivery": "ours", "id": "theirs", "by_agentmux": false, "by_app": true })).unwrap();
+    assert_eq!((both.delivery.as_str(), both.by_agentmux), ("ours", false));
 }
 
 #[test]
