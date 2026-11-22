@@ -3,7 +3,7 @@
 
 import { cleanup, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UnseenTurnsDot } from "@/app/block/UnseenTurnsDot";
 import type { TurnLedger } from "@/app/store/agent-pane-state/turn-ledger";
 import { noteTurnLedger, resetTurnAwareness, unseenTurnsFor } from "@/app/store/turn-awareness";
@@ -58,6 +58,62 @@ describe("turns you didn't start, seen when you come back", () => {
 
         setBusy(true);
         expect(container.querySelector(".agent-away-digest")).toBeNull();
+    });
+
+    it("hides itself after 10 seconds and counts the seconds down", () => {
+        vi.useFakeTimers();
+        try {
+            noteTurnLedger("b1", jektTurn(1, "AgentX"), false);
+            const { container } = render(() => <TurnAwayDigest blockId="b1" looking={() => true} busy={() => false} />);
+            const timer = () => container.querySelector(".agent-away-digest-timer")?.textContent;
+            expect(timer()).toBe("10s");
+            vi.advanceTimersByTime(3000);
+            expect(timer()).toBe("7s");
+            vi.advanceTimersByTime(6000);
+            expect(timer()).toBe("1s");
+            expect(container.querySelector(".agent-away-digest")).not.toBeNull();
+            vi.advanceTimersByTime(1000);
+            expect(container.querySelector(".agent-away-digest")).toBeNull();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("a new summary restarts the count", () => {
+        vi.useFakeTimers();
+        try {
+            noteTurnLedger("b1", jektTurn(1, "AgentX"), false);
+            const [looking, setLooking] = createSignal(true);
+            const { container } = render(() => <TurnAwayDigest blockId="b1" looking={looking} busy={() => false} />);
+            vi.advanceTimersByTime(6000);
+            expect(container.querySelector(".agent-away-digest-timer")?.textContent).toBe("4s");
+            setLooking(false);
+            noteTurnLedger("b1", jektTurn(2, "Korp"), false);
+            setLooking(true);
+            expect(container.querySelector(".agent-away-digest-timer")?.textContent).toBe("10s");
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("a second digest with the same words restarts the count too", () => {
+        vi.useFakeTimers();
+        try {
+            noteTurnLedger("b1", jektTurn(1, "AgentX"), false);
+            const [looking, setLooking] = createSignal(true);
+            const { container } = render(() => <TurnAwayDigest blockId="b1" looking={looking} busy={() => false} />);
+            vi.advanceTimersByTime(6000);
+            expect(container.querySelector(".agent-away-digest-timer")?.textContent).toBe("4s");
+            setLooking(false);
+            noteTurnLedger("b1", jektTurn(2, "AgentX"), false);
+            setLooking(true);
+            expect(container.querySelector(".agent-away-digest-text")?.textContent).toBe(
+                "While you were away: 1 turn · 1 jekt (AgentX)",
+            );
+            expect(container.querySelector(".agent-away-digest-timer")?.textContent).toBe("10s");
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("dismiss hides it", () => {

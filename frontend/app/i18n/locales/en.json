@@ -44,6 +44,7 @@
     "agentPicker.templates.managedNote": "AgentMux installs and runs its own copy of each agent CLI, kept apart from any you installed yourself (to run yours instead, switch on \"Use the CLI on my PATH\" for it in Toolchain), and keeps each agent's login and settings in its own folders. This isolates the tools, not what an agent can do on your computer.",
     "agentPicker.templates.gridLabel": "New agent",
     "agentPicker.preview.header": "Preview agent CLIs ({{count}})",
+    "agentAway.secondsLeft": "{{count}}s",
     "agentPicker.notices.launchAborted": "Launch aborted",
     "agentPicker.sharedFolder.title": "A container agent can write this folder",
     "agentPicker.sharedFolder.body": "{{containers}} can write the folder {{host}} works in, so a container agent can change what {{host}} runs.",
