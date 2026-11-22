@@ -438,6 +438,13 @@ impl Registry {
         self.building = false;
     }
 
+    /// [`finish_build`](Self::finish_build), and what the reader that built the matcher reads with: closed when more was
+    /// registered during the build than the interim values hold.
+    fn finish_and_read(&mut self, built: Option<Built>) -> Option<Built> {
+        self.finish_build(built);
+        self.interim()
+    }
+
     /// Covers a value just registered in every spelling, in the matcher in use, until the next one is swapped in. With
     /// no matcher yet, the first read builds one under the lock.
     fn note_added(&mut self, value: &str) {
@@ -680,46 +687,50 @@ fn read_from(lock: &RwLock<Registry>, wait: bool) -> Option<Built> {
     };
     let mut guard = BuildGuard(lock, false);
     let built = job.run();
-    let matcher = with_write_in(lock, |r| {
-        r.finish_build(built);
-        r.matcher.clone()
-    });
+    let matcher = with_write_in(lock, |r| r.finish_and_read(built));
     guard.1 = true;
     matcher
 }
 
-/// `text` with every value in `small` replaced by [`MARK`].
-fn replaced_small<'a>(matcher: &Matcher, text: &'a str) -> Cow<'a, str> {
-    match matcher {
-        Matcher::Pattern(regex) => regex.replace_all(text, NoExpand(MARK)),
-        Matcher::Exact(needles) => {
-            let mut out = Cow::Borrowed(text);
-            for needle in needles.iter() {
-                if out.contains(needle.as_str()) {
-                    out = Cow::Owned(out.replace(needle.as_str(), MARK));
-                }
-            }
-            out
-        }
-        Matcher::Closed => Cow::Owned(MARK.to_string()),
+/// Where each needle of `needles` is in `text`.
+fn needle_spans(needles: &[String], text: &str, spans: &mut Vec<(usize, usize)>) {
+    for needle in needles.iter().filter(|n| n.len() <= text.len()) {
+        spans.extend(text.match_indices(needle.as_str()).map(|(at, found)| (at, at + found.len())));
     }
 }
 
-/// `text` with every value `built` knows replaced by [`MARK`]. The large values go first, on the original text, so a
-/// pooled value inside a large one cannot break it up before it is found.
+/// `text` with every value `built` knows replaced by [`MARK`]. Every group (the pooled values, the large ones, the ones
+/// registered since) is matched against the original text, and matches that overlap are one: a value inside another, or
+/// two that overlap, are withheld whole whichever was registered first. Never the text of a line when matching is closed.
 fn replaced<'a>(built: &Built, text: &'a str) -> Cow<'a, str> {
-    let mut out = Cow::Borrowed(text);
-    for needle in built.large.iter().chain(built.extra.spelled()) {
-        if needle.len() <= out.len() && out.contains(needle.as_str()) {
-            out = Cow::Owned(out.replace(needle.as_str(), MARK));
-        }
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    match &built.small {
+        Some(Matcher::Closed) => return Cow::Owned(MARK.to_string()),
+        Some(Matcher::Pattern(regex)) => spans.extend(regex.find_iter(text).map(|m| (m.start(), m.end()))),
+        Some(Matcher::Exact(needles)) => needle_spans(needles, text, &mut spans),
+        None => {}
     }
-    let Some(small) = &built.small else { return out };
-    let done = match replaced_small(small, &out) {
-        Cow::Borrowed(_) => None,
-        Cow::Owned(done) => Some(done),
-    };
-    done.map_or(out, Cow::Owned)
+    needle_spans(&built.large, text, &mut spans);
+    needle_spans(built.extra.spelled(), text, &mut spans);
+    if spans.is_empty() {
+        return Cow::Borrowed(text);
+    }
+    spans.sort_unstable();
+    let mut out = String::with_capacity(text.len());
+    let (mut copied, mut start, mut end) = (0, spans[0].0, spans[0].1);
+    for &(from, to) in &spans[1..] {
+        if from < end {
+            end = end.max(to);
+            continue;
+        }
+        out.push_str(&text[copied..start]);
+        out.push_str(MARK);
+        (copied, start, end) = (end, from, to);
+    }
+    out.push_str(&text[copied..start]);
+    out.push_str(MARK);
+    out.push_str(&text[end..]);
+    Cow::Owned(out)
 }
 
 /// `text` with every registered value replaced by [`MARK`]; the text itself when it holds none. Never the text of a
@@ -1065,6 +1076,41 @@ mod tests {
         let read = read_from(&lock, false).expect("a matcher");
         assert_eq!(replaced(&read, "an ordinary line"), "an ordinary line", "open again once it is swapped in");
         assert_eq!(replaced(&read, "KEY=canary-bound-0001-first"), "KEY=[withheld]");
+    }
+
+    #[test]
+    fn a_value_registered_since_that_lies_inside_an_older_one_or_around_it_leaves_neither_exposed() {
+        let mut registry = Registry::default();
+        let large = format!("canary-span-0002-{}", "k".repeat(40 * 1024));
+        registry.add(Some("acct:old"), "canary-span-0001-secret-suffix", None);
+        registry.add(Some("acct:old-large"), &large, None);
+        registry.matcher(0);
+        // A shorter value registered during the next build, inside an older one; and a longer one around a large one.
+        registry.add(Some("acct:inner"), "canary-span-0001", None);
+        let outer = format!("{large}-and-more-private-text");
+        registry.add(Some("acct:outer"), &outer, None);
+        let _job = registry.begin_build(0).unwrap();
+        let built = registry.interim().unwrap();
+        assert!(!built.extra.values.is_empty(), "the interim values are what covers them");
+        assert_eq!(replaced(&built, "a canary-span-0001-secret-suffix b"), "a [withheld] b", "the suffix is not left");
+        assert_eq!(replaced(&built, &format!("a {outer} b")), "a [withheld] b", "none of the longer value is left");
+        assert_eq!(replaced(&built, "a canary-span-0001 b"), "a [withheld] b");
+        assert_eq!(replaced(&built, "an ordinary line"), "an ordinary line");
+    }
+
+    #[test]
+    fn the_reader_that_built_the_matcher_reads_closed_when_registrations_overflowed_during_the_build() {
+        let mut registry = Registry::default();
+        registry.add(Some("acct:a"), "canary-over-0001-value", None);
+        registry.matcher(0);
+        registry.add(Some("acct:b"), "canary-over-0002-value", None);
+        let job = registry.begin_build(0).unwrap();
+        for n in 0..EXTRA_COUNT + 10 {
+            registry.add(Some(&format!("acct:n{n}")), &format!("canary-over-{n:05}-v"), None);
+        }
+        assert!(registry.overflow);
+        let read = registry.finish_and_read(job.run()).expect("never nothing");
+        assert_eq!(replaced(&read, "an ordinary line"), MARK, "closed until a later build covers them");
     }
 
     #[test]
