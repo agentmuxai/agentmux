@@ -154,6 +154,8 @@ pub(crate) mod viewer;
 mod input_history;
 mod presence;
 pub(crate) mod client_terms;
+pub(crate) mod folder_overlap;
+pub(crate) mod agent_quit;
 pub(crate) mod tower_pane;
 mod gpu_panel;
 pub(crate) mod record_read;
@@ -207,6 +209,8 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     desktop::register(engine, state);
     presence::register(engine, state);
     client_terms::register(engine, state);
+    folder_overlap::register(engine, state);
+    agent_quit::register(engine, state);
     tower_pane::register(engine, state);
     gpu_panel::register(engine, state);
     blockstats::register(engine, state);

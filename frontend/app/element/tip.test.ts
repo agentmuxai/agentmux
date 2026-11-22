@@ -14,6 +14,15 @@ describe("tip", () => {
         expect(tip("Unseen", { label: true })).toEqual({ "data-hover-tip": "Unseen", "aria-label": "Unseen" });
     });
 
+    it("marks an instant tip, which shows with no rest and on keyboard focus", () => {
+        expect(tip("Folds it", { instant: true })).toEqual({
+            "data-hover-tip": "Folds it",
+            "data-hover-tip-instant": "",
+            "aria-description": "Folds it",
+        });
+        expect(tip("", { instant: true })).toEqual({});
+    });
+
     it("gives no attributes for no text, so a label that is not set leaves no tooltip", () => {
         expect(tip(undefined)).toEqual({});
         expect(tip(null)).toEqual({});

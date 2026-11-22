@@ -8,7 +8,7 @@
 import { createSignal, onCleanup, type Accessor } from "solid-js";
 import { joinLease } from "./lease-step";
 import { openStreamedPane, type StreamedHandle } from "./streamed-client";
-import type { ServerMsg } from "./streamed-protocol";
+import type { ServerMsg, WindowInfo } from "./streamed-protocol";
 
 /** The smallest and largest side srv accepts. */
 const MIN_SIDE = 100;
@@ -17,6 +17,8 @@ const RESIZE_MS = 100;
 
 export type PaneStatus = "waiting" | "connecting" | "starting" | "live" | "failed" | "ended" | "paused";
 export type NavState = Extract<ServerMsg, { t: "nav" }>;
+/** The pane windows and which one is shown. */
+export type WindowsState = { active: number; windows: WindowInfo[] };
 
 export function clampSide(n: number): number {
     return Math.min(MAX_SIDE, Math.max(MIN_SIDE, Math.floor(n)));
@@ -32,7 +34,11 @@ export function addressToUrl(typed: string): string {
 export interface StreamedPane {
     status: Accessor<PaneStatus>;
     nav: Accessor<NavState | null>;
+    /** The windows of the pane: more than one while a page has opened a window. */
+    windows: Accessor<WindowsState | null>;
     error: Accessor<string>;
+    /** What the server did on the person's behalf (closed a window, dismissed a message box), until they close it. */
+    notice: Accessor<string>;
     send: (message: object) => void;
     /** The stage's size changed (CSS pixels). */
     resized: (w: number, h: number) => void;
@@ -41,6 +47,40 @@ export interface StreamedPane {
     reconnect: () => void;
     /** The person closed the server's last complaint (a refused address). */
     dismissError: () => void;
+    dismissNotice: () => void;
+    /** Show one of the windows of the pane. */
+    showWindow: (id: number) => void;
+    /** Close a window a page opened. */
+    closeWindow: (id: number) => void;
+}
+
+/** Showing and closing the windows of the pane: a message to the server naming the window's number. */
+function windowActions(handle: () => StreamedHandle | null): Pick<StreamedPane, "showWindow" | "closeWindow"> {
+    return {
+        showWindow: (id) => handle()?.send({ t: "window", op: "focus", id }),
+        closeWindow: (id) => handle()?.send({ t: "window", op: "close", id }),
+    };
+}
+
+/** Where a message from the server lands. */
+interface Sinks {
+    setNav: (nav: NavState) => void;
+    setError: (text: string) => void;
+    setWindows: (state: WindowsState) => void;
+    setNotice: (text: string) => void;
+    setStatus: (status: PaneStatus) => void;
+    remember: (url: string) => void;
+}
+
+function applyServerMessage(m: ServerMsg, to: Sinks): void {
+    if (m.t === "nav") {
+        to.setNav(m);
+        to.setError("");
+        if (!m.loading && /^https?:/i.test(m.url)) to.remember(m.url);
+    } else if (m.t === "windows") to.setWindows({ active: m.active, windows: m.windows });
+    else if (m.t === "notice") to.setNotice(m.message);
+    else if (m.t === "error") to.setError(m.message);
+    else if (m.t === "closed") to.setStatus("ended");
 }
 
 /** `draw` paints a frame; `startUrl` is where a new socket starts; `remember` keeps the page's address. */
@@ -48,6 +88,8 @@ export function useStreamedPane(draw: (jpeg: Uint8Array) => void, startUrl: () =
     const [status, setStatus] = createSignal<PaneStatus>("waiting");
     const [nav, setNav] = createSignal<NavState | null>(null);
     const [error, setError] = createSignal("");
+    const [windows, setWindows] = createSignal<WindowsState | null>(null);
+    const [notice, setNotice] = createSignal("");
     let handle: StreamedHandle | null = null;
     const leave = joinLease();
     let size = { w: 0, h: 0 };
@@ -64,6 +106,8 @@ export function useStreamedPane(draw: (jpeg: Uint8Array) => void, startUrl: () =
         if (handle || !visible || size.w < MIN_SIDE || size.h < MIN_SIDE) return;
         setStatus("connecting");
         setError("");
+        setNotice("");
+        setWindows(null); // a new socket is a new browser page: its windows start over
         const at = nav()?.url || startUrl();
         const started = { w: clampSide(size.w), h: clampSide(size.h) };
         handle = openStreamedPane(
@@ -81,14 +125,7 @@ export function useStreamedPane(draw: (jpeg: Uint8Array) => void, startUrl: () =
                         handle?.send({ t: "resize", w: clampSide(size.w), h: clampSide(size.h) });
                     }
                 },
-                onMessage: (m) => {
-                    if (m.t === "nav") {
-                        setNav(m);
-                        setError("");
-                        if (!m.loading && /^https?:/i.test(m.url)) remember(m.url);
-                    } else if (m.t === "error") setError(m.message);
-                    else if (m.t === "closed") setStatus("ended");
-                },
+                onMessage: (m) => applyServerMessage(m, { setNav, setError, setWindows, setNotice, setStatus, remember }),
                 // The server's browser is being made for this pane: its own status, until the socket opens.
                 onStarting: () => setStatus("starting"),
                 onEnd: (how, reason) => {
@@ -111,7 +148,9 @@ export function useStreamedPane(draw: (jpeg: Uint8Array) => void, startUrl: () =
     return {
         status,
         nav,
+        windows,
         error,
+        notice,
         send: (message) => {
             if (status() === "live") handle?.send(message);
             // An address typed while connecting is not lost; input and other moves are not for a page that is not there yet.
@@ -141,5 +180,7 @@ export function useStreamedPane(draw: (jpeg: Uint8Array) => void, startUrl: () =
             open();
         },
         dismissError: () => setError(""),
+        dismissNotice: () => setNotice(""),
+        ...windowActions(() => handle),
     };
 }

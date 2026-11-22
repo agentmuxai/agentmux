@@ -78,5 +78,7 @@ windows-sys = { version = "0.59", features = [
 
 [dev-dependencies]
 tempfile = "3"
+# deeplinks/conformance_tests.rs: the bounded fuzz run of the link parser (R12). Same pin as srv-core.
+proptest = { version = "1", default-features = false, features = ["std"] }
 # local_http.rs's test runs with its feature on, whichever crate is built with it.
 agentmux-common = { path = ".", features = ["local-http"] }

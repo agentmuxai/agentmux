@@ -51,6 +51,16 @@ wrap_task! {
                     keep_renderer_background(&self.state, &browser, &self.label, self.alpha);
                 }
             }
+            // Windows: a Browser pane's content is a native child window the page cannot fade, so fade it with the
+            // window (the OS fade used to do this for the whole window).
+            #[cfg(target_os = "windows")]
+            {
+                let parent = unsafe { crate::commands::window::resolve_window_hwnd(&self.state, &self.label) };
+                if !parent.is_null() {
+                    let faded = crate::browser_pane::wrapper::fade_wrappers_of(parent, self.alpha);
+                    tracing::info!(label = %self.label, alpha = self.alpha, faded, "[opacity] faded Browser pane windows");
+                }
+            }
             let Some(frame) = self.state.get_browser(&self.label).and_then(|b| b.main_frame()) else {
                 tracing::warn!(label = %self.label, "[opacity] PageFadeTask: no browser for label");
                 return;

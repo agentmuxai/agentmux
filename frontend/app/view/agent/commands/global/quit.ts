@@ -7,7 +7,7 @@
  * SPEC_CLOSING_PARKS_AGENTS_SHUTDOWN_IS_EXPLICIT_2026_10_30.md §4.3: closing a pane, tab or
  * window keeps an agent running, so ending one has a name of its own.
  *
- * The server does the work (`ObjectService.QuitAgent` → `sagas/self_quit.rs`):
+ * The server does the work (`AgentQuitCommand` → `sagas/self_quit.rs`):
  * releases the agent's work claims, stops the shells it started, shuts it
  * down gracefully and closes only its tab; sibling tabs keep running. The
  * conversation is kept, so reopening the agent resumes it.
@@ -19,7 +19,8 @@
 
 import { pushNotification } from "@/app/store/flash-notifications";
 import { beginShutdownLog, endShutdownLog } from "@/app/view/agent/shutdown/shutdown-log";
-import * as services from "@/store/services";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import type { SlashCommand, SlashResult } from "../types";
 
 /** The server's answer (`sagas/self_quit.rs` `QuitSummary`). */
@@ -81,7 +82,7 @@ export const quitCommand: SlashCommand = {
         beginShutdownLog(ctx.blockId);
         let summary: QuitSummary;
         try {
-            summary = (await services.ObjectService.QuitAgent(ctx.blockId)) as QuitSummary;
+            summary = (await RpcApi.AgentQuitCommand(TabRpcClient, { blockid: ctx.blockId })) as QuitSummary;
         } catch (e) {
             endShutdownLog(ctx.blockId);
             return { kind: "error", message: `Couldn't shut down: ${e instanceof Error ? e.message : String(e)}` };
