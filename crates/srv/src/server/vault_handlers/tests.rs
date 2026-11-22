@@ -491,7 +491,7 @@ async fn generate_answers_with_the_entry_and_never_the_value() {
     let value = crate::backend::vault::reveal(&state.identity_store, &id, "value", "revealed").unwrap();
     assert!(!body.to_string().contains(value.as_str()), "the answer holds the value");
     let rows = crate::backend::vault::activity(&state.identity_store, 10).unwrap();
-    assert!(rows.iter().any(|r| r.action == "generated" && r.actor == auth.agent_id));
+    assert!(rows.iter().any(|r| r.action == "generated" && r.actor == format!("agent:{}", auth.agent_id)));
 }
 
 #[tokio::test]

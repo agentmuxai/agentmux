@@ -235,6 +235,7 @@ const REPLACED: &[(&str, &str)] = &[
     ("OpenEditor", "Pane with action \"open\" and view \"editor\""),
     ("OpenMedia", "Pane with action \"open\" and view \"media\""),
     ("OpenFiles", "Pane with action \"open\" and view \"files\""),
+    ("OpenLink", "Pane with action \"open\" and link"),
     ("NewTab", "Pane with action \"new_tab\""),
     ("SetActiveTab", "Pane with action \"activate_tab\""),
     ("FocusWindow", "Pane with action \"focus_window\""),

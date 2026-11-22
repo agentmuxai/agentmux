@@ -2877,6 +2877,11 @@ fn test_a_post_about_tokens_as_usage_units_is_let_through_but_a_jekt_tier_still_
     // Invisible characters and fullwidth letters do not hide a credential word from the post filter either.
     assert_eq!(post_refusal_reason("the pass\u{200B}word").as_deref(), Some("password"));
     assert_eq!(post_refusal_reason("the ｔｏｋｅｎ").as_deref(), Some("token"));
+    // Look-alike letters (Cyrillic, Greek) spell the word as a reader takes it.
+    assert_eq!(post_refusal_reason("the p\u{0430}ssword is in the vault").as_deref(), Some("password"));
+    assert_eq!(post_refusal_reason("the t\u{043E}k\u{0435}n").as_deref(), Some("token"));
+    assert_eq!(post_refusal_reason("the p\u{0430}ss\u{03C9}ord is in the vault"), None, "a letter that imitates nothing is not folded");
+    assert_eq!(post_refusal_reason("\u{043F}\u{0440}\u{0438}\u{0432}\u{0435}\u{0442}, \u{043C}\u{0438}\u{0440}"), None, "ordinary Cyrillic text passes");
 }
 
 #[test]
@@ -4178,8 +4183,23 @@ async fn test_a_file_name_with_a_credential_word_forces_sensitive() {
 }
 
 #[test]
+fn test_marker_reserved_name_from_wan_is_shown_as_agent_only_when_the_relay_signed_it() {
+    let unsigned = wrap_from("hello", "github-consumer");
+    assert!(tag_line(&unsigned).starts_with("[JEKT:FROM=?github-consumer "), "got: {unsigned}");
+    assert!(!unsigned.contains("Reply: mcp__agentmux__Message"), "got: {unsigned}");
+    let signed = wrap_jekt_message(
+        "hello", Some("github-consumer"), "agent1", "coord", "wan", None, Some(true), None, None, None, false, "msg-1", "normal", None,
+    );
+    assert!(tag_line(&signed).starts_with("[JEKT:FROM=github-consumer "), "got: {signed}");
+    let host = wrap_jekt_message(
+        "hello", Some("cron"), "agent1", "coord", "host", Some(true), None, None, None, None, false, "msg-1", "normal", None,
+    );
+    assert!(tag_line(&host).starts_with("[JEKT:FROM=cron "), "got: {host}");
+}
+
+#[test]
 fn test_marker_ordinary_names_are_unchanged() {
-    for name in ["github-consumer", "agent_2", "camper", "discord"] {
+    for name in ["agent_2", "camper"] {
         let m = wrap_from("hello", name);
         assert!(tag_line(&m).starts_with(&format!("[JEKT:FROM={name} ")), "got: {m}");
         assert!(

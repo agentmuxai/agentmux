@@ -113,7 +113,14 @@ async fn prepare_for(req: &mut InjectionRequest, svc: Option<Arc<attachments::Se
     // Every name the sender controls is quoted before it is used, the stored
     // copy's name included, so neither a name nor the path it gives the copy
     // can close the jekt block or open a list.
-    let sender = quote_in_jekt(req.source_agent.as_deref().unwrap_or("Another agent"));
+    let tier = req.delivery_tier.as_deref().unwrap_or("host");
+    let sender = match req.source_agent.as_deref() {
+        // A name AgentMux reserves, from afar and unsigned, reads the way the marker shows it: with a leading `?`.
+        Some(n) if crate::backend::reactive::sanitize::validate_agent_id(n) && !crate::backend::reactive::sender::is_shown_as_agent(n, tier, req.reagent_verified) => {
+            quote_in_jekt(&format!("?{n}"))
+        }
+        other => quote_in_jekt(other.unwrap_or("Another agent")),
+    };
     // Claude sees them inline only from a sender whose signature verified
     // (spec §6.4), and only when it is running to take them.
     let inline_to = sender_verified(req).then(|| inline_target(&req.target_agent)).flatten();

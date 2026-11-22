@@ -68,6 +68,7 @@ pub(super) const ALWAYS: &[&str] = &[
     "POST /api/v1/window/focus", "POST /api/v1/window/name", "POST /api/v1/work-claims",
     "POST /api/v1/work-claims/release", "POST /api/v1/workspace/name",
     "POST /api/v1/agent/detach", "POST /api/v1/agent/start", "POST /api/v1/agent/stop", "POST /api/v1/agent/delete",
+    "POST /api/v1/agent/rotate-token",
 ];
 
 /// Window and host plumbing, and the service call the window makes.
@@ -89,6 +90,8 @@ pub(super) const HANDLER: &[&str] = &[
     "POST /api/v1/agent/seats", "POST /api/v1/agent/rename", "POST /api/v1/agent/migrate-ids",
     "POST /api/v1/agent/update", "POST /api/v1/agent/bundles", "POST /api/v1/agent/hide",
     "POST /api/v1/agent/unhide",
+    // Every open it decides, refused and queued ones too, with the link and the reason (deeplink_guard::record, G9).
+    "POST /api/v1/pane/open_link",
 ];
 
 /// Answers a question or carries a stream; nothing it changes is kept.

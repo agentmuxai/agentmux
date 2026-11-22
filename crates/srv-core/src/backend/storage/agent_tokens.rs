@@ -21,7 +21,8 @@
 //! (spec §0.3). This is minted locally, with no network and no fallback.
 //!
 //! **Lifetime.** Long-lived for the agent's lifetime and revoked when the
-//! agent is deleted (`purge_agent_dependents`), never renewed on a timer:
+//! agent is deleted (`purge_agent_dependents`), replaced only on request
+//! (`agent_token_rotate`), never renewed on a timer:
 //! spec §6.3 — expiry mid-task turns a healthy agent silent, and renewal is a
 //! liveness dependency on the very path being secured. Persisted here, in
 //! the server's own store, so an srv restart does not strand every running
@@ -60,8 +61,8 @@ fn random_token() -> String {
 /// token → UID, in memory, so attributing a request never reads the store
 /// (spec §10.1). Attached to the channel's object store only
 /// ([`Store::attach_token_index`]) and kept in step with `db_agent_tokens`
-/// by the two statements that change it — mint (`agent_token_ensure`) and
-/// revoke (`purge_agent_dependents`) — each under the store's connection
+/// by the statements that change it — mint (`agent_token_ensure`), replace
+/// (`agent_token_rotate`) and revoke (`purge_agent_dependents`) — each under the store's connection
 /// lock, so the index never disagrees with a committed row (spec §6.5.3:
 /// purge is a sequence of autocommit statements, not a transaction, so
 /// the index follows the token statement itself, not the purge's result).
@@ -190,6 +191,30 @@ impl Store {
         }
         Ok(token)
     }
+
+    /// Replace this agent's token with a new one: the old value stops working at once, because the row and
+    /// the index change together under the connection lock, and the agent holds exactly one token afterwards.
+    /// An agent with no token yet is given one. The value is not returned: the agent reads it from its next
+    /// spawn environment (`agent_token_ensure`), and nothing else needs it. An empty `uid` is refused, as in
+    /// `agent_token_ensure`.
+    pub fn agent_token_rotate(&self, uid: &str) -> Result<(), StoreError> {
+        if uid.trim().is_empty() {
+            return Err(StoreError::Other("agent_token_rotate: refusing to rotate the token of an empty uid".to_string()));
+        }
+        let token = random_token();
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO db_agent_tokens (agent_id, token, created_at) VALUES (?1, ?2, ?3)",
+            params![uid, token, now_secs()],
+        )?;
+        // The new value is withheld from transcripts; the old one stays withheld, so a line that already
+        // holds it is still redacted when read.
+        crate::backend::transcript::withhold::register(&token);
+        if let Some(index) = self.token_index() {
+            index.insert(uid, &token);
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -276,6 +301,64 @@ mod tests {
             "added on mint"
         );
         assert_eq!(index.len(), 2);
+    }
+
+    /// A rotate replaces the row and the index together: the old value is refused at once, the new one
+    /// works, the agent holds one token, and another agent's token is untouched.
+    #[test]
+    fn rotate_replaces_the_token_and_the_old_value_stops_working() {
+        use crate::backend::transcript::withhold;
+        let store = object_store();
+        let index = store.attach_token_index().unwrap();
+        let old = store.agent_token_ensure("uid-a").unwrap();
+        let other = store.agent_token_ensure("uid-b").unwrap();
+
+        store.agent_token_rotate("uid-a").unwrap();
+
+        let new = store.agent_token_load("uid-a").unwrap().unwrap();
+        assert_ne!(new, old);
+        assert_eq!(new.len(), 64);
+        assert_eq!(index.uid_for(&old), None, "the old value is refused");
+        assert_eq!(index.uid_for(&new).as_deref(), Some("uid-a"), "the new value works");
+        assert_eq!(index.uid_for(&other).as_deref(), Some("uid-b"), "another agent's token is untouched");
+        assert_eq!(index.len(), 2, "one token per agent");
+        assert_eq!(store.agent_token_ensure("uid-a").unwrap(), new, "a spawn after the rotate reads the new value");
+        assert!(withhold::text(&format!("T={new}")).contains(withhold::MARK), "the new value is withheld");
+        assert!(withhold::text(&format!("T={old}")).contains(withhold::MARK), "the old value stays withheld");
+    }
+
+    /// Each rotate leaves one token; a second rotate retires the first replacement too; an agent with no
+    /// token is given one; an empty uid is refused.
+    #[test]
+    fn rotate_twice_keeps_one_token_and_a_new_agent_is_given_one() {
+        let store = object_store();
+        let index = store.attach_token_index().unwrap();
+        store.agent_token_rotate("uid-new").unwrap();
+        let first = store.agent_token_load("uid-new").unwrap().unwrap();
+        assert_eq!(index.uid_for(&first).as_deref(), Some("uid-new"));
+
+        store.agent_token_rotate("uid-new").unwrap();
+        let second = store.agent_token_load("uid-new").unwrap().unwrap();
+        assert_ne!(first, second);
+        assert_eq!(index.uid_for(&first), None);
+        assert_eq!(index.uid_for(&second).as_deref(), Some("uid-new"));
+        assert_eq!(index.len(), 1);
+
+        assert!(store.agent_token_rotate("").is_err());
+        assert!(store.agent_token_rotate("  ").is_err());
+    }
+
+    /// The rows a restart reloads give the same answer: the replaced value is the one that is loaded.
+    #[test]
+    fn a_rotated_token_survives_an_index_rebuild() {
+        let store = object_store();
+        let old = store.agent_token_ensure("uid-a").unwrap();
+        store.agent_token_rotate("uid-a").unwrap();
+        let new = store.agent_token_load("uid-a").unwrap().unwrap();
+        let rebuilt = store.attach_token_index().unwrap();
+        assert_eq!(rebuilt.uid_for(&old), None);
+        assert_eq!(rebuilt.uid_for(&new).as_deref(), Some("uid-a"));
+        assert_eq!(rebuilt.len(), 1);
     }
 
     /// Purge revokes the token from the index as well as the table.

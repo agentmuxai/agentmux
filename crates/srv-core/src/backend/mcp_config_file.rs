@@ -179,13 +179,29 @@ fn merge_project_servers(ours: &str, theirs: &str) -> String {
     serde_json::to_string_pretty(&ours).unwrap_or_else(|_| ours.to_string())
 }
 
+/// What [`data_home_lock`] holds: the lock for `AGENTMUX_DATA_HOME` and the crate-wide one for the other
+/// variables the data root is read from.
+#[cfg(any(test, feature = "test-support"))]
+pub struct DataHomeGuard {
+    _data_home: std::sync::MutexGuard<'static, ()>,
+    _root_env: std::sync::MutexGuard<'static, ()>,
+}
+
 /// The one lock every test holds while it points `AGENTMUX_DATA_HOME` at a temp folder. The
 /// variable is process-wide, so tests in different modules must not overlap; a second private
 /// mutex would let one test restore the value under another.
+///
+/// The data root is also read from `AGENTMUX_HOME_OVERRIDE`, which wins over `AGENTMUX_DATA_HOME`, and
+/// that is set under [`ISOLATED_AUTH_ENV_LOCK`](crate::test_support::ISOLATED_AUTH_ENV_LOCK). So this holds
+/// that lock too (always after its own, so two tests cannot wait on each other): a test elsewhere that points
+/// the root at its own folder cannot run beside one that has written under another, and its test of the
+/// default data folder does not read one that is set here.
 #[cfg(any(test, feature = "test-support"))]
-pub fn data_home_lock() -> std::sync::MutexGuard<'static, ()> {
+pub fn data_home_lock() -> DataHomeGuard {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    let data_home = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let root_env = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    DataHomeGuard { _data_home: data_home, _root_env: root_env }
 }
 
 /// A test points `AGENTMUX_DATA_HOME` at a temp folder so the relocated configs it writes never
@@ -209,6 +225,15 @@ pub fn with_data_home<T>(root: &Path, f: impl FnOnce() -> T) -> T {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_test_that_sets_the_data_home_also_holds_the_lock_of_the_other_root_variables() {
+        let _held = data_home_lock();
+        assert!(
+            matches!(crate::test_support::ISOLATED_AUTH_ENV_LOCK.try_lock(), Err(std::sync::TryLockError::WouldBlock)),
+            "a test that reads the data root from another variable must wait for this one"
+        );
+    }
 
     #[test]
     fn a_users_project_gets_a_config_outside_it_and_an_agent_folder_keeps_its_own() {

@@ -202,6 +202,7 @@ vi.mock("@/app/block/upgrade-requests", () => h.stub("startUpgradeRequests"));
 vi.mock("@/app/block/desktop-requests", () => h.stub("startDesktopRequests"));
 vi.mock("@/app/block/agent-notices", () => h.stub("startAgentNotices"));
 vi.mock("@/app/block/pane-confirms", () => h.stub("startPaneConfirms"));
+vi.mock("@/app/deeplinks/agent-open-bridge", () => h.stub("startDeepLinkOpens"));
 vi.mock("@/app/view/agent/components/vault-request-card/vault-request-cards", () => h.stub("startVaultRequestCards"));
 vi.mock("@/app/view/agent/endpoint-notice-cards", () => h.stub("startEndpointNoticeCards"));
 vi.mock("@/app/notification/waiting-for-you", () => h.stub("installWaitingForYou"));

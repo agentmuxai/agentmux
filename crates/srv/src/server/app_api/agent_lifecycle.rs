@@ -32,7 +32,7 @@ use crate::server::state::AppState;
 #[derive(Debug, Deserialize)]
 pub(crate) struct LifecycleRequest {
     /// The agent's id, slug or name.
-    agent: String,
+    pub(super) agent: String,
 }
 
 pub(super) struct Refusal {
@@ -45,6 +45,7 @@ pub(super) fn refuse(status: StatusCode, message: impl Into<String>) -> Refusal 
 }
 
 /// The agent making the request.
+#[derive(Clone)]
 pub(super) struct Actor {
     uid: String,
     slug: String,
@@ -53,6 +54,10 @@ pub(super) struct Actor {
 impl Actor {
     pub(super) fn uid(&self) -> &str {
         &self.uid
+    }
+
+    pub(super) fn slug(&self) -> &str {
+        &self.slug
     }
 
     /// An agent on another machine (`slug@machine`), by the same name `run_remote` records.
@@ -107,7 +112,7 @@ pub(super) fn is_running(row: &AgentRuntime) -> bool {
 
 /// Whether a stop has anything to stop: any state with a process may be one, so the teardown decides,
 /// not the recorded intent (a message to a stopped agent can run it again without clearing that).
-fn may_have_process(row: &AgentRuntime) -> bool {
+pub(super) fn may_have_process(row: &AgentRuntime) -> bool {
     !matches!(row.state, AgentRuntimeState::Stopped | AgentRuntimeState::Error)
 }
 
@@ -120,7 +125,7 @@ pub(super) fn audit(state: &AppState, actor: &Actor, action: &str, target: &str,
 }
 
 /// What the answer says about the agent now: its state (re-read after the change).
-fn row_json(state: &AppState, agent_id: &str) -> Value {
+pub(super) fn row_json(state: &AppState, agent_id: &str) -> Value {
     agent_runtime::list(state, agentmux_common::time::now_ms_u64())
         .into_iter()
         .find(|r| r.agent_id == agent_id)
@@ -158,7 +163,7 @@ pub(crate) fn needs_window(mstore: &crate::backend::storage::store::Store, calle
     target != caller && crate::server::app_api::agent_spawn::worker_of(mstore, target).as_deref() != Some(caller)
 }
 
-async fn stop(state: &AppState, actor: &Actor, req: &LifecycleRequest) -> Result<Value, Refusal> {
+pub(super) async fn stop(state: &AppState, actor: &Actor, req: &LifecycleRequest) -> Result<Value, Refusal> {
     let blocking = state.clone();
     let named = req.agent.clone();
     let target = tokio::task::spawn_blocking(move || target_of(&blocking, &named))

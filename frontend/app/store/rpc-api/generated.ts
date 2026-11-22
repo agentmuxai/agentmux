@@ -167,6 +167,7 @@ import type { CommandCopyForkHistoryData } from "@/types/rpc/CommandCopyForkHist
 import type { CommandCreateAgentDefinitionData } from "@/types/rpc/CommandCreateAgentDefinitionData";
 import type { CommandCreateAgentInstanceData } from "@/types/rpc/CommandCreateAgentInstanceData";
 import type { CommandCreateAgentSkillData } from "@/types/rpc/CommandCreateAgentSkillData";
+import type { CommandDeepLinkOpenDoneData } from "@/types/rpc/CommandDeepLinkOpenDoneData";
 import type { CommandDeleteAgentDefinitionData } from "@/types/rpc/CommandDeleteAgentDefinitionData";
 import type { CommandDeleteAgentInstanceData } from "@/types/rpc/CommandDeleteAgentInstanceData";
 import type { CommandDeleteAgentSkillData } from "@/types/rpc/CommandDeleteAgentSkillData";
@@ -317,6 +318,7 @@ import type { CreateEditorFileReq } from "@/types/rpc/CreateEditorFileReq";
 import type { CreateEditorFileResult } from "@/types/rpc/CreateEditorFileResult";
 import type { CreateScratchFileReq } from "@/types/rpc/CreateScratchFileReq";
 import type { CreateScratchFileResult } from "@/types/rpc/CreateScratchFileResult";
+import type { DeepLinkOpenDoneResult } from "@/types/rpc/DeepLinkOpenDoneResult";
 import type { DeleteAgentInstanceResult } from "@/types/rpc/DeleteAgentInstanceResult";
 import type { DeleteBundleResult } from "@/types/rpc/DeleteBundleResult";
 import type { DeleteDroneReq } from "@/types/rpc/DeleteDroneReq";
@@ -338,6 +340,7 @@ import type { FileProbeReq } from "@/types/rpc/FileProbeReq";
 import type { FileProbeResult } from "@/types/rpc/FileProbeResult";
 import type { FileSearchBytesReq } from "@/types/rpc/FileSearchBytesReq";
 import type { FileSearchBytesResult } from "@/types/rpc/FileSearchBytesResult";
+import type { FileSearchTextReq } from "@/types/rpc/FileSearchTextReq";
 import type { FleetActionResult } from "@/types/rpc/FleetActionResult";
 import type { FleetGroup } from "@/types/rpc/FleetGroup";
 import type { FleetGroupDeleteResult } from "@/types/rpc/FleetGroupDeleteResult";
@@ -2279,6 +2282,14 @@ export const GeneratedApi = {
   ): Promise<PaneConfirmDecideResult> {
     return client.rpcCall("pane.confirm.decide", data, opts);
   },
+  // command "deeplink.open.done"
+  DeepLinkOpenDoneCommand(
+    client: RpcClient,
+    data: CommandDeepLinkOpenDoneData,
+    opts?: RpcOpts
+  ): Promise<DeepLinkOpenDoneResult> {
+    return client.rpcCall("deeplink.open.done", data, opts);
+  },
   // command "pane.open"
   PaneOpenCommand(client: RpcClient, data: CommandPaneOpenData, opts?: RpcOpts): Promise<PaneOpenResult> {
     return client.rpcCall("pane.open", data, opts);
@@ -2466,6 +2477,10 @@ export const GeneratedApi = {
   // command "filesearchbytes"
   FileSearchBytesCommand(client: RpcClient, data: FileSearchBytesReq, opts?: RpcOpts): Promise<FileSearchBytesResult> {
     return client.rpcCall("filesearchbytes", data, opts);
+  },
+  // command "filesearchtext"
+  FileSearchTextCommand(client: RpcClient, data: FileSearchTextReq, opts?: RpcOpts): Promise<FileSearchBytesResult> {
+    return client.rpcCall("filesearchtext", data, opts);
   },
   // command "readeditorfile"
   ReadEditorFileCommand(

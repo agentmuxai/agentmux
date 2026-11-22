@@ -104,7 +104,7 @@ async fn a_request_reaches_the_upstream_with_the_key_and_the_agents_model_and_is
     assert!((used.cost_usd - spend::cost(price, &used.tokens)).abs() < 1e-12);
 
     let log = vault::activity(&state.identity_store, 10).unwrap();
-    assert!(log.iter().any(|a| a.actor == "gw-e2e" && a.action == vault::route_key::USED), "the use is in the Vault's log under the agent");
+    assert!(log.iter().any(|a| a.actor == "agent:gw-e2e" && a.action == vault::route_key::USED), "the use is in the Vault's log under the agent");
     assert!(!serde_json::to_string(&log).unwrap().contains(KEY));
 }
 

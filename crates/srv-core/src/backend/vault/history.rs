@@ -69,6 +69,24 @@ pub fn actor_kind(actor: &str) -> &'static str {
     }
 }
 
+/// The actor as a row keeps it: an agent is written `agent:<id>`, so a row for an agent named like the person or the
+/// system can't be read as theirs. The person, the system, AgentMux's own parts (a label with a space, or
+/// `AgentMux`) and a label that already has a kind (`drone:<id>`) stay as they are, and an older row without the
+/// prefix still reads as an agent.
+pub fn actor_label(actor: &str) -> String {
+    let own_part = actor == super::setting_key::AGENTMUX || actor.contains(char::is_whitespace);
+    if actor == PERSON || actor == expiry::ACTOR || own_part || actor.contains(':') {
+        actor.to_string()
+    } else {
+        format!("agent:{actor}")
+    }
+}
+
+/// The agent a row names, without the kind its actor is written with. A row from before the kind was written has none.
+pub fn agent_of(actor: &str) -> &str {
+    actor.strip_prefix("agent:").unwrap_or(actor)
+}
+
 /// `text` on one line, trimmed and clipped to `max` characters.
 pub fn one_line(text: &str, max: usize) -> String {
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -109,6 +127,7 @@ fn host() -> &'static str {
 /// never fails for want of a history line.
 pub fn append(store: &Store, mut row: VaultActivityRow) {
     row.actor_kind = actor_kind(&row.actor).into();
+    row.actor = actor_label(&row.actor);
     row.host = host().into();
     row.reason = one_line(&row.reason, MAX_REASON);
     match store.vault_activity_add(&row) {
@@ -289,4 +308,29 @@ fn note_head(row: &VaultActivityRow) {
             write_head(&value);
         }
     });
+}
+
+#[cfg(test)]
+mod actor_label_tests {
+    use super::*;
+
+    #[test]
+    fn an_agent_is_written_with_its_kind_and_the_rest_stay() {
+        assert_eq!(actor_label("lolly"), "agent:lolly");
+        assert_eq!(actor_label(PERSON), PERSON);
+        assert_eq!(actor_label(expiry::ACTOR), expiry::ACTOR);
+        assert_eq!(actor_label("drone:d1"), "drone:d1");
+        assert_eq!(actor_label("agent:lolly"), "agent:lolly");
+        assert_eq!(actor_label("AgentMux voice input"), "AgentMux voice input");
+        assert_eq!(actor_label(super::super::setting_key::AGENTMUX), super::super::setting_key::AGENTMUX);
+    }
+
+    #[test]
+    fn an_agent_named_like_the_person_is_not_read_as_the_person() {
+        // An old bare row still reads as the kind it always did; a new row for such an agent says it is an agent.
+        assert_eq!(actor_kind(&actor_label("lolly")), "agent");
+        assert_eq!(actor_kind(PERSON), "person");
+        assert_eq!(agent_of("agent:lolly"), "lolly");
+        assert_eq!(agent_of("lolly"), "lolly");
+    }
 }

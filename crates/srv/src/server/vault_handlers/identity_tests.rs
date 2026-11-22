@@ -72,7 +72,7 @@ async fn c2_a_token_only_agents_update_is_recorded_under_its_identity() {
     let (s, body) = call(&app, Some(&token), "/api/v1/vault/update", update(&id, "vid-pulp", json!({ "notes": "the dashboard" }))).await;
     assert_eq!(s, StatusCode::OK, "{body}");
     let line = history_of(&state, &id).into_iter().find(|l| l.action == "changed details").expect("the change is in the history");
-    assert_eq!(line.actor, "vid-pulp");
+    assert_eq!(line.actor, "agent:vid-pulp");
     assert!(!body.to_string().contains("pw-one-of-a-kind") && !format!("{line:?}").contains("pw-one-of-a-kind"));
 }
 
@@ -178,5 +178,5 @@ async fn c1_a_container_agents_rotation_is_refused_before_the_person_is_asked() 
     assert_eq!(s, StatusCode::FORBIDDEN, "{out}");
     assert!(out["error"].as_str().unwrap().contains("container agent can't"), "{out}");
     assert!(vault::uses::uses().list().iter().all(|u| u.entry_id != id), "nobody was asked");
-    assert!(history_of(&state, &id).iter().all(|l| l.actor != "vid-box"));
+    assert!(history_of(&state, &id).iter().all(|l| l.actor != "agent:vid-box"));
 }

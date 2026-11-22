@@ -102,7 +102,7 @@ fn matches_become_new_entries_and_the_output_is_cleaned_of_them() {
     assert!(!clean.contains("wJalr") && !clean.contains("AKIAEXAMPLE"));
     let log = activity(&s, 10).unwrap();
     let made = log.iter().find(|a| a.entry_id == ids[0] && a.action == "captured").unwrap();
-    assert_eq!((made.actor.as_str(), made.action.as_str(), made.target.as_str()), ("Agent2-6", "captured", "aws iam create-access-key --user-name deploy"));
+    assert_eq!((made.actor.as_str(), made.action.as_str(), made.target.as_str()), ("agent:Agent2-6", "captured", "aws iam create-access-key --user-name deploy"));
 }
 
 #[test]
@@ -340,7 +340,7 @@ fn a_card_is_made_whole_from_one_output_settled_and_the_output_is_cleaned_of_eve
     }
     assert_eq!(clean.matches(&format!("[vault:{id}]")).count(), 5, "{clean}");
     let log = activity(&s, 10).unwrap();
-    assert!(log.iter().any(|a| a.entry_id == *id && a.action == "captured" && a.actor == "Agent2-6"), "{log:?}");
+    assert!(log.iter().any(|a| a.entry_id == *id && a.action == "captured" && a.actor == "agent:Agent2-6"), "{log:?}");
 }
 
 #[test]
