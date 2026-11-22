@@ -59,8 +59,9 @@ const POPUP_PAGE: &str = "data:text/html,<html style=\"height:100%25\"><body sty
 /// The real thing, with an Xvfb and a Chrome on this machine: the browser starts on a virtual screen, the page paints (red: the
 /// browser does not report itself as remote-controlled), a click sent at screen level reaches the page (green), a frame of the screen
 /// is a JPEG of the right size, and a typed address changes the page.
-/// `cargo test -p agentmux-srv screen_mode_real -- --ignored --nocapture` on a Linux host with Xvfb and a Chrome (set
-/// `AGENTMUX_STREAMED_BROWSER_NO_SANDBOX=1` if Chrome refuses to start without it).
+/// `cargo test -p agentmux-srv screen_mode_real -- --ignored --nocapture` on a Linux host (a container or a dedicated test machine) with Xvfb and a
+/// Chrome, and the browser's policy file installed for the proxy port in `AGENTMUX_STREAMED_BROWSER_PROXY_PORT` (the file's content is in the
+/// error the first run prints). Set `AGENTMUX_STREAMED_BROWSER_NO_SANDBOX=1` only if Chrome cannot start without it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "needs Xvfb and a Chrome; run by hand on a Linux host"]
 async fn screen_mode_real() {
@@ -104,7 +105,7 @@ async fn screen_mode_popup_real() {
         eprintln!("screen_mode_popup_real: no Xvfb or no Chrome here; nothing run");
         return;
     }
-    let session = session::start(800, 600, POPUP_PAGE).await.expect("the screen and the browser start");
+    let session = session::start(800, 600, POPUP_PAGE, true).await.expect("the screen and the browser start");
     let screen = x::Screen::connect(&session.display).expect("the screen is reachable");
     wait_for_colour(&screen, 400, 400, [0, 0, 255], 30).await.expect("the page is up");
     assert_eq!(screen.visible_windows().unwrap(), 1);
