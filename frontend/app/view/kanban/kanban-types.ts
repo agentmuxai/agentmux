@@ -50,6 +50,20 @@ export interface KanbanPr {
     released_at?: number | null;
 }
 
+/** Who has to act next on a pull request (`WaitsOn` in crates/srv-core/src/backend/reviews.rs). */
+export type KanbanWaitsOn = "person" | "author" | "reviewer" | "ci" | "queue" | "none" | "unknown";
+
+/** A reviewer kind's latest verdict on a pull request (`PrVerdict`); `stale` when the head moved since. */
+export interface KanbanPrVerdict {
+    /** `bot`, `codex` or `person`. */
+    by: string;
+    /** `approved`, `changes_requested`, `commented` or another well-formed name. */
+    state: string;
+    head?: string;
+    at: number;
+    stale: boolean;
+}
+
 /** One pull request of a card (`WorkCardPr` in crates/srv-core/src/backend/storage/work_card_prs.rs). */
 export interface KanbanCardPr {
     repo: string;
@@ -70,6 +84,11 @@ export interface KanbanCardPr {
     unlinked?: boolean;
     /** Whether srv follows it (false: a private repository with no GitHub connection). */
     followed?: boolean;
+    /** The verdict of each reviewer kind srv was told of, who it waits on and why (absent from an older srv). */
+    verdicts?: KanbanPrVerdict[];
+    waits_on?: KanbanWaitsOn;
+    /** `changes_requested`, `checks_failing`, `checks_running`, `no_review`, `review_stale`, `awaiting_accept`, `ready_to_merge`, ... */
+    why?: string;
 }
 
 /** What srv derived from a card's pull requests (`pr_rollup`): the UI never recomputes the rule. */
@@ -82,6 +101,11 @@ export interface KanbanPrRollup {
     follow_up_open: boolean;
     /** A held task whose pull requests have all merged. */
     all_merged_waiting: boolean;
+    /** What the pull request that blocks the card waits on, why, which it is (`owner/repo#12`) and how many other open ones the card has. */
+    waits_on?: KanbanWaitsOn;
+    why?: string;
+    blocking?: string;
+    waits_more?: number;
 }
 
 export interface KanbanCardFields {

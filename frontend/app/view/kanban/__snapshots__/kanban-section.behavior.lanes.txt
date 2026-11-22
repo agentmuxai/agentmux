@@ -16,13 +16,22 @@ board#5 mounted
 <span class="ui-filter">
 <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
 </i>
-<input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Find a task, #number, agent or repository" aria-label="Find a task">
+<input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Find a task, #number, agent, repository, branch or pull request" aria-label="Find a task">
 </span>
 </div>
 <select class="ui-input ui-density-compact" aria-label="Repository">
 <option value="">All repositories</option>
 <option value="a5af/other">a5af/other</option>
 <option value="agentmuxai/agentmux">agentmuxai/agentmux</option>
+</select>
+<select class="ui-input ui-density-compact" aria-label="Waits on">
+<option value="">Waits on anyone</option>
+<option value="open">Open pull requests</option>
+<option value="author">Waits on the author</option>
+<option value="reviewer">Waits on a reviewer</option>
+<option value="ci">Waits on checks</option>
+<option value="queue">In the merge queue</option>
+<option value="person">Waits on a person</option>
 </select>
 <select class="ui-input ui-density-compact kanban-toolbar__reports" aria-label="Reports to">
 <option value="">Reports to anyone</option>
@@ -150,13 +159,22 @@ board#3 unmounted
 <span class="ui-filter">
 <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
 </i>
-<input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Find a task, #number, agent or repository" aria-label="Find a task">
+<input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Find a task, #number, agent, repository, branch or pull request" aria-label="Find a task">
 </span>
 </div>
 <select class="ui-input ui-density-compact" aria-label="Repository">
 <option value="">All repositories</option>
 <option value="a5af/other">a5af/other</option>
 <option value="agentmuxai/agentmux">agentmuxai/agentmux</option>
+</select>
+<select class="ui-input ui-density-compact" aria-label="Waits on">
+<option value="">Waits on anyone</option>
+<option value="open">Open pull requests</option>
+<option value="author">Waits on the author</option>
+<option value="reviewer">Waits on a reviewer</option>
+<option value="ci">Waits on checks</option>
+<option value="queue">In the merge queue</option>
+<option value="person">Waits on a person</option>
 </select>
 <select class="ui-input ui-density-compact kanban-toolbar__reports" aria-label="Reports to">
 <option value="">Reports to anyone</option>
@@ -275,13 +293,22 @@ board#6 mounted
 <span class="ui-filter">
 <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
 </i>
-<input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Find a task, #number, agent or repository" aria-label="Find a task">
+<input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Find a task, #number, agent, repository, branch or pull request" aria-label="Find a task">
 </span>
 </div>
 <select class="ui-input ui-density-compact" aria-label="Repository">
 <option value="">All repositories</option>
 <option value="a5af/other">a5af/other</option>
 <option value="agentmuxai/agentmux">agentmuxai/agentmux</option>
+</select>
+<select class="ui-input ui-density-compact" aria-label="Waits on">
+<option value="">Waits on anyone</option>
+<option value="open">Open pull requests</option>
+<option value="author">Waits on the author</option>
+<option value="reviewer">Waits on a reviewer</option>
+<option value="ci">Waits on checks</option>
+<option value="queue">In the merge queue</option>
+<option value="person">Waits on a person</option>
 </select>
 <select class="ui-input ui-density-compact kanban-toolbar__reports" aria-label="Reports to">
 <option value="">Reports to anyone</option>
