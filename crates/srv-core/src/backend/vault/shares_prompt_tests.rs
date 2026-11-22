@@ -199,7 +199,7 @@ fn a11_a_use_is_the_agents_line_in_the_history_and_holds_no_value() {
     assert_eq!((row.id.as_str(), user.as_str(), password.as_str()), (id.as_str(), "alex", "pw"));
     let lines = history::history_for(&s, &id, history::Asker::Person, 50).unwrap();
     let used = lines.iter().find(|l| l.action == signins::SIGNED_IN).expect("the use is in the history");
-    assert_eq!((used.actor.as_str(), used.target.as_str(), used.outcome.as_str()), ("pulp", SITE_URL, "done"));
+    assert_eq!((used.actor.as_str(), used.target.as_str(), used.outcome.as_str()), ("agent:pulp", SITE_URL, "done"));
     assert!(!lines.iter().any(|l| [&l.actor, &l.action, &l.target, &l.outcome, &l.reason].iter().any(|v| v.as_str() == "pw")), "no line holds the password");
     assert!(signins::fill_shared(&s, &space(&own(OTHER), "Admin"), &owner("other", OTHER), "other").unwrap().is_none(), "another agent's profile is given nothing");
 }

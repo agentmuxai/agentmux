@@ -20,6 +20,11 @@ const h = vi.hoisted(() => {
         openViews: new Set<string>(),
         order: [] as string[],
         blocks: {} as Record<string, { meta: Record<string, unknown> }>,
+        /** The blocks that sit alone in a layout leaf (a leaf with data); the others are not movable. */
+        lone: new Set<string>(),
+        treeReducer: vi.fn((..._a: unknown[]) => undefined),
+        focusNode: vi.fn((..._a: unknown[]) => undefined),
+        showBlockInPane: vi.fn((..._a: unknown[]) => undefined),
         globalMock: undefined as unknown as () => Promise<Record<string, unknown>>,
     };
     state.globalMock = async () => {
@@ -38,10 +43,14 @@ vi.mock("@/app/store/block-component-registry", () => ({ openOrFocusPaneByView: 
 vi.mock("@/app/store/global", () => h.globalMock());
 vi.mock("@/store/global", () => h.globalMock());
 const layoutModel = {
-    getNodeByBlockId: (blockId: string) => (h.blocks[blockId] ? { id: `node-of-${blockId}` } : undefined),
+    getNodeByBlockId: (blockId: string) =>
+        h.blocks[blockId] ? { id: `node-of-${blockId}`, data: h.lone.has(blockId) ? { blockId } : undefined } : undefined,
+    treeReducer: h.treeReducer,
+    focusNode: h.focusNode,
 };
 vi.mock("@/app/util/reveal-block", () => ({
     findOpenBlockByView: async (view: string) => (h.openViews.has(view) ? `open-${view}` : null),
+    showBlockInPane: h.showBlockInPane,
 }));
 vi.mock("@/layout/index", () => ({
     getLayoutModelForStaticTab: () => layoutModel,
@@ -71,6 +80,7 @@ beforeEach(() => {
     vi.clearAllMocks();
     h.blocks = {};
     h.openViews.clear();
+    h.lone.clear();
 });
 
 describe("Shortcuts pane: the manifest", () => {
@@ -180,6 +190,20 @@ describe("Shortcuts pane: a singleton tile", () => {
         h.openOrFocusPaneByView.mockImplementation(async () => void h.order.push("focus"));
         return new ShortcutsViewModel("sc");
     }
+
+    it("moves the open pane of this tab into this pane's place, closes this one, then shows the moved one", async () => {
+        h.openViews.add("memory");
+        h.blocks["open-memory"] = { meta: { view: "memory" } };
+        h.lone.add("sc").add("open-memory");
+        const m = open();
+        await m.handleWidgetSelect(tile(m, "Memory"));
+        expect(h.treeReducer).toHaveBeenCalledWith(expect.objectContaining({ node1Id: "node-of-sc", node2Id: "node-of-open-memory" }));
+        expect(h.closeBlockInStack).toHaveBeenCalledWith(layoutModel, "node-of-sc", "sc");
+        expect(h.showBlockInPane).toHaveBeenCalledWith(layoutModel, expect.objectContaining({ id: "node-of-open-memory" }), "open-memory");
+        expect(h.focusNode).toHaveBeenCalledWith("node-of-open-memory");
+        expect(h.openOrFocusPaneByView).not.toHaveBeenCalled();
+        expect(h.replaceBlock).not.toHaveBeenCalled();
+    });
 
     it("brings back the open pane and closes this one, this one first so the focus is not handed on after", async () => {
         h.openViews.add("memory");

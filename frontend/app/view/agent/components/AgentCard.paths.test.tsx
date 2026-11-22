@@ -204,7 +204,7 @@ describe("AgentCard: the ribbon and chips", () => {
 
     it("reads Free and Local from the provider, not from the definition's name", () => {
         const { container } = mount({ agent: makeAgent({ provider: "opencode", name: "Mine" }) });
-        expect(chips(container)).toEqual(["Free", "Local"]);
+        expect(chips(container)).toEqual(["Free", "Local", "Preview"]);
         cleanup();
         const other = mount({ agent: makeAgent({ provider: "muse", name: "opencode" }) });
         expect(chips(other.container)).toEqual([]);
@@ -319,11 +319,11 @@ describe("AgentCard: a narrow card", () => {
     it("shows two chips and folds the rest into +N, and all three when wide", () => {
         const seen = watchSize();
         const { container } = mount({ agent: makeAgent({ provider: "opencode" }), drift: "behind-pin" });
-        expect(chips(container)).toEqual(["Free", "Local", "Update available"]);
+        expect(chips(container)).toEqual(["Free", "Local", "Update available", "+1"]);
         seen.fire!(width(250));
-        expect(chips(container)).toEqual(["Free", "Local", "+1"]);
+        expect(chips(container)).toEqual(["Free", "Local", "+2"]);
         seen.fire!(width(400));
-        expect(chips(container)).toEqual(["Free", "Local", "Update available"]);
+        expect(chips(container)).toEqual(["Free", "Local", "Update available", "+1"]);
     });
 });
 

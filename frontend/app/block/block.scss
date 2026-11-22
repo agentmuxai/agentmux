@@ -40,6 +40,16 @@
             display: contents;
         }
 
+        // A splitter is being dragged (pane-body-hold.ts): the view keeps the size it had when the drag began, a box
+        // of its own laid out as the content box lays out its child, and the content box clips it. On release the
+        // box goes and the view lays out once at the final size.
+        &.block-content--held > .pane-view-host {
+            display: flex;
+            flex: none;
+            width: var(--held-width);
+            height: var(--held-height);
+        }
+
         // What shows while a read in the view is pending: over the view, which stays where it is and is
         // not covered or dimmed. Nothing here takes a click.
         > .pane-view-pending {

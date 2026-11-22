@@ -51,6 +51,7 @@ pub(crate) mod agent_open_remote;
 pub(crate) use agent_open::open_agent_impl;
 /// The `Agents` `spawn` action's route (SPEC_AGENT_WORKERS_2026_10_15.md).
 pub(crate) mod agent_migrate_ids;
+pub(crate) mod agent_rotate_token;
 pub(crate) mod agent_seats;
 pub(crate) mod agent_rename;
 pub(crate) mod agent_definition;
@@ -154,6 +155,7 @@ pub(crate) mod viewer;
 mod input_history;
 mod presence;
 pub(crate) mod client_terms;
+pub(crate) mod folder_overlap;
 pub(crate) mod agent_quit;
 pub(crate) mod tower_pane;
 mod gpu_panel;
@@ -208,6 +210,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     desktop::register(engine, state);
     presence::register(engine, state);
     client_terms::register(engine, state);
+    folder_overlap::register(engine, state);
     agent_quit::register(engine, state);
     tower_pane::register(engine, state);
     gpu_panel::register(engine, state);

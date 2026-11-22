@@ -118,7 +118,7 @@ fn update_changes_details_records_one_line_with_the_reason_and_leaves_the_value(
     assert_eq!(reveal(&s, &id, "value", "revealed").unwrap().as_str(), VALUE, "the value is as it was");
     let rows = history::history_for(&s, &id, Asker::Person, 20).unwrap();
     let line = rows.iter().find(|r| r.action == CHANGED_DETAILS).expect("a changed details line");
-    assert_eq!((line.actor.as_str(), line.outcome.as_str(), line.reason.as_str(), line.version), ("builder", "done", REASON, 0));
+    assert_eq!((line.actor.as_str(), line.outcome.as_str(), line.reason.as_str(), line.version), ("agent:builder", "done", REASON, 0));
     assert_eq!(line.target, "label, expires 2027-01-31, field notes, field service, tags");
     assert!(!line.target.contains(NOTE) && !line.target.contains("stripe-live"), "a field's value is not in the line");
     let shown = show(&s, &id, Some("builder"), &key(), today()).unwrap();

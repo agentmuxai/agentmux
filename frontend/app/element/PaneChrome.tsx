@@ -30,6 +30,7 @@ import type { NodeModel } from "@/layout/index";
 import { paneTabSelectionApi } from "./pane-tab-selection";
 import "./PaneChrome.scss";
 import { PaneHeaderTabStrip } from "./PaneHeaderTabStrip";
+import { PaneTabActions } from "@/app/block/pane-tab-actions";
 import { PaneTabIconView } from "./pane-tab-model";
 import { PaneTabRenameInput } from "./PaneTabRenameInput";
 import { usePaneTabProgress } from "@/app/store/pane-tab-progress";
@@ -167,6 +168,7 @@ function renderShellHeader(
             selection={paneTabSelectionApi}
             onTabDoubleClick={(id) => t.tabInfos().get(id)?.rename && t.setRenamingId(id)}
             renderLabel={(id) => renderTabLabel(id, look, t)}
+            renderActions={() => <PaneTabActions viewModel={viewModel} nodeModel={nodeModel} />}
             connBtnRef={t.model()?.connBtnRef}
             changeConnModalAtom={t.model()?.changeConnModalAtom}
             onAdd={t.handlers.handleAdd}

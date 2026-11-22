@@ -270,6 +270,12 @@ events! {
     BlockReveal: crate::backend::notify::router::EVENT_BLOCK_REVEAL => crate::backend::notify::router::BlockRevealEvent,
     /// An agent opened a pane; the person's active window offers to show it (`http_open`).
     PaneAgentOpened: "pane:agentopened" => PaneAgentOpenedEvent,
+    /// An agent's deep-link open that srv's guard let through, for the window that holds the caller's tab to carry
+    /// out; it answers with `deeplink.open.done` (`sagas::deeplink_open`).
+    DeepLinkOpen: "deeplink:open" => DeepLinkOpenEvent,
+    /// A `UI` window capture is about to take (`begin`) or has taken (`end`) its frame: every window answers with
+    /// the rectangles of its private and secret panes, `capture.mask.report` (`sagas::capture_mask`).
+    CaptureMask: "capture:mask" => CaptureMaskEvent,
     /// An agent's model server was changed through `Agents env_set`, or the change was undone: the agent's pane and
     /// My Agents say so, with an Undo for a short while (`backend::endpoint_notice`).
     AgentEndpointNotice: "agent:endpoint-notice" => crate::backend::endpoint_notice::EndpointNoticeEvent,
@@ -588,6 +594,49 @@ pub struct PaneAgentOpenedEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub title: Option<String>,
+}
+
+/// `deeplink:open`: an agent asked to open a deep link and srv's guard let it through
+/// (docs/specs/SPEC_DEEP_LINKS_ONE_FRAMEWORK_2026_11_20.md §4.2). The window named by `window_id` (or, with none, the
+/// one the person last used) carries it out with the app's executor and answers `deeplink.open.done`. Every field is
+/// srv's own: the link is the canonical form srv parsed, never the agent's text.
+#[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct DeepLinkOpenEvent {
+    pub request_id: String,
+    /// The canonical link (R7).
+    pub link: String,
+    /// The agent's id (its slug), for the record and the announcement.
+    pub agent_id: String,
+    /// The caller's own conversation pane, when it has one: `beside` opens next to it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub caller_block_id: Option<String>,
+    /// The tab the open lands in: the caller's own, or one of its own (G3).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tab_id: Option<String>,
+    /// The window that holds `tab_id`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub window_id: Option<String>,
+    /// `beside`, `new` or `pane:<block id>`: srv resolved a tab or window target into `tab_id` already.
+    pub target: String,
+    /// After this the window must not carry it out (a window that connects late, a replayed event).
+    pub expires_at_ms: i64,
+}
+
+/// `capture:mask`: a `UI` window capture asks every window for the rectangles of its private and secret panes, once
+/// just before the frame (`begin`) and once just after (`end`) (docs/specs/SPEC_DEEP_LINKS_ONE_FRAMEWORK_2026_11_20.md
+/// §7, G5). Each window answers `capture.mask.report`.
+#[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CaptureMaskEvent {
+    pub capture_id: String,
+    #[ts(type = r#""begin" | "end""#)]
+    pub phase: String,
+    /// After this an answer is too late.
+    pub expires_at_ms: i64,
 }
 
 /// `openfloatingpane`: the pane to float, now alone in its own workspace.

@@ -1,8 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The Swarm's one list of agents, shared by its sections. It is rendered once: a section switch
-// changes the area above it and the density the rows read, never the rows' elements, so a press
+// The Swarm's one list of agents, with what sits above it: the Filter, the Broadcast input and the
+// selection's row. It is rendered once: nothing above it ever replaces the rows' elements, so a press
 // is never lost because the pressed element was replaced before release (#5208).
 
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
@@ -27,14 +27,15 @@ import { agentsWithoutRow } from "./swarm-runtime";
 import { openAgentInActiveTab, sharedAgentRuntime, startAgent } from "@/app/store/agent-runtime-live";
 import { SwarmGroupByControl, SwarmSeatList, useSwarmSeats } from "./swarm-seats";
 import { SwarmSelectToggle } from "./swarm-select-toggle";
-import type { SwarmDensity } from "./swarm-section";
+import { BroadcastDock } from "./swarm-broadcast";
+import { FleetResultPanel, SuperviseActions } from "./swarm-fleet-toolbar";
 import { SwarmFilterBar, SwarmFilterEmpty, type SwarmFilterFocus } from "./swarm-filter-bar";
 import { useSwarmFilter, type SwarmFilterState } from "./swarm-filter-state";
 import { chipStatus } from "./swarm-status-chip";
 import { StoppedAgents } from "./swarm-stopped-agents";
 import { AgentRowHost, RemoteAgentRowHost, agentRowKey, focusedActiveBlockId } from "./swarm-view";
 
-/** The agents the Swarm lists, derived once for the list and for the sections' actions above it. */
+/** The agents the Swarm lists, derived once for the list and for the actions above it. */
 export interface SwarmAgents {
     /** This instance's agents (the tree). */
     tree: Accessor<AgentTreeNode[]>;
@@ -197,12 +198,31 @@ function orderItems(rows: (readonly [string, AgentTreeNode])[], remote: RemoteRo
     ];
 }
 
+/** Under the Filter: the Broadcast input (it sends to the selection ticked in the list below), what the last Broadcast, Stop or mode change did, and the selection's row. */
+function SwarmListHead(props: { model: SwarmViewModel; agents: SwarmAgents; seats: ReturnType<typeof useSwarmSeats> }): JSX.Element {
+    const { model } = props;
+    return (
+        <>
+            <BroadcastDock model={model} agents={props.agents} />
+            <FleetResultPanel model={model} quietWhenClean />
+            {/* Select all / none, what acts on the selection (once there is one), and Group by. Each pads itself, so a row with none takes no room. */}
+            <div class="swarm-list-tools">
+                <SwarmSelectToggle model={model} ids={props.agents.shownSelectableKeys} />
+                <Show when={model.selectedBlockIdsAtom().size > 0}>
+                    {/* Outside the tree's own Show: agents on other instances can be selected when this
+                        instance has none, and these are what act on them. */}
+                    <SuperviseActions model={model} allBlockIds={props.agents.shownSelectableKeys} />
+                </Show>
+                <SwarmGroupByControl seats={props.seats} />
+            </div>
+        </>
+    );
+}
+
 export function SwarmAgentList(props: {
     model: SwarmViewModel;
     ctx: PaneTabHostContext;
     agents: SwarmAgents;
-    /** Full rows in the Supervisor section, compact ones in Broadcast. */
-    density: Accessor<SwarmDensity>;
     /** Gets the filter box's focus handle, for the pane's Find. */
     filterFocusRef?: (focus: SwarmFilterFocus) => void;
 }): JSX.Element {
@@ -271,18 +291,13 @@ export function SwarmAgentList(props: {
                 <SwarmFilterEmpty filter={filter} />
             </Show>
             <Show when={tree().length > 0 || remote().length > 0}>
-                {/* Under the filter: Select all / none, and Group by. Each pads itself, so a row with neither takes no room. */}
-                <div class="swarm-list-tools">
-                    <SwarmSelectToggle model={model} ids={props.agents.shownSelectableKeys} />
-                    <SwarmGroupByControl seats={seats} />
-                </div>
+                <SwarmListHead model={model} agents={props.agents} seats={seats} />
             </Show>
             {/* The one scrolling list: a labelled part per host and channel (this machine's first), and the
                 stopped agents at the end of this machine's part. */}
             <Show when={tree().length > 0 || remote().length > 0 || filter.stopped().length > 0}>
                 <div
                     class="swarm-tree"
-                    data-density={props.density()}
                     ref={(el) => {
                         treeRef = el;
                         swarmOrder.bindList(el);

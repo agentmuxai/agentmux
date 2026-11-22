@@ -230,7 +230,7 @@ async fn an_import_makes_an_entry_and_answers_with_ids_never_the_value() {
     assert_eq!(reveal(&s, &done.id, "value", "revealed").unwrap().as_str(), VALUE, "the secret's field is the entry's main value");
     let history = history::history_for(&s, &done.id, Asker::Person, 10).unwrap();
     let imported = history.iter().find(|r| r.action == IMPORTED).expect("an imported line");
-    assert_eq!((imported.actor.as_str(), imported.target.as_str(), imported.outcome.as_str()), ("builder", "aws-secret:staging/db-creds#db.password", "done"));
+    assert_eq!((imported.actor.as_str(), imported.target.as_str(), imported.outcome.as_str()), ("agent:builder", "aws-secret:staging/db-creds#db.password", "done"));
     assert_eq!((imported.reason.as_str(), imported.version, imported.refs.as_slice()), (REASON, 1, ["task 28071".to_string()].as_slice()));
     nothing_leaked(&s, &[&answer, &format!("{imported:?}")]);
 }
@@ -388,7 +388,7 @@ async fn a_login_import_takes_its_password_and_its_user_name_from_one_secret() {
     let history = history::history_for(&s, &done.id, Asker::Person, 10).unwrap();
     let imported = history.iter().find(|r| r.action == IMPORTED).expect("an imported line");
     assert_eq!(imported.target, "aws-secret:staging/intranet#creds.password+creds.user", "the line names the secret and both keys");
-    assert_eq!((imported.actor.as_str(), imported.reason.as_str()), ("builder", REASON));
+    assert_eq!((imported.actor.as_str(), imported.reason.as_str()), ("agent:builder", REASON));
     nothing_leaked(&s, &[&answer, &format!("{imported:?}")]);
     assert!(!answer.contains(USER) && rows(&s).iter().all(|r| !format!("{r:?}").contains(USER)), "neither the user name is in the answer or a history row");
 }

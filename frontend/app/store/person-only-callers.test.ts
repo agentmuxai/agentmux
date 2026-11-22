@@ -30,6 +30,7 @@ const PROMPTS: Record<string, string[]> = {
     "app/view/drone/drone-template-picker.tsx": ["app/view/drone/drone-template-picker.tsx"],
     "app/view/swarm/swarm-model.ts": ["app/view/swarm/swarm-broadcast.tsx"],
     "app/view/tower/tower-model.ts": ["app/view/tower/tower-view.tsx"],
+    "app/view/warden-jobs/jobs-model.ts": ["app/view/warden-jobs/job-template-approval.tsx"],
 };
 
 const READ = "reads state for a view; answers nothing for the person";
@@ -71,7 +72,6 @@ const CONTROLS: Record<string, string> = {
     "app/view/skill/skill-app-run-test.tsx": OWN_VIEW,
     "app/view/swarm/swarm-row-registration.tsx": AGENT_API,
     "app/view/term/termagent.ts": AGENT_API,
-    "app/view/warden-jobs/jobs-model.ts": OWN_VIEW,
 };
 
 /** The frontend's own source files: not tests, type files or the generated RPC stubs. */

@@ -5,6 +5,7 @@
 // non-interactive copy of it stays where it was and plays `exit`, then removes itself. The owner's
 // logic is untouched, so nothing else has to wait for the motion.
 
+import { keepOverlayAnchor } from "@/app/capture/overlay-anchors";
 import { exit, MOTION, motionAllowed, type EnterKind } from "@/app/motion/primitives";
 
 /** Make `copy` a picture of `el`: nothing in it can be pressed, focused, found by a test or announced. */
@@ -29,6 +30,7 @@ export function fadeOutCopy(el: Element, kind: EnterKind = "fade", opts: { fixed
     if (!motionAllowed(MOTION.exit.category)) return;
     const copy = el.cloneNode(true) as HTMLElement;
     quiet(copy);
+    keepOverlayAnchor(el, copy);
     if (opts.fixed) {
         if (!el.isConnected) return;
         const rect = el.getBoundingClientRect();

@@ -312,6 +312,8 @@ pub struct AgentProcessRegistry {
 
 struct RegistryEntry {
     tracker: Arc<dyn TrackerHandle>,
+    /// An agent's block (its tree is the agent's), not a terminal a person types in.
+    agent: bool,
     /// Last-known PID set from the most recent poll. Used to diff
     /// against the current set so we only emit events for
     /// additions/removals — not on every poll tick.
@@ -373,7 +375,8 @@ impl AgentProcessRegistry {
     /// user `nohup`s outlives it.
     pub fn ensure_tracker_kind(&self, block_id: &str, agent: bool) -> Arc<dyn TrackerHandle> {
         let mut map = self.inner.lock();
-        if let Some(entry) = map.get(block_id) {
+        if let Some(entry) = map.get_mut(block_id) {
+            entry.agent |= agent;
             return entry.tracker.clone();
         }
         let tracker = new_tracker(block_id, agent);
@@ -381,6 +384,7 @@ impl AgentProcessRegistry {
             block_id.to_string(),
             RegistryEntry {
                 tracker: tracker.clone(),
+                agent,
                 last_pids: HashSet::new(),
                 roots: HashSet::new(),
             },
@@ -450,6 +454,14 @@ impl AgentProcessRegistry {
             None => return Vec::new(),
         };
         agent_started(tracker.list_members(), &roots)
+    }
+
+    /// The block of the agent whose process tree holds any of `pids` (a process and its ancestors), if one does. Terminals
+    /// a person types in are not agents' trees. The trackers are queried outside the registry lock.
+    pub fn agent_block_holding(&self, pids: &[u32]) -> Option<String> {
+        let trackers: Vec<(String, Arc<dyn TrackerHandle>)> =
+            self.inner.lock().iter().filter(|(_, e)| e.agent).map(|(id, e)| (id.clone(), e.tracker.clone())).collect();
+        trackers.into_iter().find(|(_, t)| t.member_pids().iter().any(|m| pids.contains(m))).map(|(id, _)| id)
     }
 
     /// Whether any block is tracked (a cheap check before a process-table read).
@@ -612,6 +624,35 @@ mod tests {
         settings.extra.insert(SETTING_AGENT_BELOW_NORMAL_PRIORITY.to_string(), serde_json::json!(true));
         config.update_settings(settings);
         assert!(reg.agent_below_normal_priority());
+    }
+
+    fn sleeper() -> std::process::Child {
+        #[cfg(windows)]
+        let mut cmd = std::process::Command::new("ping");
+        #[cfg(windows)]
+        cmd.args(["-n", "30", "127.0.0.1"]);
+        #[cfg(not(windows))]
+        let mut cmd = std::process::Command::new("sleep");
+        #[cfg(not(windows))]
+        cmd.arg("30");
+        cmd.stdout(std::process::Stdio::null()).spawn().expect("a process to track")
+    }
+
+    /// A process in an agent's tree is found, with the block it belongs to; one in a terminal a person types in, or in no tree, is not.
+    #[test]
+    fn an_agents_tree_holds_its_processes_and_a_terminals_does_not() {
+        let reg = AgentProcessRegistry::new(None);
+        let (mut agent, mut terminal) = (sleeper(), sleeper());
+        reg.assign_kind("agent-block", agent.id(), true).unwrap();
+        reg.assign_kind("terminal-block", terminal.id(), false).unwrap();
+        assert_eq!(reg.agent_block_holding(&[agent.id()]).as_deref(), Some("agent-block"));
+        assert_eq!(reg.agent_block_holding(&[u32::MAX - 1, agent.id()]).as_deref(), Some("agent-block"), "any process of the chain");
+        assert_eq!(reg.agent_block_holding(&[terminal.id()]), None, "a terminal's tree is not an agent's");
+        assert_eq!(reg.agent_block_holding(&[u32::MAX - 1]), None);
+        reg.remove("agent-block");
+        reg.remove("terminal-block");
+        let _ = (agent.kill(), terminal.kill());
+        let _ = (agent.wait(), terminal.wait());
     }
 
     #[cfg(unix)]

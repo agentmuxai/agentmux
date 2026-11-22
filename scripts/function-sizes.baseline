@@ -289,7 +289,7 @@
 163 frontend/app-init.ts::initHostNewWindow
 218 frontend/app-init.ts::initMux
 364 frontend/app/block/block.tsx::Block
-135 frontend/app/block/block.tsx::BlockFull
+136 frontend/app/block/block.tsx::BlockFull
 293 frontend/app/block/blockframe.tsx::BlockFrame_Header
 114 frontend/app/block/blockutil.tsx::ConnectionButton
 109 frontend/app/block/lazy-pane-tab.tsx::createStandIn
@@ -344,7 +344,7 @@
 141 frontend/app/view/agent/components/MyAgentsList.tsx::MyAgentsList
 130 frontend/app/view/agent/components/SeatRosterImport.tsx::SeatRosterImport
 108 frontend/app/view/agent/components/SlashCommandPicker.tsx::SlashCommandPicker
-233 frontend/app/view/agent/components/agent-picker-launch.ts::createPickerLaunch
+227 frontend/app/view/agent/components/agent-picker-launch.ts::createPickerLaunch
 127 frontend/app/view/agent/components/agent-picker-templates.ts::createTemplates
 114 frontend/app/view/agent/components/composer-stats-zone.tsx::useStatsZone
 257 frontend/app/view/agent/components/my-agents-list-data.ts::useMyAgentsData
@@ -375,7 +375,7 @@
 115 frontend/app/view/audit/audit-manager.tsx::AuditManager
 101 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
 139 frontend/app/view/browser/use-browser-auth.ts::useBrowserAuth
-365 frontend/app/view/browser/use-pane-rect-sync.ts::usePaneRectSync
+367 frontend/app/view/browser/use-pane-rect-sync.ts::usePaneRectSync
 118 frontend/app/view/bundle/components/BundleImportConfirmModal.tsx::BundleImportConfirmModalPanel
 282 frontend/app/view/editor/editor-model.ts::EditorViewModel::constructor
 118 frontend/app/view/global-bundle/GlobalMemoryFullView.tsx::EntryView
@@ -388,8 +388,8 @@
 115 frontend/app/view/settings/sections/widget-bar-settings.tsx::WidgetBarSettings
 104 frontend/app/view/settings/sections/widget-catalog.tsx::WidgetCatalog
 137 frontend/app/view/shortcuts/shortcuts.tsx::ShortcutsView
-111 frontend/app/view/swarm/swarm-agent-list.tsx::SwarmAgentList
-131 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::SuperviseActions
+104 frontend/app/view/swarm/swarm-agent-list.tsx::SwarmAgentList
+126 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::SuperviseActions
 128 frontend/app/view/swarm/swarm-view.tsx::SubagentRow
 127 frontend/app/view/sysinfo/sysinfo-model.ts::sampleReducer
 290 frontend/app/view/term/term.tsx::TerminalView

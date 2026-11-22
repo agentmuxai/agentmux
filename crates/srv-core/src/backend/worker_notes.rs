@@ -4,12 +4,15 @@
 //! A leader hears from its workers without polling
 //! (docs/specs/SPEC_AGENT_WORKERS_2026_10_15.md §3.3).
 //!
-//! A worker (a definition carrying `agent:worker_of`, `app_api::agent_spawn`)
-//! whose turn ends without a report to its leader, that is waiting for an
-//! answer, that fails, or whose process exits, gets its leader an `[AgentMux]`
-//! note in the leader's open pane. A turn in which the worker messaged its
-//! leader gets none: the message is the report. At most one note per worker a
-//! minute; a held one is counted in the next.
+//! A watched agent (a spawned worker, a definition carrying `agent:worker_of`,
+//! `app_api::agent_spawn`; or any agent that holds a claimed Kanban task) that
+//! is waiting for an answer, fails, or whose process exits gets its watchers
+//! (its seat lead, its leader, the agents that filed its tasks) an `[AgentMux]`
+//! note in their open pane. A worker whose turn ends with a question for its
+//! leader and no report gets one too; a turn that ends without a report is no
+//! note by itself, since `quiet_watch` tells the watchers when the agent has
+//! gone quiet (SPEC_LEADER_TOLD_WHEN_AN_AGENT_GOES_QUIET_2026_11_21.md §7). At
+//! most one note per agent a minute; a held one is counted in the next.
 //!
 //! Installed at boot (not with the notify Router, which starts only when a
 //! window connects): a broker observer forwards turn ends and failures, and a
@@ -126,9 +129,11 @@ pub fn install(
     broker: Arc<Broker>,
     mut reducer_events: tokio::sync::broadcast::Receiver<agentmux_common::ipc::Event>,
     mstore: Arc<Store>,
+    work: Arc<Store>,
     filestore: Arc<FileStore>,
     config: Arc<crate::backend::wconfig::ConfigState>,
 ) {
+    let _ = WORK.set(work.clone());
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<WorkerEvent>();
     let observer_tx = tx.clone();
     // Observers run inside `Broker::publish`, under its locks: parse and hand off only.
@@ -177,43 +182,87 @@ pub fn install(
             if let WorkerEvent::Failed { block_id, .. } = &ev {
                 FAILED_AT.lock().record(block_id, std::time::Instant::now());
             }
-            let (mstore, filestore, config) = (mstore.clone(), filestore.clone(), config.clone());
+            let (mstore, work, filestore, config) = (mstore.clone(), work.clone(), filestore.clone(), config.clone());
             if matches!(ev, WorkerEvent::Exited { .. }) {
                 // Off the loop, so the wait delays no other worker's note.
-                tokio::spawn(note_exit(ev, mstore, filestore, config));
+                tokio::spawn(note_exit(ev, mstore, work, filestore, config));
             } else {
-                send_note(ev, mstore, filestore, config).await;
+                send_note(ev, mstore, work, filestore, config).await;
             }
         }
     });
 }
 
 /// The note for `ev`, delivered.
-async fn send_note(ev: WorkerEvent, mstore: Arc<Store>, filestore: Arc<FileStore>, config: Arc<crate::backend::wconfig::ConfigState>) {
+async fn send_note(ev: WorkerEvent, mstore: Arc<Store>, work: Arc<Store>, filestore: Arc<FileStore>, config: Arc<crate::backend::wconfig::ConfigState>) {
     let store = mstore.clone();
-    let note = tokio::task::spawn_blocking(move || note_for(&store, &filestore, &ev)).await;
-    if let Ok(Some((leader_block, text, wait_key))) = note {
-        deliver(&mstore, &config, &leader_block, &text, wait_key.as_deref());
+    let note = tokio::task::spawn_blocking(move || note_for(&store, Some(&work), &filestore, &ev)).await;
+    if let Ok(Some((leader_blocks, text, wait_key))) = note {
+        for leader_block in &leader_blocks {
+            deliver(&mstore, &config, leader_block, &text, wait_key.as_deref());
+        }
     }
 }
 
 /// An exit's note, unless the failure that ended the turn speaks for it (#2617): its `agentfailure` follows the
 /// exit within milliseconds and names the cause, so the exit waits `EXIT_SETTLE` for it.
-async fn note_exit(ev: WorkerEvent, mstore: Arc<Store>, filestore: Arc<FileStore>, config: Arc<crate::backend::wconfig::ConfigState>) {
+async fn note_exit(ev: WorkerEvent, mstore: Arc<Store>, work: Arc<Store>, filestore: Arc<FileStore>, config: Arc<crate::backend::wconfig::ConfigState>) {
     let WorkerEvent::Exited { block_id, .. } = &ev else { return };
     let (block_id, heard_at) = (block_id.clone(), std::time::Instant::now());
     tokio::time::sleep(EXIT_SETTLE).await;
     if FAILED_AT.lock().speaks_for_exit(&block_id, heard_at) {
         return;
     }
-    send_note(ev, mstore, filestore, config).await;
+    send_note(ev, mstore, work, filestore, config).await;
 }
+
+/// An agent the notes are about, and who is told.
+#[derive(Debug, Clone)]
+struct Watched {
+    def_id: String,
+    name: String,
+    /// A spawned worker (`agent:worker_of`), else an agent that holds a claimed task.
+    is_worker: bool,
+    /// The panes to tell: its seat lead, its leader, and the filers of the tasks it holds.
+    watchers: Vec<String>,
+}
+
+/// The agent in `block_id`, when it is watched: a spawned worker, or an agent that holds a claimed task (`work`).
+fn watched_of_block(mstore: &Store, work: Option<&Store>, block_id: &str) -> Option<Watched> {
+    let block = mstore.get::<Block>(block_id).ok()??;
+    let def_id = obj::meta_get_string(&block.meta, "agentId", "");
+    if def_id.is_empty() {
+        return None;
+    }
+    let def = mstore.agent_def_list().ok()?.into_iter().find(|d| d.id == def_id)?;
+    let is_worker = crate::backend::agent_seat::worker_of(mstore, &def_id).is_some();
+    let tasks = work
+        .map(|w| {
+            let now = agentmux_common::time::now_ms();
+            crate::backend::quiet_watch::owed_by(&crate::backend::quiet_watch::claimed_by_holder(&crate::backend::quiet_watch::read_claimed(w, now)), &def)
+        })
+        .unwrap_or_default();
+    if !is_worker && tasks.is_empty() {
+        return None;
+    }
+    let filers: Vec<String> = tasks.iter().map(|t| t.filer_uid.clone()).collect();
+    Some(Watched { watchers: crate::backend::quiet_watch::watcher_panes(mstore, &def_id, &filers), def_id, name: def.name, is_worker })
+}
+
+/// A note's opening words name a worker as one, and any other watched agent as an agent.
+fn named_for(body: String, is_worker: bool) -> String {
+    match body.strip_prefix("Your worker ") {
+        Some(rest) if !is_worker => format!("Your agent {rest}"),
+        _ => body,
+    }
+}
+
+/// The Kanban store, kept at install so `already_tells_its_leader` can tell which agents hold a task.
+static WORK: std::sync::OnceLock<Arc<Store>> = std::sync::OnceLock::new();
 
 /// A worker pane's worker and leader, as srv knows them.
 #[derive(Debug, Clone)]
 struct Worker {
-    def_id: String,
-    name: String,
     /// What it sends messages as (its AGENTMUX_AGENT_ID).
     slug: String,
     leader_def_id: String,
@@ -227,19 +276,25 @@ fn worker_of_block(mstore: &Store, block_id: &str) -> Option<Worker> {
     }
     let leader_def_id = crate::backend::agent_seat::worker_of(mstore, &def_id)?;
     let def = mstore.agent_def_list().ok()?.into_iter().find(|d| d.id == def_id)?;
-    Some(Worker { def_id, name: def.name, slug: def.slug, leader_def_id })
+    Some(Worker { slug: def.slug, leader_def_id })
 }
 
-/// Whether this block's own note already tells `sender` (an agent slug or id) about an exit of it: it is a
-/// worker whose registered leader is `sender`, and that leader has an open pane to be told in. `sender_failure_note`
-/// skips telling the same agent again, less richly, about the same exit (#2627).
+/// Whether this block's own note already tells `sender` (an agent slug or id) about an exit of it: the sender is one
+/// of the watchers of the agent (a worker's leader or seat lead, or the filer of a task it holds) and has an open
+/// pane to be told in. `sender_failure_note` skips telling the same agent again, less richly, about the same exit
+/// (#2627).
 pub(crate) fn already_tells_its_leader(mstore: &Store, block_id: &str, sender: &str) -> bool {
-    let Some(worker) = worker_of_block(mstore, block_id) else { return false };
+    already_tells(mstore, WORK.get().map(|w| &**w), block_id, sender)
+}
+
+pub(crate) fn already_tells(mstore: &Store, work: Option<&Store>, block_id: &str, sender: &str) -> bool {
+    let Some(watched) = watched_of_block(mstore, work, block_id) else { return false };
     let Ok(defs) = mstore.agent_def_list() else { return false };
     let Some(sender_id) = defs.iter().find(|d| d.slug == sender || d.id == sender).map(|d| d.id.clone()) else { return false };
-    // The same check `note_for` makes: a worker's own leader is told only through its live pane, by the ad-hoc
-    // `agent:worker_of` relationship (not the formal Seats table `leader_pane_of` reads for a general seat lead).
-    if sender_id != worker.leader_def_id || live_panes_of(mstore, &worker.leader_def_id).is_empty() {
+    // The same check `note_for` makes: the sender is one of the panes its note goes to (the worker's leader or seat
+    // lead, or the filer of a task the agent holds) and has one open.
+    let sender_panes = live_panes_of(mstore, &sender_id);
+    if !watched.watchers.iter().any(|p| sender_panes.contains(p)) {
         return false;
     }
     // Only suppressed when that note was actually admitted, not held by the one-note-a-minute throttle just
@@ -265,11 +320,11 @@ pub fn live_panes_of(mstore: &Store, def_id: &str) -> Vec<String> {
         .collect()
 }
 
-/// The note for `ev`: the leader's pane, the text, and a key when the note may wait for a cold
-/// leader's next turn (a worker that ended a turn silent); no key when the leader must hear at
-/// once (it failed or stopped, or is waiting for an answer). `None` when `ev` isn't a worker's,
-/// its leader isn't open, or the worker's gap runs.
-fn note_for(mstore: &Store, filestore: &FileStore, ev: &WorkerEvent) -> Option<(String, String, Option<String>)> {
+/// The note for `ev`: the panes to tell, the text, and a key when the note may wait for a cold
+/// leader's next turn; no key when the leader must hear at once (the agent failed or stopped, or is
+/// waiting for an answer). `None` when `ev` isn't a watched agent's, nobody watching is open, or the
+/// agent's gap runs. `work` is the Kanban store, which says which agents hold a claimed task.
+pub(crate) fn note_for(mstore: &Store, work: Option<&Store>, filestore: &FileStore, ev: &WorkerEvent) -> Option<(Vec<String>, String, Option<String>)> {
     let block_id = match ev {
         WorkerEvent::TurnEnded { block_id, .. }
         | WorkerEvent::Exited { block_id, .. }
@@ -286,12 +341,17 @@ fn note_for(mstore: &Store, filestore: &FileStore, ev: &WorkerEvent) -> Option<(
     if matches!(ev, WorkerEvent::Failed { title, .. } if title == crate::agents::failure::ROUTE_CREDITS_TITLE) {
         return None;
     }
-    let worker = worker_of_block(mstore, block_id)?;
-    let leader_panes = live_panes_of(mstore, &worker.leader_def_id);
-    let leader_block = leader_panes.first()?.clone();
-    let mut wait_key = None;
+    let worker = watched_of_block(mstore, work, block_id)?;
+    if worker.watchers.is_empty() {
+        return None;
+    }
     let body = match ev {
         WorkerEvent::TurnEnded { started_at_ms, ended_at_ms, .. } => {
+            // A turn that ends without a report is no note by itself (`quiet_watch` tells the watchers when the
+            // agent has gone quiet). One that ends with a question for the leader is: the worker waits for the
+            // answer. Only a spawned worker has a leader it reports to.
+            let spawned = worker_of_block(mstore, block_id).filter(|_| worker.is_worker)?;
+            let leader_panes = live_panes_of(mstore, &spawned.leader_def_id);
             // Only a turn that has just ended is news. An old end (a turn read again when a session resumed) is not,
             // and neither is an end heard while the worker is in a turn: nothing has finished, and its words would
             // be an earlier turn's.
@@ -304,12 +364,12 @@ fn note_for(mstore: &Store, filestore: &FileStore, ev: &WorkerEvent) -> Option<(
                 return None;
             }
             absorb(&crate::backend::reactive::get_global_handler().get_audit_log(usize::MAX));
-            if last_report(&worker.slug, &leader_panes).is_some_and(|at| at + 1_000 >= *started_at_ms) {
+            if last_report(&spawned.slug, &leader_panes).is_some_and(|at| at + 1_000 >= *started_at_ms) {
                 return None;
             }
             let words = last_words(mstore, filestore, block_id, *started_at_ms);
             if !words.asked {
-                wait_key = Some(format!("worker:{}", worker.def_id));
+                return None;
             }
             turn_end_body(&worker.name, words)
         }
@@ -323,6 +383,7 @@ fn note_for(mstore: &Store, filestore: &FileStore, ev: &WorkerEvent) -> Option<(
             worker.name
         ),
     };
+    let body = named_for(body, worker.is_worker);
     let admitted = GAPS.lock().admit(&worker.def_id, body, agentmux_common::time::now_ms_u64());
     if matches!(ev, WorkerEvent::Failed { .. }) {
         // So `sender_failure_note::already_tells_its_leader` knows whether this failure's own note actually
@@ -331,7 +392,25 @@ fn note_for(mstore: &Store, filestore: &FileStore, ev: &WorkerEvent) -> Option<(
         super::worker_failure_note::record_failure_admission(block_id, admitted.is_some());
     }
     let body = admitted?;
-    Some((leader_block, format!("[AgentMux] {}", crate::backend::reactive::sanitize::quote_in_system_note(&body)), wait_key))
+    Some((worker.watchers, format!("[AgentMux] {}", crate::backend::reactive::sanitize::quote_in_system_note(&body)), None))
+}
+
+/// One note per agent per `NOTE_GAP_MS`, shared by every kind of note about it (`quiet_watch` uses it too): the
+/// text to send, with a count of the notes held back since the last one, or `None` while the gap runs.
+pub(crate) fn admit(def_id: &str, body: String, now_ms: u64) -> Option<String> {
+    GAPS.lock().admit(def_id, body, now_ms)
+}
+
+/// When `sender` (an agent id, any case) last messaged anyone, from the deliveries `absorb` has copied.
+pub(crate) fn last_message_by(sender: &str) -> Option<u64> {
+    let sender = sender.to_lowercase();
+    REPORTS.lock().iter().filter(|((from, _), _)| *from == sender).map(|(_, at)| *at).max()
+}
+
+/// The words of the newest turn the agent in `block_id` wrote, as `last_words` reads them (no turn start given):
+/// empty when there are none.
+pub(crate) fn last_words_of(mstore: &Store, filestore: &FileStore, block_id: &str) -> String {
+    last_words(mstore, filestore, block_id, 0).text
 }
 
 /// Reports, kept past the delivery log's ring: (sender, target pane) → the
@@ -431,13 +510,10 @@ fn ended_turn_text(digest: &str) -> String {
         .unwrap_or_default()
 }
 
+/// The note for a turn that ended with a question for the leader.
 fn turn_end_body(name: &str, words: LastWords) -> String {
     let quoted = if words.text.is_empty() { String::new() } else { format!(" Its last words: \"{}\"", words.text) };
-    if words.asked {
-        format!("Your worker {name} is waiting for an answer and hasn't reported to you.{quoted} Answer it with Message send.")
-    } else {
-        format!("Your worker {name} finished a turn without reporting to you.{quoted}")
-    }
+    format!("Your worker {name} is waiting for an answer and hasn't reported to you.{quoted} Answer it with Message send.")
 }
 
 fn clip(s: &str, max: usize) -> String {
@@ -478,7 +554,7 @@ impl Gaps {
 static GAPS: LazyLock<parking_lot::Mutex<Gaps>> = LazyLock::new(Default::default);
 
 /// What a note to the pane `block_id` is addressed to: its agent's uid, else its id.
-fn note_target(block_id: &str) -> Option<String> {
+pub(crate) fn note_target(block_id: &str) -> Option<String> {
     crate::backend::reactive::get_global_handler()
         .list_agents()
         .into_iter()
@@ -519,20 +595,22 @@ pub fn tell_leader(mstore: &Store, def_id: &str, body: &str) -> bool {
     crate::backend::reactive::get_global_handler().deliver_system_note(&target, &text).is_ok()
 }
 
-fn deliver(mstore: &Store, config: &crate::backend::wconfig::ConfigState, leader_block: &str, text: &str, wait_key: Option<&str>) {
+/// Whether the note was delivered or kept for the leader's next turn.
+pub(crate) fn deliver(mstore: &Store, config: &crate::backend::wconfig::ConfigState, leader_block: &str, text: &str, wait_key: Option<&str>) -> bool {
     let handler = crate::backend::reactive::get_global_handler();
     let target = note_target(leader_block);
     let Some(target) = target else {
         tracing::debug!(leader_block, "worker note: the leader's pane isn't registered");
-        return;
+        return false;
     };
     let sent = match wait_key {
         Some(key) => crate::backend::cold_hold::note_or_wait_if_cold(mstore, &config.get_settings().extra, leader_block, &target, key, text),
         None => handler.deliver_system_note(&target, text),
     };
-    if let Err(e) = sent {
+    if let Err(e) = &sent {
         tracing::warn!(leader_block, error = %e, "worker note not delivered");
     }
+    sent.is_ok()
 }
 
 #[cfg(test)]

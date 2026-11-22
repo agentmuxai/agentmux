@@ -15,6 +15,7 @@ import { carryPaneScope } from "@/app/backdrop/overlay-scope";
 import { isPrimaryButtonDown, isRestingAtPress } from "@/app/util/pointer-drag-state";
 import { claimOpen, HIDE_DELAY_MS, isWarm, releaseOpen, SHOW_DELAY_MS, type OpenTip } from "./tooltip-timing";
 import "./anchored-popover.scss";
+import { setOverlayAnchor } from "@/app/capture/overlay-anchors";
 
 const CANDIDATE = "[title], [data-hover-tip]";
 const KEEP_NATIVE = "option, optgroup, iframe, [data-native-title]";
@@ -222,6 +223,7 @@ function openFor(t: TipState, el: HTMLElement, text: string): void {
     t.panel.style.opacity = "0";
     t.stopScope?.();
     t.stopScope = carryPaneScope(t.shell, el) ?? null;
+    setOverlayAnchor(t.shell, el);
     t.doc.body.append(t.shell);
     t.stopAutoUpdate = autoUpdate(el, t.shell, () => void place(t));
     // A label that changes with the pointer resting (a live update) shows without a pointer move.

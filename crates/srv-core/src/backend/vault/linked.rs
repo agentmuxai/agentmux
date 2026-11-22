@@ -26,6 +26,9 @@ use crate::identity::aws_broker::mint::Runner;
 /// The field that marks a linked entry, and the one thing it may say.
 pub const LINK: &str = "link";
 pub const ONLY: &str = "only";
+/// A linked entry whose key the Vault reads from its place at each use and keeps no copy of: the secret in AWS
+/// Secrets Manager is the authority (SPEC_VAULT_SHARED_ACROSS_MACHINES_LAN_AND_CLOUD_2026_11_01.md §11.1).
+pub const BACKED: &str = "backed";
 /// Who or what reads the key, one line each: `invoice-sync (lambda): at run time`. Free text; the Vault enforces none of it.
 pub const READERS: &str = "readers";
 /// When the key was last changed, as recorded: a date. A linked entry's own, since the Vault holds no value to date.
@@ -59,9 +62,24 @@ pub fn is_field(name: &str) -> bool {
     FIELDS.contains(&name)
 }
 
-/// Whether the entry with these fields is a link: it holds no value.
+/// Whether the entry with these fields is a link: it holds no value (a backed entry is one, its value lives in AWS).
 pub fn is_linked(fields: &BTreeMap<String, String>) -> bool {
-    fields.get(LINK).is_some_and(|v| v == ONLY)
+    fields.get(LINK).is_some_and(|v| v == ONLY || v == BACKED)
+}
+
+/// The link mark an entry's fields carry: `only`, `backed` or none. Whether an entry is a link, and which kind, is set
+/// when it is made, so a change of this value is refused (`SET_WHEN_MADE`), `only` to `backed` and back included.
+pub fn mark(fields: &BTreeMap<String, String>) -> Option<&str> {
+    fields.get(LINK).map(|v| v.trim()).filter(|v| !v.is_empty())
+}
+
+/// Whether the entry with these fields is backed: its value is read from AWS Secrets Manager each time it is used.
+pub fn is_backed(fields: &BTreeMap<String, String>) -> bool {
+    fields.get(LINK).is_some_and(|v| v == BACKED)
+}
+
+pub fn is_backed_row(row: &VaultRow) -> bool {
+    is_backed(&fields_of(row))
 }
 
 fn fields_of(row: &VaultRow) -> BTreeMap<String, String> {
@@ -108,11 +126,14 @@ pub fn copies(fields: &BTreeMap<String, String>) -> Vec<Link> {
 pub fn validate(fields: &BTreeMap<String, String>, has_value: bool) -> Result<(), String> {
     let linked = match fields.get(LINK).map(String::as_str) {
         None => false,
-        Some(ONLY) => true,
-        Some(_) => return Err(format!("{LINK} is \"{ONLY}\", for an entry that records where a key lives and holds no value, or is left out")),
+        Some(ONLY | BACKED) => true,
+        Some(_) => return Err(format!("{LINK} is \"{ONLY}\", for an entry that records where a key lives and holds no value, \"{BACKED}\", for one that reads its value from AWS Secrets Manager at each use, or is left out")),
     };
     if linked && Link::of(fields).is_none() {
         return Err(format!("a linked entry says where the key lives: set {} and {}", source_link::KIND, source_link::LOCATION));
+    }
+    if is_backed(fields) && !Link::of(fields).is_some_and(|l| l.kind == AWS_SECRET) {
+        return Err(format!("a backed entry is read from an AWS secret: set {} to {AWS_SECRET}", source_link::KIND));
     }
     if linked && has_value {
         return Err("a linked entry holds no value: leave the value out, or leave link out to keep the value in the Vault".into());
@@ -142,7 +163,8 @@ pub fn validate(fields: &BTreeMap<String, String>, has_value: bool) -> Result<()
 /// person, because there is nothing to reveal.
 pub fn no_value(row: &VaultRow) -> Option<String> {
     let fields = fields_of(row);
-    if !is_linked(&fields) {
+    // A backed entry has a value for a use: it is read from its place then.
+    if !is_linked(&fields) || is_backed(&fields) {
         return None;
     }
     let place = Link::of(&fields).map(|l| place_text(&l)).unwrap_or_default();
@@ -152,6 +174,9 @@ pub fn no_value(row: &VaultRow) -> Option<String> {
 /// Why `row` can't be given a value (a rotation, a capture, an import into it), when it is a link; `instead` says
 /// what to do.
 pub fn takes_no_value(row: &VaultRow, instead: &str) -> Option<String> {
+    if is_backed_row(row) {
+        return Some(format!("{} is backed by AWS Secrets Manager, which holds its value: change the secret there, not here ({instead} is for an entry that keeps its own value)", row.label));
+    }
     is_linked_row(row).then(|| format!("{} is a linked entry, which holds no value: {instead}", row.label))
 }
 
@@ -168,9 +193,18 @@ pub fn about(fields: &BTreeMap<String, String>) -> String {
 /// (`said`: readers, rotated, copies, an expiry date, the kind's own plain fields). The place is `source`, whatever
 /// `said` names.
 pub fn fields_for(source: &Source, said: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    fields_marked(ONLY, source, said)
+}
+
+/// [`fields_for`] for a backed entry: the same place, marked as one the Vault reads its value from at each use.
+pub fn fields_for_backed(source: &Source, said: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    fields_marked(BACKED, source, said)
+}
+
+fn fields_marked(mark: &str, source: &Source, said: &BTreeMap<String, String>) -> BTreeMap<String, String> {
     let mut fields: BTreeMap<String, String> = said.iter().filter(|(k, _)| !source_link::is_field(k)).map(|(k, v)| (k.clone(), v.trim().to_string())).filter(|(_, v)| !v.is_empty()).collect();
     let place = [
-        (LINK, Some(ONLY)),
+        (LINK, Some(mark)),
         (source_link::KIND, Some(AWS_SECRET)),
         (source_link::LOCATION, Some(source.aws_secret_id.as_str())),
         (source_link::KEY, source.key.as_deref()),

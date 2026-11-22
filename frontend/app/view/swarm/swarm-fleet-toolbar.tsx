@@ -9,7 +9,9 @@ import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { t } from "@/app/i18n/i18n";
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import { settingsAtom } from "@/app/store/global";
-import { MODE_DESCRIPTIONS, MODE_LABELS, SUPERVISOR_MODES, SUPERVISOR_OFF_REASON, supervisorEnabled } from "@/app/store/supervisor";
+import { supervisorEnabled } from "@/app/store/supervisor";
+import { openSettingsAt } from "@/app/view/settings/open-settings";
+import { supervisorMenuHeader, supervisorMenuItems } from "./swarm-supervisor";
 import { localTarget, partitionTargets, remoteFleetTargets, unavailableReason, type FleetAction } from "./swarm-fleet-targets";
 import type { FleetResultEntry, SwarmViewModel } from "./swarm-model";
 import { remoteSections } from "./swarm-remote";
@@ -30,6 +32,20 @@ const NOTHING_REACHABLE = "Stopping agents on another machine isn't supported ye
 /** Shown when no selected agent is this AgentMux's own: each AgentMux
  *  supervises its own agents. */
 const NOTHING_SUPERVISABLE = "The Supervisor runs in each AgentMux for its own agents; select agents of this one";
+
+/** The one read-only line the Swarm keeps about the Supervisor, only while it is off: the switch is in Settings. */
+function SupervisorOffLine(): JSX.Element {
+    return (
+        <Show when={!supervisorEnabled(settingsAtom())}>
+            <span class="swarm-fleet-supervisor-off">
+                {t("swarm.supervisor.offLine")}{" "}
+                <Button variant="link" pending={false} onClick={() => void openSettingsAt("supervisor")}>
+                    {t("swarm.supervisor.turnOn")}
+                </Button>
+            </span>
+        </Show>
+    );
+}
 
 export function SuperviseActions(props: {
     model: SwarmViewModel;
@@ -72,8 +88,8 @@ export function SuperviseActions(props: {
         await model.bulkStopSelection({ staged });
     };
 
-    // Stop and the mode menu, in the Supervise section, always there: they say how many agents they reach
-    // and are off when it is none. How many are selected is beside Select all / none (swarm-select-toggle.tsx).
+    // Stop and the mode menu, on the selection's row, there while something is selected: they say how many
+    // agents they reach and are off when it is none. How many are selected is beside Select all / none (swarm-select-toggle.tsx).
     return (
         <>
             <div class="swarm-fleet-toolbar">
@@ -93,24 +109,19 @@ export function SuperviseActions(props: {
                     class="swarm-fleet-btn"
                     disabled={model.fleetActionInFlightAtom() || reachable("supervise") === 0}
                     title={count() === 0 ? "Select agents to supervise" : reachable("supervise") === 0 ? NOTHING_SUPERVISABLE : undefined}
-                    onClick={(e: MouseEvent) =>
+                    onClick={(e: MouseEvent) => {
+                        // The same menu as an agent's chip, for the selection: switched off, srv refuses Steady and Drive.
+                        const on = supervisorEnabled(settingsAtom());
                         openMenuAt(
-                            SUPERVISOR_MODES.map((mode) => {
-                                // Switched off: srv refuses Steady and Drive, so say so here (Off is always fine).
-                                const blocked = mode !== "off" && !supervisorEnabled(settingsAtom());
-                                return {
-                                    label: `Supervisor: ${MODE_LABELS[mode]} for ${reachable("supervise")} ${plural(reachable("supervise"))}`,
-                                    sublabel: blocked ? SUPERVISOR_OFF_REASON : MODE_DESCRIPTIONS[mode],
-                                    enabled: !blocked,
-                                    click: () => void model.superviseSelection(mode),
-                                };
-                            }),
-                            e
-                        )
-                    }
+                            supervisorMenuItems(null, (mode) => void model.superviseSelection(mode), on),
+                            e,
+                            { header: supervisorMenuHeader(on, `${reachable("supervise")} ${plural(reachable("supervise"))}`) }
+                        );
+                    }}
                 >
                     <i class="fa-solid fa-user-shield" /> Mode
                 </Button>
+                <SupervisorOffLine />
             </div>
 
             <ConfirmModal
@@ -213,8 +224,8 @@ const FLEET_ACTION_TITLES: Record<FleetResultEntry["action"], string> = {
     supervisor: "Supervisor",
 };
 
-/** `quietWhenClean`: a broadcast's result shows only when something failed, while the Broadcast section
- *  is open and lists what it sent (its recent list). Another action's result always shows. */
+/** `quietWhenClean`: a broadcast's result shows only when something failed or was kept, since the Broadcast
+ *  input says "Sent to N" itself. Another action's result always shows. */
 export function FleetResultPanel(props: { model: SwarmViewModel; quietWhenClean?: boolean }): JSX.Element {
     const model = props.model;
     // `quietWhenClean` follows the section while this stays mounted, so it is read through `props`.

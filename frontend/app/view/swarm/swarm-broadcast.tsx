@@ -1,13 +1,12 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The Swarm's Broadcast section: the composer at the top, above the shared agent list, and the last ten
-// broadcasts sent from this Swarm. The draft and the recent list live outside the section, so
-// switching away and back loses neither. docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §3.3.
+// The Swarm's Broadcast input: one box under the Filter. Enter sends to the selected agents, Shift+Enter adds a line.
+// The draft lives outside the component, so switching away and back loses nothing.
 
 import { actionableKeys } from "./swarm-filter-state";
-import { createEffect, createMemo, createSignal, For, onCleanup, Show, type Accessor, type JSX, type Setter } from "solid-js";
-import { Button, TextArea } from "@/app/element/ui";
+import { createEffect, createMemo, createSignal, on, onCleanup, Show, type Accessor, type JSX, type Setter } from "solid-js";
+import { TextArea } from "@/app/element/ui";
 import { keyLabel } from "@/app/keybindings";
 import { t } from "@/app/i18n/i18n";
 import { onMuxEvent } from "@/app/store/mps";
@@ -17,17 +16,6 @@ import { gapSummary, localFleetTargets, partitionTargets, remoteFleetTargets } f
 import type { SwarmViewModel } from "./swarm-model";
 import { remoteSections } from "./swarm-remote";
 import { tip } from "@/app/element/tip";
-
-/** One broadcast sent from this Swarm, kept in memory only. */
-export interface BroadcastRecord {
-    text: string;
-    at: number;
-    recipients: number;
-    delivered: number;
-    failed: number;
-}
-
-export const MAX_RECENT_BROADCASTS = 10;
 
 /** The tallest the box grows by itself, in px (about eight lines); past it the text scrolls. A height the person drags to is theirs. */
 export const MAX_AUTO_HEIGHT = 160;
@@ -71,45 +59,22 @@ export function followBroadcastProgress(id: string, set: (p: BroadcastProgress |
     };
 }
 
-/** `list` with `record` newest first, capped at the last ten. */
-export function withRecent(list: BroadcastRecord[], record: BroadcastRecord): BroadcastRecord[] {
-    return [record, ...list].slice(0, MAX_RECENT_BROADCASTS);
-}
-
 interface BroadcastState {
     draft: Accessor<string>;
     setDraft: Setter<string>;
-    recent: Accessor<BroadcastRecord[]>;
-    setRecent: Setter<BroadcastRecord[]>;
 }
 
 const states = new WeakMap<object, BroadcastState>();
 
-/** The draft and recent broadcasts of one Swarm pane, created on first use and kept for its life. */
+/** The draft of one Swarm pane, created on first use and kept for its life. */
 function broadcastStateOf(model: object): BroadcastState {
     let state = states.get(model);
     if (!state) {
         const [draft, setDraft] = createSignal("");
-        const [recent, setRecent] = createSignal<BroadcastRecord[]>([]);
-        state = { draft, setDraft, recent, setRecent };
+        state = { draft, setDraft };
         states.set(model, state);
     }
     return state;
-}
-
-function ago(at: number, now: number): string {
-    const s = Math.max(0, Math.round((now - at) / 1000));
-    if (s < 60) return "just now";
-    if (s < 3600) return `${Math.floor(s / 60)} min ago`;
-    return `${Math.floor(s / 3600)} h ago`;
-}
-
-/** The current time, refreshed every `ms` while the caller lives: the ages in the recent list tick, the list itself changes only on a send. */
-function useNow(ms: number): Accessor<number> {
-    const [now, setNow] = createSignal(Date.now());
-    const ticker = setInterval(() => setNow(Date.now()), ms);
-    onCleanup(() => clearInterval(ticker));
-    return now;
 }
 
 /**
@@ -158,21 +123,29 @@ function useAutoGrow(draft: Accessor<string>): (el: HTMLTextAreaElement) => void
     };
 }
 
-function RecentBroadcasts(props: { list: BroadcastRecord[]; now: number }): JSX.Element {
+/** "1 agent", "3 agents". */
+export function agentsOf(n: number): string {
+    return `${n} agent${n === 1 ? "" : "s"}`;
+}
+
+/** What the line under the box says: how the last send went, or that agents must be selected first. */
+type BroadcastNote = { kind: "sent" | "pick" | "failed"; text: string };
+
+/** The one line under the box for what the person needs to know now; it takes no room while there is nothing to say. */
+function BroadcastNoteLine(props: { progress: BroadcastProgress | null; note: BroadcastNote | null; gap: string | null; hidden: number }): JSX.Element {
     return (
-        <div class="swarm-broadcast-recent" aria-label="Recent broadcasts">
-            <For each={props.list}>
-                {(r) => (
-                    <div class="swarm-broadcast-recent-row" {...tip(r.text)}>
-                        <span class="swarm-broadcast-recent-text">{r.text}</span>
-                        <span class="swarm-broadcast-recent-meta">
-                            {ago(r.at, props.now)} · {r.recipients} sent · {r.delivered} delivered
-                            <Show when={r.failed > 0}> · {r.failed} failed</Show>
-                        </span>
-                    </div>
-                )}
-            </For>
-        </div>
+        <Show when={props.progress ?? props.note ?? props.gap ?? (props.hidden > 0 ? true : null)}>
+            <div class="swarm-broadcast-note" role="status" data-kind={props.progress ? "progress" : props.note?.kind}>
+                <Show when={props.progress}>
+                    {(p) => <span class="swarm-broadcast-progress">{t("swarm.broadcast.progress", { sent: p().sent, total: p().total })}</span>}
+                </Show>
+                <Show when={!props.progress && props.note}>{(n) => <span>{n().text}</span>}</Show>
+                <Show when={props.gap}>{(text) => <span class="swarm-fleet-broadcast-gap">{text()}</span>}</Show>
+                <Show when={props.hidden > 0}>
+                    <span class="swarm-fleet-broadcast-gap">{props.hidden} hidden by the filter, not included</span>
+                </Show>
+            </div>
+        </Show>
     );
 }
 
@@ -191,17 +164,26 @@ export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<Swarm
     const hidden = () => model.selectedBlockIdsAtom().size - selected();
     const gap = () => gapSummary(split().unreachable, selected(), "broadcast");
     const canSend = () => state.draft().trim().length > 0 && recipients() > 0 && !model.fleetActionInFlightAtom();
-    const now = useNow(30_000);
     const watch = useAutoGrow(state.draft);
     const [progress, setProgress] = createSignal<BroadcastProgress | null>(null);
+    const [note, setNote] = createSignal<BroadcastNote | null>(null);
+    // A line about the last send or about an empty selection is about that moment: a new selection or new text ends it.
+    createEffect(on(() => model.selectedBlockIdsAtom(), () => setNote(null), { defer: true }));
 
+    // A second Enter while a send is under way does not send twice.
+    let sending = false;
     const send = async (): Promise<void> => {
-        if (!canSend()) return;
+        if (state.draft().trim().length === 0 || sending || model.fleetActionInFlightAtom()) return;
+        // Never "everyone" when nobody is selected: one Enter would start a turn on every agent.
+        if (recipients() === 0) {
+            setNote({ kind: "pick", text: t(selected() === 0 ? "swarm.broadcast.pick" : "swarm.broadcast.noneReachable") });
+            return;
+        }
         const text = state.draft().trim();
         const count = recipients();
-        // The result also lists the targets that could not be reached; they are not among `count`.
-        const unreachable = split().unreachable.length;
         state.setDraft("");
+        setNote(null);
+        sending = true;
         let result;
         // A broadcast to many agents is paced by srv and takes a few seconds: the count shows it is going out.
         const progressId = crypto.randomUUID();
@@ -213,18 +195,24 @@ export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<Swarm
             if (state.draft() === "") state.setDraft(text);
             return;
         } finally {
+            sending = false;
             stopProgress();
         }
-        state.setRecent((list) =>
-            withRecent(list, {
-                text,
-                at: Date.now(),
-                recipients: count,
-                delivered: result.succeeded.length,
-                failed: Math.max(0, result.failed.length - unreachable),
-            })
-        );
+        // Every delivery failed: the text stays, the result panel under the box says why per agent.
+        if (result.succeeded.length === 0 && (result.held ?? []).length === 0) {
+            if (state.draft() === "") state.setDraft(text);
+            setNote({ kind: "failed", text: t("swarm.broadcast.failed", { who: agentsOf(count) }) });
+            return;
+        }
+        setNote({ kind: "sent", text: t("swarm.broadcast.sent", { who: agentsOf(result.succeeded.length) }) });
     };
+
+    const placeholder = () =>
+        selected() === 0 ? t("swarm.broadcast.placeholder") : t("swarm.broadcast.placeholderTo", { who: agentsOf(recipients()) });
+    const tooltip = () =>
+        selected() === 0
+            ? t("swarm.broadcast.tipNone", { newlineKey: keyLabel("shift+Enter") })
+            : t("swarm.broadcast.tip", { who: agentsOf(recipients()), newlineKey: keyLabel("shift+Enter") });
 
     return (
         <div class="swarm-broadcast-dock" data-operator-only="">
@@ -232,11 +220,14 @@ export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<Swarm
                 class="swarm-broadcast-input"
                 ref={watch}
                 rows={1}
-                placeholder={
-                    selected() === 0 ? "Select agents to message…" : `Message to send to ${recipients()} agent${recipients() === 1 ? "" : "s"}…`
-                }
+                placeholder={placeholder()}
+                aria-label={t("swarm.broadcast.placeholder")}
                 value={state.draft()}
-                onInput={(e) => state.setDraft(e.currentTarget.value)}
+                {...tip(tooltip())}
+                onInput={(e) => {
+                    state.setDraft(e.currentTarget.value);
+                    setNote(null);
+                }}
                 onKeyDown={(e) => {
                     // Enter sends and Shift+Enter adds a line, as in an agent's composer. An IME that is converting
                     // owns Enter (keyCode 229 is Safari's synthetic keydown for it).
@@ -245,31 +236,7 @@ export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<Swarm
                     void send();
                 }}
             />
-            <div class="swarm-broadcast-actions">
-                <Button tone="accent" class="swarm-fleet-btn swarm-fleet-btn--primary" disabled={!canSend()} onClick={() => void send()}>
-                    <i class="fa-solid fa-tower-broadcast" /> Send to {recipients()}
-                </Button>
-                {/* The hint keeps its box under the count: in a narrow pane the hint is two lines and the count one, and swapping them moved everything below the row. */}
-                <span class="swarm-broadcast-hint">
-                    <span class="swarm-broadcast-hint-text" classList={{ "is-covered": progress() !== null }} aria-hidden={progress() !== null ? "true" : undefined}>
-                        {t("swarm.broadcast.hint", { newlineKey: keyLabel("shift+Enter") })}
-                    </span>
-                    <Show when={progress()}>
-                        {(p) => (
-                            <span class="swarm-broadcast-progress" role="status">
-                                {t("swarm.broadcast.progress", { sent: p().sent, total: p().total })}
-                            </span>
-                        )}
-                    </Show>
-                </span>
-                <Show when={gap()}>{(text) => <span class="swarm-fleet-broadcast-gap">{text()}</span>}</Show>
-                <Show when={hidden() > 0}>
-                    <span class="swarm-fleet-broadcast-gap">{hidden()} hidden by the filter, not included</span>
-                </Show>
-            </div>
-            <Show when={state.recent().length > 0}>
-                <RecentBroadcasts list={state.recent()} now={now()} />
-            </Show>
+            <BroadcastNoteLine progress={progress()} note={note()} gap={gap()} hidden={hidden()} />
         </div>
     );
 }

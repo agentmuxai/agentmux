@@ -171,20 +171,61 @@ describe("AtlasView", () => {
         expect(getByText("No agents to show yet.")).toBeTruthy();
     });
 
-    it("draws a region per machine and a node per running agent, with the state in its name", () => {
-        const { getAllByTestId } = rig([
+    it("draws no box per host, and a node per running agent with its state and its host in its name", () => {
+        const { getAllByTestId, queryAllByTestId, container } = rig([
             agent("Ann", "local", { state: "working" }),
             agent("Bo", "local"),
             agent("Cy", "lab"),
         ]);
-        expect(getAllByTestId("atlas-region")).toHaveLength(2);
+        expect(queryAllByTestId("atlas-region")).toHaveLength(0);
+        expect(container.querySelector(".atlas-region")).toBeNull();
         const nodes = getAllByTestId("atlas-node");
-        expect(nodes.map((n) => n.getAttribute("aria-label"))).toEqual(["Ann, Working", "Bo, Idle", "Cy, Idle"]);
+        expect(nodes.map((n) => n.getAttribute("aria-label"))).toEqual(["Ann, Working, on desk", "Bo, Idle, on desk", "Cy, Idle, on lab-1"]);
         expect(nodes[0].className).toContain("atlas-node--working");
+        // The host in words on the node itself, so the colour is never the only way to tell.
+        expect(nodes.map((n) => n.querySelector(".atlas-node__host")?.textContent)).toEqual(["desk", "desk", "lab-1"]);
+    });
+
+    it("rings the nodes of one host alike and the nodes of two hosts apart, and sets each host's ring beside its name", () => {
+        const { getAllByTestId, getByTestId } = rig([agent("Ann", "local"), agent("Bo", "local"), agent("Cy", "lab")]);
+        const [ann, bo, cy] = getAllByTestId("atlas-node");
+        const ring = (n: HTMLElement) => `${n.getAttribute("data-host-colour")}:${n.getAttribute("data-host-line")}`;
+        expect(ann.getAttribute("data-host-colour")).not.toBeNull();
+        expect(ring(ann)).toBe(ring(bo));
+        expect(ring(ann)).not.toBe(ring(cy));
+        const legend = getByTestId("atlas-legend");
+        expect(legend.textContent).toContain("desk");
+        expect(legend.textContent).toContain("lab-1");
+        // The legend's ring is the node's ring.
+        const sample = [...legend.querySelectorAll<HTMLElement>(".atlas-legend__ring")].map(ring);
+        expect(sample.sort()).toEqual([ring(ann), ring(cy)].sort());
+    });
+
+    it("draws no ring and no legend with one host, and still says the host on each node", () => {
+        const { getAllByTestId, queryByTestId } = rig([agent("Ann", "local"), agent("Bo", "local")]);
+        const [ann] = getAllByTestId("atlas-node");
+        expect(ann.hasAttribute("data-host-colour")).toBe(false);
+        expect(queryByTestId("atlas-legend")).toBeNull();
+        expect(ann.querySelector(".atlas-node__host")?.textContent).toBe("desk");
+    });
+
+    it("gives a host the same ring however the agents are ordered", () => {
+        const ringOf = (agents: AtlasAgent[], name: string) => {
+            const { getAllByTestId, unmount } = rig(agents);
+            const node = getAllByTestId("atlas-node").find((n) => n.getAttribute("aria-label")!.startsWith(name))!;
+            const out = `${node.getAttribute("data-host-colour")}:${node.getAttribute("data-host-line")}`;
+            unmount();
+            return out;
+        };
+        const ann = agent("Ann", "local");
+        const cy = agent("Cy", "lab");
+        const zo = agent("Zo", "far");
+        expect(ringOf([ann, cy, zo], "Cy")).toBe(ringOf([zo, cy, ann], "Cy"));
+        expect(ringOf([ann, cy, zo], "Ann")).toBe(ringOf([zo, cy, ann], "Ann"));
     });
 
     it("folds the stopped agents into a chip that lists them", () => {
-        const { getByText, queryByText } = rig([
+        const { getByText, queryByText, getByTestId } = rig([
             agent("Ann", "local"),
             agent("Old", "local", { state: "stopped", runtimeId: "r1" }),
         ]);
@@ -192,6 +233,8 @@ describe("AtlasView", () => {
         fireEvent.click(getByText(/1 stopped/));
         expect(getByText("Old")).toBeTruthy();
         expect(getByText("Start")).toBeTruthy();
+        // With the host each is on.
+        expect(getByTestId("atlas-stopped").textContent).toContain("desk");
     });
 
     it("opens a card for a node, and Open focuses its pane; Escape closes the card", () => {
@@ -203,6 +246,8 @@ describe("AtlasView", () => {
         const card = getByTestId("atlas-card");
         expect(card.textContent).toContain("Fixing the cursor");
         expect(card.textContent).toContain("Edit");
+        // The host, and how its machine was found.
+        expect(card.textContent).toContain("Hostdesk · this machine");
         fireEvent.click(getByText("Open"));
         expect(reveal).toHaveBeenCalledWith("b1", { source: "atlas" });
         fireEvent.keyDown(getByTestId("atlas"), { key: "Escape" });
@@ -215,14 +260,16 @@ describe("AtlasView", () => {
         expect(queryByText("Open")).toBeNull();
     });
 
-    it("keeps the layout in the pane's meta, and the By seat layout has no regions", async () => {
-        const { getByText, queryAllByTestId, setMeta } = rig([agent("Ann", "local"), agent("Cy", "lab")]);
-        expect(queryAllByTestId("atlas-region")).toHaveLength(2);
+    it("keeps the layout in the pane's meta, and both layouts draw the same nodes with the same rings", async () => {
+        const { getByText, getAllByTestId, queryAllByTestId, setMeta } = rig([agent("Ann", "local"), agent("Cy", "lab")]);
+        const rings = () => getAllByTestId("atlas-node").map((n) => n.getAttribute("data-host-colour") + n.getAttribute("data-host-line"));
+        const before = rings();
+        expect(queryAllByTestId("atlas-region")).toHaveLength(0);
         fireEvent.click(getByText("By seat"));
         expect(setMeta).toHaveBeenCalledWith({ "atlas:layout": "seat" });
         await Promise.resolve();
-        expect(queryAllByTestId("atlas-region")).toHaveLength(0);
         expect(queryAllByTestId("atlas-node")).toHaveLength(2);
+        expect(rings()).toEqual(before);
     });
 
     it("zooms with the wheel", () => {
@@ -239,14 +286,14 @@ describe("AtlasView", () => {
     it("keeps a node's element, and its hover label, when an update rebuilds every agent", () => {
         const { getAllByTestId, setAgents } = rig([agent("Ann", "local", { line: "Fixing the map" }), agent("Bo", "local")]);
         const [ann, bo] = getAllByTestId("atlas-node");
-        expect(ann.getAttribute("data-hover-tip")).toBe("Fixing the map");
+        expect(ann.getAttribute("data-hover-tip")).toBe("Fixing the map, on desk");
         setAgents([agent("Ann", "local", { line: "Testing the map" }), agent("Bo", "local")]);
         const after = getAllByTestId("atlas-node");
         expect(after).toHaveLength(2);
         expect(after[0]).toBe(ann);
         expect(after[1]).toBe(bo);
         expect(ann.isConnected).toBe(true);
-        expect(ann.getAttribute("data-hover-tip")).toBe("Testing the map");
+        expect(ann.getAttribute("data-hover-tip")).toBe("Testing the map, on desk");
     });
 
     it("draws a new node for an agent that came, drops the one that went, and keeps the rest", () => {
@@ -254,7 +301,7 @@ describe("AtlasView", () => {
         const [ann, bo] = getAllByTestId("atlas-node");
         setAgents([agent("Bo", "local", { state: "working" }), agent("Cy", "local")]);
         const after = getAllByTestId("atlas-node");
-        expect(after.map((n) => n.getAttribute("aria-label"))).toEqual(["Bo, Working", "Cy, Idle"]);
+        expect(after.map((n) => n.getAttribute("aria-label"))).toEqual(["Bo, Working, on desk", "Cy, Idle, on desk"]);
         expect(after[0]).toBe(bo);
         expect(after[0].className).toContain("atlas-node--working");
         expect(ann.isConnected).toBe(false);
@@ -301,7 +348,7 @@ describe("selecting agents on the map", () => {
         expect(world(container).style.transform).toBe(before);
         expect(getByTestId("atlas-fleet").textContent).toContain("2 selected");
         expect(getByTestId("atlas-fleet").textContent).toContain("Stop 2");
-        expect(getByTestId("atlas-fleet").textContent).toContain("Send to 2");
+        expect(container.querySelector<HTMLTextAreaElement>(".swarm-broadcast-input")!.placeholder).toBe("Broadcast to 2 agents");
     });
 
     it("adds to the selection with a second box, an agent of another machine included", () => {
@@ -337,7 +384,7 @@ describe("selecting agents on the map", () => {
         fireEvent.click(ann(), { shiftKey: true });
         expect(model.toggleSelected).toHaveBeenCalledWith("b1");
         expect(picked(container)).toEqual(["Ann"]);
-        expect(ann().getAttribute("aria-label")).toBe("Ann, Idle, selected");
+        expect(ann().getAttribute("aria-label")).toBe("Ann, Idle, on desk, selected");
         expect(queryByTestId("atlas-card")).toBeNull();
         fireEvent.click(ann(), { shiftKey: true });
         expect(picked(container)).toEqual([]);
@@ -387,7 +434,7 @@ describe("selecting agents on the map", () => {
         const { container, getAllByTestId, model } = rig(fleet());
         fireEvent.click(getAllByTestId("atlas-node")[0], { shiftKey: true });
         fireEvent.input(container.querySelector(".swarm-broadcast-input")!, { target: { value: "ship it" } });
-        fireEvent.click(container.querySelector(".swarm-fleet-btn--primary")!);
+        fireEvent.keyDown(container.querySelector(".swarm-broadcast-input")!, { key: "Enter" });
         await Promise.resolve();
         // The second argument is the id the composer follows the send's progress by.
         expect(model.broadcastToSelection).toHaveBeenCalledWith("ship it", expect.any(String));
@@ -474,14 +521,34 @@ describe("messages and tasks on the map", () => {
         expect(rest).toHaveLength(0);
         expect(mark.dataset.kind).toBe("task");
         expect(mark.querySelector(".atlas-flow__label")!.textContent).toBe("#12");
+        // On a chip in the line's own colour, behind the text, so a number on a crossing reads as that line's.
+        const chip = mark.querySelector(".atlas-flow__chip")!;
+        expect(chip.compareDocumentPosition(mark.querySelector(".atlas-flow__label")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
         expect(mark.querySelector(".atlas-flow__line")!.hasAttribute("pathLength")).toBe(false);
     });
 
     it("runs the lines behind the nodes, so a line that passes a node does not cross its name", () => {
         const { container } = rig(fleet(), {}, [flow({})]);
-        const layer = container.querySelector(".atlas-flows")!;
+        const layer = container.querySelector(".atlas-flows:not(.atlas-flows--over)")!;
         const node = container.querySelector(".atlas-node")!;
         expect(layer.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("draws a faint copy of each line over the nodes, the same path with no number or end, so a line behind a card can be followed", () => {
+        const task = flow({ id: "t1", kind: "task", tone: "task", label: "#12" });
+        const { container } = rig(fleet(), {}, [flow({}), task, flow({ id: "r1", from: { agent: "github-consumer" } })]);
+        const over = container.querySelector(".atlas-flows--over")!;
+        const paths = [...over.querySelectorAll("[data-testid=atlas-flow-over] .atlas-flow__line")].map((p) => p.getAttribute("d"));
+        const behind = [...container.querySelectorAll("[data-testid=atlas-flow] .atlas-flow__line")].map((p) => p.getAttribute("d"));
+        // A message and a task have a curve; the ring of a message with one end on the map has none.
+        expect(paths).toHaveLength(2);
+        expect(paths).toEqual(behind);
+        expect(over.querySelector(".atlas-flow__label, .atlas-flow__end, .atlas-flow__ping")).toBeNull();
+    });
+
+    it("marks the faint copy of a line in its last second as leaving, with the line", () => {
+        const { container } = rig(fleet(), {}, [flow({ leaving: true })]);
+        expect(container.querySelector("[data-testid=atlas-flow-over]")!.classList.contains("atlas-flow--leaving")).toBe(true);
     });
 
     it("marks a line in its last second as leaving", () => {
@@ -499,7 +566,7 @@ describe("what is not an agent", () => {
         const [ann, bo] = getAllByTestId("atlas-node");
         expect(ann.classList.contains("atlas-node--container")).toBe(true);
         expect(ann.dataset.container).toBe("starting");
-        expect(ann.getAttribute("aria-label")).toBe("Ann, Idle, in a container");
+        expect(ann.getAttribute("aria-label")).toBe("Ann, Idle, on desk, in a container");
         expect(bo.classList.contains("atlas-node--container")).toBe(false);
         fireEvent.click(ann);
         expect(getByTestId("atlas-card-container").textContent).toContain("agentmux-a1");
@@ -511,6 +578,9 @@ describe("what is not an agent", () => {
         const node = getByTestId("atlas-orphan");
         expect(node.textContent).toContain("agentmux-x");
         expect(node.textContent).toContain("No agent · stopped");
+        // A container is a node of its host too: its name says where it is, and it has its host's ring.
+        expect(node.getAttribute("aria-label")).toContain(", on desk");
+        expect(node.querySelector(".atlas-node__host")?.textContent).toBe("desk");
         expect(getAllByTestId("atlas-node")).toHaveLength(3);
         fireEvent.click(node);
         expect(getByTestId("atlas-card").textContent).toContain("no agent of this machine uses it");
@@ -527,18 +597,24 @@ describe("what is not an agent", () => {
         expect(container.querySelector('[data-kind="review"], [data-kind="checks"]')).toBeNull();
     });
 
-    it("marks one of the account's other machines, and says when they could not be read", () => {
-        const { getAllByTestId, getByTestId } = rig([agent("Ann", "local"), agent("Zo", "far")], {}, [], { cloudUnavailable: true });
-        const [local, far] = getAllByTestId("atlas-region");
-        expect(local.classList.contains("atlas-region--cloud")).toBe(false);
-        expect(far.classList.contains("atlas-region--cloud")).toBe(true);
-        expect(far.textContent).toContain("cloud");
+    it("marks one of the account's other machines in the legend, and says when they could not be read", () => {
+        const { getByTestId } = rig([agent("Ann", "local"), agent("Zo", "far")], {}, [], { cloudUnavailable: true });
+        const legend = getByTestId("atlas-legend").textContent!;
+        expect(legend).toContain("far-1");
+        expect(legend).toContain("cloud");
+        expect(legend).toContain("this machine");
         expect(getByTestId("atlas-cloud-note").textContent).toContain("could not be read");
     });
 
     it("says nothing of the cloud while it reads fine, and says what is wrong with this machine after its badge", () => {
-        const { queryByTestId, getAllByTestId } = rig([agent("Ann", "local")], {}, [], { localNote: "container runtime not running" });
+        const { queryByTestId, getByTestId } = rig([agent("Ann", "local")], {}, [], { localNote: "container runtime not running" });
         expect(queryByTestId("atlas-cloud-note")).toBeNull();
-        expect(getAllByTestId("atlas-region")[0].textContent).toContain("this machine · container runtime not running");
+        expect(getByTestId("atlas-machine-note").textContent).toBe("desk: this machine · container runtime not running");
+    });
+
+    it("says a machine's trouble once, in the legend, when there is one: no line of it in the corner over the nodes", () => {
+        const { queryByTestId, getByTestId } = rig([agent("Ann", "local"), agent("Zo", "far")], {}, [], { localNote: "container runtime not running" });
+        expect(getByTestId("atlas-legend").textContent).toContain("container runtime not running");
+        expect(queryByTestId("atlas-machine-note")).toBeNull();
     });
 });

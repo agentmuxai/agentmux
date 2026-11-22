@@ -150,8 +150,10 @@ pub enum ResolverError {
     #[error("env var not set in srv environment: {0}")]
     EnvVarMissing(String),
 
-    #[error("AWS Secrets Manager backend not yet supported (Phase 3)")]
-    SecretsManagerUnsupported,
+    /// The read from AWS Secrets Manager failed. The text is one of the Vault's fixed sentences about what went wrong
+    /// (`vault::aws_import`), never any of the secret.
+    #[error("AWS Secrets Manager: {0}")]
+    SecretsManagerRead(String),
 
     #[error("PlaintextDev secrets are disabled in release builds")]
     #[cfg(not(debug_assertions))]

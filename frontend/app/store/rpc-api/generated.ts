@@ -91,6 +91,7 @@ import type { Bundle } from "@/types/rpc/Bundle";
 import type { BundleImportCommitResponse } from "@/types/rpc/BundleImportCommitResponse";
 import type { BundleImportPreviewResponse } from "@/types/rpc/BundleImportPreviewResponse";
 import type { CancelProviderAuthReq } from "@/types/rpc/CancelProviderAuthReq";
+import type { CaptureMaskReportResult } from "@/types/rpc/CaptureMaskReportResult";
 import type { CheckCliAuthResult } from "@/types/rpc/CheckCliAuthResult";
 import type { ClaudeGlobalConfig } from "@/types/rpc/ClaudeGlobalConfig";
 import type { ClientAgreeTosResult } from "@/types/rpc/ClientAgreeTosResult";
@@ -160,6 +161,7 @@ import type { CommandBrowserSigninStopData } from "@/types/rpc/CommandBrowserSig
 import type { CommandBrowserSignupPasswordData } from "@/types/rpc/CommandBrowserSignupPasswordData";
 import type { CommandBundleImportCommitData } from "@/types/rpc/CommandBundleImportCommitData";
 import type { CommandBundleImportPreviewData } from "@/types/rpc/CommandBundleImportPreviewData";
+import type { CommandCaptureMaskReportData } from "@/types/rpc/CommandCaptureMaskReportData";
 import type { CommandCheckCliAuthData } from "@/types/rpc/CommandCheckCliAuthData";
 import type { CommandContainerCachesData } from "@/types/rpc/CommandContainerCachesData";
 import type { CommandContainerImageCheckData } from "@/types/rpc/CommandContainerImageCheckData";
@@ -167,6 +169,7 @@ import type { CommandCopyForkHistoryData } from "@/types/rpc/CommandCopyForkHist
 import type { CommandCreateAgentDefinitionData } from "@/types/rpc/CommandCreateAgentDefinitionData";
 import type { CommandCreateAgentInstanceData } from "@/types/rpc/CommandCreateAgentInstanceData";
 import type { CommandCreateAgentSkillData } from "@/types/rpc/CommandCreateAgentSkillData";
+import type { CommandDeepLinkOpenDoneData } from "@/types/rpc/CommandDeepLinkOpenDoneData";
 import type { CommandDeleteAgentDefinitionData } from "@/types/rpc/CommandDeleteAgentDefinitionData";
 import type { CommandDeleteAgentInstanceData } from "@/types/rpc/CommandDeleteAgentInstanceData";
 import type { CommandDeleteAgentSkillData } from "@/types/rpc/CommandDeleteAgentSkillData";
@@ -182,6 +185,8 @@ import type { CommandFleetGroupCreateData } from "@/types/rpc/CommandFleetGroupC
 import type { CommandFleetGroupDeleteData } from "@/types/rpc/CommandFleetGroupDeleteData";
 import type { CommandFleetGroupListData } from "@/types/rpc/CommandFleetGroupListData";
 import type { CommandFleetGroupUpdateData } from "@/types/rpc/CommandFleetGroupUpdateData";
+import type { CommandFolderOverlapAcceptData } from "@/types/rpc/CommandFolderOverlapAcceptData";
+import type { CommandFolderOverlapCheckData } from "@/types/rpc/CommandFolderOverlapCheckData";
 import type { CommandForkAgentDefinitionData } from "@/types/rpc/CommandForkAgentDefinitionData";
 import type { CommandForkAgentDefinitionSuggestData } from "@/types/rpc/CommandForkAgentDefinitionSuggestData";
 import type { CommandGetAgentBundlesData } from "@/types/rpc/CommandGetAgentBundlesData";
@@ -315,6 +320,7 @@ import type { CreateEditorFileReq } from "@/types/rpc/CreateEditorFileReq";
 import type { CreateEditorFileResult } from "@/types/rpc/CreateEditorFileResult";
 import type { CreateScratchFileReq } from "@/types/rpc/CreateScratchFileReq";
 import type { CreateScratchFileResult } from "@/types/rpc/CreateScratchFileResult";
+import type { DeepLinkOpenDoneResult } from "@/types/rpc/DeepLinkOpenDoneResult";
 import type { DeleteAgentInstanceResult } from "@/types/rpc/DeleteAgentInstanceResult";
 import type { DeleteBundleResult } from "@/types/rpc/DeleteBundleResult";
 import type { DeleteDroneReq } from "@/types/rpc/DeleteDroneReq";
@@ -336,10 +342,13 @@ import type { FileProbeReq } from "@/types/rpc/FileProbeReq";
 import type { FileProbeResult } from "@/types/rpc/FileProbeResult";
 import type { FileSearchBytesReq } from "@/types/rpc/FileSearchBytesReq";
 import type { FileSearchBytesResult } from "@/types/rpc/FileSearchBytesResult";
+import type { FileSearchTextReq } from "@/types/rpc/FileSearchTextReq";
 import type { FleetActionResult } from "@/types/rpc/FleetActionResult";
 import type { FleetGroup } from "@/types/rpc/FleetGroup";
 import type { FleetGroupDeleteResult } from "@/types/rpc/FleetGroupDeleteResult";
 import type { FleetGroupListResult } from "@/types/rpc/FleetGroupListResult";
+import type { FolderOverlapAcceptResult } from "@/types/rpc/FolderOverlapAcceptResult";
+import type { FolderOverlapCheckResult } from "@/types/rpc/FolderOverlapCheckResult";
 import type { ForkAgentDefinitionSuggestResult } from "@/types/rpc/ForkAgentDefinitionSuggestResult";
 import type { FsAgentFolder } from "@/types/rpc/FsAgentFolder";
 import type { FsCreateReq } from "@/types/rpc/FsCreateReq";
@@ -2275,6 +2284,22 @@ export const GeneratedApi = {
   ): Promise<PaneConfirmDecideResult> {
     return client.rpcCall("pane.confirm.decide", data, opts);
   },
+  // command "deeplink.open.done"
+  DeepLinkOpenDoneCommand(
+    client: RpcClient,
+    data: CommandDeepLinkOpenDoneData,
+    opts?: RpcOpts
+  ): Promise<DeepLinkOpenDoneResult> {
+    return client.rpcCall("deeplink.open.done", data, opts);
+  },
+  // command "capture.mask.report"
+  CaptureMaskReportCommand(
+    client: RpcClient,
+    data: CommandCaptureMaskReportData,
+    opts?: RpcOpts
+  ): Promise<CaptureMaskReportResult> {
+    return client.rpcCall("capture.mask.report", data, opts);
+  },
   // command "pane.open"
   PaneOpenCommand(client: RpcClient, data: CommandPaneOpenData, opts?: RpcOpts): Promise<PaneOpenResult> {
     return client.rpcCall("pane.open", data, opts);
@@ -2342,6 +2367,22 @@ export const GeneratedApi = {
   // command "client.agreetos"
   ClientAgreeTosCommand(client: RpcClient, opts?: RpcOpts): Promise<ClientAgreeTosResult> {
     return client.rpcCall("client.agreetos", {}, opts);
+  },
+  // command "folderoverlapcheck"
+  FolderOverlapCheckCommand(
+    client: RpcClient,
+    data: CommandFolderOverlapCheckData,
+    opts?: RpcOpts
+  ): Promise<FolderOverlapCheckResult> {
+    return client.rpcCall("folderoverlapcheck", data, opts);
+  },
+  // command "folderoverlapaccept"
+  FolderOverlapAcceptCommand(
+    client: RpcClient,
+    data: CommandFolderOverlapAcceptData,
+    opts?: RpcOpts
+  ): Promise<FolderOverlapAcceptResult> {
+    return client.rpcCall("folderoverlapaccept", data, opts);
   },
   // command "browsergrants.list"
   BrowserGrantsListCommand(
@@ -2446,6 +2487,10 @@ export const GeneratedApi = {
   // command "filesearchbytes"
   FileSearchBytesCommand(client: RpcClient, data: FileSearchBytesReq, opts?: RpcOpts): Promise<FileSearchBytesResult> {
     return client.rpcCall("filesearchbytes", data, opts);
+  },
+  // command "filesearchtext"
+  FileSearchTextCommand(client: RpcClient, data: FileSearchTextReq, opts?: RpcOpts): Promise<FileSearchBytesResult> {
+    return client.rpcCall("filesearchtext", data, opts);
   },
   // command "readeditorfile"
   ReadEditorFileCommand(

@@ -133,6 +133,28 @@
         width: 100%;
     }
 
+    // The Preview agent CLIs: one collapsed section under the first-class cards
+    // (SPEC_AGENT_HARNESS_CURATION_FIRST_CLASS_AND_PREVIEW_2026_11_07.md).
+    .agent-picker-preview {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        margin-top: var(--space-2);
+    }
+
+    .agent-picker-preview-header {
+        // A kit row Button; only the label style and the caret's gap are set here.
+        @include mixins.label-caps;
+        gap: var(--space-2);
+    }
+
+    .agent-picker-preview-caret {
+        display: inline-block;
+        width: 1ch;
+        font-size: 0.85em;
+    }
+
     // Two-tier picker (Phase 2 — Q2 Decision Y: hide templates).
     // Collapsible "Hidden templates (N)" surface that lives directly
     // under the templates tier, hidden entirely when no templates are
@@ -363,6 +385,47 @@
             @include mixins.when-motion-reduced(status) {
                 animation: none;
             }
+        }
+    }
+
+    .agent-shared-folder-panel {
+        display: flex;
+        gap: var(--space-3);
+        padding: var(--space-3);
+        margin: var(--space-2) 0;
+        border-radius: 0;
+        background: var(--warning-bg);
+        border: 1px solid var(--warning-line);
+
+        .shared-folder-icon {
+            font-size: var(--text-xl);
+            color: var(--warning-text-color);
+            flex-shrink: 0;
+            padding-top: var(--space-0-5);
+        }
+
+        .shared-folder-title {
+            font-weight: 600;
+            font-size: var(--text-base);
+            margin-bottom: var(--space-1);
+        }
+
+        .shared-folder-text {
+            font-size: var(--text-sm);
+            line-height: 1.4;
+        }
+
+        .shared-folder-hint {
+            font-size: var(--text-xs);
+            color: var(--secondary-text-color);
+            margin-top: var(--space-1-5);
+        }
+
+        .shared-folder-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--space-2);
+            margin-top: var(--space-2);
         }
     }
 

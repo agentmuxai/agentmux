@@ -1173,6 +1173,14 @@
             "method": "PaneConfirmDecideCommand"
         },
         {
+            "command": "deeplink.open.done",
+            "method": "DeepLinkOpenDoneCommand"
+        },
+        {
+            "command": "capture.mask.report",
+            "method": "CaptureMaskReportCommand"
+        },
+        {
             "command": "pane.open",
             "method": "PaneOpenCommand"
         },
@@ -1224,6 +1232,14 @@
         {
             "command": "client.agreetos",
             "method": "ClientAgreeTosCommand"
+        },
+        {
+            "command": "folderoverlapcheck",
+            "method": "FolderOverlapCheckCommand"
+        },
+        {
+            "command": "folderoverlapaccept",
+            "method": "FolderOverlapAcceptCommand"
         },
         {
             "command": "browsergrants.list",
@@ -1290,6 +1306,10 @@
         {
             "command": "filesearchbytes",
             "method": "FileSearchBytesCommand"
+        },
+        {
+            "command": "filesearchtext",
+            "method": "FileSearchTextCommand"
         },
         {
             "command": "readeditorfile",

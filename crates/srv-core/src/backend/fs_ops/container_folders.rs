@@ -258,6 +258,12 @@ pub(crate) fn add_for_test(folder: &Path, container: &str, target: &str) {
     state().lock().for_tests.push(Folder { hosts: spellings(folder), container: container.to_string(), target: target.to_string() });
 }
 
+/// Whether `a` and `b` are one folder, or one lies beneath the other, as written or as either resolves.
+pub fn overlap(a: &Path, b: &Path) -> bool {
+    let (a, b) = (spellings(a), spellings(b));
+    a.iter().any(|x| b.iter().any(|y| relative_to(x, y).is_some() || relative_to(y, x).is_some()))
+}
+
 /// Whether one of `folders` is `asked` (the spellings of one folder) or lies beneath it.
 fn holds_one_of(asked: &[String], folders: &[Folder]) -> bool {
     folders.iter().flat_map(|folder| &folder.hosts).any(|host| asked.iter().any(|dir| relative_to(host, dir).is_some()))

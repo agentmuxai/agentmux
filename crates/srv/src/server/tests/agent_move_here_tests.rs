@@ -59,6 +59,11 @@ async fn moving_the_agent_here_stops_the_holder_pane_and_waits_for_its_lease() {
     for (block_id, uid) in [(holder.block_id(), &f.uid), (claimant.block_id(), &f.uid)] {
         let mut pane = crate::backend::obj::Block { oid: block_id.to_string(), ..Default::default() };
         pane.meta.insert("agentId".to_string(), serde_json::json!(uid));
+        if block_id == claimant.block_id() {
+            // The claimant was refused for the agent being open elsewhere, and was bound with Open here.
+            pane.meta.insert("agent:last_failure".to_string(), serde_json::json!({ "code": "open_in_other_pane", "holderBlockId": holder.block_id() }));
+            pane.meta.insert("agent:open_here".to_string(), serde_json::json!(true));
+        }
         state.mstore.insert(&mut pane).unwrap();
     }
     // The holder's process exits when told to stop; its lease drops with it.
@@ -75,6 +80,9 @@ async fn moving_the_agent_here_stops_the_holder_pane_and_waits_for_its_lease() {
     crate::backend::blockcontroller::delete_controller(holder.block_id());
 
     assert_eq!(moved.unwrap().from_block.as_deref(), Some(holder.block_id()));
+    let claimant_pane = state.mstore.get::<crate::backend::obj::Block>(claimant.block_id()).unwrap().unwrap();
+    assert!(!claimant_pane.meta.contains_key("agent:last_failure"), "the pane that has the agent now keeps no refusal for a reload to show");
+    assert!(!claimant_pane.meta.contains_key("agent:open_here"), "the Open here mark has done its work");
     assert!(graceful, "a graceful stop, not a kill");
     let failure = notice.meta.get("agent:last_failure").map(|v| v.to_string()).unwrap_or_else(|| format!("no failure in {:?}", notice.meta));
     assert!(failure.contains("open_in_other_pane") && failure.contains(claimant.block_id()), "got: {failure}");

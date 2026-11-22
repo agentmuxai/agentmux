@@ -12,12 +12,22 @@ import type { SupervisorState } from "@/types/rpc/SupervisorState";
 
 const menu = vi.hoisted(() => ({ show: vi.fn() }));
 vi.mock("@/app/element/ui/open-menu-at", async (original) => ({ ...(await original<typeof import("@/app/element/ui/open-menu-at")>()), openMenuAt: menu.show }));
+// The master switch, which the person turns on in Settings: the chip reads it.
+const master = vi.hoisted(() => ({ on: true }));
+vi.mock("@/app/store/global", async (original) => ({
+    ...(await original<typeof import("@/app/store/global")>()),
+    settingsAtom: () => ({ "supervisor:enabled": master.on }),
+}));
+const settings = vi.hoisted(() => ({ openSettingsAt: vi.fn(async () => {}) }));
+vi.mock("@/app/view/settings/open-settings", () => ({ openSettingsAt: settings.openSettingsAt }));
 
-import { SupervisorBucket, SupervisorChip, supervisorMenuItems, supervisorRows } from "./swarm-supervisor";
+import { SupervisorBucket, SupervisorChip, supervisorChipTitle, supervisorMenuHeader, supervisorMenuItems, supervisorRows } from "./swarm-supervisor";
 
 afterEach(() => {
     cleanup();
     menu.show.mockClear();
+    settings.openSettingsAt.mockClear();
+    master.on = true;
 });
 
 const state = (over: Partial<SupervisorState>): SupervisorState => ({
@@ -72,11 +82,12 @@ describe("SupervisorChip", () => {
         const chip = container.querySelector(".swarm-supervisor-chip")!;
         fireEvent.click(chip);
         const items = menu.show.mock.calls[0][0] as ContextMenuItem[];
-        expect(items.map((i) => [i.label, i.checked])).toEqual([
-            ["Supervisor: Off", true],
-            ["Supervisor: Steady", false],
-            ["Supervisor: Drive", false],
+        expect(items.filter((i) => i.type === "radio").map((i) => [i.label, i.checked])).toEqual([
+            ["Off", true],
+            ["Steady", false],
+            ["Drive", false],
         ]);
+        expect(menu.show.mock.calls[0][2]).toEqual({ header: ["Supervisor mode"] });
         items[1].click!();
         expect(onSet).toHaveBeenCalledWith("steady");
         await Promise.resolve();
@@ -86,22 +97,78 @@ describe("SupervisorChip", () => {
     });
 });
 
-describe("supervisorMenuItems when the Supervisor is switched off", () => {
-    it("disables Steady and Drive with the reason, and keeps Off", () => {
-        const items = supervisorMenuItems("off", vi.fn(), false);
-        expect(items.map((i) => i.enabled)).toEqual([true, false, false]);
-        expect(items[1].sublabel).toContain("Switched off");
-        expect(items[0].sublabel).not.toContain("Switched off");
+describe("supervisorMenuItems", () => {
+    it("has a row per mode with its name and its explanation as separate fields, then a divider and the settings entry", () => {
+        const items = supervisorMenuItems("steady", vi.fn());
+        expect(items.map((i) => i.label ?? "—")).toEqual(["Off", "Steady", "Drive", "—", "Supervisor settings…"]);
+        expect(items.slice(0, 3).map((i) => i.description)).toEqual([
+            "Leave the agent to stop when it stops.",
+            "Keep it going when it stops only to check in. Pause for real questions.",
+            "Keep it going through open questions on its own best judgement. Pause for what only you can provide.",
+        ]);
+        // The name carries no explanation, and the explanation is not a right-hand sublabel (which is cut short).
+        expect(items.slice(0, 3).every((i) => i.sublabel === undefined && !i.label!.includes("."))).toBe(true);
+        expect(items[3].type).toBe("separator");
     });
 
-    it("offers every mode when it is on", () => {
-        expect(supervisorMenuItems("off", vi.fn()).map((i) => i.enabled)).toEqual([true, true, true]);
+    it("checks the current mode, and none for a selection", () => {
+        expect(supervisorMenuItems("drive", vi.fn()).slice(0, 3).map((i) => i.checked)).toEqual([false, false, true]);
+        expect(supervisorMenuItems(null, vi.fn()).slice(0, 3).map((i) => i.checked)).toEqual([undefined, undefined, undefined]);
+    });
+
+    it("offers every mode when it is on, and the settings entry opens the Settings pane at the Supervisor section", () => {
+        const items = supervisorMenuItems("off", vi.fn());
+        expect(items.map((i) => i.enabled)).toEqual([true, true, true, undefined, undefined]);
+        items[4].click!();
+        expect(settings.openSettingsAt).toHaveBeenCalledWith("supervisor");
+    });
+
+    it("switched off: Steady and Drive are disabled, Off and the settings entry are not", () => {
+        const items = supervisorMenuItems("off", vi.fn(), false);
+        expect(items.map((i) => i.enabled)).toEqual([true, false, false, undefined, undefined]);
+        // The reason is said once, above the rows, not on each row.
+        expect(items.every((i) => !i.sublabel && !JSON.stringify(i.description ?? "").includes("switched off"))).toBe(true);
+        items[4].click!();
+        expect(settings.openSettingsAt).toHaveBeenCalledWith("supervisor");
+        expect(supervisorMenuHeader(false)).toEqual(["Supervisor mode", "The Supervisor is switched off in Settings, so Steady and Drive can't be chosen."]);
+        expect(supervisorMenuHeader(true, "3 agents")).toEqual(["Supervisor mode for 3 agents"]);
     });
 });
 
-describe("supervisorMenuItems", () => {
-    it("checks the current mode", () => {
-        expect(supervisorMenuItems("drive", vi.fn()).map((i) => i.checked)).toEqual([false, false, true]);
+describe("the chip while the Supervisor is switched off", () => {
+    it("shows the off state in every mode: another shape, no mode or detail, and a tooltip that says why", () => {
+        master.on = false;
+        for (const mode of ["off", "steady", "drive"] as const) {
+            const meta = claude({ "supervisor:mode": mode, "supervisor:state": state({ mode: mode === "off" ? "steady" : mode, status: "continued", continuations: 3 }) });
+            const { container, unmount } = render(() => <SupervisorChip meta={meta} live={true} onSet={vi.fn()} />);
+            const chip = container.querySelector(".swarm-supervisor-chip")!;
+            expect(chip.classList.contains("swarm-supervisor-chip--switched-off")).toBe(true);
+            expect(chip.querySelector(".fa-user-slash")).not.toBeNull();
+            expect(chip.querySelector(".fa-user-shield")).toBeNull();
+            expect(chip.textContent).toBe("");
+            expect(chip.getAttribute("title")).toContain("switched off in Settings");
+            expect(chip.getAttribute("aria-label")).toContain("switched off");
+            unmount();
+        }
+    });
+
+    it("tells an agent set to Steady or Drive what it is set to, and an Off agent nothing about a mode", () => {
+        expect(supervisorChipTitle("steady", null, false)).toContain("This agent is set to Steady; that applies again when it is turned on.");
+        expect(supervisorChipTitle("drive", null, false)).toContain("set to Drive");
+        expect(supervisorChipTitle("off", null, false)).not.toContain("set to");
+        expect(supervisorChipTitle("off", null, true)).toBe("Supervisor: Off\nLeave the agent to stop when it stops.\nClick to change.");
+    });
+
+    it("is the ordinary chip again when the switch is on, and opens the menu with the reason once", () => {
+        master.on = false;
+        const { container } = render(() => <SupervisorChip meta={claude()} live={false} onSet={vi.fn()} />);
+        fireEvent.click(container.querySelector(".swarm-supervisor-chip")!);
+        expect(menu.show.mock.calls[0][2].header).toHaveLength(2);
+        cleanup();
+        master.on = true;
+        const on = render(() => <SupervisorChip meta={claude()} live={false} onSet={vi.fn()} />);
+        expect(on.container.querySelector(".swarm-supervisor-chip--switched-off")).toBeNull();
+        expect(on.container.querySelector(".fa-user-shield")).not.toBeNull();
     });
 });
 

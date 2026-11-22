@@ -475,6 +475,81 @@ describe("Block — the pane's modal layer, for every kind of pane", () => {
 });
 
 /**
+ * A splitter drag settles once (#48351): the body keeps the size it had when the drag began, however the pane
+ * is resized under it, so the view's own observers see no resize until the release; then the hold goes and the
+ * view lays out once, at the final size.
+ */
+describe("Block — a splitter drag holds the body, and lets go once on release", () => {
+    function stubInnerSize(w: number, h: number) {
+        const proto = HTMLElement.prototype;
+        const had = { w: Object.getOwnPropertyDescriptor(proto, "clientWidth"), h: Object.getOwnPropertyDescriptor(proto, "clientHeight") };
+        Object.defineProperty(proto, "clientWidth", { configurable: true, get: () => w });
+        Object.defineProperty(proto, "clientHeight", { configurable: true, get: () => h });
+        return () => {
+            if (had.w) Object.defineProperty(proto, "clientWidth", had.w);
+            else delete (proto as unknown as Record<string, unknown>).clientWidth;
+            if (had.h) Object.defineProperty(proto, "clientHeight", had.h);
+            else delete (proto as unknown as Record<string, unknown>).clientHeight;
+        };
+    }
+
+    it("holds the starting size for the whole drag, and clears it on release", async () => {
+        setBlockView("b-hold", "layerprobe");
+        const Block = await loadBlock();
+        const [dragging, setDragging] = createSignal(false);
+        const restore = stubInnerSize(640, 360);
+        try {
+            const { container } = render(() => (
+                <Block nodeModel={makeNodeModel({ blockId: "b-hold", isSplitterDragging: dragging })} preview={false} />
+            ));
+            const content = container.querySelector<HTMLElement>(".block-content")!;
+            expect(content.classList.contains("block-content--held")).toBe(false);
+
+            setDragging(true);
+            await Promise.resolve();
+            expect(content.classList.contains("block-content--held")).toBe(true);
+            expect(content.style.getPropertyValue("--held-width")).toBe("640px");
+            expect(content.style.getPropertyValue("--held-height")).toBe("360px");
+
+            // The pane is resized under it, move after move: the hold stays at the starting size.
+            restore();
+            const restoreSmaller = stubInnerSize(300, 200);
+            try {
+                await Promise.resolve();
+                expect(content.style.getPropertyValue("--held-width")).toBe("640px");
+                expect(content.style.getPropertyValue("--held-height")).toBe("360px");
+            } finally {
+                restoreSmaller();
+            }
+
+            setDragging(false);
+            await Promise.resolve();
+            expect(content.classList.contains("block-content--held")).toBe(false);
+            expect(content.style.getPropertyValue("--held-width")).toBe("");
+        } finally {
+            restore();
+        }
+    });
+
+    it("never holds a browser pane: its page is a native window that follows the pane's rect", async () => {
+        setBlockView("b-hold-browser", "browser");
+        const Block = await loadBlock();
+        const [dragging, setDragging] = createSignal(false);
+        const restore = stubInnerSize(640, 360);
+        try {
+            const { container } = render(() => (
+                <Block nodeModel={makeNodeModel({ blockId: "b-hold-browser", isSplitterDragging: dragging })} preview={false} />
+            ));
+            setDragging(true);
+            await Promise.resolve();
+            expect(container.querySelector(".block-content--held")).toBeNull();
+        } finally {
+            restore();
+        }
+    });
+});
+
+/**
  * Phase 3 of SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md.
  *
  * The headline acceptance criterion is a COUNT: at no point during a pane mount

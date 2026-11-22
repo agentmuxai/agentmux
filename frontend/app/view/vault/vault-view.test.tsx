@@ -218,6 +218,22 @@ describe("the Vault pane", () => {
         }
     });
 
+    it("opens on an entry a link names by its link id, even one made after the list it first saw", async () => {
+        // The store may still hold an older list when the pane mounts; the pane's own refresh brings the new entry.
+        entries = [ssn(), apiKey({ id: "api-key-new", link_id: "e_0123456789abcdef" })];
+        setBlockMeta({ "vault:entry-link": "e_0123456789abcdef" });
+        renderVault();
+        await waitFor(() => expect(setMeta).toHaveBeenCalledWith({ "vault:section": "api-keys" }));
+        expect(blockMeta()["vault:entry-link"]).toBeNull();
+    });
+
+    it("leaves the Vault as it is for a link id no entry has, once a fresh list lacks it too", async () => {
+        setBlockMeta({ "vault:entry-link": "e_ffffffffffffffff" });
+        renderVault();
+        await waitFor(() => expect(blockMeta()["vault:entry-link"]).toBeNull());
+        expect(setMeta).not.toHaveBeenCalledWith(expect.objectContaining({ "vault:section": expect.anything() }));
+    });
+
     it("keeps Import, Export and the note in the pane when the pane is too narrow for them in its header", async () => {
         renderVault();
         await screen.findByText("Alex");

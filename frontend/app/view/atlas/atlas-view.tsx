@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The Atlas pane: the Swarm's agents as a map (docs/specs/SPEC_ATLAS_AGENT_MAP_2026_11_13.md). Machines are regions,
- * agents are nodes, a line runs from a lead to the agent that reports to it. The wheel zooms, a drag on the
+ * The Atlas pane: the Swarm's agents as a map (docs/specs/SPEC_ATLAS_AGENT_MAP_2026_11_13.md). Agents are nodes, each
+ * saying its host in words and wearing a ring in the host's colour (atlas-hosts.ts); a line runs from a lead to the
+ * agent that reports to it. The wheel zooms, a drag on the
  * background pans, Fit shows it all. A node opens a card; the card's Open and Start are the Swarm row's own actions.
  * A box dragged with Shift held (or with Select on) selects the agents it touches, for the Swarm's own Broadcast,
  * Stop and Supervisor mode (atlas-fleet-bar.tsx). A message between two agents draws a line from its sender to its
@@ -23,21 +24,15 @@ import { ByKey } from "./atlas-by-key";
 import { SwarmFilterBar } from "../swarm/swarm-filter-bar";
 import { CardFacts } from "./atlas-card-facts";
 import { inContainer } from "./atlas-containers";
-import { edgePath } from "./atlas-edge-path";
+import { edgePath, edgePoints } from "./atlas-edge-path";
 import { ExtraCard, ExtraNodes } from "./atlas-extras";
 import { AtlasFleetBar } from "./atlas-fleet-bar";
 import { flowEndResolver, labelKeepOut } from "./atlas-flow";
 import { AtlasFlowLayer } from "./atlas-flow-layer";
 import type { AtlasAgent, AtlasRegion, AtlasState } from "./atlas-graph";
-import {
-    FOLD_CHIP,
-    layoutAtlas,
-    layoutBySeat,
-    NODE_H,
-    NODE_W,
-    type AtlasLayout,
-    type RegionBox as RegionBoxLayout,
-} from "./atlas-layout";
+import { AtlasLegend, HostLabel, hostAttrs, machineDetail, onHost, ringVars } from "./atlas-host-mark";
+import { hostStyles, ringsDrawn, type HostStyle } from "./atlas-hosts";
+import { layoutAtlas, layoutBySeat, NODE_H, NODE_W, type AtlasLayout } from "./atlas-layout";
 import type { AtlasData } from "./atlas-model";
 import { ATLAS_LAYOUT_META, readAtlasLayout, type AtlasLayoutMode } from "./atlas-layout-mode";
 import { useAtlasLasso } from "./atlas-lasso";
@@ -72,7 +67,10 @@ function Node(props: {
     agent: AtlasAgent;
     x: number;
     y: number;
-    tint: number | null;
+    /** Its host's ring and name; undefined for a machine this view does not know. */
+    host: HostStyle | undefined;
+    /** Rings are drawn (more than one host). */
+    ring: boolean;
     selected: boolean;
     /** In the selection a fleet action reaches, or inside the box being dragged. */
     picked: boolean;
@@ -90,13 +88,13 @@ function Node(props: {
                 "atlas-node--stale": a().stale,
                 "atlas-node--container": inContainer(a()),
             }}
-            data-tint={props.tint ?? undefined}
+            {...hostAttrs(props.host, props.ring)}
             data-container={a().container?.state}
             data-testid="atlas-node"
             style={{ left: `${props.x}px`, top: `${props.y}px`, width: `${NODE_W}px`, height: `${NODE_H}px` }}
             aria-pressed={props.selected}
-            aria-label={`${a().name}, ${STATE_LABELS[a().state]}${inContainer(a()) ? ", in a container" : ""}${props.picked ? ", selected" : ""}`}
-            {...tip(a().line ?? STATE_LABELS[a().state])}
+            aria-label={`${a().name}, ${STATE_LABELS[a().state]}${onHost(props.host)}${inContainer(a()) ? ", in a container" : ""}${props.picked ? ", selected" : ""}`}
+            {...tip(`${a().line ?? STATE_LABELS[a().state]}${onHost(props.host)}`)}
             onClick={(e) => props.onSelect(a().key, e)}
             onKeyDown={(e) => {
                 if (e.key !== "Enter" && e.key !== " ") return;
@@ -110,6 +108,7 @@ function Node(props: {
                 <Show when={inContainer(a())}>
                     <i class="fa-solid fa-box atlas-node__kind" aria-hidden="true" />
                 </Show>
+                <HostLabel style={props.host} />
                 <Show when={props.picked}>
                     <i class="fa-solid fa-check atlas-node__check" aria-hidden="true" />
                 </Show>
@@ -123,29 +122,21 @@ function Node(props: {
     );
 }
 
-function FoldedChip(props: {
-    region: AtlasRegion;
-    x: number;
-    y: number;
-    open: boolean;
-    onToggle: () => void;
-}): JSX.Element {
+/** The stopped agents, which the map does not draw: one chip that lists them with the host each is on, to Open or Start. */
+function StoppedChip(props: { agents: { agent: AtlasAgent; host: string }[] }): JSX.Element {
+    const [open, setOpen] = createSignal(false);
     return (
-        <div class="atlas-fold" style={{ left: `${props.x}px`, top: `${props.y}px` }}>
-            <Button
-                density="compact"
-                aria-expanded={props.open}
-                style={{ height: `${FOLD_CHIP.h}px` }}
-                onClick={props.onToggle}
-            >
-                {props.region.folded.length} stopped {props.open ? "▾" : "▸"}
+        <div class="atlas-fold" data-testid="atlas-stopped">
+            <Button density="compact" aria-expanded={open()} onClick={() => setOpen(!open())}>
+                {props.agents.length} stopped {open() ? "▾" : "▴"}
             </Button>
-            <Show when={props.open}>
+            <Show when={open()}>
                 <ul class="atlas-fold__list">
-                    <For each={props.region.folded}>
-                        {(agent) => (
+                    <For each={props.agents}>
+                        {({ agent, host }) => (
                             <li>
                                 <span class="atlas-fold__name">{agent.name}</span>
+                                <span class="atlas-fold__host">{host}</span>
                                 <Show when={agent.runtimeId}>
                                     <Button
                                         density="compact"
@@ -172,6 +163,8 @@ function FoldedChip(props: {
 function Card(props: {
     agent: AtlasAgent;
     machineTitle: string;
+    /** How the machine was found and what it says of itself (atlas-host-mark.tsx `machineDetail`). */
+    machineDetail: string;
     agents: ReadonlyMap<string, AtlasAgent>;
     work: AtlasWork | null;
     onClose: () => void;
@@ -202,8 +195,11 @@ function Card(props: {
                     <dt>Seat</dt>
                     <dd>{seatTooltipLine(a().seat!)}</dd>
                 </Show>
-                <dt>Machine</dt>
-                <dd>{props.machineTitle}</dd>
+                <dt>Host</dt>
+                <dd>
+                    {props.machineTitle}
+                    <Show when={props.machineDetail}>{(text) => <span class="atlas-card__detail"> · {text()}</span>}</Show>
+                </dd>
                 <Show when={a().provider}>
                     <dt>Provider</dt>
                     <dd>{a().provider}</dd>
@@ -237,29 +233,31 @@ function Card(props: {
     );
 }
 
-/** The map itself: a box per machine, the lines, and a node per running agent, in map pixels. */
+/** The map itself: the lines and a node per running agent, in map pixels. */
 function AtlasMap(props: {
     data: AtlasData;
     layout: AtlasLayout;
     view: Viewport;
-    mode: AtlasLayoutMode;
+    hosts: ReadonlyMap<string, HostStyle>;
+    /** Rings are drawn (more than one host). */
+    ring: boolean;
     selected: string | null;
     picked: (agent: AtlasAgent) => boolean;
     onSelect: (key: string, e: MouseEvent | KeyboardEvent) => void;
 }): JSX.Element {
-    const [openFolds, setOpenFolds] = createSignal<ReadonlySet<string>>(new Set());
-    const toggleFold = (key: string) =>
-        setOpenFolds((s) => {
-            const next = new Set(s);
-            if (!next.delete(key)) next.add(key);
-            return next;
-        });
     const regions = () => props.data.graph().regions;
     const shownAgents = createMemo(() => regions().flatMap((r) => r.shown));
-    const machineIndex = (machine: string) => regions().findIndex((r) => r.key === machine);
     const flowEnd = createMemo(() => flowEndResolver(shownAgents(), props.data.machines()));
     const framed = createMemo(() => new Set(shownAgents().filter(inContainer).map((a) => a.key)));
     const keepOut = createMemo(() => labelKeepOut(props.layout));
+    // The lines of reports-to, for a task's number to keep clear of.
+    const reportLines = createMemo(() =>
+        props.data.graph().edges.flatMap((edge) => {
+            const from = props.layout.nodes.get(edge.from);
+            const to = props.layout.nodes.get(edge.to);
+            return from && to ? [edgePoints(from, to, props.layout.wrapped.get(edge.to) === edge.from, props.layout.gaps)] : [];
+        })
+    );
     return (
         <div
             class="atlas-world"
@@ -269,17 +267,10 @@ function AtlasMap(props: {
                 transform: `translate(${props.view.x}px, ${props.view.y}px) scale(${clampZoom(props.view.k)})`,
                 // A container's frame closes in with the gaps it stands in (atlas.scss `.atlas-node--container`).
                 "--atlas-frame-out": `${props.layout.gaps.frame}px`,
+                // So does a host's ring, so two neighbours' rings never meet (atlas-host-mark.tsx `ringVars`).
+                ...ringVars(props.layout.gaps),
             }}
         >
-            <For each={props.layout.regions}>
-                {(box) => (
-                    <Show when={regions().find((r) => r.key === box.key)}>
-                        {(r) => (
-                            <RegionBox box={box} region={r()} open={openFolds().has(r().key)} onToggle={() => toggleFold(r().key)} />
-                        )}
-                    </Show>
-                )}
-            </For>
             <svg class="atlas-edges" width={props.layout.width} height={props.layout.height} aria-hidden="true">
                 <For each={props.data.graph().edges}>
                     {(edge) => {
@@ -304,6 +295,7 @@ function AtlasMap(props: {
                 framed={framed()}
                 avoid={keepOut()}
                 frameOut={props.layout.gaps.frame}
+                edges={reportLines()}
                 width={props.layout.width}
                 height={props.layout.height}
             />
@@ -315,7 +307,8 @@ function AtlasMap(props: {
                                 agent={agent()}
                                 x={p().x}
                                 y={p().y}
-                                tint={props.mode === "seat" ? machineIndex(agent().machine) % 6 : null}
+                                host={props.hosts.get(agent().machine)}
+                                ring={props.ring}
                                 selected={props.selected === key}
                                 picked={props.picked(agent())}
                                 onSelect={props.onSelect}
@@ -324,40 +317,15 @@ function AtlasMap(props: {
                     </Show>
                 )}
             </ByKey>
-            <ExtraNodes graph={props.data.graph()} nodes={props.layout.nodes} selected={props.selected} onSelect={props.onSelect} />
+            <ExtraNodes
+                graph={props.data.graph()}
+                nodes={props.layout.nodes}
+                hosts={props.hosts}
+                ring={props.ring}
+                selected={props.selected}
+                onSelect={props.onSelect}
+            />
         </div>
-    );
-}
-
-/** One machine box, with its title and badge, and its folded chip. */
-function RegionBox(props: { box: RegionBoxLayout; region: AtlasRegion; open: boolean; onToggle: () => void }): JSX.Element {
-    const r = () => props.region;
-    const box = () => props.box;
-    return (
-        <>
-            <section
-                class="atlas-region"
-                classList={{ "atlas-region--stale": r().stale, "atlas-region--cloud": !!r().cloud }}
-                data-testid="atlas-region"
-                style={{ left: `${box().x}px`, top: `${box().y}px`, width: `${box().w}px`, height: `${box().h}px` }}
-            >
-                <header class="atlas-region__head">
-                    <span class="atlas-region__title">{r().title}</span>
-                    <span class="atlas-region__badge">
-                        <Show when={r().cloud}>
-                            <i class="fa-solid fa-cloud" aria-hidden="true" />{" "}
-                        </Show>
-                        {r().badge}
-                        {r().platform ? ` · ${r().platform}` : ""}
-                        {r().stale ? " · stale" : ""}
-                        {r().note ? ` · ${r().note}` : ""}
-                    </span>
-                </header>
-            </section>
-            <Show when={r().folded.length > 0}>
-                <FoldedChip region={r()} x={box().foldX} y={box().foldY} open={props.open} onToggle={props.onToggle} />
-            </Show>
-        </>
     );
 }
 
@@ -430,6 +398,62 @@ function useAtlasSelection(data: AtlasData, zoom: AtlasPanZoom, layout: () => At
     return { selecting, setSelecting, nodeKeys, lasso, picked, toggleFor };
 }
 
+/** The box a drag draws to select agents, in the pane's own pixels. */
+function LassoBox(props: { rect: { x: number; y: number; w: number; h: number } | null }): JSX.Element {
+    return (
+        <Show when={props.rect}>
+            {(r) => (
+                <div
+                    class="atlas-lasso"
+                    data-testid="atlas-lasso"
+                    style={{ left: `${r().x}px`, top: `${r().y}px`, width: `${r().w}px`, height: `${r().h}px` }}
+                />
+            )}
+        </Show>
+    );
+}
+
+/** Each machine's host and its ring (drawn only when there is more than one host to tell apart, atlas-hosts.ts), and the stopped agents with their hosts. */
+function useAtlasHosts(data: AtlasData) {
+    const hosts = createMemo(() => hostStyles(data.graph().regions));
+    const ring = createMemo(() => ringsDrawn(hosts()));
+    /** The agents the map does not draw, each with the host it is on. */
+    const stopped = createMemo(() =>
+        data.graph().regions.flatMap((r) => r.folded.map((agent) => ({ agent, host: hosts().get(r.key)?.name ?? "" })))
+    );
+    return { hosts, ring, stopped };
+}
+
+/** What the map leaves out or could not read, in its bottom left corner: the cloud, a machine's own trouble, the stopped agents. */
+function AtlasNotes(props: {
+    data: AtlasData;
+    hosts: ReadonlyMap<string, HostStyle>;
+    stopped: { agent: AtlasAgent; host: string }[];
+    stoppedCount: number;
+    /** The legend is drawn: it already says each host's trouble, so the corner does not repeat it over the nodes. */
+    legend: boolean;
+}): JSX.Element {
+    return (
+        <div class="atlas-notes">
+            <Show when={props.data.cloudUnavailable()}>
+                <div data-testid="atlas-cloud-note">The account's other machines could not be read just now.</div>
+            </Show>
+            {/* What is wrong with a machine itself (its report is old, its container runtime is not running): said by its
+                host's name here with one host, and in the legend beside the host with more. */}
+            <For each={props.legend ? [] : props.data.graph().regions.filter((r) => r.note || r.stale)}>
+                {(r) => (
+                    <div data-testid="atlas-machine-note">
+                        {props.hosts.get(r.key)?.name ?? r.title}: {machineDetail(r)}
+                    </div>
+                )}
+            </For>
+            <Show when={props.stoppedCount > 0}>
+                <StoppedChip agents={props.stopped} />
+            </Show>
+        </div>
+    );
+}
+
 export function AtlasView(props: { data: AtlasData; ctx: PaneTabHostContext }): JSX.Element {
     const { data, ctx } = props;
     const mode = createMemo<AtlasLayoutMode>(() => readAtlasLayout(ctx.meta()));
@@ -444,6 +468,7 @@ export function AtlasView(props: { data: AtlasData; ctx: PaneTabHostContext }): 
             : layoutAtlas(data.graph(), zoom.shape(), zoom.spread())
     );
     const sel = useAtlasSelection(data, zoom, layout);
+    const { hosts, ring, stopped } = useAtlasHosts(data);
     const shownCount = createMemo(() => data.graph().regions.reduce((n, r) => n + r.shown.length + r.orphans.length, 0));
     const stoppedCount = createMemo(() => data.graph().regions.reduce((n, r) => n + r.folded.length, 0));
     const selectedAgent = () => {
@@ -468,6 +493,10 @@ export function AtlasView(props: { data: AtlasData; ctx: PaneTabHostContext }): 
     return (
         <div class="atlas" data-testid="atlas" onKeyDown={(e) => e.key === "Escape" && onEscape()}>
             <AtlasBar data={data} ctx={ctx} mode={mode()} zoom={zoom} selecting={sel.selecting()} onSelecting={sel.setSelecting} />
+            {/* Each host's ring beside its name: a row only when there is a ring to explain. */}
+            <Show when={ring()}>
+                <AtlasLegend styles={hosts()} regions={data.graph().regions} />
+            </Show>
             <div
                 class="atlas-viewport"
                 classList={{ "atlas-viewport--selecting": sel.selecting() }}
@@ -487,34 +516,30 @@ export function AtlasView(props: { data: AtlasData; ctx: PaneTabHostContext }): 
                         data={data}
                         layout={layout()}
                         view={zoom.view()}
-                        mode={mode()}
+                        hosts={hosts()}
+                        ring={ring()}
                         selected={selected()}
                         picked={sel.picked}
                         onSelect={(key, e) => sel.toggleFor(key, e) || setSelected(key)}
                     />
                 </Show>
-                <Show when={sel.lasso.rect()}>
-                    {(r) => (
-                        <div
-                            class="atlas-lasso"
-                            data-testid="atlas-lasso"
-                            style={{ left: `${r().x}px`, top: `${r().y}px`, width: `${r().w}px`, height: `${r().h}px` }}
-                        />
-                    )}
-                </Show>
-                <div class="atlas-notes">
-                    <Show when={data.cloudUnavailable()}>
-                        <div data-testid="atlas-cloud-note">The account's other machines could not be read just now.</div>
-                    </Show>
-                    <Show when={mode() === "seat" && stoppedCount() > 0}>
-                        <div>{stoppedCount()} stopped, not drawn</div>
-                    </Show>
-                </div>
+                <LassoBox rect={sel.lasso.rect()} />
+                <AtlasNotes
+                    data={data}
+                    hosts={hosts()}
+                    stopped={stopped()}
+                    stoppedCount={stoppedCount()}
+                    legend={ring()}
+                />
                 <Show when={selectedAgent()} fallback={<ExtraCard graph={data.graph()} selected={selected()} onClose={() => setSelected(null)} />}>
                     {(agent) => (
                         <Card
                             agent={agent()}
-                            machineTitle={data.machines().get(agent().machine)?.title ?? ""}
+                            machineTitle={hosts().get(agent().machine)?.name ?? data.machines().get(agent().machine)?.title ?? ""}
+                            machineDetail={(() => {
+                                const m = data.graph().regions.find((r) => r.key === agent().machine);
+                                return m ? machineDetail(m) : "";
+                            })()}
                             agents={data.agents()}
                             work={work()}
                             onClose={() => setSelected(null)}

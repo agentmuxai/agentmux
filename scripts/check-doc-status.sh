@@ -67,7 +67,9 @@ else
     # path, after pairing. Same class of bug as globbing `specs/**/*.md` and
     # missing root-level files: the filter ran before the thing it filtered
     # was fully known.
-    changes=$(git diff --name-status --find-renames --diff-filter=d "$ref"...HEAD 2>/dev/null || true)
+    # The branch as it is in the working tree (committed, staged and edited), so the answer is the same
+    # before and after the commit: scripts/lib/branch-changes.mjs prints git's --name-status rows, deletions left out.
+    changes=$(node "$(dirname "${BASH_SOURCE[0]}")/lib/branch-changes.mjs" --ref "$ref" 2>/dev/null || true)
     mapfile -t files < <(printf '%s
 ' "$changes" | awk '
         $1 == "R100" { next }
@@ -82,7 +84,7 @@ added_files=""
 if [ "$explicit" -eq 0 ]; then
     # Renames are deliberately absent: --diff-filter=A with rename detection on
     # does not report them, and a relocated doc is not one you are writing.
-    added_files=$(git diff --name-only --find-renames --diff-filter=A "$ref"...HEAD 2>/dev/null         | grep -E '^docs/.*[.]md$' || true)
+    added_files=$(node "$(dirname "${BASH_SOURCE[0]}")/lib/branch-changes.mjs" --ref "$ref" --added 2>/dev/null | grep -E '^docs/.*[.]md$' || true)
 fi
 
 # ── One spec tree, not two ──────────────────────────────────────────────────

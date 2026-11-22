@@ -215,6 +215,33 @@ fn install_message_brokers(state: &AppState) {
     backend::task_flow::install(Arc::clone(&state.broker));
     backend::pr_flow::install(Arc::clone(&state.broker));
     start_container_status(state);
+    install_withhold_alert(state);
+}
+
+/// An Audit row when the registry of withheld values refuses a value or degrades its matching: a line with the counts,
+/// never a value.
+fn install_withhold_alert(state: &AppState) {
+    let handler = state.reactive_handler;
+    backend::transcript::withhold::set_alert(queued_alert(move |line| {
+        handler.log_fleet_action_audit(Some("srv"), "srv", "", "transcript.withhold", false, Some(line.as_str()), &uuid::Uuid::new_v4().to_string(), None);
+    }));
+}
+
+/// A callback that only queues each line; `deliver` runs on its own thread. The registry raises an alert from inside
+/// message delivery, where the handler's lock is held, so a `deliver` that took that lock there would never return.
+fn queued_alert(deliver: impl Fn(String) + Send + 'static) -> impl Fn(&str) + Send + Sync + 'static {
+    let (queue, lines) = std::sync::mpsc::channel::<String>();
+    let spawned = std::thread::Builder::new().name("withhold-alert".into()).spawn(move || {
+        for line in lines {
+            deliver(line);
+        }
+    });
+    if let Err(e) = spawned {
+        tracing::warn!("withhold alert worker not started, alerts are only logged: {e}");
+    }
+    move |line| {
+        let _ = queue.send(line.to_string());
+    }
 }
 
 /// The Atlas map and the Swarm show this machine's agent containers as they change (`backend::container_status`).
@@ -349,6 +376,15 @@ fn install_turn_outcome_notes(state: &AppState) {
         Arc::clone(&state.broker),
         state.srv_events_tx.subscribe(),
         Arc::clone(&state.mstore),
+        Arc::clone(&state.work_store),
+        Arc::clone(&state.filestore),
+        Arc::clone(&state.config_watcher),
+    );
+    // An agent that owes work and has gone quiet is nudged once, then its watchers are told
+    // (SPEC_LEADER_TOLD_WHEN_AN_AGENT_GOES_QUIET_2026_11_21.md).
+    backend::quiet_watch::install(
+        Arc::clone(&state.mstore),
+        Arc::clone(&state.work_store),
         Arc::clone(&state.filestore),
         Arc::clone(&state.config_watcher),
     );
@@ -567,8 +603,11 @@ pub async fn serve_until_shutdown(
     router: axum::Router,
     stdin_token: &tokio_util::sync::CancellationToken,
 ) {
-    let web_server = axum::serve(web_listener, router.clone());
-    let ws_server = axum::serve(ws_listener, router);
+    // Every request carries both ends of its connection (`ConnectInfo<Conn>`: the sign-in's confirm reads them) and the
+    // address it came from (`ConnectInfo<SocketAddr>`: the loopback-only routes read it), on either listener.
+    let router = crate::server::confirm_peer::with_plain_peer(router);
+    let web_server = axum::serve(web_listener, router.clone().into_make_service_with_connect_info::<crate::server::confirm_peer::Conn>());
+    let ws_server = axum::serve(ws_listener, router.into_make_service_with_connect_info::<crate::server::confirm_peer::Conn>());
 
     // Run both servers until shutdown
     tokio::select! {
@@ -587,3 +626,7 @@ pub async fn serve_until_shutdown(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "state_services_tests.rs"]
+mod tests;

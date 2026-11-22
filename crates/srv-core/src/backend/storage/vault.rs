@@ -109,6 +109,12 @@ pub(super) const VAULT_SCHEMA: &str = "
         instance TEXT PRIMARY KEY,
         until_ms INTEGER NOT NULL
     );
+    -- Each entry's opaque id for links (docs/specs/SPEC_DEEP_LINKS_ONE_FRAMEWORK_2026_11_20.md G2, D7): assigned
+    -- once, kept, and never derived from the entry's kind or label.
+    CREATE TABLE IF NOT EXISTS db_vault_link_ids (
+        entry_id TEXT PRIMARY KEY,
+        link_id  TEXT NOT NULL UNIQUE
+    );
 ";
 
 /// Columns added after the Vault's tables first shipped, applied like the identity store's others.
@@ -299,6 +305,7 @@ impl Store {
         let tx = conn.unchecked_transaction()?;
         tx.execute("DELETE FROM db_vault_grants WHERE entry_id = ?1", params![id])?;
         tx.execute("DELETE FROM db_vault_versions WHERE entry_id = ?1", params![id])?;
+        tx.execute("DELETE FROM db_vault_link_ids WHERE entry_id = ?1", params![id])?;
         let n = tx.execute("DELETE FROM db_vault_entries WHERE id = ?1", params![id])?;
         tx.commit()?;
         Ok(n > 0)
@@ -558,6 +565,40 @@ impl Store {
             )?;
         }
         Ok(())
+    }
+
+    /// Every entry's link id that has one: entry id to link id.
+    pub fn vault_link_ids(&self) -> Result<std::collections::HashMap<String, String>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT entry_id, link_id FROM db_vault_link_ids")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Gives `entry_id` the link id `link_id` unless it has one: the one it keeps. `None` when `link_id` is taken by
+    /// another entry (the caller draws again).
+    pub fn vault_link_id_assign(&self, entry_id: &str, link_id: &str) -> Result<Option<String>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let kept: Option<String> = conn
+            .query_row("SELECT link_id FROM db_vault_link_ids WHERE entry_id = ?1", params![entry_id], |r| r.get(0))
+            .optional()?;
+        if kept.is_some() {
+            return Ok(kept);
+        }
+        let n = conn.execute("INSERT OR IGNORE INTO db_vault_link_ids (entry_id, link_id) VALUES (?1, ?2)", params![entry_id, link_id])?;
+        Ok((n > 0).then(|| link_id.to_string()))
+    }
+
+    /// The entry a link id names, if it still exists.
+    pub fn vault_entry_of_link(&self, link_id: &str) -> Result<Option<String>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        Ok(conn
+            .query_row(
+                "SELECT l.entry_id FROM db_vault_link_ids l JOIN db_vault_entries e ON e.id = l.entry_id WHERE l.link_id = ?1",
+                params![link_id],
+                |r| r.get(0),
+            )
+            .optional()?)
     }
 
     /// Whether any AgentMux instance shows a Vault pane at `now_ms`.

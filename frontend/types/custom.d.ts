@@ -859,6 +859,8 @@ declare global {
         icon?: string;
         /** A CSS colour for that icon (a widget's own colour in the pane "+" menu); the label keeps the menu's text colour. */
         iconColor?: string;
+        /** A second line under the label, smaller and muted, that wraps and is never cut: what the choice does. A screen reader hears it as the row's description. Kit menu only (`openMenuAt`). */
+        description?: string;
         /** A pick runs `click` and leaves the menu open (the pane colours: try one after another). Kit menu only (`openMenuAt`). */
         keepOpen?: boolean;
         /** The row's `checked` and `enabled` as they are now, read each time the row draws, so an open menu follows a change a pick made. Kit menu only. */

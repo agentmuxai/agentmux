@@ -312,7 +312,7 @@ async fn only_the_approved_rows_are_read_and_a_failed_one_does_not_stop_the_rest
     assert_eq!((stored.len(), failed.len(), whole.len()), (1, 1, 1));
     assert_eq!((stored[0].entry_id.as_str(), stored[0].target.as_str(), stored[0].reason.as_str()), (kept.as_str(), "aws-secret:hosts/gamma", REASON));
     assert_eq!((failed[0].entry_label.as_str(), failed[0].target.as_str()), ("Alpha", "aws-secret:hosts/alpha"));
-    assert_eq!((whole[0].entry_label.as_str(), whole[0].entry_id.as_str(), whole[0].actor.as_str()), ("host passwords", "", "builder"));
+    assert_eq!((whole[0].entry_label.as_str(), whole[0].entry_id.as_str(), whole[0].actor.as_str()), ("host passwords", "", "agent:builder"));
     for row in [stored[0], failed[0], whole[0]] {
         assert_eq!(history::refs_of(&row.refs), [batch_ref.clone(), "task 31007".to_string()], "every line of a batch names it: {row:?}");
     }

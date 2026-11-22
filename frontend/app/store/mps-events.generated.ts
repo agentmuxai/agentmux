@@ -27,6 +27,7 @@ import type { BlockRefEvent } from "@/types/rpc/BlockRefEvent";
 import type { BlockRevealEvent } from "@/types/rpc/BlockRevealEvent";
 import type { BrowserPauseAll } from "@/types/rpc/BrowserPauseAll";
 import type { BtwAnswerChunkEvent } from "@/types/rpc/BtwAnswerChunkEvent";
+import type { CaptureMaskEvent } from "@/types/rpc/CaptureMaskEvent";
 import type { ChecksFlowEvent } from "@/types/rpc/ChecksFlowEvent";
 import type { CompactionStarted } from "@/types/rpc/CompactionStarted";
 import type { ConfigEvent } from "@/types/rpc/ConfigEvent";
@@ -35,6 +36,7 @@ import type { ConnectivityStatus } from "@/types/rpc/ConnectivityStatus";
 import type { ContainerRuntimeStatus } from "@/types/rpc/ContainerRuntimeStatus";
 import type { ContainerStatus } from "@/types/rpc/ContainerStatus";
 import type { CredentialsRevokedEvent } from "@/types/rpc/CredentialsRevokedEvent";
+import type { DeepLinkOpenEvent } from "@/types/rpc/DeepLinkOpenEvent";
 import type { DesktopEvent } from "@/types/rpc/DesktopEvent";
 import type { DispatchActivityEvent } from "@/types/rpc/DispatchActivityEvent";
 import type { DispatchUpdatedEvent } from "@/types/rpc/DispatchUpdatedEvent";
@@ -163,6 +165,7 @@ export type MuxEventPayloads = {
   browserpauseall: BrowserPauseAll;
   "browserprofiles:changed": null;
   btw_answer_chunk: BtwAnswerChunkEvent;
+  "capture:mask": CaptureMaskEvent;
   "checks-flow": ChecksFlowEvent;
   compaction_started: CompactionStarted;
   config: ConfigEvent;
@@ -172,6 +175,7 @@ export type MuxEventPayloads = {
   "container-status": ContainerStatus;
   controllerstatus: BlockControllerRuntimeStatus;
   cron_changed: null;
+  "deeplink:open": DeepLinkOpenEvent;
   "dispatch:activity": DispatchActivityEvent;
   "dispatch:updated": DispatchUpdatedEvent;
   "dock:clear": DockClearEvent;
@@ -305,6 +309,7 @@ export const TYPED_MUX_EVENTS = [
   "browserpauseall",
   "browserprofiles:changed",
   "btw_answer_chunk",
+  "capture:mask",
   "checks-flow",
   "compaction_started",
   "config",
@@ -314,6 +319,7 @@ export const TYPED_MUX_EVENTS = [
   "container-status",
   "controllerstatus",
   "cron_changed",
+  "deeplink:open",
   "dispatch:activity",
   "dispatch:updated",
   "dock:clear",

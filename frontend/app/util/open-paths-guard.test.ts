@@ -20,6 +20,7 @@ const FRONTEND_ROOT = join(__dirname, "..", "..");
  * agent rather than a view that is already open.
  */
 const OPENS_BY_THEMSELVES: Record<string, string> = {
+    "app/deeplinks/open-deps.ts": "a deep link an agent opens lands beside its conversation without focus; a person's new or floating pane",
     "app/element/link-destinations.ts": "a link opens a file, folder or URL, docked or floating",
     "app/element/open-message-file.ts": "opens a file of a container agent's message, which srv finds in the agent's own folders",
     "app/store/agent-runtime-live.ts": "opens the named agent's own pane",
@@ -38,6 +39,7 @@ const OPENS_BY_THEMSELVES: Record<string, string> = {
 const LOOKS_UP_BY_VIEW: Record<string, string> = {
     "app/store/block-component-registry.ts": "revealOrOpen's host",
     "app/util/reveal-block.ts": "defines it",
+    "app/view/shortcuts/move-singleton-here.ts": "finds the open pane of a singleton view to swap it into the shortcuts pane's place",
     "app/view/shortcuts/shortcuts.tsx": "lists the panes of a view for the shortcuts page",
 };
 

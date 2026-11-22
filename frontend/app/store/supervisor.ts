@@ -34,8 +34,11 @@ export function supervisorEnabled(settings: Record<string, unknown> | null | und
     return settings?.["supervisor:enabled"] === true;
 }
 
-/** Why Steady and Drive can't be chosen while the switch is off. */
-export const SUPERVISOR_OFF_REASON = "Switched off. Turn the Supervisor on in the Swarm's Supervisor settings.";
+/** Why Steady and Drive can't be chosen while the switch is off, said once at the top of the mode menu. */
+export const SUPERVISOR_OFF_REASON = "The Supervisor is switched off in Settings, so Steady and Drive can't be chosen.";
+
+/** The mode menu's last row: it opens the Settings pane at the Supervisor section, switch on or off. */
+export const SUPERVISOR_SETTINGS_LABEL = "Supervisor settings…";
 
 /** The pane's mode; anything unset or unknown is Off, as srv reads it. */
 export function readSupervisorMode(meta: Meta): SupervisorMode {

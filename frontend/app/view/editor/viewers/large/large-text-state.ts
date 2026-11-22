@@ -18,7 +18,7 @@ import { rangeReaderOf } from "../hex/hex-chunks";
 import { takeOpenPosition, watchOpenPosition } from "../../open-position";
 import { LineSource, type LineText } from "./line-source";
 import { createLargeFind } from "./large-find-state";
-import { hitOrdinal } from "./large-find";
+import { hitOrdinal, type LineMatcher } from "./large-find";
 import { createLineScroll } from "./line-scroll";
 
 export interface LargeTextProps {
@@ -195,7 +195,7 @@ function createSidewaysReveal(grid: () => HTMLElement | undefined, mark: Accesso
  * The match on show among those a line holds. A find hands over where in the file the match starts; this works out how
  * far into its line that is, so the line's own matches can tell which one it is (`at`) and the reveal go to that one.
  */
-function createCurrentHit(feed: ReturnType<typeof createLineFeed>, needle: () => string, encoding: () => string | undefined) {
+function createCurrentHit(feed: ReturnType<typeof createLineFeed>, needle: () => LineMatcher, encoding: () => string | undefined) {
     /** The match on show: its line (1-based) and how many bytes into that line it starts. */
     const [current, setCurrent] = createSignal<{ line: number; byte: number } | null>(null);
     let newest = 0; // the newest find; an older one still working out its place gives up

@@ -166,7 +166,7 @@ async fn a_check_says_same_or_different_names_the_place_in_the_history_and_holds
 
     let lines: Vec<_> = rows(&s).into_iter().filter(|r| r.action == CHECKED).collect();
     assert_eq!(lines.iter().map(|r| r.outcome.as_str()).collect::<Vec<_>>(), [SAME, DIFFERENT, DIFFERENT]);
-    assert!(lines.iter().all(|r| r.target == "aws-secret:staging/app#db.password" && r.actor == "builder" && r.reason == REASON && r.entry_id == id));
+    assert!(lines.iter().all(|r| r.target == "aws-secret:staging/app#db.password" && r.actor == "agent:builder" && r.reason == REASON && r.entry_id == id));
     nothing_leaked(&s, &[serde_json::to_string(&same).unwrap(), serde_json::to_string(&different).unwrap()]);
 }
 
@@ -418,7 +418,7 @@ fn an_agent_changes_the_link_only_as_the_person_allowed_it() {
     assert_eq!(inspect::link_change(&s, &spelled_out, "builder").unwrap().unwrap(), change);
     inspect::note_link_refused(&s, &change, "builder", "denied");
     let line = rows(&s).into_iter().find(|r| r.outcome == "denied").unwrap();
-    assert_eq!((line.action.as_str(), line.target.as_str(), line.actor.as_str(), line.reason.as_str()), (inspect::CHANGED_DETAILS, "machine copy", "builder", REASON));
+    assert_eq!((line.action.as_str(), line.target.as_str(), line.actor.as_str(), line.reason.as_str()), (inspect::CHANGED_DETAILS, "machine copy", "agent:builder", REASON));
 }
 
 #[test]

@@ -21,6 +21,7 @@ export type SettingsSection =
     | "devices"
     | "widgets"
     | "agents"
+    | "supervisor"
     | "kanban"
     | "advanced";
 
@@ -120,6 +121,9 @@ export const SETTINGS_SECTION_LABELS: Record<SettingsSection, string> = {
     get agents() {
         return t("settings.sections.agents");
     },
+    get supervisor() {
+        return t("settings.sections.supervisor");
+    },
     get kanban() {
         return t("settings.sections.kanban");
     },
@@ -144,6 +148,7 @@ export const SETTINGS_SECTIONS: PaneSections<SettingsSection> = {
         { id: "devices", get label() { return SETTINGS_SECTION_LABELS.devices; }, icon: "mobile-screen" },
         { id: "widgets", get label() { return SETTINGS_SECTION_LABELS.widgets; }, icon: "puzzle-piece" },
         { id: "agents", get label() { return SETTINGS_SECTION_LABELS.agents; }, icon: "robot" },
+        { id: "supervisor", get label() { return SETTINGS_SECTION_LABELS.supervisor; }, icon: "user-shield" },
         { id: "kanban", get label() { return SETTINGS_SECTION_LABELS.kanban; }, icon: "table-columns" },
         { id: "advanced", get label() { return SETTINGS_SECTION_LABELS.advanced; }, icon: "sliders" },
     ],
@@ -161,6 +166,10 @@ export class SettingsViewModel {
     kanbanBoard: () => string | null;
     /** Which click of the cog asked (`settings:kanban-ask`): a second click on the same board is a new ask. */
     kanbanAsk: () => number;
+    /** A setting row a link asked for (`settings:reveal`, its id) and which ask it was (`settings:reveal-ask`). */
+    revealRequest: () => { id: string; ask: number } | null;
+    /** Clears the ask once the row is shown, so a remount does not show it again. */
+    clearReveal: () => void;
 
     // Search query — docs/specs/SPEC_SETTINGS_PANE_SEARCH_2026_09_21.md §3.5.
     // Same plain-createSignal treatment as activeSection (no blockAtom; see
@@ -201,6 +210,12 @@ export class SettingsViewModel {
             const board = block?.meta()?.["settings:kanban-board"];
             return typeof board === "string" && board ? board : null;
         };
+        this.revealRequest = () => {
+            const id = block?.meta()?.["settings:reveal"];
+            const ask = block?.meta()?.["settings:reveal-ask"];
+            return typeof id === "string" && id ? { id, ask: typeof ask === "number" ? ask : 0 } : null;
+        };
+        this.clearReveal = () => void block?.setMeta({ "settings:reveal": null, "settings:reveal-ask": null });
         const [query, setQuery] = createSignal("");
         this.query = query;
         this.setQuery = setQuery;

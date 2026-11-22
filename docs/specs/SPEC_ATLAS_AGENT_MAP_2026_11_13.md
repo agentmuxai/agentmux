@@ -179,17 +179,24 @@ Both carry ids, hosts and times only, so the map shows that something passed bet
   host. This instance's agents carry that name in their pane (it differs from the display name for a renamed
   agent); another instance's agent is matched by its name on its machine. An end that matches no node, or two, is
   not drawn: no line rather than a wrong one.
-- **Lines run behind the nodes.** A line between two agents that are not neighbours passes behind the nodes in
-  between, so it never crosses a name; its ends show at the two nodes' edges. A task's number sits on the stretch
-  of its line nearest the middle that no node covers, in the text colour (the look checks on macOS and Linux both
-  found a number landing on another node's name, and dim on the dark theme, with the lines in front). Agents side
-  by side in a row leave no such stretch (the gap between two is narrower than a number, and the line is behind
-  the ones in between), so there the number goes just under or just over the node the line lands on, at the corner
-  it lands on (the Linux re-look found the number hidden behind the node in between). A number also keeps clear of
-  the numbers placed before it. Two tasks handed to one agent in a row land on the same corner, so the second
-  number takes the other side of the node, and a third goes a number's width along the node's edge (the same
-  re-look found one number drawn on top of the other). A task and one handed back between two agents close
-  together bow apart by less than a number's width, so the second number goes next to the first.
+- **Lines run behind the nodes, and show through them.** A line between two agents that are not neighbours is
+  drawn behind the nodes in between, so a card keeps its opaque face and its name stays readable; its ends show at
+  the two nodes' edges. A faint copy of the line (the stroke only, with no number or end) is also drawn over the
+  nodes, at 0.4 of the line's own 0.9, so about 36% of its strength, and that is the strength the look checks
+  judged: a line that runs behind a card shows through it as a dim stroke and can be followed from one end to the
+  other in a big fleet (the Linux look check on PR 8038, 49 agents). It does cross a name faintly; the name stays
+  readable. A line between two agents of one row with another card between them arcs over the row instead, from the
+  top of one card to the top of the other: its answer arcs higher, and each further line higher again, but never
+  more than half the room above the row (so in a dense grid it stays clear of the cards over it).
+- **A task's number** sits on a chip in its line's own colour, its text in the background's colour (a small number
+  in the line's colour alone is dim on the dark theme), on the stretch of the line nearest the middle that no node
+  covers. It keeps 12 px clear of the lines between other pairs of nodes and of the lines of reports-to, so on a
+  crossing it is not read as another line's (the macOS look check on PR 8038), and clear of the numbers placed
+  before it. Where no stretch is clear (a diagonal across a dense grid), the number goes just under or just over
+  the node the line lands on, at the corner it lands on. Two tasks handed to one agent land on the same corner, so
+  the second number takes the other side of the node, and a third goes a number's width along the node's edge. A
+  task and one handed back between two agents close together bow apart by less than a number's width, so the
+  second number goes next to the first.
 - **Motion.** With the Animations setting on Off, a line appears whole and goes after its time; nothing travels.
   The operating system's own "reduce motion" preference alone does not change it, as everywhere in the app
   (the motion policy's 2026-10-15 decision).
@@ -311,6 +318,49 @@ Decision 4's second half and the cloud tier, on the data three srv builds added:
 - A wrapped report's line runs along the middle of the gap under its lead's row and of the gap beside its column, whatever those gaps now are (`AtlasLayout.gaps`).
 
 **Checks.** At half the gaps, in a tall, a square and a wide pane and both layouts: every node keeps its row and its place in it, every machine box its row, the map is no wider and no taller, and no node stands on another or outside its box. The share's floor. A wheel zoom keeps the node under the pointer in place while the gaps around it close; a zoom button's step leaves the map centred.
+
+### 6.8 After v1: a host is an attribute of a node, not a box (#48370)
+
+> **Changed 2026-11-22 (#48370): no box, title or fold chip per machine.** §3, §4.1, §4.3, §6.4 (the machine's region and the
+> orphan container "in its region"), §6.5 (the machine boxes the layout packs) and §6.6 (tighter boxes) describe the
+> boxes this replaces. What they say of the layout (the order, the columns, the gaps that close, the By seat picture) still
+> holds; the box round each host does not exist.
+
+**The requirement.** The Atlas draws no box for a host. Each node says its host as an attribute of the node, and wears
+one more border, outside its own, in a colour that belongs to its host.
+
+**What replaced the box.**
+
+- **The host in words** on every node (an agent's and a container's), at the right of its name line, muted, cut with an
+  ellipsis before the name is; in the node's tooltip (`..., on alpha`) and in its accessible name (`Ann, Idle, on alpha`).
+  The card says "Host" with how the machine was found (this machine, LAN, cloud), its platform and any channel.
+- **The ring**: a second border outside the node's own and a container agent's frame, with a gap of 2 px (a seventh of the
+  gap between two nodes) and 2 px wide, never less than 1 px; both close in with the gaps as the map is zoomed in, so two
+  neighbours' rings never meet. The node's own border (its state on the left), its selection and its focus ring (drawn inside the node's border) keep their
+  meaning beside it. With **one host** there is nothing to tell apart: no ring, no legend, the label stays (chosen).
+- **The colour of a host** is stable: a hash of the host's name (the computer's, so a machine's other channels share it),
+  never the order hosts arrived in, so it is the same after a restart and on every computer that sees the same hosts.
+  Hosts that hash to one slot are settled in the order of their names. Three hues (magenta, cyan and a violet between
+  magenta and blue) that no state, line or the selection uses (working is red, waiting and selected are blue, idle is
+  green, a limit is yellow or orange, a held line is grey), taken from the theme's terminal colours so they follow every
+  theme, light and dark. With more hosts than hues the ring is **dashed**, then **dotted**, for nine rings in all; past
+  nine hosts a ring is reused (chosen) and the label is what tells the two apart. The legend says which hosts share one.
+- **A host with no name yet** (this computer before its name is known) is its own host, in the placeholder's name. This
+  computer, a LAN host, a cloud host and a container agent (the host it runs on, not the container) are hosts the same way.
+- **The legend**: a row under the bar, only with more than one host: each host's ring beside its name and how its machines
+  were found, and what is wrong with a machine itself (its report is old, its container runtime is not running). With
+  one host there is no legend, and that is said in the map's bottom left corner, by the host's name; with more it is
+  said once, in the legend, so no line of it lies over the nodes.
+- **The stopped agents**: one "N stopped" chip in that corner for the whole map, listing them with their host, to Open or
+  Start (it was a chip in each box); in both layouts.
+- **The layout**: the nodes of a host still stand together, as a group nothing draws; the groups are packed as the boxes
+  were (the order, the wrapped rows, the gap between two). The title strip, the box's padding and least width, and the
+  strip a label kept off are gone; the map keeps a margin of one gap round it, for a frame and a ring at its edge. A
+  host with only stopped agents takes no room. By seat is unchanged, with the ring in the place of its tint.
+- **Lines**: they no longer bend round a box; a line that passes behind a card still shows through it (§6.4's faint copy).
+
+**Colour-vision differences.** The three hues are told apart by the dash as well as by colour, and the host's name is on
+every node, so the colour is never the only cue. The pairing was not measured with a simulator.
 
 ## 7. Risks and notes
 
