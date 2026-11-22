@@ -174,6 +174,9 @@ pub(super) fn link_of(arguments: &Value) -> Result<String> {
 
 /// A place opened by its deep link (docs/specs/SPEC_DEEP_LINKS_ONE_FRAMEWORK_2026_11_20.md R16): srv's guard
 /// decides, the window opens it, and the answer is the outcome (opened, reused, queued or refused, with the reason).
+/// srv answers within 13 s (`queued` if the window hasn't finished by then), so the wait is longer than that.
+const OPEN_LINK_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
+
 async fn run_open_link(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let ToolCtx { local_url, auth_key, client, .. } = *cx;
     if local_url.is_empty() || auth_key.is_empty() {
@@ -187,6 +190,7 @@ async fn run_open_link(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         .post(&url)
         .header(AUTH_KEY_HEADER, auth_key)
         .json(&json!({ "link": link, "target": target }))
+        .timeout(OPEN_LINK_WAIT)
         .send()
         .await
         .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
