@@ -11,6 +11,7 @@
 
 pub mod aws_import;
 pub mod aws_import_batch;
+pub mod backed;
 pub mod capture;
 pub mod changes;
 pub mod card;
@@ -640,10 +641,15 @@ pub fn reveal(store: &Store, id: &str, part: &str, action: &str) -> Result<zeroi
     if !kind.parts.contains(&part) {
         return Err(format!("a {} entry has no part {part:?}", kind.name));
     }
-    let key = seal::key(false)?;
-    let parts = seal::open(&key, &row.id, &row.sealed)?;
-    let value = parts.get(part).ok_or_else(|| format!("{} has no {part} saved", row.label))?;
-    let value = zeroize::Zeroizing::new(value.to_string());
+    let value = if linked::is_backed_row(&row) {
+        // A backed entry keeps its value in AWS Secrets Manager, so what the person sees is what is there now.
+        backed_part(&row, part)?
+    } else {
+        let key = seal::key(false)?;
+        let parts = seal::open(&key, &row.id, &row.sealed)?;
+        let value = parts.get(part).ok_or_else(|| format!("{} has no {part} saved", row.label))?;
+        zeroize::Zeroizing::new(value.to_string())
+    };
     if action == "revealed" {
         store.vault_touch(&row.id, now_ms()).map_err(|e| e.to_string())?;
         record(store, &row.id, &row.label, PERSON, action, part, "done");
@@ -770,10 +776,22 @@ pub fn value_for_fill(store: &Store, id: &str, created_at: i64, part: &str) -> R
     if row.created_at != created_at {
         return Err(format!("{} was replaced while the person was deciding: nothing was typed", row.label));
     }
+    if linked::is_backed_row(&row) {
+        return backed_part(&row, part);
+    }
     let key = seal::key(false)?;
     let parts = seal::open(&key, &row.id, &row.sealed)?;
     let value = part_of(&row.kind, &parts, part).ok_or_else(|| format!("{} has no {part} saved", row.label))?;
     Ok(zeroize::Zeroizing::new(value))
+}
+
+/// The value of a backed entry's main part, read from AWS Secrets Manager now; any other part isn't there.
+fn backed_part(row: &VaultRow, part: &str) -> Result<zeroize::Zeroizing<String>, String> {
+    let main = kinds::kind(&row.kind).map(|k| k.parts[0]);
+    if main != Some(part) {
+        return Err(format!("{} has no {part} saved", row.label));
+    }
+    backed::value_of(row)
 }
 
 /// A part's value for a command: the current value, or the version `t` names
@@ -783,6 +801,9 @@ pub fn value_for_command(store: &Store, t: &FillTarget) -> Result<zeroize::Zeroi
     let row = store.vault_get(&t.id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {}", t.id))?;
     if row.created_at != t.created_at {
         return Err(format!("{} was replaced while the person was deciding: nothing was run", row.label));
+    }
+    if linked::is_backed_row(&row) {
+        return Err(backed::no_versions(&row, which));
     }
     let (_, sealed) = versions::sealed_version(store, &row, which)?;
     let key = seal::key(false)?;

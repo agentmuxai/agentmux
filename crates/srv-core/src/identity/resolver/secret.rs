@@ -7,6 +7,8 @@
 //! behavior change).
 
 use crate::backend::storage::store::{SecretRef, Store};
+use crate::backend::vault::aws_import::{self, Source};
+use crate::identity::aws_broker::mint::{HostRunner, Runner};
 
 use super::errors::ResolverError;
 
@@ -23,8 +25,8 @@ use super::errors::ResolverError;
 ///   dev-secret never leaks into a packaged binary. Reagent P1 on
 ///   PR #751 caught the missing guard. Phase 3's encrypted vault is
 ///   the production path.
-/// - **SecretsManager**: deferred. Returns
-///   [`ResolverError::SecretsManagerUnsupported`].
+/// - **SecretsManager**: read from AWS Secrets Manager with the host's own AWS login, the whole secret or the
+///   field `sm_json_path` names. A failed read is [`ResolverError::SecretsManagerRead`].
 ///
 /// The value is the credential to use: an account connected with OAuth
 /// stores a JSON token blob, of which only its `access_token` is the
@@ -67,6 +69,15 @@ pub fn resolve_account_secret(
     resolve_secret(&account.secret_ref)
 }
 
+/// An AWS Secrets Manager secret's text (or the field `json_path` names in a JSON one), read with the host's own AWS
+/// login by the reader the Vault's backed entries use (`vault::aws_import::read_value_blocking`). On the blocking thread
+/// the injection already runs on.
+fn secrets_manager_value<R: Runner>(runner: &R, path: &str, json_path: Option<&str>) -> Result<String, ResolverError> {
+    let source = Source { aws_secret_id: path.to_string(), key: json_path.map(str::to_string), ..Default::default() };
+    let source = aws_import::check_source(&source).map_err(ResolverError::SecretsManagerRead)?;
+    aws_import::read_value_blocking(runner, &source).map(|value| value.to_string()).map_err(ResolverError::SecretsManagerRead)
+}
+
 fn resolve_stored(secret_ref: &SecretRef) -> Result<String, ResolverError> {
     match secret_ref {
         SecretRef::Env { env_var } => std::env::var(env_var)
@@ -82,7 +93,7 @@ fn resolve_stored(secret_ref: &SecretRef) -> Result<String, ResolverError> {
                 Err(ResolverError::PlaintextDevDisabledInRelease)
             }
         }
-        SecretRef::SecretsManager { .. } => Err(ResolverError::SecretsManagerUnsupported),
+        SecretRef::SecretsManager { sm_path, sm_json_path } => secrets_manager_value(&HostRunner, sm_path, sm_json_path.as_deref()),
         SecretRef::OAuthConfigDir { dir } => {
             // Read but ignored — the resolver doesn't consume the
             // pointer; PR B's oauth-class dispatch in
@@ -156,13 +167,18 @@ mod tests {
         assert!(matches!(res, Err(ResolverError::EnvVarMissing(_))));
     }
 
+    /// A secret in AWS Secrets Manager resolves through the reader the Vault's backed entries use (the AWS CLI is a
+    /// stand-in, the secret invented): the whole text, or the field `sm_json_path` names.
     #[test]
-    fn resolve_secrets_manager_unsupported() {
-        let res = resolve_secret(&SecretRef::SecretsManager {
-            sm_path: "ignored".to_string(),
-            sm_json_path: None,
-        });
-        assert!(matches!(res, Err(ResolverError::SecretsManagerUnsupported)));
+    fn resolve_secrets_manager_reads_the_secret_or_a_field_of_it() {
+        use crate::backend::vault::backed::tests::Aws;
+        let aws = Aws::with(&[("svc/example-key", Ok(r#"{"db": {"password": "pw-from-aws"}}"#)), ("svc/plain", Ok("plain-from-aws"))]);
+        assert_eq!(secrets_manager_value(&aws, "svc/example-key", Some("db.password")).unwrap(), "pw-from-aws");
+        assert_eq!(secrets_manager_value(&aws, "svc/plain", None).unwrap(), "plain-from-aws");
+        let missing = secrets_manager_value(&aws, "svc/absent", None);
+        assert!(matches!(&missing, Err(ResolverError::SecretsManagerRead(why)) if why.contains("AWS has no secret")), "{missing:?}");
+        // The id goes to the CLI as an argument: one that isn't a secret's name never gets there.
+        assert!(matches!(secrets_manager_value(&aws, "--query x", None), Err(ResolverError::SecretsManagerRead(_))));
     }
 
     #[test]

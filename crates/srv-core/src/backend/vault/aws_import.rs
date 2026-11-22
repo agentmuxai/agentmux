@@ -380,6 +380,22 @@ pub async fn read_secret<R: Runner>(runner: &R, source: &Source, via: Via<'_>) -
     Ok(text)
 }
 
+/// The value at `source`, for a caller that isn't async: the secret's text, or the string or number at `source.key` in a
+/// JSON one, read with the host's own AWS login. This is the one reader of Secrets Manager the Vault's backed entries
+/// and the identity model's `SecretRef::SecretsManager` share. Call it on a blocking thread (a use already runs on one);
+/// with no runtime (a test) it makes its own for the one call. The value is wiped when dropped and nothing of it goes
+/// into an error.
+pub fn read_value_blocking<R: Runner>(runner: &R, source: &Source) -> Result<Zeroizing<String>, String> {
+    let read = async {
+        let secret = read_secret(runner, source, Via::Host).await?;
+        pick(secret, source.key.as_deref())
+    };
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => handle.block_on(read),
+        Err(_) => tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?.block_on(read),
+    }
+}
+
 /// Runs the AWS CLI with `args` as `via` says and returns its stdout, which may be a secret: it is wiped when dropped,
 /// and nothing of it goes into an error.
 async fn run_cli<R: Runner>(runner: &R, args: Vec<String>, source: &Source, via: Via<'_>) -> Result<Zeroizing<Vec<u8>>, String> {
