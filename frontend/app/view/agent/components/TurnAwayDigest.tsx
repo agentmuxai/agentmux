@@ -25,7 +25,9 @@ export function TurnAwayDigest(props: {
     /** A turn is running: the summary is history once the next one starts. */
     busy: Accessor<boolean>;
 }): JSX.Element {
-    const [line, setLine] = createSignal<string | null>(null);
+    // An object, not the text: a second digest with the same words is still a new digest and restarts
+    // the count, which a signal holding the string would not see.
+    const [line, setLine] = createSignal<{ text: string } | null>(null);
     const [secondsLeft, setSecondsLeft] = createSignal(AWAY_DIGEST_SHOW_SECONDS);
     // The line hides itself after AWAY_DIGEST_SHOW_SECONDS and shows the seconds left. A new summary
     // restarts the count. The end is a clock time, so a throttled timer in a background tab does not
@@ -44,7 +46,7 @@ export function TurnAwayDigest(props: {
     createEffect(() => {
         if (!props.looking()) return;
         const seen = unseenTurnsFor(props.blockId) ? markTurnsSeen(props.blockId) : null;
-        if (seen) setLine(awaySummary(seen));
+        if (seen) setLine({ text: awaySummary(seen) });
     });
     let wasBusy = props.busy();
     createEffect(() => {
@@ -57,9 +59,9 @@ export function TurnAwayDigest(props: {
     // accessor that throws "Stale read from <Show>" once the line is gone.
     return (
         <Show when={line()} keyed>
-            {(text) => (
+            {(digest) => (
                 <div class="agent-away-digest" role="status">
-                    <span class="agent-away-digest-text">{text}</span>
+                    <span class="agent-away-digest-text">{digest.text}</span>
                     <span class="agent-away-digest-timer" aria-hidden="true">
                         {t("agentAway.secondsLeft", { count: secondsLeft() })}
                     </span>

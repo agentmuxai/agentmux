@@ -96,6 +96,26 @@ describe("turns you didn't start, seen when you come back", () => {
         }
     });
 
+    it("a second digest with the same words restarts the count too", () => {
+        vi.useFakeTimers();
+        try {
+            noteTurnLedger("b1", jektTurn(1, "AgentX"), false);
+            const [looking, setLooking] = createSignal(true);
+            const { container } = render(() => <TurnAwayDigest blockId="b1" looking={looking} busy={() => false} />);
+            vi.advanceTimersByTime(6000);
+            expect(container.querySelector(".agent-away-digest-timer")?.textContent).toBe("4s");
+            setLooking(false);
+            noteTurnLedger("b1", jektTurn(2, "AgentX"), false);
+            setLooking(true);
+            expect(container.querySelector(".agent-away-digest-text")?.textContent).toBe(
+                "While you were away: 1 turn · 1 jekt (AgentX)",
+            );
+            expect(container.querySelector(".agent-away-digest-timer")?.textContent).toBe("10s");
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it("dismiss hides it", () => {
         noteTurnLedger("b1", jektTurn(1, "AgentX"), false);
         const { container } = render(() => <TurnAwayDigest blockId="b1" looking={() => true} busy={() => false} />);
