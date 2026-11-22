@@ -401,6 +401,23 @@ fn a_deletion_and_a_concurrent_replacement_at_the_same_instant_are_labelled_in_v
 }
 
 #[test]
+fn a_catch_up_brings_each_record_after_the_ones_it_replaced_and_a_cut_keeps_a_prefix_of_each_origin() {
+    let mut ms = vec![machine("a", 1), machine("z", 2)];
+    ms[1].write("card", "from z", NOW);
+    sync_all(&mut ms, NOW + 1);
+    ms[0].delete("card", NOW + 10);
+    ms[1].write("other", "later z", NOW + 20);
+    // Alphabetically "a" comes first, but z's earlier version must arrive before a's deletion.
+    let all = log::since(&ms[0].conn, COLLECTION, &Vector::new(), 100).unwrap();
+    assert!(all.windows(2).all(|w| w[0].header.version < w[1].header.version), "oldest version first");
+    assert_eq!(all.first().map(|r| r.header.origin.as_str()), Some("z"));
+    // A cut at two records keeps the two oldest, which are a prefix of each origin's sequence.
+    let cut = log::since(&ms[0].conn, COLLECTION, &Vector::new(), 2).unwrap();
+    let seqs: Vec<(&str, u64)> = cut.iter().map(|r| (r.header.origin.as_str(), r.header.seq)).collect();
+    assert_eq!(seqs, vec![("z", 1), ("a", 1)]);
+}
+
+#[test]
 fn a_record_over_the_size_cap_cannot_be_made() {
     let a = machine("a", 1);
     let header = Header {

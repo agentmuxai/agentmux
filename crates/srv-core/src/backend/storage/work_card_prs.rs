@@ -13,12 +13,15 @@
 //! A pull request a person or the holder took off the card is kept, marked `unlinked`, so no later report
 //! puts it back; only an explicit link does.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use super::store::Store;
+use crate::backend::pr_flow::{self, PrFlowSnapshot};
+use crate::backend::reviews::{waits_on, WaitsInput};
 use super::work_board::BoardTask;
 use super::work_queue::work_state;
 use super::StoreError;
@@ -42,6 +45,21 @@ pub(crate) const SCHEMA: &str = "
         PRIMARY KEY (work_id, repo, number)
     );
     CREATE INDEX IF NOT EXISTS idx_work_card_prs_pr ON db_work_card_prs (repo, number);";
+
+/// What the review, checks and merge notices add to a row (SPEC_FOLD_REVIEWS_INTO_THE_KANBAN_2026_11_22.md §3): the
+/// repository's numeric id once learned, the commit the checks were for and when, and the merge-queue state and when.
+/// Added to a table an earlier build created, so a default needs no schema version bump.
+pub(crate) const COLUMNS: [&str; 5] = [
+    "ALTER TABLE db_work_card_prs ADD COLUMN repo_id INTEGER",
+    "ALTER TABLE db_work_card_prs ADD COLUMN checks_head TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE db_work_card_prs ADD COLUMN checks_at INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE db_work_card_prs ADD COLUMN flow_merge TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE db_work_card_prs ADD COLUMN flow_at INTEGER NOT NULL DEFAULT 0",
+];
+
+/// The columns a row is read with.
+const PR_COLS: &str =
+    "work_id, repo, number, state, head, reviews, checks, opened_at, merged_at, updated_at, source, repo_id, checks_head, checks_at, flow_merge, flow_at";
 
 /// Task ids per lookup query, well under SQLite's bound-parameter limit.
 const IDS_PER_QUERY: usize = 500;
@@ -117,6 +135,23 @@ impl CardPrState {
     }
 }
 
+/// One reviewer kind's latest verdict on a pull request, as a notice gave it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrVerdict {
+    /// `bot`, `codex` or `person`.
+    pub by: String,
+    /// `approved`, `changes_requested`, `commented`, or another well-formed name.
+    pub state: String,
+    /// The commit it was given on, when the notice named one.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub head: String,
+    /// When srv accepted the notice, in milliseconds since 1970.
+    pub at: i64,
+    /// A newer commit was named after it: it was given on an older head. Derived on read, never stored.
+    #[serde(default)]
+    pub stale: bool,
+}
+
 /// One pull request of a card.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkCardPr {
@@ -139,6 +174,31 @@ pub struct WorkCardPr {
     pub updated_at: i64,
     /// One of [`PrSource`]: where the link came from.
     pub source: String,
+    /// The latest verdict of each reviewer kind (the review, checks and merge notices srv was told of).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub verdicts: Vec<PrVerdict>,
+    /// Who has to act next: `person`, `author`, `reviewer`, `ci`, `queue`, `none` or `unknown`; empty before it is derived.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub waits_on: String,
+    /// A short code for why (`changes_requested`, `checks_failing`, `ready_to_merge`, ...).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub why: String,
+    /// GitHub's numeric id of the repository, once a notice settled it. Not sent to the app.
+    #[serde(skip)]
+    pub repo_id: Option<i64>,
+    /// The commit the checks were for, and when they were reported. Not sent to the app.
+    #[serde(skip)]
+    pub checks_head: String,
+    #[serde(skip)]
+    pub checks_at: i64,
+    /// The merge or queue state a notice gave, and when. Not sent to the app.
+    #[serde(skip)]
+    pub flow_merge: String,
+    #[serde(skip)]
+    pub flow_at: i64,
+    /// `open`, `queued`, `merged` or `closed`, once derived; the merge half of `waits_on`'s input. Not sent to the app.
+    #[serde(skip)]
+    pub merge: String,
 }
 
 impl WorkCardPr {
@@ -162,6 +222,22 @@ pub struct PrRollup {
     pub follow_up_open: bool,
     /// The task is held, and every pull request of it has merged: its holder is waiting to complete it.
     pub all_merged_waiting: bool,
+    /// What the pull request that blocks the card waits on (see [`WorkCardPr::waits_on`]); empty when no open pull
+    /// request has been placed.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub waits_on: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub why: String,
+    /// The pull request that blocks the card, as `owner/repo#12`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub blocking: String,
+    /// How many other open pull requests the card has besides it.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub waits_more: usize,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 /// The rollup of a card's (linked) pull requests for a task in `task_state`.
@@ -178,6 +254,7 @@ pub fn rollup(prs: &[WorkCardPr], task_state: &str) -> PrRollup {
         "closed"
     };
     let held = matches!(task_state, work_state::CLAIMED | work_state::BLOCKED);
+    let blocking = blocking_pr(prs);
     PrRollup {
         total: prs.len(),
         open,
@@ -186,7 +263,115 @@ pub fn rollup(prs: &[WorkCardPr], task_state: &str) -> PrRollup {
         state: state.into(),
         follow_up_open: task_state == work_state::DONE && open > 0 && merged > 0,
         all_merged_waiting: held && merged > 0 && open == 0,
+        waits_on: blocking.map(|p| p.waits_on.clone()).unwrap_or_default(),
+        why: blocking.map(|p| p.why.clone()).unwrap_or_default(),
+        blocking: blocking.map(|p| format!("{}#{}", p.repo, p.number)).unwrap_or_default(),
+        waits_more: if blocking.is_some() { open.saturating_sub(1) } else { 0 },
     }
+}
+
+/// How pressing a derived `waits_on` is, lowest first (a person, the author, a reviewer, CI, the queue, unknown, nothing).
+fn urgency(waits_on: &str) -> u8 {
+    match waits_on {
+        "person" => 0,
+        "author" => 1,
+        "reviewer" => 2,
+        "ci" => 3,
+        "queue" => 4,
+        "unknown" => 5,
+        _ => 6,
+    }
+}
+
+/// The open pull request that blocks the card: the one whose wait is the most pressing, the most recently changed
+/// when two tie. None when no open pull request has been placed (its wait is not derived yet).
+fn blocking_pr(prs: &[WorkCardPr]) -> Option<&WorkCardPr> {
+    prs.iter()
+        .filter(|p| p.state == "open" && !p.waits_on.is_empty())
+        .min_by_key(|p| (urgency(&p.waits_on), std::cmp::Reverse(p.updated_at.max(p.checks_at).max(p.flow_at))))
+}
+
+/// The verdicts a `reviews` column holds, each reviewer kind's latest. An older build wrote a bare state per kind.
+fn verdicts_of(reviews: &str) -> BTreeMap<String, PrVerdict> {
+    let Ok(map) = serde_json::from_str::<BTreeMap<String, Value>>(reviews) else { return BTreeMap::new() };
+    map.into_iter()
+        .filter_map(|(by, v)| {
+            let verdict = match &v {
+                Value::String(state) => PrVerdict { by: by.clone(), state: state.clone(), ..Default::default() },
+                Value::Object(o) => PrVerdict {
+                    by: by.clone(),
+                    state: o.get("s")?.as_str()?.to_string(),
+                    head: o.get("h").and_then(Value::as_str).unwrap_or_default().to_string(),
+                    at: o.get("at").and_then(Value::as_i64).unwrap_or(0),
+                    stale: false,
+                },
+                _ => return None,
+            };
+            Some((by, verdict))
+        })
+        .collect()
+}
+
+/// The `reviews` column for `verdicts`.
+fn verdicts_json(verdicts: &BTreeMap<String, PrVerdict>) -> String {
+    let map: serde_json::Map<String, Value> = verdicts
+        .iter()
+        .map(|(by, v)| (by.clone(), serde_json::json!({ "s": v.state, "h": v.head, "at": v.at })))
+        .collect();
+    Value::Object(map).to_string()
+}
+
+/// Whether two commit ids name one commit (one may be an abbreviation of the other).
+fn same_head(a: &str, b: &str) -> bool {
+    a.starts_with(b) || b.starts_with(a)
+}
+
+/// Work out, from what the notices said, whether each verdict is stale, which checks are current, and what the pull
+/// request waits on (`reviews::waits_on`, the one table). A verdict or checks result given on a commit older than the
+/// newest one a later notice named is stale or not shown: it is of a head that moved.
+fn derive_flow(pr: &mut WorkCardPr, task_state: &str) {
+    // The newest commit anything named, by time: a verdict, the checks, or the pull request's own reported head (a
+    // report only tells of a push when its event is one of those it reads, so a notice on a newer commit than the
+    // reported head wins by being later). A notice for an older commit that arrives after a push cannot be told
+    // from one for a new commit without the commits' order; the table then follows the notices.
+    let newest: Option<(String, i64)> = pr
+        .verdicts
+        .iter()
+        .filter(|v| !v.head.is_empty())
+        .map(|v| (v.head.clone(), v.at))
+        .chain((!pr.checks_head.is_empty()).then(|| (pr.checks_head.clone(), pr.checks_at)))
+        .chain((!pr.head.is_empty()).then(|| (pr.head.clone(), pr.updated_at)))
+        .max_by_key(|(_, at)| *at);
+    for v in &mut pr.verdicts {
+        v.stale = match (&newest, v.head.is_empty()) {
+            (Some((head, at)), false) => !same_head(head, &v.head) && *at >= v.at,
+            _ => false,
+        };
+    }
+    if !pr.checks_head.is_empty() && newest.as_ref().is_some_and(|(head, _)| !same_head(head, &pr.checks_head)) {
+        pr.checks = "none".into();
+    }
+    // Approved or changes requested by the verdicts that are still of the current head.
+    let fresh: Vec<&PrVerdict> = pr.verdicts.iter().filter(|v| !v.stale).collect();
+    pr.review = if fresh.iter().any(|v| v.state == "changes_requested") {
+        "changes_requested"
+    } else if !fresh.is_empty() && fresh.iter().all(|v| v.state == "approved") {
+        "approved"
+    } else {
+        "none"
+    }
+    .into();
+    let merge = match (pr.state.as_str(), pr.flow_merge.as_str()) {
+        ("merged" | "closed", _) => pr.state.as_str(),
+        (_, m @ ("merged" | "closed" | "queued")) => m,
+        _ => "open",
+    };
+    let pairs: Vec<(&str, bool)> = pr.verdicts.iter().map(|v| (v.state.as_str(), v.stale)).collect();
+    let checks = (pr.checks != "none").then_some(pr.checks.as_str());
+    let (waits, why) = waits_on(&WaitsInput { merge, checks, reviews: &pairs, task_state: Some(task_state) });
+    pr.merge = merge.into();
+    pr.waits_on = waits.as_str().into();
+    pr.why = why.into();
 }
 
 /// `owner/repo`, as the card stores a repository from its `origin` remote; not a local folder (`local:…`).
@@ -256,17 +441,24 @@ fn row_to_pr(repo: String, number: i64, r: &rusqlite::Row) -> rusqlite::Result<W
         merged_at: r.get("merged_at")?,
         updated_at: r.get("updated_at")?,
         source: r.get("source")?,
+        verdicts: verdicts_of(&reviews).into_values().collect(),
+        repo_id: r.get("repo_id")?,
+        checks_head: r.get("checks_head")?,
+        checks_at: r.get("checks_at")?,
+        flow_merge: r.get("flow_merge")?,
+        flow_at: r.get("flow_at")?,
+        ..Default::default()
     })
 }
 
-/// The pull request's review, from the latest review of each kind on its head (a JSON object, kind to
-/// `approved`, `changes_requested` or `commented`): approved when every kind that reviewed approved,
-/// changes requested when any asked for changes, otherwise none (§3).
+/// The pull request's review, from the latest review of each kind on its head (a JSON object, kind to its verdict):
+/// approved when every kind that reviewed approved, changes requested when any asked for changes, otherwise none
+/// (§3). [`derive_flow`] redoes it over the verdicts that are not stale.
 fn review_of(reviews: &str) -> String {
-    let Ok(map) = serde_json::from_str::<HashMap<String, String>>(reviews) else { return "none".into() };
-    if map.values().any(|v| v == "changes_requested") {
+    let map = verdicts_of(reviews);
+    if map.values().any(|v| v.state == "changes_requested") {
         "changes_requested".into()
-    } else if !map.is_empty() && map.values().all(|v| v == "approved") {
+    } else if !map.is_empty() && map.values().all(|v| v.state == "approved") {
         "approved".into()
     } else {
         "none".into()
@@ -320,6 +512,8 @@ pub(crate) fn link_in(tx: &Transaction, work_id: &str, repo: &str, number: u64, 
     };
     if changed {
         touch(tx, work_id, now_ms)?;
+        // Notices that came before the card linked it.
+        replay_in(tx, work_id, number, &pr_flow::recent(), now_ms)?;
     }
     Ok(changed)
 }
@@ -362,7 +556,7 @@ pub(crate) fn attach_card_prs(conn: &Connection, tasks: &mut [BoardTask]) -> Res
     for chunk in ids.chunks(IDS_PER_QUERY) {
         let marks = vec!["?"; chunk.len()].join(",");
         let sql = format!(
-            "SELECT work_id, repo, number, state, head, reviews, checks, opened_at, merged_at, updated_at, source
+            "SELECT {PR_COLS}
                FROM db_work_card_prs WHERE unlinked = 0 AND work_id IN ({marks})
               ORDER BY COALESCE(opened_at, linked_at) DESC, number DESC"
         );
@@ -377,9 +571,155 @@ pub(crate) fn attach_card_prs(conn: &Connection, tasks: &mut [BoardTask]) -> Res
         }
     }
     for t in tasks {
-        let prs = found.remove(&t.item.id).unwrap_or_default();
+        let mut prs = found.remove(&t.item.id).unwrap_or_default();
+        prs.iter_mut().for_each(|p| derive_flow(p, &t.item.state));
         t.card.pr_rollup = rollup(&prs, &t.item.state);
         t.card.prs = prs;
+    }
+    Ok(())
+}
+
+/// What a review, checks or merge notice says about a pull request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FlowFact {
+    /// A reviewer kind's verdict, on a commit when the notice named one.
+    Review { by: String, state: String, head: Option<String> },
+    /// The checks of a commit, when the notice named one.
+    Checks { state: String, head: Option<String> },
+    /// The merge or queue state (`merged`, `closed`, `queued`, ...).
+    Merge { state: String },
+}
+
+/// One accepted notice, for the pull request `repo_id#number` of the local agent `agent` (the notices name a
+/// repository only by its numeric id, and go to the pull request's own agent).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlowNote {
+    pub agent: String,
+    pub repo_id: u64,
+    pub number: u64,
+    /// When srv accepted the notice, in milliseconds since 1970.
+    pub at_ms: i64,
+    pub fact: FlowFact,
+}
+
+impl Store {
+    /// Put what a notice says on the card rows of the pull request it names. The card is found by the holding agent
+    /// and the number; the repository's id is learned only from one unambiguous match (exactly one repository among
+    /// the agent's linked pull requests with that number, and the id not already another repository's), and from then
+    /// on every card row of that repository and number takes the notice. Two cards of one agent that hold the same
+    /// number in different repositories stay unplaced until a notice for one of them settles it: never a guess.
+    /// A notice older than what a row holds of its kind is ignored. Returns how many rows changed.
+    pub fn work_card_pr_flow_apply(&self, note: &FlowNote, now_ms: i64) -> Result<usize, StoreError> {
+        let mut conn = self.conn().lock().unwrap();
+        let tx = conn.transaction()?;
+        let changed = flow_apply_in(&tx, note, now_ms)?;
+        tx.commit()?;
+        Ok(changed)
+    }
+}
+
+/// [`Store::work_card_pr_flow_apply`] inside the caller's transaction.
+fn flow_apply_in(tx: &Transaction, note: &FlowNote, now_ms: i64) -> Result<usize, StoreError> {
+    let id = note.repo_id as i64;
+    let candidates: Vec<(String, Option<i64>)> = {
+        let mut stmt = tx.prepare(
+            "SELECT r.repo, r.repo_id FROM db_work_card_prs r JOIN db_work_queue q ON q.id = r.work_id
+              WHERE r.number = ?1 AND r.unlinked = 0
+                AND ((q.claimed_by <> '' AND q.claimed_by = ?2 COLLATE NOCASE)
+                  OR (q.claimed_by = '' AND q.target_agent = ?2 COLLATE NOCASE))",
+        )?;
+        let rows = stmt.query_map(params![note.number as i64, note.agent], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    let repo = match candidates.iter().find(|(_, known)| *known == Some(id)) {
+        Some((repo, _)) => repo.clone(),
+        None => {
+            let repos: BTreeSet<&str> = candidates.iter().map(|(r, _)| r.as_str()).collect();
+            let mut it = repos.into_iter();
+            let (Some(only), None) = (it.next(), it.next()) else { return Ok(0) };
+            // One id is one repository, and a repository has one id.
+            let clash: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM db_work_card_prs
+                  WHERE (repo_id = ?1 AND repo <> ?2) OR (repo = ?2 AND repo_id IS NOT NULL AND repo_id <> ?1)",
+                params![id, only],
+                |r| r.get(0),
+            )?;
+            if clash > 0 {
+                return Ok(0);
+            }
+            tx.execute("UPDATE db_work_card_prs SET repo_id = ?1 WHERE repo = ?2", params![id, only])?;
+            only.to_string()
+        }
+    };
+    let rows: Vec<(String, String, i64, i64)> = {
+        let mut stmt = tx.prepare(
+            "SELECT work_id, reviews, checks_at, flow_at FROM db_work_card_prs WHERE repo = ?1 AND number = ?2 AND unlinked = 0",
+        )?;
+        let found = stmt.query_map(params![repo, note.number as i64], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
+        found.collect::<Result<Vec<_>, _>>()?
+    };
+    let mut changed = 0;
+    for (work_id, reviews, checks_at, flow_at) in rows {
+        let wrote = match &note.fact {
+            FlowFact::Review { by, state, head } => {
+                let mut verdicts = verdicts_of(&reviews);
+                if verdicts.get(by).is_some_and(|v| v.at > note.at_ms) {
+                    0
+                } else {
+                    let head = head.clone().unwrap_or_default();
+                    verdicts.insert(by.clone(), PrVerdict { by: by.clone(), state: state.clone(), head, at: note.at_ms, stale: false });
+                    tx.execute(
+                        "UPDATE db_work_card_prs SET reviews = ?4 WHERE work_id = ?1 AND repo = ?2 AND number = ?3",
+                        params![work_id, repo, note.number as i64, verdicts_json(&verdicts)],
+                    )?
+                }
+            }
+            FlowFact::Checks { state, head } => {
+                if checks_at > note.at_ms {
+                    0
+                } else {
+                    let state = if matches!(state.as_str(), "passing" | "failing") { state.as_str() } else { "pending" };
+                    tx.execute(
+                        "UPDATE db_work_card_prs SET checks = ?4, checks_head = ?5, checks_at = ?6 WHERE work_id = ?1 AND repo = ?2 AND number = ?3",
+                        params![work_id, repo, note.number as i64, state, head.as_deref().unwrap_or(""), note.at_ms],
+                    )?
+                }
+            }
+            FlowFact::Merge { state } => {
+                if flow_at > note.at_ms {
+                    0
+                } else {
+                    tx.execute(
+                        "UPDATE db_work_card_prs SET flow_merge = ?4, flow_at = ?5 WHERE work_id = ?1 AND repo = ?2 AND number = ?3",
+                        params![work_id, repo, note.number as i64, state, note.at_ms],
+                    )?
+                }
+            }
+        };
+        if wrote > 0 {
+            touch(tx, &work_id, now_ms)?;
+            changed += 1;
+        }
+    }
+    Ok(changed)
+}
+
+/// Put what the recent notices said of a pull request on its card row, when the row is new on the card: a notice that
+/// came before the card linked the pull request would otherwise never reach it. The notices of the task's holder with
+/// the pull request's number, oldest first; each one goes through the same join and the same ignore-the-older rule.
+fn replay_in(tx: &Transaction, work_id: &str, number: u64, recent: &PrFlowSnapshot, now_ms: i64) -> Result<(), StoreError> {
+    let held: Option<(String, String)> = tx
+        .query_row("SELECT claimed_by, target_agent FROM db_work_queue WHERE id = ?1", params![work_id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .optional()?;
+    let Some((claimed, target)) = held else { return Ok(()) };
+    let holder = if claimed.is_empty() { target } else { claimed };
+    if holder.is_empty() {
+        return Ok(());
+    }
+    let mut notes: Vec<FlowNote> = pr_flow::notes_of(recent).into_iter().filter(|n| n.number == number && n.agent.eq_ignore_ascii_case(&holder)).collect();
+    notes.sort_by_key(|n| n.at_ms);
+    for n in &notes {
+        flow_apply_in(tx, n, now_ms)?;
     }
     Ok(())
 }
@@ -388,11 +728,11 @@ impl Store {
     /// A task's linked pull requests, newest first.
     pub fn work_card_prs(&self, work_id: &str) -> Result<Vec<WorkCardPr>, StoreError> {
         let conn = self.conn().lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT work_id, repo, number, state, head, reviews, checks, opened_at, merged_at, updated_at, source
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {PR_COLS}
                FROM db_work_card_prs WHERE unlinked = 0 AND work_id = ?1
-              ORDER BY COALESCE(opened_at, linked_at) DESC, number DESC",
-        )?;
+              ORDER BY COALESCE(opened_at, linked_at) DESC, number DESC"
+        ))?;
         let rows = stmt.query_map(params![work_id], |r| {
             let (repo, number): (String, i64) = (r.get("repo")?, r.get("number")?);
             row_to_pr(repo, number, r)
@@ -503,3 +843,7 @@ impl Store {
 #[cfg(test)]
 #[path = "work_card_prs_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "work_card_pr_flow_tests.rs"]
+mod flow_tests;
