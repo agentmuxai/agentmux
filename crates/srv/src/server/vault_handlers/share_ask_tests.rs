@@ -246,6 +246,9 @@ async fn a11_always_on_the_card_answers_each_prompt_until_the_share_is_removed()
     }
     let (s, list) = host(&app, json!({ "op": "share_list", "id": id })).await;
     assert_eq!((s, list["data"]["shares"][0]["always"].as_bool()), (StatusCode::OK, Some(true)), "the person sees it on the login's row: {list}");
+    // The sign-ins the agent made are counted against it, though the history writes the agent as `agent:<id>`.
+    assert!(list["data"]["shares"][0]["uses"].as_u64().unwrap_or(0) >= 1, "{list}");
+    assert!(list["data"]["shares"][0]["last_used_ms"].as_i64().unwrap_or(0) > 0, "{list}");
     // The person stops sharing: the prompt is answered by nothing, and sharing again starts by asking.
     assert_eq!(host(&app, json!({ "op": "share_remove", "id": id, "agent": "uid-vid-pr-b" })).await.0, StatusCode::OK);
     assert!(prompt_share::lookup(&state, &space).unwrap().is_none());
