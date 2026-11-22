@@ -32,7 +32,9 @@
 //                   the code gives (lib/doc-facts.mjs lists them: the migrations range, the
 //                   host commands, the MuxAPI tools...).
 //   denied-term     a term of the `--deny` file (anywhere, a code block too), which holds one `term => what to say
-//                   instead` per line, for names the docs must not use any more.
+//                   instead` per line, for names the docs must not use any more. A term may be a regular
+//                   expression, written `/pattern/flags => what to say instead`, and the one doc that truly
+//                   needs a denied term gets a line `allow: <term> @ <path> => <reason>` (the reason is required).
 //
 // WHAT IT SKIPS. Front matter and fenced code blocks (a shell session is not a citation);
 // a path with `<placeholders>`, `*`, `{a,b}` or `$VARS` (not a single file); a name that is
@@ -219,7 +221,7 @@ function hint(path, index) {
  * Findings for one doc: `{ kind, text, line, message }`. `text` identifies the finding in
  * the baseline; the same text twice in one doc is one finding.
  */
-export function checkDoc(text, index, { allow = new Set(), deny = [], anySymbol = false } = {}) {
+export function checkDoc(text, index, { allow = new Set(), deny = [], anySymbol = false, path = "" } = {}) {
     const found = [];
     const lines = proseLines(text);
     const add = (kind, key, n, message) => found.push({ kind, text: key, line: n, message });
@@ -270,25 +272,54 @@ export function checkDoc(text, index, { allow = new Set(), deny = [], anySymbol 
     }
     // A denied term is wrong in a command in a code block as much as in a sentence.
     if (deny.length) {
+        const here = path.replace(/\\/g, "/");
+        const excused = (term) => (deny.exceptions ?? []).some((e) => e.term === term && here.endsWith(e.path));
         text.split("\n").forEach((line, i) => {
-            for (const { term, say } of deny) {
-                if (line.includes(term)) add("denied-term", term, i + 1, `"${term}" is not to be used: ${say}`);
+            for (const { term, say, re } of deny) {
+                if (!(re ? re.test(line) : line.includes(term))) continue;
+                if (excused(term)) continue;
+                add("denied-term", term, i + 1, `"${term}" is not to be used: ${say}`);
             }
         });
     }
     return [...tableFindings(lines, index, allow), ...found];
 }
 
-/** `term => what to say instead` per line; `#` comments and blank lines ignored. */
+/**
+ * The deny file, one entry per line; `#` comments and blank lines ignored.
+ *   `term => what to say instead`            a plain substring, case-sensitive.
+ *   `/pattern/flags => what to say instead`  a regular expression, tried on each line.
+ *   `allow: term @ path => why`              the one place a past name is needed: `term` (written as in its
+ *                                            deny line) is let through in the doc whose path ends with
+ *                                            `path`. The reason is required, so each exception explains itself.
+ * The exceptions are on the returned array's `exceptions`.
+ */
 export function parseDeny(text) {
     const out = [];
+    const exceptions = [];
     for (const raw of text.split("\n")) {
         const line = raw.trim();
         if (!line || line.startsWith("#")) continue;
+        if (line.startsWith("allow:")) {
+            const [left, ...why] = line.slice("allow:".length).split("=>");
+            const [term, ...where] = left.split(" @ ");
+            const path = where.join(" @ ").trim();
+            const reason = why.join("=>").trim();
+            if (!term.trim() || !path || !reason) {
+                throw new Error(`deny file: an exception reads "allow: <term> @ <path> => <reason>" (got: ${line})`);
+            }
+            exceptions.push({ term: term.trim(), path: path.replace(/\\/g, "/"), reason });
+            continue;
+        }
         const [term, ...rest] = line.split("=>");
-        if (!term.trim()) continue;
-        out.push({ term: term.trim(), say: rest.join("=>").trim() || "see the code" });
+        const t = term.trim();
+        if (!t) continue;
+        const entry = { term: t, say: rest.join("=>").trim() || "see the code" };
+        const pattern = /^\/(.+)\/([a-z]*)$/.exec(t);
+        if (pattern) entry.re = new RegExp(pattern[1], pattern[2].replace(/[gy]/g, ""));
+        out.push(entry);
     }
+    out.exceptions = exceptions;
     return out;
 }
 
@@ -387,7 +418,7 @@ export function docFiles(base, targets) {
 export function checkDocs(docs, base, index, options) {
     const out = new Map();
     for (const doc of docs) {
-        for (const f of checkDoc(readFileSync(resolve(base, doc), "utf8"), index, options)) {
+        for (const f of checkDoc(readFileSync(resolve(base, doc), "utf8"), index, { ...options, path: doc })) {
             const key = `${doc}::${f.kind}::${f.text}`;
             if (!out.has(key)) out.set(key, { doc, ...f });
         }

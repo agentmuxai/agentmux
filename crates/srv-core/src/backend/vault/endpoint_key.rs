@@ -106,6 +106,6 @@ mod tests {
         let value = for_launch(&store, &id, "a1", "lolly").unwrap();
         assert_eq!(value.as_str(), "sk-test-0123456789");
         let log = crate::backend::vault::activity(&store, 10).unwrap();
-        assert!(log.iter().any(|l| l.actor == "lolly" && l.action == USED));
+        assert!(log.iter().any(|l| l.actor == "agent:lolly" && l.action == USED));
     }
 }

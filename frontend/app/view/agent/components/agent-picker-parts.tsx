@@ -8,7 +8,8 @@ import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
 import { CardGrid } from "@/app/element/ui/CardGrid";
 import { CopyErrorButton } from "@/app/errors/CopyErrorButton";
 import { formatErrorReport } from "@/app/errors/error-report";
-import { Menu } from "@/app/element/ui";
+import { Button, Menu } from "@/app/element/ui";
+import type { AgentDefinition } from "@/app/store/rpc-api";
 import { t } from "@/app/i18n/i18n";
 import { Rich } from "@/app/i18n/rich";
 import { MENU_ICON } from "@/app/util/menu-icons";
@@ -18,6 +19,7 @@ import { AgentCard } from "./AgentCard";
 import { AgentCardFilters } from "./AgentCardFilters";
 import { AgentCreatePanel } from "./AgentCreatePanel";
 import { AgentPickerFilterBar } from "./AgentPickerFilterBar";
+import { SharedFolderPanel } from "./SharedFolderPanel";
 import { HiddenTemplatesSection } from "./HiddenTemplatesSection";
 import { MyAgentsList } from "./MyAgentsList";
 import type { AgentPickerProps, AgentPickerState } from "./agent-picker-state";
@@ -98,7 +100,7 @@ function MyAgentsTier(part: { s: AgentPickerState; props: AgentPickerProps }): J
 /** The New Agent tier: the harness cards, with a card's panel opening below its row. */
 function TemplatesTier(part: { s: AgentPickerState; props: AgentPickerProps }): JSX.Element {
     const { s, props } = part;
-    const { templates, launch, install, prereqs } = s;
+    const { templates } = s;
     return (
         <>
             <div class="agent-picker-templates-header" data-testid="agent-templates-header">
@@ -117,63 +119,116 @@ function TemplatesTier(part: { s: AgentPickerState; props: AgentPickerProps }): 
                 disabled={!!templates.openTemplate()}
             />
             <div data-testid="agent-templates-list">
-                {/* Pattern P1 (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md
-                    §5.7): a card's panel opens below its row. */}
-                <CardGrid
-                    class="agent-picker-list"
-                    ariaLabel={t("agentPicker.templates.gridLabel")}
-                    items={templates.shownTemplates()}
-                    keyOf={(agent) => agent.id}
-                    minCardWidth={240}
-                    selectedKey={templates.openTemplate()}
-                    onClose={templates.closePanel}
-                    renderCard={(agent) => (
-                        <AgentCard
-                            agent={agent}
-                            launching={launch.launching() === agent.id}
-                            disabled={launch.busy()}
-                            installed={install.installState()[agent.id]}
-                            installing={
-                                install.installState()[agent.id] === false &&
-                                isAgentInstalling(install.providerOfAgent.get(agent.id) ?? "")
-                            }
-                            expanded={templates.openTemplate() === agent.id}
-                            drift={install.driftState()[agent.id]}
-                            onLaunch={templates.handleTemplateSelect}
-                            // Right-click → Hide template. Only
-                            // template cards; my-agent rows live in
-                            // MyAgentsList.
-                            onContextMenu={templates.handleTemplateContextMenu}
-                            // Templates have no session zone: no
-                            // "+ New" pill.
-                            hasCurrentSession={false}
-                            defaultFocus={templates.shownTemplates()[0]?.id === agent.id}
-                            blockId={props.model.blockId}
-                        />
-                    )}
-                    renderDetail={(agent) => (
-                        <AgentCreatePanel
-                            template={agent}
-                            draft={templates.draftFor(agent)}
-                            installed={install.installState()[agent.id]}
-                            probePrereqs={(fresh) => prereqs.prereqsFor(agent, fresh)}
-                            recheckInstalled={() => install.recheckInstalled(agent)}
-                            onCreated={(created) => launch.launchCreated(agent, created)}
-                            onClose={templates.closePanel}
-                            onBusyChange={templates.setPanelBusy}
-                        />
-                    )}
-                />
+                <TemplateGrid s={s} props={props} items={templates.firstClassTemplates()} firstChoice />
             </div>
+            <PreviewSection s={s} props={props} />
         </>
     );
 }
 
-/** A launch that aborted, and the Node.js notice. */
+/** The cards of a list, a card's panel opening below its row (Pattern P1, SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §5.7). */
+function TemplateGrid(part: {
+    s: AgentPickerState;
+    props: AgentPickerProps;
+    items: AgentDefinition[];
+    /** The first card is the picker's default choice: only the first-class list has one. */
+    firstChoice?: boolean;
+}): JSX.Element {
+    const { s, props } = part;
+    const { templates, launch, install, prereqs } = s;
+    return (
+        <CardGrid
+            class="agent-picker-list"
+            ariaLabel={t("agentPicker.templates.gridLabel")}
+            items={part.items}
+            keyOf={(agent) => agent.id}
+            minCardWidth={240}
+            selectedKey={templates.openTemplate()}
+            onClose={templates.closePanel}
+            renderCard={(agent) => (
+                <AgentCard
+                    agent={agent}
+                    launching={launch.launching() === agent.id}
+                    disabled={launch.busy()}
+                    installed={install.installState()[agent.id]}
+                    installing={
+                        install.installState()[agent.id] === false &&
+                        isAgentInstalling(install.providerOfAgent.get(agent.id) ?? "")
+                    }
+                    expanded={templates.openTemplate() === agent.id}
+                    drift={install.driftState()[agent.id]}
+                    onLaunch={templates.handleTemplateSelect}
+                    // Right-click → Hide template. Only
+                    // template cards; my-agent rows live in
+                    // MyAgentsList.
+                    onContextMenu={templates.handleTemplateContextMenu}
+                    // Templates have no session zone: no
+                    // "+ New" pill.
+                    hasCurrentSession={false}
+                    defaultFocus={!!part.firstChoice && part.items[0]?.id === agent.id}
+                    blockId={props.model.blockId}
+                />
+            )}
+            renderDetail={(agent) => (
+                <AgentCreatePanel
+                    template={agent}
+                    draft={templates.draftFor(agent)}
+                    installed={install.installState()[agent.id]}
+                    probePrereqs={(fresh) => prereqs.prereqsFor(agent, fresh)}
+                    recheckInstalled={() => install.recheckInstalled(agent)}
+                    onCreated={(created) => launch.launchCreated(agent, created)}
+                    onClose={templates.closePanel}
+                    onBusyChange={templates.setPanelBusy}
+                />
+            )}
+        />
+    );
+}
+
+/** The Preview agent CLIs: one section under the first-class cards, closed until the person opens it. One tab stop. */
+function PreviewSection(part: { s: AgentPickerState; props: AgentPickerProps }): JSX.Element {
+    const { s, props } = part;
+    const { templates } = s;
+    return (
+        <Show when={templates.previewTemplates().length > 0}>
+            <div class="agent-picker-preview" data-testid="agent-preview-section">
+                <Button
+                    variant="row"
+                    density="compact"
+                    class="agent-picker-preview-header"
+                    aria-expanded={templates.previewOpen()}
+                    onClick={templates.togglePreview}
+                    data-testid="agent-preview-toggle"
+                >
+                    <span class="agent-picker-preview-caret">{templates.previewOpen() ? "▾" : "▸"}</span>
+                    <span>{t("agentPicker.preview.header", { count: templates.previewTemplates().length })}</span>
+                </Button>
+                <Show when={templates.previewOpen()}>
+                    <div data-testid="agent-preview-list">
+                        <TemplateGrid s={s} props={props} items={templates.previewTemplates()} />
+                    </div>
+                </Show>
+            </div>
+        </Show>
+    );
+}
+
+/** A launch that aborted, a launch held for the person, and the Node.js notice. */
 function LaunchNotices(part: { s: AgentPickerState }): JSX.Element {
     const { launch } = part.s;
     return (
         <>
+            <Show when={launch.sharedFolder()}>
+                {(ask) => (
+                    <SharedFolderPanel
+                        hostName={ask().hostName}
+                        overlaps={ask().overlaps}
+                        busy={launch.busy()}
+                        onGoAhead={() => void launch.goAheadWithSharedFolderAsk()}
+                        onKeepApart={() => launch.keepSharedFolderApart()}
+                    />
+                )}
+            </Show>
             <Show when={launch.launchError()}>
                 <div class="agent-nodejs-notice">
                     <div class="nodejs-notice-icon">

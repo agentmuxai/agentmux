@@ -351,3 +351,20 @@ fn a_log_line_holds_no_secret_shape_the_page_put_in_a_click_name() {
     assert!(!text.contains("sk_live"), "{text}");
     assert!(text.contains("naki click") && text.contains("· ref e9 — allowed"), "{text}");
 }
+
+#[test]
+fn a_page_address_with_a_sign_in_redirects_values_is_shown_without_them() {
+    let redirect = "http://idp.test/authorize?client_id=c&state=S3CRET&nonce=N0NCE&code_challenge=CH&code=ONE";
+    let moved = json!({ "data": { "after": null, "page": { "url": redirect, "title": "", "changed": true } } });
+    let said = act_result_text("Browser click", "e2", &moved);
+    assert!(said.contains("The page moved: it is now http://idp.test/authorize?.... Take a snapshot"), "{said}");
+    let waited = wait_result_text(&json!({ "data": { "waited_ms": 5, "url": redirect } }));
+    assert!(waited.contains("the page is http://idp.test/authorize?..."), "{waited}");
+    let log = log_text(&json!({ "pane": "p1", "count": 1, "entries": [{ "ts": 1, "agent": "naki", "kind": "click", "url": redirect }] }));
+    assert!(log.contains(" at http://idp.test/authorize?..."), "{log}");
+    for said in [said, waited, log] {
+        for value in ["S3CRET", "N0NCE", "code_challenge", "ONE"] {
+            assert!(!said.contains(value), "{said}");
+        }
+    }
+}

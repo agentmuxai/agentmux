@@ -74,6 +74,10 @@ pub struct BatchItem {
     /// and read no value.
     #[serde(default)]
     pub link: bool,
+    /// Make a linked entry the Vault reads from AWS at each use: the secret there stays the authority and the Vault
+    /// keeps no copy. It is a link too (`link` may be left out).
+    #[serde(default)]
+    pub backed: bool,
     /// The batch's own, when given at all: an item can't name another region, profile or Vault.
     #[serde(default)]
     pub region: Option<String>,
@@ -175,7 +179,7 @@ fn arn_place(id: &str) -> Option<(&str, &str)> {
 /// one this agent may use (links describe infrastructure, which is what that Vault is for); the agent's first Vault
 /// otherwise.
 fn default_vault(store: &Store, req: &BatchRequest, agent: &str) -> Result<String, String> {
-    if req.items.iter().all(|item| item.link) {
+    if req.items.iter().all(|item| item.link || item.backed) {
         if let Ok(fleet) = vaults::resolve(store, FLEET, Some(Some(agent))) {
             return Ok(fleet.id);
         }
@@ -255,7 +259,7 @@ impl BatchPlan {
                 return Err(self.one_vault());
             }
         }
-        if item.link {
+        if item.link || item.backed {
             return self.link_item(item);
         }
         let request = ImportRequest {
@@ -291,7 +295,7 @@ impl BatchPlan {
             format!("a link is an entry of a kind, {LINK_KIND} when left out: one of {}", names.join(", "))
         })?;
         let label = item.label.trim().to_string();
-        let fields = linked::fields_for(&source, &item.fields);
+        let fields = if item.backed { linked::fields_for_backed(&source, &item.fields) } else { linked::fields_for(&source, &item.fields) };
         super::validate(kind, &label, &fields, &[], &Parts::default())?;
         let target = Target::Link { kind: kind.name, label, fields, vault_id: self.vault_id.clone() };
         Ok(Plan { source, target, vault_name: self.vault_name.clone(), reason: self.reason.clone(), refs: self.refs.clone(), share: false })

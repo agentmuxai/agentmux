@@ -471,6 +471,8 @@ fn service_shell_and_vault_routes() -> Router<AppState> {
         // shares the exact pane.open logic with the WebSocket RPC handler
         // (app_api::open_pane). See ANALYSIS_AGENT_APP_API_OPEN_IN_EDITOR_2026_05_30.
         .route("/api/v1/pane/open", post(handle_pane_open))
+        // A deep link an agent opens (`Pane` open with `link`): srv's guard, then the window's executor.
+        .route("/api/v1/pane/open_link", post(super::deeplink_guard::handle_pane_open_link))
         // Widgets for agents (WidgetList, WidgetInstall): an install waits
         // for the user's answer, which only the host can carry.
         .route("/api/v1/widgets", get(super::widget_agent_handlers::handle_widgets_list))
@@ -536,6 +538,7 @@ fn agent_api_routes() -> Router<AppState> {
         .route("/api/v1/agent/start", post(app_api::agent_lifecycle::handle_agent_start))
         .route("/api/v1/agent/stop", post(app_api::agent_lifecycle::handle_agent_stop))
         .route("/api/v1/agent/detach", post(app_api::agent_lifecycle::handle_agent_detach))
+        .route("/api/v1/agent/rotate-token", post(app_api::agent_rotate_token::handle_agent_rotate_token))
         // Delete an agent the caller made, once it is stopped (`Agents delete`).
         .route("/api/v1/agent/delete", post(app_api::agent_lifecycle::handle_agent_delete))
         // Replay an agent's recent transcript, then tail it (`Agents watch`).

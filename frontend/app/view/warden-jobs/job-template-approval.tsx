@@ -294,7 +294,7 @@ export function TemplateApproval(props: {
         return reporter ? reporterNote(reporter).block : false;
     };
     return (
-        <section class="warden-jobs-approval" aria-label={`Approve ${props.info.id}`}>
+        <section class="warden-jobs-approval" aria-label={`Approve ${props.info.id}`} data-operator-only="">
             <Show
                 when={m()}
                 fallback={<div class="warden-manager-error">{props.info.error ?? "This template can't be read."}</div>}

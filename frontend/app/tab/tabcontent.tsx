@@ -28,6 +28,7 @@ import {
 } from "@/app/tab/pane-close-guard";
 import { closeWithShutdownLog, isClosingWithLog } from "@/app/view/agent/shutdown/close-with-log";
 import { agentsKeepRunning, noteKeepsRunning, parkedAgentOf } from "@/app/view/agent/shutdown/keeps-running";
+import { takeHolderMoved } from "@/app/view/agent/failure/moved-holder";
 import {
     describeLeave,
     leavePrompts,
@@ -171,7 +172,8 @@ async function beforeNodeDelete(
         void closeWithShutdownLog(props.tabId, blockIds, winds);
         return false;
     }
-    noteKeepsRunning([...parked.values()]);
+    // A pane closed because its agent moved to another (Open here) has nothing to announce: the agent has a pane.
+    noteKeepsRunning([...parked].filter(([id]) => !takeHolderMoved(id)).map(([, agent]) => agent));
     // The host's log says the person closed these panes.
     notePersonClose(blockIds.filter(isBrowserBlock));
     return true;

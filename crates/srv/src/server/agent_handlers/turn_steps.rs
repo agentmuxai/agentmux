@@ -139,18 +139,22 @@ pub(super) fn surface_refusal(deps: &AgentTurnDeps, block_id: &str, message: &st
     // the agent's global zone: a pane with an agentId reads
     // that on reload, so without it the frame still vanished
     // (Phase 5a-3c).
-    let global_zone = crate::backend::transcript::append::resolve_global_output_zone(
-        &Some(mstore.clone()),
-        &block_id,
-    );
-    crate::backend::blockcontroller::shell::handle_append_block_file(
-        &broker,
-        &block_id,
-        crate::backend::blockcontroller::subprocess::SUBPROCESS_OUTPUT_SUBJECT,
-        format!("{error_frame}\n").as_bytes(),
-        Some(&filestore_gate),
-        global_zone.as_deref(),
-    );
+    // A pane bound with Open here is refused once and answers it with Move here: that refusal is
+    // left out of its history (open_here_mark.rs) and reaches the recovery row below all the same.
+    if !crate::backend::open_here_mark::expected_for_block(&mstore, block_id, message) {
+        let global_zone = crate::backend::transcript::append::resolve_global_output_zone(
+            &Some(mstore.clone()),
+            &block_id,
+        );
+        crate::backend::blockcontroller::shell::handle_append_block_file(
+            &broker,
+            &block_id,
+            crate::backend::blockcontroller::subprocess::SUBPROCESS_OUTPUT_SUBJECT,
+            format!("{error_frame}\n").as_bytes(),
+            Some(&filestore_gate),
+            global_zone.as_deref(),
+        );
+    }
     // codex P1, PR #2802: the frame above only lands in
     // the block's raw output log, which the recovery
     // banner does NOT read from — it reads the

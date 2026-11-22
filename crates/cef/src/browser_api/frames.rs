@@ -200,7 +200,7 @@ pub async fn check_frame(root: &mut CdpSession, f: &FrameRef, r: &str) -> Result
     match all.iter().find(|x| x.id == f.frame_id) {
         None => Err(format!("the frame holding {r} is gone from the page; take a new snapshot")),
         Some(now) if now.url != f.url => {
-            Err(format!("the frame holding {r} has moved on (now {}); take a new snapshot", now.url))
+            Err(format!("the frame holding {r} has moved on (now {}); take a new snapshot", agentmux_common::shown_url::shown_url(&now.url)))
         }
         Some(now) if now.session != f.session => {
             Err(format!("the frame holding {r} was reloaded in another process; take a new snapshot"))

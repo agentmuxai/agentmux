@@ -5,14 +5,17 @@
 // all merged, and the drawer's list. srv derives the roll-up (`pr_rollup`); nothing here recomputes it, so an
 // older srv with no list shows the card as it always did.
 
-import { For, Show, type JSX } from "solid-js";
+import { createSignal, For, Show, type JSX } from "solid-js";
 
 import { t as tr } from "@/app/i18n/i18n";
-import { Pill, type PillTone } from "@/app/element/ui";
+import { Button, CloseButton, Pill, TextInput, type PillTone } from "@/app/element/ui";
 import { openLink } from "@/app/store/misc-utils";
 import { formatAge } from "@/app/view/warden-shared/warden-shared";
 
-import type { KanbanCardFields, KanbanCardPr } from "./kanban-types";
+import type { KanbanActRequest, KanbanActResult, KanbanCardFields, KanbanCardPr } from "./kanban-types";
+
+/** The drawer's move on its task: srv is asked with the task's id filled in; null when the call failed (the board shows why). */
+export type PrAct = (req: KanbanActRequest) => Promise<KanbanActResult | null>;
 
 /** The pull requests a card lists, newest first as srv sends them; none for an older srv. */
 export function prsOf(card: KanbanCardFields): KanbanCardPr[] {
@@ -84,30 +87,124 @@ function prAge(p: KanbanCardPr, now: number): string | null {
     return tr(p.state === "merged" ? "kanban.prs.mergedAgo" : "kanban.prs.openedAgo", { age: formatAge(Math.max(0, now - at)) });
 }
 
-/** The drawer's list: each pull request of the card, its state and age, newest first. One pull request keeps the drawer's own button. */
-export function DrawerPrs(props: { card: KanbanCardFields; now: number }): JSX.Element {
+/** Takes one pull request off the card (the operator's `pr_unlink`; srv records it so it is not matched back). */
+function UnlinkPr(props: { pr: KanbanCardPr; act: PrAct }): JSX.Element {
+    const [busy, setBusy] = createSignal(false);
+    return (
+        <CloseButton
+            label={tr("kanban.prs.unlink", { pr: prName(props.pr) })}
+            disabled={busy()}
+            onClick={() => {
+                setBusy(true);
+                void props.act({ action: "pr_unlink", pr: prName(props.pr) }).finally(() => setBusy(false));
+            }}
+        />
+    );
+}
+
+/** "Add a pull request": an address or `owner/repo#12` typed by the operator, linked to the card. */
+function AddPr(props: { act: PrAct }): JSX.Element {
+    const [text, setText] = createSignal("");
+    const [busy, setBusy] = createSignal(false);
+    const [already, setAlready] = createSignal(false);
+    return (
+        <form
+            class="kanban-drawer__pr-add"
+            onSubmit={(e) => {
+                e.preventDefault();
+                const pr = text().trim();
+                if (!pr || busy()) return;
+                setBusy(true);
+                void props
+                    .act({ action: "pr_link", pr })
+                    .then((res) => {
+                        if (!res) return;
+                        setText("");
+                        setAlready(res.changed === false);
+                    })
+                    .finally(() => setBusy(false));
+            }}
+        >
+            <TextInput
+                density="compact"
+                placeholder={tr("kanban.prs.addPlaceholder")}
+                aria-label={tr("kanban.prs.addLabel")}
+                value={text()}
+                onInput={(e) => {
+                    setText(e.currentTarget.value);
+                    setAlready(false);
+                }}
+            />
+            <Button type="submit" density="compact" icon="plus" busy={busy()} disabled={!text().trim()}>
+                {tr("kanban.prs.add")}
+            </Button>
+            <Show when={already()}>
+                <span class="warden-manager-dim">{tr("kanban.prs.already")}</span>
+            </Show>
+        </form>
+    );
+}
+
+/**
+ * The drawer's list: each pull request of the card, its state and age, newest first, each with Unlink; one pull
+ * request keeps the drawer's own button and gets an Unlink beside the add box. `act` is absent where the card is
+ * only shown (no moves).
+ */
+export function DrawerPrs(props: { card: KanbanCardFields; now: number; act?: PrAct }): JSX.Element {
     const prs = () => prsOf(props.card);
     return (
-        <Show when={prs().length > 1}>
-            <ul class="kanban-drawer__prs" aria-label={tr("kanban.prs.list")}>
-                <For each={prs()}>
-                    {(p) => (
-                        <li class="kanban-drawer__pr">
-                            <a
-                                href={p.url}
-                                onClick={(e) => {
-                                    e.preventDefault();
-                                    void openLink(p.url);
-                                }}
-                            >
-                                {prName(p)}
-                            </a>
-                            <Pill tone={p.state === "merged" ? "ok" : p.state === "closed" ? "neutral" : "accent"}>{prStateWords(p)}</Pill>
-                            <Show when={prAge(p, props.now)}>{(age) => <span class="warden-manager-dim">{age()}</span>}</Show>
-                        </li>
-                    )}
-                </For>
-            </ul>
-        </Show>
+        <>
+            <Show when={prs().length > 1}>
+                <ul class="kanban-drawer__prs" aria-label={tr("kanban.prs.list")}>
+                    <For each={prs()}>
+                        {(p) => (
+                            <li class="kanban-drawer__pr">
+                                <a
+                                    href={p.url}
+                                    onClick={(e) => {
+                                        e.preventDefault();
+                                        void openLink(p.url);
+                                    }}
+                                >
+                                    {prName(p)}
+                                </a>
+                                <Pill tone={p.state === "merged" ? "ok" : p.state === "closed" ? "neutral" : "accent"}>{prStateWords(p)}</Pill>
+                                <Show when={p.followed === false}>
+                                    <Pill tone="warn" title={tr("kanban.prs.notFollowedWhy")}>
+                                        {tr("kanban.prs.notFollowed")}
+                                    </Pill>
+                                </Show>
+                                <Show when={prAge(p, props.now)}>{(age) => <span class="warden-manager-dim">{age()}</span>}</Show>
+                                <Show when={props.act}>{(act) => <UnlinkPr pr={p} act={act()} />}</Show>
+                            </li>
+                        )}
+                    </For>
+                </ul>
+            </Show>
+            <Show when={prs().length === 1 && prs()[0].followed === false}>
+                <Pill tone="warn" title={tr("kanban.prs.notFollowedWhy")}>
+                    {tr("kanban.prs.notFollowed")}
+                </Pill>
+            </Show>
+            <Show when={props.act}>
+                {(act) => (
+                    <>
+                        <Show when={prs().length === 1 ? prs()[0] : undefined}>
+                            {(p) => (
+                                <Button
+                                    density="compact"
+                                    tone="quiet"
+                                    icon="link-slash"
+                                    onClick={() => void act()({ action: "pr_unlink", pr: prName(p()) })}
+                                >
+                                    {tr("kanban.prs.unlink", { pr: prName(p()) })}
+                                </Button>
+                            )}
+                        </Show>
+                        <AddPr act={act()} />
+                    </>
+                )}
+            </Show>
+        </>
     );
 }

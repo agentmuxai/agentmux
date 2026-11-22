@@ -242,11 +242,11 @@ fn contains_whole_word(haystack: &str, needle: &str, allow_plural: bool) -> bool
 }
 
 /// What a text posted for others to read (a bulletin, a channel post) is read as: the text a model reads (invisibles
-/// dropped, fullwidth letters as ASCII), lower-cased.
+/// dropped, fullwidth letters as ASCII, look-alike letters as the letters they imitate), lower-cased.
 fn as_read(msg: &str) -> String {
     msg.chars()
         .filter(|&c| !is_invisible(c) && !matches!(c, '\u{200C}' | '\u{200D}'))
-        .map(fold)
+        .map(|c| fold(super::post_secrets::letter_lookalike(c)))
         .collect::<String>()
         .to_lowercase()
 }
@@ -327,20 +327,27 @@ fn whole_word_spots<'a>(lower: &'a str, needle: &'a str) -> impl Iterator<Item =
 /// tokens", "token budget"); in any other place it is refused. A jekt's tier still escalates on the bare word, as
 /// `is_sensitive_message` says.
 pub fn post_refusal_reason(msg: &str) -> Option<String> {
+    let (rule, shown) = post_refusal(msg)?;
+    super::post_secrets::count_refusal(rule);
+    Some(shown)
+}
+
+/// [`post_refusal_reason`] without the counting: the rule as a fixed name, and the word as it stands in the text.
+fn post_refusal(msg: &str) -> Option<(&'static str, String)> {
     if let Some(rule) = super::post_secrets::refusal_rule(msg) {
-        return Some(rule.to_string());
+        return Some((rule, rule.to_string()));
     }
     let lower = as_read(msg);
     if let Some(kw) = SENSITIVE_SUBSTRING_KEYWORDS.iter().find(|kw| lower.contains(**kw)) {
-        return Some((*kw).to_string());
+        return Some((*kw, (*kw).to_string()));
     }
     for (kw, allow_plural) in SENSITIVE_WHOLE_WORD_KEYWORDS {
         if *kw == "token" {
             if let Some((start, end)) = whole_word_spots(&lower, kw).find(|&(s, e)| !token_reads_as_usage_unit(&lower, s, e)) {
-                return Some(lower[start..end].to_string());
+                return Some(("token", lower[start..end].to_string()));
             }
         } else if contains_whole_word(&lower, kw, *allow_plural) {
-            return Some((*kw).to_string());
+            return Some((*kw, (*kw).to_string()));
         }
     }
     None
@@ -349,7 +356,10 @@ pub fn post_refusal_reason(msg: &str) -> Option<String> {
 /// What a refusal adds for the word it names, so the poster knows how to get past it: "token" is let through
 /// when it is about usage.
 pub fn post_refusal_help(word: &str) -> &'static str {
-    if word.starts_with("token") {
+    let rule_help = super::post_secrets::help(word);
+    if !rule_help.is_empty() {
+        rule_help
+    } else if word.starts_with("token") {
         " Use the word only about usage (\"40k tokens\", \"save tokens\", \"token budget\"); a credential is sent to the one agent it concerns with Message send."
     } else {
         ""
@@ -569,7 +579,7 @@ pub fn jekt_origin(
 ) -> crate::backend::message_origin::MessageOrigin {
     use crate::backend::message_origin::{MessageOrigin, OriginDelivery, OriginSig, OriginTier};
     let mut origin = match req.source_agent.as_deref() {
-        Some(from) if validate_agent_id(from) => MessageOrigin::from_sender(from),
+        Some(from) if super::sender::is_shown_as_agent(from, delivery_tier, req.reagent_verified) => MessageOrigin::from_sender(from),
         _ => MessageOrigin::of(crate::backend::blockcontroller::health::TriggerKind::Agent),
     };
     let wan_pinned = delivery_tier == "wan" && req.wan_instance.is_some() && req.wan_verified == Some(true);
@@ -641,7 +651,7 @@ pub fn wrap_jekt_message_with_files(
     // which no agent id contains — so its escaped form can't read as a real
     // agent's name, and it gets no reply hint to follow.
     let raw_from = source_agent.unwrap_or("unknown");
-    let from_is_agent = validate_agent_id(raw_from);
+    let from_is_agent = super::sender::is_shown_as_agent(raw_from, delivery_tier, reagent_verified);
     let from = if from_is_agent { raw_from.to_string() } else { format!("?{}", marker_field(raw_from)) };
     let target_agent = marker_field(target_agent);
     let msg_id = marker_field(msg_id);

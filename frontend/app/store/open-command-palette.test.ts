@@ -7,12 +7,19 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ dismissed: 0 }));
+const h = vi.hoisted(() => ({ dismissed: 0, failLoad: false }));
 
 vi.mock("@/app/modals/command-palette", () => ({ CommandPaletteModal: () => null }));
 vi.mock("@/app/element/anchored-popover", () => ({
-    dismissAnchoredPopovers: () => {
-        h.dismissed++;
+    // Read when the load finishes: a load that fails once (a chunk that could not be fetched) throws here, once.
+    get dismissAnchoredPopovers() {
+        if (h.failLoad) {
+            h.failLoad = false;
+            throw new Error("chunk load failed");
+        }
+        return () => {
+            h.dismissed++;
+        };
     },
 }));
 
@@ -27,7 +34,9 @@ afterEach(() => {
 // The palette is the one surface where a press must show something at once: once its code is loaded, the open path
 // makes no call and awaits nothing, so the palette is mounted in the same task as the key press.
 describe("openCommandPalette: the fast path", () => {
-    it("before the code is loaded, waits for the load once and then opens", async () => {
+    it("before the code is loaded, waits for the load once and then opens; a load that failed once is tried again by the next press", async () => {
+        h.failLoad = true;
+        await expect(preloadCommandPalette()).rejects.toThrow("chunk load failed");
         const pending = openCommandPalette();
         expect(pending).toBeInstanceOf(Promise);
         expect(modalsModel.modalsAtom()).toHaveLength(0);

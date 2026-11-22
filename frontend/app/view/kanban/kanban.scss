@@ -541,6 +541,30 @@ $kanban-narrow: 760px;
     font-size: var(--text-xs);
 }
 
+.kanban-drawer__pr-add {
+    display: flex;
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+// The panel of pull requests no card claimed: a row each, the pull request on top, its moves under it.
+.kanban-unmatched__row {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    font-size: var(--text-xs);
+}
+
+.kanban-unmatched__main,
+.kanban-unmatched__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+}
+
 .kanban-card__repo,
 .kanban-card__untracked-label {
     font-size: var(--text-xs);

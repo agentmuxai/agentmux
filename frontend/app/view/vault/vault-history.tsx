@@ -37,7 +37,12 @@ export function whyOf(a: VaultActivity): string {
 
 /** Who did it, with the machine when the rows come from more than one. */
 export function whoOf(a: VaultActivity): string {
-    return a.actor === "you" ? "You" : a.actor;
+    return a.actor === "you" ? "You" : agentNameOf(a.actor);
+}
+
+/** An agent's row is written `agent:<id>`; the panel shows the name alone, as it always has. */
+export function agentNameOf(actor: string): string {
+    return actor.startsWith("agent:") ? actor.slice("agent:".length) : actor;
 }
 
 export function chainNote(c: VaultChain | undefined): string {

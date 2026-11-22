@@ -235,6 +235,9 @@ mod sender_claims_tests;
 #[path = "tests/agent_status_tests.rs"]
 mod agent_status_tests;
 #[cfg(test)]
+#[path = "tests/folder_overlap_tests.rs"]
+mod folder_overlap_tests;
+#[cfg(test)]
 #[path = "tests/model_gateway_tests.rs"]
 mod model_gateway_tests;
 #[cfg(test)]
@@ -324,6 +327,7 @@ mod http_viewer_terminal;
 mod http_shell;
 mod http_pty_shell;
 mod http_open;
+pub(crate) mod deeplink_guard;
 mod http_app_api;
 mod http_self;
 mod http_skill;

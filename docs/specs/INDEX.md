@@ -200,6 +200,7 @@ partial list.
 
 | Spec | Title | Status | Date | Replaces / replaced by |
 |---|---|---|---|---|
+| [`SPEC_LEADER_TOLD_WHEN_AN_AGENT_GOES_QUIET_2026_11_21`](SPEC_LEADER_TOLD_WHEN_AN_AGENT_GOES_QUIET_2026_11_21.md) | Spec: a leader is told when an agent that owes it work has gone quiet, in one grouped note | active | 2026-11-21 |  |
 | [`SPEC_AGENT_PREP_BEFORE_SESSION_RESTART_2026_11_14`](SPEC_AGENT_PREP_BEFORE_SESSION_RESTART_2026_11_14.md) | Spec: prepare, then proceed. An agent gets a window to reach a safe point before a user action restarts its session | active | 2026-11-14 |  |
 
 ### agent pane
@@ -259,6 +260,8 @@ than none. Add the line when you touch one and know which area it belongs to.
 
 | Spec | Title | Status | Date | Replaces / replaced by |
 |---|---|---|---|---|
+| [`SPEC_KANBAN_PULL_REQUEST_ACTIONS_2026_11_21`](SPEC_KANBAN_PULL_REQUEST_ACTIONS_2026_11_21.md) | Spec: Kanban pull request actions: unlink, add by name, and pull requests not matched to a task | active | 2026-11-21 |  |
+| [`SPEC_BUTTON_PRESSED_AND_PENDING_FEEDBACK_2026_11_20`](SPEC_BUTTON_PRESSED_AND_PENDING_FEEDBACK_2026_11_20.md) | Spec: Every button answers the press at once and shows a spinner while its action runs | implemented | 2026-11-20 |  |
 | [`SPEC_DEEP_LINKS_ONE_FRAMEWORK_2026_11_20`](SPEC_DEEP_LINKS_ONE_FRAMEWORK_2026_11_20.md) | Deep links: one framework by which any view opens at a named place, in any pane | active | 2026-11-20 |  |
 | [`SPEC_LINKS_ON_EVERYTHING_2026_11_20`](SPEC_LINKS_ON_EVERYTHING_2026_11_20.md) | Links on nearly everything: one recognition layer that turns agent names, task numbers, files, pull requests and URLs into correct links | active | 2026-11-20 |  |
 | [`SPEC_MUXAPI_AGENT_LIVE_FACTS_2026_11_20`](SPEC_MUXAPI_AGENT_LIVE_FACTS_2026_11_20.md) | Spec: MuxAPI agent live facts (model and the rest), on this host and across the LAN | active | 2026-11-20 |  |

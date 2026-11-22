@@ -287,6 +287,30 @@ pub struct FileSearchBytesResult {
     pub next_from: u64,
 }
 
+/// Request for `filesearchtext`: the next match of a text (or a regular expression) in a UTF-8 file, read on srv
+/// so a file bigger than memory can be searched. The answer is a `FileSearchBytesResult`: where the match starts
+/// and how many bytes it is. docs/specs/SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.4.6.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FileSearchTextReq {
+    pub path: String,
+    /// The text to find, or a regular expression (Rust `regex` syntax) when `regex` is set. At most 1,000 characters.
+    pub query: String,
+    /// `query` is a regular expression, not a literal text.
+    #[serde(default)]
+    pub regex: bool,
+    /// Letters match in either case (Unicode case folding).
+    #[serde(default)]
+    pub ignore_case: bool,
+    /// Forward: the first match that starts at or after this offset.
+    /// Backward: the last match that starts at or before it.
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub from: u64,
+    #[serde(default)]
+    pub backward: bool,
+}
+
 /// Request for `fileindexlines`: where a run of a text file's lines is, so the Large text viewer can fetch that
 /// byte range. srv reads the file once per (path, modified time) and keeps the line index.
 /// docs/specs/SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.4.6.

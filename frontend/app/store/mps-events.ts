@@ -259,6 +259,8 @@ export const WpsEvent = {
     AgentNotice: "agent:notice",
     /** A question srv asks the person in a pane, as a modal over that pane, and its end (crates/srv/src/sagas/pane_confirm.rs). */
     PaneConfirm: "pane:confirm",
+    /** An agent's deep-link open, handed to the window that carries it out; it answers with deeplink.open.done (crates/srv/src/sagas/deeplink_open.rs). */
+    DeepLinkOpen: "deeplink:open",
     /** The agents the person said "Always" to, after a change (crates/srv-core/src/backend/agent_grants.rs). */
     AgentGrants: "agent:grants",
     AmbientSpent: "ambient:spent",

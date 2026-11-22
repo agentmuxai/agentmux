@@ -50,6 +50,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "set_container_limits", tool: "AgentSetContainerLimits", rename: &[] },
     Act { action: "container_caches", tool: "AgentContainerCaches", rename: &[] },
     Act { action: "migrate_ids", tool: "AgentMigrateIds", rename: &[] },
+    Act { action: "rotate_token", tool: "AgentRotateToken", rename: &[] },
 ];
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
@@ -86,6 +87,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "AgentStop" => lifecycle(cx, "stop", &args).await,
                 "AgentDetach" => lifecycle(cx, "detach", &args).await,
                 "AgentDelete" => lifecycle(cx, "delete", &args).await,
+                "AgentRotateToken" => lifecycle(cx, "rotate-token", &args).await,
                 "AgentWatch" => watch(cx, &args).await,
                 "AgentContext" => own_context(cx, "context", None).await,
                 "AgentCompact" => own_context(cx, "compact", str_arg(&args, "keep")).await,
@@ -694,8 +696,8 @@ async fn definition_action(cx: &ToolCtx<'_>, action: &str, args: &Value) -> Resu
     Ok(serde_json::to_string_pretty(&answer)?)
 }
 
-/// `start`, `stop` and `detach`: srv acts on the agent in `agent` as the agent this process's token
-/// names, and records it under that agent (`/api/v1/agent/{start,stop,detach}`).
+/// `start`, `stop`, `detach`, `delete` and `rotate_token`: srv acts on the agent in `agent` as the agent this process's token
+/// names, and records it under that agent (`/api/v1/agent/{start,stop,detach,delete,rotate-token}`).
 async fn lifecycle(cx: &ToolCtx<'_>, action: &str, args: &Value) -> Result<String> {
     require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
     let agent = str_arg(args, "agent").ok_or_else(|| anyhow::anyhow!("missing required parameter: agent"))?;
@@ -711,7 +713,8 @@ async fn lifecycle(cx: &ToolCtx<'_>, action: &str, args: &Value) -> Result<Strin
     let status = resp.status();
     let body: Value = resp.json().await.unwrap_or(Value::Null);
     if !status.is_success() {
-        anyhow::bail!("Agent{}: {}", capitalised(action), body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
+        let tool = if action == "rotate-token" { "AgentRotateToken".to_string() } else { format!("Agent{}", capitalised(action)) };
+        anyhow::bail!("{tool}: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
     }
     Ok(serde_json::to_string_pretty(&body)?)
 }
@@ -841,7 +844,7 @@ mod tests {
 
     #[test]
     fn start_stop_and_detach_name_the_agent_and_run_their_own_handlers() {
-        for (action, tool) in [("start", "AgentStart"), ("stop", "AgentStop"), ("detach", "AgentDetach"), ("delete", "AgentDelete")] {
+        for (action, tool) in [("start", "AgentStart"), ("stop", "AgentStop"), ("detach", "AgentDetach"), ("delete", "AgentDelete"), ("rotate_token", "AgentRotateToken")] {
             let (act, args) = pick("Agents", ACTS, &json!({ "action": action, "agent": "korp" })).unwrap();
             assert_eq!((act.tool, args), (tool, json!({ "agent": "korp" })));
         }
@@ -937,7 +940,7 @@ mod tests {
         let loops = LoopRegistry::default();
         let counter = std::sync::atomic::AtomicU64::new(0);
         let cx = ToolCtx { local_url: "", auth_key: "", block_id: "", client: &client, loops: &loops, loop_counter: &counter };
-        for action in ["spawn", "detach", "watch"] {
+        for action in ["spawn", "detach", "watch", "rotate_token"] {
             let e = call("Agents", &json!({ "action": action, "host": "narko" }), &cx).await.unwrap_err().to_string();
             assert!(e.contains("host applies to start, open, stop, set_seat, rename, update (model and effort), env_get and env_set"), "{action}: {e}");
         }

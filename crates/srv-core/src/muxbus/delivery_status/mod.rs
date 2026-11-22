@@ -169,6 +169,24 @@ pub fn fetched(agent: &str, delivered: usize, expired: &[ExpiredItem]) {
     hold(note.into_iter().collect());
 }
 
+/// A relay message for `agent` was left at the relay, because the agent can't work now (out of quota, signed
+/// out). Remembered, so it is told once when it can.
+pub fn left_at_relay(agent: &str) {
+    rt().book.lock().unwrap_or_else(|e| e.into_inner()).left_at_relay(agent, now_ms());
+}
+
+/// Whether relay messages for `agent` were left at the relay and it has not been told.
+pub fn has_left_at_relay(agent: &str) -> bool {
+    rt().book.lock().unwrap_or_else(|e| e.into_inner()).has_left_at_relay(agent)
+}
+
+/// `agent` can work: holds its one note about relay messages left at the relay, if any were. Call after its
+/// pull's own messages are delivered, so the note comes last.
+pub fn can_work_again(agent: &str) {
+    let note = rt().book.lock().unwrap_or_else(|e| e.into_inner()).can_work_again(agent);
+    hold(note.into_iter().collect());
+}
+
 /// `agent`'s pull (fetch or claim) got no usable answer from the relay,
 /// though the WebSocket may be open: its messages aren't arriving.
 pub fn pull_failed(agent: &str, reason: impl Into<String>) {

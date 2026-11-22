@@ -70,6 +70,7 @@ pub mod sensitive_runners;
 pub mod agent_notice;
 pub mod credential_notice;
 pub mod pane_confirm;
+pub mod deeplink_open;
 pub mod sensitive_window;
 pub mod restore_torn_off_tab;
 pub mod tear_off_block;

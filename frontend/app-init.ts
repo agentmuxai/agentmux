@@ -8,6 +8,7 @@ import { registerInputOwnerTracking } from "@/app/store/input-owner";
 import { globalRefocus, installShortcutApi, registerChordCapture, registerControlShiftTracking, registerGlobalKeys, registerHostShortcuts, registerUserKeybindings } from "@/app/store/keymodel";
 import { modalsModel } from "@/app/store/modalmodel";
 import { registerLinkInPaneListener } from "@/app/element/link-open";
+import { installPaneSelectGuard } from "@/app/element/ui/pane-select";
 import { installTextDragGuard } from "@/app/element/ui/text-drag";
 import { installFloatModifier } from "@/app/store/float-modifier";
 import { initUiEventSubs } from "@/app/store/ui-event-subs";
@@ -259,6 +260,12 @@ function pickTabId(workspace: Workspace): string {
         throw new Error("No tab found in workspace");
     }
     return tabId;
+}
+
+/** The guards that keep a press, and the selection it starts, where it began (a text field's drag; a pane's selection). */
+function installPointerGuards(): void {
+    installTextDragGuard();
+    installPaneSelectGuard();
 }
 
 /** Apply dev window title — task dev TITLE="agentx: PR #1780". */
@@ -1161,7 +1168,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     registerChordCapture();
     registerHostShortcuts();
     installShortcutApi();
-    installTextDragGuard();
+    installPointerGuards();
     registerLinkInPaneListener();
     installFloatModifier();
     tlog("registerKeys", t);
@@ -1189,7 +1196,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     // An agent's request to drive a native app opens a prompt here.
     void import("@/app/block/desktop-requests").then((m) => m.startDesktopRequests());
     void import("@/app/view/agent/endpoint-notice-cards").then((m) => m.startEndpointNoticeCards());
-    void Promise.all([import("@/app/block/agent-notices"), import("@/app/block/pane-confirms")]).then(([n, c]) => (n.startAgentNotices(), c.startPaneConfirms()));
+    void Promise.all([import("@/app/block/agent-notices"), import("@/app/block/pane-confirms"), import("@/app/deeplinks/agent-open-bridge")]).then(([n, c, d]) => (n.startAgentNotices(), c.startPaneConfirms(), d.startDeepLinkOpens()));
     // An agent's Vault requests are cards in its pane, and the Vault pane lists them all.
     void import("@/app/view/agent/components/vault-request-card/vault-request-cards").then((m) => m.startVaultRequestCards());
     // srv's calls to action (browser, SSH consent, widget installs) join the waiting tone and notification.

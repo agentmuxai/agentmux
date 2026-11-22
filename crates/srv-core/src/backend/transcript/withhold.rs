@@ -11,6 +11,10 @@
 //! - [`register`] keeps a value for the life of the process;
 //! - [`hold`] keeps a value for an owner, until its expiry, until the owner is [`release`]d (its token revoked, its
 //!   container removed, its device unpaired) or until the owner holds another value in its place;
+//! - [`hold_until`] keeps a value that works until a given time, and keeps it until then even when a renewed one
+//!   follows it: the value that was replaced still works, so it stays hidden until it expires;
+//! - [`hold_kept`] keeps a value with no known expiry (a refresh token, an API key) and keeps the values an owner held
+//!   before it, up to [`KEPT_PER_OWNER`], oldest dropped first;
 //! - a batch of registrations ([`register_all`]) costs one rebuild of the matcher, made when a line next needs it.
 
 use std::borrow::Cow;
@@ -23,6 +27,9 @@ pub const MARK: &str = "[withheld]";
 
 /// Shorter values are not registered: matching them would mangle ordinary text.
 pub const MIN_LEN: usize = 8;
+
+/// How many values with no known expiry an owner keeps with [`hold_kept`].
+pub const KEPT_PER_OWNER: usize = 8;
 
 struct Entry {
     /// Who holds the value; `None` for one kept for the life of the process.
@@ -77,6 +84,43 @@ impl Registry {
             self.stale = true;
         }
         self.reindex();
+    }
+
+    /// Keeps `value` for `owner` along with what the owner kept before, up to [`KEPT_PER_OWNER`] (the oldest is dropped).
+    fn add_kept(&mut self, owner: &str, value: &str) {
+        let value = value.trim();
+        let mine = |e: &Entry| e.owner.as_deref() == Some(owner);
+        if value.len() < MIN_LEN || self.entries.iter().any(|e| mine(e) && e.value == value) {
+            return;
+        }
+        self.entries.push(Entry { owner: Some(owner.to_string()), value: value.to_string(), expires_at: None });
+        if self.entries.iter().filter(|e| mine(e)).count() > KEPT_PER_OWNER {
+            if let Some(oldest) = self.entries.iter().position(|e| mine(e)) {
+                self.entries.remove(oldest);
+            }
+        }
+        self.stale = true;
+    }
+
+    /// Drops what `owner` holds, and what it holds with [`hold_until`].
+    fn release_all(&mut self, owner: &str) {
+        let until = format!("{owner}#");
+        let before = self.entries.len();
+        self.entries.retain(|e| e.owner.as_deref().map_or(true, |o| o != owner && !o.starts_with(&until)));
+        if self.entries.len() != before {
+            self.stale = true;
+            self.reindex();
+        }
+    }
+
+    /// Drops what every owner whose name starts with `prefix` holds.
+    fn release_prefix(&mut self, prefix: &str) {
+        let before = self.entries.len();
+        self.entries.retain(|e| !e.owner.as_deref().is_some_and(|o| o.starts_with(prefix)));
+        if self.entries.len() != before {
+            self.stale = true;
+            self.reindex();
+        }
     }
 
     fn release(&mut self, owner: &str) {
@@ -144,9 +188,33 @@ pub fn hold(owner: &str, value: &str, expires_at: Option<i64>) {
     write().add(Some(owner), value, expires_at);
 }
 
+/// Withholds `value` for `owner` until `expires_at` (unix ms), when it stops working. A renewed value the owner holds
+/// next with [`hold_until`] does not take its place: the value that was replaced still works until its own expiry,
+/// so it stays withheld until then. Holding the same value and expiry again changes nothing.
+pub fn hold_until(owner: &str, value: &str, expires_at: i64) {
+    write().add(Some(&format!("{owner}#{expires_at}")), value, Some(expires_at));
+}
+
+/// Withholds `value` for `owner` with no expiry, until the process ends or the owner is [`release`]d. The values the
+/// owner kept before it stay withheld too, up to [`KEPT_PER_OWNER`]: past that the oldest is dropped. Keeping the same
+/// value again changes nothing.
+pub fn hold_kept(owner: &str, value: &str) {
+    write().add_kept(owner, value);
+}
+
 /// Stops withholding what `owner` holds: its value no longer works.
 pub fn release(owner: &str) {
     write().release(owner);
+}
+
+/// [`release_all`] for every owner whose name starts with `prefix`.
+pub fn release_prefix(prefix: &str) {
+    write().release_prefix(prefix);
+}
+
+/// [`release`] for what `owner` holds and what it holds with [`hold_until`].
+pub fn release_all(owner: &str) {
+    write().release_all(owner);
 }
 
 /// One matcher for every value in every spelling, longest first so a spelling that contains another is
@@ -344,6 +412,63 @@ mod tests {
         assert_eq!(registry.entries.len(), 1);
         assert!(!shows(&mut registry, 2_000, "canary-again-0001-token"));
         assert!(shows(&mut registry, 5_000, "canary-again-0001-token"));
+    }
+
+    #[test]
+    fn a_renewed_value_does_not_end_the_withholding_of_the_one_it_replaced_before_that_one_expires() {
+        let mut registry = Registry::default();
+        // What hold_until does: one owner per expiry.
+        registry.add(Some("github:a#3600"), "canary-renew-0001-first", Some(3_600));
+        registry.add(Some("github:a#7200"), "canary-renew-0002-second", Some(7_200));
+        assert!(!shows(&mut registry, 3_599, "canary-renew-0001-first"), "the replaced one still works");
+        assert!(!shows(&mut registry, 3_599, "canary-renew-0002-second"));
+        assert!(shows(&mut registry, 3_600, "canary-renew-0001-first"), "dropped at its own expiry");
+        assert!(!shows(&mut registry, 3_600, "canary-renew-0002-second"));
+        assert_eq!(registry.entries.len(), 1, "the registry holds only what can still be used");
+        assert!(shows(&mut registry, 7_200, "canary-renew-0002-second"));
+        assert!(registry.entries.is_empty());
+    }
+
+    #[test]
+    fn kept_values_stay_until_the_cap_and_then_the_oldest_goes() {
+        let mut registry = Registry::default();
+        for n in 0..KEPT_PER_OWNER + 2 {
+            registry.add_kept("acct:a", &format!("canary-kept-{n:04}-value"));
+            registry.add_kept("acct:a", &format!("canary-kept-{n:04}-value"));
+        }
+        registry.add_kept("acct:b", "canary-kept-other-value");
+        assert_eq!(registry.entries.iter().filter(|e| e.owner.as_deref() == Some("acct:a")).count(), KEPT_PER_OWNER);
+        assert!(shows(&mut registry, 0, "canary-kept-0000-value"), "the oldest was dropped");
+        assert!(shows(&mut registry, 0, "canary-kept-0001-value"));
+        assert!(!shows(&mut registry, 0, "canary-kept-0002-value"));
+        assert!(!shows(&mut registry, 0, &format!("canary-kept-{:04}-value", KEPT_PER_OWNER + 1)));
+        assert!(!shows(&mut registry, 0, "canary-kept-other-value"), "another owner's values are its own");
+        assert!(!shows(&mut registry, u64::MAX as i64, "canary-kept-0002-value"), "no expiry");
+        registry.release("acct:a");
+        assert!(shows(&mut registry, 0, "canary-kept-0002-value"));
+    }
+
+    #[test]
+    fn release_prefix_drops_every_owner_under_the_prefix_and_no_other() {
+        let mut registry = Registry::default();
+        registry.add(Some("acct:a:access#100"), "canary-prefix-0001-first", Some(100));
+        registry.add_kept("acct:a:refresh", "canary-prefix-0002-second");
+        registry.add(Some("acct:b:refresh"), "canary-prefix-0003-other", None);
+        registry.release_prefix("acct:a:");
+        assert_eq!(registry.entries.len(), 1);
+        assert!(!shows(&mut registry, 0, "canary-prefix-0003-other"));
+    }
+
+    #[test]
+    fn release_all_drops_every_value_an_owner_holds_and_no_other_owners() {
+        let mut registry = Registry::default();
+        registry.add(Some("acct:a#100"), "canary-all-0001-first", Some(100));
+        registry.add(Some("acct:a#200"), "canary-all-0002-second", Some(200));
+        registry.add(Some("acct:a"), "canary-all-0003-plain", None);
+        registry.add(Some("acct:ab#200"), "canary-all-0004-other", Some(200));
+        registry.release_all("acct:a");
+        assert_eq!(registry.entries.len(), 1, "another owner whose name starts the same stays");
+        assert!(!shows(&mut registry, 0, "canary-all-0004-other"));
     }
 
     #[test]

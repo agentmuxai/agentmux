@@ -20,6 +20,7 @@ import { remoteSettingsMenuItems } from "@/app/view/remotes/open-remotes";
 import { BlockStatsBadge, statsBadgeShown } from "@/element/blockstats";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { ClosingLabel } from "./closing-label";
+import { KeptEndIcons } from "./pane-tab-actions";
 import { minimizeToHeader, useBlockConnection, useBodyContextMenu, useHeaderFit } from "./blockframe-hooks";
 import { useHeaderScrollRange } from "./header-scroll-range";
 import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
@@ -385,23 +386,6 @@ function OptMagnifyButton(props: { magnified: boolean; toggleMagnify: () => void
     return (
         <Show when={!props.alone || props.magnified}>
             <DeclIconButton decl={magnifyDecl()} className="block-frame-magnify" />
-        </Show>
-    );
-}
-
-/** The view's own end buttons. They live in the header's scrolling range
- *  (#29325): unlike the window controls, they scroll with the tabs. */
-function AuxEndIcons(props: { viewModel: ViewModel; nodeModel: NodeModel }): JSX.Element {
-    const buttons = createMemo(() => util.useAtomValueSafe(props.viewModel?.endIconButtons));
-    const closing = () => props.nodeModel.isClosing?.() ?? false;
-    return (
-        <Show when={!closing() && (buttons()?.length ?? 0) > 0}>
-            {/* In the range now, so it no longer inherits .block-frame-end-icons' double-click
-                isolation: a double click on one of these must not magnify the pane. */}
-            <div class="block-frame-header-aux" style={{ display: "contents" }} onDblClick={(e) => e.stopPropagation()}>
-                <For each={buttons()}>{(button) => <DeclIconButton decl={button} className="block-frame-end-extra" />}</For>
-                <div class="block-frame-btn-separator block-frame-end-extra" aria-hidden="true" />
-            </div>
         </Show>
     );
 }
@@ -799,7 +783,7 @@ function BlockFrame_Header(
                 </Show>
             </div>
             <div class="block-frame-header-spacer" aria-hidden="true" />
-            <AuxEndIcons viewModel={props.viewModel} nodeModel={props.nodeModel} />
+            <KeptEndIcons viewModel={props.viewModel} nodeModel={props.nodeModel} />
             </div>
             </div>
             {/* Away from the scrolling range, so an overflow box can never clip or follow it. */}

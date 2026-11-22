@@ -35,6 +35,7 @@ import type { ConnectivityStatus } from "@/types/rpc/ConnectivityStatus";
 import type { ContainerRuntimeStatus } from "@/types/rpc/ContainerRuntimeStatus";
 import type { ContainerStatus } from "@/types/rpc/ContainerStatus";
 import type { CredentialsRevokedEvent } from "@/types/rpc/CredentialsRevokedEvent";
+import type { DeepLinkOpenEvent } from "@/types/rpc/DeepLinkOpenEvent";
 import type { DesktopEvent } from "@/types/rpc/DesktopEvent";
 import type { DispatchActivityEvent } from "@/types/rpc/DispatchActivityEvent";
 import type { DispatchUpdatedEvent } from "@/types/rpc/DispatchUpdatedEvent";
@@ -172,6 +173,7 @@ export type MuxEventPayloads = {
   "container-status": ContainerStatus;
   controllerstatus: BlockControllerRuntimeStatus;
   cron_changed: null;
+  "deeplink:open": DeepLinkOpenEvent;
   "dispatch:activity": DispatchActivityEvent;
   "dispatch:updated": DispatchUpdatedEvent;
   "dock:clear": DockClearEvent;
@@ -314,6 +316,7 @@ export const TYPED_MUX_EVENTS = [
   "container-status",
   "controllerstatus",
   "cron_changed",
+  "deeplink:open",
   "dispatch:activity",
   "dispatch:updated",
   "dock:clear",

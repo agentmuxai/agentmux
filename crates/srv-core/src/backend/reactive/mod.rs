@@ -25,6 +25,7 @@ pub mod rate_limiter;
 pub mod registry;
 pub mod post_secrets;
 pub mod sanitize;
+pub mod sender;
 pub mod sensitive_audit;
 pub mod system_turn;
 pub mod sent_audit;

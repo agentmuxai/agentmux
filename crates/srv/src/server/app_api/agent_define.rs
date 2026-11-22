@@ -465,6 +465,9 @@ pub(crate) async fn agent_define_core(
         crate::backend::reserved_names::check_all(&[named]).map_err(|e| format!("agent.define: {e}"))?;
     }
     let mut def = new_definition(&cmd, &provider, cmd_model_vendor_base_url, now);
+    if !exists {
+        crate::backend::folder_overlap::check(&mstore, &def, None).map_err(|e| format!("agent.define: {e}"))?;
+    }
 
     // Returns Some(existing) if a row matched by name/slug already exists;
     // None if the row was freshly inserted (def.slug now holds the resolved slug).
@@ -632,6 +635,9 @@ fn update_existing(
     if !cmd.environment.is_empty() { updated.environment = cmd.environment.clone(); }
     // name update intentionally omitted — the slug is immutable; renaming would create a slug
     // mismatch. Use updateagent for renames.
+    if crate::backend::folder_overlap::folders_changed(&existing, &updated) {
+        crate::backend::folder_overlap::check(mstore, &updated, None).map_err(|e| format!("agent.define: {e}"))?;
+    }
     let did_update = mstore.agent_def_update(&mut updated)
         .map_err(|e| format!("agent.define: update: {e}"))?;
     if !did_update {

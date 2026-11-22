@@ -200,8 +200,7 @@ describe("the header", () => {
         const range = q(header, ".block-frame-header-scroll") as HTMLElement;
         expect(range).not.toBeNull();
         expect(q(range, ".block-frame-header-content")).not.toBeNull();
-        // The view's end buttons scroll with the tabs (#29325); the window controls stay pinned after the range,
-        // and the grip is pinned with them, just left of minimize.
+        // The window controls stay pinned after the range, and the grip is pinned with them, just left of minimize.
         expect(q(range, ".pane-grip")).toBeNull();
         const pinned = q(header, ".block-frame-end-icons") as HTMLElement;
         expect(pinned).not.toBeNull();
@@ -211,16 +210,15 @@ describe("the header", () => {
         expect(pinned.children[1]?.classList.contains("block-frame-minimize")).toBe(true);
     });
 
-    it("keeps the grip right of the view's own buttons and their separator, just left of minimize", () => {
+    it("draws none of the view's own buttons in the header, which keeps the grip just left of minimize", () => {
         const t = setup({ noHeader: false, meta: { view: "term" }, endButtons: 2 });
         const header = q(t.view.container, ".block-frame-default-header") as HTMLElement;
+        // They are the selected tab's now (PaneTabActions): the header holds the pane's own controls only.
+        expect(header.querySelector('[aria-label="Aux 0"], [title="Aux 0"]')).toBeNull();
+        expect(q(header, ".block-frame-btn-separator")).toBeNull();
+        expect(q(header, ".block-frame-end-kept")).toBeNull();
         const grip = q(header, ".pane-grip") as HTMLElement;
-        const separator = q(header, ".block-frame-header-aux .block-frame-btn-separator") as HTMLElement;
         const minimize = q(header, ".block-frame-minimize") as HTMLElement;
-        expect(separator).not.toBeNull();
-        const follows = (a: Element, b: Element) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
-        expect(follows(separator, grip)).toBe(true);
-        expect(follows(grip, minimize)).toBe(true);
         expect(grip.nextElementSibling).toBe(minimize);
     });
 

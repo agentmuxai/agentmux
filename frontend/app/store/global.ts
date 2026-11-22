@@ -24,6 +24,7 @@ import { allConnStatus } from "./conn-status";
 import { flashErrors, notificationPopoverMode, notifications, pushNotification } from "./flash-notifications";
 import * as MOS from "./mos";
 import { getFileSubject, onMuxEvent } from "./mps";
+import { enqueueMuxUpdate } from "./mos-update-queue";
 import { acceptMuxbusDelivery, MUXBUS_STATUS_EVENT } from "./muxbus-delivery";
 import {
     activeTabId,
@@ -236,7 +237,8 @@ function initGlobalSignals(initOpts: GlobalInitOptions) {
 }
 
 export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
-    onMuxEvent(WpsEvent.MuxObjUpdate, (update) => MOS.updateMuxObject(update));
+    // Applied at the next frame with the other updates pending then (mos-update-queue.ts), not one by one in this task.
+    onMuxEvent(WpsEvent.MuxObjUpdate, (update) => enqueueMuxUpdate(update));
     onMuxEvent(WpsEvent.BlockFile, (fileData) => {
         const fileSubject = getFileSubject(fileData.zoneid, fileData.filename);
         if (fileSubject != null) fileSubject.next(fileData);

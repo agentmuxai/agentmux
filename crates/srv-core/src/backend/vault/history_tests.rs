@@ -72,7 +72,7 @@ fn every_row_says_who_where_and_under_which_version_of_the_value() {
         "a new value is the next version; a use is under the version then current; details are 0"
     );
     let rows = history::history_for(&s, &id, Asker::Person, 100).unwrap();
-    let by_builder = rows.iter().find(|r| r.actor == "builder").unwrap();
+    let by_builder = rows.iter().find(|r| r.actor == "agent:builder").unwrap();
     assert_eq!(by_builder.actor_kind, "agent");
     assert!(rows.iter().filter(|r| r.actor == "you").all(|r| r.actor_kind == "person"));
     assert!(rows.iter().find(|r| r.action == "ran a command").unwrap().is_use);
@@ -311,7 +311,7 @@ fn generate_keeps_the_reason_in_the_history_and_why_still_works_as_the_older_nam
     let b = generate_entry(&s, generating("the older name still counts", None), "builder").unwrap();
     let reason_of = |id: &str| history::history_for(&s, id, Asker::Person, 5).unwrap().into_iter().find(|r| r.action == "generated").unwrap();
     let (ra, rb) = (reason_of(&a.id), reason_of(&b.id));
-    assert_eq!((ra.reason.as_str(), ra.actor.as_str(), ra.actor_kind.as_str(), ra.version), ("a webhook secret for task 27968", "builder", "agent", 1));
+    assert_eq!((ra.reason.as_str(), ra.actor.as_str(), ra.actor_kind.as_str(), ra.version), ("a webhook secret for task 27968", "agent:builder", "agent", 1));
     assert_eq!(rb.reason, "the older name still counts");
     assert!(!ra.target.contains("task 27968"), "the reason is its own column, not the target");
 }
