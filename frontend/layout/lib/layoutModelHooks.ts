@@ -9,6 +9,7 @@ import { fireAndForget } from "@/util/util";
 import type { Properties as CSSProperties } from "csstype";
 import { createEffect, createMemo, createRoot, createSignal, on, onCleanup, onMount, untrack } from "solid-js";
 import { getLayoutStateAtomFromTab } from "./layoutAtom";
+import { hasMinimizedNode } from "./layoutInvariants";
 import type { LayoutModel } from "./layoutModel";
 import { LayoutNode, NodeModel, TileLayoutContents } from "./types";
 
@@ -130,7 +131,18 @@ export function useTileLayout(tabAtom: () => Tab, tileContent: TileLayoutContent
     // Minimized-pane chips are sized from the chrome zoom (the header they
     // show scales with it), so re-lay out when it changes. Geometry only — no
     // tree change, so no rebalance (REPORT_MINIMIZED_PANE_CHROME_ZOOM_DESYNC_2026_10_10.md).
-    createEffect(on(chromeZoomAtom, () => layoutModel.updateTree(false), { defer: true }));
+    // With no chip in the tab the geometry does not depend on the zoom, so the pass is skipped: it
+    // would redo every pane's rectangle for nothing. A chip added later is laid out at the zoom
+    // then current (updateTree reads it untracked).
+    createEffect(
+        on(
+            chromeZoomAtom,
+            () => {
+                if (hasMinimizedNode(layoutModel.treeState?.rootNode)) layoutModel.updateTree(false);
+            },
+            { defer: true }
+        )
+    );
 
     return layoutModel;
 }
