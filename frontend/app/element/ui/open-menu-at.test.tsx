@@ -53,6 +53,11 @@ describe("menuEntriesFrom", () => {
         expect(click).toHaveBeenCalledTimes(1);
     });
 
+    it("carries a description through to the kit row", () => {
+        const [row] = menuEntriesFrom([{ label: "Steady", description: "Keep it going." }]);
+        expect(row.description).toBe("Keep it going.");
+    });
+
     it("reads `checked` with no type as a choice among peers: a radio that keeps its swatch", () => {
         const [current, other, plain] = menuEntriesFrom([
             { label: "Red", checked: true, swatchColor: "#f00" },

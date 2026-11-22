@@ -73,6 +73,7 @@ mod self_keys;
 mod serve;
 mod tool_schemas;
 use tool_schemas::*;
+mod window_blackout;
 mod window_capture;
 use window_capture::*;
 

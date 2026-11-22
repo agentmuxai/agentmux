@@ -44,7 +44,7 @@ export function PaneRequestDock(props: { blockId: string }): JSX.Element {
                         <span class="pane-request-more-count">{rest().length} more:</span>
                         <For each={rest()}>
                             {(r) => (
-                                <Button tone="quiet" class="pane-request-more-item" data-operator-only={r.operatorOnly ? "" : undefined} onClick={() => setPicked(r.id)}>
+                                <Button tone="quiet" class="pane-request-more-item" data-request-source={r.source} data-operator-only={r.operatorOnly ? "" : undefined} onClick={() => setPicked(r.id)}>
                                     {r.summary ?? r.source}
                                 </Button>
                             )}

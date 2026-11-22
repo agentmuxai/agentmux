@@ -443,6 +443,15 @@
     }
   },
   {
+    "event": "capture:mask",
+    "payloadTs": {
+      "imports": [
+        "CaptureMaskEvent"
+      ],
+      "name": "CaptureMaskEvent"
+    }
+  },
+  {
     "event": "checks-flow",
     "payloadTs": {
       "imports": [

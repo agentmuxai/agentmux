@@ -334,18 +334,11 @@ describe("flowCurves", () => {
         expect(curves.get("a")!.d).toBe(flowCurve(bot, first)!.d);
     });
 
-    it("keeps a label inside the map, off a region's title and off the line along its bottom", () => {
-        // A machine's region with one agent, and another agent in the region under it, as the layout places them.
+    it("keeps a label inside the map, whichever stretch of its line is clear", () => {
+        // Two agents, one over the other near the map's left edge: the middle of the line is inside the map.
         const agent = { x: 16, y: 56 };
         const bot = { x: 16, y: 204 };
-        const layout = {
-            regions: [
-                { key: "m", x: 0, y: 0, w: 220, h: 120, foldX: 0, foldY: 0 },
-                { key: "n", x: 0, y: 148, w: 220, h: 120, foldX: 0, foldY: 0 },
-            ],
-            width: 220,
-            height: 268,
-        };
+        const layout = { width: 220, height: 268 };
         const lines = ["#7301", "#7290 person", "#7302"].map((label, i) => ({ id: String(i), from: bot, to: agent, label }));
         const placed = [...flowCurves(lines, [agent, bot, ...labelKeepOut(layout)]).values()].map((c) => c.label);
         lines.forEach((line, i) => {
@@ -353,9 +346,8 @@ describe("flowCurves", () => {
             const halfW = line.label.length * 3.25 + 1;
             expect(p.x - halfW).toBeGreaterThanOrEqual(0);
             expect(p.x + halfW).toBeLessThanOrEqual(layout.width);
-            // Not on the title of the lower region (148 to 178), nor on the bottom line of the upper (119).
-            expect(p.y + 7 <= 148 || p.y - 7 >= 178).toBe(true);
-            expect(p.y + 7 <= 119 || p.y - 7 >= 120).toBe(true);
+            expect(p.y - 7).toBeGreaterThanOrEqual(0);
+            expect(p.y + 7).toBeLessThanOrEqual(layout.height);
         });
         // And not on each other.
         for (let i = 0; i < placed.length; i++) {

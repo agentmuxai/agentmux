@@ -175,6 +175,7 @@ pub fn install(state: AppState) {
     if tokio::runtime::Handle::try_current().is_err() {
         return;
     }
+    crate::identity::staged_watch::start(sign_in_watch.0.clone());
     crate::identity::sign_in_watch::start(sign_in_watch.0, sign_in_watch.1);
     tokio::spawn(async {
         let Some(rt) = RUNTIME.get() else { return };

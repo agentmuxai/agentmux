@@ -15,10 +15,10 @@
     overflow: hidden;
 }
 
-// ── Sections ─────────────────────────────────────────────────────────────
-// Broadcast and Supervise sit above the list in one raised compartment, each a header that opens and
-// closes its body. The body under them is a flex column with a definite size, and the one thing in it that
-// scrolls is `.swarm-agents-pane`: the sections, the filter and the list move together under one scrollbar.
+// ── The body ──────────────────────────────────────────────────────────────
+// The body under the account strip is a flex column with a definite size, and the one thing in it that
+// scrolls is `.swarm-agents-pane`: the Filter, the Broadcast input, the selection's row and the list move
+// together under one scrollbar.
 
 .swarm-section-body {
     display: flex;
@@ -29,52 +29,8 @@
     overflow: hidden;
 }
 
-.swarm-section-block__head {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    width: 100%;
-    padding: 6px 10px;
-    background: transparent;
-    border: 0;
-    color: inherit;
-    font: inherit;
-    font-weight: 600;
-    text-align: left;
-    cursor: pointer;
-
-    &:hover {
-        background: var(--hover-bg-color);
-    }
-
-    &:focus-visible {
-        @include mixins.focus-ring-inset(2px);
-    }
-}
-
-.swarm-section-block__chevron {
-    width: 10px;
-    font-size: var(--text-xs);
-    color: var(--secondary-text-color);
-}
-
-.swarm-section-block__icon {
-    color: var(--secondary-text-color);
-}
-
-.swarm-section-block__body > .swarm-fleet-toolbar,
-.swarm-section-block__body > .swarm-supervisor-settings,
-.swarm-section-block__body > .swarm-broadcast-dock {
-    background: transparent;
-    margin: 0;
-    max-height: none;
-    border-bottom: 0;
-    overflow: visible;
-}
-
-// The agent list's side of the body: the Supervisor's and Broadcast's content, never unmounted by a switch.
-// The pane's only scroll container: nothing inside it sets a height or an overflow of its own, so opening a
-// section's settings pushes the list down instead of opening a second scroll area.
+// The agent list's side of the body. The pane's only scroll container: nothing inside it sets a height or an
+// overflow of its own.
 .swarm-agents-pane {
     display: flex;
     flex: 1 1 0;
@@ -1171,40 +1127,19 @@
     flex-shrink: 0;
 }
 
+// The Swarm's one line about the Supervisor while it is switched off (swarm-fleet-toolbar.tsx).
+.swarm-fleet-supervisor-off {
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+// Stop and Mode, on the selection's row (swarm-agent-list.tsx).
 .swarm-fleet-toolbar {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 10px;
-    background: var(--hover-bg-color);
-    border-bottom: 1px solid var(--border-color);
+    padding: 4px 8px 0;
     flex-wrap: wrap;
-}
-
-// The Supervisor's and Broadcast's own controls: one raised surface apart from the agent list,
-// which keeps the pane background. One custom property for the surface, so a shared compartment
-// token can replace it in one line. It has no height or overflow of its own: the pane scrolls.
-.swarm-compartment {
-    --swarm-compartment-bg: var(--hover-bg-color);
-    display: flex;
-    flex: 0 0 auto;
-    flex-direction: column;
-    gap: 1px;
-    margin: 6px 8px;
-    background: var(--swarm-compartment-bg);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-
-    // Their own bars and dividers become the compartment's inner structure.
-    > .swarm-fleet-result-panel {
-        background: transparent;
-        margin: 0;
-        border-bottom: 0;
-    }
-
-    > * + * {
-        border-top: 1px solid var(--border-color);
-    }
 }
 
 // Fleet toolbar buttons are element/ui Buttons: primary accent, destructive
@@ -1442,101 +1377,40 @@
     color: var(--secondary-text-color);
 }
 
-// The Supervisor section's settings: one line (the master switch), then the limits when opened.
-.swarm-supervisor-settings {
-    border-bottom: 1px solid var(--border-color);
-    padding: 6px 10px;
-
-    &-line {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        flex-wrap: wrap;
-    }
-
-    &-state {
-        font-weight: 600;
-        font-size: var(--text-sm);
-    }
-
-    &-hint {
-        color: var(--secondary-text-color);
-        font-size: var(--text-sm);
-    }
-
-    &-toggle {
-        margin-left: auto;
-    }
-
-    &-panel {
-        margin-top: 6px;
-    }
-
-    &-note {
-        color: var(--secondary-text-color);
-        font-size: var(--text-sm);
-        padding: 6px 0 2px;
-    }
-}
-
-// The Broadcast section: the composer at the top of the compartment, then the recent broadcasts.
+// The Broadcast input (swarm-broadcast.tsx): a sibling of the Filter box, under it, with the same padding.
 .swarm-broadcast-dock {
     flex-shrink: 0;
-    padding: 8px 10px;
+    padding: var(--space-1) var(--space-2);
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--space-1);
 }
 
-// One line to start (the kit's textarea is four); swarm-broadcast.tsx sets the height as the text grows.
+// One line to start (the kit's textarea is four); swarm-broadcast.tsx sets the height as the text grows, and the
+// person can drag it taller.
 .swarm-broadcast-dock textarea.swarm-broadcast-input {
     width: 100%;
     min-height: var(--ui-height);
-    // The dock scrolls when it is short; the box keeps the height it fits to.
     flex-shrink: 0;
     resize: vertical;
 }
 
-.swarm-broadcast-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-}
-
-// The hint and, while a paced broadcast goes out, the count shown in its place. Both sit in one grid
-// cell and the hint stays laid out (hidden) under the count, so the row keeps the hint's height where
-// the hint wraps to two lines and the count is one.
-.swarm-broadcast-hint {
-    display: grid;
-    color: var(--secondary-text-color);
-    font-size: var(--text-sm);
-}
-
-.swarm-broadcast-hint > * {
-    grid-area: 1 / 1;
-}
-
-.swarm-broadcast-hint-text.is-covered {
-    visibility: hidden;
-}
-
-.swarm-broadcast-recent-row {
+// The line under the box: how the last send went, that agents must be selected, or why some are not reached.
+.swarm-broadcast-note {
     display: flex;
     flex-direction: column;
-    padding: 4px 0;
-    border-top: 1px solid var(--border-color);
-}
-
-.swarm-broadcast-recent-text {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.swarm-broadcast-recent-meta {
+    gap: 2px;
+    font-size: var(--text-xs);
     color: var(--secondary-text-color);
-    font-size: var(--text-sm);
+
+    &[data-kind="pick"],
+    &[data-kind="failed"] {
+        color: var(--warning-text-color);
+    }
+
+    .swarm-fleet-broadcast-gap {
+        flex-basis: auto;
+    }
 }
 
 // ── Stopped agents: created agents with no pane and no process (swarm-stopped-agents.tsx) ──

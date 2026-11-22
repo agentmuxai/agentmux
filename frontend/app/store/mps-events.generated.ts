@@ -27,6 +27,7 @@ import type { BlockRefEvent } from "@/types/rpc/BlockRefEvent";
 import type { BlockRevealEvent } from "@/types/rpc/BlockRevealEvent";
 import type { BrowserPauseAll } from "@/types/rpc/BrowserPauseAll";
 import type { BtwAnswerChunkEvent } from "@/types/rpc/BtwAnswerChunkEvent";
+import type { CaptureMaskEvent } from "@/types/rpc/CaptureMaskEvent";
 import type { ChecksFlowEvent } from "@/types/rpc/ChecksFlowEvent";
 import type { CompactionStarted } from "@/types/rpc/CompactionStarted";
 import type { ConfigEvent } from "@/types/rpc/ConfigEvent";
@@ -164,6 +165,7 @@ export type MuxEventPayloads = {
   browserpauseall: BrowserPauseAll;
   "browserprofiles:changed": null;
   btw_answer_chunk: BtwAnswerChunkEvent;
+  "capture:mask": CaptureMaskEvent;
   "checks-flow": ChecksFlowEvent;
   compaction_started: CompactionStarted;
   config: ConfigEvent;
@@ -307,6 +309,7 @@ export const TYPED_MUX_EVENTS = [
   "browserpauseall",
   "browserprofiles:changed",
   "btw_answer_chunk",
+  "capture:mask",
   "checks-flow",
   "compaction_started",
   "config",

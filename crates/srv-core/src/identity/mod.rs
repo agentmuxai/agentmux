@@ -40,6 +40,7 @@ pub mod browser_credential_store;
 pub mod cleanup;
 pub mod credential_watch;
 pub mod sign_in_watch;
+pub mod staged_watch;
 pub mod foreign_dir;
 pub mod aws_broker;
 pub mod github_connect;
