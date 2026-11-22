@@ -7,7 +7,6 @@
 //! does not report itself as remote-controlled (Chromium turns that report on for a debugging pipe, an automation or headless switch).
 //! A prototype for the decision in task 48354: no agent driving, no windows list, a US keyboard, a fixed screen size.
 
-mod confine;
 mod frames;
 mod keymap;
 mod policy;
@@ -29,6 +28,8 @@ use crate::server::local_session_routes::WS_PROTOCOL;
 
 /// `1` in the environment turns screen mode on (with the streamed browser on, and the pane asking for `mode=screen`).
 pub const ENABLE_ENV: &str = "AGENTMUX_STREAMED_BROWSER_SCREEN";
+/// The setting that allows more than one screen session at once, up to `MAX_SESSIONS` (a test host).
+pub const MAX_ENV: &str = "AGENTMUX_STREAMED_BROWSER_SCREEN_MAX";
 /// At most this many screen panes at once: each is a browser and a screen of its own.
 const MAX_SESSIONS: usize = 4;
 /// Frames per second at most; a screen that did not change makes none.
@@ -59,19 +60,11 @@ impl Drop for Place {
     }
 }
 
-/// A hosted task that holds one screen-mode browser and nothing else (the task-scoped policy form): it serves no streamed browser, and one
-/// screen session.
-pub fn task_form() -> bool {
-    policy::form() == policy::Form::Task
-}
-
-/// How many screen sessions at once: a task-scoped container holds one browser.
-fn limit() -> usize {
-    if task_form() {
-        1
-    } else {
-        MAX_SESSIONS
-    }
+/// Screen mode holds its browser's policy in the folder of the container (or dedicated machine) it runs in, so a server with screen mode on serves
+/// no streamed browser (the two would share one policy file) and, by default, one screen session: a hosted task holds one browser. A test host
+/// may allow more with `MAX_ENV`.
+pub fn limit() -> usize {
+    std::env::var(MAX_ENV).ok().and_then(|v| v.parse::<usize>().ok()).map_or(1, |n| n.clamp(1, MAX_SESSIONS))
 }
 
 pub fn enabled() -> bool {
@@ -123,7 +116,7 @@ fn capture(display: &str, tx: mpsc::Sender<Vec<u8>>) -> Result<(), String> {
 
 /// Run one pane until its socket closes, its screen goes, or the sign-in behind it ends.
 async fn run(mut socket: WebSocket, start: Start, ended: impl std::future::Future<Output = ()>) {
-    let session = match session::start(start.w, start.h, &start.url).await {
+    let session = match session::start(start.w, start.h, &start.url, OPEN.load(Ordering::SeqCst) <= 1).await {
         Ok(s) => s,
         Err(e) => {
             tracing::warn!(error = %e, "screen browser: a pane could not be opened");

@@ -37,8 +37,9 @@ pub fn policy_dir(binary: &Path) -> PathBuf {
 }
 
 /// The policy: the blocked addresses, no developer tools, no extensions, no sign-in to the browser itself, no file dialogs and no downloads
-/// (as in the streamed pane, which denies downloads).
-pub fn wanted() -> Value {
+/// (as in the streamed pane, which denies downloads), and the network the browser has: only the address proxy on `proxy_port` (every name is
+/// looked up by the proxy), no QUIC and no DNS over HTTPS. The browser is started with none of these as switches.
+pub fn wanted(proxy_port: u16) -> Value {
     json!({
         "URLBlocklist": BLOCKED,
         "DeveloperToolsAvailability": 2,
@@ -46,17 +47,27 @@ pub fn wanted() -> Value {
         "BrowserSignin": 0,
         "AllowFileSelectionDialogs": false,
         "DownloadRestrictions": 3,
+        "ProxyMode": "fixed_servers",
+        "ProxyServer": format!("socks5://127.0.0.1:{proxy_port}"),
+        "ProxyBypassList": "<-loopback>",
+        "QuicAllowed": false,
+        "DnsOverHttpsMode": "off",
     })
 }
 
 /// Does the policy in `text` block every address in `BLOCKED`, turn the developer tools off, and allow no file dialog and no download?
-pub fn holds(text: &str) -> bool {
+pub fn holds(text: &str, proxy_port: u16) -> bool {
     let Ok(v) = serde_json::from_str::<Value>(text) else { return false };
     let listed: Vec<&str> = v["URLBlocklist"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
     BLOCKED.iter().all(|b| listed.contains(b))
         && v["DeveloperToolsAvailability"] == json!(2)
         && v["AllowFileSelectionDialogs"] == json!(false)
         && v["DownloadRestrictions"] == json!(3)
+        && v["ProxyMode"] == json!("fixed_servers")
+        && v["ProxyServer"] == json!(format!("socks5://127.0.0.1:{proxy_port}"))
+        && v["ProxyBypassList"] == json!("<-loopback>")
+        && v["QuicAllowed"] == json!(false)
+        && v["DnsOverHttpsMode"] == json!("off")
 }
 
 /// Is the browser a snap or a flatpak, or the shim that starts one? Such a browser reads its policy from inside its own sandbox, not from the
@@ -78,37 +89,6 @@ pub fn sandboxed_install(binary: &Path) -> bool {
     text.starts_with("#!") && (text.contains("/snap/") || text.contains("snap run") || text.contains("flatpak run"))
 }
 
-/// Where the browser's policy comes from: a folder made for this one instance (a mount namespace, the shared-host form), or the folder of a
-/// container that holds only this browser (the task-scoped form, chosen by `FORM_ENV=task`). Never a machine-wide file on a machine that also
-/// runs a streamed browser.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Form {
-    Namespace,
-    Task,
-}
-
-/// The setting that says this server is a hosted task that holds one screen-mode browser and no streamed browser.
-pub const FORM_ENV: &str = "AGENTMUX_STREAMED_BROWSER_SCREEN_POLICY";
-
-pub fn form() -> Form {
-    form_of(std::env::var(FORM_ENV).ok().as_deref())
-}
-
-fn form_of(setting: Option<&str>) -> Form {
-    if setting == Some("task") {
-        Form::Task
-    } else {
-        Form::Namespace
-    }
-}
-
-/// Write this instance's policy into `dir` (made if it is not there): the folder the namespace puts where the browser reads its policy.
-pub fn write_instance(dir: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(dir).map_err(|e| format!("cannot make the browser's policy folder: {e}"))?;
-    let text = serde_json::to_string_pretty(&wanted()).map_err(|e| e.to_string())?;
-    std::fs::write(dir.join(FILE_NAME), text).map_err(|e| format!("cannot write the browser's policy: {e}"))
-}
-
 /// Whether any of these program names is a Chrome or Chromium (a process's `comm`).
 fn any_browser(names: &[String]) -> bool {
     names.iter().any(|n| n.starts_with("chrome") || n.starts_with("chromium"))
@@ -124,36 +104,29 @@ fn running_programs() -> Vec<String> {
         .collect()
 }
 
-/// The browser will start under the policy for its form, or the words that say what is missing. Never writes a machine-wide file.
-/// Namespace form: bubblewrap must be there. Task form: the container's policy file must hold, and no browser may already be running in
-/// the container (a streamed browser sharing it would be bound by the same file).
-pub fn ensure(binary: &Path) -> Result<(), String> {
+/// The browser will start under the policy, or the words that say what is missing. The policy is the folder of the container (or dedicated
+/// machine) this server runs in, which holds this one browser: it is never written by the server, and screen mode serves no streamed browser
+/// next to it. `first` is true for the first screen session: no other browser may already be running in the container then.
+pub fn ensure(binary: &Path, first: bool, proxy_port: u16) -> Result<(), String> {
     if sandboxed_install(binary) {
         return Err(format!(
             "screen mode does not run with {}: a snap or flatpak browser reads its policy from inside its own sandbox, where this check cannot see it. Use the Google Chrome or Chromium package",
             binary.display()
         ));
     }
-    match form() {
-        Form::Namespace => which::which(super::confine::PROGRAM).map(|_| ()).map_err(|_| {
-            "screen mode needs bubblewrap (the `bwrap` program) to give each browser its own policy folder; install it (for example `apt install bubblewrap`). It does not write a machine-wide policy file".to_string()
-        }),
-        Form::Task => {
-            let path = policy_dir(binary).join(FILE_NAME);
-            if !std::fs::read_to_string(&path).is_ok_and(|t| holds(&t)) {
-                return Err(missing_words(&path));
-            }
-            if any_browser(&running_programs()) {
-                return Err("screen mode in a task-scoped container needs the container to hold this one browser: another browser is already running in it".to_string());
-            }
-            Ok(())
-        }
+    let path = policy_dir(binary).join(FILE_NAME);
+    if !std::fs::read_to_string(&path).is_ok_and(|t| holds(&t, proxy_port)) {
+        return Err(missing_words(&path, proxy_port));
     }
+    if first && any_browser(&running_programs()) {
+        return Err("screen mode needs the container to hold this one browser: another browser is already running in it".to_string());
+    }
+    Ok(())
 }
 
 /// What to install, in words: the file, and what it holds.
-fn missing_words(path: &Path) -> String {
-    let text = serde_json::to_string_pretty(&wanted()).unwrap_or_default();
+fn missing_words(path: &Path, proxy_port: u16) -> String {
+    let text = serde_json::to_string_pretty(&wanted(proxy_port)).unwrap_or_default();
     format!(
         "screen mode needs the browser's managed policy file {} (it blocks local files, the browser's own pages, developer tools, file dialogs and downloads); it is missing or does not hold. Install it as the machine's administrator, with this content:
 {text}",
@@ -167,8 +140,9 @@ mod tests {
 
     #[test]
     fn the_wanted_policy_holds_and_blocks_what_the_streamed_pane_blocks() {
-        let text = wanted().to_string();
-        assert!(holds(&text));
+        let text = wanted(41234).to_string();
+        assert!(holds(&text, 41234));
+        assert!(!holds(&text, 41235), "the policy names the proxy's port");
         for scheme in ["file:", "chrome:", "chrome-untrusted:", "chrome-extension:", "devtools:", "view-source:"] {
             assert!(BLOCKED.iter().any(|b| b.starts_with(scheme)), "{scheme} is not blocked");
         }
@@ -176,19 +150,19 @@ mod tests {
 
     #[test]
     fn a_policy_that_leaves_something_open_does_not_hold() {
-        assert!(!holds("not json"));
-        assert!(!holds("{}"));
-        let mut v = wanted();
+        assert!(!holds("not json", 1));
+        assert!(!holds("{}", 1));
+        let mut v = wanted(1);
         v["DeveloperToolsAvailability"] = json!(1);
-        assert!(!holds(&v.to_string()));
+        assert!(!holds(&v.to_string(), 1));
         for (key, open) in [("AllowFileSelectionDialogs", json!(true)), ("DownloadRestrictions", json!(0))] {
-            let mut v = wanted();
+            let mut v = wanted(1);
             v[key] = open;
-            assert!(!holds(&v.to_string()), "{key} left open still holds");
+            assert!(!holds(&v.to_string(), 1), "{key} left open still holds");
         }
-        let mut v = wanted();
+        let mut v = wanted(1);
         v["URLBlocklist"] = json!(BLOCKED.iter().filter(|b| !b.starts_with("file")).collect::<Vec<_>>());
-        assert!(!holds(&v.to_string()));
+        assert!(!holds(&v.to_string(), 1));
     }
 
     #[test]
@@ -206,22 +180,7 @@ exec /snap/bin/chromium \"$@\"
 exec /opt/google/chrome/chrome \"$@\"
 ").unwrap();
         assert!(!sandboxed_install(&plain));
-        assert!(ensure(&shim).unwrap_err().contains("snap or flatpak"));
-    }
-
-    #[test]
-    fn the_form_is_the_shared_host_one_unless_the_task_form_is_asked_for() {
-        assert_eq!(form_of(None), Form::Namespace);
-        assert_eq!(form_of(Some("")), Form::Namespace);
-        assert_eq!(form_of(Some("task")), Form::Task);
-    }
-
-    #[test]
-    fn the_instances_policy_is_written_and_holds() {
-        let dir = tempfile::tempdir().unwrap();
-        write_instance(&dir.path().join("managed")).unwrap();
-        let text = std::fs::read_to_string(dir.path().join("managed").join(FILE_NAME)).unwrap();
-        assert!(holds(&text));
+        assert!(ensure(&shim, true, 1).unwrap_err().contains("snap or flatpak"));
     }
 
     #[test]
@@ -236,7 +195,7 @@ exec /opt/google/chrome/chrome \"$@\"
     fn a_missing_policy_is_refused_in_words_and_nothing_is_written() {
         let dir = std::env::temp_dir().join("agentmux-policy-check-only");
         let path = dir.join(FILE_NAME);
-        let words = missing_words(&path);
+        let words = missing_words(&path, 41234);
         assert!(words.contains("DownloadRestrictions") && words.contains("URLBlocklist") && words.contains(FILE_NAME), "{words}");
         assert!(!path.exists(), "checking must not write the file");
     }

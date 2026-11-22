@@ -64,7 +64,7 @@ async fn screen_mode_real() {
         eprintln!("screen_mode_real: no Xvfb or no Chrome here; nothing run");
         return;
     }
-    let session = session::start(800, 600, PAGE).await.expect("the screen and the browser start");
+    let session = session::start(800, 600, PAGE, true).await.expect("the screen and the browser start");
     let screen = x::Screen::connect(&session.display).expect("the screen is reachable");
     assert_eq!((screen.w, screen.h), (800, 600));
     // Under the browser's own tab strip and address bar: the page.
@@ -104,7 +104,7 @@ async fn screen_mode_window_stays_put_real() {
         eprintln!("screen_mode_window_stays_put_real: no Xvfb, openbox or Chrome here; nothing run");
         return;
     }
-    let session = session::start(800, 600, PAGE).await.expect("the screen and the browser start");
+    let session = session::start(800, 600, PAGE, true).await.expect("the screen and the browser start");
     let screen = x::Screen::connect(&session.display).expect("the screen is reachable");
     wait_for_colour(&screen, 400, 400, [0, 0, 255], 30).await.expect("the page is up");
     let alt = keymap::keycode("AltLeft").unwrap();

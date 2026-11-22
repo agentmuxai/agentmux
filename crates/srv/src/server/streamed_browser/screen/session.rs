@@ -32,15 +32,11 @@ pub fn xvfb_args(w: u32, h: u32) -> Vec<String> {
 }
 
 /// The arguments of the browser: a profile of its own, the address proxy, a window the size of the screen, and the page to open.
-pub fn chrome_args(profile: &Path, proxy_port: u16, w: u32, h: u32, url: &str, no_sandbox: bool, has_wm: bool) -> Vec<String> {
+pub fn chrome_args(profile: &Path, w: u32, h: u32, url: &str, no_sandbox: bool, has_wm: bool) -> Vec<String> {
     let mut a = vec![
         format!("--user-data-dir={}", profile.display()),
         "--no-first-run".to_string(),
         "--no-default-browser-check".to_string(),
-        format!("--proxy-server=socks5://127.0.0.1:{proxy_port}"),
-        "--proxy-bypass-list=<-loopback>".to_string(),
-        "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1".to_string(),
-        "--disable-quic".to_string(),
         "--force-webrtc-ip-handling-policy=disable_non_proxied_udp".to_string(),
         "--dns-prefetch-disable".to_string(),
         "--window-position=0,0".to_string(),
@@ -67,30 +63,15 @@ fn command(program: &Path, args: &[String], display: Option<&str>) -> Command {
     c
 }
 
-/// The browser's command, with its policy for this one instance: in a task-scoped container the container's own policy folder is the instance's;
-/// on a shared host the browser starts inside its own mount namespace, where only the policy folder is this instance's own.
-fn browser_command(chrome_bin: &Path, args: &[String], profile: &Path, display: &str) -> Result<Command, String> {
-    if super::policy::form() == super::policy::Form::Task {
-        return Ok(command(chrome_bin, args, Some(display)));
-    }
-    let policy_src = profile.join("policy");
-    super::policy::write_instance(&policy_src)?;
-    let bwrap = which::which(super::confine::PROGRAM).map_err(|_| "screen mode needs bubblewrap (the `bwrap` program)".to_string())?;
-    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-    let mut all = super::confine::args(&policy_src, &super::policy::policy_dir(chrome_bin), home.as_deref());
-    all.push(chrome_bin.display().to_string());
-    all.extend(args.iter().cloned());
-    Ok(command(&bwrap, &all, Some(display)))
-}
-
 /// Start the screen, the window manager and the browser, and say which display they are on.
-pub async fn start(w: u32, h: u32, url: &str) -> Result<Session, String> {
+pub async fn start(w: u32, h: u32, url: &str, first: bool) -> Result<Session, String> {
     let xvfb_bin = which::which("Xvfb").map_err(|_| "this server has no Xvfb to make a virtual screen with".to_string())?;
     let chrome_bin = chromium::find_binary()?;
-    // What the browser may open is its managed policy: nothing starts without it.
-    super::policy::ensure(&chrome_bin)?;
     // The one way out for the browser, as for every pane: if the proxy cannot start, nothing runs.
     let proxy_port = super::super::address_proxy::start().await.map_err(|e| format!("the browser's address proxy did not start: {e}"))?;
+    // What the browser may open and the network it has (the proxy's port) are its managed policy: nothing starts without it.
+    super::policy::ensure(&chrome_bin, first, proxy_port)?;
+
 
     let mut xvfb = command(&xvfb_bin, &xvfb_args(w, h), None).stdout(Stdio::piped()).spawn().map_err(|e| format!("cannot start Xvfb: {e}"))?;
     let out = xvfb.stdout.take().ok_or("Xvfb has no output")?;
@@ -109,8 +90,8 @@ pub async fn start(w: u32, h: u32, url: &str) -> Result<Session, String> {
         Err(_) => None,
     };
     let no_sandbox = std::env::var(chromium::NO_SANDBOX_ENV).is_ok_and(|v| v == "1");
-    let args = chrome_args(profile.path(), proxy_port, w, h, url, no_sandbox, wm.is_some());
-    let chrome = browser_command(&chrome_bin, &args, profile.path(), &display)?
+    let args = chrome_args(profile.path(), w, h, url, no_sandbox, wm.is_some());
+    let chrome = command(&chrome_bin, &args, Some(&display))
         .spawn()
         .map_err(|e| format!("cannot start {}: {e}", chrome_bin.display()))?;
     Ok(Session { display, _xvfb: xvfb, _wm: wm, _chrome: chrome, _profile: profile })
@@ -122,7 +103,7 @@ mod tests {
 
     #[test]
     fn the_browser_is_started_like_a_persons_browser() {
-        let a = chrome_args(Path::new("/tmp/p"), 41234, 1024, 640, "https://a.example/", false, true);
+        let a = chrome_args(Path::new("/tmp/p"), 1024, 640, "https://a.example/", false, true);
         for banned in ["--remote-debugging", "--enable-automation", "--headless", "--disable-blink-features", "--enable-blink-features", "--user-agent", "--load-extension", "--disable-web-security"] {
             assert!(!a.iter().any(|x| x.starts_with(banned)), "{banned} is not allowed: {a:?}");
         }
@@ -133,22 +114,23 @@ mod tests {
     }
 
     #[test]
-    fn the_browser_has_no_way_around_the_address_proxy() {
-        let a = chrome_args(Path::new("/tmp/p"), 41234, 800, 600, "about:blank", false, false);
-        assert!(a.contains(&"--proxy-server=socks5://127.0.0.1:41234".to_string()));
-        assert!(a.contains(&"--proxy-bypass-list=<-loopback>".to_string()));
-        assert!(a.contains(&"--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1".to_string()));
-        assert!(a.contains(&"--disable-quic".to_string()));
-        assert!(!a.iter().any(|x| x == "--no-proxy-server" || x.starts_with("--proxy-auto-detect") || x.starts_with("--proxy-pac-url")));
+    fn the_browser_gets_its_network_from_policy_and_no_switch_that_chrome_calls_unsupported() {
+        let a = chrome_args(Path::new("/tmp/p"), 800, 600, "about:blank", false, false);
+        // The network is the container's policy (policy.rs), not switches: no switch that Chrome calls unsupported, no way around the proxy.
+        assert!(!a.iter().any(|x| x.starts_with("--proxy-") || x == "--no-proxy-server" || x.starts_with("--host-resolver-rules") || x == "--disable-quic"), "{a:?}");
+        let policy = super::super::policy::wanted(41234);
+        assert_eq!(policy["ProxyServer"], "socks5://127.0.0.1:41234");
+        assert_eq!(policy["ProxyMode"], "fixed_servers");
+        assert_eq!(policy["QuicAllowed"], false);
     }
 
     #[test]
     fn the_window_is_the_screen_and_the_demo_sandbox_switch_is_only_asked_for() {
-        let a = chrome_args(Path::new("/tmp/p"), 1, 1280, 720, "about:blank", true, false);
+        let a = chrome_args(Path::new("/tmp/p"), 1280, 720, "about:blank", true, false);
         assert!(a.contains(&"--window-size=1280,720".to_string()) && a.contains(&"--window-position=0,0".to_string()));
         assert!(a.contains(&"--no-sandbox".to_string()));
         assert!(!a.contains(&"--start-maximized".to_string()));
-        assert!(chrome_args(Path::new("/tmp/p"), 1, 1280, 720, "about:blank", false, true).contains(&"--start-maximized".to_string()));
+        assert!(chrome_args(Path::new("/tmp/p"), 1280, 720, "about:blank", false, true).contains(&"--start-maximized".to_string()));
     }
 
     #[test]
