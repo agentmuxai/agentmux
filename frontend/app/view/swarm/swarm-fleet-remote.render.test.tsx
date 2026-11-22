@@ -72,6 +72,7 @@ function modelStub(selectedKeys: string[]) {
 const toolbar = (model: SwarmViewModel) => render(() => <SuperviseActions model={model} allBlockIds={() => ["blk-korp"]} />);
 const toggle = (model: SwarmViewModel) => render(() => <SwarmSelectToggle model={model} ids={() => ["blk-korp"]} />);
 const statsText = () => document.querySelector(".swarm-select-toggle__stats")!.textContent!.replace(/\s+/g, " ").trim();
+const pressEnter = () => fireEvent.keyDown(document.querySelector<HTMLTextAreaElement>(".swarm-broadcast-input")!, { key: "Enter" });
 const dock = (model: SwarmViewModel) =>
     render(() => <BroadcastDock model={model} agents={{ tree: () => [{ blockId: "blk-korp", agentName: "Korp" }] as never }} />);
 const type = (text: string) =>
@@ -129,15 +130,18 @@ describe("Select all and the Supervise actions with agents of other instances se
         expect(stop.title).toBe("Stopping agents on another machine isn't supported yet");
         dock(model);
         type("hello");
-        expect((screen.getByText(/Send to 1/).closest("button") as HTMLButtonElement).disabled).toBe(false);
+        expect(document.querySelector<HTMLTextAreaElement>(".swarm-broadcast-input")!.placeholder).toBe("Broadcast to 1 agent");
+        (model.broadcastToSelection as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ succeeded: [MANOZ], failed: [], aborted_early: false });
+        pressEnter();
+        expect(model.broadcastToSelection).toHaveBeenCalledWith("hello", expect.any(String));
     });
 
-    it("leaves Send and Stop enabled when something selected can be reached", () => {
+    it("leaves Stop enabled and Enter sending when something selected can be reached", () => {
         const model = modelStub([MANOZ, LOAP]);
         toolbar(model);
         dock(model);
         type("hello");
-        expect((screen.getByText(/Send to 2/).closest("button") as HTMLButtonElement).disabled).toBe(false);
+        expect(document.querySelector<HTMLTextAreaElement>(".swarm-broadcast-input")!.placeholder).toBe("Broadcast to 2 agents");
         expect((screen.getByText(/Stop 1/).closest("button") as HTMLButtonElement).disabled).toBe(false);
     });
 
@@ -146,7 +150,7 @@ describe("Select all and the Supervise actions with agents of other instances se
     it("says in the composer why fewer agents get the message than are selected", () => {
         dock(modelStub(["blk-korp", LOAP, MANOZ, "blk-gone"]));
         const input = document.querySelector<HTMLTextAreaElement>(".swarm-broadcast-input")!;
-        expect(input.placeholder).toBe("Message to send to 3 agents…");
+        expect(input.placeholder).toBe("Broadcast to 3 agents");
         expect(document.querySelector(".swarm-fleet-broadcast-gap")!.textContent).toBe("1 of 4 can't be messaged: no longer listed");
     });
 

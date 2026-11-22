@@ -348,7 +348,7 @@ describe("selecting agents on the map", () => {
         expect(world(container).style.transform).toBe(before);
         expect(getByTestId("atlas-fleet").textContent).toContain("2 selected");
         expect(getByTestId("atlas-fleet").textContent).toContain("Stop 2");
-        expect(getByTestId("atlas-fleet").textContent).toContain("Send to 2");
+        expect(container.querySelector<HTMLTextAreaElement>(".swarm-broadcast-input")!.placeholder).toBe("Broadcast to 2 agents");
     });
 
     it("adds to the selection with a second box, an agent of another machine included", () => {
@@ -434,7 +434,7 @@ describe("selecting agents on the map", () => {
         const { container, getAllByTestId, model } = rig(fleet());
         fireEvent.click(getAllByTestId("atlas-node")[0], { shiftKey: true });
         fireEvent.input(container.querySelector(".swarm-broadcast-input")!, { target: { value: "ship it" } });
-        fireEvent.click(container.querySelector(".swarm-fleet-btn--primary")!);
+        fireEvent.keyDown(container.querySelector(".swarm-broadcast-input")!, { key: "Enter" });
         await Promise.resolve();
         // The second argument is the id the composer follows the send's progress by.
         expect(model.broadcastToSelection).toHaveBeenCalledWith("ship it", expect.any(String));

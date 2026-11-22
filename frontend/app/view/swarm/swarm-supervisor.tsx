@@ -23,7 +23,10 @@ import {
     supervisorSupported,
     SUPERVISOR_MODES,
     SUPERVISOR_OFF_REASON,
+    SUPERVISOR_SETTINGS_LABEL,
 } from "@/app/store/supervisor";
+import { t } from "@/app/i18n/i18n";
+import { openSettingsAt } from "@/app/view/settings/open-settings";
 import type { SupervisorDecision } from "@/types/rpc/SupervisorDecision";
 import type { SupervisorMode } from "@/types/rpc/SupervisorMode";
 import type { SupervisorState } from "@/types/rpc/SupervisorState";
@@ -31,31 +34,49 @@ import { tip } from "@/app/element/tip";
 
 type Meta = Record<string, unknown> | undefined;
 
-/** The mode menu: one radio item per mode, the current one checked. While the Supervisor is switched
- *  off, Steady and Drive are disabled and say why (srv refuses them too); Off is always offered. */
+/**
+ * The mode menu: a row per mode (its name, then what it does on a muted line below), a divider, and "Supervisor settings…",
+ * which opens the Settings pane at the Supervisor section and is always offered (it is the way to turn the Supervisor
+ * on). `current` checks the agent's own mode; null is a menu for a selection, where none is checked. While the
+ * Supervisor is switched off, Steady and Drive can't be chosen (srv refuses them too; Off is always offered).
+ */
 export function supervisorMenuItems(
-    current: SupervisorMode,
+    current: SupervisorMode | null,
     pick: (mode: SupervisorMode) => void,
     enabled = true
 ): ContextMenuItem[] {
-    return SUPERVISOR_MODES.map((mode) => {
-        const blocked = !enabled && mode !== "off";
-        return {
-            label: `Supervisor: ${MODE_LABELS[mode]}`,
-            sublabel: blocked ? SUPERVISOR_OFF_REASON : MODE_DESCRIPTIONS[mode],
-            type: "radio" as const,
-            checked: mode === current,
-            enabled: !blocked,
+    return [
+        ...SUPERVISOR_MODES.map((mode) => ({
+            label: MODE_LABELS[mode],
+            description: MODE_DESCRIPTIONS[mode],
+            ...(current === null ? {} : { type: "radio" as const, checked: mode === current }),
+            enabled: enabled || mode === "off",
             click: () => pick(mode),
-        };
-    });
+        })),
+        { type: "separator" as const },
+        { label: SUPERVISOR_SETTINGS_LABEL, icon: "gear", click: () => void openSettingsAt("supervisor") },
+    ];
 }
 
-/** The chip's tooltip: the mode, what it does, and the last decision. */
+/** The lines above the mode menu's rows: what it sets, and once (not per row) why some rows are off. */
+export function supervisorMenuHeader(enabled: boolean, forWhom = ""): string[] {
+    const title = forWhom ? t("swarm.supervisor.menuTitleFor", { who: forWhom }) : t("swarm.supervisor.menuTitle");
+    return enabled ? [title] : [title, SUPERVISOR_OFF_REASON];
+}
+
+/**
+ * The chip's tooltip: the mode, what it does, and the last decision. Switched off: that, first, and for an agent set to
+ * Steady or Drive what it is set to, which applies again when the Supervisor is turned on.
+ */
 export function supervisorChipTitle(mode: SupervisorMode, state: SupervisorState | null, enabled = true): string {
+    if (!enabled) {
+        const lines = [t("swarm.supervisor.chipOff")];
+        if (mode !== "off") lines.push(t("swarm.supervisor.chipOffMode", { mode: MODE_LABELS[mode] }));
+        lines.push(t("swarm.supervisor.chipMenu"));
+        return lines.join("\n");
+    }
     const lines = [`Supervisor: ${MODE_LABELS[mode]}`, MODE_DESCRIPTIONS[mode]];
     if (mode !== "off" && state?.reason) lines.push(state.reason);
-    if (!enabled) lines.push(SUPERVISOR_OFF_REASON);
     lines.push("Click to change.");
     return lines.join("\n");
 }
@@ -76,7 +97,9 @@ export function SupervisorChip(props: {
     const [error, setError] = createSignal<string | null>(null);
     // Off stays quiet; a mode shows in the accent; a pause asks for attention.
     const tone = (): UiTone =>
-        error() ? "danger" : detail() === "paused" ? "attention" : mode() === "off" ? "quiet" : "accent";
+        error() ? "danger" : !on() ? "quiet" : detail() === "paused" ? "attention" : mode() === "off" ? "quiet" : "accent";
+    // The master switch is the person's, in Settings: while it is off every chip says so, whatever the agent's own mode.
+    const on = () => supervisorEnabled(settingsAtom());
     const open = (e: MouseEvent) => {
         e.stopPropagation();
         e.preventDefault();
@@ -87,9 +110,10 @@ export function SupervisorChip(props: {
                     setError(null);
                     void props.onSet(next).then(setError);
                 },
-                supervisorEnabled(settingsAtom())
+                on()
             ),
-            e
+            e,
+            { header: supervisorMenuHeader(on()) }
         );
     };
     return (
@@ -97,22 +121,24 @@ export function SupervisorChip(props: {
             <Button
                 tone={tone()}
                 density="compact"
-                icon="user-shield"
+                // Switched off: a different shape (the person with a slash), not only a duller tone.
+                icon={on() ? "user-shield" : "user-slash"}
                 class={clsx(
                     "swarm-supervisor-chip",
                     `swarm-supervisor-chip--${mode()}`,
+                    !on() && "swarm-supervisor-chip--switched-off",
                     detail() === "paused" && "swarm-supervisor-chip--paused",
                     !!error() && "swarm-supervisor-chip--error"
                 )}
-                title={error() ?? supervisorChipTitle(mode(), state(), supervisorEnabled(settingsAtom()))}
-                aria-label={`Supervisor: ${MODE_LABELS[mode()]}`}
+                title={error() ?? supervisorChipTitle(mode(), state(), on())}
+                aria-label={on() ? `Supervisor: ${MODE_LABELS[mode()]}` : t("swarm.supervisor.chipOffLabel", { mode: MODE_LABELS[mode()] })}
                 onClick={open}
                 onContextMenu={open}
             >
-                <Show when={mode() !== "off"}>
+                <Show when={mode() !== "off" && on()}>
                     <span class="swarm-supervisor-mode">{MODE_LABELS[mode()]}</span>
                 </Show>
-                <Show when={detail()}>
+                <Show when={detail() && on()}>
                     <span class="swarm-supervisor-detail">{detail()}</span>
                 </Show>
             </Button>

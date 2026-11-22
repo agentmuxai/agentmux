@@ -24,6 +24,7 @@ import { DevicesSection } from "./sections/devices-section";
 import { WidgetsSection } from "./sections/widgets-section";
 import { AgentsSection } from "./sections/agents-section";
 import { KanbanSection } from "./sections/kanban-section";
+import { SupervisorSection } from "./sections/supervisor-section";
 import { AdvancedSection } from "./sections/advanced-section";
 import "./settings.scss";
 import { DURATION_LINGER_MS } from "@/app/motion/tokens";
@@ -84,6 +85,7 @@ const SECTION_VIEWS: Record<SettingsSection, (p: { model: SettingsViewModel }) =
     devices: DevicesSection,
     widgets: WidgetsSection,
     agents: AgentsSection,
+    supervisor: SupervisorSection,
     kanban: KanbanSection,
     advanced: AdvancedSection,
 };
