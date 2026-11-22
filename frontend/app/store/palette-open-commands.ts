@@ -25,7 +25,6 @@ export const OPEN_COMMAND_FOR_VIEW: Readonly<Record<string, string>> = {
     audit: "open:audit",
     warden: "open:jobs",
     help: "open:help",
-    reviews: "open:reviews",
     atlas: "open:atlas",
     swarm: "open:swarm",
     files: "open:files",

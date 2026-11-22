@@ -11,7 +11,7 @@ use super::*;
 /// The built-in management views, as `BUILTIN_SINGLETON_VIEWS` in `frontend/app/store/widget-singleton.ts`
 /// has them (a test keeps the two equal). A view that a widget entry flags singleton is the window's to
 /// enforce: srv doesn't read `widgets.json`.
-pub(super) const SINGLETON_VIEWS: [&str; 14] = [
+pub(super) const SINGLETON_VIEWS: [&str; 13] = [
     "atlas",
     "audit",
     "connectors",
@@ -20,7 +20,6 @@ pub(super) const SINGLETON_VIEWS: [&str; 14] = [
     "history",
     "kanban",
     "memory",
-    "reviews",
     "settings",
     "swarm",
     "toolchain",
@@ -179,6 +178,22 @@ mod tests {
         assert!(stacked.created && stacked.block_id != first.block_id);
         assert!(!wants_existing(&CommandPaneOpenData { floating: Some(true), ..open("settings", &tab) }));
         assert!(!wants_existing(&CommandPaneOpenData { skip_placement: Some(true), ..open("settings", &tab) }));
+    }
+
+    #[tokio::test]
+    async fn an_open_of_reviews_is_the_kanban_on_open_pull_requests() {
+        let state = test_state();
+        let tab = window(&state, "one").await;
+        let first = open_pane(&state, open("reviews", &tab)).await.unwrap();
+        assert_eq!(first.view, "kanban");
+        let block = state.mstore.get::<Block>(&first.block_id).unwrap().unwrap();
+        assert_eq!(block.meta.get("view").and_then(|v| v.as_str()), Some("kanban"));
+        assert_eq!(block.meta.get("kanban:waits").and_then(|v| v.as_str()), Some("open"));
+        // The window's one Kanban: asking again, either way, brings it back.
+        let again = open_pane(&state, open("reviews", &tab)).await.unwrap();
+        let plain = open_pane(&state, open("kanban", &tab)).await.unwrap();
+        assert!(!again.created && !plain.created);
+        assert_eq!((again.block_id.as_str(), plain.block_id.as_str()), (first.block_id.as_str(), first.block_id.as_str()));
     }
 
     /// srv can't read the frontend's list at run time, so a test keeps its copy equal.

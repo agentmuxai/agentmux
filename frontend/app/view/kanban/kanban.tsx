@@ -11,6 +11,9 @@ import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
 export const kanbanPaneTab = lazyPaneTab({
     apiVersion: 1,
     view: "kanban",
+    // A saved pane, pin or widget that still says "reviews" opens here, on the open-pull-requests filter
+    // (kanban-instance.tsx reads the old view name and `reviews:task`).
+    aliases: ["reviews"],
     label: "Kanban",
     icon: "table-columns",
     defaultColor: "red",

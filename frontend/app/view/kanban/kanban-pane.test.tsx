@@ -85,7 +85,7 @@ describe("the Kanban pane", () => {
     it("writes the board's choices to the pane's meta and clears an open request once handled", () => {
         const { getByTestId, written } = setup({ "kanban:open": "t1" });
         board.last!.onOpenHandled();
-        expect(written).toContainEqual({ "kanban:open": null });
+        expect(written).toContainEqual({ "kanban:open": null, "reviews:task": null });
         expect(getByTestId("board").dataset.open).toBe("null");
         board.last!.onLanes(false);
         expect(written).toContainEqual({ "kanban:lanes": false });

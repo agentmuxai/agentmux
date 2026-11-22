@@ -149,7 +149,9 @@ export function createKanbanSection(props: SectionProps) {
     const [query, setQuery] = createSignal("");
     const [repo, setRepo] = createSignal("");
     // The "waits on" filter (kanban-columns WAITS_FILTERS): cards by what their open pull requests wait on.
-    const [waits, setWaits] = createSignal("");
+    const [ownWaits, setOwnWaits] = createSignal("");
+    const waits = () => props.waits ?? ownWaits();
+    const setWaits = (w: string) => (props.onWaits ? props.onWaits(w) : setOwnWaits(w));
     // "Reports to …" (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §4): the owner's seat names its lead.
     const [lead, setLead] = createSignal("");
     const seats = useSeatIndex();

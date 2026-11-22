@@ -283,6 +283,12 @@ describe("a retired pin", () => {
         expect(getSavedPinNames({ "widget:pinned": ["term", "media", "agent"] }, wmap())).toEqual(["term", "editor", "agent"]);
     });
 
+    it("keeps the Reviews pane's place on the bar as the Kanban, and not twice", () => {
+        const withKanban = { ...wmap(), "defwidget@kanban": widget({ label: "Kanban", blockdef: { meta: { view: "kanban" } } }) };
+        expect(getSavedPinNames({ "widget:pinned": ["term", "reviews", "agent"] }, withKanban)).toEqual(["term", "kanban", "agent"]);
+        expect(getSavedPinNames({ "widget:pinned": ["kanban", "reviews"] }, withKanban)).toEqual(["kanban"]);
+    });
+
     it("isn't pinned twice when the Editor already is", () => {
         expect(getSavedPinNames({ "widget:pinned": ["editor", "media"] }, wmap())).toEqual(["editor"]);
     });

@@ -24,6 +24,7 @@ export const DEST_META = {
     memoryAgent: "memory:agent",
     kanbanOpen: "kanban:open",
     kanbanBoard: "kanban:board",
+    kanbanWaits: "kanban:waits",
     auditAgent: "audit:agent",
     auditSound: "audit:sound",
     auditMessage: "audit:message",
@@ -112,6 +113,8 @@ export function planDestination(link: ParsedDeepLink, now: number = Date.now()):
         case "kanban":
             if (link.place === "task") focus[DEST_META.kanbanOpen] = str(v.task);
             if (link.place === "board") focus[DEST_META.kanbanBoard] = str(v.board);
+            // `agentmux://reviews` is an alias of this place: the board filtered to cards with open pull requests.
+            if (link.place === "pulls") focus[DEST_META.kanbanWaits] = "open";
             // The Kanban reads `<board>#<n>` as that board's task (kanban-section-state.ts).
             if (link.place === "board-task") focus[DEST_META.kanbanOpen] = `${str(v.board)}#${str(v.task)}`;
             break;

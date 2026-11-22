@@ -35,6 +35,9 @@ describe("a link's place is the pane's own meta (R14)", () => {
         ["agentmux://kanban/board/work", { view: "kanban", "kanban:board": "work" }],
         // The Kanban's own ref for a board's task.
         ["agentmux://kanban/board/work/task/12", { view: "kanban", "kanban:open": "work#12" }],
+        // The Reviews pane is part of the Kanban: its link is an alias of the open-pull-requests place.
+        ["agentmux://kanban/pulls", { view: "kanban", "kanban:waits": "open" }],
+        ["agentmux://reviews", { view: "kanban", "kanban:waits": "open" }],
         ["agentmux://swarm/supervisor", { view: "swarm", "swarm:section": "supervisor" }],
         ["agentmux://audit/agent/sorrel", { view: "audit", "audit:agent": "sorrel" }],
         ["agentmux://history", { view: "history" }],
