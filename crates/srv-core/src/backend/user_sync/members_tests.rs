@@ -39,7 +39,7 @@ fn members_are_machines_and_recovery_subjects_and_only_machines_are_pinned_or_an
     add(&mut chain, &ka, &a, &b);
     let recovery = Subject::recovery(&[9; 32], "sealed");
     add(&mut chain, &kb, &b, &recovery);
-    let state = chain.state(C);
+    let state = chain.state(C).unwrap();
     assert_eq!(state.members.len(), 3);
     assert_eq!(state.epoch, 0);
     let pins = state.pins();
@@ -71,7 +71,7 @@ fn a_change_that_no_member_signed_is_refused() {
     add(&mut chain, &ka, &a, &recovery);
     let by_recovery = chain.next(&ka, C, &recovery.id, Change::Add { member: b.clone() }).unwrap();
     assert_eq!(chain.take(C, by_recovery), Err(MemberError::NotAMember));
-    assert_eq!(chain.state(C).members.len(), 2, "nothing refused was taken");
+    assert_eq!(chain.state(C).unwrap().members.len(), 2, "nothing refused was taken");
     let _ = kb;
 }
 
@@ -131,7 +131,7 @@ fn a_removal_moves_the_epoch_and_a_removed_member_signs_nothing() {
     let ended: BTreeMap<String, u64> = [(a.id.clone(), 7), (c.id.clone(), 3)].into();
     let remove = chain.next(&ka, C, &a.id, Change::Remove { id: b.id.clone(), ended: ended.clone() }).unwrap();
     assert_eq!(chain.take(C, remove), Ok(Taken::Extended));
-    let state = chain.state(C);
+    let state = chain.state(C).unwrap();
     assert_eq!((state.epoch, state.members.contains_key(&b.id)), (1, false));
     assert!(!state.pins().contains_key(&b.id));
     // The removed member can no longer change the list.
@@ -144,7 +144,7 @@ fn a_removal_moves_the_epoch_and_a_removed_member_signs_nothing() {
     // A machine may remove itself, but the last machine cannot go, and a stranger is not removable.
     let leave = chain.next(&kc, C, &c.id, Change::Remove { id: c.id.clone(), ended: [(a.id.clone(), 7)].into() }).unwrap();
     assert_eq!(chain.take(C, leave), Ok(Taken::Extended));
-    assert_eq!(chain.state(C).epoch, 2);
+    assert_eq!(chain.state(C).unwrap().epoch, 2);
     let last = chain.next(&ka, C, &a.id, Change::Remove { id: a.id.clone(), ended: BTreeMap::new() }).unwrap();
     assert_eq!(chain.take(C, last), Err(MemberError::BadRemoval));
     let stranger = chain.next(&ka, C, &a.id, Change::Remove { id: "nobody".into(), ended: BTreeMap::new() }).unwrap();
@@ -154,14 +154,14 @@ fn a_removal_moves_the_epoch_and_a_removed_member_signs_nothing() {
 #[test]
 fn how_machines_join_changes_only_by_a_signed_entry() {
     let (mut chain, ka, a) = founded();
-    assert_eq!(chain.state(C).policy, Policy::Approve);
+    assert_eq!(chain.state(C).unwrap().policy, Policy::Approve);
     let (kc, c) = machine(3);
     let by_stranger = Entry::sign(&kc, C, 2, chain.entries.last().map(Entry::hash), Change::SetPolicy { policy: Policy::AutoProven }, &c.id).unwrap();
     assert_eq!(chain.take(C, by_stranger), Err(MemberError::NotAMember));
-    assert_eq!(chain.state(C).policy, Policy::Approve, "a peer cannot quietly relax approve");
+    assert_eq!(chain.state(C).unwrap().policy, Policy::Approve, "a peer cannot quietly relax approve");
     let signed = chain.next(&ka, C, &a.id, Change::SetPolicy { policy: Policy::AutoProven }).unwrap();
     assert_eq!(chain.take(C, signed), Ok(Taken::Extended));
-    assert_eq!(chain.state(C).policy, Policy::AutoProven);
+    assert_eq!(chain.state(C).unwrap().policy, Policy::AutoProven);
 }
 
 #[test]
@@ -195,6 +195,136 @@ fn a_chain_received_whole_is_checked_entry_by_entry() {
     let mut broken = chain.entries.clone();
     broken[1].sig = broken[0].sig.clone();
     assert_eq!(Chain::from_entries(C, broken), Err(MemberError::BadSignature));
-    let state: State = Chain::from_entries(C, chain.entries.clone()).unwrap().state(C);
+    let state: State = Chain::from_entries(C, chain.entries.clone()).unwrap().state(C).unwrap();
     assert_eq!(state.n, 2);
+}
+
+/// A chain founded by machine 1 with machines 2 and 3 added: (chain, keys, subjects).
+fn three() -> (Chain, [[u8; 32]; 3], [Subject; 3]) {
+    let (mut chain, ka, a) = founded();
+    let (kb, b) = machine(2);
+    let (kc, c) = machine(3);
+    add(&mut chain, &ka, &a, &b);
+    add(&mut chain, &ka, &a, &c);
+    (chain, [ka, kb, kc], [a, b, c])
+}
+
+fn ended(pairs: &[(&Subject, u64)]) -> BTreeMap<String, u64> {
+    pairs.iter().map(|(s, n)| (s.id.clone(), *n)).collect()
+}
+
+/// An `Add` of a fresh machine signed by `by`, with its label varied until the entry's hash is below `below`.
+fn grind_add(chain: &Chain, by: &[u8; 32], signer: &Subject, below: &str) -> Entry {
+    for i in 0..500 {
+        let (_, d) = machine(40);
+        let d = Subject { sealed_label: format!("label-{i}"), ..d };
+        let entry = chain.next(by, C, &signer.id, Change::Add { member: d }).unwrap();
+        if entry.hash().as_str() < below {
+            return entry;
+        }
+    }
+    panic!("no lower hash found");
+}
+
+#[test]
+fn a_member_cannot_undo_its_own_removal_by_racing_it() {
+    let (chain, [ka, kb, _], [a, b, c]) = three();
+    let removal = chain.next(&ka, C, &a.id, Change::Remove { id: b.id.clone(), ended: ended(&[(&a, 4), (&c, 2)]) }).unwrap();
+    // b signs a competing entry at the same position and varies it until its hash is the lower one.
+    let rival = grind_add(&chain, &kb, &b, &removal.hash());
+    assert!(rival.hash() < removal.hash());
+    let (mut p, mut q) = (chain.clone(), chain.clone());
+    assert_eq!(p.take(C, removal.clone()), Ok(Taken::Extended));
+    assert_eq!(p.take(C, rival.clone()), Err(MemberError::ForkLost));
+    assert_eq!(q.take(C, rival), Ok(Taken::Extended));
+    assert!(matches!(q.take(C, removal.clone()), Ok(Taken::Replaced(_))));
+    for chain in [&p, &q] {
+        let state = chain.state(C).unwrap();
+        assert_eq!((chain.entries.last(), state.epoch, state.members.contains_key(&b.id)), (Some(&removal), 1, false));
+    }
+}
+
+#[test]
+fn two_members_removing_each_other_at_once_are_settled_by_who_joined_first_whatever_the_hashes() {
+    let (chain, [ka, kb, _], [a, b, c]) = three();
+    let by_a = chain.next(&ka, C, &a.id, Change::Remove { id: b.id.clone(), ended: ended(&[(&a, 1), (&c, 1)]) }).unwrap();
+    // b's removal of a is varied (the sequence numbers it names) until its hash is lower than a's.
+    let by_b = (0..500)
+        .map(|i| chain.next(&kb, C, &b.id, Change::Remove { id: a.id.clone(), ended: ended(&[(&b, i), (&c, 1)]) }).unwrap())
+        .find(|e| e.hash() < by_a.hash())
+        .unwrap();
+    let (mut p, mut q) = (chain.clone(), chain.clone());
+    let _ = (p.take(C, by_a.clone()), p.take(C, by_b.clone()));
+    let _ = (q.take(C, by_b), q.take(C, by_a.clone()));
+    assert_eq!((p.entries.last(), q.entries.last()), (Some(&by_a), Some(&by_a)), "the founder's removal stands on both");
+}
+
+#[test]
+fn a_cycle_of_removals_at_one_position_settles_the_same_way_in_every_order() {
+    let (chain, [ka, kb, kc], [a, b, c]) = three();
+    let ra = chain.next(&ka, C, &a.id, Change::Remove { id: b.id.clone(), ended: ended(&[(&a, 1), (&c, 1)]) }).unwrap();
+    let rb = chain.next(&kb, C, &b.id, Change::Remove { id: c.id.clone(), ended: ended(&[(&a, 1), (&b, 1)]) }).unwrap();
+    let rc = chain.next(&kc, C, &c.id, Change::Remove { id: a.id.clone(), ended: ended(&[(&b, 1), (&c, 1)]) }).unwrap();
+    let orders = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+    let entries = [ra, rb, rc];
+    let heads: Vec<Option<Entry>> = orders
+        .iter()
+        .map(|order| {
+            let mut p = chain.clone();
+            for i in order {
+                let _ = p.take(C, entries[*i].clone());
+            }
+            p.entries.last().cloned()
+        })
+        .collect();
+    assert!(heads.iter().all(|h| *h == heads[0]), "every order ends at the same head");
+    assert_eq!(heads[0].as_ref().map(|e| e.signer.clone()), Some(a.id.clone()), "the earliest member's entry stands");
+}
+
+#[test]
+fn the_founding_entry_is_never_replaced() {
+    let (mut chain, _, a) = founded();
+    let held = chain.entries[0].clone();
+    // Anyone can sign a founding entry naming themselves, so a second one is a different collection, however low its hash.
+    for seed in 50..80 {
+        let (private, s) = machine(seed);
+        let rival = Entry::sign(&private, C, 1, None, Change::Found { member: s.clone(), policy: Policy::AutoProven }, &s.id).unwrap();
+        assert_eq!(chain.take(C, rival), Err(MemberError::ForkLost));
+    }
+    assert_eq!(chain.entries, vec![held]);
+    assert!(chain.state(C).unwrap().members.contains_key(&a.id));
+}
+
+#[test]
+fn a_removal_names_every_machine_that_remains_and_only_those() {
+    let (chain, [ka, _, _], [a, b, c]) = three();
+    let remove = |ended: BTreeMap<String, u64>| chain.next(&ka, C, &a.id, Change::Remove { id: b.id.clone(), ended }).unwrap();
+    let mut p = chain.clone();
+    assert_eq!(p.take(C, remove(BTreeMap::new())), Err(MemberError::BadRemoval), "empty");
+    assert_eq!(p.take(C, remove(ended(&[(&a, 1)]))), Err(MemberError::BadRemoval), "one left out");
+    assert_eq!(p.take(C, remove(ended(&[(&a, 1), (&c, 1), (&b, 1)]))), Err(MemberError::BadRemoval), "the removed named");
+    let stranger: BTreeMap<String, u64> = [(a.id.clone(), 1), (c.id.clone(), 1), ("nobody".to_string(), 1)].into();
+    assert_eq!(p.take(C, remove(stranger)), Err(MemberError::BadRemoval), "a non-member named");
+    assert_eq!(p.take(C, remove(ended(&[(&a, 1), (&c, 1)]))), Ok(Taken::Extended));
+}
+
+#[test]
+fn a_recovery_subject_has_the_id_its_box_key_makes() {
+    let (mut chain, ka, a) = founded();
+    let (_, b) = machine(2);
+    let mut taking_a_machines_id = Subject::recovery(&[9; 32], "s");
+    taking_a_machines_id.id = b.id.clone();
+    let entry = chain.next(&ka, C, &a.id, Change::Add { member: taking_a_machines_id }).unwrap();
+    assert_eq!(chain.take(C, entry), Err(MemberError::BadSubject));
+    let mut arbitrary = Subject::recovery(&[9; 32], "s");
+    arbitrary.id = "recovery-anything".into();
+    let entry = chain.next(&ka, C, &a.id, Change::Add { member: arbitrary }).unwrap();
+    assert_eq!(chain.take(C, entry), Err(MemberError::BadSubject));
+}
+
+#[test]
+fn a_chain_that_was_altered_after_it_was_taken_in_reads_as_an_error_not_an_empty_collection() {
+    let (mut chain, _, _) = founded();
+    chain.entries[0].sig = "AAAA".into();
+    assert_eq!(chain.state(C), Err(MemberError::BadSignature));
 }
