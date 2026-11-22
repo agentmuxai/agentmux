@@ -81,6 +81,16 @@ impl Machine {
     fn pull(&mut self, from: &Machine, all: &Pins, at: i64) -> Vec<Outcome> {
         self.pull_with(from, all, at, &Never).into_iter().map(|o| o.unwrap()).collect()
     }
+
+    /// Like `pull`, but the records are delivered in the order `reorder` leaves them in. The layer lists a peer's records
+    /// oldest version first, so an arrival out of that order (a relay, a second path, a retry) is made here.
+    fn pull_reordered(&mut self, from: &Machine, all: &Pins, at: i64, reorder: impl FnOnce(&mut Vec<Record>)) -> Vec<Outcome> {
+        let mine = log::vector(&self.conn, VAULT).unwrap();
+        let mut records = log::since(&from.conn, VAULT, &mine, 1000).unwrap();
+        reorder(&mut records);
+        let adapter = VaultAdapter { conn: &self.conn, rotations: &Never };
+        records.iter().map(|r| log::apply_remote(&self.conn, r, all, &mut self.clock, at, &adapter).unwrap()).collect()
+    }
 }
 
 #[test]
@@ -237,8 +247,8 @@ fn a_record_whose_base_was_changed_on_the_way_is_refused() {
 
 #[test]
 fn a_machine_sent_a_delete_before_the_entry_it_deleted_does_not_bring_the_entry_back() {
-    // z makes an entry and edits it twice; a takes all three and deletes it; c, new, takes a's log, which lists a's own
-    // records first, so the delete reaches c before the three it came after.
+    // z makes an entry and edits it twice; a takes all three and deletes it; c, new, is sent a's log with the delete first,
+    // as a second path or a retry can do, so the delete reaches c before the three it came after.
     let (mut z, mut a, mut c) = (machine("z", 3), machine("a", 1), machine("c", 4));
     let all = pins(&[&z, &a, &c]);
     z.write("entry-1", "created", NOW);
@@ -246,7 +256,7 @@ fn a_machine_sent_a_delete_before_the_entry_it_deleted_does_not_bring_the_entry_
     z.write("entry-1", "edited again", NOW + 20);
     a.pull(&z, &all, NOW + 30);
     a.delete("entry-1", NOW + 40);
-    let got = c.pull(&a, &all, NOW + 50);
+    let got = c.pull_reordered(&a, &all, NOW + 50, |records| records.rotate_right(1));
     // The delete, then each earlier version: none brings the entry back (the first two cannot be told from changes made
     // apart, so they are kept as versions; the last is known to be the one the delete followed).
     assert_eq!(got, [Outcome::Applied, Outcome::Conflict, Outcome::Conflict, Outcome::KeptLocal]);
@@ -257,7 +267,7 @@ fn a_machine_sent_a_delete_before_the_entry_it_deleted_does_not_bring_the_entry_
 #[test]
 fn a_restore_and_its_later_edit_delivered_out_of_order_end_with_the_edit_on_every_machine() {
     // m deletes an entry; z, sent the delete, restores it; a, sent the restore, edits it. m is then sent the edit before
-    // the restore, because a's own records are listed first.
+    // the restore, as a second path or a retry can do.
     let (mut m, mut z, mut a) = (machine("m", 1), machine("z", 3), machine("a", 2));
     let all = pins(&[&m, &z, &a]);
     m.write("entry-1", "made", NOW);
@@ -266,7 +276,7 @@ fn a_restore_and_its_later_edit_delivered_out_of_order_end_with_the_edit_on_ever
     z.write("entry-1", "restored", NOW + 20);
     a.pull(&z, &all, NOW + 25);
     a.write("entry-1", "edited again", NOW + 30);
-    assert_eq!(m.pull(&a, &all, NOW + 40), [Outcome::Conflict, Outcome::KeptLocal], "the edit takes the place of the delete; the restore it is on top of is then known to be older");
+    assert_eq!(m.pull_reordered(&a, &all, NOW + 40, |records| records.reverse()), [Outcome::Conflict, Outcome::KeptLocal], "the edit takes the place of the delete; the restore it is on top of is then known to be older");
     assert_eq!(z.pull(&a, &all, NOW + 40), [Outcome::Applied]);
     for machine in [&m, &z, &a] {
         assert_eq!(machine.state("entry-1").as_deref(), Some("edited again"), "{}", machine.id);
