@@ -361,16 +361,47 @@ mod windows {
     /// Make the administrators the owner of a file or folder and give them (and the system) full control of it, whatever its
     /// list said before: what an administrator does to delete what a service made for its own account alone. Needs an elevated
     /// token (it uses the right to take ownership and to restore).
-    pub fn take_over(path: &Path) -> Result<(), String> {
-        use windows_sys::Win32::Security::{GetSecurityDescriptorOwner, OWNER_SECURITY_INFORMATION};
+    ///
+    /// The change is made through a handle opened on the entry itself, never on what a link points to: `Ok(false)` says the entry
+    /// is a link (a junction or a symbolic link) and nothing was changed, so what an account that can still write there swaps in
+    /// between a check and this call is not followed.
+    pub fn take_over(path: &Path) -> Result<bool, String> {
+        use std::os::windows::io::FromRawHandle;
+        use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+        use windows_sys::Win32::Security::Authorization::SetSecurityInfo;
+        use windows_sys::Win32::Security::GetSecurityDescriptorOwner;
+        use windows_sys::Win32::Storage::FileSystem::{
+            CreateFileW, GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+            FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
+        };
         let _ = enable_privilege("SeTakeOwnershipPrivilege");
         let _ = enable_privilege("SeRestorePrivilege");
         let sddl: Vec<u16> = "O:BAD:P(A;OICI;FA;;;BA)(A;OICI;FA;;;SY)".encode_utf16().chain(std::iter::once(0)).collect();
-        let mut name = wide(path);
+        let name = wide(path);
         let mut sd: PSECURITY_DESCRIPTOR = null_mut();
-        // SAFETY: NUL-terminated strings that outlive the calls; the descriptor is LocalAlloc'd, read only before it is freed, and
-        // freed on every path.
+        // SAFETY: NUL-terminated strings that outlive the calls; the handle is owned by a `File` (closed on every path); the
+        // descriptor is LocalAlloc'd, read only before it is freed, and freed on every path.
         unsafe {
+            let handle = CreateFileW(
+                name.as_ptr(),
+                READ_CONTROL | WRITE_OWNER | WRITE_DAC,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                null_mut(),
+                OPEN_EXISTING,
+                FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+                null_mut(),
+            );
+            if handle == INVALID_HANDLE_VALUE {
+                return Err(format!("cannot open {}: {}", path.display(), std::io::Error::last_os_error()));
+            }
+            let held = std::fs::File::from_raw_handle(handle as _);
+            let mut info: BY_HANDLE_FILE_INFORMATION = std::mem::zeroed();
+            if GetFileInformationByHandle(handle, &mut info) == 0 {
+                return Err(format!("cannot read {}: {}", path.display(), std::io::Error::last_os_error()));
+            }
+            if info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+                return Ok(false);
+            }
             if ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.as_ptr(), SDDL_REVISION_1, &mut sd, null_mut()) == 0 || sd.is_null() {
                 return Err("cannot make the access list".to_string());
             }
@@ -378,16 +409,17 @@ mod windows {
             let (mut present, mut dacl) = (0i32, null_mut());
             let got = GetSecurityDescriptorOwner(sd, &mut owner, &mut defaulted) != 0 && !owner.is_null() && GetSecurityDescriptorDacl(sd, &mut present, &mut dacl, &mut defaulted) != 0 && present != 0;
             let code = if got {
-                SetNamedSecurityInfoW(name.as_mut_ptr(), SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION, owner, null_mut(), dacl, null_mut())
+                SetSecurityInfo(handle, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION, owner, null_mut(), dacl, null_mut())
             } else {
                 1
             };
             LocalFree(sd);
+            drop(held);
             if code != 0 {
                 return Err(format!("cannot take over {} (Windows error {code})", path.display()));
             }
         }
-        Ok(())
+        Ok(true)
     }
 
     /// The owner and the access list of a file or folder, as SDDL text (`O:...D:...`).

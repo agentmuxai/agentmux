@@ -278,7 +278,8 @@ mod front {
             (Err(e), _) | (_, Err(e)) => return crate::fail(&e),
         };
         let exe = plan::layout(&files_dir, &data_dir, channel, "0").exe;
-        if owner_only::is_elevated() {
+        let installed_here = std::env::current_exe().and_then(|p| p.canonicalize()).ok().zip(exe.parent().and_then(|p| p.canonicalize().ok())).is_some_and(|(me, dir)| me.starts_with(dir));
+        if owner_only::is_elevated() && installed_here {
             return apply::run(channel, &ApplyArgs { pause: false, ..step });
         }
         if !exe.is_file() {

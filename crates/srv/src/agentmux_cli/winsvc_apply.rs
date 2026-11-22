@@ -102,6 +102,10 @@ fn manage(action: Action, a: &ApplyArgs, service: &Service, layout: &Layout, rep
             service.delete().map_err(|e| format!("cannot remove the service: {e}"))?;
             report.say("The service is removed. Its program folder and its data are kept.");
             if a.purge {
+                if std::fs::symlink_metadata(&layout.data_root).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound) {
+                    report.say(&format!("{} is already gone: nothing to delete.", layout.data_root.display()));
+                    return Ok(());
+                }
                 purge(&layout.data_root).map_err(|e| format!("cannot remove {}: {e}", layout.data_root.display()))?;
                 report.say(&format!("{} is deleted: the service's data, its keys and its sign-ins are gone.", layout.data_root.display()));
             }
@@ -112,20 +116,20 @@ fn manage(action: Action, a: &ApplyArgs, service: &Service, layout: &Layout, rep
 }
 
 /// Delete a folder and everything in it, including what the service made for its own account alone: each folder and file is first
-/// taken over by the administrators (the step runs elevated), and a link is removed as a link, never followed.
+/// taken over by the administrators (the step runs elevated), and a link is removed as a link, never followed. The take-over is
+/// made through a handle on the entry itself, which says whether it is a link, so an entry the service's account swapped for a link
+/// is never followed; once a folder is taken over that account cannot change it, so what is read from it next is what was taken.
 fn purge(path: &Path) -> Result<(), String> {
+    let taken = owner_only::take_over(path)?;
     let meta = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
-    let is_link = meta.file_type().is_symlink() || std::os::windows::fs::MetadataExt::file_attributes(&meta) & 0x400 != 0;
-    if !is_link {
-        owner_only::take_over(path)?;
+    let is_link = !taken || meta.file_type().is_symlink() || std::os::windows::fs::MetadataExt::file_attributes(&meta) & 0x400 != 0;
+    if is_link {
+        return std::fs::remove_dir(path).or_else(|_| std::fs::remove_file(path)).map_err(|e| e.to_string());
     }
-    if meta.is_dir() && !is_link {
+    if meta.is_dir() {
         for item in std::fs::read_dir(path).map_err(|e| e.to_string())? {
             purge(&item.map_err(|e| e.to_string())?.path())?;
         }
-        return std::fs::remove_dir(path).map_err(|e| e.to_string());
-    }
-    if meta.is_dir() {
         return std::fs::remove_dir(path).map_err(|e| e.to_string());
     }
     let mut readonly = meta.permissions();
@@ -349,4 +353,29 @@ fn place_version(layout: &Layout, stage: &Path) -> Result<(), String> {
         let _ = std::fs::remove_dir_all(&aside);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Needs an elevated token (the take-over uses the right to take ownership), so it does nothing in a terminal that is not.
+    #[test]
+    fn purge_deletes_a_tree_and_never_follows_a_link_out_of_it() {
+        if !owner_only::is_elevated() {
+            return;
+        }
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("keep.txt"), "kept").unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("data");
+        std::fs::create_dir_all(root.join("a/b")).unwrap();
+        std::fs::write(root.join("a/b/key"), "k").unwrap();
+        std::fs::write(root.join("top.txt"), "t").unwrap();
+        agentmux_common::data_paths::ensure_history_link(&root.join("a/out"), outside.path()).unwrap();
+        purge(&root).unwrap();
+        assert!(!root.exists(), "the data root is gone");
+        assert_eq!(std::fs::read_to_string(outside.path().join("keep.txt")).unwrap(), "kept", "what the link pointed to is untouched");
+        assert!(owner_only::take_over(&root).is_err(), "a missing entry is an error, not a success");
+    }
 }
