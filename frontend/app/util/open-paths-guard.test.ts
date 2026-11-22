@@ -38,6 +38,7 @@ const OPENS_BY_THEMSELVES: Record<string, string> = {
 const LOOKS_UP_BY_VIEW: Record<string, string> = {
     "app/store/block-component-registry.ts": "revealOrOpen's host",
     "app/util/reveal-block.ts": "defines it",
+    "app/view/shortcuts/move-singleton-here.ts": "finds the open pane of a singleton view to swap it into the shortcuts pane's place",
     "app/view/shortcuts/shortcuts.tsx": "lists the panes of a view for the shortcuts page",
 };
 
