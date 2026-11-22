@@ -375,13 +375,13 @@ fn a_write_cut_off_by_a_removal_is_written_again_at_the_new_epoch_and_reaches_th
     let ans = ops::members(&mut a.ctx(), &b.id, &MembersReq { collection: C.into(), have_n: 3, offered: vec![remove] }).unwrap();
     assert_eq!(ans.taken, vec![Ok(Taken::Extended)]);
     assert_eq!(log::collection_epoch(&a.conn, C).unwrap(), Some(1));
-    // It is refused where it would be sent as it is, and A never offers it.
+    // A re-issues it at the new epoch; the cut-off write still goes with it, so A's sequence reaches B unbroken.
     let mut signer = Signer { machine: &a.id, private: &a.private, clock: &mut a.clock };
     assert_eq!(ops::reissue(&a.conn, &mut signer, &a.ring, C, NOW).unwrap(), 1);
     let sent = log::since(&a.conn, C, &b.vector(C), 100).unwrap();
-    assert_eq!(sent.iter().map(|r| (r.header.seq, r.header.epoch)).collect::<Vec<_>>(), vec![(3, 1)], "the cut-off one is not served");
+    assert_eq!(sent.iter().map(|r| (r.header.seq, r.header.epoch)).collect::<Vec<_>>(), vec![(2, 0), (3, 1)], "the cut-off write goes too, as a void one");
     let ans = ops::push(&mut b.ctx(), &a.id, &PushReq { collection: C.into(), records: sent }, &NewestWins).unwrap();
-    assert_eq!(ans.results, vec![Ok(Outcome::Applied)], "the first write after the cut continues past the skipped sequence");
+    assert_eq!(ans.results, vec![Ok(Outcome::Void), Ok(Outcome::Applied)], "the cut-off write changes nothing; the re-issued one is applied");
     let held = log::current(&b.conn, C, "card").unwrap().unwrap();
     let plain = super::seal::open(&b.ring, &held.header, &held.body).unwrap();
     assert_eq!(&plain[..], b"second");
@@ -392,7 +392,7 @@ fn a_write_cut_off_by_a_removal_is_written_again_at_the_new_epoch_and_reaches_th
 }
 
 #[test]
-fn a_skipped_sequence_is_taken_only_after_a_cut_and_only_once_what_the_cut_owes_is_held() {
+fn a_write_at_the_new_epoch_is_a_gap_until_what_the_cut_owes_is_held() {
     let (mut a, mut b, c) = three("kanban");
     a.write(C, "x", "1");
     a.write(C, "x", "2");
@@ -508,4 +508,40 @@ fn a_removal_that_loses_a_fork_leaves_neither_its_epoch_nor_its_ends_behind() {
     let pushed = log::since(&a.conn, C, &log::Vector::new(), 10).unwrap();
     let ans = ops::push(&mut b.ctx(), &a.id, &PushReq { collection: C.into(), records: pushed }, &NewestWins).unwrap();
     assert_eq!(ans.results, vec![Ok(Outcome::Applied)], "A's write past the lost removal's end is taken");
+}
+
+#[test]
+fn a_later_sequence_after_a_cut_is_never_taken_before_the_ones_before_it() {
+    let (mut a, mut b, c) = three("kanban");
+    a.write(C, "x", "1");
+    sync_records(&mut b, &mut a, C);
+    a.write(C, "x", "2");
+    let gone = ended(&[(&a, 1), (&b, 0)]);
+    let remove = ops::change(&mut b.ctx(), C, Change::Remove { id: c.id.clone(), ended: gone }).unwrap();
+    ops::members(&mut a.ctx(), &b.id, &MembersReq { collection: C.into(), have_n: 3, offered: vec![remove] }).unwrap();
+    let mut signer = Signer { machine: &a.id, private: &a.private, clock: &mut a.clock };
+    assert_eq!(ops::reissue(&a.conn, &mut signer, &a.ring, C, NOW).unwrap(), 1);
+    a.write(C, "y", "4");
+    let all = log::since(&a.conn, C, &b.vector(C), 100).unwrap();
+    assert_eq!(all.iter().map(|r| r.header.seq).collect::<Vec<_>>(), vec![2, 3, 4]);
+    // The last arrives first: 2 (void) and 3 are still owed, so it is a gap and the vector does not move past them.
+    let early = ops::push(&mut b.ctx(), &a.id, &PushReq { collection: C.into(), records: vec![all[2].clone()] }, &NewestWins).unwrap();
+    assert_eq!(early.results, vec![Err(Refused::Gap { have: 1 })]);
+    assert_eq!(b.vector(C).get(&a.id), Some(&1));
+    let in_order = ops::push(&mut b.ctx(), &a.id, &PushReq { collection: C.into(), records: all }, &NewestWins).unwrap();
+    assert_eq!(in_order.results, vec![Ok(Outcome::Void), Ok(Outcome::Applied), Ok(Outcome::Applied)]);
+    assert_eq!(b.vector(C).get(&a.id), Some(&4));
+}
+
+#[test]
+fn an_approval_with_no_key_to_give_adds_nobody_and_keeps_the_request_waiting() {
+    let (mut a, b) = (node(1), node(2));
+    a.found(C, "kanban", Policy::Approve);
+    let req = JoinReq { collection: C.into(), subject: b.subject.clone() };
+    assert_eq!(ops::join(&mut a.ctx(), &b.id, &req), Ok(Joined::Pending));
+    a.keys = false;
+    assert_eq!(ops::approve(&mut a.ctx(), C, &b.id), Err(OpError::NoKey));
+    assert_eq!((a.pending.len(), a.chains[C].entries.len()), (1, 1));
+    a.keys = true;
+    assert!(ops::approve(&mut a.ctx(), C, &b.id).is_ok());
 }

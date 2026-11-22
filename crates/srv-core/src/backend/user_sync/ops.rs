@@ -438,7 +438,9 @@ fn wait_for_person(ctx: &mut Ctx, collection: &str, subject: &Subject) -> Result
 pub fn approve(ctx: &mut Ctx, collection: &str, machine: &str) -> Result<Entry, OpError> {
     gate(ctx)?;
     let at = ctx.pending.iter().position(|p| p.collection == collection && p.subject.id == machine).ok_or(OpError::Bad)?;
-    let subject = ctx.pending.remove(at).subject;
+    let subject = ctx.pending[at].subject.clone();
+    keys_or_refuse(ctx, collection, &subject)?;
+    ctx.pending.remove(at);
     room_for_one_more(ctx, collection)?;
     change(ctx, collection, Change::Add { member: subject })
 }
