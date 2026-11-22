@@ -38,12 +38,14 @@ pub(crate) async fn delete_identity_account(
             revoke: revoke_report,
         });
     }
-    release_sign_in_values(acct.as_ref());
-    let cleanup_report = remove_secrets(acct).await;
+    let cleanup_report = remove_secrets(acct.clone()).await;
     let outcome = mstore
         .identity_delete(id)
         .map_err(|e| format!("deleteidentityaccount: {e}"))?;
     let deleted = outcome.deleted;
+    if deleted {
+        release_sign_in_values(acct.as_ref(), &revoke_report, &cleanup_report);
+    }
     // Links live in identity_store, not the store holding the account row, so the cascade above
     // finds none (SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md): remove the real rows here and merge the
     // two outcomes, or every delete would orphan its links.
@@ -102,11 +104,14 @@ pub(crate) async fn delete_identity_account(
     })
 }
 
-/// The values read from the account's sign-in files are no longer withheld from transcripts: the account and its
-/// credential directory are going.
-fn release_sign_in_values(acct: Option<&IdentityAccount>) {
+/// The values read from the account's sign-in files are no longer withheld from transcripts once the account is
+/// deleted, the provider has revoked the grant and the credential directory is removed. Otherwise (a grant not
+/// revoked, a directory kept or not removed) they stay withheld.
+pub(super) fn release_sign_in_values(acct: Option<&IdentityAccount>, revoke_report: &serde_json::Value, cleanup_report: &serde_json::Value) {
     use crate::backend::storage::store::SecretRef;
-    if let Some(SecretRef::OAuthConfigDir { dir }) = acct.map(|a| &a.secret_ref) {
+    let outcome_is = |report: &serde_json::Value, outcome: &str| report.get("outcome").and_then(|v| v.as_str()) == Some(outcome);
+    let gone = outcome_is(revoke_report, "revoked") && outcome_is(cleanup_report, "removed");
+    if let (true, Some(SecretRef::OAuthConfigDir { dir })) = (gone, acct.map(|a| &a.secret_ref)) {
         crate::identity::resolver::release_sign_in(dir);
     }
 }
