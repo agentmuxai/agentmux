@@ -190,27 +190,27 @@ mod tests {
 
     /// A browser that starts helpers leaves none of them behind: ending its group ends them all.
     #[cfg(target_os = "linux")]
-    #[test]
-    fn ending_the_group_ends_what_the_browser_started_too() {
-        use std::os::unix::process::CommandExt;
-        use std::process::{Command, Stdio};
-        // A "browser" (the shell) that starts a helper (a long sleep) and prints the helper's number.
-        let mut leader = Command::new("sh");
-        leader.args(["-c", "sleep 60 & echo $!; wait"]).stdout(Stdio::piped()).process_group(0);
+    #[tokio::test]
+    async fn ending_the_group_ends_what_the_browser_started_too() {
+        use tokio::io::{AsyncBufReadExt, BufReader};
+        // A "browser" (the shell) that starts a helper (a long sleep) and prints the helper's number. Started the way the browser is.
+        let args = vec!["-c".to_string(), "/bin/sleep 60 & echo $!; wait".to_string()];
+        let mut leader = command(Path::new("/bin/sh"), &args, None);
+        leader.stdout(Stdio::piped()).process_group(0);
         let mut leader = leader.spawn().expect("sh starts");
         let mut line = String::new();
-        std::io::BufRead::read_line(&mut std::io::BufReader::new(leader.stdout.take().unwrap()), &mut line).unwrap();
-        let helper: libc::pid_t = line.trim().parse().expect("the helper's number");
+        BufReader::new(leader.stdout.take().unwrap()).read_line(&mut line).await.unwrap();
+        let helper: u32 = line.trim().parse().expect("the helper's number");
         // A process that has ended but is not yet collected (a zombie) is gone for this purpose.
-        let alive = |pid: libc::pid_t| {
+        let alive = |pid: u32| {
             std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|s| !s.rsplit(')').next().unwrap_or("").trim_start().starts_with('Z'))
         };
         assert!(alive(helper));
-        kill_group(leader.id());
-        leader.wait().unwrap();
+        kill_group(leader.id().expect("the shell is running"));
+        leader.wait().await.unwrap();
         let until = std::time::Instant::now() + Duration::from_secs(3);
         while alive(helper) && std::time::Instant::now() < until {
-            std::thread::sleep(Duration::from_millis(20));
+            tokio::time::sleep(Duration::from_millis(20)).await;
         }
         assert!(!alive(helper), "the helper outlived its group");
     }
