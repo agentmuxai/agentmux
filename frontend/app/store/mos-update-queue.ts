@@ -25,9 +25,10 @@
  */
 
 import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
+import { WpsEvent } from "./mps-events";
 
 /** The event that carries a single object update (`WpsEvent.MuxObjUpdate`). */
-export const MUX_OBJ_UPDATE_EVENT = "waveobj:update";
+export const MUX_OBJ_UPDATE_EVENT: string = WpsEvent.MuxObjUpdate;
 
 /**
  * Events whose handlers do not read objects the pending updates carry, so they do not make the queue flush first: the
