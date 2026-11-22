@@ -14,6 +14,7 @@
 use std::collections::BTreeMap;
 
 use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
 
 use super::adapter::Adapter;
 use super::chain_store;
@@ -39,6 +40,10 @@ pub const PENDING_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 /// Kinds of collection whose joins may go ahead without a person confirming (a Vault never does yet).
 pub const AUTO_JOIN_KINDS: [&str; 1] = ["kanban"];
 
+/// The most bytes of JSON params a sync op takes: a batch at its largest as base64, its headers, and what is around
+/// them. A record too large for a push is pulled by the peer instead (an answer is not held to this).
+pub const MAX_WIRE_BYTES: usize = MAX_BATCH_BYTES / 3 * 4 + MAX_BATCH_RECORDS * 1024 + 64 * 1024;
+
 const HEADER_WEIGHT: usize = 512;
 
 /// Why an op did not run.
@@ -55,6 +60,20 @@ pub enum OpError {
     /// A member was added but no key could be sealed to it: nothing was done.
     NoKey,
     Db(String),
+}
+
+impl OpError {
+    /// The code an op's refusal carries to the asker.
+    pub fn code(&self) -> &'static str {
+        match self {
+            OpError::NotActive => "not_active",
+            OpError::NotMember => "not_member",
+            OpError::TooBig => "too_big",
+            OpError::Bad => "bad_request",
+            OpError::NoKey => "no_key",
+            OpError::Db(_) => "failed",
+        }
+    }
 }
 
 impl From<rusqlite::Error> for OpError {
@@ -155,7 +174,7 @@ fn within_caps(records: &[Record]) -> bool {
 }
 
 /// What a machine holds of one collection.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Held {
     pub collection: String,
     pub n: u64,
@@ -180,14 +199,14 @@ pub fn hello(ctx: &Ctx, caller: &str, collections: &[String]) -> Result<Vec<Held
     Ok(out)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PullReq {
     pub collection: String,
     pub vector: Vector,
     pub limit: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PullAns {
     pub records: Vec<Record>,
     /// More remain: ask again with the vector after applying these.
@@ -227,13 +246,13 @@ pub fn check_pull_answer(ans: &PullAns, asked: usize) -> Result<(), OpError> {
     Ok(())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PushReq {
     pub collection: String,
     pub records: Vec<Record>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PushAns {
     /// One result per record, in order.
     pub results: Vec<Result<Outcome, Refused>>,
@@ -267,7 +286,7 @@ pub fn push(ctx: &mut Ctx, caller: &str, req: &PushReq, adapter: &dyn Adapter) -
     Ok(PushAns { results, vector: log::vector(ctx.conn, &req.collection)?, epoch: state.epoch })
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MembersReq {
     pub collection: String,
     /// How many entries the caller holds.
@@ -276,7 +295,7 @@ pub struct MembersReq {
     pub offered: Vec<Entry>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MembersAns {
     pub entries: Vec<Entry>,
     pub n: u64,
@@ -334,13 +353,13 @@ pub fn may_seal(ctx: &Ctx, collection: &str) -> bool {
     ctx.chains.get(collection).is_some_and(|c| !c.epoch_contested())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JoinReq {
     pub collection: String,
     pub subject: Subject,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Joined {
     /// The caller is a member: the whole chain, and the collection's keys sealed to it.
     Added { entries: Vec<Entry>, keys: Vec<(u32, String)> },
@@ -348,7 +367,7 @@ pub enum Joined {
     Pending,
 }
 
-fn kind_of(conn: &Connection, collection: &str) -> Result<String, OpError> {
+pub fn kind_of(conn: &Connection, collection: &str) -> Result<String, OpError> {
     Ok(conn.query_row("SELECT kind FROM db_sync_collections WHERE id = ?1", [collection], |r| r.get(0))?)
 }
 

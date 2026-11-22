@@ -8,6 +8,7 @@
 
 use agentmux_common::jekt_sign::{ed25519_sign_b64, ed25519_verify_b64};
 use serde_json::{json, Map, Value};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::hlc::Version;
@@ -22,7 +23,7 @@ pub const MAX_RECORD_BYTES: u64 = 25 * 1024 * 1024;
 const DOMAIN: &str = "agentmux-sync-record-v1";
 
 /// The header of a record.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Header {
     pub collection: String,
     /// A stable id made where the record was born, never reused.
@@ -42,15 +43,17 @@ pub struct Header {
 }
 
 /// A record: its header, the origin's signature over it, and the sealed body (empty for a tombstone).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Record {
     pub header: Header,
     pub sig: String,
+    /// Carried as base64 text in JSON.
+    #[serde(with = "b64")]
     pub body: Vec<u8>,
 }
 
 /// Why a record was not accepted as written.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BadRecord {
     /// A field holds the separator, the size does not match the body, or a tombstone has a body.
     Malformed,
@@ -150,5 +153,20 @@ impl Record {
             return Map::new();
         };
         map
+    }
+}
+
+/// A body as base64 text, so a record is JSON like any other op's params.
+mod b64 {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(bytes: &[u8], s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&STANDARD.encode(bytes))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+        let text = String::deserialize(d)?;
+        STANDARD.decode(text).map_err(serde::de::Error::custom)
     }
 }
