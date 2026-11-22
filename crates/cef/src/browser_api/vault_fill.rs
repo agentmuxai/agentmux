@@ -142,7 +142,7 @@ pub(super) async fn locate(
     let frame = table.frames.get(ref_).cloned();
     let now = page_url(cdp).await;
     if !table.url.is_empty() && now != table.url {
-        return Err(format!("the page changed since the snapshot (now {now}); take a new snapshot"));
+        return Err(format!("the page changed since the snapshot (now {}); take a new snapshot", agentmux_common::shown_url::shown_url(&now)));
     }
     if let Some(f) = &frame {
         frames::check_frame(cdp, f, ref_).await?;

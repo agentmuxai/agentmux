@@ -218,12 +218,13 @@ describe("MessagesPanel", () => {
         expect(el.querySelector(".messages-header-button")?.textContent).toBe("3");
     });
 
-    it("stays in a narrow header: the class the header's fit rules spare", () => {
+    it("stays reachable in a narrow header: the class the fit rules spare, drawn in the header when the tab strip is hidden", () => {
         mount([jekt()]);
         expect(messagesHeaderButtons("p1")[0].className).toContain("block-frame-end-keep");
         const rules = readFileSync(resolve(__dirname, "../../../mixins.scss"), "utf8");
-        for (const tier of ["trim", "min"]) {
-            expect(rules).toContain(`&[data-fit="${tier}"] .block-frame-end-extra:not(.block-frame-end-keep)`);
+        // The tab strip, and the selected tab's buttons with it, is hidden at these tiers; the kept button then shows in the header.
+        for (const tier of ["tabs", "trim", "min"]) {
+            expect(rules).toContain(`&[data-fit="${tier}"] .block-frame-end-kept`);
         }
         expect(rules).toContain(".block-frame-end-icons > :not(.block-frame-default-close):not(.block-frame-end-keep)");
     });

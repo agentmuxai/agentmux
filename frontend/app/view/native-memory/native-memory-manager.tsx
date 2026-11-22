@@ -889,6 +889,8 @@ function renderDetailHeader(s: ManagerState, agent: Accessor<AgentDefinition>, c
             <Button
                 class="native-memory-manager-back"
                 density="compact"
+                // The handler waits for the person's answer to the discard question, which is not work in progress.
+                pending={false}
                 onClick={async () => {
                     if (!s.selectedFilename()) {
                         setSelectedAgent(s, null);
