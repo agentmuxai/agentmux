@@ -407,6 +407,8 @@ pub(crate) struct ResolvedWindow {
     pub(crate) tier: CaptureTier,
     pub(crate) is_agentmux: bool,
     pub(crate) is_self: bool,
+    /// How many of this AgentMux's own windows have this title, the target included.
+    pub(crate) same_title: usize,
 }
 
 pub(crate) fn resolve_window(
@@ -430,6 +432,7 @@ pub(crate) fn resolve_window(
         tier: target.tier,
         is_agentmux: target.is_agentmux,
         is_self: target.is_self,
+        same_title: all.iter().filter(|w| w.is_agentmux && w.is_self && w.title == target.title).count(),
     })
 }
 

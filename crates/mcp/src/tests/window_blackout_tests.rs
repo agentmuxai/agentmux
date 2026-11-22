@@ -114,3 +114,10 @@ fn the_title_linux_adds_without_the_sandbox_still_finds_the_window() {
     let host = include_str!("../../../cef/src/client/display.rs");
     assert!(host.contains(&format!("push_str(\"{UNSANDBOXED_SUFFIX}\")")), "the host's suffix changed: change UNSANDBOXED_SUFFIX with it");
 }
+
+#[test]
+fn two_windows_on_screen_with_one_title_are_refused_even_if_only_one_answered() {
+    assert!(unique_title(1, "AgentMux").is_ok());
+    let err = unique_title(2, "AgentMux").unwrap_err().to_string();
+    assert!(err.contains("can't be told apart"), "{err}");
+}

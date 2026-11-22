@@ -54,6 +54,17 @@ fn same_title(title: &str, page: &str) -> bool {
     title == page || title.strip_suffix(UNSANDBOXED_SUFFIX) == Some(page)
 }
 
+/// Refuses when more than one of this AgentMux's own windows has the target's title (`same_title` counts the
+/// windows on screen, the target included), whichever of them answered: an answer is found by its title.
+pub(crate) fn unique_title(same_title: usize, title: &str) -> Result<()> {
+    if same_title > 1 {
+        anyhow::bail!(
+            "{same_title} AgentMux windows have the title {title:?}, so their private panes can't be told apart and neither is captured: rename one, or use UI screenshot of your own pane"
+        );
+    }
+    Ok(())
+}
+
 /// The answer for the window titled `title`, out of every window's answer to `begin`, if it may be captured now.
 pub(crate) fn before<'a>(masks: &'a [WindowMask], title: &str) -> Result<&'a WindowMask> {
     let mine: Vec<&WindowMask> = masks.iter().filter(|m| same_title(title, &m.title)).collect();

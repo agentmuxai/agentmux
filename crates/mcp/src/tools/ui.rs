@@ -212,6 +212,7 @@ async fn capture_blacked_out(
     if !target.is_self {
         anyhow::bail!(wb::OTHER_INSTANCE);
     }
+    wb::unique_title(target.same_title, &target.title)?;
     let capture_id = uuid::Uuid::new_v4().to_string();
     let begins = capture_masks(cx, &capture_id, "begin").await?;
     let begin = wb::before(&begins, &target.title)?.clone();
