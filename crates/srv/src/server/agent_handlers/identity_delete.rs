@@ -38,6 +38,7 @@ pub(crate) async fn delete_identity_account(
             revoke: revoke_report,
         });
     }
+    release_sign_in_values(acct.as_ref());
     let cleanup_report = remove_secrets(acct).await;
     let outcome = mstore
         .identity_delete(id)
@@ -101,6 +102,15 @@ pub(crate) async fn delete_identity_account(
     })
 }
 
+/// The values read from the account's sign-in files are no longer withheld from transcripts: the account and its
+/// credential directory are going.
+fn release_sign_in_values(acct: Option<&IdentityAccount>) {
+    use crate::backend::storage::store::SecretRef;
+    if let Some(SecretRef::OAuthConfigDir { dir }) = acct.map(|a| &a.secret_ref) {
+        crate::identity::resolver::release_sign_in(dir);
+    }
+}
+
 /// An OAuth grant is revoked at the provider first, while the token is still in the keychain;
 /// otherwise it would live on there (spec §7 "Disconnect"). Null when there's none.
 async fn revoke_at_provider(mstore: &Arc<Store>, acct: Option<&IdentityAccount>) -> serde_json::Value {
@@ -159,3 +169,7 @@ fn tell_windows_and_agents(broker: &Arc<Broker>, id: &str, provider: &str, affec
         broker.publish_event_for::<crate::backend::mps_events::AgentCredentialsRevoked>(agent_id, &revoked, vec![], 0);
     }
 }
+
+#[cfg(test)]
+#[path = "identity_delete_tests.rs"]
+mod tests;
