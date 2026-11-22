@@ -148,3 +148,20 @@ fn a_profile_id_in_a_received_body_is_another_machines_and_is_dropped() {
     assert!(!fields_of(&made).contains_key(PROFILE) || fields_of(&made).get(PROFILE).map(String::as_str) == Some("personal"));
     assert!(!made.fields.contains("p-0123456789ab"));
 }
+
+#[test]
+fn a_sign_in_edited_on_a_machine_without_its_profile_goes_back_to_that_profile() {
+    let work = [profile("p-0123456789ab", "Work", None)];
+    let value = parts(&[("value", SECRET)]);
+    // A (has Work) sends it; B (no Work) receives it under Personal, marked with the name.
+    let sent = EntryBody::of_row(&login("profile:p-0123456789ab"), &value, &Known(&work));
+    let on_b = sent.into_row("entry-1", "vault-b", vec![], None, NONE);
+    assert_eq!(fields_of(&on_b).get(PROFILE_FROM).map(String::as_str), Some("Work"));
+    // B edits it and sends it back: it still names Work.
+    let back = EntryBody::of_row(&on_b, &value, NONE);
+    assert_eq!(back.fields.get(PROFILE_NAME).map(String::as_str), Some("Work"));
+    assert!(!back.fields.contains_key(PROFILE) && !back.fields.contains_key(PROFILE_FROM));
+    // On A it is in Work, not in Personal.
+    let on_a = back.into_row("entry-1", "vault-a", vec![], None, &Known(&work));
+    assert_eq!(fields_of(&on_a).get(PROFILE).map(String::as_str), Some("profile:p-0123456789ab"));
+}

@@ -87,11 +87,17 @@ impl EntryBody {
         }
         // A machine's profile id never leaves it: the profile goes by name (a sign-in that can't be named stays here, see
         // `stays_here`, so none arrives without one).
+        let from = fields.remove(PROFILE_FROM);
         if let Some(id) = fields.get(PROFILE).and_then(|p| p.strip_prefix("profile:")).map(str::to_string) {
             fields.remove(PROFILE);
             if let Some(name) = profiles.name_of(&id) {
                 fields.insert(PROFILE_NAME.to_string(), name);
             }
+        } else if let Some(name) = from {
+            // A sign-in that arrived for a profile this machine lacks is still that profile's: it goes on by its name, so
+            // an edit made here does not move it to Personal for every machine that has the profile.
+            fields.remove(PROFILE);
+            fields.insert(PROFILE_NAME.to_string(), name);
         }
         EntryBody {
             kind: row.kind.clone(),
