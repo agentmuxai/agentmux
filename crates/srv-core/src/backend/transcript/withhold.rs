@@ -40,6 +40,14 @@ pub const MIN_LEN: usize = 8;
 /// How many values with no known expiry an owner keeps with [`hold_kept`].
 pub const KEPT_PER_OWNER: usize = 8;
 
+/// How many values an owner holds with [`hold_until`] at once: past it the one that expires first is dropped (the
+/// value just held never is), so what one owner is given cannot crowd out the values of the others.
+pub const UNTIL_PER_OWNER: usize = 16;
+
+/// The longest a value is trusted to keep working (ms from now): an expiry beyond it is not believed, and the value is
+/// held as one with no known expiry ([`hold_kept`]).
+pub const MAX_TRUSTED_LIFE_MS: i64 = 30 * 24 * 60 * 60 * 1000;
+
 /// The longest value the registry takes (bytes): a longer one is refused.
 pub const MAX_VALUE_LEN: usize = 4 * 1024 * 1024;
 
@@ -238,6 +246,31 @@ impl Registry {
         self.reindex();
     }
 
+    /// [`hold_until`] at `now`: a value held with an expiry that is believed is one of at most [`UNTIL_PER_OWNER`] for
+    /// `base`; one with an expiry beyond [`MAX_TRUSTED_LIFE_MS`] is one of those kept with no expiry.
+    fn add_until(&mut self, base: &str, value: &str, expires_at: i64, now: i64) {
+        if expires_at.saturating_sub(now) > MAX_TRUSTED_LIFE_MS {
+            self.add_kept(base, value);
+            return;
+        }
+        let owner = format!("{base}#{expires_at}");
+        self.add(Some(&owner), value, Some(expires_at));
+        let prefix = format!("{base}#");
+        let held = |e: &Entry| e.owner.as_deref().is_some_and(|o| o.starts_with(&prefix));
+        let mut dropped = 0u64;
+        while self.entries.iter().filter(|e| held(e)).count() > UNTIL_PER_OWNER {
+            let soonest = self.entries.iter().enumerate().filter(|(_, e)| held(e) && e.owner.as_deref() != Some(owner.as_str())).min_by_key(|(_, e)| e.expires_at);
+            let Some((at, _)) = soonest else { break };
+            self.entries.remove(at);
+            dropped += 1;
+        }
+        if dropped > 0 {
+            self.stale = true;
+            self.reindex();
+            self.evicted(dropped);
+        }
+    }
+
     /// Keeps `value` for `owner` along with what the owner kept before, up to [`KEPT_PER_OWNER`] (the oldest is dropped).
     fn add_kept(&mut self, owner: &str, value: &str) {
         let value = value.trim();
@@ -411,7 +444,8 @@ pub fn hold(owner: &str, value: &str, expires_at: Option<i64>) {
 /// next with [`hold_until`] does not take its place: the value that was replaced still works until its own expiry,
 /// so it stays withheld until then. Holding the same value and expiry again changes nothing.
 pub fn hold_until(owner: &str, value: &str, expires_at: i64) {
-    with_write(|r| r.add(Some(&format!("{owner}#{expires_at}")), value, Some(expires_at)));
+    let now = agentmux_common::time::now_ms();
+    with_write(|r| r.add_until(owner, value, expires_at, now));
 }
 
 /// Withholds `value` for `owner` with no expiry, until the process ends or the owner is [`release`]d. The values the
@@ -901,6 +935,55 @@ mod tests {
         let closed = Built { small: Some(Matcher::Closed), large: Arc::new(Vec::new()) };
         assert_eq!(replaced(&closed, "an ordinary line"), MARK, "never the text");
         assert_eq!(replaced(&closed, "KEY=canary-closed-0001-value"), MARK);
+    }
+
+    #[test]
+    fn an_expiry_beyond_the_longest_a_value_is_trusted_to_work_holds_it_as_one_with_no_expiry() {
+        let day = 24 * 60 * 60 * 1000;
+        let now = 1_800_000_000_000;
+        let mut registry = Registry::default();
+        registry.add_until("acct:far", "canary-far-0001-value", now + 365 * day, now);
+        registry.add_until("acct:far", "canary-far-0002-value", now + 3_600_000, now);
+        assert!(registry.entries.iter().any(|e| e.expires_at.is_none() && e.owner.as_deref() == Some("acct:far")), "held as kept");
+        assert!(registry.entries.iter().any(|e| e.expires_at.is_some()), "a believable expiry is kept as one");
+        assert!(!shows(&mut registry, now + 400 * day, "canary-far-0001-value"), "it never runs out");
+        assert!(shows(&mut registry, now + 2 * 3_600_000, "canary-far-0002-value"), "the other does, at its own time");
+    }
+
+    #[test]
+    fn an_owner_holds_at_most_a_set_number_of_values_with_an_expiry_and_the_one_just_held_stays() {
+        let now = 1_800_000_000_000;
+        let evicted = EVICTED.load(Ordering::Relaxed);
+        let mut registry = Registry::default();
+        for n in 0..40 {
+            registry.add_until("acct:cap", &format!("canary-cap-{n:04}-value"), now + 3_600_000 + n * 1000, now);
+        }
+        let held = registry.entries.iter().filter(|e| e.owner.as_deref().is_some_and(|o| o.starts_with("acct:cap#"))).count();
+        assert_eq!(held, UNTIL_PER_OWNER);
+        assert!(!shows(&mut registry, now, "canary-cap-0039-value"), "the latest is held");
+        assert!(shows(&mut registry, now, "canary-cap-0000-value"), "the one that expires first made room");
+        assert!(EVICTED.load(Ordering::Relaxed) - evicted >= 24, "the ones dropped are counted");
+        // A value that expires sooner than all the rest is not the one dropped.
+        registry.add_until("acct:cap", "canary-cap-0100-value", now + 1_800_000, now);
+        assert!(!shows(&mut registry, now, "canary-cap-0100-value"));
+    }
+
+    #[test]
+    fn a_flood_of_values_for_one_owner_leaves_every_other_owners_value_hidden() {
+        let now = 1_800_000_000_000;
+        let mut registry = Registry::default();
+        registry.add(Some("acct:real"), "canary-flood-real-0001-value", None);
+        registry.add_kept("acct:real-kept", "canary-flood-real-0002-value");
+        registry.add_until("acct:real-until", "canary-flood-real-0003-value", now + 3_600_000, now);
+        let filler = "f".repeat(4096);
+        for n in 0..1000 {
+            registry.add_until("acct:flood", &format!("canary-flood-{n:05}-{filler}"), now + 3_600_000 + n, now);
+            registry.add_until("acct:flood-far", &format!("canary-flood-far-{n:05}-{filler}"), now + 400 * 24 * 3_600_000, now);
+        }
+        assert!(registry.bytes() <= MAX_TOTAL_BYTES);
+        for value in ["canary-flood-real-0001-value", "canary-flood-real-0002-value", "canary-flood-real-0003-value"] {
+            assert!(!shows(&mut registry, now, value), "{value} is still hidden");
+        }
     }
 
     #[test]
