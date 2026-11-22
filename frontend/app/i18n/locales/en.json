@@ -561,7 +561,7 @@
     "settings.notifications.quietHours.label": "Quiet hours",
     "settings.notifications.quietHours.description": "Hold notifications back every day during these hours (local time), e.g. 22:00-08:00. Leave empty for none.",
     "settings.notifications.osSummary.label": "Show what the agent is working on",
-    "settings.notifications.osSummary.description": "Add the agent's current session summary as a small line under the notification",
+    "settings.notifications.osSummary.description": "Add what the agent is on as a small line under the notification: its own status line, or the task it holds, when recent",
     "settings.notifications.osPreview.label": "Notification content",
     "settings.notifications.osPreview.description": "How much of an agent's question to show. Credentials and sensitive terms are always hidden.",
     "settings.notifications.osTest.label": "Send test notification",

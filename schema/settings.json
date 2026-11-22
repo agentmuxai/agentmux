@@ -880,7 +880,7 @@
         "notify:os:summary": {
           "type": "boolean",
           "default": true,
-          "description": "Show the agent's current session summary as a small line under its notifications. Left out when the agent has none. See docs/specs/SPEC_OS_NOTIFICATIONS_RICH_CONTENT_AND_CLICK_TO_PANE_2026_09_25.md §1.",
+          "description": "Show what the agent is on as a small line under its notifications: its own status line when it is recent, else the Kanban task it holds. Left out when there is neither. See docs/specs/SPEC_OS_NOTIFICATIONS_RICH_CONTENT_AND_CLICK_TO_PANE_2026_09_25.md §1.",
           "x-section": "Notifications"
         },
         "notify:os:preview": {
