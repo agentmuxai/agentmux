@@ -2877,6 +2877,11 @@ fn test_a_post_about_tokens_as_usage_units_is_let_through_but_a_jekt_tier_still_
     // Invisible characters and fullwidth letters do not hide a credential word from the post filter either.
     assert_eq!(post_refusal_reason("the pass\u{200B}word").as_deref(), Some("password"));
     assert_eq!(post_refusal_reason("the ｔｏｋｅｎ").as_deref(), Some("token"));
+    // Look-alike letters (Cyrillic, Greek) spell the word as a reader takes it.
+    assert_eq!(post_refusal_reason("the p\u{0430}ssword is in the vault").as_deref(), Some("password"));
+    assert_eq!(post_refusal_reason("the t\u{043E}k\u{0435}n").as_deref(), Some("token"));
+    assert_eq!(post_refusal_reason("the p\u{0430}ss\u{03C9}ord is in the vault"), None, "a letter that imitates nothing is not folded");
+    assert_eq!(post_refusal_reason("\u{043F}\u{0440}\u{0438}\u{0432}\u{0435}\u{0442}, \u{043C}\u{0438}\u{0440}"), None, "ordinary Cyrillic text passes");
 }
 
 #[test]

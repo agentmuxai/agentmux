@@ -242,11 +242,11 @@ fn contains_whole_word(haystack: &str, needle: &str, allow_plural: bool) -> bool
 }
 
 /// What a text posted for others to read (a bulletin, a channel post) is read as: the text a model reads (invisibles
-/// dropped, fullwidth letters as ASCII), lower-cased.
+/// dropped, fullwidth letters as ASCII, look-alike letters as the letters they imitate), lower-cased.
 fn as_read(msg: &str) -> String {
     msg.chars()
         .filter(|&c| !is_invisible(c) && !matches!(c, '\u{200C}' | '\u{200D}'))
-        .map(fold)
+        .map(|c| fold(super::post_secrets::letter_lookalike(c)))
         .collect::<String>()
         .to_lowercase()
 }

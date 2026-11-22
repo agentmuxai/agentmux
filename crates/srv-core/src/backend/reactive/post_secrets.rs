@@ -90,7 +90,7 @@ fn names_a_credential(word: &str) -> bool {
 }
 
 /// A letter a look-alike character stands for, with its case: the Cyrillic and Greek letters that copy Latin ones.
-fn letter_lookalike(c: char) -> char {
+pub(super) fn letter_lookalike(c: char) -> char {
     match c {
         'а' => 'a', 'е' | 'є' => 'e', 'о' | 'ο' => 'o', 'р' | 'ρ' => 'p', 'с' | 'ϲ' => 'c', 'у' => 'y', 'х' | 'χ' => 'x',
         'і' | 'ї' | 'ι' => 'i', 'ѕ' => 's', 'ј' => 'j', 'ԁ' => 'd', 'α' => 'a', 'ν' => 'v', 'τ' => 't', 'κ' => 'k',
