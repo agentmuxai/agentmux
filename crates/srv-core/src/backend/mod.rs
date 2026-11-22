@@ -117,6 +117,7 @@ pub mod editor_file_watcher;
 pub mod editor_probe;
 pub mod editor_lines;
 pub mod editor_search;
+pub mod editor_search_text;
 pub mod file_icons;
 pub mod files_watcher;
 pub mod fs_ops;

@@ -338,6 +338,7 @@ import type { FileProbeReq } from "@/types/rpc/FileProbeReq";
 import type { FileProbeResult } from "@/types/rpc/FileProbeResult";
 import type { FileSearchBytesReq } from "@/types/rpc/FileSearchBytesReq";
 import type { FileSearchBytesResult } from "@/types/rpc/FileSearchBytesResult";
+import type { FileSearchTextReq } from "@/types/rpc/FileSearchTextReq";
 import type { FleetActionResult } from "@/types/rpc/FleetActionResult";
 import type { FleetGroup } from "@/types/rpc/FleetGroup";
 import type { FleetGroupDeleteResult } from "@/types/rpc/FleetGroupDeleteResult";
@@ -2466,6 +2467,10 @@ export const GeneratedApi = {
   // command "filesearchbytes"
   FileSearchBytesCommand(client: RpcClient, data: FileSearchBytesReq, opts?: RpcOpts): Promise<FileSearchBytesResult> {
     return client.rpcCall("filesearchbytes", data, opts);
+  },
+  // command "filesearchtext"
+  FileSearchTextCommand(client: RpcClient, data: FileSearchTextReq, opts?: RpcOpts): Promise<FileSearchBytesResult> {
+    return client.rpcCall("filesearchtext", data, opts);
   },
   // command "readeditorfile"
   ReadEditorFileCommand(

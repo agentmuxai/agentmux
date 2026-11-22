@@ -3284,6 +3284,25 @@
     }
   },
   {
+    "command": "filesearchtext",
+    "request": "agentmux_srv_core::backend::rpc_types::editor_read::FileSearchTextReq",
+    "requestName": "FileSearchTextReq",
+    "requestTs": {
+      "imports": [
+        "FileSearchTextReq"
+      ],
+      "name": "FileSearchTextReq"
+    },
+    "response": "agentmux_srv_core::backend::rpc_types::editor_read::FileSearchBytesResult",
+    "responseName": "FileSearchBytesResult",
+    "responseTs": {
+      "imports": [
+        "FileSearchBytesResult"
+      ],
+      "name": "FileSearchBytesResult"
+    }
+  },
+  {
     "command": "fleet.broadcast",
     "request": "agentmux_srv_core::backend::rpc_types::fleet::CommandFleetBroadcastData",
     "requestName": "CommandFleetBroadcastData",
