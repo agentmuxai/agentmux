@@ -241,7 +241,7 @@ async fn connect(
     }
     let stop = host.stop.clone();
     let serving = Serving::begin(&host);
-    super::upgrade(ws, start, async move {
+    super::open_pane(params.mode.as_deref(), ws, start, async move {
         let _open = open;
         let _serving = serving;
         stop.cancelled().await

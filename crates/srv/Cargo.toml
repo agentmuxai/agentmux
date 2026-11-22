@@ -110,6 +110,11 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["ring",
 # from the ring already under rustls: no new crate.
 ring = { version = "0.17", default-features = false, features = ["alloc"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# The screen-mode Browser pane (streamed_browser/screen): reads the pixels of a virtual X screen and sends pointer and key events to it.
+# Pure Rust (no libxcb); already in the lock for other crates.
+x11rb = { version = "0.13", features = ["xtest"] }
+
 [target.'cfg(windows)'.dependencies]
 # Out-of-process crash dump capture via VEH + named-pipe IPC.
 # Catches AV, heap corruption, and non-__fastfail aborts.

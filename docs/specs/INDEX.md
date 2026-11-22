@@ -261,6 +261,7 @@ than none. Add the line when you touch one and know which area it belongs to.
 | Spec | Title | Status | Date | Replaces / replaced by |
 |---|---|---|---|---|
 | [`SPEC_FOLD_REVIEWS_INTO_THE_KANBAN_2026_11_22`](SPEC_FOLD_REVIEWS_INTO_THE_KANBAN_2026_11_22.md) | Spec: fold Reviews into the Kanban: a card shows what its pull requests wait on, and the Reviews pane goes away | active | 2026-11-22 |  |
+| [`SPEC_SIGN_IN_BROWSER_PERSON_DRIVEN_SCREEN_MODE_2026_11_22`](SPEC_SIGN_IN_BROWSER_PERSON_DRIVEN_SCREEN_MODE_2026_11_22.md) | Spec: a sign-in browser a person drives (the Browser pane's screen mode), production build | active | 2026-11-22 |  |
 | [`SPEC_KANBAN_PULL_REQUEST_ACTIONS_2026_11_21`](SPEC_KANBAN_PULL_REQUEST_ACTIONS_2026_11_21.md) | Spec: Kanban pull request actions: unlink, add by name, and pull requests not matched to a task | active | 2026-11-21 |  |
 | [`SPEC_BUTTON_PRESSED_AND_PENDING_FEEDBACK_2026_11_20`](SPEC_BUTTON_PRESSED_AND_PENDING_FEEDBACK_2026_11_20.md) | Spec: Every button answers the press at once and shows a spinner while its action runs | implemented | 2026-11-20 |  |
 | [`SPEC_DEEP_LINKS_ONE_FRAMEWORK_2026_11_20`](SPEC_DEEP_LINKS_ONE_FRAMEWORK_2026_11_20.md) | Deep links: one framework by which any view opens at a named place, in any pane | active | 2026-11-20 |  |
