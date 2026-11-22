@@ -222,9 +222,26 @@ fn install_message_brokers(state: &AppState) {
 /// never a value.
 fn install_withhold_alert(state: &AppState) {
     let handler = state.reactive_handler;
-    backend::transcript::withhold::set_alert(move |line| {
-        handler.log_fleet_action_audit(Some("srv"), "srv", "", "transcript.withhold", false, Some(line), &uuid::Uuid::new_v4().to_string(), None);
+    backend::transcript::withhold::set_alert(queued_alert(move |line| {
+        handler.log_fleet_action_audit(Some("srv"), "srv", "", "transcript.withhold", false, Some(line.as_str()),&uuid::Uuid::new_v4().to_string(), None);
+    }));
+}
+
+/// A callback that only queues each line; `deliver` runs on its own thread. The registry raises an alert from inside
+/// message delivery, where the handler's lock is held, so a `deliver` that took that lock there would never return.
+fn queued_alert(deliver: impl Fn(String) + Send + 'static) -> impl Fn(&str) + Send + Sync + 'static {
+    let (queue, lines) = std::sync::mpsc::channel::<String>();
+    let spawned = std::thread::Builder::new().name("withhold-alert".into()).spawn(move || {
+        for line in lines {
+            deliver(line);
+        }
     });
+    if let Err(e) = spawned {
+        tracing::warn!("withhold alert worker not started, alerts are only logged: {e}");
+    }
+    move |line| {
+        let _ = queue.send(line.to_string());
+    }
 }
 
 /// The Atlas map and the Swarm show this machine's agent containers as they change (`backend::container_status`).

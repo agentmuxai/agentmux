@@ -71,3 +71,23 @@ async fn a_connection_to_either_listener_is_traced_to_its_process() {
     stop.cancel();
     serving.await.unwrap();
 }
+
+/// An alert raised while the caller holds the lock the delivery needs returns at once; the line is delivered after
+/// the lock is released.
+#[test]
+fn a_queued_alert_returns_while_the_caller_holds_the_lock_the_delivery_needs() {
+    let lock = Arc::new(std::sync::Mutex::new(()));
+    let (done, delivered) = std::sync::mpsc::channel::<String>();
+    let alert = queued_alert({
+        let lock = Arc::clone(&lock);
+        move |line| {
+            let _held = lock.lock().unwrap();
+            let _ = done.send(line);
+        }
+    });
+    let held = lock.lock().unwrap();
+    alert("canary-alert-line");
+    assert!(delivered.try_recv().is_err(), "nothing is delivered while the lock is held");
+    drop(held);
+    assert_eq!(delivered.recv_timeout(std::time::Duration::from_secs(10)).unwrap(), "canary-alert-line");
+}
