@@ -336,10 +336,13 @@ fn sync_account(
         label
     };
 
-    let staged = std::fs::read_to_string(&file)
-        .ok()
-        .map(Zeroizing::new)
-        .filter(|raw| expires_at(raw).is_some());
+    let staged = std::fs::read_to_string(&file).ok().map(Zeroizing::new);
+    // Whatever this copy holds is kept out of every transcript from this look on, before anything is decided or written
+    // with it: a login that first appears here (the container's CLI refreshed) is not the account's yet.
+    if let Some(raw) = &staged {
+        withhold_login(config_dir, raw);
+    }
+    let staged = staged.filter(|raw| expires_at(raw).is_some());
     let in_keychain = match keychain.read(&service) {
         Ok(entry) => entry.filter(|raw| expires_at(raw).is_some()),
         Err(e) => {
@@ -397,6 +400,14 @@ fn sync_account(
             }
             Ok(dir)
         }
+    }
+}
+
+/// Registers the tokens in a login read out of a container's copy of the account `config_dir` with the sign-in
+/// withhold, under the account's own owner (the same one its file's look uses).
+fn withhold_login(config_dir: &str, raw: &str) {
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(raw) {
+        crate::identity::resolver::withhold_sign_in(config_dir, &json);
     }
 }
 
@@ -484,7 +495,11 @@ fn push_to_siblings(copy: &Copy, login: &str, moved: &mut dyn FnMut(Moved)) {
         }
         let dir = staging_dir(copy.root, &sibling, copy.config_dir);
         let file = dir.join(CLAUDE_CREDENTIALS_FILE);
-        let held = std::fs::read_to_string(&file).ok().map(Zeroizing::new).and_then(|raw| expires_at(&raw));
+        let raw = std::fs::read_to_string(&file).ok().map(Zeroizing::new);
+        if let Some(raw) = &raw {
+            withhold_login(copy.config_dir, raw);
+        }
+        let held = raw.and_then(|raw| expires_at(&raw));
         if held.is_some_and(|held| held < newer) {
             let outcome = stage(&dir, &file, copy.config_dir, login);
             moved(Moved { direction: Direction::ContainerToSibling, account: copy.label.to_string(), outcome });

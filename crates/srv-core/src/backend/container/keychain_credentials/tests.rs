@@ -880,6 +880,54 @@ fn a_refresh_in_one_container_reaches_the_account_and_every_other_copy_in_the_sa
     assert_eq!(json(&held(&a)), json(&login(400, "b")), "and the first container's copy follows");
 }
 
+/// A Keychain that notes, at each write, whether the value written was already withheld from transcripts.
+struct Spy<'a> {
+    inner: &'a Fake,
+    withheld_at_write: RefCell<Vec<bool>>,
+}
+impl Keychain for Spy<'_> {
+    fn read(&self, service: &str) -> Result<Option<Zeroizing<String>>, String> {
+        self.inner.read(service)
+    }
+    fn write(&self, service: &str, value: &str) -> Result<(), String> {
+        self.withheld_at_write.borrow_mut().push(crate::backend::transcript::withhold::holds(value));
+        self.inner.write(service, value)
+    }
+}
+
+#[test]
+fn a_login_that_first_appears_in_a_containers_copy_is_withheld_before_the_account_file_changes() {
+    let (tmp, config) = setup();
+    let service = service_name(&config);
+    let fake = Fake::with(&service, Some(login(100, "withhold-old")));
+    let spy = Spy { inner: &fake, withheld_at_write: RefCell::new(Vec::new()) };
+    let first = |container: &str, account: Option<&str>| {
+        let mut moved = Vec::new();
+        let dir = prepare(&spy, &tmp.path().join("root"), container, &config, account, &mut |m| moved.push(m)).unwrap();
+        (dir, moved)
+    };
+    let (a, _) = first("agentmux-wa", None);
+    let (b, _) = first("agentmux-wb", None);
+    let (refreshed, refused) = ("r-withhold-from-a-refresh", "r-withhold-from-another-account");
+    let withheld = crate::backend::transcript::withhold::holds;
+    assert!(!withheld(refreshed) && !withheld(refused), "neither value is withheld yet");
+
+    // A's CLI refreshed: the value is in the copy and nowhere else; the sync takes it into the account and the sibling.
+    std::fs::write(a.join(".credentials.json"), login(300, "withhold-from-a-refresh")).unwrap();
+    let (_, moved) = first("agentmux-wa", Some(ACCOUNT));
+    assert!(moved.iter().all(|m| m.outcome.is_ok()), "{moved:?}");
+    assert_eq!(*spy.withheld_at_write.borrow(), vec![true], "withheld at the moment the account's file was written");
+    assert!(withheld(refreshed), "and still");
+    assert!(held(&b).contains(refreshed), "the sibling's copy carries it now");
+
+    // A copy refused because it is signed in as another account is read too, so its value is withheld all the same.
+    std::fs::write(b.join(".credentials.json"), login(500, "withhold-from-another-account")).unwrap();
+    let (_, moved) = first("agentmux-wb", Some("someone-else"));
+    assert!(moved.iter().any(|m| m.outcome.is_err()), "refused: {moved:?}");
+    assert_eq!(spy.withheld_at_write.borrow().len(), 1, "the account's file was not written again");
+    assert!(withheld(refused), "withheld although refused");
+}
+
 #[test]
 fn a_copy_made_from_a_refresh_token_the_account_has_since_replaced_gets_the_accounts_login() {
     let (tmp, config) = setup();
