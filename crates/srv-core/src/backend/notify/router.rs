@@ -313,6 +313,9 @@ pub struct Router {
     last_tray: Mutex<Option<TrayState>>,
     /// block_id → last `turn_active` seen in `controllerstatus`.
     turn_active: Mutex<std::collections::HashMap<String, bool>>,
+    /// block_id → when its latest turn was seen to start (epoch ms): a status line set since is about
+    /// the turn a toast reports (`toast_line`).
+    turn_started_ms: Mutex<std::collections::HashMap<String, i64>>,
     /// (block_id, turn_id, ended_at_ms) of turn ends already notified.
     notified_turns: Mutex<std::collections::HashSet<(String, u64, u64)>>,
     /// `block:reveal` requests whose caller waits for the window's answer, by request id.
@@ -359,6 +362,7 @@ pub fn init(
                 internal: tx,
                 last_tray: Mutex::new(None),
                 turn_active: Mutex::new(Default::default()),
+                turn_started_ms: Mutex::new(Default::default()),
                 notified_turns: Mutex::new(Default::default()),
                 reveal_waiters: Mutex::new(Default::default()),
             });
@@ -500,31 +504,7 @@ fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::Unbound
                     crate::backend::user_stop::note_user_stop(&block_id);
                     r.resolve(&block_id, Family::Turn)
                 }
-                Internal::TurnStatus { block_id, active } => {
-                    let prev = {
-                        let mut turns = r.turn_active.lock().unwrap_or_else(|e| e.into_inner());
-                        // Bounded: forgetting an IDLE block is
-                        // harmless — its next `true` still reads as Started.
-                        if turns.len() > TURN_MAP_MAX {
-                            turns.retain(|_, active| *active);
-                        }
-                        turns.insert(block_id.clone(), active)
-                    };
-                    let stopped_recently = crate::backend::user_stop::stopped_recently(&block_id);
-                    match turn_transition(prev, active, stopped_recently) {
-                        TurnTransition::Started => {
-                            // A new turn: the earlier stop no longer applies
-                            // to it (Codex P2 on #3705).
-                            crate::backend::user_stop::forget(&block_id);
-                            r.resolve(&block_id, Family::Turn)
-                        }
-                        // Notified from the turn's ledger instead
-                        // (`Internal::TurnEnded`): a pass ending is not the
-                        // turn ending.
-                        TurnTransition::Finished => {}
-                        TurnTransition::Nothing => {}
-                    }
-                }
+                Internal::TurnStatus { block_id, active } => r.on_turn_status(&block_id, active),
             }
         }
     });
@@ -593,7 +573,7 @@ pub(crate) fn is_bidi_control(c: char) -> bool {
     matches!(c, '\u{200E}' | '\u{200F}' | '\u{061C}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
 }
 
-/// Rich-content spec §1.2: the agent's session summary as a single line —
+/// Rich-content spec §1.2: what the agent is on (`toast_line`) as a single line —
 /// controls and bidi stripped, whitespace collapsed, capped at 90 characters.
 /// A summary that trips the jekt keyword list is dropped, not replaced: it is
 /// decoration, not something the user needs to be told is hidden.
@@ -749,7 +729,7 @@ impl Router {
         matches!(self.store.get::<Block>(block_id), Ok(Some(_)))
     }
 
-    /// The block's sanitized agent name and session summary, from one read.
+    /// The block's sanitized agent name and the line saying what it is on, from one read.
     /// BLOCKING (SQLite behind `Store`'s process-wide mutex) — only ever
     /// reached through `emit` / `emit_fixed`, which callers must run off the
     /// async workers (`spawn_blocking`; the #1782 failure class, see
@@ -765,21 +745,52 @@ impl Router {
         if raw_name.is_empty() {
             raw_name = meta("agentId");
         }
-        // A stored value that is not a real title (a placeholder an older build
-        // accepted, such as `(none yet)`) must not reach an OS notification either.
-        let stored_summary = meta(crate::ambient::title::META_TITLE);
-        let stored_summary = if crate::ambient::validate::is_usable_title(&stored_summary) {
-            stored_summary
-        } else {
-            String::new()
-        };
+        // The line under the name is the agent's own status line or its held task, when fresh; never
+        // the ambient title, which nothing checks the age of (`toast_line`).
+        let turn_started = self.turn_started_ms.lock().unwrap_or_else(|e| e.into_inner()).get(block_id).copied();
+        let summary = block.as_ref().and_then(|b| super::toast_line::of_block(b, turn_started, now_ms()));
         // A pane that holds no agent (a browser, an editor) is named by what it is,
         // not "An agent": the countdown to close it says what is closing.
         let name = match block.as_ref().filter(|_| raw_name.trim().is_empty()) {
             Some(b) => super::pane_label::pane_label(&b.meta),
             None => sanitize_name(&raw_name),
         };
-        (name, sanitize_summary(&stored_summary))
+        (name, summary)
+    }
+
+    /// A controller's `turn_active` for `block_id`: a turn that starts forgets the stop that ended
+    /// the one before, records when it began (`toast_line` reads it) and retracts the turn's toast.
+    fn on_turn_status(&self, block_id: &str, active: bool) {
+        let prev = {
+            let mut turns = self.turn_active.lock().unwrap_or_else(|e| e.into_inner());
+            // Bounded: forgetting an IDLE block is
+            // harmless — its next `true` still reads as Started.
+            if turns.len() > TURN_MAP_MAX {
+                turns.retain(|_, active| *active);
+            }
+            turns.insert(block_id.to_string(), active)
+        };
+        let stopped_recently = crate::backend::user_stop::stopped_recently(block_id);
+        match turn_transition(prev, active, stopped_recently) {
+            TurnTransition::Started => {
+                // A new turn: the earlier stop no longer applies
+                // to it (Codex P2 on #3705).
+                crate::backend::user_stop::forget(block_id);
+                {
+                    let mut starts = self.turn_started_ms.lock().unwrap_or_else(|e| e.into_inner());
+                    if starts.len() > TURN_MAP_MAX {
+                        starts.clear();
+                    }
+                    starts.insert(block_id.to_string(), now_ms());
+                }
+                self.resolve(block_id, Family::Turn)
+            }
+            // Notified from the turn's ledger instead
+            // (`Internal::TurnEnded`): a pass ending is not the
+            // turn ending.
+            TurnTransition::Finished => {}
+            TurnTransition::Nothing => {}
+        }
     }
 
     /// Run the policy and publish what it decided. `Activate` is returned,

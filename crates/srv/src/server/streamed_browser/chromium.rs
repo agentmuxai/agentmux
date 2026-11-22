@@ -82,7 +82,7 @@ fn profile_dir() -> Option<PathBuf> {
     HOST_PROFILE.get().cloned().or_else(|| crate::headless::data_dir().map(profile_under))
 }
 
-fn find_binary() -> Result<PathBuf, String> {
+pub(super) fn find_binary() -> Result<PathBuf, String> {
     if let Some(path) = std::env::var_os(BINARY_ENV).filter(|p| !p.is_empty()) {
         return Ok(PathBuf::from(path));
     }

@@ -217,19 +217,46 @@ async fn ask_instance(state: &AppState, url: &str, auth_key: &str, block_id: &st
     }
 }
 
-/// Asks the other instances on this machine (the shared registry's loopback entries, never this one)
-/// whether one of them sent this forward. The channel that did answers yes, once.
-async fn forward_confirmed_by_a_sender(state: &AppState, block_id: &str, body: &str, msg_id: &str, recipients: usize) -> ForwardProof {
-    let Some(dir) = crate::registry::resolve_shared_reactive_dir() else { return ForwardProof::NoInstanceConfirmed };
+/// The loopback address and key of every other instance on this machine that might have sent a forward: the shared agent
+/// registry's entries and the shared instance registry's live records, so a channel with no agent registered is asked too.
+async fn candidate_instances(state: &AppState) -> Vec<(String, String)> {
+    let agents: Vec<(String, String)> = crate::registry::resolve_shared_reactive_dir()
+        .map(|dir| crate::backend::reactive::registry::list_all_shared(&dir).into_iter().map(|e| (e.local_url, e.auth_key)).collect())
+        .unwrap_or_default();
+    // Under `cargo test` the instance records are not read: a test must not ask a developer's real instances.
+    #[cfg(not(test))]
+    let instances = tokio::task::spawn_blocking(|| {
+        crate::registry::resolve_shared_instances_dir().map(|dir| crate::backend::instance_registry::live_instances(&dir)).unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default();
+    #[cfg(test)]
+    let instances = Vec::new();
+    candidates_from(agents, instances, &state.local_web_url, std::process::id())
+}
+
+/// The addresses to ask, in the order found, each once: never this instance, and only loopback ones. An instance record is
+/// listed only while its srv lives; either source is a file any local process can write, so each address is looked at
+/// (who listens there) before it is asked.
+fn candidates_from(agents: Vec<(String, String)>, instances: Vec<crate::backend::instance_registry::InstanceRecord>, own_url: &str, own_pid: u32) -> Vec<(String, String)> {
+    let from_instances = instances.into_iter().filter(|r| r.pid != own_pid).map(|r| (r.local_url, r.auth_key));
     let mut asked = std::collections::HashSet::new();
+    agents
+        .into_iter()
+        .chain(from_instances)
+        .filter(|(url, _)| {
+            let loopback = url.starts_with("http://127.0.0.1") || url.starts_with("http://localhost") || url.starts_with("http://[::1]");
+            loopback && url != own_url && asked.insert(url.clone())
+        })
+        .collect()
+}
+
+/// Asks the other instances on this machine (never this one) whether one of them sent this forward. The channel that did
+/// answers yes, once.
+async fn forward_confirmed_by_a_sender(state: &AppState, block_id: &str, body: &str, msg_id: &str, recipients: usize) -> ForwardProof {
     let mut found = ForwardProof::NoInstanceConfirmed;
-    for entry in crate::backend::reactive::registry::list_all_shared(&dir) {
-        let url = entry.local_url.clone();
-        let loopback = url.starts_with("http://127.0.0.1") || url.starts_with("http://localhost") || url.starts_with("http://[::1]");
-        if !loopback || url == state.local_web_url || !asked.insert(url.clone()) {
-            continue;
-        }
-        let proof = ask_instance(state, &url, &entry.auth_key, block_id, body, msg_id, recipients).await;
+    for (url, auth_key) in candidate_instances(state).await {
+        let proof = ask_instance(state, &url, &auth_key, block_id, body, msg_id, recipients).await;
         if proof == ForwardProof::Confirmed {
             return proof;
         }
@@ -437,6 +464,38 @@ mod tests {
         assert_eq!(ask_instance(&state, &url, "", "blk", "hi", "m-6", 1).await, ForwardProof::ListenerNotIdentified);
         hook::set_sequence(addr, vec![Standing::Instance(Listeners::Held(vec![1])), Standing::InsideAgent("some-agent".into())]);
         assert_eq!(ask_instance(&state, &url, "", "blk", "hi", "m-6", 1).await, ForwardProof::AnsweredFromAgent("some-agent".into()));
+    }
+
+    fn record(channel: &str, url: &str, pid: u32) -> crate::backend::instance_registry::InstanceRecord {
+        crate::backend::instance_registry::InstanceRecord {
+            channel: channel.to_string(),
+            version: "0.0.0".to_string(),
+            pid,
+            local_url: url.to_string(),
+            auth_key: format!("key-{channel}"),
+            started_at: 1,
+            updated_at: 2,
+            agent_count: 0,
+        }
+    }
+
+    #[test]
+    fn a_channel_with_no_agent_registered_is_asked_through_its_instance_record() {
+        let agents = vec![("http://127.0.0.1:7001".to_string(), "agent-key".to_string())];
+        let instances = vec![record("with-agent", "http://127.0.0.1:7001", 11), record("no-agent", "http://127.0.0.1:7002", 12)];
+        let found = candidates_from(agents, instances, "http://127.0.0.1:7000", 10);
+        assert_eq!(
+            found,
+            vec![("http://127.0.0.1:7001".to_string(), "agent-key".to_string()), ("http://127.0.0.1:7002".to_string(), "key-no-agent".to_string())],
+            "the instance with no agent is asked, and an instance listed twice once"
+        );
+    }
+
+    #[test]
+    fn this_instance_and_addresses_off_this_machine_are_never_asked() {
+        let agents = vec![("http://203.0.113.9:7003".to_string(), "k".to_string()), ("http://127.0.0.1:7000".to_string(), "own".to_string())];
+        let instances = vec![record("self-by-pid", "http://127.0.0.1:7004", 10), record("self-by-url", "http://127.0.0.1:7000", 13)];
+        assert!(candidates_from(agents, instances, "http://127.0.0.1:7000", 10).is_empty());
     }
 
     fn nobody_holds(_: u32) -> Option<String> {

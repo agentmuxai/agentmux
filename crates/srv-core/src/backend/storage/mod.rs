@@ -67,6 +67,7 @@ pub mod skills;
 pub mod snapshot;
 pub mod store;
 pub mod vault;
+pub mod vault_sync;
 pub mod vault_versions;
 pub mod viewer_devices;
 pub mod agent_input_history;
