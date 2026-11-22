@@ -47,7 +47,24 @@ function pickRow(scroller: HTMLElement, box: DOMRect, point: ZoomPoint | null): 
 const rowOf = (scroller: HTMLElement, path: string): HTMLElement | null =>
     scroller.querySelector<HTMLElement>(`[role=treeitem][data-path="${CSS.escape(path)}"]`);
 
+/**
+ * A capture this near (zoomed px) to the offset the last one held, on the same row with the pointer where it
+ * was, is the same hold: a step settles within `TOLERANCE_PX` of it, and capturing that leftover as the new
+ * offset made every step add its own (about 0.4 px a step, 2.4 px over six). A real scroll between steps is
+ * further than this, and is captured as it is.
+ */
+const SAME_HOLD_PX = 4;
+/** The pointer moved no further than this (px) is where it was (as `zoom-anchor.ts`'s gesture slop). */
+const POINTER_SLOP_PX = 4;
+
+const pointerNear = (a: ZoomPoint | null, b: ZoomPoint | null): boolean =>
+    a == null || b == null
+        ? a === b
+        : Math.abs(a.clientX - b.clientX) <= POINTER_SLOP_PX && Math.abs(a.clientY - b.clientY) <= POINTER_SLOP_PX;
+
 export function treeZoomAnchor(deps: TreeZoomAnchorDeps): ZoomAnchorAdapter<RowAnchor> {
+    // What the last capture held, so a run of steps keeps the first one's offset.
+    let held: { anchor: RowAnchor; point: ZoomPoint | null } | null = null;
     return {
         capture(point) {
             const scroller = deps.scroller();
@@ -57,7 +74,11 @@ export function treeZoomAnchor(deps: TreeZoomAnchorDeps): ZoomAnchorAdapter<RowA
             const row = pickRow(scroller, box, point);
             const path = row?.dataset.path;
             if (!row || !path) return null;
-            return { path, offsetY: row.getBoundingClientRect().top - box.top };
+            const measured = row.getBoundingClientRect().top - box.top;
+            const same = held && held.anchor.path === path && pointerNear(held.point, point) && Math.abs(measured - held.anchor.offsetY) <= SAME_HOLD_PX;
+            const anchor = same ? held!.anchor : { path, offsetY: measured };
+            held = { anchor, point };
+            return anchor;
         },
 
         restore(anchor) {

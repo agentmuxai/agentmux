@@ -109,6 +109,7 @@ export const JSDOM_TS_TESTS = [
     "frontend/app/view/editor/editor-doc-tabs.test.ts",
     "frontend/app/view/editor/editor-body-focus.test.ts",
     "frontend/app/view/editor/editor-focus-guard.test.ts",
+    "frontend/app/view/editor/editor-tree-zoom-anchor.test.ts",
     "frontend/app/view/files/files-tabs.test.ts",
     "frontend/app/view/global-bundle/global-bundle-model.test.ts",
     "frontend/app/view/identity/account-label.test.ts",
