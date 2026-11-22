@@ -664,11 +664,11 @@ fn every_request_and_answer_survives_json_and_a_record_still_verifies_after_it()
 }
 
 #[test]
-fn a_refusal_carries_a_code_of_its_own_and_one_record_at_its_largest_fits_the_wire_limit() {
+fn a_refusal_carries_a_code_of_its_own_and_a_batch_at_its_largest_fits_the_wire_limit() {
     let all = [OpError::NotActive, OpError::NotMember, OpError::TooBig, OpError::Bad, OpError::NoKey, OpError::Db("x".into())];
     let mut codes: Vec<&str> = all.iter().map(|e| e.code()).collect();
     codes.sort();
     codes.dedup();
     assert_eq!(codes.len(), all.len());
-    assert!(ops::MAX_WIRE_BYTES as u64 >= super::record::MAX_RECORD_BYTES * 4 / 3 + 1024, "base64 of the largest record, and its header");
+    assert!(ops::MAX_WIRE_BYTES >= ops::MAX_BATCH_BYTES * 4 / 3 + ops::MAX_BATCH_RECORDS * 512, "base64 of the largest batch, and its headers");
 }

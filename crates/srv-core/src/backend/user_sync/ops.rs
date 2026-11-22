@@ -40,9 +40,9 @@ pub const PENDING_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 /// Kinds of collection whose joins may go ahead without a person confirming (a Vault never does yet).
 pub const AUTO_JOIN_KINDS: [&str; 1] = ["kanban"];
 
-/// The most bytes of JSON params or answer a sync op carries: one record at its largest as base64, and what is
-/// around it. A batch of several records is held to `MAX_BATCH_BYTES` long before this.
-pub const MAX_WIRE_BYTES: usize = (MAX_RECORD_BYTES as usize) / 3 * 4 + 64 * 1024;
+/// The most bytes of JSON params a sync op takes: a batch at its largest as base64, its headers, and what is around
+/// them. A record too large for a push is pulled by the peer instead (an answer is not held to this).
+pub const MAX_WIRE_BYTES: usize = MAX_BATCH_BYTES / 3 * 4 + MAX_BATCH_RECORDS * 1024 + 64 * 1024;
 
 const HEADER_WEIGHT: usize = 512;
 
@@ -367,7 +367,7 @@ pub enum Joined {
     Pending,
 }
 
-fn kind_of(conn: &Connection, collection: &str) -> Result<String, OpError> {
+pub fn kind_of(conn: &Connection, collection: &str) -> Result<String, OpError> {
     Ok(conn.query_row("SELECT kind FROM db_sync_collections WHERE id = ?1", [collection], |r| r.get(0))?)
 }
 
