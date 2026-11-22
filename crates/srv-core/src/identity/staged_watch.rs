@@ -31,18 +31,29 @@ const COPY_FILE: &str = ".credentials.json";
 /// How long a burst of events (a copy written in pieces, or replaced) settles before it is read.
 const SETTLE: Duration = Duration::from_millis(150);
 
-/// Withholds the values in the staged copy at `file` (a `.credentials.json` in a container's staging folder), under
-/// owners named by that folder. An unreadable copy (it can be mid-write) withholds nothing; the next change reads it
-/// again.
-fn look(file: &Path) {
-    let Some(folder) = file.parent() else { return };
-    let Ok(text) = std::fs::read_to_string(file) else { return };
-    let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&text) else { return };
-    // The copy's own expiry is not trusted: a value is withheld without one, under the folder's cap.
+/// Withholds the values of `json`, the parsed copy in the container's staging folder `folder`, under owners named by
+/// that folder. Whoever reads a staged copy registers what it finds through this, not under the account's owners.
+pub fn withhold_copy(folder: &Path, json: &serde_json::Value) {
+    // The copy's own expiry is not trusted, in either shape the parser reads: a value is withheld without one,
+    // under the folder's cap.
+    let mut json = json.clone();
+    if let Some(top) = json.as_object_mut() {
+        top.remove("expiresAt");
+    }
     if let Some(oauth) = json.get_mut("claudeAiOauth").and_then(serde_json::Value::as_object_mut) {
         oauth.remove("expiresAt");
     }
     withhold_sign_in(&format!("staged:{}", folder.to_string_lossy()), &json);
+}
+
+/// Withholds the values in the staged copy at `file` (a `.credentials.json` in a container's staging folder). An
+/// unreadable copy (it can be mid-write) withholds nothing; the next change reads it again.
+fn look(file: &Path) {
+    let Some(folder) = file.parent() else { return };
+    let Ok(text) = std::fs::read_to_string(file) else { return };
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+        withhold_copy(folder, &json);
+    }
 }
 
 /// Every copy under the staging tree at `tree` is read once.
@@ -59,10 +70,27 @@ fn is_copy(path: &Path) -> bool {
     path.file_name().is_some_and(|name| name == COPY_FILE)
 }
 
+/// The staging tree exists (private to the user) before it is watched, so a first container's copy is seen.
+fn ensure_tree(tree: &Path) {
+    if std::fs::create_dir_all(tree).is_err() {
+        return;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(tree, std::fs::Permissions::from_mode(0o700));
+    }
+}
+
 async fn run(pool: Arc<FsWatchPool>, tree: PathBuf) {
     // events() before the subscription, or a change landing between them is missed.
     let mut events = pool.events();
+    ensure_tree(&tree);
     let _subscription = pool.subscribe_dir_recursive(&tree);
+    // What the copies hold now: after a restart nothing is registered yet, and a copy that does not change is
+    // never announced.
+    let scan_tree = tree.clone();
+    let _ = tokio::task::spawn_blocking(move || look_at_all(&scan_tree)).await;
     loop {
         let mut changed: HashSet<PathBuf> = HashSet::new();
         let mut all = false;

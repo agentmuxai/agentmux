@@ -85,6 +85,55 @@ fn each_staging_folder_has_its_own_cap() {
 }
 
 #[test]
+fn a_copy_registered_by_another_reader_is_held_under_the_copys_own_owners() {
+    let tmp = tempfile::tempdir().unwrap();
+    let folder = tmp.path().join("container-z").join("h1");
+    let json: serde_json::Value = serde_json::from_str(&copy_body("canary-reader-access-0001", "canary-reader-refresh-0001")).unwrap();
+    withhold_copy(&folder, &json);
+    assert!(hidden("canary-reader-access-0001") && hidden("canary-reader-refresh-0001"));
+    crate::backend::transcript::withhold::release_prefix(&format!("sign-in:staged:{}:", folder.to_string_lossy()));
+    assert!(!hidden("canary-reader-refresh-0001"), "the copy's owners are named by its folder");
+}
+
+#[test]
+fn an_expiry_in_either_shape_a_copy_is_written_in_is_not_used() {
+    let tmp = tempfile::tempdir().unwrap();
+    let file = folder(tmp.path(), "container-top", "h1", "cfg");
+    for n in 0..40 {
+        let far = agentmux_common::time::now_ms() + 86_400_000 + n;
+        let top = serde_json::json!({ "accessToken": format!("canary-top-access-{n:04}"), "refreshToken": format!("canary-top-refresh-{n:04}"), "expiresAt": far });
+        std::fs::write(&file, top.to_string()).unwrap();
+        look(&file);
+    }
+    assert!(!hidden("canary-top-access-0000"), "the cap holds for the top-level shape too: the oldest is dropped");
+    assert!(hidden("canary-top-access-0039") && hidden("canary-top-refresh-0039"));
+}
+
+#[tokio::test]
+async fn copies_that_exist_when_the_watch_starts_are_withheld_with_no_change() {
+    let tmp = tempfile::tempdir().unwrap();
+    let tree = tmp.path().join(STAGING_ROOT);
+    let file = folder(&tree, "container-old", "h1", "cfg");
+    std::fs::write(&file, copy_body("canary-start-access-0001", "canary-start-refresh-0001")).unwrap();
+    start_at(FsWatchPool::new(), tree);
+    let end = tokio::time::Instant::now() + WAIT;
+    while !hidden("canary-start-refresh-0001") && tokio::time::Instant::now() < end {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(hidden("canary-start-refresh-0001") && hidden("canary-start-access-0001"));
+}
+
+#[tokio::test]
+async fn a_staging_tree_that_does_not_exist_yet_is_created_and_followed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let tree = tmp.path().join(STAGING_ROOT);
+    start_at(FsWatchPool::new(), tree.clone());
+    let file = folder(&tree, "container-first", "h1", "cfg");
+    let body = copy_body("canary-first-access-0001", "canary-first-refresh-0001");
+    assert!(withheld_after("canary-first-refresh-0001", || std::fs::write(&file, &body).unwrap()).await);
+}
+
+#[test]
 fn a_half_written_copy_withholds_nothing() {
     let tmp = tempfile::tempdir().unwrap();
     let half = folder(tmp.path(), "container-b", "h2", "acct-config-half");
