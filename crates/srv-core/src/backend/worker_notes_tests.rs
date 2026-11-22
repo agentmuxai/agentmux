@@ -82,8 +82,8 @@ fn one_note_a_minute_per_worker_and_the_next_says_how_many_were_held() {
 fn the_note_says_whether_the_worker_is_waiting_and_quotes_it() {
     let asked = turn_end_body("Loap-4", LastWords { text: "Should I use the v2 API?".into(), asked: true });
     assert_eq!(asked, "Your worker Loap-4 is waiting for an answer and hasn't reported to you. Its last words: \"Should I use the v2 API?\" Answer it with Message send.");
-    let done = turn_end_body("Loap-4", LastWords::default());
-    assert_eq!(done, "Your worker Loap-4 finished a turn without reporting to you.");
+    let bare = turn_end_body("Loap-4", LastWords { text: String::new(), asked: true });
+    assert_eq!(bare, "Your worker Loap-4 is waiting for an answer and hasn't reported to you. Answer it with Message send.");
     assert_eq!(clip(&"word ".repeat(100), 10).chars().count(), 11);
 }
 
@@ -135,9 +135,15 @@ fn the_note_quotes_only_the_turn_that_ended() {
 }
 
 #[test]
-fn a_tools_only_turn_repeats_no_old_words_in_its_note() {
-    let words = LastWords { text: ended_turn_text("[user] one\n[assistant] Old words.\n[user] two\n[tool] Bash"), asked: false };
-    assert_eq!(turn_end_body("Pulp", words), "Your worker Pulp finished a turn without reporting to you.");
+fn a_tools_only_turn_repeats_no_old_words_in_a_note() {
+    assert_eq!(ended_turn_text("[user] one\n[assistant] Old words.\n[user] two\n[tool] Bash"), "");
+}
+
+#[test]
+fn a_note_names_a_worker_as_one_and_any_other_watched_agent_as_an_agent() {
+    assert_eq!(named_for("Your worker Pulp stopped: its process exited.".into(), true), "Your worker Pulp stopped: its process exited.");
+    assert_eq!(named_for("Your worker Pulp stopped: its process exited.".into(), false), "Your agent Pulp stopped: its process exited.");
+    assert_eq!(named_for("Something else.".into(), false), "Something else.");
 }
 
 fn mark_worker(state: &CoreParts, worker_id: &str, lead: &crate::backend::storage::agents::AgentDefinition) {
@@ -181,26 +187,28 @@ async fn a_workers_question_mid_turn_notes_its_open_leader() {
     let asked = WorkerEvent::Asked { block_id: worker_pane.clone() };
 
     register_stub(&worker_pane, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, true);
-    assert_eq!(note_for(&state.mstore, &state.filestore, &asked), None, "answered within the grace");
+    assert_eq!(note_for(&state.mstore, None, &state.filestore, &asked), None, "answered within the grace");
 
     dispatch_apply(&state, Command::UpdateBlockMeta { block_id: worker_pane.clone(), meta_patch: json!({ (META_AWAITING_USER): true }) }).await;
-    let (to, text, wait) = note_for(&state.mstore, &state.filestore, &asked).expect("the leader is told");
+    let (to, text, wait) = note_for(&state.mstore, None, &state.filestore, &asked).expect("the leader is told");
     assert_eq!(wait, None, "a worker waiting on the user is told at once");
-    assert_eq!(to, lead_pane);
+    assert_eq!(to, vec![lead_pane]);
     assert_eq!(
         text,
         format!("[AgentMux] Your worker {} is waiting for the user to answer a question in its pane; it can't go on until they do.", worker.name)
     );
 
     register_stub(&worker_pane, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
-    assert_eq!(note_for(&state.mstore, &state.filestore, &asked), None, "the turn is over: a flag left behind isn't a question");
+    assert_eq!(note_for(&state.mstore, None, &state.filestore, &asked), None, "the turn is over: a flag left behind isn't a question");
     delete_controller(&worker_pane);
 }
 
-/// A worker's turn that ended without a report notes its leader's open pane;
-/// a pane that isn't a worker's, or a worker whose leader isn't open, notes no one.
+/// A worker's turn that ended with a question for its leader and no report notes its leader's open pane. A turn
+/// that ended without a question is no note by itself (`quiet_watch` covers the worker that goes quiet); a pane
+/// that isn't a worker's, or a worker whose leader isn't open, notes no one.
 #[tokio::test]
-async fn a_workers_unreported_turn_notes_its_open_leader() {
+async fn a_workers_turn_that_ends_asking_notes_its_open_leader_and_one_that_ends_silent_does_not() {
+    use crate::backend::storage::filestore::{FileMeta, FileOpts};
     let state = crate::test_support::core_parts();
     let tab = tab(&state).await;
     let id = uuid::Uuid::new_v4().to_string();
@@ -210,19 +218,34 @@ async fn a_workers_unreported_turn_notes_its_open_leader() {
     state.mstore.agent_def_insert(&mut lead).unwrap();
     state.mstore.agent_def_insert(&mut worker).unwrap();
     let worker_pane = pane(&state, &tab, &worker_id).await;
-    let ev = WorkerEvent::TurnEnded { block_id: worker_pane.clone(), started_at_ms: u64::MAX / 2, ended_at_ms: 0, key: "k".into() };
-    assert_eq!(note_for(&state.mstore, &state.filestore, &ev), None, "not marked as a worker");
+    state.filestore.make_file(&worker_pane, "output", FileMeta::default(), FileOpts::default()).unwrap();
+    let say = |text: &str| {
+        let line = json!({ "type": "assistant", "message": { "content": [{ "type": "text", "text": text }] } });
+        state.filestore.append_lines(&worker_pane, "output", format!("{line}\n").as_bytes()).unwrap();
+    };
+    let ev = WorkerEvent::TurnEnded { block_id: worker_pane.clone(), started_at_ms: 0, ended_at_ms: 0, key: "k".into() };
+    say("Should I use the v2 API?");
+    assert_eq!(note_for(&state.mstore, None, &state.filestore, &ev), None, "not marked as a worker");
 
     mark_worker(&state, &worker_id, &lead);
-    assert_eq!(note_for(&state.mstore, &state.filestore, &ev), None, "its leader isn't open");
+    assert_eq!(note_for(&state.mstore, None, &state.filestore, &ev), None, "its leader isn't open");
 
     let lead_pane = pane(&state, &tab, &lead_id).await;
-    let (to, text, wait) = note_for(&state.mstore, &state.filestore, &ev).expect("the leader is told");
-    assert_eq!(wait, Some(format!("worker:{worker_id}")), "a silent turn may wait for a cold leader");
-    assert_eq!(to, lead_pane);
-    assert_eq!(text, format!("[AgentMux] Your worker {} finished a turn without reporting to you.", worker.name));
+    let (to, text, wait) = note_for(&state.mstore, None, &state.filestore, &ev).expect("the leader is told");
+    assert_eq!(wait, None, "a question is told at once");
+    assert_eq!(to, vec![lead_pane]);
+    assert_eq!(
+        text,
+        format!("[AgentMux] Your worker {} is waiting for an answer and hasn't reported to you. Its last words: \"Should I use the v2 API?\" Answer it with Message send.", worker.name)
+    );
+
+    // The next turn ends with a statement: no note at its end, however long the worker then says nothing.
+    GAPS.lock().by_worker.remove(&worker_id);
+    say("Done with the first half.");
+    assert_eq!(note_for(&state.mstore, None, &state.filestore, &ev), None, "a turn that ends without a report is not a note");
     let failed = WorkerEvent::Failed { block_id: worker_pane, title: "Usage limit reached".into() };
-    assert_eq!(note_for(&state.mstore, &state.filestore, &failed), None, "held: within a minute of the last note");
+    assert!(note_for(&state.mstore, None, &state.filestore, &failed).is_some(), "a failure still is");
+    assert_eq!(note_for(&state.mstore, None, &state.filestore, &failed), None, "held: within a minute of the last note");
 }
 
 /// A route out of credits stops every agent on it: the route's own note tells the lead once, so no worker's
@@ -241,8 +264,8 @@ async fn a_workers_credits_failure_adds_no_note_of_its_own() {
     pane(&state, &tab, &lead_id).await;
     let worker_pane = pane(&state, &tab, &worker_id).await;
     let failed = |title: &str| WorkerEvent::Failed { block_id: worker_pane.clone(), title: title.into() };
-    assert!(note_for(&state.mstore, &state.filestore, &failed("Not authenticated")).is_some(), "another failure is noted");
-    assert_eq!(note_for(&state.mstore, &state.filestore, &failed(crate::agents::failure::ROUTE_CREDITS_TITLE)), None);
+    assert!(note_for(&state.mstore, None, &state.filestore, &failed("Not authenticated")).is_some(), "another failure is noted");
+    assert_eq!(note_for(&state.mstore, None, &state.filestore, &failed(crate::agents::failure::ROUTE_CREDITS_TITLE)), None);
 }
 
 /// A worker's turn that died of a rate limit: its failure's note names the class, that it is transient, and
@@ -261,17 +284,17 @@ async fn a_rate_limited_turns_note_names_the_cause_and_the_exit_adds_none() {
     pane(&state, &tab, &lead_id).await;
     let worker_pane = pane(&state, &tab, &worker_id).await;
     let exited = WorkerEvent::Exited { block_id: worker_pane.clone(), key: "k".into() };
-    let (_, plain, _) = note_for(&state.mstore, &state.filestore, &exited).expect("no failure stored: the exit is the news");
+    let (_, plain, _) = note_for(&state.mstore, None, &state.filestore, &exited).expect("no failure stored: the exit is the news");
     assert_eq!(plain, format!("[AgentMux] Your worker {} stopped: its process exited.", worker.name));
 
     GAPS.lock().by_worker.remove(&worker_id); // the plain exit's note used this worker's minute
     let failure = json!({ "code": "rate_limited", "title": "API rate limit", "detail": "", "retryable": true });
     dispatch_apply(&state, Command::UpdateBlockMeta { block_id: worker_pane.clone(), meta_patch: json!({ "agent:last_failure": failure }) }).await;
     GAPS.lock().by_worker.remove(&worker_id);
-    assert!(note_for(&state.mstore, &state.filestore, &exited).is_some(), "a failure stored by an earlier turn doesn't silence an exit");
+    assert!(note_for(&state.mstore, None, &state.filestore, &exited).is_some(), "a failure stored by an earlier turn doesn't silence an exit");
     GAPS.lock().by_worker.remove(&worker_id);
     let failed = WorkerEvent::Failed { block_id: worker_pane, title: "API rate limit".into() };
-    let (_, text, wait) = note_for(&state.mstore, &state.filestore, &failed).expect("the leader is told");
+    let (_, text, wait) = note_for(&state.mstore, None, &state.filestore, &failed).expect("the leader is told");
     assert_eq!(wait, None);
     assert!(text.contains("stopped with an error: API rate limit. The provider rate-limited it (HTTP 429)"), "{text}");
     assert!(text.contains("transient and has no reset time") && text.contains("send it another message"), "{text}");
@@ -310,16 +333,19 @@ async fn an_old_turn_end_or_one_heard_mid_turn_notes_no_one() {
     pane(&state, &tab, &lead_id).await;
     let worker_pane = pane(&state, &tab, &worker_id).await;
     let now = agentmux_common::time::now_ms_u64();
-    let ended = |ended_at_ms: u64| WorkerEvent::TurnEnded { block_id: worker_pane.clone(), started_at_ms: u64::MAX / 2, ended_at_ms, key: "k".into() };
+    let ended = |ended_at_ms: u64| WorkerEvent::TurnEnded { block_id: worker_pane.clone(), started_at_ms: 0, ended_at_ms, key: "k".into() };
+    state.filestore.make_file(&worker_pane, "output", crate::backend::storage::filestore::FileMeta::default(), crate::backend::storage::filestore::FileOpts::default()).unwrap();
+    let line = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Which branch should I use?"}]}}"#;
+    state.filestore.append_lines(&worker_pane, "output", format!("{line}\n").as_bytes()).unwrap();
 
-    assert_eq!(note_for(&state.mstore, &state.filestore, &ended(now - 2 * TURN_END_FRESH_MS)), None, "an end from long ago");
+    assert_eq!(note_for(&state.mstore, None, &state.filestore, &ended(now - 2 * TURN_END_FRESH_MS)), None, "an end from long ago");
 
     register_stub(&worker_pane, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, true);
-    assert_eq!(note_for(&state.mstore, &state.filestore, &ended(now)), None, "the worker is in a turn: nothing has finished");
+    assert_eq!(note_for(&state.mstore, None, &state.filestore, &ended(now)), None, "the worker is in a turn: nothing has finished");
 
     register_stub(&worker_pane, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
-    let (_, text, _) = note_for(&state.mstore, &state.filestore, &ended(now)).expect("a turn that just ended, with the worker idle");
-    assert_eq!(text, format!("[AgentMux] Your worker {} finished a turn without reporting to you.", worker.name));
+    let (_, text, _) = note_for(&state.mstore, None, &state.filestore, &ended(now)).expect("a turn that just ended asking, with the worker idle");
+    assert!(text.starts_with(&format!("[AgentMux] Your worker {} is waiting for an answer", worker.name)), "{text}");
     delete_controller(&worker_pane);
 }
 

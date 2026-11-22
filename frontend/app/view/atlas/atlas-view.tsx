@@ -23,7 +23,7 @@ import { ByKey } from "./atlas-by-key";
 import { SwarmFilterBar } from "../swarm/swarm-filter-bar";
 import { CardFacts } from "./atlas-card-facts";
 import { inContainer } from "./atlas-containers";
-import { edgePath } from "./atlas-edge-path";
+import { edgePath, edgePoints } from "./atlas-edge-path";
 import { ExtraCard, ExtraNodes } from "./atlas-extras";
 import { AtlasFleetBar } from "./atlas-fleet-bar";
 import { flowEndResolver, labelKeepOut } from "./atlas-flow";
@@ -260,6 +260,14 @@ function AtlasMap(props: {
     const flowEnd = createMemo(() => flowEndResolver(shownAgents(), props.data.machines()));
     const framed = createMemo(() => new Set(shownAgents().filter(inContainer).map((a) => a.key)));
     const keepOut = createMemo(() => labelKeepOut(props.layout));
+    // The lines of reports-to, for a task's number to keep clear of.
+    const reportLines = createMemo(() =>
+        props.data.graph().edges.flatMap((edge) => {
+            const from = props.layout.nodes.get(edge.from);
+            const to = props.layout.nodes.get(edge.to);
+            return from && to ? [edgePoints(from, to, props.layout.wrapped.get(edge.to) === edge.from, props.layout.gaps)] : [];
+        })
+    );
     return (
         <div
             class="atlas-world"
@@ -304,6 +312,7 @@ function AtlasMap(props: {
                 framed={framed()}
                 avoid={keepOut()}
                 frameOut={props.layout.gaps.frame}
+                edges={reportLines()}
                 width={props.layout.width}
                 height={props.layout.height}
             />

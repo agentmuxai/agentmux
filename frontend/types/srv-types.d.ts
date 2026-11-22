@@ -921,6 +921,8 @@ declare global {
          *  such an agent as signed out (agent_state.rs). Cleared (null) once the controller registers. */
         "agent:launch_blocked"?: "sign_in";
         "agent:launch_blocked_at_ms"?: number;
+        /** The pane was bound with "Open here": srv leaves the refusal that follows out of its history (open-here-mark.ts). Cleared (null) when the agent has moved. */
+        "agent:open_here"?: boolean | null;
         /** A model change srv undid because the new place refused the conversation on its first turn (model-undone.ts). Cleared (null) by the pane's Dismiss. */
         "agent:model_switch_undone"?: { at: number; tried: { route: string; model: string; label: string }; back_on: { route: string; model: string; label: string }; status: number; reason: string } | null;
         /** What an agent on a model route has used today and its daily cap, for the chips (spend-stopped.ts). `day` is days since the epoch, UTC. */

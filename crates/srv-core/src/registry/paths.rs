@@ -170,6 +170,13 @@ pub fn resolve_shared_container_agent_folders_dir() -> Option<PathBuf> {
     shared_root_ignoring_deferral().map(|h| h.join("container-agent-folders"))
 }
 
+/// The GLOBAL `<home>/shared/folder-overlap-choices/` directory: one small file per pair of agents whose folders
+/// overlap (`backend::folder_overlap`), written when the person goes ahead. Like the marks of
+/// [`resolve_shared_container_agent_folders_dir`] it outlives an upgrade and is bound into no container.
+pub fn resolve_shared_folder_overlap_choices_dir() -> Option<PathBuf> {
+    shared_root_ignoring_deferral().map(|h| h.join("folder-overlap-choices"))
+}
+
 /// The global, channel-independent `<home>/shared` root. Deliberately
 /// UNAFFECTED by `isolated_auth_enabled()` — callers that need the true
 /// `~/.agentmux` home (e.g. `migrations/runner.rs`'s `MigrationContext.home`)
