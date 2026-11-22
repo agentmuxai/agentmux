@@ -19,16 +19,57 @@ pub(crate) fn owner_of(peer: SocketAddr, server: SocketAddr) -> Option<u32> {
     os::owner_of(peer, server)
 }
 
-/// The processes that listen on `addr`, if the system says: the listener that answers a request sent to that address.
-/// `None` when it cannot be said (not supported, the table could not be read, the address is not an IPv4 loopback address,
-/// or nothing listens there).
-pub(crate) fn listeners_at(addr: SocketAddr) -> Option<Vec<u32>> {
+/// Who listens on an address.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Listeners {
+    /// The processes that hold the listening socket.
+    Held(Vec<u32>),
+    /// The socket is listening (these inodes) but no process this one can read holds it: a process that hides its descriptors
+    /// from others, as a packaged srv does on Linux. Only Linux says this.
+    #[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
+    Hidden(Vec<u64>),
+}
+
+/// Who listens on `addr`, if the system says: the listener that answers a request sent to that address. `None` when it
+/// cannot be said (not supported, the table could not be read, the address is not an IPv4 loopback address, or nothing
+/// listens there).
+pub(crate) fn listeners_at(addr: SocketAddr) -> Option<Listeners> {
     let SocketAddr::V4(addr) = addr else { return None };
     if !addr.ip().is_loopback() {
         return None;
     }
-    let pids = os::listeners_at(addr);
-    (!pids.is_empty()).then_some(pids)
+    os::listeners_at(addr)
+}
+
+/// Whether this process can read `pid`'s open descriptors. `Hidden` is a process that hides them from others (Linux: a
+/// process that is not dumpable, as a packaged srv is). A system that does not hide them says `Readable`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
+pub(crate) enum Descriptors {
+    Readable,
+    Hidden,
+    Gone,
+}
+
+pub(crate) fn descriptors_of(pid: u32) -> Descriptors {
+    os::descriptors_of(pid)
+}
+
+/// The process ids `lsof` named for a listener or a connection on `port`, own process excluded.
+#[cfg(target_os = "macos")]
+fn lsof_pids(port: u16, state: &str) -> Option<Vec<u32>> {
+    let arg = format!("TCP@127.0.0.1:{port}");
+    let mut lsof = std::process::Command::new("lsof");
+    crate::backend::pane_env::sanitize_external_std_command(&mut lsof);
+    let out = lsof.args(["-nP", "-a", "-i", &arg, state, "-Fp"]).output().ok()?;
+    let own = std::process::id();
+    let mut pids: Vec<u32> = Vec::new();
+    for pid in pids_in_lsof(&String::from_utf8_lossy(&out.stdout)) {
+        if pid != own && !pids.contains(&pid) {
+            pids.push(pid);
+        }
+    }
+    Some(pids)
 }
 
 /// One row of the Windows extended TCP table, in the fields the lookup reads.
@@ -129,8 +170,13 @@ mod os {
         owner_in_rows(&read_rows()?, peer, server)
     }
 
-    pub(super) fn listeners_at(addr: SocketAddrV4) -> Vec<u32> {
-        read_rows().map(|rows| listeners_in_rows(&rows, addr)).unwrap_or_default()
+    pub(super) fn listeners_at(addr: SocketAddrV4) -> Option<Listeners> {
+        let pids = listeners_in_rows(&read_rows()?, addr);
+        (!pids.is_empty()).then_some(Listeners::Held(pids))
+    }
+
+    pub(super) fn descriptors_of(_pid: u32) -> Descriptors {
+        Descriptors::Readable
     }
 
     fn read_rows() -> Option<Vec<TcpRow>> {
@@ -170,22 +216,32 @@ mod os {
         None
     }
 
-    pub(super) fn listeners_at(addr: SocketAddrV4) -> Vec<u32> {
-        let Ok(table) = std::fs::read_to_string("/proc/net/tcp") else { return Vec::new() };
-        let wanted: Vec<String> = listening_inodes_in_proc_net_tcp(&table, addr).into_iter().map(|i| format!("socket:[{i}]")).collect();
-        let mut pids = Vec::new();
-        if wanted.is_empty() {
-            return pids;
+    pub(super) fn listeners_at(addr: SocketAddrV4) -> Option<Listeners> {
+        let table = std::fs::read_to_string("/proc/net/tcp").ok()?;
+        let mut inodes = listening_inodes_in_proc_net_tcp(&table, addr);
+        if inodes.is_empty() {
+            return None;
         }
-        let Ok(procs) = std::fs::read_dir("/proc") else { return pids };
-        for entry in procs.flatten() {
+        inodes.sort_unstable();
+        let wanted: Vec<String> = inodes.iter().map(|i| format!("socket:[{i}]")).collect();
+        let mut pids = Vec::new();
+        for entry in std::fs::read_dir("/proc").ok()?.flatten() {
             let Some(pid) = entry.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else { continue };
             let Ok(fds) = std::fs::read_dir(entry.path().join("fd")) else { continue };
             if fds.flatten().any(|fd| std::fs::read_link(fd.path()).is_ok_and(|t| t.to_str().is_some_and(|t| wanted.iter().any(|w| w == t)))) {
                 pids.push(pid);
             }
         }
-        pids
+        // A packaged srv hides its descriptors from every other process, so no process may be readable that holds the socket.
+        Some(if pids.is_empty() { Listeners::Hidden(inodes) } else { Listeners::Held(pids) })
+    }
+
+    pub(super) fn descriptors_of(pid: u32) -> Descriptors {
+        match std::fs::read_dir(format!("/proc/{pid}/fd")) {
+            Ok(_) => Descriptors::Readable,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => Descriptors::Hidden,
+            Err(_) => Descriptors::Gone,
+        }
     }
 }
 
@@ -193,24 +249,18 @@ mod os {
 mod os {
     use super::*;
 
-    pub(super) fn listeners_at(addr: SocketAddrV4) -> Vec<u32> {
-        let arg = format!("TCP@127.0.0.1:{}", addr.port());
-        let mut lsof = std::process::Command::new("lsof");
-        crate::backend::pane_env::sanitize_external_std_command(&mut lsof);
-        let Ok(out) = lsof.args(["-nP", "-a", "-i", &arg, "-sTCP:LISTEN", "-Fp"]).output() else { return Vec::new() };
-        let mut pids = pids_in_lsof(&String::from_utf8_lossy(&out.stdout));
+    pub(super) fn listeners_at(addr: SocketAddrV4) -> Option<Listeners> {
+        let mut pids = lsof_pids(addr.port(), "-sTCP:LISTEN")?;
         pids.sort_unstable();
-        pids.dedup();
-        pids
+        (!pids.is_empty()).then_some(Listeners::Held(pids))
     }
 
     pub(super) fn owner_of(peer: SocketAddrV4, _server: SocketAddrV4) -> Option<u32> {
-        let arg = format!("TCP@127.0.0.1:{}", peer.port());
-        let mut lsof = std::process::Command::new("lsof");
-        crate::backend::pane_env::sanitize_external_std_command(&mut lsof);
-        let out = lsof.args(["-nP", "-a", "-i", &arg, "-sTCP:ESTABLISHED", "-Fp"]).output().ok()?;
-        let own = std::process::id();
-        pids_in_lsof(&String::from_utf8_lossy(&out.stdout)).into_iter().find(|p| *p != own)
+        lsof_pids(peer.port(), "-sTCP:ESTABLISHED")?.into_iter().next()
+    }
+
+    pub(super) fn descriptors_of(_pid: u32) -> Descriptors {
+        Descriptors::Readable
     }
 }
 
@@ -222,8 +272,12 @@ mod os {
         None
     }
 
-    pub(super) fn listeners_at(_addr: SocketAddrV4) -> Vec<u32> {
-        Vec::new()
+    pub(super) fn listeners_at(_addr: SocketAddrV4) -> Option<Listeners> {
+        None
+    }
+
+    pub(super) fn descriptors_of(_pid: u32) -> Descriptors {
+        Descriptors::Readable
     }
 }
 

@@ -23,6 +23,7 @@ use crate::backend::reactive::broadcast_turn_message;
 use super::fleet::{deliver_broadcast_turn, BroadcastForward, FLEET_BROADCAST_AUDIT_ACTION, NO_REGISTERED_AGENT};
 use super::AppState;
 use crate::server::agent_handlers::AgentTurnDeps;
+use crate::server::peer_process::{self, Descriptors, Listeners};
 
 /// The broadcasts this instance has sent on to another channel and not yet had confirmed.
 static VOUCHED_FORWARDS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<(String, String), VouchedForward>>> = std::sync::OnceLock::new();
@@ -72,8 +73,9 @@ pub(crate) fn confirm_forward(msg_id: &str, block_id: &str, body_sha256: &str, r
 /// Who holds the listener that would answer a confirmation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Standing {
-    /// The listener's processes (all of them), none inside an agent's process tree: an AgentMux instance.
-    Instance(Vec<u32>),
+    /// The listener's processes (all of them), none inside an agent's process tree: an AgentMux instance. A listener whose
+    /// holder hides its descriptors (a packaged srv on Linux) counts when no process in any agent's tree hides its own.
+    Instance(Listeners),
     /// A process of this agent's tree listens there: its answer does not count.
     InsideAgent(String),
     /// The lookup could not say (not supported, the table could not be read, the process tracker is not running, or the
@@ -93,15 +95,42 @@ async fn listener_standing(state: &AppState, url: &str) -> Standing {
 }
 
 fn listener_standing_now(state: &AppState, addr: std::net::SocketAddr) -> Standing {
-    let Some(pids) = crate::server::peer_process::listeners_at(addr) else { return Standing::Unknown };
+    let Some(found) = peer_process::listeners_at(addr) else { return Standing::Unknown };
     let Some(registry) = crate::backend::process_tracker::registry::global() else { return Standing::Unknown };
-    for pid in &pids {
-        if let Some(block) = registry.agent_block_holding(&crate::server::confirm_peer::with_ancestors(*pid)) {
-            let agent = crate::identity::resolver::block_agent_id(&state.mstore, &block).unwrap_or(block);
-            return Standing::InsideAgent(agent);
+    standing_from(
+        found,
+        |pid| {
+            let block = registry.agent_block_holding(&crate::server::confirm_peer::with_ancestors(pid))?;
+            Some(crate::identity::resolver::block_agent_id(&state.mstore, &block).unwrap_or(block))
+        },
+        || registry.agent_member_pids().into_iter().map(|(_, pid)| pid).collect(),
+        peer_process::descriptors_of,
+    )
+}
+
+/// The standing of what was found listening. `agent_holding(pid)` names the agent whose process tree holds `pid`;
+/// `agent_pids` lists every process in every agent's tree; `descriptors(pid)` says whether a process's descriptors can be read.
+fn standing_from(
+    found: Listeners,
+    agent_holding: impl Fn(u32) -> Option<String>,
+    agent_pids: impl FnOnce() -> Vec<u32>,
+    descriptors: impl Fn(u32) -> Descriptors,
+) -> Standing {
+    match &found {
+        Listeners::Held(pids) => {
+            if let Some(agent) = pids.iter().find_map(|pid| agent_holding(*pid)) {
+                return Standing::InsideAgent(agent);
+            }
+        }
+        Listeners::Hidden(_) => {
+            // No readable process holds the socket, so its holder hides its descriptors. It is outside every agent's tree
+            // only if nothing in those trees hides its own: a hidden process of an agent could be the holder.
+            if agent_pids().into_iter().any(|pid| descriptors(pid) == Descriptors::Hidden) {
+                return Standing::Unknown;
+            }
         }
     }
-    Standing::Instance(pids)
+    Standing::Instance(found)
 }
 
 /// `http://127.0.0.1:<port>` (or `localhost`) as an address; anything else is not looked up.
@@ -377,7 +406,7 @@ mod tests {
     async fn an_answer_from_a_real_second_instance_counts() {
         let state = crate::server::tests::test_state();
         let (url, addr, asked) = confirming_listener().await;
-        hook::set(addr, Standing::Instance(vec![4242]));
+        hook::set(addr, Standing::Instance(Listeners::Held(vec![4242])));
         assert_eq!(ask_instance(&state, &url, "", "blk", "hi", "m-3", 1).await, ForwardProof::Confirmed);
         assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
@@ -404,10 +433,35 @@ mod tests {
     async fn a_listener_that_changes_hands_during_the_question_does_not_count() {
         let state = crate::server::tests::test_state();
         let (url, addr, _) = confirming_listener().await;
-        hook::set_sequence(addr, vec![Standing::Instance(vec![1]), Standing::Instance(vec![2])]);
+        hook::set_sequence(addr, vec![Standing::Instance(Listeners::Held(vec![1])), Standing::Instance(Listeners::Held(vec![2]))]);
         assert_eq!(ask_instance(&state, &url, "", "blk", "hi", "m-6", 1).await, ForwardProof::ListenerNotIdentified);
-        hook::set_sequence(addr, vec![Standing::Instance(vec![1]), Standing::InsideAgent("some-agent".into())]);
+        hook::set_sequence(addr, vec![Standing::Instance(Listeners::Held(vec![1])), Standing::InsideAgent("some-agent".into())]);
         assert_eq!(ask_instance(&state, &url, "", "blk", "hi", "m-6", 1).await, ForwardProof::AnsweredFromAgent("some-agent".into()));
+    }
+
+    fn nobody_holds(_: u32) -> Option<String> {
+        None
+    }
+
+    #[test]
+    fn a_listener_held_by_a_process_in_an_agents_tree_is_that_agents() {
+        let standing = standing_from(Listeners::Held(vec![10, 11]), |pid| (pid == 11).then(|| "some-agent".to_string()), Vec::new, |_| Descriptors::Readable);
+        assert_eq!(standing, Standing::InsideAgent("some-agent".into()));
+        let standing = standing_from(Listeners::Held(vec![10, 11]), nobody_holds, Vec::new, |_| Descriptors::Readable);
+        assert_eq!(standing, Standing::Instance(Listeners::Held(vec![10, 11])));
+    }
+
+    #[test]
+    fn a_hidden_listener_counts_only_when_nothing_in_an_agents_tree_is_hidden_too() {
+        let hidden = || Listeners::Hidden(vec![555]);
+        // A packaged srv hides its descriptors; the agents' processes can all be read: it is not inside any tree.
+        assert_eq!(standing_from(hidden(), nobody_holds, || vec![1, 2, 3], |_| Descriptors::Readable), Standing::Instance(hidden()));
+        // A process that is gone since the list was made does not make it uncertain.
+        assert_eq!(standing_from(hidden(), nobody_holds, || vec![1, 2], |pid| if pid == 2 { Descriptors::Gone } else { Descriptors::Readable }), Standing::Instance(hidden()));
+        // A process in an agent's tree that hides its descriptors could be the holder: it is not said to be an instance.
+        assert_eq!(standing_from(hidden(), nobody_holds, || vec![1, 2, 3], |pid| if pid == 2 { Descriptors::Hidden } else { Descriptors::Readable }), Standing::Unknown);
+        // The same listener is what is looked at twice: the sockets must be the same ones.
+        assert_ne!(Standing::Instance(Listeners::Hidden(vec![555])), Standing::Instance(Listeners::Hidden(vec![556])));
     }
 
     #[test]
@@ -423,7 +477,7 @@ mod tests {
     async fn a_localhost_entry_is_asked_at_the_looked_up_ipv4_address() {
         let state = crate::server::tests::test_state();
         let (_, addr, asked) = confirming_listener().await;
-        hook::set(addr, Standing::Instance(vec![4243]));
+        hook::set(addr, Standing::Instance(Listeners::Held(vec![4243])));
         let url = format!("http://localhost:{}", addr.port());
         assert_eq!(ask_instance(&state, &url, "", "blk", "hi", "m-7", 1).await, ForwardProof::Confirmed);
         assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 1);

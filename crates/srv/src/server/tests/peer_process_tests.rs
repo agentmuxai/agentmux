@@ -98,7 +98,8 @@ fn only_a_loopback_ipv4_listener_is_looked_up() {
 #[test]
 fn a_real_loopback_listener_is_found_to_be_this_process() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    assert_eq!(listeners_at(listener.local_addr().unwrap()), Some(vec![std::process::id()]));
+    assert_eq!(listeners_at(listener.local_addr().unwrap()), Some(Listeners::Held(vec![std::process::id()])));
+    assert_eq!(descriptors_of(std::process::id()), Descriptors::Readable, "this process can read its own descriptors");
 }
 
 #[test]
