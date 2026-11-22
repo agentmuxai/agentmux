@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// The GPU readouts in the status bar ("GPU n%", "GFX HW", "UI n%") and the panel they open: sibling of
+// The GPU readouts in the status bar ("GPU n%", "GFX HW") and the panel they open: sibling of
 // _cpu-cores-popover.scss and _disk-volumes-popover.scss, the same chrome.
 
 @use "../element/popover-frame" as popoverFrame;
