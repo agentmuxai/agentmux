@@ -5,9 +5,13 @@
 //! events a person's mouse and keyboard make). Nothing here attaches to the browser; the browser is a program on a screen.
 
 use x11rb::connection::Connection;
+use x11rb::protocol::damage::{ConnectionExt as _, ReportLevel};
+use x11rb::protocol::Event;
 use x11rb::protocol::xproto::{ChangeWindowAttributesAux, ConnectionExt as _, EventMask, ImageFormat, MapState, BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, KEY_PRESS_EVENT, KEY_RELEASE_EVENT, MOTION_NOTIFY_EVENT};
 use x11rb::protocol::xtest::ConnectionExt as _;
 use x11rb::rust_connection::RustConnection;
+
+use super::frames::Rect;
 
 pub struct Screen {
     conn: RustConnection,
@@ -34,6 +38,58 @@ impl Screen {
             .reply()
             .map_err(|e| format!("the screen could not be read: {e}"))?;
         Ok(reply.data)
+    }
+
+    /// A part of the screen, as `grab` gives the whole of it.
+    pub fn grab_rect(&self, at: Rect) -> Result<Vec<u8>, String> {
+        let reply = self
+            .conn
+            .get_image(ImageFormat::Z_PIXMAP, self.root, at.x as i16, at.y as i16, at.w, at.h, u32::MAX)
+            .map_err(|e| e.to_string())?
+            .reply()
+            .map_err(|e| format!("the screen could not be read: {e}"))?;
+        Ok(reply.data)
+    }
+
+    /// Ask the screen to say which part of it changed (the damage extension), so the screen is read when it changed and only where. The
+    /// answer is the damage's id, for `clear_damage`.
+    pub fn watch_damage(&self) -> Result<u32, String> {
+        self.conn.damage_query_version(1, 1).map_err(|e| e.to_string())?.reply().map_err(|e| format!("the screen has no damage extension: {e}"))?;
+        let id = self.conn.generate_id().map_err(|e| e.to_string())?;
+        self.conn.damage_create(id, self.root, ReportLevel::RAW_RECTANGLES).map_err(|e| e.to_string())?.check().map_err(|e| format!("the screen's changes could not be followed: {e}"))?;
+        Ok(id)
+    }
+
+    /// Wait until some part of the screen changes, and say which part (cut to the screen). An error when the screen has gone.
+    pub fn wait_damage(&self) -> Result<Rect, String> {
+        loop {
+            let event = self.conn.wait_for_event().map_err(|e| format!("the screen has gone: {e}"))?;
+            if let Some(at) = self.damaged(&event) {
+                return Ok(at);
+            }
+        }
+    }
+
+    /// The parts that changed since the last look, as one rectangle that holds them all; none when nothing did.
+    pub fn take_damage(&self) -> Result<Option<Rect>, String> {
+        let mut all: Option<Rect> = None;
+        while let Some(event) = self.conn.poll_for_event().map_err(|e| format!("the screen has gone: {e}"))? {
+            if let Some(at) = self.damaged(&event) {
+                all = Some(all.map_or(at, |a| a.union(at)));
+            }
+        }
+        Ok(all)
+    }
+
+    /// Tell the screen the changes so far are taken in (it forgets the region it has kept for them).
+    pub fn clear_damage(&self, id: u32) -> Result<(), String> {
+        self.conn.damage_subtract(id, x11rb::NONE, x11rb::NONE).map_err(|e| e.to_string())?;
+        self.conn.flush().map_err(|e| e.to_string())
+    }
+
+    fn damaged(&self, event: &Event) -> Option<Rect> {
+        let Event::DamageNotify(d) = event else { return None };
+        Rect::clipped(d.area.x, d.area.y, d.area.width, d.area.height, self.w, self.h)
     }
 
     /// How many top-level windows a person would see: shown, not a menu or tooltip (override-redirect), and bigger than 100 by 100.

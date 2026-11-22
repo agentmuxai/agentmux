@@ -10,6 +10,7 @@
 mod frames;
 mod held;
 mod keymap;
+mod pace;
 mod policy;
 mod session;
 mod watch;
@@ -88,29 +89,56 @@ fn error(message: &str) -> Message {
     Message::Text(json!({ "t": "error", "message": message }).to_string().into())
 }
 
-/// The screen's frames, made on a thread of their own (reading and encoding a screen is work that must not hold up input).
-fn capture(display: &str, tx: mpsc::Sender<Vec<u8>>) -> Result<(), String> {
+/// The screen's frames, made on a thread of their own (reading and encoding a screen is work that must not hold up input). The screen says
+/// when a part of it changed: nothing is read while it is still, so a page that is not moving costs next to nothing. A change is read where
+/// it happened and written into the picture of the whole screen, and a frame is made only if some pixel really differs. Frames are at most
+/// `FPS` a second, but come at once and quickly just after the person's input (`pace`).
+fn capture(display: &str, tx: mpsc::Sender<Vec<u8>>, activity: pace::Activity) -> Result<(), String> {
     let screen = x::Screen::connect(display)?;
-    let (w, h) = (u32::from(screen.w), u32::from(screen.h));
+    let damage = screen.watch_damage()?;
+    let (w, h) = (screen.w, screen.h);
     std::thread::spawn(move || {
-        let mut changes = frames::Changes::default();
-        let every = Duration::from_millis(1000 / FPS);
+        let steady = Duration::from_millis(1000 / FPS);
+        let mut picture = frames::Picture::new(w, h);
+        // The first picture is the whole screen, and is sent whatever it holds.
+        let mut pending = Some(frames::Rect::whole(w, h));
+        let mut unsent = true;
+        let mut last_frame: Option<Instant> = None;
         while !tx.is_closed() {
-            let started = Instant::now();
-            let Ok(pixels) = screen.grab() else { return };
-            if changes.differs(&pixels) {
-                match frames::frame_message(&pixels, w, h) {
-                    // A frame the pane is too slow to take is dropped, and the screen is not remembered as sent: the next tick tries again
-                    // with a newer screen, so the pane never stays on a picture that is out of date.
-                    Ok(frame) => match tx.try_send(frame) {
-                        Ok(()) => changes.remember(&pixels),
-                        Err(mpsc::error::TrySendError::Closed(_)) => return,
-                        Err(mpsc::error::TrySendError::Full(_)) => {}
-                    },
+            if pending.is_none() && !unsent {
+                // Waits until the screen changes; ends with the screen (the thread goes when the browser's screen does).
+                match screen.wait_damage() {
+                    Ok(at) => pending = Some(at),
                     Err(_) => return,
                 }
             }
-            std::thread::sleep(every.saturating_sub(started.elapsed()));
+            if let Some(at) = last_frame {
+                std::thread::sleep(pace::gap(activity.since(), steady).saturating_sub(at.elapsed()));
+            }
+            match screen.take_damage() {
+                Ok(Some(more)) => pending = Some(pending.map_or(more, |p| p.union(more))),
+                Ok(None) => {}
+                Err(_) => return,
+            }
+            if let Some(at) = pending.take() {
+                // Taken in before it is read, so a change made while it is read is not lost.
+                if screen.clear_damage(damage).is_err() {
+                    return;
+                }
+                let Ok(part) = screen.grab_rect(at) else { return };
+                unsent |= picture.update(at, &part);
+            }
+            if unsent {
+                let Ok(frame) = frames::frame_message(picture.pixels(), u32::from(w), u32::from(h)) else { return };
+                match tx.try_send(frame) {
+                    Ok(()) => unsent = false,
+                    Err(mpsc::error::TrySendError::Closed(_)) => return,
+                    // A frame the pane is too slow to take is dropped: the picture is still unsent, so it is tried again after the gap,
+                    // from the newest screen, and the pane never stays on a picture that is out of date.
+                    Err(mpsc::error::TrySendError::Full(_)) => {}
+                }
+                last_frame = Some(Instant::now());
+            }
         }
     });
     Ok(())
@@ -135,7 +163,8 @@ async fn run(mut socket: WebSocket, start: Start, ended: impl std::future::Futur
         }
     };
     let (tx, mut frames) = mpsc::channel::<Vec<u8>>(2);
-    if let Err(e) = capture(&session.display, tx) {
+    let activity = pace::Activity::default();
+    if let Err(e) = capture(&session.display, tx, activity.clone()) {
         let _ = socket.send(error(&e)).await;
         return;
     }
@@ -163,7 +192,7 @@ async fn run(mut socket: WebSocket, start: Start, ended: impl std::future::Futur
             },
             incoming = socket.recv() => match incoming {
                 Some(Ok(Message::Text(t))) => {
-                    if let Some(said) = on_client(&input, t.as_str(), &start, watch.keys_held(Instant::now()), &mut held).await {
+                    if let Some(said) = on_client(&input, t.as_str(), &start, watch.keys_held(Instant::now()), &mut held, &activity).await {
                         socket.send(said).await.is_ok()
                     } else {
                         true
@@ -213,7 +242,7 @@ fn watch_windows(display: &str, tx: mpsc::UnboundedSender<usize>) -> Result<(), 
 
 /// One message from the pane, sent to the screen. A word for the pane when there is one to say. While `keys_held`, a key press or a
 /// paste is dropped (a window just opened that the person did not choose); a release still goes, so no key is left down.
-async fn on_client(screen: &x::Screen, text: &str, start: &Start, keys_held: bool, held: &mut held::Held) -> Option<Message> {
+async fn on_client(screen: &x::Screen, text: &str, start: &Start, keys_held: bool, held: &mut held::Held, activity: &pace::Activity) -> Option<Message> {
     let msg = match protocol::parse(text) {
         Ok(m) => m,
         Err(e) => return Some(error(&e)),
@@ -223,6 +252,10 @@ async fn on_client(screen: &x::Screen, text: &str, start: &Start, keys_held: boo
     }
     if let ClientMsg::Key { kind, code, .. } = &msg {
         held.note(code, matches!(kind, KeyKind::Down));
+    }
+    // What the person does is seen as it happens: frames come quickly for a moment (a pointer that only moves does not count).
+    if !matches!(msg, ClientMsg::Mouse { kind: MouseKind::Move, .. } | ClientMsg::Resize { .. }) {
+        activity.touch();
     }
     let sent = match msg {
         // The paste is typed with the modifiers let go (Ctrl+V is the paste itself), and they are pressed again after.
