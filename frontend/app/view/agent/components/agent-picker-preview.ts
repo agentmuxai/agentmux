@@ -45,8 +45,11 @@ export function createPreviewSection(d: {
     const firstClassTemplates = createMemo(() => d.shownTemplates().filter((a) => !isPreviewAgent(a)));
     const previewTemplates = createMemo(() => d.shownTemplates().filter(isPreviewAgent));
     const [previewOpen, setPreviewOpenState] = createSignal(loadPreviewOpen());
+    // A boolean, so the effect below runs when the filters change or a match appears or goes, not on every install
+    // answer: a person who closed the section with a filter on is not shown it open again.
+    const anyPreviewShown = createMemo(() => previewTemplates().length > 0);
     createEffect(() => {
-        if (d.cardFilters().length > 0 && previewTemplates().length > 0) setPreviewOpenState(true);
+        if (d.cardFilters().length > 0 && anyPreviewShown()) setPreviewOpenState(true);
     });
     /** Opens or closes the section; closing it closes the open panel of a card inside it, unless that panel is busy. */
     const togglePreview = (): void => {
