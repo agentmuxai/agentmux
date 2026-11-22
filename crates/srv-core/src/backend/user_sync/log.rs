@@ -12,6 +12,7 @@
 use std::collections::BTreeMap;
 
 use rusqlite::{params, Connection, OptionalExtension, Row};
+use serde::{Deserialize, Serialize};
 
 use super::adapter::{Adapter, Merge, Side};
 use super::hlc::{Clock, SkewRefused, Version};
@@ -76,7 +77,7 @@ pub const HORIZON_BOARD_DAYS: i64 = 30;
 pub const HORIZON_VAULT_DAYS: i64 = 90;
 
 /// Why a record was refused.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Refused {
     UnknownCollection,
     UnknownOrigin,
@@ -111,7 +112,7 @@ impl From<Refused> for SyncError {
 }
 
 /// What applying a record did.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Outcome {
     Applied,
     KeptLocal,

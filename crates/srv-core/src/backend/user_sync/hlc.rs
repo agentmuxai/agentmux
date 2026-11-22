@@ -35,7 +35,7 @@ impl PartialOrd for Version {
 }
 
 /// A version was too far ahead of this machine's clock.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SkewRefused {
     /// How far ahead of this machine's clock it was.
     pub ahead_ms: i64,

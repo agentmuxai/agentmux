@@ -619,3 +619,56 @@ fn a_joiner_keeps_the_chain_it_took_and_its_epoch_follows_it() {
     assert_eq!(chain_store::load_all(&d.conn).unwrap(), d.chains);
     let _ = &mut b;
 }
+
+fn through_json<T: serde::Serialize + serde::de::DeserializeOwned>(v: &T) -> T {
+    serde_json::from_str(&serde_json::to_string(v).unwrap()).unwrap()
+}
+
+#[test]
+fn every_request_and_answer_survives_json_and_a_record_still_verifies_after_it() {
+    let (mut a, mut b, c) = three("kanban");
+    a.write(C, "card", "hello");
+    a.write_bytes(C, "blob", &[0u8, 255, 7, 128]);
+    let pull = ops::pull(&a.ctx(), &b.id, &b.pull_req(C, 10)).unwrap();
+    assert_eq!(through_json(&pull), pull);
+    let key = a.chains[C].state(C).unwrap().pins()[&a.id];
+    for rec in &through_json(&pull).records {
+        assert_eq!(rec.verify(&key), Ok(()), "the signature holds over the body after the trip");
+    }
+    let req = b.pull_req(C, 10);
+    assert_eq!(through_json(&req), req);
+    let push = PushReq { collection: C.into(), records: pull.records.clone() };
+    assert_eq!(through_json(&push), push);
+    let pushed = ops::push(&mut b.ctx(), &a.id, &push, &NewestWins).unwrap();
+    assert_eq!(through_json(&pushed), pushed);
+    let hello = ops::hello(&a.ctx(), &b.id, &[C.to_string()]).unwrap();
+    assert_eq!(through_json(&hello), hello);
+    let gone = ended(&[(&a, 0), (&b, 0)]);
+    let remove = ops::change(&mut a.ctx(), C, Change::Remove { id: c.id.clone(), ended: gone }).unwrap();
+    let members = MembersReq { collection: C.into(), have_n: 3, offered: vec![remove] };
+    assert_eq!(through_json(&members), members);
+    let answered = ops::members(&mut b.ctx(), &a.id, &members).unwrap();
+    assert_eq!(through_json(&answered), answered);
+    let d = node(4);
+    let join = JoinReq { collection: C.into(), subject: d.subject.clone() };
+    assert_eq!(through_json(&join), join);
+    let added = ops::join(&mut a.ctx(), &d.id, &join).unwrap();
+    assert_eq!(through_json(&added), added);
+    assert_eq!(through_json(&Joined::Pending), Joined::Pending);
+    for r in [Refused::UnknownCollection, Refused::UnknownOrigin, Refused::Rollback, Refused::Gap { have: 4 }, Refused::Epoch { have: 1, got: 2 }, Refused::Bad(super::record::BadRecord::Signature), Refused::Skew(super::hlc::SkewRefused { ahead_ms: 9 })] {
+        assert_eq!(through_json(&r), r);
+    }
+    for e in [MemberError::DoesNotExtend, MemberError::Founding, MemberError::NotAMember, MemberError::BadSignature, MemberError::BadSubject, MemberError::AlreadyMember, MemberError::BadRemoval, MemberError::ForkLost] {
+        assert_eq!(through_json(&e), e);
+    }
+}
+
+#[test]
+fn a_refusal_carries_a_code_of_its_own_and_one_record_at_its_largest_fits_the_wire_limit() {
+    let all = [OpError::NotActive, OpError::NotMember, OpError::TooBig, OpError::Bad, OpError::NoKey, OpError::Db("x".into())];
+    let mut codes: Vec<&str> = all.iter().map(|e| e.code()).collect();
+    codes.sort();
+    codes.dedup();
+    assert_eq!(codes.len(), all.len());
+    assert!(ops::MAX_WIRE_BYTES as u64 >= super::record::MAX_RECORD_BYTES * 4 / 3 + 1024, "base64 of the largest record, and its header");
+}

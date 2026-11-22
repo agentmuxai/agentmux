@@ -187,7 +187,7 @@ impl Entry {
 }
 
 /// Why an entry was refused.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MemberError {
     /// Not for this collection, or not the next entry, or it does not name the head it extends.
     DoesNotExtend,
@@ -301,7 +301,7 @@ impl State {
 }
 
 /// What taking an entry did.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Taken {
     /// It extended the chain.
     Extended,
