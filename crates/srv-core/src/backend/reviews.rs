@@ -98,6 +98,43 @@ pub enum WaitsOn {
     Unknown,
 }
 
+impl WaitsOn {
+    /// The name the board and the route use for it (the same as its serialized form).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WaitsOn::Person => "person",
+            WaitsOn::Author => "author",
+            WaitsOn::Reviewer => "reviewer",
+            WaitsOn::Ci => "ci",
+            WaitsOn::Queue => "queue",
+            WaitsOn::None => "none",
+            WaitsOn::Unknown => "unknown",
+        }
+    }
+
+    /// The kind a name from [`WaitsOn::as_str`] stands for; a name it does not know is `Unknown`.
+    pub fn parse(name: &str) -> WaitsOn {
+        [WaitsOn::Person, WaitsOn::Author, WaitsOn::Reviewer, WaitsOn::Ci, WaitsOn::Queue, WaitsOn::None]
+            .into_iter()
+            .find(|w| w.as_str() == name)
+            .unwrap_or(WaitsOn::Unknown)
+    }
+
+    /// How urgently it needs someone, for the card that has several pull requests: the one that blocks it is the
+    /// most pressing (a person first, nothing last).
+    pub fn urgency(self) -> u8 {
+        match self {
+            WaitsOn::Person => 0,
+            WaitsOn::Author => 1,
+            WaitsOn::Reviewer => 2,
+            WaitsOn::Ci => 3,
+            WaitsOn::Queue => 4,
+            WaitsOn::Unknown => 5,
+            WaitsOn::None => 6,
+        }
+    }
+}
+
 /// A pull request and where it stands.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]

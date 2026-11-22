@@ -13,7 +13,7 @@ import { t } from "@/app/i18n/i18n";
 import { KanbanBoard, useCardDrop } from "./kanban-board";
 import { KanbanBoardPicker } from "./kanban-board-picker";
 import { AgentChip, agentStateWords } from "./kanban-card";
-import { agentLabel, columnOf, isFinishedColumn, repoLabel } from "./kanban-columns";
+import { agentLabel, columnOf, isFinishedColumn, repoLabel, WAITS_FILTERS } from "./kanban-columns";
 import { KanbanDrawer } from "./kanban-drawer";
 import type { KanbanModel } from "./kanban-model";
 import { KANBAN_REMINDERS_DESCRIPTION, kanbanRemindersOn, setKanbanReminders } from "./kanban-reminders";
@@ -25,6 +25,26 @@ import type { KanbanAgent, KanbanTask } from "./kanban-types";
 
 type Part = { s: KanbanSectionState };
 
+/** A value of the "waits on" filter, in words. */
+function waitsFilterLabel(w: (typeof WAITS_FILTERS)[number]): string {
+    switch (w) {
+        case "open":
+            return t("kanban.waits.open");
+        case "author":
+            return t("kanban.waits.author");
+        case "reviewer":
+            return t("kanban.waits.reviewer");
+        case "ci":
+            return t("kanban.waits.ci");
+        case "queue":
+            return t("kanban.waits.queue");
+        case "person":
+            return t("kanban.waits.person");
+        default:
+            return t("kanban.waits.any");
+    }
+}
+
 export function KanbanToolbar(props: Part): JSX.Element {
     const s = props.s;
     return (
@@ -34,7 +54,7 @@ export function KanbanToolbar(props: Part): JSX.Element {
                 <FilterInput
                     value={s.query()}
                     onInput={s.setQuery}
-                    placeholder="Find a task, #number, agent or repository"
+                    placeholder={t("kanban.find.placeholder")}
                     ariaLabel="Find a task"
                 />
             </div>
@@ -50,6 +70,13 @@ export function KanbanToolbar(props: Part): JSX.Element {
                     ]}
                 />
             </Show>
+            <Select
+                density="compact"
+                ariaLabel={t("kanban.waits.label")}
+                value={s.waits()}
+                onChange={s.setWaits}
+                options={WAITS_FILTERS.map((w) => ({ value: w, label: waitsFilterLabel(w) }))}
+            />
             <ReportsToSelect value={s.lead()} onChange={s.setLead} />
             <label class="kanban-toolbar__switch" {...tip("One row of columns per repository")}>
                 <Switch checked={s.lanes()} onChange={s.setLanes} density="compact" ariaLabel="Lanes by repository" />

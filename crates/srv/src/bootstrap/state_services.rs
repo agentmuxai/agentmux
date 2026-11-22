@@ -214,6 +214,7 @@ fn install_message_brokers(state: &AppState) {
     backend::message_flow::install(Arc::clone(&state.broker));
     backend::task_flow::install(Arc::clone(&state.broker));
     backend::pr_flow::install(Arc::clone(&state.broker));
+    backend::pr_flow::install_cards(Arc::clone(&state.identity_store));
     start_container_status(state);
     install_withhold_alert(state);
 }

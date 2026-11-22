@@ -12,6 +12,7 @@ mod held;
 mod keymap;
 mod policy;
 mod session;
+mod watch;
 mod wm;
 mod x;
 
@@ -138,19 +139,31 @@ async fn run(mut socket: WebSocket, start: Start, ended: impl std::future::Futur
         let _ = socket.send(error(&e)).await;
         return;
     }
+    let (wtx, mut counts) = mpsc::unbounded_channel::<usize>();
+    if let Err(e) = watch_windows(&session.display, wtx) {
+        let _ = socket.send(error(&e)).await;
+        return;
+    }
+    let mut watch = watch::Watch::default();
     let _ = socket.send(Message::Text(json!({ "t": "size", "w": start.w, "h": start.h }).to_string().into())).await;
     let mut held = held::Held::default();
     tokio::pin!(ended);
     loop {
         let keep = tokio::select! {
+            // A window opening is handled before the next thing the person typed, so the key hold starts first; what the person sends is
+            // read before the next frame is sent, so a slow link that keeps the frame channel full never starves the person's input.
+            biased;
             _ = &mut ended => false,
-            frame = frames.recv() => match frame {
-                Some(f) => socket.send(Message::Binary(f.into())).await.is_ok(),
+            count = counts.recv() => match count {
+                Some(n) => match watch.seen(n, Instant::now()) {
+                    Some(notice) => socket.send(Message::Text(json!({ "t": "notice", "message": notice }).to_string().into())).await.is_ok(),
+                    None => true,
+                },
                 None => false,
             },
             incoming = socket.recv() => match incoming {
                 Some(Ok(Message::Text(t))) => {
-                    if let Some(said) = on_client(&input, t.as_str(), &start, &mut held).await {
+                    if let Some(said) = on_client(&input, t.as_str(), &start, watch.keys_held(Instant::now()), &mut held).await {
                         socket.send(said).await.is_ok()
                     } else {
                         true
@@ -158,6 +171,10 @@ async fn run(mut socket: WebSocket, start: Start, ended: impl std::future::Futur
                 }
                 Some(Ok(Message::Close(_))) | None | Some(Err(_)) => false,
                 Some(Ok(_)) => true,
+            },
+            frame = frames.recv() => match frame {
+                Some(f) => socket.send(Message::Binary(f.into())).await.is_ok(),
+                None => false,
             },
         };
         if !keep {
@@ -167,12 +184,43 @@ async fn run(mut socket: WebSocket, start: Start, ended: impl std::future::Futur
     drop(session);
 }
 
-/// One message from the pane, sent to the screen. A word for the pane when there is one to say.
-async fn on_client(screen: &x::Screen, text: &str, start: &Start, held: &mut held::Held) -> Option<Message> {
+/// How many windows the screen shows, told whenever it changes: at the moment a window is mapped or unmapped (the screen's own events, on a
+/// thread of its own), so what is typed after a window opens is held from that moment.
+fn watch_windows(display: &str, tx: mpsc::UnboundedSender<usize>) -> Result<(), String> {
+    let screen = x::Screen::connect(display)?;
+    screen.follow_windows()?;
+    std::thread::spawn(move || {
+        let mut last = usize::MAX;
+        loop {
+            match screen.visible_windows() {
+                Ok(n) if n != last => {
+                    last = n;
+                    if tx.send(n).is_err() {
+                        return;
+                    }
+                }
+                Ok(_) => {}
+                Err(_) => return,
+            }
+            // Blocks until the screen says a window changed; ends with the screen (the thread goes when the browser's screen does).
+            if screen.next_window_event().is_err() {
+                return;
+            }
+        }
+    });
+    Ok(())
+}
+
+/// One message from the pane, sent to the screen. A word for the pane when there is one to say. While `keys_held`, a key press or a
+/// paste is dropped (a window just opened that the person did not choose); a release still goes, so no key is left down.
+async fn on_client(screen: &x::Screen, text: &str, start: &Start, keys_held: bool, held: &mut held::Held) -> Option<Message> {
     let msg = match protocol::parse(text) {
         Ok(m) => m,
         Err(e) => return Some(error(&e)),
     };
+    if keys_held && matches!(msg, ClientMsg::Key { kind: KeyKind::Down, .. } | ClientMsg::Paste { .. }) {
+        return None;
+    }
     if let ClientMsg::Key { kind, code, .. } = &msg {
         held.note(code, matches!(kind, KeyKind::Down));
     }

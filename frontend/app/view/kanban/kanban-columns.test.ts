@@ -11,6 +11,7 @@ import {
     columnTasks,
     isSpecd,
     matchesQuery,
+    matchesWaits,
     needsCountOf,
     needsReason,
     quotaReason,
@@ -353,5 +354,28 @@ describe("collapsed columns", () => {
         expect(takesDrops("specd")).toBe(true);
         expect(takesDrops("review")).toBe(false);
         expect(takesDrops("merged")).toBe(false);
+    });
+});
+
+describe("finding a card by its pull requests", () => {
+    const prs = [
+        { repo: "o/r", number: 77, state: "open", waits_on: "reviewer", unlinked: false },
+        { repo: "o/r", number: 5, state: "merged", waits_on: "none", unlinked: false },
+        { repo: "o/r", number: 9, state: "open", waits_on: "author", unlinked: true },
+    ];
+    const t = task(12, "claimed", { card: { repo: "o/r", branch: "pell/card-flow", prs } as unknown as KanbanTask["card"] });
+
+    it("matches the search on a pull request's number, its owner/repo#number and the branch", () => {
+        expect(["77", "#77", "o/r#77", "5", "card-flow"].every((q) => matchesQuery(t, q))).toBe(true);
+        expect(matchesQuery(t, "9"), "a pull request taken off the card").toBe(false);
+        expect(matchesQuery(t, "78")).toBe(false);
+    });
+
+    it("filters on who an open pull request waits on, or on having one open", () => {
+        expect(matchesWaits(t.card, "")).toBe(true);
+        expect(matchesWaits(t.card, "open")).toBe(true);
+        expect(matchesWaits(t.card, "reviewer")).toBe(true);
+        expect(matchesWaits(t.card, "author"), "the author's pull request was taken off").toBe(false);
+        expect(matchesWaits(task(1, "open").card, "open")).toBe(false);
     });
 });

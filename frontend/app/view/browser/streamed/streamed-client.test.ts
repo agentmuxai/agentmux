@@ -37,7 +37,7 @@ vi.mock("./lease-step", () => ({
     releaseOnPageHide: () => {},
 }));
 
-import { openStreamedPane, streamedUrl } from "./streamed-client";
+import { openStreamedPane, screenModeAsked, streamedUrl } from "./streamed-client";
 
 function events(): StreamedEvents & { log: string[] } {
     const log: string[] = [];
@@ -65,6 +65,25 @@ afterEach(() => {
     vi.unstubAllGlobals();
 });
 
+describe("screen mode", () => {
+    it("is asked for with mode=screen, and an ordinary pane's address is unchanged", () => {
+        expect(streamedUrl("wss://host.test", start, true)).toContain("mode=screen");
+        expect(streamedUrl("wss://host.test", start)).not.toContain("mode=");
+        expect(streamedUrl("wss://host.test", start, false)).toBe(streamedUrl("wss://host.test", start));
+    });
+
+    it("is asked for by the page's ?screen=1 or the local setting, and by nothing else", () => {
+        vi.stubGlobal("window", { location: { search: "" }, localStorage: { getItem: () => null } });
+        expect(screenModeAsked()).toBe(false);
+        vi.stubGlobal("window", { location: { search: "?screen=1" }, localStorage: { getItem: () => null } });
+        expect(screenModeAsked()).toBe(true);
+        vi.stubGlobal("window", { location: { search: "" }, localStorage: { getItem: (k: string) => (k === "streamedBrowserScreen" ? "1" : null) } });
+        expect(screenModeAsked()).toBe(true);
+        vi.stubGlobal("window", { location: { search: "?screen=0" }, localStorage: { getItem: () => "0" } });
+        expect(screenModeAsked()).toBe(false);
+    });
+});
+
 describe("a streamed pane's socket", () => {
     it("asks the server for the browser first, and opens the socket only once it says it is ready", async () => {
         let ready!: () => void;
@@ -79,6 +98,20 @@ describe("a streamed pane's socket", () => {
         await settle();
         expect(sockets).toHaveLength(1);
         expect(sockets[0].url).toBe(streamedUrl("wss://host.test", start));
+    });
+
+    it("asks for the full browser the person drives when the pane says so, whatever the page and the setting say", async () => {
+        vi.stubGlobal("window", { location: { origin: "https://host.test", search: "" }, localStorage: { getItem: () => null } });
+        openStreamedPane({ ...start, screen: true }, events());
+        await settle();
+        expect(sockets[0].url).toContain("mode=screen");
+    });
+
+    it("honours an explicit choice of the ordinary browser even when the page asks for the full one (the pane's fallback)", async () => {
+        vi.stubGlobal("window", { location: { origin: "https://host.test", search: "?screen=1" }, localStorage: { getItem: () => null } });
+        openStreamedPane({ ...start, screen: false }, events());
+        await settle();
+        expect(sockets[0].url).not.toContain("mode=screen");
     });
 
     it("carries frames and messages as before once the socket is open", async () => {
