@@ -63,6 +63,9 @@ pub struct EntryBody {
     pub parts: BTreeMap<String, String>,
     pub created_at: i64,
     pub updated_at: i64,
+    /// The entry's link ids (`sync_links`): its own first, then its aliases. Empty from a machine that sends none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub link_ids: Vec<String>,
 }
 
 impl Drop for EntryBody {
@@ -107,7 +110,14 @@ impl EntryBody {
             parts: parts.0.clone(),
             created_at: row.created_at,
             updated_at: row.updated_at,
+            link_ids: Vec::new(),
         }
+    }
+
+    /// This body carrying the entry's link ids, from [`super::sync_links::Links::ids`].
+    pub fn with_link_ids(mut self, ids: Vec<String>) -> EntryBody {
+        self.link_ids = ids;
+        self
     }
 
     /// The row this body makes on this machine, in the Vault `vault_id`. `sealed` is its parts sealed with this
