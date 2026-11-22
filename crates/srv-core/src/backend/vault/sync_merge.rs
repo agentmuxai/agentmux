@@ -14,9 +14,6 @@
 
 use super::sync_seal::Version;
 
-/// How long a tombstone is kept at most (spec 6.4): the Vault's own horizon, longer than the layer's default of 30 days.
-pub const TOMBSTONE_HORIZON_MS: i64 = 90 * 24 * 60 * 60 * 1000;
-
 /// A record arriving from another machine, as far as the merge needs to know it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Change {
@@ -146,18 +143,6 @@ pub fn merge(held: Option<&Held>, change: &Change) -> Decision {
             Decision::Conflict { current: side, kept, tags }
         }
     }
-}
-
-/// Whether a tombstone made at `version` can be dropped: every member has acknowledged it, or it is older than the
-/// horizon. Until then it stays, so a machine that was off does not bring the entry back.
-pub fn tombstone_due(version: &Version, now_ms: i64, acknowledged_by_all: bool) -> bool {
-    acknowledged_by_all || now_ms.saturating_sub(version.wall_ms) >= TOMBSTONE_HORIZON_MS
-}
-
-/// Whether a machine last in contact at `last_contact_ms` has been away so long that tombstones it never saw are gone,
-/// so it must take the whole Vault again from scratch rather than catch up.
-pub fn needs_resync(last_contact_ms: i64, now_ms: i64) -> bool {
-    now_ms.saturating_sub(last_contact_ms) >= TOMBSTONE_HORIZON_MS
 }
 
 /// After a full resync: the records only this machine has (`mine`, against `theirs`, the ids every other member holds).

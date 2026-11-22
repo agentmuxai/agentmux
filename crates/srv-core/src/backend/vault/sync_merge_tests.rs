@@ -135,17 +135,6 @@ fn a_delete_follows_on_but_loses_to_an_edit_it_did_not_see() {
 }
 
 #[test]
-fn a_tombstone_is_kept_until_everyone_has_it_and_at_most_ninety_days() {
-    let day = 24 * 60 * 60 * 1000;
-    let t = v(1_000, 0, "a");
-    assert!(!tombstone_due(&t, 1_000 + 89 * day, false));
-    assert!(tombstone_due(&t, 1_000 + 90 * day, false), "the horizon");
-    assert!(tombstone_due(&t, 1_000 + day, true), "every member has acknowledged it");
-    assert!(!needs_resync(1_000, 1_000 + 89 * day));
-    assert!(needs_resync(1_000, 1_000 + 91 * day), "a machine off for longer takes the Vault again from scratch");
-}
-
-#[test]
 fn what_only_this_machine_has_after_a_resync_is_listed_not_decided() {
     let mine = ["e1", "e2", "e3"].map(String::from);
     let theirs = ["e2"].map(String::from);

@@ -33,14 +33,9 @@ pub const MAX_CHUNK: usize = 48 * 1024;
 /// of its own, so this bounds the record and not the file.
 pub const MAX_SEALED: usize = 8 * 1024 * 1024;
 
-/// A record's version: the hybrid logical clock the layer gives it, ordered by wall time, then counter, then machine, so
-/// any two versions are ordered and a machine with a fast clock cannot make two of its own versions equal.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Version {
-    pub wall_ms: i64,
-    pub counter: u32,
-    pub machine: String,
-}
+/// A record's version, the layer's hybrid logical clock (`user_sync::hlc`): ordered by wall time, then counter, then machine,
+/// so any two versions are ordered and a machine with a fast clock cannot make two of its own versions equal.
+pub use crate::backend::user_sync::hlc::Version;
 
 impl Version {
     pub fn new(wall_ms: i64, counter: u32, machine: &str) -> Self {
