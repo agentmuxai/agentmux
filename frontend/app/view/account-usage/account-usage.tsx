@@ -1,18 +1,17 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// How much of an account's usage window is used: one line per window with a thin bar, in the
-// accounts view (an account's panel) and at the top of the Swarm (a strip with one block per
-// account that reports). Read-only, no modal.
+// How much of an account's usage window is used: one line per window with a thin bar, then where the
+// numbers come from and how old they are, in the accounts view (an account's panel). Read-only, no modal.
 
 import { For, Show, type JSX } from "solid-js";
 
 import { tip } from "@/app/element/tip";
 import { t } from "@/app/i18n/i18n";
 import {
-    accountsWithReading,
-    ageNote,
+    ageText,
     barPercent,
+    freshestAgeMs,
     noReadingText,
     useAccountUsage,
     usageTone,
@@ -31,31 +30,31 @@ export function AccountUsageRows(props: { usage: AccountUsage }): JSX.Element {
             when={windowsOf(props.usage).length > 0}
             fallback={<span class="account-usage__none">{noReadingText(props.usage)}</span>}
         >
-            <ul class="account-usage" aria-label={t("accountUsage.rows.aria")}>
-                <For each={windowsOf(props.usage)}>
-                    {([key, w]) => (
-                        <li class="account-usage__row" data-tone={usageTone(w)}>
-                            <span class="account-usage__name" {...tip(windowName(key))}>
-                                {windowName(key)}
-                            </span>
-                            <span
-                                class="account-usage__bar"
-                                role="progressbar"
-                                aria-label={t("accountUsage.window.aria", { name: windowName(key) })}
-                                aria-valuemin={0}
-                                aria-valuemax={100}
-                                aria-valuenow={barPercent(w)}
-                            >
-                                <span class="account-usage__fill" style={{ width: `${barPercent(w)}%` }} />
-                            </span>
-                            <span class="account-usage__text">
-                                {windowText(w)}
-                                <Show when={ageNote(w)}>{(n) => <span class="account-usage__age">{n()}</span>}</Show>
-                            </span>
-                        </li>
-                    )}
-                </For>
-            </ul>
+            <div class="account-usage__wrap">
+                <ul class="account-usage" aria-label={t("accountUsage.rows.aria")}>
+                    <For each={windowsOf(props.usage)}>
+                        {([key, w]) => (
+                            <li class="account-usage__row" data-tone={usageTone(w)}>
+                                <span class="account-usage__name" {...tip(windowName(key))}>
+                                    {windowName(key)}
+                                </span>
+                                <span
+                                    class="account-usage__bar"
+                                    role="progressbar"
+                                    aria-label={t("accountUsage.window.aria", { name: windowName(key) })}
+                                    aria-valuemin={0}
+                                    aria-valuemax={100}
+                                    aria-valuenow={barPercent(w)}
+                                >
+                                    <span class="account-usage__fill" style={{ width: `${barPercent(w)}%` }} />
+                                </span>
+                                <span class="account-usage__text">{windowText(w)}</span>
+                            </li>
+                        )}
+                    </For>
+                </ul>
+                <span class="account-usage__source">{t("accountUsage.source", { age: ageText(freshestAgeMs(props.usage)) })}</span>
+            </div>
         </Show>
     );
 }
@@ -71,30 +70,6 @@ export function AccountUsageField(props: { accountId: string }): JSX.Element {
                     <AccountUsageRows usage={a().usage} />
                 </div>
             )}
-        </Show>
-    );
-}
-
-/** At the top of the Swarm: every account that reports its usage, or nothing. */
-export function AccountUsageStrip(): JSX.Element {
-    const accounts = useAccountUsage();
-    const shown = () => accountsWithReading(accounts());
-    return (
-        <Show when={shown().length > 0}>
-            <div class="account-usage-strip" role="group" aria-label={t("accountUsage.strip.aria")}>
-                <For each={shown().map((a) => a.account_id)}>
-                    {(id) => (
-                        <Show when={shown().find((a) => a.account_id === id)}>
-                            {(a) => (
-                                <div class="account-usage-strip__account">
-                                    <span class="account-usage-strip__label">{a().label}</span>
-                                    <AccountUsageRows usage={a().usage} />
-                                </div>
-                            )}
-                        </Show>
-                    )}
-                </For>
-            </div>
         </Show>
     );
 }

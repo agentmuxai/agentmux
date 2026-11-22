@@ -11,6 +11,7 @@
 import { Show, type JSX } from "solid-js";
 
 import { Button, MenuTrigger, Pill, type MenuEntry } from "@/app/element/ui";
+import { t as tr } from "@/app/i18n/i18n";
 
 import { tierOf } from "./kanban-boards";
 import type { KanbanSectionState } from "./kanban-section-state";
@@ -46,6 +47,7 @@ export function pickerEntries(s: KanbanSectionState): MenuEntry[] {
     entries.push({ label: "", divider: true });
     entries.push({ label: "New board", icon: "plus", onSelect: () => s.setManaging("new"), testId: "kanban-board-new" });
     entries.push({ label: "Manage boards…", icon: "gear", onSelect: () => s.setManaging("manage"), testId: "kanban-board-manage" });
+    entries.push({ label: tr("kanban.prs.unmatchedMenu"), icon: "code-pull-request", onSelect: () => s.setManaging("prs"), testId: "kanban-board-unmatched-prs" });
     if (archived.length > 0) {
         entries.push({ label: "", divider: true });
         entries.push({

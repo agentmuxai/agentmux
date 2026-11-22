@@ -10,7 +10,8 @@
 //!   credential (token, key, secret, password, credential, auth).
 //!
 //! A token that carries its own expiry (a JWT's `exp`, grok's `expires_at`) is withheld until then, even after the
-//! CLI has renewed it, since the old one still works; the other values are withheld until the file holds another.
+//! CLI has renewed it, since the old one still works. A value with no known expiry (a refresh token, an API key) stays
+//! withheld after the file holds another, up to `withhold::KEPT_PER_OWNER` per owner, oldest dropped first.
 //! A look that finds no value (a sign-out) leaves what was held.
 
 use serde_json::Value;
@@ -33,11 +34,11 @@ fn text(value: Option<&Value>) -> Option<&str> {
     value.and_then(Value::as_str).filter(|s| !s.is_empty())
 }
 
-/// Withholds `value` until `expires_at` (unix ms) when it is known, else until the owner holds another.
+/// Withholds `value` until `expires_at` (unix ms) when it is known, else as a kept value of the owner.
 fn hold(owner: &str, value: &str, expires_at: Option<i64>) {
     match expires_at {
         Some(at) => withhold::hold_until(owner, value, at),
-        None => withhold::hold(owner, value, None),
+        None => withhold::hold_kept(owner, value),
     }
 }
 
@@ -58,10 +59,10 @@ fn codex(dir: &str, json: &Value) {
         }
     }
     if let Some(refresh) = text(tokens.and_then(|t| t.get("refresh_token"))) {
-        withhold::hold(&sign_in_owner(dir, "codex:refresh"), refresh, None);
+        withhold::hold_kept(&sign_in_owner(dir, "codex:refresh"), refresh);
     }
     if let Some(key) = text(json.get("OPENAI_API_KEY")) {
-        withhold::hold(&sign_in_owner(dir, "codex:api-key"), key, None);
+        withhold::hold_kept(&sign_in_owner(dir, "codex:api-key"), key);
     }
 }
 
@@ -73,7 +74,7 @@ fn grok(dir: &str, json: &Value) {
             hold(&sign_in_owner(dir, &format!("grok:{scope}:key")), key, expires);
         }
         if let Some(refresh) = text(entry.get("refresh_token")) {
-            withhold::hold(&sign_in_owner(dir, &format!("grok:{scope}:refresh")), refresh, None);
+            withhold::hold_kept(&sign_in_owner(dir, &format!("grok:{scope}:refresh")), refresh);
         }
     }
 }
@@ -88,7 +89,7 @@ fn muse(dir: &str, json: &Value) {
     fn walk(dir: &str, path: &str, in_credential: bool, value: &Value) {
         match value {
             Value::String(s) if in_credential && !s.is_empty() => {
-                withhold::hold(&sign_in_owner(dir, &format!("muse:{path}")), s, None);
+                withhold::hold_kept(&sign_in_owner(dir, &format!("muse:{path}")), s);
             }
             Value::Object(fields) => {
                 for (name, inner) in fields {
