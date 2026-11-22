@@ -214,24 +214,45 @@ fn what_a_card_adds_to_the_board_stays_small() {
 }
 
 #[test]
-fn a_late_verdict_of_an_older_commit_does_not_hide_the_current_commits_checks() {
+fn a_head_the_pull_request_reported_after_a_verdict_makes_that_verdict_stale() {
     let (s, _d) = store();
     card(&s, "a", "pell", "o/r", 7);
-    // The pull request's own report: its head is h2.
-    s.work_card_pr_apply(
-        "a",
-        &PrReport { repo: "o/r".into(), number: 7, state: CardPrState::Open, head: Some("h2".into()), opened_at: Some(1), merged_at: None, updated_at: 150 },
-        PrSource::Holder,
-        150,
-    )
-    .unwrap();
     s.work_card_pr_flow_apply(&note("pell", 42, 7, 200, checks("failing", "h2")), 200).unwrap();
     s.work_card_pr_flow_apply(&note("pell", 42, 7, 250, review("muxreview", "approved", "h1")), 250).unwrap();
+    // The pull request's own report, of a time after both, says its head is h2.
+    s.work_card_pr_apply(
+        "a",
+        &PrReport { repo: "o/r".into(), number: 7, state: CardPrState::Open, head: Some("h2".into()), opened_at: Some(1), merged_at: None, updated_at: 300 },
+        PrSource::Holder,
+        300,
+    )
+    .unwrap();
 
     let pr = s.work_board_get("a").unwrap().unwrap().card.prs.remove(0);
     assert!(pr.verdicts[0].stale, "the approval is of h1, not the pull request's head");
     assert_eq!(pr.checks, "failing", "the current commit's checks stay");
     assert_eq!(waits(&s, "a"), pair("author", "checks_failing"));
+}
+
+#[test]
+fn a_push_the_pull_request_never_reported_does_not_make_the_new_notices_stale() {
+    let (s, _d) = store();
+    card(&s, "a", "pell", "o/r", 7);
+    // The report knows h1 only; a push to h2 came with no report (nothing tells of a push), then its notices.
+    s.work_card_pr_apply(
+        "a",
+        &PrReport { repo: "o/r".into(), number: 7, state: CardPrState::Open, head: Some("h1".into()), opened_at: Some(1), merged_at: None, updated_at: 100 },
+        PrSource::Holder,
+        100,
+    )
+    .unwrap();
+    s.work_card_pr_flow_apply(&note("pell", 42, 7, 200, checks("passing", "h2")), 200).unwrap();
+    s.work_card_pr_flow_apply(&note("pell", 42, 7, 250, review("muxreview", "approved", "h2")), 250).unwrap();
+
+    let pr = s.work_board_get("a").unwrap().unwrap().card.prs.remove(0);
+    assert!(!pr.verdicts[0].stale);
+    assert_eq!((pr.checks.as_str(), pr.review.as_str()), ("passing", "approved"));
+    assert_eq!(waits(&s, "a"), pair("author", "ready_to_merge"));
 }
 
 #[test]

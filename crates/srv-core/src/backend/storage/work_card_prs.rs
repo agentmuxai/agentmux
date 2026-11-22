@@ -329,18 +329,18 @@ fn same_head(a: &str, b: &str) -> bool {
 /// request waits on (`reviews::waits_on`, the one table). A verdict or checks result given on a commit older than the
 /// newest one a later notice named is stale or not shown: it is of a head that moved.
 fn derive_flow(pr: &mut WorkCardPr, task_state: &str) {
-    // The pull request's own head, when a report gave one, is the current commit: a notice that arrives late for an
-    // older commit does not become the newest. With none known, the newest commit any notice named is.
-    let newest: Option<(String, i64)> = if pr.head.is_empty() {
-        pr.verdicts
-            .iter()
-            .filter(|v| !v.head.is_empty())
-            .map(|v| (v.head.clone(), v.at))
-            .chain((!pr.checks_head.is_empty()).then(|| (pr.checks_head.clone(), pr.checks_at)))
-            .max_by_key(|(_, at)| *at)
-    } else {
-        Some((pr.head.clone(), i64::MAX))
-    };
+    // The newest commit anything named, by time: a verdict, the checks, or the pull request's own reported head (a
+    // report only tells of a push when its event is one of those it reads, so a notice on a newer commit than the
+    // reported head wins by being later). A notice for an older commit that arrives after a push cannot be told
+    // from one for a new commit without the commits' order; the table then follows the notices.
+    let newest: Option<(String, i64)> = pr
+        .verdicts
+        .iter()
+        .filter(|v| !v.head.is_empty())
+        .map(|v| (v.head.clone(), v.at))
+        .chain((!pr.checks_head.is_empty()).then(|| (pr.checks_head.clone(), pr.checks_at)))
+        .chain((!pr.head.is_empty()).then(|| (pr.head.clone(), pr.updated_at)))
+        .max_by_key(|(_, at)| *at);
     for v in &mut pr.verdicts {
         v.stale = match (&newest, v.head.is_empty()) {
             (Some((head, at)), false) => !same_head(head, &v.head) && *at >= v.at,
