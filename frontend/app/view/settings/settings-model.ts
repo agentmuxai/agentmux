@@ -21,6 +21,7 @@ export type SettingsSection =
     | "devices"
     | "widgets"
     | "agents"
+    | "supervisor"
     | "kanban"
     | "advanced";
 
@@ -120,6 +121,9 @@ export const SETTINGS_SECTION_LABELS: Record<SettingsSection, string> = {
     get agents() {
         return t("settings.sections.agents");
     },
+    get supervisor() {
+        return t("settings.sections.supervisor");
+    },
     get kanban() {
         return t("settings.sections.kanban");
     },
@@ -144,6 +148,7 @@ export const SETTINGS_SECTIONS: PaneSections<SettingsSection> = {
         { id: "devices", get label() { return SETTINGS_SECTION_LABELS.devices; }, icon: "mobile-screen" },
         { id: "widgets", get label() { return SETTINGS_SECTION_LABELS.widgets; }, icon: "puzzle-piece" },
         { id: "agents", get label() { return SETTINGS_SECTION_LABELS.agents; }, icon: "robot" },
+        { id: "supervisor", get label() { return SETTINGS_SECTION_LABELS.supervisor; }, icon: "user-shield" },
         { id: "kanban", get label() { return SETTINGS_SECTION_LABELS.kanban; }, icon: "table-columns" },
         { id: "advanced", get label() { return SETTINGS_SECTION_LABELS.advanced; }, icon: "sliders" },
     ],

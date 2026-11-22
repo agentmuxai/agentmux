@@ -106,6 +106,10 @@ export const DEEPLINK_REGISTRY: DeepLinkRegistry = {
                                     labelKey: "settings.sections.agents"
                                 },
                                 {
+                                    id: "supervisor",
+                                    labelKey: "settings.sections.supervisor"
+                                },
+                                {
                                     id: "kanban",
                                     labelKey: "settings.sections.kanban"
                                 },

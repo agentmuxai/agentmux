@@ -28,3 +28,50 @@
     opacity: 0.5;
     pointer-events: none;
 }
+
+// A row with a description (MenuEntry.description): the name on the first line, the explanation under it, smaller
+// and muted, wrapping and never cut. The check or icon sits on the name's line, and hover, focus and the disabled
+// state are the whole row's, as for any row.
+.ui-menu-item--described {
+    --ui-menu-name-height: calc(var(--text-sm) * 1.4);
+    align-items: flex-start;
+
+    > .menu-item-icon,
+    > .menu-item-swatch {
+        height: var(--ui-menu-name-height);
+        display: inline-flex;
+        align-items: center;
+        margin-top: 0;
+    }
+
+    > .menu-item-swatch {
+        height: 12px;
+        margin-top: calc((var(--ui-menu-name-height) - 12px) / 2);
+    }
+
+    > .menu-item-shortcut,
+    > .menu-item-sublabel,
+    > .fa-chevron-right {
+        line-height: var(--ui-menu-name-height);
+    }
+}
+
+.ui-menu-item__text {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: var(--space-0-5);
+    min-width: 0;
+
+    .label {
+        line-height: var(--ui-menu-name-height);
+    }
+}
+
+.ui-menu-item__description {
+    font-size: var(--text-xs);
+    line-height: 1.35;
+    color: var(--secondary-text-color);
+    white-space: normal;
+    overflow-wrap: anywhere;
+}

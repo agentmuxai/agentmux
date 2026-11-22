@@ -56,6 +56,7 @@
                                 { "id": "devices", "label": "settings.sections.devices" },
                                 { "id": "widgets", "label": "settings.sections.widgets" },
                                 { "id": "agents", "label": "settings.sections.agents" },
+                                { "id": "supervisor", "label": "settings.sections.supervisor" },
                                 { "id": "kanban", "label": "settings.sections.kanban" },
                                 { "id": "advanced", "label": "settings.sections.advanced" }
                             ]

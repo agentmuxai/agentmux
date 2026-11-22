@@ -13,7 +13,6 @@
  * rather than an RPC mock.
  */
 
-import { takeSupervisorSettingsRequest } from "@/app/store/supervisor-settings-request";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 const devMode = vi.hoisted(() => ({ on: false }));
@@ -91,11 +90,11 @@ describe("SettingsView section tabs", () => {
         return { ...result, model };
     }
 
-    it("orders the tabs as Appearance, Animations, Window & Panes, Browser, Terminal, Keyboard shortcuts, Sounds, Notifications & Tray, Recording, Paired devices, Widgets, Agents, Kanban, Advanced", () => {
+    it("orders the tabs as Appearance, Animations, Window & Panes, Browser, Terminal, Keyboard shortcuts, Sounds, Notifications & Tray, Recording, Paired devices, Widgets, Agents, Supervisor, Kanban, Advanced", () => {
         renderSettings();
         const tabs = screen.getByRole("tablist", { name: "Settings section" });
         const labels = Array.from(tabs.querySelectorAll('[role="tab"]')).map((el) => el.textContent);
-        expect(labels).toEqual(["Appearance", "Animations", "Window & Panes", "Browser", "Terminal", "Keyboard shortcuts", "Sounds", "Notifications & Tray", "Recording", "Paired devices", "Widgets", "Agents", "Kanban", "Advanced"]);
+        expect(labels).toEqual(["Appearance", "Animations", "Window & Panes", "Browser", "Terminal", "Keyboard shortcuts", "Sounds", "Notifications & Tray", "Recording", "Paired devices", "Widgets", "Agents", "Supervisor", "Kanban", "Advanced"]);
     });
 
     it("defaults to the Appearance section visible", () => {
@@ -292,23 +291,25 @@ describe("SettingsView search bar", () => {
         }
     });
 
-    it("opens the Swarm's Supervisor settings for a Supervisor result, and stays in this section", async () => {
-        const { model } = renderSettings();
-        const input = screen.getByTestId("settings-search-input");
-        fireEvent.input(input, { target: { value: "supervisor" } });
-        const result = screen.getAllByTestId("settings-search-result")[0];
-        expect(result).toHaveTextContent("Swarm Supervisor");
-        fireEvent.click(result);
-        expect(opened.openOrFocusPaneIdByView).toHaveBeenCalledWith(
-            "swarm",
-            { meta: { view: "swarm", "swarm:section": "supervisor" } },
-            { "swarm:section": "supervisor" }
-        );
-        // The ask names the pane that was focused or created, so only that Swarm opens its panel.
-        await vi.waitFor(() => expect(takeSupervisorSettingsRequest("swarm-block")).toBe(true));
-        expect(takeSupervisorSettingsRequest("another-swarm")).toBe(false);
-        expect(model.activeSection()).toBe("appearance");
-        expect(model.query()).toBe("");
+    it("opens the Supervisor section itself for a Supervisor result, on the row that matched", async () => {
+        const original = Element.prototype.scrollIntoView;
+        Element.prototype.scrollIntoView = vi.fn();
+        try {
+            const { model } = renderSettings();
+            const input = screen.getByTestId("settings-search-input");
+            fireEvent.input(input, { target: { value: "fleet budget" } });
+            const result = screen.getAllByTestId("settings-search-result")[0];
+            expect(result).toHaveTextContent("Fleet budget (continuations per hour)");
+            fireEvent.click(result);
+            expect(model.activeSection()).toBe("supervisor");
+            // Nothing opens in the Swarm any more: the settings are here.
+            expect(opened.openOrFocusPaneIdByView).not.toHaveBeenCalled();
+            await vi.waitFor(() => expect(document.getElementById("setting-supervisor.hourly")).not.toBeNull());
+            await vi.waitFor(() => expect(Element.prototype.scrollIntoView).toHaveBeenCalled());
+            expect(model.query()).toBe("");
+        } finally {
+            Element.prototype.scrollIntoView = original;
+        }
     });
 
     it("lists an exact setting name alone, not the settings that only look like it", () => {

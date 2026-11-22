@@ -31,7 +31,7 @@ describe("SETTINGS_INDEX", () => {
     it("covers every section", () => {
         const sections = new Set(SETTINGS_INDEX.map((e) => e.section));
         expect(sections).toEqual(
-            new Set(["appearance", "animations", "window", "browser", "terminal", "keyboard", "sounds", "notifications", "recording", "devices", "widgets", "agents", "kanban", "advanced"]),
+            new Set(["appearance", "animations", "window", "browser", "terminal", "keyboard", "sounds", "notifications", "recording", "devices", "widgets", "agents", "supervisor", "kanban", "advanced"]),
         );
     });
 
@@ -61,13 +61,12 @@ describe("searchSettings", () => {
         }
     });
 
-    it("finds the Supervisor's one entry by its settings' words, and it opens the Swarm", () => {
+    it("finds the Supervisor's settings by their words, each in the Supervisor section", () => {
         for (const q of ["supervisor", "steady", "wait before continuing", "fleet budget", "cooldown", "supervisor:hourly"]) {
-            expect(labels(q)).toContain("Swarm Supervisor");
+            expect(searchSettings(SETTINGS_INDEX, q).some((e) => e.section === "supervisor"), q).toBe(true);
         }
-        const entry = SETTINGS_INDEX.find((e) => e.id === "agents.supervisor")!;
-        expect(typeof entry.opens).toBe("function");
-        expect(SETTINGS_INDEX.filter((e) => e.label.toLowerCase().includes("supervisor"))).toHaveLength(1);
+        expect(searchSettings(SETTINGS_INDEX, "fleet budget")[0].id).toBe("supervisor.hourly");
+        expect(SETTINGS_INDEX.filter((e) => e.section === "supervisor").every((e) => !e.opens)).toBe(true);
     });
 
     it("finds the Kanban reminder switch by kanban, backlog and reminder", () => {
