@@ -1,6 +1,6 @@
 # Spec: a sign-in browser a person drives (the Browser pane's screen mode), production build
 
-Status: draft for approval. Public requirements only.
+**Status:** active - the first pull requests (the core, then windows and the pane) are in review; the later ones follow this list. Public requirements only.
 
 ## 1. What this is, and the decision behind it
 
