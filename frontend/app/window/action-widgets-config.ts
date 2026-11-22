@@ -202,7 +202,11 @@ export function getPinnedKeys(
 /** A pin whose widget was folded into another, and the pin that takes its place: the Media
  *  pane is the Editor's image and video viewers now (SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md),
  *  so a saved `media` pin stays on the bar as the Editor rather than dropping off it. */
-const RETIRED_PINS = new Map<string, string>([["media", "editor"]]);
+const RETIRED_PINS = new Map<string, string>([
+    ["media", "editor"],
+    // The Reviews pane is part of the Kanban (SPEC_FOLD_REVIEWS_INTO_THE_KANBAN_2026_11_22.md): its pin is the Kanban's.
+    ["reviews", "kanban"],
+]);
 
 /**
  * The pins as saved, hidden or not: `widget:pinned` (or the fresh-install

@@ -862,3 +862,16 @@ fn a_workspace_plans_every_window_with_its_name_and_state() {
     // A layout reader still opens the first window alone.
     assert_eq!(plan_from_doc(&Store::open_in_memory().unwrap(), &doc, &opts(home.path(), false)).tabs.len(), 1);
 }
+
+#[test]
+fn an_old_reviews_pane_opens_the_kanban_on_open_pull_requests() {
+    let home = tempfile::tempdir().unwrap();
+    let store = Store::open_in_memory().unwrap();
+    let plan = plan_from_doc(&store, &one_pane(json!({ "type": "reviews" })), &opts(home.path(), false));
+    let m = block_meta(&plan, 0, 0);
+    assert_eq!((m["view"].as_str(), m["kanban:waits"].as_str()), (Some("kanban"), Some("open")));
+    assert!(!m.contains_key("kanban:open") && plan.notes.is_empty(), "{:?}", plan.notes);
+    // The task it showed is the card the Kanban opens.
+    let plan = plan_from_doc(&store, &one_pane(json!({ "type": "reviews", "config": { "task": "work#12" } })), &opts(home.path(), false));
+    assert_eq!(block_meta(&plan, 0, 0)["kanban:open"], "work#12");
+}

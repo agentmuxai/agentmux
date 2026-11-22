@@ -690,7 +690,7 @@ const MAX_TREE_DEPTH: usize = 32;
 
 /// Views that need no config to open, beyond their type.
 const PLAIN_VIEWS: &[&str] = &[
-    "swarm", "kanban", "history", "audit", "help", "drone", "workflows", "toolchain", "launcher", "shortcuts", "identity", "tower", "atlas", "reviews",
+    "swarm", "kanban", "history", "audit", "help", "drone", "workflows", "toolchain", "launcher", "shortcuts", "identity", "tower", "atlas",
 ];
 
 /// The pane a Warden section opens now, or None when it is still Warden's own (Jobs). Host, no
@@ -1186,6 +1186,7 @@ impl PlanBuilder<'_> {
                 }
                 self.summary.push(pane.to_string());
             }
+            "reviews" => fold_reviews_meta(view, &mut meta, &mut self.summary),
             k if PLAIN_VIEWS.contains(&k) => {
                 meta.insert("view".into(), Value::String(k.to_string()));
                 self.summary.push(k.to_string());
@@ -1200,6 +1201,17 @@ impl PlanBuilder<'_> {
             }
         }
         Value::Object(meta)
+    }
+}
+
+/// The Reviews pane is part of the Kanban now: an old file's Reviews pane opens the Kanban on the filter that showed
+/// what it did (cards with open pull requests), and its task, if it named one, is opened.
+fn fold_reviews_meta(view: &LayoutView, meta: &mut serde_json::Map<String, Value>, summary: &mut Vec<String>) {
+    summary.push("kanban".to_string());
+    meta.insert("view".into(), Value::String("kanban".to_string()));
+    meta.insert("kanban:waits".into(), Value::String("open".to_string()));
+    if let Some(task) = cfg_str(view, "task") {
+        meta.insert("kanban:open".into(), Value::String(task.to_string()));
     }
 }
 

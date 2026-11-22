@@ -1221,6 +1221,7 @@ mod close_pane_tests {
 /// block/tab/layout updates so the frontend renders the new pane.
 pub async fn open_pane(state: &AppState, mut cmd: CommandPaneOpenData) -> Result<PaneOpenResult, String> {
     steps::fold_media_into_editor(&mut cmd)?;
+    steps::fold_reviews_into_kanban(&mut cmd);
     // A file of a container agent's folder opens as a read-only copy, which goes with the pane it opened in.
     let copy = crate::server::agent_folder_open::bind(state, &mut cmd).await?;
     let opened = open_checked(state, cmd).await;
