@@ -17,6 +17,13 @@ fn store() -> Connection {
 }
 
 #[test]
+fn the_logs_own_init_creates_the_lock_table() {
+    let conn = Connection::open_in_memory().unwrap();
+    super::log::init(&conn).unwrap();
+    assert_eq!(acquire(&conn, "a", NOW, LEASE_MS).unwrap(), Lock::Held { generation: 1 });
+}
+
+#[test]
 fn only_one_install_holds_the_lock_at_a_time() {
     let conn = store();
     assert_eq!(acquire(&conn, "a", NOW, LEASE_MS).unwrap(), Lock::Held { generation: 1 });

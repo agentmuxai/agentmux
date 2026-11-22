@@ -10,7 +10,7 @@
 
 use rusqlite::{params, Connection, OptionalExtension};
 
-/// The table, created with the log's.
+/// The table, created by `log::init` with the log's.
 pub(crate) const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS db_sync_lock (
         id         INTEGER PRIMARY KEY CHECK (id = 1),

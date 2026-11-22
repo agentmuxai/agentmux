@@ -33,6 +33,8 @@ pub const MAX_BATCH_BYTES: usize = 256 * 1024;
 pub const MAX_ENTRIES: usize = 256;
 /// Most join requests one collection keeps waiting for a person.
 pub const MAX_PENDING: usize = 16;
+/// How long a join waits for a person before it is dropped (the machine asks again).
+pub const PENDING_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 /// Kinds of collection whose joins may go ahead without a person confirming (a Vault never does yet).
 pub const AUTO_JOIN_KINDS: [&str; 1] = ["kanban"];
 
@@ -96,6 +98,8 @@ pub struct Ctx<'a> {
     pub proof: &'a dyn Proof,
     pub keys: &'a dyn KeyDelivery,
     pub now_ms: i64,
+    /// The longest chain this machine hands over (`MAX_ENTRIES` unless a caller sets less).
+    pub chain_cap: usize,
     /// Whether this install holds the computer's sync lock right now.
     pub active: bool,
 }
@@ -307,19 +311,21 @@ pub fn members(ctx: &mut Ctx, caller: &str, req: &MembersReq) -> Result<MembersA
     if req.offered.len() > MAX_ENTRIES {
         return Err(OpError::TooBig);
     }
-    let current = matches!(standing(ctx, &req.collection, caller), Standing::Current(_));
-    let former = matches!(standing(ctx, &req.collection, caller), Standing::Former);
-    if !current && !former {
-        return Err(OpError::NotMember);
-    }
-    let chain = ctx.chains.get_mut(&req.collection).ok_or(OpError::NotMember)?;
+    let was_current = match standing(ctx, &req.collection, caller) {
+        Standing::Current(_) => true,
+        Standing::Former => false,
+        Standing::Stranger => return Err(OpError::NotMember),
+    };
     let mut taken = Vec::new();
-    if current {
+    if was_current {
+        let chain = ctx.chains.get_mut(&req.collection).ok_or(OpError::NotMember)?;
         taken = req.offered.iter().map(|e| chain.take(&req.collection, e.clone())).collect();
         sync_epoch(ctx.conn, &req.collection, chain)?;
     }
+    // What the caller may read is decided after its offers are taken: one that removes the caller itself ends what it sees.
+    let still_current = matches!(standing(ctx, &req.collection, caller), Standing::Current(_));
     let chain = &ctx.chains[&req.collection];
-    let upto = if current { chain.entries.len() } else { visible_to_former(&chain.entries, caller) };
+    let upto = if still_current { chain.entries.len() } else { visible_to_former(&chain.entries, caller) };
     let from = (req.have_n as usize).min(upto);
     let entries: Vec<Entry> = chain.entries[from..upto].iter().take(MAX_ENTRIES).cloned().collect();
     Ok(MembersAns { entries, n: chain.entries.len() as u64, taken })
@@ -362,7 +368,7 @@ pub fn change(ctx: &mut Ctx, collection: &str, change: Change) -> Result<Entry, 
 
 fn added(ctx: &Ctx, collection: &str, keys: Vec<(u32, String)>) -> Result<Joined, OpError> {
     let chain = &ctx.chains[collection];
-    if chain.entries.len() > MAX_ENTRIES {
+    if chain.entries.len() > ctx.chain_cap {
         return Err(OpError::TooBig);
     }
     Ok(Joined::Added { entries: chain.entries.clone(), keys })
@@ -390,6 +396,9 @@ pub fn join(ctx: &mut Ctx, caller: &str, req: &JoinReq) -> Result<Joined, OpErro
     if req.subject.kind != Kind::Machine || req.subject.id != caller {
         return Err(OpError::Bad);
     }
+    if !req.subject.valid() {
+        return Err(OpError::Bad);
+    }
     let kind = kind_of(ctx.conn, &req.collection)?;
     let already = state.members.get(caller) == Some(&req.subject);
     let at_once = state.policy == Policy::AutoProven && AUTO_JOIN_KINDS.contains(&kind.as_str()) && ctx.proof.auto_proven(caller);
@@ -398,13 +407,26 @@ pub fn join(ctx: &mut Ctx, caller: &str, req: &JoinReq) -> Result<Joined, OpErro
     }
     let keys = keys_or_refuse(ctx, &req.collection, &req.subject)?;
     if !already {
+        room_for_one_more(ctx, &req.collection)?;
         change(ctx, &req.collection, Change::Add { member: req.subject.clone() })?;
         ctx.pending.retain(|p| !(p.collection == req.collection && p.subject.id == caller));
     }
     added(ctx, &req.collection, keys)
 }
 
+/// Refuses before anything is signed when one more entry would make the chain longer than an answer may carry (a
+/// member added whose chain could then not be handed over is never left behind).
+fn room_for_one_more(ctx: &Ctx, collection: &str) -> Result<(), OpError> {
+    let len = ctx.chains.get(collection).map_or(0, |c| c.entries.len());
+    if len + 1 > ctx.chain_cap {
+        return Err(OpError::TooBig);
+    }
+    Ok(())
+}
+
 fn wait_for_person(ctx: &mut Ctx, collection: &str, subject: &Subject) -> Result<Joined, OpError> {
+    let now = ctx.now_ms;
+    ctx.pending.retain(|p| now - p.asked_at < PENDING_TTL_MS);
     let waiting = ctx.pending.iter().filter(|p| p.collection == collection).count();
     let already = ctx.pending.iter().any(|p| p.collection == collection && p.subject.id == subject.id);
     if !already {
@@ -421,10 +443,9 @@ fn wait_for_person(ctx: &mut Ctx, collection: &str, subject: &Subject) -> Result
 pub fn approve(ctx: &mut Ctx, collection: &str, machine: &str) -> Result<Entry, OpError> {
     gate(ctx)?;
     let at = ctx.pending.iter().position(|p| p.collection == collection && p.subject.id == machine).ok_or(OpError::Bad)?;
-    let subject = ctx.pending[at].subject.clone();
-    let entry = change(ctx, collection, Change::Add { member: subject })?;
-    ctx.pending.remove(at);
-    Ok(entry)
+    let subject = ctx.pending.remove(at).subject;
+    room_for_one_more(ctx, collection)?;
+    change(ctx, collection, Change::Add { member: subject })
 }
 
 /// Why a joiner did not take the chain it was given.

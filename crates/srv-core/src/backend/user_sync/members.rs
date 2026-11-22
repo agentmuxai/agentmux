@@ -102,7 +102,7 @@ impl Subject {
 
     /// Whether the subject is what it says: a machine's id is made from its signing key and its box key is signed by
     /// that key; a recovery subject has neither.
-    fn valid(&self) -> bool {
+    pub fn valid(&self) -> bool {
         if unhex32(&self.box_key).is_none() || self.id.is_empty() || self.id.contains(SEP) || self.sealed_label.contains(SEP) {
             return false;
         }

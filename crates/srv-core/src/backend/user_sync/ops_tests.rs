@@ -52,6 +52,8 @@ struct Node {
     active: bool,
     proven: bool,
     keys: bool,
+    now: i64,
+    chain_cap: usize,
 }
 
 fn node(seed: u8) -> Node {
@@ -74,6 +76,8 @@ fn node(seed: u8) -> Node {
         active: true,
         proven: true,
         keys: true,
+        now: NOW,
+        chain_cap: ops::MAX_ENTRIES,
     }
 }
 
@@ -87,7 +91,8 @@ impl Node {
             me: Me { id: &self.id, private: &self.private },
             proof: if self.proven { &YES } else { &NO },
             keys: if self.keys { &YES } else { &NO },
-            now_ms: NOW,
+            now_ms: self.now,
+            chain_cap: self.chain_cap,
             active: self.active,
         }
     }
@@ -426,4 +431,64 @@ fn the_ops_reach_nothing_but_the_log_and_the_chains() {
     for word in ["reqwest", "hyper", "TcpStream", "UdpSocket", "std::net", "tokio::net", "relay", "http"] {
         assert!(!src.contains(word), "ops.rs mentions {word}");
     }
+}
+
+#[test]
+fn a_subject_that_is_not_what_it_says_is_never_queued_and_a_waiting_join_expires_or_is_dropped_when_it_cannot_be_added() {
+    let (mut a, b) = (node(1), node(2));
+    a.found(C, "kanban", Policy::Approve);
+    let mut forged = b.subject.clone();
+    forged.box_key = "00".repeat(32);
+    assert_eq!(ops::join(&mut a.ctx(), &b.id, &JoinReq { collection: C.into(), subject: forged }), Err(OpError::Bad));
+    assert!(a.pending.is_empty(), "a subject whose box key its signing key did not sign is not queued");
+
+    // One that was added by another member meanwhile: approving it fails, and it does not stay in the list.
+    let req = JoinReq { collection: C.into(), subject: b.subject.clone() };
+    assert_eq!(ops::join(&mut a.ctx(), &b.id, &req), Ok(Joined::Pending));
+    ops::change(&mut a.ctx(), C, Change::Add { member: b.subject.clone() }).unwrap();
+    assert_eq!(ops::approve(&mut a.ctx(), C, &b.id), Err(OpError::Bad));
+    assert!(a.pending.is_empty());
+
+    // A full list frees itself when its entries have waited too long.
+    let mut full = node(1);
+    full.found(C, "kanban", Policy::Approve);
+    for seed in 10..(10 + ops::MAX_PENDING as u8) {
+        let n = node(seed);
+        ops::join(&mut full.ctx(), &n.id, &JoinReq { collection: C.into(), subject: n.subject.clone() }).unwrap();
+    }
+    let late = node(99);
+    let ask = JoinReq { collection: C.into(), subject: late.subject.clone() };
+    assert_eq!(ops::join(&mut full.ctx(), &late.id, &ask), Err(OpError::TooBig));
+    full.now = NOW + ops::PENDING_TTL_MS;
+    assert_eq!(ops::join(&mut full.ctx(), &late.id, &ask), Ok(Joined::Pending));
+    assert_eq!(full.pending.len(), 1);
+}
+
+#[test]
+fn a_chain_too_long_to_hand_over_adds_nobody() {
+    let (mut a, b) = (node(1), node(2));
+    a.found(C, "kanban", Policy::AutoProven);
+    a.chain_cap = 3;
+    ops::change(&mut a.ctx(), C, Change::SetPolicy { policy: Policy::Approve }).unwrap();
+    ops::change(&mut a.ctx(), C, Change::SetPolicy { policy: Policy::AutoProven }).unwrap();
+    assert_eq!(a.chains[C].entries.len(), 3);
+    let req = JoinReq { collection: C.into(), subject: b.subject.clone() };
+    assert_eq!(ops::join(&mut a.ctx(), &b.id, &req), Err(OpError::TooBig));
+    assert_eq!(a.chains[C].entries.len(), 3, "no entry was signed for it");
+    assert!(!a.chains[C].state(C).unwrap().members.contains_key(&b.id));
+}
+
+#[test]
+fn a_member_whose_removal_is_among_the_entries_it_offers_sees_nothing_after_it() {
+    let (mut a, mut b, c) = three("kanban");
+    let gone = ended(&[(&a, 0), (&b, 0)]);
+    let remove = ops::change(&mut b.ctx(), C, Change::Remove { id: c.id.clone(), ended: gone }).unwrap();
+    // The entries a member of another copy of the chain signed on top of it, handed over by the machine they remove.
+    let mut other = a.chains[C].clone();
+    other.take(C, remove.clone()).unwrap();
+    let d = node(4);
+    let add = other.next(&a.private, C, &a.id, Change::Add { member: d.subject.clone() }).unwrap();
+    let ans = ops::members(&mut a.ctx(), &c.id, &MembersReq { collection: C.into(), have_n: 3, offered: vec![remove.clone(), add] }).unwrap();
+    assert_eq!(ans.taken.len(), 2);
+    assert_eq!(ans.entries, vec![remove], "its removal and nothing after it, though the offer was taken first");
 }
