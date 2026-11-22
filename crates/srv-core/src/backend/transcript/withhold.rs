@@ -368,9 +368,9 @@ impl Registry {
     }
 
     /// What a reader uses while a build runs: the matcher in use with the values registered since, or closed when more
-    /// was registered than those can hold.
+    /// was registered than those can hold, or when there is no matcher in use to add them to.
     fn interim(&self) -> Option<Built> {
-        if self.overflow || self.overflow_pre {
+        if self.overflow || self.overflow_pre || (self.matcher.is_none() && self.building) {
             return Some(Built { small: Some(Matcher::Closed), large: Arc::default(), extra: Arc::default() });
         }
         self.matcher.clone()
@@ -662,7 +662,7 @@ fn read_from(lock: &RwLock<Registry>, wait: bool) -> Option<Built> {
         }
     }
     let job = with_write_in(lock, |r| {
-        if r.matcher.is_none() {
+        if r.matcher.is_none() && !r.building {
             return Err(r.matcher(now));
         }
         Ok(r.begin_build(now))
@@ -1065,6 +1065,20 @@ mod tests {
         let read = read_from(&lock, false).expect("a matcher");
         assert_eq!(replaced(&read, "an ordinary line"), "an ordinary line", "open again once it is swapped in");
         assert_eq!(replaced(&read, "KEY=canary-bound-0001-first"), "KEY=[withheld]");
+    }
+
+    #[test]
+    fn a_reader_that_finds_a_build_running_and_no_matcher_in_use_gets_the_mark() {
+        let lock = RwLock::new(Registry::default());
+        with_write_in(&lock, |r| {
+            r.add(Some("acct:a"), "canary-none-0001-value", None);
+            r.matcher = None;
+            r.stale = true;
+            r.building = true;
+        });
+        let read = read_from(&lock, false).expect("closed, never nothing");
+        assert_eq!(replaced(&read, "an ordinary line"), MARK);
+        assert!(holds_in(&read, "canary-none-0001-value"));
     }
 
     #[test]
