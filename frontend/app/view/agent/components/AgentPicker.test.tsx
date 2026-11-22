@@ -806,6 +806,23 @@ describe("AgentPicker — the Preview agent CLIs section", () => {
         expect(screen.getByTestId("agent-preview-toggle")).toHaveTextContent("Preview agent CLIs (1)");
         expect(localStorage.getItem("agentPicker:previewOpen")).not.toBe("1");
     });
+
+    it("stays closed after the person closes it with a chip filter on, once things have settled", async () => {
+        vi.mocked(RpcApi.InstallCheckCommand).mockImplementation(
+            async (_client: unknown, req: { providerId: string }) => ({ installed: req.providerId === "kimi", version: null }) as any
+        );
+        render(() => <AgentPicker model={makeMockModel() as any} />);
+        const installed = await screen.findByRole("button", { name: /Installed/ });
+        await waitFor(() => expect(installed).not.toBeDisabled());
+        fireEvent.click(installed);
+        await screen.findByTestId("agent-preview-list");
+        fireEvent.click(screen.getByTestId("agent-preview-toggle"));
+        // Let any pending reactive work run: a closed section must not reopen on its own.
+        await Promise.resolve();
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(screen.queryByTestId("agent-preview-list")).toBeNull();
+        expect(screen.getByTestId("agent-preview-toggle")).toHaveAttribute("aria-expanded", "false");
+    });
 });
 
 describe("AgentPicker — install check on mount", () => {

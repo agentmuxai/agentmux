@@ -40,6 +40,8 @@ pub mod signins;
 pub mod signups;
 pub mod slots;
 pub mod source_link;
+pub mod sync_record;
+pub mod sync_seal;
 pub mod transfer;
 pub mod uses;
 pub mod vaults;
