@@ -180,3 +180,32 @@ async fn screen_mode_idle_real() {
     let frame = tokio::time::timeout(Duration::from_secs(1), rx.recv()).await.expect("a change makes a frame within a second").unwrap();
     assert_eq!(frame[0], frames::FRAME);
 }
+
+/// A page with a text box that turns green when it holds exactly the text the test pastes (with a newline and a hash sign), and red for any
+/// other text. (No hash sign or question mark in the address itself: a data address ends at the first hash sign.)
+const PASTE_PAGE: &str = "data:text/html,<html style=\"height:100%25\"><body style=\"height:100%25;margin:0;background:blue\">\
+                          <textarea autofocus style=\"width:100%25;height:100%25;margin:0;background:blue\" \
+                          oninput=\"this.style.background=this.value==['Hello, World! %2342','line two'].join(String.fromCharCode(10))&&'lime'||'red'\">\
+                          </textarea></body></html>";
+
+/// Text pasted by the person (the pane's paste message) lands in the page's text box exactly, newline included.
+/// Run with the same command as `screen_mode_real`, by name `screen_mode_paste_real`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "needs Xvfb and a Chrome; run by hand on a Linux host"]
+async fn screen_mode_paste_real() {
+    if which::which("Xvfb").is_err() || chromium_missing() {
+        eprintln!("screen_mode_paste_real: no Xvfb or no Chrome here; nothing run");
+        return;
+    }
+    let session = session::start(800, 600, PASTE_PAGE, true).await.expect("the screen and the browser start");
+    let screen = x::Screen::connect(&session.display).expect("the screen is reachable");
+    wait_for_colour(&screen, 700, 500, [255, 0, 0], 30).await.expect("the page is up (blue)");
+    // The text box has the focus (autofocus); a click makes sure.
+    let click = |kind| ClientMsg::Mouse { kind, x: 400.0, y: 400.0, button: Button::Left, buttons: 1, clicks: 1, mods: 0 };
+    send_input(&screen, &click(MouseKind::Down)).await.unwrap();
+    send_input(&screen, &click(MouseKind::Up)).await.unwrap();
+    let text = "Hello, World! #42
+line two".to_string();
+    send_input(&screen, &ClientMsg::Paste { text }).await.unwrap();
+    wait_for_colour(&screen, 700, 500, [0, 255, 0], 10).await.expect("the pasted text arrived exactly in the page");
+}
