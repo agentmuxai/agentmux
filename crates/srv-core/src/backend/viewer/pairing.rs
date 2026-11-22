@@ -48,15 +48,24 @@ pub fn new_code() -> String {
 
 /// A fresh viewer token: `amxv_` + base64url (no padding) of 32 random bytes.
 pub fn new_token() -> String {
-    format!(
+    let token = format!(
         "{TOKEN_PREFIX}{}",
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(random_bytes::<32>())
-    )
+    );
+    // A device's token is never written into a transcript, nor shown on a paired device's feed, until the device is
+    // unpaired (`withhold_owner`).
+    crate::backend::transcript::withhold::hold(&withhold_owner(&token_hash(&token)), &token, None);
+    token
 }
 
 /// What a token is stored as: lowercase hex SHA-256.
 pub fn token_hash(token: &str) -> String {
     hex::encode(Sha256::digest(token.as_bytes()))
+}
+
+/// Who holds a device's token, named by its stored hash, in the transcript withhold registry.
+pub fn withhold_owner(token_hash: &str) -> String {
+    format!("viewer-token:{token_hash}")
 }
 
 /// The outcome of presenting a code.

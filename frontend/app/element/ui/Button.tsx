@@ -30,6 +30,11 @@ export interface ButtonProps extends Omit<JSX.ButtonHTMLAttributes<HTMLButtonEle
     busy?: boolean;
     /** For a toggle button: renders `aria-pressed` and the pressed look. */
     pressed?: boolean;
+    /**
+     * The button reads as text and opens something (a pane, a file or folder, a page), so it shows the link hand.
+     * Leave it off for a button that acts or toggles: that keeps the arrow.
+     */
+    opens?: boolean;
     class?: string;
 }
 
@@ -38,7 +43,7 @@ export interface ButtonProps extends Omit<JSX.ButtonHTMLAttributes<HTMLButtonEle
  * colour, hover and pressed as a stronger line and a faint tint.
  */
 export function Button(props: ButtonProps): JSX.Element {
-    const [local, rest] = splitProps(props, ["tone", "variant", "density", "icon", "busy", "pressed", "class", "children", "disabled", "type"]);
+    const [local, rest] = splitProps(props, ["tone", "variant", "density", "icon", "busy", "pressed", "opens", "class", "children", "disabled", "type"]);
     return (
         <button
             {...rest}
@@ -50,6 +55,7 @@ export function Button(props: ButtonProps): JSX.Element {
                           "ui-button",
                           toneClass(local.tone ?? (local.variant ? "quiet" : undefined)),
                           local.variant && `ui-button--${local.variant}`,
+                          local.opens && "ui-button--opens",
                           densityClass(local.density),
                       ],
                 local.class

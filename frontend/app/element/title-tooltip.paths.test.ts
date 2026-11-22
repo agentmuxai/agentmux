@@ -6,7 +6,8 @@
  * What initTitleTooltips does around the edges that title-tooltip.test.ts leaves open: being started
  * twice, how the panel is placed and followed, the hand-over from one titled element to the next, a
  * pending close that the pointer coming back cancels, how soon the next tooltip shows after one
- * closed, and which events it listens for (and takes back on stop).
+ * closed, and which events it listens for (and takes back on stop). Focus is listened for too, but only
+ * an element with an instant tip reacts to it (title-tooltip.test.ts).
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -398,6 +399,8 @@ describe("the listeners it adds", () => {
             ])
         ).toEqual([
             ["document", "pointerover", true],
+            ["document", "focusin", true],
+            ["document", "focusout", true],
             ["document", "pointerdown", true],
             ["document", "keydown", true],
             ["document", "wheel", true],

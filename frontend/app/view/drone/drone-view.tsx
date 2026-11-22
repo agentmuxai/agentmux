@@ -11,6 +11,8 @@ import { abbreviateText } from "@/util/format-text";
 import { t } from "@/app/i18n/i18n";
 import { BLOCK_KINDS, blockMeta } from "./block-registry";
 import type { DroneViewModel } from "./drone-model";
+import { DroneTemplatePicker } from "./drone-template-picker";
+import { TriggerCard } from "./drone-trigger-card";
 import type { BlockKind, FlowEdge, FlowNode } from "./drone-types";
 import "./drone-view.scss";
 import type { Bundle } from "@/app/store/rpc-api";
@@ -34,13 +36,20 @@ const endChipDrag = (reason: DragEndReason) => {
 
 export const DroneView = (props: { model: DroneViewModel }): JSX.Element => {
     const m = props.model;
+    const [templatesOpen, setTemplatesOpen] = createSignal(false);
 
     return (
         <div class="drone-pane">
-            <NodeTypeBar model={m} />
+            <NodeTypeBar model={m} onTemplates={() => setTemplatesOpen(!templatesOpen())} />
             <div class="drone-stage">
-                <Canvas model={m} />
-                <RunPanel model={m} />
+                <Show when={templatesOpen()}>
+                    <DroneTemplatePicker model={m} onClose={() => setTemplatesOpen(false)} />
+                </Show>
+                <TriggerCard model={m} />
+                <div class="drone-stage-body">
+                    <Canvas model={m} />
+                    <RunPanel model={m} />
+                </div>
             </div>
         </div>
     );
@@ -54,7 +63,7 @@ DroneView.displayName = "DroneView";
 // Center: the horizontal row of draggable emoji node-type chips.
 // Everything below this bar is canvas.
 
-const NodeTypeBar = (p: { model: DroneViewModel }): JSX.Element => {
+const NodeTypeBar = (p: { model: DroneViewModel; onTemplates: () => void }): JSX.Element => {
     const m = p.model;
     const validation = () => m.validate();
     let nameEl!: HTMLInputElement;
@@ -100,6 +109,9 @@ const NodeTypeBar = (p: { model: DroneViewModel }): JSX.Element => {
                     }}
                 >
                     New
+                </Button>
+                <Button class="drone-btn" onClick={() => p.onTemplates()}>
+                    {t("drone.templates.open")}
                 </Button>
                 <Button class="drone-btn" onClick={() => void m.save()}>
                     Save

@@ -20,6 +20,7 @@ import { tip } from "@/app/element/tip";
 import { AgentChip, agentStateWords, KanbanCard, UntrackedCard } from "./kanban-card";
 import { backlogGroups, columnStats, rankBetween, rankOf, reviewLoad, type BacklogGroup, type ColumnStats } from "./kanban-columns";
 import type { KanbanModel } from "./kanban-model";
+import { KanbanSectionBar, sectionOrder, useSectionBar, type SectionBarEntry } from "./kanban-section-bar";
 import {
     defaultStages,
     isFinishedStage,
@@ -29,6 +30,7 @@ import {
     type KanbanStage,
 } from "./kanban-stages";
 import type { KanbanAgent, KanbanTask } from "./kanban-types";
+import { WindowedList } from "./kanban-window";
 
 import "./kanban-stage-colours.scss";
 
@@ -101,8 +103,10 @@ function BacklogGroupView(props: {
                     <Show when={!busyOn() && props.group.agent}>{(a) => <>, {agentStateWords(a().state)}</>}</Show>
                 </span>
             </div>
-            <For each={props.group.tasks}>
-                {(t) => (
+            <WindowedList
+                items={props.group.tasks}
+                keyOf={(t) => t.id}
+                each={(t) => (
                     <KanbanCard
                         task={t}
                         now={props.now}
@@ -111,7 +115,7 @@ function BacklogGroupView(props: {
                         onOpen={props.onOpen}
                     />
                 )}
-            </For>
+            />
         </div>
     );
 }
@@ -180,8 +184,10 @@ interface BoardProps {
     reviewTotal: number;
     /** The colours of agents not running here, by uid (`agent_colors`). */
     colors?: Record<string, string>;
-    /** The narrow layout (§8): one list, the finished stages folded until opened. */
+    /** The narrow layout (§8): one list, every section foldable, the finished ones folded until opened. */
     narrow?: boolean;
+    /** The narrow list's bar of links to its sections and Collapse all, at the head of the list (not in a lane). */
+    sectionBar?: boolean;
     /** The stages collapsed to a strip, by id (wide layout only; the narrow list folds its own). */
     collapsed?: readonly string[];
     /** Collapse or expand a stage; without it the board has no collapse control. */
@@ -196,6 +202,11 @@ interface BoardState {
     foldable: (stage: KanbanStage) => boolean;
     folded: (stage: KanbanStage) => boolean;
     toggle: (id: string) => void;
+    /** Fold every section, or open every one (the bar's Collapse all and Expand all). */
+    setAllFolded: (fold: boolean) => void;
+    /** Open a section if it is folded (a link of the bar goes to it). */
+    open: (id: string) => void;
+    allFolded: () => boolean;
     stripped: (id: string) => boolean;
     gridColumns: () => string | undefined;
     review: () => ReturnType<typeof reviewLoad>;
@@ -211,16 +222,19 @@ const stagesOf = (props: BoardProps): readonly KanbanStage[] => props.stages ?? 
 
 function createBoardState(props: BoardProps): BoardState {
     const groups = (stage: KanbanStage) => backlogGroups(props.tasks, props.agents, stage.takes);
-    // In the narrow list, the finished stages (Merged and Released by default) start folded: one header line each.
-    const [unfolded, setUnfolded] = createSignal<ReadonlySet<string>>(new Set());
-    const foldable = (stage: KanbanStage) => !!props.narrow && isFinishedStage(stage);
-    const folded = (stage: KanbanStage) => foldable(stage) && !unfolded().has(stage.id);
-    const toggle = (id: string) =>
-        setUnfolded((s) => {
-            const next = new Set(s);
-            if (!next.delete(id)) next.add(id);
-            return next;
-        });
+    // In the narrow list every section can fold, and the finished stages (Merged and Released by default) start
+    // folded: one header line each. What the person set is kept by stage; a stage with no entry has its default.
+    const [folds, setFolds] = createSignal<ReadonlyMap<string, boolean>>(new Map());
+    const foldable = (_stage: KanbanStage) => !!props.narrow;
+    const folded = (stage: KanbanStage) => !!props.narrow && (folds().get(stage.id) ?? isFinishedStage(stage));
+    const setFold = (map: ReadonlyMap<string, boolean>, id: string, fold: boolean) => new Map(map).set(id, fold);
+    const toggle = (id: string) => {
+        const stage = stagesOf(props).find((s) => s.id === id);
+        if (stage) setFolds((m) => setFold(m, id, !folded(stage)));
+    };
+    const open = (id: string) => setFolds((m) => setFold(m, id, false));
+    const setAllFolded = (fold: boolean) => setFolds(new Map(stagesOf(props).map((s) => [s.id, fold] as const)));
+    const allFolded = () => stagesOf(props).length > 0 && stagesOf(props).every((s) => folded(s));
     const collapsedSet = createMemo(
         () => new Set(props.narrow || !props.onToggleCollapsed ? [] : parseCollapsedStages(props.collapsed, stagesOf(props)))
     );
@@ -239,6 +253,9 @@ function createBoardState(props: BoardProps): BoardState {
         foldable,
         folded,
         toggle,
+        setAllFolded,
+        open,
+        allFolded,
         stripped,
         gridColumns,
         review,
@@ -248,10 +265,42 @@ function createBoardState(props: BoardProps): BoardState {
     };
 }
 
+/** The number a stage's header shows: its tasks (cancelled ones sit under Merged, folded), and the untracked agents in the stage that shows In progress. */
+function stageCount(props: BoardProps, stage: KanbanStage): number {
+    const tasks = stageTasks(props.tasks, stage);
+    const finished = stage.takes.includes("merged") ? tasks.filter((t) => t.state !== "cancelled") : tasks;
+    return finished.length + (stage.takes.includes("progress") ? props.untracked.length : 0);
+}
+
 export function KanbanBoard(props: BoardProps): JSX.Element {
     const s = createBoardState(props);
+    let board: HTMLDivElement | undefined;
+    const sections = () => sectionOrder(stagesOf(props));
+    const entries = (): SectionBarEntry[] =>
+        sections().map((stage) => ({ id: stage.id, name: stage.name, colour: stage.colour, count: stageCount(props, stage) }));
+    const sectionEl = (id: string) => board?.querySelector<HTMLElement>(`[data-stage-id="${id}"]`) ?? null;
+    const bar = useSectionBar(() => board, () => sections().map((st) => st.id), sectionEl, () => !!props.narrow && !!props.sectionBar);
+    // A link opens its section if it is folded and brings its header to the top, under the bar (the sections keep a
+    // scroll margin for it). After the open has drawn, so the section has its height.
+    const go = (id: string) => {
+        s.open(id);
+        queueMicrotask(() => {
+            sectionEl(id)?.scrollIntoView({ block: "start" });
+            bar.pin(id);
+        });
+    };
     return (
-        <div class="kanban-board" style={{ "grid-template-columns": s.gridColumns() }}>
+        <div ref={board} class="kanban-board" style={{ "grid-template-columns": s.gridColumns() }}>
+            <Show when={props.narrow && props.sectionBar}>
+                <KanbanSectionBar
+                    entries={entries()}
+                    allFolded={s.allFolded()}
+                    current={bar.current()}
+                    onGo={go}
+                    onToggleAll={() => s.setAllFolded(!s.allFolded())}
+                    bindBar={bar.bindBar}
+                />
+            </Show>
             <For each={stagesOf(props)}>{(stage) => <ColumnSection s={s} stage={stage} />}</For>
         </div>
     );
@@ -280,10 +329,11 @@ function ColumnSection({ s, stage }: { s: BoardState; stage: KanbanStage }) {
                 "kanban-column--folded": folded(stage),
                 "kanban-column--collapsed": stripped(stage.id),
             }}
+            data-stage-id={stage.id}
             aria-label={stage.name}
         >
             <Show when={!stripped(stage.id)} fallback={<ColumnStrip s={s} stage={stage} tasks={tasks} />}>
-                {columnHead(s, stage, finished().length + (holdsProgress ? props.untracked.length : 0))}
+                {columnHead(s, stage, stageCount(props, stage))}
                 <Show when={!isWaitingStage(stage)} fallback={<WaitingList s={s} stage={stage} />}>
                     <ColumnList s={s} stage={stage} finished={finished} cancelled={cancelled} />
                 </Show>
@@ -443,7 +493,7 @@ function ColumnList(listProps: {
                     )}
                 </For>
             </Show>
-            <For each={finished()}>{(t) => card(s, t)}</For>
+            <WindowedList items={finished()} keyOf={(t) => t.id} each={(t) => card(s, t)} />
             <Show when={cancelled().length > 0}>
                 <Button
                     density="compact"
@@ -456,7 +506,7 @@ function ColumnList(listProps: {
                     Cancelled · {cancelled().length}
                 </Button>
                 <Show when={showCancelled()}>
-                    <For each={cancelled()}>{(t) => card(s, t)}</For>
+                    <WindowedList items={cancelled()} keyOf={(t) => t.id} each={(t) => card(s, t)} />
                 </Show>
             </Show>
         </div>

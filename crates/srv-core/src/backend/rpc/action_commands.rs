@@ -32,7 +32,7 @@ pub const ALWAYS: &[&str] = &[
     "auth.start", "auth.submitcallback", "browser.signin_fill", "browser.signin_offer_answer", "browser.signin_stop", "browser.signup_password", "browser_profiles.create", "browser_profiles.delete",
     "browser_profiles.update", "browser_start_page.set", "browsergrants.pauseall", "browsergrants.permissionrevoke", "browsergrants.permissionset", "browsergrants.powers", "browsergrants.preset",
     "browsergrants.revoke", "browsergrants.set", "bundle.delete", "bundle.import", "bundle.import.commit",
-    "bundle.import_for_agent", "bundle.upsert", "connconnect", "conndisconnect", "connensure", "connsessionend",
+    "bundle.import_for_agent", "bundle.upsert", "client.agreetos", "connconnect", "conndisconnect", "connensure", "connsessionend",
     "copyforkhistory", "createagent", "createagentinstance", "createagentskill", "createeditordir",
     "createeditorfile", "createscratchfile", "deleteagent", "deleteagentinstance", "deleteagentskill", "deletedrone",
     "deleteeditorfile", "deleteidentityaccount", "deletememory", "deletesystemmemory", "fleet.broadcast",
@@ -60,17 +60,17 @@ pub const ALWAYS: &[&str] = &[
     "updateagentinstance", "updateagentskill", "upsertdrone", "upsertidentityaccount", "upsertmemory",
     "upsertsystemmemory", "viewer.pair-start", "viewer.revoke", "widget.api", "widgets.call",
     "widgets.catalog.install", "widgets.install", "widgets.rescan", "widgets.session", "widgets.setenabled",
-    "widgets.uninstall", "writeagentconfig", "writeeditorfile",
+    "widgets.uninstall", "workspace.importuserworkspace", "writeagentconfig", "writeeditorfile",
     "updatecontainer", "setcontainerlimits", "clearcontainercaches",
     "identity.account.set_failover", "identity.account.signed_in", "identity.account.validate",
 ];
 
 /// The window's own view and bookkeeping state.
 pub const UNLESS_OPERATOR: &[&str] = &[
-    "agent.input-draft", "agent.input-history-append", "agent.input-history-clear", "agent.input-history-delete",
+    "agentquit", "agentshutdown", "agent.input-draft", "agent.input-history-append", "agent.input-history-clear", "agent.input-history-delete",
     "agent.input-history-restore", "agent.input-history-trash", "ambientnarrate", "attachments.cancel",
     "backgroundtaskcompletion", "backgroundtaskpid", "block.reveal", "block.revealed", "blockfile:write_state", "bookmarks.set", "browser.signin_list_close",
-    "controllerresync", "createsubblock", "deletesubblock", "docknodestatus", "fs.reveal", "fs.unwatch", "fs.watch",
+    "controllerresync", "createsubblock", "deletesubblock", "docknodestatus", "folderoverlapaccept", "fs.reveal", "fs.unwatch", "fs.watch",
     "layout.applyIntent", "layout.open", "layout.restoreOtherBuild", "layout.save", "memorydelivery:claim_fallback",
     "notify.ack", "notify.attention", "notify.emit", "notify.focus", "notify.takeactivation", "notify.test",
     "operator.challenge", "pane.activateTab", "pane.confirm.decide", "pane.moveTab", "pane.moveTabs", "pane.open", "pane.removeTab",
@@ -96,7 +96,7 @@ pub const READ_ONLY: &[&str] = &[
     "bundle.get", "bundle.import.preview", "bundle.list", "bundle.self.get", "bundle.validate", "checkcliauth",
     "connectivity.status", "connlist", "connlistaws", "connsessions", "containerimagecheck",
     "containerruntimeavailable", "eventreadhistory", "exportagents", "fileindexlines", "fileprobe", "filesearchbytes", "fleet.group.list",
-    "forkagentdefinitionsuggest", "fs.agent_folder", "fs.git_status", "fs.list", "fs.places", "getagentbundles", "getagentcontent",
+    "folderoverlapcheck", "forkagentdefinitionsuggest", "fs.agent_folder", "fs.git_status", "fs.list", "fs.places", "getagentbundles", "getagentcontent",
     "getagentinstance", "getallagentcontent", "getbuildslot", "getclaudeglobalconfig", "getcontainercaches", "getcontainerlimits", "getdrone", "getdronepayloadschema", "geteditorhome",
     "geteditorroots", "getfullconfig", "getidentityaccount", "getmemory", "getmeta", "gettoolstatus",
     "getwaveairatelimit", "globalmemory:diff", "globalmemory:history", "globalmemory:import_sources",

@@ -21,6 +21,7 @@ import { SaveAsInput } from "./editor-save-as-input";
 import { TabNameInput, TabRenameLine } from "./editor-tab-name-input";
 import { revealMenuItems } from "./editor-tab-reveal";
 import { showAsMenuItems } from "./editor-tab-show-as";
+import { isDroppedPath } from "./viewers/viewer-tabs";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { editorDocTabs } from "./editor-doc-tabs";
 import { registerDocTabDropZone } from "@/app/doc-tabs/doc-tab-hosts";
@@ -379,6 +380,7 @@ function EditorTabBar(props: {
                     </Show>
                 }
                 tooltipOf={(t) => t.payload.filePath}
+                pathOf={(t) => (t.payload.isScratch || isDroppedPath(t.payload.filePath) ? undefined : t.payload.filePath || undefined)}
                 // Not while one of its boxes is open: the path would sit on the line under the box.
                 tooltipOff={(t) => saveAs.saveAsTabId() === t.id || naming(t.id)}
                 addTitle={`New scratch buffer (${keyLabel("ctrl+t")})`}

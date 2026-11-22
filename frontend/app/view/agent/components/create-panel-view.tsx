@@ -3,14 +3,14 @@
 
 /** The create panel's frame: the title and step trail, the container offer, and the current step. */
 
-import { For, Match, Show, Switch, type JSX } from "solid-js";
+import { createEffect, For, Match, on, Show, Switch, type JSX } from "solid-js";
 
 import { Button } from "@/app/element/ui";
 import { AgentCreateForm } from "./AgentCreateForm";
 import { FreeStartGuide } from "./FreeStartGuide";
 import type { InstallStep } from "./create-panel-install";
 import type { FreeGuide } from "./create-panel-guide";
-import { NpmInstall, VendorInstall } from "./create-panel-install-view";
+import { keepInView, NpmInstall, VendorInstall } from "./create-panel-install-view";
 import { STEP_LABEL } from "./create-panel-model";
 import type { PanelState } from "./create-panel-state";
 import type { StepFlow } from "./create-panel-steps";
@@ -72,8 +72,12 @@ function CreateStep(props: { p: PanelParts }): JSX.Element {
 
 export function PanelView(props: { p: PanelParts }): JSX.Element {
     const { s, install, flow } = props.p;
+    let root: HTMLElement | undefined;
+    // A step that replaces another (the install ends and Create follows) changes the panel's height; in a small pane
+    // that left the list scrolled to other cards. Keep the panel where the person is looking.
+    createEffect(on(flow.step, () => keepInView(root), { defer: true }));
     return (
-        <section class="agent-create-panel" aria-label={`New ${s.props.template.name} agent`} data-testid="agent-create-panel">
+        <section ref={root} class="agent-create-panel" aria-label={`New ${s.props.template.name} agent`} data-testid="agent-create-panel">
             <PanelHeader p={props.p} />
 
             <Show when={flow.offerContainer()}>

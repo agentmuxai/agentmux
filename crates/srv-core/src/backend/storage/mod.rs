@@ -13,6 +13,7 @@ pub mod agent_tokens;
 pub mod agent_lan_keys;
 pub mod agent_uid_keys;
 pub mod agent_wan_keys;
+pub mod stored_keys_withheld;
 pub mod db_copy;
 pub mod drone_store;
 pub mod drone_types;
@@ -78,6 +79,7 @@ pub mod google_grants;
 pub mod work_deps;
 pub mod work_media;
 pub mod work_card_prs;
+pub mod work_pr_match;
 pub mod work_prs;
 pub mod work_queue;
 

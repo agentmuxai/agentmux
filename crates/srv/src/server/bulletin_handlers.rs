@@ -17,7 +17,7 @@ use serde_json::json;
 
 use crate::backend::agent_status::{decide, Decision, Intent};
 use crate::backend::bulletin::{self, DEFAULT_EXPIRES_MINUTES, MAX_EXPIRES_MINUTES, MAX_LIVE, MAX_PER_HOUR};
-use crate::backend::reactive::sanitize::{is_sensitive_message, route_name};
+use crate::backend::reactive::sanitize::{post_refusal_help, post_refusal_reason, route_name};
 use crate::backend::storage::bulletins::Bulletin;
 
 use super::availability_view::status_of;
@@ -158,11 +158,16 @@ pub(crate) async fn handle_post_bulletin(
     if key == bulletin::FLEET_MODE_KEY {
         return bad_request("the key `mode` is the fleet's quota mode notice: set it with Message quota_mode");
     }
-    if is_sensitive_message(&text) || (!key.is_empty() && is_sensitive_message(&key)) {
-        return bad_request(
-            "not posted: it looks like it is about credentials or a destructive action, which a bulletin must not \
-             carry. Send it to the one agent it concerns with Message send, where it is marked sensitive.",
-        );
+    let matched = post_refusal_reason(&text)
+        .map(|w| ("message", w))
+        .or_else(|| (!key.is_empty()).then(|| post_refusal_reason(&key).map(|w| ("key", w))).flatten());
+    if let Some((field, word)) = matched {
+        return bad_request(&format!(
+            "not posted: the {field} has \"{word}\", which reads as being about credentials or a destructive action, \
+             and a bulletin must not carry that. Reword that part, or send it to the one agent it concerns with Message \
+             send, where it is marked sensitive.{}",
+            post_refusal_help(&word)
+        ));
     }
     if !caller.as_ref().is_some_and(|c| c.0.uid().is_some()) {
         return bad_request("who is posting is not proven: a bulletin needs an agent started by AgentMux");
@@ -286,5 +291,57 @@ mod tests {
             crate::backend::reactive::held_notes::attach(&r.block_id, "hello").0.contains("bulletin-body-b1")
         };
         assert!(held(&wanted) && held(&stopped), "both hold the note");
+    }
+
+    async fn posted(message: &str, key: Option<&str>) -> (axum::http::StatusCode, serde_json::Value) {
+        let state = crate::server::tests::test_state();
+        let p = PostParams { message: Some(message.into()), key: key.map(Into::into), ..Default::default() };
+        let resp = handle_post_bulletin(State(state), None, Json(p)).await;
+        let status = resp.status();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap())
+    }
+
+    /// Text about the work, which uses the word for a model's usage units, is not refused as a credential; what is
+    /// refused names the word and the field, so the poster can cut that part. (Not posted here: with no agent
+    /// token these calls stop at "who is posting is not proven", after the text was let through.)
+    #[tokio::test]
+    async fn a_refusal_names_what_matched_and_ordinary_text_about_tokens_is_let_through() {
+        for ordinary in [
+            "Record ways to save tokens: a kind named security is for gaps.",
+            "Token savers and workflow kinks go on the Wishlist board.",
+            "This cost about 40k tokens and seven turns.",
+        ] {
+            let (_, b) = posted(ordinary, None).await;
+            assert!(!b["error"].as_str().unwrap_or("").contains("not posted"), "refused: {ordinary:?}: {b}");
+        }
+        let (status, b) = posted("the deploy password is in the old note", None).await;
+        assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+        let error = b["error"].as_str().unwrap();
+        assert!(error.contains("the message has \"password\""), "{error}");
+        let (_, b) = posted("hello", Some("access-token")).await;
+        assert!(b["error"].as_str().unwrap().contains("the key has \"token\"") && b["error"].as_str().unwrap().contains("Use the word only about usage"), "{b}");
+        let (_, b) = posted("run rm -rf on the cache", None).await;
+        assert!(b["error"].as_str().unwrap().contains("\"rm -rf\""), "{b}");
+    }
+
+    /// A value AgentMux holds secret is refused in every spelling, and the refusal names the rule, never the value.
+    #[tokio::test]
+    async fn a_known_secret_value_is_refused_in_a_bulletin_and_never_echoed() {
+        let canary = "bulletin-canary_91Zx7Q-value";
+        crate::backend::transcript::withhold::register(canary);
+        // The value as it is and as hex (the registry knows more spellings; its own tests cover them).
+        let hex: String = canary.bytes().map(|b| format!("{b:02x}")).collect();
+        for form in [canary.to_string(), hex] {
+            let (status, b) = posted(&format!("fyi the value is {form} now"), None).await;
+            assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "{form}");
+            let error = b["error"].as_str().unwrap();
+            assert!(error.contains("a known secret value") && !error.contains(&form), "{error}");
+        }
+        let value = ["ghp", "_aB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3xY5"].concat();
+        let (_, b) = posted(&format!("access_token={value}"), None).await;
+        assert!(b["error"].as_str().unwrap().contains("a credential word followed by a value"), "{b}");
+        let (_, b) = posted("Record ways to save tokens: a kind named security is for gaps.", None).await;
+        assert!(!b["error"].as_str().unwrap_or("").contains("not posted"), "{b}");
     }
 }

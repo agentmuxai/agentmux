@@ -323,7 +323,7 @@ fn register(state: &AppState, prefix: &str) -> (String, String) {
 }
 
 /// An agent whose block names its definition, so it can be hidden.
-fn register_defined(state: &AppState, prefix: &str) -> (String, String, String) {
+pub(crate) fn register_defined(state: &AppState, prefix: &str) -> (String, String, String) {
     let (name, block_id) = register(state, prefix);
     let def_id = uuid::Uuid::new_v4().to_string();
     let mut def = crate::backend::storage::agents::test_agent_def(&def_id, &name, "claude", "standalone", 1, "");
@@ -425,7 +425,7 @@ fn user_line(text: &str) -> String {
     serde_json::json!({ "type": "user", "message": { "role": "user", "content": text } }).to_string()
 }
 
-fn append(state: &AppState, block_id: &str, line: &str) {
+pub(crate) fn append(state: &AppState, block_id: &str, line: &str) {
     crate::backend::transcript::append::append_output_line(&state.broker, block_id, line, Some(&state.filestore), None);
 }
 
@@ -535,6 +535,29 @@ async fn a_feed_shows_nothing_srv_holds_secret_in_the_snapshot_or_in_what_follow
     assert_eq!(event, "append");
     let lines = lines_of(&appended);
     assert!(!lines[0].contains(written_after) && lines[0].contains(withhold::MARK), "{}", lines[0]);
+}
+
+/// The values srv makes for an agent's process (its container token, its LAN key) are withheld from the feed as they
+/// are from the stored transcript.
+#[tokio::test]
+async fn a_feed_withholds_the_tokens_and_keys_srv_made_for_an_agents_process() {
+    use crate::backend::transcript::withhold;
+    let state = test_state();
+    let (_, token) = pair_device(&state, "Pixel");
+    let (name, block, _) = register_defined(&state, "viewer-withhold-made");
+    let container_token = crate::backend::container::credential::token_for_block(&block, None);
+    let lan_key = state.mstore.agent_lan_key_ensure("viewer-withhold-made").unwrap().private_key;
+    append(&state, &block, &user_line(&format!("TOKEN={container_token} LAN={lan_key}")));
+
+    let (status, mut body) = open_feed(&state, &name, &token, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(next_chunk(&mut body).await.unwrap(), "retry: 3000
+
+");
+    let (_, _, snap) = next_event(&mut body).await.unwrap();
+    let shown = lines_of(&snap).join("
+");
+    assert!(shown.contains(withhold::MARK) && !shown.contains(&container_token) && !shown.contains(&lan_key), "{shown}");
 }
 
 #[tokio::test]

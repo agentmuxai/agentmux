@@ -17,12 +17,19 @@
 
 export interface TipAttributes {
     "data-hover-tip"?: string;
+    "data-hover-tip-instant"?: "";
     "aria-description"?: string;
     "aria-label"?: string;
 }
 
-/** Attributes for an element that shows `text` on hover; none when `text` is empty. */
-export function tip(text: string | null | undefined, options?: { label?: boolean }): TipAttributes {
+/**
+ * Attributes for an element that shows `text` on hover; none when `text` is empty. `instant`: the tip shows the
+ * moment the pointer is on the element, without the short rest the others wait for, and also when the element
+ * takes keyboard focus (title-tooltip.ts). For a row of choices whose labels do not say what they do.
+ */
+export function tip(text: string | null | undefined, options?: { label?: boolean; instant?: boolean }): TipAttributes {
     if (!text) return {};
-    return options?.label ? { "data-hover-tip": text, "aria-label": text } : { "data-hover-tip": text, "aria-description": text };
+    const out: TipAttributes = options?.label ? { "data-hover-tip": text, "aria-label": text } : { "data-hover-tip": text, "aria-description": text };
+    if (options?.instant) out["data-hover-tip-instant"] = "";
+    return out;
 }

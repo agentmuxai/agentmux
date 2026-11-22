@@ -3,6 +3,7 @@
 
 
 pub mod agent_admission;
+pub mod open_here_mark;
 pub mod agent_route;
 pub mod session_snapshot;
 pub mod agent_grants;
@@ -27,6 +28,7 @@ pub mod agent_skill_files;
 pub mod agent_registry_lookup;
 pub mod agent_resolve;
 pub mod name_resolution;
+pub mod reserved_names;
 pub mod identity_spawn;
 pub mod work_store_handle;
 pub mod agent_session;
@@ -76,6 +78,7 @@ pub mod narrated_events;
 pub mod pending_background_pids;
 pub mod agent_mcp_flag;
 pub mod mcp_config_file;
+pub mod folder_overlap;
 pub mod mcp_folder_rule;
 pub mod mcp_health;
 pub mod mcp_health_meta;
@@ -288,7 +291,8 @@ pub mod route_credits;
 pub mod sender_failure_note;
 /// What a leader is told about why a worker's turn failed, and what happens next.
 pub mod worker_failure_note;
-/// A leader hears when its workers end a turn without reporting, fail or stop.
+/// A leader hears when its workers (and the agents that hold its tasks) fail, stop or wait on a question.
 pub mod worker_notes;
+pub mod quiet_watch;
 
 pub use oref::ORef;

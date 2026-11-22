@@ -93,6 +93,7 @@ import type { BundleImportPreviewResponse } from "@/types/rpc/BundleImportPrevie
 import type { CancelProviderAuthReq } from "@/types/rpc/CancelProviderAuthReq";
 import type { CheckCliAuthResult } from "@/types/rpc/CheckCliAuthResult";
 import type { ClaudeGlobalConfig } from "@/types/rpc/ClaudeGlobalConfig";
+import type { ClientAgreeTosResult } from "@/types/rpc/ClientAgreeTosResult";
 import type { CommandActivitySummaryData } from "@/types/rpc/CommandActivitySummaryData";
 import type { CommandAgentAnswerData } from "@/types/rpc/CommandAgentAnswerData";
 import type { CommandAgentApiRetryData } from "@/types/rpc/CommandAgentApiRetryData";
@@ -108,12 +109,14 @@ import type { CommandAgentNoticeSetGrantData } from "@/types/rpc/CommandAgentNot
 import type { CommandAgentOpenData } from "@/types/rpc/CommandAgentOpenData";
 import type { CommandAgentOpenTailData } from "@/types/rpc/CommandAgentOpenTailData";
 import type { CommandAgentPaneUnregisterData } from "@/types/rpc/CommandAgentPaneUnregisterData";
+import type { CommandAgentQuitData } from "@/types/rpc/CommandAgentQuitData";
 import type { CommandAgentSessionAppendOutputData } from "@/types/rpc/CommandAgentSessionAppendOutputData";
 import type { CommandAgentSessionArchiveData } from "@/types/rpc/CommandAgentSessionArchiveData";
 import type { CommandAgentSessionListArchivesData } from "@/types/rpc/CommandAgentSessionListArchivesData";
 import type { CommandAgentSessionReadData } from "@/types/rpc/CommandAgentSessionReadData";
 import type { CommandAgentSessionWriteStateData } from "@/types/rpc/CommandAgentSessionWriteStateData";
 import type { CommandAgentSetSeatData } from "@/types/rpc/CommandAgentSetSeatData";
+import type { CommandAgentShutdownData } from "@/types/rpc/CommandAgentShutdownData";
 import type { CommandAgentShutdownKeepData } from "@/types/rpc/CommandAgentShutdownKeepData";
 import type { CommandAgentShutdownNowData } from "@/types/rpc/CommandAgentShutdownNowData";
 import type { CommandAgentStartData } from "@/types/rpc/CommandAgentStartData";
@@ -179,6 +182,8 @@ import type { CommandFleetGroupCreateData } from "@/types/rpc/CommandFleetGroupC
 import type { CommandFleetGroupDeleteData } from "@/types/rpc/CommandFleetGroupDeleteData";
 import type { CommandFleetGroupListData } from "@/types/rpc/CommandFleetGroupListData";
 import type { CommandFleetGroupUpdateData } from "@/types/rpc/CommandFleetGroupUpdateData";
+import type { CommandFolderOverlapAcceptData } from "@/types/rpc/CommandFolderOverlapAcceptData";
+import type { CommandFolderOverlapCheckData } from "@/types/rpc/CommandFolderOverlapCheckData";
 import type { CommandForkAgentDefinitionData } from "@/types/rpc/CommandForkAgentDefinitionData";
 import type { CommandForkAgentDefinitionSuggestData } from "@/types/rpc/CommandForkAgentDefinitionSuggestData";
 import type { CommandGetAgentBundlesData } from "@/types/rpc/CommandGetAgentBundlesData";
@@ -298,6 +303,7 @@ import type { CommandViewerAgentHiddenData } from "@/types/rpc/CommandViewerAgen
 import type { CommandViewerCanSendData } from "@/types/rpc/CommandViewerCanSendData";
 import type { CommandViewerRevokeData } from "@/types/rpc/CommandViewerRevokeData";
 import type { CommandVoiceCheckPathData } from "@/types/rpc/CommandVoiceCheckPathData";
+import type { CommandWorkspaceImportUserWorkspaceData } from "@/types/rpc/CommandWorkspaceImportUserWorkspaceData";
 import type { CommandWriteAgentConfigData } from "@/types/rpc/CommandWriteAgentConfigData";
 import type { CommandWriteAgentConfigResult } from "@/types/rpc/CommandWriteAgentConfigResult";
 import type { CommandWriteEditorFileData } from "@/types/rpc/CommandWriteEditorFileData";
@@ -336,6 +342,8 @@ import type { FleetActionResult } from "@/types/rpc/FleetActionResult";
 import type { FleetGroup } from "@/types/rpc/FleetGroup";
 import type { FleetGroupDeleteResult } from "@/types/rpc/FleetGroupDeleteResult";
 import type { FleetGroupListResult } from "@/types/rpc/FleetGroupListResult";
+import type { FolderOverlapAcceptResult } from "@/types/rpc/FolderOverlapAcceptResult";
+import type { FolderOverlapCheckResult } from "@/types/rpc/FolderOverlapCheckResult";
 import type { ForkAgentDefinitionSuggestResult } from "@/types/rpc/ForkAgentDefinitionSuggestResult";
 import type { FsAgentFolder } from "@/types/rpc/FsAgentFolder";
 import type { FsCreateReq } from "@/types/rpc/FsCreateReq";
@@ -624,6 +632,7 @@ import type { WidgetSectionEntryResult } from "@/types/rpc/WidgetSectionEntryRes
 import type { WidgetSessionReq } from "@/types/rpc/WidgetSessionReq";
 import type { WidgetSessionResult } from "@/types/rpc/WidgetSessionResult";
 import type { WidgetSetEnabledReq } from "@/types/rpc/WidgetSetEnabledReq";
+import type { WorkspaceImportUserWorkspaceResult } from "@/types/rpc/WorkspaceImportUserWorkspaceResult";
 import { RpcClient } from "../rpc-client";
 
 export const GeneratedApi = {
@@ -858,6 +867,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<AgentShutdownKeepResult> {
     return client.rpcCall("agentshutdownkeep", data, opts);
+  },
+  // command "agentquit"
+  AgentQuitCommand(client: RpcClient, data: CommandAgentQuitData, opts?: RpcOpts): Promise<any> {
+    return client.rpcCall("agentquit", data, opts);
+  },
+  // command "agentshutdown"
+  AgentShutdownCommand(client: RpcClient, data: CommandAgentShutdownData, opts?: RpcOpts): Promise<any> {
+    return client.rpcCall("agentshutdown", data, opts);
   },
   // command "agentshutdownnow"
   AgentShutdownNowCommand(
@@ -2326,6 +2343,26 @@ export const GeneratedApi = {
   PresenceStatusCommand(client: RpcClient, opts?: RpcOpts): Promise<PresenceStatusResult> {
     return client.rpcCall("presence.status", {}, opts);
   },
+  // command "client.agreetos"
+  ClientAgreeTosCommand(client: RpcClient, opts?: RpcOpts): Promise<ClientAgreeTosResult> {
+    return client.rpcCall("client.agreetos", {}, opts);
+  },
+  // command "folderoverlapcheck"
+  FolderOverlapCheckCommand(
+    client: RpcClient,
+    data: CommandFolderOverlapCheckData,
+    opts?: RpcOpts
+  ): Promise<FolderOverlapCheckResult> {
+    return client.rpcCall("folderoverlapcheck", data, opts);
+  },
+  // command "folderoverlapaccept"
+  FolderOverlapAcceptCommand(
+    client: RpcClient,
+    data: CommandFolderOverlapAcceptData,
+    opts?: RpcOpts
+  ): Promise<FolderOverlapAcceptResult> {
+    return client.rpcCall("folderoverlapaccept", data, opts);
+  },
   // command "browsergrants.list"
   BrowserGrantsListCommand(
     client: RpcClient,
@@ -3387,6 +3424,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<CommandWriteAgentConfigResult> {
     return client.rpcCall("writeagentconfig", data, opts);
+  },
+  // command "workspace.importuserworkspace"
+  WorkspaceImportUserWorkspaceCommand(
+    client: RpcClient,
+    data: CommandWorkspaceImportUserWorkspaceData,
+    opts?: RpcOpts
+  ): Promise<WorkspaceImportUserWorkspaceResult> {
+    return client.rpcCall("workspace.importuserworkspace", data, opts);
   },
   // command "writeeditorfile"
   WriteEditorFileCommand(client: RpcClient, data: CommandWriteEditorFileData, opts?: RpcOpts): Promise<void> {

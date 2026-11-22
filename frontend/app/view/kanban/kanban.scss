@@ -177,6 +177,8 @@ $kanban-narrow: 760px;
         align-content: start;
         overflow-x: visible;
         overflow-y: auto;
+        // The sections' offsets are the list's own, which the bar of links reads for the section you are in.
+        position: relative;
     }
 
     // Qualified by the board: these come before the base rules below and must win over them.
@@ -191,6 +193,13 @@ $kanban-narrow: 760px;
 
     .kanban-column__head {
         @include color-section.sticky-head;
+        // Under the bar of section links, when the list has one (kanban-section-bar.tsx sets its height).
+        top: var(--kanban-bar-h, 0px);
+    }
+
+    // A link of the bar brings a section's header to the top, under the bar.
+    .kanban-board .kanban-column {
+        scroll-margin-top: var(--kanban-bar-h, 0px);
     }
 
     // Extra-large section labels, so where one section ends and the next begins reads at a glance
@@ -385,6 +394,25 @@ $kanban-narrow: 760px;
     min-height: 32px;
 }
 
+// A long list's cards, drawn near the view (kanban-window.tsx): the same column of cards with the same gap,
+// and two spacers for the cards left out. The browser must not move the scroll for a spacer's change; the
+// window keeps the card at the top of the view where it was.
+.kanban-window {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    overflow-anchor: none;
+}
+
+.kanban-group .kanban-window {
+    gap: var(--space-1);
+}
+
+.kanban-window__item,
+.kanban-window__spacer {
+    flex: none;
+}
+
 .kanban-group__head {
     display: flex;
     flex-wrap: wrap;
@@ -482,6 +510,35 @@ $kanban-narrow: 760px;
     flex-wrap: wrap;
     align-items: center;
     gap: var(--space-1);
+}
+
+// A held task whose pull requests have all merged: it waits on its holder.
+.kanban-card__waiting {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+// The drawer's pull requests, one row each.
+.kanban-drawer__prs {
+    display: flex;
+    flex-direction: column;
+    flex-basis: 100%;
+    gap: var(--space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.kanban-drawer__pr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-xs);
 }
 
 .kanban-card__repo,

@@ -173,3 +173,43 @@ async fn a_wan_message_with_files_to_a_limited_agent_is_held_with_them() {
     assert!(t.deliveries.lock().unwrap()[0].contains("1 file sent with this message"));
     crate::backend::blockcontroller::delete_controller(&t.block.oid);
 }
+
+/// What the relay delivers: no proof of its sender (`network-claimed`), or a proven install.
+fn relayed(slug: &str, id: &str, proven: bool) -> InjectionRequest {
+    InjectionRequest {
+        target_agent: slug.into(),
+        message: "[muxreview] reviewed".into(),
+        source_agent: Some("github-consumer".into()),
+        request_id: Some(id.into()),
+        delivery_tier: Some("wan".into()),
+        wan_verified: proven.then_some(true),
+        wan_instance: proven
+            .then(|| WanInstanceInfo { id: "I1".into(), label: "host~I1".into(), status: WanInstanceStatus::Approved }),
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn an_unproven_relay_message_to_a_limited_agent_is_given_back_not_held_and_not_injected() {
+    let mut t = limited_agent();
+    let (store, handler) = (&t.state.mstore, t.state.reactive_handler);
+    let unproven = relayed(&t.slug, "req-notice", false);
+    assert!(!hold_wan_for_unavailable(store, handler, &unproven), "no proof: never held (a replay would raise its tier)");
+    assert!(give_back_for_unavailable(store, handler, &unproven), "so it goes back to the relay");
+    assert!(store.jekt_held_for_target(&t.uid, 10).unwrap().is_empty(), "and nothing is kept here");
+
+    // A proven peer is still held, as before: the delivery never reaches the give-back.
+    let proven = relayed(&t.slug, "req-peer", true);
+    assert!(hold_wan_for_unavailable(store, handler, &proven));
+    assert_eq!(store.jekt_held_for_target(&t.uid, 10).unwrap().len(), 1);
+
+    // A periodic fire is left alone, and so is a name no agent here answers to.
+    let cron = InjectionRequest { source_agent: Some("cron".into()), ..relayed(&t.slug, "req-cron", false) };
+    assert!(!give_back_for_unavailable(store, handler, &cron));
+    assert!(!give_back_for_unavailable(store, handler, &relayed("nobody-here", "req-x", false)));
+
+    // Recovered: delivered as any other.
+    t.recovers();
+    assert!(!give_back_for_unavailable(&t.state.mstore, t.state.reactive_handler, &unproven));
+    crate::backend::blockcontroller::delete_controller(&t.block.oid);
+}

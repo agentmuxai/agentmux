@@ -129,7 +129,7 @@ export function AgentStrip(props: Part): JSX.Element {
 }
 
 /** The board over some tasks and untracked agents: the whole board, or one lane of it. */
-function SectionBoard(props: Part & { tasks: KanbanTask[]; untracked: KanbanAgent[] }): JSX.Element {
+function SectionBoard(props: Part & { tasks: KanbanTask[]; untracked: KanbanAgent[]; sectionBar?: boolean }): JSX.Element {
     const s = props.s;
     return (
         <KanbanBoard
@@ -146,6 +146,7 @@ function SectionBoard(props: Part & { tasks: KanbanTask[]; untracked: KanbanAgen
             stages={s.stages()}
             colors={s.board()?.agent_colors}
             narrow={s.narrow()}
+            sectionBar={props.sectionBar}
             collapsed={s.collapsed()}
             onToggleCollapsed={s.toggleColumn}
         />
@@ -217,7 +218,7 @@ export function BoardArea(props: Part): JSX.Element {
             when={s.board()}
             fallback={<p class="warden-manager-dim">{s.model.error() ? "" : "Loading the Kanban…"}</p>}
         >
-            <Show when={s.lanes()} fallback={<SectionBoard s={s} tasks={s.tasks()} untracked={s.untracked()} />}>
+            <Show when={s.lanes()} fallback={<SectionBoard s={s} tasks={s.tasks()} untracked={s.untracked()} sectionBar />}>
                 <LanesView s={s} />
             </Show>
         </Show>

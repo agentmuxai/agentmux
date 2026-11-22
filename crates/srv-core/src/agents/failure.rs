@@ -176,8 +176,18 @@ fn names_plan_limit(hay: &str) -> bool {
         || hay.contains("spend limit")
         || hay.contains("out of credits")
         // "You've hit your limit", "hit your 5-hour limit", "hit your Opus limit": whatever window it names.
-        || hay.find("hit your").is_some_and(|at| hay[at..].contains("limit"))
+        || names_hit_your_limit(hay)
         || ["5-hour limit", "five-hour limit", "5 hour limit", "daily limit", "monthly limit"].iter().any(|w| hay.contains(w))
+}
+
+/// "hit your <window> limit": the plan's, unless what it names is a rate: "You've hit your rate limit" (or a
+/// requests-, tokens- or concurrency limit) clears in seconds and is the transient class.
+fn names_hit_your_limit(hay: &str) -> bool {
+    let Some(at) = hay.find("hit your") else { return false };
+    let rest = &hay[at + "hit your".len()..];
+    let Some(end) = rest.find("limit") else { return false };
+    let named = &rest[..end];
+    !["rate", "request", "token", "concurren", "per minute", "per second"].iter().any(|w| named.contains(w))
 }
 
 /// Whether `hay` (lower-cased) is the server's own throttle, which says in so many words that it is not the plan's

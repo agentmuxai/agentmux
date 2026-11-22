@@ -191,6 +191,11 @@ export interface UseAgentFailureOptions {
     onGoThere?: (holderBlockId: string) => void;
     /** `open_in_other_pane`: stop the holder pane and run the agent here, sending the refused message. */
     onMoveHere?: () => Promise<void>;
+    /**
+     * `open_in_other_pane`: true once when the person already chose Move here, by opening the agent here
+     * from the picker. The row then runs it as soon as the refusal arrives, with no second click.
+     */
+    moveHereAtOnce?: () => boolean;
     /** The pane's failed-turn recovery (offline/failed-turn.ts): a failure
      *  it waits on gets no timed retry, its Retry goes there, and the row's
      *  meta says what happens once the API is back. */
@@ -262,6 +267,8 @@ interface FailureHookState {
     lastFailureAt: number;
     // The usage limit's one automatic resend: its timer, and the reset it was last made for (one per reset).
     resendTimer: ReturnType<typeof setTimeout> | undefined;
+    /** The reset the pending resend waits for: a later reset replaces it. */
+    resendFor: number | undefined;
     resentReset: number | undefined;
 }
 
@@ -297,6 +304,7 @@ function createFailureHookState(opts: UseAgentFailureOptions): FailureHookState 
         completionTimer: undefined,
         lastFailureAt: 0,
         resendTimer: undefined,
+        resendFor: undefined,
         resentReset: undefined,
     };
 }
@@ -304,6 +312,7 @@ function createFailureHookState(opts: UseAgentFailureOptions): FailureHookState 
 function cancelResend(s: FailureHookState) {
     clearTimeout(s.resendTimer);
     s.resendTimer = undefined;
+    s.resendFor = undefined;
 }
 
 function cancelCountdown(s: FailureHookState) {
@@ -553,10 +562,10 @@ function watchFailureCleared(s: FailureHookState) {
 
 // First click arms, the second (within TAKEOVER_CONFIRM_MS) runs `run`: both Take over and Move here stop
 // the agent where it is running, so neither fires on one click.
-function confirmed(s: FailureHookState, run: () => Promise<void>, failedTitle: string) {
+function confirmed(s: FailureHookState, run: () => Promise<void>, failedTitle: string, alreadyChosen = false) {
     const { opts } = s;
     if (s.takingOver()) return;
-    if (!s.takeoverArmed()) {
+    if (!alreadyChosen && !s.takeoverArmed()) {
         s.setTakeoverArmed(true);
         s.disarmTimer = setTimeout(() => disarmTakeover(s), TAKEOVER_CONFIRM_MS);
         return;
@@ -593,9 +602,18 @@ function takeOver(s: FailureHookState, turnAttempted: boolean) {
     if (onTakeOver) confirmed(s, () => onTakeOver(turnAttempted), "Could not take over");
 }
 
-function moveHere(s: FailureHookState) {
+function moveHere(s: FailureHookState, alreadyChosen = false) {
     const onMoveHere = s.opts.onMoveHere;
-    if (onMoveHere) confirmed(s, onMoveHere, "Could not move it here");
+    if (onMoveHere) confirmed(s, onMoveHere, "Could not move it here", alreadyChosen);
+}
+
+// The agent was opened here from the picker: that was the choice Move here asks a second click for.
+function watchMoveHereAtOnce(s: FailureHookState) {
+    createEffect(() => {
+        const pf = s.opts.failure();
+        if (pf?.data.code !== "open_in_other_pane") return;
+        if (s.opts.moveHereAtOnce?.()) moveHere(s, true);
+    });
 }
 
 // The failure against what is true now (failure-verdict.ts).
@@ -660,11 +678,16 @@ function watchUsageResend(s: FailureHookState) {
     createEffect(() => {
         const pf = s.opts.failure();
         const reset = pf?.data.code === "usage_limit" ? pf.data.resetsAtMs : undefined;
-        if (!pf || reset == null || pf.turnAttempted === false || s.resentReset === reset || s.resendTimer) return;
+        if (!pf || reset == null || pf.turnAttempted === false || s.resentReset === reset) return;
+        // The same reset keeps its timer; a replacement limit with a later reset moves the send to that reset.
+        if (s.resendTimer && s.resendFor === reset) return;
+        cancelResend(s);
         const wait = reset + RESEND_AFTER_RESET_MS + Math.random() * RESEND_JITTER_MS - Date.now();
         if (wait > 2 ** 31 - 1) return;
+        s.resendFor = reset;
         s.resendTimer = setTimeout(() => {
             s.resendTimer = undefined;
+            s.resendFor = undefined;
             const done = s.completedTurnAt();
             if (done != null && done > pf.at) return;
             s.resentReset = reset;
@@ -771,6 +794,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
     });
 
     watchFailureCleared(s);
+    watchMoveHereAtOnce(s);
     watchAccount(s);
     watchUsageResend(s);
     const verdict = createMemo((): FailureVerdict | null => {

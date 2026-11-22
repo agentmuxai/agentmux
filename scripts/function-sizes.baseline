@@ -16,7 +16,6 @@
 149 crates/cef/src/app/mod.rs::AgentMuxWindowDelegate::WindowDelegate::on_window_created
 157 crates/cef/src/browser_api/act.rs::act
 118 crates/cef/src/browser_api/act.rs::snapshot_route
-108 crates/cef/src/browser_api/routes.rs::click_element
 176 crates/cef/src/browser_api/routes.rs::dispatch_key
 101 crates/cef/src/browser_api/routes.rs::query
 163 crates/cef/src/browser_api/routes.rs::screenshot
@@ -26,7 +25,7 @@
 240 crates/cef/src/browser_pane/hwnd.rs::install_browser_pane_subclass
 168 crates/cef/src/browser_pane/hwnd.rs::install_browser_pane_subclass::wndproc_hook
 293 crates/cef/src/browser_panes/clip.rs::BrowserPaneManager::set_pane_overlay_clip_hwnd
-120 crates/cef/src/browser_panes/clip.rs::SetPaneOverlayClipViewsTask::Task::execute
+115 crates/cef/src/browser_panes/clip.rs::SetPaneOverlayClipViewsTask::Task::execute
 143 crates/cef/src/browser_panes/mod.rs::BrowserPaneManager::create
 417 crates/cef/src/client/crash_recovery.rs::AgentMuxHandler::on_render_process_terminated
 246 crates/cef/src/client/error_catalog.rs::describe
@@ -69,7 +68,7 @@
 119 crates/cef/src/floating_pane.rs::CreatePanePoolWindowWin32Task::Task::execute
 153 crates/cef/src/floating_pane.rs::create_popup
 142 crates/cef/src/floating_pane.rs::floating_pane_wndproc
-1049 crates/cef/src/ipc.rs::route_command
+1013 crates/cef/src/ipc.rs::route_command
 130 crates/cef/src/launcher_ipc/mod.rs::apply_event_to_shadow
 259 crates/cef/src/launcher_ipc/mod.rs::connect_to_launcher
 209 crates/cef/src/launcher_ipc/mod.rs::connect_to_launcher#2
@@ -85,7 +84,7 @@
 467 crates/cef/src/ui_tasks/drag.rs::Win32BeginMoveTask::Task::execute
 124 crates/cef/src/ui_tasks/drag.rs::run_macos_native_drag_loop
 781 crates/cef/src/ui_tasks/pane_geometry.rs::SetPaneBoundsViewsTask::Task::execute
-176 crates/cef/src/ui_tasks/pane_hole_mask.rs::apply_pane_overlay_hole_mask
+174 crates/cef/src/ui_tasks/pane_hole_mask.rs::apply_pane_overlay_hole_mask
 293 crates/cef/src/ui_tasks/platform_macos.rs::swizzled_nsapp_send_event
 369 crates/cef/src/ui_tasks/window.rs::CloseWindowTask::Task::execute
 141 crates/cef/src/ui_tasks/window.rs::CreateWindowTask::Task::execute
@@ -251,12 +250,11 @@
 115 crates/srv/src/server/app_api/bundle/export_for_agent.rs::bundle_export_for_agent_with_history_impl
 156 crates/srv/src/server/app_api/bundle/import.rs::bundle_import_preview_impl
 142 crates/srv/src/server/app_api/dev_server.rs::handle_register_dev_server
-123 crates/srv/src/server/app_api/global_memory.rs::global_memory_write_inner
+120 crates/srv/src/server/app_api/global_memory.rs::global_memory_write_inner
 111 crates/srv/src/server/app_api/layout.rs::layout_open_impl
 109 crates/srv/src/server/app_api/memory.rs::memory_write_impl
 161 crates/srv/src/server/app_api/pane.rs::open_pane_floating
 116 crates/srv/src/server/browser_bypass_routes.rs::handle_ui_browser_request_bypass
-216 crates/srv/src/server/browser_terminal.rs::handle_ui_browser_terminal
 183 crates/srv/src/server/browser_vault_fill.rs::handle_vault_fill
 121 crates/srv/src/server/http_health.rs::handle_discovery
 147 crates/srv/src/server/http_shell.rs::try_attach_to_existing_shell
@@ -314,9 +312,8 @@
 116 frontend/app/hook/useVoiceInput.ts::createWebSpeechVoiceSession
 109 frontend/app/hook/useWindowDrag.win32.ts::installJsDragListener
 105 frontend/app/init/error-display.ts::showStartupError
-102 frontend/app/modals/command-palette.tsx::CommandPaletteModal
 114 frontend/app/notification/notificationitem.tsx::NotificationItem
-111 frontend/app/platform/pane-overlay.ts::flushClip
+108 frontend/app/platform/pane-overlay.ts::flushClip
 175 frontend/app/selection/selection-effects.ts::createSelectionRunner
 104 frontend/app/selection/selection-machine.ts::transition
 139 frontend/app/statusbar/BackendStatus.tsx::BackendStatus
@@ -347,7 +344,7 @@
 141 frontend/app/view/agent/components/MyAgentsList.tsx::MyAgentsList
 130 frontend/app/view/agent/components/SeatRosterImport.tsx::SeatRosterImport
 108 frontend/app/view/agent/components/SlashCommandPicker.tsx::SlashCommandPicker
-233 frontend/app/view/agent/components/agent-picker-launch.ts::createPickerLaunch
+227 frontend/app/view/agent/components/agent-picker-launch.ts::createPickerLaunch
 127 frontend/app/view/agent/components/agent-picker-templates.ts::createTemplates
 114 frontend/app/view/agent/components/composer-stats-zone.tsx::useStatsZone
 257 frontend/app/view/agent/components/my-agents-list-data.ts::useMyAgentsData

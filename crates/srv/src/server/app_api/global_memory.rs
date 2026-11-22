@@ -17,6 +17,28 @@ pub(crate) struct GlobalMemoryWriteProvenance<'a> {
     pub detail: &'a str,
 }
 
+/// What a write through the agent route records as its source and detail. srv names the source: the labels it uses
+/// itself for who wrote (`human`, `armory-ui`, `revert`, `jekt`, `agent`) are never taken from the caller, so a caller
+/// cannot have its write read as the person's or as a revert. The caller's own label stays what it is for a note
+/// (`agent_inferred` when it gives none), and one of those reserved words moves into the detail as `claimed_source`.
+fn recorded_provenance<'a>(provenance: Option<&'a GlobalMemoryWriteProvenance<'a>>) -> (&'a str, String) {
+    const RESERVED: [&str; 5] = ["human", "armory-ui", "revert", "jekt", "agent"];
+    let Some(p) = provenance else { return ("agent_inferred", "{}".to_string()) };
+    let detail = if p.detail.is_empty() { "{}" } else { p.detail };
+    let label = p.source.trim();
+    if !RESERVED.iter().any(|r| r.eq_ignore_ascii_case(label)) {
+        // Any other label is a note of the caller's, not a claim about who wrote: kept as given.
+        return (label, detail.to_string());
+    }
+    let mut merged = match serde_json::from_str::<serde_json::Value>(detail) {
+        Ok(serde_json::Value::Object(map)) => map,
+        Ok(other) => serde_json::Map::from_iter([("detail".to_string(), other)]),
+        Err(_) => serde_json::Map::new(),
+    };
+    merged.entry("claimed_source").or_insert_with(|| serde_json::Value::String(label.to_string()));
+    ("agent_inferred", serde_json::Value::Object(merged).to_string())
+}
+
 /// Creates a new ordinary Global Memory entry, or updates an existing one
 /// by `id`. Backs the `GlobalMemoryWrite` MCP tool.
 pub(crate) fn global_memory_write_impl(
@@ -135,11 +157,8 @@ pub(crate) fn global_memory_write_inner(
     // under concurrent writers). `written_by_uid` is the writer's UID from
     // the request's `Caller` (identity M4c-1, spec §6.5.9) — its token,
     // never a body field; `""` when Unattributed.
-    let (source, detail) = match &provenance {
-        Some(p) => (p.source, p.detail),
-        None => ("agent_inferred", "{}"),
-    };
-    let source_detail = if detail.is_empty() { "{}" } else { detail };
+    let (source, source_detail) = recorded_provenance(provenance.as_ref());
+    let source_detail = source_detail.as_str();
     if let Some(before_write) = before_write {
         before_write(&bundle.id)?;
     }

@@ -136,6 +136,14 @@
             "method": "AgentShutdownKeepCommand"
         },
         {
+            "command": "agentquit",
+            "method": "AgentQuitCommand"
+        },
+        {
+            "command": "agentshutdown",
+            "method": "AgentShutdownCommand"
+        },
+        {
             "command": "agentshutdownnow",
             "method": "AgentShutdownNowCommand"
         },
@@ -1214,6 +1222,18 @@
             "method": "PresenceStatusCommand"
         },
         {
+            "command": "client.agreetos",
+            "method": "ClientAgreeTosCommand"
+        },
+        {
+            "command": "folderoverlapcheck",
+            "method": "FolderOverlapCheckCommand"
+        },
+        {
+            "command": "folderoverlapaccept",
+            "method": "FolderOverlapAcceptCommand"
+        },
+        {
             "command": "browsergrants.list",
             "method": "BrowserGrantsListCommand",
             "send": "data ?? {}"
@@ -1960,6 +1980,10 @@
         {
             "command": "writeagentconfig",
             "method": "WriteAgentConfigCommand"
+        },
+        {
+            "command": "workspace.importuserworkspace",
+            "method": "WorkspaceImportUserWorkspaceCommand"
         },
         {
             "command": "writeeditorfile",

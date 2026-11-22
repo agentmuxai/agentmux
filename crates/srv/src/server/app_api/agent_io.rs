@@ -417,18 +417,22 @@ fn show_refused_spawn(state: &AppState, block_id: &str, reason: &str) {
     // PR #2164 round 2). And to the agent's global zone,
     // which is what a pane with an agentId reloads from
     // (Phase 5a-3c).
-    let global_zone = crate::backend::transcript::append::resolve_global_output_zone(
-        &Some(state.mstore.clone()),
-        block_id,
-    );
-    crate::backend::blockcontroller::shell::handle_append_block_file(
-        &state.broker,
-        block_id,
-        crate::backend::blockcontroller::subprocess::SUBPROCESS_OUTPUT_SUBJECT,
-        format!("{error_frame}\n").as_bytes(),
-        Some(&state.filestore),
-        global_zone.as_deref(),
-    );
+    // Not for the refusal a pane bound with Open here expects and answers with Move here: it reaches
+    // the recovery row below, and stays out of the history (open_here_mark.rs).
+    if !crate::backend::open_here_mark::expected_for_block(&state.mstore, block_id, reason) {
+        let global_zone = crate::backend::transcript::append::resolve_global_output_zone(
+            &Some(state.mstore.clone()),
+            block_id,
+        );
+        crate::backend::blockcontroller::shell::handle_append_block_file(
+            &state.broker,
+            block_id,
+            crate::backend::blockcontroller::subprocess::SUBPROCESS_OUTPUT_SUBJECT,
+            format!("{error_frame}\n").as_bytes(),
+            Some(&state.filestore),
+            global_zone.as_deref(),
+        );
+    }
     // codex P1, PR #2802: same fix as agent_handlers/
     // input.rs's agentinput handler — the frame above
     // only lands in the block's raw output log, which

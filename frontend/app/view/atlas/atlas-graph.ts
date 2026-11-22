@@ -8,9 +8,8 @@
  *
  * Stopped agents are not nodes: each region folds them into a chip, as the Swarm folds them into one section.
  *
- * Three things that are not agents are on the map too (§6.4): the container an agent runs in, as a fact of its
- * node; a container of this machine that no agent uses, as a node in its region; and the review bot and CI, as
- * two nodes of their own.
+ * Two things that are not agents are on the map too (§6.4): the container an agent runs in, as a fact of its
+ * node; and a container of this machine that no agent uses, as a node in its region.
  */
 
 import type { SeatSummary } from "@/types/rpc/SeatSummary";
@@ -37,33 +36,6 @@ export interface AtlasOrphan extends AtlasContainer {
     key: string;
     /** The `AtlasMachine.key` it is on. */
     machine: string;
-}
-
-/** One pull request's line at a service's node, for its card. */
-export interface AtlasServiceLine {
-    id: string;
-    /** The pull request, as "#12". */
-    pr: string;
-    /** What became of it, in words: "approved", "changes requested", "failing". */
-    state: string;
-    tone: "passed" | "failed" | "neutral";
-    /** The agent whose pull request it is, by the name messages reach it by. */
-    agent: string;
-    atMs: number;
-}
-
-/** The review bot or CI: a node that is not an agent, with a line to each agent whose pull request it worked on. */
-export interface AtlasService {
-    /** Unique in the graph. */
-    key: string;
-    name: string;
-    icon: string;
-    /** "warn": a pull request needs changes or fails its checks. "paused": its notices are not reaching this machine. */
-    state: "ok" | "warn" | "paused";
-    /** The line under its name. */
-    sub: string;
-    /** The pull requests it has a line for, newest first. */
-    lines: AtlasServiceLine[];
 }
 
 /** One agent, from this instance or another. */
@@ -147,14 +119,11 @@ export interface AtlasRegion extends AtlasMachine {
 export interface AtlasGraph {
     regions: AtlasRegion[];
     edges: AtlasEdge[];
-    /** The review bot and CI, once either has been heard from. */
-    services: AtlasService[];
 }
 
 /** What is on the map and is not an agent. */
 export interface AtlasExtras {
     orphans?: readonly AtlasOrphan[];
-    services?: readonly AtlasService[];
 }
 
 /** A lead written `Name@host`: its name and the machine it is on. */
@@ -231,5 +200,5 @@ export function buildAtlasGraph(
         if (!lead) continue;
         edges.push({ from: lead.key, to: agent.key, kind: agent.seat?.qualifier === "spawned" ? "spawned" : "lead" });
     }
-    return { regions, edges, services: [...(extras.services ?? [])] };
+    return { regions, edges };
 }

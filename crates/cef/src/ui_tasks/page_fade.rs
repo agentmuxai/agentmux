@@ -48,7 +48,17 @@ wrap_task! {
                 // for a windowed browser), so even a clear NSWindow shows black behind a faded page. Making it
                 // transparent through DevTools is what lets the backdrop show through the faded panes.
                 if let Some(browser) = self.state.get_browser(&self.label) {
-                    keep_renderer_background(&browser, &self.label, self.alpha);
+                    keep_renderer_background(&self.state, &browser, &self.label, self.alpha);
+                }
+            }
+            // Windows: a Browser pane's content is a native child window the page cannot fade, so fade it with the
+            // window (the OS fade used to do this for the whole window).
+            #[cfg(target_os = "windows")]
+            {
+                let parent = unsafe { crate::commands::window::resolve_window_hwnd(&self.state, &self.label) };
+                if !parent.is_null() {
+                    let faded = crate::browser_pane::wrapper::fade_wrappers_of(parent, self.alpha);
+                    tracing::info!(label = %self.label, alpha = self.alpha, faded, "[opacity] faded Browser pane windows");
                 }
             }
             let Some(frame) = self.state.get_browser(&self.label).and_then(|b| b.main_frame()) else {
@@ -83,34 +93,57 @@ fn renderer_background_override(alpha: f64) -> String {
 
 #[cfg(target_os = "macos")]
 thread_local! {
-    /// The fade each browser carries, by browser id, and the observer that watches its DevTools sessions (UI thread
-    /// only; dropping a `Registration` removes the observer).
-    static FADES: std::cell::RefCell<std::collections::HashMap<i32, f64>> = Default::default();
-    static WATCHERS: std::cell::RefCell<std::collections::HashMap<i32, Registration>> = Default::default();
+    /// The fade each faded browser carries, by browser id, as `(window label, alpha)`; and whether the re-send timer
+    /// below is running. UI thread only.
+    static FADES: std::cell::RefCell<std::collections::HashMap<i32, (String, f64)>> = Default::default();
+    static TIMER_RUNNING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
+/// How often the transparent renderer background is sent again while a window is faded. Chromium drops the override
+/// when any other DevTools client (an agent's Browser tool, DevTools, a test driver) detaches, and a remote client's
+/// session end raises no event the host can hear, so the panes went opaque until the next opacity change.
 #[cfg(target_os = "macos")]
-wrap_dev_tools_message_observer! {
-    struct BackgroundWatcher {}
+const RESEND_BACKGROUND_MS: i64 = 1500;
 
-    impl DevToolsMessageObserver {
-        // Chromium drops a renderer background override together with the DevTools session that set it, so another
-        // client (an agent's Browser tool, DevTools, a test driver) attaching and detaching turned the faded panes
-        // opaque again until the next opacity change. Send it again when a session ends.
-        fn on_dev_tools_agent_detached(&self, browser: Option<&mut Browser>) {
-            let Some(browser) = browser else { return };
-            let alpha = FADES.with(|fades| fades.borrow().get(&browser.identifier()).copied());
-            if let (Some(alpha), Some(host)) = (alpha, browser.host()) {
-                let message = renderer_background_override(alpha);
-                host.send_dev_tools_message(Some(message.as_bytes()));
+#[cfg(target_os = "macos")]
+wrap_task! {
+    struct ResendBackgroundTask {
+        state: Arc<AppState>,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            // A window that closed, or whose browser was made again under a new id, is forgotten here: the timer
+            // must end when no live window is faded, and must not keep sending to a browser that is back at 100%.
+            let fades: Vec<(i32, String, f64)> =
+                FADES.with(|fades| fades.borrow().iter().map(|(id, (label, alpha))| (*id, label.clone(), *alpha)).collect());
+            let mut live = Vec::new();
+            for (id, label, alpha) in fades {
+                match self.state.get_browser(&label) {
+                    Some(browser) if browser.identifier() == id => live.push((browser, alpha)),
+                    _ => {
+                        FADES.with(|fades| fades.borrow_mut().remove(&id));
+                    }
+                }
             }
+            if live.is_empty() {
+                TIMER_RUNNING.with(|running| running.set(false));
+                return;
+            }
+            for (browser, alpha) in live {
+                if let Some(host) = browser.host() {
+                    host.send_dev_tools_message(Some(renderer_background_override(alpha).as_bytes()));
+                }
+            }
+            let mut next = ResendBackgroundTask::new(self.state.clone());
+            post_delayed_task(ThreadId::UI, Some(&mut next), RESEND_BACKGROUND_MS);
         }
     }
 }
 
 /// Make the renderer's default background transparent for a fade below 1.0 and keep it so, or give it back at 1.0.
 #[cfg(target_os = "macos")]
-fn keep_renderer_background(browser: &Browser, label: &str, alpha: f64) {
+fn keep_renderer_background(state: &Arc<AppState>, browser: &Browser, label: &str, alpha: f64) {
     let Some(host) = browser.host() else { return };
     if host.send_dev_tools_message(Some(renderer_background_override(alpha).as_bytes())) == 0 {
         tracing::warn!(label = %label, "[opacity] renderer background override was refused");
@@ -118,19 +151,13 @@ fn keep_renderer_background(browser: &Browser, label: &str, alpha: f64) {
     let id = browser.identifier();
     if alpha >= 1.0 {
         FADES.with(|fades| fades.borrow_mut().remove(&id));
-        WATCHERS.with(|watchers| watchers.borrow_mut().remove(&id));
         return;
     }
-    FADES.with(|fades| fades.borrow_mut().insert(id, alpha));
-    WATCHERS.with(|watchers| {
-        let mut watchers = watchers.borrow_mut();
-        if !watchers.contains_key(&id) {
-            let mut observer = BackgroundWatcher::new();
-            if let Some(registration) = host.add_dev_tools_message_observer(Some(&mut observer)) {
-                watchers.insert(id, registration);
-            }
-        }
-    });
+    FADES.with(|fades| fades.borrow_mut().insert(id, (label.to_string(), alpha)));
+    if !TIMER_RUNNING.with(|running| running.replace(true)) {
+        let mut task = ResendBackgroundTask::new(state.clone());
+        post_delayed_task(ThreadId::UI, Some(&mut task), RESEND_BACKGROUND_MS);
+    }
 }
 
 /// Script that fades the whole page to `alpha` (or clears the fade at 1.0).

@@ -37,6 +37,7 @@ import { messagesHeaderButtons } from "./messages/messages-state";
 import { searchHeaderButtons } from "./search/search-bridge";
 import { launchResumesConversation, requestCatchUp } from "./catch-up-request";
 import { isContainerAgentMode, isContainerAgentType } from "@/util/runtime-kind";
+import { sharedFolderOverlaps, type SharedFolderAsk } from "./shared-folder-ask";
 import {
     allocateLaunchWorkDir,
     buildLaunchEnv,
@@ -53,6 +54,14 @@ interface LaunchTarget {
     effectiveProvider: string;
     provider: NonNullable<ReturnType<typeof getProvider>>;
     cliBin: string | undefined;
+}
+
+/** A launch the picker holds until the person has answered (`sharedFolder`): the call, to make again. */
+export interface HeldLaunch {
+    agent: AgentDefinition;
+    overrides: LaunchOverrides | undefined;
+    targetBlockId: string | undefined;
+    targetTabId: string | undefined;
 }
 
 /** What the second stage worked out for the launch to carry. */
@@ -104,6 +113,11 @@ export class AgentViewModel {
     nodejsError: string | null = null;
     /** Why the last launch aborted, for the picker to show (identity M4b-3). */
     launchError: string | null = null;
+    /**
+     * The last launch was held: the host agent opens in a folder a container agent can write, and the person has not gone
+     * ahead with that pair. The picker asks them and, on Go ahead, runs `launch` again (`shared-folder-ask.ts`).
+     */
+    sharedFolder: SharedFolderAsk<HeldLaunch> | null = null;
 
     // Opens a modal in the pane's own layer, for the right-click menu's Seat…;
     // wired by AgentPresentationView on mount.
@@ -514,6 +528,12 @@ export class AgentViewModel {
         const blockId = targetBlockId ?? this.blockId;
         const oref = MOS.makeORef("block", blockId);
         try {
+            // The folder it will run in: a continuation runs in the folder it names, not the definition's.
+            const shared = await sharedFolderOverlaps(agent.id, agentMode, overrides?.workDirOverride?.trim() || workDir);
+            if (shared) {
+                this.sharedFolder = { hostName: agent.name, overlaps: shared, launch: { agent, overrides, targetBlockId, targetTabId } };
+                return false;
+            }
             const finalWorkDir = await allocateLaunchWorkDir({ agent, overrides, workDir, instanceName, agentMode });
             markAgentOpen(blockId, "config");
             const agentColor = launchAgentColor(agent, contentMap);

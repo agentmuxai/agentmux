@@ -71,15 +71,15 @@ fn register_definition_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // createagent → insert new agent, broadcast agents:changed
     let mstore_cfa = state.mstore.clone();
     let broker_cfa = state.broker.clone();
-    engine.register_typed(COMMAND_CREATE_AGENT, move |cmd: CommandCreateAgentDefinitionData, _ctx| {
-        create_agent(cmd, mstore_cfa.clone(), broker_cfa.clone())
+    engine.register_typed(COMMAND_CREATE_AGENT, move |cmd: CommandCreateAgentDefinitionData, ctx| {
+        create_agent(cmd, mstore_cfa.clone(), broker_cfa.clone(), is_the_window(&ctx))
     });
 
     // updateagent → update existing agent, broadcast agents:changed
     let mstore_ufa = state.mstore.clone();
     let broker_ufa = state.broker.clone();
-    engine.register_typed(COMMAND_UPDATE_AGENT, move |cmd: CommandUpdateAgentDefinitionData, _ctx| {
-        update_agent(cmd, mstore_ufa.clone(), broker_ufa.clone())
+    engine.register_typed(COMMAND_UPDATE_AGENT, move |cmd: CommandUpdateAgentDefinitionData, ctx| {
+        update_agent(cmd, mstore_ufa.clone(), broker_ufa.clone(), is_the_window(&ctx))
     });
 
     // deleteagent → delete agent by id, broadcast agents:changed
@@ -339,12 +339,21 @@ async fn list_agents(
     Ok(filtered)
 }
 
+/// Whether the call is the AgentMux window's own. It has no editor for an agent's folders to ask in: a host agent that
+/// shares a folder with a container agent is asked about when it is opened (`folder_overlap`), so only a caller that is
+/// not the window is refused when it saves one.
+fn is_the_window(ctx: &crate::backend::rpc_types::RpcContext) -> bool {
+    ctx.operator_only("").is_ok()
+}
+
 async fn create_agent(
     cmd: CommandCreateAgentDefinitionData,
     mstore: Arc<crate::backend::storage::store::Store>,
     broker: Arc<crate::backend::mps::Broker>,
+    from_window: bool,
 ) -> Result<AgentDefinition, String> {
     let now = agentmux_common::time::now_ms();
+    crate::backend::reserved_names::check_all(&[&cmd.name]).map_err(|e| format!("createagent: {e}"))?;
     // slug is empty here — agent_def_insert auto-derives it
     // from name AND collision-resolves AND mutates the
     // struct so we serialize the resolved value back to
@@ -384,6 +393,9 @@ async fn create_agent(
         seat: None,
         conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
     };
+    if !from_window {
+        crate::backend::folder_overlap::check(&mstore, &agent, None).map_err(|e| format!("createagent: {e}"))?;
+    }
     mstore.agent_def_insert(&mut agent).map_err(|e| format!("createagent: {e}"))?;
     // Assign the agent its display color at creation
     // (SPEC_AGENT_COLOR_2026_08_08.md). Best-effort: a failure
@@ -403,11 +415,16 @@ async fn update_agent(
     cmd: CommandUpdateAgentDefinitionData,
     mstore: Arc<crate::backend::storage::store::Store>,
     broker: Arc<crate::backend::mps::Broker>,
+    from_window: bool,
 ) -> Result<AgentDefinition, String> {
     // Fetch existing to preserve created_at
     let existing = mstore.agent_def_list().map_err(|e| format!("updateagent: {e}"))?;
     let old = existing.iter().find(|a| a.id == cmd.id)
         .ok_or_else(|| format!("updateagent: agent {} not found", cmd.id))?;
+    // An agent that already has a reserved name keeps it; a new one is not given.
+    if cmd.name != old.name {
+        crate::backend::reserved_names::check_all(&[&cmd.name]).map_err(|e| format!("updateagent: {e}"))?;
+    }
     crate::server::app_api::check_provider_unchanged(&old.id, &old.provider, &cmd.provider)
         .and_then(|()| crate::server::app_api::check_volumes(&cmd.container_volumes)).map_err(|e| format!("updateagent: {e}"))?;
     // Model vendor base URL: `None` (omitted) preserves the
@@ -424,6 +441,9 @@ async fn update_agent(
         None => old.model_vendor_base_url.clone(),
     };
     let mut agent = updated_definition(cmd, old, chosen_model_vendor_base_url);
+    if !from_window && crate::backend::folder_overlap::folders_changed(old, &agent) {
+        crate::backend::folder_overlap::check(&mstore, &agent, None).map_err(|e| format!("updateagent: {e}"))?;
+    }
     let found = mstore.agent_def_update(&mut agent).map_err(|e| format!("updateagent: {e}"))?;
     if !found {
         return Err(format!("updateagent: agent {} not found", agent.id));
@@ -523,6 +543,7 @@ async fn import_agent_from_claw(
     if !workspace_path.exists() {
         return Err(format!("importagentfromclaw: path does not exist: {}", cmd.workspace_path));
     }
+    crate::backend::reserved_names::check_all(&[&cmd.agent_name]).map_err(|e| format!("importagentfromclaw: {e}"))?;
 
     let now = agentmux_common::time::now_ms();
 
@@ -629,6 +650,10 @@ async fn import_agents(
                 continue;
             }
 
+        if let Err(e) = crate::backend::reserved_names::check_all(&[&agent_import.name, &agent_import.id]) {
+            failed.push(format!("{}: {e}", agent_import.name));
+            continue;
+        }
         let mut agent = agent_from_import(&agent_import, now);
 
         if let Err(e) = mstore.agent_def_insert(&mut agent) {
@@ -795,6 +820,8 @@ pub(crate) async fn delete_agent_definition(state: &AppState, id: &str, via: &'s
     // Deleting an agent is the one thing that deletes its parked block (and stops it).
     crate::sagas::park_agents::delete_parked_blocks_of(state, id).await;
     state.mstore.agent_def_delete(id).map_err(|e| format!("{via}: {e}"))?;
+    // What the person chose for a pair this agent was in is not kept for the pair it was.
+    crate::backend::folder_overlap::forget_agent(id);
     // A key account's gateway token ends with the agent, before the container's own cleanup (which also ends it) runs.
     crate::backend::model_gateway::token::revoke(id, crate::backend::model_gateway::catalog::KEY_ROUTE_ID);
     super::purge_identity_store_rows(&state.identity_store, &state.id_store, id, via);
