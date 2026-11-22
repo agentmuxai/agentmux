@@ -17,10 +17,39 @@ use zeroize::Zeroize;
 
 use super::seal::Parts;
 use super::shares;
+use super::signins::{PERSONAL, PROFILE};
+use crate::backend::browser_profiles_store::BrowserProfile;
 use crate::backend::storage::vault::VaultRow;
 
 /// The plain fields that name this machine's agents, which a synced entry neither sends nor overwrites.
 pub const LOCAL_FIELDS: [&str; 1] = [shares::SHARED];
+
+/// The plain field that names the browser profile a sign-in belongs to, in place of `profile`: a profile's id is made on
+/// one machine and means nothing on another, its name is what the person sees on both.
+pub const PROFILE_NAME: &str = "profile_name";
+/// On a sign-in received for a profile this machine does not have: the name of that profile. The sign-in is shown under
+/// Personal, marked with it.
+pub const PROFILE_FROM: &str = "profile_from";
+
+/// The person's browser profiles of one machine, by id and by name.
+pub trait Profiles {
+    /// The name of the person's profile `id`; `None` for an agent's own profile and for one that does not exist.
+    fn name_of(&self, id: &str) -> Option<String>;
+    /// The id of the person's profile called `name` (the same name in any case), if this machine has one.
+    fn id_of(&self, name: &str) -> Option<String>;
+}
+
+/// The profiles of this machine, as `browser_profiles_store::read_profiles` lists them.
+pub struct Known<'a>(pub &'a [BrowserProfile]);
+
+impl Profiles for Known<'_> {
+    fn name_of(&self, id: &str) -> Option<String> {
+        self.0.iter().find(|p| p.id == id && p.owner_agent.is_none()).map(|p| p.name.clone())
+    }
+    fn id_of(&self, name: &str) -> Option<String> {
+        self.0.iter().find(|p| p.owner_agent.is_none() && p.name.eq_ignore_ascii_case(name)).map(|p| p.id.clone())
+    }
+}
 
 /// An entry as a sync record carries it.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -51,10 +80,18 @@ impl std::fmt::Debug for EntryBody {
 
 impl EntryBody {
     /// The body of `row`, whose parts are `parts` (opened with this machine's key by the caller).
-    pub fn of_row(row: &VaultRow, parts: &Parts) -> EntryBody {
+    pub fn of_row(row: &VaultRow, parts: &Parts, profiles: &dyn Profiles) -> EntryBody {
         let mut fields: BTreeMap<String, String> = serde_json::from_str(&row.fields).unwrap_or_default();
         for name in LOCAL_FIELDS {
             fields.remove(name);
+        }
+        // A machine's profile id never leaves it: the profile goes by name (a sign-in that can't be named stays here, see
+        // `stays_here`, so none arrives without one).
+        if let Some(id) = fields.get(PROFILE).and_then(|p| p.strip_prefix("profile:")).map(str::to_string) {
+            fields.remove(PROFILE);
+            if let Some(name) = profiles.name_of(&id) {
+                fields.insert(PROFILE_NAME.to_string(), name);
+            }
         }
         EntryBody {
             kind: row.kind.clone(),
@@ -70,10 +107,28 @@ impl EntryBody {
     /// The row this body makes on this machine, in the Vault `vault_id`. `sealed` is its parts sealed with this
     /// machine's own key (`seal::seal`), and `local` the row it replaces, if there is one: the fields that are this
     /// machine's own and the time of its last use here stay as they were.
-    pub fn into_row(&self, id: &str, vault_id: &str, sealed: Vec<u8>, local: Option<&VaultRow>) -> VaultRow {
+    pub fn into_row(&self, id: &str, vault_id: &str, sealed: Vec<u8>, local: Option<&VaultRow>, profiles: &dyn Profiles) -> VaultRow {
         let mut fields = self.fields.clone();
         for name in LOCAL_FIELDS {
             fields.remove(name);
+        }
+        // The profile by name: the profile of that name here, or Personal marked with the name. A raw profile id in a
+        // body is another machine's and is not trusted.
+        fields.remove(PROFILE_FROM);
+        let named = fields.remove(PROFILE_NAME);
+        if fields.get(PROFILE).is_some_and(|p| p != PERSONAL) {
+            fields.remove(PROFILE);
+        }
+        if let Some(name) = named {
+            match profiles.id_of(&name) {
+                Some(pid) => {
+                    fields.insert(PROFILE.to_string(), format!("profile:{pid}"));
+                }
+                None => {
+                    fields.insert(PROFILE.to_string(), PERSONAL.to_string());
+                    fields.insert(PROFILE_FROM.to_string(), name);
+                }
+            }
         }
         let kept: BTreeMap<String, String> = local.map(|r| serde_json::from_str(&r.fields).unwrap_or_default()).unwrap_or_default();
         for name in LOCAL_FIELDS {
@@ -94,6 +149,14 @@ impl EntryBody {
             vault_id: vault_id.to_string(),
         }
     }
+}
+
+/// Whether `row` is one this machine keeps to itself: a sign-in in the own browsing profile of an agent, or in a profile
+/// that has no name here. Such an entry would land under Personal on another machine, where more of the person's tabs may
+/// use it than the profile it was saved for, so it does not go.
+pub fn stays_here(row: &VaultRow, profiles: &dyn Profiles) -> bool {
+    let fields: BTreeMap<String, String> = serde_json::from_str(&row.fields).unwrap_or_default();
+    fields.get(PROFILE).and_then(|p| p.strip_prefix("profile:")).is_some_and(|id| profiles.name_of(id).is_none())
 }
 
 #[cfg(test)]
