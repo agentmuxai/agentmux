@@ -47,7 +47,7 @@ import { PaneViewBoundary } from "./PaneViewBoundary";
 import { agentNameOf, logBlockCover } from "./pane-cover-log";
 import { MissingWidget } from "./missing-widget";
 import { BlockFrame } from "./blockframe";
-import { bodyHoldVars, holdsBodyDuringDrag, measureBodyHold, type BodyHold } from "./pane-body-hold";
+import { bodyHoldVars, usePaneBodyHold } from "./pane-body-hold";
 import { blockViewToIcon, blockViewToName } from "./blockutil";
 import { paneTabCapability } from "@/app/store/pane-tab-registry";
 import { readZoom } from "@/app/store/zoom-factor";
@@ -296,14 +296,13 @@ function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Eleme
     // Track previous focus state to handle blockClicked
     const [blockContentOffset, setBlockContentOffset] = createSignal<Dimensions>(null);
 
-    const [bodyHold, setBodyHold] = createSignal<BodyHold | null>(null);
+    const bodyHold = usePaneBodyHold(() => nodeModel.isSplitterDragging?.() ?? false, () => contentRef.current, () => blockData()?.meta?.view);
     const paneZoomLevel = createMemo(() => paneZoomLevelOf(blockData()?.meta));
     const blockContentStyle = createMemo<JSX.CSSProperties>(() => {
         const retVal: JSX.CSSProperties = {
-            "pointer-events": disablePointerEvents() ? "none" : undefined,
+            "pointer-events": disablePointerEvents() ? "none" : undefined, ...bodyHoldVars(bodyHold()),
         };
         if (paneZoomLevel() !== undefined) (retVal as Record<string, string>)["--pane-zoom"] = paneZoomLevel()!;
-        Object.assign(retVal, bodyHoldVars(bodyHold()));
         const rect = innerRect();
         const offset = blockContentOffset();
         if (rect?.width && rect?.height && offset) {
@@ -314,15 +313,6 @@ function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Eleme
     });
 
     const blockViewType = createMemo(() => blockData()?.meta?.view);
-
-    // While a splitter is dragged the body keeps the size it had at the start (pane-body-hold.ts), so the view is
-    // not laid out on every move; the frame and the border follow, and on release it lays out once.
-    createEffect(() => {
-        const dragging = nodeModel.isSplitterDragging?.() ?? false;
-        if (!dragging) return setBodyHold(null);
-        const content = contentRef.current;
-        if (content && holdsBodyDuringDrag(untrack(blockViewType))) setBodyHold(measureBodyHold(content));
-    });
 
     const handleChildFocus = (event: FocusEvent) => {
         if (!isFocused()) {

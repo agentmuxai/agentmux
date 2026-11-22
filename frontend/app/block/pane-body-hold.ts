@@ -14,6 +14,8 @@
  * body would leave it at the old size over its neighbour (it settles as it did).
  */
 
+import { createEffect, createSignal, untrack, type Accessor } from "solid-js";
+
 /** The size, in CSS px, of the box a pane's view is laid out in: its content box. */
 export interface BodyHold {
     width: number;
@@ -38,6 +40,24 @@ export function measureBodyHold(content: HTMLElement): BodyHold | null {
     const width = content.clientWidth - px(style.paddingLeft) - px(style.paddingRight);
     const height = content.clientHeight - px(style.paddingTop) - px(style.paddingBottom);
     return width > 0 && height > 0 ? { width, height } : null;
+}
+
+/**
+ * The size this pane's body holds, or null: measured once when a splitter drag begins, kept for the whole drag
+ * however the pane is resized under it, and dropped when the drag ends. Declare it before any memo that reads it.
+ */
+export function usePaneBodyHold(
+    dragging: Accessor<boolean>,
+    content: () => HTMLElement | null | undefined,
+    view: Accessor<string | undefined>,
+): Accessor<BodyHold | null> {
+    const [hold, setHold] = createSignal<BodyHold | null>(null);
+    createEffect(() => {
+        if (!dragging()) return setHold(null);
+        const el = content();
+        if (el && holdsBodyDuringDrag(untrack(view))) setHold(measureBodyHold(el));
+    });
+    return hold;
 }
 
 /** The custom properties `.block-content--held` (block.scss) reads. */

@@ -44,6 +44,30 @@ export function holdRectDuringDrag(rect: PaneRect, start: { width: number; heigh
     return { ...rect, width: Math.min(rect.width, start.width), height: Math.min(rect.height, start.height) };
 }
 
+/** The page's hold for one splitter drag: the pane's size when the drag began, taken at the first rect of the drag
+ *  and dropped when the drag ends. `apply` holds a rect in device px (holdRectDuringDrag); `sizeCss` is the held
+ *  page's size in CSS px, rounded, from the placeholder's own rect. */
+export function createDragHold(dragging: () => boolean) {
+    let start: { width: number; height: number } | null = null;
+    return {
+        apply(rect: PaneRect): PaneRect {
+            if (!dragging()) {
+                start = null;
+                return rect;
+            }
+            start ??= { width: rect.width, height: rect.height };
+            return holdRectDuringDrag(rect, start);
+        },
+        sizeCss(r: { width: number; height: number }, dpr: number): { w: number; h: number } {
+            const cap = dragging() ? start : null;
+            return {
+                w: Math.round(cap ? Math.min(r.width, cap.width / dpr) : r.width),
+                h: Math.round(cap ? Math.min(r.height, cap.height / dpr) : r.height),
+            };
+        },
+    };
+}
+
 /** After a splitter drag ends, ask for every pane's final rect to be sent again, a few times.
  *  The sync below sends a rect once and then skips it as unchanged; the host can miss an update
  *  that lands while a pane is mid-resize, and the pane then stays at its old size until another
@@ -213,8 +237,7 @@ export function usePaneRectSync(params: PaneRectSyncParams): PaneRectSync {
     // and Win32 SetWindowPos expect physical / device pixels. Multiply by
     // devicePixelRatio to convert. On HiDPI displays (dpr > 1) the pane
     // would be mispositioned/missized without this.
-    // The pane's size when the current splitter drag began (device px), or none outside a drag.
-    let dragStartSize: { width: number; height: number } | null = null;
+    const dragHold = createDragHold(() => model.splitterDragging?.() ?? false);
     const paneRect = (): PaneRect => {
         const r = placeholderRef()!.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
@@ -235,12 +258,8 @@ export function usePaneRectSync(params: PaneRectSyncParams): PaneRectSync {
             height = Math.max(1, height - b);
         }
         const rect = { x, y, width, height };
-        const dragging = model.splitterDragging?.() ?? false;
-        // Taken before the hold, so the drag's starting size is the pane's own.
-        if (dragging && dragStartSize === null) dragStartSize = { width, height };
-        if (!dragging) dragStartSize = null;
-        const held = dragging ? holdRectDuringDrag(rect, dragStartSize) : rect;
-        return dragging && !isViewsPanesOnWindows() ? insetForSizeBadge(held, dpr) : held;
+        const held = dragHold.apply(rect);
+        return model.splitterDragging?.() && !isViewsPanesOnWindows() ? insetForSizeBadge(held, dpr) : held;
     };
 
     /** CSS-pixel rect (same coordinate space as `getBoundingClientRect`
@@ -248,17 +267,12 @@ export function usePaneRectSync(params: PaneRectSyncParams): PaneRectSync {
      *  `sendClip` can short-circuit when no overlay intersects a pane. */
     const paneRectCss = () => {
         const r = placeholderRef()!.getBoundingClientRect();
-        const dragging = model.splitterDragging?.() ?? false;
-        const dpr = window.devicePixelRatio || 1;
-        // The page's own size: held at the drag's starting size when the pane grows (holdRectDuringDrag).
-        const cap = dragging && dragStartSize ? dragStartSize : null;
-        const w = Math.round(cap ? Math.min(r.width, cap.width / dpr) : r.width);
-        const h = Math.round(cap ? Math.min(r.height, cap.height / dpr) : r.height);
+        const { w, h } = dragHold.sizeCss(r, window.devicePixelRatio || 1);
         return {
             x: Math.round(r.x),
             y: Math.round(r.y),
             w,
-            h: dragging && !isViewsPanesOnWindows() ? Math.max(1, h - SIZE_BADGE_STRIP_CSS) : h,
+            h: model.splitterDragging?.() && !isViewsPanesOnWindows() ? Math.max(1, h - SIZE_BADGE_STRIP_CSS) : h,
         };
     };
 
