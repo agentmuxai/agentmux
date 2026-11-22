@@ -349,9 +349,15 @@ describe("AgentCard tags", () => {
         expect(screen.getByText("Installing…")).toBeTruthy();
     });
 
-    it("shows the update note as the last chip, after Free and Local", () => {
+    it("shows the update note after Free and Local, ahead of the Preview label", () => {
         const { container } = renderTags("opencode", { drift: "behind-pin" });
-        expect(chipLabels(container)).toEqual(["Free", "Local", "Update available"]);
+        expect(chipLabels(container)).toEqual(["Free", "Local", "Update available", "+1"]);
+    });
+
+    it("labels a Preview harness's card Preview, and no first-class card", () => {
+        expect(chipLabels(renderTags("opencode", {}).container)).toEqual(["Free", "Local", "Preview"]);
+        cleanup();
+        expect(chipLabels(renderTags("claude", {}).container)).not.toContain("Preview");
     });
 
     it("marks a card with a session as having an action, so a narrow card makes room for it", () => {
@@ -374,7 +380,7 @@ describe("AgentCard tags", () => {
         try {
             const { container } = renderTags("opencode", { hasCurrentSession: true, drift: "behind-pin" });
             expect(container.querySelector(".agent-card--narrow")).toBeNull();
-            expect(chipLabels(container).length).toBe(3);
+            expect(chipLabels(container).length).toBe(4);
             fire!(250);
             expect(container.querySelector(".agent-card--narrow")).not.toBeNull();
             expect(chipLabels(container).length).toBeLessThanOrEqual(3);

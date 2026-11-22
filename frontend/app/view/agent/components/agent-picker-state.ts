@@ -15,6 +15,7 @@ import { createPickerLaunch } from "./agent-picker-launch";
 import { createPrereqs } from "./agent-picker-prereqs";
 import { usePickerReadiness } from "./agent-picker-readiness";
 import { loadStoredSort, storeSort } from "./agent-picker-sort";
+import { createPreviewSection } from "./agent-picker-preview";
 import { createTemplates } from "./agent-picker-templates";
 
 export interface AgentPickerProps {
@@ -49,11 +50,13 @@ export function createAgentPicker(props: AgentPickerProps) {
         useInstanceOpenDefinitions();
     const install = useInstallStates(agents);
     const prereqs = createPrereqs();
-    const templates = createTemplates({
+    const newAgentCards = createTemplates({
         agents,
         install,
         clearNodejsError: () => launch.setNodejsError(null),
     });
+    // The Preview agent CLIs' own section sits beside the cards it splits off.
+    const templates = { ...newAgentCards, ...createPreviewSection(newAgentCards) };
     const launch = createPickerLaunch(props, { agents, refreshOpenDefinitions, forgetTemplate: templates.forgetTemplate });
 
     // Per-pane zoom — read `term:zoom` from block meta and apply CSS
