@@ -14,7 +14,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { CaptureMaskEvent } from "@/types/rpc/CaptureMaskEvent";
 import type { WindowCaptureMask } from "@/types/rpc/WindowCaptureMask";
-import { overlayAnchor } from "./overlay-anchors";
+import { OVERLAY_SELECTOR, overlayAnchor } from "./overlay-anchors";
 import { CaptureWatch, measure, openListRefusal, PRIVATE_SELECTOR, toMask, type MaskSource, type Measured } from "./capture-mask";
 
 /** A watch not ended by then stops measuring. */
@@ -36,7 +36,7 @@ export async function answerAsk(ev: CaptureMaskEvent, deps: MaskBridgeDeps, watc
     const windowId = deps.windowId();
     if (!windowId || Number(ev.expires_at_ms) < deps.now()) return;
     if (ev.phase === "begin") {
-        const watch = new CaptureWatch(() => deps.read(), deps.nextFrame, deps.now() + WATCH_MS, deps.now);
+        const watch = new CaptureWatch(() => deps.read(), deps.nextFrame, deps.now() + WATCH_MS, deps.now, () => deps.refusal());
         watches.set(ev.capture_id, watch);
         setTimeout(() => watches.delete(ev.capture_id), WATCH_MS);
         await deps.answer(ev.capture_id, "begin", toMask(windowId, deps.title(), watch.begin, { refuse: deps.refusal() }));
@@ -48,8 +48,8 @@ export async function answerAsk(ev: CaptureMaskEvent, deps: MaskBridgeDeps, watc
         await deps.answer(ev.capture_id, "end", toMask(windowId, deps.title(), deps.read(), { changed: true }));
         return;
     }
-    const { measured, changed } = watch.end();
-    await deps.answer(ev.capture_id, "end", toMask(windowId, deps.title(), measured, { changed, refuse: deps.refusal() }));
+    const { measured, changed, refused } = watch.end();
+    await deps.answer(ev.capture_id, "end", toMask(windowId, deps.title(), measured, { changed, refuse: refused ?? deps.refusal() }));
 }
 
 let dragging = false;
@@ -78,7 +78,7 @@ function windowSource(): MaskSource {
             [...document.querySelectorAll("[data-blockid]")].map((el) => ({ blockId: el.getAttribute("data-blockid") ?? "", rect: rectOf(el) })),
         panels: () => [...document.querySelectorAll(PRIVATE_SELECTOR)].map(rectOf),
         overlays: () =>
-            [...document.querySelectorAll("[data-pane-overlay]")].flatMap((el) => {
+            [...document.querySelectorAll(OVERLAY_SELECTOR)].flatMap((el) => {
                 const anchor = overlayAnchor(el);
                 if (!anchor) return [];
                 const blockId = anchor.closest("[data-blockid]")?.getAttribute("data-blockid") ?? null;

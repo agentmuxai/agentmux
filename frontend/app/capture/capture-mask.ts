@@ -96,17 +96,20 @@ export function sameMeasure(a: Measured, b: Measured): boolean {
     return JSON.stringify(a) === JSON.stringify(b);
 }
 
-/** One capture's watch: from `begin` it measures each frame until `end`, and remembers whether anything changed. */
+/** One capture's watch: from `begin` it measures each frame until `end`, and remembers whether anything changed and
+ *  the first reason, at any frame, that the window could not give its rectangles. */
 export class CaptureWatch {
     private first: Measured;
     private changed = false;
+    private refusedWhy: string | undefined;
     private done = false;
 
     constructor(
         private readonly read: () => Measured,
         private readonly nextFrame: (cb: () => void) => void,
         private readonly giveUpAt: number,
-        private readonly now: () => number
+        private readonly now: () => number,
+        private readonly refusal: () => string | undefined = () => undefined
     ) {
         this.first = read();
         this.tick();
@@ -116,6 +119,7 @@ export class CaptureWatch {
         this.nextFrame(() => {
             if (this.done || this.now() > this.giveUpAt) return;
             if (!sameMeasure(this.first, this.read())) this.changed = true;
+            this.refusedWhy ??= this.refusal();
             this.tick();
         });
     }
@@ -125,10 +129,10 @@ export class CaptureWatch {
     }
 
     /** Stop watching: what the window shows now, and whether it changed at any frame since `begin`. */
-    end(): { measured: Measured; changed: boolean } {
+    end(): { measured: Measured; changed: boolean; refused?: string } {
         this.done = true;
         const last = this.read();
-        return { measured: last, changed: this.changed || !sameMeasure(this.first, last) };
+        return { measured: last, changed: this.changed || !sameMeasure(this.first, last), refused: this.refusedWhy };
     }
 }
 

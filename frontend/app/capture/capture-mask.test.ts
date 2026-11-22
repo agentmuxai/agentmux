@@ -105,6 +105,19 @@ describe("a capture's watch", () => {
     });
 });
 
+describe("a refusal between the asks", () => {
+    it("is kept even when it is over by the end, such as a Vault list opened and closed again", () => {
+        const queue: (() => void)[] = [];
+        let open = false;
+        const w = new CaptureWatch(() => measure(source()), (cb) => queue.push(cb), Infinity, () => 0, () => (open ? "a list of Vault entries may be open" : undefined));
+        open = true;
+        queue.splice(0).forEach((cb) => cb());
+        open = false;
+        queue.splice(0).forEach((cb) => cb());
+        expect(w.end()).toMatchObject({ changed: false, refused: "a list of Vault entries may be open" });
+    });
+});
+
 describe("the window's answer", () => {
     function deps(over: Partial<MaskBridgeDeps> = {}) {
         const answers: { phase: string; mask: WindowCaptureMask }[] = [];

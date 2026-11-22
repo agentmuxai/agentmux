@@ -4,7 +4,7 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { openListRefusal, PRIVATE_SELECTOR } from "./capture-mask";
-import { overlayAnchor, setOverlayAnchor } from "./overlay-anchors";
+import { EXIT_COPY_ATTR, keepOverlayAnchor, OVERLAY_SELECTOR, overlayAnchor, setOverlayAnchor } from "./overlay-anchors";
 
 afterEach(() => (document.body.innerHTML = ""));
 
@@ -33,5 +33,19 @@ describe("an overlay's anchor", () => {
         const tip = document.getElementById("tip")!;
         setOverlayAnchor(tip, document.getElementById("b")!);
         expect(overlayAnchor(tip)?.closest("[data-blockid]")?.getAttribute("data-blockid")).toBe("v1");
+    });
+
+    it("stays with the copy left fading out when the overlay closes", () => {
+        document.body.innerHTML = `<div data-blockid="v1"><button id="b">x</button></div><div id="menu" data-pane-overlay></div>`;
+        const menu = document.getElementById("menu")!;
+        setOverlayAnchor(menu, document.getElementById("b")!);
+        const copy = menu.cloneNode(true) as HTMLElement;
+        copy.removeAttribute("data-pane-overlay");
+        keepOverlayAnchor(menu, copy);
+        menu.remove();
+        document.body.append(copy);
+        expect(copy.hasAttribute(EXIT_COPY_ATTR)).toBe(true);
+        expect([...document.querySelectorAll(OVERLAY_SELECTOR)]).toEqual([copy]);
+        expect(overlayAnchor(copy)?.id).toBe("b");
     });
 });
