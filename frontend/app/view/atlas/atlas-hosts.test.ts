@@ -18,9 +18,9 @@ const names = (n: number) => Array.from({ length: n }, (_, i) => `host-${i}`);
 
 describe("a node's host", () => {
     it("is the computer, whichever of its channels the machine is", () => {
-        expect(hostNameOf(machine("a", "narko"))).toBe("narko");
-        expect(hostNameOf(machine("b", "narko · dev"))).toBe("narko");
-        expect(hostIdOf(machine("b", "Narko · dev"))).toBe("narko");
+        expect(hostNameOf(machine("a", "alpha"))).toBe("alpha");
+        expect(hostNameOf(machine("b", "alpha · dev"))).toBe("alpha");
+        expect(hostIdOf(machine("b", "Alpha · dev"))).toBe("alpha");
     });
 
     it("is the machine itself while this computer has no name yet", () => {
@@ -32,7 +32,7 @@ describe("a node's host", () => {
 
 describe("the ring of each host", () => {
     it("is the same for two nodes of one host, and differs between hosts", () => {
-        const styles = hostStyles([machine("m1", "narko"), machine("m2", "narko · dev"), machine("m3", "charlie")]);
+        const styles = hostStyles([machine("m1", "alpha"), machine("m2", "alpha · dev"), machine("m3", "bravo")]);
         expect(styles.get("m1")).toBe(styles.get("m2"));
         const [a, b] = [styles.get("m1")!, styles.get("m3")!];
         expect(`${a.colour}:${a.line}`).not.toBe(`${b.colour}:${b.line}`);
@@ -46,10 +46,10 @@ describe("the ring of each host", () => {
     });
 
     it("is the same on another computer that sees the same hosts under other keys", () => {
-        const here = hostStyles([machine("local", "narko", { badge: "this machine" }), machine("lan/charlie", "charlie")]);
-        const there = hostStyles([machine("lan/narko", "narko"), machine("local", "charlie", { badge: "this machine" })]);
-        expect(here.get("local")).toEqual(there.get("lan/narko"));
-        expect(here.get("lan/charlie")).toEqual(there.get("local"));
+        const here = hostStyles([machine("local", "alpha", { badge: "this machine" }), machine("lan/bravo", "bravo")]);
+        const there = hostStyles([machine("lan/alpha", "alpha"), machine("local", "bravo", { badge: "this machine" })]);
+        expect(here.get("local")).toEqual(there.get("lan/alpha"));
+        expect(here.get("lan/bravo")).toEqual(there.get("local"));
     });
 
     it("gives each of up to nine hosts a ring of its own", () => {
@@ -67,7 +67,7 @@ describe("the ring of each host", () => {
     });
 
     it("is drawn for two hosts or more, and not for one", () => {
-        expect(ringsDrawn(hostStyles([machine("a", "narko"), machine("b", "narko · dev")]))).toBe(false);
-        expect(ringsDrawn(hostStyles([machine("a", "narko"), machine("b", "charlie")]))).toBe(true);
+        expect(ringsDrawn(hostStyles([machine("a", "alpha"), machine("b", "alpha · dev")]))).toBe(false);
+        expect(ringsDrawn(hostStyles([machine("a", "alpha"), machine("b", "bravo")]))).toBe(true);
     });
 });

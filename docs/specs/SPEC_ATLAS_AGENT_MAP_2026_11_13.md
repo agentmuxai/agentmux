@@ -332,7 +332,7 @@ one more border, outside its own, in a colour that belongs to its host.
 **What replaced the box.**
 
 - **The host in words** on every node (an agent's and a container's), at the right of its name line, muted, cut with an
-  ellipsis before the name is; in the node's tooltip (`..., on narko`) and in its accessible name (`Ann, Idle, on narko`).
+  ellipsis before the name is; in the node's tooltip (`..., on alpha`) and in its accessible name (`Ann, Idle, on alpha`).
   The card says "Host" with how the machine was found (this machine, LAN, cloud), its platform and any channel.
 - **The ring**: a second border outside the node's own and a container agent's frame, with a gap of 2 px (a seventh of the
   gap between two nodes) and 2 px wide, never less than 1 px; both close in with the gaps as the map is zoomed in, so two

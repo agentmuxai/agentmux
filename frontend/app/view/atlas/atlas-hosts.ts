@@ -36,7 +36,7 @@ export interface HostStyle {
     shared: boolean;
 }
 
-/** The computer a machine is: "narko" for "narko" and for one of its channels ("narko · dev"). */
+/** The computer a machine is: "alpha" for "alpha" and for one of its channels ("alpha · dev"). */
 export function hostNameOf(machine: Pick<AtlasMachine, "title" | "unnamed">): string {
     return machine.unnamed ? machine.title : machine.title.split("·")[0].trim() || machine.title;
 }

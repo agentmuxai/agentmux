@@ -17,7 +17,7 @@ export function hostAttrs(style: HostStyle | undefined, ring: boolean): { "data-
     return style && ring ? { "data-host-colour": style.colour + 1, "data-host-line": style.line } : {};
 }
 
-/** ", on narko": the host in words, for a node's accessible name and tooltip. */
+/** ", on alpha": the host in words, for a node's accessible name and tooltip. */
 export function onHost(style: HostStyle | undefined): string {
     return style ? `, on ${style.name}` : "";
 }
