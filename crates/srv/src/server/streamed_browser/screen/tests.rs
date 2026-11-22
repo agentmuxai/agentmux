@@ -61,7 +61,7 @@ const POPUP_PAGE: &str = "data:text/html,<html style=\"height:100%25\"><body sty
 /// is a JPEG of the right size, and a typed address changes the page.
 /// `cargo test -p agentmux-srv screen_mode_real -- --ignored --nocapture` on a Linux host (a container or a dedicated test machine) with Xvfb and a
 /// Chrome, and the browser's policy file installed for the proxy port in `AGENTMUX_STREAMED_BROWSER_PROXY_PORT` (the file's content is in the
-/// error the first run prints). Set `AGENTMUX_STREAMED_BROWSER_NO_SANDBOX=1` only if Chrome cannot start without it.
+/// error the first run prints). The browser's own sandbox is on: a container that cannot start it cannot run these.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "needs Xvfb and a Chrome; run by hand on a Linux host"]
 async fn screen_mode_real() {
@@ -147,4 +147,36 @@ async fn screen_mode_window_stays_put_real() {
     let corner = pixel(&screen, &screen.grab().unwrap(), 790, 590);
     let page = |want: [u8; 3]| corner.iter().zip(want).all(|(a, w)| a.abs_diff(w) < 40);
     assert!(page([0, 0, 255]) || page([0, 255, 0]), "the window moved: the corner is {corner:?}");
+}
+
+/// A screen that is not changing makes (next to) no frames, and a change makes one within a moment, because the screen says where it changed.
+/// Run with the same command as `screen_mode_real`, by name `screen_mode_idle_real`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "needs Xvfb and a Chrome; run by hand on a Linux host"]
+async fn screen_mode_idle_real() {
+    if which::which("Xvfb").is_err() || chromium_missing() {
+        eprintln!("screen_mode_idle_real: no Xvfb or no Chrome here; nothing run");
+        return;
+    }
+    let session = session::start(800, 600, PAGE, true).await.expect("the screen and the browser start");
+    let screen = x::Screen::connect(&session.display).expect("the screen is reachable");
+    wait_for_colour(&screen, 400, 400, [0, 0, 255], 30).await.expect("the page is up");
+    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(8);
+    capture(&session.display, tx, pace::Activity::default()).expect("frames start");
+    assert!(tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.is_ok(), "the first picture of the screen is sent");
+    // Let the browser settle, then watch a still page.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    while rx.try_recv().is_ok() {}
+    tokio::time::sleep(Duration::from_secs(6)).await;
+    let mut idle = 0;
+    while rx.try_recv().is_ok() {
+        idle += 1;
+    }
+    assert!(idle <= 3, "a still page made {idle} frames in 6 seconds");
+    // A click turns the page green: a frame follows at once.
+    let click = |kind| ClientMsg::Mouse { kind, x: 400.0, y: 400.0, button: Button::Left, buttons: 1, clicks: 1, mods: 0 };
+    send_input(&screen, &click(MouseKind::Down)).await.unwrap();
+    send_input(&screen, &click(MouseKind::Up)).await.unwrap();
+    let frame = tokio::time::timeout(Duration::from_secs(1), rx.recv()).await.expect("a change makes a frame within a second").unwrap();
+    assert_eq!(frame[0], frames::FRAME);
 }
