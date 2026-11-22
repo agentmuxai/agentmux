@@ -1189,7 +1189,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     // An agent's request to drive a native app opens a prompt here.
     void import("@/app/block/desktop-requests").then((m) => m.startDesktopRequests());
     void import("@/app/view/agent/endpoint-notice-cards").then((m) => m.startEndpointNoticeCards());
-    void Promise.all([import("@/app/block/agent-notices"), import("@/app/block/pane-confirms")]).then(([n, c]) => (n.startAgentNotices(), c.startPaneConfirms()));
+    void Promise.all([import("@/app/block/agent-notices"), import("@/app/block/pane-confirms"), import("@/app/deeplinks/agent-open-bridge")]).then(([n, c, d]) => (n.startAgentNotices(), c.startPaneConfirms(), d.startDeepLinkOpens()));
     // An agent's Vault requests are cards in its pane, and the Vault pane lists them all.
     void import("@/app/view/agent/components/vault-request-card/vault-request-cards").then((m) => m.startVaultRequestCards());
     // srv's calls to action (browser, SSH consent, widget installs) join the waiting tone and notification.

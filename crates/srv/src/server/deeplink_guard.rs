@@ -298,7 +298,12 @@ fn facts_of(state: &AppState, uid: &str, container: bool) -> CallerFacts {
 
 fn window_of_tab(state: &AppState, tab_id: &str) -> Option<String> {
     use crate::backend::obj::{Window, Workspace};
-    let ws = state.mstore.get_all::<Workspace>().ok()?.into_iter().find(|w| w.tabids.iter().any(|t| t == tab_id))?;
+    let ws = state
+        .mstore
+        .get_all::<Workspace>()
+        .ok()?
+        .into_iter()
+        .find(|w| w.tabids.iter().chain(w.pinnedtabids.iter()).any(|t| t == tab_id))?;
     state.mstore.get_all::<Window>().ok()?.into_iter().find(|w| w.workspaceid == ws.oid).map(|w| w.oid)
 }
 
