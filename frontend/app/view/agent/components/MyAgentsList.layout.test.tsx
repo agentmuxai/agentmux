@@ -159,8 +159,14 @@ let tiles: Tile[] = [];
 describe.skipIf(!BROWSER)("My Agents tile layout (real browser)", () => {
     beforeAll(async () => {
         const { RpcApi } = await import("@/app/store/rpc-api");
+        // One clock reading for the whole fixture. The list shows the most recently used agent first, so a time read
+        // afresh for each row (`Date.now()` inside the map) differs by a millisecond whenever the clock ticks between
+        // two rows, and a slow machine then lists the rows in another order: the last row is no longer the narrow
+        // "Long seat" one, and every measurement is of a different layout. Each row is a minute older than the one
+        // before it, so the order is the order they are written in, never left to a tie.
+        const now = Date.now();
         vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue({
-            rows: rows.map((r) => ({
+            rows: rows.map((r, i) => ({
                 provider: "claude",
                 definition_name: "Claude Code",
                 working_directory: "/tmp",
@@ -168,10 +174,10 @@ describe.skipIf(!BROWSER)("My Agents tile layout (real browser)", () => {
                 memory_id: "m",
                 memory_name: "m",
                 block_id_hint: "blk",
-                last_active_at: Date.now() - 60_000,
+                last_active_at: now - 60_000 * (i + 1),
                 has_snapshot: true,
-                agent_created_at: Date.now() - 7_776_000_000,
-                started_at: Date.now() - 3_600_000,
+                agent_created_at: now - 7_776_000_000,
+                started_at: now - 3_600_000,
                 ...r,
             })),
             degraded: [],
@@ -184,8 +190,8 @@ describe.skipIf(!BROWSER)("My Agents tile layout (real browser)", () => {
     afterEach(() => {});
     afterAll(() => cleanup());
 
-    it("measures every tile", () => {
-        expect(tiles).toHaveLength(rows.length);
+    it("measures every tile, in the order the fixture is written in (the narrow tile is last)", () => {
+        expect(tiles.map((t) => t.name)).toEqual(rows.map((r) => r.instance_name));
     });
 
     it("a long seat tag stays inside its tile and is cut with an ellipsis, its text inside its own outline", () => {
