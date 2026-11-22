@@ -47,6 +47,7 @@ import { PaneViewBoundary } from "./PaneViewBoundary";
 import { agentNameOf, logBlockCover } from "./pane-cover-log";
 import { MissingWidget } from "./missing-widget";
 import { BlockFrame } from "./blockframe";
+import { bodyHoldVars, usePaneBodyHold } from "./pane-body-hold";
 import { blockViewToIcon, blockViewToName } from "./blockutil";
 import { paneTabCapability } from "@/app/store/pane-tab-registry";
 import { readZoom } from "@/app/store/zoom-factor";
@@ -295,10 +296,11 @@ function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Eleme
     // Track previous focus state to handle blockClicked
     const [blockContentOffset, setBlockContentOffset] = createSignal<Dimensions>(null);
 
+    const bodyHold = usePaneBodyHold(() => nodeModel.isSplitterDragging?.() ?? false, () => contentRef.current, () => blockData()?.meta?.view);
     const paneZoomLevel = createMemo(() => paneZoomLevelOf(blockData()?.meta));
     const blockContentStyle = createMemo<JSX.CSSProperties>(() => {
         const retVal: JSX.CSSProperties = {
-            "pointer-events": disablePointerEvents() ? "none" : undefined,
+            "pointer-events": disablePointerEvents() ? "none" : undefined, ...bodyHoldVars(bodyHold()),
         };
         if (paneZoomLevel() !== undefined) (retVal as Record<string, string>)["--pane-zoom"] = paneZoomLevel()!;
         const rect = innerRect();
@@ -397,7 +399,7 @@ function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Eleme
                     />
                 </div>
                 <div
-                    class={clsx("block-content", { "block-no-padding": noPadding })}
+                    class={clsx("block-content", { "block-no-padding": noPadding, "block-content--held": bodyHold() !== null })}
                     ref={(el) => { contentRef.current = el; }}
                     style={blockContentStyle()}
                 >

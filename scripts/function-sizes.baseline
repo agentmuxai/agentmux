@@ -289,7 +289,7 @@
 163 frontend/app-init.ts::initHostNewWindow
 218 frontend/app-init.ts::initMux
 364 frontend/app/block/block.tsx::Block
-135 frontend/app/block/block.tsx::BlockFull
+136 frontend/app/block/block.tsx::BlockFull
 293 frontend/app/block/blockframe.tsx::BlockFrame_Header
 114 frontend/app/block/blockutil.tsx::ConnectionButton
 109 frontend/app/block/lazy-pane-tab.tsx::createStandIn
@@ -375,7 +375,7 @@
 115 frontend/app/view/audit/audit-manager.tsx::AuditManager
 101 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
 139 frontend/app/view/browser/use-browser-auth.ts::useBrowserAuth
-365 frontend/app/view/browser/use-pane-rect-sync.ts::usePaneRectSync
+367 frontend/app/view/browser/use-pane-rect-sync.ts::usePaneRectSync
 118 frontend/app/view/bundle/components/BundleImportConfirmModal.tsx::BundleImportConfirmModalPanel
 282 frontend/app/view/editor/editor-model.ts::EditorViewModel::constructor
 118 frontend/app/view/global-bundle/GlobalMemoryFullView.tsx::EntryView
