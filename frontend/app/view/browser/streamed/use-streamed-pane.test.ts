@@ -8,8 +8,11 @@ import type { StreamedEvents } from "./streamed-client";
 let events: StreamedEvents | null = null;
 const sent: object[] = [];
 let closed = 0;
+const starts: { screen?: boolean }[] = [];
 vi.mock("./streamed-client", () => ({
-    openStreamedPane: (_start: unknown, ev: StreamedEvents) => {
+    screenModeAsked: () => false,
+    openStreamedPane: (start: { screen?: boolean }, ev: StreamedEvents) => {
+        starts.push(start);
         events = ev;
         return { send: (m: object) => sent.push(m), close: () => void closed++ };
     },
@@ -30,6 +33,7 @@ function mount() {
 afterEach(() => {
     events = null;
     sent.length = 0;
+    starts.length = 0;
     closed = 0;
     vi.useRealTimers();
 });
@@ -241,6 +245,29 @@ describe("a streamed pane's windows", () => {
         pane.reconnect();
         expect(pane.windows()).toBeNull();
         expect(pane.notice()).toBe("");
+        dispose();
+    });
+
+    it("moves a page to the full browser the person drives on request, and says so in words when the server does not have it", () => {
+        vi.useFakeTimers();
+        const { pane, dispose } = mount();
+        pane.shown(true);
+        pane.resized(800, 600);
+        vi.advanceTimersByTime(150);
+        expect(starts[0].screen).toBe(false);
+        expect(pane.fullBrowser()).toBe(false);
+        events!.onOpen();
+        pane.openFullBrowser();
+        expect(closed).toBe(1);
+        expect(starts[1].screen).toBe(true);
+        expect(pane.fullBrowser()).toBe(true);
+        // A server without the mode answers "not found": the socket never opens. The pane goes back to the ordinary browser and says why.
+        events!.onEnd("failed");
+        expect(pane.fullBrowser()).toBe(false);
+        expect(pane.status()).toBe("failed");
+        expect(pane.error()).not.toBe("");
+        pane.reconnect();
+        expect(starts[2].screen).toBe(false);
         dispose();
     });
 });

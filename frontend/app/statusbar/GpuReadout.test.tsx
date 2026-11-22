@@ -82,4 +82,3 @@ describe("the GPU meter beside CPU and Mem", () => {
         expect(container.querySelector("[data-stand=GpuPanel]")).toBeNull();
     });
 });
-
