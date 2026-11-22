@@ -154,6 +154,7 @@ beforeEach(() => {
         EnsureProviderAuthDirCommand: { path: "/shared/providers/claude" },
         WriteAgentConfigCommand: (d: { working_dir: string }) => ({ working_dir: d.working_dir }),
         CreateAgentInstanceCommand: { id: "inst-1" },
+        FolderOverlapCheckCommand: { overlaps: [] },
         ListAgentIdentitiesCommand: [],
     };
 });

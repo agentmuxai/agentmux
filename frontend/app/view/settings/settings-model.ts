@@ -161,6 +161,10 @@ export class SettingsViewModel {
     kanbanBoard: () => string | null;
     /** Which click of the cog asked (`settings:kanban-ask`): a second click on the same board is a new ask. */
     kanbanAsk: () => number;
+    /** A setting row a link asked for (`settings:reveal`, its id) and which ask it was (`settings:reveal-ask`). */
+    revealRequest: () => { id: string; ask: number } | null;
+    /** Clears the ask once the row is shown, so a remount does not show it again. */
+    clearReveal: () => void;
 
     // Search query — docs/specs/SPEC_SETTINGS_PANE_SEARCH_2026_09_21.md §3.5.
     // Same plain-createSignal treatment as activeSection (no blockAtom; see
@@ -201,6 +205,12 @@ export class SettingsViewModel {
             const board = block?.meta()?.["settings:kanban-board"];
             return typeof board === "string" && board ? board : null;
         };
+        this.revealRequest = () => {
+            const id = block?.meta()?.["settings:reveal"];
+            const ask = block?.meta()?.["settings:reveal-ask"];
+            return typeof id === "string" && id ? { id, ask: typeof ask === "number" ? ask : 0 } : null;
+        };
+        this.clearReveal = () => void block?.setMeta({ "settings:reveal": null, "settings:reveal-ask": null });
         const [query, setQuery] = createSignal("");
         this.query = query;
         this.setQuery = setQuery;

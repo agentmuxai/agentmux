@@ -179,17 +179,24 @@ Both carry ids, hosts and times only, so the map shows that something passed bet
   host. This instance's agents carry that name in their pane (it differs from the display name for a renamed
   agent); another instance's agent is matched by its name on its machine. An end that matches no node, or two, is
   not drawn: no line rather than a wrong one.
-- **Lines run behind the nodes.** A line between two agents that are not neighbours passes behind the nodes in
-  between, so it never crosses a name; its ends show at the two nodes' edges. A task's number sits on the stretch
-  of its line nearest the middle that no node covers, in the text colour (the look checks on macOS and Linux both
-  found a number landing on another node's name, and dim on the dark theme, with the lines in front). Agents side
-  by side in a row leave no such stretch (the gap between two is narrower than a number, and the line is behind
-  the ones in between), so there the number goes just under or just over the node the line lands on, at the corner
-  it lands on (the Linux re-look found the number hidden behind the node in between). A number also keeps clear of
-  the numbers placed before it. Two tasks handed to one agent in a row land on the same corner, so the second
-  number takes the other side of the node, and a third goes a number's width along the node's edge (the same
-  re-look found one number drawn on top of the other). A task and one handed back between two agents close
-  together bow apart by less than a number's width, so the second number goes next to the first.
+- **Lines run behind the nodes, and show through them.** A line between two agents that are not neighbours is
+  drawn behind the nodes in between, so a card keeps its opaque face and its name stays readable; its ends show at
+  the two nodes' edges. A faint copy of the line (the stroke only, with no number or end) is also drawn over the
+  nodes, at 0.4 of the line's own 0.9, so about 36% of its strength, and that is the strength the look checks
+  judged: a line that runs behind a card shows through it as a dim stroke and can be followed from one end to the
+  other in a big fleet (the Linux look check on PR 8038, 49 agents). It does cross a name faintly; the name stays
+  readable. A line between two agents of one row with another card between them arcs over the row instead, from the
+  top of one card to the top of the other: its answer arcs higher, and each further line higher again, but never
+  more than half the room above the row (so in a dense grid it stays clear of the cards over it).
+- **A task's number** sits on a chip in its line's own colour, its text in the background's colour (a small number
+  in the line's colour alone is dim on the dark theme), on the stretch of the line nearest the middle that no node
+  covers. It keeps 12 px clear of the lines between other pairs of nodes and of the lines of reports-to, so on a
+  crossing it is not read as another line's (the macOS look check on PR 8038), and clear of the numbers placed
+  before it. Where no stretch is clear (a diagonal across a dense grid), the number goes just under or just over
+  the node the line lands on, at the corner it lands on. Two tasks handed to one agent land on the same corner, so
+  the second number takes the other side of the node, and a third goes a number's width along the node's edge. A
+  task and one handed back between two agents close together bow apart by less than a number's width, so the
+  second number goes next to the first.
 - **Motion.** With the Animations setting on Off, a line appears whole and goes after its time; nothing travels.
   The operating system's own "reduce motion" preference alone does not change it, as everywhere in the app
   (the motion policy's 2026-10-15 decision).

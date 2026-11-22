@@ -44,6 +44,11 @@
     "agentPicker.templates.managedNote": "AgentMux installs and runs its own copy of each agent CLI, kept apart from any you installed yourself (to run yours instead, switch on \"Use the CLI on my PATH\" for it in Toolchain), and keeps each agent's login and settings in its own folders. This isolates the tools, not what an agent can do on your computer.",
     "agentPicker.templates.gridLabel": "New agent",
     "agentPicker.notices.launchAborted": "Launch aborted",
+    "agentPicker.sharedFolder.title": "A container agent can write this folder",
+    "agentPicker.sharedFolder.body": "{{containers}} can write the folder {{host}} works in, so a container agent can change what {{host}} runs.",
+    "agentPicker.sharedFolder.hint": "To keep them apart, give them separate workspaces, or make the shared folder read-only for the container agent.",
+    "agentPicker.sharedFolder.goAhead": "Go ahead",
+    "agentPicker.sharedFolder.cancel": "Don't open",
     "agentPicker.notices.nodeRequired": "Node.js Required",
     "agentPicker.notices.nodeHint": "After installing, restart AgentMux and try again.",
     "agentPicker.menu.label": "Template actions",
@@ -1242,6 +1247,7 @@
     "editor.diskConflict.message": "{{name}} changed on disk. Reload loses your unsaved edits; Keep mine keeps them.",
     "editor.diskConflict.reload": "Reload",
     "editor.diskConflict.keepMine": "Keep mine",
+    "ui.button.working": "Working",
     "docTabs.pinned": "Pinned",
     "editor.lsp.dismissBanner": "Dismiss banner for this session",
     "editor.lsp.notOnHost": "A container agent can write in this folder, so no language server runs on the host for it.",
@@ -1359,5 +1365,7 @@
     "drone.templates.loading": "Loading templates…",
     "drone.templates.none": "No Drone templates are installed.",
     "drone.templates.use": "Use",
-    "drone.templates.review": "Review and approve"
+    "drone.templates.review": "Review and approve",
+    "jobs.droneTemplate.pill": "Drone",
+    "jobs.droneTemplate.make": "Make a drone"
 }

@@ -285,6 +285,17 @@ describe("quickForkAgent", () => {
         );
     });
 
+    it("tells the person to open the fork from the picker when it is held for a folder a container agent can write, and drops the held ask", async () => {
+        const held = { sharedFolder: { hostName: "X #2", overlaps: [], launch: {} } as unknown };
+        const heldModel = { blockId: "source-block", launchAgentDefinition, ...held };
+        launchAgentDefinition.mockResolvedValue(false);
+        expect(await quickForkAgent(heldModel as never)).toBe(false);
+        expect(heldModel.sharedFolder).toBeNull();
+        const [notice] = pushNotification.mock.calls[0];
+        expect(notice.message).toContain("A container agent can write the folder X #2 works in");
+        expect(notice.message).toContain("agent picker");
+    });
+
     it("does not push a failure notification when the launch succeeds", async () => {
         await quickForkAgent(model);
         expect(pushNotification).not.toHaveBeenCalled();
