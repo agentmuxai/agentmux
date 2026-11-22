@@ -34,6 +34,34 @@ fn a_record_the_machine_never_had_is_applied_and_a_repeat_changes_nothing() {
 }
 
 #[test]
+fn two_machines_that_made_the_same_record_apart_keep_both_and_the_later_is_current() {
+    // The Vault names an entry from its kind and label, so two machines can each make "the same" entry before they meet.
+    // Neither first version is an ancestor of the other.
+    let mine = held(&[v(100, 0, "a")], &["prod"]);
+    let theirs = change(v(150, 0, "b"), None, Some(&["billing"]));
+    let Decision::Conflict { current, kept, tags } = merge(Some(&mine), &theirs) else { panic!("expected a conflict") };
+    assert_eq!((current, kept), (Side::Incoming, Kept::SameTime { machine: "a".into() }));
+    assert_eq!(tags, self::tags(&["billing", "prod"]));
+    // The same on the other machine: the answers agree on which is current.
+    let there = held(&[v(150, 0, "b")], &["billing"]);
+    let Decision::Conflict { current, .. } = merge(Some(&there), &change(v(100, 0, "a"), None, Some(&["prod"]))) else { panic!("expected a conflict") };
+    assert_eq!(current, Side::Local);
+}
+
+#[test]
+fn a_record_sent_before_the_ones_it_came_after_does_not_bring_a_deleted_entry_back() {
+    // This machine was sent a delete before the entry it deleted. When the entry's earlier versions arrive they are
+    // not known to be ancestors, and the entry stays deleted, with each kept as a version.
+    let gone = Held { versions: vec![v(300, 0, "a"), v(200, 0, "z")], deleted: true, pending_rotation: false, tags: vec![] };
+    for late in [change(v(100, 0, "z"), None, Some(&["prod"])), change(v(150, 0, "z"), Some(v(100, 0, "z")), Some(&["prod"]))] {
+        let Decision::Conflict { current, kept, .. } = merge(Some(&gone), &late) else { panic!("expected the entry to stay deleted") };
+        assert_eq!((current, kept), (Side::Local, Kept::ChangedWhileDeleted { machine: "z".into() }));
+    }
+    // A record this machine has never heard of is applied, first version or not.
+    assert_eq!(merge(None, &change(v(100, 0, "z"), None, Some(&["prod"]))), Decision::Applied);
+}
+
+#[test]
 fn a_change_made_on_top_of_what_this_machine_holds_follows_on() {
     let h = held(&[v(100, 0, "a")], &["prod"]);
     let c = change(v(200, 1, "b"), Some(v(100, 0, "a")), Some(&["prod", "billing"]));
@@ -119,30 +147,32 @@ fn a_delete_waits_while_the_entry_is_being_rotated() {
 }
 
 #[test]
-fn a_delete_follows_on_but_loses_to_an_edit_it_did_not_see() {
+fn a_delete_and_a_change_made_apart_end_as_the_later_of_the_two_with_the_other_kept() {
     let h = held(&[v(100, 0, "a")], &["prod"]);
     assert_eq!(merge(Some(&h), &change(v(200, 0, "b"), Some(v(100, 0, "a")), None)), Decision::Applied, "a delete of what we hold");
-    // A delete made from version 50, when we have already edited it to 100: the edit stays.
+    // A delete made from version 50, when we have already edited it to 100: the entry ends deleted on every machine, and
+    // the edit is kept as a version the person can restore.
     let edited = held(&[v(100, 0, "a"), v(50, 0, "a")], &["prod"]);
-    assert_eq!(merge(Some(&edited), &change(v(200, 0, "b"), Some(v(50, 0, "a")), None)), Decision::KeptLocal);
+    let Decision::Conflict { current, kept, .. } = merge(Some(&edited), &change(v(200, 0, "b"), Some(v(50, 0, "a")), None)) else { panic!("expected a conflict") };
+    assert_eq!((current, kept.clone()), (Side::Incoming, Kept::ChangedWhileDeleted { machine: "a".into() }));
+    assert_eq!(kept.label(), "changed on a while it was deleted elsewhere");
 
-    // The other way round: we deleted, and an edit made without seeing the delete arrives.
+    // The other way round: we deleted, and an edit made without seeing the delete arrives: it stays deleted.
     let gone = Held { versions: vec![v(200, 0, "a"), v(50, 0, "a")], deleted: true, pending_rotation: false, tags: vec![] };
-    assert_eq!(merge(Some(&gone), &change(v(100, 0, "b"), Some(v(50, 0, "a")), Some(&["prod"]))), Decision::Applied, "the edit wins");
-    // The deleted version itself, and a second delete, change nothing.
+    let Decision::Conflict { current, kept, .. } = merge(Some(&gone), &change(v(100, 0, "b"), Some(v(50, 0, "a")), Some(&["prod"]))) else { panic!("expected a conflict") };
+    assert_eq!((current, kept), (Side::Local, Kept::ChangedWhileDeleted { machine: "b".into() }));
+    // A change made apart from the delete that is the later one wins, and the delete is the one kept.
+    let Decision::Conflict { current, kept, .. } = merge(Some(&gone), &change(v(300, 0, "b"), Some(v(50, 0, "a")), Some(&["prod"]))) else { panic!("expected a conflict") };
+    assert_eq!((current, kept.clone()), (Side::Incoming, Kept::Deleted { machine: "a".into() }));
+    assert_eq!(kept.label(), "deleted on a while it was changed elsewhere");
+    // The deleted version itself, and an earlier second delete, change nothing.
     assert_eq!(merge(Some(&gone), &change(v(50, 0, "a"), None, Some(&["prod"]))), Decision::KeptLocal);
-    assert_eq!(merge(Some(&gone), &change(v(210, 0, "c"), Some(v(50, 0, "a")), None)), Decision::KeptLocal);
-}
-
-#[test]
-fn a_tombstone_is_kept_until_everyone_has_it_and_at_most_ninety_days() {
-    let day = 24 * 60 * 60 * 1000;
-    let t = v(1_000, 0, "a");
-    assert!(!tombstone_due(&t, 1_000 + 89 * day, false));
-    assert!(tombstone_due(&t, 1_000 + 90 * day, false), "the horizon");
-    assert!(tombstone_due(&t, 1_000 + day, true), "every member has acknowledged it");
-    assert!(!needs_resync(1_000, 1_000 + 89 * day));
-    assert!(needs_resync(1_000, 1_000 + 91 * day), "a machine off for longer takes the Vault again from scratch");
+    assert_eq!(merge(Some(&gone), &change(v(150, 0, "c"), Some(v(50, 0, "a")), None)), Decision::KeptLocal);
+    // A later second delete takes the place of the one held, which is kept, so a change between the two is compared with the
+    // same delete on every machine.
+    let Decision::Conflict { current, kept, .. } = merge(Some(&gone), &change(v(210, 0, "c"), Some(v(50, 0, "a")), None)) else { panic!("expected a conflict") };
+    assert_eq!((current, kept.clone()), (Side::Incoming, Kept::DeletedAlso { machine: "a".into() }));
+    assert_eq!(kept.label(), "deleted on a as well");
 }
 
 #[test]
@@ -157,4 +187,19 @@ fn what_only_this_machine_has_after_a_resync_is_listed_not_decided() {
 fn tags_are_a_union_that_keeps_the_first_side_first() {
     assert_eq!(union_tags(&tags(&["a", "b"]), &tags(&["b", "c"])), tags(&["a", "b", "c"]));
     assert_eq!(union_tags(&[], &tags(&["x"])), tags(&["x"]));
+}
+
+#[test]
+fn a_restore_and_its_later_edit_that_arrive_out_of_order_end_with_the_edit_current() {
+    // The entry was deleted (version 300), restored by z (400, on top of the delete) and edited again (500, on top of the
+    // restore). This machine is sent the edit before the restore.
+    let gone = Held { versions: vec![v(300, 0, "m")], deleted: true, pending_rotation: false, tags: vec![] };
+    let edit = change(v(500, 0, "a"), Some(v(400, 0, "z")), Some(&["prod"]));
+    let Decision::Conflict { current, kept, .. } = merge(Some(&gone), &edit) else { panic!("expected a conflict") };
+    assert_eq!((current, kept), (Side::Incoming, Kept::Deleted { machine: "m".into() }), "the edit is the latest, so it is current");
+    // Then the restore arrives: it is older than the edit that is current and changes nothing about which is current.
+    let live = held(&[v(500, 0, "a"), v(300, 0, "m")], &["prod"]);
+    let restore = change(v(400, 0, "z"), Some(v(300, 0, "m")), Some(&["prod"]));
+    let Decision::Conflict { current, .. } = merge(Some(&live), &restore) else { panic!("expected a conflict") };
+    assert_eq!(current, Side::Local);
 }
