@@ -143,7 +143,7 @@ pub(super) async fn claim_and_deliver(
     http: &reqwest::Client,
     mstore: &Arc<Store>,
     handler: &'static crate::backend::reactive::handler::ReactiveHandler,
-    body: PendingResp,
+    mut body: PendingResp,
     agent_token: String,
     using_per_agent: bool,
 ) -> AgentSyncOutcome {
@@ -156,24 +156,10 @@ pub(super) async fn claim_and_deliver(
 
     // A name the subscription holds through the pane's agent is delivered to the pane.
     let target = super::live_names::delivery_target(handler, agent_id).await;
-
-    // An agent that can't work now (out of quota, signed out) is not given a relay notice: it would start a turn
-    // that ends in an error. A message with no signature of an install of this account can't be held for it (no
-    // proof of its sender, so a replay would raise its tier), and is not even claimed: it stays at the relay,
-    // which offers it again on a later pull, and the agent is told once when it can work. A signed one is
-    // claimed and held as before.
     let limited = hooks.agent_unavailable(mstore, handler, &target);
-    let mut body = body;
-    if limited {
-        let pulled = body.injections.len();
-        body.injections.retain(|inj| inj.wan_sig.is_some());
-        if body.injections.len() < pulled {
-            delivery_status::left_at_relay(agent_id);
-        }
-        if body.injections.is_empty() {
-            delivery_status::fetched(agent_id, 0, &body.expired);
-            return AgentSyncOutcome::Ok;
-        }
+    if limited && leave_unsigned_at_relay(agent_id, &mut body) {
+        delivery_status::fetched(agent_id, 0, &body.expired);
+        return AgentSyncOutcome::Ok;
     }
 
     // Claim BEFORE delivering, not after: this is what prevents
@@ -248,6 +234,20 @@ pub(super) async fn claim_and_deliver(
         delivery_status::can_work_again(agent_id);
     }
     AgentSyncOutcome::Ok
+}
+
+/// An agent that can't work now (out of quota, signed out) is not given a relay notice: it would start a turn
+/// that ends in an error. A message with no signature of an install of this account can't be held for it (no
+/// proof of its sender, so a replay would raise its tier), and is not even claimed: it is taken out of `body`,
+/// stays at the relay, which offers it again on a later pull, and the agent is told once when it can work. A
+/// signed one stays in `body`, to be claimed and held as before. `true` when nothing is left to claim.
+fn leave_unsigned_at_relay(agent_id: &str, body: &mut PendingResp) -> bool {
+    let pulled = body.injections.len();
+    body.injections.retain(|inj| inj.wan_sig.is_some());
+    if body.injections.len() < pulled {
+        delivery_status::left_at_relay(agent_id);
+    }
+    body.injections.is_empty()
 }
 
 /// When relay messages were left at the relay for `agent_id` and it can work now: its one note about them.
