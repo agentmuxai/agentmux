@@ -11,8 +11,8 @@
 //! the tables comes with the numbering of the next step. A lease's expiry is not recorded (every heartbeat would
 //! write a row); the number a card has on a machine is not either (numbers are per board, see the spec §3.2).
 //!
-//! Records of a board are in the collection [`collection_id`] names; a record id is `<task>/<field>`,
-//! `<task>/life`, `<task>/after/<other task>` or `<task>/event/<machine>/<line>`.
+//! Records of a board are in the collection [`collection_id`] names; a record id is `<task>.<field>`,
+//! `<task>.life`, `<task>.after.<other task>` or `<task>.event.<machine>.<line>`.
 
 use std::collections::BTreeMap;
 
@@ -30,7 +30,7 @@ pub const KIND: &str = "kanban";
 
 /// The collection a board's records are in.
 pub fn collection_id(board_id: &str) -> String {
-    format!("kanban:{board_id}")
+    format!("kanban.{board_id}")
 }
 
 /// The lifecycle fields: written as one record, because they only make sense together.
@@ -105,10 +105,10 @@ fn read_tasks(conn: &Connection, default_board: &str) -> rusqlite::Result<BTreeM
             if LIFE_FIELDS.contains(&name.as_str()) {
                 life.insert(name.clone(), v);
             } else {
-                records.insert(format!("{work_id}/{name}"), v);
+                records.insert(format!("{work_id}.{name}"), v);
             }
         }
-        records.insert(format!("{work_id}/life"), Value::Object(life));
+        records.insert(format!("{work_id}.life"), Value::Object(life));
         tasks.insert(work_id, Task { board, records });
     }
     let mut deps = conn.prepare("SELECT work_id, after_id FROM db_work_deps")?;
@@ -116,7 +116,7 @@ fn read_tasks(conn: &Connection, default_board: &str) -> rusqlite::Result<BTreeM
     for pair in pairs {
         let (work_id, after) = pair?;
         if let Some(t) = tasks.get_mut(&work_id) {
-            t.records.insert(format!("{work_id}/after/{after}"), Value::Bool(true));
+            t.records.insert(format!("{work_id}.after.{after}"), Value::Bool(true));
         }
     }
     Ok(tasks)
@@ -256,7 +256,7 @@ fn capture_events(conn: &Connection, signer: &mut Signer, tasks: &BTreeMap<Strin
             let Some(task) = tasks.get(work_id) else { continue };
             let collection = collection_id(&task.board);
             log::ensure_collection(conn, &collection, KIND, now_ms)?;
-            let record = format!("{work_id}/event/{}/{id}", signer.machine);
+            let record = format!("{work_id}.event.{}.{id}", signer.machine);
             if write_if_changed(conn, signer, &collection, &record, serde_json::to_vec(body).unwrap_or_default(), now_ms)? {
                 out.written += 1;
             }
@@ -291,7 +291,7 @@ pub struct KanbanAdapter;
 impl Adapter for KanbanAdapter {
     fn merge(&self, local: Option<&Header>, incoming: &Header) -> Merge {
         match local {
-            Some(_) if incoming.record.contains("/event/") => Merge::KeptLocal,
+            Some(_) if incoming.record.contains(".event.") => Merge::KeptLocal,
             _ => NewestWins.merge(local, incoming),
         }
     }
