@@ -153,6 +153,16 @@ struct Entry {
     expires_at: Option<i64>,
 }
 
+impl Entry {
+    /// Whether this is a value `base` holds with [`hold_until`]: held under `{base}#{its expiry}` and nothing else, so an
+    /// owner whose own name starts with `{base}#` is not mistaken for it.
+    fn is_until_of(&self, base: &str) -> bool {
+        let Some(at) = self.expires_at else { return false };
+        let suffix = self.owner.as_deref().and_then(|o| o.strip_prefix(base)).and_then(|rest| rest.strip_prefix('#'));
+        suffix.is_some_and(|rest| rest.parse::<i64>().ok() == Some(at))
+    }
+}
+
 #[derive(Default)]
 struct Registry {
     entries: Vec<Entry>,
@@ -319,8 +329,7 @@ impl Registry {
         }
         let owner = format!("{base}#{expires_at}");
         self.add(Some(&owner), value, Some(expires_at));
-        let prefix = format!("{base}#");
-        let held = |e: &Entry| e.owner.as_deref().is_some_and(|o| o.starts_with(&prefix));
+        let held = |e: &Entry| e.is_until_of(base);
         let mut dropped = 0u64;
         while self.entries.iter().filter(|e| held(e)).count() > UNTIL_PER_OWNER {
             let soonest = self.entries.iter().enumerate().filter(|(_, e)| held(e) && e.owner.as_deref() != Some(owner.as_str())).min_by_key(|(_, e)| e.expires_at);
@@ -358,9 +367,8 @@ impl Registry {
 
     /// Drops what `owner` holds, and what it holds with [`hold_until`].
     fn release_all(&mut self, owner: &str) {
-        let until = format!("{owner}#");
         let before = self.entries.len();
-        self.entries.retain(|e| e.owner.as_deref().map_or(true, |o| o != owner && !o.starts_with(&until)));
+        self.entries.retain(|e| e.owner.as_deref().map_or(true, |o| o != owner) && !e.is_until_of(owner));
         if self.entries.len() != before {
             self.stale = true;
             self.reindex();
@@ -1362,6 +1370,31 @@ mod tests {
         for value in ["canary-flood-real-0001-value", "canary-flood-real-0002-value", "canary-flood-real-0003-value"] {
             assert!(!shows(&mut registry, now, value), "{value} is still hidden");
         }
+    }
+
+    #[test]
+    fn an_owner_whose_name_starts_with_another_owners_base_is_not_counted_or_released_with_it() {
+        let now = 1_800_000_000_000;
+        let mut registry = Registry::default();
+        registry.add_kept("s:key#extra", "canary-base-0001-kept");
+        for n in 0..3 {
+            registry.add_until("s:key#extra", &format!("canary-base-0002-{n}-until"), now + 3_600_000 + n, now);
+        }
+        // Another base that is a prefix of that owner's name, given more than the cap.
+        for n in 0..40 {
+            registry.add_until("s", &format!("canary-base-0003-{n:02}-until"), now + 3_600_000 + n, now);
+        }
+        let of = |registry: &Registry, base: &str| registry.entries.iter().filter(|e| e.is_until_of(base)).count();
+        assert_eq!(of(&registry, "s"), UNTIL_PER_OWNER, "the cap is on what `s` holds");
+        assert_eq!(of(&registry, "s:key#extra"), 3, "none of the other owner's values was dropped for it");
+        assert!(!shows(&mut registry, now, "canary-base-0001-kept"), "its kept value is still hidden");
+
+        registry.release_all("s");
+        assert_eq!(of(&registry, "s"), 0);
+        assert_eq!(of(&registry, "s:key#extra"), 3, "released with its own owner only");
+        assert!(!shows(&mut registry, now, "canary-base-0001-kept"));
+        registry.release_all("s:key#extra");
+        assert!(registry.entries.is_empty());
     }
 
     #[test]
