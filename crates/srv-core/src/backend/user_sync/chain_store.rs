@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 //! A membership chain kept in the store, so a restart does not forget a collection's members, its key epoch's removals
-//! or a fork not yet outgrown. What is read back is checked again, entry by entry, as a chain received from a peer is:
-//! a stored chain that was altered is an error, never an empty or a shorter collection.
+//! or a fork not yet outgrown. What is read back is checked again, entry by entry, as a chain received from a peer is,
+//! and against the length and head stored beside it: a stored chain that was altered (an entry gone from its middle or
+//! its end) is an error, never an empty or a shorter collection.
 
 use std::collections::BTreeMap;
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use super::members::{Chain, Entry, MemberError};
 
@@ -18,6 +19,11 @@ pub(crate) const SCHEMA: &str = "
         idx        INTEGER NOT NULL,
         entry      TEXT NOT NULL,
         PRIMARY KEY (collection, slot, idx)
+    );
+    CREATE TABLE IF NOT EXISTS db_sync_chain_head (
+        collection TEXT PRIMARY KEY,
+        n          INTEGER NOT NULL,
+        head       TEXT NOT NULL
     );";
 
 /// Why a stored chain was not given back.
@@ -28,6 +34,9 @@ pub enum LoadError {
     Unreadable,
     /// The entries do not verify as a chain.
     Unsound(MemberError),
+    /// The stored entries are not the ones that were saved: fork entries with no chain, or a chain whose length or head
+    /// is not the one stored beside it (an entry gone from its end, or a head row gone).
+    Altered,
 }
 
 impl From<rusqlite::Error> for LoadError {
@@ -40,6 +49,10 @@ impl From<rusqlite::Error> for LoadError {
 pub fn save(conn: &Connection, collection: &str, chain: &Chain) -> rusqlite::Result<()> {
     let tx = conn.unchecked_transaction()?;
     tx.execute("DELETE FROM db_sync_chain WHERE collection = ?1", params![collection])?;
+    tx.execute("DELETE FROM db_sync_chain_head WHERE collection = ?1", params![collection])?;
+    if let Some(last) = chain.entries.last() {
+        tx.execute("INSERT INTO db_sync_chain_head (collection, n, head) VALUES (?1, ?2, ?3)", params![collection, chain.entries.len() as i64, last.hash()])?;
+    }
     for (slot, entries) in [("chain", chain.entries.as_slice()), ("fork", chain.forks())] {
         for (i, e) in entries.iter().enumerate() {
             let text = serde_json::to_string(e).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
@@ -58,11 +71,18 @@ fn read(conn: &Connection, collection: &str, slot: &str) -> Result<Vec<Entry>, L
 /// The chain stored for a collection, checked again; none if nothing is stored.
 pub fn load(conn: &Connection, collection: &str) -> Result<Option<Chain>, LoadError> {
     let entries = read(conn, collection, "chain")?;
-    if entries.is_empty() {
-        return Ok(None);
-    }
     let forks = read(conn, collection, "fork")?;
-    Chain::restore(collection, entries, forks).map(Some).map_err(LoadError::Unsound)
+    let stored: Option<(i64, String)> =
+        conn.query_row("SELECT n, head FROM db_sync_chain_head WHERE collection = ?1", params![collection], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+    if entries.is_empty() {
+        return if forks.is_empty() && stored.is_none() { Ok(None) } else { Err(LoadError::Altered) };
+    }
+    let chain = Chain::restore(collection, entries, forks).map_err(LoadError::Unsound)?;
+    let last = chain.entries.last().map(|e| e.hash());
+    match stored {
+        Some((n, head)) if n == chain.entries.len() as i64 && last.as_deref() == Some(head.as_str()) => Ok(Some(chain)),
+        _ => Err(LoadError::Altered),
+    }
 }
 
 /// Every stored chain, by collection. One that fails its check is an error for the whole read: it is not skipped.

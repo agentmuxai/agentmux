@@ -350,8 +350,13 @@ impl Chain {
     pub fn restore(collection: &str, entries: Vec<Entry>, forks: Vec<Entry>) -> Result<Chain, MemberError> {
         Chain::replay(collection, &entries)?;
         if !forks.is_empty() {
-            let before = entries.split_last().map(|(_, rest)| rest).ok_or(MemberError::DoesNotExtend)?;
-            for f in &forks {
+            // A fork is an entry beside the head at a position after the founding one, never the head itself and
+            // never held twice.
+            let before = entries.split_last().filter(|(_, rest)| !rest.is_empty()).map(|(_, rest)| rest).ok_or(MemberError::ForkLost)?;
+            for (i, f) in forks.iter().enumerate() {
+                if entries.last() == Some(f) || forks[..i].contains(f) {
+                    return Err(MemberError::ForkLost);
+                }
                 let mut state = Chain::replay(collection, before)?;
                 state.apply(f)?;
             }

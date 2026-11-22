@@ -574,6 +574,7 @@ fn a_stored_chain_that_was_altered_is_an_error_not_a_shorter_collection() {
         for (slot, idx, text) in a.conn.prepare("SELECT slot, idx, entry FROM db_sync_chain").unwrap().query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?))).unwrap().map(|r| r.unwrap()) {
             copy.execute("INSERT INTO db_sync_chain (collection, slot, idx, entry) VALUES (?1, ?2, ?3, ?4)", rusqlite::params![C, slot, idx, text]).unwrap();
         }
+        copy.execute("INSERT INTO db_sync_chain_head SELECT collection, n, head FROM (SELECT ?1 AS collection, ?2 AS n, ?3 AS head)", rusqlite::params![C, a.chains[C].entries.len() as i64, a.chains[C].entries.last().unwrap().hash()]).unwrap();
         copy.execute(sql, []).unwrap();
         chain_store::load(&copy, C)
     };
@@ -581,6 +582,26 @@ fn a_stored_chain_that_was_altered_is_an_error_not_a_shorter_collection() {
     assert!(matches!(altered("DELETE FROM db_sync_chain WHERE idx = 1"), Err(LoadError::Unsound(_))), "a middle entry gone");
     assert!(matches!(altered("UPDATE db_sync_chain SET entry = replace(entry, '\"n\":2', '\"n\":3') WHERE idx = 1"), Err(LoadError::Unsound(_))));
     assert!(matches!(altered("UPDATE db_sync_chain SET entry = 'not json' WHERE idx = 2"), Err(LoadError::Unreadable)));
+    // The end of the chain gone, or its head row, or the chain with only its forks left: not a shorter collection.
+    assert!(matches!(altered("DELETE FROM db_sync_chain WHERE idx = 2"), Err(LoadError::Altered)));
+    assert!(matches!(altered("DELETE FROM db_sync_chain_head"), Err(LoadError::Altered)));
+    assert!(matches!(altered("DELETE FROM db_sync_chain WHERE slot = 'chain'"), Err(LoadError::Altered)), "even with no entries left");
+}
+
+#[test]
+fn a_stored_fork_must_be_one_that_was_valid_beside_the_head_and_held_once() {
+    let (mut a, mut b, c) = three("kanban");
+    ops::change(&mut a.ctx(), C, Change::SetPolicy { policy: Policy::Approve }).unwrap();
+    let gone = ended(&[(&a, 0), (&b, 0)]);
+    let remove = ops::change(&mut b.ctx(), C, Change::Remove { id: c.id.clone(), ended: gone }).unwrap();
+    ops::members(&mut a.ctx(), &b.id, &MembersReq { collection: C.into(), have_n: 3, offered: vec![remove.clone()] }).unwrap();
+    let chain = &a.chains[C];
+    let head = chain.entries.last().unwrap().clone();
+    assert_eq!(chain.forks(), &[remove.clone()]);
+    assert!(Chain::restore(C, chain.entries.clone(), vec![remove.clone()]).is_ok());
+    assert_eq!(Chain::restore(C, chain.entries.clone(), vec![remove.clone(), remove.clone()]), Err(MemberError::ForkLost), "held twice");
+    assert_eq!(Chain::restore(C, chain.entries.clone(), vec![head]), Err(MemberError::ForkLost), "the head itself");
+    assert_eq!(Chain::restore(C, chain.entries[..1].to_vec(), vec![remove]), Err(MemberError::ForkLost), "beside the founding entry");
 }
 
 #[test]
