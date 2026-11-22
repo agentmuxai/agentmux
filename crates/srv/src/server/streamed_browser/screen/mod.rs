@@ -8,6 +8,7 @@
 //! A prototype for the decision in task 48354: no agent driving, no windows list, a US keyboard, a fixed screen size.
 
 mod frames;
+mod held;
 mod keymap;
 mod policy;
 mod session;
@@ -138,6 +139,7 @@ async fn run(mut socket: WebSocket, start: Start, ended: impl std::future::Futur
         return;
     }
     let _ = socket.send(Message::Text(json!({ "t": "size", "w": start.w, "h": start.h }).to_string().into())).await;
+    let mut held = held::Held::default();
     tokio::pin!(ended);
     loop {
         let keep = tokio::select! {
@@ -148,7 +150,7 @@ async fn run(mut socket: WebSocket, start: Start, ended: impl std::future::Futur
             },
             incoming = socket.recv() => match incoming {
                 Some(Ok(Message::Text(t))) => {
-                    if let Some(said) = on_client(&input, t.as_str(), &start).await {
+                    if let Some(said) = on_client(&input, t.as_str(), &start, &mut held).await {
                         socket.send(said).await.is_ok()
                     } else {
                         true
@@ -166,12 +168,20 @@ async fn run(mut socket: WebSocket, start: Start, ended: impl std::future::Futur
 }
 
 /// One message from the pane, sent to the screen. A word for the pane when there is one to say.
-async fn on_client(screen: &x::Screen, text: &str, start: &Start) -> Option<Message> {
+async fn on_client(screen: &x::Screen, text: &str, start: &Start, held: &mut held::Held) -> Option<Message> {
     let msg = match protocol::parse(text) {
         Ok(m) => m,
         Err(e) => return Some(error(&e)),
     };
-    match send_input(screen, &msg).await {
+    if let ClientMsg::Key { kind, code, .. } = &msg {
+        held.note(code, matches!(kind, KeyKind::Down));
+    }
+    let sent = match msg {
+        // The paste is typed with the modifiers let go (Ctrl+V is the paste itself), and they are pressed again after.
+        ClientMsg::Paste { .. } => send_without_modifiers(screen, &msg, held.keys()).await,
+        _ => send_input(screen, &msg).await,
+    };
+    match sent {
         Ok(()) => match msg {
             // The screen keeps its size: say so, as a resize that was answered.
             ClientMsg::Resize { .. } => Some(Message::Text(json!({ "t": "size", "w": start.w, "h": start.h }).to_string().into())),
@@ -179,6 +189,18 @@ async fn on_client(screen: &x::Screen, text: &str, start: &Start) -> Option<Mess
         },
         Err(e) => Some(error(&e)),
     }
+}
+
+/// Send `msg` with the modifier keys in `held` let go for the while, then pressed again, so what the person still holds stays held.
+async fn send_without_modifiers(screen: &x::Screen, msg: &ClientMsg, held: &[u8]) -> Result<(), String> {
+    for k in held {
+        screen.key(*k, false)?;
+    }
+    let sent = send_input(screen, msg).await;
+    for k in held {
+        screen.key(*k, true)?;
+    }
+    sent
 }
 
 fn button_number(b: Button) -> Option<u8> {

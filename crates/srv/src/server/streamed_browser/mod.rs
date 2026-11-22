@@ -101,14 +101,25 @@ pub(in crate::server) async fn handle(
         Err(e) => return (StatusCode::BAD_REQUEST, e).into_response(),
     };
     let session = session.map(|Extension(s)| s);
-    if params.mode.as_deref() == Some("screen") {
-        return screen_pane(ws, start, session_ended(session));
+    open_pane(params.mode.as_deref(), ws, start, session_ended(session))
+}
+
+/// Open the pane's browser for the mode asked for: the full browser a person drives (`screen`), or the streamed browser. One dispatch for every
+/// route that opens a pane (this server's and the dedicated browser host's), so each honours the mode.
+pub(in crate::server) fn open_pane(
+    mode: Option<&str>,
+    ws: WebSocketUpgrade,
+    start: pane::Start,
+    ended: impl std::future::Future<Output = ()> + Send + 'static,
+) -> Response {
+    if mode == Some("screen") {
+        return screen_pane(ws, start, ended);
     }
     // A server with screen mode on (its policy file is the container's own) serves no streamed browser: the two would share one policy file.
     if streamed_closed() {
         return (StatusCode::NOT_FOUND, "this server's browser is the full browser only").into_response();
     }
-    upgrade(ws, start, session_ended(session))
+    upgrade(ws, start, ended)
 }
 
 #[cfg(target_os = "linux")]
