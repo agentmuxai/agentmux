@@ -15,3 +15,4 @@ pub mod policy;
 pub mod router;
 pub mod shutdown_buttons;
 pub mod sources;
+pub(crate) mod toast_line;

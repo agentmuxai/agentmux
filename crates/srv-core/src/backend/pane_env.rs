@@ -594,6 +594,8 @@ mod spawn_site_coverage {
          "test: an ignored test writes and removes a file inside a WSL distro"),
         ("src/server/streamed_browser/chromium.rs", "&binary", 1,
          "allowlisted: the streamed Browser pane's Chromium (unix only): it opens pages from the web, so its environment is cleared and only a short named list (chromium.rs ENV_KEEP) is passed, never srv's own"),
+        ("src/server/streamed_browser/screen/session.rs", "program", 1,
+         "allowlisted: the screen-mode Browser pane's Xvfb, window manager and Chrome (unix only): the environment is cleared and only the same short named list as the streamed pane (chromium.rs ENV_KEEP) plus DISPLAY is passed, never srv's own"),
         ("src/server/editor_handlers/file_io.rs", "\"explorer.exe\"", 1,
          "sanitized: file manager, strict policy (I7 fix, this PR)"),
         ("src/server/editor_handlers/file_io.rs", "\"open\"", 1,

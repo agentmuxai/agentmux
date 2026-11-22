@@ -190,12 +190,16 @@ async fn accept_loop<R: Resolve>(listener: TcpListener, resolver: Arc<R>) {
     }
 }
 
-/// Start the proxy on a loopback port of the system's choosing, once; the port is the same for every later call.
+/// The setting that fixes the proxy's loopback port (a container whose browser policy names the port); unset, the system chooses.
+pub const PORT_ENV: &str = "AGENTMUX_STREAMED_BROWSER_PROXY_PORT";
+
+/// Start the proxy on a loopback port (the one in `PORT_ENV`, else the system's choosing), once; the port is the same for every later call.
 pub async fn start() -> io::Result<u16> {
     static STARTED: tokio::sync::OnceCell<u16> = tokio::sync::OnceCell::const_new();
     STARTED
         .get_or_try_init(|| async {
-            let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
+            let want = std::env::var(PORT_ENV).ok().and_then(|v| v.parse::<u16>().ok()).unwrap_or(0);
+            let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, want)).await?;
             let port = listener.local_addr()?.port();
             let _ = PROXY_PORT.set(port);
             address_policy::note_ports_from_env();

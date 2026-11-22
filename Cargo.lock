@@ -316,6 +316,7 @@ dependencies = [
  "windows-service",
  "windows-sys 0.59.0",
  "winres",
+ "x11rb",
  "zeroize",
  "zip 2.4.2",
 ]
