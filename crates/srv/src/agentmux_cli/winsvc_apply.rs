@@ -75,10 +75,11 @@ fn run_inner(channel: &str, a: &ApplyArgs, report: &mut Report) -> Result<(), St
     }
     let (files_dir, data_dir) = (win::known_folder(Known::ProgramFiles)?, win::known_folder(Known::ProgramData)?);
     let layout = plan::layout(&files_dir, &data_dir, channel, crate::VERSION);
-    // The folder above the program folder is made first and checked, so the log has a place whatever fails next.
+    // The folder above the program folder is made first and checked, and the log is opened in it only once it is fit: a folder a
+    // person could write in is refused before anything of the administrators' is created or truncated there.
     if let (Some(parent), Ok(log)) = (layout.program_root.parent(), log_path_of(channel)) {
         if parent.is_dir() || a.action == Action::Install {
-            let _ = claim(parent, &plan::parent_sddl(), &[], Reach::Above, false);
+            claim(parent, &plan::parent_sddl(), &[], Reach::Above, false)?;
             report.open(&log);
         }
     }
