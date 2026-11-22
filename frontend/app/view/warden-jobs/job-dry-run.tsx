@@ -92,7 +92,7 @@ export function JobDryRun(props: {
                             when={r().secrets.length > 0}
                             fallback={<span class="warden-manager-dim">none declared</span>}
                         >
-                            <ul class="warden-jobs-list">
+                            <ul class="warden-jobs-list job-vault-secrets">
                                 <For each={r().secrets}>
                                     {(s) => (
                                         <li>

@@ -40,6 +40,10 @@ pub mod signins;
 pub mod signups;
 pub mod slots;
 pub mod source_link;
+pub mod sync_activity;
+pub mod sync_grant;
+pub mod sync_links;
+pub mod sync_merge;
 pub mod sync_record;
 pub mod sync_seal;
 pub mod transfer;
@@ -74,6 +78,11 @@ const MAX_ID: usize = 48;
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct VaultEntryInfo {
     pub id: String,
+    /// The entry's opaque id for links (`agentmux://vault/entry/<link_id>`): says nothing about the entry (G2).
+    /// Absent only when none could be assigned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub link_id: Option<String>,
     pub kind: String,
     pub section: VaultSection,
     pub label: String,
@@ -111,6 +120,8 @@ pub struct VaultEntryInfo {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct VaultAgentEntry {
     pub id: String,
+    /// The entry's opaque id for a link to it (`agentmux://vault/entry/<link_id>`), which names nothing about it.
+    pub link_id: String,
     pub label: String,
     pub kind: String,
     pub section: VaultSection,
@@ -823,6 +834,37 @@ pub fn delete(store: &Store, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The prefix of every link id.
+pub const LINK_ID_PREFIX: &str = "e_";
+
+/// A new link id: the prefix and 16 random lowercase letters and digits, so it says nothing about the entry.
+fn new_link_id() -> String {
+    let hex = uuid::Uuid::new_v4().simple().to_string();
+    format!("{LINK_ID_PREFIX}{}", &hex[..16])
+}
+
+/// The link id of each entry in `ids`, given to those that have none yet (an id is assigned once and kept).
+pub fn link_ids(store: &Store, ids: &[&str]) -> Result<std::collections::HashMap<String, String>, String> {
+    let mut known = store.vault_link_ids().map_err(|e| e.to_string())?;
+    for id in ids {
+        if known.contains_key(*id) {
+            continue;
+        }
+        for _ in 0..8 {
+            if let Some(link) = store.vault_link_id_assign(id, &new_link_id()).map_err(|e| e.to_string())? {
+                known.insert(id.to_string(), link);
+                break;
+            }
+        }
+    }
+    Ok(known)
+}
+
+/// The entry a link id names, if it still exists.
+pub fn entry_of_link(store: &Store, link_id: &str) -> Result<Option<String>, String> {
+    store.vault_entry_of_link(link_id).map_err(|e| e.to_string())
+}
+
 /// Every entry for the pane, and why the values couldn't be opened if they
 /// couldn't (the tails are then empty).
 pub fn list_for_pane(store: &Store) -> Result<(Vec<VaultEntryInfo>, Option<String>), String> {
@@ -830,6 +872,7 @@ pub fn list_for_pane(store: &Store) -> Result<(Vec<VaultEntryInfo>, Option<Strin
     let mut grants = store.vault_grants().map_err(|e| e.to_string())?;
     versions::prune(store);
     let counts = store.vault_version_counts().map_err(|e| e.to_string())?;
+    let mut links = link_ids(store, &rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>())?;
     let key = if rows.is_empty() { Ok(None) } else { seal::key(false).map(Some) };
     let mut problem = key.as_ref().err().cloned();
     let mut out = Vec::with_capacity(rows.len());
@@ -855,6 +898,7 @@ pub fn list_for_pane(store: &Store) -> Result<(Vec<VaultEntryInfo>, Option<Strin
             section: kind.section,
             grants: grants.remove(&row.id).unwrap_or_default(),
             versions: counts.get(&row.id).filter(|(created, _)| *created == row.created_at).map(|(_, n)| *n).unwrap_or(0),
+            link_id: links.remove(&row.id),
             id: row.id,
             kind: row.kind,
             label: row.label,
@@ -878,9 +922,9 @@ pub fn list_for_agent(store: &Store, agent: Option<&str>) -> Result<Vec<VaultAge
 /// [`list_for_agent`], telling the agent whose permanent uid is `uid` which logins are shared with it.
 pub fn list_for_agent_as(store: &Store, agent: Option<&str>, uid: Option<&str>) -> Result<Vec<VaultAgentEntry>, String> {
     let vaults = store.vaults().map_err(|e| e.to_string())?;
-    Ok(store
-        .vault_list()
-        .map_err(|e| e.to_string())?
+    let rows = store.vault_list().map_err(|e| e.to_string())?;
+    let mut links = link_ids(store, &rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>())?;
+    Ok(rows
         .into_iter()
         .filter_map(|r| {
             let vault = vaults.iter().find(|v| v.id == r.vault_id);
@@ -892,7 +936,8 @@ pub fn list_for_agent_as(store: &Store, agent: Option<&str>, uid: Option<&str>) 
             let vault = vault.map(|v| v.name.clone()).unwrap_or_default();
             let source = source_link::for_agent(store, &r);
             let shared_with_you = uid.is_some_and(|u| shares::names(&signins::fields_of(&r), u));
-            Some(VaultAgentEntry { id: r.id, label: r.label, kind: r.kind, section, vault, expires, source, shared_with_you })
+            let link_id = links.remove(&r.id).unwrap_or_default();
+            Some(VaultAgentEntry { id: r.id, link_id, label: r.label, kind: r.kind, section, vault, expires, source, shared_with_you })
         })
         .collect())
 }

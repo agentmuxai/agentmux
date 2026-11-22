@@ -31,7 +31,7 @@ fn version() -> Version {
 }
 
 fn at(v: &Version) -> Place<'_> {
-    Place { vault: "vault-1", record: "entry-1", version: v, epoch: 3 }
+    Place { vault: "vault-1", record: "entry-1", version: v, base: None, epoch: 3 }
 }
 
 fn contains(haystack: &[u8], needle: &str) -> bool {
@@ -58,6 +58,7 @@ fn a_record_does_not_open_at_another_place_or_with_another_key_or_changed() {
         Place { record: "entry-2", ..at(&v) },
         Place { version: &later, ..at(&v) },
         Place { epoch: 4, ..at(&v) },
+        Place { base: Some(&later), ..at(&v) },
     ];
     for place in &places {
         let said = open_record::<Body>(&key, place, &sealed).unwrap_err();
@@ -135,4 +136,34 @@ fn a_record_over_the_size_limit_is_not_sealed() {
     let (key, v) = (seal::test_key(), version());
     let huge = vec![b'x'; MAX_SEALED];
     assert!(seal_raw(&key, &at(&v), &huge).unwrap_err().contains("at most 8 MiB"));
+}
+
+#[test]
+fn the_base_is_sealed_with_the_record_so_a_relay_cannot_change_what_it_follows() {
+    let (key, v) = (seal::test_key(), version());
+    let (b1, b2) = (Version::new(1, 0, "machine-a"), Version::new(2, 0, "machine-b"));
+    let place = Place { base: Some(&b1), ..at(&v) };
+    let sealed = seal_record(&key, &place, &body()).unwrap();
+    assert_eq!(open_record::<Body>(&key, &place, &sealed).unwrap(), body());
+    for other in [Place { base: Some(&b2), ..at(&v) }, Place { base: None, ..at(&v) }] {
+        assert!(open_record::<Body>(&key, &other, &sealed).unwrap_err().contains("can't be opened"));
+    }
+    // A base that could run two parts together is refused like any other id.
+    let bad = Version::new(1, 0, "a:b");
+    assert!(seal_record(&key, &Place { base: Some(&bad), ..at(&v) }, &body()).is_err());
+}
+
+#[test]
+fn a_tombstone_is_sealed_with_nothing_inside_and_only_opens_as_one() {
+    let (key, v) = (seal::test_key(), version());
+    let base = Version::new(1, 0, "machine-a");
+    let place = Place { base: Some(&base), ..at(&v) };
+    let sealed = seal_tombstone(&key, &place).unwrap();
+    assert!(open_tombstone(&key, &place, &sealed).is_ok());
+    assert!(open_tombstone(&key, &Place { base: None, ..at(&v) }, &sealed).is_err(), "its base can't be changed");
+    assert!(open_tombstone(&key, &Place { record: "entry-2", ..at(&v) }, &sealed).is_err());
+    // A record with a body is not a tombstone, and a tombstone is not a body.
+    let valued = seal_record(&key, &place, &body()).unwrap();
+    assert!(open_tombstone(&key, &place, &valued).is_err());
+    assert!(open_record::<Body>(&key, &place, &sealed).is_err());
 }

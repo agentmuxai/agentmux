@@ -7,7 +7,12 @@ import type { VaultSourceCheck } from "./VaultSourceCheck";
  * An entry as the pane shows it: no value, only which parts are set and
  * the main value's last characters.
  */
-export type VaultEntryInfo = { id: string, kind: string, section: VaultSection, label: string, 
+export type VaultEntryInfo = { id: string, 
+/**
+ * The entry's opaque id for links (`agentmux://vault/entry/<link_id>`): says nothing about the entry (G2).
+ * Absent only when none could be assigned.
+ */
+link_id?: string, kind: string, section: VaultSection, label: string, 
 /**
  * The Vault it belongs to (`vaults::VaultInfo::id`).
  */

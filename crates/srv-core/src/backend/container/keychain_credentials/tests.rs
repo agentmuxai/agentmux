@@ -929,6 +929,29 @@ fn a_login_that_first_appears_in_a_containers_copy_is_withheld_before_the_accoun
 }
 
 #[test]
+fn many_junk_values_in_a_containers_copy_never_push_out_what_the_account_holds_withheld() {
+    let (tmp, config) = setup();
+    let service = service_name(&config);
+    let fake = Fake::with(&service, Some(login(100, "flood-real-account")));
+    // The account's own file, as its watch registers it.
+    crate::identity::resolver::oauth_probe::withhold_sign_in(&config, &json(&login(100, "flood-real-account")));
+    let withheld = crate::backend::transcript::withhold::holds;
+    assert!(withheld("r-flood-real-account"));
+
+    let dir = run_as(&fake, &tmp, &config, "agentmux-flood", None).0.unwrap();
+    let junk = 4 * crate::backend::transcript::withhold::KEPT_PER_OWNER;
+    for i in 0..junk {
+        // A distinct value and a distinct far-future expiry each time, in a copy signed in as another account.
+        std::fs::write(dir.join(".credentials.json"), login(4_000_000_000_000 + i as i64, &format!("flood-junk-{i}"))).unwrap();
+        run_as(&fake, &tmp, &config, "agentmux-flood", Some("someone-else"));
+    }
+
+    assert!(withheld("r-flood-real-account"), "the account's own value is still withheld");
+    assert!(withheld(&format!("r-flood-junk-{}", junk - 1)), "the newest junk value is withheld");
+    assert!(!withheld("r-flood-junk-0"), "the copy's values are bounded: the oldest was dropped");
+}
+
+#[test]
 fn a_copy_made_from_a_refresh_token_the_account_has_since_replaced_gets_the_accounts_login() {
     let (tmp, config) = setup();
     let service = service_name(&config);

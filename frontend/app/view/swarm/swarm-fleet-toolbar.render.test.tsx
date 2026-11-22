@@ -72,11 +72,9 @@ describe("SuperviseActions", () => {
         fireEvent.click(getByText("Mode"));
         expect(menu.show).toHaveBeenCalledTimes(1);
         const items = menu.show.mock.calls[0][0] as ContextMenuItem[];
-        expect(items.map((i) => i.label)).toEqual([
-            "Supervisor: Off for 2 agents",
-            "Supervisor: Steady for 2 agents",
-            "Supervisor: Drive for 2 agents",
-        ]);
+        // The same rows as an agent's chip menu, with who they reach said once in the header.
+        expect(items.map((i) => i.label)).toEqual(["Off", "Steady", "Drive", undefined, "Supervisor settings…"]);
+        expect(menu.show.mock.calls[0][2]).toEqual({ header: ["Supervisor mode for 2 agents", expect.stringContaining("switched off")] });
         items[2].click!();
         expect(model.superviseSelection).toHaveBeenCalledWith("drive");
     });

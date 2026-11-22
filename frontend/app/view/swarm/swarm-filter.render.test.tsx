@@ -242,8 +242,8 @@ describe("selection and the fleet actions with a filter on", () => {
         expect(r.model.selectedBlockIdsAtom()).toEqual(new Set(["a", "b"]));
         expect(stats(r)).toContain("2 selected · 1 hidden by the filter, not included");
         // Broadcast says the same, and sends to the shown one only.
-        expect(r.container.querySelector(".swarm-broadcast-actions")!.textContent).toContain("Send to 1");
-        expect(r.container.querySelector(".swarm-broadcast-actions")!.textContent).toContain("1 hidden by the filter, not included");
+        expect(r.container.querySelector<HTMLTextAreaElement>(".swarm-broadcast-input")!.placeholder).toBe("Broadcast to 1 agent");
+        expect(r.container.querySelector(".swarm-broadcast-note")!.textContent).toContain("1 hidden by the filter, not included");
     });
 
     it("clearing the filter puts the hidden agents back in reach", () => {

@@ -16,7 +16,7 @@ import { menuIconClass } from "@/app/util/menu-icons";
 import { createPeerRegistry, createSubmenuHover, type SubmenuHoverController } from "@/app/util/submenu-hover";
 import type { Placement } from "@floating-ui/dom";
 import clsx from "clsx";
-import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, createUniqueId, For, on, onCleanup, Show, type JSX } from "solid-js";
 import "./menu.scss";
 
 export interface MenuEntry {
@@ -41,6 +41,10 @@ export interface MenuEntry {
     swatchColor?: string;
     /** With `swatchColor`: the bar across the top of the swatch (a tab's or pill's bar). */
     swatchBar?: string;
+    /** A second line under the label, smaller and muted, that wraps and is never cut (what the choice does): the row's
+     *  name is the label alone and this is its accessible description. A menu whose rows have one keeps the check
+     *  and icon on the label's line. */
+    description?: string;
     /** More inside the label (a second line under it); the row's `class` styles it. */
     detail?: JSX.Element;
     /** After the label: a mark at the row's end (the tab's own identity). */
@@ -194,6 +198,7 @@ interface MenuRowProps {
 /** One row: the lead slot, label, sublabel, shortcut and the chevron of a submenu. */
 function MenuRow(props: MenuRowProps): JSX.Element {
     const e = () => props.entry;
+    const id = createUniqueId();
     return (
         <div
             ref={props.ref}
@@ -202,7 +207,10 @@ function MenuRow(props: MenuRowProps): JSX.Element {
                 active: props.active,
                 "ui-menu-item--danger": e().tone === "danger",
                 "ui-menu-item--disabled": e().disabled,
+                "ui-menu-item--described": !!e().description,
             }, e().class)}
+            aria-labelledby={e().description ? `${id}-name` : undefined}
+            aria-describedby={e().description ? `${id}-description` : undefined}
             aria-checked={e().type ? !!e().checked : undefined}
             aria-disabled={e().disabled || undefined}
             aria-haspopup={e().submenu ? "menu" : undefined}
@@ -213,10 +221,27 @@ function MenuRow(props: MenuRowProps): JSX.Element {
             onClick={props.onPick}
         >
             <MenuRowLead entry={e()} reserve={props.reserve} />
-            <span class="label">
-                {e().label}
-                {e().detail}
-            </span>
+            <Show
+                when={e().description}
+                fallback={
+                    <span class="label">
+                        {e().label}
+                        {e().detail}
+                    </span>
+                }
+            >
+                {(text) => (
+                    <span class="ui-menu-item__text">
+                        <span class="label" id={`${id}-name`}>
+                            {e().label}
+                            {e().detail}
+                        </span>
+                        <span class="ui-menu-item__description" id={`${id}-description`}>
+                            {text()}
+                        </span>
+                    </span>
+                )}
+            </Show>
             {e().trailing}
             <Show when={e().sublabel}>
                 <span class="menu-item-sublabel">{e().sublabel}</span>

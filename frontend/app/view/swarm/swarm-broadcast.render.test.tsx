@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The Broadcast section's dock: the composer, the recipient count, and the last ten broadcasts.
- * docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §3.3.
+ * The Broadcast input: one box, Enter sends to the selection, the count in the placeholder and the tooltip,
+ * and a line under it for how the send went.
  */
 
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
@@ -24,14 +24,17 @@ vi.mock("@/app/store/mps", async (original) => ({
     },
 }));
 
-import { BroadcastDock, fittedHeight, followBroadcastProgress, MAX_AUTO_HEIGHT, MAX_RECENT_BROADCASTS, PROGRESS_AFTER_MS, withRecent, type BroadcastProgress, type BroadcastRecord } from "./swarm-broadcast";
+import { BroadcastDock, fittedHeight, followBroadcastProgress, MAX_AUTO_HEIGHT, PROGRESS_AFTER_MS, type BroadcastProgress } from "./swarm-broadcast";
 import type { AgentTreeNode, SwarmViewModel } from "./swarm-model";
 
 afterEach(() => cleanup());
 
 const agents = { tree: () => ["a", "b", "c"].map((k) => ({ blockId: k, agentName: k.toUpperCase() })) as unknown as AgentTreeNode[] };
 
-function modelStub(selectedKeys: string[], result = { succeeded: selectedKeys, failed: [] as { id: string; error: string }[] }) {
+function modelStub(
+    selectedKeys: string[],
+    result: { succeeded: string[]; failed: { id: string; error: string }[] } = { succeeded: selectedKeys, failed: [] }
+) {
     const [selected] = createSignal<Set<string>>(new Set(selectedKeys));
     return {
         selectedBlockIdsAtom: selected,
@@ -45,46 +48,57 @@ function modelStub(selectedKeys: string[], result = { succeeded: selectedKeys, f
 }
 
 const box = (c: HTMLElement) => c.querySelector<HTMLTextAreaElement>(".swarm-broadcast-input")!;
-const sendButton = (c: HTMLElement) => c.querySelector<HTMLButtonElement>(".swarm-fleet-btn--primary")!;
+const note = (c: HTMLElement) => c.querySelector<HTMLElement>(".swarm-broadcast-note");
+const enter = (c: HTMLElement) => fireEvent.keyDown(box(c), { key: "Enter" });
+const settle = async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+};
 
 describe("BroadcastDock", () => {
-    it("counts the recipients on the button and sends nothing until there is a message", () => {
-        const model = modelStub(["a", "b"]);
-        const { container } = render(() => <BroadcastDock model={model} agents={agents} />);
-        expect(sendButton(container).textContent).toContain("Send to 2");
-        expect(sendButton(container).disabled).toBe(true);
-        fireEvent.input(box(container), { target: { value: "  " } });
-        expect(sendButton(container).disabled).toBe(true);
+    it("is one box with no label, no collapse button and no Send button", () => {
+        const { container } = render(() => <BroadcastDock model={modelStub(["a"])} agents={agents} />);
+        expect(container.querySelectorAll("textarea")).toHaveLength(1);
+        expect(container.querySelector("button")).toBeNull();
+        expect(container.textContent).not.toContain("Send to");
+        expect(container.textContent).not.toContain("Broadcast");
     });
 
-    it("sends the trimmed message to the selection, clears the box and records the broadcast", async () => {
+    it("says in its ghost text who it goes to: the agents, then the count of those selected", () => {
+        const none = render(() => <BroadcastDock model={modelStub([])} agents={agents} />);
+        expect(box(none.container).placeholder).toBe("Broadcast to agents");
+        none.unmount();
+        const one = render(() => <BroadcastDock model={modelStub(["a"])} agents={agents} />);
+        expect(box(one.container).placeholder).toBe("Broadcast to 1 agent");
+        one.unmount();
+        const two = render(() => <BroadcastDock model={modelStub(["a", "b"])} agents={agents} />);
+        expect(box(two.container).placeholder).toBe("Broadcast to 2 agents");
+    });
+
+    it("tells what Enter does, with the count, on hover and as the box's description", () => {
+        const { container } = render(() => <BroadcastDock model={modelStub(["a", "b"])} agents={agents} />);
+        const text = box(container).getAttribute("data-hover-tip")!;
+        expect(text).toMatch(/^Enter sends to 2 agents · (Shift\+Enter|⇧Enter) adds a line · each agent gets it as your own message$/);
+        expect(box(container).getAttribute("aria-description")).toBe(text);
+    });
+
+    it("sends the trimmed message to the selection on Enter, clears the box and says how many it went to", async () => {
         const model = modelStub(["a", "b"], { succeeded: ["a"], failed: [{ id: "b", error: "gone" }] });
         const { container } = render(() => <BroadcastDock model={model} agents={agents} />);
         fireEvent.input(box(container), { target: { value: "  ship it \n" } });
-        fireEvent.click(sendButton(container));
-        await Promise.resolve();
-        await Promise.resolve();
+        enter(container);
+        await settle();
         expect(model.broadcastToSelection).toHaveBeenCalledWith("ship it", expect.any(String));
         expect(box(container).value).toBe("");
-        const row = container.querySelector(".swarm-broadcast-recent-row")!;
-        expect(row.textContent).toContain("ship it");
-        expect(row.textContent).toContain("2 sent · 1 delivered · 1 failed");
+        expect(note(container)!.textContent).toContain("Sent to 1 agent");
     });
 
-    it("says Enter sends and Shift+Enter adds a line", () => {
-        const { container } = render(() => <BroadcastDock model={modelStub(["a"])} agents={agents} />);
-        expect(container.querySelector(".swarm-broadcast-hint")!.textContent).toMatch(/^Enter sends · (Shift\+Enter|⇧Enter) adds a line$/);
-    });
-
-    it("sends on Enter, and on Ctrl+Enter too", () => {
+    it("sends on Ctrl+Enter too", () => {
         const model = modelStub(["a"]);
         const { container } = render(() => <BroadcastDock model={model} agents={agents} />);
         fireEvent.input(box(container), { target: { value: "hi" } });
-        fireEvent.keyDown(box(container), { key: "Enter" });
-        expect(model.broadcastToSelection).toHaveBeenCalledWith("hi", expect.any(String));
-        fireEvent.input(box(container), { target: { value: "again" } });
         fireEvent.keyDown(box(container), { key: "Enter", ctrlKey: true });
-        expect(model.broadcastToSelection).toHaveBeenLastCalledWith("again", expect.any(String));
+        expect(model.broadcastToSelection).toHaveBeenCalledWith("hi", expect.any(String));
     });
 
     it("adds a line on Shift+Enter and sends nothing", () => {
@@ -106,55 +120,82 @@ describe("BroadcastDock", () => {
         expect(model.broadcastToSelection).not.toHaveBeenCalled();
     });
 
-    it("sends nothing on Enter with an empty box, and does not insert a line break", () => {
+    it("sends nothing for an empty or blank message", () => {
         const model = modelStub(["a"]);
         const { container } = render(() => <BroadcastDock model={model} agents={agents} />);
-        const notCancelled = fireEvent.keyDown(box(container), { key: "Enter" });
+        expect(enter(container)).toBe(false);
+        fireEvent.input(box(container), { target: { value: "  \n " } });
+        enter(container);
         expect(model.broadcastToSelection).not.toHaveBeenCalled();
-        expect(notCancelled).toBe(false);
+        expect(note(container)).toBeNull();
     });
 
-    it("keeps a half-typed message and the recent list across a section switch", async () => {
+    it("with nobody selected sends nothing, keeps the text and says to select agents first, never falling back to everyone", () => {
+        const model = modelStub([]);
+        const { container } = render(() => <BroadcastDock model={model} agents={agents} />);
+        fireEvent.input(box(container), { target: { value: "hello all" } });
+        enter(container);
+        expect(model.broadcastToSelection).not.toHaveBeenCalled();
+        expect(box(container).value).toBe("hello all");
+        expect(note(container)!.textContent).toBe("Select the agents to message first");
+        expect(note(container)!.getAttribute("role")).toBe("status");
+        fireEvent.input(box(container), { target: { value: "hello all!" } });
+        expect(note(container)).toBeNull();
+    });
+
+    it("does not send a second time while the first is in flight", async () => {
+        let finish!: (r: unknown) => void;
+        const model = modelStub(["a"]);
+        (model.broadcastToSelection as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+        const { container } = render(() => <BroadcastDock model={model} agents={agents} />);
+        fireEvent.input(box(container), { target: { value: "once" } });
+        enter(container);
+        fireEvent.input(box(container), { target: { value: "twice" } });
+        enter(container);
+        expect(model.broadcastToSelection).toHaveBeenCalledTimes(1);
+        finish({ succeeded: ["a"], failed: [], aborted_early: false });
+        await settle();
+    });
+
+    it("keeps a half-typed message across switching away and back", () => {
         const model = modelStub(["a"]);
         const first = render(() => <BroadcastDock model={model} agents={agents} />);
-        fireEvent.input(box(first.container), { target: { value: "sent one" } });
-        fireEvent.click(sendButton(first.container));
-        await Promise.resolve();
-        await Promise.resolve();
         fireEvent.input(box(first.container), { target: { value: "still typing" } });
         first.unmount();
         const second = render(() => <BroadcastDock model={model} agents={agents} />);
         expect(box(second.container).value).toBe("still typing");
-        expect(second.container.querySelectorAll(".swarm-broadcast-recent-row")).toHaveLength(1);
     });
 
-    it("keeps the message when the call itself fails, and records nothing", async () => {
+    it("keeps the message when the call itself fails", async () => {
         const model = modelStub(["a"]);
         (model.broadcastToSelection as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("rpc down"));
         const { container } = render(() => <BroadcastDock model={model} agents={agents} />);
         fireEvent.input(box(container), { target: { value: "do not lose me" } });
-        fireEvent.click(sendButton(container));
-        await Promise.resolve();
-        await Promise.resolve();
+        enter(container);
+        await settle();
         expect(box(container).value).toBe("do not lose me");
-        expect(container.querySelectorAll(".swarm-broadcast-recent-row")).toHaveLength(0);
     });
 
-    it("does not count an unreachable agent as a failed delivery", async () => {
-        const model = modelStub(["a", "ghost"], { succeeded: ["a"], failed: [{ id: "ghost", error: "no longer listed" }] });
+    it("keeps the message and says so when every delivery fails", async () => {
+        const model = modelStub(["a", "b"], {
+            succeeded: [],
+            failed: [
+                { id: "a", error: "gone" },
+                { id: "b", error: "gone" },
+            ],
+        });
         const { container } = render(() => <BroadcastDock model={model} agents={agents} />);
-        fireEvent.input(box(container), { target: { value: "hi" } });
-        fireEvent.click(sendButton(container));
-        await Promise.resolve();
-        await Promise.resolve();
-        expect(container.querySelector(".swarm-broadcast-recent-meta")!.textContent).toContain("1 sent · 1 delivered");
-        expect(container.querySelector(".swarm-broadcast-recent-meta")!.textContent).not.toContain("failed");
+        fireEvent.input(box(container), { target: { value: "try again" } });
+        enter(container);
+        await settle();
+        expect(box(container).value).toBe("try again");
+        expect(note(container)!.textContent).toBe("Not sent: none of the 2 agents could be reached");
     });
 
-    it("says why fewer agents get the message than are selected", () => {
+    it("says why fewer agents get the message than are selected, and counts only the reachable ones", () => {
         const { container } = render(() => <BroadcastDock model={modelStub(["a", "ghost"])} agents={agents} />);
         expect(container.querySelector(".swarm-fleet-broadcast-gap")!.textContent).toBe("1 of 2 can't be messaged: no longer listed");
-        expect(sendButton(container).textContent).toContain("Send to 1");
+        expect(box(container).placeholder).toBe("Broadcast to 1 agent");
     });
 });
 
@@ -189,44 +230,23 @@ describe("a paced broadcast's progress", () => {
         expect(seen).toEqual([{ sent: 2, total: 30 }, { sent: 3, total: 30 }, null]);
     });
 
-    it("says how many have been sent in place of the hint while a paced broadcast goes out, then the hint again", async () => {
+    it("says how many have been sent under the box while a paced broadcast goes out, then how many it went to", async () => {
         let finish!: (r: unknown) => void;
         const model = modelStub(["a", "b", "c"]);
         (model.broadcastToSelection as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
         const { container } = render(() => <BroadcastDock model={model} agents={agents} />);
         fireEvent.input(box(container), { target: { value: "go" } });
-        fireEvent.click(sendButton(container));
+        enter(container);
         const id = (model.broadcastToSelection as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1] as string;
-        // The hint stays in the page under the count (hidden, and not read out), so the row keeps its height.
-        const hint = () => container.querySelector(".swarm-broadcast-hint-text")!;
-        const count = () => container.querySelector(".swarm-broadcast-progress");
-        expect(hint().textContent).toContain("Enter sends");
         progressEvents.emit({ id, sent: 2, total: 3 });
-        expect(count()).toBeNull();
-        expect(hint().classList.contains("is-covered")).toBe(false);
+        expect(container.querySelector(".swarm-broadcast-progress")).toBeNull();
         vi.advanceTimersByTime(PROGRESS_AFTER_MS);
-        expect(count()!.textContent).toBe("Sent 2 of 3…");
-        expect(count()!.getAttribute("role")).toBe("status");
-        expect(count()!.parentElement).toBe(hint().parentElement);
-        expect(hint().textContent).toContain("Enter sends");
-        expect(hint().classList.contains("is-covered")).toBe(true);
-        expect(hint().getAttribute("aria-hidden")).toBe("true");
+        expect(container.querySelector(".swarm-broadcast-progress")!.textContent).toBe("Sent 2 of 3…");
+        expect(note(container)!.getAttribute("role")).toBe("status");
         finish({ succeeded: ["a", "b", "c"], failed: [], aborted_early: false });
         await vi.advanceTimersByTimeAsync(0);
-        expect(count()).toBeNull();
-        expect(hint().classList.contains("is-covered")).toBe(false);
-        expect(hint().hasAttribute("aria-hidden")).toBe(false);
-        expect(container.querySelector(".swarm-broadcast-recent-meta")!.textContent).toContain("3 sent · 3 delivered");
-    });
-});
-
-describe("withRecent", () => {
-    it("keeps the last ten, newest first", () => {
-        let list: BroadcastRecord[] = [];
-        for (let i = 0; i < 12; i++) list = withRecent(list, { text: `m${i}`, at: i, recipients: 1, delivered: 1, failed: 0 });
-        expect(list).toHaveLength(MAX_RECENT_BROADCASTS);
-        expect(list[0].text).toBe("m11");
-        expect(list[9].text).toBe("m2");
+        expect(container.querySelector(".swarm-broadcast-progress")).toBeNull();
+        expect(note(container)!.textContent).toBe("Sent to 3 agents");
     });
 });
 
@@ -294,9 +314,8 @@ describe("BroadcastDock - the box starts at one line and grows", () => {
         const { container } = render(() => <BroadcastDock model={modelStub(["a"])} agents={agents} />);
         type(container, "one\ntwo", 44);
         expect(box(container).style.height).toBe("44px");
-        fireEvent.click(sendButton(container));
-        await Promise.resolve();
-        await Promise.resolve();
+        enter(container);
+        await settle();
         expect(box(container).value).toBe("");
         expect(box(container).style.height).toBe("");
     });

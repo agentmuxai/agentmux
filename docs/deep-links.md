@@ -24,7 +24,7 @@ Agents: yes. Surfaces: desktop.
 | Link | Opens |
 |---|---|
 | `agentmux://settings` | Settings |
-| `agentmux://settings/<section>?board=<slug>#<id>` | `appearance` (Appearance), `animations` (Animations), `window` (Window & Panes), `browser` (Browser), `terminal` (Terminal), `keyboard` (Keyboard shortcuts), `sounds` (Sounds), `notifications` (Notifications & Tray), `recording` (Recording), `devices` (Paired devices), `widgets` (Widgets), `agents` (Agents), `kanban` (Kanban), `advanced` (Advanced) |
+| `agentmux://settings/<section>?board=<slug>#<id>` | `appearance` (Appearance), `animations` (Animations), `window` (Window & Panes), `browser` (Browser), `terminal` (Terminal), `keyboard` (Keyboard shortcuts), `sounds` (Sounds), `notifications` (Notifications & Tray), `recording` (Recording), `devices` (Paired devices), `widgets` (Widgets), `agents` (Agents), `supervisor` (Supervisor), `kanban` (Kanban), `advanced` (Advanced) |
 
 ## Vault (`vault`)
 

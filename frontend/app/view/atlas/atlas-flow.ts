@@ -13,7 +13,7 @@ import type { MessageFlowEvent } from "@/types/rpc/MessageFlowEvent";
 import type { TaskFlowEvent } from "@/types/rpc/TaskFlowEvent";
 import type { AtlasAgent, AtlasMachine } from "./atlas-graph";
 import { machineHost } from "./atlas-graph";
-import { NODE_H, NODE_W, REGION_TITLE_H, type AtlasLayout, type Placed } from "./atlas-layout";
+import { NODE_H, NODE_W, type AtlasLayout, type Placed } from "./atlas-layout";
 
 /** How long a message's line stays after it is drawn, and a task's. */
 export const MESSAGE_SHOWN_MS = 12_000;
@@ -184,15 +184,10 @@ export interface FlowNode extends Placed {
 /** Further than any map reaches. */
 const FAR = 100_000;
 
-/**
- * What a label keeps clear of besides the nodes: the strip each region's title is written in, the line along the
- * bottom of each region, and everything outside the map, so that no label hangs over its edge.
- */
-export function labelKeepOut(layout: Pick<AtlasLayout, "regions" | "width" | "height">): FlowNode[] {
+/** What a label keeps clear of besides the nodes: everything outside the map, so that no label hangs over its edge. */
+export function labelKeepOut(layout: Pick<AtlasLayout, "width" | "height">): FlowNode[] {
     const { width, height } = layout;
     return [
-        ...layout.regions.map((box) => ({ x: box.x, y: box.y, w: box.w, h: REGION_TITLE_H })),
-        ...layout.regions.map((box) => ({ x: box.x, y: box.y + box.h - 1, w: box.w, h: 1 })),
         { x: -FAR, y: -FAR, w: FAR, h: FAR * 2 + height },
         { x: width, y: -FAR, w: FAR, h: FAR * 2 + height },
         { x: -FAR, y: -FAR, w: FAR * 2 + width, h: FAR },

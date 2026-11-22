@@ -1296,3 +1296,10 @@
         white-space: normal;
     }
 }
+
+// A closing note under a section's rows (the Supervisor's: what judges a turn).
+.settings-section-note {
+    margin: var(--space-2) 0 0;
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}

@@ -6,8 +6,8 @@
 //! section 6.1) and never a label, a kind, a site or a value.
 //!
 //! The seal is ChaCha20-Poly1305 with a random nonce and the associated data
-//! `agentmux-vault-sync-v1:<vault>:<record>:<version>:<epoch>`, so a record replayed under another Vault, record, version
-//! or key epoch does not open, and an old version can't be put back under the same id. This is a different seal from
+//! `agentmux-vault-sync-v1:<vault>:<record>:<version>:<epoch>:<base>`, so a record replayed under another Vault, record, version
+//! key epoch or base does not open, and an old version can't be put back under the same id. This is a different seal from
 //! `seal.rs`, which keeps a value on one machine under that machine's own key: the record is opened with the collection
 //! key on arrival and sealed again with the machine key.
 //!
@@ -60,6 +60,10 @@ pub struct Place<'a> {
     pub vault: &'a str,
     pub record: &'a str,
     pub version: &'a Version,
+    /// The version the change replaced on the machine that made it, `None` for a first version. It is in the associated
+    /// data too: the merge decides from it whether two changes were made apart, so a relay that altered it in the clear
+    /// header would otherwise hide a conflict.
+    pub base: Option<&'a Version>,
     pub epoch: u32,
 }
 
@@ -70,12 +74,14 @@ fn plain_id(s: &str) -> bool {
 
 impl Place<'_> {
     fn aad(&self) -> Result<Vec<u8>, String> {
-        for (what, id) in [("Vault", self.vault), ("record", self.record), ("machine", self.version.machine.as_str())] {
+        let base_machine = self.base.map(|b| ("machine", b.machine.as_str()));
+        for (what, id) in [("Vault", self.vault), ("record", self.record), ("machine", self.version.machine.as_str())].into_iter().chain(base_machine) {
             if !plain_id(id) {
                 return Err(format!("a synced record's {what} id is letters, digits and ._- only, at most 128 characters"));
             }
         }
-        Ok(format!("{AAD_PREFIX}:{}:{}:{}:{}", self.vault, self.record, self.version.text(), self.epoch).into_bytes())
+        let base = self.base.map_or_else(|| "-".to_string(), Version::text);
+        Ok(format!("{AAD_PREFIX}:{}:{}:{}:{}:{base}", self.vault, self.record, self.version.text(), self.epoch).into_bytes())
     }
 }
 
@@ -125,6 +131,21 @@ pub fn seal_record<T: Serialize>(key: &Key, at: &Place<'_>, body: &T) -> Result<
 pub fn open_record<T: DeserializeOwned>(key: &Key, at: &Place<'_>, sealed: &[u8]) -> Result<T, String> {
     let plain = open_raw(key, at, sealed)?;
     serde_json::from_slice(&plain).map_err(|_| CANT_OPEN.to_string())
+}
+
+/// A tombstone sealed for `at`: it holds nothing, so no value and no label can live on in it, but the seal still
+/// vouches for its place, its version and its base, so a relay can neither forge a delete nor change what it follows.
+pub fn seal_tombstone(key: &Key, at: &Place<'_>) -> Result<Vec<u8>, String> {
+    seal_raw(key, at, &[])
+}
+
+/// Opens a tombstone sealed by [`seal_tombstone`]. A record that holds anything is not a tombstone and is refused.
+pub fn open_tombstone(key: &Key, at: &Place<'_>, sealed: &[u8]) -> Result<(), String> {
+    if open_raw(key, at, sealed)?.is_empty() {
+        Ok(())
+    } else {
+        Err(CANT_OPEN.into())
+    }
 }
 
 /// Seals again a record under a new key and epoch, for the background pass that follows a member's removal: the new
