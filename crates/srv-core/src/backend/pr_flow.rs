@@ -328,7 +328,9 @@ fn by_name(by: PrFlowBy) -> &'static str {
 pub fn note(accepted: &Accepted) {
     if let Some(cards) = CARDS.get() {
         // Applying is idempotent (a notice older than a row's own is ignored), so a redelivery changes nothing.
-        let _ = cards.work_card_pr_flow_apply(&note_of(accepted), agentmux_common::time::now_ms());
+        if let Err(e) = cards.work_card_pr_flow_apply(&note_of(accepted), agentmux_common::time::now_ms()) {
+            tracing::warn!(error = %e, "pr flow: could not put a notice on the cards; the badge may lag the event");
+        }
     }
     if let Some(flow) = FLOW.get() {
         flow.record(accepted);

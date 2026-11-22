@@ -212,3 +212,31 @@ fn what_a_card_adds_to_the_board_stays_small() {
     // Three reviewers on a full commit id, checks, and the wait: well under half a kilobyte more per pull request.
     assert!(with - without < 500, "a pull request grew by {} bytes", with - without);
 }
+
+#[test]
+fn a_late_verdict_of_an_older_commit_does_not_hide_the_current_commits_checks() {
+    let (s, _d) = store();
+    card(&s, "a", "pell", "o/r", 7);
+    // The pull request's own report: its head is h2.
+    s.work_card_pr_apply(
+        "a",
+        &PrReport { repo: "o/r".into(), number: 7, state: CardPrState::Open, head: Some("h2".into()), opened_at: Some(1), merged_at: None, updated_at: 150 },
+        PrSource::Holder,
+        150,
+    )
+    .unwrap();
+    s.work_card_pr_flow_apply(&note("pell", 42, 7, 200, checks("failing", "h2")), 200).unwrap();
+    s.work_card_pr_flow_apply(&note("pell", 42, 7, 250, review("muxreview", "approved", "h1")), 250).unwrap();
+
+    let pr = s.work_board_get("a").unwrap().unwrap().card.prs.remove(0);
+    assert!(pr.verdicts[0].stale, "the approval is of h1, not the pull request's head");
+    assert_eq!(pr.checks, "failing", "the current commit's checks stay");
+    assert_eq!(waits(&s, "a"), pair("author", "checks_failing"));
+}
+
+#[test]
+fn an_abbreviated_commit_id_names_the_same_commit() {
+    assert!(same_head("0123456789abcdef", "0123456"));
+    assert!(same_head("0123456", "0123456789abcdef"));
+    assert!(!same_head("0123456789abcdef", "fedcba9"));
+}

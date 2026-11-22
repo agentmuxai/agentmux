@@ -320,24 +320,34 @@ fn verdicts_json(verdicts: &BTreeMap<String, PrVerdict>) -> String {
     Value::Object(map).to_string()
 }
 
+/// Whether two commit ids name one commit (one may be an abbreviation of the other).
+fn same_head(a: &str, b: &str) -> bool {
+    a.starts_with(b) || b.starts_with(a)
+}
+
 /// Work out, from what the notices said, whether each verdict is stale, which checks are current, and what the pull
 /// request waits on (`reviews::waits_on`, the one table). A verdict or checks result given on a commit older than the
 /// newest one a later notice named is stale or not shown: it is of a head that moved.
 fn derive_flow(pr: &mut WorkCardPr, task_state: &str) {
-    let newest: Option<(String, i64)> = pr
-        .verdicts
-        .iter()
-        .filter(|v| !v.head.is_empty())
-        .map(|v| (v.head.clone(), v.at))
-        .chain((!pr.checks_head.is_empty()).then(|| (pr.checks_head.clone(), pr.checks_at)))
-        .max_by_key(|(_, at)| *at);
+    // The pull request's own head, when a report gave one, is the current commit: a notice that arrives late for an
+    // older commit does not become the newest. With none known, the newest commit any notice named is.
+    let newest: Option<(String, i64)> = if pr.head.is_empty() {
+        pr.verdicts
+            .iter()
+            .filter(|v| !v.head.is_empty())
+            .map(|v| (v.head.clone(), v.at))
+            .chain((!pr.checks_head.is_empty()).then(|| (pr.checks_head.clone(), pr.checks_at)))
+            .max_by_key(|(_, at)| *at)
+    } else {
+        Some((pr.head.clone(), i64::MAX))
+    };
     for v in &mut pr.verdicts {
         v.stale = match (&newest, v.head.is_empty()) {
-            (Some((head, at)), false) => *head != v.head && *at >= v.at,
+            (Some((head, at)), false) => !same_head(head, &v.head) && *at >= v.at,
             _ => false,
         };
     }
-    if !pr.checks_head.is_empty() && newest.as_ref().is_some_and(|(head, _)| *head != pr.checks_head) {
+    if !pr.checks_head.is_empty() && newest.as_ref().is_some_and(|(head, _)| !same_head(head, &pr.checks_head)) {
         pr.checks = "none".into();
     }
     // Approved or changes requested by the verdicts that are still of the current head.
