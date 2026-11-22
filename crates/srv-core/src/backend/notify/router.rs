@@ -504,38 +504,7 @@ fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::Unbound
                     crate::backend::user_stop::note_user_stop(&block_id);
                     r.resolve(&block_id, Family::Turn)
                 }
-                Internal::TurnStatus { block_id, active } => {
-                    let prev = {
-                        let mut turns = r.turn_active.lock().unwrap_or_else(|e| e.into_inner());
-                        // Bounded: forgetting an IDLE block is
-                        // harmless — its next `true` still reads as Started.
-                        if turns.len() > TURN_MAP_MAX {
-                            turns.retain(|_, active| *active);
-                        }
-                        turns.insert(block_id.clone(), active)
-                    };
-                    let stopped_recently = crate::backend::user_stop::stopped_recently(&block_id);
-                    match turn_transition(prev, active, stopped_recently) {
-                        TurnTransition::Started => {
-                            // A new turn: the earlier stop no longer applies
-                            // to it (Codex P2 on #3705).
-                            crate::backend::user_stop::forget(&block_id);
-                            {
-                                let mut starts = r.turn_started_ms.lock().unwrap_or_else(|e| e.into_inner());
-                                if starts.len() > TURN_MAP_MAX {
-                                    starts.clear();
-                                }
-                                starts.insert(block_id.clone(), now_ms());
-                            }
-                            r.resolve(&block_id, Family::Turn)
-                        }
-                        // Notified from the turn's ledger instead
-                        // (`Internal::TurnEnded`): a pass ending is not the
-                        // turn ending.
-                        TurnTransition::Finished => {}
-                        TurnTransition::Nothing => {}
-                    }
-                }
+                Internal::TurnStatus { block_id, active } => r.on_turn_status(&block_id, active),
             }
         }
     });
@@ -789,6 +758,41 @@ impl Router {
             None => sanitize_name(&raw_name),
         };
         (name, summary)
+    }
+
+    /// A controller's `turn_active` for `block_id`: a turn that starts forgets the stop that ended
+    /// the one before, records when it began (`toast_line` reads it) and retracts the turn's toast.
+    fn on_turn_status(&self, block_id: &str, active: bool) {
+        let prev = {
+            let mut turns = self.turn_active.lock().unwrap_or_else(|e| e.into_inner());
+            // Bounded: forgetting an IDLE block is
+            // harmless — its next `true` still reads as Started.
+            if turns.len() > TURN_MAP_MAX {
+                turns.retain(|_, active| *active);
+            }
+            turns.insert(block_id.to_string(), active)
+        };
+        let stopped_recently = crate::backend::user_stop::stopped_recently(block_id);
+        match turn_transition(prev, active, stopped_recently) {
+            TurnTransition::Started => {
+                // A new turn: the earlier stop no longer applies
+                // to it (Codex P2 on #3705).
+                crate::backend::user_stop::forget(block_id);
+                {
+                    let mut starts = self.turn_started_ms.lock().unwrap_or_else(|e| e.into_inner());
+                    if starts.len() > TURN_MAP_MAX {
+                        starts.clear();
+                    }
+                    starts.insert(block_id.to_string(), now_ms());
+                }
+                self.resolve(block_id, Family::Turn)
+            }
+            // Notified from the turn's ledger instead
+            // (`Internal::TurnEnded`): a pass ending is not the
+            // turn ending.
+            TurnTransition::Finished => {}
+            TurnTransition::Nothing => {}
+        }
     }
 
     /// Run the policy and publish what it decided. `Activate` is returned,
