@@ -10,7 +10,11 @@ const pushNotification = vi.hoisted(() => vi.fn());
 const beginShutdownLog = vi.hoisted(() => vi.fn());
 const endShutdownLog = vi.hoisted(() => vi.fn());
 
-vi.mock("@/store/services", () => ({ ObjectService: { ShutdownAgent: shutdownAgent, ShutdownPreview: shutdownPreview } }));
+vi.mock("@/store/services", () => ({ ObjectService: { ShutdownPreview: shutdownPreview } }));
+vi.mock("@/app/store/rpc-api", () => ({
+    RpcApi: { AgentShutdownCommand: (_client: unknown, d: { blockid: string; stop_background: boolean }) => shutdownAgent(d.blockid, d.stop_background) },
+}));
+vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/pane-requests", () => ({ openPaneModal }));
 vi.mock("@/app/store/flash-notifications", () => ({ pushNotification }));
 vi.mock("./shutdown-log", () => ({ beginShutdownLog, endShutdownLog }));

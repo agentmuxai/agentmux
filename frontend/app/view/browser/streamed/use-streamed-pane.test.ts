@@ -183,3 +183,64 @@ describe("a streamed pane's state", () => {
         dispose();
     });
 });
+
+
+describe("a streamed pane's windows", () => {
+    function live() {
+        vi.useFakeTimers();
+        const m = mount();
+        m.pane.shown(true);
+        m.pane.resized(800, 600);
+        vi.advanceTimersByTime(150);
+        events!.onOpen();
+        return m;
+    }
+    const two = {
+        t: "windows" as const,
+        active: 1,
+        windows: [
+            { id: 0, url: "https://app.example/", title: "App", opener: null, closable: false },
+            { id: 1, url: "https://idp.example/auth", title: "Sign in", opener: 0, closable: true },
+        ],
+    };
+
+    it("keeps the windows the server reports and which one is shown", () => {
+        const { pane, dispose } = live();
+        expect(pane.windows()).toBeNull();
+        events!.onMessage(two);
+        expect(pane.windows()?.active).toBe(1);
+        expect(pane.windows()?.windows.map((w) => w.id)).toEqual([0, 1]);
+        dispose();
+    });
+
+    it("shows or closes a window by telling the server its number", () => {
+        const { pane, dispose } = live();
+        events!.onMessage(two);
+        pane.showWindow(0);
+        pane.closeWindow(1);
+        expect(sent).toEqual([
+            { t: "window", op: "focus", id: 0 },
+            { t: "window", op: "close", id: 1 },
+        ]);
+        dispose();
+    });
+
+    it("shows what the server did for the person until they close it, and the page's error comes first", () => {
+        const { pane, dispose } = live();
+        events!.onMessage({ t: "notice", message: "ads.example opened a message box. It was dismissed." });
+        expect(pane.notice()).toBe("ads.example opened a message box. It was dismissed.");
+        pane.dismissNotice();
+        expect(pane.notice()).toBe("");
+        dispose();
+    });
+
+    it("starts the windows over with a new socket", () => {
+        const { pane, dispose } = live();
+        events!.onMessage(two);
+        events!.onMessage({ t: "notice", message: "x" });
+        pane.reconnect();
+        expect(pane.windows()).toBeNull();
+        expect(pane.notice()).toBe("");
+        dispose();
+    });
+});

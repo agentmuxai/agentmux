@@ -128,6 +128,8 @@ function mount(opts: Setup = {}) {
         handleAttachNoPane: vi.fn(),
         handleOpenNewSession: vi.fn(() => Promise.resolve()),
         handleSwitchToExisting: vi.fn(() => Promise.resolve()),
+        handleOpenHere: vi.fn(() => Promise.resolve()),
+        canOpenHere: vi.fn(() => false),
         handleForkStart: vi.fn(() => Promise.resolve()),
         handleForkCancel: vi.fn(),
         handleRenameSubmit: vi.fn(() => Promise.resolve()),

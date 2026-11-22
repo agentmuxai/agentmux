@@ -3,7 +3,7 @@
 
 /** The create panel's Install step: the vendor's own installer, or the run AgentMux makes for an npm-managed CLI. */
 
-import { Match, Show, Switch, type Accessor, type JSX } from "solid-js";
+import { createEffect, on, Match, Show, Switch, type Accessor, type JSX } from "solid-js";
 
 import { Button } from "@/app/element/ui";
 import { InstallProgress } from "@/element/install/InstallProgress";
@@ -56,11 +56,31 @@ export function VendorInstall(props: { p: PanelParts }): JSX.Element {
 
 type Session = NonNullable<ReturnType<PanelParts["install"]["session"]>>;
 
+/**
+ * Bring an element into view without moving anything that is already in view. The panel opens inside a list that
+ * scrolls, and in a small pane its steps are below the fold; the run is what the person is waiting on.
+ */
+export function keepInView(el: HTMLElement | undefined): void {
+    el?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+}
+
 export function NpmInstall(props: { p: PanelParts; session: Accessor<Session> }): JSX.Element {
     const { s, install } = props.p;
     const sess = props.session;
+    let root: HTMLDivElement | undefined;
+    // The run starts, or ends badly: show its steps. (Its end in success moves the panel to the next step, which
+    // keeps itself in view: PanelView.)
+    createEffect(
+        on(
+            () => sess().state(),
+            (state) => {
+                if (state === "running" || state === "failed") keepInView(root);
+            },
+            { defer: true },
+        ),
+    );
     return (
-        <div class="agent-create-install" data-testid="agent-create-npm-install">
+        <div ref={root} class="agent-create-install" data-testid="agent-create-npm-install">
             <p class="agent-create-panel-text">
                 {s.name()} isn't installed yet. AgentMux installs its own copy, kept apart from any you
                 installed yourself. It needs an internet connection, and keeps going if you close this.

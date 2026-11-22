@@ -315,6 +315,66 @@ describe("the delegated tooltip", () => {
     });
 });
 
+describe("an instant tip (tip(text, { instant: true }))", () => {
+    const INSTANT = '<button data-hover-tip="Folds it" data-hover-tip-instant="" aria-description="Folds it">Collapsed</button>';
+    /** jsdom has no focus ring to ask: say the element is shown focused by the keyboard, or not. */
+    const keyboardFocus = (el: HTMLElement, fromKeyboard: boolean) => {
+        const matches = el.matches.bind(el);
+        el.matches = ((sel: string) => (sel === ":focus-visible" ? fromKeyboard : matches(sel))) as typeof el.matches;
+        el.dispatchEvent(new Event("focusin", { bubbles: true }));
+    };
+
+    it("shows the moment the pointer is on the element, with none of the short rest", async () => {
+        const el = add(INSTANT);
+        over(el);
+        await settle(0);
+        expect(panel()!.textContent).toBe("Folds it");
+        expect(body().style.opacity).toBe("1");
+    });
+
+    it("an ordinary tip still waits the short rest on a cold start", async () => {
+        const el = add('<button data-hover-tip="Plain">x</button>');
+        over(el);
+        await settle(0);
+        expect(body().style.opacity).toBe("0");
+    });
+
+    it("shows when the keyboard focuses the element, and goes when focus leaves", async () => {
+        const el = add(INSTANT);
+        keyboardFocus(el, true);
+        await settle(0);
+        expect(panel()!.textContent).toBe("Folds it");
+        expect(body().style.opacity).toBe("1");
+        el.dispatchEvent(new Event("focusout", { bubbles: true }));
+        expect(panel()).toBeNull();
+    });
+
+    it("moves along a row with the arrow keys: a key press closes it and the next focus shows the next at once", async () => {
+        const host = add('<div><button data-hover-tip="One" data-hover-tip-instant="">1</button><button data-hover-tip="Two" data-hover-tip-instant="">2</button></div>');
+        const [a, b] = Array.from(host.querySelectorAll<HTMLElement>("button"));
+        keyboardFocus(a, true);
+        await settle(0);
+        expect(panel()!.textContent).toBe("One");
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+        a.dispatchEvent(new Event("focusout", { bubbles: true }));
+        keyboardFocus(b, true);
+        await settle(0);
+        expect(panel()!.textContent).toBe("Two");
+        expect(body().style.opacity).toBe("1");
+    });
+
+    it("does not show for a click's focus, nor for an element without an instant tip", async () => {
+        const clicked = add(INSTANT);
+        keyboardFocus(clicked, false);
+        await settle(100);
+        expect(panel()).toBeNull();
+        const plain = add('<button data-hover-tip="Plain">x</button>');
+        keyboardFocus(plain, true);
+        await settle(100);
+        expect(panel()).toBeNull();
+    });
+});
+
 describe("data-hover-tip (tip.ts)", () => {
     it("shows the shared tooltip for an element with data-hover-tip, leaving its attributes alone", async () => {
         const el = add('<span data-hover-tip="Full name" aria-description="Full name">Fu…</span>');

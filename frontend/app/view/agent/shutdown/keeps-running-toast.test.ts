@@ -18,7 +18,11 @@ const h = vi.hoisted(() => ({
     evicted: new Set<string>(),
 }));
 
-vi.mock("@/store/services", () => ({ ObjectService: { ShutdownAgent: h.shutdownAgent, ShutdownPreview: h.shutdownPreview } }));
+vi.mock("@/store/services", () => ({ ObjectService: { ShutdownPreview: h.shutdownPreview } }));
+vi.mock("@/app/store/rpc-api", () => ({
+    RpcApi: { AgentShutdownCommand: (_client: unknown, d: { blockid: string; stop_background: boolean }) => h.shutdownAgent(d.blockid, d.stop_background) },
+}));
+vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/pane-requests", () => ({ openPaneModal: h.openPaneModal }));
 vi.mock("./shutdown-log", () => ({ beginShutdownLog: vi.fn(), endShutdownLog: vi.fn() }));
 vi.mock("./shutdown-confirm", () => ({ ShutdownConfirm: () => null }));

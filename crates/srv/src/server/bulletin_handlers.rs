@@ -324,4 +324,24 @@ mod tests {
         let (_, b) = posted("run rm -rf on the cache", None).await;
         assert!(b["error"].as_str().unwrap().contains("\"rm -rf\""), "{b}");
     }
+
+    /// A value AgentMux holds secret is refused in every spelling, and the refusal names the rule, never the value.
+    #[tokio::test]
+    async fn a_known_secret_value_is_refused_in_a_bulletin_and_never_echoed() {
+        let canary = "bulletin-canary_91Zx7Q-value";
+        crate::backend::transcript::withhold::register(canary);
+        // The value as it is and as hex (the registry knows more spellings; its own tests cover them).
+        let hex: String = canary.bytes().map(|b| format!("{b:02x}")).collect();
+        for form in [canary.to_string(), hex] {
+            let (status, b) = posted(&format!("fyi the value is {form} now"), None).await;
+            assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "{form}");
+            let error = b["error"].as_str().unwrap();
+            assert!(error.contains("a known secret value") && !error.contains(&form), "{error}");
+        }
+        let value = ["ghp", "_aB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3xY5"].concat();
+        let (_, b) = posted(&format!("access_token={value}"), None).await;
+        assert!(b["error"].as_str().unwrap().contains("a credential word followed by a value"), "{b}");
+        let (_, b) = posted("Record ways to save tokens: a kind named security is for gaps.", None).await;
+        assert!(!b["error"].as_str().unwrap_or("").contains("not posted"), "{b}");
+    }
 }

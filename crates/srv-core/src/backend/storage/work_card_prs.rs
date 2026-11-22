@@ -420,6 +420,25 @@ impl Store {
             params![work_id, repo, number as i64],
         )?;
         if n > 0 {
+            // The card's own address follows the list: when it named this pull request, it moves to the newest
+            // one left (or empties), and what was learned about the old one goes with it.
+            let (card_repo, card_url): (String, String) = tx
+                .query_row("SELECT repo, pr_url FROM db_work_cards WHERE work_id = ?1", params![work_id], |r| Ok((r.get(0)?, r.get(1)?)))
+                .optional()?
+                .unwrap_or_default();
+            if parse_pr_ref(&card_url, &card_repo) == Some((repo.to_string(), number)) {
+                let next: Option<(String, i64)> = tx
+                    .query_row(
+                        "SELECT repo, number FROM db_work_card_prs WHERE work_id = ?1 AND unlinked = 0
+                          ORDER BY linked_at DESC, rowid DESC LIMIT 1",
+                        params![work_id],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                    .optional()?;
+                let url = next.map(|(r, n)| pr_url(&r, n as u64)).unwrap_or_default();
+                tx.execute("UPDATE db_work_cards SET pr_url = ?2 WHERE work_id = ?1", params![work_id, url])?;
+                tx.execute("DELETE FROM db_work_prs WHERE work_id = ?1", params![work_id])?;
+            }
             touch(&tx, work_id, now_ms)?;
         }
         tx.commit()?;

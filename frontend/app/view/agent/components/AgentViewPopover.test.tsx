@@ -10,6 +10,7 @@ import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentViewControls } from "../agent-view-controls";
 import { VIEW_PRESETS, type AgentView, type ResolvedView } from "../virtualization/verbosity";
+import { MAKE_DEFAULT_DONE_TIP, MAKE_DEFAULT_TIP } from "../virtualization/view-options";
 import { AgentViewPopover } from "./AgentViewPopover";
 
 function controls(resolved: ResolvedView, defaultView: AgentView = VIEW_PRESETS.full): AgentViewControls & { calls: Record<string, ReturnType<typeof vi.fn>> } {
@@ -67,7 +68,10 @@ describe("AgentViewPopover", () => {
         mount(c);
         fireEvent.click(radio("Replies", "Preset"));
         expect(c.calls.setPreset).toHaveBeenCalledWith("replies");
-        expect((radio("Custom", "Preset") as HTMLButtonElement).disabled).toBe(true);
+        const custom = radio("Custom", "Preset");
+        expect(custom.getAttribute("aria-disabled")).toBe("true");
+        fireEvent.click(custom);
+        expect(c.calls.setPreset).toHaveBeenCalledTimes(1);
     });
 
     it("changes one switch at a time", () => {
@@ -96,8 +100,39 @@ describe("AgentViewPopover", () => {
         fireEvent.click(screen.getByText("Make this the default"));
         expect(c.calls.makeDefault).toHaveBeenCalledTimes(1);
         cleanup();
+        const same = controls({ view: VIEW_PRESETS.full, source: "default" });
+        mount(same);
+        const nothing = screen.getByText("Make this the default") as HTMLButtonElement;
+        expect(nothing.getAttribute("aria-disabled")).toBe("true");
+        fireEvent.click(nothing);
+        expect(same.calls.makeDefault).not.toHaveBeenCalled();
+    });
+
+    it("gives every button and both links a tooltip that is also its accessible description", () => {
+        const controlsOf = (source: "pane" | "default") => controls({ view: source === "pane" ? VIEW_PRESETS.replies : VIEW_PRESETS.full, source });
+        for (const source of ["pane", "default"] as const) {
+            mount(controlsOf(source));
+            const all = Array.from(document.body.querySelectorAll<HTMLElement>("button"));
+            // 4 presets + 4+4+4+2+2 switch values, "Make this the default", and "Follow default" for a pane of its own.
+            expect(all.length).toBe(4 + 16 + 1 + (source === "pane" ? 1 : 0));
+            for (const el of all) {
+                const text = el.getAttribute("data-hover-tip");
+                expect(text, `${el.textContent} has a tooltip`).toBeTruthy();
+                expect(el.hasAttribute("data-hover-tip-instant"), `${el.textContent}'s tooltip is instant`).toBe(true);
+                expect(el.getAttribute("aria-description")).toBe(text);
+                expect(text!.trim().toLowerCase(), "it says the effect, not the label").not.toBe(el.textContent!.trim().toLowerCase());
+            }
+            cleanup();
+        }
+    });
+
+    it("tells why Make this the default does nothing when there is nothing to change", () => {
         mount(controls({ view: VIEW_PRESETS.full, source: "default" }));
-        expect((screen.getByText("Make this the default") as HTMLButtonElement).disabled).toBe(true);
+        const nothing = screen.getByText("Make this the default");
+        expect(nothing.getAttribute("data-hover-tip")).toBe(MAKE_DEFAULT_DONE_TIP);
+        cleanup();
+        mount(controls({ view: VIEW_PRESETS.replies, source: "pane" }));
+        expect(screen.getByText("Make this the default").getAttribute("data-hover-tip")).toBe(MAKE_DEFAULT_TIP);
     });
 
     it("closes on Esc", () => {

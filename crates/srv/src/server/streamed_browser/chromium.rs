@@ -253,26 +253,29 @@ async fn start() -> Result<Arc<Cdp>, String> {
     tracing::info!(sandbox = !no_sandbox, "streamed browser: Chromium started with its sandbox {}", if no_sandbox { "OFF" } else { "ON" });
     // Downloads are refused in the demo (spec §8); a later PR gives them a place.
     let _ = cdp.call("Browser.setDownloadBehavior", serde_json::json!({ "behavior": "deny" }), None).await;
-    close_popups(&cdp).await;
+    route_windows(&cdp).await;
     Ok(cdp)
 }
 
-/// A window a page opens (a target with an opener) is closed as it appears: the demo has no place for it.
+/// The browser's new and ended pages are told to the pane that owns them (`popups`): a window a pane's page opens is shown by that pane.
+/// A page no pane lists is closed as it appears, with an opener or without one. The page the browser started with (blank) is srv's own
+/// and is kept, so it is marked before news of pages is asked for.
 #[cfg(unix)]
-async fn close_popups(cdp: &Arc<Cdp>) {
+async fn route_windows(cdp: &Arc<Cdp>) {
     let mut events = cdp.browser_events();
+    if let Ok(found) = cdp.call("Target.getTargets", serde_json::json!({}), None).await {
+        for info in found["targetInfos"].as_array().into_iter().flatten().filter(|i| i["type"] == "page") {
+            if let Some(id) = info["targetId"].as_str() {
+                super::popups::claim_for_srv(id);
+            }
+        }
+    }
     let _ = cdp.call("Target.setDiscoverTargets", serde_json::json!({ "discover": true }), None).await;
     let cdp = cdp.clone();
     tokio::spawn(async move {
         while let Some(event) = events.recv().await {
-            if event.method != "Target.targetCreated" {
-                continue;
-            }
-            let info = &event.params["targetInfo"];
-            if info["type"] == "page" && info.get("openerId").is_some_and(|o| !o.is_null()) {
-                if let Some(id) = info["targetId"].as_str() {
-                    cdp.send("Target.closeTarget", serde_json::json!({ "targetId": id }), None);
-                }
+            for target in super::popups::route(&event.method, &event.params) {
+                cdp.send("Target.closeTarget", serde_json::json!({ "targetId": target }), None);
             }
         }
     });
@@ -374,6 +377,16 @@ mod tests {
             assert!(!a.iter().any(|x| x.contains("remote-debugging-port") || x.contains("remote-debugging-address")));
             // Nothing in the arguments turns the proxy off.
             assert!(!a.iter().any(|x| x == "--no-proxy-server" || x.starts_with("--proxy-auto-detect") || x.starts_with("--proxy-pac-url")));
+        }
+    }
+
+    #[test]
+    fn the_engine_s_pop_up_blocking_is_left_on_so_a_page_opens_a_window_only_on_a_gesture() {
+        // The real-Chromium test `real_chromium_a_page_can_open_a_window_only_on_a_gesture` shows the engine's behaviour with these
+        // arguments; this keeps anything from switching the blocking off.
+        for no_sandbox in [false, true] {
+            let a = args(Path::new("/p"), no_sandbox, 41234);
+            assert!(!a.iter().any(|x| x.contains("popup") || x.contains("pop-up") || x.contains("user-gesture") || x.contains("autoplay-policy")), "{a:?}");
         }
     }
 

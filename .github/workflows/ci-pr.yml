@@ -1048,6 +1048,13 @@ jobs:
           bash scripts/check-taskfile-target-dir.sh
           bash scripts/check-taskfile-target-dir.test.sh
 
+      # `task dev` builds with DEV_CARGO_ENV (LTO off). A cargo build line that loses {{.CARGO_ENV}}, or a dev task that stops
+      # passing it down, turns a dev build into a full-LTO release build that holds the build slot for 15+ minutes (#48337).
+      - name: Taskfile dev cargo settings gate
+        run: |
+          bash scripts/check-taskfile-dev-cargo-env.sh
+          bash scripts/check-taskfile-dev-cargo-env.test.sh
+
       # scripts/cef-verify.sh is the carry-set gate for the CEF fork
       # (docs/cef-build/CEF_FORK_MAINTENANCE.md §5). It runs against a CEF
       # checkout, which CI does not have -- so what runs here is its TEST SUITE,
@@ -1218,7 +1225,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: generator and classifier tests
-        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs scripts/cli-probe/fake-anthropic.test.mjs scripts/cli-probe/probe-safety.test.mjs scripts/release-manifest.test.mjs scripts/release-gate.test.mjs scripts/release-publish-needs.test.mjs scripts/check-rust-pin.test.mjs scripts/check-shared-paths.test.mjs scripts/check-test-support-off.test.mjs scripts/ci-main-stalled.test.mjs scripts/ci-main-range.test.mjs
+        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs scripts/cli-probe/fake-anthropic.test.mjs scripts/cli-probe/probe-safety.test.mjs scripts/release-manifest.test.mjs scripts/release-gate.test.mjs scripts/release-publish-needs.test.mjs scripts/check-rust-pin.test.mjs scripts/check-shared-paths.test.mjs scripts/check-test-support-off.test.mjs scripts/ci-main-stalled.test.mjs scripts/ci-main-range.test.mjs scripts/branch-changes.test.mjs scripts/preflight.test.mjs
       - name: Specs index is current (changed specs only)
         run: node scripts/gen-docs-index.mjs --check
       - name: bash wrapper reaches the same generator
@@ -1286,6 +1293,11 @@ jobs:
       - name: generated broker event types are current
         if: matrix.shard == 1
         run: node scripts/gen-mux-events.mjs --check
+      # frontend/app/deeplinks/registry.generated.ts, crates/common/src/deeplinks/registry.rs and
+      # docs/deep-links.md, from crates/common/deeplinks/destinations.json (the deep-link registry).
+      - name: generated deep-link tables are current
+        if: matrix.shard == 1
+        run: node scripts/gen-deeplinks.mjs --check
       # Three checks the bindings gate (check-rpc-bindings.sh, rust job) CANNOT make: it verifies a generated
       # file exists per type and is current with the Rust, which a file can be while still describing a wire
       # format nobody speaks. Each of these was written after the same defect got past review more than once.

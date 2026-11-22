@@ -232,6 +232,9 @@ function fake(init: { agents?: any[]; loading?: boolean; zoom?: number } = {}) {
         },
         launch: {
             launching, busy, launchError, nodejsError,
+            sharedFolder: () => null,
+            keepSharedFolderApart: press("keepSharedFolderApart"),
+            goAheadWithSharedFolderAsk: press("goAheadWithSharedFolderAsk"),
             setNodejsError: (v: unknown) => (log(`setNodejsError ${v}`), setNodejsError(v as null)),
             runtimeOf: (id: string) => (id === "a1" ? "runtime-a1" : undefined),
             handleReattach: press("handleReattach"), handleAttach: press("handleAttach"), handleFork: press("handleFork"),
