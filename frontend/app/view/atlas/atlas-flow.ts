@@ -205,6 +205,8 @@ export interface FlowCurve {
     d: string;
     end: Placed;
     label: Placed;
+    /** Points along the curve (a polyline), for another line's label to keep clear of where the two cross. */
+    samples: Placed[];
 }
 
 const round = (n: number) => Math.round(n * 10) / 10;
@@ -217,6 +219,26 @@ const LABEL_HALF_W = 20;
 const LABEL_HALF_H = 9;
 /** Half the height of the label's own glyphs: what it needs with no room to spare, in the gap between two rows. */
 const LABEL_TIGHT_H = 7;
+/** How near another line a label may not be: on a crossing it could read as that line's. */
+const CROSS_CLEAR = 12;
+/** How many stretches a curve is sampled in, for the crossings. */
+const SAMPLES = 24;
+
+/** How far `p` is from the polyline `line`, along its straight pieces. */
+export function distanceToLine(line: readonly Placed[], p: Placed): number {
+    let best = Infinity;
+    for (let i = 1; i < line.length; i++) {
+        const a = line[i - 1];
+        const b = line[i];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const len2 = dx * dx + dy * dy;
+        const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
+        best = Math.min(best, Math.hypot(a.x + t * dx - p.x, a.y + t * dy - p.y));
+    }
+    return best;
+}
+
 /** Where along a line its label is tried: the middle first, then further out on either side. */
 const LABEL_STOPS = [0.5, 0.45, 0.55, 0.4, 0.6, 0.35, 0.65, 0.3, 0.7, 0.25, 0.75, 0.2, 0.8, 0.15, 0.85];
 
@@ -275,6 +297,48 @@ function labelBesideEnd(to: FlowNode, end: Placed, fromBelow: boolean, free: (p:
     return null;
 }
 
+/** How high a line arcs over its row, past the top of the cards: the first line, an answer's extra, and each further line's. */
+const ARC_RISE = 16;
+const ARC_ANSWER = 8;
+const ARC_LANE = 8;
+/** The most it rises: less than the gap between two rows, so it stays out of the row above. */
+const ARC_MAX = 30;
+
+/** The least an arc rises, however little room there is above the row. */
+const ARC_MIN = 4;
+
+/**
+ * How far above `top` the nearest thing above the span `left` to `right` ends: a card of the row above, a region's
+ * title, the edge of the map. Infinity when nothing is above it.
+ */
+function roomAbove(top: number, left: number, right: number, nodes: readonly FlowNode[]): number {
+    let room = Infinity;
+    for (const n of nodes) {
+        const w = n.w ?? NODE_W;
+        const bottom = n.y + (n.h ?? NODE_H) + (n.pad ?? 0);
+        if (bottom > top + 1 || n.x + w < left || n.x > right) continue;
+        room = Math.min(room, top - bottom);
+    }
+    return room;
+}
+
+/** Whether `from` and `to` stand in one row with an agent's card between them. */
+function blockedInRow(from: Placed, to: Placed, nodes: readonly FlowNode[]): boolean {
+    if (Math.abs(to.y - from.y) >= NODE_H / 2) return false;
+    const left = Math.min(from.x, to.x) + NODE_W / 2;
+    const right = Math.max(from.x, to.x) + NODE_W / 2;
+    return nodes.some(
+        (n) =>
+            n.w === undefined &&
+            n.h === undefined &&
+            !(n.x === from.x && n.y === from.y) &&
+            !(n.x === to.x && n.y === to.y) &&
+            Math.abs(n.y - from.y) < NODE_H &&
+            n.x + NODE_W / 2 > left &&
+            n.x + NODE_W / 2 < right
+    );
+}
+
 /**
  * The curve from one node's edge to another's, bowed a little to the left of its direction, so a line and its
  * answer do not lie on each other. Its label goes on the stretch nearest its middle that no node of `nodes` covers;
@@ -291,7 +355,8 @@ export function flowCurve(
     nodes: readonly FlowNode[] = [],
     taken: readonly PlacedLabel[] = [],
     halfW = LABEL_HALF_W,
-    lane = 0
+    lane = 0,
+    others: readonly (readonly Placed[])[] = []
 ): FlowCurve | null {
     const ax = from.x + NODE_W / 2;
     const ay = from.y + NODE_H / 2;
@@ -303,25 +368,35 @@ export function flowCurve(
     // How far along the line a node's own box reaches from its centre.
     const reach = Math.min(dx === 0 ? Infinity : NODE_W / 2 / Math.abs(dx), dy === 0 ? Infinity : NODE_H / 2 / Math.abs(dy));
     if (length === 0 || reach >= 0.5) return null;
-    const x1 = ax + dx * reach;
-    const y1 = ay + dy * reach;
-    const x2 = bx - dx * reach;
-    const y2 = by - dy * reach;
+    // Two agents in one row with another between them: a straight line would run behind that card, and only its
+    // two ends would show. It leaves the top of one card and arcs over the row to the top of the other.
+    const arced = blockedInRow(from, to, nodes);
+    const wanted = Math.min(ARC_MAX, ARC_RISE + (dx < 0 ? ARC_ANSWER : 0) + lane * ARC_LANE);
+    // Never more than half the room above the row, so in a dense grid the arc stays clear of the cards over it.
+    const room = arced ? roomAbove(Math.min(from.y, to.y), Math.min(ax, bx), Math.max(ax, bx), nodes) : Infinity;
+    const rise = Math.max(ARC_MIN, Math.min(wanted, room / 2));
+    const x1 = arced ? ax : ax + dx * reach;
+    const y1 = arced ? from.y : ay + dy * reach;
+    const x2 = arced ? bx : bx - dx * reach;
+    const y2 = arced ? to.y : by - dy * reach;
     const bow = Math.min(28, length * 0.15) * (1 + lane * LANE_BOW);
-    const cx = (x1 + x2) / 2 + (dy / length) * bow;
-    const cy = (y1 + y2) / 2 - (dx / length) * bow;
+    const cx = arced ? (x1 + x2) / 2 : (x1 + x2) / 2 + (dy / length) * bow;
+    const cy = arced ? Math.min(y1, y2) - 2 * rise : (y1 + y2) / 2 - (dx / length) * bow;
     const at = (t: number): Placed => ({
         x: round((1 - t) ** 2 * x1 + 2 * (1 - t) * t * cx + t ** 2 * x2),
         y: round((1 - t) ** 2 * y1 + 2 * (1 - t) * t * cy + t ** 2 * y2),
     });
     const end = { x: round(x2), y: round(y2) };
     const free = (halfH: number) => (p: Placed) =>
-        !nodes.some((node) => hidesLabel(node, p, halfH, halfW)) && !taken.some((label) => onLabel(label, p, halfW));
+        !nodes.some((node) => hidesLabel(node, p, halfH, halfW)) &&
+        !taken.some((label) => onLabel(label, p, halfW)) &&
+        !others.some((o) => distanceToLine(o, p) < CROSS_CLEAR);
     const clear = LABEL_STOPS.map((t) => nextToLabel(taken, at(t), halfW)).find(free(LABEL_HALF_H));
     return {
         d: `M${round(x1)},${round(y1)} Q${round(cx)},${round(cy)} ${round(x2)},${round(y2)}`,
         end,
         label: clear ?? labelBesideEnd(to, end, cy >= y2, free(LABEL_TIGHT_H)) ?? at(0.5),
+        samples: Array.from({ length: SAMPLES + 1 }, (_, i) => at(i / SAMPLES)),
     };
 }
 
@@ -336,21 +411,37 @@ export interface FlowLine {
 /**
  * The curve of each line, by its id. A line's label keeps clear of the labels of the lines before it, so two tasks
  * handed to one agent both show their number, and a line bows further than the ones before it between the same
- * two nodes.
+ * two nodes. A number also keeps clear of the lines in `keepClear` (the lines of reports-to, as polylines).
  */
-export function flowCurves(lines: readonly FlowLine[], nodes: readonly FlowNode[]): Map<string, FlowCurve> {
+export function flowCurves(
+    lines: readonly FlowLine[],
+    nodes: readonly FlowNode[],
+    keepClear: readonly (readonly Placed[])[] = []
+): Map<string, FlowCurve> {
+    const laneOf = new Map<string, number>();
+    const lanes = lines.map((line) => {
+        const pair = `${line.from.x},${line.from.y}>${line.to.x},${line.to.y}`;
+        const lane = laneOf.get(pair) ?? 0;
+        laneOf.set(pair, lane + 1);
+        return lane;
+    });
+    const halfWs = lines.map((line) => (line.label ? labelHalfWidth(line.label) : LABEL_HALF_W));
+    // The lines first, with no labels' worth of care: where a line runs does not depend on its label.
+    const bare = lines.map((line, i) => flowCurve(line.from, line.to, nodes, [], halfWs[i], lanes[i]));
+    // The same two nodes, either way round: a line and its answer, or tasks between them, run side by side
+    // and share a gap for their numbers (above); they do not cross.
+    const pairOf = (line: FlowLine) => [`${line.from.x},${line.from.y}`, `${line.to.x},${line.to.y}`].sort().join(">");
     const taken: PlacedLabel[] = [];
     const curves = new Map<string, FlowCurve>();
-    const lanes = new Map<string, number>();
-    for (const line of lines) {
-        const pair = `${line.from.x},${line.from.y}>${line.to.x},${line.to.y}`;
-        const lane = lanes.get(pair) ?? 0;
-        lanes.set(pair, lane + 1);
-        const halfW = line.label ? labelHalfWidth(line.label) : LABEL_HALF_W;
-        const curve = flowCurve(line.from, line.to, nodes, line.label ? taken : [], halfW, lane);
-        if (!curve) continue;
+    lines.forEach((line, i) => {
+        if (!bare[i]) return;
+        // A label keeps clear of the crossings with the lines between other pairs of nodes, so it reads as its own line's.
+        const mine = pairOf(line);
+        const others = [...keepClear, ...bare.flatMap((c, j) => (j !== i && c && pairOf(lines[j]) !== mine ? [c.samples] : []))];
+        const curve = flowCurve(line.from, line.to, nodes, line.label ? taken : [], halfWs[i], lanes[i], others);
+        if (!curve) return;
         curves.set(line.id, curve);
-        if (line.label) taken.push({ ...curve.label, halfW });
-    }
+        if (line.label) taken.push({ ...curve.label, halfW: halfWs[i] });
+    });
     return curves;
 }
