@@ -83,6 +83,7 @@ export function PaneHeaderTabStrip<T>(props: PaneHeaderTabStripProps<T>): JSX.El
             onClose={props.onClose}
             onTabDoubleClick={props.onTabDoubleClick}
             renderLabel={props.renderLabel}
+            renderActions={props.renderActions}
             onAdd={props.onAdd}
             addTitle={props.addTitle}
             addLabel={props.addLabel}
