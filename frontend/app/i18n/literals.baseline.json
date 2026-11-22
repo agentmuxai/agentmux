@@ -198,7 +198,7 @@
     "frontend/app/view/atlas/atlas-card-facts.tsx": 8,
     "frontend/app/view/atlas/atlas-extras.tsx": 7,
     "frontend/app/view/atlas/atlas-fleet-bar.tsx": 1,
-    "frontend/app/view/atlas/atlas-view.tsx": 28,
+    "frontend/app/view/atlas/atlas-view.tsx": 26,
     "frontend/app/view/audit/audit-feed.tsx": 1,
     "frontend/app/view/audit/audit-kind-chips.tsx": 1,
     "frontend/app/view/audit/audit-live-bar.tsx": 2,

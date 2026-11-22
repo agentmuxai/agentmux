@@ -1346,6 +1346,7 @@
     "deeplinks.params.select": "Selected item",
     "agentPicker.openHere": "Open here",
     "agentPicker.openHereTip": "Move {{name}} into this pane. The pane that has it now closes; its session carries on here.",
+    "atlas.legend.hosts": "Hosts",
     "drone.trigger.title": "Trigger",
     "drone.trigger.byHand": "By hand",
     "drone.trigger.run": "▶ Run",

@@ -3,7 +3,7 @@
 
 /**
  * What is on the Atlas map and is not an agent (docs/specs/SPEC_ATLAS_AGENT_MAP_2026_11_13.md §6.4): a container of
- * this machine that no agent uses, as a node in the machine's region. It opens a card, as an agent's node does; it
+ * this machine that no agent uses, as a node among its host's. It opens a card, as an agent's node does; it
  * cannot be selected for a fleet action.
  */
 
@@ -13,6 +13,8 @@ import { createMemo, Show, type JSX } from "solid-js";
 import { ByKey } from "./atlas-by-key";
 import { containerLine } from "./atlas-card-facts";
 import type { AtlasGraph, AtlasOrphan } from "./atlas-graph";
+import { HostLabel, hostAttrs, onHost } from "./atlas-host-mark";
+import type { HostStyle } from "./atlas-hosts";
 import { NODE_H, NODE_W, type Placed } from "./atlas-layout";
 
 type Select = (key: string, e: MouseEvent | KeyboardEvent) => void;
@@ -33,7 +35,14 @@ function nodeProps(key: string, at: Placed, selected: boolean, onSelect: Select)
     };
 }
 
-function OrphanNode(props: { orphan: AtlasOrphan; at: Placed; selected: boolean; onSelect: Select }): JSX.Element {
+function OrphanNode(props: {
+    orphan: AtlasOrphan;
+    at: Placed;
+    host: HostStyle | undefined;
+    ring: boolean;
+    selected: boolean;
+    onSelect: Select;
+}): JSX.Element {
     const o = () => props.orphan;
     return (
         <div
@@ -42,12 +51,14 @@ function OrphanNode(props: { orphan: AtlasOrphan; at: Placed; selected: boolean;
             classList={{ "atlas-node--selected": props.selected }}
             data-testid="atlas-orphan"
             data-container={o().state}
-            aria-label={`${o().name}, ${o().helper ?? "a container no agent uses"}, ${o().state}`}
-            {...tip(`${o().helper ?? "A container no agent uses"}, ${containerLine(o())}`)}
+            {...hostAttrs(props.host, props.ring)}
+            aria-label={`${o().name}, ${o().helper ?? "a container no agent uses"}, ${o().state}${onHost(props.host)}`}
+            {...tip(`${o().helper ?? "A container no agent uses"}, ${containerLine(o())}${onHost(props.host)}`)}
         >
             <span class="atlas-node__top">
                 <i class="fa-solid fa-box atlas-node__kind" aria-hidden="true" />
                 <span class="atlas-node__name">{o().name}</span>
+                <HostLabel style={props.host} />
             </span>
             <span class="atlas-node__sub">{o().helper ?? "No agent"} · {o().state}</span>
         </div>
@@ -58,6 +69,9 @@ function OrphanNode(props: { orphan: AtlasOrphan; at: Placed; selected: boolean;
 export function ExtraNodes(props: {
     graph: AtlasGraph;
     nodes: ReadonlyMap<string, Placed>;
+    /** Each machine's host, by the machine's key, and whether rings are drawn. */
+    hosts: ReadonlyMap<string, HostStyle>;
+    ring: boolean;
     selected: string | null;
     onSelect: Select;
 }): JSX.Element {
@@ -67,7 +81,16 @@ export function ExtraNodes(props: {
             <ByKey each={orphans()}>
                 {(orphan, key) => (
                     <Show when={props.nodes.get(key)}>
-                        {(at) => <OrphanNode orphan={orphan()} at={at()} selected={props.selected === key} onSelect={props.onSelect} />}
+                        {(at) => (
+                            <OrphanNode
+                                orphan={orphan()}
+                                at={at()}
+                                host={props.hosts.get(orphan().machine)}
+                                ring={props.ring}
+                                selected={props.selected === key}
+                                onSelect={props.onSelect}
+                            />
+                        )}
                     </Show>
                 )}
             </ByKey>

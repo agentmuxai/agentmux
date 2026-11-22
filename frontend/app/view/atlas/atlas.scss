@@ -20,6 +20,75 @@
     // map is formed and fitted for the room that is left (block.tsx gives the block its level as `--pane-zoom`; the
     // pane's `paneZoom` capability in atlas.tsx says it takes part).
     zoom: var(--pane-zoom, 1);
+
+    // The ring of a host (atlas-hosts.ts): hues that no state, line or selection uses (red is working, blue is waiting and
+    // the selection, green is idle, yellow and orange are a limit), so a ring is never taken for one of them. With more
+    // hosts than hues the line changes as well (dashed, dotted), and the host's name is on the node in words.
+    --atlas-host-1: var(--term-magenta);
+    --atlas-host-2: var(--term-cyan);
+    --atlas-host-3: color-mix(in oklch, var(--term-magenta) 50%, var(--term-blue));
+}
+
+// What says a host, on a node and in the legend: the colour and the line of its ring.
+.atlas [data-host-colour="1"] {
+    --atlas-host: var(--atlas-host-1);
+}
+
+.atlas [data-host-colour="2"] {
+    --atlas-host: var(--atlas-host-2);
+}
+
+.atlas [data-host-colour="3"] {
+    --atlas-host: var(--atlas-host-3);
+}
+
+.atlas [data-host-line="dashed"] {
+    --atlas-host-line: dashed;
+}
+
+.atlas [data-host-line="dotted"] {
+    --atlas-host-line: dotted;
+}
+
+// Each host's ring beside its name, in a row under the bar; only with more than one host.
+.atlas-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-3);
+    margin: 0;
+    padding: var(--space-1) var(--space-2);
+    list-style: none;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--secondary-text-color);
+    font-size: var(--text-2xs);
+}
+
+.atlas-legend__host {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-width: 0;
+}
+
+.atlas-legend__ring {
+    flex: none;
+    box-sizing: border-box;
+    width: 18px;
+    height: 10px;
+    border: 2px var(--atlas-host-line, solid) var(--atlas-host, var(--secondary-text-color));
+    border-radius: var(--radius-sm);
+}
+
+.atlas-legend__name {
+    color: var(--main-text-color);
+    font-weight: 600;
+}
+
+.atlas-legend__detail {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .atlas-bar {
@@ -126,46 +195,6 @@
     justify-content: center;
     color: var(--secondary-text-color);
     font-size: var(--text-sm);
-}
-
-.atlas-region {
-    position: absolute;
-    box-sizing: border-box;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    background: var(--panel-bg-color);
-
-    &--stale {
-        opacity: 0.6;
-    }
-
-    // One of the account's other machines, known through the cloud only: an outline, no surface.
-    &--cloud {
-        background: transparent;
-    }
-}
-
-.atlas-region__head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-2) 0;
-    font-size: var(--text-sm);
-}
-
-.atlas-region__title {
-    min-width: 0;
-    overflow: hidden;
-    font-weight: 600;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.atlas-region__badge {
-    flex: none;
-    color: var(--secondary-text-color);
-    font-size: var(--text-2xs);
 }
 
 .atlas-edges {
@@ -374,12 +403,30 @@
         border-color: var(--secondary-text-color);
     }
 
-    // In the By seat layout a node carries its machine as a tint along its top.
-    $tints: var(--accent-color), var(--success-color), var(--warning-color), var(--error-color), var(--info-color), var(--secondary-text-color);
-    @for $i from 1 through 6 {
-        &[data-tint="#{$i - 1}"] {
-            box-shadow: inset 0 2px 0 color-mix(in srgb, #{nth($tints, $i)} 80%, transparent);
-        }
+    // The host's ring, outside the node's own border and the container's frame with a gap between, so the node's border,
+    // its state colour, the selection and the focus ring keep their meaning beside it. Its gap and width are the layout's
+    // (atlas-host-mark.tsx `ringVars`), which close in with the gaps as the map is zoomed in, so two neighbours' rings never
+    // meet. It is drawn only with more than one host.
+    &[data-host-colour]::before {
+        content: "";
+        position: absolute;
+        // The node's border is 1 px, 3 px at the left (the state's colour), and a pseudo element is placed from the padding box.
+        --ring-in: var(--atlas-ring-gap, 2px);
+        --ring-out: calc(var(--ring-in) + var(--atlas-ring-w, 2px));
+        inset: calc(-1px - var(--ring-out)) calc(-1px - var(--ring-out)) calc(-1px - var(--ring-out)) calc(-3px - var(--ring-out));
+        border: var(--atlas-ring-w, 2px) var(--atlas-host-line, solid) var(--atlas-host);
+        border-radius: calc(var(--radius-sm) + var(--ring-out));
+        pointer-events: none;
+    }
+
+    // A container agent's frame is in the way: the ring is outside it.
+    &--container[data-host-colour]::before {
+        --ring-in: max(var(--atlas-ring-gap, 2px), calc(var(--atlas-frame-out, 7px) - 2px));
+    }
+
+    // A container no agent uses has a 1 px border all round.
+    &--orphan[data-host-colour]::before {
+        inset: calc(-1px - var(--ring-out));
     }
 }
 
@@ -397,6 +444,24 @@
     font-weight: 600;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+// The host, in words: at the right of the node's name line, muted, and cut with an ellipsis before the name is (it shrinks
+// eight times as fast).
+.atlas-node__host {
+    flex: 0 8 auto;
+    min-width: 0;
+    margin-left: auto;
+    overflow: hidden;
+    color: var(--secondary-text-color);
+    font-size: var(--text-2xs);
+    font-weight: 400;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.atlas-node__host + .atlas-node__check {
+    margin-left: var(--space-1);
 }
 
 // What a node is when it is not a plain agent on its machine: a box for a container.
@@ -462,18 +527,21 @@
 }
 
 .atlas-fold {
-    position: absolute;
+    position: relative;
     z-index: var(--z-map-fold);
+    // The notes around it let a click through; the chip does not.
+    pointer-events: auto;
 }
 
+// Opens upward: the chip is in the map's bottom left corner.
 .atlas-fold__list {
     position: absolute;
     left: 0;
-    top: 100%;
+    bottom: 100%;
     z-index: var(--z-map-fold-list);
-    min-width: 200px;
+    min-width: 240px;
     max-height: 240px;
-    margin: var(--space-1) 0 0;
+    margin: 0 0 var(--space-1);
     padding: var(--space-1);
     overflow-y: auto;
     list-style: none;
@@ -498,7 +566,13 @@
     white-space: nowrap;
 }
 
-// What the map leaves out or could not read, in its bottom left corner.
+.atlas-fold__host {
+    flex: none;
+    color: var(--secondary-text-color);
+    font-size: var(--text-2xs);
+}
+
+// What the map leaves out (the stopped agents' chip) or could not read, in its bottom left corner.
 .atlas-notes {
     position: absolute;
     left: var(--space-2);

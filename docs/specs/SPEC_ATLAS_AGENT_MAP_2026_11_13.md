@@ -319,6 +319,48 @@ Decision 4's second half and the cloud tier, on the data three srv builds added:
 
 **Checks.** At half the gaps, in a tall, a square and a wide pane and both layouts: every node keeps its row and its place in it, every machine box its row, the map is no wider and no taller, and no node stands on another or outside its box. The share's floor. A wheel zoom keeps the node under the pointer in place while the gaps around it close; a zoom button's step leaves the map centred.
 
+### 6.8 After v1: a host is an attribute of a node, not a box (#48370)
+
+> **Changed 2026-11-22 (#48370): no box, title or fold chip per machine.** §3, §4.1, §4.3, §6.4 (the machine's region and the
+> orphan container "in its region"), §6.5 (the machine boxes the layout packs) and §6.6 (tighter boxes) describe the
+> boxes this replaces. What they say of the layout (the order, the columns, the gaps that close, the By seat picture) still
+> holds; the box round each host does not exist.
+
+**The requirement.** The Atlas draws no box for a host. Each node says its host as an attribute of the node, and wears
+one more border, outside its own, in a colour that belongs to its host.
+
+**What replaced the box.**
+
+- **The host in words** on every node (an agent's and a container's), at the right of its name line, muted, cut with an
+  ellipsis before the name is; in the node's tooltip (`..., on narko`) and in its accessible name (`Ann, Idle, on narko`).
+  The card says "Host" with how the machine was found (this machine, LAN, cloud), its platform and any channel.
+- **The ring**: a second border outside the node's own and a container agent's frame, with a gap of 2 px (a seventh of the
+  gap between two nodes) and 2 px wide, never less than 1 px; both close in with the gaps as the map is zoomed in, so two
+  neighbours' rings never meet. The node's own border (its state on the left), its selection and its focus ring keep their
+  meaning beside it. With **one host** there is nothing to tell apart: no ring, no legend, the label stays (chosen).
+- **The colour of a host** is stable: a hash of the host's name (the computer's, so a machine's other channels share it),
+  never the order hosts arrived in, so it is the same after a restart and on every computer that sees the same hosts.
+  Hosts that hash to one slot are settled in the order of their names. Three hues (magenta, cyan and a violet between
+  magenta and blue) that no state, line or the selection uses (working is red, waiting and selected are blue, idle is
+  green, a limit is yellow or orange, a held line is grey), taken from the theme's terminal colours so they follow every
+  theme, light and dark. With more hosts than hues the ring is **dashed**, then **dotted**, for nine rings in all; past
+  nine hosts a ring is reused (chosen) and the label is what tells the two apart. The legend says which hosts share one.
+- **A host with no name yet** (this computer before its name is known) is its own host, in the placeholder's name. This
+  computer, a LAN host, a cloud host and a container agent (the host it runs on, not the container) are hosts the same way.
+- **The legend**: a row under the bar, only with more than one host: each host's ring beside its name and how its machines
+  were found. What is wrong with a machine itself (its report is old, its container runtime is not running) is said in the
+  map's bottom left corner, by the host's name, with one host or many.
+- **The stopped agents**: one "N stopped" chip in that corner for the whole map, listing them with their host, to Open or
+  Start (it was a chip in each box); in both layouts.
+- **The layout**: the nodes of a host still stand together, as a group nothing draws; the groups are packed as the boxes
+  were (the order, the wrapped rows, the gap between two). The title strip, the box's padding and least width, and the
+  strip a label kept off are gone; the map keeps a margin of one gap round it, for a frame and a ring at its edge. A
+  host with only stopped agents takes no room. By seat is unchanged, with the ring in the place of its tint.
+- **Lines**: they no longer bend round a box; a line that passes behind a card still shows through it (§6.4's faint copy).
+
+**Colour-vision differences.** The three hues are told apart by the dash as well as by colour, and the host's name is on
+every node, so the colour is never the only cue. The pairing was not measured with a simulator.
+
 ## 7. Risks and notes
 
 - **"Steward" is not a stored seat role** (`ROLES` is leader, worker, specialist, platform_tester, analyst, super), so a
