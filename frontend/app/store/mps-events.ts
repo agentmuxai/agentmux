@@ -261,6 +261,8 @@ export const WpsEvent = {
     PaneConfirm: "pane:confirm",
     /** An agent's deep-link open, handed to the window that carries it out; it answers with deeplink.open.done (crates/srv/src/sagas/deeplink_open.rs). */
     DeepLinkOpen: "deeplink:open",
+    /** A window capture asks for the rectangles of this window's private and secret panes; it answers with capture.mask.report (crates/srv/src/sagas/capture_mask.rs). */
+    CaptureMask: "capture:mask",
     /** The agents the person said "Always" to, after a change (crates/srv-core/src/backend/agent_grants.rs). */
     AgentGrants: "agent:grants",
     AmbientSpent: "ambient:spent",

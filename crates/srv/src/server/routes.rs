@@ -760,6 +760,8 @@ fn ui_and_host_routes() -> Router<AppState> {
         // is stamped by agentmux-mcp from AGENTMUX_BLOCKID, same trust model as
         // the agent/memory/preset/identity routes just above.
         .route("/api/v1/ui/screenshot", post(ui_handlers::handle_ui_screenshot))
+        // A `UI` window capture reads what each window blacks out, just before and just after its frame.
+        .route("/api/v1/ui/capture_mask", post(super::capture_mask_route::handle_capture_mask))
         .route("/api/v1/ui/record", post(ui_record::handle_ui_record))
         .route("/api/v1/ui/click", post(ui_handlers::handle_ui_click))
         .route("/api/v1/ui/query", post(ui_handlers::handle_ui_query))

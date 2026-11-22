@@ -273,6 +273,9 @@ events! {
     /// An agent's deep-link open that srv's guard let through, for the window that holds the caller's tab to carry
     /// out; it answers with `deeplink.open.done` (`sagas::deeplink_open`).
     DeepLinkOpen: "deeplink:open" => DeepLinkOpenEvent,
+    /// A `UI` window capture is about to take (`begin`) or has taken (`end`) its frame: every window answers with
+    /// the rectangles of its private and secret panes, `capture.mask.report` (`sagas::capture_mask`).
+    CaptureMask: "capture:mask" => CaptureMaskEvent,
     /// An agent's model server was changed through `Agents env_set`, or the change was undone: the agent's pane and
     /// My Agents say so, with an Undo for a short while (`backend::endpoint_notice`).
     AgentEndpointNotice: "agent:endpoint-notice" => crate::backend::endpoint_notice::EndpointNoticeEvent,
@@ -620,6 +623,19 @@ pub struct DeepLinkOpenEvent {
     /// `beside`, `new` or `pane:<block id>`: srv resolved a tab or window target into `tab_id` already.
     pub target: String,
     /// After this the window must not carry it out (a window that connects late, a replayed event).
+    pub expires_at_ms: i64,
+}
+
+/// `capture:mask`: a `UI` window capture asks every window for the rectangles of its private and secret panes, once
+/// just before the frame (`begin`) and once just after (`end`) (docs/specs/SPEC_DEEP_LINKS_ONE_FRAMEWORK_2026_11_20.md
+/// §7, G5). Each window answers `capture.mask.report`.
+#[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CaptureMaskEvent {
+    pub capture_id: String,
+    #[ts(type = r#""begin" | "end""#)]
+    pub phase: String,
+    /// After this an answer is too late.
     pub expires_at_ms: i64,
 }
 

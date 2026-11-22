@@ -1177,6 +1177,10 @@
             "method": "DeepLinkOpenDoneCommand"
         },
         {
+            "command": "capture.mask.report",
+            "method": "CaptureMaskReportCommand"
+        },
+        {
             "command": "pane.open",
             "method": "PaneOpenCommand"
         },

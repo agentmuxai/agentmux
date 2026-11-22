@@ -632,6 +632,7 @@ fn audit_log_capture_window_appends_ndjson_for_success_and_failure() {
             tier: CaptureTier::OtherInstance,
             target: "pid=42 title=\"Other\"".to_string(),
             image_sha256: Some("deadbeef".to_string()),
+            redacted: true,
         }),
         &None,
     );
@@ -650,7 +651,7 @@ fn audit_log_capture_window_appends_ndjson_for_success_and_failure() {
     assert_eq!(first["tier"], "T2-other-instance");
     assert_eq!(first["target"], "pid=42 title=\"Other\"");
     assert_eq!(first["image_sha256"], "deadbeef");
-    assert_eq!(first["redacted"], false);
+    assert_eq!(first["redacted"], true, "a blacked-out capture says so");
 
     let second: Value = serde_json::from_str(lines[1]).unwrap();
     assert_eq!(second["query"], "second query");
@@ -747,14 +748,9 @@ fn a_withheld_window_is_still_findable_for_auditing() {
 #[test]
 fn a_title_miss_never_reveals_a_withheld_match() {
     let mut resolved = None;
-    let err = capture_window_impl(
-        Some("zzz-nonexistent-window-title-zzz"),
-        None,
-        None,
-        &mut resolved,
-        false,
-    )
-    .expect_err("a nonsense title cannot match");
+    let err = resolve_window(Some("zzz-nonexistent-window-title-zzz"), None, None, &mut resolved)
+    .err()
+    .expect("a nonsense title cannot match");
     let msg = err.to_string();
     for leak in ["T3", "other-user", "withheld", "different OS user"] {
         assert!(

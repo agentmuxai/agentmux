@@ -2539,6 +2539,25 @@
     }
   },
   {
+    "command": "capture.mask.report",
+    "request": "agentmux_srv::sagas::capture_mask::CommandCaptureMaskReportData",
+    "requestName": "CommandCaptureMaskReportData",
+    "requestTs": {
+      "imports": [
+        "CommandCaptureMaskReportData"
+      ],
+      "name": "CommandCaptureMaskReportData"
+    },
+    "response": "agentmux_srv::sagas::capture_mask::CaptureMaskReportResult",
+    "responseName": "CaptureMaskReportResult",
+    "responseTs": {
+      "imports": [
+        "CaptureMaskReportResult"
+      ],
+      "name": "CaptureMaskReportResult"
+    }
+  },
+  {
     "command": "checkcliauth",
     "request": "agentmux_srv_core::backend::rpc_types::block::CommandCheckCliAuthData",
     "requestName": "CommandCheckCliAuthData",

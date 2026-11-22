@@ -91,6 +91,7 @@ import type { Bundle } from "@/types/rpc/Bundle";
 import type { BundleImportCommitResponse } from "@/types/rpc/BundleImportCommitResponse";
 import type { BundleImportPreviewResponse } from "@/types/rpc/BundleImportPreviewResponse";
 import type { CancelProviderAuthReq } from "@/types/rpc/CancelProviderAuthReq";
+import type { CaptureMaskReportResult } from "@/types/rpc/CaptureMaskReportResult";
 import type { CheckCliAuthResult } from "@/types/rpc/CheckCliAuthResult";
 import type { ClaudeGlobalConfig } from "@/types/rpc/ClaudeGlobalConfig";
 import type { ClientAgreeTosResult } from "@/types/rpc/ClientAgreeTosResult";
@@ -160,6 +161,7 @@ import type { CommandBrowserSigninStopData } from "@/types/rpc/CommandBrowserSig
 import type { CommandBrowserSignupPasswordData } from "@/types/rpc/CommandBrowserSignupPasswordData";
 import type { CommandBundleImportCommitData } from "@/types/rpc/CommandBundleImportCommitData";
 import type { CommandBundleImportPreviewData } from "@/types/rpc/CommandBundleImportPreviewData";
+import type { CommandCaptureMaskReportData } from "@/types/rpc/CommandCaptureMaskReportData";
 import type { CommandCheckCliAuthData } from "@/types/rpc/CommandCheckCliAuthData";
 import type { CommandContainerCachesData } from "@/types/rpc/CommandContainerCachesData";
 import type { CommandContainerImageCheckData } from "@/types/rpc/CommandContainerImageCheckData";
@@ -2289,6 +2291,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<DeepLinkOpenDoneResult> {
     return client.rpcCall("deeplink.open.done", data, opts);
+  },
+  // command "capture.mask.report"
+  CaptureMaskReportCommand(
+    client: RpcClient,
+    data: CommandCaptureMaskReportData,
+    opts?: RpcOpts
+  ): Promise<CaptureMaskReportResult> {
+    return client.rpcCall("capture.mask.report", data, opts);
   },
   // command "pane.open"
   PaneOpenCommand(client: RpcClient, data: CommandPaneOpenData, opts?: RpcOpts): Promise<PaneOpenResult> {
