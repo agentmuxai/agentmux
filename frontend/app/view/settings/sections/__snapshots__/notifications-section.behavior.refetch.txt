@@ -176,7 +176,7 @@ getAutostartStatus
               "Show what the agent is working on"
             <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
-            "Add the agent's current session summary as a small line under the notification"
+            "Add what the agent is on as a small line under the notification: its own status line, or the task it holds, when recent"
         <div class="ui-field-control">
           <div data-stand="ToggleControl" data-checked="true">
             <span data-cb="onChange">
@@ -465,7 +465,7 @@ getAutostartStatus
               "Show what the agent is working on"
             <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
-            "Add the agent's current session summary as a small line under the notification"
+            "Add what the agent is on as a small line under the notification: its own status line, or the task it holds, when recent"
         <div class="ui-field-control">
           <div data-stand="ToggleControl" data-checked="true">
             <span data-cb="onChange">
