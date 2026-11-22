@@ -157,6 +157,29 @@ fn an_edit_later_than_a_delete_made_apart_from_it_ends_current_on_both_machines(
 }
 
 #[test]
+fn two_deletes_and_an_edit_between_them_end_deleted_whatever_order_a_machine_hears_them_in() {
+    let (mut a, mut x, mut y, mut c) = (machine("a", 1), machine("x", 2), machine("y", 3), machine("c", 4));
+    let (mut m, mut n) = (machine("m", 5), machine("n", 6));
+    let all = pins(&[&a, &x, &y, &c, &m, &n]);
+    a.write("entry-1", "base", NOW);
+    for peer in [&mut x, &mut y, &mut c, &mut m, &mut n] {
+        peer.pull(&a, &all, NOW + 1);
+    }
+    // x and y delete the entry apart, and c edits it between the two deletes.
+    x.delete("entry-1", NOW + 100);
+    c.write("entry-1", "edited", NOW + 120);
+    y.delete("entry-1", NOW + 150);
+    // m hears the earlier delete first, n the later one; both are then sent the edit.
+    for (peer, order) in [(&mut m, [&x, &y, &c]), (&mut n, [&y, &x, &c])] {
+        for from in order {
+            peer.pull(from, &all, NOW + 200);
+        }
+    }
+    assert_eq!((m.state("entry-1"), n.state("entry-1")), (None, None), "the later delete is current on both");
+    assert_eq!((m.versions("entry-1"), n.versions("entry-1")), (4, 4));
+}
+
+#[test]
 fn two_machines_that_made_the_same_entry_apart_keep_both_and_agree_which_is_current() {
     // The Vault names an entry from its kind and label, so two machines can each make "the same" entry before they meet.
     let (mut a, mut b) = (machine("a", 1), machine("b", 2));

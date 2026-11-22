@@ -165,9 +165,14 @@ fn a_delete_and_a_change_made_apart_end_as_the_later_of_the_two_with_the_other_k
     let Decision::Conflict { current, kept, .. } = merge(Some(&gone), &change(v(300, 0, "b"), Some(v(50, 0, "a")), Some(&["prod"]))) else { panic!("expected a conflict") };
     assert_eq!((current, kept.clone()), (Side::Incoming, Kept::Deleted { machine: "a".into() }));
     assert_eq!(kept.label(), "deleted on a while it was changed elsewhere");
-    // The deleted version itself, and a second delete, change nothing.
+    // The deleted version itself, and an earlier second delete, change nothing.
     assert_eq!(merge(Some(&gone), &change(v(50, 0, "a"), None, Some(&["prod"]))), Decision::KeptLocal);
-    assert_eq!(merge(Some(&gone), &change(v(210, 0, "c"), Some(v(50, 0, "a")), None)), Decision::KeptLocal);
+    assert_eq!(merge(Some(&gone), &change(v(150, 0, "c"), Some(v(50, 0, "a")), None)), Decision::KeptLocal);
+    // A later second delete takes the place of the one held, which is kept, so a change between the two is compared with the
+    // same delete on every machine.
+    let Decision::Conflict { current, kept, .. } = merge(Some(&gone), &change(v(210, 0, "c"), Some(v(50, 0, "a")), None)) else { panic!("expected a conflict") };
+    assert_eq!((current, kept.clone()), (Side::Incoming, Kept::DeletedAlso { machine: "a".into() }));
+    assert_eq!(kept.label(), "deleted on a as well");
 }
 
 #[test]

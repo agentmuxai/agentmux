@@ -65,6 +65,9 @@ pub enum Kept {
     /// A delete made on `machine` apart from a change that is later than it: the entry ends as changed on every machine,
     /// and the delete is kept, so the person can see it and delete the entry again.
     Deleted { machine: String },
+    /// Two deletes of the entry made apart on `machine` and elsewhere: the later is current and the earlier is kept, so
+    /// a change made between them is compared with the same delete on every machine.
+    DeletedAlso { machine: String },
 }
 
 impl Kept {
@@ -76,6 +79,7 @@ impl Kept {
             Kept::DeleteWaitsForRotation { machine } => format!("deleted on {machine} while this was being rotated"),
             Kept::ChangedWhileDeleted { machine } => format!("changed on {machine} while it was deleted elsewhere"),
             Kept::Deleted { machine } => format!("deleted on {machine} while it was changed elsewhere"),
+            Kept::DeletedAlso { machine } => format!("deleted on {machine} as well"),
         }
     }
 }
@@ -138,8 +142,10 @@ pub fn merge(held: Option<&Held>, change: &Change) -> Decision {
     let side = if rotating || !incoming_later { Side::Local } else { Side::Incoming };
     let (local_machine, incoming_machine) = (current.machine.clone(), change.version.machine.clone());
     match (h.deleted, value_in) {
-        // Two deletes of the same record: either way it is deleted.
-        (true, None) => Decision::KeptLocal,
+        // Two deletes of the same record: it is deleted either way, but which delete is current is still decided by the
+        // versions, because a change made apart from them is compared with the current one.
+        (true, None) if side == Side::Local => Decision::KeptLocal,
+        (true, None) => Decision::Conflict { current: Side::Incoming, kept: Kept::DeletedAlso { machine: local_machine }, tags: h.tags.clone() },
         (false, Some(theirs)) => {
             let kept = match side {
                 Side::Local if rotating => Kept::WaitsForRotation { machine: incoming_machine },
