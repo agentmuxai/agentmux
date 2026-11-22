@@ -43,6 +43,7 @@ pub mod layout_file;
 pub mod browser_start_page;
 pub mod user_widgets;
 pub mod user_attention;
+pub mod user_sync;
 pub mod widget;
 pub mod workspace_copy;
 pub mod job_templates;

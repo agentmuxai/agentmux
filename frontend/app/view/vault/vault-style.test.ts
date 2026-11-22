@@ -62,10 +62,27 @@ describe("the Vault's stylesheets", () => {
 
     it("keeps a chip's words in one box, so a narrow column wraps them at spaces and not inside the name", () => {
         const css = sass.compile(join(dir, "vault-view.scss"), { loadPaths: [join(dir, "../../..")] }).css;
-        const text = css.match(/\.vault-grant__text\s*\{([^}]*)\}/);
+        const text = css.match(/(?:^|\n)\.vault-grant__text\s*\{([^}]*)\}/);
         expect(text).not.toBeNull();
         expect(text![1]).toMatch(/min-width:\s*0;/);
         expect(text![1]).toMatch(/overflow-wrap:\s*anywhere;/);
+    });
+
+    it("keeps an entry row's chip whole on one line and its id to one line, in the entries table", () => {
+        const css = sass.compile(join(dir, "vault-view.scss"), { loadPaths: [join(dir, "../../..")] }).css;
+        const chip = css.match(/\.vault-entry-table \.vault-grant__text\s*\{([^}]*)\}/);
+        expect(chip![1]).toMatch(/white-space:\s*nowrap;/);
+        expect(chip![1]).toMatch(/text-overflow:\s*ellipsis;/);
+        const id = css.match(/\.vault-entry-table \.vault-id\s*\{([^}]*)\}/);
+        expect(id![1]).toMatch(/white-space:\s*nowrap;/);
+        expect(id![1]).toMatch(/text-overflow:\s*ellipsis;/);
+    });
+
+    it("lays an entry's row out in three layouts by the list's room in em: table, grid, stack", () => {
+        const css = sass.compile(join(dir, "vault-view.scss"), { loadPaths: [join(dir, "../../..")] }).css;
+        expect(css).toContain("@container vault (min-width: 80em)");
+        expect(css).toContain("@container vault (min-width: 52em) and (max-width: 79.99em)");
+        expect(css).toContain("@container vault (max-width: 51.99em)");
     });
 
     it("clears a stacked cell's own line and padding with a rule that outranks the shared table's", () => {

@@ -15,6 +15,7 @@ import { InstancePanel } from "./InstancePanel";
 import { SummaryStatus } from "./SummaryStatus";
 import { LastSoundStatus } from "./LastSoundStatus";
 import { useSummary } from "./use-summary";
+import { sharedUiBusyAlert } from "./ui-busy";
 import { ambientFailingCount } from "@/app/store/ambient-health";
 import { FIT_TIERS, slotDropAt, type DropAt } from "./status-bar-fit";
 import { MultiInputStatus } from "./MultiInputStatus";
@@ -153,6 +154,8 @@ const StatusBar = (): JSX.Element => {
     registerBuiltinStatusBarItems();
     // The summary is kept while anything waits on the person: an ask, a Vault request, a Kanban task.
     const summary = useSummary({});
+    // The Graphics item is kept while this window's page is busy: its red colour is the only place that says so.
+    const busyAlert = sharedUiBusyAlert();
     let barRef: HTMLDivElement | undefined;
     useWidthFit(() => barRef, FIT_TIERS, (el) => [...el.querySelectorAll(".status-bar-left, .status-bar-right")], chromeZoomAtom);
     // The separator goes with its item, so a hidden item leaves none behind.
@@ -163,7 +166,8 @@ const StatusBar = (): JSX.Element => {
                 item.id,
                 item.dropAt ?? (item.id.startsWith("agentmux:") ? undefined : WIDGET_DROP_AT),
                 summary().waiting > 0,
-                ambientFailingCount() > 0
+                ambientFailingCount() > 0,
+                busyAlert()
             )}
         >
             <Show when={separated}>

@@ -8,7 +8,7 @@
 //! the cost (`backend::gpu` module doc), and why a read is kept to one query that stays open between reads. The
 //! engine counter is a rate and needs two collections before it means anything, which is what [`Read::Warming`] is.
 
-use super::aggregate::{AdapterInfo, Instances, RawCounters};
+use super::aggregate::{AdapterInfo, AdapterType, Instances, RawCounters};
 use super::names::luid;
 use std::time::{Duration, Instant};
 use windows::core::{HSTRING, PCWSTR};
@@ -192,6 +192,71 @@ fn names_unlisted(raw: &RawCounters, infos: &[AdapterInfo]) -> bool {
         .any(|l| !infos.iter().any(|i| i.luid == l))
 }
 
+/// The kernel's adapter-type query (`D3DKMTQueryAdapterInfo` with `KMTQAITYPE_ADAPTERTYPE`, gdi32): what Windows says an
+/// adapter is. Declared here, with the few types it takes, rather than through a binding crate: three calls and three
+/// structs, laid out as `d3dkmthk.h` does.
+mod kmt {
+    use super::AdapterType;
+
+    #[repr(C)]
+    struct Luid {
+        low: u32,
+        high: i32,
+    }
+
+    #[repr(C)]
+    struct OpenAdapterFromLuid {
+        adapter_luid: Luid,
+        h_adapter: u32,
+    }
+
+    #[repr(C)]
+    struct QueryAdapterInfo {
+        h_adapter: u32,
+        /// `KMTQAITYPE_ADAPTERTYPE`.
+        kind: u32,
+        private_driver_data: *mut core::ffi::c_void,
+        private_driver_data_size: u32,
+    }
+
+    #[repr(C)]
+    struct CloseAdapter {
+        h_adapter: u32,
+    }
+
+    #[link(name = "gdi32", kind = "raw-dylib")]
+    extern "system" {
+        fn D3DKMTOpenAdapterFromLuid(open: *mut OpenAdapterFromLuid) -> i32;
+        fn D3DKMTQueryAdapterInfo(query: *mut QueryAdapterInfo) -> i32;
+        fn D3DKMTCloseAdapter(close: *mut CloseAdapter) -> i32;
+    }
+
+    const KMTQAITYPE_ADAPTERTYPE: u32 = 15;
+
+    /// What Windows says the adapter with this id is; `None` when it won't say (the query failed: the adapter went away, or a
+    /// driver without the query), in which case nothing is assumed of it.
+    pub fn adapter_type(high: i32, low: u32) -> Option<AdapterType> {
+        let mut open = OpenAdapterFromLuid { adapter_luid: Luid { low, high }, h_adapter: 0 };
+        // SAFETY: the structs are the kernel's own layouts, owned here for the call; the handle opened is closed below.
+        unsafe {
+            if D3DKMTOpenAdapterFromLuid(&mut open) != 0 {
+                return None;
+            }
+            let mut value: u32 = 0;
+            let mut query = QueryAdapterInfo {
+                h_adapter: open.h_adapter,
+                kind: KMTQAITYPE_ADAPTERTYPE,
+                private_driver_data: (&mut value as *mut u32).cast(),
+                private_driver_data_size: core::mem::size_of::<u32>() as u32,
+            };
+            let status = D3DKMTQueryAdapterInfo(&mut query);
+            let mut close = CloseAdapter { h_adapter: open.h_adapter };
+            D3DKMTCloseAdapter(&mut close);
+            (status == 0).then_some(AdapterType(value))
+        }
+    }
+}
+
 /// The adapters DXGI lists: their names and memory, in the spelling of an id the counters use.
 fn dxgi_adapters() -> Vec<AdapterInfo> {
     let mut out = Vec::new();
@@ -203,10 +268,14 @@ fn dxgi_adapters() -> Vec<AdapterInfo> {
             i += 1;
             let Ok(d) = adapter.GetDesc1() else { continue };
             let end = d.Description.iter().position(|&c| c == 0).unwrap_or(d.Description.len());
+            // What the kernel says the adapter is, which DXGI's description (a name and a memory size) can't: a virtual display
+            // adapter is listed by DXGI under the name and memory of the GPU that draws for it.
+            let kind = kmt::adapter_type(d.AdapterLuid.HighPart, d.AdapterLuid.LowPart);
             out.push(AdapterInfo {
                 luid: luid(d.AdapterLuid.HighPart, d.AdapterLuid.LowPart),
                 name: String::from_utf16_lossy(&d.Description[..end]).trim().to_string(),
-                software: d.Flags & DXGI_SOFTWARE != 0,
+                software: d.Flags & DXGI_SOFTWARE != 0 || kind.is_some_and(AdapterType::is_software),
+                virtual_display: kind.is_some_and(AdapterType::is_virtual_display),
                 dedicated_total: d.DedicatedVideoMemory as u64,
                 shared_total: d.SharedSystemMemory as u64,
             });
@@ -231,6 +300,18 @@ mod tests {
             }
             Err(why) => assert!(!why.is_empty()),
         }
+    }
+
+    /// The kernel answers for every adapter DXGI lists on this machine (or, for one that went away between the two calls,
+    /// says nothing): never a panic, and never "virtual" for the only adapter a machine has unless it truly is one, which
+    /// `aggregate` keeps anyway.
+    #[test]
+    fn the_kernel_says_what_each_listed_adapter_is() {
+        for a in dxgi_adapters() {
+            assert!(!(a.software && a.virtual_display), "an adapter is one or the other: {a:?}");
+        }
+        // An id no adapter has: no answer, not a made-up one.
+        assert!(kmt::adapter_type(0x7fff_ffff, 0xdead_beef).is_none());
     }
 
     #[test]

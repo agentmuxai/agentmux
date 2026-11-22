@@ -8,7 +8,7 @@ import { getGpuInfo, gpuClassBadge } from "@/util/gpuutil";
 import { Show, type JSX } from "solid-js";
 import { closeGpuPanel, gpuPanelAnchor, toggleGpuPanel } from "./gpu-panel-state";
 import { GpuPanel } from "./GpuPanel";
-import { sharedUiBusy } from "./ui-busy";
+import { sharedUiBusy, sharedUiBusyAlert } from "./ui-busy";
 
 // Compact bottom-left status-bar line for GPU/WebGL state (enabled/disabled). A click opens the GPU panel (use and
 // memory, per adapter and per process; GpuPanel.tsx), the same one the "GPU n%" meter beside CPU opens. Driver detail
@@ -17,7 +17,12 @@ const GpuStatus = (): JSX.Element => {
     const info = getGpuInfo();
     let ref: HTMLButtonElement | undefined;
 
+    // The window's page busy share (ui-busy.ts): its figure is in the panel's footer; here it is the colour, and the tip says why.
+    const busy = sharedUiBusy();
+    const pulling = sharedUiBusyAlert();
+
     const color = () => {
+        if (pulling()) return "var(--error-text-color)";
         switch (info.classification) {
             case "hardware":
                 return "var(--secondary-text-color)";
@@ -29,6 +34,11 @@ const GpuStatus = (): JSX.Element => {
     };
 
     const tip = () => {
+        const busyPart = pulling() && busy() != null ? ` · ${t("uiBusy.gfxTip", { pct: busy()! })}` : "";
+        return `${graphicsTip()}${busyPart}`;
+    };
+
+    const graphicsTip = () => {
         const term = termRendererAtom();
         const rend = info.renderer ? ` — ${info.renderer}` : "";
         const termPart = term ? ` · terminal: ${term.toUpperCase()}` : "";
@@ -60,7 +70,7 @@ const GpuStatus = (): JSX.Element => {
                 GFX {gpuClassBadge(info.classification)}
             </Button>
             <Show when={ref != null && gpuPanelAnchor() === ref}>
-                <GpuPanel anchor={ref} uiBusy={sharedUiBusy()()} onClose={closeGpuPanel} />
+                <GpuPanel anchor={ref} uiBusy={busy()} onClose={closeGpuPanel} />
             </Show>
         </>
     );

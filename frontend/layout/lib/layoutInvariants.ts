@@ -64,6 +64,12 @@ export function isEffectivelyMinimized(node: LayoutNode | undefined): boolean {
     return node.children.every((c) => isEffectivelyMinimized(c));
 }
 
+/** True when anything in the tree under `node` renders as a minimized chip. */
+export function hasMinimizedNode(node: LayoutNode | undefined): boolean {
+    if (!node) return false;
+    return isEffectivelyMinimized(node) || (node.children ?? []).some((c) => hasMinimizedNode(c));
+}
+
 /** I10 — a block is held by one pane only: two holders draw it twice, and closing either closes both. */
 function duplicateViolations(root: LayoutNode): LayoutViolation[] {
     return duplicateBlockIds(root).map((blockId) => ({

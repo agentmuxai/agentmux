@@ -11,7 +11,7 @@ import { gpuColor } from "./gpu-format";
 import { closeGpuPanel, gpuPanelAnchor, toggleGpuPanel } from "./gpu-panel-state";
 import { GpuPanel } from "./GpuPanel";
 import type { SysStats } from "./SystemStatsState";
-import { sharedUiBusy, UI_BUSY_WARN_PCT, uiBusyColor } from "./ui-busy";
+import { sharedUiBusy } from "./ui-busy";
 
 function formatMemBytes(gb: number): string {
     if (gb >= 1) return `${gb.toFixed(1)}G`;
@@ -71,24 +71,6 @@ export function GpuReadout(props: Reading): JSX.Element {
             <Show when={open()}>
                 <GpuPanel anchor={ref} uiBusy={sharedUiBusy()()} onClose={closeGpuPanel} />
             </Show>
-        </Show>
-    );
-}
-
-/** The page's busy share ("UI n%"), with its separator; absent while this window is in the background. */
-export function UiBusyReadout(): JSX.Element {
-    const busy = sharedUiBusy();
-    return (
-        <Show when={busy() != null}>
-            <span class="stat-separator">|</span>
-            <span
-                class="stat-mono stat-ui"
-                style={{ color: uiBusyColor(busy()!) }}
-                data-tip={t("uiBusy.tip", { warn: UI_BUSY_WARN_PCT })}
-                aria-label={t("uiBusy.aria")}
-            >
-                {t("uiBusy.label")} {busy()}%
-            </span>
         </Show>
     );
 }

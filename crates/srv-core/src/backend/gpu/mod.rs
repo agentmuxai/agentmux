@@ -18,6 +18,12 @@
 //! Windows reads the PDH counters (`pdh`). Linux reads what the kernel and the driver publish (`linux`: AMD's sysfs files,
 //! NVIDIA through NVML loaded at run time, `fdinfo` for the processes, Intel's memory only). macOS is a later phase and
 //! reports [`GpuSampleState::Unsupported`].
+//!
+//! **The panel lists real GPUs only, on every OS, decided by what the OS says an adapter is and never by its name.**
+//! Windows asks the kernel's adapter type (`aggregate::AdapterType`) and drops an indirect display device, an adapter that
+//! cannot render, and the software renderer; Linux lists the PCI bus's display controllers, so a virtual DRM device is
+//! never a row (`linux`). A macOS reader, when it is written, must list only the devices Metal itself reports as GPUs
+//! and treat anything else the same way. Everywhere the one adapter a machine has is shown, however virtual.
 
 pub mod aggregate;
 #[cfg(any(target_os = "linux", test))]

@@ -385,16 +385,24 @@ function applyChromeZoomCSS(factor: number): void {
     document.documentElement.style.setProperty("--zoomfactor", String(factor));
 }
 
+// The level the last step asked for, which the page may not show yet: a wheel or a trackpad sends
+// several events a frame, and each one steps from the one before it. The page is brought to it
+// once a frame (the first step of a burst at once, the rest with the frame after it): restyling
+// and re-laying out the whole window for a level nobody sees is the cost of a zoom step.
+let wantedChromeZoom: number | null = null;
+let chromeZoomFrame = 0;
+
 export function chromeZoomIn(step: number = WHEEL_STEP): void {
-    setChromeZoom(chromeZoomAtom() + step);
+    setChromeZoom((wantedChromeZoom ?? chromeZoomAtom()) + step);
 }
 
 export function chromeZoomOut(step: number = WHEEL_STEP): void {
-    setChromeZoom(chromeZoomAtom() - step);
+    setChromeZoom((wantedChromeZoom ?? chromeZoomAtom()) - step);
 }
 
-function setChromeZoom(factor: number): void {
-    const clamped = clampZoom(roundZoom(factor));
+function showChromeZoom(clamped: number): void {
+    wantedChromeZoom = null;
+    if (clamped === chromeZoomAtom()) return;
     setChromeZoomSignal(clamped);
     applyChromeZoomCSS(clamped);
     try {
@@ -402,7 +410,33 @@ function setChromeZoom(factor: number): void {
     } catch {
         // Unavailable: the zoom still applies to this page.
     }
+}
+
+function setChromeZoom(factor: number): void {
+    const clamped = clampZoom(roundZoom(factor));
+    // Before the page changes: the indicator measures its box, which would make the browser restyle
+    // and lay out the whole window on the spot, ahead of the frame that does it anyway.
     showZoomIndicator(`Chrome ${Math.round(clamped * 100)}%`);
+    if (typeof requestAnimationFrame !== "function") {
+        showChromeZoom(clamped);
+        return;
+    }
+    if (chromeZoomFrame !== 0) {
+        wantedChromeZoom = clamped;
+        return;
+    }
+    showChromeZoom(clamped);
+    holdChromeZoomFrame();
+}
+
+/** Steps that come before the next frame wait for it; a frame that shows one holds the one after it too. */
+function holdChromeZoomFrame(): void {
+    chromeZoomFrame = requestAnimationFrame(() => {
+        chromeZoomFrame = 0;
+        if (wantedChromeZoom === null) return;
+        showChromeZoom(wantedChromeZoom);
+        holdChromeZoomFrame();
+    });
 }
 
 /**
@@ -420,6 +454,9 @@ export function initChromeZoom(opts?: { fresh?: boolean }): void {
         // Unavailable: start at the default.
     }
     const factor = Number.isFinite(stored) ? clampZoom(stored) : DEFAULT_ZOOM;
+    wantedChromeZoom = null;
+    if (chromeZoomFrame !== 0) cancelAnimationFrame(chromeZoomFrame);
+    chromeZoomFrame = 0;
     setChromeZoomSignal(factor);
     applyChromeZoomCSS(factor);
 }

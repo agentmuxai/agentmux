@@ -17,9 +17,21 @@
     overflow-y: auto;
 }
 
+// The four tiles sit in one row while four fit at their least width (which scales with the pane's zoom, as their
+// text does), then two by two, and in one column only when two cannot sit side by side (150px each, as before):
+// never three and one. The columns' least width is picked, not stepped: a quarter of the row while four fit, else
+// half of it (the huge multiplier turns "four do not fit" into the half). Each is a pixel short, so rounding
+// cannot drop a column.
 .sysinfo-overview-tiles {
+    --sysinfo-tile-min: calc(150px * var(--sysinfo-zoom, 1));
+    --sysinfo-tile-quarter: calc((100% - 3 * var(--sysinfo-gap)) / 4 - 1px);
+    --sysinfo-tile-half: calc((100% - var(--sysinfo-gap)) / 2 - 1px);
+    --sysinfo-tile-short: calc((4 * var(--sysinfo-tile-min) + 3 * var(--sysinfo-gap) - 100%) * 1000);
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    grid-template-columns: repeat(
+        auto-fit,
+        minmax(clamp(var(--sysinfo-tile-quarter), var(--sysinfo-tile-short), max(var(--sysinfo-tile-half), 150px)), 1fr)
+    );
     gap: var(--sysinfo-gap);
 }
 
