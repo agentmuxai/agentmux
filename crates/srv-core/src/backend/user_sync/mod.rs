@@ -9,6 +9,7 @@
 pub mod adapter;
 pub mod hlc;
 pub mod kanban;
+pub mod lock;
 pub mod log;
 pub mod members;
 pub mod record;
@@ -16,6 +17,8 @@ pub mod seal;
 
 #[cfg(test)]
 mod kanban_tests;
+#[cfg(test)]
+mod lock_tests;
 #[cfg(test)]
 mod members_tests;
 #[cfg(test)]
