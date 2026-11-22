@@ -7,6 +7,7 @@
 //! does not report itself as remote-controlled (Chromium turns that report on for a debugging pipe, an automation or headless switch).
 //! A prototype for the decision in task 48354: no agent driving, no windows list, a US keyboard, a fixed screen size.
 
+mod clipboard;
 mod frames;
 mod held;
 mod keymap;
@@ -171,6 +172,8 @@ async fn run(mut socket: WebSocket, start: Start, ended: impl std::future::Futur
         let _ = socket.send(error(&e)).await;
         return;
     }
+    // The screen's clipboard, for an exact paste and a copy on the person's request; without it a paste is typed key by key.
+    let clip = clipboard::Clipboard::connect(&session.display).map(Arc::new).map_err(|e| tracing::warn!(error = %e, "screen browser: no clipboard")).ok();
     let (wtx, mut counts) = mpsc::unbounded_channel::<usize>();
     if let Err(e) = watch_windows(&session.display, wtx, input.opened.clone()) {
         let _ = socket.send(error(&e)).await;
@@ -195,7 +198,7 @@ async fn run(mut socket: WebSocket, start: Start, ended: impl std::future::Futur
             },
             incoming = socket.recv() => match incoming {
                 Some(Ok(Message::Text(t))) => {
-                    if let Some(said) = on_client(&input, t.as_str(), &start, watch.keys_held(Instant::now()), &mut held, &activity).await {
+                    if let Some(said) = on_client(&input, t.as_str(), &start, watch.keys_held(Instant::now()), &mut held, &activity, clip.as_ref()).await {
                         socket.send(said).await.is_ok()
                     } else {
                         true
@@ -249,7 +252,7 @@ fn watch_windows(display: &str, tx: mpsc::UnboundedSender<usize>, opened: Arc<At
 
 /// One message from the pane, sent to the screen. A word for the pane when there is one to say. While `keys_held`, a key press or a
 /// paste is dropped (a window just opened that the person did not choose); a release still goes, so no key is left down.
-async fn on_client(screen: &x::Screen, text: &str, start: &Start, keys_held: bool, held: &mut held::Held, activity: &pace::Activity) -> Option<Message> {
+async fn on_client(screen: &x::Screen, text: &str, start: &Start, keys_held: bool, held: &mut held::Held, activity: &pace::Activity, clip: Option<&Arc<clipboard::Clipboard>>) -> Option<Message> {
     let msg = match protocol::parse(text) {
         Ok(m) => m,
         Err(e) => return Some(error(&e)),
@@ -264,7 +267,12 @@ async fn on_client(screen: &x::Screen, text: &str, start: &Start, keys_held: boo
     if !matches!(msg, ClientMsg::Mouse { kind: MouseKind::Move, .. } | ClientMsg::Resize { .. }) {
         activity.touch();
     }
+    if matches!(msg, ClientMsg::Copy) {
+        return copy_out(clip).await;
+    }
     let sent = match msg {
+        // The text goes to the screen's clipboard and Ctrl+V is pressed, with the other modifiers let go; without a clipboard it is typed key by key.
+        ClientMsg::Paste { ref text } if clip.is_some() => paste_exact(screen, clip, text, held.keys()).await,
         // The paste is typed with the modifiers let go (Ctrl+V is the paste itself), and they are pressed again after.
         ClientMsg::Paste { .. } => send_without_modifiers(screen, &msg, held.keys()).await,
         _ => send_input(screen, &msg).await,
@@ -276,6 +284,41 @@ async fn on_client(screen: &x::Screen, text: &str, start: &Start, keys_held: boo
             _ => None,
         },
         Err(e) => Some(error(&e)),
+    }
+}
+
+/// Paste `text` exactly: offer it as the screen's clipboard and press Ctrl+V (the other modifiers the person holds are let go for the while, and
+/// pressed again). The offer ends a moment later, so nothing stays on the screen's clipboard for the browser to read on its own.
+async fn paste_exact(screen: &x::Screen, clip: Option<&Arc<clipboard::Clipboard>>, text: &str, held: &[u8]) -> Result<(), String> {
+    let clip = clip.ok_or("no clipboard")?;
+    let generation = clip.offer(text)?;
+    let v = keymap::keycode("KeyV").ok_or("no such key")?;
+    for k in held {
+        screen.key(*k, false)?;
+    }
+    screen.key(keymap::CONTROL, true)?;
+    let tapped = tap(screen, v, false);
+    screen.key(keymap::CONTROL, false)?;
+    for k in held {
+        screen.key(*k, true)?;
+    }
+    let clip = clip.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(clipboard::OFFER_HOLD).await;
+        clip.end(generation);
+    });
+    tapped
+}
+
+/// What the browser copied, for the pane (which puts it on the person's clipboard): asked for by the person (Ctrl+C or Ctrl+X in the pane).
+/// None when the browser has copied nothing.
+async fn copy_out(clip: Option<&Arc<clipboard::Clipboard>>) -> Option<Message> {
+    let clip = clip?.clone();
+    match tokio::task::spawn_blocking(move || clip.fetch()).await {
+        Ok(Ok(Some(text))) => Some(Message::Text(json!({ "t": "clipboard", "text": text }).to_string().into())),
+        Ok(Ok(None)) => None,
+        Ok(Err(e)) => Some(error(&e)),
+        Err(_) => Some(error("the remote browser's clipboard could not be read")),
     }
 }
 
@@ -345,7 +388,7 @@ async fn send_input(screen: &x::Screen, msg: &ClientMsg) -> Result<(), String> {
             navigate(screen, Go::Url, &url).await?
         }
         ClientMsg::Nav { go, url } => navigate(screen, *go, url).await?,
-        ClientMsg::Resize { .. } | ClientMsg::Window { .. } => {}
+        ClientMsg::Resize { .. } | ClientMsg::Window { .. } | ClientMsg::Copy => {}
     }
     Ok(())
 }

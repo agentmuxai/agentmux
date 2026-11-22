@@ -5,7 +5,10 @@
 // Keys and paste are taken only while the stage has focus (it is focusable and takes focus when pressed), so typing
 // elsewhere in the window is never sent. docs/specs/SPEC_STREAMED_BROWSER_PANE_DEMO_2026_11_15.md §4, §7.
 
-import { isPasteChord, keyMessage, mouseMessage, wheelMessage } from "./streamed-protocol";
+import { isCopyChord, isPasteChord, keyMessage, mouseMessage, wheelMessage } from "./streamed-protocol";
+
+/** How long after a copy chord the pane asks for what was copied: the browser has put it on its clipboard by then. */
+export const COPY_DELAY_MS = 150;
 
 type Send = (message: object) => void;
 
@@ -17,6 +20,7 @@ export function attachStageInput(stage: HTMLElement, canvas: () => HTMLElement |
     let pressed = false;
     let moveFrame = 0;
     let lastMove: MouseEvent | null = null;
+    let copyTimer: ReturnType<typeof setTimeout> | undefined;
 
     const onDown = (e: MouseEvent) => {
         if (!onPage(e)) return;
@@ -50,6 +54,11 @@ export function attachStageInput(stage: HTMLElement, canvas: () => HTMLElement |
         if (!onPage(e) || isPasteChord(e)) return;
         e.preventDefault();
         send(keyMessage(type, e));
+        // The person copied or cut in the remote browser: ask for the text, to put it on their own clipboard (only on their say-so).
+        if (type === "down" && isCopyChord(e)) {
+            clearTimeout(copyTimer);
+            copyTimer = setTimeout(() => send({ t: "copy" }), COPY_DELAY_MS);
+        }
     };
     const onKeyDown = onKey("down");
     const onKeyUp = onKey("up");
@@ -77,6 +86,7 @@ export function attachStageInput(stage: HTMLElement, canvas: () => HTMLElement |
         stage.removeEventListener("paste", onPaste);
         stage.removeEventListener("contextmenu", noMenu);
         window.removeEventListener("mouseup", onUp);
+        clearTimeout(copyTimer);
         if (moveFrame) cancelAnimationFrame(moveFrame);
     };
 }

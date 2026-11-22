@@ -217,6 +217,7 @@
     "browser.streamed.reconnect": "Reconnect",
     "browser.streamed.fullBrowser": "Open in a full browser you drive",
     "browser.streamed.fullBrowserOff": "The full browser is not available on this server.",
+    "browser.streamed.copyFailed": "What you copied could not be put on your clipboard here. Click the page and copy again.",
     "browser.streamed.fullBrowserOn": "A full browser you drive. Only you can use it; agents cannot.",
     "settings.sections.terminal": "Terminal",
     "settings.sections.keyboard": "Keyboard shortcuts",

@@ -75,6 +75,8 @@ interface Sinks {
     setNotice: (text: string) => void;
     setStatus: (status: PaneStatus) => void;
     remember: (url: string) => void;
+    /** Put the text the person copied in the remote browser on their own clipboard. */
+    putClipboard: (text: string) => void;
 }
 
 function applyServerMessage(m: ServerMsg, to: Sinks): void {
@@ -85,7 +87,18 @@ function applyServerMessage(m: ServerMsg, to: Sinks): void {
     } else if (m.t === "windows") to.setWindows({ active: m.active, windows: m.windows });
     else if (m.t === "notice") to.setNotice(m.message);
     else if (m.t === "error") to.setError(m.message);
+    else if (m.t === "clipboard") to.putClipboard(m.text);
     else if (m.t === "closed") to.setStatus("ended");
+}
+
+/**
+ * Put the text the person copied in the remote browser on their own clipboard. The page is in the foreground and the person just pressed a
+ * key, so the browser lets it write their clipboard; if it does not, say so.
+ */
+function copyToClipboard(text: string, setNotice: (text: string) => void): void {
+    const put = navigator.clipboard?.writeText(text);
+    if (put) put.catch(() => setNotice(t("browser.streamed.copyFailed")));
+    else setNotice(t("browser.streamed.copyFailed"));
 }
 
 /** The message that tells the server the stage's size. */
@@ -155,7 +168,7 @@ export function useStreamedPane(draw: (jpeg: Uint8Array) => void, startUrl: () =
                     // The pane may have been resized while the socket was opening: the server has the size it started with.
                     if (clampSide(size.w) !== started.w || clampSide(size.h) !== started.h) handle?.send(resizeMessage(size));
                 },
-                onMessage: (m) => applyServerMessage(m, { setNav, setError, setWindows, setNotice, setStatus, remember }),
+                onMessage: (m) => applyServerMessage(m, { setNav, setError, setWindows, setNotice, setStatus, remember, putClipboard: (text) => copyToClipboard(text, setNotice) }),
                 // The server's browser is being made for this pane: its own status, until the socket opens.
                 onStarting: () => setStatus("starting"),
                 onEnd: (how, reason) => {
