@@ -74,6 +74,7 @@ function fakeWindow(start: Record<string, { view: string; tab?: string; facts?: 
         tabOf: (blockId) => panes.get(blockId)?.tab,
         tabExists: (tabId) => tabId === "t1" || tabId === "t2",
         settingExists: async (id) => id === "recording.engine",
+        vaultEntryExists: async (id) => id === "e_ab12cd34",
         locate: (blockId) => calls.located.push(blockId),
         announce: (text) => calls.announced.push(text),
         personInput: () => input,
@@ -129,7 +130,8 @@ describe("openDestination: outcomes", () => {
         expect(gone.place).toBe("missing");
         const there = await ex.open("agentmux://settings/recording#recording.engine", { source: PERSON });
         expect(there.place).toBeUndefined();
-        expect((await ex.open("agentmux://vault/entry/e_ab12cd34", { source: PERSON })).place).toBe("missing");
+        expect((await ex.open("agentmux://vault/entry/e_ab12cd34", { source: PERSON })).place).toBeUndefined();
+        expect((await ex.open("agentmux://vault/entry/e_ffff0000", { source: PERSON })).place).toBe("missing");
     });
 });
 

@@ -31,6 +31,7 @@ import {
     vaultAvailable,
     vaultError,
     vaultProblem,
+    vaultEntries,
     vaultList,
     vaultRequests,
 } from "./vault-store";
@@ -89,6 +90,21 @@ function keepOnScreenNoted(model: VaultViewModel): void {
     });
 }
 
+/** Opened on an entry by its link id (a deep link): its section, then its row scrolled into view. The meta is cleared
+ *  once the entries are known; an id no entry has leaves the Vault as it is (the opener says the entry is gone). */
+function revealLinkedEntry(model: VaultViewModel, setSection: (id: VaultPaneSection) => void, root: { current: HTMLElement | null }): void {
+    createEffect(
+        on([model.entryLinkAtom, vaultEntries], ([link, entries]) => {
+            if (!link || !entries) return;
+            model.setMeta({ "vault:entry-link": null });
+            const entry = entries.find((e) => e.link_id === link);
+            if (!entry) return;
+            setSection(entry.section as VaultPaneSection);
+            requestAnimationFrame(() => root.current?.querySelector(`[data-entry="${CSS.escape(entry.id)}"]`)?.scrollIntoView?.({ block: "nearest" }));
+        })
+    );
+}
+
 export function VaultView(props: { model: VaultViewModel }): JSX.Element {
     const model = props.model;
     // Names the section the list opens and scrolls to (vault-list.tsx).
@@ -116,6 +132,7 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
     // The pane's own width decides whether the header keeps its buttons, never the window's.
     const container: { current: HTMLDivElement | null } = { current: null };
     useOnResize(container, (rect) => model.setWidth(rect.width));
+    revealLinkedEntry(model, setSection, container);
 
     const focused = focusedRequest(model);
 

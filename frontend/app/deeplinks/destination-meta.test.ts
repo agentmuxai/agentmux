@@ -52,10 +52,12 @@ describe("a link's place is the pane's own meta (R14)", () => {
         expect(plan("agentmux://settings/recording#recording.engine").revealSetting).toBe("recording.engine");
     });
 
-    it("opens the Vault and calls an entry missing until entries have opaque ids", () => {
+    it("opens the Vault on an entry by its opaque id", () => {
         const p = plan("agentmux://vault/entry/e_ab12cd34");
         expect(p.view).toBe("vault");
-        expect(p.missing).toBe("entry");
+        expect(p.vaultEntry).toBe("e_ab12cd34");
+        expect(p.focusMeta).toMatchObject({ "vault:entry-link": "e_ab12cd34" });
+        expect(p.missing).toBeUndefined();
     });
 
     it("is one pane: never more than one view in the plan (G10)", () => {
