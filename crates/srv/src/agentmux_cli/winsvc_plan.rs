@@ -181,7 +181,8 @@ fn rights_mask(rights: &str) -> u32 {
     rights.as_bytes().chunks(2).map(|c| right_bits(std::str::from_utf8(c).unwrap_or(""))).fold(0, |all, bit| all | bit)
 }
 
-/// Who besides the administrators and `allowed` (the service's own account, when it may) can change the thing whose access
+/// Who besides the administrators and `allowed` (the service's own account, when it may; an entry ending in `*` is a prefix, so
+/// `S-1-5-80-*` is any service's account) can change the thing whose access
 /// list is `sddl` (a DACL, or an `O:...D:...` text), each named once, in the order the list gives them. An entry that only
 /// applies to what is inside the folder (inherit-only) does not change the folder itself and is not counted. A denial is
 /// not counted either: a list is read as its allowances, so a person is told of more than can happen, never of less.
@@ -200,7 +201,10 @@ pub fn who_can_change(sddl: &str, allowed: &[&str], reach: Reach) -> Vec<String>
         if !matches!(kind, "A" | "OA" | "XA" | "ZA") || inherit_only || principal.is_empty() || !changes(rights_mask(rights), reach) {
             continue;
         }
-        let known = ADMINS.iter().chain(allowed.iter()).any(|ok| ok.eq_ignore_ascii_case(principal));
+        let known = ADMINS.iter().chain(allowed.iter()).any(|ok| match ok.strip_suffix('*') {
+            Some(prefix) => principal.len() >= prefix.len() && principal[..prefix.len()].eq_ignore_ascii_case(prefix),
+            None => ok.eq_ignore_ascii_case(principal),
+        });
         let who = say_who(&principal.to_ascii_uppercase()).name;
         if !known && !out.contains(&who) {
             out.push(who);
@@ -290,6 +294,27 @@ pub fn digest_is_valid(digest: &str) -> bool {
 /// anything. `rels` are the package's files, lower-cased and with forward slashes.
 pub fn missing_from_package(rels: &[String]) -> Vec<&'static str> {
     ["bin/agentmux.exe", "bin/agentmux-srv.exe", "web/index.html"].into_iter().filter(|want| !rels.iter().any(|r| r.eq_ignore_ascii_case(want))).collect()
+}
+
+/// Why the digest the administrator step was given cannot be taken, or `None` when it is the digest of the package it read. The step
+/// is not a command to type: it is started by `agentmux service install` with the digest of what that command hashed and held, and
+/// it installs nothing without one.
+pub fn digest_problem(given: Option<&str>, actual: &str) -> Option<String> {
+    match given {
+        None => Some("this step is started by `agentmux service install`, which gives it the digest of the package it checked: run that instead".to_string()),
+        Some(d) if !digest_is_valid(d) => Some("the digest the step was given is not a SHA-256 digest: run `agentmux service install`".to_string()),
+        Some(d) if d != actual => Some("the package is not the one that was checked before the administrator prompt (it changed): nothing is installed".to_string()),
+        Some(_) => None,
+    }
+}
+
+/// Why this is not an account that may be given read on the server's key, or `None`. The person is named by their own account's
+/// SID (`whoami /user` says it); a group or a well-known SID would let everyone in it read the key.
+pub fn reader_problem(sid: &str) -> Option<String> {
+    if agentmux_common::owner_only::is_account_sid(sid) {
+        return None;
+    }
+    Some(format!("{sid:?} is not the SID of a person's own account, and a group or a well-known one (Everyone, Users, Authenticated Users, Anonymous) would let all of them read the server's key. Pass the SID `whoami /user` gives for the account that signs in, or leave --reader out"))
 }
 
 /// The sentence a refusal for a missing administrator gives, the one a person reads whoever ran the command (C.3).
@@ -469,6 +494,55 @@ mod tests {
         assert!(digest_is_valid(&"0123456789abcdef".repeat(4)));
         for bad in ["", "abc", &"A".repeat(64), &"g".repeat(64), &"a".repeat(65)] {
             assert!(!digest_is_valid(bad), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn the_step_installs_nothing_without_the_digest_of_the_package_that_was_checked() {
+        let digest = "ab".repeat(32);
+        assert_eq!(digest_problem(Some(&digest), &digest), None);
+        assert!(digest_problem(None, &digest).unwrap().contains("agentmux service install"), "no digest given");
+        assert!(digest_problem(Some("abc"), &digest).unwrap().contains("not a SHA-256 digest"), "not a digest");
+        assert!(digest_problem(Some(&"AB".repeat(32)), &digest).is_some(), "not lower case");
+        assert!(digest_problem(Some(&"cd".repeat(32)), &digest).unwrap().contains("it changed"), "another package");
+    }
+
+    #[test]
+    fn a_reader_is_refused_unless_it_is_a_persons_own_account_and_the_refusal_says_what_to_pass() {
+        assert_eq!(reader_problem("S-1-5-21-1-2-3-1001"), None);
+        for bad in ["S-1-1-0", "S-1-5-11", "S-1-5-32-545", "S-1-5-7", "S-1-5-18", "S-1-5-21-1-2-3-513", "S-1-5-21-1-2-3-501", "Everyone"] {
+            let said = reader_problem(bad).unwrap();
+            assert!(said.contains("whoami /user") && said.contains(&format!("{bad:?}")), "{bad}: {said}");
+        }
+    }
+
+    #[test]
+    fn a_service_account_may_be_allowed_by_prefix_and_nobody_else_with_that_prefix_is() {
+        let sddl = "D:P(A;OICI;FA;;;S-1-5-80-1-2-3-4-5)(A;OICI;FA;;;S-1-5-21-1-2-3-1001)";
+        assert_eq!(who_can_change(sddl, &["S-1-5-80-*"], Reach::TheFolder), vec!["S-1-5-21-1-2-3-1001"]);
+        assert_eq!(who_can_change(sddl, &[], Reach::TheFolder).len(), 2);
+    }
+
+    /// The test switch for one check exists only in a debug build: the function that reads it is compiled for debug assertions
+    /// alone, so the name is not in a release build, and no release profile or workflow turns debug assertions on.
+    #[test]
+    fn the_test_switch_is_compiled_only_into_debug_builds_and_no_release_build_turns_debug_assertions_on() {
+        let source = include_str!("winsvc_apply.rs");
+        let lines: Vec<&str> = source.lines().collect();
+        let uses: Vec<usize> = lines.iter().enumerate().filter(|(_, l)| l.contains("AGENTMUX_TEST_SKIP_ABOVE_CHECK")).map(|(i, _)| i).collect();
+        assert_eq!(uses.len(), 1, "the name is used in one place");
+        assert_eq!(lines[uses[0] - 2].trim(), "#[cfg(debug_assertions)]", "and only where debug assertions are on");
+        let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
+        let mut texts = vec![std::fs::read_to_string(workspace.join("Cargo.toml")).unwrap_or_default()];
+        texts.extend(["config.toml", "config"].iter().filter_map(|f| std::fs::read_to_string(workspace.join(".cargo").join(f)).ok()));
+        if let Ok(dir) = std::fs::read_dir(workspace.join(".github").join("workflows")) {
+            texts.extend(dir.flatten().filter_map(|f| std::fs::read_to_string(f.path()).ok()));
+        }
+        for text in texts {
+            for line in text.lines().filter(|l| !l.trim_start().starts_with('#')) {
+                let squeezed: String = line.split_whitespace().collect();
+                assert!(!squeezed.contains("debug-assertions=true") && !squeezed.contains("Cdebug-assertions"), "a build turns debug assertions on: {line}");
+            }
         }
     }
 

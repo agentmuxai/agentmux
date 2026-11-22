@@ -152,7 +152,25 @@ fn package_root() -> Result<PathBuf, String> {
     exe.parent().and_then(Path::parent).map(Path::to_path_buf).ok_or_else(|| "cannot find the package this program is in".to_string())
 }
 
-/// `service install`, as an administrator.
+/// The accounts that may read the key, as given: each must be a person's own account, as Windows says too, or the install is
+/// refused.
+fn readers_of(a: &ApplyArgs) -> Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    for sid in &a.reader {
+        if let Some(problem) = plan::reader_problem(sid) {
+            return Err(problem);
+        }
+        if !owner_only::sid_is_user(sid) {
+            return Err(format!("{sid} is not a user account on this computer (Windows says it is a group or unknown). Pass the SID `whoami /user` gives for the account that signs in"));
+        }
+        out.push(sid.clone());
+    }
+    Ok(out)
+}
+
+/// `service install`, as an administrator. Everything that can refuse comes first and leaves a service that is installed as it
+/// was: the arguments, the package and its digest, the folders and the staged copy, hashed at its destination. Only then is the
+/// service touched.
 fn install(channel: &str, a: &ApplyArgs, layout: &Layout, report: &mut Report) -> Result<(), String> {
     if !plan::version_is_valid(crate::VERSION) {
         return Err(format!("{:?} is not a version a folder can be named for", crate::VERSION));
@@ -160,37 +178,62 @@ fn install(channel: &str, a: &ApplyArgs, layout: &Layout, report: &mut Report) -
     if !a.allow_domain_joined && win::domain_joined() {
         return Err(plan::DOMAIN_JOINED.to_string());
     }
+    let readers = readers_of(a)?;
     let package = files::read_package(&package_root()?, true)?;
     let digest = package.digest();
-    if let Some(checked) = &a.digest {
-        if !plan::digest_is_valid(checked) || *checked != digest {
-            return Err("the package is not the one that was checked before the administrator prompt (it changed): nothing is installed".to_string());
-        }
+    if let Some(problem) = plan::digest_problem(a.digest.as_deref(), &digest) {
+        return Err(problem);
     }
-    let name = winservice::service_name(channel);
-    if let Ok(old) = win::open(&name, ServiceAccess::ALL_ACCESS) {
-        report.say("Stopping the service that is installed.");
-        win::stop(&old, WAIT_SECS)?;
-    }
-    // The service first: its account's SID is what the folders' access lists name.
-    let (service, made) = win::create_or_update(channel, &layout.exe, &layout.data_root, a.port)?;
-    let done = install_into(channel, a, layout, &package, &digest, &service, report);
-    if done.is_err() && made {
-        let _ = service.delete();
+    check_folders(layout)?;
+    report.say(&format!("Copying AgentMux Headless {} to a staging folder and checking it.", crate::VERSION));
+    let stage = stage_copy(layout, &package, &digest)?;
+    let done = commit(channel, a, layout, stage.as_deref(), &readers, report);
+    if let Some(stage) = &stage {
+        let _ = std::fs::remove_dir_all(stage);
     }
     done
 }
 
-fn install_into(channel: &str, a: &ApplyArgs, layout: &Layout, package: &files::Package, digest: &str, service: &Service, report: &mut Report) -> Result<(), String> {
+/// Touch the service: stop the one that is there, make or change it, give it its folders and its version, and start it. If this
+/// fails after the old service was stopped, it is started again (the service it was, or the one this made is removed).
+fn commit(channel: &str, a: &ApplyArgs, layout: &Layout, stage: Option<&Path>, readers: &[String], report: &mut Report) -> Result<(), String> {
+    let name = winservice::service_name(channel);
+    let old = win::open(&name, ServiceAccess::ALL_ACCESS).ok();
+    if let Some(old) = &old {
+        report.say("Stopping the service that is installed.");
+        win::stop(old, WAIT_SECS)?;
+    }
+    // The service first: its account's SID is what the folders' access lists name.
+    let (service, made) = match win::create_or_update(channel, &layout.exe, &layout.data_root, a.port) {
+        Ok(done) => done,
+        Err(e) => {
+            if let Some(old) = &old {
+                let _ = win::start(old, WAIT_SECS);
+            }
+            return Err(e);
+        }
+    };
+    let done = commit_into(channel, layout, stage, readers, &service, report);
+    if done.is_err() {
+        if made {
+            let _ = service.delete();
+        } else {
+            let _ = win::start(&service, WAIT_SECS);
+        }
+    }
+    done
+}
+
+fn commit_into(channel: &str, layout: &Layout, stage: Option<&Path>, readers: &[String], service: &Service, report: &mut Report) -> Result<(), String> {
     win::finish_definition(service)?;
     let sid = owner_only::account_sid(&winservice::virtual_account(channel))?;
-    let readers: Vec<String> = a.reader.iter().filter(|r| r.starts_with("S-1-")).cloned().collect();
     if !readers.is_empty() {
         win::set_service_environment(&winservice::service_name(channel), &[format!("{}={}", owner_only::KEY_READERS_ENV, readers.join(","))])?;
     }
     claim_folders(layout, &sid)?;
-    report.say(&format!("Copying AgentMux Headless {} to {}.", crate::VERSION, layout.version_dir.display()));
-    put_version(layout, package, digest)?;
+    if let Some(stage) = stage {
+        place_version(layout, stage)?;
+    }
     agentmux_common::data_paths::ensure_history_link(&layout.current, &layout.version_dir).map_err(|e| format!("cannot point {} at the new version: {e}", layout.current.display()))?;
     report.say("Starting the service.");
     win::start(service, WAIT_SECS).map_err(|e| format!("{e}. The service stays installed: `agentmux service status` says how it is, and its log is in {}", layout.data_root.display()))?;
@@ -200,15 +243,42 @@ fn install_into(channel: &str, a: &ApplyArgs, layout: &Layout, package: &files::
     Ok(())
 }
 
-/// Make the folders the service uses, each with its own access list from the moment it exists, or take over one that is
-/// there only when an administrator owns it and it is fit. Folders above them are checked too.
-fn claim_folders(layout: &Layout, service_sid: &str) -> Result<(), String> {
+/// Every check that needs no service: the folders above, and a program folder or data root that is already there (it must be
+/// owned by an administrator and be one nobody else can change, whichever service's account it names).
+fn check_folders(layout: &Layout) -> Result<(), String> {
     for root in [&layout.program_root, &layout.data_root] {
         if let Some(parent) = root.parent() {
             claim(parent, &plan::parent_sddl(), &[], Reach::Above, false)?;
             check_above(parent)?;
         }
+        if root.exists() {
+            if let Some(problem) = plan::folder_problem(root, &owner_only::owner_and_sddl_of(root)?, &["S-1-5-80-*"], Reach::TheFolder) {
+                return Err(problem);
+            }
+        }
     }
+    Ok(())
+}
+
+/// Copy the package into a staging folder beside the program folder (which only administrators can write) and hash it there: it
+/// must give the package's digest. `None` when this program already runs from the version folder it would install.
+fn stage_copy(layout: &Layout, package: &files::Package, digest: &str) -> Result<Option<PathBuf>, String> {
+    if package.root.canonicalize().ok() == layout.version_dir.canonicalize().ok() {
+        return Ok(None);
+    }
+    let parent = layout.program_root.parent().ok_or_else(|| "cannot tell where the program folder is".to_string())?;
+    let stage = parent.join(format!(".stage-{}", uuid::Uuid::new_v4().simple()));
+    let copied = files::copy_package(package, &stage).and_then(|_| files::verify_copy(&stage, digest));
+    if let Err(e) = copied {
+        let _ = std::fs::remove_dir_all(&stage);
+        return Err(e);
+    }
+    Ok(Some(stage))
+}
+
+/// Make the folders the service uses, each with its own access list from the moment it exists, or take over one that is
+/// there only when an administrator owns it and it is fit.
+fn claim_folders(layout: &Layout, service_sid: &str) -> Result<(), String> {
     claim(&layout.program_root, &plan::program_sddl(service_sid), &[], Reach::TheFolder, true)?;
     claim(&layout.data_root, &plan::data_sddl(service_sid), &[service_sid], Reach::TheFolder, true)
 }
@@ -237,8 +307,7 @@ fn claim(folder: &Path, sddl: &str, allowed: &[&str], reach: Reach, own: bool) -
 /// No folder above `folder`, up to the root of its drive, may be one that a person who is not an administrator can change
 /// or replace what is below (creating an entry beside it is not that).
 fn check_above(folder: &Path) -> Result<(), String> {
-    // A debug build, which is never shipped, lets a test host with an unusual list on its drive root try the rest of the install.
-    if cfg!(debug_assertions) && std::env::var_os("AGENTMUX_TEST_SKIP_ABOVE_CHECK").is_some() {
+    if skip_requested() {
         return Ok(());
     }
     for above in folder.ancestors().skip(1) {
@@ -250,25 +319,27 @@ fn check_above(folder: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Put the package in its version folder: copied into a folder of its own, hashed there, and only then moved into place. A
-/// version that is already there is moved aside first and removed once the new one is in.
-fn put_version(layout: &Layout, package: &files::Package, digest: &str) -> Result<(), String> {
-    if package.root.canonicalize().ok() == layout.version_dir.canonicalize().ok() {
-        return Ok(());
-    }
-    let stage = layout.program_root.join(format!(".stage-{}", uuid::Uuid::new_v4().simple()));
-    let copied = files::copy_package(package, &stage).and_then(|_| files::verify_copy(&stage, digest));
-    if let Err(e) = copied {
-        let _ = std::fs::remove_dir_all(&stage);
-        return Err(e);
-    }
+/// A test run of a debug build can skip the check of the folders above (and only that one). The release build does not contain
+/// the code, or the name of the variable.
+#[cfg(debug_assertions)]
+fn skip_requested() -> bool {
+    std::env::var_os("AGENTMUX_TEST_SKIP_ABOVE_CHECK").is_some()
+}
+
+#[cfg(not(debug_assertions))]
+fn skip_requested() -> bool {
+    false
+}
+
+/// Move the staged package into its version folder. A version that is already there is moved aside first and removed once the new
+/// one is in.
+fn place_version(layout: &Layout, stage: &Path) -> Result<(), String> {
     let aside = layout.program_root.join(format!(".old-{}", uuid::Uuid::new_v4().simple()));
     let moved_aside = layout.version_dir.exists();
     if moved_aside {
         std::fs::rename(&layout.version_dir, &aside).map_err(|e| format!("cannot replace {}: {e}", layout.version_dir.display()))?;
     }
-    if let Err(e) = std::fs::rename(&stage, &layout.version_dir) {
-        let _ = std::fs::remove_dir_all(&stage);
+    if let Err(e) = std::fs::rename(stage, &layout.version_dir) {
         if moved_aside {
             let _ = std::fs::rename(&aside, &layout.version_dir);
         }

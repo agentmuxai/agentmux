@@ -98,11 +98,27 @@ pub fn key_readers() -> Vec<String> {
     key_readers_of(std::env::var(KEY_READERS_ENV).ok().as_deref())
 }
 
-/// The SIDs in a comma-separated value. Whitespace and empty entries are dropped, and so is anything that is not a SID, so a
-/// value another program put there cannot be spliced into an access list.
+/// The accounts in a comma-separated value. Whitespace and empty entries are dropped, and so is anything that is not the SID of a
+/// person's own account, so a value another program put there cannot be spliced into an access list.
 fn key_readers_of(value: Option<&str>) -> Vec<String> {
-    let is_sid = |s: &str| s.starts_with("S-1-") && s.len() <= 184 && s.chars().all(|c| c.is_ascii_digit() || c == '-' || c == 'S');
-    value.unwrap_or("").split(',').map(str::trim).filter(|s| is_sid(s)).map(str::to_string).collect()
+    value.unwrap_or("").split(',').map(str::trim).filter(|s| is_account_sid(s)).map(str::to_string).collect()
+}
+
+/// Is this the SID of one person's own account, as text: `S-1-5-21-<a>-<b>-<c>-<rid>` (a local or a domain account) or
+/// `S-1-12-1-<a>-<b>-<c>-<d>` (an account of an organisation's directory), every part digits only? A group, a well-known SID
+/// (Everyone, Authenticated Users, Users, Anonymous, the system, the administrators) and a built-in account that nobody signs in
+/// with (Guest and the like, relative ids 501 to 999) are not.
+pub fn is_account_sid(sid: &str) -> bool {
+    let digits = |s: &str| !s.is_empty() && s.len() <= 10 && s.chars().all(|c| c.is_ascii_digit());
+    if let Some(rest) = sid.strip_prefix("S-1-5-21-") {
+        let parts: Vec<&str> = rest.split('-').collect();
+        return parts.len() == 4 && parts.iter().all(|p| digits(p)) && parts[3].parse::<u64>().is_ok_and(|rid| rid == 500 || rid >= 1000);
+    }
+    if let Some(rest) = sid.strip_prefix("S-1-12-1-") {
+        let parts: Vec<&str> = rest.split('-').collect();
+        return parts.len() == 4 && parts.iter().all(|p| digits(p));
+    }
+    false
 }
 
 /// The words to a person whose folder lets others in: which folder, who, and the one command that fixes it: it stops what
@@ -187,6 +203,28 @@ mod windows {
             let got = GetTokenInformation(token, TokenElevation, (&mut elevation as *mut TOKEN_ELEVATION).cast(), std::mem::size_of::<TOKEN_ELEVATION>() as u32, &mut len) != 0;
             CloseHandle(token);
             got && elevation.TokenIsElevated != 0
+        }
+    }
+
+    /// Does Windows say this SID is a user account (and not a group, an alias or anything else)?
+    pub fn sid_is_user(sid: &str) -> bool {
+        use windows_sys::Win32::Security::Authorization::ConvertStringSidToSidW;
+        use windows_sys::Win32::Security::{LookupAccountSidW, SidTypeUser};
+        let text: Vec<u16> = sid.encode_utf16().chain(std::iter::once(0)).collect();
+        // SAFETY: a NUL-terminated text that outlives the calls; the SID Windows allocates is freed here on every path; the name
+        // buffers are the sizes the first call asked for.
+        unsafe {
+            let mut raw: *mut std::ffi::c_void = null_mut();
+            if ConvertStringSidToSidW(text.as_ptr(), &mut raw) == 0 || raw.is_null() {
+                return false;
+            }
+            let (mut name_len, mut domain_len, mut kind) = (0u32, 0u32, 0i32);
+            LookupAccountSidW(null_mut(), raw, null_mut(), &mut name_len, null_mut(), &mut domain_len, &mut kind);
+            let mut name = vec![0u16; name_len.max(1) as usize];
+            let mut domain = vec![0u16; domain_len.max(1) as usize];
+            let found = LookupAccountSidW(null_mut(), raw, name.as_mut_ptr(), &mut name_len, domain.as_mut_ptr(), &mut domain_len, &mut kind) != 0;
+            LocalFree(raw);
+            found && kind == SidTypeUser
         }
     }
 
@@ -384,7 +422,7 @@ mod windows {
 }
 
 #[cfg(windows)]
-pub use windows::{account_sid, apply_sddl, create_dir_with_sddl, is_elevated, take_over, others_who_can_open, owner_and_sddl_of, restrict_to_user, restrict_to_user_and_readers, sddl_of, user_sid};
+pub use windows::{account_sid, apply_sddl, create_dir_with_sddl, is_elevated, sid_is_user, take_over, others_who_can_open, owner_and_sddl_of, restrict_to_user, restrict_to_user_and_readers, sddl_of, user_sid};
 
 #[cfg(test)]
 mod tests {
@@ -395,9 +433,38 @@ mod tests {
     #[test]
     fn only_sids_are_taken_as_the_accounts_that_may_read_the_key() {
         assert!(key_readers_of(None).is_empty());
-        assert_eq!(key_readers_of(Some(" S-1-5-21-1-2-3-1001 ,S-1-5-32-544,,")), vec!["S-1-5-21-1-2-3-1001", "S-1-5-32-544"]);
+        assert_eq!(key_readers_of(Some(" S-1-5-21-1-2-3-1001 ,S-1-5-21-1-2-3-500,,")), vec!["S-1-5-21-1-2-3-1001", "S-1-5-21-1-2-3-500"]);
         // A name, a trailing entry, or anything else that is not a SID is dropped.
         assert!(key_readers_of(Some("Everyone,(A;;FA;;;WD),S-1-1-0)x,S-1-5-21-1;FA")).is_empty());
+    }
+
+    #[test]
+    fn only_the_sid_of_a_persons_own_account_is_one_that_may_read_the_key() {
+        for ok in ["S-1-5-21-3904905834-1961560920-3170238172-1001", "S-1-5-21-1-2-3-500", "S-1-5-21-1-2-3-1000", "S-1-12-1-1-2-3-4"] {
+            assert!(is_account_sid(ok), "{ok}");
+        }
+        for (bad, what) in [
+            ("S-1-1-0", "Everyone"),
+            ("S-1-5-11", "Authenticated Users"),
+            ("S-1-5-32-545", "Users"),
+            ("S-1-5-32-544", "the administrators"),
+            ("S-1-5-7", "Anonymous"),
+            ("S-1-5-18", "the system"),
+            ("S-1-5-4", "interactive users"),
+            ("S-1-5-21-1-2-3-513", "Domain Users"),
+            ("S-1-5-21-1-2-3-512", "Domain Admins"),
+            ("S-1-5-21-1-2-3-501", "Guest"),
+            ("S-1-5-21-1-2-3", "a domain, no account"),
+            ("S-1-5-21-1-2-3-1001-5", "too many parts"),
+            ("S-1-5-21-1-2-3-10a", "not digits"),
+            ("S-1-5-21-1-2-3-+1001", "a sign"),
+            ("S-1-12-1-1-2-3", "too few parts"),
+            ("S-1-5-80-1-2-3-4-5", "a service"),
+            ("Everyone", "a name"),
+            ("", "nothing"),
+        ] {
+            assert!(!is_account_sid(bad), "{what}: {bad}");
+        }
     }
 
     #[test]
