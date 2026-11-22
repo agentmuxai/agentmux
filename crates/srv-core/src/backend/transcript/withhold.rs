@@ -16,8 +16,15 @@
 //! - [`hold_kept`] keeps a value with no known expiry (a refresh token, an API key) and keeps the values an owner held
 //!   before it, up to [`KEPT_PER_OWNER`], oldest dropped first;
 //! - a batch of registrations ([`register_all`]) costs one rebuild of the matcher, made when a line next needs it.
+//!
+//! The registry is bounded and never fails open. A value over [`MAX_VALUE_LEN`] is refused, and the registry holds at
+//! most [`MAX_TOTAL_BYTES`] (the oldest values an owner holds make room first); each refusal is counted and logged. A
+//! matcher that cannot be built as one pattern is replaced by an exact search over the same values, and if even that
+//! is over its limit every line is read as the mark ([`MARK`]) in place of its text. Either state is logged once with
+//! the counts and reported to the hook ([`set_alert`]).
 
 use std::borrow::Cow;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
 
 use regex::{NoExpand, Regex, RegexBuilder};
@@ -31,6 +38,45 @@ pub const MIN_LEN: usize = 8;
 /// How many values with no known expiry an owner keeps with [`hold_kept`].
 pub const KEPT_PER_OWNER: usize = 8;
 
+/// The longest value the registry takes (bytes): a longer one is refused. No real secret is this long, and one this
+/// long could stop the matcher of every other value from building.
+pub const MAX_VALUE_LEN: usize = 32 * 1024;
+
+/// The most the registry holds (bytes of values, not of spellings): past it the oldest values an owner holds make room.
+pub const MAX_TOTAL_BYTES: usize = 2 * 1024 * 1024;
+
+/// The size limit of the one-pattern matcher, and of the exact search that replaces it (bytes of spellings).
+const REGEX_LIMIT: usize = 64 << 20;
+const EXACT_LIMIT: usize = 32 << 20;
+
+/// How many values were refused, and how many times the one-pattern matcher could not be built.
+static REFUSED: AtomicU64 = AtomicU64::new(0);
+static FALLBACKS: AtomicU64 = AtomicU64::new(0);
+
+/// How the registry matches.
+#[derive(Clone)]
+enum Matcher {
+    /// One pattern over every value in every spelling.
+    Pattern(Arc<Regex>),
+    /// The same spellings, longest first, searched one at a time: slower, and with no size limit but [`EXACT_LIMIT`].
+    Exact(Arc<Vec<String>>),
+    /// Neither could be used: every line reads as [`MARK`].
+    Closed,
+}
+
+/// The state of the registry, for a health read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Health {
+    /// `none` (nothing registered), `pattern`, `exact` or `closed`.
+    pub mode: &'static str,
+    pub values: usize,
+    pub bytes: usize,
+    /// Values refused since the process started.
+    pub refused: u64,
+    /// Times the one-pattern matcher could not be built.
+    pub fallbacks: u64,
+}
+
 struct Entry {
     /// Who holds the value; `None` for one kept for the life of the process.
     owner: Option<String>,
@@ -42,7 +88,11 @@ struct Entry {
 #[derive(Default)]
 struct Registry {
     entries: Vec<Entry>,
-    matcher: Option<Arc<Regex>>,
+    matcher: Option<Matcher>,
+    /// Told to the alert hook once the lock is released.
+    alerts: Vec<String>,
+    /// The sizes the matcher is built under (`None`: the constants), so a test can force a failure.
+    limits: Option<(usize, usize)>,
     /// The values changed since `matcher` was built.
     stale: bool,
     /// The earliest expiry among the entries.
@@ -52,6 +102,47 @@ struct Registry {
 }
 
 impl Registry {
+    fn bytes(&self) -> usize {
+        self.entries.iter().map(|e| e.value.len()).sum()
+    }
+
+    /// Counts a refusal and queues a line for the log and the alert hook: the first, then each power of two.
+    fn refuse(&mut self, why: &str, len: usize) {
+        let n = REFUSED.fetch_add(1, Ordering::Relaxed) + 1;
+        if n.is_power_of_two() {
+            let line = format!("transcript withhold: a value was refused ({why}, {len} bytes); {n} refused since start");
+            tracing::warn!(refused = n, len, why, "{line}");
+            self.alerts.push(line);
+        }
+    }
+
+    /// Whether a value of `len` bytes can be taken at all.
+    fn takes(&mut self, len: usize) -> bool {
+        if len > MAX_VALUE_LEN {
+            self.refuse("over the longest value", len);
+            return false;
+        }
+        true
+    }
+
+    /// Makes the registry fit [`MAX_TOTAL_BYTES`] after `newest` was pushed: the oldest values an owner holds go first.
+    /// `newest` itself goes (and is refused) when nothing else can make room.
+    fn fit(&mut self) {
+        while self.bytes() > MAX_TOTAL_BYTES {
+            let last = self.entries.len().saturating_sub(1);
+            match self.entries[..last].iter().position(|e| e.owner.is_some()) {
+                Some(oldest) => {
+                    self.entries.remove(oldest);
+                }
+                None => {
+                    let len = self.entries.pop().map_or(0, |e| e.value.len());
+                    self.refuse("the registry is full", len);
+                    break;
+                }
+            }
+        }
+    }
+
     fn reindex(&mut self) {
         self.next_expiry = self.entries.iter().filter_map(|e| e.expires_at).min();
     }
@@ -60,7 +151,7 @@ impl Registry {
     /// shorter than [`MIN_LEN`] is not kept, so an owner given one holds nothing.
     fn add(&mut self, owner: Option<&str>, value: &str, expires_at: Option<i64>) {
         let value = value.trim();
-        let keep = value.len() >= MIN_LEN;
+        let keep = value.len() >= MIN_LEN && self.takes(value.len());
         let mine = |e: &Entry| e.owner.as_deref() == owner;
         if let Some(same) = self.entries.iter_mut().find(|e| mine(e) && e.value == value) {
             if keep && owner.is_none() {
@@ -81,6 +172,7 @@ impl Registry {
         }
         if keep {
             self.entries.push(Entry { owner: owner.map(str::to_string), value: value.to_string(), expires_at });
+            self.fit();
             self.stale = true;
         }
         self.reindex();
@@ -90,7 +182,7 @@ impl Registry {
     fn add_kept(&mut self, owner: &str, value: &str) {
         let value = value.trim();
         let mine = |e: &Entry| e.owner.as_deref() == Some(owner);
-        if value.len() < MIN_LEN || self.entries.iter().any(|e| mine(e) && e.value == value) {
+        if value.len() < MIN_LEN || self.entries.iter().any(|e| mine(e) && e.value == value) || !self.takes(value.len()) {
             return;
         }
         self.entries.push(Entry { owner: Some(owner.to_string()), value: value.to_string(), expires_at: None });
@@ -99,7 +191,9 @@ impl Registry {
                 self.entries.remove(oldest);
             }
         }
+        self.fit();
         self.stale = true;
+        self.reindex();
     }
 
     /// Drops what `owner` holds, and what it holds with [`hold_until`].
@@ -147,15 +241,38 @@ impl Registry {
     }
 
     /// The matcher for the values that have not run out at `now`, built only when they changed.
-    fn matcher(&mut self, now: i64) -> Option<Arc<Regex>> {
+    fn matcher(&mut self, now: i64) -> Option<Matcher> {
         self.expire(now);
         if self.stale {
             let values: Vec<&str> = self.entries.iter().map(|e| e.value.as_str()).collect();
-            self.matcher = build(&values);
+            let (regex_limit, exact_limit) = self.limits.unwrap_or((REGEX_LIMIT, EXACT_LIMIT));
+            let was = mode_of(self.matcher.as_ref());
+            self.matcher = build(&values, regex_limit, exact_limit);
+            let now_mode = mode_of(self.matcher.as_ref());
+            if matches!(now_mode, "exact" | "closed") && now_mode != was {
+                let n = FALLBACKS.load(Ordering::Relaxed);
+                let line = format!(
+                    "transcript withhold: matching is degraded to {now_mode} ({} values, {} bytes; {n} builds failed, {} refused since start)",
+                    self.entries.len(),
+                    self.bytes(),
+                    REFUSED.load(Ordering::Relaxed)
+                );
+                tracing::warn!(mode = now_mode, values = self.entries.len(), "{line}");
+                self.alerts.push(line);
+            }
             self.rebuilds += 1;
             self.stale = false;
         }
         self.matcher.clone()
+    }
+}
+
+fn mode_of(matcher: Option<&Matcher>) -> &'static str {
+    match matcher {
+        None => "none",
+        Some(Matcher::Pattern(_)) => "pattern",
+        Some(Matcher::Exact(_)) => "exact",
+        Some(Matcher::Closed) => "closed",
     }
 }
 
@@ -168,58 +285,96 @@ fn write() -> std::sync::RwLockWriteGuard<'static, Registry> {
     state().write().unwrap_or_else(|e| e.into_inner())
 }
 
+type Alert = Box<dyn Fn(&str) + Send + Sync>;
+
+static ALERT: OnceLock<Alert> = OnceLock::new();
+
+/// Sets what is told when the registry refuses a value or degrades its matching: one line with the counts, never a
+/// value. Called outside the registry's lock, so it may read or write the registry. The first call wins.
+pub fn set_alert(alert: impl Fn(&str) + Send + Sync + 'static) {
+    let _ = ALERT.set(Box::new(alert));
+}
+
+/// Runs `f` on the registry under its write lock, then tells the alert hook what it queued.
+fn with_write<R>(f: impl FnOnce(&mut Registry) -> R) -> R {
+    let (result, alerts) = {
+        let mut registry = write();
+        let result = f(&mut registry);
+        (result, std::mem::take(&mut registry.alerts))
+    };
+    if let Some(alert) = ALERT.get() {
+        alerts.iter().for_each(|line| alert(line));
+    }
+    result
+}
+
+/// The state of the registry now.
+pub fn health() -> Health {
+    let matcher = matcher();
+    let registry = state().read().unwrap_or_else(|e| e.into_inner());
+    Health {
+        mode: mode_of(matcher.as_ref()),
+        values: registry.entries.len(),
+        bytes: registry.bytes(),
+        refused: REFUSED.load(Ordering::Relaxed),
+        fallbacks: FALLBACKS.load(Ordering::Relaxed),
+    }
+}
+
 /// Registers `value` to be withheld from now on, for the life of the process. A value shorter than [`MIN_LEN`] and one
 /// already registered change nothing.
 pub fn register(value: &str) {
-    write().add(None, value, None);
+    with_write(|r| r.add(None, value, None));
 }
 
 /// [`register`] for each of `values`, under one lock: the matcher is built once for the lot, when a line next needs it.
 pub fn register_all<'a>(values: impl IntoIterator<Item = &'a str>) {
-    let mut registry = write();
-    for value in values {
-        registry.add(None, value, None);
-    }
+    with_write(|registry| {
+        for value in values {
+            registry.add(None, value, None);
+        }
+    });
 }
 
 /// Withholds `value` for `owner`, in place of what the owner held before, until `expires_at` (unix ms; `None` for no
 /// expiry) or until the owner is [`release`]d. Holding the value the owner already holds changes nothing.
 pub fn hold(owner: &str, value: &str, expires_at: Option<i64>) {
-    write().add(Some(owner), value, expires_at);
+    with_write(|r| r.add(Some(owner), value, expires_at));
 }
 
 /// Withholds `value` for `owner` until `expires_at` (unix ms), when it stops working. A renewed value the owner holds
 /// next with [`hold_until`] does not take its place: the value that was replaced still works until its own expiry,
 /// so it stays withheld until then. Holding the same value and expiry again changes nothing.
 pub fn hold_until(owner: &str, value: &str, expires_at: i64) {
-    write().add(Some(&format!("{owner}#{expires_at}")), value, Some(expires_at));
+    with_write(|r| r.add(Some(&format!("{owner}#{expires_at}")), value, Some(expires_at)));
 }
 
 /// Withholds `value` for `owner` with no expiry, until the process ends or the owner is [`release`]d. The values the
 /// owner kept before it stay withheld too, up to [`KEPT_PER_OWNER`]: past that the oldest is dropped. Keeping the same
 /// value again changes nothing.
 pub fn hold_kept(owner: &str, value: &str) {
-    write().add_kept(owner, value);
+    with_write(|r| r.add_kept(owner, value));
 }
 
 /// Stops withholding what `owner` holds: its value no longer works.
 pub fn release(owner: &str) {
-    write().release(owner);
+    with_write(|r| r.release(owner));
 }
 
 /// [`release_all`] for every owner whose name starts with `prefix`.
 pub fn release_prefix(prefix: &str) {
-    write().release_prefix(prefix);
+    with_write(|r| r.release_prefix(prefix));
 }
 
 /// [`release`] for what `owner` holds and what it holds with [`hold_until`].
 pub fn release_all(owner: &str) {
-    write().release_all(owner);
+    with_write(|r| r.release_all(owner));
 }
 
-/// One matcher for every value in every spelling, longest first so a spelling that contains another is
-/// replaced whole. `None` when nothing is registered, or when the matcher could not be built.
-fn build(values: &[&str]) -> Option<Arc<Regex>> {
+/// One matcher for every value in every spelling, longest first so a spelling that contains another is replaced
+/// whole. `None` when nothing is registered. When one pattern cannot be built under `regex_limit` the same spellings
+/// are searched one at a time; when they are over `exact_limit` bytes the matcher is [`Matcher::Closed`].
+fn build(values: &[&str], regex_limit: usize, exact_limit: usize) -> Option<Matcher> {
     let mut needles: Vec<String> = Vec::new();
     for value in values {
         for form in crate::backend::vault::scrub::forms(value) {
@@ -233,16 +388,20 @@ fn build(values: &[&str]) -> Option<Arc<Regex>> {
     }
     needles.sort_by(|a, b| b.len().cmp(&a.len()));
     let pattern = needles.iter().map(|n| regex::escape(n)).collect::<Vec<_>>().join("|");
-    match RegexBuilder::new(&pattern).size_limit(64 << 20).build() {
-        Ok(matcher) => Some(Arc::new(matcher)),
+    // A limit of 0 means no one-pattern matcher at all.
+    let built = if regex_limit == 0 { Err("no pattern allowed".to_string()) } else { RegexBuilder::new(&pattern).size_limit(regex_limit).build().map_err(|e| e.to_string()) };
+    match built {
+        Ok(matcher) => Some(Matcher::Pattern(Arc::new(matcher))),
         Err(e) => {
-            tracing::warn!(error = %e, values = values.len(), "transcript withhold: the matcher could not be built");
-            None
+            FALLBACKS.fetch_add(1, Ordering::Relaxed);
+            tracing::warn!(error = %e, values = values.len(), "transcript withhold: the matcher could not be built as one pattern");
+            let bytes: usize = needles.iter().map(String::len).sum();
+            Some(if bytes > exact_limit { Matcher::Closed } else { Matcher::Exact(Arc::new(needles)) })
         }
     }
 }
 
-fn matcher() -> Option<Arc<Regex>> {
+fn matcher() -> Option<Matcher> {
     let now = agentmux_common::time::now_ms();
     {
         let registry = state().read().unwrap_or_else(|e| e.into_inner());
@@ -250,24 +409,52 @@ fn matcher() -> Option<Arc<Regex>> {
             return registry.matcher.clone();
         }
     }
-    write().matcher(now)
+    with_write(|r| r.matcher(now))
 }
 
-/// `text` with every registered value replaced by [`MARK`]; the text itself when it holds none.
+/// `text` with every value `matcher` knows replaced by [`MARK`].
+fn replaced<'a>(matcher: &Matcher, text: &'a str) -> Cow<'a, str> {
+    match matcher {
+        Matcher::Pattern(regex) => regex.replace_all(text, NoExpand(MARK)),
+        Matcher::Exact(needles) => {
+            let mut out = Cow::Borrowed(text);
+            for needle in needles.iter() {
+                if out.contains(needle.as_str()) {
+                    out = Cow::Owned(out.replace(needle.as_str(), MARK));
+                }
+            }
+            out
+        }
+        Matcher::Closed => Cow::Owned(MARK.to_string()),
+    }
+}
+
+/// `text` with every registered value replaced by [`MARK`]; the text itself when it holds none. Never the text of a
+/// line when matching is closed: then every line is the mark.
 pub fn text(text: &str) -> Cow<'_, str> {
     match matcher() {
-        Some(matcher) => matcher.replace_all(text, NoExpand(MARK)),
+        Some(matcher) => replaced(&matcher, text),
         None => Cow::Borrowed(text),
     }
 }
 
-/// Whether `text` holds a registered value, in any of its spellings: the same matcher [`text`] replaces with.
+/// Whether `text` holds a registered value, in any of its spellings: the same matcher [`text`] replaces with. Always
+/// true when matching is closed.
 pub fn holds(text: &str) -> bool {
-    matcher().is_some_and(|matcher| matcher.is_match(text))
+    match matcher() {
+        Some(Matcher::Pattern(regex)) => regex.is_match(text),
+        Some(Matcher::Exact(needles)) => needles.iter().any(|n| text.contains(n.as_str())),
+        Some(Matcher::Closed) => true,
+        None => false,
+    }
 }
 
-/// [`text`] over transcript bytes (NDJSON lines); bytes that are not UTF-8 are left as they are.
+/// [`text`] over transcript bytes (NDJSON lines); bytes that are not UTF-8 are left as they are, except when matching is
+/// closed: then every line is the mark.
 pub fn lines(data: &[u8]) -> Cow<'_, [u8]> {
+    if matches!(matcher(), Some(Matcher::Closed)) {
+        return Cow::Owned(MARK.as_bytes().to_vec());
+    }
     let Ok(as_text) = std::str::from_utf8(data) else { return Cow::Borrowed(data) };
     match text(as_text) {
         Cow::Borrowed(_) => Cow::Borrowed(data),
@@ -360,7 +547,11 @@ mod tests {
 
     fn shows(registry: &mut Registry, now: i64, value: &str) -> bool {
         let line = format!("KEY={value}");
-        registry.matcher(now).map_or(line.clone(), |m| m.replace_all(&line, NoExpand(MARK)).into_owned()).contains(value)
+        registry.matcher(now).map_or(line.clone(), |m| replaced(&m, &line).into_owned()).contains(value)
+    }
+
+    fn big(n: usize) -> String {
+        format!("canary-big-{n:04}-{}", "x".repeat(MAX_VALUE_LEN))
     }
 
     #[test]
@@ -457,6 +648,73 @@ mod tests {
         registry.release_prefix("acct:a:");
         assert_eq!(registry.entries.len(), 1);
         assert!(!shows(&mut registry, 0, "canary-prefix-0003-other"));
+    }
+
+    #[test]
+    fn one_oversized_registration_is_refused_and_leaves_every_other_value_withheld() {
+        let mut registry = Registry::default();
+        registry.add(Some("acct:ok"), "canary-oversize-0001-ok", None);
+        registry.add(Some("acct:evil"), &big(1), None);
+        registry.add_kept("acct:evil", &big(2));
+        registry.add(None, &big(3), None);
+        assert_eq!(registry.entries.len(), 1, "an oversized value is refused, whoever registers it and however");
+        assert!(!shows(&mut registry, 0, "canary-oversize-0001-ok"));
+        assert!(REFUSED.load(Ordering::Relaxed) >= 3, "each refusal is counted");
+    }
+
+    #[test]
+    fn the_registry_holds_a_bounded_total_and_the_oldest_owned_values_make_room() {
+        let mut registry = Registry::default();
+        let each = "y".repeat(MAX_VALUE_LEN - 64);
+        for n in 0..100 {
+            registry.add(Some(&format!("acct:{n}")), &format!("canary-room-{n:04}-{each}"), None);
+        }
+        assert!(registry.bytes() <= MAX_TOTAL_BYTES);
+        assert!(shows(&mut registry, 0, &format!("canary-room-0000-{each}")), "the oldest made room");
+        assert!(!shows(&mut registry, 0, &format!("canary-room-0099-{each}")), "the newest is held");
+
+        // Values kept for the process cannot make room: the one that does not fit is refused, the others stay.
+        let mut registry = Registry::default();
+        for n in 0..100 {
+            registry.add(None, &format!("canary-forever-{n:04}-{each}"), None);
+        }
+        assert!(registry.bytes() <= MAX_TOTAL_BYTES);
+        assert!(!shows(&mut registry, 0, &format!("canary-forever-0000-{each}")));
+    }
+
+    #[test]
+    fn a_matcher_that_cannot_be_built_as_one_pattern_is_replaced_by_an_exact_search() {
+        let mut registry = Registry::default();
+        registry.add(Some("acct:a"), "canary-exact-0001-first", None);
+        registry.add(Some("acct:b"), "canary-exact-0002-second", None);
+        registry.limits = Some((0, EXACT_LIMIT));
+        let line = "KEY=canary-exact-0001-first and canary-exact-0002-second";
+        assert!(matches!(registry.matcher(0), Some(Matcher::Exact(_))), "the pattern is over its limit");
+        assert!(!shows(&mut registry, 0, "canary-exact-0001-first") && !shows(&mut registry, 0, "canary-exact-0002-second"));
+        assert!(registry.alerts.iter().any(|a| a.contains("degraded to exact")), "one signal, with the counts: {:?}", registry.alerts);
+
+        // The exact search withholds what the pattern does, in every spelling.
+        let exact = registry.matcher(0).unwrap();
+        registry.limits = None;
+        registry.stale = true;
+        let pattern = registry.matcher(0).unwrap();
+        assert!(matches!(pattern, Matcher::Pattern(_)));
+        let spelled = base64::engine::general_purpose::STANDARD.encode("canary-exact-0001-first");
+        let line = format!("{line} {spelled}");
+        assert_eq!(replaced(&exact, &line), replaced(&pattern, &line));
+        assert!(!replaced(&exact, &line).contains("canary-exact"));
+    }
+
+    #[test]
+    fn when_even_the_exact_search_is_over_its_limit_every_line_reads_as_the_mark() {
+        let mut registry = Registry::default();
+        registry.add(Some("acct:a"), "canary-closed-0001-value", None);
+        registry.limits = Some((0, 1));
+        assert!(matches!(registry.matcher(0), Some(Matcher::Closed)));
+        assert!(registry.alerts.iter().any(|a| a.contains("degraded to closed")), "{:?}", registry.alerts);
+        let closed = Matcher::Closed;
+        assert_eq!(replaced(&closed, "an ordinary line"), MARK, "never the text");
+        assert_eq!(replaced(&closed, "KEY=canary-closed-0001-value"), MARK);
     }
 
     #[test]

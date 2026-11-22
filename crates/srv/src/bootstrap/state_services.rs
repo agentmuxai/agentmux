@@ -215,6 +215,16 @@ fn install_message_brokers(state: &AppState) {
     backend::task_flow::install(Arc::clone(&state.broker));
     backend::pr_flow::install(Arc::clone(&state.broker));
     start_container_status(state);
+    install_withhold_alert(state);
+}
+
+/// An Audit row when the registry of withheld values refuses a value or degrades its matching: a line with the counts,
+/// never a value.
+fn install_withhold_alert(state: &AppState) {
+    let handler = state.reactive_handler;
+    backend::transcript::withhold::set_alert(move |line| {
+        handler.log_fleet_action_audit(Some("srv"), "srv", "", "transcript.withhold", false, Some(line), &uuid::Uuid::new_v4().to_string(), None);
+    });
 }
 
 /// The Atlas map and the Swarm show this machine's agent containers as they change (`backend::container_status`).
