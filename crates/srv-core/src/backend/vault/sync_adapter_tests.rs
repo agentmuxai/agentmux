@@ -182,3 +182,19 @@ fn a_record_whose_base_was_changed_on_the_way_is_refused() {
     assert!(matches!(said, Err(SyncError::Refused(Refused::Bad(BadRecord::Signature)))), "{said:?}");
     assert_eq!(a.state("entry-1").as_deref(), Some("from a"));
 }
+
+#[test]
+fn a_machine_sent_a_delete_before_the_entry_it_deleted_does_not_bring_the_entry_back() {
+    // z makes an entry and edits it; a takes both and deletes it; c, new, takes a's log, which lists a's own records
+    // first, so the delete reaches c before the entry does.
+    let (mut z, mut a, mut c) = (machine("z", 3), machine("a", 1), machine("c", 4));
+    let all = pins(&[&z, &a, &c]);
+    z.write("entry-1", "created", NOW);
+    z.write("entry-1", "edited", NOW + 10);
+    a.pull(&z, &all, NOW + 20);
+    a.delete("entry-1", NOW + 30);
+    let got = c.pull(&a, &all, NOW + 40);
+    assert_eq!(got, [Outcome::Applied, Outcome::KeptLocal, Outcome::KeptLocal], "the delete, then the two it came after");
+    assert_eq!(c.state("entry-1"), None, "still deleted");
+    assert_eq!(a.state("entry-1"), None);
+}

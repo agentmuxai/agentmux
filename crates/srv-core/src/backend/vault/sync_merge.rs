@@ -107,6 +107,12 @@ pub fn merge(held: Option<&Held>, change: &Change) -> Decision {
     }
     let current = &h.versions[0];
     let value_in = change.tags.as_deref();
+    // A record's first version has no base and is the ancestor of every later one: when this machine holds any version,
+    // a first version that arrives now is one it was ahead of, never a change made apart. Without this, a machine that
+    // was sent a delete before the entry it deleted would bring the entry back when the entry arrived.
+    if change.base.is_none() {
+        return Decision::KeptLocal;
+    }
     // The change was made on top of what this machine holds, and is later than it: it follows on. A change that only
     // claims to follow, but is not later, is treated as made at the same time, so an old record replayed with a false
     // base cannot take the place of a new one.

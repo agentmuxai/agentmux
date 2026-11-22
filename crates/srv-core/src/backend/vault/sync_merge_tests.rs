@@ -34,6 +34,17 @@ fn a_record_the_machine_never_had_is_applied_and_a_repeat_changes_nothing() {
 }
 
 #[test]
+fn a_first_version_that_arrives_after_a_later_one_is_an_ancestor_not_a_change_made_apart() {
+    // This machine was sent a delete before the entry it deleted: the entry arriving late must not bring it back.
+    let gone = Held { versions: vec![v(300, 0, "a")], deleted: true, pending_rotation: false, tags: vec![] };
+    assert_eq!(merge(Some(&gone), &change(v(100, 0, "z"), None, Some(&["prod"]))), Decision::KeptLocal);
+    let live = held(&[v(300, 0, "a")], &["prod"]);
+    assert_eq!(merge(Some(&live), &change(v(100, 0, "z"), None, Some(&["prod"]))), Decision::KeptLocal);
+    // A record this machine has never heard of is still applied, first version or not.
+    assert_eq!(merge(None, &change(v(100, 0, "z"), None, Some(&["prod"]))), Decision::Applied);
+}
+
+#[test]
 fn a_change_made_on_top_of_what_this_machine_holds_follows_on() {
     let h = held(&[v(100, 0, "a")], &["prod"]);
     let c = change(v(200, 1, "b"), Some(v(100, 0, "a")), Some(&["prod", "billing"]));
