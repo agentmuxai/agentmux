@@ -31,6 +31,9 @@ pub trait ServerHooks: Send + Sync {
     /// ends in an error. `true` when the caller gives the claim back to the relay instead.
     fn give_back_for_unavailable(&self, mstore: &Store, handler: &ReactiveHandler, req: &InjectionRequest) -> bool;
 
+    /// The agent here that `target` names can't work now (out of quota, signed out).
+    fn agent_unavailable(&self, mstore: &Store, handler: &ReactiveHandler, target: &str) -> bool;
+
     /// A routine message to a session gone cold waits for its next activity. `true` when it is kept.
     fn hold_relayed<'a>(&'a self, req: &'a InjectionRequest) -> BoxFuture<'a, bool>;
 
@@ -95,6 +98,9 @@ impl ServerHooks for NotReady {
     fn give_back_for_unavailable(&self, _: &Store, _: &ReactiveHandler, _: &InjectionRequest) -> bool {
         false
     }
+    fn agent_unavailable(&self, _: &Store, _: &ReactiveHandler, _: &str) -> bool {
+        false
+    }
     fn hold_relayed<'a>(&'a self, _: &'a InjectionRequest) -> BoxFuture<'a, bool> {
         Box::pin(async { false })
     }
@@ -133,6 +139,9 @@ impl ServerHooks for PlainSteps {
     }
     fn give_back_for_unavailable(&self, _: &Store, _: &ReactiveHandler, req: &InjectionRequest) -> bool {
         TEST_LIMITED.lock().unwrap().contains(&req.target_agent)
+    }
+    fn agent_unavailable(&self, _: &Store, _: &ReactiveHandler, target: &str) -> bool {
+        TEST_LIMITED.lock().unwrap().iter().any(|a| a == target)
     }
     fn hold_relayed<'a>(&'a self, _: &'a InjectionRequest) -> BoxFuture<'a, bool> {
         Box::pin(async { false })

@@ -490,11 +490,18 @@ pub(crate) fn give_back_for_unavailable(
     handler: &crate::backend::reactive::handler::ReactiveHandler,
     req: &InjectionRequest,
 ) -> bool {
+    req.source_agent.as_deref() != Some("cron") && agent_unavailable(mstore, handler, &req.target_agent)
+}
+
+/// Whether the agent here that `target` names can't work now (out of quota, or signed out). `false` for a
+/// name no agent here answers to.
+pub(crate) fn agent_unavailable(
+    mstore: &crate::backend::storage::store::Store,
+    handler: &crate::backend::reactive::handler::ReactiveHandler,
+    target: &str,
+) -> bool {
     use crate::backend::reactive::handler::LookupOutcome;
-    if req.source_agent.as_deref() == Some("cron") {
-        return false;
-    }
-    let Some(target) = crate::backend::reactive::sanitize::route_name(&req.target_agent) else {
+    let Some(target) = crate::backend::reactive::sanitize::route_name(target) else {
         return false;
     };
     let LookupOutcome::One(reg) = handler.lookup_delivery_target(&target) else {
