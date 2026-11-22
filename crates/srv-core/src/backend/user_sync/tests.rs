@@ -367,13 +367,16 @@ fn a_member_that_missed_the_last_record_of_an_epoch_still_catches_up_across_the_
     assert_eq!(log::apply_remote(&b.conn, &old, &all, &mut clock, NOW + 20, &NewestWins).unwrap(), Outcome::Applied);
     assert_eq!(log::apply_remote(&b.conn, &new, &all, &mut clock, NOW + 20, &NewestWins).unwrap(), Outcome::Applied);
     assert_eq!(b.state("card").as_deref(), Some("after"));
-    // A record past the end of its origin's old epoch is still refused, and so is one at an epoch not yet held.
+    // A record past the end of its origin's old epoch is kept as void (the origin's sequence stays unbroken) and
+    // changes nothing; one at an epoch not yet held is refused.
     let signed = |seq: u64, epoch: u32| {
         let header = Header { seq, epoch, ..new.header.clone() };
         Record::sign(&a.private, header, new.body.clone()).unwrap()
     };
-    assert_eq!(refused(log::apply_remote(&b.conn, &signed(2, 0), &all, &mut clock, NOW + 20, &NewestWins)), Refused::Epoch { have: 1, got: 0 });
     assert_eq!(refused(log::apply_remote(&b.conn, &signed(3, 2), &all, &mut clock, NOW + 20, &NewestWins)), Refused::Epoch { have: 1, got: 2 });
+    assert_eq!(log::apply_remote(&b.conn, &signed(3, 0), &all, &mut clock, NOW + 20, &NewestWins).unwrap(), Outcome::Void);
+    assert_eq!(b.state("card").as_deref(), Some("after"));
+    assert_eq!(log::vector(&b.conn, COLLECTION).unwrap().get("a"), Some(&3));
 }
 
 #[test]

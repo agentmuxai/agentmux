@@ -102,7 +102,7 @@ impl Subject {
 
     /// Whether the subject is what it says: a machine's id is made from its signing key and its box key is signed by
     /// that key; a recovery subject has neither.
-    fn valid(&self) -> bool {
+    pub fn valid(&self) -> bool {
         if unhex32(&self.box_key).is_none() || self.id.is_empty() || self.id.contains(SEP) || self.sealed_label.contains(SEP) {
             return false;
         }
@@ -350,6 +350,13 @@ impl Chain {
     /// after it was taken in is an error, not an empty collection).
     pub fn state(&self, collection: &str) -> Result<State, MemberError> {
         Chain::replay(collection, &self.entries)
+    }
+
+    /// Whether a removal is in doubt: entries beside the head are held that this machine has not outgrown, and one of
+    /// them, or the head, removes a member. The key epoch that removal makes is not settled, so nothing is sealed at it.
+    pub fn epoch_contested(&self) -> bool {
+        let removes = |e: &Entry| matches!(e.change, Change::Remove { .. });
+        !self.contested.is_empty() && (self.contested.iter().any(removes) || self.entries.last().is_some_and(removes))
     }
 
     /// The next entry, signed by `signer` (a machine of this chain) with its key's seed.
