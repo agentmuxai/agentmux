@@ -114,6 +114,11 @@ fn loopback_addr(url: &str) -> Option<std::net::SocketAddr> {
     Some(std::net::SocketAddr::new(ip.into(), parsed.port_or_known_default()?))
 }
 
+/// The base URL a confirmation is sent to: the IPv4 loopback address of `url`, as a literal address.
+fn confirm_target(url: &str) -> Option<String> {
+    loopback_addr(url).map(|addr| format!("http://{addr}"))
+}
+
 /// What asking the other instances found, and so how the forward is delivered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ForwardProof {
@@ -154,14 +159,17 @@ impl ForwardProof {
 /// instance and not a process inside an agent's process tree: that is checked before the question is sent, and again on the
 /// answer (the same processes must still hold the listener).
 async fn ask_instance(state: &AppState, url: &str, auth_key: &str, block_id: &str, body: &str, msg_id: &str, recipients: usize) -> ForwardProof {
-    let before = match listener_standing(state, url).await {
+    // The question goes to the very address that was looked up, never to a name that could resolve elsewhere (`localhost`
+    // can resolve to `::1`, which is not looked up).
+    let Some(target) = confirm_target(url) else { return ForwardProof::ListenerNotIdentified };
+    let before = match listener_standing(state, &target).await {
         Standing::Instance(pids) => pids,
         Standing::InsideAgent(agent) => return ForwardProof::AnsweredFromAgent(agent),
         Standing::Unknown => return ForwardProof::ListenerNotIdentified,
     };
     let mut http = state
         .http_client
-        .post(format!("{url}/agentmux/agent/broadcast/confirm"))
+        .post(format!("{target}/agentmux/agent/broadcast/confirm"))
         .timeout(std::time::Duration::from_secs(3))
         // The digest, not the words: an instance asked here is not necessarily one of ours.
         .json(&serde_json::json!({ "block_id": block_id, "body_sha256": body_digest(body), "msg_id": msg_id, "recipients": recipients }));
@@ -173,7 +181,7 @@ async fn ask_instance(state: &AppState, url: &str, auth_key: &str, block_id: &st
     if answer.get("confirmed").and_then(|v| v.as_bool()) != Some(true) {
         return ForwardProof::NoInstanceConfirmed;
     }
-    match listener_standing(state, url).await {
+    match listener_standing(state, &target).await {
         Standing::Instance(after) if after == before => ForwardProof::Confirmed,
         Standing::InsideAgent(agent) => ForwardProof::AnsweredFromAgent(agent),
         _ => ForwardProof::ListenerNotIdentified,
@@ -400,6 +408,25 @@ mod tests {
         assert_eq!(ask_instance(&state, &url, "", "blk", "hi", "m-6", 1).await, ForwardProof::ListenerNotIdentified);
         hook::set_sequence(addr, vec![Standing::Instance(vec![1]), Standing::InsideAgent("some-agent".into())]);
         assert_eq!(ask_instance(&state, &url, "", "blk", "hi", "m-6", 1).await, ForwardProof::AnsweredFromAgent("some-agent".into()));
+    }
+
+    #[test]
+    fn the_question_goes_to_the_address_that_was_looked_up() {
+        assert_eq!(confirm_target("http://localhost:7380").as_deref(), Some("http://127.0.0.1:7380"), "localhost is not sent as a name");
+        assert_eq!(confirm_target("http://127.0.0.1:7380/").as_deref(), Some("http://127.0.0.1:7380"));
+        assert_eq!(confirm_target("http://[::1]:7380"), None, "an address that is not looked up is not asked");
+        assert_eq!(confirm_target("http://127.0.0.1.example.com:7380"), None, "a name that only starts like loopback is not asked");
+        assert_eq!(confirm_target("http://127.0.0.1@example.com:7380"), None, "an address in the user part is not the host");
+    }
+
+    #[tokio::test]
+    async fn a_localhost_entry_is_asked_at_the_looked_up_ipv4_address() {
+        let state = crate::server::tests::test_state();
+        let (_, addr, asked) = confirming_listener().await;
+        hook::set(addr, Standing::Instance(vec![4243]));
+        let url = format!("http://localhost:{}", addr.port());
+        assert_eq!(ask_instance(&state, &url, "", "blk", "hi", "m-7", 1).await, ForwardProof::Confirmed);
+        assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[test]
