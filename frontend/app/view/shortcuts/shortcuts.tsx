@@ -29,6 +29,7 @@ import { orderByRecent } from "@/app/store/shortcuts-recent";
 import { matchesEveryWord } from "@/app/util/fuzzysearch";
 import { tip } from "@/app/element/tip";
 import { readZoom } from "@/app/store/zoom-factor";
+import { moveOpenPaneHere } from "./move-singleton-here";
 import "./shortcuts.scss";
 
 function sortByDisplayOrder(
@@ -227,9 +228,11 @@ export class ShortcutsViewModel {
     }
 
     /**
-     * A tile for a singleton view (Memory, Connectors...) whose pane is already open brings that pane
-     * back, as the widget bar does, and this pane closes: it was a question and has been answered.
-     * `forceNew` (Shift) opens a new pane in this one's place instead, and so does a singleton that is not open.
+     * A tile for a singleton view (Memory, Connectors...) whose pane is already open in this tab moves that pane here
+     * (move-singleton-here.ts) and this pane closes. A pane that cannot move (in another tab, or sharing a stack of
+     * in-pane tabs) is brought back where it is, as the widget bar does, and this pane closes: it was a question and has
+     * been answered. `forceNew` (Shift) opens a new pane in this one's place instead, and so does a singleton that is
+     * not open.
      */
     async handleWidgetSelect(widget: WidgetConfigType, opts: { forceNew?: boolean } = {}) {
         if (this.isParentWidget(widget)) {
@@ -239,6 +242,7 @@ export class ShortcutsViewModel {
         const view = widget.blockdef?.meta?.["view"] as string | undefined;
         if (view && !opts.forceNew && !widget.magnified && (widget.singleton ?? isSingletonView(view)) && (await isViewOpen(view))) {
             try {
+                if (await moveOpenPaneHere(this.blockId, view, () => this.closeSelf())) return;
                 // This pane first: closing it afterwards would hand the focus to its neighbour.
                 await this.closeSelf();
                 await openWidget(widget);
