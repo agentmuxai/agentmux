@@ -223,7 +223,7 @@ fn install_message_brokers(state: &AppState) {
 fn install_withhold_alert(state: &AppState) {
     let handler = state.reactive_handler;
     backend::transcript::withhold::set_alert(queued_alert(move |line| {
-        handler.log_fleet_action_audit(Some("srv"), "srv", "", "transcript.withhold", false, Some(line.as_str()),&uuid::Uuid::new_v4().to_string(), None);
+        handler.log_fleet_action_audit(Some("srv"), "srv", "", "transcript.withhold", false, Some(line.as_str()), &uuid::Uuid::new_v4().to_string(), None);
     }));
 }
 
