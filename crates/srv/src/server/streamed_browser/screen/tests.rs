@@ -94,3 +94,29 @@ async fn screen_mode_real() {
 fn chromium_missing() -> bool {
     super::super::chromium::find_binary().is_err()
 }
+
+/// A client holding Alt and dragging cannot move the browser off the screen, and nothing else is reachable: the window manager binds nothing.
+/// Run with the same command as `screen_mode_real`, by name `screen_mode_window_stays_put_real`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "needs Xvfb, openbox and a Chrome; run by hand on a Linux host"]
+async fn screen_mode_window_stays_put_real() {
+    if which::which("Xvfb").is_err() || which::which("openbox").is_err() || chromium_missing() {
+        eprintln!("screen_mode_window_stays_put_real: no Xvfb, openbox or Chrome here; nothing run");
+        return;
+    }
+    let session = session::start(800, 600, PAGE).await.expect("the screen and the browser start");
+    let screen = x::Screen::connect(&session.display).expect("the screen is reachable");
+    wait_for_colour(&screen, 400, 400, [0, 0, 255], 30).await.expect("the page is up");
+    let alt = keymap::keycode("AltLeft").unwrap();
+    screen.key(alt, true).unwrap();
+    screen.move_to(300.0, 300.0).unwrap();
+    screen.button(1, true).unwrap();
+    screen.move_to(500.0, 450.0).unwrap();
+    screen.button(1, false).unwrap();
+    screen.key(alt, false).unwrap();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    // The page still fills the screen: its bottom right corner is the page (red, or green if the click reached it), not the bare screen.
+    let corner = pixel(&screen, &screen.grab().unwrap(), 790, 590);
+    let page = |want: [u8; 3]| corner.iter().zip(want).all(|(a, w)| a.abs_diff(w) < 40);
+    assert!(page([0, 0, 255]) || page([0, 255, 0]), "the window moved: the corner is {corner:?}");
+}

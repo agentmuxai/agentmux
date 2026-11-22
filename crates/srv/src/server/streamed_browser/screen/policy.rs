@@ -59,8 +59,33 @@ pub fn holds(text: &str) -> bool {
         && v["DownloadRestrictions"] == json!(3)
 }
 
+/// Is the browser a snap or a flatpak, or the shim that starts one? Such a browser reads its policy from inside its own sandbox, not from the
+/// folder checked here, so a file there would pass the check and be ignored by the browser.
+pub fn sandboxed_install(binary: &Path) -> bool {
+    use std::io::Read;
+    let real = std::fs::canonicalize(binary).unwrap_or_else(|_| binary.to_path_buf());
+    let named = |p: &Path| {
+        let s = p.to_string_lossy();
+        s.contains("/snap/") || s.contains("/flatpak/") || p.file_name().is_some_and(|n| n == "snap" || n == "flatpak")
+    };
+    if named(binary) || named(&real) {
+        return true;
+    }
+    // A small script that starts a snap (the deb that only hands over to the snap on Ubuntu).
+    let mut head = [0u8; 4096];
+    let n = std::fs::File::open(&real).and_then(|mut f| f.read(&mut head)).unwrap_or(0);
+    let text = String::from_utf8_lossy(&head[..n]);
+    text.starts_with("#!") && (text.contains("/snap/") || text.contains("snap run") || text.contains("flatpak run"))
+}
+
 /// The browser will start under the policy, or the words that say what to install. Never writes: the file is system-wide.
 pub fn ensure(binary: &Path) -> Result<(), String> {
+    if sandboxed_install(binary) {
+        return Err(format!(
+            "screen mode does not run with {}: a snap or flatpak browser reads its policy from inside its own sandbox, where this check cannot see it. Use the Google Chrome or Chromium package",
+            binary.display()
+        ));
+    }
     let path = policy_dir(binary).join(FILE_NAME);
     if std::fs::read_to_string(&path).is_ok_and(|t| holds(&t)) {
         return Ok(());
@@ -106,6 +131,24 @@ mod tests {
         let mut v = wanted();
         v["URLBlocklist"] = json!(BLOCKED.iter().filter(|b| !b.starts_with("file")).collect::<Vec<_>>());
         assert!(!holds(&v.to_string()));
+    }
+
+    #[test]
+    fn a_snap_or_flatpak_browser_is_refused_and_a_plain_one_is_not() {
+        assert!(sandboxed_install(Path::new("/snap/bin/chromium")));
+        assert!(sandboxed_install(Path::new("/var/lib/flatpak/app/org.chromium.Chromium/x")));
+        let dir = tempfile::tempdir().unwrap();
+        let shim = dir.path().join("chromium-browser");
+        std::fs::write(&shim, "#!/bin/sh
+exec /snap/bin/chromium \"$@\"
+").unwrap();
+        assert!(sandboxed_install(&shim), "a script that starts the snap");
+        let plain = dir.path().join("google-chrome");
+        std::fs::write(&plain, "#!/bin/sh
+exec /opt/google/chrome/chrome \"$@\"
+").unwrap();
+        assert!(!sandboxed_install(&plain));
+        assert!(ensure(&shim).unwrap_err().contains("snap or flatpak"));
     }
 
     #[test]

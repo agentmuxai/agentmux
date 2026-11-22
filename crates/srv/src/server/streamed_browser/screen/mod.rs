@@ -11,6 +11,7 @@ mod frames;
 mod keymap;
 mod policy;
 mod session;
+mod wm;
 mod x;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -31,6 +32,8 @@ pub const ENABLE_ENV: &str = "AGENTMUX_STREAMED_BROWSER_SCREEN";
 const MAX_SESSIONS: usize = 4;
 /// Frames per second at most; a screen that did not change makes none.
 const FPS: u64 = 15;
+/// How long to wait after Ctrl+L before typing an address.
+const ADDRESS_BAR_FOCUS_MS: u64 = 250;
 /// The longest paste that is typed key by key.
 const MAX_TYPED: usize = 4000;
 
@@ -268,6 +271,8 @@ async fn navigate(screen: &x::Screen, go: Go, url: &str) -> Result<(), String> {
         Go::Url => {
             // `parse` has already checked the address: only http, https or about:blank.
             chord(keymap::CONTROL, "KeyL")?;
+            // The address bar takes the focus a moment after the chord: typing at once loses the first letters (found on a real run).
+            tokio::time::sleep(Duration::from_millis(ADDRESS_BAR_FOCUS_MS)).await;
             type_text(screen, url).await?;
             tap(screen, keymap::keycode("Enter").ok_or("no such key")?, false)
         }

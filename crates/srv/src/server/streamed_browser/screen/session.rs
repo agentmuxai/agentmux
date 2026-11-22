@@ -86,11 +86,12 @@ pub async fn start(w: u32, h: u32, url: &str) -> Result<Session, String> {
     let number: u32 = line.trim().parse().map_err(|_| format!("the virtual screen said {:?}, not a display number", line.trim()))?;
     let display = format!(":{number}");
 
+    let profile = tempfile::Builder::new().prefix("agentmux-screen-browser-").tempdir().map_err(|e| format!("cannot make the browser's profile folder: {e}"))?;
+    // The window manager runs with settings that bind nothing (wm.rs): a client's keys and mouse reach the browser and nothing else.
     let wm = match which::which("openbox") {
-        Ok(bin) => command(&bin, &[], Some(&display)).spawn().ok(),
+        Ok(bin) => command(&bin, &super::wm::write(&profile.path().join("wm"))?, Some(&display)).spawn().ok(),
         Err(_) => None,
     };
-    let profile = tempfile::Builder::new().prefix("agentmux-screen-browser-").tempdir().map_err(|e| format!("cannot make the browser's profile folder: {e}"))?;
     let no_sandbox = std::env::var(chromium::NO_SANDBOX_ENV).is_ok_and(|v| v == "1");
     let chrome = command(&chrome_bin, &chrome_args(profile.path(), proxy_port, w, h, url, no_sandbox, wm.is_some()), Some(&display))
         .spawn()
