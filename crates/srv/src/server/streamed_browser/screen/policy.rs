@@ -3,8 +3,8 @@
 
 //! What the browser may open. The streamed pane blocks local files and the browser's own pages through the debugging channel
 //! (`pane.rs`, `BLOCKED_URLS`); in screen mode a person has the browser's own address bar, so the block is the browser's managed policy,
-//! which the browser reads before it starts. Screen mode does not start without it: the policy is checked, written when this server
-//! can, and refused in words when it cannot.
+//! which the browser reads before it starts. Screen mode does not start without it. This server only checks that the policy is there: the file
+//! is system-wide (every browser of that kind on the machine reads it), so whoever runs the machine or builds its image installs it.
 
 use std::path::{Path, PathBuf};
 
@@ -36,33 +36,46 @@ pub fn policy_dir(binary: &Path) -> PathBuf {
     }
 }
 
-/// The policy: the blocked addresses, no developer tools, no extensions, no sign-in to the browser itself, and downloads that do not ask.
+/// The policy: the blocked addresses, no developer tools, no extensions, no sign-in to the browser itself, no file dialogs and no downloads
+/// (as in the streamed pane, which denies downloads).
 pub fn wanted() -> Value {
     json!({
         "URLBlocklist": BLOCKED,
         "DeveloperToolsAvailability": 2,
         "ExtensionInstallBlocklist": ["*"],
         "BrowserSignin": 0,
-        "PromptForDownloadLocation": false,
+        "AllowFileSelectionDialogs": false,
+        "DownloadRestrictions": 3,
     })
 }
 
-/// Does the policy in `text` block every address in `BLOCKED` and turn the developer tools off?
+/// Does the policy in `text` block every address in `BLOCKED`, turn the developer tools off, and allow no file dialog and no download?
 pub fn holds(text: &str) -> bool {
     let Ok(v) = serde_json::from_str::<Value>(text) else { return false };
     let listed: Vec<&str> = v["URLBlocklist"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
-    BLOCKED.iter().all(|b| listed.contains(b)) && v["DeveloperToolsAvailability"] == json!(2)
+    BLOCKED.iter().all(|b| listed.contains(b))
+        && v["DeveloperToolsAvailability"] == json!(2)
+        && v["AllowFileSelectionDialogs"] == json!(false)
+        && v["DownloadRestrictions"] == json!(3)
 }
 
-/// The browser will start under the policy, or the words that say what to install. Writes it when it is missing or short.
+/// The browser will start under the policy, or the words that say what to install. Never writes: the file is system-wide.
 pub fn ensure(binary: &Path) -> Result<(), String> {
     let path = policy_dir(binary).join(FILE_NAME);
     if std::fs::read_to_string(&path).is_ok_and(|t| holds(&t)) {
         return Ok(());
     }
-    let text = serde_json::to_string_pretty(&wanted()).map_err(|e| e.to_string())?;
-    let written = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(&path, text.as_bytes()));
-    written.map_err(|e| format!("screen mode needs the browser's policy file {} (it blocks local files, the browser's own pages and its developer tools), and this server cannot write it: {e}", path.display()))
+    Err(missing_words(&path))
+}
+
+/// What to install, in words: the file, and what it holds.
+fn missing_words(path: &Path) -> String {
+    let text = serde_json::to_string_pretty(&wanted()).unwrap_or_default();
+    format!(
+        "screen mode needs the browser's managed policy file {} (it blocks local files, the browser's own pages, developer tools, file dialogs and downloads); it is missing or does not hold. Install it as the machine's administrator, with this content:
+{text}",
+        path.display()
+    )
 }
 
 #[cfg(test)]
@@ -85,9 +98,23 @@ mod tests {
         let mut v = wanted();
         v["DeveloperToolsAvailability"] = json!(1);
         assert!(!holds(&v.to_string()));
+        for (key, open) in [("AllowFileSelectionDialogs", json!(true)), ("DownloadRestrictions", json!(0))] {
+            let mut v = wanted();
+            v[key] = open;
+            assert!(!holds(&v.to_string()), "{key} left open still holds");
+        }
         let mut v = wanted();
         v["URLBlocklist"] = json!(BLOCKED.iter().filter(|b| !b.starts_with("file")).collect::<Vec<_>>());
         assert!(!holds(&v.to_string()));
+    }
+
+    #[test]
+    fn a_missing_policy_is_refused_in_words_and_nothing_is_written() {
+        let dir = std::env::temp_dir().join("agentmux-policy-check-only");
+        let path = dir.join(FILE_NAME);
+        let words = missing_words(&path);
+        assert!(words.contains("DownloadRestrictions") && words.contains("URLBlocklist") && words.contains(FILE_NAME), "{words}");
+        assert!(!path.exists(), "checking must not write the file");
     }
 
     #[test]

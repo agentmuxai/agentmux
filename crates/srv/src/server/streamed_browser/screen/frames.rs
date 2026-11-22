@@ -18,14 +18,15 @@ pub struct Changes {
 }
 
 impl Changes {
-    /// True when `pixels` differs from the last one handed in (or is the first). Remembers it.
-    pub fn changed(&mut self, pixels: &[u8]) -> bool {
-        if self.last == pixels {
-            return false;
-        }
+    /// True when `pixels` differs from the last one remembered (or is the first).
+    pub fn differs(&self, pixels: &[u8]) -> bool {
+        self.last != pixels
+    }
+
+    /// Remember `pixels` as sent. Called only once the frame has gone, so a frame that was dropped is made again.
+    pub fn remember(&mut self, pixels: &[u8]) {
         self.last.clear();
         self.last.extend_from_slice(pixels);
-        true
     }
 }
 
@@ -60,10 +61,24 @@ mod tests {
     fn a_screen_is_sent_once_and_again_only_when_it_changes() {
         let mut c = Changes::default();
         let a = screen(4, 4, [0, 0, 255, 0]);
-        assert!(c.changed(&a), "the first screen is always sent");
-        assert!(!c.changed(&a), "the same screen is not sent again");
-        assert!(c.changed(&screen(4, 4, [0, 255, 0, 0])));
-        assert!(c.changed(&a), "going back is a change");
+        assert!(c.differs(&a), "the first screen is always sent");
+        c.remember(&a);
+        assert!(!c.differs(&a), "the same screen is not sent again");
+        let b = screen(4, 4, [0, 255, 0, 0]);
+        assert!(c.differs(&b));
+        c.remember(&b);
+        assert!(c.differs(&a), "going back is a change");
+    }
+
+    #[test]
+    fn a_screen_that_was_not_sent_is_offered_again() {
+        let mut c = Changes::default();
+        let a = screen(4, 4, [0, 0, 255, 0]);
+        c.remember(&a);
+        let b = screen(4, 4, [0, 255, 0, 0]);
+        // The send of `b` failed (the pane was full): it was not remembered, so it is still a change on the next tick.
+        assert!(c.differs(&b));
+        assert!(c.differs(&b));
     }
 
     #[test]

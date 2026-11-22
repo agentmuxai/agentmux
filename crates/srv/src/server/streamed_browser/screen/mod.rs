@@ -84,14 +84,15 @@ fn capture(display: &str, tx: mpsc::Sender<Vec<u8>>) -> Result<(), String> {
         while !tx.is_closed() {
             let started = Instant::now();
             let Ok(pixels) = screen.grab() else { return };
-            if changes.changed(&pixels) {
+            if changes.differs(&pixels) {
                 match frames::frame_message(&pixels, w, h) {
-                    // A frame the pane is too slow to take is dropped: the next one is newer.
-                    Ok(frame) => {
-                        if matches!(tx.try_send(frame), Err(mpsc::error::TrySendError::Closed(_))) {
-                            return;
-                        }
-                    }
+                    // A frame the pane is too slow to take is dropped, and the screen is not remembered as sent: the next tick tries again
+                    // with a newer screen, so the pane never stays on a picture that is out of date.
+                    Ok(frame) => match tx.try_send(frame) {
+                        Ok(()) => changes.remember(&pixels),
+                        Err(mpsc::error::TrySendError::Closed(_)) => return,
+                        Err(mpsc::error::TrySendError::Full(_)) => {}
+                    },
                     Err(_) => return,
                 }
             }
@@ -214,6 +215,11 @@ async fn send_input(screen: &x::Screen, msg: &ClientMsg) -> Result<(), String> {
             }
         }
         ClientMsg::Paste { text } => type_text(screen, text).await?,
+        ClientMsg::Nav { go: Go::Url, url } => {
+            // The checked, normalised address is what is typed: the raw string could carry a tab or a newline that moves the typing elsewhere.
+            let url = protocol::check_url(url)?;
+            navigate(screen, Go::Url, &url).await?
+        }
         ClientMsg::Nav { go, url } => navigate(screen, *go, url).await?,
         ClientMsg::Resize { .. } | ClientMsg::Window { .. } => {}
     }

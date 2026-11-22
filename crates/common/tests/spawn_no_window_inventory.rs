@@ -106,6 +106,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/server/streamed_browser/chromium.rs", "&binary", 1,
      "not-windows: macOS/Linux/unix-only code path"),
+    ("crates/srv/src/server/streamed_browser/screen/session.rs", "program", 1,
+     "not-windows: macOS/Linux/unix-only code path (the screen-mode Xvfb, window manager and Chrome)"),
     ("crates/srv/src/server/files_root.rs", "\"cmd\"", 1,
      "test: the Windows-only junction test makes a junction in a temp folder with mklink /J"),
     ("crates/srv/src/server/agent_folder_open.rs", "\"cmd\"", 1,
