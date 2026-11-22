@@ -315,6 +315,14 @@ fn note_of(accepted: &Accepted) -> FlowNote {
     FlowNote { agent: agent.to_ascii_lowercase(), repo_id: pr.repo_id, number: pr.number, at_ms: at_ms as i64, fact }
 }
 
+/// Every event of `snapshot` as what it says about a pull request.
+pub(crate) fn notes_of(snapshot: &PrFlowSnapshot) -> Vec<FlowNote> {
+    let review = snapshot.review.iter().cloned().map(Accepted::Review);
+    let checks = snapshot.checks.iter().cloned().map(Accepted::Checks);
+    let merge = snapshot.merge.iter().cloned().map(Accepted::Merge);
+    review.chain(checks).chain(merge).map(|a| note_of(&a)).collect()
+}
+
 fn by_name(by: PrFlowBy) -> &'static str {
     match by {
         PrFlowBy::Bot => "bot",

@@ -5,6 +5,8 @@
 //! then waits on.
 
 use super::*;
+use crate::backend::pr_flow::{PrFlowBy, PrRef, ReviewFlowEvent};
+use crate::backend::pr_flow::PrFlowSnapshot;
 use crate::backend::storage::work_queue::WorkItem;
 
 fn store() -> (Store, tempfile::TempDir) {
@@ -260,4 +262,39 @@ fn an_abbreviated_commit_id_names_the_same_commit() {
     assert!(same_head("0123456789abcdef", "0123456"));
     assert!(same_head("0123456", "0123456789abcdef"));
     assert!(!same_head("0123456789abcdef", "fedcba9"));
+}
+
+fn replayed(s: &Store, id: &str, number: u64, agent: &str) {
+    let event = |agent: &str, number: u64| ReviewFlowEvent {
+        id: format!("{agent}{number}"),
+        at_ms: 100,
+        agent: agent.into(),
+        pr: PrRef { repo_id: 42, number },
+        state: "approved".into(),
+        by: PrFlowBy::Bot,
+        head: Some("0123456789ab".into()),
+    };
+    let snapshot = PrFlowSnapshot { review: vec![event(agent, number), event("someone", number), event(agent, number + 1)], ..Default::default() };
+    let mut conn = s.conn().lock().unwrap();
+    let tx = conn.transaction().unwrap();
+    replay_in(&tx, id, number, &snapshot, 200).unwrap();
+    tx.commit().unwrap();
+}
+
+#[test]
+fn a_notice_that_came_before_the_card_linked_the_pull_request_reaches_it() {
+    let (s, _d) = store();
+    card(&s, "a", "pell", "o/r", 7);
+    assert_eq!(waits(&s, "a").1, "no_review");
+    replayed(&s, "a", 7, "Pell");
+    let pr = s.work_board_get("a").unwrap().unwrap().card.prs.remove(0);
+    assert_eq!((pr.review.as_str(), pr.repo_id), ("approved", Some(42)));
+}
+
+#[test]
+fn a_replay_takes_only_the_holders_notices_of_that_number() {
+    let (s, _d) = store();
+    card(&s, "a", "pell", "o/r", 7);
+    replayed(&s, "a", 7, "lazo");
+    assert_eq!(waits(&s, "a").1, "no_review", "the notice was for another agent's pull request");
 }

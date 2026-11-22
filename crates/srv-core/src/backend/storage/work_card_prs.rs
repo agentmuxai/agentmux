@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::store::Store;
+use crate::backend::pr_flow::{self, PrFlowSnapshot};
 use crate::backend::reviews::{waits_on, WaitsInput};
 use super::work_board::BoardTask;
 use super::work_queue::work_state;
@@ -511,6 +512,8 @@ pub(crate) fn link_in(tx: &Transaction, work_id: &str, repo: &str, number: u64, 
     };
     if changed {
         touch(tx, work_id, now_ms)?;
+        // Notices that came before the card linked it.
+        replay_in(tx, work_id, number, &pr_flow::recent(), now_ms)?;
     }
     Ok(changed)
 }
@@ -609,91 +612,119 @@ impl Store {
     pub fn work_card_pr_flow_apply(&self, note: &FlowNote, now_ms: i64) -> Result<usize, StoreError> {
         let mut conn = self.conn().lock().unwrap();
         let tx = conn.transaction()?;
-        let id = note.repo_id as i64;
-        let candidates: Vec<(String, Option<i64>)> = {
-            let mut stmt = tx.prepare(
-                "SELECT r.repo, r.repo_id FROM db_work_card_prs r JOIN db_work_queue q ON q.id = r.work_id
-                  WHERE r.number = ?1 AND r.unlinked = 0
-                    AND ((q.claimed_by <> '' AND q.claimed_by = ?2 COLLATE NOCASE)
-                      OR (q.claimed_by = '' AND q.target_agent = ?2 COLLATE NOCASE))",
-            )?;
-            let rows = stmt.query_map(params![note.number as i64, note.agent], |r| Ok((r.get(0)?, r.get(1)?)))?;
-            rows.collect::<Result<Vec<_>, _>>()?
-        };
-        let repo = match candidates.iter().find(|(_, known)| *known == Some(id)) {
-            Some((repo, _)) => repo.clone(),
-            None => {
-                let repos: BTreeSet<&str> = candidates.iter().map(|(r, _)| r.as_str()).collect();
-                let mut it = repos.into_iter();
-                let (Some(only), None) = (it.next(), it.next()) else { return Ok(0) };
-                // One id is one repository, and a repository has one id.
-                let clash: i64 = tx.query_row(
-                    "SELECT COUNT(*) FROM db_work_card_prs
-                      WHERE (repo_id = ?1 AND repo <> ?2) OR (repo = ?2 AND repo_id IS NOT NULL AND repo_id <> ?1)",
-                    params![id, only],
-                    |r| r.get(0),
-                )?;
-                if clash > 0 {
-                    return Ok(0);
-                }
-                tx.execute("UPDATE db_work_card_prs SET repo_id = ?1 WHERE repo = ?2", params![id, only])?;
-                only.to_string()
-            }
-        };
-        let rows: Vec<(String, String, i64, i64)> = {
-            let mut stmt = tx.prepare(
-                "SELECT work_id, reviews, checks_at, flow_at FROM db_work_card_prs WHERE repo = ?1 AND number = ?2 AND unlinked = 0",
-            )?;
-            let found = stmt.query_map(params![repo, note.number as i64], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
-            found.collect::<Result<Vec<_>, _>>()?
-        };
-        let mut changed = 0;
-        for (work_id, reviews, checks_at, flow_at) in rows {
-            let wrote = match &note.fact {
-                FlowFact::Review { by, state, head } => {
-                    let mut verdicts = verdicts_of(&reviews);
-                    if verdicts.get(by).is_some_and(|v| v.at > note.at_ms) {
-                        0
-                    } else {
-                        let head = head.clone().unwrap_or_default();
-                        verdicts.insert(by.clone(), PrVerdict { by: by.clone(), state: state.clone(), head, at: note.at_ms, stale: false });
-                        tx.execute(
-                            "UPDATE db_work_card_prs SET reviews = ?4 WHERE work_id = ?1 AND repo = ?2 AND number = ?3",
-                            params![work_id, repo, note.number as i64, verdicts_json(&verdicts)],
-                        )?
-                    }
-                }
-                FlowFact::Checks { state, head } => {
-                    if checks_at > note.at_ms {
-                        0
-                    } else {
-                        let state = if matches!(state.as_str(), "passing" | "failing") { state.as_str() } else { "pending" };
-                        tx.execute(
-                            "UPDATE db_work_card_prs SET checks = ?4, checks_head = ?5, checks_at = ?6 WHERE work_id = ?1 AND repo = ?2 AND number = ?3",
-                            params![work_id, repo, note.number as i64, state, head.as_deref().unwrap_or(""), note.at_ms],
-                        )?
-                    }
-                }
-                FlowFact::Merge { state } => {
-                    if flow_at > note.at_ms {
-                        0
-                    } else {
-                        tx.execute(
-                            "UPDATE db_work_card_prs SET flow_merge = ?4, flow_at = ?5 WHERE work_id = ?1 AND repo = ?2 AND number = ?3",
-                            params![work_id, repo, note.number as i64, state, note.at_ms],
-                        )?
-                    }
-                }
-            };
-            if wrote > 0 {
-                touch(&tx, &work_id, now_ms)?;
-                changed += 1;
-            }
-        }
+        let changed = flow_apply_in(&tx, note, now_ms)?;
         tx.commit()?;
         Ok(changed)
     }
+}
 
+/// [`Store::work_card_pr_flow_apply`] inside the caller's transaction.
+fn flow_apply_in(tx: &Transaction, note: &FlowNote, now_ms: i64) -> Result<usize, StoreError> {
+    let id = note.repo_id as i64;
+    let candidates: Vec<(String, Option<i64>)> = {
+        let mut stmt = tx.prepare(
+            "SELECT r.repo, r.repo_id FROM db_work_card_prs r JOIN db_work_queue q ON q.id = r.work_id
+              WHERE r.number = ?1 AND r.unlinked = 0
+                AND ((q.claimed_by <> '' AND q.claimed_by = ?2 COLLATE NOCASE)
+                  OR (q.claimed_by = '' AND q.target_agent = ?2 COLLATE NOCASE))",
+        )?;
+        let rows = stmt.query_map(params![note.number as i64, note.agent], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    let repo = match candidates.iter().find(|(_, known)| *known == Some(id)) {
+        Some((repo, _)) => repo.clone(),
+        None => {
+            let repos: BTreeSet<&str> = candidates.iter().map(|(r, _)| r.as_str()).collect();
+            let mut it = repos.into_iter();
+            let (Some(only), None) = (it.next(), it.next()) else { return Ok(0) };
+            // One id is one repository, and a repository has one id.
+            let clash: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM db_work_card_prs
+                  WHERE (repo_id = ?1 AND repo <> ?2) OR (repo = ?2 AND repo_id IS NOT NULL AND repo_id <> ?1)",
+                params![id, only],
+                |r| r.get(0),
+            )?;
+            if clash > 0 {
+                return Ok(0);
+            }
+            tx.execute("UPDATE db_work_card_prs SET repo_id = ?1 WHERE repo = ?2", params![id, only])?;
+            only.to_string()
+        }
+    };
+    let rows: Vec<(String, String, i64, i64)> = {
+        let mut stmt = tx.prepare(
+            "SELECT work_id, reviews, checks_at, flow_at FROM db_work_card_prs WHERE repo = ?1 AND number = ?2 AND unlinked = 0",
+        )?;
+        let found = stmt.query_map(params![repo, note.number as i64], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
+        found.collect::<Result<Vec<_>, _>>()?
+    };
+    let mut changed = 0;
+    for (work_id, reviews, checks_at, flow_at) in rows {
+        let wrote = match &note.fact {
+            FlowFact::Review { by, state, head } => {
+                let mut verdicts = verdicts_of(&reviews);
+                if verdicts.get(by).is_some_and(|v| v.at > note.at_ms) {
+                    0
+                } else {
+                    let head = head.clone().unwrap_or_default();
+                    verdicts.insert(by.clone(), PrVerdict { by: by.clone(), state: state.clone(), head, at: note.at_ms, stale: false });
+                    tx.execute(
+                        "UPDATE db_work_card_prs SET reviews = ?4 WHERE work_id = ?1 AND repo = ?2 AND number = ?3",
+                        params![work_id, repo, note.number as i64, verdicts_json(&verdicts)],
+                    )?
+                }
+            }
+            FlowFact::Checks { state, head } => {
+                if checks_at > note.at_ms {
+                    0
+                } else {
+                    let state = if matches!(state.as_str(), "passing" | "failing") { state.as_str() } else { "pending" };
+                    tx.execute(
+                        "UPDATE db_work_card_prs SET checks = ?4, checks_head = ?5, checks_at = ?6 WHERE work_id = ?1 AND repo = ?2 AND number = ?3",
+                        params![work_id, repo, note.number as i64, state, head.as_deref().unwrap_or(""), note.at_ms],
+                    )?
+                }
+            }
+            FlowFact::Merge { state } => {
+                if flow_at > note.at_ms {
+                    0
+                } else {
+                    tx.execute(
+                        "UPDATE db_work_card_prs SET flow_merge = ?4, flow_at = ?5 WHERE work_id = ?1 AND repo = ?2 AND number = ?3",
+                        params![work_id, repo, note.number as i64, state, note.at_ms],
+                    )?
+                }
+            }
+        };
+        if wrote > 0 {
+            touch(tx, &work_id, now_ms)?;
+            changed += 1;
+        }
+    }
+    Ok(changed)
+}
+
+/// Put what the recent notices said of a pull request on its card row, when the row is new on the card: a notice that
+/// came before the card linked the pull request would otherwise never reach it. The notices of the task's holder with
+/// the pull request's number, oldest first; each one goes through the same join and the same ignore-the-older rule.
+fn replay_in(tx: &Transaction, work_id: &str, number: u64, recent: &PrFlowSnapshot, now_ms: i64) -> Result<(), StoreError> {
+    let held: Option<(String, String)> = tx
+        .query_row("SELECT claimed_by, target_agent FROM db_work_queue WHERE id = ?1", params![work_id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .optional()?;
+    let Some((claimed, target)) = held else { return Ok(()) };
+    let holder = if claimed.is_empty() { target } else { claimed };
+    if holder.is_empty() {
+        return Ok(());
+    }
+    let mut notes: Vec<FlowNote> = pr_flow::notes_of(recent).into_iter().filter(|n| n.number == number && n.agent.eq_ignore_ascii_case(&holder)).collect();
+    notes.sort_by_key(|n| n.at_ms);
+    for n in &notes {
+        flow_apply_in(tx, n, now_ms)?;
+    }
+    Ok(())
+}
+
+impl Store {
     /// A task's linked pull requests, newest first.
     pub fn work_card_prs(&self, work_id: &str) -> Result<Vec<WorkCardPr>, StoreError> {
         let conn = self.conn().lock().unwrap();
