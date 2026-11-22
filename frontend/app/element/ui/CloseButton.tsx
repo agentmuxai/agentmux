@@ -27,6 +27,7 @@
 import clsx from "clsx";
 import { type JSX, Show, splitProps } from "solid-js";
 import { Tooltip } from "../tooltip";
+import { createPendingPress, type PendingMode } from "./pending-press";
 import "./close-button.scss";
 
 export type CloseButtonSize = "sm" | "md" | "tab" | "header";
@@ -42,22 +43,32 @@ export interface CloseButtonProps extends Omit<JSX.ButtonHTMLAttributes<HTMLButt
     /** Default true. Set false where a surrounding element already explains it, or on a control inside another tooltip. */
     tooltip?: boolean;
     tooltipPlacement?: "top" | "bottom" | "left" | "right";
+    /** What it does while its click handler's promise runs: locks, and shows the spinner after a short delay (see `PendingMode`). */
+    pending?: PendingMode;
     class?: string;
 }
 
 export function CloseButton(props: CloseButtonProps): JSX.Element {
-    const [local, rest] = splitProps(props, ["label", "text", "size", "busy", "tooltip", "tooltipPlacement", "class", "type"]);
+    const [local, rest] = splitProps(props, ["label", "text", "size", "busy", "pending", "tooltip", "tooltipPlacement", "class", "type", "onClick"]);
     const label = () => local.label ?? "Close";
+    const press = createPendingPress(
+        () => local.onClick,
+        () => local.pending,
+        () => false
+    );
+    const spinner = () => local.busy || press.spinning();
     const button = () => (
         <button
             {...rest}
             type={local.type ?? "button"}
             class={clsx("ui-close", `ui-close--${local.size ?? "md"}`, local.text && "ui-close--text", local.class)}
             aria-label={local.text ? undefined : label()}
-            aria-busy={local.busy ? "true" : undefined}
+            onClick={press.click}
+            aria-busy={local.busy || press.pending() ? "true" : undefined}
+            data-pending={press.pending() ? "true" : undefined}
             disabled={rest.disabled || local.busy}
         >
-            <i class={local.busy ? "fa-solid fa-spinner fa-spin" : "fa-solid fa-xmark"} aria-hidden="true" />
+            <i class={spinner() ? "fa-solid fa-spinner fa-spin" : "fa-solid fa-xmark"} aria-hidden="true" />
             <Show when={local.text}>
                 <span class="ui-close__text">{local.text}</span>
             </Show>

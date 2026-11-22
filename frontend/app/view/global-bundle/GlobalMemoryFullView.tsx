@@ -63,6 +63,7 @@ function EditorBar(props: { model: GlobalBundleViewModel; isNew: boolean; confir
                     density="compact"
                     class="memory-editor-btn"
                     disabled={draft.savingAtom()}
+                    pending={false}
                     onClick={() =>
                         requestCancel({
                             isDirty: draft.dirtyAtom,
@@ -91,6 +92,13 @@ function EditorBar(props: { model: GlobalBundleViewModel; isNew: boolean; confir
             </label>
         </>
     );
+}
+
+/** Asks in the pane whether to remove the entry, and removes it on a yes. The button that calls it waits for a person's
+ *  answer, so it is `pending={false}`. */
+async function removeAfterConfirm(confirm: PaneConfirm, name: string, remove: () => void): Promise<void> {
+    if (!(await confirm.ask({ title: `Remove "${name}" from Global Memory?`, confirmLabel: "Remove" }))) return;
+    remove();
 }
 
 /** Mounted once per entry id (not per list refresh — the refreshed Bundle is
@@ -169,10 +177,10 @@ function EntryView(props: { model: GlobalBundleViewModel; id: string; confirm: P
                             tone="danger"
                             class="memory-editor-btn is-danger"
                             title="Remove this memory from Global Memory"
-                            onClick={async () => {
-                                if (!(await props.confirm.ask({ title: `Remove "${entry().name}" from Global Memory?`, confirmLabel: "Remove" }))) return;
-                                void (isSystem() ? model.removeSystem(id) : model.remove(id));
-                            }}
+                            pending={false}
+                            onClick={() =>
+                                removeAfterConfirm(props.confirm, entry().name, () => void (isSystem() ? model.removeSystem(id) : model.remove(id)))
+                            }
                         >
                             Remove
                         </Button>
