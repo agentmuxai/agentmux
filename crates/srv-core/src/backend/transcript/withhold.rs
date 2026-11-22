@@ -41,7 +41,7 @@ pub const MIN_LEN: usize = 8;
 pub const KEPT_PER_OWNER: usize = 8;
 
 /// The longest value the registry takes (bytes): a longer one is refused.
-pub const MAX_VALUE_LEN: usize = 32 * 1024 * 1024;
+pub const MAX_VALUE_LEN: usize = 4 * 1024 * 1024;
 
 /// The longest value that goes into the one pattern; a longer one is held apart and matched by an exact search.
 pub const MAX_POOLED_LEN: usize = 32 * 1024;
@@ -50,8 +50,9 @@ pub const MAX_POOLED_LEN: usize = 32 * 1024;
 /// make room.
 pub const MAX_TOTAL_BYTES: usize = 2 * 1024 * 1024;
 
-/// The most the values over [`MAX_POOLED_LEN`] hold in all (bytes).
-pub const MAX_LARGE_BYTES: usize = 32 * 1024 * 1024;
+/// The most the values over [`MAX_POOLED_LEN`] hold in all (bytes). Each is kept in every spelling, about 15 times its
+/// size, so this bounds what the exact search holds.
+pub const MAX_LARGE_BYTES: usize = 4 * 1024 * 1024;
 
 /// The size limit of the one-pattern matcher, and of the exact search that replaces it (bytes of spellings).
 const REGEX_LIMIT: usize = 64 << 20;
@@ -78,14 +79,14 @@ enum Matcher {
 #[derive(Clone)]
 struct Built {
     small: Option<Matcher>,
-    /// The spellings of the values over [`MAX_POOLED_LEN`] (plain, as JSON holds it, base64).
+    /// The spellings of the values over [`MAX_POOLED_LEN`], the same as the pooled values have (`vault::scrub::forms`).
     large: Arc<Vec<String>>,
 }
 
 /// The state of the registry, for a health read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Health {
-    /// `none` (nothing registered), `pattern`, `exact` or `closed`.
+    /// `none` (nothing registered), `pattern`, `exact`, `closed`, or `large` (only values over [`MAX_POOLED_LEN`]).
     pub mode: &'static str,
     pub values: usize,
     /// How many of the values are over [`MAX_POOLED_LEN`].
@@ -435,26 +436,13 @@ pub fn release_all(owner: &str) {
     with_write(|r| r.release_all(owner));
 }
 
-/// The spellings of a value over [`MAX_POOLED_LEN`]: as it is, as a JSON string holds it, and base64.
-fn large_forms(value: &str) -> Vec<String> {
-    use base64::Engine;
-    let mut out = vec![value.to_string()];
-    let json = serde_json::to_string(value).unwrap_or_default();
-    if let Some(plain) = json.strip_prefix('"').and_then(|q| q.strip_suffix('"')) {
-        out.push(plain.to_string());
-    }
-    out.push(base64::engine::general_purpose::STANDARD.encode(value));
-    out.dedup();
-    out
-}
-
 /// What matches `values`. The values up to [`MAX_POOLED_LEN`] go into one matcher for every value in every spelling,
 /// longest first so a spelling that contains another is replaced whole; when one pattern cannot be built under
 /// `regex_limit` the same spellings are searched one at a time, and when they are over `exact_limit` bytes the matcher
 /// is [`Matcher::Closed`]. The larger values are held apart and searched exactly. `None` when nothing is registered.
 fn build(values: &[&str], regex_limit: usize, exact_limit: usize) -> Option<Built> {
     let (large, pooled): (Vec<&str>, Vec<&str>) = values.iter().partition(|v| v.len() > MAX_POOLED_LEN);
-    let mut large_needles: Vec<String> = large.iter().flat_map(|v| large_forms(v)).filter(|f| f.len() >= MIN_LEN).collect();
+    let mut large_needles: Vec<String> = large.iter().flat_map(|v| crate::backend::vault::scrub::forms(v)).filter(|f| f.len() >= MIN_LEN).collect();
     large_needles.sort_by(|a, b| b.len().cmp(&a.len()));
     large_needles.dedup();
     let small = build_pooled(&pooled, regex_limit, exact_limit);
@@ -782,6 +770,10 @@ mod tests {
         assert!(!shows(&mut registry, 0, "canary-large-small-0001"));
         let spelled = base64::engine::general_purpose::STANDARD.encode(&large);
         assert!(!replaced(&built, &format!("out: {spelled}")).contains("canary-large"), "also as base64");
+        // Every spelling the pooled values have: percent-encoded, hex, URL-safe base64, as JSON holds it.
+        for form in crate::backend::vault::scrub::forms(&large) {
+            assert_eq!(replaced(&built, &format!("out: {form}")), "out: [withheld]", "a spelling of the large value shows");
+        }
         assert!(replaced(&built, "an ordinary line").as_ref() == "an ordinary line");
     }
 
