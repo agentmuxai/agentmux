@@ -180,3 +180,38 @@ async fn screen_mode_idle_real() {
     let frame = tokio::time::timeout(Duration::from_secs(1), rx.recv()).await.expect("a change makes a frame within a second").unwrap();
     assert_eq!(frame[0], frames::FRAME);
 }
+
+#[tokio::test]
+async fn typing_that_is_cut_short_says_so_and_types_nothing_more() {
+    use std::cell::Cell;
+    let typed = std::cell::RefCell::new(Vec::new());
+    let calls = Cell::new(0);
+    // The screen changes before the fourth character is typed.
+    let stop = || {
+        calls.set(calls.get() + 1);
+        calls.get() > 3
+    };
+    let out = type_chars("abcdef", stop, |key, shift| {
+        typed.borrow_mut().push((key, shift));
+        Ok(())
+    })
+    .await
+    .unwrap();
+    assert_eq!(out, Typed::Interrupted);
+    assert_eq!(typed.borrow().len(), 3, "only what came before the change was typed");
+    let all = type_chars("ab", || false, |_, _| Ok(())).await.unwrap();
+    assert_eq!(all, Typed::Done);
+}
+
+#[tokio::test]
+async fn a_key_that_cannot_be_pressed_is_an_error_and_a_character_with_no_us_key_is_skipped() {
+    assert!(type_chars("a", || false, |_, _| Err("no".to_string())).await.is_err());
+    let n = std::cell::Cell::new(0);
+    type_chars("a\u{e9}b", || false, |_, _| {
+        n.set(n.get() + 1);
+        Ok(())
+    })
+    .await
+    .unwrap();
+    assert_eq!(n.get(), 2, "the accented letter has no US key and is skipped");
+}
