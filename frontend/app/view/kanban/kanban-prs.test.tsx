@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const { opened } = vi.hoisted(() => ({ opened: vi.fn(async () => undefined) }));
 vi.mock("@/app/store/misc-utils", () => ({ openLink: opened }));
 
-import { DrawerPrs, prChip, prsOf, prStateWords, PrChip, WaitingOnLine } from "./kanban-prs";
+import { DrawerPrs, prChip, prFlow, PrFlowLine, prsOf, prStateWords, PrChip, WaitingOnLine } from "./kanban-prs";
 import type { KanbanActResult, KanbanCardFields, KanbanCardPr, KanbanPrRollup } from "./kanban-types";
 
 const NOW = 10_000_000;
@@ -216,5 +216,46 @@ describe("the drawer's moves on a card's pull requests", () => {
         only.unmount();
         const shown = render(() => <DrawerPrs card={card([pr(12, { followed: false })])} now={NOW} />);
         expect(shown.getByText("Not followed")).toBeTruthy();
+    });
+});
+
+describe("the pull request line of a card", () => {
+    const flowPr = (over: Partial<KanbanCardPr> = {}) => pr(7, { waits_on: "author", why: "checks_failing", review: "approved", checks: "failing", ...over });
+    const withFlow = (p: KanbanCardPr, roll: Partial<KanbanPrRollup> = {}) =>
+        card([p], { waits_on: p.waits_on, why: p.why, blocking: "agentmuxai/agentmux#7", waits_more: 0, ...roll });
+
+    it("is absent for a card with no open pull request", () => {
+        expect(prFlow(card(undefined))).toBeNull();
+        expect(prFlow(withFlow(flowPr({ state: "merged" })))).toBeNull();
+    });
+
+    it("names who the blocking pull request waits on, with the review and checks chips", () => {
+        const f = prFlow(withFlow(flowPr()));
+        expect(f?.badge).toMatchObject({ word: "Waits on the author", tone: "warn" });
+        expect(f?.badge?.title).toContain("agentmuxai/agentmux#7");
+        expect(f?.chips.map((c) => c.word)).toEqual(["approved", "checks failing"]);
+    });
+
+    it("says ready to merge, and keeps the line without a badge for a pull request the rule cannot place", () => {
+        expect(prFlow(withFlow(flowPr({ waits_on: "author", why: "ready_to_merge", checks: "passing" })))?.badge?.word).toBe("Ready to merge");
+        const unplaced = prFlow(withFlow(flowPr({ waits_on: "unknown", why: "unknown" })));
+        expect(unplaced).not.toBeNull();
+        expect(unplaced?.badge).toBeNull();
+        expect(prFlow(card([pr(7)]))?.badge).toBeNull();
+    });
+
+    it("marks a verdict of an older commit, and counts the other open pull requests", () => {
+        const stale = flowPr({ review: "none", checks: "none", verdicts: [{ by: "bot", state: "approved", head: "abc1234", at: 1, stale: true }] });
+        expect(prFlow(withFlow(stale, { waits_more: 2 }))).toMatchObject({ more: 2, chips: [{ word: "review stale" }] });
+    });
+
+    it("draws the badge and the chips, and a drawer detail with each verdict and its commit", () => {
+        const p = flowPr({ verdicts: [{ by: "bot", state: "changes_requested", head: "abcdef0123", at: 1, stale: false }] });
+        const line = render(() => <PrFlowLine card={withFlow(p)} />);
+        expect(line.getByText("Waits on the author")).toBeTruthy();
+        expect(line.getByText("checks failing")).toBeTruthy();
+        line.unmount();
+        const drawer = render(() => <DrawerPrs card={withFlow(p)} now={NOW} />);
+        expect(drawer.getByText("Review bot: changes requested · abcdef0")).toBeTruthy();
     });
 });

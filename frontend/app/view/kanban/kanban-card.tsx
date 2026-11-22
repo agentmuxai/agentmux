@@ -32,7 +32,7 @@ import {
 import { refOf } from "./kanban-boards";
 import { surfaceOf } from "./kanban-links";
 import { CardMedia } from "./kanban-media";
-import { PrChip, prChip, WaitingOnLine } from "./kanban-prs";
+import { PrChip, prChip, PrFlowLine, WaitingOnLine } from "./kanban-prs";
 import { seatOf, useSeatIndex } from "./kanban-seats";
 import type { KanbanAfter, KanbanAgent, KanbanAgentState, KanbanTask } from "./kanban-types";
 
@@ -254,6 +254,7 @@ export function KanbanCard(props: KanbanCardProps): JSX.Element {
                 <StatusPills s={s} />
                 <FactPills s={s} />
             </div>
+            <PrFlowLine card={t().card} />
             <div class="kanban-card__foot">
                 <span>from {requestedBy(t())}</span>
                 <span {...tip("Since it last moved")}>{formatAge(Math.max(0, props.now - t().updated_at))}</span>

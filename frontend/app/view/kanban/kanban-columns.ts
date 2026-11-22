@@ -334,11 +334,32 @@ export function prLabel(url: string): string {
     return m ? `#${m[1]}` : "PR";
 }
 
-/** Whether a task matches the search box: title, number, agent, repository. */
+/** The pull requests a card lists, those taken off it left out. */
+const listed = (card: KanbanTask["card"]) => (card.prs ?? []).filter((p) => !p.unlinked);
+
+/** Whether a card's pull request is named by `q`: its number (`12`, `#12`) or `owner/repo#12`. */
+export function matchesPr(card: KanbanTask["card"], q: string): boolean {
+    const s = q.trim().toLowerCase().replace(/^#/, "");
+    return !!s && listed(card).some((p) => String(p.number) === s || `${p.repo}#${p.number}`.toLowerCase() === s);
+}
+
+/** The values of the "waits on" filter: nothing (anyone), any open pull request, or who the blocked one waits on. */
+export const WAITS_FILTERS = ["", "open", "author", "reviewer", "ci", "queue", "person"] as const;
+
+/** Whether a card passes the "waits on" filter: any open pull request that waits on `wait`, or (`open`) any open one. */
+export function matchesWaits(card: KanbanTask["card"], wait: string): boolean {
+    if (!wait) return true;
+    const open = listed(card).filter((p) => p.state === "open");
+    return wait === "open" ? open.length > 0 : open.some((p) => p.waits_on === wait);
+}
+
+/** Whether a task matches the search box: title, number, agent, repository, branch, or one of its pull requests'
+ *  numbers (`12`, `#12`, `owner/repo#12`). */
 export function matchesQuery(t: KanbanTask, q: string): boolean {
     const s = q.trim().toLowerCase();
     if (!s) return true;
     if (s.replace(/^#/, "") === String(t.card.num)) return true;
+    if (matchesPr(t.card, s)) return true;
     return [t.title, t.target_agent, t.claimed_by, t.card.repo, t.card.branch, t.kind]
         .filter(Boolean)
         .some((f) => f.toLowerCase().includes(s));
