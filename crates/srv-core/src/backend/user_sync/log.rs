@@ -94,6 +94,8 @@ pub enum Refused {
 pub enum SyncError {
     Refused(Refused),
     Db(rusqlite::Error),
+    /// The caller's sealing of a body failed; nothing was written.
+    Seal(String),
 }
 
 impl From<rusqlite::Error> for SyncError {
@@ -276,15 +278,47 @@ pub fn append_local(
     tombstone: bool,
     now_ms: i64,
 ) -> Result<Record, SyncError> {
+    append_local_with(conn, signer, collection, record, tombstone, now_ms, |_| Ok(body))
+}
+
+/// What the header of a record being written will carry, handed to the caller before the body is made so it can
+/// seal the body for exactly that place (the associated data of the seal is these fields).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SealAt {
+    pub collection: String,
+    pub record: String,
+    pub version: Version,
+    pub base: Option<Version>,
+    pub epoch: u32,
+}
+
+/// [`append_local`] with the body made by `seal` once the version, base and epoch are known. A tombstone has no
+/// body: `seal` is not called. An error from `seal` writes nothing.
+pub fn append_local_with(
+    conn: &Connection,
+    signer: &mut Signer,
+    collection: &str,
+    record: &str,
+    tombstone: bool,
+    now_ms: i64,
+    seal: impl FnOnce(&SealAt) -> Result<Vec<u8>, String>,
+) -> Result<Record, SyncError> {
     let epoch = collection_epoch(conn, collection)?.ok_or(Refused::UnknownCollection)?;
     if let Some(held) = max_version(conn, collection)? {
         signer.clock.raise(&held);
     }
     let base = current(conn, collection, record)?.map(|r| r.header.version);
+    let version = signer.clock.tick(now_ms);
+    let body = if tombstone {
+        Vec::new()
+    } else {
+        seal(&SealAt { collection: collection.to_string(), record: record.to_string(), version: version.clone(), base: base.clone(), epoch })
+            .map_err(SyncError::Seal)?
+    };
     let header = Header {
         collection: collection.to_string(),
         record: record.to_string(),
-        version: signer.clock.tick(now_ms),
+        version,
         base,
         origin: signer.machine.to_string(),
         seq: have(conn, collection, signer.machine)? + 1,
@@ -341,25 +375,25 @@ pub fn apply_remote(
     })
 }
 
-/// What a peer lacks: the records after the sequences in `vector`, per origin, at most `limit`.
+/// What a peer lacks: the records after the sequences in `vector`, per origin, at most `limit`, oldest version first.
 pub fn since(conn: &Connection, collection: &str, vector: &Vector, limit: usize) -> rusqlite::Result<Vec<Record>> {
     let mut origins = conn.prepare("SELECT DISTINCT origin FROM db_sync_log WHERE collection = ?1 ORDER BY origin")?;
     let names: Vec<String> = origins.query_map(params![collection], |r| r.get(0))?.collect::<Result<_, _>>()?;
     let mut out = Vec::new();
     for origin in names {
-        let room = limit.saturating_sub(out.len());
-        if room == 0 {
-            break;
-        }
         let after = vector.get(&origin).copied().unwrap_or(0) as i64;
         let mut stmt = conn.prepare(&format!(
             "SELECT {COLS}, sig, body FROM db_sync_log WHERE collection = ?1 AND origin = ?2 AND seq > ?3 ORDER BY seq LIMIT ?4"
         ))?;
-        let rows = stmt.query_map(params![collection, origin, after, room as i64], record_of)?;
+        let rows = stmt.query_map(params![collection, origin, after, limit as i64], record_of)?;
         for r in rows {
             out.push(r?);
         }
     }
+    // Oldest version first, so a record arrives after the ones it replaced (an origin's own versions rise with its
+    // sequence, so each origin's records still come in sequence, and a cut at `limit` keeps a prefix of each).
+    out.sort_by(|a, b| a.header.version.cmp(&b.header.version));
+    out.truncate(limit);
     Ok(out)
 }
 
