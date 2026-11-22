@@ -28,6 +28,7 @@ function source(over: Partial<MaskSource> = {}, metas: Record<string, Record<str
             { blockId: "hidden-memory", rect: r(0, 0, 0, 0) },
         ],
         panels: () => [],
+        overlays: () => [],
         meta: (id) => metas[id] ?? { vault: { view: "vault" }, agent: { view: "agent" }, "hidden-memory": { view: "memory" } }[id],
         ...over,
     };
@@ -55,6 +56,21 @@ describe("measure", () => {
     it("includes an overlay that shows private content, such as a Vault request card in an agent pane", () => {
         const m = measure(source({ panels: () => [r(420, 500, 300, 80)] }));
         expect(m.rects).toEqual([r(0, 0, 400, 600), r(420, 500, 300, 80)]);
+    });
+
+    it("includes a tooltip or menu opened from a private pane or panel, wherever it is drawn, and no other", () => {
+        const m = measure(
+            source({
+                panes: () => [],
+                overlays: () => [
+                    { rect: r(450, 100, 200, 30), blockId: "vault", inPanel: false },
+                    { rect: r(450, 200, 200, 30), blockId: "agent", inPanel: true },
+                    { rect: r(450, 300, 200, 30), blockId: "agent", inPanel: false },
+                    { rect: r(450, 400, 200, 30), blockId: null, inPanel: false },
+                ],
+            })
+        );
+        expect(m.rects).toEqual([r(450, 100, 200, 30), r(450, 200, 200, 30)]);
     });
 
     it("clips to the viewport and drops what is off it", () => {

@@ -44,6 +44,7 @@ import { autoUpdate, type Placement } from "@floating-ui/dom";
 import { createSignal, onCleanup, onMount, untrack, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import "./anchored-popover.scss";
+import { setOverlayAnchor } from "@/app/capture/overlay-anchors";
 
 /** A zero-size rect at a point: the cursor, for a menu that opens where the user clicked. */
 export function pointAnchor(x: number, y: number): DOMRect {
@@ -129,7 +130,9 @@ function roomStyle(base: JSX.CSSProperties | undefined, room: Room): JSX.CSSProp
 }
 
 /** A floating-ui reference that keeps reading the anchor captured at mount. */
-function referenceFor(anchor: Element | DOMRect) {
+/** What the panel is placed against; also records it as the panel's anchor (a window capture's mask reads it). */
+function referenceFor(anchor: Element | DOMRect, panel?: Element) {
+    if (panel) setOverlayAnchor(panel, anchor);
     if (anchor instanceof Element) {
         return { getBoundingClientRect: () => anchor.getBoundingClientRect(), contextElement: anchor };
     }
@@ -235,7 +238,7 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
                 shown();
                 return;
             }
-            const reference = referenceFor(anchor);
+            const reference = referenceFor(anchor, el);
             const placement = untrack(() => props.placement) ?? "top-start";
             const container = untrack(() => props.containWithin)?.() ?? undefined;
             const update = async () => {

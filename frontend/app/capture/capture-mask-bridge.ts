@@ -14,7 +14,8 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { CaptureMaskEvent } from "@/types/rpc/CaptureMaskEvent";
 import type { WindowCaptureMask } from "@/types/rpc/WindowCaptureMask";
-import { CaptureWatch, measure, PRIVATE_SELECTOR, toMask, type MaskSource, type Measured } from "./capture-mask";
+import { overlayAnchor } from "./overlay-anchors";
+import { CaptureWatch, measure, openListRefusal, PRIVATE_SELECTOR, toMask, type MaskSource, type Measured } from "./capture-mask";
 
 /** A watch not ended by then stops measuring. */
 const WATCH_MS = 15_000;
@@ -53,6 +54,17 @@ export async function answerAsk(ev: CaptureMaskEvent, deps: MaskBridgeDeps, watc
 
 let dragging = false;
 
+/** An overlay's whole drawn area: its shell and what is inside it, which may be placed outside the shell. */
+function unionRect(el: Element): { x: number; y: number; w: number; h: number } {
+    const rects = [el, ...el.querySelectorAll("*")].map((e) => e.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0);
+    if (rects.length === 0) return { x: 0, y: 0, w: 0, h: 0 };
+    const x0 = Math.min(...rects.map((r) => r.left));
+    const y0 = Math.min(...rects.map((r) => r.top));
+    const x1 = Math.max(...rects.map((r) => r.right));
+    const y1 = Math.max(...rects.map((r) => r.bottom));
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
 function windowSource(): MaskSource {
     const rectOf = (el: Element) => {
         const r = el.getBoundingClientRect();
@@ -65,6 +77,13 @@ function windowSource(): MaskSource {
         panes: () =>
             [...document.querySelectorAll("[data-blockid]")].map((el) => ({ blockId: el.getAttribute("data-blockid") ?? "", rect: rectOf(el) })),
         panels: () => [...document.querySelectorAll(PRIVATE_SELECTOR)].map(rectOf),
+        overlays: () =>
+            [...document.querySelectorAll("[data-pane-overlay]")].flatMap((el) => {
+                const anchor = overlayAnchor(el);
+                if (!anchor) return [];
+                const blockId = anchor.closest("[data-blockid]")?.getAttribute("data-blockid") ?? null;
+                return [{ rect: unionRect(el), blockId, inPanel: anchor.closest(PRIVATE_SELECTOR) != null }];
+            }),
         meta: (blockId) => MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta as Record<string, unknown> | undefined,
     };
 }
@@ -76,7 +95,7 @@ function windowDeps(): MaskBridgeDeps {
         title: () => document.title,
         read: () => measure(windowSource()),
         nextFrame: (cb) => requestAnimationFrame(() => cb()),
-        refusal: () => (dragging ? "a pane is being dragged" : undefined),
+        refusal: () => (dragging ? "a pane is being dragged" : openListRefusal(document.activeElement)),
         async answer(captureId, phase, mask) {
             await RpcApi.CaptureMaskReportCommand(TabRpcClient, { capture_id: captureId, phase, mask });
         },

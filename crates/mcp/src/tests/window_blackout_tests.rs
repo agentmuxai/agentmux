@@ -105,3 +105,12 @@ fn the_container_refusal_says_what_to_do_instead() {
     assert!(IN_CONTAINER.contains("UI screenshot of your own pane"));
     assert!(OTHER_INSTANCE.contains("capture it from an agent of that AgentMux"));
 }
+
+#[test]
+fn the_title_linux_adds_without_the_sandbox_still_finds_the_window() {
+    let m = mask("w1", "AgentMux · work");
+    assert!(before(std::slice::from_ref(&m), &format!("AgentMux · work{UNSANDBOXED_SUFFIX}")).is_ok());
+    assert!(before(std::slice::from_ref(&m), "AgentMux · work — something else").is_err());
+    let host = include_str!("../../../cef/src/client/display.rs");
+    assert!(host.contains(&format!("push_str(\"{UNSANDBOXED_SUFFIX}\")")), "the host's suffix changed: change UNSANDBOXED_SUFFIX with it");
+}

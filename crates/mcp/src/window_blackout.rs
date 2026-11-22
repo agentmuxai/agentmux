@@ -45,9 +45,18 @@ pub(crate) struct WindowMask {
 /// What to do instead, said with every refusal.
 const INSTEAD: &str = "try again in a moment, or use UI screenshot of your own pane";
 
+/// What the host adds to a window's title on Linux when it runs without the sandbox
+/// (`crates/cef/src/client/display.rs`); the page's own title, which the window reports, does not have it.
+pub(crate) const UNSANDBOXED_SUFFIX: &str = " — Sandbox Disabled";
+
+/// Whether the operating system's `title` for a window is the page title `page` the window reported.
+fn same_title(title: &str, page: &str) -> bool {
+    title == page || title.strip_suffix(UNSANDBOXED_SUFFIX) == Some(page)
+}
+
 /// The answer for the window titled `title`, out of every window's answer to `begin`, if it may be captured now.
 pub(crate) fn before<'a>(masks: &'a [WindowMask], title: &str) -> Result<&'a WindowMask> {
-    let mine: Vec<&WindowMask> = masks.iter().filter(|m| m.title == title).collect();
+    let mine: Vec<&WindowMask> = masks.iter().filter(|m| same_title(title, &m.title)).collect();
     let mask = match mine.as_slice() {
         [] => anyhow::bail!("this AgentMux window did not give the rectangles of its private panes, so it is not captured: {INSTEAD}"),
         [one] => *one,
