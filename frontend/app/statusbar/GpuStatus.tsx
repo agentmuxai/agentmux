@@ -8,7 +8,7 @@ import { getGpuInfo, gpuClassBadge } from "@/util/gpuutil";
 import { Show, type JSX } from "solid-js";
 import { closeGpuPanel, gpuPanelAnchor, toggleGpuPanel } from "./gpu-panel-state";
 import { GpuPanel } from "./GpuPanel";
-import { createUiBusyAlert, sharedUiBusy } from "./ui-busy";
+import { sharedUiBusy, sharedUiBusyAlert } from "./ui-busy";
 
 // Compact bottom-left status-bar line for GPU/WebGL state (enabled/disabled). A click opens the GPU panel (use and
 // memory, per adapter and per process; GpuPanel.tsx), the same one the "GPU n%" meter beside CPU opens. Driver detail
@@ -19,7 +19,7 @@ const GpuStatus = (): JSX.Element => {
 
     // The window's page busy share (ui-busy.ts): its figure is in the panel's footer; here it is the colour, and the tip says why.
     const busy = sharedUiBusy();
-    const pulling = createUiBusyAlert(busy);
+    const pulling = sharedUiBusyAlert();
 
     const color = () => {
         if (pulling()) return "var(--error-text-color)";

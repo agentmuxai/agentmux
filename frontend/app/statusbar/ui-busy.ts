@@ -103,6 +103,14 @@ export function sharedUiBusy(): Accessor<number | null> {
     return shared;
 }
 
+let sharedAlert: Accessor<boolean> | null = null;
+
+/** This window's one busy alert over `sharedUiBusy`: the Graphics item's colour and the bar's fit rule (which keeps the item while it is on) read the same answer. */
+export function sharedUiBusyAlert(): Accessor<boolean> {
+    sharedAlert ??= createRoot(() => createUiBusyAlert(sharedUiBusy()));
+    return sharedAlert;
+}
+
 /** Slow-frame time in a window; long-task time where the engine has no Long Animation Frames; null with neither. */
 export function pageBusyBetween(start: number, end: number): number | null {
     return slowFrameMsEndedBetween(start, end) ?? blockedMsBetween(start, end);

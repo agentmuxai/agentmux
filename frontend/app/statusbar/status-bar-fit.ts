@@ -8,6 +8,8 @@ export type DropAt = 0 | 1 | 2 | 3 | 4;
 
 /** The summary's id in the status bar registry. */
 export const SUMMARY_ID = "agentmux:summary";
+/** The Graphics item's id: the one place the status bar says that this window's page is busy. */
+export const GPU_ID = "agentmux:gpu";
 /** The token count's id: the item that carries the dot for AgentMux's own failing model calls. */
 export const TOKEN_USAGE_ID = "agentmux:token-usage";
 
@@ -16,11 +18,19 @@ export const TOKEN_USAGE_ID = "agentmux:token-usage";
  * person is kept once its toast has gone, so while anything waits it is never dropped (every other item that can go
  * has gone before the last tier); the others keep their own. The token count is kept in the same way while AgentMux's
  * own model calls are failing, because its red dot is the only place that says so: from the tier it would go at, it
- * shrinks to the dot (StatusBar.scss).
+ * shrinks to the dot (StatusBar.scss). The Graphics item is kept in the same way while this window's page is busy,
+ * because its red colour is the only place that says so.
  */
-export function slotDropAt(id: string, base: DropAt | undefined, waiting: boolean, failing = false): DropAt | undefined {
+export function slotDropAt(
+    id: string,
+    base: DropAt | undefined,
+    waiting: boolean,
+    failing = false,
+    busy = false
+): DropAt | undefined {
     if (id === SUMMARY_ID && waiting) return undefined;
     if (id === TOKEN_USAGE_ID && failing) return undefined;
+    if (id === GPU_ID && busy) return undefined;
     return base;
 }
 

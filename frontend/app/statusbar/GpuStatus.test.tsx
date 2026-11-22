@@ -4,7 +4,7 @@
 /** The status bar's Graphics item ("GFX HW"): red while this window's page is busy, and the tip says why. */
 
 import { cleanup, render } from "@solidjs/testing-library";
-import { createSignal } from "solid-js";
+import { createRoot, createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ setBusy: null as any }));
@@ -22,7 +22,9 @@ vi.mock("./ui-busy", async (orig) => {
     // Like the real meter: every reading is news, equal or not.
     const [busy, setBusy] = createSignal<number | null>(null, { equals: false });
     h.setBusy = setBusy;
-    return { ...real, sharedUiBusy: () => busy };
+    // The one alert over that reading, as the real module makes it over its own.
+    const alert = createRoot(() => real.createUiBusyAlert(busy));
+    return { ...real, sharedUiBusy: () => busy, sharedUiBusyAlert: () => alert };
 });
 
 import { closeGpuPanel } from "./gpu-panel-state";
