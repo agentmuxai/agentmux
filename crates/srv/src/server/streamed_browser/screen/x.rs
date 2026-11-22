@@ -5,7 +5,7 @@
 //! events a person's mouse and keyboard make). Nothing here attaches to the browser; the browser is a program on a screen.
 
 use x11rb::connection::Connection;
-use x11rb::protocol::xproto::{ConnectionExt as _, ImageFormat, BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, KEY_PRESS_EVENT, KEY_RELEASE_EVENT, MOTION_NOTIFY_EVENT};
+use x11rb::protocol::xproto::{ChangeWindowAttributesAux, ConnectionExt as _, EventMask, ImageFormat, MapState, BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, KEY_PRESS_EVENT, KEY_RELEASE_EVENT, MOTION_NOTIFY_EVENT};
 use x11rb::protocol::xtest::ConnectionExt as _;
 use x11rb::rust_connection::RustConnection;
 
@@ -34,6 +34,36 @@ impl Screen {
             .reply()
             .map_err(|e| format!("the screen could not be read: {e}"))?;
         Ok(reply.data)
+    }
+
+    /// How many top-level windows a person would see: shown, not a menu or tooltip (override-redirect), and bigger than 100 by 100.
+    pub fn visible_windows(&self) -> Result<usize, String> {
+        let tree = self.conn.query_tree(self.root).map_err(|e| e.to_string())?.reply().map_err(|e| e.to_string())?;
+        let mut shown = 0;
+        for window in tree.children {
+            let Ok(attrs) = self.conn.get_window_attributes(window).map_err(|e| e.to_string())?.reply() else { continue };
+            if attrs.map_state != MapState::VIEWABLE || attrs.override_redirect {
+                continue;
+            }
+            if let Ok(geometry) = self.conn.get_geometry(window).map_err(|e| e.to_string())?.reply() {
+                if geometry.width >= 100 && geometry.height >= 100 {
+                    shown += 1;
+                }
+            }
+        }
+        Ok(shown)
+    }
+
+    /// Ask the screen to say when a top-level window is mapped, unmapped or destroyed (events on the root window), so a window opening is known
+    /// at the moment it opens and not at the next look.
+    pub fn follow_windows(&self) -> Result<(), String> {
+        let attrs = ChangeWindowAttributesAux::new().event_mask(EventMask::SUBSTRUCTURE_NOTIFY);
+        self.conn.change_window_attributes(self.root, &attrs).map_err(|e| e.to_string())?.check().map_err(|e| format!("the screen's window events could not be followed: {e}"))
+    }
+
+    /// Wait for the next event about a top-level window (after `follow_windows`). An error when the screen has gone.
+    pub fn next_window_event(&self) -> Result<(), String> {
+        self.conn.wait_for_event().map(|_| ()).map_err(|e| format!("the screen has gone: {e}"))
     }
 
     fn fake(&self, kind: u8, detail: u8, x: i16, y: i16) -> Result<(), String> {
