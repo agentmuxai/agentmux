@@ -194,7 +194,7 @@ fn generate_makes_an_entry_whose_value_nobody_was_given() {
     // The record names the agent, and never the value.
     let rows = activity(&s, 10).unwrap();
     let line = rows.iter().find(|r| r.action == "generated").unwrap();
-    assert_eq!(line.actor, "Agent2-6");
+    assert_eq!(line.actor, "agent:Agent2-6");
     assert_eq!(line.reason, "deploy key for the staging site");
     assert!(line.target.contains("20 characters"), "{}", line.target);
     assert!(rows.iter().all(|r| !format!("{r:?}").contains(value.as_str())));

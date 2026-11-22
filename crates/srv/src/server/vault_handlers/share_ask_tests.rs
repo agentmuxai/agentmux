@@ -95,7 +95,7 @@ async fn a2_an_agents_request_shows_the_person_the_login_and_only_their_yes_make
     assert!(!out.to_string().contains("alice") && !out.to_string().contains("pw-one-of-a-kind"), "{out}");
     let lines = lines_of(&state, &id);
     let asked_line = lines.iter().find(|l| l.action == vault::shares::ASKED_TO_BE_SHARED).expect("the request is in the history");
-    assert_eq!((asked_line.actor.as_str(), asked_line.outcome.as_str(), asked_line.reason.as_str()), ("vid-ask-a", "done", REASON));
+    assert_eq!((asked_line.actor.as_str(), asked_line.outcome.as_str(), asked_line.reason.as_str()), ("agent:vid-ask-a", "done", REASON));
     assert!(lines.iter().any(|l| l.action == "shared" && l.actor == vault::PERSON), "the share is the person's line");
 }
 
@@ -220,7 +220,7 @@ async fn a11_a_yes_on_the_card_shares_a_prompt_sign_in_and_covers_the_prompt_tha
     // One use: the next prompt asks the person again.
     assert!(!prompt_share::lookup(&state, &space).unwrap().unwrap().granted);
     let used = lines_of(&state, &id).into_iter().find(|l| l.action == vault::signins::SIGNED_IN).expect("the use is in the history");
-    assert_eq!((used.actor.as_str(), used.outcome.as_str()), ("vid-pr-a", "done"), "the use is the agent's line");
+    assert_eq!((used.actor.as_str(), used.outcome.as_str()), ("agent:vid-pr-a", "done"), "the use is the agent's line");
 
     // Another agent's profile, and Personal, are given nothing through this share.
     for other in [prompt_space("vid-pr-other"), Space { profile: "personal".into(), ..space.clone() }, Space { realm: "Admin".into(), ..space.clone() }] {

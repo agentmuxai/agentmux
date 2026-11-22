@@ -579,7 +579,7 @@ pub fn jekt_origin(
 ) -> crate::backend::message_origin::MessageOrigin {
     use crate::backend::message_origin::{MessageOrigin, OriginDelivery, OriginSig, OriginTier};
     let mut origin = match req.source_agent.as_deref() {
-        Some(from) if validate_agent_id(from) => MessageOrigin::from_sender(from),
+        Some(from) if super::sender::is_shown_as_agent(from, delivery_tier, req.reagent_verified) => MessageOrigin::from_sender(from),
         _ => MessageOrigin::of(crate::backend::blockcontroller::health::TriggerKind::Agent),
     };
     let wan_pinned = delivery_tier == "wan" && req.wan_instance.is_some() && req.wan_verified == Some(true);
@@ -651,7 +651,7 @@ pub fn wrap_jekt_message_with_files(
     // which no agent id contains — so its escaped form can't read as a real
     // agent's name, and it gets no reply hint to follow.
     let raw_from = source_agent.unwrap_or("unknown");
-    let from_is_agent = validate_agent_id(raw_from);
+    let from_is_agent = super::sender::is_shown_as_agent(raw_from, delivery_tier, reagent_verified);
     let from = if from_is_agent { raw_from.to_string() } else { format!("?{}", marker_field(raw_from)) };
     let target_agent = marker_field(target_agent);
     let msg_id = marker_field(msg_id);
