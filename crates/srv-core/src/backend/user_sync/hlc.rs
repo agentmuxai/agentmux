@@ -72,12 +72,19 @@ impl Clock {
         if ahead > MAX_SKEW_MS {
             return Err(SkewRefused { ahead_ms: ahead });
         }
-        if seen.wall_ms > self.last_wall {
-            self.last_wall = seen.wall_ms;
-            self.last_counter = seen.counter;
-        } else if seen.wall_ms == self.last_wall && seen.counter > self.last_counter {
-            self.last_counter = seen.counter;
-        }
+        self.raise(seen);
         Ok(())
+    }
+
+    /// Moves the clock to at least `held`, a version already stored here (no skew check: it was accepted when it
+    /// was stored). A clock made fresh after a restart is raised this way, so it never makes a version at or
+    /// before one already held.
+    pub fn raise(&mut self, held: &Version) {
+        if held.wall_ms > self.last_wall {
+            self.last_wall = held.wall_ms;
+            self.last_counter = held.counter;
+        } else if held.wall_ms == self.last_wall && held.counter > self.last_counter {
+            self.last_counter = held.counter;
+        }
     }
 }

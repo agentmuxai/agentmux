@@ -267,6 +267,33 @@ fn the_history_names_who_and_when_and_never_a_value() {
 }
 
 #[test]
+fn a_restarted_machine_still_edits_after_what_it_holds() {
+    let mut ms = vec![machine("a", 1), machine("b", 2)];
+    ms[1].write("card", "from b, ahead", NOW + 200_000);
+    sync_all(&mut ms, NOW + 1);
+    // a restarts: a fresh clock, and a wall clock that is behind the version b made.
+    ms[0].clock = Clock::new("a");
+    let edit = ms[0].write("card", "from a, after restart", NOW + 2);
+    let held = log::current(&ms[1].conn, COLLECTION, "card").unwrap().unwrap().header.version;
+    assert!(edit.header.version > held, "the edit is after the version it replaces");
+    assert_eq!(ms[0].state("card").as_deref(), Some("from a, after restart"));
+    sync_all(&mut ms, NOW + 3);
+    assert_eq!(ms[1].state("card").as_deref(), Some("from a, after restart"), "the peer takes the edit too");
+}
+
+#[test]
+fn a_record_made_again_after_a_delete_is_created_not_updated() {
+    let mut a = machine("a", 1);
+    a.write("card", "one", NOW);
+    a.delete("card", NOW + 10);
+    a.write("card", "two", NOW + 20);
+    a.write("card", "three", NOW + 30);
+    let h = log::history(&a.conn, COLLECTION, 10).unwrap();
+    let changes: Vec<Change> = h.iter().map(|e| e.change).collect();
+    assert_eq!(changes, vec![Change::Updated, Change::Created, Change::Deleted, Change::Created]);
+}
+
+#[test]
 fn a_record_over_the_size_cap_cannot_be_made() {
     let a = machine("a", 1);
     let header = Header {

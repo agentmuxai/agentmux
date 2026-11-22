@@ -17,7 +17,8 @@ use super::adapter::{Adapter, Merge};
 use super::hlc::{Clock, SkewRefused, Version};
 use super::record::{BadRecord, Header, Record};
 
-/// The tables, created on every open of the identity store (no schema version bump).
+/// The tables, all `IF NOT EXISTS` so [`init`] may run on every open (no schema version bump). Nothing calls
+/// `init` yet: the first collection's adapter does, when it starts writing the log.
 pub(crate) const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS db_sync_collections (
         id         TEXT PRIMARY KEY,
@@ -209,7 +210,20 @@ pub fn current(conn: &Connection, collection: &str, record: &str) -> rusqlite::R
     .optional()
 }
 
-/// A change made here: the next sequence of this machine's log, the next version of its clock, signed.
+/// The highest version this store holds in a collection, from any origin.
+fn max_version(conn: &Connection, collection: &str) -> rusqlite::Result<Option<Version>> {
+    conn.query_row(
+        "SELECT wall_ms, counter, machine FROM db_sync_log WHERE collection = ?1
+         ORDER BY wall_ms DESC, counter DESC, machine DESC LIMIT 1",
+        params![collection],
+        |r| Ok(Version { wall_ms: r.get(0)?, counter: r.get(1)?, machine: r.get(2)? }),
+    )
+    .optional()
+}
+
+/// A change made here: the next sequence of this machine's log, the next version of its clock, signed. The clock
+/// is first raised to the highest version the log holds, so a clock made fresh after a restart (or a wall clock
+/// that stepped back) still makes a version after the record's current state, and the new write may point it.
 pub fn append_local(
     conn: &Connection,
     signer: &mut Signer,
@@ -220,6 +234,9 @@ pub fn append_local(
     now_ms: i64,
 ) -> Result<Record, SyncError> {
     let epoch = collection_epoch(conn, collection)?.ok_or(Refused::UnknownCollection)?;
+    if let Some(held) = max_version(conn, collection)? {
+        signer.clock.raise(&held);
+    }
     let header = Header {
         collection: collection.to_string(),
         record: record.to_string(),
@@ -385,13 +402,18 @@ pub fn history(conn: &Connection, collection: &str, limit: usize) -> rusqlite::R
         let change = if tombstone != 0 {
             Change::Deleted
         } else {
-            let earlier: bool = conn.query_row(
-                "SELECT EXISTS (SELECT 1 FROM db_sync_log WHERE collection = ?1 AND record = ?2 AND tombstone = 0
-                 AND (wall_ms < ?3 OR (wall_ms = ?3 AND counter < ?4)))",
-                params![collection, record, wall_ms, counter],
-                |r| r.get(0),
-            )?;
-            if earlier {
+            // The nearest earlier entry of the record: a change after a live one is an update; after a delete, or
+            // with nothing before it, the record is made (again).
+            let before: Option<i64> = conn
+                .query_row(
+                    "SELECT tombstone FROM db_sync_log WHERE collection = ?1 AND record = ?2
+                     AND (wall_ms < ?3 OR (wall_ms = ?3 AND counter < ?4))
+                     ORDER BY wall_ms DESC, counter DESC, machine DESC LIMIT 1",
+                    params![collection, record, wall_ms, counter],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if before == Some(0) {
                 Change::Updated
             } else {
                 Change::Created
