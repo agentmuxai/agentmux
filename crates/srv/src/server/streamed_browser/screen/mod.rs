@@ -150,7 +150,8 @@ async fn run(mut socket: WebSocket, start: Start, ended: impl std::future::Futur
     tokio::pin!(ended);
     loop {
         let keep = tokio::select! {
-            // A window opening is handled before the next thing the person typed, so the key hold starts first.
+            // A window opening is handled before the next thing the person typed, so the key hold starts first; what the person sends is
+            // read before the next frame is sent, so a slow link that keeps the frame channel full never starves the person's input.
             biased;
             _ = &mut ended => false,
             count = counts.recv() => match count {
@@ -158,10 +159,6 @@ async fn run(mut socket: WebSocket, start: Start, ended: impl std::future::Futur
                     Some(notice) => socket.send(Message::Text(json!({ "t": "notice", "message": notice }).to_string().into())).await.is_ok(),
                     None => true,
                 },
-                None => false,
-            },
-            frame = frames.recv() => match frame {
-                Some(f) => socket.send(Message::Binary(f.into())).await.is_ok(),
                 None => false,
             },
             incoming = socket.recv() => match incoming {
@@ -174,6 +171,10 @@ async fn run(mut socket: WebSocket, start: Start, ended: impl std::future::Futur
                 }
                 Some(Ok(Message::Close(_))) | None | Some(Err(_)) => false,
                 Some(Ok(_)) => true,
+            },
+            frame = frames.recv() => match frame {
+                Some(f) => socket.send(Message::Binary(f.into())).await.is_ok(),
+                None => false,
             },
         };
         if !keep {
