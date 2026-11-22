@@ -70,7 +70,7 @@ fn classify_now(state: &AppState, conn: Conn) -> ConfirmHow {
 
 /// `pid` and its parents, nearest first, as the process table records them (a parent that started after its child is a
 /// reused id and ends the chain).
-fn with_ancestors(pid: u32) -> Vec<u32> {
+pub(crate) fn with_ancestors(pid: u32) -> Vec<u32> {
     let mut chain = vec![pid];
     let Ok(all) = agentmux_procstats::snapshot() else { return chain };
     let mut current = all.iter().find(|p| p.pid == pid);

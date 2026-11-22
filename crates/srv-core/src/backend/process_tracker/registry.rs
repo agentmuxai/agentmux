@@ -464,6 +464,13 @@ impl AgentProcessRegistry {
         trackers.into_iter().find(|(_, t)| t.member_pids().iter().any(|m| pids.contains(m))).map(|(id, _)| id)
     }
 
+    /// The PIDs in every agent block's process tree, each with its block.
+    pub fn agent_member_pids(&self) -> Vec<(String, u32)> {
+        let trackers: Vec<(String, Arc<dyn TrackerHandle>)> =
+            self.inner.lock().iter().filter(|(_, e)| e.agent).map(|(id, e)| (id.clone(), e.tracker.clone())).collect();
+        trackers.into_iter().flat_map(|(id, t)| t.member_pids().into_iter().map(move |pid| (id.clone(), pid))).collect()
+    }
+
     /// Whether any block is tracked (a cheap check before a process-table read).
     pub fn has_tracked_blocks(&self) -> bool {
         !self.inner.lock().is_empty()
