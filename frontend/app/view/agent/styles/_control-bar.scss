@@ -94,6 +94,13 @@
             min-width: 0;
             @include mixins.truncate;
         }
+
+        // Seconds left before the line hides itself.
+        .agent-away-digest-timer {
+            flex-shrink: 0;
+            font-variant-numeric: tabular-nums;
+            opacity: 0.7;
+        }
     }
 
     // The CLI is retrying a failed API request (ApiRetryRow.tsx): the reason,
