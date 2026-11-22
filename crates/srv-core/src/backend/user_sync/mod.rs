@@ -12,6 +12,7 @@ pub mod kanban;
 pub mod lock;
 pub mod log;
 pub mod members;
+pub mod ops;
 pub mod record;
 pub mod seal;
 
@@ -21,6 +22,8 @@ mod kanban_tests;
 mod lock_tests;
 #[cfg(test)]
 mod members_tests;
+#[cfg(test)]
+mod ops_tests;
 #[cfg(test)]
 mod seal_tests;
 #[cfg(test)]

@@ -161,6 +161,30 @@ pub fn set_epoch(conn: &Connection, id: &str, epoch: u32, ended: &Vector) -> rus
     tx.commit()
 }
 
+/// Whether `h` is the first record its origin wrote after the key epoch it was cut off in: what the origin wrote at
+/// that epoch beyond the end the membership change named (`set_epoch`) is void everywhere, so those sequence numbers
+/// are skipped, and its writes from the new epoch on continue after them. Only when this machine already holds
+/// everything up to that end (otherwise the records before it are still owed) and nothing of the origin's at a later epoch.
+fn first_after_cut(conn: &Connection, h: &Header, held: u64) -> rusqlite::Result<bool> {
+    let cut: Option<(i64, i64)> = conn
+        .query_row(
+            "SELECT epoch, last_seq FROM db_sync_epoch_cut WHERE collection = ?1 AND origin = ?2 AND epoch < ?3 ORDER BY epoch DESC LIMIT 1",
+            params![h.collection, h.origin, h.epoch],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    let Some((epoch, last)) = cut else { return Ok(false) };
+    if (held as i64) < last || (h.seq as i64) <= last {
+        return Ok(false);
+    }
+    let later: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM db_sync_log WHERE collection = ?1 AND origin = ?2 AND epoch > ?3",
+        params![h.collection, h.origin, epoch],
+        |r| r.get(0),
+    )?;
+    Ok(later == 0)
+}
+
 /// Whether a record at an epoch older than the collection's is within what its origin had written when that epoch ended.
 fn within_epoch_end(conn: &Connection, h: &Header) -> rusqlite::Result<bool> {
     let end: Option<i64> = conn
@@ -356,7 +380,7 @@ pub fn apply_remote(
     if h.seq <= held {
         return Ok(Outcome::Duplicate);
     }
-    if h.seq > held + 1 {
+    if h.seq > held + 1 && !first_after_cut(conn, h, held)? {
         return Err(Refused::Gap { have: held }.into());
     }
     clock.observe(&h.version, now_ms).map_err(Refused::Skew)?;
@@ -376,6 +400,8 @@ pub fn apply_remote(
 }
 
 /// What a peer lacks: the records after the sequences in `vector`, per origin, at most `limit`, oldest version first.
+/// A record at an epoch older than the collection's is served only within the end its origin had at that epoch: any
+/// other would be refused by the peer, so it is never sent (and the peer's vector never waits on it).
 pub fn since(conn: &Connection, collection: &str, vector: &Vector, limit: usize) -> rusqlite::Result<Vec<Record>> {
     let mut origins = conn.prepare("SELECT DISTINCT origin FROM db_sync_log WHERE collection = ?1 ORDER BY origin")?;
     let names: Vec<String> = origins.query_map(params![collection], |r| r.get(0))?.collect::<Result<_, _>>()?;
@@ -383,7 +409,10 @@ pub fn since(conn: &Connection, collection: &str, vector: &Vector, limit: usize)
     for origin in names {
         let after = vector.get(&origin).copied().unwrap_or(0) as i64;
         let mut stmt = conn.prepare(&format!(
-            "SELECT {COLS}, sig, body FROM db_sync_log WHERE collection = ?1 AND origin = ?2 AND seq > ?3 ORDER BY seq LIMIT ?4"
+            "SELECT {COLS}, sig, body FROM db_sync_log WHERE collection = ?1 AND origin = ?2 AND seq > ?3
+             AND (epoch >= (SELECT epoch FROM db_sync_collections WHERE id = ?1)
+                  OR seq <= COALESCE((SELECT last_seq FROM db_sync_epoch_cut c WHERE c.collection = ?1 AND c.origin = ?2 AND c.epoch = db_sync_log.epoch), -1))
+             ORDER BY seq LIMIT ?4"
         ))?;
         let rows = stmt.query_map(params![collection, origin, after, limit as i64], record_of)?;
         for r in rows {
@@ -395,6 +424,21 @@ pub fn since(conn: &Connection, collection: &str, vector: &Vector, limit: usize)
     out.sort_by(|a, b| a.header.version.cmp(&b.header.version));
     out.truncate(limit);
     Ok(out)
+}
+
+/// What this machine wrote at an older key epoch beyond the end the membership change named for it, and that is still
+/// a record's current state: the writes the others refuse, to be written again at the current epoch.
+pub fn cut_off(conn: &Connection, collection: &str, origin: &str) -> rusqlite::Result<Vec<Record>> {
+    let mut stmt = conn.prepare(
+        "SELECT l.collection, l.record, l.wall_ms, l.counter, l.machine, l.origin, l.seq, l.epoch, l.tombstone, l.size,
+                l.base_wall, l.base_counter, l.base_machine, l.sig, l.body
+         FROM db_sync_state s JOIN db_sync_log l ON l.collection = s.collection AND l.origin = s.origin AND l.seq = s.seq
+         WHERE s.collection = ?1 AND l.origin = ?2 AND l.epoch < (SELECT epoch FROM db_sync_collections WHERE id = ?1)
+           AND l.seq > COALESCE((SELECT last_seq FROM db_sync_epoch_cut c WHERE c.collection = ?1 AND c.origin = ?2 AND c.epoch = l.epoch), l.seq)
+         ORDER BY l.seq",
+    )?;
+    let rows = stmt.query_map(params![collection, origin], record_of)?;
+    rows.collect()
 }
 
 /// The newest head accepted from a store: a generation (it rises when a store compacts or re-seals) and the vector.
