@@ -63,7 +63,7 @@ impl Want {
         Self { agent: self.agent.clone(), owner: self.owner.to_ascii_lowercase(), repo: self.repo.to_ascii_lowercase(), workflows: self.workflows }
     }
 
-    /// Who holds this token in the transcript withhold registry: the token that replaces it takes its place.
+    /// Who holds this token in the transcript withhold registry: each token is held until its own expiry.
     fn withhold_owner(&self) -> String {
         format!("github-token:{}:{}/{}:{}", self.agent, self.owner, self.repo, self.workflows)
     }
@@ -191,8 +191,10 @@ impl Tokens {
         match &result {
             Ok(minted) => {
                 st.refused.remove(&want);
-                // A token an agent's git or `gh` holds is never written into a transcript, until it runs out.
-                crate::backend::transcript::withhold::hold(&want.withhold_owner(), &minted.token, Some(minted.expires_at.saturating_mul(1000)));
+                // A token an agent's git or `gh` holds is never written into a transcript, until it runs out: a renewed
+                // token does not end the one it replaced, which works for its last minutes, and a disconnect only
+                // makes srv forget it, so the token still works until its expiry.
+                crate::backend::transcript::withhold::hold_until(&want.withhold_owner(), &minted.token, minted.expires_at.saturating_mul(1000));
                 st.cache.insert(want.clone(), minted.clone());
             }
             // A bad moment at the broker doesn't take back a token that still works.
@@ -201,9 +203,7 @@ impl Tokens {
                 return Ok(kept);
             }
             Err(error) => {
-                if st.cache.remove(&want).is_some() {
-                    crate::backend::transcript::withhold::release(&want.withhold_owner());
-                }
+                st.cache.remove(&want);
                 st.refused.insert(want.clone(), (now + REFUSAL_TTL_SECS, error.clone()));
             }
         }
@@ -219,9 +219,6 @@ impl Tokens {
     fn bind(&self, connection: Option<&String>) {
         let mut st = self.st();
         if st.connection.as_ref() != connection {
-            for want in st.cache.keys() {
-                crate::backend::transcript::withhold::release(&want.withhold_owner());
-            }
             st.cache.clear();
             st.refused.clear();
             st.installations = None;
@@ -698,7 +695,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_minted_token_is_withheld_from_transcripts_until_it_runs_out_or_the_connection_ends() {
+    async fn a_minted_token_is_withheld_from_transcripts_until_it_runs_out() {
         use crate::backend::transcript::withhold;
         let now = chrono::Utc::now().timestamp();
         let answer = |value: &str, secs: i64| {
@@ -713,15 +710,16 @@ mod tests {
         tokens.token_for(&fake, &w, now).await.unwrap();
         assert_eq!(shown("ghs_canary_withhold_0001"), format!("GH_TOKEN={}", withhold::MARK), "withheld from the moment it is minted");
 
-        // Within five minutes of running out it is renewed: the new token is withheld in place of the old.
+        // Within five minutes of running out it is renewed: both tokens work, so both are withheld.
         tokens.token_for(&fake, &w, now + 3600 - 100).await.unwrap();
         assert_eq!(shown("ghs_canary_withhold_0002"), format!("GH_TOKEN={}", withhold::MARK));
-        assert_eq!(shown("ghs_canary_withhold_0001"), "GH_TOKEN=ghs_canary_withhold_0001", "the token that was replaced is dropped");
+        assert_eq!(shown("ghs_canary_withhold_0001"), format!("GH_TOKEN={}", withhold::MARK), "the token that was replaced still works");
 
-        // A disconnect takes the cached tokens back, and what is withheld for them with it.
+        // A disconnect makes srv forget its cached tokens; they still work until they expire, so they stay withheld.
         *fake.connection.lock().unwrap() = Err(TokenError::NoGithubAccount);
         tokens.token_for(&fake, &w, now + 3600).await.unwrap_err();
-        assert_eq!(shown("ghs_canary_withhold_0002"), "GH_TOKEN=ghs_canary_withhold_0002");
+        assert_eq!(shown("ghs_canary_withhold_0002"), format!("GH_TOKEN={}", withhold::MARK));
+        assert_eq!(shown("ghs_canary_withhold_0001"), format!("GH_TOKEN={}", withhold::MARK));
     }
 
     #[tokio::test]

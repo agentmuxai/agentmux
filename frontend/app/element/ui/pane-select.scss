@@ -1,0 +1,19 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// While a press that began in a pane is held (pane-select.ts), everything outside that pane is not
+// selectable: the engine has nothing outside it to extend the selection to. Owned by `user-select` alone,
+// so it composes with `html[data-text-drag]` (which owns `pointer-events`). The `:not(... *)` form is
+// needed: an element that says `user-select: text` for itself (a transcript, a card) ignores a `none` on
+// its ancestor, so every element outside the owner has to be switched, not just the panes.
+html[data-pane-select] *:not([data-pane-select-owner]):not([data-pane-select-owner] *) {
+    -webkit-user-select: none !important;
+    user-select: none !important;
+}
+
+// The rule above also reaches the owner's ancestors (the layout around it). An element whose own value is
+// `auto` takes `none` from its parent, so the owner says `text` for itself and its `auto` content follows.
+html[data-pane-select] [data-pane-select-owner] {
+    -webkit-user-select: text;
+    user-select: text;
+}

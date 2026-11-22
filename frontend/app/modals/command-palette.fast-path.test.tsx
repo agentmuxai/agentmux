@@ -182,6 +182,17 @@ describe("the palette's keystroke budget", () => {
         expect(builtRows()).toBe(ROW_CHUNK);
     });
 
+    it("builds rows that join the list while the palette is open, without a character typed", async () => {
+        h.commands = all.slice(0, ROW_CHUNK * 3 + 20);
+        open();
+        for (let i = 0; i < 6; i++) await frame(); // everything there is has been built, and the building has stopped
+        expect(builtRows()).toBe(ROW_CHUNK * 3 + 20);
+        // An agent starts: more rows than were built come into the list.
+        h.setAgents(entries(ROW_CHUNK * 2, "Agent", "Agent"));
+        for (let i = 0; i < 6; i++) await frame();
+        expect(builtRows()).toBe(ROW_CHUNK * 3 + 20 + ROW_CHUNK * 2);
+    });
+
     it("builds through the row a key moves the selection to, so End shows the last row", () => {
         h.commands = all.slice(0, 500);
         const input = open();

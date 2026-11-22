@@ -19,7 +19,7 @@ import { arrangeRecent, paletteRows, paletteSegments, sortCommands, type Palette
 import { watchCutLabels } from "./palette-cut-labels";
 import { PaletteRow } from "./palette-row";
 import { markEnd, markStart } from "@/perf/marks";
-import { batch, createEffect, createMemo, createSignal, createUniqueId, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { batch, createEffect, createMemo, createSignal, createUniqueId, For, on, onCleanup, onMount, Show, type JSX } from "solid-js";
 import "./command-palette.scss";
 
 /**
@@ -157,7 +157,9 @@ function useBuiltRows(rows: () => PaletteRowModel[]) {
             grow();
         });
     };
-    onMount(grow); // the rows past the first chunk, a chunk a frame
+    // The rows past the first chunk, a chunk a frame: from the start, and again whenever the list grows past what is built
+    // (an agent starts while the palette is open), not only when a character is typed.
+    createEffect(on(() => rows().length, grow));
     onCleanup(() => cancelAnimationFrame(frame));
     return {
         segments: createMemo(() => paletteSegments(rows().slice(0, built()))),

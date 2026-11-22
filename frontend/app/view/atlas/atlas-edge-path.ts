@@ -78,3 +78,22 @@ export function edgePath(from: Pt, to: Pt, wrapped = false, gaps: EdgeGaps = FUL
     const mid = (y1 + y2) / 2;
     return `M${x1},${y1} C${x1},${mid} ${x2},${mid} ${x2},${y2}`;
 }
+
+/** Points along the line from a lead's node to a report's, as a polyline, for what must keep clear of it (a task's number). */
+export function edgePoints(from: Pt, to: Pt, wrapped = false, gaps: EdgeGaps = FULL): Pt[] {
+    if (wrapped) return wrappedRoute(from, to, gaps);
+    const x1 = from.x + NODE_W / 2;
+    const y1 = from.y + NODE_H;
+    const x2 = to.x + NODE_W / 2;
+    const y2 = to.y;
+    const mid = (y1 + y2) / 2;
+    const STEPS = 12;
+    return Array.from({ length: STEPS + 1 }, (_, i) => {
+        const t = i / STEPS;
+        const u = 1 - t;
+        return {
+            x: u ** 3 * x1 + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t ** 3 * x2,
+            y: u ** 3 * y1 + 3 * u * u * t * mid + 3 * u * t * t * mid + t ** 3 * y2,
+        };
+    });
+}

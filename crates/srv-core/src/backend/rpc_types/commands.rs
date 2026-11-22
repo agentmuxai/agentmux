@@ -632,6 +632,10 @@ pub const COMMAND_PRESENCE_PUBLISH_NOW: &str = "presence.publish-now";
 
 /// Accepting the terms: the person's, from the AgentMux window alone.
 pub const COMMAND_CLIENT_AGREE_TOS: &str = "client.agreetos";
+/// Which container agents a host agent shares a folder with, and going ahead with one: the person's, from the
+/// AgentMux window alone.
+pub const COMMAND_FOLDER_OVERLAP_CHECK: &str = "folderoverlapcheck";
+pub const COMMAND_FOLDER_OVERLAP_ACCEPT: &str = "folderoverlapaccept";
 
 // Tower, the read-only task manager pane (backend::tower::sampler). The
 // window's, not an agent API: a registered agent connection is refused.

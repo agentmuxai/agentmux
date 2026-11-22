@@ -95,6 +95,7 @@ vi.mock("@/app/store/keymodel", () =>
 vi.mock("@/app/store/modalmodel", () => ({ modalsModel: {} }));
 vi.mock("@/app/element/link-open", () => h.stub("registerLinkInPaneListener"));
 vi.mock("@/app/element/ui/text-drag", () => h.stub("installTextDragGuard"));
+vi.mock("@/app/element/ui/pane-select", () => h.stub("installPaneSelectGuard"));
 vi.mock("@/app/store/float-modifier", () => h.stub("installFloatModifier"));
 vi.mock("@/app/store/ui-event-subs", () => ({ initUiEventSubs: h.initUiEventSubs }));
 vi.mock("@/app/modals/modal-layer-panels", () => ({}));

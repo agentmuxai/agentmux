@@ -19,6 +19,7 @@ import {
     type PillTone,
     type SelectOption,
 } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { sortByLastUsed } from "@/app/view/agent/agent-recency";
 import { useAgentList } from "@/app/view/agent/use-agent-list";
 import { refreshVault, vaultAvailable, vaultEntries } from "@/app/view/vault/vault-store";
@@ -36,6 +37,7 @@ import {
     type JobDraft,
     type ParamValue,
 } from "./job-draft";
+import { MakeDroneForm } from "./job-drone-template";
 import { JobDryRun } from "./job-dry-run";
 import { PolicySection, WhatSection, WhenSection, withCurrent } from "./job-editor-fields";
 import { JobParamsForm } from "./job-params-form";
@@ -110,7 +112,10 @@ function createEditorState(props: JobEditorProps): EditorState {
 
     const manifest = createMemo(() => templates().find((t) => t.id === draft.template?.id)?.manifest ?? null);
     const agentOptions = createMemo<SelectOption[]>(() =>
-        sortByLastUsed((agents() ?? []).filter((a) => !a.is_seeded), (a) => a.name).map((a) => ({ value: a.id, label: a.name }))
+        sortByLastUsed(
+            (agents() ?? []).filter((a) => !a.is_seeded),
+            (a) => a.name
+        ).map((a) => ({ value: a.id, label: a.name }))
     );
     const nameOf = (id: string) => agentOptions().find((o) => o.value === id)?.label ?? id;
     const vault = () => (vaultAvailable() ? (vaultEntries() ?? []) : null);
@@ -255,22 +260,40 @@ const showForm = (ed: EditorState) =>
 
 function TemplateItem(p: { ed: EditorState; t: JobTemplateInfo }): JSX.Element {
     const pill = STATE_PILL[p.t.state] ?? STATE_PILL.invalid;
+    const isDrone = p.t.manifest?.kind === "drone";
+    // A Drone template makes a drone (its graph), not a job: its settings are asked for here.
+    const [making, setMaking] = createSignal(false);
     return (
         <li class="warden-jobs-template">
             <div class="warden-jobs-template-head">
                 <strong>{p.t.manifest?.name ?? p.t.id}</strong>
                 <span class="warden-manager-dim">{p.t.manifest?.version}</span>
                 <Pill tone={pill.tone}>{pill.label}</Pill>
+                <Show when={isDrone}>
+                    <Pill>{t("jobs.droneTemplate.pill")}</Pill>
+                </Show>
                 <Show when={p.t.source === "builtin"}>
                     <Pill>AgentMux</Pill>
                 </Show>
             </div>
             <div class="warden-manager-dim">{p.t.manifest?.description ?? p.t.error}</div>
+            <Show when={making()}>
+                <MakeDroneForm info={p.t} onDone={() => p.ed.props.onClose()} onBack={() => setMaking(false)} />
+            </Show>
             <div class="warden-jobs-actions">
-                <Show when={p.t.state === "approved"}>
-                    <Button density="compact" icon="clone" onClick={() => useTemplate(p.ed, p.t)}>
-                        Clone to a job
-                    </Button>
+                <Show when={p.t.state === "approved" && !making()}>
+                    <Show
+                        when={isDrone}
+                        fallback={
+                            <Button density="compact" icon="clone" onClick={() => useTemplate(p.ed, p.t)}>
+                                Clone to a job
+                            </Button>
+                        }
+                    >
+                        <Button density="compact" icon="diagram-project" onClick={() => setMaking(true)}>
+                            {t("jobs.droneTemplate.make")}
+                        </Button>
+                    </Show>
                 </Show>
                 <Show when={p.t.state === "needs_approval" || p.t.state === "changed"}>
                     <Button density="compact" icon="shield-halved" onClick={() => p.ed.setApproving(p.t)}>
@@ -317,8 +340,7 @@ function JobForm(p: { ed: EditorState }): JSX.Element {
                 {(t) => (
                     <div class="warden-manager-dim">
                         Made from <strong>{ed.manifest()?.name ?? t().id}</strong>{" "}
-                        {t().version || ed.manifest()?.version}. The template writes the brief; its settings are
-                        below.
+                        {t().version || ed.manifest()?.version}. The template writes the brief; its settings are below.
                     </div>
                 )}
             </Show>

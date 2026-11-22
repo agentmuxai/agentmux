@@ -131,6 +131,7 @@ beforeEach(() => {
         EnsureProviderAuthDirCommand: { path: "/shared/providers/claude" },
         WriteAgentConfigCommand: (d: { working_dir: string }) => ({ working_dir: d.working_dir }),
         CreateAgentInstanceCommand: { id: "inst-1" },
+        FolderOverlapCheckCommand: { overlaps: [] },
         ListAgentIdentitiesCommand: [],
     };
 });
@@ -260,5 +261,72 @@ describe("launchAgentDefinition", () => {
         });
         expect(JSON.parse(out).ok).toBe(false);
         await expect(out).toMatchFileSnapshot(snap("terminal-in-container"));
+    });
+});
+
+describe("a host agent that opens in a folder a container agent can write", () => {
+    const pair = { host_id: "agent-1", host_name: "Korp", container_id: "agent-9", container_name: "Aria" };
+
+    async function held(agent: AgentDefinition, overrides?: LaunchOverrides) {
+        let model!: AgentViewModel;
+        const dispose = createRoot((d) => {
+            model = new AgentViewModel(ctx());
+            return d;
+        });
+        const ok = await model.launchAgentDefinition(agent, overrides);
+        dispose();
+        return { ok, model };
+    }
+
+    it("is held for the person: nothing is recorded or started, and the ask names the agent and what to launch again", async () => {
+        answers.FolderOverlapCheckCommand = { overlaps: [pair] };
+        const overrides: LaunchOverrides = { instanceName: "Korp 2", agentType: "host", environment: "local", accountId: ACCOUNT, bundleId: "" };
+        const { ok, model } = await held(def(), overrides);
+        expect(ok).toBe(false);
+        expect(model.launchError).toBeNull();
+        expect(model.sharedFolder).toMatchObject({ hostName: "Korp", overlaps: [pair], launch: { agent: { id: "agent-1" }, overrides } });
+        expect(calls.find((c) => c.cmd === "FolderOverlapCheck")?.data).toEqual({ agent_id: "agent-1", folder: expect.stringContaining("/agents/") });
+        const asked = calls.map((c) => c.cmd);
+        for (const started of ["CreateAgentInstance", "SetMeta", "ControllerResync", "WriteAgentConfig"]) {
+            expect(asked, started).not.toContain(started);
+        }
+    });
+
+    it("asks about the folder a continuation runs in, not the one the definition names", async () => {
+        answers.FolderOverlapCheckCommand = { overlaps: [pair] };
+        const overrides: LaunchOverrides = {
+            instanceName: "Korp",
+            agentType: "host",
+            environment: "local",
+            accountId: ACCOUNT,
+            bundleId: "",
+            continueOfInstanceId: "inst-0",
+            workDirOverride: "/srv/home/agents/korp-old",
+        };
+        const { ok, model } = await held(def(), overrides);
+        expect(ok).toBe(false);
+        expect(model.sharedFolder).not.toBeNull();
+        expect(calls.find((c) => c.cmd === "FolderOverlapCheck")?.data).toEqual({ agent_id: "agent-1", folder: "/srv/home/agents/korp-old" });
+    });
+
+    it("goes on once the person has gone ahead with the pair", async () => {
+        answers.FolderOverlapCheckCommand = { overlaps: [] };
+        const { ok, model } = await held(def());
+        expect(ok).toBe(true);
+        expect(model.sharedFolder).toBeNull();
+        expect(calls.map((c) => c.cmd)).toContain("CreateAgentInstance");
+    });
+
+    it("is not asked for a container agent, which is asked when its own folders are saved", async () => {
+        answers.FolderOverlapCheckCommand = { overlaps: [pair] };
+        const { model } = await held(def({ agent_type: "container", container_image: "img:1" } as Partial<AgentDefinition>), {
+            instanceName: "Aria",
+            agentType: "container",
+            environment: "docker",
+            accountId: ACCOUNT,
+            bundleId: "",
+        });
+        expect(model.sharedFolder).toBeNull();
+        expect(calls.map((c) => c.cmd)).not.toContain("FolderOverlapCheck");
     });
 });

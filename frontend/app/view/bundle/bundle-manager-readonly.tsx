@@ -66,6 +66,7 @@ export function BundleReadOnly(props: {
                         density="compact"
                         tone="danger"
                         class="bundle-view-delete-btn"
+                        pending={false}
                         onClick={() => act.handleDelete(memory().id)}
                     >
                         Delete
