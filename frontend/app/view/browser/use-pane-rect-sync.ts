@@ -34,6 +34,16 @@ export function insetForSizeBadge(rect: PaneRect, dpr: number): PaneRect {
     return { ...rect, height: Math.max(1, rect.height - Math.round(SIZE_BADGE_STRIP_CSS * dpr)) };
 }
 
+/** The rect the native page takes while a splitter is dragged: where its pane is, but never larger than the
+ *  pane was when the drag began. A pane that grows leaves the page at its starting size, with the pane's
+ *  background around it (the page lays out once, on release, like every other pane's body); a pane that
+ *  shrinks takes the page along, because the page is a native window above the DOM and would otherwise
+ *  cover the next pane. `start` is the pane's size in device px when the drag began; none leaves `rect` as it is. */
+export function holdRectDuringDrag(rect: PaneRect, start: { width: number; height: number } | null): PaneRect {
+    if (!start || rect.width <= 0 || rect.height <= 0) return rect;
+    return { ...rect, width: Math.min(rect.width, start.width), height: Math.min(rect.height, start.height) };
+}
+
 /** After a splitter drag ends, ask for every pane's final rect to be sent again, a few times.
  *  The sync below sends a rect once and then skips it as unchanged; the host can miss an update
  *  that lands while a pane is mid-resize, and the pane then stays at its old size until another
@@ -203,6 +213,8 @@ export function usePaneRectSync(params: PaneRectSyncParams): PaneRectSync {
     // and Win32 SetWindowPos expect physical / device pixels. Multiply by
     // devicePixelRatio to convert. On HiDPI displays (dpr > 1) the pane
     // would be mispositioned/missized without this.
+    // The pane's size when the current splitter drag began (device px), or none outside a drag.
+    let dragStartSize: { width: number; height: number } | null = null;
     const paneRect = (): PaneRect => {
         const r = placeholderRef()!.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
@@ -223,7 +235,12 @@ export function usePaneRectSync(params: PaneRectSyncParams): PaneRectSync {
             height = Math.max(1, height - b);
         }
         const rect = { x, y, width, height };
-        return model.splitterDragging?.() && !isViewsPanesOnWindows() ? insetForSizeBadge(rect, dpr) : rect;
+        const dragging = model.splitterDragging?.() ?? false;
+        // Taken before the hold, so the drag's starting size is the pane's own.
+        if (dragging && dragStartSize === null) dragStartSize = { width, height };
+        if (!dragging) dragStartSize = null;
+        const held = dragging ? holdRectDuringDrag(rect, dragStartSize) : rect;
+        return dragging && !isViewsPanesOnWindows() ? insetForSizeBadge(held, dpr) : held;
     };
 
     /** CSS-pixel rect (same coordinate space as `getBoundingClientRect`
@@ -231,12 +248,17 @@ export function usePaneRectSync(params: PaneRectSyncParams): PaneRectSync {
      *  `sendClip` can short-circuit when no overlay intersects a pane. */
     const paneRectCss = () => {
         const r = placeholderRef()!.getBoundingClientRect();
-        const h = Math.round(r.height);
+        const dragging = model.splitterDragging?.() ?? false;
+        const dpr = window.devicePixelRatio || 1;
+        // The page's own size: held at the drag's starting size when the pane grows (holdRectDuringDrag).
+        const cap = dragging && dragStartSize ? dragStartSize : null;
+        const w = Math.round(cap ? Math.min(r.width, cap.width / dpr) : r.width);
+        const h = Math.round(cap ? Math.min(r.height, cap.height / dpr) : r.height);
         return {
             x: Math.round(r.x),
             y: Math.round(r.y),
-            w: Math.round(r.width),
-            h: model.splitterDragging?.() && !isViewsPanesOnWindows() ? Math.max(1, h - SIZE_BADGE_STRIP_CSS) : h,
+            w,
+            h: dragging && !isViewsPanesOnWindows() ? Math.max(1, h - SIZE_BADGE_STRIP_CSS) : h,
         };
     };
 
