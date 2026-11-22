@@ -49,6 +49,7 @@ pub mod inject;
 pub mod oauth_probe;
 pub mod provider;
 pub mod secret;
+mod sign_in_withhold;
 
 pub use errors::SpawnGateError;
 pub use inject::block_agent_id;

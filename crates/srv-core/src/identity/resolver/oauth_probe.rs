@@ -61,7 +61,7 @@ pub fn claude_token_expiry_ms(dir: &str) -> Option<i64> {
 }
 
 /// Who holds a sign-in file's access or refresh token in the transcript withhold registry, named by the config dir.
-fn sign_in_owner(dir: &str, what: &str) -> String {
+pub(super) fn sign_in_owner(dir: &str, what: &str) -> String {
     format!("sign-in:{dir}:{what}")
 }
 
@@ -95,6 +95,7 @@ fn probe_codex_auth(dir: &Path) -> OAuthProbeStatus {
     let json: Option<serde_json::Value> = std::fs::read_to_string(&path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok());
+    json.iter().for_each(|j| super::sign_in_withhold::withhold_file("codex", dir, j));
     let non_empty = |v: Option<&serde_json::Value>| v.and_then(|v| v.as_str()).is_some_and(|s| !s.is_empty());
     let signed_in = json.as_ref().is_some_and(|j| {
         non_empty(j.get("tokens").and_then(|t| t.get("refresh_token"))) || non_empty(j.get("OPENAI_API_KEY"))

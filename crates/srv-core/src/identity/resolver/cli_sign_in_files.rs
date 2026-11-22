@@ -45,6 +45,11 @@ fn non_empty(value: Option<&serde_json::Value>) -> bool {
     value.and_then(|v| v.as_str()).is_some_and(|s| !s.is_empty())
 }
 
+/// When a grok credential stops working (unix ms): its `expires_at`, else 30 days after its `create_time`.
+pub(super) fn grok_expiry_ms(entry: &serde_json::Value) -> Option<i64> {
+    time_ms(entry.get("expires_at")).or_else(|| time_ms(entry.get("create_time")).map(|t| t + GROK_DEFAULT_LIFETIME_MS))
+}
+
 fn probe_grok(json: &serde_json::Value, now_ms: i64) -> OAuthProbeStatus {
     let Some(scopes) = json.as_object() else {
         return OAuthProbeStatus::NeedsReauth;
@@ -53,8 +58,7 @@ fn probe_grok(json: &serde_json::Value, now_ms: i64) -> OAuthProbeStatus {
     let mut any_refresh = false;
     for entry in scopes.values().filter(|e| non_empty(e.get("key"))) {
         any_key = true;
-        let expires = time_ms(entry.get("expires_at"))
-            .or_else(|| time_ms(entry.get("create_time")).map(|t| t + GROK_DEFAULT_LIFETIME_MS));
+        let expires = grok_expiry_ms(entry);
         if expires.is_none_or(|e| e > now_ms) {
             return OAuthProbeStatus::Valid;
         }
@@ -80,6 +84,7 @@ fn holds_a_credential(json: &serde_json::Value) -> bool {
 pub(super) fn probe(provider: &str, dir: &Path, now_ms: i64) -> Option<OAuthProbeStatus> {
     let path = credential_path(provider, dir)?;
     let json: Option<serde_json::Value> = std::fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str(&s).ok());
+    json.iter().for_each(|j| super::sign_in_withhold::withhold_file(provider, dir, j));
     Some(match (provider, json) {
         (_, None) => OAuthProbeStatus::NeedsReauth,
         ("grok", Some(j)) => probe_grok(&j, now_ms),
