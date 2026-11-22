@@ -745,8 +745,6 @@ impl Router {
         if raw_name.is_empty() {
             raw_name = meta("agentId");
         }
-        // A stored value that is not a real title (a placeholder an older build
-        // accepted, such as `(none yet)`) must not reach an OS notification either.
         // The line under the name is the agent's own status line or its held task, when fresh; never
         // the ambient title, which nothing checks the age of (`toast_line`).
         let turn_started = self.turn_started_ms.lock().unwrap_or_else(|e| e.into_inner()).get(block_id).copied();
