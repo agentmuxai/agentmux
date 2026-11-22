@@ -67,6 +67,7 @@ fn event(number: u64, action: PrAction, task_ref: &str, agent: &str, by_agentmux
         updated_at: json!(at),
         delivery: delivery.into(),
         task_ref: Some(task_ref.into()),
+        task: None,
         agent: Some(agent.into()),
         by_agentmux,
     }
@@ -96,6 +97,26 @@ fn a_signed_text_is_an_event_only_when_it_says_so_itself() {
     assert_eq!(parse_pr_event(&other.to_string()), None);
     assert_eq!(parse_pr_event("not json"), None);
     assert_eq!(parse_pr_event(r#"{"kind":"pr_event","repo":"o/r","action":"exploded"}"#), None);
+}
+
+#[test]
+fn the_other_field_names_are_read_as_ours() {
+    // `id`, `by_app` and `task` (a board and a number) mean `delivery`, `by_agentmux` and `task_ref`; fields we do not use are ignored.
+    let text = json!({
+        "kind": "pr_event", "id": "dlv-9", "repo": "o/r", "number": 12, "action": "opened", "state": "open",
+        "head": "abc1234", "updated_at": "2026-11-21T10:00:00Z", "by_app": true, "task": { "board": "work", "n": 7 }, "agent": "pell"
+    });
+    let ev = parse_pr_event(&text.to_string()).unwrap();
+    assert_eq!((ev.delivery.as_str(), ev.by_agentmux, ev.agent.as_deref()), ("dlv-9", true, Some("pell")));
+    assert_eq!(ev.task_ref_text().as_deref(), Some("work#7"));
+    assert_eq!(TaskRef::parse("work#7"), Some(TaskRef::Board { board: "work".into(), num: 7 }));
+    // A number with no board is a bare one; no task at all is none; our own `task_ref` wins when both are there.
+    let bare = json!({ "kind": "pr_event", "repo": "o/r", "number": 1, "action": "opened", "task": { "n": 3 } });
+    assert_eq!(parse_pr_event(&bare.to_string()).unwrap().task_ref_text().as_deref(), Some("3"));
+    let none = json!({ "kind": "pr_event", "repo": "o/r", "number": 1, "action": "opened" });
+    assert_eq!(parse_pr_event(&none.to_string()).unwrap().task_ref_text(), None);
+    let both = json!({ "kind": "pr_event", "repo": "o/r", "number": 1, "action": "opened", "task_ref": "#5", "task": { "n": 3 } });
+    assert_eq!(parse_pr_event(&both.to_string()).unwrap().task_ref_text().as_deref(), Some("#5"));
 }
 
 #[test]

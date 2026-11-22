@@ -56,18 +56,41 @@ pub struct PrEvent {
     /// GitHub's own time for the change: epoch milliseconds, or an RFC 3339 string.
     #[serde(default)]
     pub updated_at: Value,
-    /// One per change, so a replay is ignored.
-    #[serde(default)]
+    /// One per change, so a replay is ignored (also read from `id`).
+    #[serde(default, alias = "id")]
     pub delivery: String,
     /// The task reference read from the pull request (`#12`, `board#12`).
     #[serde(default)]
     pub task_ref: Option<String>,
+    /// The same, as a board and a number.
+    #[serde(default)]
+    pub task: Option<TaskOf>,
     /// The agent tag read from the pull request: an agent id.
     #[serde(default)]
     pub agent: Option<String>,
-    /// Whether AgentMux's own GitHub identity opened the pull request.
-    #[serde(default)]
+    /// Whether AgentMux's own GitHub identity opened the pull request (also read from `by_app`).
+    #[serde(default, alias = "by_app")]
     pub by_agentmux: bool,
+}
+
+/// The task a pull request names, by board and number.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct TaskOf {
+    #[serde(default)]
+    pub board: String,
+    #[serde(default)]
+    pub n: u64,
+}
+
+impl PrEvent {
+    /// The task reference as text for [`TaskRef::parse`]: `task_ref`, else the board and number of `task`.
+    pub fn task_ref_text(&self) -> Option<String> {
+        if let Some(r) = self.task_ref.as_ref().filter(|r| !r.is_empty()) {
+            return Some(r.clone());
+        }
+        let t = self.task.as_ref().filter(|t| t.n > 0)?;
+        Some(if t.board.is_empty() { t.n.to_string() } else { format!("{}#{}", t.board, t.n) })
+    }
 }
 
 /// The `pr_event` a verified signed text carries, or `None` when its kind is not that or it is malformed.
@@ -164,7 +187,7 @@ impl Intake {
         };
         let updated_at = time_ms(&ev.updated_at).unwrap_or(now_ms);
         let agent = ev.agent.as_deref().and_then(agent_of);
-        let task_ref = ev.task_ref.as_deref().and_then(TaskRef::parse);
+        let task_ref = ev.task_ref_text().as_deref().and_then(TaskRef::parse);
         let Ok(matched) = identity.work_pr_match(&repo, ev.number, task_ref.as_ref(), agent.as_ref(), now_ms) else {
             return self.drop_with("the store did not answer");
         };
@@ -199,7 +222,7 @@ impl Intake {
                     ev.number,
                     state.as_str(),
                     &a.id,
-                    ev.task_ref.as_deref().unwrap_or(""),
+                    ev.task_ref_text().as_deref().unwrap_or(""),
                     why,
                     ev.head.as_deref().unwrap_or(""),
                     updated_at,
