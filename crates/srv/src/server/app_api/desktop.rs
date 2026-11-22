@@ -121,7 +121,7 @@ pub(crate) fn grant_after_countdown(state: &AppState, request_id: &str, approver
             "app": t.app,
             "action": "grant",
             "decision": "granted",
-            "details": { "by": approver.unwrap_or("no super agent"), "minutes": t.minutes, "request": request_id },
+            "details": { "by": approver.map_or_else(|| "no super agent".to_string(), |a| crate::backend::rpc::actor::Actor::Agent(a.to_string()).label()), "minutes": t.minutes, "request": request_id },
         }));
     }
     publish(state);

@@ -83,7 +83,7 @@ fn a_new_entry_keeps_the_pages_origin_and_says_where_it_came_from() {
     assert_eq!(fields.get("service").map(String::as_str), Some("https://github.com"));
     assert_eq!(fields.get("expires").map(String::as_str), Some("2027-10-30"));
     let made = activity(&s, 10).unwrap().into_iter().find(|a| a.entry_id == id && a.action == "captured").unwrap();
-    assert_eq!((made.actor.as_str(), made.target.as_str()), ("Agent2-6", "from https://github.com"));
+    assert_eq!((made.actor.as_str(), made.target.as_str()), ("agent:Agent2-6", "from https://github.com"));
 }
 
 #[test]

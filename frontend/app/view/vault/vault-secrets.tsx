@@ -7,6 +7,7 @@
 // with a way to stop each. The entries themselves are in the Vault pane, which
 // this links to, and which links back.
 
+import { agentNameOf } from "./vault-history";
 import { createEffect, createSignal, For, on, Show, type JSX } from "solid-js";
 
 import { Button, CloseButton } from "@/app/element/ui";
@@ -188,7 +189,7 @@ export function VaultSecrets(props: { visible?: boolean }): JSX.Element {
                             {(a) => (
                                 <tr data-outcome={a.outcome}>
                                     <td class="warden-manager-dim vault-uses__when">{formatWhen(a.at)}</td>
-                                    <td class="warden-manager-mono vault-uses__agent">{a.actor}</td>
+                                    <td class="warden-manager-mono vault-uses__agent">{agentNameOf(a.actor)}</td>
                                     <td class="vault-uses__what">{a.action}</td>
                                     <td class="vault-uses__entry">{a.entry_label}</td>
                                     <td class="warden-manager-dim vault-uses__where" data-label={t("vault.activity.where")}>

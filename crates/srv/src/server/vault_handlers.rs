@@ -178,7 +178,7 @@ fn share_list(state: &AppState, id: &str) -> Result<Value, String> {
     let uses: Vec<(String, i64)> = signed_in
         .iter()
         .filter(|r| r.outcome == "done")
-        .map(|r| (state.reactive_handler.get_agent(&r.actor).and_then(|a| a.uid).unwrap_or_default(), r.at))
+        .map(|r| (state.reactive_handler.get_agent(vault::history::agent_of(&r.actor)).and_then(|a| a.uid).unwrap_or_default(), r.at))
         .collect();
     let shares: Vec<Value> = listed
         .iter()
