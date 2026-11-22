@@ -215,7 +215,7 @@ export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<Swarm
             : t("swarm.broadcast.tip", { who: agentsOf(recipients()), newlineKey: keyLabel("shift+Enter") });
 
     return (
-        <div class="swarm-broadcast-dock">
+        <div class="swarm-broadcast-dock" data-operator-only="">
             <TextArea
                 class="swarm-broadcast-input"
                 ref={watch}
