@@ -24,10 +24,16 @@ mod settings;
 mod setup;
 mod state;
 // The service entry's parts that need no Windows (the names, the command line, what is told to the service manager) are also
-// for the installer, which is the next PR of docs/specs/SPEC_WINDOWS_HEADLESS_AS_A_SERVICE_2026_11_20.md: until then only the
-// tests use some of them.
+// for the installer (`winsvc_*`); where the installer is not built, only the tests use some of them.
 #[allow(dead_code)]
 mod winservice;
+#[cfg(windows)]
+mod winsvc_apply;
+mod winsvc_cli;
+mod winsvc_files;
+mod winsvc_plan;
+#[cfg(windows)]
+mod winsvc_win;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -38,6 +44,7 @@ use agentmux_common::{DataPaths, RuntimeMode};
 use clap::{Args, Parser, Subcommand};
 
 use settings::SecretStore;
+use winsvc_cli::ServiceCmd;
 use state::ServerState;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -190,18 +197,11 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
-    /// What the Windows service manager runs (not a command to type).
-    #[command(hide = true)]
+    /// AgentMux Headless as a Windows service: install, uninstall, start, stop and status.
     Service {
         #[command(subcommand)]
         command: ServiceCmd,
     },
-}
-
-#[derive(Subcommand, Debug)]
-enum ServiceCmd {
-    /// Be the Windows service: report to the service manager and run the server as `run` does.
-    Run(ServerArgs),
 }
 
 fn main() {
@@ -213,6 +213,12 @@ fn main() {
 fn dispatch(cli: Cli) -> i32 {
     if let Cmd::Version { json } = cli.command {
         return cmd_version(&cli.channel, json);
+    }
+    // The installer's commands run no server and read no data folder of the person's: they take nothing from the environment
+    // of the terminal or the data folders `context` prepares.
+    if matches!(&cli.command, Cmd::Service { command } if !command.runs_the_server()) {
+        let Cmd::Service { command } = cli.command else { unreachable!("matched above") };
+        return winsvc_cli::manage(command, &cli.channel);
     }
     let paths = match context(&cli.channel, cli.home.as_deref()) {
         Ok(p) => p,
@@ -251,7 +257,7 @@ fn dispatch(cli: Cli) -> i32 {
         }
         Cmd::Uninstall { remove_data, yes } => cmd_uninstall(&paths, remove_data, yes),
         Cmd::Version { .. } => unreachable!("answered above"),
-        Cmd::Service { command: ServiceCmd::Run(args) } => winservice::command(&paths, &args),
+        Cmd::Service { command } => winsvc_cli::dispatch(command, &paths),
     }
 }
 
@@ -293,7 +299,7 @@ fn fail(message: &str) -> i32 {
 /// starts and the programs it starts inherit it, so one folder holds all of it.
 fn context(channel: &str, home: Option<&Path>) -> Result<DataPaths, String> {
     for (key, _) in std::env::vars_os() {
-        if key.to_string_lossy().starts_with("AGENTMUX_") && key != HOME_VAR {
+        if key.to_string_lossy().starts_with("AGENTMUX_") && key != HOME_VAR && key != agentmux_common::owner_only::KEY_READERS_ENV {
             std::env::remove_var(key);
         }
     }
@@ -357,7 +363,10 @@ fn ensure_channel_dirs(paths: &DataPaths) -> Result<(), String> {
             if !path.exists() {
                 continue;
             }
-            let others = owner_only::others_who_can_open(&path)?;
+            // A service's key is also readable by the person who installed it (`service install`): not a stranger.
+            let readers = owner_only::key_readers();
+            let mut others = owner_only::others_who_can_open(&path)?;
+            others.retain(|o| !readers.iter().any(|r| r.eq_ignore_ascii_case(&o.sid)));
             if !others.is_empty() {
                 let user = match (std::env::var("USERDOMAIN"), std::env::var("USERNAME")) {
                     (Ok(domain), Ok(name)) if !domain.is_empty() && !name.is_empty() => format!("{domain}\\{name}"),
@@ -786,6 +795,8 @@ fn cmd_status(paths: &DataPaths, json: bool) -> i32 {
         }
     } else if let Some(b) = &blocked {
         tell!("AgentMux is not running (channel {}). {}", paths.channel, b.sentence());
+    } else if let Some(line) = winsvc_cli::installed_note(&paths.channel) {
+        tell!("{line}");
     } else {
         tell!("AgentMux is not running (channel {}). Start it with `agentmux start`.", paths.channel);
     }
@@ -975,15 +986,22 @@ fn cmd_client(paths: &DataPaths, name: &str, extra: &[String]) -> i32 {
 /// Runs a client command of `agentmux-srv`. With `capture` its output comes back to the caller and nothing is shown;
 /// without, it keeps the person's terminal. The code is the command's exit code.
 fn run_client(paths: &DataPaths, name: &str, extra: &[String], capture: bool) -> (i32, String) {
-    let Some(record) = running(paths) else {
+    let target = match running(paths) {
+        Some(record) => {
+            let srv = if record.srv.is_file() { record.srv.clone() } else { exe_dir().and_then(|d| find_srv_in(&d, None)).unwrap_or(record.srv.clone()) };
+            Some((srv, record.web_port, record.key_file.clone()))
+        }
+        // A Windows service keeps its record where this account cannot read it, and the key where it can: its own client target.
+        None => winsvc_cli::service_target(&paths.channel),
+    };
+    let Some((srv, port, key_file)) = target else {
         if !capture {
             warn!("AgentMux Headless is not running. Start it with `agentmux start`.");
         }
         return (1, String::new());
     };
-    let srv = if record.srv.is_file() { record.srv.clone() } else { exe_dir().and_then(|d| find_srv_in(&d, None)).unwrap_or(record.srv.clone()) };
     let mut command = Command::new(&srv);
-    command.arg(name).args(["--port", &record.web_port.to_string(), "--key-file"]).arg(&record.key_file).args(extra);
+    command.arg(name).args(["--port", &port.to_string(), "--key-file"]).arg(&key_file).args(extra);
     if capture {
         return match command.stdin(Stdio::null()).stderr(Stdio::null()).output() {
             Ok(out) => (out.status.code().unwrap_or(3), String::from_utf8_lossy(&out.stdout).into_owned()),
