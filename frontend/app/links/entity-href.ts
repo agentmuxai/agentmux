@@ -17,6 +17,8 @@ export function hrefOf(dest: Destination): string {
             return `agentmux://task/${dest.number}`;
         case "agent":
             return `agentmux://agent/${encodeURIComponent(dest.id)}`;
+        case "file":
+            return `agentmux://file?path=${encodeURIComponent(dest.path)}`;
     }
 }
 

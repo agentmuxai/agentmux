@@ -58,3 +58,19 @@ export function openAgentEntity(dest: Extract<Destination, { kind: "agent" }>): 
         await goToAgent({ agent_id: dest.id, name: dest.name });
     });
 }
+
+/** A file a message names, opened as the author's own folders allow: srv checks the path first and says why when it
+ *  is not there, or not the author's. A container agent's file is opened by srv as a read-only copy; any other
+ *  agent's is opened at the place srv resolved it to. */
+export function openFileEntity(dest: Extract<Destination, { kind: "file" }>, options: OpenOptions): Promise<OpenResult> {
+    return attempt(async () => {
+        const { checkFileNow } = await import("../file-check-store");
+        const found = await checkFileNow(dest.blockId, dest.path);
+        if (found.state !== "found") throw new Error(found.reason || "That file can't be opened.");
+        const { openPathLink } = await import("@/app/element/link-destinations");
+        await openPathLink(dest.confined ? dest.path : found.resolved || dest.path, {
+            floating: options.floating,
+            owner: { blockId: dest.blockId, confined: dest.confined },
+        });
+    });
+}
