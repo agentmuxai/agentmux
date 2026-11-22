@@ -18,7 +18,9 @@ export interface DrivenPage {
     /** Evaluate an expression in the page and return its value. */
     eval<T>(expression: string): Promise<T>;
     /** Dispatch a primary-button mouse event at page coordinates. */
-    mouse(type: "mouseMoved" | "mousePressed" | "mouseReleased", x: number, y: number): Promise<void>;
+    mouse(type: "mouseMoved" | "mousePressed" | "mouseReleased", x: number, y: number, opts?: { clickCount?: number; modifiers?: number }): Promise<void>;
+    /** A key press (down and up) with CDP modifier bits (2 Ctrl, 8 Shift) and, for a selection key, the editing commands it runs. */
+    key(key: string, code: string, vk: number, modifiers?: number, commands?: string[]): Promise<void>;
 }
 
 /** A page with `html` loaded in `browser`; `run` drives it, then the browser is stopped. */
@@ -120,8 +122,21 @@ function pageOver(ws: WebSocket): DrivenPage {
             if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text);
             return r.result.value as T;
         },
-        async mouse(type, x, y) {
-            await call("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount: 1 });
+        async mouse(type, x, y, opts) {
+            await call("Input.dispatchMouseEvent", {
+                type,
+                x,
+                y,
+                button: "left",
+                buttons: type === "mouseReleased" ? 0 : 1,
+                clickCount: opts?.clickCount ?? 1,
+                modifiers: opts?.modifiers ?? 0,
+            });
+        },
+        async key(key, code, vk, modifiers = 0, commands) {
+            const ev = { key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers, ...(commands ? { commands } : {}) };
+            await call("Input.dispatchKeyEvent", { type: "rawKeyDown", ...ev });
+            await call("Input.dispatchKeyEvent", { type: "keyUp", ...ev });
         },
     };
 }
