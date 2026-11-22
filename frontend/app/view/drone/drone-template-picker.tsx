@@ -33,7 +33,7 @@ const STATE_PILL: Record<string, { label: () => string; tone: PillTone }> = {
 };
 
 /** A chosen template's name and settings, and the button that makes the drone. */
-const TemplateForm = (p: {
+export const TemplateForm = (p: {
     info: JobTemplateInfo;
     name: string;
     values: Record<string, ParamValue>;
@@ -114,8 +114,27 @@ const TemplateList = (p: {
     </Show>
 );
 
+/** Make a drone from an approved template, its settings checked first: the new drone's id, or what is wrong with the settings. */
+export async function makeDroneFrom(
+    info: JobTemplateInfo,
+    name: string,
+    values: Record<string, ParamValue>
+): Promise<{ droneId: string } | { problems: Record<string, string> }> {
+    const manifest = info.manifest;
+    if (!manifest) return { problems: {} };
+    const { params, errors } = paramsFromForm(manifest, values);
+    if (Object.keys(errors).length > 0) return { problems: errors };
+    const made = await RpcApi.JobsTemplatesMakeDroneCommand(TabRpcClient, {
+        id: info.id,
+        version: manifest.version,
+        params,
+        name: name.trim() || undefined,
+    });
+    return { droneId: made.drone.id };
+}
+
 /** Run `work` with the panel busy and no old refusal; a refusal from it is shown in the panel, not thrown. */
-async function guarded(
+export async function guarded(
     setBusy: (busy: boolean) => void,
     setFailure: (message: string | null) => void,
     work: () => Promise<void>
@@ -179,19 +198,14 @@ function usePicker(p: { model: DroneViewModel; onClose: () => void }) {
 
     const make = async () => {
         const info = chosen();
-        const manifest = info?.manifest;
-        if (!info || !manifest) return;
-        const { params, errors: bad } = paramsFromForm(manifest, values());
-        setErrors(bad);
-        if (Object.keys(bad).length > 0) return;
+        if (!info) return;
         await guarded(setBusy, setFailure, async () => {
-            const made = await RpcApi.JobsTemplatesMakeDroneCommand(TabRpcClient, {
-                id: info.id,
-                version: manifest.version,
-                params,
-                name: name().trim() || undefined,
-            });
-            await p.model.openDrone(made.drone.id);
+            const made = await makeDroneFrom(info, name(), values());
+            if ("problems" in made) {
+                setErrors(made.problems);
+                return;
+            }
+            await p.model.openDrone(made.droneId);
             void p.model.refreshList();
             p.onClose();
         });

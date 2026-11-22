@@ -269,6 +269,19 @@
       ]
     },
     {
+      "name": "folder overlap choices",
+      "paths": [
+        "folder-overlap-choices/"
+      ],
+      "why": "The person's go-ahead for a host agent that works in a folder a container agent can write is kept for that pair of agents on every install, channel and version on the machine, so an upgrade does not ask again.",
+      "gate": "n/a: a choice is a plain-text file of the two agent ids, one a line, with one format; its presence is the choice.",
+      "lock": "Written once by the AgentMux window's go-ahead and removed only when the pair is forgotten; two writers write the same text.",
+      "users": [
+        "crates/srv-core/src/backend/folder_overlap.rs",
+        "crates/srv-core/src/registry/paths.rs"
+      ]
+    },
+    {
       "name": "where the shared folder is",
       "paths": [
         "shared/"

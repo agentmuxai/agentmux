@@ -109,6 +109,13 @@
       }
     },
     {
+      "cmd": "FolderOverlapCheck",
+      "data": {
+        "agent_id": "agent-1",
+        "folder": "/srv/home/agents/korp"
+      }
+    },
+    {
       "cmd": "WriteAgentConfig",
       "data": {
         "working_dir": "/srv/home/agents/korp",
@@ -170,6 +177,13 @@
       "cmd": "EnsureProviderAuthDir",
       "data": {
         "provider_id": "claude"
+      }
+    },
+    {
+      "cmd": "FolderOverlapCheck",
+      "data": {
+        "agent_id": "agent-1",
+        "folder": "/srv/home/agents/k-1103c"
       }
     },
     {

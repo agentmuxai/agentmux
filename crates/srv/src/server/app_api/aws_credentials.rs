@@ -118,12 +118,13 @@ pub(crate) async fn serve<R: Runner>(
 }
 
 /// The secret key and session token of the credentials an agent was given are never written into its transcript,
-/// until they run out. Asked for again, an agent's profile gets its next credentials in place of these.
+/// until they run out. Credentials an agent's profile is given next do not end these: they still work until their
+/// own expiration, so they stay withheld until then.
 fn hold_in_transcripts(uid: &str, profile: &str, creds: &crate::identity::aws_broker::mint::Minted) {
-    let until = Some(creds.expiration.timestamp_millis());
+    let until = creds.expiration.timestamp_millis();
     let owner = |what: &str| format!("aws-credentials:{uid}:{profile}:{what}");
-    crate::backend::transcript::withhold::hold(&owner("secret"), &creds.secret_access_key, until);
-    crate::backend::transcript::withhold::hold(&owner("session"), &creds.session_token, until);
+    crate::backend::transcript::withhold::hold_until(&owner("secret"), &creds.secret_access_key, until);
+    crate::backend::transcript::withhold::hold_until(&owner("session"), &creds.session_token, until);
 }
 
 /// Whether a refusal is one the person can fix on this computer, so the agent's pane says so: the host's AWS login
