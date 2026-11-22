@@ -290,7 +290,7 @@ function EntryTable(props: { s: EntriesState; section: VaultSection; showVault: 
                         <tr data-entry={e.id}>
                             <td>
                                 <EntryLabel entry={e} />
-                                <span class="warden-manager-mono warden-manager-dim vault-id" title={e.id}>
+                                <span class="warden-manager-mono warden-manager-dim vault-id" {...tip(e.id)}>
                                     {e.id}
                                 </span>
                                 <EntryGrants entry={e} revoke={(grant) => s.revoke(e.id, grant)} />

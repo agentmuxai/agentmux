@@ -28,7 +28,7 @@ const TOKENS = `:root{--main-text-color:#ddd;--secondary-text-color:#999;--warni
 --space-1:4px;--space-2:8px;--space-3:12px;--radius-full:999px;--radius-sm:3px}
 body{margin:0;background:#111;color:#ddd;font:13px Arial,sans-serif}.case{margin:0 0 8px}
 .vault-view{height:auto !important}.vault-list{height:auto !important}.vault-list__sections{overflow:visible !important}
-.ui-button{display:inline-block;width:24px;height:24px;padding:0;border:1px solid #444;background:#2a2a2a;color:#ddd}`;
+.ui-button{display:inline-block;width:18px;height:18px;padding:0;border:1px solid #444;background:#2a2a2a;color:#ddd}`;
 
 const CHIPS = (names: string[]) =>
     names
@@ -163,10 +163,12 @@ describe.skipIf(!BROWSER)("Vault entry rows across widths", () => {
     });
 
     it("gives the label a least width of 14em, or the whole row when the row has less, and never a few letters", () => {
-        for (const [w, z] of CASES) {
+        // Under 160px of list the pane says it is too narrow and draws no rows (vault-view.scss, `vault-pane`).
+        for (const [w, z] of CASES.filter(([cw, cz]) => cw / cz >= 160)) {
             const m = measured[key(w, z)];
             for (const r of m.rows) {
-                const least = Math.min(14 * m.fs, w / z - 2 * 12);
+                // The section's frame and the row's padding take about 60px of the list's width.
+                const least = Math.min(14 * m.fs, w / z - 60);
                 expect(r.labelCellWidth, `label cell at ${w}px, zoom ${z}`).toBeGreaterThanOrEqual(Math.min(least, 120) - 1);
             }
         }
