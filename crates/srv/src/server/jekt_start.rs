@@ -175,12 +175,26 @@ pub(super) fn start_for_held(state: &AppState, req: &InjectionRequest, target_ui
 /// Deliver a Job or cron fire. With the setting on, a target that is an agent of this instance and runs
 /// nowhere is started first and waited for, then the fire goes the normal way: before this, a signed-in
 /// instance would have queued the fire to the cloud as delivered while the local agent stayed stopped.
-pub(crate) async fn deliver_cron(state: &AppState, creator_uid: &str, req: InjectionRequest) -> serde_json::Value {
+pub(crate) async fn deliver_cron(state: &AppState, creator_uid: &str, mut req: InjectionRequest) -> serde_json::Value {
+    name_the_proof(state, &mut req);
     if starts_the_agent(enabled(state)) {
         let sender = if creator_uid.is_empty() { "job".to_string() } else { format!("job:{creator_uid}") };
         start_stopped_local_target(state, &req.target_agent, &sender).await;
     }
     super::reactive::deliver(state, super::ReactiveAuthVia::FullAuthKey, creator_uid, req).await
+}
+
+/// Name who a scheduled fire runs for, from the agent's own record here: the marker shows that name, never one a
+/// request carried. An agent that no longer exists here names no one, so the fire goes unproven.
+fn name_the_proof(state: &AppState, req: &mut InjectionRequest) {
+    let Some(fire) = req.scheduler_fire.as_mut() else { return };
+    if !fire.runs_for.is_empty() {
+        return;
+    }
+    match state.mstore.agent_def_get(&fire.proof_uid) {
+        Ok(Some(def)) if !def.slug.trim().is_empty() => fire.runs_for = def.slug.clone(),
+        _ => req.scheduler_fire = None,
+    }
 }
 
 /// Start the agent `target` names when it is defined here and runs nowhere (not here, not in another

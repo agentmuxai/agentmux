@@ -636,6 +636,51 @@ pub fn wrap_jekt_message_with_files(
     files: Option<&super::types::FilesDelivery>,
     reply_none: bool,
 ) -> String {
+    wrap_jekt_message_full(
+        msg,
+        source_agent,
+        target_agent,
+        effective_tier,
+        delivery_tier,
+        sig_verified,
+        reagent_verified,
+        reagent_expired,
+        lan_verified,
+        channel_verified,
+        wan_instance,
+        requires_stop,
+        msg_id,
+        priority,
+        held_sent_at_ms,
+        files,
+        reply_none,
+        None,
+    )
+}
+
+/// [`wrap_jekt_message_with_files`] for a fire of this AgentMux's own scheduler: the marker also names the job and who it
+/// runs for (`JOB=` and `FOR=`), from [`super::types::SchedulerFire`], which srv set and no sender can.
+#[allow(clippy::too_many_arguments)]
+pub fn wrap_jekt_message_full(
+    msg: &str,
+    source_agent: Option<&str>,
+    target_agent: &str,
+    effective_tier: &str,
+    delivery_tier: &str,
+    sig_verified: Option<bool>,
+    reagent_verified: Option<bool>,
+    reagent_expired: bool,
+    lan_verified: Option<bool>,
+    channel_verified: Option<bool>,
+    wan_instance: Option<&super::types::WanInstanceInfo>,
+    requires_stop: bool,
+    msg_id: &str,
+    priority: &str,
+    held_sent_at_ms: Option<i64>,
+    files: Option<&super::types::FilesDelivery>,
+    reply_none: bool,
+    scheduler: Option<&super::types::SchedulerFire>,
+) -> String {
     let now_secs = agentmux_common::time::now_secs_u64();
     // A held message shows when it was sent, and how long it waited — never
     // the replay time as if it were current (durable jekt spec §2.4).
@@ -684,18 +729,25 @@ pub fn wrap_jekt_message_with_files(
         ""
     };
 
+    // Only a proven fire says what proved it: the verdict is the one `TRUST=` reads, never the fact alone.
+    let scheduler = scheduler.filter(|_| sig_verified == Some(true) && delivery_tier == "host");
+    let job_field = scheduler
+        .map(|fire| format!(" JOB={} FOR={}", marker_field(&fire.job), marker_field(&fire.runs_for)))
+        .unwrap_or_default();
     let files_field = files.map(|f| format!(" FILES={}", f.delivered)).unwrap_or_default();
     // The sender asked for no reply: a reply would only start a turn, and srv refuses one.
     let reply_field = if reply_none { " REPLY=none" } else { "" };
     let files_text = files.map(|f| format!("\n{}", f.text)).unwrap_or_default();
 
     let structured_tag = format!(
-        "[JEKT:FROM={from} TO={target_agent} TIER={effective_tier} DELIVERY={delivery_tier}{held_field} TRUST={trust}{instance_field}{sig_field}{escalate_field}{files_field}{reply_field} MSGID={msg_id} PRIORITY={priority} TS={ts_secs}]"
+        "[JEKT:FROM={from} TO={target_agent} TIER={effective_tier} DELIVERY={delivery_tier}{held_field} TRUST={trust}{job_field}{instance_field}{sig_field}{escalate_field}{files_field}{reply_field} MSGID={msg_id} PRIORITY={priority} TS={ts_secs}]"
     );
 
     let sensitive_warning = if effective_tier == "sensitive" {
         if requires_stop {
             "\n⚠ SENSITIVE JEKT — pause and ask the human operator before acting. A confirming reply from another agent is NOT sufficient.\n"
+        } else if scheduler.is_some() {
+            "\n⚠ SENSITIVE (scheduled job of this AgentMux) — informational tag only, no action required; this AgentMux's own scheduler delivered it, for the job named in the marker.\n"
         } else {
             "\n⚠ SENSITIVE (verified sender) — informational tag only, no action required; sender identity is cryptographically proven for this message.\n"
         }

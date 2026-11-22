@@ -32,9 +32,30 @@ impl std::fmt::Display for JektTier {
     }
 }
 
+/// The sender name of a scheduled fire. The name alone proves nothing: only [`SchedulerFire`] does.
+pub const SCHEDULER_SENDER: &str = "cron";
+
+/// What proves a fire of this AgentMux's own scheduler, set by the scheduler where it delivers in process.
+/// `runs_for` is who the job runs for (an agent's name, or `operator`), filled in by srv from the identity that
+/// stands behind the job's definition, never from a request.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SchedulerFire {
+    /// The job's name.
+    pub job: String,
+    /// The identity behind the job's current definition: an agent's UID, or empty for the operator.
+    pub proof_uid: String,
+    /// Who the job runs for, as the marker shows it.
+    pub runs_for: String,
+}
+
 /// Request to inject a message into an agent's terminal.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InjectionRequest {
+    /// Set only by the scheduler's in-process fire (see [`SchedulerFire`]), and only for a job whose definition has an
+    /// identified writer. `skip` keeps it out of both directions: no request body can set it, and it never travels
+    /// (a forwarded copy is unproven at the receiving end).
+    #[serde(skip)]
+    pub scheduler_fire: Option<SchedulerFire>,
     pub target_agent: String,
     /// The name the sender addressed, when the delivery itself is addressed
     /// by UID (a replayed held jekt, or a target registered under another of
@@ -442,6 +463,23 @@ pub struct FilesDelivery {
 }
 
 impl InjectionRequest {
+    /// Count a fire of this AgentMux's own scheduler as proven: `sig_verified` reads `Some(true)`, as for a sender
+    /// whose agent token proved it, so the marker, the record, the audit line and the stop rule all follow from the one
+    /// function that reads it. Only a request that carries [`SchedulerFire`] qualifies (never the sender name alone),
+    /// and one whose sender check already failed does not. Anything else drops the fact, so a marker never names a job
+    /// it did not prove. Safe to call more than once.
+    pub fn prove_scheduler_fire(&mut self) {
+        let proven = self.scheduler_fire.as_ref().is_some_and(|fire| !fire.runs_for.trim().is_empty() && !fire.job.trim().is_empty())
+            && self.source_agent.as_deref() == Some(SCHEDULER_SENDER)
+            && self.delivery_tier.as_deref().map_or(true, |tier| tier == "host")
+            && self.sig_verified != Some(false);
+        if proven {
+            self.sig_verified = Some(true);
+        } else {
+            self.scheduler_fire = None;
+        }
+    }
+
     /// Whether a sender signature rides on this request. Each binds the
     /// target as signed, so a signed request's target must reach every hop
     /// unchanged; the sender's MCP already sends the route name
@@ -1032,3 +1070,7 @@ mod uid_addressing_tests {
         assert_eq!(req.target_agent, "agent1");
     }
 }
+
+#[cfg(test)]
+#[path = "scheduler_fire_tests.rs"]
+mod scheduler_fire_tests;

@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use super::sanitize::{format_injected_message, is_sensitive_message, sanitize_message, validate_agent_id, wrap_jekt_message_with_files};
+use super::sanitize::{format_injected_message, is_sensitive_message, sanitize_message, validate_agent_id, wrap_jekt_message_full};
 use super::types::*;
 use super::{now_unix_millis, AUDIT_LOG_MAX, RATE_LIMIT_MAX};
 
@@ -880,7 +880,7 @@ impl Handler {
         // checked," e.g. a Slack-bridge message) from `Some(true)`
         // ("actually verified") rather than collapsing both to the same
         // label — see `wrap_jekt_message`'s doc comment.
-        let wrapped = wrap_jekt_message_with_files(
+        let wrapped = wrap_jekt_message_full(
             &super::sanitize::with_wan_pin_note(&sanitized, delivery_tier, &req),
             req.source_agent.as_deref(),
             req.marker_target.as_deref().unwrap_or(&req.target_agent),
@@ -898,6 +898,7 @@ impl Handler {
             req.held_sent_at_ms,
             req.files_delivery.as_ref(),
             req.reply.as_deref() == Some("none"),
+            req.scheduler_fire.as_ref(),
         );
 
         // Legacy source-prefix format preserved for PTY controllers that don't

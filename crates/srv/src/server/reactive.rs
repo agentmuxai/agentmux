@@ -598,6 +598,7 @@ async fn admit(
     }
 
     verify_jekt_signature(state, req);
+    req.prove_scheduler_fire(); // only the scheduler's in-process fire carries the fact (`types.rs`)
     verify_reagent_signature(req, now_unix_secs());
     super::lan_watch::during("sender signature check", verify_lan_signature(state, req)).await;
     verify_cross_channel_signature(state, req);
