@@ -1365,5 +1365,7 @@
     "drone.templates.none": "No Drone templates are installed.",
     "drone.templates.use": "Use",
     "drone.templates.review": "Review and approve",
-    "pane.tab.actions": "Tab actions"
+    "pane.tab.actions": "Tab actions",
+    "jobs.droneTemplate.pill": "Drone",
+    "jobs.droneTemplate.make": "Make a drone"
 }

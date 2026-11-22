@@ -152,6 +152,31 @@ describe("checkDoc", () => {
         expect(prose[0].message).toContain("the Linux portable build is .tar.xz");
         expect(prose[1].message).toContain("see the code");
     });
+
+    it("takes a denied term written as a regular expression", () => {
+        const deny = parseDeny("/PR #[0-9]{3,}/ => no PR numbers in prose\n/since v?0\\.[0-9]+/ => say what it does now\n");
+        const found = checkDoc("Fixed in PR #926.\nOK: PR #7 is an example.\nSince v0.59 it differs, since 0.60 too.\n", index, { deny });
+        expect(kinds(found)).toEqual(["denied-term:/PR #[0-9]{3,}/", "denied-term:/since v?0\\.[0-9]+/"]);
+        expect(found[0].line).toBe(1);
+        // A flag works, and a g flag does not make a match depend on the last one (no lastIndex state).
+        const flagged = parseDeny("/earlier releases?/i => say nothing of the past\n");
+        const twice = checkDoc("Earlier release one.\nEarlier releases two.\n", index, { deny: flagged });
+        expect(twice.map((f) => f.line)).toEqual([1, 2]);
+    });
+
+    it("lets one doc keep a denied term when its exception has a reason", () => {
+        const deny = parseDeny("formerly => in alpha the docs describe the current release\nallow: formerly @ internals/jekt-protocol.md => the protocol's own wording for a slug\n");
+        expect(deny.exceptions).toEqual([{ term: "formerly", path: "internals/jekt-protocol.md", reason: "the protocol's own wording for a slug" }]);
+        const doc = "An id it was formerly known by.\n";
+        expect(checkDoc(doc, index, { deny, path: "src/content/docs/internals/jekt-protocol.md" })).toEqual([]);
+        expect(kinds(checkDoc(doc, index, { deny, path: "src/content/docs/memory.md" }))).toEqual(["denied-term:formerly"]);
+        expect(kinds(checkDoc(doc, index, { deny }))).toEqual(["denied-term:formerly"]);
+    });
+
+    it("refuses an exception with no reason or no path", () => {
+        expect(() => parseDeny("allow: formerly @ a.md\n")).toThrow(/an exception reads/);
+        expect(() => parseDeny("allow: formerly => because\n")).toThrow(/an exception reads/);
+    });
 });
 
 describe("file tables", () => {

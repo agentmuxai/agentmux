@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { buildAtlasGraph, type AtlasAgent, type AtlasMachine } from "./atlas-graph";
-import { edgePath, wrappedRoute, type Pt } from "./atlas-edge-path";
+import { edgePath, edgePoints, wrappedRoute, type Pt } from "./atlas-edge-path";
 import { GAP_X, GAP_Y, layoutAtlas, layoutBySeat, NODE_H, NODE_W, type PaneShape } from "./atlas-layout";
 
 const machine = (key: string): AtlasMachine => ({ key, title: key, badge: "LAN", platform: null, stale: false, seenAtMs: null });
@@ -130,5 +130,20 @@ describe("which reports the layout says it wrapped", () => {
     it("is empty when every lead's reports stand in one row", () => {
         expect(layoutAtlas(g(), { w: 4000, h: 1500 }).wrapped.size).toBe(0);
         expect(layoutAtlas(g()).wrapped.size).toBe(0);
+    });
+});
+
+describe("edgePoints", () => {
+    it("runs from the lead's bottom to the report's top, as a curve through the gap between", () => {
+        const pts = edgePoints({ x: 0, y: 0 }, { x: 300, y: 100 });
+        expect(pts[0]).toEqual({ x: NODE_W / 2, y: NODE_H });
+        expect(pts.at(-1)).toEqual({ x: 300 + NODE_W / 2, y: 100 });
+        expect(pts.length).toBeGreaterThan(8);
+    });
+
+    it("is a wrapped report's own route when the layout says it wrapped", () => {
+        const from = { x: 0, y: 0 };
+        const to = { x: 300, y: 200 };
+        expect(edgePoints(from, to, true)).toEqual(wrappedRoute(from, to));
     });
 });
