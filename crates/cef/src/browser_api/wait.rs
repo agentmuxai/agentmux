@@ -157,6 +157,7 @@ async fn find_text(root: &mut CdpSession, text: &str, worlds: &mut Worlds) -> Op
 /// What a wait that ran out of time says. A page still on its way is named as such, so the agent does not
 /// take the blank page it is looking at for the answer.
 fn still_waiting(secs: f64, url: &str, loading: bool) -> String {
+    let url = agentmux_common::shown_url::shown_url(url);
     if loading {
         format!("still waiting after {secs:.1} s: the page is still loading (the pane shows {url} until it arrives); wait again, or take a snapshot to see where it is")
     } else {

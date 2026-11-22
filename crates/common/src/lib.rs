@@ -56,6 +56,7 @@ pub mod capture_shape;
 pub mod secret_shape;
 pub mod typed_secrets;
 pub mod shown_once;
+pub mod shown_url;
 pub mod secret_eq;
 pub mod secret_env;
 pub mod system_certs;

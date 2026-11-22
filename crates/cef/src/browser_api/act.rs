@@ -969,7 +969,7 @@ async fn act(
 ) -> Result<Value, String> {
     let now = page_url(root).await;
     if !table.url.is_empty() && now != table.url {
-        return Err(format!("the page changed since the snapshot (now {now}); take a new snapshot"));
+        return Err(format!("the page changed since the snapshot (now {}); take a new snapshot", agentmux_common::shown_url::shown_url(&now)));
     }
     if let Some(f) = frame {
         frames::check_frame(root, f, &req.ref_).await?;
@@ -1465,7 +1465,7 @@ pub async fn set_files_route(
 async fn set_files(root: &mut CdpSession, table: &RefTable, backend: i64, frame: Option<&FrameRef>, req: &SetFilesReq) -> Result<Value, String> {
     let now = page_url(root).await;
     if !table.url.is_empty() && now != table.url {
-        return Err(format!("the page changed since the snapshot (now {now}); take a new snapshot"));
+        return Err(format!("the page changed since the snapshot (now {}); take a new snapshot", agentmux_common::shown_url::shown_url(&now)));
     }
     if let Some(f) = frame {
         frames::check_frame(root, f, &req.ref_).await?;
