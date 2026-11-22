@@ -42,6 +42,7 @@ pub mod slots;
 pub mod source_link;
 pub mod sync_activity;
 pub mod sync_grant;
+pub mod sync_links;
 pub mod sync_merge;
 pub mod sync_record;
 pub mod sync_seal;
