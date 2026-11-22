@@ -14,8 +14,16 @@ pub enum Merge {
     Applied,
     /// Keep what is here.
     KeptLocal,
-    /// Neither wins: keep both for the person (a Vault's secrets).
-    Conflict,
+    /// Neither wins: both rows stay in the log for the person (a Vault's secrets), and the record's current state
+    /// is the side the adapter names, so every machine shows the same one as current.
+    Conflict { current: Side },
+}
+
+/// Which side of a conflict is the record's current state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Side {
+    Local,
+    Incoming,
 }
 
 /// One kind of collection's merge rule.

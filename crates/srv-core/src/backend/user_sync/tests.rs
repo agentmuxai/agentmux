@@ -7,9 +7,9 @@
 use agentmux_common::jekt_sign::generate_lan_keypair;
 use rusqlite::Connection;
 
-use super::adapter::NewestWins;
+use super::adapter::{Adapter, Merge, NewestWins, Side};
 use super::hlc::{Clock, Version, MAX_SKEW_MS};
-use super::log::{self, Change, Head, Outcome, Pins, Refused, Signer, SyncError};
+use super::log::{self, Change, Head, Outcome, Pins, Refused, Signer, SyncError, Vector};
 use super::record::{BadRecord, Header, Record, CLEAR_FIELDS};
 
 const NOW: i64 = 1_800_000_000_000;
@@ -159,6 +159,7 @@ fn a_version_that_names_another_machine_is_refused() {
         collection: COLLECTION.into(),
         record: "card".into(),
         version: Version { wall_ms: NOW, counter: 0, machine: "b".into() },
+        base: None,
         origin: "a".into(),
         seq: 1,
         epoch: 0,
@@ -209,7 +210,7 @@ fn a_removed_member_writing_at_the_old_epoch_is_refused() {
     let mut a = machine("a", 1);
     let b = machine("b", 2);
     let old = a.write("card", "before", NOW);
-    log::set_epoch(&b.conn, COLLECTION, 1).unwrap();
+    log::set_epoch(&b.conn, COLLECTION, 1, &Vector::new()).unwrap();
     let all = pins(&[&a, &b]);
     let mut clock = Clock::new("b");
     assert_eq!(refused(log::apply_remote(&b.conn, &old, &all, &mut clock, NOW, &NewestWins)), Refused::Epoch { have: 1, got: 0 });
@@ -293,6 +294,112 @@ fn a_record_made_again_after_a_delete_is_created_not_updated() {
     assert_eq!(changes, vec![Change::Updated, Change::Created, Change::Deleted, Change::Created]);
 }
 
+/// Keeps both sides of an edit made apart, with the newer one current; an edit made on top of what is held applies.
+struct KeepBoth;
+
+impl Adapter for KeepBoth {
+    fn merge(&self, local: Option<&Header>, incoming: &Header) -> Merge {
+        match local {
+            None => Merge::Applied,
+            Some(l) if incoming.base.as_ref() == Some(&l.version) => Merge::Applied,
+            Some(l) if l.version >= incoming.version => Merge::Conflict { current: Side::Local },
+            Some(_) => Merge::Conflict { current: Side::Incoming },
+        }
+    }
+}
+
+/// What `to` takes from `from`, under KeepBoth, and what happened to each record.
+fn take_all(from: &Machine, to: &mut Machine, all: &Pins, at: i64) -> Vec<Outcome> {
+    let mine = log::vector(&to.conn, COLLECTION).unwrap();
+    let records = log::since(&from.conn, COLLECTION, &mine, 100).unwrap();
+    records.iter().map(|r| log::apply_remote(&to.conn, r, all, &mut to.clock, at, &KeepBoth).unwrap()).collect()
+}
+
+#[test]
+fn a_record_names_the_version_it_replaced_and_the_signature_covers_it() {
+    let mut a = machine("a", 1);
+    let b = machine("b", 2);
+    let first = a.write("card", "one", NOW);
+    let second = a.write("card", "two", NOW + 1);
+    assert_eq!(first.header.base, None);
+    assert_eq!(second.header.base, Some(first.header.version.clone()));
+    let all = pins(&[&a, &b]);
+    let mut clock = Clock::new("b");
+    log::apply_remote(&b.conn, &first, &all, &mut clock, NOW, &NewestWins).unwrap();
+    let mut edited = second.clone();
+    edited.header.base = None;
+    assert_eq!(refused(log::apply_remote(&b.conn, &edited, &all, &mut clock, NOW + 2, &NewestWins)), Refused::Bad(BadRecord::Signature));
+    assert_eq!(log::current(&a.conn, COLLECTION, "card").unwrap().unwrap().header.base, second.header.base, "stored and read back");
+}
+
+#[test]
+fn a_follow_on_edit_applies_and_an_edit_made_apart_keeps_both_with_one_current_everywhere() {
+    let mut ms = vec![machine("a", 1), machine("b", 2)];
+    let all: Pins = ms.iter().map(|m| (m.id.clone(), m.public)).collect();
+    ms[0].write("card", "base", NOW);
+    let (first, rest) = ms.split_at_mut(1);
+    let outcomes = take_all(&first[0], &mut rest[0], &all, NOW + 1);
+    assert_eq!(outcomes, vec![Outcome::Applied], "an edit made on top of what is held applies");
+    ms[0].write("card", "from a", NOW + 100);
+    ms[1].write("card", "from b", NOW + 200);
+    let (first, rest) = ms.split_at_mut(1);
+    let mut seen = take_all(&first[0], &mut rest[0], &all, NOW + 300);
+    seen.extend(take_all(&rest[0], &mut first[0], &all, NOW + 300));
+    let conflicts = seen.iter().filter(|o| **o == Outcome::Conflict).count();
+    assert_eq!(conflicts, 2, "each machine saw the other's edit as made apart");
+    assert!(ms.iter().all(|m| m.state("card").as_deref() == Some("from b")), "the later version is current on both");
+    assert_eq!(log::history(&ms[0].conn, COLLECTION, 10).unwrap().len(), 3, "the other side stays in the log");
+}
+
+#[test]
+fn a_member_that_missed_the_last_record_of_an_epoch_still_catches_up_across_the_change() {
+    let mut a = machine("a", 1);
+    let b = machine("b", 2);
+    let all = pins(&[&a, &b]);
+    let old = a.write("card", "before", NOW);
+    // Both move to epoch 1; the membership change says a had written 1 record at epoch 0.
+    let ended: Vector = [("a".to_string(), 1)].into();
+    log::set_epoch(&a.conn, COLLECTION, 1, &ended).unwrap();
+    log::set_epoch(&b.conn, COLLECTION, 1, &ended).unwrap();
+    let new = a.write("card", "after", NOW + 10);
+    assert_eq!((old.header.epoch, new.header.epoch), (0, 1));
+    let mut clock = Clock::new("b");
+    assert_eq!(log::apply_remote(&b.conn, &old, &all, &mut clock, NOW + 20, &NewestWins).unwrap(), Outcome::Applied);
+    assert_eq!(log::apply_remote(&b.conn, &new, &all, &mut clock, NOW + 20, &NewestWins).unwrap(), Outcome::Applied);
+    assert_eq!(b.state("card").as_deref(), Some("after"));
+    // A record past the end of its origin's old epoch is still refused, and so is one at an epoch not yet held.
+    let signed = |seq: u64, epoch: u32| {
+        let header = Header { seq, epoch, ..new.header.clone() };
+        Record::sign(&a.private, header, new.body.clone()).unwrap()
+    };
+    assert_eq!(refused(log::apply_remote(&b.conn, &signed(2, 0), &all, &mut clock, NOW + 20, &NewestWins)), Refused::Epoch { have: 1, got: 0 });
+    assert_eq!(refused(log::apply_remote(&b.conn, &signed(3, 2), &all, &mut clock, NOW + 20, &NewestWins)), Refused::Epoch { have: 1, got: 2 });
+}
+
+#[test]
+fn the_counter_carries_into_the_wall_time_instead_of_overflowing() {
+    let mut clock = Clock::new("a");
+    let seen = Version { wall_ms: NOW, counter: u32::MAX, machine: "b".into() };
+    clock.observe(&seen, NOW).unwrap();
+    let next = clock.tick(NOW - 5);
+    assert!(next > seen, "the next version is after the one seen");
+    assert_eq!(next.wall_ms, NOW + 1);
+    assert_eq!(next.counter, 0);
+}
+
+#[test]
+fn a_deletion_and_a_concurrent_replacement_at_the_same_instant_are_labelled_in_version_order() {
+    let mut ms = vec![machine("a", 1), machine("b", 2)];
+    ms[0].write("card", "one", NOW);
+    sync_all(&mut ms, NOW + 1);
+    ms[0].delete("card", NOW + 10);
+    ms[1].write("card", "two", NOW + 10);
+    sync_all(&mut ms, NOW + 20);
+    let h = log::history(&ms[0].conn, COLLECTION, 10).unwrap();
+    let changes: Vec<(&str, Change)> = h.iter().map(|e| (e.machine.as_str(), e.change)).collect();
+    assert_eq!(changes, vec![("b", Change::Created), ("a", Change::Deleted), ("a", Change::Created)]);
+}
+
 #[test]
 fn a_record_over_the_size_cap_cannot_be_made() {
     let a = machine("a", 1);
@@ -300,6 +407,7 @@ fn a_record_over_the_size_cap_cannot_be_made() {
         collection: COLLECTION.into(),
         record: "card".into(),
         version: Version { wall_ms: NOW, counter: 0, machine: "a".into() },
+        base: None,
         origin: "a".into(),
         seq: 1,
         epoch: 0,

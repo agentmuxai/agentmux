@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use super::hlc::Version;
 
 /// Every field a record carries in the clear, and no other.
-pub const CLEAR_FIELDS: [&str; 9] = ["collection", "record", "version", "origin", "seq", "epoch", "tombstone", "size", "sig"];
+pub const CLEAR_FIELDS: [&str; 10] = ["collection", "record", "version", "base", "origin", "seq", "epoch", "tombstone", "size", "sig"];
 
 /// Separates the fields of the signed material; a field holding it is refused.
 const SEP: char = '\u{1f}';
@@ -28,6 +28,9 @@ pub struct Header {
     /// A stable id made where the record was born, never reused.
     pub record: String,
     pub version: Version,
+    /// The version this change replaced on the machine that made it (`None` for a record's first version). It
+    /// lets an adapter tell an edit made on top of what a receiver holds from one made apart, from headers alone.
+    pub base: Option<Version>,
     /// The machine that wrote this entry of its log (its pinned instance identifier).
     pub origin: String,
     /// The origin's own sequence number for this collection.
@@ -65,6 +68,10 @@ impl Header {
     /// The bytes the origin signs: every field, and a digest of the sealed body.
     fn material(&self, body: &[u8]) -> String {
         let digest = hex(&Sha256::digest(body));
+        let base = match &self.base {
+            None => ["0".to_string(), String::new(), String::new(), String::new()],
+            Some(b) => ["1".to_string(), b.wall_ms.to_string(), b.counter.to_string(), b.machine.clone()],
+        };
         [
             DOMAIN.to_string(),
             self.collection.clone(),
@@ -72,13 +79,18 @@ impl Header {
             self.version.wall_ms.to_string(),
             self.version.counter.to_string(),
             self.version.machine.clone(),
+        ]
+        .into_iter()
+        .chain(base)
+        .chain([
             self.origin.clone(),
             self.seq.to_string(),
             self.epoch.to_string(),
             (self.tombstone as u8).to_string(),
             self.size.to_string(),
             digest,
-        ]
+        ])
+        .collect::<Vec<String>>()
         .join(&SEP.to_string())
     }
 
@@ -88,6 +100,7 @@ impl Header {
             && clean(&self.record)
             && clean(&self.origin)
             && clean(&self.version.machine)
+            && self.base.as_ref().map_or(true, |b| clean(&b.machine))
             && self.size == body.len() as u64
             && self.size <= MAX_RECORD_BYTES
             && (!self.tombstone || body.is_empty())
@@ -126,6 +139,7 @@ impl Record {
             "collection": h.collection,
             "record": h.record,
             "version": { "wall_ms": h.version.wall_ms, "counter": h.version.counter, "machine": h.version.machine },
+            "base": h.base.as_ref().map(|b| json!({ "wall_ms": b.wall_ms, "counter": b.counter, "machine": b.machine })),
             "origin": h.origin,
             "seq": h.seq,
             "epoch": h.epoch,

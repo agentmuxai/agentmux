@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
-use super::adapter::{Adapter, Merge};
+use super::adapter::{Adapter, Merge, Side};
 use super::hlc::{Clock, SkewRefused, Version};
 use super::record::{BadRecord, Header, Record};
 
@@ -38,9 +38,19 @@ pub(crate) const SCHEMA: &str = "
         epoch      INTEGER NOT NULL,
         tombstone  INTEGER NOT NULL DEFAULT 0,
         size       INTEGER NOT NULL,
+        base_wall    INTEGER,
+        base_counter INTEGER,
+        base_machine TEXT,
         sig        TEXT NOT NULL,
         body       BLOB NOT NULL,
         PRIMARY KEY (collection, origin, seq)
+    );
+    CREATE TABLE IF NOT EXISTS db_sync_epoch_cut (
+        collection TEXT NOT NULL,
+        epoch      INTEGER NOT NULL,
+        origin     TEXT NOT NULL,
+        last_seq   INTEGER NOT NULL,
+        PRIMARY KEY (collection, epoch, origin)
     );
     CREATE INDEX IF NOT EXISTS idx_sync_log_record ON db_sync_log (collection, record);
     CREATE TABLE IF NOT EXISTS db_sync_state (
@@ -131,10 +141,34 @@ pub fn collection_epoch(conn: &Connection, id: &str) -> rusqlite::Result<Option<
     conn.query_row("SELECT epoch FROM db_sync_collections WHERE id = ?1", params![id], |r| r.get(0)).optional()
 }
 
-/// A member left: the collection moves to the next key epoch, and records at the old one are refused.
-pub fn set_epoch(conn: &Connection, id: &str, epoch: u32) -> rusqlite::Result<()> {
-    conn.execute("UPDATE db_sync_collections SET epoch = ?2 WHERE id = ?1", params![id, epoch])?;
-    Ok(())
+/// A member left: the collection moves to the next key epoch. `ended` is what the membership change says each
+/// remaining member had written at the epoch being left: a record at that old epoch is still taken (a member that
+/// had not yet caught up completes its catch-up) when it is within its origin's end; any other record at an old
+/// epoch is refused, so a removed member (which has no end) cannot write on at the old key.
+pub fn set_epoch(conn: &Connection, id: &str, epoch: u32, ended: &Vector) -> rusqlite::Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    if let Some(old) = collection_epoch(&tx, id)? {
+        for (origin, last) in ended {
+            tx.execute(
+                "INSERT OR REPLACE INTO db_sync_epoch_cut (collection, epoch, origin, last_seq) VALUES (?1, ?2, ?3, ?4)",
+                params![id, old, origin, *last as i64],
+            )?;
+        }
+    }
+    tx.execute("UPDATE db_sync_collections SET epoch = ?2 WHERE id = ?1", params![id, epoch])?;
+    tx.commit()
+}
+
+/// Whether a record at an epoch older than the collection's is within what its origin had written when that epoch ended.
+fn within_epoch_end(conn: &Connection, h: &Header) -> rusqlite::Result<bool> {
+    let end: Option<i64> = conn
+        .query_row(
+            "SELECT last_seq FROM db_sync_epoch_cut WHERE collection = ?1 AND epoch = ?2 AND origin = ?3",
+            params![h.collection, h.epoch, h.origin],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(end.map_or(false, |e| h.seq as i64 <= e))
 }
 
 pub fn horizon_days(kind: &str) -> i64 {
@@ -145,13 +179,18 @@ pub fn horizon_days(kind: &str) -> i64 {
     }
 }
 
-const COLS: &str = "collection, record, wall_ms, counter, machine, origin, seq, epoch, tombstone, size";
+const COLS: &str = "collection, record, wall_ms, counter, machine, origin, seq, epoch, tombstone, size, base_wall, base_counter, base_machine";
 
 fn header_of(r: &Row) -> rusqlite::Result<Header> {
+    let base = match r.get::<_, Option<i64>>(10)? {
+        Some(wall_ms) => Some(Version { wall_ms, counter: r.get(11)?, machine: r.get(12)? }),
+        None => None,
+    };
     Ok(Header {
         collection: r.get(0)?,
         record: r.get(1)?,
         version: Version { wall_ms: r.get(2)?, counter: r.get(3)?, machine: r.get(4)? },
+        base,
         origin: r.get(5)?,
         seq: r.get::<_, i64>(6)? as u64,
         epoch: r.get(7)?,
@@ -161,7 +200,7 @@ fn header_of(r: &Row) -> rusqlite::Result<Header> {
 }
 
 fn record_of(r: &Row) -> rusqlite::Result<Record> {
-    Ok(Record { header: header_of(r)?, sig: r.get(10)?, body: r.get(11)? })
+    Ok(Record { header: header_of(r)?, sig: r.get(13)?, body: r.get(14)? })
 }
 
 fn have(conn: &Connection, collection: &str, origin: &str) -> rusqlite::Result<u64> {
@@ -179,12 +218,15 @@ pub fn vector(conn: &Connection, collection: &str) -> rusqlite::Result<Vector> {
 
 fn insert_log(conn: &Connection, rec: &Record) -> rusqlite::Result<()> {
     let h = &rec.header;
+    let base = h.base.as_ref();
     conn.execute(
-        "INSERT INTO db_sync_log (collection, origin, seq, record, wall_ms, counter, machine, epoch, tombstone, size, sig, body)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        "INSERT INTO db_sync_log (collection, origin, seq, record, wall_ms, counter, machine, epoch, tombstone, size,
+                                  base_wall, base_counter, base_machine, sig, body)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             h.collection, h.origin, h.seq as i64, h.record, h.version.wall_ms, h.version.counter, h.version.machine, h.epoch,
-            h.tombstone as i64, h.size as i64, rec.sig, rec.body
+            h.tombstone as i64, h.size as i64, base.map(|b| b.wall_ms), base.map(|b| b.counter), base.map(|b| b.machine.clone()),
+            rec.sig, rec.body
         ],
     )?;
     Ok(())
@@ -201,7 +243,8 @@ fn point_state(conn: &Connection, h: &Header) -> rusqlite::Result<()> {
 /// A record's current state, as a whole record.
 pub fn current(conn: &Connection, collection: &str, record: &str) -> rusqlite::Result<Option<Record>> {
     conn.query_row(
-        "SELECT l.collection, l.record, l.wall_ms, l.counter, l.machine, l.origin, l.seq, l.epoch, l.tombstone, l.size, l.sig, l.body
+        "SELECT l.collection, l.record, l.wall_ms, l.counter, l.machine, l.origin, l.seq, l.epoch, l.tombstone, l.size,
+                l.base_wall, l.base_counter, l.base_machine, l.sig, l.body
          FROM db_sync_state s JOIN db_sync_log l ON l.collection = s.collection AND l.origin = s.origin AND l.seq = s.seq
          WHERE s.collection = ?1 AND s.record = ?2",
         params![collection, record],
@@ -237,10 +280,12 @@ pub fn append_local(
     if let Some(held) = max_version(conn, collection)? {
         signer.clock.raise(&held);
     }
+    let base = current(conn, collection, record)?.map(|r| r.header.version);
     let header = Header {
         collection: collection.to_string(),
         record: record.to_string(),
         version: signer.clock.tick(now_ms),
+        base,
         origin: signer.machine.to_string(),
         seq: have(conn, collection, signer.machine)? + 1,
         epoch,
@@ -268,7 +313,7 @@ pub fn apply_remote(
 ) -> Result<Outcome, SyncError> {
     let h = &rec.header;
     let epoch = collection_epoch(conn, &h.collection)?.ok_or(Refused::UnknownCollection)?;
-    if h.epoch != epoch {
+    if h.epoch > epoch || (h.epoch < epoch && !within_epoch_end(conn, h)?) {
         return Err(Refused::Epoch { have: epoch, got: h.epoch }.into());
     }
     let key = pins.get(&h.origin).ok_or(Refused::UnknownOrigin)?;
@@ -285,14 +330,14 @@ pub fn apply_remote(
     insert_log(&tx, rec)?;
     let local = current(&tx, &h.collection, &h.record)?.map(|r| r.header);
     let merge = adapter.merge(local.as_ref(), h);
-    if merge == Merge::Applied {
+    if matches!(merge, Merge::Applied | Merge::Conflict { current: Side::Incoming }) {
         point_state(&tx, h)?;
     }
     tx.commit()?;
     Ok(match merge {
         Merge::Applied => Outcome::Applied,
         Merge::KeptLocal => Outcome::KeptLocal,
-        Merge::Conflict => Outcome::Conflict,
+        Merge::Conflict { .. } => Outcome::Conflict,
     })
 }
 
@@ -391,14 +436,16 @@ pub struct HistoryEntry {
 /// The collection's change history, newest first, from its log.
 pub fn history(conn: &Connection, collection: &str, limit: usize) -> rusqlite::Result<Vec<HistoryEntry>> {
     let mut stmt = conn.prepare(
-        "SELECT origin, seq, wall_ms, counter, record, tombstone FROM db_sync_log WHERE collection = ?1
+        "SELECT origin, seq, wall_ms, counter, record, tombstone, machine FROM db_sync_log WHERE collection = ?1
          ORDER BY wall_ms DESC, counter DESC, machine DESC LIMIT ?2",
     )?;
-    let rows: Vec<(String, i64, i64, i64, String, i64)> = stmt
-        .query_map(params![collection, limit as i64], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))?
+    let rows: Vec<(String, i64, i64, i64, String, i64, String)> = stmt
+        .query_map(params![collection, limit as i64], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?))
+        })?
         .collect::<Result<_, _>>()?;
     let mut out = Vec::new();
-    for (origin, seq, wall_ms, counter, record, tombstone) in rows {
+    for (origin, seq, wall_ms, counter, record, tombstone, version_machine) in rows {
         let change = if tombstone != 0 {
             Change::Deleted
         } else {
@@ -407,9 +454,9 @@ pub fn history(conn: &Connection, collection: &str, limit: usize) -> rusqlite::R
             let before: Option<i64> = conn
                 .query_row(
                     "SELECT tombstone FROM db_sync_log WHERE collection = ?1 AND record = ?2
-                     AND (wall_ms < ?3 OR (wall_ms = ?3 AND counter < ?4))
+                     AND (wall_ms < ?3 OR (wall_ms = ?3 AND (counter < ?4 OR (counter = ?4 AND machine < ?5))))
                      ORDER BY wall_ms DESC, counter DESC, machine DESC LIMIT 1",
-                    params![collection, record, wall_ms, counter],
+                    params![collection, record, wall_ms, counter, version_machine],
                     |r| r.get(0),
                 )
                 .optional()?;

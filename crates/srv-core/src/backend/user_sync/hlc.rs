@@ -59,8 +59,12 @@ impl Clock {
         if now_ms > self.last_wall {
             self.last_wall = now_ms;
             self.last_counter = 0;
+        } else if let Some(next) = self.last_counter.checked_add(1) {
+            self.last_counter = next;
         } else {
-            self.last_counter += 1;
+            // The counter is full (a received version can carry any counter): carry into the wall time.
+            self.last_wall += 1;
+            self.last_counter = 0;
         }
         Version { wall_ms: self.last_wall, counter: self.last_counter, machine: self.machine.clone() }
     }
