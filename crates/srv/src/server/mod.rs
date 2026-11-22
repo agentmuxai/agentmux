@@ -327,6 +327,7 @@ mod http_viewer_terminal;
 mod http_shell;
 mod http_pty_shell;
 mod http_open;
+pub(crate) mod deeplink_guard;
 mod http_app_api;
 mod http_self;
 mod http_skill;

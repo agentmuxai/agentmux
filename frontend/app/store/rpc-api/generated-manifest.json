@@ -1173,6 +1173,10 @@
             "method": "PaneConfirmDecideCommand"
         },
         {
+            "command": "deeplink.open.done",
+            "method": "DeepLinkOpenDoneCommand"
+        },
+        {
             "command": "pane.open",
             "method": "PaneOpenCommand"
         },

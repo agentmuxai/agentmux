@@ -167,6 +167,7 @@ import type { CommandCopyForkHistoryData } from "@/types/rpc/CommandCopyForkHist
 import type { CommandCreateAgentDefinitionData } from "@/types/rpc/CommandCreateAgentDefinitionData";
 import type { CommandCreateAgentInstanceData } from "@/types/rpc/CommandCreateAgentInstanceData";
 import type { CommandCreateAgentSkillData } from "@/types/rpc/CommandCreateAgentSkillData";
+import type { CommandDeepLinkOpenDoneData } from "@/types/rpc/CommandDeepLinkOpenDoneData";
 import type { CommandDeleteAgentDefinitionData } from "@/types/rpc/CommandDeleteAgentDefinitionData";
 import type { CommandDeleteAgentInstanceData } from "@/types/rpc/CommandDeleteAgentInstanceData";
 import type { CommandDeleteAgentSkillData } from "@/types/rpc/CommandDeleteAgentSkillData";
@@ -317,6 +318,7 @@ import type { CreateEditorFileReq } from "@/types/rpc/CreateEditorFileReq";
 import type { CreateEditorFileResult } from "@/types/rpc/CreateEditorFileResult";
 import type { CreateScratchFileReq } from "@/types/rpc/CreateScratchFileReq";
 import type { CreateScratchFileResult } from "@/types/rpc/CreateScratchFileResult";
+import type { DeepLinkOpenDoneResult } from "@/types/rpc/DeepLinkOpenDoneResult";
 import type { DeleteAgentInstanceResult } from "@/types/rpc/DeleteAgentInstanceResult";
 import type { DeleteBundleResult } from "@/types/rpc/DeleteBundleResult";
 import type { DeleteDroneReq } from "@/types/rpc/DeleteDroneReq";
@@ -2279,6 +2281,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<PaneConfirmDecideResult> {
     return client.rpcCall("pane.confirm.decide", data, opts);
+  },
+  // command "deeplink.open.done"
+  DeepLinkOpenDoneCommand(
+    client: RpcClient,
+    data: CommandDeepLinkOpenDoneData,
+    opts?: RpcOpts
+  ): Promise<DeepLinkOpenDoneResult> {
+    return client.rpcCall("deeplink.open.done", data, opts);
   },
   // command "pane.open"
   PaneOpenCommand(client: RpcClient, data: CommandPaneOpenData, opts?: RpcOpts): Promise<PaneOpenResult> {

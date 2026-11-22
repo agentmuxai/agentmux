@@ -522,6 +522,15 @@
     }
   },
   {
+    "event": "deeplink:open",
+    "payloadTs": {
+      "imports": [
+        "DeepLinkOpenEvent"
+      ],
+      "name": "DeepLinkOpenEvent"
+    }
+  },
+  {
     "event": "dispatch:activity",
     "payloadTs": {
       "imports": [
