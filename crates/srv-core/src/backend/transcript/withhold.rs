@@ -81,6 +81,9 @@ struct Built {
     small: Option<Matcher>,
     /// The spellings of the values over [`MAX_POOLED_LEN`], the same as the pooled values have (`vault::scrub::forms`).
     large: Arc<Vec<String>>,
+    /// The spellings of the values registered since this matcher's values were taken, searched exactly until the
+    /// next matcher is swapped in.
+    extra: Arc<Vec<String>>,
 }
 
 /// The state of the registry, for a health read.
@@ -122,6 +125,25 @@ struct Registry {
     next_expiry: Option<i64>,
     /// How many times the matcher has been built.
     rebuilds: usize,
+    /// A matcher is being built, off the lock, from the values as they were when it began.
+    building: bool,
+    /// The spellings of the values registered since the matcher was last swapped in, in the order they came.
+    extra: Vec<String>,
+    /// How many of `extra` the build in progress already covers.
+    extra_covered: usize,
+}
+
+/// What a build needs, taken under the lock so the build itself runs without it.
+struct BuildJob {
+    values: Vec<String>,
+    limits: (usize, usize),
+}
+
+impl BuildJob {
+    fn run(&self) -> Option<Built> {
+        let values: Vec<&str> = self.values.iter().map(String::as_str).collect();
+        build(&values, self.limits.0, self.limits.1)
+    }
 }
 
 impl Registry {
@@ -229,6 +251,7 @@ impl Registry {
             self.entries.push(Entry { owner: owner.map(str::to_string), value: value.to_string(), expires_at });
             if self.fit() {
                 self.stale = true;
+                self.note_added(value);
             } else {
                 // Not kept for lack of room: what the owner held is still held.
                 self.entries.extend(old);
@@ -255,6 +278,7 @@ impl Registry {
             }
         }
         self.stale = true;
+        self.note_added(value);
         self.reindex();
     }
 
@@ -302,30 +326,77 @@ impl Registry {
         !self.stale && self.next_expiry.map_or(true, |at| at > now)
     }
 
-    /// The matcher for the values that have not run out at `now`, built only when they changed.
+    /// The matcher for the values that have not run out at `now`, built only when they changed, and here and now.
     fn matcher(&mut self, now: i64) -> Option<Built> {
-        self.expire(now);
-        if self.stale {
-            let values: Vec<&str> = self.entries.iter().map(|e| e.value.as_str()).collect();
-            let (regex_limit, exact_limit) = self.limits.unwrap_or((REGEX_LIMIT, EXACT_LIMIT));
-            let was = mode_of(self.matcher.as_ref());
-            self.matcher = build(&values, regex_limit, exact_limit);
-            let now_mode = mode_of(self.matcher.as_ref());
-            if matches!(now_mode, "exact" | "closed") && now_mode != was {
-                let n = FALLBACKS.load(Ordering::Relaxed);
-                let line = format!(
-                    "transcript withhold: matching is degraded to {now_mode} ({} values, {} bytes; {n} builds failed, {} refused since start)",
-                    self.entries.len(),
-                    self.bytes(),
-                    REFUSED.load(Ordering::Relaxed)
-                );
-                tracing::warn!(mode = now_mode, values = self.entries.len(), "{line}");
-                self.alerts.push(line);
-            }
-            self.rebuilds += 1;
-            self.stale = false;
+        if let Some(job) = self.begin_build(now) {
+            let built = job.run();
+            self.finish_build(built);
         }
         self.matcher.clone()
+    }
+
+    /// Notes that the values changed and a matcher is wanted: the values to build it from, when no build is running.
+    fn begin_build(&mut self, now: i64) -> Option<BuildJob> {
+        self.expire(now);
+        if !self.stale || self.building {
+            return None;
+        }
+        self.stale = false;
+        self.building = true;
+        self.extra_covered = self.extra.len();
+        let limits = self.limits.unwrap_or((REGEX_LIMIT, EXACT_LIMIT));
+        Some(BuildJob { values: self.entries.iter().map(|e| e.value.clone()).collect(), limits })
+    }
+
+    /// Swaps in a finished matcher. What was registered while it was built stays covered by the exact search, and the
+    /// matcher is built again when a line next needs it.
+    fn finish_build(&mut self, built: Option<Built>) {
+        let was = mode_of(self.matcher.as_ref());
+        self.extra.drain(..self.extra_covered.min(self.extra.len()));
+        self.extra_covered = 0;
+        self.matcher = built;
+        self.refresh_extra();
+        let now_mode = mode_of(self.matcher.as_ref());
+        if matches!(now_mode, "exact" | "closed") && now_mode != was {
+            let n = FALLBACKS.load(Ordering::Relaxed);
+            let line = format!(
+                "transcript withhold: matching is degraded to {now_mode} ({} values, {} bytes; {n} builds failed, {} refused since start)",
+                self.entries.len(),
+                self.bytes(),
+                REFUSED.load(Ordering::Relaxed)
+            );
+            tracing::warn!(mode = now_mode, values = self.entries.len(), "{line}");
+            self.alerts.push(line);
+        }
+        self.rebuilds += 1;
+        self.building = false;
+    }
+
+    /// Covers a value just registered in every spelling, in the matcher in use, until the next one is swapped in. With
+    /// no matcher yet, the first read builds one under the lock.
+    fn note_added(&mut self, value: &str) {
+        if self.matcher.is_none() {
+            return;
+        }
+        self.extra.extend(crate::backend::vault::scrub::forms(value).into_iter().filter(|f| f.len() >= MIN_LEN));
+        self.refresh_extra();
+    }
+
+    /// Puts `extra` into the matcher in use, longest first.
+    fn refresh_extra(&mut self) {
+        let mut needles = self.extra.clone();
+        needles.sort_by(|a, b| b.len().cmp(&a.len()));
+        needles.dedup();
+        if needles.is_empty() && self.matcher.as_ref().is_some_and(|b| b.small.is_none() && b.large.is_empty()) {
+            self.matcher = None;
+            return;
+        }
+        if !needles.is_empty() {
+            let built = self.matcher.get_or_insert_with(|| Built { small: None, large: Arc::default(), extra: Arc::default() });
+            built.extra = Arc::new(needles);
+        } else if let Some(built) = self.matcher.as_mut() {
+            built.extra = Arc::default();
+        }
     }
 }
 
@@ -449,7 +520,7 @@ fn build(values: &[&str], regex_limit: usize, exact_limit: usize) -> Option<Buil
     if small.is_none() && large_needles.is_empty() {
         return None;
     }
-    Some(Built { small, large: Arc::new(large_needles) })
+    Some(Built { small, large: Arc::new(large_needles), extra: Arc::default() })
 }
 
 fn build_pooled(values: &[&str], regex_limit: usize, exact_limit: usize) -> Option<Matcher> {
@@ -479,6 +550,23 @@ fn build_pooled(values: &[&str], regex_limit: usize, exact_limit: usize) -> Opti
     }
 }
 
+/// Puts the registry back to wanting a build if the one in progress ends without finishing.
+struct BuildGuard(bool);
+
+impl Drop for BuildGuard {
+    fn drop(&mut self) {
+        if !self.0 {
+            with_write(|r| {
+                r.building = false;
+                r.stale = true;
+            });
+        }
+    }
+}
+
+/// The matcher to read with. When the values changed it is built from a copy of them with no lock held: readers meanwhile
+/// use the matcher they had, plus an exact search for what was registered since, so nothing registered is ever left
+/// out. Only the very first matcher is built under the lock, because until then there is nothing to read with.
 fn matcher() -> Option<Built> {
     let now = agentmux_common::time::now_ms();
     {
@@ -487,7 +575,37 @@ fn matcher() -> Option<Built> {
             return registry.matcher.clone();
         }
     }
-    with_write(|r| r.matcher(now))
+    let job = with_write(|r| {
+        if r.matcher.is_none() {
+            return Err(r.matcher(now));
+        }
+        Ok(r.begin_build(now))
+    });
+    let job = match job {
+        Err(built) => return built,
+        Ok(Some(job)) => job,
+        Ok(None) => {
+            // Tests share this registry and assert that a released value is shown at once, so there a reader waits for the
+            // build in progress; a reader outside tests never does.
+            #[cfg(test)]
+            {
+                while state().read().unwrap_or_else(|e| e.into_inner()).building {
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+                return matcher();
+            }
+            #[cfg(not(test))]
+            return state().read().unwrap_or_else(|e| e.into_inner()).matcher.clone();
+        }
+    };
+    let mut guard = BuildGuard(false);
+    let built = job.run();
+    let matcher = with_write(|r| {
+        r.finish_build(built);
+        r.matcher.clone()
+    });
+    guard.0 = true;
+    matcher
 }
 
 /// `text` with every value in `small` replaced by [`MARK`].
@@ -511,7 +629,7 @@ fn replaced_small<'a>(matcher: &Matcher, text: &'a str) -> Cow<'a, str> {
 /// pooled value inside a large one cannot break it up before it is found.
 fn replaced<'a>(built: &Built, text: &'a str) -> Cow<'a, str> {
     let mut out = Cow::Borrowed(text);
-    for needle in built.large.iter() {
+    for needle in built.large.iter().chain(built.extra.iter()) {
         if needle.len() <= out.len() && out.contains(needle.as_str()) {
             out = Cow::Owned(out.replace(needle.as_str(), MARK));
         }
@@ -543,7 +661,7 @@ pub fn holds(text: &str) -> bool {
         Some(Matcher::Closed) => true,
         None => false,
     };
-    small || built.large.iter().any(|n| text.contains(n.as_str()))
+    small || built.large.iter().chain(built.extra.iter()).any(|n| text.contains(n.as_str()))
 }
 
 /// [`text`] over transcript bytes (NDJSON lines); bytes that are not UTF-8 are left as they are, except when matching is
@@ -780,6 +898,79 @@ mod tests {
         assert!(replaced(&built, "an ordinary line").as_ref() == "an ordinary line");
     }
 
+    /// A matcher in use, the way a reader gets it.
+    fn in_use(registry: &Registry) -> Built {
+        registry.matcher.clone().expect("a matcher is in use")
+    }
+
+    #[test]
+    fn while_a_matcher_is_built_off_the_lock_readers_use_the_one_they_had_and_what_is_registered_is_withheld_at_once() {
+        let mut registry = Registry::default();
+        registry.add(Some("acct:old"), "canary-swap-0001-old", None);
+        registry.matcher(0);
+        let large = format!("canary-swap-0002-{}", "l".repeat(100 * 1024));
+        registry.add(Some("acct:large"), &large, None);
+
+        // The build begins; the lock is free and a reader gets a matcher that already covers the large value.
+        let job = registry.begin_build(0).expect("the values changed, so a build is due");
+        assert!(registry.begin_build(0).is_none(), "one build at a time");
+        assert!(registry.building);
+        assert_eq!(replaced(&in_use(&registry), &format!("x {large}")), "x [withheld]");
+        assert_eq!(replaced(&in_use(&registry), "KEY=canary-swap-0001-old"), "KEY=[withheld]", "the old one still");
+
+        // A value registered while it is being built is withheld at once, small or large.
+        registry.add(Some("acct:during"), "canary-swap-0003-during", None);
+        let large_during = format!("canary-swap-0004-{}", "m".repeat(50 * 1024));
+        registry.add(Some("acct:during-large"), &large_during, None);
+        assert_eq!(replaced(&in_use(&registry), "KEY=canary-swap-0003-during"), "KEY=[withheld]");
+        assert_eq!(replaced(&in_use(&registry), &format!("x {large_during}")), "x [withheld]");
+        assert!(holds_in(&in_use(&registry), "canary-swap-0003-during"));
+
+        // The matcher is swapped in; what came during the build is still covered, and a build is still due.
+        let built = job.run();
+        registry.finish_build(built);
+        assert!(!registry.building);
+        assert!(registry.stale, "the values changed during the build, so another is due");
+        assert_eq!(replaced(&in_use(&registry), "KEY=canary-swap-0003-during"), "KEY=[withheld]");
+        assert_eq!(replaced(&in_use(&registry), "KEY=canary-swap-0001-old"), "KEY=[withheld]");
+
+        let built = registry.matcher(0).unwrap();
+        assert!(built.extra.is_empty(), "the next matcher holds everything");
+        for line in ["canary-swap-0001-old", "canary-swap-0003-during", large.as_str(), large_during.as_str()] {
+            assert_eq!(replaced(&built, line), MARK, "{} bytes", line.len());
+        }
+    }
+
+    #[test]
+    fn a_registry_with_no_matcher_yet_builds_the_first_one_for_the_reader() {
+        let mut registry = Registry::default();
+        registry.add(Some("acct:first"), "canary-first-0001-value", None);
+        assert!(registry.matcher.is_none());
+        let built = registry.matcher(0).unwrap();
+        assert_eq!(replaced(&built, "canary-first-0001-value"), MARK);
+        assert!(!registry.building);
+    }
+
+    #[test]
+    fn a_build_that_ends_without_finishing_leaves_a_build_due() {
+        let mut registry = Registry::default();
+        registry.add(Some("acct:a"), "canary-guard-0001-value", None);
+        registry.matcher(0);
+        registry.add(Some("acct:b"), "canary-guard-0002-value", None);
+        let _lost = registry.begin_build(0).unwrap();
+        assert!(registry.building && !registry.stale);
+        // What the guard does when a build is lost.
+        registry.building = false;
+        registry.stale = true;
+        let built = registry.matcher(0).unwrap();
+        assert_eq!(replaced(&built, "canary-guard-0002-value"), MARK);
+    }
+
+    /// Whether `built` finds a value in `text`, as [`holds`] does.
+    fn holds_in(built: &Built, text: &str) -> bool {
+        replaced(built, text).as_ref() != text
+    }
+
     #[test]
     fn a_large_value_that_holds_a_pooled_value_is_withheld_whole() {
         let mut registry = Registry::default();
@@ -898,7 +1089,7 @@ mod tests {
         registry.limits = Some((0, 1));
         assert!(matches!(registry.matcher(0).unwrap().small, Some(Matcher::Closed)));
         assert!(registry.alerts.iter().any(|a| a.contains("degraded to closed")), "{:?}", registry.alerts);
-        let closed = Built { small: Some(Matcher::Closed), large: Arc::new(Vec::new()) };
+        let closed = Built { small: Some(Matcher::Closed), large: Arc::new(Vec::new()), extra: Arc::default() };
         assert_eq!(replaced(&closed, "an ordinary line"), MARK, "never the text");
         assert_eq!(replaced(&closed, "KEY=canary-closed-0001-value"), MARK);
     }
