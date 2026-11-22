@@ -48,7 +48,7 @@ export function streamedUrl(wsBase: string, start: { url: string; w: number; h: 
  * Open a pane's socket at `start`: after the server has said the pane's browser is ready, when it hands one out per person
  * (lease-step.ts). `onStarting` is called while that wait goes on; a server that refuses ends the pane as `failed` with its words.
  */
-export function openStreamedPane(start: { url: string; w: number; h: number }, events: StreamedEvents): StreamedHandle {
+export function openStreamedPane(start: { url: string; w: number; h: number; screen?: boolean }, events: StreamedEvents): StreamedHandle {
     let ws: WebSocket | null = null;
     let opened = false;
     let ended = false;
@@ -60,7 +60,7 @@ export function openStreamedPane(start: { url: string; w: number; h: number }, e
     };
     const connect = () => {
         const wsBase = window.__WAVE_SERVER_WS_ENDPOINT__ ?? window.location.origin.replace(/^http/, "ws");
-        const socket = newWebSocket(streamedUrl(wsBase, start, screenModeAsked()), {});
+        const socket = newWebSocket(streamedUrl(wsBase, start, start.screen === true || screenModeAsked()), {});
         ws = socket;
         socket.binaryType = "arraybuffer";
         socket.onopen = () => {

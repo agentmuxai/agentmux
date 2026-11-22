@@ -100,6 +100,13 @@ describe("a streamed pane's socket", () => {
         expect(sockets[0].url).toBe(streamedUrl("wss://host.test", start));
     });
 
+    it("asks for the full browser the person drives when the pane says so, whatever the page and the setting say", async () => {
+        vi.stubGlobal("window", { location: { origin: "https://host.test", search: "" }, localStorage: { getItem: () => null } });
+        openStreamedPane({ ...start, screen: true }, events());
+        await settle();
+        expect(sockets[0].url).toContain("mode=screen");
+    });
+
     it("carries frames and messages as before once the socket is open", async () => {
         const ev = events();
         const h = openStreamedPane(start, ev);

@@ -7,7 +7,8 @@
 
 import { createSignal, onCleanup, type Accessor } from "solid-js";
 import { joinLease } from "./lease-step";
-import { openStreamedPane, type StreamedHandle } from "./streamed-client";
+import { t } from "@/app/i18n/i18n";
+import { openStreamedPane, screenModeAsked, type StreamedHandle } from "./streamed-client";
 import type { ServerMsg, WindowInfo } from "./streamed-protocol";
 
 /** The smallest and largest side srv accepts. */
@@ -33,6 +34,8 @@ export function addressToUrl(typed: string): string {
 
 export interface StreamedPane {
     status: Accessor<PaneStatus>;
+    /** The page is in the full browser the person drives (screen mode), not the streamed one agents can drive. */
+    fullBrowser: Accessor<boolean>;
     nav: Accessor<NavState | null>;
     /** The windows of the pane: more than one while a page has opened a window. */
     windows: Accessor<WindowsState | null>;
@@ -45,6 +48,8 @@ export interface StreamedPane {
     /** The stage is on screen or not. */
     shown: (visible: boolean) => void;
     reconnect: () => void;
+    /** Move this page to the full browser the person drives: a new page there, at the address it was on. */
+    openFullBrowser: () => void;
     /** The person closed the server's last complaint (a refused address). */
     dismissError: () => void;
     dismissNotice: () => void;
@@ -83,13 +88,40 @@ function applyServerMessage(m: ServerMsg, to: Sinks): void {
     else if (m.t === "closed") to.setStatus("ended");
 }
 
-/** `draw` paints a frame; `startUrl` is where a new socket starts; `remember` keeps the page's address. */
-export function useStreamedPane(draw: (jpeg: Uint8Array) => void, startUrl: () => string, remember: (url: string) => void): StreamedPane {
+/** The message that tells the server the stage's size. */
+function resizeMessage(size: { w: number; h: number }): object {
+    return { t: "resize", w: clampSide(size.w), h: clampSide(size.h) };
+}
+
+/**
+ * The socket ended. A server that would not hand out a browser says why (it stays readable next to Reconnect). A server without the full
+ * browser answers "not found" to the request for it: the pane goes back to the ordinary browser and says so in words.
+ */
+function applyEnd(how: "failed" | "closed", reason: string | undefined, full: boolean, to: Pick<Sinks, "setStatus" | "setError"> & { setFull: (on: boolean) => void }): void {
+    if (how === "failed" && full && !screenModeAsked()) {
+        to.setFull(false);
+        to.setStatus("failed");
+        to.setError(t("browser.streamed.fullBrowserOff"));
+        return;
+    }
+    to.setStatus(how === "failed" ? "failed" : "ended");
+    if (reason) to.setError(reason);
+}
+
+/** The pane's state: what the page is doing, what the server said, and whether the page is in the full browser the person drives. */
+function paneSignals() {
     const [status, setStatus] = createSignal<PaneStatus>("waiting");
     const [nav, setNav] = createSignal<NavState | null>(null);
     const [error, setError] = createSignal("");
     const [windows, setWindows] = createSignal<WindowsState | null>(null);
     const [notice, setNotice] = createSignal("");
+    const [full, setFull] = createSignal(screenModeAsked());
+    return { status, setStatus, nav, setNav, error, setError, windows, setWindows, notice, setNotice, full, setFull };
+}
+
+/** `draw` paints a frame; `startUrl` is where a new socket starts; `remember` keeps the page's address. */
+export function useStreamedPane(draw: (jpeg: Uint8Array) => void, startUrl: () => string, remember: (url: string) => void): StreamedPane {
+    const { status, setStatus, nav, setNav, error, setError, windows, setWindows, notice, setNotice, full, setFull } = paneSignals();
     let handle: StreamedHandle | null = null;
     const leave = joinLease();
     let size = { w: 0, h: 0 };
@@ -111,7 +143,7 @@ export function useStreamedPane(draw: (jpeg: Uint8Array) => void, startUrl: () =
         const at = nav()?.url || startUrl();
         const started = { w: clampSide(size.w), h: clampSide(size.h) };
         handle = openStreamedPane(
-            { url: at && at !== "about:blank" ? at : "", ...started },
+            { url: at && at !== "about:blank" ? at : "", ...started, screen: full() },
             {
                 onFrame: draw,
                 onOpen: () => {
@@ -121,21 +153,22 @@ export function useStreamedPane(draw: (jpeg: Uint8Array) => void, startUrl: () =
                         pendingNav = null;
                     }
                     // The pane may have been resized while the socket was opening: the server has the size it started with.
-                    if (clampSide(size.w) !== started.w || clampSide(size.h) !== started.h) {
-                        handle?.send({ t: "resize", w: clampSide(size.w), h: clampSide(size.h) });
-                    }
+                    if (clampSide(size.w) !== started.w || clampSide(size.h) !== started.h) handle?.send(resizeMessage(size));
                 },
                 onMessage: (m) => applyServerMessage(m, { setNav, setError, setWindows, setNotice, setStatus, remember }),
                 // The server's browser is being made for this pane: its own status, until the socket opens.
                 onStarting: () => setStatus("starting"),
                 onEnd: (how, reason) => {
                     handle = null;
-                    setStatus(how === "failed" ? "failed" : "ended");
-                    // A server that would not hand out a browser says why; it stays readable next to Reconnect.
-                    if (reason) setError(reason);
+                    applyEnd(how, reason, full(), { setFull, setStatus, setError });
                 },
             }
         );
+    };
+
+    const reconnect = () => {
+        close();
+        open();
     };
 
     onCleanup(() => {
@@ -147,6 +180,7 @@ export function useStreamedPane(draw: (jpeg: Uint8Array) => void, startUrl: () =
 
     return {
         status,
+        fullBrowser: full,
         nav,
         windows,
         error,
@@ -162,7 +196,7 @@ export function useStreamedPane(draw: (jpeg: Uint8Array) => void, startUrl: () =
             if (timer !== undefined) return;
             timer = setTimeout(() => {
                 timer = undefined;
-                if (handle) handle.send({ t: "resize", w: clampSide(size.w), h: clampSide(size.h) });
+                if (handle) handle.send(resizeMessage(size));
                 // A pane that has not opened yet (or was shown too small to open) opens here; a failed or ended one waits for Reconnect.
                 else if (status() === "waiting" || status() === "paused") open();
             }, RESIZE_MS);
@@ -175,9 +209,10 @@ export function useStreamedPane(draw: (jpeg: Uint8Array) => void, startUrl: () =
                 setStatus("paused");
             }
         },
-        reconnect: () => {
-            close();
-            open();
+        reconnect,
+        openFullBrowser: () => {
+            setFull(true);
+            reconnect();
         },
         dismissError: () => setError(""),
         dismissNotice: () => setNotice(""),

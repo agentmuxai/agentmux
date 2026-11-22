@@ -150,16 +150,18 @@ async fn run(mut socket: WebSocket, start: Start, ended: impl std::future::Futur
     tokio::pin!(ended);
     loop {
         let keep = tokio::select! {
+            // A window opening is handled before the next thing the person typed, so the key hold starts first.
+            biased;
             _ = &mut ended => false,
-            frame = frames.recv() => match frame {
-                Some(f) => socket.send(Message::Binary(f.into())).await.is_ok(),
-                None => false,
-            },
             count = counts.recv() => match count {
                 Some(n) => match watch.seen(n, Instant::now()) {
                     Some(notice) => socket.send(Message::Text(json!({ "t": "notice", "message": notice }).to_string().into())).await.is_ok(),
                     None => true,
                 },
+                None => false,
+            },
+            frame = frames.recv() => match frame {
+                Some(f) => socket.send(Message::Binary(f.into())).await.is_ok(),
                 None => false,
             },
             incoming = socket.recv() => match incoming {
@@ -181,12 +183,14 @@ async fn run(mut socket: WebSocket, start: Start, ended: impl std::future::Futur
     drop(session);
 }
 
-/// How many windows the screen shows, told whenever it changes (a look every quarter second, on a thread of its own).
+/// How many windows the screen shows, told whenever it changes: at the moment a window is mapped or unmapped (the screen's own events, on a
+/// thread of its own), so what is typed after a window opens is held from that moment.
 fn watch_windows(display: &str, tx: mpsc::UnboundedSender<usize>) -> Result<(), String> {
     let screen = x::Screen::connect(display)?;
+    screen.follow_windows()?;
     std::thread::spawn(move || {
         let mut last = usize::MAX;
-        while !tx.is_closed() {
+        loop {
             match screen.visible_windows() {
                 Ok(n) if n != last => {
                     last = n;
@@ -197,7 +201,10 @@ fn watch_windows(display: &str, tx: mpsc::UnboundedSender<usize>) -> Result<(), 
                 Ok(_) => {}
                 Err(_) => return,
             }
-            std::thread::sleep(Duration::from_millis(250));
+            // Blocks until the screen says a window changed; ends with the screen (the thread goes when the browser's screen does).
+            if screen.next_window_event().is_err() {
+                return;
+            }
         }
     });
     Ok(())

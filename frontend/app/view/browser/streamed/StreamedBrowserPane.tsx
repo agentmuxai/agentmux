@@ -64,6 +64,9 @@ function StreamedBar(props: { pane: StreamedPane }): JSX.Element {
                     if (e.key === "Escape") setTyped(null);
                 }}
             />
+            <Show when={!props.pane.fullBrowser()}>
+                <IconButton icon="arrow-up-right-from-square" label={t("browser.streamed.fullBrowser")} onClick={props.pane.openFullBrowser} />
+            </Show>
         </div>
     );
 }
@@ -131,6 +134,9 @@ export function StreamedBrowserPane(props: { model: BrowserViewModel }): JSX.Ele
         <div class="browser-view streamed-browser">
             <StreamedBar pane={pane} />
             <StreamedWindows pane={pane} />
+            <Show when={pane.fullBrowser() && pane.status() === "live"}>
+                <div class="streamed-windows" role="note">{t("browser.streamed.fullBrowserOn")}</div>
+            </Show>
             <div class="streamed-stage" ref={stage} tabindex={0}>
                 <canvas class="streamed-canvas" ref={canvas} />
                 <Show when={message()}>
