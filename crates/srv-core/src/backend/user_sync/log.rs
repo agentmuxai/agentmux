@@ -186,6 +186,24 @@ fn first_after_cut(conn: &Connection, h: &Header, held: u64) -> rusqlite::Result
     Ok(later == 0)
 }
 
+/// Sets the collection's key epoch and the ends of the epochs before it to exactly what the membership chain says now,
+/// in either direction: a removal that lost a fork to another entry leaves no epoch and no ends behind. `cuts` holds,
+/// for each epoch left, what each remaining member had written at it.
+pub fn reset_epochs(conn: &Connection, id: &str, epoch: u32, cuts: &[(u32, &Vector)]) -> rusqlite::Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute("DELETE FROM db_sync_epoch_cut WHERE collection = ?1", params![id])?;
+    for (left, ended) in cuts {
+        for (origin, last) in ended.iter() {
+            tx.execute(
+                "INSERT INTO db_sync_epoch_cut (collection, epoch, origin, last_seq) VALUES (?1, ?2, ?3, ?4)",
+                params![id, left, origin, *last as i64],
+            )?;
+        }
+    }
+    tx.execute("UPDATE db_sync_collections SET epoch = ?2 WHERE id = ?1", params![id, epoch])?;
+    tx.commit()
+}
+
 /// Whether a record at an epoch older than the collection's is within what its origin had written when that epoch ended.
 fn within_epoch_end(conn: &Connection, h: &Header) -> rusqlite::Result<bool> {
     let end: Option<i64> = conn
@@ -401,7 +419,7 @@ pub fn apply_remote(
 }
 
 /// What a peer lacks: the records after the sequences in `vector`, per origin, at most `limit`, oldest version first.
-/// A record at an epoch older than the collection's is served only within the end its origin had at that epoch: any
+/// A record at an epoch other than the collection's is served only within the end its origin had at that epoch: any
 /// other would be refused by the peer, so it is never sent (and the peer's vector never waits on it).
 pub fn since(conn: &Connection, collection: &str, vector: &Vector, limit: usize) -> rusqlite::Result<Vec<Record>> {
     let mut origins = conn.prepare("SELECT DISTINCT origin FROM db_sync_log WHERE collection = ?1 ORDER BY origin")?;
@@ -411,7 +429,7 @@ pub fn since(conn: &Connection, collection: &str, vector: &Vector, limit: usize)
         let after = vector.get(&origin).copied().unwrap_or(0) as i64;
         let mut stmt = conn.prepare(&format!(
             "SELECT {COLS}, sig, body FROM db_sync_log WHERE collection = ?1 AND origin = ?2 AND seq > ?3
-             AND (epoch >= (SELECT epoch FROM db_sync_collections WHERE id = ?1)
+             AND (epoch = (SELECT epoch FROM db_sync_collections WHERE id = ?1)
                   OR seq <= COALESCE((SELECT last_seq FROM db_sync_epoch_cut c WHERE c.collection = ?1 AND c.origin = ?2 AND c.epoch = db_sync_log.epoch), -1))
              ORDER BY seq LIMIT ?4"
         ))?;

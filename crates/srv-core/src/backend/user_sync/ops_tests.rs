@@ -492,3 +492,20 @@ fn a_member_whose_removal_is_among_the_entries_it_offers_sees_nothing_after_it()
     assert_eq!(ans.taken.len(), 2);
     assert_eq!(ans.entries, vec![remove], "its removal and nothing after it, though the offer was taken first");
 }
+
+#[test]
+fn a_removal_that_loses_a_fork_leaves_neither_its_epoch_nor_its_ends_behind() {
+    let (mut a, mut b, c) = three("kanban");
+    a.write(C, "x", "1");
+    let policy = ops::change(&mut a.ctx(), C, Change::SetPolicy { policy: Policy::Approve }).unwrap();
+    let gone = ended(&[(&a, 0), (&b, 0)]);
+    ops::change(&mut b.ctx(), C, Change::Remove { id: c.id.clone(), ended: gone }).unwrap();
+    assert_eq!(log::collection_epoch(&b.conn, C).unwrap(), Some(1));
+    // The earlier member's competing entry wins at B: the removal is gone, and with it its epoch and its ends.
+    let ans = ops::members(&mut b.ctx(), &a.id, &MembersReq { collection: C.into(), have_n: 3, offered: vec![policy] }).unwrap();
+    assert!(matches!(ans.taken[0], Ok(Taken::Replaced(_))));
+    assert_eq!(log::collection_epoch(&b.conn, C).unwrap(), Some(0));
+    let pushed = log::since(&a.conn, C, &log::Vector::new(), 10).unwrap();
+    let ans = ops::push(&mut b.ctx(), &a.id, &PushReq { collection: C.into(), records: pushed }, &NewestWins).unwrap();
+    assert_eq!(ans.results, vec![Ok(Outcome::Applied)], "A's write past the lost removal's end is taken");
+}

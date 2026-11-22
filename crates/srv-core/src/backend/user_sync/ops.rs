@@ -283,18 +283,13 @@ pub struct MembersAns {
     pub taken: Vec<Result<Taken, MemberError>>,
 }
 
-/// Moves the log to the key epochs the chain has reached, one removal at a time, so the end each remaining member had
-/// at an epoch is recorded as the chain names it.
+/// Puts the log's key epoch, and the end each remaining member had at each epoch left, exactly where the chain says
+/// (one removal moves it one epoch): in either direction, so a removal that lost a fork to another entry leaves
+/// nothing behind. Called after every change to a chain.
 pub fn sync_epoch(conn: &Connection, collection: &str, chain: &Chain) -> Result<(), OpError> {
-    let mut epoch = 0u32;
-    for e in &chain.entries {
-        if let Change::Remove { ended, .. } = &e.change {
-            epoch += 1;
-            if log::collection_epoch(conn, collection)?.is_some_and(|have| have < epoch) {
-                log::set_epoch(conn, collection, epoch, ended)?;
-            }
-        }
-    }
+    let removals: Vec<&BTreeMap<String, u64>> = chain.entries.iter().filter_map(|e| if let Change::Remove { ended, .. } = &e.change { Some(ended) } else { None }).collect();
+    let cuts: Vec<(u32, &log::Vector)> = removals.iter().enumerate().map(|(i, ended)| (i as u32, *ended)).collect();
+    log::reset_epochs(conn, collection, removals.len() as u32, &cuts)?;
     Ok(())
 }
 
