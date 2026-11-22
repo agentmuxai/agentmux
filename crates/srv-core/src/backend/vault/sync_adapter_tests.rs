@@ -127,18 +127,33 @@ fn a_fast_clock_wins_the_choice_but_the_other_change_is_kept() {
 }
 
 #[test]
-fn a_delete_is_never_undone_by_an_edit_made_without_seeing_it_and_the_edit_is_kept() {
+fn a_delete_and_an_edit_made_apart_end_as_the_later_of_the_two_with_the_other_kept() {
     let (mut a, mut b) = (machine("a", 1), machine("b", 2));
     let all = pins(&[&a, &b]);
     a.write("entry-1", "base", NOW);
     b.pull(&a, &all, NOW + 1);
     b.write("entry-1", "edited", NOW + 50);
     a.delete("entry-1", NOW + 100);
-    // Whichever side hears first, both end with the entry deleted, and the edit is a version each still holds.
+    // The delete is the later of the two: whichever side hears first, both end with the entry deleted, and the edit is a
+    // version each still holds.
     assert_eq!(a.pull(&b, &all, NOW + 200), [Outcome::Conflict]);
     assert_eq!(b.pull(&a, &all, NOW + 200), [Outcome::Conflict]);
     assert_eq!((a.state("entry-1"), b.state("entry-1")), (None, None));
     assert_eq!((a.versions("entry-1"), b.versions("entry-1")), (3, 3));
+}
+
+#[test]
+fn an_edit_later_than_a_delete_made_apart_from_it_ends_current_on_both_machines() {
+    let (mut a, mut b) = (machine("a", 1), machine("b", 2));
+    let all = pins(&[&a, &b]);
+    a.write("entry-1", "base", NOW);
+    b.pull(&a, &all, NOW + 1);
+    a.delete("entry-1", NOW + 50);
+    b.write("entry-1", "edited", NOW + 100);
+    assert_eq!(a.pull(&b, &all, NOW + 200), [Outcome::Conflict]);
+    assert_eq!(b.pull(&a, &all, NOW + 200), [Outcome::Conflict]);
+    assert_eq!((a.state("entry-1").as_deref(), b.state("entry-1").as_deref()), (Some("edited"), Some("edited")));
+    assert_eq!((a.versions("entry-1"), b.versions("entry-1")), (3, 3), "the delete is kept as a version");
 }
 
 #[test]
@@ -214,4 +229,23 @@ fn a_machine_sent_a_delete_before_the_entry_it_deleted_does_not_bring_the_entry_
     assert_eq!(got, [Outcome::Applied, Outcome::Conflict, Outcome::Conflict, Outcome::KeptLocal]);
     assert_eq!(c.state("entry-1"), None, "still deleted");
     assert_eq!(a.state("entry-1"), None);
+}
+
+#[test]
+fn a_restore_and_its_later_edit_delivered_out_of_order_end_with_the_edit_on_every_machine() {
+    // m deletes an entry; z, sent the delete, restores it; a, sent the restore, edits it. m is then sent the edit before
+    // the restore, because a's own records are listed first.
+    let (mut m, mut z, mut a) = (machine("m", 1), machine("z", 3), machine("a", 2));
+    let all = pins(&[&m, &z, &a]);
+    m.write("entry-1", "made", NOW);
+    m.delete("entry-1", NOW + 10);
+    z.pull(&m, &all, NOW + 15);
+    z.write("entry-1", "restored", NOW + 20);
+    a.pull(&z, &all, NOW + 25);
+    a.write("entry-1", "edited again", NOW + 30);
+    assert_eq!(m.pull(&a, &all, NOW + 40), [Outcome::Conflict, Outcome::KeptLocal], "the edit takes the place of the delete; the restore it is on top of is then known to be older");
+    assert_eq!(z.pull(&a, &all, NOW + 40), [Outcome::Applied]);
+    for machine in [&m, &z, &a] {
+        assert_eq!(machine.state("entry-1").as_deref(), Some("edited again"), "{}", machine.id);
+    }
 }
