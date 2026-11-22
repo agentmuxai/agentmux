@@ -50,7 +50,12 @@
  *   docs_only=true|false     every changed file was documentation
  *   docs_index=true|false    run the specs-index generator on all three OSes
  *   cef=true|false           run the agentmux-cef crate's tests on Linux (R10)
+ *   deps=true|false          run the known-vulnerability check (R11)
  *   version_only=true|false  the PR only moves the release version (R7)
+ *
+ *   R11 The known-vulnerability check (ci-pr.yml's `advisories`) runs on a PR only when a changed file is a
+ *       lock file, a manifest or part of the check itself (DEPENDENCY_INPUTS), and, like every output here, on
+ *       anything unrecognised (R2). The nightly and the push to main never depend on this output.
  *
  *   R10 The agentmux-cef crate's tests run on a PR only when a changed file is one the crate is built from
  *       (CEF_BUILT_FROM), and, like every output here, on anything unrecognised (R2). That check reports and
@@ -150,6 +155,20 @@ const CEF_BUILT_FROM = [
     /^frontend\/app\/store\/low-disk-levels\.json$/,
     /^\.github\/workflows\/ci-pr\.yml$/,
     /^scripts\/(ci-apt|ci-require-tools|ci-classify-changes)\./,
+];
+
+/**
+ * R11. What the known-vulnerability check reads: the Rust and npm lock files and manifests, the ignore lists, the
+ * check's own scripts, and the workflow that runs it. A change to one of them runs the check on a PR.
+ */
+const DEPENDENCY_INPUTS = [
+    /^Cargo\.(toml|lock)$/,
+    /^crates\/[^/]+\/Cargo\.toml$/,
+    /^deny\.toml$/,
+    /^package(-lock)?\.json$/,
+    /^\.github\/npm-audit-ignore\.json$/,
+    /^scripts\/(advisory-ignores|npm-audit-gate)\./,
+    /^\.github\/workflows\/ci-pr\.yml$/,
 ];
 
 /**
@@ -274,6 +293,12 @@ export function isCefInput(rawPath) {
     return CEF_BUILT_FROM.some((re) => re.test(p));
 }
 
+/** R11: a file the known-vulnerability check reads. */
+export function isDependencyInput(rawPath) {
+    const p = normalize(rawPath);
+    return DEPENDENCY_INPUTS.some((re) => re.test(p));
+}
+
 /** True when this single path provably cannot affect any build output. */
 export function isDocsOnlyPath(rawPath) {
     const p = normalize(rawPath);
@@ -303,6 +328,7 @@ export function classifyChanges(files) {
             docs_only: false,
             docs_index: true,
             cef: true,
+            deps: true,
             reason: "no files resolved — running everything (R2)",
         };
     }
@@ -313,6 +339,8 @@ export function classifyChanges(files) {
     const docs_index = malformed || paths.some((p) => DOCS_INDEX_PATTERNS.some((re) => re.test(p)));
     // R2 for the agentmux-cef check as well; otherwise only a change to what the crate is built from runs it (R10).
     const cef = malformed || paths.some(isCefInput);
+    // R2 for the known-vulnerability check too; otherwise only a change to what it reads runs it (R11).
+    const deps = malformed || paths.some(isDependencyInput);
 
     const nonDocs = paths.filter((p) => !isDocsOnlyPath(p));
     if (nonDocs.length === 0) {
@@ -323,6 +351,7 @@ export function classifyChanges(files) {
             docs_only: true,
             docs_index,
             cef,
+            deps,
             reason: `all ${paths.length} changed file(s) are documentation`,
         };
     }
@@ -336,6 +365,7 @@ export function classifyChanges(files) {
             docs_only: false,
             docs_index,
             cef,
+            deps,
             reason: `all ${nonDocs.length} non-doc file(s) are frontend files no Rust crate reads, e.g. ${nonDocs[0]} (R8)`,
         };
     }
@@ -349,6 +379,7 @@ export function classifyChanges(files) {
         docs_only: false,
         docs_index,
         cef,
+        deps,
         // Naming a concrete file makes a wrong decision debuggable from the log
         // alone, without re-deriving the whole list.
         reason: `${nonDocs.length} non-doc file(s), e.g. ${nonDocs[0]}; frontend build: ${built !== undefined ? `yes, e.g. ${built}` : "no, only Rust files (R9)"}`,
@@ -381,6 +412,8 @@ export function classifyPullFiles(entries) {
             docs_only: false,
             docs_index: false,
             cef: false,
+            // The release moves only the version lines of the lock files: no dependency changes.
+            deps: false,
             version_only: true,
             reason: `version-only change, ${version.from} -> ${version.to} (R7)`,
         };
@@ -421,6 +454,7 @@ if (isMain(import.meta.url)) {
     console.log(`docs_only=${result.docs_only}`);
     console.log(`docs_index=${result.docs_index}`);
     console.log(`cef=${result.cef}`);
+    console.log(`deps=${result.deps}`);
     console.log(`version_only=${result.version_only}`);
     console.error(`ci-classify-changes: ${result.reason}`);
 }

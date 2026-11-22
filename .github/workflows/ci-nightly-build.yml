@@ -446,6 +446,35 @@ jobs:
           bash scripts/docs-stale-issue-comment.sh nightly-doc-links
           doc-link-report/report.md doc-link-report/fingerprint.txt
 
+  # Known-vulnerability check, the whole list: Cargo.lock against the RustSec advisories (cargo-deny, deny.toml) and
+  # package-lock.json against the npm advisories (scripts/npm-audit-gate.mjs, .github/npm-audit-ignore.json). It
+  # fails on an advisory no ignore list names and on an ignore whose review date has passed, and a red run is
+  # announced by `nightly status` below like any other red job. The same check runs on a pull request that changes
+  # a lock file or a manifest (ci-pr.yml `advisories`), where a date that has passed is only a warning. No secret:
+  # the advisory sources are public. Tool versions are pinned.
+  advisories:
+    name: known-vulnerability check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: clippy, rustfmt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.22.0
+      - name: Ignore lists carry a reason and a review date, and none has run out
+        run: node scripts/advisory-ignores.mjs --expired=fail
+      - name: Rust advisories (cargo-deny)
+        run: cargo deny --locked check advisories
+      - name: npm advisories
+        run: node scripts/npm-audit-gate.mjs --expired=fail
+
   # A red nightly is announced: one issue labelled nightly-red while nightlies
   # on main fail (a comment per run, naming the failing jobs and tests), closed
   # by the next green one. It reads each job's own conclusion, so the macOS
@@ -454,7 +483,7 @@ jobs:
   # docs/specs/PLAN_NIGHTLY_RED_LEGS_ARE_HEARD_2026_10_18.md Phase 1.
   nightly-status:
     name: nightly status
-    needs: [build-and-test, frontend, gates]
+    needs: [build-and-test, frontend, gates, advisories]
     if: ${{ always() && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
