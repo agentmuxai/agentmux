@@ -162,6 +162,7 @@ pub fn install(state: AppState) {
     crate::backend::account_availability::set_covers_block(covers_block);
     let baseline = baseline(&state.mstore);
     let broker = state.broker.clone();
+    let sign_in_watch = (state.fs_watch_pool.clone(), state.id_store.clone());
     if RUNTIME.set(Runtime { state, episodes: Mutex::new(Episodes::new(baseline)), wake: tokio::sync::Notify::new() }).is_err() {
         return;
     }
@@ -174,6 +175,7 @@ pub fn install(state: AppState) {
     if tokio::runtime::Handle::try_current().is_err() {
         return;
     }
+    crate::identity::sign_in_watch::start(sign_in_watch.0, sign_in_watch.1);
     tokio::spawn(async {
         let Some(rt) = RUNTIME.get() else { return };
         loop {
