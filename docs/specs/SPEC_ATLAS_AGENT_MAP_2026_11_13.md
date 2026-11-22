@@ -336,7 +336,7 @@ one more border, outside its own, in a colour that belongs to its host.
   The card says "Host" with how the machine was found (this machine, LAN, cloud), its platform and any channel.
 - **The ring**: a second border outside the node's own and a container agent's frame, with a gap of 2 px (a seventh of the
   gap between two nodes) and 2 px wide, never less than 1 px; both close in with the gaps as the map is zoomed in, so two
-  neighbours' rings never meet. The node's own border (its state on the left), its selection and its focus ring keep their
+  neighbours' rings never meet. The node's own border (its state on the left), its selection and its focus ring (drawn inside the node's border) keep their
   meaning beside it. With **one host** there is nothing to tell apart: no ring, no legend, the label stays (chosen).
 - **The colour of a host** is stable: a hash of the host's name (the computer's, so a machine's other channels share it),
   never the order hosts arrived in, so it is the same after a restart and on every computer that sees the same hosts.
@@ -348,8 +348,9 @@ one more border, outside its own, in a colour that belongs to its host.
 - **A host with no name yet** (this computer before its name is known) is its own host, in the placeholder's name. This
   computer, a LAN host, a cloud host and a container agent (the host it runs on, not the container) are hosts the same way.
 - **The legend**: a row under the bar, only with more than one host: each host's ring beside its name and how its machines
-  were found. What is wrong with a machine itself (its report is old, its container runtime is not running) is said in the
-  map's bottom left corner, by the host's name, with one host or many.
+  were found, and what is wrong with a machine itself (its report is old, its container runtime is not running). With
+  one host there is no legend, and that is said in the map's bottom left corner, by the host's name; with more it is
+  said once, in the legend, so no line of it lies over the nodes.
 - **The stopped agents**: one "N stopped" chip in that corner for the whole map, listing them with their host, to Open or
   Start (it was a chip in each box); in both layouts.
 - **The layout**: the nodes of a host still stand together, as a group nothing draws; the groups are packed as the boxes

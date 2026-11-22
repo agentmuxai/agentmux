@@ -332,8 +332,9 @@
         background: linear-gradient(var(--hover-bg-color), var(--hover-bg-color)), var(--atlas-node-bg);
     }
 
+    // Inside the border: an outer outline would cover the host ring or reach the next node's.
     &:focus-visible {
-        @include mixins.focus-ring;
+        @include mixins.focus-ring-inset(2px);
     }
 
     &--selected {

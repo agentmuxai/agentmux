@@ -430,6 +430,8 @@ function AtlasNotes(props: {
     hosts: ReadonlyMap<string, HostStyle>;
     stopped: { agent: AtlasAgent; host: string }[];
     stoppedCount: number;
+    /** The legend is drawn: it already says each host's trouble, so the corner does not repeat it over the nodes. */
+    legend: boolean;
 }): JSX.Element {
     return (
         <div class="atlas-notes">
@@ -437,8 +439,8 @@ function AtlasNotes(props: {
                 <div data-testid="atlas-cloud-note">The account's other machines could not be read just now.</div>
             </Show>
             {/* What is wrong with a machine itself (its report is old, its container runtime is not running): said by its
-                host's name, with one host or many. */}
-            <For each={props.data.graph().regions.filter((r) => r.note || r.stale)}>
+                host's name here with one host, and in the legend beside the host with more. */}
+            <For each={props.legend ? [] : props.data.graph().regions.filter((r) => r.note || r.stale)}>
                 {(r) => (
                     <div data-testid="atlas-machine-note">
                         {props.hosts.get(r.key)?.name ?? r.title}: {machineDetail(r)}
@@ -527,6 +529,7 @@ export function AtlasView(props: { data: AtlasData; ctx: PaneTabHostContext }): 
                     hosts={hosts()}
                     stopped={stopped()}
                     stoppedCount={stoppedCount()}
+                    legend={ring()}
                 />
                 <Show when={selectedAgent()} fallback={<ExtraCard graph={data.graph()} selected={selected()} onClose={() => setSelected(null)} />}>
                     {(agent) => (

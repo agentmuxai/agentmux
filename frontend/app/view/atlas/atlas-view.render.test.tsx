@@ -611,4 +611,10 @@ describe("what is not an agent", () => {
         expect(queryByTestId("atlas-cloud-note")).toBeNull();
         expect(getByTestId("atlas-machine-note").textContent).toBe("desk: this machine · container runtime not running");
     });
+
+    it("says a machine's trouble once, in the legend, when there is one: no line of it in the corner over the nodes", () => {
+        const { queryByTestId, getByTestId } = rig([agent("Ann", "local"), agent("Zo", "far")], {}, [], { localNote: "container runtime not running" });
+        expect(getByTestId("atlas-legend").textContent).toContain("container runtime not running");
+        expect(queryByTestId("atlas-machine-note")).toBeNull();
+    });
 });
