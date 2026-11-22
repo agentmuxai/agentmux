@@ -26,7 +26,7 @@ vi.mock("@/util/clipboard", () => ({ writeText: (text: string) => copied(text) }
 
 import { VaultEntries } from "./vault-entries";
 import { VaultEntryForm } from "./vault-entry-form";
-import { isLinked, linkFields, uncheckedDays } from "./vault-linked";
+import { isBacked, isLinked, linkFields, uncheckedDays } from "./vault-linked";
 import { VaultUseItem as UsePrompt } from "./vault-requests-list";
 import { sourceCheck } from "./vault-source";
 import { refreshVault } from "./vault-store";
@@ -99,6 +99,13 @@ describe("a linked entry's fields and what a check of its place found", () => {
         expect(isLinked({ source_kind: "aws-secret" })).toBe(false);
         expect(linkFields({ link: "only", readers: " a \n\n b ", rotated: " 2026-10-01 ", copies: "", service: "Example" })).toEqual({ link: "only", readers: "a\nb", rotated: "2026-10-01" });
         expect(linkFields({ readers: "a", rotated: "2026-10-01" })).toEqual({ readers: "a" });
+    });
+
+    it("keeps a backed entry backed when its fields are saved", () => {
+        expect(isLinked({ link: "backed" })).toBe(true);
+        expect(isBacked({ link: "backed" })).toBe(true);
+        expect(isBacked({ link: "only" })).toBe(false);
+        expect(linkFields({ link: "backed", readers: "a", rotated: "2026-10-01" })).toEqual({ link: "backed", readers: "a", rotated: "2026-10-01" });
     });
 
     it("says the place is there, changed or missing, and why", () => {
@@ -185,6 +192,19 @@ describe("a linked entry in the list", () => {
         expect([ci, replica, spare].map((p) => note(p).classList.contains("vault-expiry-warn"))).toEqual([false, true, false]);
         // The places themselves read as before, each followed by its note.
         expect(said.textContent?.replace(/\s+/g, " ")).toContain(`Also kept at: ${ci} · can't be checked from here; ${replica} · `);
+    });
+
+    it("marks a backed entry as managed in AWS Secrets Manager, still readable outside the Vault, with no value kept", async () => {
+        entries = [entry({ fields: { link: "backed", ...PLACE } })];
+        await refreshVault();
+        render(() => <VaultEntries section="api-keys" />);
+        const line = row("api-key-invoice");
+        expect(line.textContent).toContain("Managed in AWS Secrets Manager");
+        expect(line.textContent).not.toContain("Linked");
+        expect(line.textContent).toContain("Readable outside the Vault");
+        expect(line.querySelector(".vault-value")?.textContent).toBe("read from AWS at each use");
+        expect(screen.queryByRole("button", { name: "Show or copy" })).toBeNull();
+        expect(screen.getByRole("button", { name: "Copy the place" })).toBeTruthy();
     });
 
     it("leaves an entry that holds its value as it was", async () => {
