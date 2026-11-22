@@ -209,4 +209,12 @@ describe("the drawer's moves on a card's pull requests", () => {
         const { getByText } = render(() => <DrawerPrs card={card([pr(12, { followed: false }), pr(11)])} now={NOW} act={act} />);
         expect(getByText("Not followed")).toBeTruthy();
     });
+
+    it("marks the only pull request of a card too, with or without the actions", () => {
+        const only = render(() => <DrawerPrs card={card([pr(12, { followed: false })])} now={NOW} act={act} />);
+        expect(only.getByText("Not followed")).toBeTruthy();
+        only.unmount();
+        const shown = render(() => <DrawerPrs card={card([pr(12, { followed: false })])} now={NOW} />);
+        expect(shown.getByText("Not followed")).toBeTruthy();
+    });
 });

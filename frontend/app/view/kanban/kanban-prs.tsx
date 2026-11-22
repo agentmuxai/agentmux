@@ -181,6 +181,11 @@ export function DrawerPrs(props: { card: KanbanCardFields; now: number; act?: Pr
                     </For>
                 </ul>
             </Show>
+            <Show when={prs().length === 1 && prs()[0].followed === false}>
+                <Pill tone="warn" title={tr("kanban.prs.notFollowedWhy")}>
+                    {tr("kanban.prs.notFollowed")}
+                </Pill>
+            </Show>
             <Show when={props.act}>
                 {(act) => (
                     <>
