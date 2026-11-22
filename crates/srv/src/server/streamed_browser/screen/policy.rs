@@ -55,11 +55,19 @@ pub fn wanted(proxy_port: u16) -> Value {
     })
 }
 
-/// Does the policy in `text` block every address in `BLOCKED`, turn the developer tools off, and allow no file dialog and no download?
+/// The strings in a policy key that holds a list (none when the key is absent or not a list).
+fn listed<'a>(v: &'a Value, key: &str) -> Vec<&'a str> {
+    v[key].as_array().map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default()
+}
+
+/// Does the policy in `text` hold every key `wanted` names: every address in `BLOCKED` blocked, the developer tools off, no extension may be
+/// installed, no sign-in to the browser itself, no file dialog, no download, and the network only through the address proxy?
 pub fn holds(text: &str, proxy_port: u16) -> bool {
     let Ok(v) = serde_json::from_str::<Value>(text) else { return false };
-    let listed: Vec<&str> = v["URLBlocklist"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
-    BLOCKED.iter().all(|b| listed.contains(b))
+    let blocked = listed(&v, "URLBlocklist");
+    BLOCKED.iter().all(|b| blocked.contains(b))
+        && listed(&v, "ExtensionInstallBlocklist").contains(&"*")
+        && v["BrowserSignin"] == json!(0)
         && v["DeveloperToolsAvailability"] == json!(2)
         && v["AllowFileSelectionDialogs"] == json!(false)
         && v["DownloadRestrictions"] == json!(3)
@@ -128,7 +136,7 @@ pub fn ensure(binary: &Path, first: bool, proxy_port: u16) -> Result<(), String>
 fn missing_words(path: &Path, proxy_port: u16) -> String {
     let text = serde_json::to_string_pretty(&wanted(proxy_port)).unwrap_or_default();
     format!(
-        "screen mode needs the browser's managed policy file {} (it blocks local files, the browser's own pages, developer tools, file dialogs and downloads); it is missing or does not hold. Install it as the machine's administrator, with this content:
+        "screen mode needs the browser's managed policy file {} (it blocks local files, the browser's own pages, developer tools, extensions, the browser's own sign-in, file dialogs and downloads, and sets its network); it is missing or does not hold. Install it as the machine's administrator, with this content:
 {text}",
         path.display()
     )
@@ -163,6 +171,37 @@ mod tests {
         let mut v = wanted(1);
         v["URLBlocklist"] = json!(BLOCKED.iter().filter(|b| !b.starts_with("file")).collect::<Vec<_>>());
         assert!(!holds(&v.to_string(), 1));
+    }
+
+    #[test]
+    fn a_policy_without_the_extension_block_or_with_browser_sign_in_on_does_not_hold() {
+        for key in ["ExtensionInstallBlocklist", "BrowserSignin"] {
+            let mut v = wanted(1);
+            v.as_object_mut().unwrap().remove(key);
+            assert!(!holds(&v.to_string(), 1), "{key} left out still holds");
+        }
+        for (key, open) in [
+            ("ExtensionInstallBlocklist", json!([])),
+            ("ExtensionInstallBlocklist", json!(["abcdefghijklmnop"])),
+            ("ExtensionInstallBlocklist", json!("*")),
+            ("BrowserSignin", json!(1)),
+            ("BrowserSignin", json!(2)),
+        ] {
+            let mut v = wanted(1);
+            v[key] = open.clone();
+            assert!(!holds(&v.to_string(), 1), "{key} = {open} still holds");
+        }
+    }
+
+    #[test]
+    fn every_key_the_wanted_policy_names_is_checked() {
+        // `wanted` and `holds` cannot drift apart: dropping any one key from the wanted policy must make it not hold.
+        let all = wanted(1);
+        for key in all.as_object().unwrap().keys() {
+            let mut v = all.clone();
+            v.as_object_mut().unwrap().remove(key);
+            assert!(!holds(&v.to_string(), 1), "{key} is named by the policy but not checked");
+        }
     }
 
     #[test]

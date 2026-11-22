@@ -68,7 +68,9 @@ fn plain_id(s: &str) -> bool {
 }
 
 impl Place<'_> {
-    fn aad(&self) -> Result<Vec<u8>, String> {
+    /// The associated data under a prefix: the Vault's is [`AAD_PREFIX`], and another kind of collection seals its
+    /// records the same way under its own (see `user_sync::seal`).
+    fn aad_with(&self, prefix: &str) -> Result<Vec<u8>, String> {
         let base_machine = self.base.map(|b| ("machine", b.machine.as_str()));
         for (what, id) in [("Vault", self.vault), ("record", self.record), ("machine", self.version.machine.as_str())].into_iter().chain(base_machine) {
             if !plain_id(id) {
@@ -76,7 +78,7 @@ impl Place<'_> {
             }
         }
         let base = self.base.map_or_else(|| "-".to_string(), Version::text);
-        Ok(format!("{AAD_PREFIX}:{}:{}:{}:{}:{base}", self.vault, self.record, self.version.text(), self.epoch).into_bytes())
+        Ok(format!("{prefix}:{}:{}:{}:{}:{base}", self.vault, self.record, self.version.text(), self.epoch).into_bytes())
     }
 }
 
@@ -88,7 +90,12 @@ const CANT_OPEN: &str = "a synced record can't be opened: it was changed, it was
 
 /// Seals `plain` for the place `at`. The plaintext is copied into a buffer that is wiped when this returns.
 pub fn seal_raw(key: &Key, at: &Place<'_>, plain: &[u8]) -> Result<Vec<u8>, String> {
-    let aad = at.aad()?;
+    seal_raw_with(AAD_PREFIX, key, at, plain)
+}
+
+/// [`seal_raw`] under another associated-data prefix (another kind of collection; `user_sync::seal`).
+pub fn seal_raw_with(prefix: &str, key: &Key, at: &Place<'_>, plain: &[u8]) -> Result<Vec<u8>, String> {
+    let aad = at.aad_with(prefix)?;
     let mut nonce = [0u8; NONCE_LEN];
     SystemRandom::new().fill(&mut nonce).map_err(|_| "the system's random source failed".to_string())?;
     let mut buf = Zeroizing::new(plain.to_vec());
@@ -106,10 +113,15 @@ pub fn seal_raw(key: &Key, at: &Place<'_>, plain: &[u8]) -> Result<Vec<u8>, Stri
 /// Opens what [`seal_raw`] sealed for `at`. Fails, with one sentence for every cause, on any change to the record, on a
 /// record sealed for another Vault, record, version or epoch, and on another key. What it returns is wiped when dropped.
 pub fn open_raw(key: &Key, at: &Place<'_>, sealed: &[u8]) -> Result<Zeroizing<Vec<u8>>, String> {
+    open_raw_with(AAD_PREFIX, key, at, sealed)
+}
+
+/// [`open_raw`] under another associated-data prefix.
+pub fn open_raw_with(prefix: &str, key: &Key, at: &Place<'_>, sealed: &[u8]) -> Result<Zeroizing<Vec<u8>>, String> {
     if sealed.len() < 1 + NONCE_LEN || sealed.len() > MAX_SEALED || sealed[0] != FORMAT_V1 {
         return Err(CANT_OPEN.into());
     }
-    let aad = at.aad()?;
+    let aad = at.aad_with(prefix)?;
     let nonce = Nonce::try_assume_unique_for_key(&sealed[1..1 + NONCE_LEN]).map_err(|_| CANT_OPEN.to_string())?;
     let mut buf = Zeroizing::new(sealed[1 + NONCE_LEN..].to_vec());
     let plain = aead_key(key).open_in_place(nonce, Aad::from(aad), &mut *buf).map_err(|_| CANT_OPEN.to_string())?;
