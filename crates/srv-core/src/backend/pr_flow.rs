@@ -21,6 +21,8 @@ use serde_json::Value;
 
 use super::mps::Broker;
 use super::mps_events::{ChecksFlow, MergeFlow, ReviewFlow};
+use super::storage::store::Store;
+use super::storage::work_card_prs::{FlowFact, FlowNote};
 
 /// How many recent events of each kind are kept.
 pub const RECENT_MAX: usize = 100;
@@ -294,8 +296,40 @@ impl Flow {
     }
 }
 
-/// Records and publishes `accepted`. Does nothing before [`install`].
+/// The board's store, where a notice is also put on the card rows of the pull request it names (the card's badge and
+/// chips ride with the card and survive a restart: SPEC_FOLD_REVIEWS_INTO_THE_KANBAN_2026_11_22.md §3).
+static CARDS: OnceLock<Arc<Store>> = OnceLock::new();
+
+/// Start putting accepted notices on the cards in `store` for the rest of the process. The first call wins.
+pub fn install_cards(store: Arc<Store>) {
+    let _ = CARDS.set(store);
+}
+
+/// `accepted` as what it says about a pull request.
+fn note_of(accepted: &Accepted) -> FlowNote {
+    let (agent, pr, at_ms, fact) = match accepted {
+        Accepted::Review(e) => (&e.agent, e.pr, e.at_ms, FlowFact::Review { by: by_name(e.by).into(), state: e.state.clone(), head: e.head.clone() }),
+        Accepted::Checks(e) => (&e.agent, e.pr, e.at_ms, FlowFact::Checks { state: e.state.clone(), head: e.head.clone() }),
+        Accepted::Merge(e) => (&e.agent, e.pr, e.at_ms, FlowFact::Merge { state: e.state.clone() }),
+    };
+    FlowNote { agent: agent.to_ascii_lowercase(), repo_id: pr.repo_id, number: pr.number, at_ms: at_ms as i64, fact }
+}
+
+fn by_name(by: PrFlowBy) -> &'static str {
+    match by {
+        PrFlowBy::Bot => "bot",
+        PrFlowBy::Codex => "codex",
+        PrFlowBy::Person => "person",
+    }
+}
+
+/// Records and publishes `accepted`, after putting it on the cards it names, so a board read on the event sees it.
+/// Does nothing before [`install`] and [`install_cards`].
 pub fn note(accepted: &Accepted) {
+    if let Some(cards) = CARDS.get() {
+        // Applying is idempotent (a notice older than a row's own is ignored), so a redelivery changes nothing.
+        let _ = cards.work_card_pr_flow_apply(&note_of(accepted), agentmux_common::time::now_ms());
+    }
     if let Some(flow) = FLOW.get() {
         flow.record(accepted);
     }
