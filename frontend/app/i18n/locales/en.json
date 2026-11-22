@@ -1136,7 +1136,7 @@
     "accountUsage.field": "Usage",
     "accountUsage.rows.aria": "Usage of this account",
     "accountUsage.window.aria": "{{name}} window",
-    "accountUsage.strip.aria": "Account usage",
+    "accountUsage.source": "From the provider's own report · updated {{age}}",
     "accountsTab.action.reauth": "Reauth",
     "accountsTab.action.validate": "Validate…",
     "accountsTab.action.edit": "Edit",
