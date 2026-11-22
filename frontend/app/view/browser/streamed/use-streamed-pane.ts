@@ -98,7 +98,7 @@ function resizeMessage(size: { w: number; h: number }): object {
  * browser answers "not found" to the request for it: the pane goes back to the ordinary browser and says so in words.
  */
 function applyEnd(how: "failed" | "closed", reason: string | undefined, full: boolean, to: Pick<Sinks, "setStatus" | "setError"> & { setFull: (on: boolean) => void }): void {
-    if (how === "failed" && full && !screenModeAsked()) {
+    if (how === "failed" && full) {
         to.setFull(false);
         to.setStatus("failed");
         to.setError(t("browser.streamed.fullBrowserOff"));

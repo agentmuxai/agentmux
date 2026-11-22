@@ -60,7 +60,7 @@ export function openStreamedPane(start: { url: string; w: number; h: number; scr
     };
     const connect = () => {
         const wsBase = window.__WAVE_SERVER_WS_ENDPOINT__ ?? window.location.origin.replace(/^http/, "ws");
-        const socket = newWebSocket(streamedUrl(wsBase, start, start.screen === true || screenModeAsked()), {});
+        const socket = newWebSocket(streamedUrl(wsBase, start, start.screen ?? screenModeAsked()), {});
         ws = socket;
         socket.binaryType = "arraybuffer";
         socket.onopen = () => {
