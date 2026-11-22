@@ -11,8 +11,11 @@ pub mod hlc;
 pub mod kanban;
 pub mod log;
 pub mod record;
+pub mod seal;
 
 #[cfg(test)]
 mod kanban_tests;
+#[cfg(test)]
+mod seal_tests;
 #[cfg(test)]
 mod tests;
