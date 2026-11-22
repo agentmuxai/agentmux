@@ -359,13 +359,6 @@ fn with_login_of(keychain_json: &str, staged_json: &str) -> Option<String> {
     serde_json::to_string(&entry).ok()
 }
 
-/// The config dir of the account the staging folder `folder` (`<root>/container-credentials/<container>/<account>`)
-/// holds a login for, or `None` when the folder has no readable `meta.json`.
-pub(crate) fn staged_config_dir(folder: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(folder.join(META_FILE)).ok()?;
-    serde_json::from_str::<Meta>(&text).ok().map(|meta| meta.config_dir)
-}
-
 /// The config dirs that have a staged login for `container_name` (one per account it was bound to).
 pub(crate) fn staged_config_dirs(root: &Path, container_name: &str) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(root.join(STAGING_ROOT).join(container_name)) else {

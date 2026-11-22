@@ -5,11 +5,14 @@
 //! the write, as one in the account's own file is (`sign_in_watch`).
 //!
 //! A container agent holds a copy of its account's login under `<AgentMux root>/container-credentials/<container>/
-//! <account>/`, with a `meta.json` that names the account's config dir. [`start`] watches that tree through the shared
-//! [`FsWatchPool`], so a container that is added is followed with no further step, and reads a copy again when its
-//! `.credentials.json` changes (written in place, or replaced by a renamed temp file). What it finds is withheld under
-//! the account's own owners, so the copies and the account's file share one set of held values. It only reads: it
-//! never writes a copy and never logs a value.
+//! <account>/`. [`start`] watches that tree through the shared [`FsWatchPool`], so a container that is added is
+//! followed with no further step, and reads a copy again when its `.credentials.json` changes (written in place, or
+//! replaced by a renamed temp file).
+//!
+//! A container can write its own copy, so what a copy holds is not trusted: its values are withheld under owners of
+//! their own, one pair per staging folder, with the usual cap per owner (`withhold::KEPT_PER_OWNER`), and the copy's
+//! `expiresAt` is not used, so a copy holds a bounded number of values and cannot push out what the account's own
+//! file holds. It only reads: it never writes a copy and never logs a value.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -18,7 +21,7 @@ use std::time::Duration;
 
 use tokio::sync::broadcast::error::{RecvError, TryRecvError};
 
-use crate::backend::container::keychain_credentials::{staged_config_dir, STAGING_ROOT};
+use crate::backend::container::keychain_credentials::STAGING_ROOT;
 use crate::backend::fs_watch::{FsWatchEventKind, FsWatchPool};
 use crate::identity::resolver::oauth_probe::withhold_sign_in;
 
@@ -28,16 +31,18 @@ const COPY_FILE: &str = ".credentials.json";
 /// How long a burst of events (a copy written in pieces, or replaced) settles before it is read.
 const SETTLE: Duration = Duration::from_millis(150);
 
-/// Withholds the values in the staged copy at `file` (a `.credentials.json` in a container's staging folder), under the
-/// owners of the account its `meta.json` names. Nothing is withheld when the folder names no account or the copy is
-/// unreadable (it can be mid-write; the next change reads it again).
+/// Withholds the values in the staged copy at `file` (a `.credentials.json` in a container's staging folder), under
+/// owners named by that folder. An unreadable copy (it can be mid-write) withholds nothing; the next change reads it
+/// again.
 fn look(file: &Path) {
     let Some(folder) = file.parent() else { return };
-    let Some(config_dir) = staged_config_dir(folder) else { return };
     let Ok(text) = std::fs::read_to_string(file) else { return };
-    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-        withhold_sign_in(&config_dir, &json);
+    let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&text) else { return };
+    // The copy's own expiry is not trusted: a value is withheld without one, under the folder's cap.
+    if let Some(oauth) = json.get_mut("claudeAiOauth").and_then(serde_json::Value::as_object_mut) {
+        oauth.remove("expiresAt");
     }
+    withhold_sign_in(&format!("staged:{}", folder.to_string_lossy()), &json);
 }
 
 /// Every copy under the staging tree at `tree` is read once.

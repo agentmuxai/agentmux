@@ -3,14 +3,14 @@
 
 use super::*;
 use crate::backend::transcript::withhold;
-use crate::identity::resolver::release_sign_in;
+use crate::identity::resolver::probe_oauth_status;
 
 fn copy_body(access: &str, refresh: &str) -> String {
     let expires = agentmux_common::time::now_ms() + 3_600_000;
     serde_json::json!({ "claudeAiOauth": { "accessToken": access, "refreshToken": refresh, "expiresAt": expires } }).to_string()
 }
 
-/// A staging folder `<tree>/<container>/<account>` that names `config_dir` as its account, and the copy file in it.
+/// A staging folder `<tree>/<container>/<account>`, with the `meta.json` the staging code writes, and the copy file in it.
 fn folder(tree: &Path, container: &str, account: &str, config_dir: &str) -> PathBuf {
     let dir = tree.join(container).join(account);
     std::fs::create_dir_all(&dir).unwrap();
@@ -34,37 +34,63 @@ async fn withheld_after(value: &str, mut write: impl FnMut()) -> bool {
     false
 }
 
-#[test]
-fn a_staged_copy_is_withheld_under_its_accounts_owners_and_released_with_them() {
-    let tmp = tempfile::tempdir().unwrap();
-    let (one, other) = ("acct-config-one", "acct-config-two");
-    let file = folder(tmp.path(), "container-a", "h1", one);
-    let other_file = folder(tmp.path(), "container-a", "h2", other);
-    std::fs::write(&file, copy_body("canary-staged-access-0001", "canary-staged-refresh-0001")).unwrap();
-    std::fs::write(&other_file, copy_body("canary-staged-access-0002", "canary-staged-refresh-0002")).unwrap();
-    look(&file);
-    look(&other_file);
-    for value in ["canary-staged-access-0001", "canary-staged-refresh-0001", "canary-staged-access-0002"] {
-        assert_eq!(withhold::text(value), withhold::MARK, "{value}");
-    }
-    release_sign_in(one);
-    assert_eq!(withhold::text("canary-staged-refresh-0001"), "canary-staged-refresh-0001", "held under the account's own owners");
-    assert_eq!(withhold::text("canary-staged-refresh-0002"), withhold::MARK, "another account's stays");
+fn hidden(value: &str) -> bool {
+    withhold::text(value) == withhold::MARK
 }
 
 #[test]
-fn a_copy_with_no_account_or_that_is_half_written_withholds_nothing() {
+fn a_staged_copys_values_are_withheld_without_trusting_its_expiry() {
     let tmp = tempfile::tempdir().unwrap();
-    let orphan = tmp.path().join("container-b").join("h1");
-    std::fs::create_dir_all(&orphan).unwrap();
-    std::fs::write(orphan.join(COPY_FILE), copy_body("canary-orphan-access-0001", "canary-orphan-refresh-0001")).unwrap();
-    look(&orphan.join(COPY_FILE));
+    let file = folder(tmp.path(), "container-a", "h1", "acct-config-one");
+    std::fs::write(&file, copy_body("canary-staged-access-0001", "canary-staged-refresh-0001")).unwrap();
+    look(&file);
+    assert!(hidden("canary-staged-access-0001") && hidden("canary-staged-refresh-0001"));
+    // A replaced value stays withheld (kept), and the expiry the copy states is not what bounds it.
+    std::fs::write(&file, copy_body("canary-staged-access-0002", "canary-staged-refresh-0002")).unwrap();
+    look(&file);
+    assert!(hidden("canary-staged-access-0001") && hidden("canary-staged-access-0002") && hidden("canary-staged-refresh-0002"));
+}
+
+#[test]
+fn a_container_that_floods_its_copy_cannot_push_out_what_the_accounts_own_file_holds() {
+    let account = tempfile::tempdir().unwrap();
+    let real = serde_json::json!({ "claudeAiOauth": { "accessToken": "canary-real-access-0001", "refreshToken": "canary-real-refresh-0001", "expiresAt": agentmux_common::time::now_ms() + 3_600_000 } });
+    std::fs::write(account.path().join(".credentials.json"), real.to_string()).unwrap();
+    probe_oauth_status("claude", account.path().to_str().unwrap(), agentmux_common::time::now_ms());
+    assert!(hidden("canary-real-refresh-0001"));
+
+    // The container's copy names that very account in its meta.json and is rewritten with many distinct values.
+    let tmp = tempfile::tempdir().unwrap();
+    let file = folder(tmp.path(), "container-evil", "h1", account.path().to_str().unwrap());
+    for n in 0..40 {
+        std::fs::write(&file, copy_body(&format!("canary-junk-access-{n:04}"), &format!("canary-junk-refresh-{n:04}"))).unwrap();
+        look(&file);
+    }
+    assert!(hidden("canary-real-access-0001") && hidden("canary-real-refresh-0001"), "the account's own values stay withheld");
+    assert!(!hidden("canary-junk-refresh-0000"), "the copy holds a bounded number of values: the oldest is dropped");
+    assert!(hidden("canary-junk-refresh-0039"));
+}
+
+#[test]
+fn each_staging_folder_has_its_own_cap() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (a, b) = (folder(tmp.path(), "container-x", "h1", "cfg"), folder(tmp.path(), "container-y", "h1", "cfg"));
+    std::fs::write(&a, copy_body("canary-cap-access-xx-0000", "canary-cap-refresh-xx-0000")).unwrap();
+    look(&a);
+    for n in 0..20 {
+        std::fs::write(&b, copy_body(&format!("canary-cap-access-yy-{n:04}"), &format!("canary-cap-refresh-yy-{n:04}"))).unwrap();
+        look(&b);
+    }
+    assert!(hidden("canary-cap-refresh-xx-0000"), "another container's copy is not pushed out");
+}
+
+#[test]
+fn a_half_written_copy_withholds_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
     let half = folder(tmp.path(), "container-b", "h2", "acct-config-half");
     std::fs::write(&half, "{ \"claudeAiOauth\": { \"accessToken\": \"canary-half-access-0001").unwrap();
     look(&half);
-    for value in ["canary-orphan-access-0001", "canary-orphan-refresh-0001", "canary-half-access-0001"] {
-        assert_eq!(withhold::text(value), value, "{value}");
-    }
+    assert!(!hidden("canary-half-access-0001"));
 }
 
 #[tokio::test]
@@ -78,7 +104,7 @@ async fn a_value_written_first_to_a_container_copy_is_withheld_with_no_account_f
     let file = folder(&tree, "container-c", "h1", "acct-config-watch");
     let body = copy_body("canary-copy-access-0001", "canary-copy-refresh-0001");
     assert!(withheld_after("canary-copy-refresh-0001", || std::fs::write(&file, &body).unwrap()).await);
-    assert_eq!(withhold::text("canary-copy-access-0001"), withhold::MARK);
+    assert!(hidden("canary-copy-access-0001"));
 }
 
 #[tokio::test]
@@ -98,5 +124,5 @@ async fn a_copy_replaced_by_a_renamed_temp_file_is_withheld() {
     })
     .await;
     assert!(replaced, "a refreshed value in a copy replaced by a renamed temp file is withheld");
-    assert_eq!(withhold::text("canary-swap-access-0002"), withhold::MARK);
+    assert!(hidden("canary-swap-access-0002"));
 }
