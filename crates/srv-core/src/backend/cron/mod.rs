@@ -42,9 +42,9 @@ use chrono::{DateTime, Utc};
 use crate::backend::jobs::admission::Admission;
 use crate::backend::jobs::{self, RunLedger};
 use crate::backend::storage::store::Store;
-use crate::backend::storage::cron::CronJob;
+use crate::backend::storage::cron::{CronJob, FireProof, WRITER_OPERATOR};
 use crate::backend::mps::Broker;
-use crate::backend::reactive::types::InjectionRequest;
+use crate::backend::reactive::types::{InjectionRequest, SchedulerFire, SCHEDULER_SENDER};
 
 /// Abort handles for every currently scheduled cron task.
 type HandleMap = Mutex<HashMap<String, tokio::task::AbortHandle>>;
@@ -608,8 +608,9 @@ impl CronScheduler {
                 let req = InjectionRequest {
                     target_agent,
                     message,
-                    source_agent: Some("cron".to_string()),
+                    source_agent: Some(SCHEDULER_SENDER.to_string()),
                     request_id,
+                    scheduler_fire: scheduler_fire_of(job),
                     ..Default::default()
                 };
                 Some(deliver(req, job.created_by_uid.clone()).await)
@@ -805,6 +806,18 @@ impl CronScheduler {
     }
 }
 
+/// What proves a fire of `job` when this scheduler delivers it in process: the job's name and the identity behind its
+/// definition. `None` when nothing identified who wrote it (it fires unproven, as before). For an agent the name it runs for
+/// is not known here: srv fills it in from the agent's own record, and drops the fact when there is none.
+fn scheduler_fire_of(job: &CronJob) -> Option<SchedulerFire> {
+    let proof = job.fire_proof()?;
+    let name = if job.name.trim().is_empty() { job.id.as_str() } else { job.name.as_str() };
+    Some(match proof {
+        FireProof::Operator => SchedulerFire { job_id: job.id.clone(), job: name.to_string(), proof_uid: String::new(), runs_for: WRITER_OPERATOR.to_string() },
+        FireProof::Agent(uid) => SchedulerFire { job_id: job.id.clone(), job: name.to_string(), proof_uid: uid, runs_for: String::new() },
+    })
+}
+
 /// Determine if a job needs a catch-up fire on startup.
 ///
 /// True when there is a scheduled fire time that falls strictly between
@@ -973,6 +986,10 @@ mod identity_m4c3_tests {
         assert_eq!(req.target_agent, "uid-target");
         assert_eq!(req.message, "check in", "no ledger installed: no run line");
         assert_eq!(req.source_agent.as_deref(), Some("cron"), "the sender name stays cron");
+        let proof = req.scheduler_fire.as_ref().expect("a job whose creator was identified carries what proves its fire");
+        assert_eq!(proof.proof_uid, "uid-creator", "the creator, named later by srv from its own record");
+        assert_eq!(proof.runs_for, "", "the scheduler does not name it");
+        assert!(!proof.job.is_empty(), "the job's name rides with it");
         assert_eq!(creator_uid, "uid-creator");
         assert_eq!(req.audit_source_uid, "", "the delivery path sets it, on this instance only");
     }
