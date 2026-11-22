@@ -279,17 +279,53 @@ async fn a_delivery_that_lands_is_not_released() {
 }
 
 #[tokio::test]
-async fn a_message_for_an_agent_out_of_quota_is_given_back_to_the_relay_and_never_typed() {
+async fn a_relay_notice_for_an_agent_out_of_quota_is_not_even_claimed_and_the_agent_is_told_once_it_can_work() {
+    let agent = agent_name();
+    let (handler, typed) = live_pane(&agent);
+    crate::muxbus::server_hooks::TEST_LIMITED.lock().unwrap().push(agent.clone());
+    let (base, asked) = relay(vec![]).await;
+
+    claim(&base, &agent, handler, rows(serde_json::json!([{ "id": "inj-1", "message": "[muxreview] reviewed" }])), true).await;
+
+    assert!(lines(&asked).is_empty(), "nothing claimed, nothing released: {:?}", lines(&asked));
+    assert!(typed.lock().unwrap().is_empty());
+    assert!(crate::muxbus::delivery_status::has_left_at_relay(&agent), "remembered, to tell it once");
+
+    // Still limited: a second pull leaves it as it is.
+    claim(&base, &agent, handler, rows(serde_json::json!([{ "id": "inj-1", "message": "[muxreview] reviewed" }])), true).await;
+    assert!(lines(&asked).is_empty());
+    assert!(crate::muxbus::delivery_status::has_left_at_relay(&agent));
+
+    // The limit clears: the same message is claimed and delivered, and the note is spent.
+    crate::muxbus::server_hooks::TEST_LIMITED.lock().unwrap().retain(|a| a != &agent);
+    let (base, asked) = relay(vec![won(&["inj-1"])]).await;
+    claim(&base, &agent, handler, rows(serde_json::json!([{ "id": "inj-1", "message": "[muxreview] reviewed" }])), true).await;
+    assert_eq!(lines(&asked), ["POST /reactive/ack"]);
+    assert_eq!(typed.lock().unwrap().join("").matches("[muxreview] reviewed").count(), 1);
+    assert!(!crate::muxbus::delivery_status::has_left_at_relay(&agent), "told once");
+}
+
+#[tokio::test]
+async fn an_agent_that_could_work_all_along_is_never_told_anything() {
+    let agent = agent_name();
+    let (handler, _) = live_pane(&agent);
+    let (base, _) = relay(vec![]).await;
+    claim(&base, &agent, handler, rows(serde_json::json!([])), true).await;
+    assert!(!crate::muxbus::delivery_status::has_left_at_relay(&agent));
+}
+
+#[tokio::test]
+async fn a_signed_message_for_an_agent_out_of_quota_is_still_claimed_so_a_proven_peer_can_be_held() {
     let agent = agent_name();
     let (handler, typed) = live_pane(&agent);
     crate::muxbus::server_hooks::TEST_LIMITED.lock().unwrap().push(agent.clone());
     let (base, asked) = relay(vec![won(&["inj-1"]), released()]).await;
 
-    claim(&base, &agent, handler, rows(serde_json::json!([{ "id": "inj-1", "message": "[muxreview] reviewed" }])), true).await;
+    claim(&base, &agent, handler, rows(serde_json::json!([{ "id": "inj-1", "message": "from a peer", "wan_sig": "x" }])), true).await;
 
-    assert!(typed.lock().unwrap().is_empty(), "no turn starts for an agent that cannot work");
-    assert_eq!(lines(&asked), ["POST /reactive/ack", "POST /reactive/release"], "the claim goes back");
-    assert_eq!(body_of(&asked, "POST /reactive/release"), [serde_json::json!({ "injection_id": "inj-1", "delivered_at": STAMP })]);
+    // Not proven here, so it goes back (a proven one is held by `hold_wan_for_unavailable`, before this).
+    assert_eq!(lines(&asked), ["POST /reactive/ack", "POST /reactive/release"]);
+    assert!(typed.lock().unwrap().is_empty());
     crate::muxbus::server_hooks::TEST_LIMITED.lock().unwrap().retain(|a| a != &agent);
 }
 
