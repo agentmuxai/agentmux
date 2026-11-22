@@ -159,6 +159,7 @@ vi.mock("@/app/view/agent/shutdown/keeps-running", () => ({
     parkedAgentOf: h.parkedAgentOf,
 }));
 
+import { markHolderMoved } from "@/app/view/agent/failure/moved-holder";
 import { takePersonClose } from "@/app/view/browser/leave-prompt";
 import { TabContent } from "./tabcontent";
 
@@ -905,6 +906,19 @@ describe("TabContent beforeNodeDelete", () => {
             expect(winds("a1")).toBe(false);
             expect(winds("a2")).toBe(true);
             expect(h.noteKeepsRunning).not.toHaveBeenCalled();
+        });
+
+        it("notes nothing for the pane an Open here closes, whose agent runs in another pane, and says so once", async () => {
+            h.keepRunning = true;
+            markHolderMoved("a1");
+            const ok = await contents().beforeNodeDelete(layoutData("a1"));
+            expect(ok).toBe(true);
+            expect(h.closeWithShutdownLog).not.toHaveBeenCalled();
+            expect(h.noteKeepsRunning).toHaveBeenCalledWith([]);
+            // The mark is used up: the next close of that pane notes as usual.
+            h.noteKeepsRunning.mockClear();
+            await contents().beforeNodeDelete(layoutData("a1"));
+            expect(h.noteKeepsRunning).toHaveBeenCalledWith([{ agentId: "posa", name: "Posa" }]);
         });
 
         it("notes every parked agent, in pane order", async () => {
