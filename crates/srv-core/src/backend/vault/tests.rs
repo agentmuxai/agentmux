@@ -42,7 +42,8 @@ fn an_entry_is_stored_sealed_and_listed_without_its_value() {
     assert!(!shown.contains("123-45"), "the pane never gets the whole value: {shown}");
 
     let agent = serde_json::to_string(&list_for_agent(&s, None).unwrap()).unwrap();
-    assert_eq!(agent, r#"[{"id":"ssn-alex","label":"Alex","kind":"ssn","section":"personal","vault":"Personal"}]"#);
+    let link = link_ids(&s, &["ssn-alex"]).unwrap()["ssn-alex"].clone();
+    assert_eq!(agent, format!(r#"[{{"id":"ssn-alex","link_id":"{link}","label":"Alex","kind":"ssn","section":"personal","vault":"Personal"}}]"#));
 }
 
 #[test]
@@ -190,7 +191,8 @@ fn generate_makes_an_entry_whose_value_nobody_was_given() {
     assert_eq!(value.chars().count(), generate::DEFAULT_LENGTH);
     // What an agent can see names it, and nothing else.
     let listed = list_for_agent(&s, None).unwrap();
-    assert_eq!(listed, vec![VaultAgentEntry { id: made.id.clone(), label: "Staging deploy key".into(), kind: "api-key".into(), section: VaultSection::ApiKeys, vault: "Personal".into(), expires: None, source: None, shared_with_you: false }]);
+    let link_id = listed[0].link_id.clone();
+    assert_eq!(listed, vec![VaultAgentEntry { id: made.id.clone(), link_id, label: "Staging deploy key".into(), kind: "api-key".into(), section: VaultSection::ApiKeys, vault: "Personal".into(), expires: None, source: None, shared_with_you: false }]);
     // The record names the agent, and never the value.
     let rows = activity(&s, 10).unwrap();
     let line = rows.iter().find(|r| r.action == "generated").unwrap();
@@ -339,4 +341,22 @@ fn a_default_that_is_not_yes_is_dropped() {
     let s = store();
     let id = create(&s, card("Visa", &[], &[("default", "true")])).unwrap();
     assert!(!fields_of(&s, &id).contains_key("default"));
+}
+
+#[test]
+fn an_entry_has_an_opaque_link_id_that_it_keeps_and_that_names_it_back() {
+    let s = store();
+    let id = create(&s, ssn("Alex", "123-45-6789")).unwrap();
+    let first = link_ids(&s, &[id.as_str()]).unwrap()[&id].clone();
+    assert!(first.starts_with("e_") && first.len() == 18, "{first}");
+    assert!(first[2..].chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()), "{first}");
+    assert!(!first.contains("ssn") && !first.contains("alex"), "it says nothing about the entry: {first}");
+    assert_eq!(link_ids(&s, &[id.as_str()]).unwrap()[&id], first, "kept");
+    assert_eq!(list_for_pane(&s).unwrap().0[0].link_id.as_deref(), Some(first.as_str()), "the pane is given the same one");
+    assert_eq!(entry_of_link(&s, &first).unwrap(), Some(id.clone()));
+    let other = create(&s, ssn("Sam", "987-65-4321")).unwrap();
+    assert_ne!(link_ids(&s, &[other.as_str()]).unwrap()[&other], first);
+    assert_eq!(entry_of_link(&s, "e_0000000000000000").unwrap(), None);
+    s.vault_delete(&id).unwrap();
+    assert_eq!(entry_of_link(&s, &first).unwrap(), None, "a deleted entry's link names nothing");
 }

@@ -87,6 +87,8 @@ export interface ExecutorDeps {
     tabExists(tabId: string): boolean;
     /** Whether a setting with this id is in this version's Settings. */
     settingExists(id: string): Promise<boolean>;
+    /** Whether a Vault entry has this opaque link id. */
+    vaultEntryExists(linkId: string): Promise<boolean>;
     /** The locate flash on the pane: the person sees where it went. */
     locate(blockId: string): void;
     /** A polite live region; never moves focus. */
@@ -188,7 +190,10 @@ export class Executor {
 
     private async placeOutcome(plan: PanePlan, label: string, blockId: string | undefined, reused: boolean): Promise<OpenOutcome> {
         if (!blockId) return { outcome: "refused", label, reason: { code: "not_open", text: "The pane couldn't be opened." } };
-        const missing = plan.missing !== undefined || (plan.revealSetting !== undefined && !(await this.deps.settingExists(plan.revealSetting)));
+        const missing =
+            plan.missing !== undefined ||
+            (plan.revealSetting !== undefined && !(await this.deps.settingExists(plan.revealSetting))) ||
+            (plan.vaultEntry !== undefined && !(await this.deps.vaultEntryExists(plan.vaultEntry)));
         return { outcome: reused ? "reused" : "opened", label, blockId, ...(missing ? { place: "missing" as const } : {}) };
     }
 
