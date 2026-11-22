@@ -37,7 +37,7 @@ vi.mock("./lease-step", () => ({
     releaseOnPageHide: () => {},
 }));
 
-import { openStreamedPane, streamedUrl } from "./streamed-client";
+import { openStreamedPane, screenModeAsked, streamedUrl } from "./streamed-client";
 
 function events(): StreamedEvents & { log: string[] } {
     const log: string[] = [];
@@ -63,6 +63,25 @@ afterEach(() => {
     asked.length = 0;
     outcome = Promise.resolve({ ok: true });
     vi.unstubAllGlobals();
+});
+
+describe("screen mode", () => {
+    it("is asked for with mode=screen, and an ordinary pane's address is unchanged", () => {
+        expect(streamedUrl("wss://host.test", start, true)).toContain("mode=screen");
+        expect(streamedUrl("wss://host.test", start)).not.toContain("mode=");
+        expect(streamedUrl("wss://host.test", start, false)).toBe(streamedUrl("wss://host.test", start));
+    });
+
+    it("is asked for by the page's ?screen=1 or the local setting, and by nothing else", () => {
+        vi.stubGlobal("window", { location: { search: "" }, localStorage: { getItem: () => null } });
+        expect(screenModeAsked()).toBe(false);
+        vi.stubGlobal("window", { location: { search: "?screen=1" }, localStorage: { getItem: () => null } });
+        expect(screenModeAsked()).toBe(true);
+        vi.stubGlobal("window", { location: { search: "" }, localStorage: { getItem: (k: string) => (k === "streamedBrowserScreen" ? "1" : null) } });
+        expect(screenModeAsked()).toBe(true);
+        vi.stubGlobal("window", { location: { search: "?screen=0" }, localStorage: { getItem: () => "0" } });
+        expect(screenModeAsked()).toBe(false);
+    });
 });
 
 describe("a streamed pane's socket", () => {

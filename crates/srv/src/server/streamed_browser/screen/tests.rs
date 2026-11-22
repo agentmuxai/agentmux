@@ -52,6 +52,10 @@ async fn wait_for_colour(screen: &x::Screen, x: usize, y: usize, want: [u8; 3], 
     }
 }
 
+/// A page that opens a small pop-up window when it is clicked.
+const POPUP_PAGE: &str = "data:text/html,<html style=\"height:100%25\"><body style=\"height:100%25;margin:0;background:red\" \
+                          onclick=\"window.open('about:blank','','popup,width=300,height=300')\"></body></html>";
+
 /// The real thing, with an Xvfb and a Chrome on this machine: the browser starts on a virtual screen, the page paints (red: the
 /// browser does not report itself as remote-controlled), a click sent at screen level reaches the page (green), a frame of the screen
 /// is a JPEG of the right size, and a typed address changes the page.
@@ -89,6 +93,29 @@ async fn screen_mode_real() {
     let now = pixel(&screen, &screen.grab().unwrap(), px, py);
     let _ = std::fs::remove_file(&file);
     assert!(now.iter().zip([0u8, 255, 0]).any(|(a, w)| a.abs_diff(w) >= 40), "the local file opened: {now:?}");
+}
+
+/// A pop-up the page opens is counted as a second window on the screen (the notice and the key hold follow from it).
+/// Run with the same command as `screen_mode_real`, by name `screen_mode_popup_real`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "needs Xvfb and a Chrome; run by hand on a Linux host"]
+async fn screen_mode_popup_real() {
+    if which::which("Xvfb").is_err() || chromium_missing() {
+        eprintln!("screen_mode_popup_real: no Xvfb or no Chrome here; nothing run");
+        return;
+    }
+    let session = session::start(800, 600, POPUP_PAGE).await.expect("the screen and the browser start");
+    let screen = x::Screen::connect(&session.display).expect("the screen is reachable");
+    wait_for_colour(&screen, 400, 400, [0, 0, 255], 30).await.expect("the page is up");
+    assert_eq!(screen.visible_windows().unwrap(), 1);
+    let click = |kind| ClientMsg::Mouse { kind, x: 400.0, y: 400.0, button: Button::Left, buttons: 1, clicks: 1, mods: 0 };
+    send_input(&screen, &click(MouseKind::Down)).await.unwrap();
+    send_input(&screen, &click(MouseKind::Up)).await.unwrap();
+    let until = Instant::now() + Duration::from_secs(15);
+    while screen.visible_windows().unwrap() < 2 {
+        assert!(Instant::now() < until, "the pop-up was not counted as a window");
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
 }
 
 fn chromium_missing() -> bool {

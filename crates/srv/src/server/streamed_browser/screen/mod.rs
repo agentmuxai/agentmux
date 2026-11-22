@@ -12,6 +12,7 @@ mod held;
 mod keymap;
 mod policy;
 mod session;
+mod watch;
 mod wm;
 mod x;
 
@@ -138,6 +139,12 @@ async fn run(mut socket: WebSocket, start: Start, ended: impl std::future::Futur
         let _ = socket.send(error(&e)).await;
         return;
     }
+    let (wtx, mut counts) = mpsc::unbounded_channel::<usize>();
+    if let Err(e) = watch_windows(&session.display, wtx) {
+        let _ = socket.send(error(&e)).await;
+        return;
+    }
+    let mut watch = watch::Watch::default();
     let _ = socket.send(Message::Text(json!({ "t": "size", "w": start.w, "h": start.h }).to_string().into())).await;
     let mut held = held::Held::default();
     tokio::pin!(ended);
@@ -148,9 +155,16 @@ async fn run(mut socket: WebSocket, start: Start, ended: impl std::future::Futur
                 Some(f) => socket.send(Message::Binary(f.into())).await.is_ok(),
                 None => false,
             },
+            count = counts.recv() => match count {
+                Some(n) => match watch.seen(n, Instant::now()) {
+                    Some(notice) => socket.send(Message::Text(json!({ "t": "notice", "message": notice }).to_string().into())).await.is_ok(),
+                    None => true,
+                },
+                None => false,
+            },
             incoming = socket.recv() => match incoming {
                 Some(Ok(Message::Text(t))) => {
-                    if let Some(said) = on_client(&input, t.as_str(), &start, &mut held).await {
+                    if let Some(said) = on_client(&input, t.as_str(), &start, watch.keys_held(Instant::now()), &mut held).await {
                         socket.send(said).await.is_ok()
                     } else {
                         true
@@ -167,12 +181,38 @@ async fn run(mut socket: WebSocket, start: Start, ended: impl std::future::Futur
     drop(session);
 }
 
-/// One message from the pane, sent to the screen. A word for the pane when there is one to say.
-async fn on_client(screen: &x::Screen, text: &str, start: &Start, held: &mut held::Held) -> Option<Message> {
+/// How many windows the screen shows, told whenever it changes (a look every quarter second, on a thread of its own).
+fn watch_windows(display: &str, tx: mpsc::UnboundedSender<usize>) -> Result<(), String> {
+    let screen = x::Screen::connect(display)?;
+    std::thread::spawn(move || {
+        let mut last = usize::MAX;
+        while !tx.is_closed() {
+            match screen.visible_windows() {
+                Ok(n) if n != last => {
+                    last = n;
+                    if tx.send(n).is_err() {
+                        return;
+                    }
+                }
+                Ok(_) => {}
+                Err(_) => return,
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        }
+    });
+    Ok(())
+}
+
+/// One message from the pane, sent to the screen. A word for the pane when there is one to say. While `keys_held`, a key press or a
+/// paste is dropped (a window just opened that the person did not choose); a release still goes, so no key is left down.
+async fn on_client(screen: &x::Screen, text: &str, start: &Start, keys_held: bool, held: &mut held::Held) -> Option<Message> {
     let msg = match protocol::parse(text) {
         Ok(m) => m,
         Err(e) => return Some(error(&e)),
     };
+    if keys_held && matches!(msg, ClientMsg::Key { kind: KeyKind::Down, .. } | ClientMsg::Paste { .. }) {
+        return None;
+    }
     if let ClientMsg::Key { kind, code, .. } = &msg {
         held.note(code, matches!(kind, KeyKind::Down));
     }
