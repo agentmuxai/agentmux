@@ -415,7 +415,7 @@
         --ring-out: calc(var(--ring-in) + var(--atlas-ring-w, 2px));
         inset: calc(-1px - var(--ring-out)) calc(-1px - var(--ring-out)) calc(-1px - var(--ring-out)) calc(-3px - var(--ring-out));
         border: var(--atlas-ring-w, 2px) var(--atlas-host-line, solid) var(--atlas-host);
-        border-radius: calc(var(--radius-sm) + var(--ring-out));
+        border-radius: var(--radius-sm);
         pointer-events: none;
     }
 
