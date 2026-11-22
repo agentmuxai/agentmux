@@ -9,7 +9,17 @@
 import type { AgentEntry, AgentIndex, TaskEntry, TaskIndex } from "./types";
 
 /** Names that are also ordinary words. Written alone, in any case, they are not linked (D3): only `Name@computer`, or an id that is more than the word. */
-const NEVER_ALONE_WORDS = ["will", "mark", "grace", "hope", "rose", "sage", "patch", "pulp", "ace", "art", "wren", "may", "bill"];
+const NEVER_ALONE_WORDS = ["will", "mark", "grace", "hope", "rose", "sage", "patch", "ace", "art", "wren", "may", "bill"];
+
+/**
+ * Whether an agent's slug or id, written `written`, is read as the agent when it stands alone in text. It is when it is
+ * the display name's own word in another case (`opaz` for Opaz), or carries a digit (`naki-2`, `opaz-0909m`): more than
+ * a word. An id that is another plain word (the slug `pulse` of the agent Pulp) is never the agent on its own: the
+ * product "Pulse" is not a mention. It links only with its computer (`pulse@computer`).
+ */
+function aliasStandsAlone(agent: AgentEntry, written: string): boolean {
+    return written.toLowerCase() === agent.name.trim().toLowerCase() || /\d/.test(written);
+}
 
 export type AgentIndexOptions = { localComputer?: string; neverAlone?: string[]; version?: number };
 
@@ -34,7 +44,12 @@ export function buildAgentIndex(agents: AgentEntry[], options: AgentIndexOptions
     return {
         version: options.version ?? 0,
         localComputer: options.localComputer,
-        find: (written) => byName.get(written) ?? byKey.get(written.toLowerCase()),
+        find: (written, withComputer = false) => {
+            const named = byName.get(written);
+            if (named) return named;
+            const keyed = byKey.get(written.toLowerCase());
+            return keyed && (withComputer || aliasStandsAlone(keyed, written)) ? keyed : undefined;
+        },
         neverAlone: (written) => never.has(written.toLowerCase()),
         startsWith: (char) => firsts.has(char),
     };
