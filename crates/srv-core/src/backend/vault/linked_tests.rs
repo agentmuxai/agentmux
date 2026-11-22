@@ -196,6 +196,7 @@ fn list_and_show_tell_an_agent_the_place_the_readers_and_the_copies_and_never_th
         key: "api.token".into(),
         checked: None,
         link_only: true,
+        backed: false,
         readers: lines(READERS_TEXT).into_iter().map(str::to_string).collect(),
         rotated: Some("2026-10-01".into()),
         copies: lines(COPIES_TEXT).into_iter().map(str::to_string).collect(),

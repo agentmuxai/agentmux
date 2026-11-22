@@ -251,9 +251,12 @@ pub struct AgentLink {
     pub key: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checked: Option<VaultSourceCheck>,
-    /// The entry is a link (`linked`): it holds no value, and the key is only at the place.
+    /// The entry is a link (`linked`): it holds no value, and the key is only at the place. A use of it is refused.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub link_only: bool,
+    /// The entry is backed by AWS Secrets Manager: the Vault keeps no value, and each use reads the key at the place.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub backed: bool,
     /// Who or what reads the key, as recorded.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub readers: Vec<String>,
@@ -288,7 +291,8 @@ pub fn for_agent(store: &Store, row: &VaultRow) -> Option<AgentLink> {
         location: link.location,
         key: link.key,
         checked,
-        link_only: linked::is_linked(&fields),
+        link_only: linked::is_linked(&fields) && !linked::is_backed(&fields),
+        backed: linked::is_backed(&fields),
         readers: lines(linked::READERS),
         rotated: fields.get(linked::ROTATED).cloned(),
         copies: lines(linked::COPIES),
