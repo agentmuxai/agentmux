@@ -153,7 +153,7 @@ export function createKanbanSection(props: SectionProps) {
     const [showUntracked, setShowUntracked] = createSignal(true);
     const [adding, setAdding] = createSignal(false);
     // The panel that creates and manages boards (a panel, never a modal).
-    const [managing, setManaging] = createSignal<false | "new" | "manage">(false);
+    const [managing, setManaging] = createSignal<false | "new" | "manage" | "prs">(false);
     const [openId, setOpenId] = createSignal<string | null>(null);
     const [ownLanes, setOwnLanes] = createSignal(false);
     const lanes = () => props.lanes ?? ownLanes();
