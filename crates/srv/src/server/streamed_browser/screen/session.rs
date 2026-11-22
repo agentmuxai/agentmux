@@ -67,6 +67,22 @@ fn command(program: &Path, args: &[String], display: Option<&str>) -> Command {
     c
 }
 
+/// The browser's command, with its policy for this one instance: in a task-scoped container the container's own policy folder is the instance's;
+/// on a shared host the browser starts inside its own mount namespace, where only the policy folder is this instance's own.
+fn browser_command(chrome_bin: &Path, args: &[String], profile: &Path, display: &str) -> Result<Command, String> {
+    if super::policy::form() == super::policy::Form::Task {
+        return Ok(command(chrome_bin, args, Some(display)));
+    }
+    let policy_src = profile.join("policy");
+    super::policy::write_instance(&policy_src)?;
+    let bwrap = which::which(super::confine::PROGRAM).map_err(|_| "screen mode needs bubblewrap (the `bwrap` program)".to_string())?;
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let mut all = super::confine::args(&policy_src, &super::policy::policy_dir(chrome_bin), home.as_deref());
+    all.push(chrome_bin.display().to_string());
+    all.extend(args.iter().cloned());
+    Ok(command(&bwrap, &all, Some(display)))
+}
+
 /// Start the screen, the window manager and the browser, and say which display they are on.
 pub async fn start(w: u32, h: u32, url: &str) -> Result<Session, String> {
     let xvfb_bin = which::which("Xvfb").map_err(|_| "this server has no Xvfb to make a virtual screen with".to_string())?;
@@ -93,7 +109,8 @@ pub async fn start(w: u32, h: u32, url: &str) -> Result<Session, String> {
         Err(_) => None,
     };
     let no_sandbox = std::env::var(chromium::NO_SANDBOX_ENV).is_ok_and(|v| v == "1");
-    let chrome = command(&chrome_bin, &chrome_args(profile.path(), proxy_port, w, h, url, no_sandbox, wm.is_some()), Some(&display))
+    let args = chrome_args(profile.path(), proxy_port, w, h, url, no_sandbox, wm.is_some());
+    let chrome = browser_command(&chrome_bin, &args, profile.path(), &display)?
         .spawn()
         .map_err(|e| format!("cannot start {}: {e}", chrome_bin.display()))?;
     Ok(Session { display, _xvfb: xvfb, _wm: wm, _chrome: chrome, _profile: profile })

@@ -78,7 +78,55 @@ pub fn sandboxed_install(binary: &Path) -> bool {
     text.starts_with("#!") && (text.contains("/snap/") || text.contains("snap run") || text.contains("flatpak run"))
 }
 
-/// The browser will start under the policy, or the words that say what to install. Never writes: the file is system-wide.
+/// Where the browser's policy comes from: a folder made for this one instance (a mount namespace, the shared-host form), or the folder of a
+/// container that holds only this browser (the task-scoped form, chosen by `FORM_ENV=task`). Never a machine-wide file on a machine that also
+/// runs a streamed browser.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Form {
+    Namespace,
+    Task,
+}
+
+/// The setting that says this server is a hosted task that holds one screen-mode browser and no streamed browser.
+pub const FORM_ENV: &str = "AGENTMUX_STREAMED_BROWSER_SCREEN_POLICY";
+
+pub fn form() -> Form {
+    form_of(std::env::var(FORM_ENV).ok().as_deref())
+}
+
+fn form_of(setting: Option<&str>) -> Form {
+    if setting == Some("task") {
+        Form::Task
+    } else {
+        Form::Namespace
+    }
+}
+
+/// Write this instance's policy into `dir` (made if it is not there): the folder the namespace puts where the browser reads its policy.
+pub fn write_instance(dir: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("cannot make the browser's policy folder: {e}"))?;
+    let text = serde_json::to_string_pretty(&wanted()).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join(FILE_NAME), text).map_err(|e| format!("cannot write the browser's policy: {e}"))
+}
+
+/// Whether any of these program names is a Chrome or Chromium (a process's `comm`).
+fn any_browser(names: &[String]) -> bool {
+    names.iter().any(|n| n.starts_with("chrome") || n.starts_with("chromium"))
+}
+
+/// The names of the programs running in this container (each process's `comm`).
+fn running_programs() -> Vec<String> {
+    let Ok(dir) = std::fs::read_dir("/proc") else { return Vec::new() };
+    dir.flatten()
+        .filter(|e| e.file_name().to_string_lossy().bytes().all(|b| b.is_ascii_digit()))
+        .filter_map(|e| std::fs::read_to_string(e.path().join("comm")).ok())
+        .map(|s| s.trim().to_string())
+        .collect()
+}
+
+/// The browser will start under the policy for its form, or the words that say what is missing. Never writes a machine-wide file.
+/// Namespace form: bubblewrap must be there. Task form: the container's policy file must hold, and no browser may already be running in
+/// the container (a streamed browser sharing it would be bound by the same file).
 pub fn ensure(binary: &Path) -> Result<(), String> {
     if sandboxed_install(binary) {
         return Err(format!(
@@ -86,11 +134,21 @@ pub fn ensure(binary: &Path) -> Result<(), String> {
             binary.display()
         ));
     }
-    let path = policy_dir(binary).join(FILE_NAME);
-    if std::fs::read_to_string(&path).is_ok_and(|t| holds(&t)) {
-        return Ok(());
+    match form() {
+        Form::Namespace => which::which(super::confine::PROGRAM).map(|_| ()).map_err(|_| {
+            "screen mode needs bubblewrap (the `bwrap` program) to give each browser its own policy folder; install it (for example `apt install bubblewrap`). It does not write a machine-wide policy file".to_string()
+        }),
+        Form::Task => {
+            let path = policy_dir(binary).join(FILE_NAME);
+            if !std::fs::read_to_string(&path).is_ok_and(|t| holds(&t)) {
+                return Err(missing_words(&path));
+            }
+            if any_browser(&running_programs()) {
+                return Err("screen mode in a task-scoped container needs the container to hold this one browser: another browser is already running in it".to_string());
+            }
+            Ok(())
+        }
     }
-    Err(missing_words(&path))
 }
 
 /// What to install, in words: the file, and what it holds.
@@ -149,6 +207,29 @@ exec /opt/google/chrome/chrome \"$@\"
 ").unwrap();
         assert!(!sandboxed_install(&plain));
         assert!(ensure(&shim).unwrap_err().contains("snap or flatpak"));
+    }
+
+    #[test]
+    fn the_form_is_the_shared_host_one_unless_the_task_form_is_asked_for() {
+        assert_eq!(form_of(None), Form::Namespace);
+        assert_eq!(form_of(Some("")), Form::Namespace);
+        assert_eq!(form_of(Some("task")), Form::Task);
+    }
+
+    #[test]
+    fn the_instances_policy_is_written_and_holds() {
+        let dir = tempfile::tempdir().unwrap();
+        write_instance(&dir.path().join("managed")).unwrap();
+        let text = std::fs::read_to_string(dir.path().join("managed").join(FILE_NAME)).unwrap();
+        assert!(holds(&text));
+    }
+
+    #[test]
+    fn another_browser_in_the_container_is_seen_by_its_program_name() {
+        let names = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(any_browser(&names(&["srv", "chrome"])));
+        assert!(any_browser(&names(&["chromium"])));
+        assert!(!any_browser(&names(&["srv", "Xvfb", "openbox"])));
     }
 
     #[test]

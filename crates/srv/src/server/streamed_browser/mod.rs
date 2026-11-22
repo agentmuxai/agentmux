@@ -104,7 +104,22 @@ pub(in crate::server) async fn handle(
     if params.mode.as_deref() == Some("screen") {
         return screen_pane(ws, start, session_ended(session));
     }
+    // A task-scoped server (one screen-mode browser in its container, its policy the container's own) serves no streamed browser: the two would
+    // share one policy file.
+    if streamed_closed() {
+        return (StatusCode::NOT_FOUND, "this server's browser is the full browser only").into_response();
+    }
     upgrade(ws, start, session_ended(session))
+}
+
+#[cfg(target_os = "linux")]
+fn streamed_closed() -> bool {
+    screen::task_form()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn streamed_closed() -> bool {
+    false
 }
 
 /// A screen-mode pane, when this server has that mode on.

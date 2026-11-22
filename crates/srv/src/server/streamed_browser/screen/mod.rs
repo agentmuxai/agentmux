@@ -7,6 +7,7 @@
 //! does not report itself as remote-controlled (Chromium turns that report on for a debugging pipe, an automation or headless switch).
 //! A prototype for the decision in task 48354: no agent driving, no windows list, a US keyboard, a fixed screen size.
 
+mod confine;
 mod frames;
 mod keymap;
 mod policy;
@@ -44,7 +45,7 @@ struct Place;
 
 impl Place {
     fn take() -> Option<Self> {
-        if OPEN.fetch_add(1, Ordering::SeqCst) >= MAX_SESSIONS {
+        if OPEN.fetch_add(1, Ordering::SeqCst) >= limit() {
             OPEN.fetch_sub(1, Ordering::SeqCst);
             return None;
         }
@@ -58,6 +59,21 @@ impl Drop for Place {
     }
 }
 
+/// A hosted task that holds one screen-mode browser and nothing else (the task-scoped policy form): it serves no streamed browser, and one
+/// screen session.
+pub fn task_form() -> bool {
+    policy::form() == policy::Form::Task
+}
+
+/// How many screen sessions at once: a task-scoped container holds one browser.
+fn limit() -> usize {
+    if task_form() {
+        1
+    } else {
+        MAX_SESSIONS
+    }
+}
+
 pub fn enabled() -> bool {
     std::env::var(ENABLE_ENV).is_ok_and(|v| v == "1")
 }
@@ -66,7 +82,7 @@ pub fn enabled() -> bool {
 pub fn upgrade(ws: WebSocketUpgrade, start: Start, ended: impl std::future::Future<Output = ()> + Send + 'static) -> Response {
     ws.protocols([WS_PROTOCOL]).on_upgrade(move |mut socket| async move {
         let Some(_place) = Place::take() else {
-            let _ = socket.send(error(&format!("the server's browser is busy ({MAX_SESSIONS} panes are open)"))).await;
+            let _ = socket.send(error(&format!("the server's browser is busy ({} panes are open)", limit()))).await;
             return;
         };
         run(socket, start, ended).await;
