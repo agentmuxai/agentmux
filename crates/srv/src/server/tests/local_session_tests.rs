@@ -312,3 +312,24 @@ async fn only_the_socket_of_the_session_signed_out_hears_it() {
     assert!(!waiting_b.is_finished(), "the other browser's socket stays open");
     waiting_b.abort();
 }
+
+#[test]
+fn a_confirm_is_recorded_under_the_check_phrase_and_the_record_is_capped() {
+    let store = SessionStore::default();
+    let now = Instant::now();
+    assert!(!store.note_confirm("no such code", ConfirmHow::Outside, now), "nothing waits on that code");
+    let mut last = String::new();
+    for _ in 0..(MAX_CONFIRMS + 5) {
+        let code = store.mint_code(now);
+        let entered = store.enter(&code, now).unwrap();
+        assert!(store.note_confirm(&code, ConfirmHow::Unknown, now));
+        last = entered.phrase;
+        assert!(store.decide(&code, false, now));
+    }
+    let confirms = store.confirms();
+    assert_eq!(confirms.len(), MAX_CONFIRMS);
+    assert_eq!(confirms.last().unwrap().session, last);
+    assert_eq!(ConfirmHow::Refused("agent:opaz".into()).label(), "refused: agent:opaz");
+    assert_eq!(ConfirmHow::Outside.label(), "peer outside agent trees");
+    assert_eq!(ConfirmHow::Unknown.label(), "peer unknown");
+}

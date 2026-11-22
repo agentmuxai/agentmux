@@ -11,6 +11,20 @@ import type { ParsedDeepLink } from "./parse";
 import { DEEPLINK_REGISTRY } from "./registry.generated";
 import type { DeepLinkPlace, DeepLinkRegistry, DeepLinkView } from "./registry-types";
 
+/** The contract every opener is written against (the executor implements it; R11a). */
+export type {
+    CanOpen,
+    DestinationRequest,
+    OpenDestination,
+    OpenOptions,
+    OpenOutcome,
+    OpenOutcomeKind,
+    OpenReasonCode,
+    OpenSource,
+    OpenTarget,
+    OpenWrappers,
+} from "./open-types";
+
 export const DEEPLINKS: DeepLinkRegistry = DEEPLINK_REGISTRY;
 
 export function deepLinkView(id: string): DeepLinkView | undefined {

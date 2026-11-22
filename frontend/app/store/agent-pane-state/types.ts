@@ -659,6 +659,8 @@ export type AgentPaneCommand =
           attachments?: { id: string; name: string }[];
           /** The pane sends it on AgentMux's behalf (the start-up document): a retry sends it so again. */
           system?: boolean;
+          /** The same message again (a Retry): acceptance takes it off the queue and adds no second node. */
+          resend?: boolean;
           /**
            * True when the user sent this while a turn was in flight (isWorking was true before
            * TurnStart); false for idle sends. Stored on the PendingMessage entry;

@@ -56,6 +56,7 @@ pub async fn bind_listeners_and_network(
     // until the editor pane calls `lspstart`. Spec:
     // docs/specs/SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md
     let lsp_supervisor = Arc::new(backend::lsp::LspSupervisor::new(event_bus.clone()));
+    lsp_supervisor.spawn_recheck();
 
     sweep_stale_registry_entries();
     spawn_registry_heartbeat(local_web_url.clone());

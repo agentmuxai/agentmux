@@ -53,6 +53,15 @@ pub enum ClientMsg {
     Paste { text: String },
     Resize { w: u32, h: u32 },
     Nav { go: Go, #[serde(default)] url: String },
+    /// Show or close one of the pane's windows (`windows.rs`).
+    Window { op: WindowOp, id: u32 },
+}
+
+#[derive(Debug, Deserialize, PartialEq, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+pub enum WindowOp {
+    Focus,
+    Close,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Clone, Copy)]
@@ -249,6 +258,16 @@ mod tests {
         let paste = |n: usize| format!(r#"{{"t":"paste","text":"{}"}}"#, "p".repeat(n));
         assert!(parse(&paste(MAX_PASTE_BYTES)).is_ok());
         assert!(parse(&paste(MAX_PASTE_BYTES + 1)).is_err());
+    }
+
+    #[test]
+    fn a_window_can_be_shown_or_closed_by_its_number_and_nothing_else_is_taken() {
+        assert_eq!(parse(r#"{"t":"window","op":"focus","id":2}"#).unwrap(), ClientMsg::Window { op: WindowOp::Focus, id: 2 });
+        assert_eq!(parse(r#"{"t":"window","op":"close","id":1}"#).unwrap(), ClientMsg::Window { op: WindowOp::Close, id: 1 });
+        for bad in [r#"{"t":"window","op":"open","id":1}"#, r#"{"t":"window","op":"focus"}"#, r#"{"t":"window","op":"focus","id":-1}"#, r#"{"t":"window","op":"focus","id":"1"}"#] {
+            assert!(parse(bad).is_err(), "{bad}");
+        }
+        assert!(input_call(&ClientMsg::Window { op: WindowOp::Focus, id: 0 }).is_none(), "a window move is not input to the page");
     }
 
     #[test]

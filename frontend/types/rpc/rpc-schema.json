@@ -1246,6 +1246,25 @@
     }
   },
   {
+    "command": "agentquit",
+    "request": "agentmux_srv_core::backend::rpc_types::agent_quit::CommandAgentQuitData",
+    "requestName": "CommandAgentQuitData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentQuitData"
+      ],
+      "name": "CommandAgentQuitData"
+    },
+    "response": "serde_json::value::Value",
+    "responseName": "Value",
+    "responseTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    }
+  },
+  {
     "command": "agentruntime.list",
     "request": "serde_json::value::Value",
     "requestName": "Value",
@@ -1281,6 +1300,25 @@
         "MigrateForkSlugsResult"
       ],
       "name": "MigrateForkSlugsResult"
+    }
+  },
+  {
+    "command": "agentshutdown",
+    "request": "agentmux_srv_core::backend::rpc_types::agent_quit::CommandAgentShutdownData",
+    "requestName": "CommandAgentShutdownData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentShutdownData"
+      ],
+      "name": "CommandAgentShutdownData"
+    },
+    "response": "serde_json::value::Value",
+    "responseName": "Value",
+    "responseTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
     }
   },
   {
@@ -3395,6 +3433,44 @@
         "FleetGroup"
       ],
       "name": "FleetGroup"
+    }
+  },
+  {
+    "command": "folderoverlapaccept",
+    "request": "agentmux_srv_core::backend::rpc_types::folder_overlap::CommandFolderOverlapAcceptData",
+    "requestName": "CommandFolderOverlapAcceptData",
+    "requestTs": {
+      "imports": [
+        "CommandFolderOverlapAcceptData"
+      ],
+      "name": "CommandFolderOverlapAcceptData"
+    },
+    "response": "agentmux_srv_core::backend::rpc_types::folder_overlap::FolderOverlapAcceptResult",
+    "responseName": "FolderOverlapAcceptResult",
+    "responseTs": {
+      "imports": [
+        "FolderOverlapAcceptResult"
+      ],
+      "name": "FolderOverlapAcceptResult"
+    }
+  },
+  {
+    "command": "folderoverlapcheck",
+    "request": "agentmux_srv_core::backend::rpc_types::folder_overlap::CommandFolderOverlapCheckData",
+    "requestName": "CommandFolderOverlapCheckData",
+    "requestTs": {
+      "imports": [
+        "CommandFolderOverlapCheckData"
+      ],
+      "name": "CommandFolderOverlapCheckData"
+    },
+    "response": "agentmux_srv_core::backend::rpc_types::folder_overlap::FolderOverlapCheckResult",
+    "responseName": "FolderOverlapCheckResult",
+    "responseTs": {
+      "imports": [
+        "FolderOverlapCheckResult"
+      ],
+      "name": "FolderOverlapCheckResult"
     }
   },
   {

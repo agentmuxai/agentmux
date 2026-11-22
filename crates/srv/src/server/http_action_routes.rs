@@ -96,6 +96,8 @@ pub(super) const HANDLER: &[&str] = &[
 /// Answers a question or carries a stream; nothing it changes is kept.
 pub(super) const NEVER: &[&str] = &[
     "POST /agentmux/agents/resolve", "POST /agentmux/wps/publish", "POST /api/post-chat-message",
+    // An instance asking another whether it sent a forwarded broadcast; the forward itself is recorded.
+    "POST /agentmux/agent/broadcast/confirm",
     // The Audit's read of another channel's own rows, every ten seconds while it is listed: a record of each would
     // be rows in the Audit it reads.
     "POST /agentmux/audit/own",

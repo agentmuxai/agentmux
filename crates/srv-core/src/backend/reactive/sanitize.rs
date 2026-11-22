@@ -327,6 +327,9 @@ fn whole_word_spots<'a>(lower: &'a str, needle: &'a str) -> impl Iterator<Item =
 /// tokens", "token budget"); in any other place it is refused. A jekt's tier still escalates on the bare word, as
 /// `is_sensitive_message` says.
 pub fn post_refusal_reason(msg: &str) -> Option<String> {
+    if let Some(rule) = super::post_secrets::refusal_rule(msg) {
+        return Some(rule.to_string());
+    }
     let lower = as_read(msg);
     if let Some(kw) = SENSITIVE_SUBSTRING_KEYWORDS.iter().find(|kw| lower.contains(**kw)) {
         return Some((*kw).to_string());

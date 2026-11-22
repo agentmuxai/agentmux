@@ -137,6 +137,8 @@ pub const ROUTES: &[(Match, Audience)] = &[
     // For everyone: whatever a native agent can use, a container agent can too.
     (Match::Route("/"), Audience::Everyone),
     (Match::Route("/agentmux/agent/broadcast"), Audience::Everyone),
+    // An instance asking another whether it sent a forward: the handler refuses a request that carries an agent's token.
+    (Match::Route("/agentmux/agent/broadcast/confirm"), Audience::Everyone),
     (Match::Route("/agentmux/agent/release"), Audience::Everyone),
     (Match::Route("/agentmux/agent/stop"), Audience::Everyone),
     (Match::Route("/agentmux/agent/stop-pending"), Audience::Everyone),

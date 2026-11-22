@@ -19,6 +19,8 @@ import type { RecentSessionRow } from "@/types/rpc/RecentSessionRow";
 import { eventBelongsToPaneOf } from "@/util/focusutil";
 import { Logger } from "@/util/logger";
 import { batch, createEffect, createSignal, on, onCleanup, type Accessor, type Setter } from "solid-js";
+import { forgetOpenHere, requestOpenHere } from "../failure/open-here";
+import { markOpenHerePane, unmarkOpenHerePane } from "../failure/open-here-mark";
 import { requestShutdown } from "../shutdown/shut-down-agent";
 import { createEnvDraft, type EnvDraft } from "./AgentEnvPanel";
 import { columnsForWidth, gridMetrics, type GridMetrics } from "./my-agents-grid-columns";
@@ -133,6 +135,9 @@ const setForkState = (s: RowPanelsState, definitionId: string, state: ForkState)
     });
 };
 
+/** An agent with no turn running can be moved without cutting work off; a working one keeps Switch and Fork only. */
+export const canOpenHere = (state: string | undefined): boolean => state === "idle" || state === "stopped";
+
 const openMap = (s: RowPanelsState): Map<string, string> =>
     s.freshOpen() ?? s.props.openDefinitions?.() ?? new Map<string, string>();
 
@@ -204,6 +209,32 @@ async function handleOpenNewSession(s: RowPanelsState, row: RecentSessionRow): P
             loading: false,
             error: null,
         });
+    }
+}
+
+/**
+ * Open here: the agent is open in another pane and this pane takes it. This pane is bound to the agent as
+ * any open does it, marked so the refusal that follows is answered with Move here (which keeps the session
+ * and sends nothing) and the pane that held it is closed (failure/open-here.ts). An agent that is no longer
+ * open elsewhere by the time of the click is just opened.
+ */
+async function handleOpenHere(s: RowPanelsState, row: RecentSessionRow): Promise<void> {
+    const open = await readOpenNow(s);
+    const blockId = s.props.paneBlockId;
+    closePanels(s);
+    if (!blockId || !open?.has(row.definition_id)) {
+        s.props.onReattach(row);
+        return;
+    }
+    requestOpenHere(blockId);
+    try {
+        await markOpenHerePane(blockId);
+        await s.props.onReattach(row);
+    } catch (e) {
+        // The launch reports its own failure on the pane (finishAgentOpen); only the mark is left to drop.
+        forgetOpenHere(blockId);
+        void unmarkOpenHerePane(blockId);
+        Logger.warn("agent-picker", `Open here failed: ${errorDetail(e)}`);
     }
 }
 
@@ -623,6 +654,8 @@ export function createRowPanels(
         handleAttachNoPane: (row: RecentSessionRow): void => handleAttachNoPane(s, row),
         handleOpenNewSession: (row: RecentSessionRow): Promise<void> => handleOpenNewSession(s, row),
         handleSwitchToExisting: (row: RecentSessionRow): Promise<void> => handleSwitchToExisting(s, row),
+        handleOpenHere: (row: RecentSessionRow): Promise<void> => handleOpenHere(s, row),
+        canOpenHere: (definitionId: string): boolean => canOpenHere(s.props.runtimeOf?.(definitionId)?.state),
         handleForkStart: (row: RecentSessionRow): Promise<void> => handleForkStart(s, row),
         handleForkCancel: (definitionId: string): void => handleForkCancel(s, definitionId),
         handleRenameSubmit: (row: RecentSessionRow): Promise<void> => handleRenameSubmit(s, row),

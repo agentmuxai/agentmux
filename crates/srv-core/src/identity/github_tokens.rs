@@ -62,6 +62,11 @@ impl Want {
     fn normalized(&self) -> Self {
         Self { agent: self.agent.clone(), owner: self.owner.to_ascii_lowercase(), repo: self.repo.to_ascii_lowercase(), workflows: self.workflows }
     }
+
+    /// Who holds this token in the transcript withhold registry: each token is held until its own expiry.
+    fn withhold_owner(&self) -> String {
+        format!("github-token:{}:{}/{}:{}", self.agent, self.owner, self.repo, self.workflows)
+    }
 }
 
 /// GitHub's own rule for an owner or a repository name, narrowed: letters, digits, `-`, `_`, `.`.
@@ -186,6 +191,10 @@ impl Tokens {
         match &result {
             Ok(minted) => {
                 st.refused.remove(&want);
+                // A token an agent's git or `gh` holds is never written into a transcript, until it runs out: a renewed
+                // token does not end the one it replaced, which works for its last minutes, and a disconnect only
+                // makes srv forget it, so the token still works until its expiry.
+                crate::backend::transcript::withhold::hold_until(&want.withhold_owner(), &minted.token, minted.expires_at.saturating_mul(1000));
                 st.cache.insert(want.clone(), minted.clone());
             }
             // A bad moment at the broker doesn't take back a token that still works.
@@ -683,6 +692,46 @@ mod tests {
         assert_eq!(asked[0].permissions, permissions_for(false));
         assert!(!asked[0].permissions.contains_key("workflows"), "no CI changes unless the person allowed them");
         assert!(!format!("{minted:?}").contains("ghs_TOKEN"));
+    }
+
+    #[tokio::test]
+    async fn a_minted_token_is_withheld_from_transcripts_until_it_runs_out() {
+        use crate::backend::transcript::withhold;
+        let now = chrono::Utc::now().timestamp();
+        let answer = |value: &str, secs: i64| {
+            let at = chrono::DateTime::from_timestamp(now + secs, 0).unwrap().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            InstallationToken { token: value.to_string(), ..token(&at) }
+        };
+        let shown = |value: &str| withhold::text(&format!("GH_TOKEN={value}")).into_owned();
+        let w = Want { agent: "withhold-gh-agent".into(), ..want("o", "r") };
+        let fake = Fake::new(vec![vec![link(5, "o", "active", "active")]], vec![Ok(answer("ghs_canary_withhold_0001", 3600)), Ok(answer("ghs_canary_withhold_0002", 7200))]);
+        let tokens = Tokens::default();
+
+        tokens.token_for(&fake, &w, now).await.unwrap();
+        assert_eq!(shown("ghs_canary_withhold_0001"), format!("GH_TOKEN={}", withhold::MARK), "withheld from the moment it is minted");
+
+        // Within five minutes of running out it is renewed: both tokens work, so both are withheld.
+        tokens.token_for(&fake, &w, now + 3600 - 100).await.unwrap();
+        assert_eq!(shown("ghs_canary_withhold_0002"), format!("GH_TOKEN={}", withhold::MARK));
+        assert_eq!(shown("ghs_canary_withhold_0001"), format!("GH_TOKEN={}", withhold::MARK), "the token that was replaced still works");
+
+        // A disconnect makes srv forget its cached tokens; they still work until they expire, so they stay withheld.
+        *fake.connection.lock().unwrap() = Err(TokenError::NoGithubAccount);
+        tokens.token_for(&fake, &w, now + 3600).await.unwrap_err();
+        assert_eq!(shown("ghs_canary_withhold_0002"), format!("GH_TOKEN={}", withhold::MARK));
+        assert_eq!(shown("ghs_canary_withhold_0001"), format!("GH_TOKEN={}", withhold::MARK));
+    }
+
+    #[tokio::test]
+    async fn a_minted_token_stops_being_withheld_when_it_runs_out() {
+        use crate::backend::transcript::withhold;
+        let at = chrono::Utc::now().timestamp() - 1;
+        let stamp = chrono::DateTime::from_timestamp(at, 0).unwrap().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let fake = Fake::new(vec![vec![link(5, "o", "active", "active")]], vec![Ok(InstallationToken { token: "ghs_canary_withhold_0003".to_string(), ..token(&stamp) })]);
+        let w = Want { agent: "withhold-gh-expired".into(), ..want("o", "r") };
+        Tokens::default().token_for(&fake, &w, at - 3600).await.unwrap();
+        let line = "GH_TOKEN=ghs_canary_withhold_0003";
+        assert_eq!(withhold::text(line), line, "a token whose expiry has passed is not kept");
     }
 
     #[test]

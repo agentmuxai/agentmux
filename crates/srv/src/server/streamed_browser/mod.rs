@@ -15,12 +15,18 @@ mod address_proxy;
 mod cdp;
 #[cfg_attr(not(unix), allow(dead_code))]
 mod chromium;
+#[cfg(test)]
+mod fake_browser;
 mod host;
 mod lease_token;
 mod nav;
 #[cfg_attr(not(unix), allow(dead_code))]
 mod pane;
+#[cfg_attr(not(unix), allow(dead_code))]
+mod popups;
 mod protocol;
+#[cfg_attr(not(unix), allow(dead_code))]
+mod windows;
 
 use axum::extract::ws::rejection::WebSocketUpgradeRejection;
 use axum::extract::{Extension, Query, WebSocketUpgrade};

@@ -70,6 +70,19 @@ async fn a_container_agent_gets_credentials_the_sdk_can_read() {
 }
 
 #[tokio::test]
+async fn the_secret_key_and_session_token_an_agent_was_given_are_withheld_from_transcripts() {
+    use crate::backend::transcript::withhold;
+    let state = test_state();
+    let me = agent(&state, "container");
+    let line = "AWS_SECRET_ACCESS_KEY=test-secret-value AWS_SESSION_TOKEN=test-session-token AWS_ACCESS_KEY_ID=AKIATESTKEY";
+    let (status, _) = call(&state, &me, &Fake::ok(creds_json(60)), &Sessions::default(), request("read", None)).await;
+    assert_eq!(status, StatusCode::OK);
+    let shown = withhold::text(line);
+    assert!(!shown.contains("test-secret-value") && !shown.contains("test-session-token"), "{shown}");
+    assert!(shown.contains("AKIATESTKEY"), "the key id is not a secret: {shown}");
+}
+
+#[tokio::test]
 async fn a_fresh_grant_is_one_audit_row_and_a_cache_hit_is_none() {
     let state = test_state();
     let me = agent(&state, "container");

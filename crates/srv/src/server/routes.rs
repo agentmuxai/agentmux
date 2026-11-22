@@ -936,6 +936,8 @@ fn forward_messaging_and_work_routes() -> Router<AppState> {
         // same trust model as the stop forward above. The caller sends only the
         // body; this instance writes the header.
         .route("/agentmux/agent/broadcast", post(handle_agent_broadcast_forward))
+        // The receiving instance asks the sending one whether it sent the forward from the operator's window.
+        .route("/agentmux/agent/broadcast/confirm", post(handle_agent_broadcast_confirm))
         // The same forward, for an agent's FleetBulkStop: this instance's
         // user gets the 30 s override window (SPEC_AGENT_SELF_QUIT §6.5).
         .route("/agentmux/agent/stop-pending", post(handle_agent_stop_pending_forward))

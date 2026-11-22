@@ -113,6 +113,7 @@ import {
     writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { baseRef, changedRows, untrackedFiles } from "./lib/branch-changes.mjs";
 import { isMain } from "./lib/is-main.mjs";
 
 export const INDEX = "docs/specs/INDEX.md";
@@ -561,31 +562,26 @@ const IN_SCOPE = /^(docs\/specs\/.*[.]md|scripts\/gen-docs-index\.(sh|mjs)|\.git
 /** Returns `{ check: boolean, message: string[] }`. */
 export function shouldCheck(root, env) {
     const base = env.GITHUB_BASE_REF || "main";
-    let ref;
-    if (git(root, ["rev-parse", "--verify", "--quiet", `origin/${base}`], env) !== null) {
-        ref = `origin/${base}`;
-    } else if (git(root, ["rev-parse", "--verify", "--quiet", base], env) !== null) {
-        ref = base;
-    } else {
+    const ref = baseRef(root, env);
+    if (ref === null) {
         // Same posture as check-doc-status.sh: an unresolvable base is a CI
         // environment problem, not a docs problem. Skip rather than fail.
         return { check: false, message: [`gen-docs-index: cannot resolve base ref '${base}' — skipping.`] };
     }
-    const diff = git(root, ["diff", "--name-status", "-z", "--find-renames", `${ref}...HEAD`], env);
-    if (diff !== null) {
-        const fields = splitNul(diff).map((b) => b.toString("latin1"));
-        for (let i = 0; i < fields.length;) {
-            const status = fields[i++];
-            const nPaths = status.startsWith("R") || status.startsWith("C") ? 2 : 1;
-            for (let k = 0; k < nPaths && i < fields.length; k++) {
-                if (IN_SCOPE.test(fields[i++])) return { check: true, message: [] };
-            }
-        }
+    // The working tree counts, so a spec that is staged and not yet committed is asserted too: the answer is the same
+    // before and after the commit (scripts/lib/branch-changes.mjs).
+    const rows = changedRows({ root, ref });
+    if (rows !== null && rows.some((r) => r.slice(1).some((p) => IN_SCOPE.test(p)))) {
+        return { check: true, message: [] };
     }
+    const untracked = untrackedFiles(root).filter((p) => IN_SCOPE.test(p));
     return {
         check: false,
         message: [
             "gen-docs-index: no specs changed on this branch — index not asserted.",
+            ...(untracked.length
+                ? [`  (${untracked.length} untracked spec file(s) are not on the branch until you 'git add' them: ${untracked.join(", ")})`]
+                : []),
             "  (run 'bash scripts/gen-docs-index.sh --check-all' to assert anyway)",
         ],
     };

@@ -89,6 +89,17 @@ describe("sendWithState", () => {
         });
     });
 
+    it("tells srv a retry is the same message again, and a fresh send is not", async () => {
+        const model = ready();
+        await withCommands(model, async (c) => {
+            await c.sendWithState("do the thing");
+            expect(hub.agentInput.mock.calls[0][1]).not.toHaveProperty("resend");
+            model.dispatchPane({ type: "TurnReset" }, "system");
+            await c.sendWithState("do the thing", [], false, true);
+            expect(hub.agentInput.mock.calls[1][1]).toMatchObject({ message: "do the thing", resend: true });
+        });
+    });
+
     it("holds a message sent while a turn runs, without starting another", async () => {
         const model = ready();
         model.dispatchPane({ type: "TurnStart", at: Date.now(), content: "first" }, "user");

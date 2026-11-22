@@ -58,6 +58,7 @@ export function onPendingMessageQueued(state: AgentPaneState, command: Extract<A
                     createdAt: command.at,
                     enqueuedWhileBusy: command.enqueuedWhileBusy,
                     ...(command.attachments?.length ? { attachments: command.attachments } : {}), ...(command.system ? { system: true } : {}),
+                    ...(command.resend ? { resend: true } : {}),
                 },
             ],
         },

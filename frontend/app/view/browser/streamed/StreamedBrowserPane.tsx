@@ -4,10 +4,11 @@
 import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { t } from "@/app/i18n/i18n";
-import { Button, IconButton, Notice, TextInput } from "@/app/element/ui";
+import { Button, CloseButton, IconButton, Notice, Tabs, TextInput } from "@/app/element/ui";
 import type { BrowserViewModel } from "../browser-model";
 import { createFramePainter } from "./frame-painter";
 import { attachStageInput } from "./stage-input";
+import { windowLabel } from "./streamed-protocol";
 import { addressToUrl, useStreamedPane, type PaneStatus, type StreamedPane } from "./use-streamed-pane";
 import "./streamed-browser.scss";
 
@@ -67,6 +68,28 @@ function StreamedBar(props: { pane: StreamedPane }): JSX.Element {
     );
 }
 
+/** The windows of the pane, as tabs, while a page has opened one: each says which site it is on; the shown pop-up can be closed. */
+function StreamedWindows(props: { pane: StreamedPane }): JSX.Element {
+    const state = () => props.pane.windows();
+    const shown = () => state()?.windows.find((w) => w.id === state()?.active);
+    return (
+        <Show when={(state()?.windows.length ?? 0) > 1}>
+            <div class="streamed-windows">
+                <Tabs
+                    idPrefix="streamed-windows"
+                    ariaLabel={t("browser.streamed.windows")}
+                    items={(state()?.windows ?? []).map((w) => ({ id: String(w.id), label: windowLabel(w), tooltip: w.url || w.title }))}
+                    value={String(state()?.active ?? 0)}
+                    onChange={(id) => props.pane.showWindow(Number(id))}
+                />
+                <Show when={shown()?.closable}>
+                    <CloseButton size="sm" label={t("browser.streamed.closeWindow")} onClick={() => props.pane.closeWindow(state()?.active ?? 0)} />
+                </Show>
+            </div>
+        </Show>
+    );
+}
+
 /**
  * A Browser pane for a host that has no native browser: the page runs in a Chromium on the server and arrives as
  * frames on a canvas; the mouse, wheel, keyboard and paste go back. The socket is opened when the pane is on screen
@@ -107,6 +130,7 @@ export function StreamedBrowserPane(props: { model: BrowserViewModel }): JSX.Ele
     return (
         <div class="browser-view streamed-browser">
             <StreamedBar pane={pane} />
+            <StreamedWindows pane={pane} />
             <div class="streamed-stage" ref={stage} tabindex={0}>
                 <canvas class="streamed-canvas" ref={canvas} />
                 <Show when={message()}>
@@ -122,6 +146,14 @@ export function StreamedBrowserPane(props: { model: BrowserViewModel }): JSX.Ele
                     <div class="streamed-notice">
                         <Notice tone="warning" icon="triangle-exclamation" onDismiss={pane.dismissError}>
                             {pane.error()}
+                        </Notice>
+                    </div>
+                </Show>
+                {/* What the server did on the person's behalf (closed a window a page opened, dismissed a message box): which site, and what. */}
+                <Show when={!pane.error() && pane.notice()}>
+                    <div class="streamed-notice">
+                        <Notice tone="accent" icon="circle-info" onDismiss={pane.dismissNotice}>
+                            {pane.notice()}
                         </Notice>
                     </div>
                 </Show>
