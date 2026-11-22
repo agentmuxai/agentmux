@@ -8,8 +8,11 @@
 
 pub mod adapter;
 pub mod hlc;
+pub mod kanban;
 pub mod log;
 pub mod record;
 
+#[cfg(test)]
+mod kanban_tests;
 #[cfg(test)]
 mod tests;
