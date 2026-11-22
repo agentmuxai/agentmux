@@ -210,19 +210,24 @@
     @include mixins.sr-only;
 }
 
-// In a wide pane the columns have the same widths in every section, so the sections read as one list. Between
-// this and the stacked rows of a narrow pane each section sizes its own columns.
-@container vault (min-width: 900px) {
+// An entry's row reads as one unit at every width (the Vault list's three layouts, chosen by the list's room in em
+// of its own text, so they follow the pane's zoom and the text size):
+//  - wide (80em and more): one table, the same column widths in every section, the details taking what is left;
+//  - middle (52em to 80em): each row is a small grid, the label with its id and agents on the left, the details
+//    beside it, the value and the date, then the actions, columns aligned from row to row;
+//  - narrow (under 52em): the row stacks, the label across the top, then the details, value, date and actions.
+// A row is never squeezed to give the label a few letters' width: it changes layout first.
+@container vault (min-width: 80em) {
     .vault-entry-table {
         table-layout: fixed;
     }
 
     .vault-col-label {
-        width: 28%;
+        width: 22%;
     }
 
     .vault-col-kind {
-        width: 14%;
+        width: 9em;
     }
 
     .vault-col-value {
@@ -460,6 +465,121 @@
 @container vault (max-width: 700px) {
     .vault-table--wide {
         @include stacked-rows;
+    }
+}
+
+// An entry's parts, whatever the layout. The label breaks between words, never inside one while it has room; the id is one
+// muted line, cut short (its full text is the tooltip); an agent's chip stays whole on one line, and a line of chips
+// wraps between chips.
+.vault-entry-table td:first-child {
+    overflow-wrap: break-word;
+}
+
+.vault-entry-table .vault-id {
+    display: block;
+    margin-left: 0;
+    overflow: hidden;
+    overflow-wrap: normal;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vault-entry-table .vault-grant {
+    flex: 0 0 auto;
+    max-width: 100%;
+}
+
+.vault-entry-table .vault-grant__text {
+    overflow: hidden;
+    overflow-wrap: normal;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+// Middle: a grid per row. The label's column keeps at least 14em before the details take the rest; the value and the
+// date share a column, and the actions have one of their own, wrapping between icons, so none drops out of reach.
+@container vault (min-width: 52em) and (max-width: 79.99em) {
+    .vault-entry-table {
+        display: block;
+
+        thead,
+        colgroup {
+            display: none;
+        }
+
+        tbody {
+            display: block;
+        }
+
+        tr {
+            display: grid;
+            grid-template-columns: minmax(14em, 1.3fr) minmax(8em, 1.7fr) 12em 10em;
+            align-items: start;
+            gap: var(--space-1) var(--space-3);
+            padding: var(--space-2);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        tbody td {
+            min-width: 0;
+            padding: 0;
+            border-bottom: 0;
+        }
+
+        td:first-child {
+            grid-column: 1;
+            grid-row: 1 / span 2;
+        }
+
+        td.vault-details {
+            grid-column: 2;
+            grid-row: 1;
+            min-width: 0;
+        }
+
+        td.vault-kind {
+            grid-column: 2;
+            grid-row: 2;
+        }
+
+        td.vault-value {
+            grid-column: 3;
+            grid-row: 1;
+            white-space: nowrap;
+        }
+
+        td.vault-when {
+            grid-column: 3;
+            grid-row: 2;
+        }
+
+        td.vault-actions {
+            grid-column: 4;
+            grid-row: 1 / span 2;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: var(--space-1);
+            white-space: normal;
+        }
+    }
+}
+
+// Narrow: the row stacks. The label has the whole line; the details take the rest of a line and wrap between words;
+// the value, the date and the actions share a line when they fit, and wrap whole when they do not.
+@container vault (max-width: 51.99em) {
+    .vault-entry-table {
+        @include stacked-rows;
+
+        td.vault-details {
+            flex: 1 1 12em;
+        }
+
+        td.vault-actions {
+            flex: 0 1 auto;
+            justify-content: flex-end;
+            margin-left: auto;
+        }
     }
 }
 
