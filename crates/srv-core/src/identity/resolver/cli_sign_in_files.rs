@@ -28,7 +28,7 @@ pub fn provider_of_cli(cli_path: &str) -> Option<&'static str> {
 }
 
 /// The credential file of `provider` under its config dir `dir`.
-fn credential_path(provider: &str, dir: &Path) -> Option<std::path::PathBuf> {
+pub(super) fn credential_path(provider: &str, dir: &Path) -> Option<std::path::PathBuf> {
     match provider {
         "grok" => Some(dir.join("auth.json")),
         "muse" => Some(dir.join("muse").join("auth.json")),

@@ -60,6 +60,16 @@ pub fn claude_token_expiry_ms(dir: &str) -> Option<i64> {
     json.get("claudeAiOauth").and_then(|o| o.get("expiresAt")).and_then(|v| v.as_i64())
 }
 
+/// The file `probe_oauth_status` reads the sign-in of `provider` from under config dir `dir`, or `None` for a provider
+/// it does not read a file for.
+pub fn sign_in_file(provider: &str, dir: &Path) -> Option<std::path::PathBuf> {
+    match provider {
+        "claude" | "openclaw" => Some(dir.join(".credentials.json")),
+        "codex" => Some(dir.join("auth.json")),
+        _ => super::cli_sign_in_files::credential_path(provider, dir),
+    }
+}
+
 /// Who holds a sign-in file's access or refresh token in the transcript withhold registry, named by the config dir.
 pub(super) fn sign_in_owner(dir: &str, what: &str) -> String {
     format!("sign-in:{dir}:{what}")
