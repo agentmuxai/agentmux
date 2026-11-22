@@ -507,18 +507,21 @@ fn replaced_small<'a>(matcher: &Matcher, text: &'a str) -> Cow<'a, str> {
     }
 }
 
-/// `text` with every value `built` knows replaced by [`MARK`].
+/// `text` with every value `built` knows replaced by [`MARK`]. The large values go first, on the original text, so a
+/// pooled value inside a large one cannot break it up before it is found.
 fn replaced<'a>(built: &Built, text: &'a str) -> Cow<'a, str> {
-    let mut out = match &built.small {
-        Some(small) => replaced_small(small, text),
-        None => Cow::Borrowed(text),
-    };
+    let mut out = Cow::Borrowed(text);
     for needle in built.large.iter() {
         if needle.len() <= out.len() && out.contains(needle.as_str()) {
             out = Cow::Owned(out.replace(needle.as_str(), MARK));
         }
     }
-    out
+    let Some(small) = &built.small else { return out };
+    let done = match replaced_small(small, &out) {
+        Cow::Borrowed(_) => None,
+        Cow::Owned(done) => Some(done),
+    };
+    done.map_or(out, Cow::Owned)
 }
 
 /// `text` with every registered value replaced by [`MARK`]; the text itself when it holds none. Never the text of a
@@ -775,6 +778,21 @@ mod tests {
             assert_eq!(replaced(&built, &format!("out: {form}")), "out: [withheld]", "a spelling of the large value shows");
         }
         assert!(replaced(&built, "an ordinary line").as_ref() == "an ordinary line");
+    }
+
+    #[test]
+    fn a_large_value_that_holds_a_pooled_value_is_withheld_whole() {
+        let mut registry = Registry::default();
+        let large = format!("canary-contained-0001{}", "p".repeat(40 * 1024));
+        registry.add(Some("acct:small"), "canary-contained-0001", None);
+        registry.add(Some("acct:large"), &large, None);
+        let built = registry.matcher(0).unwrap();
+        for line in [large.clone(), format!("KEY={large} and canary-contained-0001")] {
+            let out = replaced(&built, &line);
+            assert!(!out.contains('p'), "none of the large value is left: {} bytes", out.len());
+            assert!(!out.contains("canary-contained"));
+        }
+        assert!(!shows(&mut registry, 0, &large));
     }
 
     #[test]
