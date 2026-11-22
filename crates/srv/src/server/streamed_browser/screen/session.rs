@@ -3,7 +3,8 @@
 
 //! One screen-mode session: a virtual X screen, a window manager (when the server has one) and an ordinary Chrome on it, started the way a
 //! person starts Chrome: no debugging pipe or port, no automation or headless switch, no script put into a page. The only extra
-//! arguments are the address proxy's (the network policy every pane has), a window size and, for the demo only, the sandbox switch.
+//! arguments are a window size and the page to open (the network is the browser's managed policy). The browser's own sandbox is always on: no switch turns it off,
+//! and a server asked to start without it refuses.
 
 use std::path::Path;
 use std::process::Stdio;
@@ -32,7 +33,7 @@ pub fn xvfb_args(w: u32, h: u32) -> Vec<String> {
 }
 
 /// The arguments of the browser: a profile of its own, the address proxy, a window the size of the screen, and the page to open.
-pub fn chrome_args(profile: &Path, w: u32, h: u32, url: &str, no_sandbox: bool, has_wm: bool) -> Vec<String> {
+pub fn chrome_args(profile: &Path, w: u32, h: u32, url: &str, has_wm: bool) -> Vec<String> {
     let mut a = vec![
         format!("--user-data-dir={}", profile.display()),
         "--no-first-run".to_string(),
@@ -45,11 +46,20 @@ pub fn chrome_args(profile: &Path, w: u32, h: u32, url: &str, no_sandbox: bool, 
     if has_wm {
         a.push("--start-maximized".to_string());
     }
-    if no_sandbox {
-        a.push("--no-sandbox".to_string());
-    }
     a.push(url.to_string());
     a
+}
+
+/// The browser's own sandbox is part of what keeps a page away from the container, so screen mode never starts without it: the switch the
+/// streamed pane has for a test host (`NO_SANDBOX_ENV`) is refused here, in words, and `chrome_args` has no way to add `--no-sandbox`.
+pub fn sandbox_on(asked_off: Option<&str>) -> Result<(), String> {
+    match asked_off {
+        Some("1") => Err(format!(
+            "screen mode does not start without the browser's own sandbox ({} is set): run it in a container that lets the browser's sandbox start, or unset that setting",
+            chromium::NO_SANDBOX_ENV
+        )),
+        _ => Ok(()),
+    }
 }
 
 /// A process that is stopped when its handle is dropped, with the environment it needs and nothing else of srv's.
@@ -65,13 +75,13 @@ fn command(program: &Path, args: &[String], display: Option<&str>) -> Command {
 
 /// Start the screen, the window manager and the browser, and say which display they are on.
 pub async fn start(w: u32, h: u32, url: &str, first: bool) -> Result<Session, String> {
+    sandbox_on(std::env::var(chromium::NO_SANDBOX_ENV).ok().as_deref())?;
     let xvfb_bin = which::which("Xvfb").map_err(|_| "this server has no Xvfb to make a virtual screen with".to_string())?;
     let chrome_bin = chromium::find_binary()?;
     // The one way out for the browser, as for every pane: if the proxy cannot start, nothing runs.
     let proxy_port = super::super::address_proxy::start().await.map_err(|e| format!("the browser's address proxy did not start: {e}"))?;
     // What the browser may open and the network it has (the proxy's port) are its managed policy: nothing starts without it.
     super::policy::ensure(&chrome_bin, first, proxy_port)?;
-
 
     let mut xvfb = command(&xvfb_bin, &xvfb_args(w, h), None).stdout(Stdio::piped()).spawn().map_err(|e| format!("cannot start Xvfb: {e}"))?;
     let out = xvfb.stdout.take().ok_or("Xvfb has no output")?;
@@ -89,8 +99,7 @@ pub async fn start(w: u32, h: u32, url: &str, first: bool) -> Result<Session, St
         Ok(bin) => command(&bin, &super::wm::write(&profile.path().join("wm"))?, Some(&display)).spawn().ok(),
         Err(_) => None,
     };
-    let no_sandbox = std::env::var(chromium::NO_SANDBOX_ENV).is_ok_and(|v| v == "1");
-    let args = chrome_args(profile.path(), w, h, url, no_sandbox, wm.is_some());
+    let args = chrome_args(profile.path(), w, h, url, wm.is_some());
     let chrome = command(&chrome_bin, &args, Some(&display))
         .spawn()
         .map_err(|e| format!("cannot start {}: {e}", chrome_bin.display()))?;
@@ -103,7 +112,7 @@ mod tests {
 
     #[test]
     fn the_browser_is_started_like_a_persons_browser() {
-        let a = chrome_args(Path::new("/tmp/p"), 1024, 640, "https://a.example/", false, true);
+        let a = chrome_args(Path::new("/tmp/p"), 1024, 640, "https://a.example/", true);
         for banned in ["--remote-debugging", "--enable-automation", "--headless", "--disable-blink-features", "--enable-blink-features", "--user-agent", "--load-extension", "--disable-web-security"] {
             assert!(!a.iter().any(|x| x.starts_with(banned)), "{banned} is not allowed: {a:?}");
         }
@@ -115,7 +124,7 @@ mod tests {
 
     #[test]
     fn the_browser_gets_its_network_from_policy_and_no_switch_that_chrome_calls_unsupported() {
-        let a = chrome_args(Path::new("/tmp/p"), 800, 600, "about:blank", false, false);
+        let a = chrome_args(Path::new("/tmp/p"), 800, 600, "about:blank", false);
         // The network is the container's policy (policy.rs), not switches: no switch that Chrome calls unsupported, no way around the proxy.
         assert!(!a.iter().any(|x| x.starts_with("--proxy-") || x == "--no-proxy-server" || x.starts_with("--host-resolver-rules") || x == "--disable-quic"), "{a:?}");
         let policy = super::super::policy::wanted(41234);
@@ -125,12 +134,22 @@ mod tests {
     }
 
     #[test]
-    fn the_window_is_the_screen_and_the_demo_sandbox_switch_is_only_asked_for() {
-        let a = chrome_args(Path::new("/tmp/p"), 1280, 720, "about:blank", true, false);
+    fn the_window_is_the_screen() {
+        let a = chrome_args(Path::new("/tmp/p"), 1280, 720, "about:blank", false);
         assert!(a.contains(&"--window-size=1280,720".to_string()) && a.contains(&"--window-position=0,0".to_string()));
-        assert!(a.contains(&"--no-sandbox".to_string()));
         assert!(!a.contains(&"--start-maximized".to_string()));
-        assert!(chrome_args(Path::new("/tmp/p"), 1280, 720, "about:blank", false, true).contains(&"--start-maximized".to_string()));
+        assert!(chrome_args(Path::new("/tmp/p"), 1280, 720, "about:blank", true).contains(&"--start-maximized".to_string()));
+    }
+
+    #[test]
+    fn a_start_with_the_sandbox_off_is_refused_in_words_and_no_argument_turns_it_off() {
+        assert!(sandbox_on(None).is_ok() && sandbox_on(Some("0")).is_ok() && sandbox_on(Some("")).is_ok());
+        let words = sandbox_on(Some("1")).unwrap_err();
+        assert!(words.contains("sandbox") && words.contains(chromium::NO_SANDBOX_ENV), "{words}");
+        for has_wm in [false, true] {
+            let a = chrome_args(Path::new("/tmp/p"), 800, 600, "about:blank", has_wm);
+            assert!(!a.iter().any(|x| x.contains("sandbox")), "{a:?}");
+        }
     }
 
     #[test]

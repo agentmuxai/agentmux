@@ -4,6 +4,9 @@
 //! The virtual X screen: its pixels read out, and pointer and key events sent to it at screen level (the XTEST extension: the same
 //! events a person's mouse and keyboard make). Nothing here attaches to the browser; the browser is a program on a screen.
 
+use std::sync::atomic::AtomicUsize;
+use std::sync::Arc;
+
 use x11rb::connection::Connection;
 use x11rb::protocol::damage::{ConnectionExt as _, ReportLevel};
 use x11rb::protocol::Event;
@@ -18,6 +21,9 @@ pub struct Screen {
     root: u32,
     pub w: u16,
     pub h: u16,
+    /// How many windows have opened (after the browser's first), counted by the thread that watches the screen's windows. Text being typed
+    /// stops when it changes, so what is left of a paste does not go to a window the person has not seen.
+    pub opened: Arc<AtomicUsize>,
 }
 
 impl Screen {
@@ -26,7 +32,7 @@ impl Screen {
         let (conn, n) = RustConnection::connect(Some(display)).map_err(|e| format!("cannot reach the virtual screen {display}: {e}"))?;
         let s = &conn.setup().roots[n];
         let (root, w, h) = (s.root, s.width_in_pixels, s.height_in_pixels);
-        Ok(Self { conn, root, w, h })
+        Ok(Self { conn, root, w, h, opened: Arc::default() })
     }
 
     /// The whole screen: four bytes a pixel (blue, green, red, one unused), row after row.

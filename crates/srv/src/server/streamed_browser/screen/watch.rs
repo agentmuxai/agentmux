@@ -9,6 +9,12 @@ use std::time::Instant;
 
 use super::super::windows::{NoticeLimiter, KEY_GAP};
 
+/// Did one more window open between a look that saw `before` and one that saw `count`? The browser's first window is the pane itself coming
+/// up, not a new window.
+pub fn opened_one(before: usize, count: usize) -> bool {
+    before > 0 && count > before
+}
+
 #[derive(Default)]
 pub struct Watch {
     /// How many windows were there at the last look (0 until the browser's first window has come up).
@@ -21,8 +27,7 @@ impl Watch {
     /// A look at the screen at `now` saw `count` windows. The notice to show when one more window opened.
     pub fn seen(&mut self, count: usize, now: Instant) -> Option<String> {
         let before = std::mem::replace(&mut self.count, count);
-        // The browser's first window is the pane itself coming up, not a new window.
-        if before == 0 || count <= before {
+        if !opened_one(before, count) {
             return None;
         }
         self.held_until = Some(now + KEY_GAP);
@@ -47,6 +52,13 @@ mod tests {
         assert_eq!(w.seen(0, t), None);
         assert_eq!(w.seen(1, t), None);
         assert!(!w.keys_held(t));
+    }
+
+    #[test]
+    fn only_a_window_after_the_first_that_adds_to_the_count_is_news() {
+        assert!(!opened_one(0, 1), "the pane's own first window");
+        assert!(!opened_one(2, 2) && !opened_one(2, 1), "no more windows, or fewer");
+        assert!(opened_one(1, 2) && opened_one(2, 4));
     }
 
     #[test]

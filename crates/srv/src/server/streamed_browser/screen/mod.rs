@@ -18,6 +18,7 @@ mod wm;
 mod x;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -169,7 +170,7 @@ async fn run(mut socket: WebSocket, start: Start, ended: impl std::future::Futur
         return;
     }
     let (wtx, mut counts) = mpsc::unbounded_channel::<usize>();
-    if let Err(e) = watch_windows(&session.display, wtx) {
+    if let Err(e) = watch_windows(&session.display, wtx, input.opened.clone()) {
         let _ = socket.send(error(&e)).await;
         return;
     }
@@ -215,7 +216,7 @@ async fn run(mut socket: WebSocket, start: Start, ended: impl std::future::Futur
 
 /// How many windows the screen shows, told whenever it changes: at the moment a window is mapped or unmapped (the screen's own events, on a
 /// thread of its own), so what is typed after a window opens is held from that moment.
-fn watch_windows(display: &str, tx: mpsc::UnboundedSender<usize>) -> Result<(), String> {
+fn watch_windows(display: &str, tx: mpsc::UnboundedSender<usize>, opened: Arc<AtomicUsize>) -> Result<(), String> {
     let screen = x::Screen::connect(display)?;
     screen.follow_windows()?;
     std::thread::spawn(move || {
@@ -223,6 +224,10 @@ fn watch_windows(display: &str, tx: mpsc::UnboundedSender<usize>) -> Result<(), 
         loop {
             match screen.visible_windows() {
                 Ok(n) if n != last => {
+                    // Before the person's next key is read, anything being typed is told a window opened.
+                    if last != usize::MAX && watch::opened_one(last, n) {
+                        opened.fetch_add(1, Ordering::SeqCst);
+                    }
                     last = n;
                     if tx.send(n).is_err() {
                         return;
@@ -354,9 +359,14 @@ fn tap(screen: &x::Screen, key: u8, shift: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// Type text key by key. A character with no US key is skipped; the text is cut at `MAX_TYPED` characters.
+/// Type text key by key. A character with no US key is skipped; the text is cut at `MAX_TYPED` characters. When a window opens while it is
+/// being typed, the rest is dropped: it was meant for the window the person was looking at.
 async fn type_text(screen: &x::Screen, text: &str) -> Result<(), String> {
+    let windows = screen.opened.load(Ordering::SeqCst);
     for (i, c) in text.chars().take(MAX_TYPED).enumerate() {
+        if screen.opened.load(Ordering::SeqCst) != windows {
+            return Ok(());
+        }
         if let Some((key, shift)) = keymap::ascii(c) {
             tap(screen, key, shift)?;
         }
