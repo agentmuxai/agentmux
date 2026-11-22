@@ -28,6 +28,7 @@ const TOKENS = `:root{--main-text-color:#ddd;--secondary-text-color:#999;--warni
 --space-1:4px;--space-2:8px;--space-3:12px;--radius-full:999px;--radius-sm:3px}
 body{margin:0;background:#111;color:#ddd;font:13px Arial,sans-serif}.case{margin:0 0 8px}
 .vault-view{height:auto !important}.vault-list{height:auto !important}.vault-list__sections{overflow:visible !important}
+.ui-pill{display:inline-flex;align-items:center;padding:0 8px;border:1px solid transparent;border-radius:999px;font-size:11px}
 .ui-button{display:inline-block;width:18px;height:18px;padding:0;border:1px solid #444;background:#2a2a2a;color:#ddd}`;
 
 const CHIPS = (names: string[]) =>
@@ -35,7 +36,8 @@ const CHIPS = (names: string[]) =>
         .map((n) => `<span class="vault-grant" data-origin="${n}"><span class="vault-grant__text">${n}</span><button class="ui-button" style="width:14px;height:14px"></button></span>`)
         .join("");
 
-const ACTIONS = `<td class="vault-actions">${'<button class="ui-button" aria-label="x"></button>'.repeat(6)}</td>`;
+// A row's actions: six, or seven for a login with earlier values (vault-entries.tsx EntryActions), 18px each.
+const actions = (n: number) => `<td class="vault-actions">${'<button class="ui-button" aria-label="x"></button>'.repeat(n)}</td>`;
 
 interface Row {
     label: string;
@@ -43,6 +45,10 @@ interface Row {
     chips: string[];
     details: string;
     expiry?: string;
+    /** The value cell's own markup, when it is not just the masked digits. */
+    value?: string;
+    /** How many action icons the row has (default 6). */
+    icons?: number;
 }
 
 const ROWS: Row[] = [
@@ -55,6 +61,15 @@ const ROWS: Row[] = [
         expiry: "Expires in 40 days",
     },
     { label: "EXAMPLE_ENVIRONMENT_VARIABLE_NAME_FOR_TESTING", id: "example-env-0003", chips: [], details: "https://example.com/a/very/long/path/with-no-spaces-in-it-at-all-0003" },
+    // A card: the brand's pill before the masked digits (EntryValue, vault-entries.tsx).
+    {
+        label: "Example team card",
+        id: "example-card-0004",
+        chips: [],
+        details: "Example Team",
+        value: `<span class="ui-pill">American Express</span> <span class="vault-last-four">•••• 4321</span>`,
+        icons: 7,
+    },
 ];
 
 function row(r: Row): string {
@@ -65,8 +80,8 @@ function row(r: Row): string {
     return (
         `<tr><td><span class="vault-label">${r.label}</span><span class="warden-manager-mono warden-manager-dim vault-id" title="${r.id}">${r.id}</span>${grants}${expiry}</td>` +
         `<td class="vault-kind">API key</td><td class="warden-manager-dim vault-details">${r.details}</td>` +
-        `<td class="warden-manager-mono vault-value"><span class="vault-last-four">•••• 4321</span></td>` +
-        `<td class="warden-manager-dim vault-when">3 days ago</td>${ACTIONS}</tr>`
+        `<td class="warden-manager-mono vault-value">${r.value ?? '<span class="vault-last-four">•••• 4321</span>'}</td>` +
+        `<td class="warden-manager-dim vault-when">3 days ago</td>${actions(r.icons ?? 6)}</tr>`
     );
 }
 
@@ -114,11 +129,13 @@ for (const c of document.querySelectorAll('.case')) {
       lineHeight: lh,
       chipHeights: chips.map((r) => r.height / zoom),
       chipWidths: chips.map((r) => r.width / zoom),
+      buttonLines: new Set(buttons.map((b) => Math.round(b.top))).size,
       buttonsRight: buttons.length ? Math.max(...buttons.map((b) => b.right)) - box.right : -999,
       buttonsLeft: buttons.length ? Math.min(...buttons.map((b) => b.left)) - box.left : 999,
       detailsLeft: tr.querySelector('.vault-details').getBoundingClientRect().left / zoom,
       valueLeft: tr.querySelector('.vault-value').getBoundingClientRect().left / zoom,
       idHeight: tr.querySelector('.vault-id').getBoundingClientRect().height / zoom,
+      valueOverflow: (tr.querySelector('.vault-value').scrollWidth - tr.querySelector('.vault-value').clientWidth) / zoom,
     };
   });
   const body = c.querySelector('.vault-section__body');
@@ -137,11 +154,13 @@ interface Measured {
         lineHeight: number;
         chipHeights: number[];
         chipWidths: number[];
+        buttonLines: number;
         buttonsRight: number;
         buttonsLeft: number;
         detailsLeft: number;
         valueLeft: number;
         idHeight: number;
+        valueOverflow: number;
     }>;
 }
 
@@ -208,10 +227,25 @@ describe.skipIf(!BROWSER)("Vault entry rows across widths", () => {
         }
     });
 
+    it("keeps a card's brand and masked digits inside the value cell, wrapping between them when it must", () => {
+        for (const [w, z] of CASES.filter(([cw, cz]) => cw / cz >= 160)) {
+            for (const r of measured[key(w, z)].rows) expect(r.valueOverflow, `value cell at ${w}px, zoom ${z}`).toBeLessThanOrEqual(1);
+        }
+    });
+
+    it("keeps all of a row's action icons on one line where the row is a table or a grid, at most seven of them", () => {
+        for (const [w, z] of CASES) {
+            const m = measured[key(w, z)];
+            if (w / z - 60 < 53 * m.fs) continue;
+            for (const r of m.rows) expect(r.buttonLines, `action icons at ${w}px, zoom ${z}`).toBe(1);
+        }
+    });
+
     it("aligns the details and the value from row to row where the row is a table or a grid (52em and more)", () => {
         for (const [w, z] of CASES) {
             const m = measured[key(w, z)];
-            if (w / z < 54 * m.fs) continue;
+            // The list is the pane less the section's frame (about 60px): the grid starts at 52em of the list.
+            if (w / z - 60 < 53 * m.fs) continue;
             for (const r of m.rows.slice(1)) {
                 expect(Math.abs(r.detailsLeft - m.rows[0].detailsLeft), `details' left at ${w}px, zoom ${z}`).toBeLessThanOrEqual(1);
                 expect(Math.abs(r.valueLeft - m.rows[0].valueLeft), `value's left at ${w}px, zoom ${z}`).toBeLessThanOrEqual(1);

@@ -497,7 +497,8 @@
 }
 
 // Middle: a grid per row. The label's column keeps at least 14em before the details take the rest; the value and the
-// date share a column, and the actions have one of their own, wrapping between icons, so none drops out of reach.
+// date share a column, and the actions have one of their own that holds the most icons a row has (seven, 18px each)
+// on one line, wrapping between icons only below that, so none drops out of reach.
 @container vault (min-width: 52em) and (max-width: 79.99em) {
     .vault-entry-table {
         display: block;
@@ -513,7 +514,7 @@
 
         tr {
             display: grid;
-            grid-template-columns: minmax(14em, 1.3fr) minmax(8em, 1.7fr) 12em 10em;
+            grid-template-columns: minmax(14em, 1.3fr) minmax(8em, 1.7fr) 10em max(13em, 152px);
             align-items: start;
             gap: var(--space-1) var(--space-3);
             padding: var(--space-2);
@@ -542,10 +543,10 @@
             grid-row: 2;
         }
 
+        // A card's brand badge and its masked digits wrap between them (the digits stay whole, `.vault-last-four`).
         td.vault-value {
             grid-column: 3;
             grid-row: 1;
-            white-space: nowrap;
         }
 
         td.vault-when {
