@@ -195,6 +195,7 @@ fn name_the_proof(state: &AppState, req: &mut InjectionRequest) {
         Ok(Some(def)) if !def.slug.trim().is_empty() => fire.runs_for = def.slug.clone(),
         _ => req.scheduler_fire = None,
     }
+    req.prove_scheduler_fire(); // before anything reads the verdict, a hold included (`types.rs`)
 }
 
 /// Start the agent `target` names when it is defined here and runs nowhere (not here, not in another
