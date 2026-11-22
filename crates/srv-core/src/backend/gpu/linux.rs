@@ -16,6 +16,11 @@
 //! query of it (a sysfs read of amdgpu, any NVML call) wakes it for good, which costs the battery. A PCI device whose
 //! `power/runtime_status` is `suspended` is reported idle without being read.
 //!
+//! **Only real GPUs are listed:** the list is the PCI bus's display controllers (`discover`), so a virtual DRM device (the
+//! kernel's vkms and vgem, a remote-desktop driver's evdi, a firmware framebuffer's simpledrm), which has no PCI parent,
+//! is never a row. It is the bus that says so, not a name. A machine whose only adapter is one of those (or a virtual
+//! machine's, which this module does not read) has nothing to open: the panel shows no adapter, not a made-up one.
+//!
 //! The paths are a [`Fs`], so the tests give it a directory built like `/sys` and `/proc`.
 
 use super::aggregate::{ProcessFigures, Reading};
@@ -522,6 +527,21 @@ mod tests {
         let mut gpu = Gpu::open_with(r.fs()).unwrap();
         let names: Vec<String> = reading(gpu.read(false).unwrap()).adapters.into_iter().map(|a| a.name).collect();
         assert_eq!(names, ["Intel UHD Graphics 770", "AMD Radeon RX 6800/6800 XT / 6900 XT"]);
+    }
+
+    #[test]
+    fn a_virtual_drm_device_is_never_listed_beside_the_real_card() {
+        let r = amd_root();
+        // The kernel's virtual display devices (vkms, vgem, evdi, simpledrm) are not on the PCI bus: they sit under
+        // /sys/devices/virtual or a platform bus, and the card list is the PCI bus's display controllers only.
+        for (card, driver) in [("card1", "vkms"), ("card2", "vgem"), ("card3", "evdi"), ("card4", "simpledrm")] {
+            r.write(&format!("sys/devices/virtual/drm/{card}/uevent"), &format!("DRIVER={driver}\nDEVNAME=dri/{card}\n"));
+            r.write(&format!("sys/class/drm/{card}/uevent"), &format!("DRIVER={driver}\n"));
+        }
+        let mut gpu = Gpu::open_with(r.fs()).unwrap();
+        let adapters = reading(gpu.read(false).unwrap()).adapters;
+        assert_eq!(adapters.len(), 1, "{adapters:?}");
+        assert_eq!(adapters[0].luid, "0000:03:00.0");
     }
 
     #[test]
