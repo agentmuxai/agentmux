@@ -58,6 +58,9 @@ pub enum Kept {
     /// A delete made on `machine` of a value whose rotation has not ended here: it waits too, because the rotation may
     /// already have changed the credential at its source, and deleting the entry would lose the new value.
     DeleteWaitsForRotation { machine: String },
+    /// A change made on `machine` without seeing that the entry was deleted, or a delete made without seeing the change:
+    /// the entry stays deleted on every machine, and the change is kept as a version the person can restore.
+    ChangedWhileDeleted { machine: String },
 }
 
 impl Kept {
@@ -67,6 +70,7 @@ impl Kept {
             Kept::SameTime { machine } => format!("changed on {machine} at the same time"),
             Kept::WaitsForRotation { machine } => format!("changed on {machine} while this was being rotated"),
             Kept::DeleteWaitsForRotation { machine } => format!("deleted on {machine} while this was being rotated"),
+            Kept::ChangedWhileDeleted { machine } => format!("changed on {machine} while it was deleted elsewhere"),
         }
     }
 }
@@ -76,8 +80,7 @@ impl Kept {
 pub enum Decision {
     /// The incoming record replaces the current one.
     Applied,
-    /// The incoming record is one this machine already has, or is older than what it holds, or is a delete that did not
-    /// see an edit: nothing changes.
+    /// The incoming record is one this machine already has, or is older than what it holds: nothing changes.
     KeptLocal,
     /// Neither replaces the other. `current` is the one every machine uses until the person chooses, `kept` is the state
     /// of the other (kept as a version, never dropped), and `tags` is the union of both's tags, which goes on the
@@ -107,12 +110,6 @@ pub fn merge(held: Option<&Held>, change: &Change) -> Decision {
     }
     let current = &h.versions[0];
     let value_in = change.tags.as_deref();
-    // A record's first version has no base and is the ancestor of every later one: when this machine holds any version,
-    // a first version that arrives now is one it was ahead of, never a change made apart. Without this, a machine that
-    // was sent a delete before the entry it deleted would bring the entry back when the entry arrived.
-    if change.base.is_none() {
-        return Decision::KeptLocal;
-    }
     // The change was made on top of what this machine holds, and is later than it: it follows on. A change that only
     // claims to follow, but is not later, is treated as made at the same time, so an old record replayed with a false
     // base cannot take the place of a new one.
@@ -129,11 +126,17 @@ pub fn merge(held: Option<&Held>, change: &Change) -> Decision {
     match (h.deleted, value_in) {
         // Two deletes of the same record.
         (true, None) => Decision::KeptLocal,
-        // An edit made without seeing the delete wins: nothing is lost to a delete the editor didn't know of. The person
-        // deletes it again if they meant to.
-        (true, Some(_)) => Decision::Applied,
-        // A delete made without seeing an edit loses to the edit, for the same reason.
-        (false, None) => Decision::KeptLocal,
+        // A delete is never undone by a sync: an entry deleted here stays deleted, and a change that did not follow the
+        // delete is kept as a version and shown to the person, who can restore it. A record this machine was sent
+        // before the ones it came after (a delete reaching a new machine ahead of the entry it deleted) lands here too,
+        // so it cannot bring a deleted secret back; it is only shown as a conflict that is not one.
+        (true, Some(_)) => Decision::Conflict { current: Side::Local, kept: Kept::ChangedWhileDeleted { machine: change.version.machine.clone() }, tags: h.tags.clone() },
+        // The same from the other side, so every machine ends with the entry deleted: a delete that did not follow an
+        // edit wins, and the edit is kept as a version. An entry whose rotation has not ended waits instead.
+        (false, None) if h.pending_rotation => {
+            Decision::Conflict { current: Side::Local, kept: Kept::DeleteWaitsForRotation { machine: change.version.machine.clone() }, tags: h.tags.clone() }
+        }
+        (false, None) => Decision::Conflict { current: Side::Incoming, kept: Kept::ChangedWhileDeleted { machine: current.machine.clone() }, tags: h.tags.clone() },
         (false, Some(theirs)) => {
             let incoming_later = change.version > *current;
             let side = if h.pending_rotation || !incoming_later { Side::Local } else { Side::Incoming };

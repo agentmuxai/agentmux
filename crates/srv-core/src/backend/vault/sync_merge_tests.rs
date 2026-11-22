@@ -34,13 +34,30 @@ fn a_record_the_machine_never_had_is_applied_and_a_repeat_changes_nothing() {
 }
 
 #[test]
-fn a_first_version_that_arrives_after_a_later_one_is_an_ancestor_not_a_change_made_apart() {
-    // This machine was sent a delete before the entry it deleted: the entry arriving late must not bring it back.
-    let gone = Held { versions: vec![v(300, 0, "a")], deleted: true, pending_rotation: false, tags: vec![] };
-    assert_eq!(merge(Some(&gone), &change(v(100, 0, "z"), None, Some(&["prod"]))), Decision::KeptLocal);
-    let live = held(&[v(300, 0, "a")], &["prod"]);
-    assert_eq!(merge(Some(&live), &change(v(100, 0, "z"), None, Some(&["prod"]))), Decision::KeptLocal);
-    // A record this machine has never heard of is still applied, first version or not.
+fn two_machines_that_made_the_same_record_apart_keep_both_and_the_later_is_current() {
+    // The Vault names an entry from its kind and label, so two machines can each make "the same" entry before they meet.
+    // Neither first version is an ancestor of the other.
+    let mine = held(&[v(100, 0, "a")], &["prod"]);
+    let theirs = change(v(150, 0, "b"), None, Some(&["billing"]));
+    let Decision::Conflict { current, kept, tags } = merge(Some(&mine), &theirs) else { panic!("expected a conflict") };
+    assert_eq!((current, kept), (Side::Incoming, Kept::SameTime { machine: "a".into() }));
+    assert_eq!(tags, self::tags(&["billing", "prod"]));
+    // The same on the other machine: the answers agree on which is current.
+    let there = held(&[v(150, 0, "b")], &["billing"]);
+    let Decision::Conflict { current, .. } = merge(Some(&there), &change(v(100, 0, "a"), None, Some(&["prod"]))) else { panic!("expected a conflict") };
+    assert_eq!(current, Side::Local);
+}
+
+#[test]
+fn a_record_sent_before_the_ones_it_came_after_never_brings_a_deleted_entry_back() {
+    // This machine was sent a delete before the entry it deleted. When the entry's earlier versions arrive they are
+    // not known to be ancestors, and the entry stays deleted, with each kept as a version.
+    let gone = Held { versions: vec![v(300, 0, "a"), v(200, 0, "z")], deleted: true, pending_rotation: false, tags: vec![] };
+    for late in [change(v(100, 0, "z"), None, Some(&["prod"])), change(v(150, 0, "z"), Some(v(100, 0, "z")), Some(&["prod"]))] {
+        let Decision::Conflict { current, kept, .. } = merge(Some(&gone), &late) else { panic!("expected the entry to stay deleted") };
+        assert_eq!((current, kept), (Side::Local, Kept::ChangedWhileDeleted { machine: "z".into() }));
+    }
+    // A record this machine has never heard of is applied, first version or not.
     assert_eq!(merge(None, &change(v(100, 0, "z"), None, Some(&["prod"]))), Decision::Applied);
 }
 
@@ -130,16 +147,20 @@ fn a_delete_waits_while_the_entry_is_being_rotated() {
 }
 
 #[test]
-fn a_delete_follows_on_but_loses_to_an_edit_it_did_not_see() {
+fn a_delete_follows_on_and_is_never_undone_by_a_change_that_did_not_see_it() {
     let h = held(&[v(100, 0, "a")], &["prod"]);
     assert_eq!(merge(Some(&h), &change(v(200, 0, "b"), Some(v(100, 0, "a")), None)), Decision::Applied, "a delete of what we hold");
-    // A delete made from version 50, when we have already edited it to 100: the edit stays.
+    // A delete made from version 50, when we have already edited it to 100: the entry ends deleted on every machine, and
+    // the edit is kept as a version the person can restore.
     let edited = held(&[v(100, 0, "a"), v(50, 0, "a")], &["prod"]);
-    assert_eq!(merge(Some(&edited), &change(v(200, 0, "b"), Some(v(50, 0, "a")), None)), Decision::KeptLocal);
+    let Decision::Conflict { current, kept, .. } = merge(Some(&edited), &change(v(200, 0, "b"), Some(v(50, 0, "a")), None)) else { panic!("expected a conflict") };
+    assert_eq!((current, kept.clone()), (Side::Incoming, Kept::ChangedWhileDeleted { machine: "a".into() }));
+    assert_eq!(kept.label(), "changed on a while it was deleted elsewhere");
 
-    // The other way round: we deleted, and an edit made without seeing the delete arrives.
+    // The other way round: we deleted, and an edit made without seeing the delete arrives: it stays deleted.
     let gone = Held { versions: vec![v(200, 0, "a"), v(50, 0, "a")], deleted: true, pending_rotation: false, tags: vec![] };
-    assert_eq!(merge(Some(&gone), &change(v(100, 0, "b"), Some(v(50, 0, "a")), Some(&["prod"]))), Decision::Applied, "the edit wins");
+    let Decision::Conflict { current, kept, .. } = merge(Some(&gone), &change(v(100, 0, "b"), Some(v(50, 0, "a")), Some(&["prod"]))) else { panic!("expected a conflict") };
+    assert_eq!((current, kept), (Side::Local, Kept::ChangedWhileDeleted { machine: "b".into() }));
     // The deleted version itself, and a second delete, change nothing.
     assert_eq!(merge(Some(&gone), &change(v(50, 0, "a"), None, Some(&["prod"]))), Decision::KeptLocal);
     assert_eq!(merge(Some(&gone), &change(v(210, 0, "c"), Some(v(50, 0, "a")), None)), Decision::KeptLocal);

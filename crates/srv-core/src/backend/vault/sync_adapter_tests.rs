@@ -127,17 +127,31 @@ fn a_fast_clock_wins_the_choice_but_the_other_change_is_kept() {
 }
 
 #[test]
-fn an_edit_made_without_seeing_a_delete_wins_over_it_on_both_machines() {
+fn a_delete_is_never_undone_by_an_edit_made_without_seeing_it_and_the_edit_is_kept() {
     let (mut a, mut b) = (machine("a", 1), machine("b", 2));
     let all = pins(&[&a, &b]);
     a.write("entry-1", "base", NOW);
     b.pull(&a, &all, NOW + 1);
     b.write("entry-1", "edited", NOW + 50);
     a.delete("entry-1", NOW + 100);
-    // The delete is the later version, and the edit still wins: nothing is lost to a delete the editor did not see.
-    assert_eq!(a.pull(&b, &all, NOW + 200), [Outcome::Applied]);
-    assert_eq!(b.pull(&a, &all, NOW + 200), [Outcome::KeptLocal]);
-    assert_eq!((a.state("entry-1").as_deref(), b.state("entry-1").as_deref()), (Some("edited"), Some("edited")));
+    // Whichever side hears first, both end with the entry deleted, and the edit is a version each still holds.
+    assert_eq!(a.pull(&b, &all, NOW + 200), [Outcome::Conflict]);
+    assert_eq!(b.pull(&a, &all, NOW + 200), [Outcome::Conflict]);
+    assert_eq!((a.state("entry-1"), b.state("entry-1")), (None, None));
+    assert_eq!((a.versions("entry-1"), b.versions("entry-1")), (3, 3));
+}
+
+#[test]
+fn two_machines_that_made_the_same_entry_apart_keep_both_and_agree_which_is_current() {
+    // The Vault names an entry from its kind and label, so two machines can each make "the same" entry before they meet.
+    let (mut a, mut b) = (machine("a", 1), machine("b", 2));
+    let all = pins(&[&a, &b]);
+    a.write("entry-1", "made on a", NOW + 10);
+    b.write("entry-1", "made on b", NOW + 20);
+    assert_eq!(a.pull(&b, &all, NOW + 100), [Outcome::Conflict]);
+    assert_eq!(b.pull(&a, &all, NOW + 100), [Outcome::Conflict]);
+    assert_eq!((a.state("entry-1").as_deref(), b.state("entry-1").as_deref()), (Some("made on b"), Some("made on b")));
+    assert_eq!((a.versions("entry-1"), b.versions("entry-1")), (2, 2));
 }
 
 #[test]
@@ -185,16 +199,19 @@ fn a_record_whose_base_was_changed_on_the_way_is_refused() {
 
 #[test]
 fn a_machine_sent_a_delete_before_the_entry_it_deleted_does_not_bring_the_entry_back() {
-    // z makes an entry and edits it; a takes both and deletes it; c, new, takes a's log, which lists a's own records
-    // first, so the delete reaches c before the entry does.
+    // z makes an entry and edits it twice; a takes all three and deletes it; c, new, takes a's log, which lists a's own
+    // records first, so the delete reaches c before the three it came after.
     let (mut z, mut a, mut c) = (machine("z", 3), machine("a", 1), machine("c", 4));
     let all = pins(&[&z, &a, &c]);
     z.write("entry-1", "created", NOW);
     z.write("entry-1", "edited", NOW + 10);
-    a.pull(&z, &all, NOW + 20);
-    a.delete("entry-1", NOW + 30);
-    let got = c.pull(&a, &all, NOW + 40);
-    assert_eq!(got, [Outcome::Applied, Outcome::KeptLocal, Outcome::KeptLocal], "the delete, then the two it came after");
+    z.write("entry-1", "edited again", NOW + 20);
+    a.pull(&z, &all, NOW + 30);
+    a.delete("entry-1", NOW + 40);
+    let got = c.pull(&a, &all, NOW + 50);
+    // The delete, then each earlier version: none brings the entry back (the first two cannot be told from changes made
+    // apart, so they are kept as versions; the last is known to be the one the delete followed).
+    assert_eq!(got, [Outcome::Applied, Outcome::Conflict, Outcome::Conflict, Outcome::KeptLocal]);
     assert_eq!(c.state("entry-1"), None, "still deleted");
     assert_eq!(a.state("entry-1"), None);
 }
