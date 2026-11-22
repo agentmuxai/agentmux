@@ -31,7 +31,7 @@ import {
 import { kindsIn, type VaultInput, vaultKind, type VaultKind } from "./vault-kinds";
 import { firstSaveNotice } from "./vault-prompts";
 import { MachineCopyFields, offersSource, sourceFields } from "./vault-source";
-import { isLinked, LinkedFields, linkFields } from "./vault-linked";
+import { isBacked, isLinked, LinkedFields, linkFields } from "./vault-linked";
 import { t } from "@/app/i18n/i18n";
 import { createEntry, updateEntry, vaultEntries } from "./vault-store";
 import { VaultField } from "./vault-vaults";
@@ -236,7 +236,7 @@ export function VaultEntryForm(props: FormProps): JSX.Element {
                     request?.why
                         ? `Why: ${request.why}`
                         : editing && isLinked(editing.fields)
-                          ? t("vault.linked.editDescription")
+                          ? t(isBacked(editing.fields) ? "vault.backed.editDescription" : "vault.linked.editDescription")
                           : editing
                             ? "Values aren't shown. Type one to replace it; leave it empty to keep it."
                             : undefined
