@@ -99,6 +99,35 @@ fn a_signed_text_is_an_event_only_when_it_says_so_itself() {
 }
 
 #[test]
+fn the_other_field_names_are_read_as_ours() {
+    // `id`, `by_app` and `task` (a board and a number) mean `delivery`, `by_agentmux` and `task_ref`; fields we do not use are ignored.
+    let text = json!({
+        "kind": "pr_event", "id": "dlv-9", "repo": "o/r", "number": 12, "action": "opened", "state": "open",
+        "head": "abc1234", "updated_at": "2026-11-21T10:00:00Z", "by_app": true, "task": { "board": "work", "n": 7 }, "agent": "pell"
+    });
+    let ev = parse_pr_event(&text.to_string()).unwrap();
+    assert_eq!((ev.delivery.as_str(), ev.by_agentmux, ev.agent.as_deref()), ("dlv-9", true, Some("pell")));
+    assert_eq!(ev.task_ref.as_deref(), Some("work#7"));
+    assert_eq!(TaskRef::parse("work#7"), Some(TaskRef::Board { board: "work".into(), num: 7 }));
+    let read = |extra: serde_json::Value| {
+        let mut e = json!({ "kind": "pr_event", "repo": "o/r", "number": 1, "action": "opened" });
+        e.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        parse_pr_event(&e.to_string())
+    };
+    // A number with no board is a bare one, whether the board is missing, null or empty; no task is none.
+    assert_eq!(read(json!({ "task": { "n": 3 } })).unwrap().task_ref.as_deref(), Some("3"));
+    assert_eq!(read(json!({ "task": { "board": null, "n": 3 } })).unwrap().task_ref.as_deref(), Some("3"));
+    assert_eq!(read(json!({ "task": { "board": "", "n": 3 } })).unwrap().task_ref.as_deref(), Some("3"));
+    assert_eq!(read(json!({})).unwrap().task_ref, None);
+    assert_eq!(read(json!({ "task": null })).unwrap().task_ref, None);
+    assert_eq!(read(json!({ "task": { "board": "work", "n": null } })).unwrap().task_ref, None, "a null number is no task, and not a dropped event");
+    // Ours wins when both names are there, and an event that carries both is still read.
+    assert_eq!(read(json!({ "task_ref": "#5", "task": { "n": 3 } })).unwrap().task_ref.as_deref(), Some("#5"));
+    let both = read(json!({ "delivery": "ours", "id": "theirs", "by_agentmux": false, "by_app": true })).unwrap();
+    assert_eq!((both.delivery.as_str(), both.by_agentmux), ("ours", false));
+}
+
+#[test]
 fn an_event_from_anyone_but_the_integration_is_dropped_and_counted() {
     let (s, _d) = store();
     held(&s, "a", "pell");
