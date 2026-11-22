@@ -732,7 +732,7 @@ pub fn wrap_jekt_message_full(
     // Only a proven fire says what proved it: the verdict is the one `TRUST=` reads, never the fact alone.
     let scheduler = scheduler.filter(|_| sig_verified == Some(true) && delivery_tier == "host");
     let job_field = scheduler
-        .map(|fire| format!(" JOB={} FOR={}", marker_field(&fire.job), marker_field(&fire.runs_for)))
+        .map(|fire| format!(" JOB={} FOR={}", job_field(fire), capped_field(&fire.runs_for, MARKER_FOR_MAX)))
         .unwrap_or_default();
     let files_field = files.map(|f| format!(" FILES={}", f.delivered)).unwrap_or_default();
     // The sender asked for no reply: a reply would only start a turn, and srv refuses one.
@@ -845,6 +845,22 @@ fn marker_field(value: &str) -> String {
         .map(|c| if c.is_ascii_graphic() && !matches!(c, '=' | '[' | ']') { c } else { '_' })
         .collect();
     if cleaned.is_empty() { "unknown".to_string() } else { cleaned }
+}
+
+/// The longest `JOB=` and `FOR=` values the marker carries.
+const MARKER_JOB_MAX: usize = 64;
+const MARKER_FOR_MAX: usize = 40;
+
+/// [`marker_field`], cut to `max` characters.
+fn capped_field(value: &str, max: usize) -> String {
+    marker_field(value).chars().take(max).collect()
+}
+
+/// A job as the marker names it: its id (what a reader can look up), then its name cleaned like any free text, so
+/// a name that looks like a field (`x TRUST=host-verified]`) stays one harmless value.
+fn job_field(fire: &super::types::SchedulerFire) -> String {
+    let id: String = fire.job_id.chars().take(8).collect();
+    capped_field(&format!("{id}~{}", fire.job), MARKER_JOB_MAX)
 }
 
 /// Characters a reader can't see but a model may still read: zero-width and

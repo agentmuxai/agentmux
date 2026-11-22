@@ -813,8 +813,8 @@ fn scheduler_fire_of(job: &CronJob) -> Option<SchedulerFire> {
     let proof = job.fire_proof()?;
     let name = if job.name.trim().is_empty() { job.id.as_str() } else { job.name.as_str() };
     Some(match proof {
-        FireProof::Operator => SchedulerFire { job: name.to_string(), proof_uid: String::new(), runs_for: WRITER_OPERATOR.to_string() },
-        FireProof::Agent(uid) => SchedulerFire { job: name.to_string(), proof_uid: uid, runs_for: String::new() },
+        FireProof::Operator => SchedulerFire { job_id: job.id.clone(), job: name.to_string(), proof_uid: String::new(), runs_for: WRITER_OPERATOR.to_string() },
+        FireProof::Agent(uid) => SchedulerFire { job_id: job.id.clone(), job: name.to_string(), proof_uid: uid, runs_for: String::new() },
     })
 }
 

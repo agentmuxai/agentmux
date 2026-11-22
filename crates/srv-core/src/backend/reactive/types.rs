@@ -40,6 +40,8 @@ pub const SCHEDULER_SENDER: &str = "cron";
 /// stands behind the job's definition, never from a request.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SchedulerFire {
+    /// The job's id.
+    pub job_id: String,
     /// The job's name.
     pub job: String,
     /// The identity behind the job's current definition: an agent's UID, or empty for the operator.
