@@ -826,3 +826,18 @@ describe("a Drone template's facts", () => {
         expect(document.body.textContent).not.toContain("template's brief");
     });
 });
+
+describe("the approval is the person's own answer", () => {
+    it("is marked data-operator-only, with Approve and Cancel inside it, so an agent's UI click on it is refused", () => {
+        show(job());
+        const card = document.querySelector(".warden-jobs-approval")!;
+        expect(card.hasAttribute("data-operator-only")).toBe(true);
+        expect(approve().closest("[data-operator-only]")).toBe(card);
+        expect(cancel().closest("[data-operator-only]")).toBe(card);
+    });
+
+    it("is marked for a template that cannot be read too", () => {
+        show(unreadable(null));
+        expect(document.querySelector(".warden-jobs-approval")?.hasAttribute("data-operator-only")).toBe(true);
+    });
+});

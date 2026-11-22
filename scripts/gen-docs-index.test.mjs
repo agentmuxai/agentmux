@@ -379,13 +379,17 @@ describe("--check", () => {
     it(
         "no spec or generator touched → not asserted, exit 0, even if stale",
         () => {
-            const root = fixture((r) =>
-                branched(r, (x) => {
-                    put(x, "src/unrelated.txt", "x\n");
-                })
-            );
-            // Make the committed index stale without touching docs/specs on the branch.
-            put(root, "docs/specs/INDEX.md", "# Specs index\n\nhand edit\n");
+            const root = fixture((r) => {
+                buildNoMarker(r);
+                run(r);
+                commitAll(r, "index");
+                // The index goes stale on main (a spec changes, nothing regenerates); the branch leaves docs/specs alone.
+                put(r, "docs/specs/two.md", "# Two\n\n**Status:** implemented\n");
+                commitAll(r, "stale on main");
+                git(r, "checkout", "-q", "-b", "feature");
+                put(r, "src/unrelated.txt", "x\n");
+                commitAll(r, "feature");
+            });
             const res = run(root, ["--check"]);
             expect(res.code).toBe(0);
             expect(res.out).toContain("gen-docs-index: no specs changed on this branch — index not asserted.");
@@ -477,8 +481,16 @@ describe("failure handling", () => {
     it(
         "--check out of scope exits 0 before looking for INDEX.md (as before)",
         () => {
-            const root = fixture((r) => branched(r, (x) => put(x, "src/unrelated.txt", "x\n")));
-            rmSync(join(root, "docs/specs/INDEX.md"));
+            const root = fixture((r) => {
+                buildNoMarker(r);
+                run(r);
+                commitAll(r, "index");
+                rmSync(join(r, "docs/specs/INDEX.md"));
+                commitAll(r, "no index on main");
+                git(r, "checkout", "-q", "-b", "feature");
+                put(r, "src/unrelated.txt", "x\n");
+                commitAll(r, "feature");
+            });
             expect(run(root, ["--check"]).code).toBe(0);
         },
         TIMEOUT

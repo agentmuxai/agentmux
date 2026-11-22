@@ -24,6 +24,43 @@ import { copyForkHistory } from "../quick-fork";
 import type { CreatedAgent } from "./AgentCreateForm";
 import { isContainerAgentType } from "@/util/runtime-kind";
 import { attachRunningAgent } from "./attach-target";
+import type { HeldLaunch } from "../agent-model";
+import { goAheadWithSharedFolder, type SharedFolderAsk } from "../shared-folder-ask";
+
+/**
+ * What a launch leaves in the picker: why it aborted (identity M4b-3: its row could not be recorded), and a launch held
+ * for the person, a host agent that opens in a folder a container agent can write (`shared-folder-ask.ts`).
+ */
+function createLaunchNotices(model: AgentViewModel, setLaunching: (id: string | null) => void) {
+    const [launchError, setLaunchError] = createSignal<string | null>(null);
+    const [sharedFolder, setSharedFolder] = createSignal<SharedFolderAsk<HeldLaunch> | null>(null);
+    // Taken after every launch attempt, so a later attempt that did not abort clears the notice instead of leaving it
+    // up (review of #3583).
+    const take = () => {
+        setLaunchError(model.launchError);
+        model.launchError = null;
+        setSharedFolder(model.sharedFolder);
+        model.sharedFolder = null;
+    };
+    const keepSharedFolderApart = () => setSharedFolder(null);
+    const goAheadWithSharedFolderAsk = async () => {
+        const ask = sharedFolder();
+        if (!ask) return;
+        const { agent, overrides, targetBlockId, targetTabId } = ask.launch;
+        setLaunching(agent.id);
+        try {
+            await goAheadWithSharedFolder(ask.overlaps);
+            setSharedFolder(null);
+            await model.launchAgentDefinition(agent, overrides, targetBlockId, targetTabId);
+            take();
+        } catch (e) {
+            setLaunchError(e instanceof Error ? e.message : String(e));
+        } finally {
+            setLaunching(null);
+        }
+    };
+    return { launchError, sharedFolder, take, keepSharedFolderApart, goAheadWithSharedFolderAsk };
+}
 
 export function createPickerLaunch(
     props: { model: AgentViewModel },
@@ -36,14 +73,7 @@ export function createPickerLaunch(
     const { agents, refreshOpenDefinitions } = d;
     const [launching, setLaunching] = createSignal<string | null>(null);
     const [nodejsError, setNodejsError] = createSignal<string | null>(null);
-    // Identity M4b-3: a launch that aborted (its row could not be recorded).
-    const [launchError, setLaunchError] = createSignal<string | null>(null);
-    // Taken after every launch attempt, so a later attempt that did not
-    // abort clears the notice instead of leaving it up (review of #3583).
-    const takeLaunchError = () => {
-        setLaunchError(props.model.launchError);
-        props.model.launchError = null;
-    };
+    const { take: takeLaunchError, ...notices } = createLaunchNotices(props.model, setLaunching);
 
     // Cascade follow-up (2026-05-23) — reattach via Recent Sessions.
     // No form: the row carries the account and bundle, so this calls
@@ -167,6 +197,7 @@ export function createPickerLaunch(
                 // session to fork from.
                 ...(row.session_id ? { continueSessionId: row.session_id, forkSession: true } : {}),
             });
+            takeLaunchError();
         } finally {
             setLaunching(null);
         }
@@ -247,7 +278,7 @@ export function createPickerLaunch(
         launching,
         nodejsError,
         setNodejsError,
-        launchError,
+        ...notices,
         busy,
         runtimeOf,
         handleReattach,

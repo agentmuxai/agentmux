@@ -56,7 +56,7 @@ else
     # rename exemption a silent no-op). Pure renames are skipped for the same
     # reason as in check-doc-status.sh — relocating a file asserts nothing.
     mapfile -t files < <(
-        git diff --name-status --find-renames --diff-filter=d "$ref"...HEAD 2>/dev/null | awk '
+        node "$(dirname "${BASH_SOURCE[0]}")/lib/branch-changes.mjs" --ref "$ref" 2>/dev/null | awk '
             $1 == "R100" { next }
             $1 ~ /^R/    { print $3; next }
             NF >= 2      { print $2 }

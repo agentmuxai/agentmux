@@ -15,9 +15,11 @@
 import { findTabHolding } from "@/app/util/reveal-block";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import { closeAgentTab } from "../close-agent-tab";
+import { markHolderMoved } from "./moved-holder";
 
 /** A mark that was never answered (the agent was free, so nothing refused the pane) lapses. */
-const MARK_MS = 30_000;
+export const OPEN_HERE_MARK_MS = 30_000;
+const MARK_MS = OPEN_HERE_MARK_MS;
 const wanted = new Map<string, number>();
 const moving = new Set<string>();
 
@@ -57,6 +59,8 @@ export async function closeHolderPane(holderBlockId: string): Promise<boolean> {
     const layoutModel = getLayoutModelForTabById(tabId);
     const node = layoutModel?.getNodeByBlockId(holderBlockId);
     if (!layoutModel || !node) return false;
+    // The agent runs in the pane the person picked it in: the close must not say it keeps running without one.
+    markHolderMoved(holderBlockId);
     await closeAgentTab({ layoutModel, ownNodeId: node.id, blockId: holderBlockId });
     return true;
 }
