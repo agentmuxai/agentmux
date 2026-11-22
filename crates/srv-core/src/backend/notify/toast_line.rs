@@ -227,6 +227,21 @@ mod tests {
     }
 
     #[test]
+    fn another_identity_with_the_same_name_does_not_lend_its_task() {
+        use crate::backend::storage::work_queue::ClaimFilter;
+        let dir = tempfile::tempdir().unwrap();
+        let work = Store::open_identity_store(&dir.path().join("identity-store.db")).unwrap();
+        let theirs = ClaimFilter { agent_id: "lark".into(), agent_uid: "uid-other".into(), ..ClaimFilter::default() };
+        work.work_queue_enqueue(&work_item("x", "Someone else's task")).unwrap();
+        work.work_queue_claim(&theirs, 1_000, 120_000).unwrap().expect("claimed");
+        // Same name, a different UID: the UID decides, so this lark holds nothing.
+        assert!(held_in(&work, "lark", "uid-lark").is_empty());
+        assert_eq!(held_in(&work, "lark", "uid-other").len(), 1);
+        // With no UID known on our side, the name still matches.
+        assert_eq!(held_in(&work, "lark", "").len(), 1);
+    }
+
+    #[test]
     fn the_ambient_title_is_never_the_line() {
         let mut block = Block { oid: "b1".into(), ..Default::default() };
         block.meta.insert(crate::ambient::title::META_TITLE.to_string(), serde_json::json!("Set up CI for the docs site"));

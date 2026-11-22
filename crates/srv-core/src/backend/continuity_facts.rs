@@ -137,10 +137,9 @@ pub fn something_to_lose(mstore: &Store, identity: Option<&Store>, block_id: &st
 /// `board#12`). `uid` may be empty. Blocking reads.
 pub(crate) fn held_tasks(identity: &Store, agent_id: &str, uid: &str) -> Vec<(String, crate::backend::storage::work_queue::WorkItem)> {
     let mut out = Vec::new();
-    for item in identity.work_queue_claimed_by(agent_id, uid).unwrap_or_default() {
-        if item.state != "claimed" {
-            continue;
-        }
+    // The store's lookup matches the name or the UID; the holder rule narrows it to the UID when both sides have one.
+    let items = identity.work_queue_claimed_by(agent_id, uid).unwrap_or_default();
+    for item in crate::backend::work_claims::claims_held_by(&items, agent_id, Some(uid)).into_iter().cloned() {
         let reference = match identity.work_task_board(&item.id) {
             Ok(Some((board, num))) => board.task_ref(num),
             _ => "task".to_string(),
