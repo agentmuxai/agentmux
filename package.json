@@ -138,6 +138,9 @@
     ],
     "overrides": {
         "brace-expansion@5.x": "^5.0.8",
+        "@typescript-eslint/typescript-estree": {
+            "minimatch": "^11.0.1"
+        },
         "tsconfck": {
             "typescript": "$typescript"
         }
