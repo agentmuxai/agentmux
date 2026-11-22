@@ -100,8 +100,10 @@ mod providers_handlers;
 mod voice;
 mod attachments;
 pub(crate) mod local_proof;
+pub(crate) mod confirm_peer;
 pub(crate) mod local_session;
 pub(crate) mod local_session_routes;
+pub(crate) mod peer_process;
 mod ui_cache;
 pub(crate) mod mux_obj_bridge;
 mod websocket;
@@ -232,6 +234,9 @@ mod sender_claims_tests;
 #[cfg(test)]
 #[path = "tests/agent_status_tests.rs"]
 mod agent_status_tests;
+#[cfg(test)]
+#[path = "tests/folder_overlap_tests.rs"]
+mod folder_overlap_tests;
 #[cfg(test)]
 #[path = "tests/model_gateway_tests.rs"]
 mod model_gateway_tests;

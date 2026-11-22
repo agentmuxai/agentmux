@@ -15,10 +15,11 @@ const READERS: [&str; 3] = ["current_state", "current_state_at", "unavailable_of
 /// The files that call a reader, and why each may. A reason that says "feeds" is the reader the
 /// module is built on; "display" shows a state and decides nothing; "busy" asks whether a turn is in
 /// flight, which is not an availability.
-const ALLOWED: [(&str, &str); 13] = [
+const ALLOWED: [(&str, &str); 14] = [
     ("backend/fleet_source.rs", "display: the fleet feed's state for the Swarm, LAN and mobile"),
     ("backend/kanban.rs", "busy: the reminder loop reminds an idle agent; a limited or signed-out one reads as not idle"),
     ("backend/lan/discovery/agent_names.rs", "display: a limited agent's reset time on the LAN beacon (spec D5)"),
+    ("backend/quiet_watch.rs", "busy: only a working or idle agent is called quiet; one waiting on its user or that cannot run is told by its own notes, and no delivery is decided here"),
     ("backend/supervisor/watcher.rs", "feeds: the Supervisor pauses on an agent that is out of quota or signed out"),
     ("backend/worker_notes.rs", "busy: a note is not sent to a worker waiting on its user"),
     ("server/prep/decide.rs", "busy: whether an agent is in a turn or can take one, to decide whether to ask it to prepare; the note itself goes through the hold, and offline APIs are read through `jekt_hold`"),

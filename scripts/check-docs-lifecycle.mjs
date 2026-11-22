@@ -42,6 +42,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
+import { changedRows, pathsOf } from "./lib/branch-changes.mjs";
 
 // Must stay in step with check-doc-status.sh's VALID. `retro` and `analysis`
 // were added to that gate in #3378 and not to this one, so for a week any doc
@@ -178,25 +179,13 @@ if (REF) process.exit(0);
 const mb = sh("git merge-base origin/main HEAD") || sh("git merge-base main HEAD");
 if (!mb) { console.log("\n(no merge-base with main available; skipping the ratchet)"); process.exit(0); }
 const baseRef = mb.trim();
-const touched = (sh(`git diff --name-only ${baseRef}...HEAD -- ${DIR}`) || "")
-    .split("\n").map((x) => x.trim()).filter((x) => x.endsWith(".md") && !EXCLUDED.test(x));
-
-// The file LIST comes from committed history; the CONTENT checked above comes
-// from the working tree. So a spec edited but not yet committed is invisible
-// here and this gate reports a confident pass that CI then contradicts — three
-// separate times on #3510, which cost four CI rounds before the cause was
-// spotted. Warn rather than fail: running the gate mid-edit is legitimate, it
-// just cannot tell you anything about uncommitted work.
-const uncommitted = (sh(`git status --porcelain -- ${DIR}`) || "")
-    .split("\n").map((x) => x.trim()).filter((x) => x.endsWith(".md"));
-if (uncommitted.length) {
-    console.log(
-        `\nWARNING: ${uncommitted.length} spec(s) have uncommitted changes. The ratchet ` +
-        `reads content from your working tree but takes its file list from committed\n` +
-        `history, so uncommitted edits are NOT evaluated and this result may not match CI. ` +
-        `Commit, then re-run.`
-    );
-}
+// The file LIST and the CONTENT both come from the working tree: a spec that is
+// staged or edited and not yet committed is evaluated, so the answer is the same
+// before and after the commit (it was not: the list came from committed history
+// and a spec edited but not committed was invisible, which cost four CI rounds
+// on #3510). A spec git does not track yet is not on the branch until it is added.
+const touched = pathsOf(changedRows({ ref: baseRef }), "ACMR")
+    .filter((x) => x.startsWith(`${DIR}/`) && x.endsWith(".md") && !EXCLUDED.test(x));
 
 if (!touched.length) { console.log("\nRatchet: this branch touches no specs. ok"); process.exit(0); }
 

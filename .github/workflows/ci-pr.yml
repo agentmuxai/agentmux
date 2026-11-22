@@ -1225,7 +1225,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: generator and classifier tests
-        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs scripts/cli-probe/fake-anthropic.test.mjs scripts/cli-probe/probe-safety.test.mjs scripts/release-manifest.test.mjs scripts/release-gate.test.mjs scripts/release-publish-needs.test.mjs scripts/check-rust-pin.test.mjs scripts/check-shared-paths.test.mjs scripts/check-test-support-off.test.mjs scripts/ci-main-stalled.test.mjs scripts/ci-main-range.test.mjs
+        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs scripts/cli-probe/fake-anthropic.test.mjs scripts/cli-probe/probe-safety.test.mjs scripts/release-manifest.test.mjs scripts/release-gate.test.mjs scripts/release-publish-needs.test.mjs scripts/check-rust-pin.test.mjs scripts/check-shared-paths.test.mjs scripts/check-test-support-off.test.mjs scripts/ci-main-stalled.test.mjs scripts/ci-main-range.test.mjs scripts/branch-changes.test.mjs scripts/preflight.test.mjs
       - name: Specs index is current (changed specs only)
         run: node scripts/gen-docs-index.mjs --check
       - name: bash wrapper reaches the same generator
@@ -1293,6 +1293,11 @@ jobs:
       - name: generated broker event types are current
         if: matrix.shard == 1
         run: node scripts/gen-mux-events.mjs --check
+      # frontend/app/deeplinks/registry.generated.ts, crates/common/src/deeplinks/registry.rs and
+      # docs/deep-links.md, from crates/common/deeplinks/destinations.json (the deep-link registry).
+      - name: generated deep-link tables are current
+        if: matrix.shard == 1
+        run: node scripts/gen-deeplinks.mjs --check
       # Three checks the bindings gate (check-rpc-bindings.sh, rust job) CANNOT make: it verifies a generated
       # file exists per type and is current with the Rust, which a file can be while still describing a wire
       # format nobody speaks. Each of these was written after the same defect got past review more than once.

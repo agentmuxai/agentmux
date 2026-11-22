@@ -120,27 +120,23 @@ function liveStateOf(model: EditorViewModel, tab: DocTab<EditorBuffer>): EditorL
 }
 
 /**
- * Close several tabs (Close Others, Close to the Right). The clean ones close at once; each one with unsaved
- * changes asks in turn, and a refusal ends the round, leaving the rest of them open.
+ * Close several tabs (Close Others, Close to the Right). Each tab with unsaved changes asks first, one at a
+ * time; nothing closes until every one is confirmed, so a Cancel leaves all the tabs open as they were.
  */
 function closeTabsAsking(model: EditorViewModel, tabIds: string[]): void {
     const blockId = model.blockId;
-    const dirty: string[] = [];
-    for (const tabId of tabIds) {
-        const events = dispatch(blockId, { type: "CloseTab", tabId, source: "user" });
-        if (events.some((e) => e.type === "RequestDirtyConfirm")) dirty.push(tabId);
-    }
-    const askNext = (): void => {
-        const tabId = dirty.shift();
-        const tab = tabId === undefined ? undefined : snapshot(blockId)?.tabs.find((t) => t.id === tabId);
-        if (!tabId || !tab || !model.confirmDirtyClose) return;
-        model.confirmDirtyClose(tab, () => {
-            dispatch(blockId, { type: "CloseTab", tabId, force: true, source: "user" });
-            // The panel clears itself right after this runs: the next ask goes after that.
-            queueMicrotask(askNext);
-        });
+    const unsaved = tabIds.filter((id) => snapshot(blockId)?.doc.tabs.find((t) => t.id === id)?.dirty);
+    const closeAll = (): void => {
+        for (const tabId of tabIds) dispatch(blockId, { type: "CloseTab", tabId, force: unsaved.includes(tabId), source: "user" });
     };
-    askNext();
+    const askFrom = (at: number): void => {
+        const tab = at < unsaved.length ? snapshot(blockId)?.tabs.find((t) => t.id === unsaved[at]) : undefined;
+        if (at >= unsaved.length) return closeAll();
+        if (!tab || !model.confirmDirtyClose) return;
+        // The panel clears itself right after this runs: the next ask (or the close) goes after that.
+        model.confirmDirtyClose(tab, () => queueMicrotask(() => askFrom(at + 1)));
+    };
+    askFrom(0);
 }
 
 /**

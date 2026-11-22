@@ -17,7 +17,8 @@ import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import { closeAgentTab } from "../close-agent-tab";
 
 /** A mark that was never answered (the agent was free, so nothing refused the pane) lapses. */
-const MARK_MS = 30_000;
+export const OPEN_HERE_MARK_MS = 30_000;
+const MARK_MS = OPEN_HERE_MARK_MS;
 const wanted = new Map<string, number>();
 const moving = new Set<string>();
 

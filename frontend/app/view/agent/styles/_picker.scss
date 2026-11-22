@@ -366,6 +366,47 @@
         }
     }
 
+    .agent-shared-folder-panel {
+        display: flex;
+        gap: var(--space-3);
+        padding: var(--space-3);
+        margin: var(--space-2) 0;
+        border-radius: 0;
+        background: var(--warning-bg);
+        border: 1px solid var(--warning-line);
+
+        .shared-folder-icon {
+            font-size: var(--text-xl);
+            color: var(--warning-text-color);
+            flex-shrink: 0;
+            padding-top: var(--space-0-5);
+        }
+
+        .shared-folder-title {
+            font-weight: 600;
+            font-size: var(--text-base);
+            margin-bottom: var(--space-1);
+        }
+
+        .shared-folder-text {
+            font-size: var(--text-sm);
+            line-height: 1.4;
+        }
+
+        .shared-folder-hint {
+            font-size: var(--text-xs);
+            color: var(--secondary-text-color);
+            margin-top: var(--space-1-5);
+        }
+
+        .shared-folder-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--space-2);
+            margin-top: var(--space-2);
+        }
+    }
+
     .agent-nodejs-notice {
         display: flex;
         gap: var(--space-3);

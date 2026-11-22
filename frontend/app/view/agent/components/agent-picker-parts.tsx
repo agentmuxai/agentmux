@@ -18,6 +18,7 @@ import { AgentCard } from "./AgentCard";
 import { AgentCardFilters } from "./AgentCardFilters";
 import { AgentCreatePanel } from "./AgentCreatePanel";
 import { AgentPickerFilterBar } from "./AgentPickerFilterBar";
+import { SharedFolderPanel } from "./SharedFolderPanel";
 import { HiddenTemplatesSection } from "./HiddenTemplatesSection";
 import { MyAgentsList } from "./MyAgentsList";
 import type { AgentPickerProps, AgentPickerState } from "./agent-picker-state";
@@ -169,11 +170,22 @@ function TemplatesTier(part: { s: AgentPickerState; props: AgentPickerProps }): 
     );
 }
 
-/** A launch that aborted, and the Node.js notice. */
+/** A launch that aborted, a launch held for the person, and the Node.js notice. */
 function LaunchNotices(part: { s: AgentPickerState }): JSX.Element {
     const { launch } = part.s;
     return (
         <>
+            <Show when={launch.sharedFolder()}>
+                {(ask) => (
+                    <SharedFolderPanel
+                        hostName={ask().hostName}
+                        overlaps={ask().overlaps}
+                        busy={launch.busy()}
+                        onGoAhead={() => void launch.goAheadWithSharedFolderAsk()}
+                        onKeepApart={() => launch.keepSharedFolderApart()}
+                    />
+                )}
+            </Show>
             <Show when={launch.launchError()}>
                 <div class="agent-nodejs-notice">
                     <div class="nodejs-notice-icon">
