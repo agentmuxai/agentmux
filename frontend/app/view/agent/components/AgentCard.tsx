@@ -30,6 +30,7 @@ import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { accessTagsFor } from "../defaults/provider-access-model";
 import type { PinDrift } from "../providers/version-drift";
 import { AccessTagDetail } from "./AccessTagDetail";
+import { isPreviewAgent } from "./agent-picker-preview";
 
 interface AgentCardProps {
     agent: AgentDefinition;
@@ -152,6 +153,10 @@ function cardTags(props: AgentCardProps): TagSpec[] {
             group: "fact",
             title: t("agentCard.updateTitle"),
         });
+    }
+    // Last, so that on a crowded card the update note (something to do) shows before the label of the section the card is in.
+    if (isPreviewAgent(props.agent)) {
+        out.push({ id: "preview", label: t("agentCard.preview"), group: "fact", title: t("agentCard.previewTitle") });
     }
     return out;
 }
