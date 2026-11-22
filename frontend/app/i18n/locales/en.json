@@ -943,7 +943,7 @@
     "kanban.waits.ci": "Waits on checks",
     "kanban.waits.queue": "In the merge queue",
     "kanban.waits.person": "Waits on a person",
-    "kanban.find.placeholder": "Find a task, #number, agent, repository, branch or pull request",
+    "kanban.find.placeholder": "Find a task, PR or branch",
     "kanban.settings": "Kanban settings",
     "kanban.bar.label": "Sections",
     "kanban.bar.collapseAll": "Collapse all",

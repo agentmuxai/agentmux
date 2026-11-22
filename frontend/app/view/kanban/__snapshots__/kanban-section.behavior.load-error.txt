@@ -10,7 +10,7 @@ subscribe agents:changed
 <span class="ui-filter">
 <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
 </i>
-<input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Find a task, #number, agent, repository, branch or pull request" aria-label="Find a task">
+<input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Find a task, PR or branch" aria-label="Find a task">
 </span>
 </div>
 <select class="ui-input ui-density-compact" aria-label="Waits on">
@@ -77,7 +77,7 @@ subscribe agents:changed
 <span class="ui-filter">
 <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
 </i>
-<input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Find a task, #number, agent, repository, branch or pull request" aria-label="Find a task">
+<input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Find a task, PR or branch" aria-label="Find a task">
 </span>
 </div>
 <select class="ui-input ui-density-compact" aria-label="Waits on">
