@@ -1,6 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+use agentmux_common::time::now_secs;
 use base64::Engine;
 
 use crate::backend::transcript::withhold;
@@ -18,10 +19,6 @@ fn shown(value: &str) -> bool {
 fn jwt(exp_secs: i64, canary: &str) -> String {
     let b64 = |s: String| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(s);
     format!("{}.{}.{canary}", b64("{\"alg\":\"none\"}".into()), b64(format!("{{\"exp\":{exp_secs}}}")))
-}
-
-fn now_secs() -> i64 {
-    agentmux_common::time::now_ms() / 1000
 }
 
 fn write(path: &std::path::Path, body: serde_json::Value) {
