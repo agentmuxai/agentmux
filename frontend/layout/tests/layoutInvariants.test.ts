@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { newLayoutNode } from "../lib/layoutNode";
 import { applyLayoutAction } from "../lib/layoutIntentActions";
-import { validateLayoutInvariants, describeLayoutTree } from "../lib/layoutInvariants";
+import { validateLayoutInvariants, describeLayoutTree, hasMinimizedNode } from "../lib/layoutInvariants";
 import { minimizeNodeToggle } from "../lib/layoutMinimize";
 import { FlexDirection, type LayoutNode, type LayoutNodeAdditionalProps, type LayoutTreeAction, type LayoutTreeState } from "../lib/types";
 
@@ -158,5 +158,24 @@ describe("validateLayoutInvariants", () => {
         expect(desc).toContain("legacyMIN(orig=200)");
         expect(desc).toContain("legacyLOCK=33");
         expect(desc).toContain(" MIN");
+    });
+});
+
+describe("hasMinimizedNode", () => {
+    const pane = (blockId: string, minimized = false) => {
+        const node = newLayoutNode(FlexDirection.Row, 200, undefined, { blockId });
+        if (minimized) node.minimized = true;
+        return node;
+    };
+
+    it("is false for a tree of open panes, and for no tree", () => {
+        const root = newLayoutNode(FlexDirection.Row, 200, [pane("p1"), newLayoutNode(FlexDirection.Column, 200, [pane("p2"), pane("p3")])]);
+        expect(hasMinimizedNode(root)).toBe(false);
+        expect(hasMinimizedNode(undefined)).toBe(false);
+    });
+
+    it("is true when a pane anywhere in the tree is minimized", () => {
+        const root = newLayoutNode(FlexDirection.Row, 200, [pane("p1"), newLayoutNode(FlexDirection.Column, 200, [pane("p2"), pane("p3", true)])]);
+        expect(hasMinimizedNode(root)).toBe(true);
     });
 });
