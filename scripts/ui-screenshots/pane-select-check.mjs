@@ -181,10 +181,14 @@ check("Shift+Up, 400 times: the selection stays inside the pane", up.ranges === 
 await clearSelection();
 await mouse("mousePressed", P.pt.x, P.pt.y, 1);
 await mouse("mouseReleased", P.pt.x, P.pt.y, 0);
+// With the focus in a text field (a Settings pane's search line, a composer), Select all is the field's own: it selects
+// the field's text and leaves the page's selection alone, so there is nothing to check about the pane's content.
+const fieldFocused = await s.evaluate(`(() => { const a = document.activeElement; return !!a && (/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) || a.isContentEditable); })()`);
 await key("a", "KeyA", 65, CTRL, ["selectAll"]);
 await s.wait(100);
 const all = await s.evaluate(PROBE(P.id));
-check("Ctrl+A selects the pane's own content, not the window's", all.ranges > 0 && all.len > 0 && all.startIn && all.endIn, all);
+if (fieldFocused) console.log(`SKIP  Ctrl+A selects the pane's own content: the focus is in a text field, whose own Select all runs  ${JSON.stringify(all)}`);
+else check("Ctrl+A selects the pane's own content, not the window's", all.ranges > 0 && all.len > 0 && all.startIn && all.endIn, all);
 
 s.close();
 console.log(failures.length ? `\n${failures.length} FAILED` : "\nall passed");
