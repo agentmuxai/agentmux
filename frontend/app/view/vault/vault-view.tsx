@@ -90,14 +90,23 @@ function keepOnScreenNoted(model: VaultViewModel): void {
     });
 }
 
-/** Opened on an entry by its link id (a deep link): its section, then its row scrolled into view. The meta is cleared
- *  once the entries are known; an id no entry has leaves the Vault as it is (the opener says the entry is gone). */
+/** Opened on an entry by its link id (a deep link): its section, then its row scrolled into view. The list the pane
+ *  first sees may be from before the entry was made, so an id not found there is looked for again in the list the
+ *  pane's own refresh brings; the meta is cleared once the entry is found, or once that list does not have it either
+ *  (the Vault then stays as it is, and the opener says the entry is gone). */
 function revealLinkedEntry(model: VaultViewModel, setSection: (id: VaultPaneSection) => void, root: { current: HTMLElement | null }): void {
+    let looked = 0;
     createEffect(
         on([model.entryLinkAtom, vaultEntries], ([link, entries]) => {
-            if (!link || !entries) return;
-            model.setMeta({ "vault:entry-link": null });
+            if (!link) {
+                looked = 0;
+                return;
+            }
+            if (!entries) return;
             const entry = entries.find((e) => e.link_id === link);
+            if (!entry && ++looked < 2) return;
+            looked = 0;
+            model.setMeta({ "vault:entry-link": null });
             if (!entry) return;
             setSection(entry.section as VaultPaneSection);
             requestAnimationFrame(() => root.current?.querySelector(`[data-entry="${CSS.escape(entry.id)}"]`)?.scrollIntoView?.({ block: "nearest" }));
