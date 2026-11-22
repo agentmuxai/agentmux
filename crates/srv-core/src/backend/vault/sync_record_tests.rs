@@ -87,7 +87,7 @@ fn a_body_goes_through_the_seal_and_never_prints_a_value() {
     let body = EntryBody::of_row(&r, &value, NONE);
     assert!(!format!("{body:?}").contains(SECRET), "the debug form names the parts, not their values");
     let (key, v) = (seal::test_key(), Version::new(5_000, 1, "machine-a"));
-    let place = Place { vault: "vault-1", record: "entry-1", version: &v, epoch: 1 };
+    let place = Place { vault: "vault-1", record: "entry-1", version: &v, base: None, epoch: 1 };
     let sealed = seal_record(&key, &place, &body).unwrap();
     let opened: EntryBody = open_record(&key, &place, &sealed).unwrap();
     assert_eq!(opened, body);

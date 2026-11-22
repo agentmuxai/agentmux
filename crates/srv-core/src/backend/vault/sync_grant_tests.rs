@@ -53,7 +53,7 @@ fn a_grant_goes_through_the_seal_with_nothing_readable_outside() {
     let g = GrantBody::new("entry-1", "https://billing.example.com", 9_000, 1_000);
     let (key, ver) = (seal::test_key(), v(9_000, "machine-a"));
     let id = g.record_id();
-    let place = Place { vault: "vault-1", record: &id, version: &ver, epoch: 1 };
+    let place = Place { vault: "vault-1", record: &id, version: &ver, base: None, epoch: 1 };
     let sealed = seal_record(&key, &place, &g).unwrap();
     assert!(!sealed.windows(7).any(|w| w == b"billing"));
     assert_eq!(open_record::<GrantBody>(&key, &place, &sealed).unwrap(), g);

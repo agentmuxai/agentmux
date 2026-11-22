@@ -104,6 +104,21 @@ fn a_rotation_in_progress_is_never_overwritten() {
 }
 
 #[test]
+fn a_delete_waits_while_the_entry_is_being_rotated() {
+    // The rotation may already have changed the credential at its source: deleting the entry would lose the new value.
+    let mut h = held(&[v(100, 0, "a")], &["prod"]);
+    h.pending_rotation = true;
+    let delete = change(v(200, 0, "b"), Some(v(100, 0, "a")), None);
+    let Decision::Conflict { current, kept, tags } = merge(Some(&h), &delete) else { panic!("expected the delete to wait") };
+    assert_eq!((current, tags), (Side::Local, self::tags(&["prod"])));
+    assert_eq!(kept, Kept::DeleteWaitsForRotation { machine: "b".into() });
+    assert_eq!(kept.label(), "deleted on b while this was being rotated");
+    // Once the rotation has ended the same delete applies.
+    h.pending_rotation = false;
+    assert_eq!(merge(Some(&h), &delete), Decision::Applied);
+}
+
+#[test]
 fn a_delete_follows_on_but_loses_to_an_edit_it_did_not_see() {
     let h = held(&[v(100, 0, "a")], &["prod"]);
     assert_eq!(merge(Some(&h), &change(v(200, 0, "b"), Some(v(100, 0, "a")), None)), Decision::Applied, "a delete of what we hold");

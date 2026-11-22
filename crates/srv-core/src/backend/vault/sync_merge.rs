@@ -7,7 +7,7 @@
 //! A value is never merged and never lost to a clock. When two machines change an entry before either has seen the
 //! other's change, the later version becomes current and the other is kept, as a version called "changed on <machine> at
 //! the same time" that is not pruned after 7 days. A delete made without seeing an edit loses to the edit. A rotation in
-//! progress is never overwritten. Only the tags are merged, as a union.
+//! progress is never overwritten, nor deleted until it ends. Only the tags are merged, as a union.
 //!
 //! Every function is pure over versions and tags: no store, no clock, no network. The records' bodies stay sealed in
 //! [`super::sync_seal`]; what is decided here needs only their versions.
@@ -21,9 +21,10 @@ pub const TOMBSTONE_HORIZON_MS: i64 = 90 * 24 * 60 * 60 * 1000;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Change {
     pub version: Version,
-    /// The version this change replaced on the machine that made it. It travels in the clear beside the version, so a
-    /// relay could alter it: it only ever lets a newer record take the place of the current one, never an older (see
-    /// [`merge`]), and a false one can only show up as a conflict, which keeps both.
+    /// The version this change replaced on the machine that made it. It travels in the clear beside the version and is
+    /// also in the record's associated data (`sync_seal::Place::base`), so the caller takes it from a record that has
+    /// opened: a relay cannot change it to hide a conflict. Even then it only lets a newer record take the place of the
+    /// current one, never an older (see [`merge`]).
     pub base: Option<Version>,
     /// The tags of the new value; `None` for a tombstone, which carries only its id and versions.
     pub tags: Option<Vec<String>>,
@@ -57,6 +58,9 @@ pub enum Kept {
     /// Made on `machine` on top of a value whose rotation has not ended here: it waits as a version, and the person
     /// settles it when the rotation is over.
     WaitsForRotation { machine: String },
+    /// A delete made on `machine` of a value whose rotation has not ended here: it waits too, because the rotation may
+    /// already have changed the credential at its source, and deleting the entry would lose the new value.
+    DeleteWaitsForRotation { machine: String },
 }
 
 impl Kept {
@@ -65,6 +69,7 @@ impl Kept {
         match self {
             Kept::SameTime { machine } => format!("changed on {machine} at the same time"),
             Kept::WaitsForRotation { machine } => format!("changed on {machine} while this was being rotated"),
+            Kept::DeleteWaitsForRotation { machine } => format!("deleted on {machine} while this was being rotated"),
         }
     }
 }
@@ -109,8 +114,10 @@ pub fn merge(held: Option<&Held>, change: &Change) -> Decision {
     // claims to follow, but is not later, is treated as made at the same time, so an old record replayed with a false
     // base cannot take the place of a new one.
     if change.base.as_ref() == Some(current) && change.version > *current {
-        return if h.pending_rotation && !h.deleted && value_in.is_some() {
-            Decision::Conflict { current: Side::Local, kept: Kept::WaitsForRotation { machine: change.version.machine.clone() }, tags: h.tags.clone() }
+        return if h.pending_rotation && !h.deleted {
+            let machine = change.version.machine.clone();
+            let kept = if value_in.is_some() { Kept::WaitsForRotation { machine } } else { Kept::DeleteWaitsForRotation { machine } };
+            Decision::Conflict { current: Side::Local, kept, tags: h.tags.clone() }
         } else {
             Decision::Applied
         };

@@ -60,7 +60,7 @@ fn lines_never_conflict_and_a_repeat_changes_nothing() {
 fn a_line_goes_through_the_seal_and_shows_nothing_readable() {
     let (key, v) = (seal::test_key(), Version::new(9_000, 0, "machine-a"));
     let id = record_id("machine-a", 41);
-    let place = Place { vault: "vault-1", record: &id, version: &v, epoch: 1 };
+    let place = Place { vault: "vault-1", record: &id, version: &v, base: None, epoch: 1 };
     let sealed = seal_record(&key, &place, &ActivityBody::of_row(&row())).unwrap();
     assert!(!sealed.windows(6).any(|w| w == b"deploy"), "the target is inside the seal");
     assert_eq!(open_record::<ActivityBody>(&key, &place, &sealed).unwrap(), ActivityBody::of_row(&row()));
