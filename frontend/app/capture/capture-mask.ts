@@ -24,6 +24,7 @@ import type { WindowCaptureMask } from "@/types/rpc/WindowCaptureMask";
  */
 export const PRIVATE_PANELS: { selector: string; file: string; shows: string }[] = [
     { selector: ".vault-request-card", file: "app/view/agent/components/vault-request-card/vault-request-cards.tsx", shows: "a Vault request in an agent pane" },
+    { selector: '.pane-request-more-item[data-request-source^="vault"]', file: "app/view/agent/pane-requests/PaneRequestDock.tsx", shows: "a waiting Vault request's label, collapsed under the open one" },
     { selector: ".vault-form", file: "app/view/vault/vault-entry-form.tsx", shows: "the Vault's entry form, where a value is entered or shown, wherever it opens" },
     { selector: ".browser-signin-list", file: "app/view/browser/browser-signin-list.tsx", shows: "the saved sign-ins under a login field" },
     { selector: ".status-last-sound", file: "app/statusbar/LastSoundStatus.tsx", shows: "the last sound's words, from the Audit" },

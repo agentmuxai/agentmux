@@ -163,7 +163,7 @@ describe("the private panels", () => {
     it("are each still drawn with the selector the mask looks for", () => {
         for (const p of PRIVATE_PANELS) {
             const text = readFileSync(resolve(__dirname, "../..", p.file), "utf8");
-            expect(text, p.file).toContain(p.selector.slice(1));
+            expect(text, p.file).toContain(p.selector.slice(1).split("[")[0]);
         }
     });
 });

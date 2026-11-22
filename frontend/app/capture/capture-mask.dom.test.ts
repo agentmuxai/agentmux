@@ -19,6 +19,11 @@ describe("a list of Vault entries drawn by the system", () => {
         expect(openListRefusal(null)).toBeUndefined();
     });
 
+    it("covers a waiting Vault request collapsed in an agent pane, and no other request", () => {
+        document.body.innerHTML = `<button class="pane-request-more-item" data-request-source="vault-request">Stripe key</button><button class="pane-request-more-item" data-request-source="vault-use">AWS</button><button class="pane-request-more-item" data-request-source="pane-confirm">Close?</button>`;
+        expect([...document.querySelectorAll(PRIVATE_SELECTOR)].map((e) => e.textContent)).toEqual(["Stripe key", "AWS"]);
+    });
+
     it("covers the Jobs editor's entry picker and the Settings key field", () => {
         for (const cls of ["job-vault-entry", "setting-vault-key", "job-vault-secrets"]) {
             document.body.innerHTML = `<div class="${cls}"></div>`;
