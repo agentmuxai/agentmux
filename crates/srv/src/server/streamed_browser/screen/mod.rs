@@ -113,9 +113,11 @@ fn capture(display: &str, tx: mpsc::Sender<Vec<u8>>, activity: pace::Activity) -
                     Err(_) => return,
                 }
             }
+            // The gap runs from the start of the last frame, so making a frame (which takes time) is part of the gap and not on top of it.
             if let Some(at) = last_frame {
                 std::thread::sleep(pace::gap(activity.since(), steady).saturating_sub(at.elapsed()));
             }
+            let began = Instant::now();
             match screen.take_damage() {
                 Ok(Some(more)) => pending = Some(pending.map_or(more, |p| p.union(more))),
                 Ok(None) => {}
@@ -138,7 +140,7 @@ fn capture(display: &str, tx: mpsc::Sender<Vec<u8>>, activity: pace::Activity) -
                     // from the newest screen, and the pane never stays on a picture that is out of date.
                     Err(mpsc::error::TrySendError::Full(_)) => {}
                 }
-                last_frame = Some(Instant::now());
+                last_frame = Some(began);
             }
         }
     });
@@ -334,7 +336,9 @@ async fn send_input(screen: &x::Screen, msg: &ClientMsg) -> Result<(), String> {
                 type_text(screen, text).await?;
             }
         }
-        ClientMsg::Paste { text } => type_text(screen, text).await?,
+        ClientMsg::Paste { text } => {
+            type_text(screen, text).await?;
+        }
         ClientMsg::Nav { go: Go::Url, url } => {
             // The checked, normalised address is what is typed: the raw string could carry a tab or a newline that moves the typing elsewhere.
             let url = protocol::check_url(url)?;
@@ -361,20 +365,32 @@ fn tap(screen: &x::Screen, key: u8, shift: bool) -> Result<(), String> {
 
 /// Type text key by key. A character with no US key is skipped; the text is cut at `MAX_TYPED` characters. When a window opens while it is
 /// being typed, the rest is dropped: it was meant for the window the person was looking at.
-async fn type_text(screen: &x::Screen, text: &str) -> Result<(), String> {
+async fn type_text(screen: &x::Screen, text: &str) -> Result<Typed, String> {
     let windows = screen.opened.load(Ordering::SeqCst);
+    type_chars(text, || screen.opened.load(Ordering::SeqCst) != windows, |key, shift| tap(screen, key, shift)).await
+}
+
+/// How typing ended: all of the text was typed, or it stopped because the person's screen changed under it.
+#[derive(Debug, PartialEq, Eq)]
+enum Typed {
+    Done,
+    Interrupted,
+}
+
+/// The typing itself: `stop` is asked before every character, `press` types one key (with Shift or not).
+async fn type_chars(text: &str, stop: impl Fn() -> bool, mut press: impl FnMut(u8, bool) -> Result<(), String>) -> Result<Typed, String> {
     for (i, c) in text.chars().take(MAX_TYPED).enumerate() {
-        if screen.opened.load(Ordering::SeqCst) != windows {
-            return Ok(());
+        if stop() {
+            return Ok(Typed::Interrupted);
         }
         if let Some((key, shift)) = keymap::ascii(c) {
-            tap(screen, key, shift)?;
+            press(key, shift)?;
         }
         if i % 64 == 63 {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
     }
-    Ok(())
+    Ok(Typed::Done)
 }
 
 /// Back, forward, reload and stop are the browser's own keys; an address is typed into its address bar.
@@ -395,7 +411,10 @@ async fn navigate(screen: &x::Screen, go: Go, url: &str) -> Result<(), String> {
             chord(keymap::CONTROL, "KeyL")?;
             // The address bar takes the focus a moment after the chord: typing at once loses the first letters (found on a real run).
             tokio::time::sleep(Duration::from_millis(ADDRESS_BAR_FOCUS_MS)).await;
-            type_text(screen, url).await?;
+            // A window that opened while the address was typed took what was left of it: Enter would send half an address (or go to the new window).
+            if type_text(screen, url).await? == Typed::Interrupted {
+                return Ok(());
+            }
             tap(screen, keymap::keycode("Enter").ok_or("no such key")?, false)
         }
     }
