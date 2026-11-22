@@ -201,6 +201,7 @@ impl Store {
         conn.execute_batch(super::work_deps::SCHEMA)?;
         conn.execute_batch(super::work_prs::SCHEMA)?;
         conn.execute_batch(super::work_card_prs::SCHEMA)?;
+        super::migrations::apply_additive_columns(&conn, super::work_card_prs::COLUMNS)?;
         conn.execute_batch(super::work_pr_match::SCHEMA)?;
         conn.execute_batch(super::work_media::SCHEMA)?;
         Ok(conn.execute_batch(super::google_grants::SCHEMA)?)
@@ -275,6 +276,7 @@ impl Store {
         conn.execute_batch(super::work_deps::SCHEMA)?;
         conn.execute_batch(super::work_prs::SCHEMA)?;
         conn.execute_batch(super::work_card_prs::SCHEMA)?;
+        super::migrations::apply_additive_columns(&conn, super::work_card_prs::COLUMNS)?;
         conn.execute_batch(super::work_pr_match::SCHEMA)?;
         conn.execute_batch(super::work_media::SCHEMA)?;
         super::job_runs::apply_schema(&conn)?;
