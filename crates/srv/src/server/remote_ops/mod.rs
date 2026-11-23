@@ -204,6 +204,8 @@ pub(crate) fn lookup(op: &str) -> Option<Op> {
         "sync.pull" => Op::write(|state, caller, params| Box::pin(sync_ops::pull(state, caller, params))),
         "sync.push" => Op::write(|state, caller, params| Box::pin(sync_ops::push(state, caller, params))).with_max_params(crate::backend::user_sync::ops::MAX_WIRE_BYTES),
         "sync.members" => Op::write(|state, caller, params| Box::pin(sync_ops::members(state, caller, params))).with_max_params(crate::backend::user_sync::ops::MAX_WIRE_BYTES),
+        "sync.join" => Op::write(|state, caller, params| Box::pin(sync_ops::join(state, caller, params))),
+        "sync.keys" => Op::write(|state, caller, params| Box::pin(sync_ops::keys(state, caller, params))),
         #[cfg(test)]
         "test.big" => Op::read(|_, _, params| Box::pin(async move { Ok(serde_json::json!({ "bytes": params.to_string().len() })) })).with_max_params(1_200_000),
         // Sizes of build folders and older versions, with a time budget: a read that deletes nothing.

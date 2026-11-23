@@ -228,8 +228,9 @@ pub(super) async fn prepare_attachments(
         // Re-derive any send-copy whose fingerprint is stale (a changed send
         // edge) under the service's CPU and memory limits, before the
         // blocking resolve below looks the files up.
+        // The person is sending these in their own message, so a file stored unread is opened now.
         for a in &attachments {
-            svc.ensure_derived(&a.id).await;
+            svc.open_derived(&a.id).await;
         }
         let by_path = ctrl.as_any().downcast_ref::<blockcontroller::app_server_controller::AppServerController>().is_some();
         let (prepared, pictures) = tokio::task::spawn_blocking(move || {
