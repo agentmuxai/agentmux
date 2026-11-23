@@ -221,6 +221,8 @@ describe("MessageImageLightbox: videos", () => {
         expect(label(container)).toBe("Video 2 of 3: clip.mp4");
         await waitFor(() => expect(video(container)).not.toBeNull());
         expect(video(container).hasAttribute("controls")).toBe(true);
+        // The native menu's Download starts no save in this window, so it is not offered.
+        expect(video(container).getAttribute("controlslist")).toContain("nodownload");
         expect(container.querySelector("img")).toBeNull();
         key(container, "ArrowRight");
         expect(label(container)).toBe("Image 3 of 3: b.png");

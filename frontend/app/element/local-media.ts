@@ -27,6 +27,13 @@ export const VIDEO_EXTENSIONS = ["webm", "mp4", "mov", "m4v"];
 export const AUDIO_EXTENSIONS = ["wav", "mp3", "ogg", "oga", "opus", "flac", "m4a", "aac"];
 
 /** Client-side caps for inline media (§4.2, §5); srv's own limit is 500 MB. */
+/**
+ * The native player's own menu entries that cannot work in AgentMux's windows, so the player does not offer them
+ * (`controlslist`): "Download" (the host starts no file save from the app's own UI, which has no download handler on
+ * purpose, so the entry did nothing) and the remote-playback (cast) entry. A file is taken out through Copy path, Copy
+ * frame and Open in the Editor, which the right-click menu and the viewers have.
+ */
+export const NATIVE_PLAYER_CONTROLS_LIST = "nodownload noremoteplayback";
 export const INLINE_IMAGE_MAX_BYTES = 25 * 1024 * 1024;
 export const INLINE_AV_MAX_BYTES = 200 * 1024 * 1024;
 
