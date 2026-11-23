@@ -527,7 +527,8 @@ pub fn promote_pane_pool_window(
     state: &Arc<AppState>,
     pane_id: &str,
     workspace_id: &str,
-    x: i32, y: i32,
+    x: i32,
+    y: i32,
     width: i32,
     height: i32,
     parent_hwnd: isize,
@@ -587,8 +588,7 @@ pub fn promote_pane_pool_window(
         // same coordinate space as `CreateWindowExW` (physical screen coords).
         // SetWindowPos activates the window while it is still hidden, and with
         // a snapshot it stays hidden until the renderer has put it up; keep
-        // the invisible-activation hand-back off it until then (to the end of
-        // this function).
+        // the invisible-activation hand-back off it until then (to the end of this function).
         let _promoting = crate::client::wndproc::PromoteActivationGuard::new(outer_hwnd as _);
         unsafe {
             let ok = SetWindowPos(outer_hwnd as HWND, HWND_TOP, x, y, width, height, if activate { 0 } else { SWP_NOACTIVATE });

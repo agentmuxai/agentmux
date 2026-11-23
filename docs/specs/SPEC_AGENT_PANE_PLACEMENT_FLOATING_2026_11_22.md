@@ -3,7 +3,7 @@
 **Date:** 2026-11-22
 **Author:** Loap@narko
 **Type:** Spec (task #48507; the build is #48508 and starts after the operator approves this)
-**Status:** approved 2026-11-22 with the recommendations of section 4 (the operator's "yes", relayed by AgentY)
+**Status:** active (approved 2026-11-22 with the recommendations of section 4; built in three phases)
 **Requested by:** the operator (2026-11-22): agents should open panes, a browser above all, as floating panes, with a size and a position they can set, and be able to resize and move them afterwards. It should also make "the layout holds at this size" checks repeatable.
 **Related:** `SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27.md`, `SPEC_FLOATING_PANE_REDOCK_TO_ORIGIN_2026_11_03.md`, `SPEC_FLOATING_PANE_SOURCE_WINDOW_2026_10_13.md`, `SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md`.
 

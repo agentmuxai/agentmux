@@ -241,16 +241,15 @@ pub fn open_floating_pane_window(
                 fallback
             }
         };
-        // Pane pool fast path (Windows): promote a pre-warmed WS_POPUP pane pool
-        // window. `width` and `height` are already DPI-converted to physical
-        // pixels by the block above. `parent_main_hwnd` is passed so the cascade
-        // hook is registered at promote time (deferred from spawn because the
-        // parent was unknown when the pool window was pre-warmed).
+        // Pane pool fast path (Windows): promote a pre-warmed WS_POPUP pane pool window. `width` and `height` are
+        // already physical pixels (the DPI block above). `parent_main_hwnd` registers the cascade hook at promote
+        // time (the parent was unknown when the pool window was pre-warmed).
         if let Some(pool_label) = crate::commands::window_pool::promote_pane_pool_window(
             state,
             &parsed.pane_id,
             parsed.workspace_id.as_deref().unwrap_or(""),
-            parsed.x, parsed.y,
+            parsed.x,
+            parsed.y,
             parsed.width,
             parsed.height,
             parent_main_hwnd,
@@ -278,7 +277,8 @@ pub fn open_floating_pane_window(
             state,
             &parsed.pane_id,
             parsed.workspace_id.as_deref().unwrap_or(""),
-            parsed.x, parsed.y,
+            parsed.x,
+            parsed.y,
             parsed.width,
             parsed.height,
             0, // parent_hwnd: unused on non-Windows

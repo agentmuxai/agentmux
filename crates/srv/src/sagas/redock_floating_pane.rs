@@ -159,6 +159,8 @@ async fn run_inner(
     })
     .await
     .map_err(|e| format!("RedockFloatingPane MoveBlock: {}", e))?;
+    // An agent's floating pane that is docked again no longer counts toward its limit of floating panes.
+    crate::server::pane_openers::set_floating(&block_id, false);
 
     // A redocked pane is no longer "Always on top": drop the tack so a later
     // tear-off starts untacked (SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27
@@ -284,6 +286,10 @@ mod tests {
             })
             .unwrap();
 
+        let agent = format!("redock-agent-{block_id}");
+        crate::server::pane_openers::record(&block_id, &agent, true);
+        assert_eq!(crate::server::pane_openers::floaters_of(&agent), vec![block_id.clone()]);
+
         let result = run(
             &state,
             block_id.clone(),
@@ -297,6 +303,10 @@ mod tests {
         .unwrap();
         assert_eq!(result["block_id"], block_id);
         assert_eq!(result["target_tab_id"], dst_tab);
+        // Docked again: it keeps its opener but no longer counts as one of the agent's floating panes.
+        assert!(crate::server::pane_openers::floaters_of(&agent).is_empty());
+        assert_eq!(crate::server::pane_openers::opener_of(&block_id).as_deref(), Some(agent.as_str()));
+        crate::server::pane_openers::forget(&block_id);
 
         // Reducer: source tab is empty; target tab has the block.
         let s = state.srv_state.lock().await;
