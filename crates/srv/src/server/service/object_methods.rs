@@ -181,9 +181,11 @@ pub(super) fn shutdown_agent(state: &AppState, args: &[serde_json::Value], calle
     super::super::stop_requests::ask_the_person_to_stop(state, &block_id, caller_uid, "ShutdownAgent")
 }
 
-// What a shutdown would end, for the confirm; nothing is ended.
-pub(super) async fn shutdown_preview(state: &AppState, args: &[serde_json::Value]) -> Reply {
+// What a shutdown would end, for the confirm; nothing is ended. A request carrying an agent's token is answered for
+// that agent's own pane only (`stop_requests::own_pane_only`).
+pub(super) async fn shutdown_preview(state: &AppState, args: &[serde_json::Value], caller_uid: Option<&str>) -> Reply {
     let block_id: String = arg(args, 0)?;
+    super::super::stop_requests::own_pane_only(state, &block_id, caller_uid, "ShutdownPreview")?;
     let preview = crate::sagas::self_quit::preview(state, &block_id).await;
     Ok(WebReturnType::success(serde_json::to_value(&preview).unwrap_or_default()))
 }
