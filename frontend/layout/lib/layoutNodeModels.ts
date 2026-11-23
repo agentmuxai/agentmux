@@ -137,6 +137,7 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
                 numLeafs: model.numLeafs,
                 isResizing: model.isResizing,
                 isSplitterDragging: model.isSplitterDragging,
+                isSplitterHeld: createMemo(() => model.splitterHeldNodeIds?.()?.has(nodeid) ?? true),
                 isMagnified: createMemo(() => {
                     const treeState = model.localTreeStateAtom();
                     return treeState.magnifiedNodeId === nodeid;

@@ -334,6 +334,17 @@ export function createStopContainerResizing(model: LayoutModel) {
     });
 }
 
+/** The leaf node ids under `nodes`: the panes whose size a drag of their shared border changes. */
+export function resizedLeafIds(nodes: readonly LayoutNode[]): Set<string> {
+    const ids = new Set<string>();
+    const walk = (node: LayoutNode) => {
+        if (node.children?.length) node.children.forEach(walk);
+        else ids.add(node.id);
+    };
+    nodes.forEach(walk);
+    return ids;
+}
+
 /**
  * Callback to update pending node sizes when a resize handle is dragged.
  * @param model The LayoutModel instance.
@@ -402,6 +413,9 @@ export function onResizeMove(
                 stagedSizes: new Map(groupSiblingStartSizes.map((s) => [s.nodeId, s.size])),
                 floors,
             };
+            model.splitterHeldNodeIds?._set(
+                resizedLeafIds(groupResize ? (parentNode.children ?? []) : [beforeNode, afterNode])
+            );
         } else {
             console.error(
                 "Invalid resize handle, cannot get the additional properties for the nodes in the resize handle properties."
@@ -484,6 +498,7 @@ export function onResizeMove(
  * Callback to end the current resize operation and commit its pending action.
  */
 export function onResizeEnd(model: LayoutModel) {
+    model.splitterHeldNodeIds?._set(null);
     if (model.resizeContext) {
         model.resizeContext = undefined;
         model.treeReducer({ type: LayoutTreeActionType.CommitPendingAction });
