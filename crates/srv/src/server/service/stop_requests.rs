@@ -22,21 +22,30 @@ const AGENT_OPENS: usize = 10;
 struct Limiter(Mutex<HashMap<String, VecDeque<i64>>>);
 
 impl Limiter {
-    /// Counts one more countdown for `key`, or says how many ms until its oldest one leaves the window.
-    fn take(&self, key: &str, limit: usize, now: i64) -> Result<(), i64> {
+    /// Whether `key` may open another countdown, or how many ms until its oldest one leaves the window. Counts nothing.
+    fn room(&self, key: &str, limit: usize, now: i64) -> Result<(), i64> {
         let mut map = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        Self::forget_old(&mut map, now);
+        match map.get(key) {
+            Some(opened) if opened.len() >= limit => Err(WINDOW_MS - (now - opened[0])),
+            _ => Ok(()),
+        }
+    }
+
+    /// Counts a countdown `key` opened.
+    fn charge(&self, key: &str, now: i64) {
+        let mut map = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        Self::forget_old(&mut map, now);
+        map.entry(key.to_string()).or_default().push_back(now);
+    }
+
+    fn forget_old(map: &mut HashMap<String, VecDeque<i64>>, now: i64) {
         map.retain(|_, opened| {
             while opened.front().is_some_and(|t| now - t >= WINDOW_MS) {
                 opened.pop_front();
             }
             !opened.is_empty()
         });
-        let opened = map.entry(key.to_string()).or_default();
-        if opened.len() >= limit {
-            return Err(WINDOW_MS - (now - opened[0]));
-        }
-        opened.push_back(now);
-        Ok(())
     }
 }
 
@@ -75,9 +84,10 @@ pub(super) fn ask_the_person_to_stop(state: &AppState, block_id: &str, caller_ui
     if agent_of(state, block_id).is_some_and(|target| target == uid || target == by) {
         return Err(refused(format!("{method}: your own block: to end your own session use Stop with action \"self\"")));
     }
-    // A request for an agent that already has a countdown joins it and opens nothing, so it is not counted.
+    // A request for an agent that already has a countdown joins it and opens nothing, so it needs no room; only a
+    // countdown that is opened is counted.
     if crate::sagas::pending_shutdown::active_for(block_id).is_none() {
-        if let Err(wait_ms) = LIMITER.take(uid, AGENT_OPENS, now_ms()) {
+        if let Err(wait_ms) = LIMITER.room(uid, AGENT_OPENS, now_ms()) {
             return Err(refused(format!(
                 "{method}: RATE_LIMITED: {by} has opened {AGENT_OPENS} stop countdowns in the last minute; wait {} s, or leave it to the person",
                 wait_ms / 1000 + 1
@@ -86,6 +96,9 @@ pub(super) fn ask_the_person_to_stop(state: &AppState, block_id: &str, caller_ui
     }
     let action = crate::sagas::pending_shutdown::Action::CloseTab { detail: format!("asked by {by} ({method}, on the service route)") };
     let pending = crate::sagas::pending_shutdown::request(state, block_id, &by, "Service", "", action);
+    if !pending.joined {
+        LIMITER.charge(uid, now_ms());
+    }
     Ok(WebReturnType::success(serde_json::json!({ "pending": pending })))
 }
 
@@ -97,11 +110,21 @@ mod tests {
     fn a_caller_may_open_its_limit_in_a_minute_and_a_slot_frees_as_the_oldest_leaves() {
         let limiter = Limiter::default();
         for t in 0..3 {
-            assert!(limiter.take("a", 3, t * 1_000).is_ok());
+            assert!(limiter.room("a", 3, t * 1_000).is_ok());
+            limiter.charge("a", t * 1_000);
         }
-        assert_eq!(limiter.take("a", 3, 10_000), Err(WINDOW_MS - 10_000), "the fourth waits for the first to leave the minute");
-        assert!(limiter.take("b", 3, 10_000).is_ok(), "another caller has its own count");
-        assert!(limiter.take("a", 3, WINDOW_MS).is_ok(), "the first has left the window");
-        assert!(limiter.take("a", 3, WINDOW_MS + 500).is_err(), "and the one that took its place counts");
+        assert_eq!(limiter.room("a", 3, 10_000), Err(WINDOW_MS - 10_000), "the fourth waits for the first to leave the minute");
+        assert!(limiter.room("b", 3, 10_000).is_ok(), "another caller has its own count");
+        assert!(limiter.room("a", 3, WINDOW_MS).is_ok(), "the first has left the window");
+        limiter.charge("a", WINDOW_MS);
+        assert!(limiter.room("a", 3, WINDOW_MS + 500).is_err(), "and the one that took its place counts");
+    }
+
+    #[test]
+    fn asking_for_room_counts_nothing() {
+        let limiter = Limiter::default();
+        for _ in 0..10 {
+            assert!(limiter.room("a", 1, 0).is_ok());
+        }
     }
 }
