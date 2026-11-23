@@ -122,12 +122,7 @@ pub(super) async fn open_stacked(state: &AppState, cmd: &CommandPaneOpenData, ta
         tracing::warn!(block_id = %block_id, "pane.open: stack_onto_block_id: stackpush queue failed: {e}");
     }
     tracing::info!(block_id = %block_id, target = %target, view = %cmd.view, "pane.open: block created as a pane tab");
-    Ok(PaneOpenResult {
-        block_id,
-        tab_id,
-        view: cmd.view.clone(),
-        created: true,
-    })
+    Ok(PaneOpenResult::docked(block_id, tab_id, cmd.view.clone(), true))
 }
 
 /// Skip-placement path (SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §4.2): create the block through the reducer and
@@ -164,12 +159,7 @@ pub(super) async fn open_unplaced(state: &AppState, view: String, tab_id: String
     }
     crate::server::service::publish_events(state, &create_events);
     tracing::info!(block_id = %block_id, view = %view, "pane.open: block created, placement skipped");
-    Ok(PaneOpenResult {
-        block_id,
-        tab_id,
-        view,
-        created: true,
-    })
+    Ok(PaneOpenResult::docked(block_id, tab_id, view, true))
 }
 
 /// Docked path: create the block through the reducer, place it (split if asked, else appended), and tell every window.
@@ -259,10 +249,5 @@ pub(super) async fn open_docked(state: &AppState, cmd: &CommandPaneOpenData, tab
         event_bus.broadcast_mux_obj_updates(&updates);
     }
 
-    Ok(PaneOpenResult {
-        block_id,
-        tab_id,
-        view: cmd.view.clone(),
-        created: true,
-    })
+    Ok(PaneOpenResult::docked(block_id, tab_id, cmd.view.clone(), true))
 }

@@ -73,7 +73,7 @@ pub const UNLESS_OPERATOR: &[&str] = &[
     "capture.mask.report", "controllerresync", "createsubblock", "deeplink.open.done", "deletesubblock", "docknodestatus", "folderoverlapaccept", "fs.reveal", "fs.unwatch", "fs.watch",
     "layout.applyIntent", "layout.open", "layout.restoreOtherBuild", "layout.save", "memorydelivery:claim_fallback",
     "notify.ack", "notify.attention", "notify.emit", "notify.focus", "notify.takeactivation", "notify.test",
-    "operator.challenge", "pane.activateTab", "pane.confirm.decide", "pane.moveTab", "pane.moveTabs", "pane.open", "pane.removeTab",
+    "operator.challenge", "pane.activateTab", "pane.confirm.decide", "pane.floatplaced", "pane.moveTab", "pane.moveTabs", "pane.open", "pane.removeTab",
     "presence.publish-now", "record.page", "setmeta", "unwatcheditorfile", "unwatchmediadir", "viewer.agent-hidden",
     "watcheditorfile", "watchmediadir", "widgets.endsession",
 ];

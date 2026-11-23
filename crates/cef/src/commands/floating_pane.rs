@@ -80,6 +80,11 @@ pub struct OpenFloatingPaneArgs {
     /// SPEC_TEAROFF_PAINT_LATENCY_2026_09_30.md phase 3.1.
     #[serde(default)]
     pub snapshot: Option<String>,
+    /// Whether the window may take the foreground when it shows (absent: it does). An agent's floating pane
+    /// is shown without taking it, so the person's typing and caret stay where they were.
+    /// SPEC_AGENT_PANE_PLACEMENT_FLOATING_2026_11_22.md §2.4.
+    #[serde(default)]
+    pub activate: Option<bool>,
 }
 
 /// Keep a floater on the monitor its release point is on: its rect (physical pixels) is pulled inside that
@@ -236,11 +241,9 @@ pub fn open_floating_pane_window(
                 fallback
             }
         };
-        // Pane pool fast path (Windows): promote a pre-warmed WS_POPUP pane pool
-        // window. `width` and `height` are already DPI-converted to physical
-        // pixels by the block above. `parent_main_hwnd` is passed so the cascade
-        // hook is registered at promote time (deferred from spawn because the
-        // parent was unknown when the pool window was pre-warmed).
+        // Pane pool fast path (Windows): promote a pre-warmed WS_POPUP pane pool window. `width` and `height` are
+        // already physical pixels (the DPI block above). `parent_main_hwnd` registers the cascade hook at promote
+        // time (the parent was unknown when the pool window was pre-warmed).
         if let Some(pool_label) = crate::commands::window_pool::promote_pane_pool_window(
             state,
             &parsed.pane_id,
@@ -251,6 +254,7 @@ pub fn open_floating_pane_window(
             parsed.height,
             parent_main_hwnd,
             parsed.snapshot.as_deref(),
+            parsed.activate.unwrap_or(true),
         ) {
             return Ok(serde_json::to_value(OpenFloatingPaneResponse {
                 window_label: pool_label,
@@ -279,6 +283,7 @@ pub fn open_floating_pane_window(
             parsed.height,
             0, // parent_hwnd: unused on non-Windows
             parsed.snapshot.as_deref(),
+            parsed.activate.unwrap_or(true),
         ) {
             return Ok(serde_json::to_value(OpenFloatingPaneResponse {
                 window_label: pool_label,

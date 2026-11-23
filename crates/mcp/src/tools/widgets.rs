@@ -134,6 +134,15 @@ async fn run_open_widget(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> 
         req["split_direction"] = json!(split);
         req["split_reference_block_id"] = json!(cx.block_id);
     }
+    if arguments.get("floating").and_then(Value::as_bool) == Some(true) {
+        req["floating"] = json!(true);
+        let place = agentmux_common::api_types::PlaceArgs::of(arguments).map_err(|e| anyhow::anyhow!("INVALID_ARG: {e}"))?;
+        if let Value::Object(fields) = serde_json::to_value(place)? {
+            if let Some(o) = req.as_object_mut() {
+                o.extend(fields);
+            }
+        }
+    }
     let url = format!("{}/api/v1/pane/open", cx.local_url.trim_end_matches('/'));
     let resp = cx
         .client
@@ -148,7 +157,8 @@ async fn run_open_widget(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> 
     if !status.is_success() {
         anyhow::bail!("the pane didn't open: HTTP {status}: {result}");
     }
-    Ok(format!("Opened {view} (pane {}).", result["block_id"].as_str().unwrap_or("?")))
+    let placed = serde_json::from_value::<agentmux_common::api_types::PaneOpenResponse>(result.clone()).map(|r| super::panes::placed_note(&r)).unwrap_or_default();
+    Ok(format!("Opened {view} (pane {}).{placed}", result["block_id"].as_str().unwrap_or("?")))
 }
 
 #[cfg(test)]
