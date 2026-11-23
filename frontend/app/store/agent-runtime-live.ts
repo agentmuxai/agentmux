@@ -14,6 +14,7 @@ import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { isSharedFolderRefusal, OPEN_ASK_META } from "@/app/store/shared-folder-open";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import { createRoot } from "solid-js";
 import { createAgentRuntimeStore, type AgentRuntimeStore } from "./agent-runtime";
@@ -62,8 +63,22 @@ export async function openAgentInActiveTab(
         await open(atoms.activeTabId());
         return undefined;
     } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        if (isSharedFolderRefusal(message)) return askInAPane(agent, message);
         console.warn(`[agent-runtime] opening ${agent.name} failed`, e);
-        return e instanceof Error ? e.message : String(e);
+        return message;
+    }
+}
+
+/** srv held the open for a shared folder: an agent pane asks the person in place, then opens the agent into itself. */
+async function askInAPane(agent: Pick<AgentRuntime, "agent_id" | "name">, refusal: string): Promise<string | undefined> {
+    try {
+        const { createBlock } = await import("@/app/store/block-layout-actions");
+        await createBlock({ meta: { view: "agent", agentName: agent.name, [OPEN_ASK_META]: agent.agent_id } as MetaType });
+        return undefined;
+    } catch (e) {
+        console.warn(`[agent-runtime] asking about ${agent.name} failed`, e);
+        return refusal;
     }
 }
 

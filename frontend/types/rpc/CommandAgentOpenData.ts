@@ -3,4 +3,9 @@
 /**
  * Request for agent.open — find or create an agent pane for the given agent_id.
  */
-export type CommandAgentOpenData = { agent_id: string, tab_id?: string, split_direction?: string, split_reference_block_id?: string, focus?: boolean, };
+export type CommandAgentOpenData = { agent_id: string, tab_id?: string, split_direction?: string, split_reference_block_id?: string, focus?: boolean, 
+/**
+ * Open the agent into this empty agent pane of the tab (the picker, or a layout's placeholder) instead of
+ * making a new pane: where the window retries an open that asked the person first.
+ */
+into_block_id?: string, };

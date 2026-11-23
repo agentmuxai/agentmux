@@ -94,6 +94,7 @@ pub(crate) async fn run_remote(state: &AppState, who: &str, agent: &str) -> Resu
         split_direction: None,
         split_reference_block_id: None,
         focus: Some(false),
+        into_block_id: None,
     };
     let opened = super::agent_open::open_agent_impl(state, cmd).await.map_err(|e| (open_status(&e), format!("Agents open {}: {e}", target.name)))?;
     Ok(json!({

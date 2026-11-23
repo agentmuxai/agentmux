@@ -4,15 +4,15 @@
 // A pane opened from a click must appear in the window the click was in.
 // A raw `PaneOpenCommand` / `AgentOpenCommand` with no `tab_id` falls back to the first workspace with an
 // active tab, which can be another window's. srv derives the tab from `split_reference_block_id` or
-// `stack_onto_block_id` (app_api/pane.rs `open_pane`), so a call anchored to a pane of this window is
-// fine too. A singleton view goes through `openOrFocusPaneByView` instead.
+// `stack_onto_block_id` (app_api/pane.rs `open_pane`), and an agent open from `into_block_id` (the pane it fills,
+// app_api/agent_open.rs `tab_for_open`), so a call anchored to a pane of this window is fine too. A singleton view goes through `openOrFocusPaneByView` instead.
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const repoRoot = resolve(__dirname, "../../..");
-const ANCHORS = ["tab_id", "split_reference_block_id", "stack_onto_block_id"];
+const ANCHORS = ["tab_id", "split_reference_block_id", "stack_onto_block_id", "into_block_id"];
 /** Call sites that pass no anchor on purpose, as `file:N` (the Nth call in that file); the list only shrinks. */
 const ALLOWED: string[] = [];
 

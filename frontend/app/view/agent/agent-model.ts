@@ -62,6 +62,8 @@ export interface HeldLaunch {
     overrides: LaunchOverrides | undefined;
     targetBlockId: string | undefined;
     targetTabId: string | undefined;
+    /** An open that srv refused, not a launch: Go ahead opens the agent into this pane (`shared-folder-ask.ts`). */
+    reopen?: boolean;
 }
 
 /** What the second stage worked out for the launch to carry. */
