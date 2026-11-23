@@ -489,6 +489,8 @@ fn settled_text(v: &PendingView, via: &str) -> Option<String> {
     let tool = match via {
         "ClosePane" => "Stop pane",
         "FleetBulkStop" => "Stop agents",
+        "QuitAgent" => "QuitAgent call",
+        "ShutdownAgent" => "ShutdownAgent call",
         other => other,
     };
     Some(format!("[AgentMux] Your {tool} (request {}): {}.", v.request_id, parts.join("; ")))
