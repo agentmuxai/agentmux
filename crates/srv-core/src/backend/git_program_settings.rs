@@ -27,8 +27,7 @@
 //!   `credential.helper` the environment itself lists is left;
 //! - `GIT_PROXY_COMMAND` empty (no proxy command), unless the environment already has a value;
 //! - the agent's `git` shell function, which adds `--no-ext-diff` and `--no-textconv` to `diff`, `log`, `show`,
-//!   `format-patch` and `whatchanged` (`agentmux_common::github_broker_shim`), so the folder's external diff
-//!   program, diff driver commands and textconv programs do not run for git run through that function.
+//!   `format-patch` and `whatchanged` (`agentmux_common::github_broker_shim`).
 
 use std::collections::HashMap;
 use std::path::Path;
