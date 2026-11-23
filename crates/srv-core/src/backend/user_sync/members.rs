@@ -59,7 +59,7 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn unhex32(s: &str) -> Option<[u8; 32]> {
+pub(super) fn unhex32(s: &str) -> Option<[u8; 32]> {
     if s.len() != 64 || !s.is_ascii() {
         return None;
     }

@@ -1,13 +1,13 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-//! `sync.hello`, `sync.pull`, `sync.push` and `sync.members`: the transport's thin handlers over the sync layer's op
+//! `sync.hello`, `sync.pull`, `sync.push`, `sync.members`, `sync.join` and `sync.keys`: the transport's thin handlers over the sync layer's op
 //! bodies (`backend::user_sync::ops`, SPEC_USER_DATA_SYNC_LAYER). Each is a write op, so the transport has already
 //! required a certificate from an install this machine trusts. The caller the layer sees is that install's id: the
 //! member of a collection is the install that holds this computer's sync lock, so a request is answered only while this
 //! install holds it, and only for a caller that is a current member of the collection it names. Nothing here
-//! sends anything or reaches the relay. `sync.join` is not served yet: it needs the collection keys sealed to the
-//! joining machine, which come with the key store.
+//! sends anything or reaches the relay. A join waits for a person unless the collection allows it; the collection's keys
+//! reach a member sealed to its box key and never otherwise.
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -20,8 +20,8 @@ use crate::backend::user_sync::adapter::Adapter;
 use crate::backend::user_sync::hlc::Clock;
 use crate::backend::user_sync::kanban::KanbanAdapter;
 use crate::backend::user_sync::lock::{self, Lock, LEASE_MS};
-use crate::backend::user_sync::members::Subject;
-use crate::backend::user_sync::ops::{self, Ctx, Held, KeyDelivery, Me, MembersAns, MembersReq, OpError, Proof, PullAns, PullReq, PushAns, PushReq};
+use crate::backend::user_sync::keys::{SqlKeys, StoreKeys};
+use crate::backend::user_sync::ops::{self, Ctx, Held, JoinReq, Joined, KeysAns, KeysReq, Me, MembersAns, MembersReq, OpError, Proof, PullAns, PullReq, PushAns, PushReq};
 use crate::backend::user_sync::{chain_store, log};
 
 /// How long a peer's pin must have been held here before a join may go ahead without a person.
@@ -33,15 +33,6 @@ struct LanProof(bool);
 impl Proof for LanProof {
     fn auto_proven(&self, _machine: &str) -> bool {
         self.0
-    }
-}
-
-/// No collection key is held for delivery yet.
-struct NoKeys;
-
-impl KeyDelivery for NoKeys {
-    fn keys_for(&self, _collection: &str, _to: &Subject) -> Vec<(u32, String)> {
-        Vec::new()
     }
 }
 
@@ -92,7 +83,9 @@ fn exec<Req, Ans>(
     let active = matches!(lock::acquire(&conn, &me.instance_id, now, LEASE_MS).map_err(failed)?, Lock::Held { .. });
     let mut chains = chain_store::load_all(&conn).map_err(|e| failed(format!("a stored membership chain is not sound: {e:?}")))?;
     let mut clock = Clock::new(&me.instance_id);
-    let mut pending = Vec::new();
+    let mut pending = chain_store::load_pending(&conn).map_err(|e| failed(format!("the waiting joins are not readable: {e:?}")))?;
+    let keystore = SqlKeys(&conn);
+    let keys = StoreKeys { store: &keystore, wan_public: me.public_key, wan_seed: me.private_key };
     let proof = LanProof(pinned_since.is_some_and(|since| now - since >= MIN_PIN_AGE_MS));
     let mut ctx = Ctx {
         conn: &conn,
@@ -101,12 +94,14 @@ fn exec<Req, Ans>(
         pending: &mut pending,
         me: Me { id: &me.instance_id, private: &me.private_key },
         proof: &proof,
-        keys: &NoKeys,
+        keys: &keys,
         now_ms: now,
         chain_cap: ops::MAX_ENTRIES,
         active,
     };
-    run(&mut ctx, machine, req).map_err(refusal)
+    let answer = run(&mut ctx, machine, req).map_err(refusal);
+    chain_store::save_pending(&conn, &pending).map_err(failed)?;
+    answer
 }
 
 async fn run<Req, Ans>(
@@ -161,6 +156,14 @@ pub(super) async fn push(state: &AppState, caller: &RemoteCaller, params: Value)
 
 pub(super) async fn members(state: &AppState, caller: &RemoteCaller, params: Value) -> RemoteResult {
     run(state, caller, "sync.members", params, |ctx, who, req: MembersReq| -> Result<MembersAns, OpError> { ops::members(ctx, who, &req) }).await
+}
+
+pub(super) async fn join(state: &AppState, caller: &RemoteCaller, params: Value) -> RemoteResult {
+    run(state, caller, "sync.join", params, |ctx, who, req: JoinReq| -> Result<Joined, OpError> { ops::join(ctx, who, &req) }).await
+}
+
+pub(super) async fn keys(state: &AppState, caller: &RemoteCaller, params: Value) -> RemoteResult {
+    run(state, caller, "sync.keys", params, |ctx, who, req: KeysReq| -> Result<KeysAns, OpError> { ops::keys(ctx, who, &req) }).await
 }
 
 #[cfg(test)]

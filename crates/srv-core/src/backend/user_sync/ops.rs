@@ -98,6 +98,16 @@ pub trait Proof {
 /// Seals the collection's keys to a new member's box key: one sealed key for each epoch the member needs.
 pub trait KeyDelivery {
     fn keys_for(&self, collection: &str, to: &Subject) -> Vec<(u32, String)>;
+    /// Makes and keeps the key of an epoch before a change that starts it is signed: false if it could not be made.
+    fn mint(&self, _collection: &str, _epoch: u32) -> bool {
+        true
+    }
+    /// Opens keys another member sealed to this machine and keeps them: how many were taken.
+    fn take(&self, _collection: &str, _keys: &[(u32, String)]) -> usize {
+        0
+    }
+    /// Forgets the key this machine made for an epoch whose removal lost a fork to another entry.
+    fn discard(&self, _collection: &str, _epoch: u32) {}
 }
 
 /// A machine waiting for a person to confirm its join on this member.
@@ -313,6 +323,19 @@ pub fn sync_epoch(conn: &Connection, collection: &str, chain: &Chain) -> Result<
     Ok(())
 }
 
+/// A removal this machine signed that lost a fork to another entry leaves no key behind for its epoch: the winner's key
+/// is the one that counts, and is taken when it is offered.
+fn discard_lost_keys(keys: &dyn KeyDelivery, collection: &str, me: &str, chain: &Chain, taken: &[Result<Taken, MemberError>]) {
+    for t in taken {
+        if let Ok(Taken::Replaced(old)) = t {
+            if old.signer == me && matches!(old.change, Change::Remove { .. }) {
+                let before = chain.entries.iter().take(old.n.saturating_sub(1) as usize).filter(|e| matches!(e.change, Change::Remove { .. })).count();
+                keys.discard(collection, before as u32 + 1);
+            }
+        }
+    }
+}
+
 /// A former member is told how it was removed and nothing that came after.
 fn visible_to_former(entries: &[Entry], caller: &str) -> usize {
     entries.iter().position(|e| matches!(&e.change, Change::Remove { id, .. } if id == caller)).map_or(0, |i| i + 1)
@@ -335,6 +358,7 @@ pub fn members(ctx: &mut Ctx, caller: &str, req: &MembersReq) -> Result<MembersA
     if was_current {
         let chain = ctx.chains.get_mut(&req.collection).ok_or(OpError::NotMember)?;
         taken = req.offered.iter().map(|e| chain.take(&req.collection, e.clone())).collect();
+        discard_lost_keys(ctx.keys, &req.collection, ctx.me.id, chain, &taken);
         sync_epoch(ctx.conn, &req.collection, chain)?;
         chain_store::save(ctx.conn, &req.collection, chain)?;
     }
@@ -345,6 +369,31 @@ pub fn members(ctx: &mut Ctx, caller: &str, req: &MembersReq) -> Result<MembersA
     let from = (req.have_n as usize).min(upto);
     let entries: Vec<Entry> = chain.entries[from..upto].iter().take(MAX_ENTRIES).cloned().collect();
     Ok(MembersAns { entries, n: chain.entries.len() as u64, taken })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeysReq {
+    pub collection: String,
+    /// The epochs the caller already holds a key for.
+    pub have: Vec<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeysAns {
+    /// The keys the caller lacks, each sealed to the caller's box key as the chain lists it, for its epoch only.
+    pub keys: Vec<(u32, String)>,
+}
+
+/// `sync.keys`: the collection's keys a current member lacks (it learned of a removal, or lost one), sealed to it. A
+/// machine that is not a current member is given none, and never a key of an epoch the chain has not reached.
+pub fn keys(ctx: &Ctx, caller: &str, req: &KeysReq) -> Result<KeysAns, OpError> {
+    let state = member(ctx, &req.collection, caller)?;
+    if req.have.len() > MAX_NAMES {
+        return Err(OpError::TooBig);
+    }
+    let to = state.members.get(caller).ok_or(OpError::NotMember)?;
+    let keys = ctx.keys.keys_for(&req.collection, to).into_iter().filter(|(epoch, _)| *epoch <= state.epoch && !req.have.contains(epoch)).collect();
+    Ok(KeysAns { keys })
 }
 
 /// Whether this machine may seal a new record for the collection. Not while a removal at the chain's head is
@@ -376,6 +425,13 @@ pub fn kind_of(conn: &Connection, collection: &str) -> Result<String, OpError> {
 pub fn change(ctx: &mut Ctx, collection: &str, change: Change) -> Result<Entry, OpError> {
     gate(ctx)?;
     let chain = ctx.chains.get_mut(collection).ok_or(OpError::NotMember)?;
+    if matches!(change, Change::Remove { .. }) {
+        // A removal starts the next key epoch: its key is made first, so no member is removed that cannot be given one.
+        let next = chain.state(collection).map_err(|_| OpError::Bad)?.epoch + 1;
+        if !ctx.keys.mint(collection, next) {
+            return Err(OpError::NoKey);
+        }
+    }
     let entry = chain.next(ctx.me.private, collection, ctx.me.id, change).ok_or(OpError::Bad)?;
     chain.take(collection, entry.clone()).map_err(|_| OpError::Bad)?;
     sync_epoch(ctx.conn, collection, chain)?;
@@ -493,7 +549,10 @@ pub fn take_join(collection: &str, me: &str, entries: Vec<Entry>, trusted: &dyn 
 }
 
 /// Founds a collection here: its first entry, signed by this machine, and the collection in the log.
-pub fn found(conn: &Connection, chains: &mut BTreeMap<String, Chain>, collection: &str, kind: &str, me: &Subject, private: &[u8; 32], policy: Policy, now_ms: i64) -> Result<(), OpError> {
+pub fn found(conn: &Connection, chains: &mut BTreeMap<String, Chain>, keys: &dyn KeyDelivery, collection: &str, kind: &str, me: &Subject, private: &[u8; 32], policy: Policy, now_ms: i64) -> Result<(), OpError> {
+    if !keys.mint(collection, 0) {
+        return Err(OpError::NoKey);
+    }
     log::ensure_collection(conn, collection, kind, now_ms)?;
     let first = Entry::sign(private, collection, 1, None, Change::Found { member: me.clone(), policy }, &me.id).ok_or(OpError::Bad)?;
     let chain = Chain::from_entries(collection, vec![first]).map_err(|_| OpError::Bad)?;
