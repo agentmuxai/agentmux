@@ -9,7 +9,7 @@ import { SharedFolderPanel } from "./SharedFolderPanel";
 
 afterEach(() => cleanup());
 
-const pair = (container: string) => ({ host_id: "h", host_name: "Korp", container_id: `c-${container}`, container_name: container });
+const pair = (container: string, untrusted = false) => ({ host_id: "h", host_name: "Korp", container_id: `c-${container}`, container_name: container, untrusted });
 
 function show(over: Partial<Parameters<typeof SharedFolderPanel>[0]> = {}) {
     const onGoAhead = vi.fn();
@@ -25,6 +25,14 @@ describe("SharedFolderPanel", () => {
         expect(text).toContain("Aria");
         expect(text).toContain("Korp");
         expect(text).toMatch(/can change what Korp runs/);
+    });
+
+    it("says why it asks again when a choice is kept that nothing records the person made, and says nothing of it otherwise", () => {
+        show({ overlaps: [pair("Aria", true)] });
+        expect(screen.getByTestId("shared-folder-untrusted").textContent).toMatch(/no record that you made it, so it asks again/);
+        cleanup();
+        show({ overlaps: [pair("Aria")] });
+        expect(screen.queryByTestId("shared-folder-untrusted")).toBeNull();
     });
 
     it("lists every container agent that can write the folder, once each", () => {

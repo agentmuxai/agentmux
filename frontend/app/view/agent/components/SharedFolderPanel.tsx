@@ -10,7 +10,7 @@
 import { Button } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
 import type { Overlap } from "@/types/rpc/Overlap";
-import { onMount, type JSX } from "solid-js";
+import { onMount, Show, type JSX } from "solid-js";
 import { keepInViewWhileItSettles } from "./create-panel-install-view";
 
 export interface SharedFolderPanelProps {
@@ -38,6 +38,11 @@ export function SharedFolderPanel(props: SharedFolderPanelProps): JSX.Element {
                     {t("agentPicker.sharedFolder.body", { containers: containers(), host: props.hostName })}
                 </div>
                 <div class="shared-folder-hint">{t("agentPicker.sharedFolder.hint")}</div>
+                <Show when={props.overlaps.some((pair) => pair.untrusted)}>
+                    <div class="shared-folder-hint" data-testid="shared-folder-untrusted">
+                        {t("agentPicker.sharedFolder.untrusted")}
+                    </div>
+                </Show>
                 <div class="shared-folder-actions">
                     <Button tone="neutral" onClick={() => props.onKeepApart()} disabled={props.busy} data-testid="shared-folder-cancel">
                         {t("agentPicker.sharedFolder.cancel")}
