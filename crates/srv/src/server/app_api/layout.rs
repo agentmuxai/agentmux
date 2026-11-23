@@ -187,8 +187,7 @@ pub(super) async fn layout_open_impl(
             if def_id.is_empty() {
                 continue;
             }
-            let name = obj::meta_get_string(&block.meta, "agentName", "");
-            let who = if name.is_empty() { def_id.clone() } else { name };
+            let who = super::agent_open::agent_label(&state.mstore, &obj::meta_get_string(&block.meta, "agentName", ""), &def_id);
             match super::agent_open::open_agent_into_block(state, &def_id, &tab.tab_id, block_id).await {
                 // An agent has one pane: this one stays a picker, and the layout says where the agent is.
                 Ok(opened) if opened.block_id != *block_id => {
@@ -201,7 +200,7 @@ pub(super) async fn layout_open_impl(
                     notes.push(format!("{who} is already open in {at}, so its pane there was kept and this pane shows the agent picker."));
                 }
                 Ok(_) => {}
-                Err(e) => notes.push(format!("An agent ({who}) didn't start, so its pane shows the agent picker: {e}")),
+                Err(e) => notes.push(super::agent_open::not_started_note(&who, &e)),
             }
         }
     }

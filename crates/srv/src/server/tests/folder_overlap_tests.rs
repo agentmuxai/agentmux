@@ -90,6 +90,19 @@ async fn the_window_is_told_which_container_agents_a_host_agent_shares_a_folder_
 }
 
 #[tokio::test]
+async fn a_host_agent_that_names_no_folder_is_asked_about_the_folder_it_opens_in() {
+    let f = fleet();
+    let blank = save(&f.state, "Blanky", "host", "", "[]");
+    let own = overlap::open_folder(&f.state.mstore.agent_def_get(&blank).unwrap().unwrap());
+    let holder = save(&f.state, "Holder", "container", &own.parent().unwrap().to_string_lossy(), "[]");
+
+    let (data, error) = call(&f.state, window(), "folderoverlapcheck", json!({ "agent_id": blank })).await;
+
+    assert!(error.is_empty(), "{error}");
+    assert_eq!(data["overlaps"][0]["container_id"].as_str(), Some(holder.as_str()), "{data}");
+}
+
+#[tokio::test]
 async fn only_the_window_goes_ahead_and_the_choice_is_for_that_pair() {
     let f = fleet();
     let other = save(&f.state, "Ula", "container", &f.path("shared"), "[]");
