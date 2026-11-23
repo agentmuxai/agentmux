@@ -364,6 +364,8 @@ fn the_function_keeps_the_folders_diff_programs_from_running_and_leaves_git_s_ow
     std::fs::write(repo.join("w.txt"), "a\nb\nc\nd\ne\n").unwrap();
     folder.git(&["add", "."], &HashMap::new());
     folder.git(&["commit", "-q", "-m", "more"], &HashMap::new());
+    std::fs::write(repo.join("b.txt"), "mid\n").unwrap();
+    folder.git(&["commit", "-q", "-a", "-m", "again"], &HashMap::new());
     std::fs::write(repo.join("a.txt"), "two\n").unwrap();
     std::fs::write(repo.join("b.txt"), "y\n").unwrap();
     std::fs::write(repo.join("w.txt"), "a\nb\nc \nd\nE\n").unwrap();
@@ -378,6 +380,7 @@ fn the_function_keeps_the_folders_diff_programs_from_running_and_leaves_git_s_ow
         "git diff HEAD~1 HEAD",
         "git blame b.txt",
         "git reflog -p",
+        "git range-diff HEAD~2..HEAD~1 HEAD~1..HEAD",
     ];
     for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
         for (key, name) in [("diff.external", "diffext"), ("diff.drvcmd.command", "drvcmd"), ("diff.drvtext.textconv", "drvtext")] {
@@ -505,6 +508,7 @@ fn the_function_keeps_a_pager_the_folder_names_from_running_on_a_terminal() {
 fn the_function_keeps_a_remotes_upload_and_receive_programs_from_running() {
     let folder = Folder::new();
     let commands = ["git fetch viaup", "git ls-remote viaup", "git pull viaup HEAD", "git push viaup HEAD:refs/heads/x"];
+    let remote_commands = ["git remote update viaup", "git remote show viaup", "git remote prune viaup"];
     for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
         folder.forget();
         for command in commands {
@@ -516,6 +520,14 @@ fn the_function_keeps_a_remotes_upload_and_receive_programs_from_running() {
             through_the_function(&folder, body, true, command);
         }
         assert_eq!(folder.ran(), Vec::<String>::new(), "with it none of {commands:?} runs them");
+    }
+    for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
+        folder.forget();
+        for command in remote_commands {
+            let said = through_the_function(&folder, body, true, command);
+            assert!(said.contains("is not run while"), "{command}: {said}");
+        }
+        assert_eq!(folder.ran(), Vec::<String>::new(), "with it none of {remote_commands:?} runs them");
     }
     let pushed = through_the_function(&folder, agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, true, "git push viaup HEAD:refs/heads/y && git ls-remote viaup");
     assert!(pushed.contains("refs/heads/y"), "a push still works through it: {pushed}");

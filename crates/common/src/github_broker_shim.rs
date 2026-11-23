@@ -75,19 +75,21 @@ pub const GIT_FUNCTION_NAME: &str = "BASH_FUNC_git%%";
 /// host agent in a folder a container agent can write).
 pub const GIT_NO_EXT_DIFF_ENV: &str = "AGENTMUX_GIT_NO_EXT_DIFF";
 
-/// The step of the `git` function that [`GIT_NO_EXT_DIFF_ENV`] turns on. After any leading `-C <dir>`, `-c
-/// <name=value>` and other global options, every command gets `--no-pager` (so a pager the folder's own
-/// configuration names does not run); `diff`, `log`, `show`, `format-patch`, `whatchanged`, `blame` and `reflog`
-/// (after its `show`, or with no subcommand, and not for another one) also get `--no-ext-diff` and `--no-textconv`
-/// (so the external diff program, a diff driver's `command` and a `textconv` of the folder's own configuration do not
-/// run); `fetch`, `pull`, `ls-remote` and `clone` get
+/// The step of the `git` function that [`GIT_NO_EXT_DIFF_ENV`] turns on. A `diff.<driver>.textconv` of the folder's
+/// own configuration is set to `cat` on the command line (`-c`, which every command git starts inherits, so
+/// `range-diff` is covered). After any leading `-C <dir>`, `-c <name=value>` and other global options, every command
+/// gets `--no-pager` (so a pager the folder's own configuration names does not run); `diff`, `log`, `show`,
+/// `format-patch`, `whatchanged`, `blame` and `reflog` (after its `show`, or with no subcommand, and not for another
+/// one) also get `--no-ext-diff` and `--no-textconv` (so the external diff program, a diff driver's `command` and a
+/// `textconv` of the folder's own configuration do not run); `fetch`, `pull`, `ls-remote` and `clone` get
 /// `--upload-pack=git-upload-pack` and `push` gets `--receive-pack=git-receive-pack` (so a remote's `uploadpack` and
-/// `receivepack` of the folder's configuration do not run). Every other option is git's own, and the function goes on
-/// with the arguments so changed.
+/// `receivepack` of the folder's configuration do not run); `remote update`, `remote show` and `remote prune` are
+/// refused while the folder's configuration names such a program for a remote. Every other option is git's own, and
+/// the function goes on with the arguments so changed.
 macro_rules! no_ext_diff_step {
     () => {
         r#"  if [ -n "${AGENTMUX_GIT_NO_EXT_DIFF:-}" ]; then
-    local _amx_g=() _amx_s _amx_t;
+    local _amx_g=() _amx_s _amx_t _amx_c _amx_k _amx_u=;
     while [ $# -gt 0 ]; do
       case "$1" in
         -C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env) _amx_g+=("$1"); shift; if [ $# -gt 0 ]; then _amx_g+=("$1"); shift; fi;;
@@ -95,7 +97,23 @@ macro_rules! no_ext_diff_step {
         *) break;;
       esac;
     done;
+    while IFS=$'\t' read -r _amx_c _amx_k; do
+      case "$_amx_c" in global|system) continue;; esac;
+      case "$_amx_k" in
+        *=*) ;;
+        *.textconv) _amx_g+=(-c "$_amx_k=cat");;
+        *.uploadpack|*.receivepack) _amx_u=1;;
+      esac;
+    done < <(command git ${_amx_g[@]+"${_amx_g[@]}"} config --show-scope --name-only --get-regexp '^(diff\..*\.textconv|remote\..*\.(uploadpack|receivepack))$' 2>/dev/null);
     case "${1:-}" in
+      remote)
+        case "${2:-}" in
+          update|show|prune)
+            if [ -n "$_amx_u" ]; then
+              echo "git remote $2 is not run while this folder's configuration names an upload or receive program for a remote; use git fetch or git ls-remote" >&2;
+              return 1;
+            fi;;
+        esac;;
       diff|log|show|format-patch|whatchanged|blame) _amx_s=$1; shift; set -- "$_amx_s" --no-ext-diff --no-textconv "$@";;
       reflog)
         _amx_s=$1; shift;
