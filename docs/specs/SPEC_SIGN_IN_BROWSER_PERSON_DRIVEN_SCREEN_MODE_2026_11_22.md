@@ -39,10 +39,11 @@ The streamed pane blocks local files, the browser's own pages and developer tool
 
 ## 5. Frames and input
 
-As built: a frame is the whole screen as a JPEG (the pane's existing frame message), sent only when the screen changed and at most 15 a second, a frame the pane cannot take is dropped and made again from a newer screen; mouse, wheel and keys reach the screen as a person's pointer and keyboard (the X test extension); a typed address is the checked, normalised address, typed after the address bar has the focus. A US keyboard and a fixed screen size are limits of the first release; a resize reconnects at the new size.
+As built: a frame is the whole screen as a JPEG (the pane's existing frame message), sent only when the screen changed and at most 15 a second, a frame the pane cannot take is dropped and made again from a newer screen; mouse, wheel and keys reach the screen as a person's pointer and keyboard (the X test extension); a typed address is the checked, normalised address, typed after the address bar has the focus. A US keyboard is a limit of the first release. The screen follows the pane's size (R16).
 
 - R14. **Idle cost.** The screen is read only when the screen server reports a change (its damage events), through shared memory, never on a timer; a static page costs at most 5% of one core per session in the whole stack at both sizes, and sends no frame unless pixels changed.
 - R15. **Typing latency.** A frame is made at once when an input event arrives, and every ~16 ms for about 300 ms after it, then back to the steady cap (15 a second); the steady rate does not rise. Target: key to changed picture under about 40 ms at the smaller size and under about 60 ms at the larger, on a real text box.
+- R16. **Live resize.** The virtual screen follows the pane: once the pane's size has stayed the same for about 150 ms the screen is made that size (100 to 4096 wide and 100 to 2304 high; a larger ask is cut to that), the browser's maximised window follows, the capture reads the new size whole, and the pane is told the size it got. The screen is started at its largest size and set to the pane's size before the browser opens, because the screen server can only shrink and grow within the size it started with. Proven by a real run: bigger and smaller sizes, the window's far corner is the page's at each.
 
 ## 6. Windows, the new-window notice and the key gap
 
@@ -85,6 +86,7 @@ Denied, as in the streamed pane (R5's policy). A sign-in does not need them. If 
 2. **Windows and pane** (the second prototype pull request, made real): event-driven window tracking, notice, key gap (R9, R10), the pane's opt-in and the "Full browser (you drive)" choice.
 2b. **Capture cost and typing latency** (R14, R15): damage-driven capture, shared-memory reads, input-triggered bursts, a faster encode of the changed rectangle; proven by the idle and key-to-picture measurements of the prototype, re-run.
 3. **Clipboard** (section 7).
+3b. **Live resize** (R16).
 4. **Kept profile, sign-out and removal** (section 9), with the server-side archive; depends on the kept-profile design.
 5. **Limits and metering** (section 10), after the measured numbers.
 6. **Hosted image and docs**: the Linux image with the screen, window manager and browser, and user docs.

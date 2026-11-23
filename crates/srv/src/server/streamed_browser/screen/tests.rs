@@ -120,7 +120,7 @@ async fn screen_mode_popup_real() {
 }
 
 /// A page whose text box holds a text and has it selected, with a non-US letter in it.
-const COPY_PAGE: &str = "data:text/html,<html style=\"height:100%25\"><body style=\"height:100%25;margin:0\"><textarea autofocus onfocus=\"this.select()\" style=\"width:100%25;height:100%25;margin:0;background:blue\">copy me, W%C3%B6rld</textarea></body></html>";
+const COPY_PAGE: &str = "data:text/html;charset=utf-8,<html style=\"height:100%25\"><body style=\"height:100%25;margin:0\"><textarea autofocus onfocus=\"this.select()\" style=\"width:100%25;height:100%25;margin:0;background:blue\">copy me, W%C3%B6rld</textarea></body></html>";
 
 /// What the person copies in the remote browser (Ctrl+C) can be read out of the screen's clipboard, exactly, and nothing is read before that.
 /// Run with the same command as `screen_mode_real`, by name `screen_mode_copy_real`.
@@ -151,6 +151,29 @@ async fn screen_mode_copy_real() {
     tokio::time::sleep(Duration::from_millis(300)).await;
     let text = read(clip).await.expect("the copy is read").expect("the browser put text on the clipboard");
     assert_eq!(text, "copy me, Wörld");
+}
+
+/// A page with a text box that turns green when it holds exactly "café 😀" (a letter with no US key, and a character outside the first plane),
+/// and red for any other text. The expected text is built from character codes, so the page does not depend on how its own text is read.
+const PASTE_NON_US_PAGE: &str = "data:text/html;charset=utf-8,<html style=\"height:100%25\"><body style=\"height:100%25;margin:0;background:blue\">                          <textarea autofocus style=\"width:100%25;height:100%25;margin:0;background:blue\"                           oninput=\"this.style.background=this.value=='caf'+String.fromCharCode(233,32,55357,56832)&&'lime'||'red'\">                          </textarea></body></html>";
+
+/// A paste through the screen's clipboard is exact: a letter with no US key and an emoji arrive in the page (typing key by key would skip them).
+/// Run with the same command as `screen_mode_real`, by name `screen_mode_paste_exact_real`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "needs Xvfb and a Chrome; run by hand on a Linux host"]
+async fn screen_mode_paste_exact_real() {
+    if which::which("Xvfb").is_err() || chromium_missing() {
+        eprintln!("screen_mode_paste_exact_real: no Xvfb or no Chrome here; nothing run");
+        return;
+    }
+    let session = session::start(800, 600, PASTE_NON_US_PAGE, true).await.expect("the screen and the browser start");
+    let screen = x::Screen::connect(&session.display).expect("the screen is reachable");
+    wait_for_colour(&screen, 700, 500, [255, 0, 0], 30).await.expect("the page is up (blue)");
+    let clip = std::sync::Arc::new(clipboard::Clipboard::connect(&session.display).expect("the clipboard connects"));
+    send_input(&screen, &click_at(MouseKind::Down)).await.unwrap();
+    send_input(&screen, &click_at(MouseKind::Up)).await.unwrap();
+    paste_exact(&screen, Some(&clip), "café 😀", &[]).await.expect("the paste is sent");
+    wait_for_colour(&screen, 700, 500, [0, 255, 0], 10).await.expect("the pasted text arrived exactly in the page");
 }
 
 fn click_at(kind: MouseKind) -> ClientMsg {
@@ -249,7 +272,7 @@ async fn screen_mode_idle_real() {
 
 /// A page with a text box that turns green when it holds exactly the text the test pastes (with a newline and a hash sign), and red for any
 /// other text. (No hash sign or question mark in the address itself: a data address ends at the first hash sign.)
-const PASTE_PAGE: &str = "data:text/html,<html style=\"height:100%25\"><body style=\"height:100%25;margin:0;background:blue\">\
+const PASTE_PAGE: &str = "data:text/html;charset=utf-8,<html style=\"height:100%25\"><body style=\"height:100%25;margin:0;background:blue\">\
                           <textarea autofocus style=\"width:100%25;height:100%25;margin:0;background:blue\" \
                           oninput=\"this.style.background=this.value==['Hello, World! %2342','line two'].join(String.fromCharCode(10))&&'lime'||'red'\">\
                           </textarea></body></html>";
