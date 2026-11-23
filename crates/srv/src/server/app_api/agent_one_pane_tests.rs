@@ -8,7 +8,7 @@ use super::*;
 use crate::sagas::park_agents_tests::{in_tab, seed_agent_block, seed_block, seed_workspace, set_always_available};
 
 fn open_cmd(agent: &str, tab: Option<&str>) -> CommandAgentOpenData {
-    CommandAgentOpenData { agent_id: agent.to_string(), tab_id: tab.map(str::to_string), split_direction: None, split_reference_block_id: None, focus: Some(false) }
+    CommandAgentOpenData { agent_id: agent.to_string(), tab_id: tab.map(str::to_string), split_direction: None, split_reference_block_id: None, focus: Some(false), into_block_id: None }
 }
 
 fn blocks_of(state: &AppState, agent: &str) -> Vec<String> {

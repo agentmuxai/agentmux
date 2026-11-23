@@ -118,7 +118,7 @@ mod tests {
     use crate::server::tests::test_state;
 
     fn ask(agent: &str) -> CommandAgentOpenData {
-        CommandAgentOpenData { agent_id: agent.to_string(), tab_id: None, split_direction: None, split_reference_block_id: None, focus: None }
+        CommandAgentOpenData { agent_id: agent.to_string(), tab_id: None, split_direction: None, split_reference_block_id: None, focus: None, into_block_id: None }
     }
 
     #[tokio::test]

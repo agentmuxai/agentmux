@@ -13,7 +13,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { revealBlock } from "@/app/util/reveal-block";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import type { RecentSessionRow } from "@/types/rpc/RecentSessionRow";
-import { createSignal, type Accessor } from "solid-js";
+import { createEffect, createSignal, type Accessor } from "solid-js";
 import { resolveEffectiveLaunchProvider } from "../agent-launch-env";
 import type { AgentViewModel } from "../agent-model";
 import { realAccountIdOrEmpty } from "../identity-carry-over";
@@ -25,13 +25,20 @@ import type { CreatedAgent } from "./AgentCreateForm";
 import { isContainerAgentType } from "@/util/runtime-kind";
 import { attachRunningAgent } from "./attach-target";
 import type { HeldLaunch } from "../agent-model";
-import { goAheadWithSharedFolder, type SharedFolderAsk } from "../shared-folder-ask";
+import {
+    declineAskedOpen,
+    goAheadWithSharedFolder,
+    OPEN_ASK_META,
+    openIntoPane,
+    sharedFolderOverlaps,
+    type SharedFolderAsk,
+} from "../shared-folder-ask";
 
 /**
  * What a launch leaves in the picker: why it aborted (identity M4b-3: its row could not be recorded), and a launch held
  * for the person, a host agent that opens in a folder a container agent can write (`shared-folder-ask.ts`).
  */
-function createLaunchNotices(model: AgentViewModel, setLaunching: (id: string | null) => void) {
+function createLaunchNotices(model: AgentViewModel, setLaunching: (id: string | null) => void, agents: Accessor<AgentDefinition[]>) {
     const [launchError, setLaunchError] = createSignal<string | null>(null);
     const [sharedFolder, setSharedFolder] = createSignal<SharedFolderAsk<HeldLaunch> | null>(null);
     // Taken after every launch attempt, so a later attempt that did not abort clears the notice instead of leaving it
@@ -42,15 +49,24 @@ function createLaunchNotices(model: AgentViewModel, setLaunching: (id: string | 
         setSharedFolder(model.sharedFolder);
         model.sharedFolder = null;
     };
-    const keepSharedFolderApart = () => setSharedFolder(null);
+    const keepSharedFolderApart = () => {
+        const held = sharedFolder()?.launch;
+        setSharedFolder(null);
+        if (held?.reopen && held.targetBlockId) void declineAskedOpen(held.targetBlockId, held.agent.id);
+    };
     const goAheadWithSharedFolderAsk = async () => {
         const ask = sharedFolder();
         if (!ask) return;
-        const { agent, overrides, targetBlockId, targetTabId } = ask.launch;
+        const { agent, overrides, targetBlockId, targetTabId, reopen } = ask.launch;
         setLaunching(agent.id);
         try {
             await goAheadWithSharedFolder(ask.overlaps);
             setSharedFolder(null);
+            if (reopen && targetBlockId) {
+                noteOpenedByPerson(agent.id);
+                await openIntoPane(agent.id, targetBlockId, agent.name);
+                return;
+            }
             await model.launchAgentDefinition(agent, overrides, targetBlockId, targetTabId);
             take();
         } catch (e) {
@@ -59,7 +75,38 @@ function createLaunchNotices(model: AgentViewModel, setLaunching: (id: string | 
             setLaunching(null);
         }
     };
+    /** This pane is to open `agent` and srv held it for a shared folder: ask here, then open it into this pane. */
+    const holdOpen = async (agent: AgentDefinition) => {
+        const overlaps = await sharedFolderOverlaps(agent.id, agent.agent_type, agent.working_directory ?? "");
+        if (!overlaps) return;
+        setSharedFolder({
+            hostName: agent.name,
+            overlaps,
+            launch: { agent, overrides: undefined, targetBlockId: model.blockId, targetTabId: undefined, reopen: true },
+        });
+    };
+    askWhenThePaneIsToOpenAnAgent(model, agents, holdOpen);
     return { launchError, sharedFolder, take, keepSharedFolderApart, goAheadWithSharedFolderAsk };
+}
+
+/**
+ * A pane that a restore, an import or a window open could not open for a shared folder carries the agent
+ * (`layout:agent`): ask the person here, once for that agent.
+ */
+function askWhenThePaneIsToOpenAnAgent(
+    model: AgentViewModel,
+    agents: Accessor<AgentDefinition[]>,
+    hold: (agent: AgentDefinition) => Promise<void>
+): void {
+    const block = model.blockAtom;
+    let asked = "";
+    createEffect(() => {
+        const wanted = block()?.meta?.[OPEN_ASK_META];
+        const agent = typeof wanted === "string" && wanted !== asked ? agents().find((a) => a.id === wanted) : undefined;
+        if (!agent) return;
+        asked = agent.id;
+        void hold(agent).catch((e) => console.warn(`[agent-picker] asking about ${agent.name} failed`, e));
+    });
 }
 
 export function createPickerLaunch(
@@ -73,7 +120,7 @@ export function createPickerLaunch(
     const { agents, refreshOpenDefinitions } = d;
     const [launching, setLaunching] = createSignal<string | null>(null);
     const [nodejsError, setNodejsError] = createSignal<string | null>(null);
-    const { take: takeLaunchError, ...notices } = createLaunchNotices(props.model, setLaunching);
+    const { take: takeLaunchError, ...notices } = createLaunchNotices(props.model, setLaunching, agents);
 
     // Cascade follow-up (2026-05-23) — reattach via Recent Sessions.
     // No form: the row carries the account and bundle, so this calls

@@ -14,6 +14,7 @@ fn open_cmd(agent: &str, tab: Option<&str>) -> CommandAgentOpenData {
         split_direction: None,
         split_reference_block_id: None,
         focus: Some(false),
+        into_block_id: None,
     }
 }
 
