@@ -109,7 +109,9 @@ impl Screen {
             let _ = self.conn.randr_delete_output_mode(output, old);
             let _ = self.conn.randr_destroy_mode(old);
         }
-        self.conn.flush().map_err(|e| x(&e))
+        self.conn.flush().map_err(|e| x(&e))?;
+        // The window manager has the new screen (its work area follows at once); a maximised window is asked again to fill it.
+        self.refit()
     }
 
     fn set_screen(&self, w: u16, h: u16) -> Result<(), String> {

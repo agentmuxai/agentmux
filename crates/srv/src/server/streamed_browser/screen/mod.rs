@@ -8,6 +8,7 @@
 //! A prototype for the decision in task 48354: no agent driving, no windows list, a US keyboard. The screen follows the pane's size (`randr`).
 
 mod clipboard;
+mod ewmh;
 mod frames;
 mod held;
 mod keymap;
@@ -198,6 +199,13 @@ async fn run(mut socket: WebSocket, start: Start, ended: impl std::future::Futur
         let _ = socket.send(error(&e)).await;
         return;
     }
+    // The browser's window fills the screen once it is up, and (maximised) follows the screen when the pane is resized (`ewmh`).
+    let display = session.display.clone();
+    tokio::task::spawn_blocking(move || {
+        if let Err(e) = x::Screen::connect(&display).and_then(|s| s.maximize_first_within(Duration::from_secs(15))) {
+            tracing::warn!(error = %e, "screen browser: the window was not maximised");
+        }
+    });
     let mut watch = watch::Watch::default();
     let (sw, sh) = input.size();
     let _ = socket.send(size_message(sw, sh)).await;

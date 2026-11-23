@@ -153,12 +153,13 @@ async fn screen_mode_copy_real() {
     assert_eq!(text, "copy me, Wörld");
 }
 
-/// A page with a text box that turns green when it holds exactly "café 😀" (a letter with no US key, and a character outside the first plane),
-/// and red for any other text. The expected text is built from character codes, so the page does not depend on how its own text is read.
-const PASTE_NON_US_PAGE: &str = "data:text/html;charset=utf-8,<html style=\"height:100%25\"><body style=\"height:100%25;margin:0;background:blue\">                          <textarea autofocus style=\"width:100%25;height:100%25;margin:0;background:blue\"                           oninput=\"this.style.background=this.value=='caf'+String.fromCharCode(233,32,55357,56832)&&'lime'||'red'\">                          </textarea></body></html>";
+/// A page with a text box and three stripes under it that say what the box holds: the first turns green when the text starts with "café" (a
+/// letter with no US key), the second when it ends with 😀 (a character outside the first plane), the third when it is seven code units long
+/// ("café 😀"); red when not. The expected characters are built from character codes, so the page does not depend on how its own text is read.
+const PASTE_NON_US_PAGE: &str = "data:text/html;charset=utf-8,<html><body style=\"margin:0;background:blue\"><textarea autofocus style=\"display:block;width:800px;height:300px;margin:0;background:blue\" oninput=\"var v=this.value,e=String.fromCharCode(233),s=String.fromCharCode(55357,56832);document.getElementById('a').style.background=v.indexOf('caf'+e)==0&&'lime'||'red';document.getElementById('b').style.background=v.slice(-2)==s&&'lime'||'red';document.getElementById('c').style.background=v.length==7&&'lime'||'red'\"></textarea><div id=a style=\"height:100px;background:blue\"></div><div id=b style=\"height:100px;background:blue\"></div><div id=c style=\"height:100px;background:blue\"></div></body></html>";
 
 /// A paste through the screen's clipboard is exact: a letter with no US key and an emoji arrive in the page (typing key by key would skip them).
-/// Run with the same command as `screen_mode_real`, by name `screen_mode_paste_exact_real`.
+/// The three stripes say which part failed. Run with the same command as `screen_mode_real`, by name `screen_mode_paste_exact_real`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "needs Xvfb and a Chrome; run by hand on a Linux host"]
 async fn screen_mode_paste_exact_real() {
@@ -168,12 +169,21 @@ async fn screen_mode_paste_exact_real() {
     }
     let session = session::start(800, 600, PASTE_NON_US_PAGE, true).await.expect("the screen and the browser start");
     let screen = x::Screen::connect(&session.display).expect("the screen is reachable");
-    wait_for_colour(&screen, 700, 500, [255, 0, 0], 30).await.expect("the page is up (blue)");
+    wait_for_colour(&screen, 700, 550, [255, 0, 0], 30).await.expect("the page is up (blue)");
     let clip = std::sync::Arc::new(clipboard::Clipboard::connect(&session.display).expect("the clipboard connects"));
     send_input(&screen, &click_at(MouseKind::Down)).await.unwrap();
     send_input(&screen, &click_at(MouseKind::Up)).await.unwrap();
     paste_exact(&screen, Some(&clip), "café 😀", &[]).await.expect("the paste is sent");
-    wait_for_colour(&screen, 700, 500, [0, 255, 0], 10).await.expect("the pasted text arrived exactly in the page");
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let grabbed = screen.grab().expect("the screen is read");
+    let says = |y| match pixel(&screen, &grabbed, 700, y) {
+        [0, 255, 0] => "ok",
+        [0, 0, 255] => "WRONG",
+        [255, 0, 0] => "NO INPUT EVENT",
+        _ => "?",
+    };
+    let (prefix, emoji, length) = (says(350), says(450), says(550));
+    assert_eq!((prefix, emoji, length), ("ok", "ok", "ok"), "the text starts with café: {prefix}; ends with the emoji: {emoji}; is seven code units: {length}");
 }
 
 fn click_at(kind: MouseKind) -> ClientMsg {
@@ -195,7 +205,9 @@ async fn screen_mode_resize_real() {
     let session = session::start(800, 600, BLUE_PAGE, true).await.expect("the screen and the browser start");
     let screen = x::Screen::connect(&session.display).expect("the screen is reachable");
     assert_eq!(screen.size(), (800, 600), "the screen is the size the pane asked for");
-    wait_for_colour(&screen, 790, 590, [255, 0, 0], 30).await.expect("the page is up (blue)");
+    // The window manager's maximise, as the pane's session makes it once the window is up; the window then fills the screen.
+    screen.maximize_first_within(Duration::from_secs(30)).expect("the browser's window is maximised");
+    wait_for_colour(&screen, 799, 599, [255, 0, 0], 30).await.expect("the page fills the screen (blue)");
     for (w, h) in [(1024u16, 700u16), (640, 480), (1200, 800), (800, 600)] {
         screen.resize(w, h).unwrap_or_else(|e| panic!("resize to {w}x{h}: {e}"));
         assert_eq!(screen.size(), (w, h));
