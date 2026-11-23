@@ -166,34 +166,19 @@ pub(super) async fn delete_block(state: &AppState, args: &[serde_json::Value]) -
     Ok(WebReturnType::success_empty())
 }
 
-/// Who asked, for the person's countdown: the calling agent, or this when the request carries no agent credential.
-const UNVERIFIED_CALLER: &str = "an unverified caller";
-
 // `/shutdown` (`/quit`, `/exit`) and Shut down are the person's own choices, made in the window over its websocket
 // (`app_api::agent_quit`). A request on this route proves nothing about who made it, so it is handled as an agent's
 // `Agents stop` is: the person is shown who asked and can keep the agent running; nothing is recorded as their
 // own slash or menu action. The reply carries the pending request. (`ShutdownAgent`'s background-tasks answer is
-// the person's and is not taken from here.)
+// the person's and is not taken from here.) What may be asked, and how often, is `stop_requests`.
 pub(super) fn quit_agent(state: &AppState, args: &[serde_json::Value], caller_uid: Option<&str>) -> Reply {
     let block_id: String = arg(args, 0)?;
-    ask_the_person_to_stop(state, &block_id, caller_uid, "QuitAgent")
+    super::super::stop_requests::ask_the_person_to_stop(state, &block_id, caller_uid, "QuitAgent")
 }
 
 pub(super) fn shutdown_agent(state: &AppState, args: &[serde_json::Value], caller_uid: Option<&str>) -> Reply {
     let block_id: String = arg(args, 0)?;
-    ask_the_person_to_stop(state, &block_id, caller_uid, "ShutdownAgent")
-}
-
-fn ask_the_person_to_stop(state: &AppState, block_id: &str, caller_uid: Option<&str>, method: &str) -> Reply {
-    if crate::backend::blockcontroller::get_controller(block_id).is_none() {
-        return Err(WebReturnType::error(format!("{method}: no running agent in block {block_id}")));
-    }
-    let by = caller_uid
-        .and_then(|uid| state.mstore.agent_names_by_id(uid).ok().flatten().map(|row| row.slug).or_else(|| Some(uid.to_string())))
-        .unwrap_or_else(|| UNVERIFIED_CALLER.to_string());
-    let action = crate::sagas::pending_shutdown::Action::CloseTab { detail: format!("asked by {by} ({method}, on the service route)") };
-    let pending = crate::sagas::pending_shutdown::request(state, block_id, &by, "Service", "", action);
-    Ok(WebReturnType::success(serde_json::json!({ "pending": pending })))
+    super::super::stop_requests::ask_the_person_to_stop(state, &block_id, caller_uid, "ShutdownAgent")
 }
 
 // What a shutdown would end, for the confirm; nothing is ended.
