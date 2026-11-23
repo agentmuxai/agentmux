@@ -226,6 +226,30 @@ fn a_removal_that_loses_a_fork_leaves_no_key_behind_and_one_that_cannot_be_given
 }
 
 #[test]
+fn a_removal_another_machine_made_and_gave_its_key_for_leaves_no_key_when_it_loses_a_fork() {
+    let (mut a, mut b, mut c, mut d) = (n(1), n(2), n(3), n(4));
+    a.found("kanban", Policy::AutoProven);
+    join(&mut a, &mut b, "kanban");
+    join(&mut a, &mut c, "kanban");
+    join(&mut a, &mut d, "kanban");
+    catch_up(&mut b, &mut a);
+    catch_up(&mut c, &mut a);
+    let policy = a.with(|ctx| ops::change(ctx, C, Change::SetPolicy { policy: Policy::Approve })).unwrap();
+    let (gone, did, aid, cid) = (ended(&[(&a, 0), (&b, 0), (&c, 0)]), d.id.clone(), a.id.clone(), c.id.clone());
+    b.with(|ctx| ops::change(ctx, C, Change::Remove { id: did, ended: gone })).unwrap();
+    // C learns of B's removal and is given the key B made for it.
+    catch_up(&mut c, &mut b);
+    let given = b.with(|ctx| ops::keys(ctx, &cid, &KeysReq { collection: C.into(), have: vec![0] })).unwrap();
+    assert_eq!(c.with(|ctx| ctx.keys.take(C, &given.keys)), 1);
+    assert_eq!(c.epochs(), vec![0, 1]);
+    // A's earlier entry wins at C: the removal is gone, and with it the key B made, which C did not sign.
+    let offer = MembersReq { collection: C.into(), have_n: 4, offered: vec![policy] };
+    let ans = c.with(|ctx| ops::members(ctx, &aid, &offer)).unwrap();
+    assert!(matches!(ans.taken[0], Ok(super::members::Taken::Replaced(_))));
+    assert_eq!(c.epochs(), vec![0], "the key of the lost removal is forgotten here too, so the winner's key can be taken");
+}
+
+#[test]
 fn a_join_waiting_for_a_person_is_still_there_in_the_next_call() {
     let (mut a, b) = (n(1), n(2));
     a.found("kanban", Policy::Approve);

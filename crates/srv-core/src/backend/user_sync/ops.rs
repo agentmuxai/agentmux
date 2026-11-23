@@ -323,12 +323,12 @@ pub fn sync_epoch(conn: &Connection, collection: &str, chain: &Chain) -> Result<
     Ok(())
 }
 
-/// A removal this machine signed that lost a fork to another entry leaves no key behind for its epoch: the winner's key
-/// is the one that counts, and is taken when it is offered.
-fn discard_lost_keys(keys: &dyn KeyDelivery, collection: &str, me: &str, chain: &Chain, taken: &[Result<Taken, MemberError>]) {
+/// A removal that lost a fork to another entry leaves no key behind for its epoch, whichever machine signed it or made
+/// the key: the winner's key is the one that counts, and is taken when it is offered.
+fn discard_lost_keys(keys: &dyn KeyDelivery, collection: &str, chain: &Chain, taken: &[Result<Taken, MemberError>]) {
     for t in taken {
         if let Ok(Taken::Replaced(old)) = t {
-            if old.signer == me && matches!(old.change, Change::Remove { .. }) {
+            if matches!(old.change, Change::Remove { .. }) {
                 let before = chain.entries.iter().take(old.n.saturating_sub(1) as usize).filter(|e| matches!(e.change, Change::Remove { .. })).count();
                 keys.discard(collection, before as u32 + 1);
             }
@@ -358,7 +358,7 @@ pub fn members(ctx: &mut Ctx, caller: &str, req: &MembersReq) -> Result<MembersA
     if was_current {
         let chain = ctx.chains.get_mut(&req.collection).ok_or(OpError::NotMember)?;
         taken = req.offered.iter().map(|e| chain.take(&req.collection, e.clone())).collect();
-        discard_lost_keys(ctx.keys, &req.collection, ctx.me.id, chain, &taken);
+        discard_lost_keys(ctx.keys, &req.collection, chain, &taken);
         sync_epoch(ctx.conn, &req.collection, chain)?;
         chain_store::save(ctx.conn, &req.collection, chain)?;
     }
