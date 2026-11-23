@@ -86,6 +86,23 @@ fn the_event_asks_for_an_inactive_window_and_caps_the_cascade() {
 }
 
 #[test]
+fn a_rebuilt_request_keeps_the_floating_ask() {
+    let asked = CommandPaneOpenData {
+        width: Some(json!("60%")),
+        height: Some(json!(500)),
+        spot: Some("left".into()),
+        x: Some(1.0),
+        y: Some(2.0),
+        ..floating()
+    };
+    let mut rebuilt = CommandPaneOpenData { view: "editor".into(), ..Default::default() };
+    carry_over(&asked, &mut rebuilt);
+    assert_eq!(rebuilt.floating, Some(true));
+    assert_eq!((rebuilt.width, rebuilt.height), (Some(json!("60%")), Some(json!(500))));
+    assert_eq!((rebuilt.spot.as_deref(), rebuilt.x, rebuilt.y), (Some("left"), Some(1.0), Some(2.0)));
+}
+
+#[test]
 fn a_place_the_agent_named_is_not_stepped_over() {
     for named in [
         CommandPaneOpenData { spot: Some("bottom-right".into()), ..floating() },

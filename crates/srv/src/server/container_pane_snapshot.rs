@@ -196,7 +196,11 @@ pub(crate) fn open_for(
     req: CommandPaneOpenData,
 ) -> Result<(CommandPaneOpenData, Option<Snapshot>), String> {
     let workspace = super::container_workspace::workspace_of(state, block_id).ok_or("this container agent has no workspace folder to open files from")?;
-    prepare(&workspace, root().as_deref(), req)
+    // The rebuilt request keeps only a fixed list of fields; the floating-pane request, already checked, is carried over.
+    let asked = req.clone();
+    let (mut open, snapshot) = prepare(&workspace, root().as_deref(), req)?;
+    crate::server::app_api::floater_place::carry_over(&asked, &mut open);
+    Ok((open, snapshot))
 }
 
 /// The snapshot kept for `block_id`'s pane goes with it. One not yet noted to a pane is a pane still opening: left alone.

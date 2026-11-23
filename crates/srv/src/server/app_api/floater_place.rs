@@ -33,6 +33,16 @@ const BROWSER_SPOT: &str = "right";
 pub(crate) const SPOTS: [&str; 9] =
     ["center", "right", "left", "top", "bottom", "top-right", "top-left", "bottom-right", "bottom-left"];
 
+/// Copies the floating-pane request of `from` onto `to`, for a request that was rebuilt from a fixed field list.
+pub(crate) fn carry_over(from: &CommandPaneOpenData, to: &mut CommandPaneOpenData) {
+    to.floating = from.floating;
+    to.width = from.width.clone();
+    to.height = from.height.clone();
+    to.spot = from.spot.clone();
+    to.x = from.x;
+    to.y = from.y;
+}
+
 /// Whether the request names any placement.
 pub(crate) fn names_placement(cmd: &CommandPaneOpenData) -> bool {
     cmd.width.is_some() || cmd.height.is_some() || cmd.spot.is_some() || cmd.x.is_some() || cmd.y.is_some()
