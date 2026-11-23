@@ -55,6 +55,40 @@ describe("a streamed pane's stage", () => {
     });
 });
 
+// The person's own clipboard reaches the page through the browser's paste event: the chord itself is left alone so that the event fires.
+const paste = (target: Element, text: string) => {
+    const e = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(e, "clipboardData", { value: { getData: (type: string) => (type === "text/plain" ? text : "") } });
+    target.dispatchEvent(e);
+    return e;
+};
+
+describe("a streamed pane's stage and the person's clipboard", () => {
+    it("sends the text of a paste, exactly, as one paste message and keeps it from the browser", () => {
+        const { stage, sent } = setup();
+        const text = "Hello, World!\nsecond line\t#42 \u00e9";
+        const e = paste(stage, text);
+        expect(sent).toEqual([{ t: "paste", text }]);
+        expect(e.defaultPrevented).toBe(true);
+    });
+
+    it("leaves the paste chord alone (no key message, not cancelled) so the browser's paste event fires", () => {
+        const { stage, sent } = setup();
+        for (const init of [{ ctrlKey: true }, { metaKey: true }]) {
+            const e = key(stage, "keydown", { key: "v", code: "KeyV", ...init });
+            expect(e.defaultPrevented, "cancelling the chord would cancel the paste").toBe(false);
+        }
+        expect(sent).toHaveLength(0);
+    });
+
+    it("sends nothing for an empty clipboard, and ignores a paste into a control drawn over the page", () => {
+        const { stage, button, sent } = setup();
+        paste(stage, "");
+        paste(button, "not for the page");
+        expect(sent).toHaveLength(0);
+    });
+});
+
 describe("a streamed pane's stage and copying out of the remote browser", () => {
     it("asks for what the browser copied a moment after the person's Ctrl+C or Ctrl+X, and only then", () => {
         vi.useFakeTimers();
