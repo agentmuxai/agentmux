@@ -162,6 +162,25 @@ pub fn check(store: &Store, def: &AgentDefinition, host_folder: Option<&Path>) -
     if pending.is_empty() { Ok(()) } else { Err(refusal(&pending)) }
 }
 
+/// What an `agent.open` refusal for a shared folder starts with, so the window knows to ask the person and try again.
+pub const OPEN_REFUSAL_CODE: &str = "SHARED_FOLDER";
+
+/// The folder `agent.open` runs a host agent in, expanded: the one it names, else its own folder.
+pub fn open_folder(def: &AgentDefinition) -> PathBuf {
+    let named = def.working_directory.trim();
+    let dir = if named.is_empty() { crate::backend::storage::agents::default_agent_working_dir(&def.name) } else { named.to_string() };
+    crate::backend::base::expand_home_dir_safe(&dir)
+}
+
+/// [`check`] for an agent being opened, in [`open_folder`], with the refusal marked [`OPEN_REFUSAL_CODE`]. A container
+/// agent is not refused here: it is asked when its own folders are saved.
+pub fn check_open(store: &Store, def: &AgentDefinition) -> Result<(), String> {
+    if is_container(def) {
+        return Ok(());
+    }
+    check(store, def, Some(&open_folder(def))).map_err(|refusal| format!("{OPEN_REFUSAL_CODE}: {refusal}"))
+}
+
 /// Whether a save of `new` over `old` changes a folder an agent works in or can write.
 pub fn folders_changed(old: &AgentDefinition, new: &AgentDefinition) -> bool {
     old.working_directory != new.working_directory || old.agent_type != new.agent_type || old.container_volumes != new.container_volumes

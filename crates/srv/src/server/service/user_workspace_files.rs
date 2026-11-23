@@ -210,13 +210,8 @@ async fn start_agents(state: &AppState) -> Vec<String> {
     for ws in shown {
         for (tab, block, def) in agent_placeholders(store, &ws) {
             let name = || {
-                store
-                    .get::<Block>(&block)
-                    .ok()
-                    .flatten()
-                    .map(|b| obj::meta_get_string(&b.meta, "agentName", ""))
-                    .filter(|n| !n.is_empty())
-                    .unwrap_or_else(|| def.clone())
+                let in_pane = store.get::<Block>(&block).ok().flatten().map(|b| obj::meta_get_string(&b.meta, "agentName", "")).unwrap_or_default();
+                crate::server::app_api::agent_open::agent_label(store, &in_pane, &definition_id(store, &def))
             };
             // One pane per agent: an agent that already has a pane in the
             // windows being shown (any tab, running or not), such as the same
@@ -234,7 +229,7 @@ async fn start_agents(state: &AppState) -> Vec<String> {
                 continue;
             }
             if let Err(e) = crate::server::app_api::agent_open::open_agent_into_block(state, &def, &tab, &block).await {
-                notes.push(format!("An agent ({}) didn't start, so its pane shows the agent picker: {e}", name()));
+                notes.push(crate::server::app_api::agent_open::not_started_note(&name(), &e));
             }
         }
     }

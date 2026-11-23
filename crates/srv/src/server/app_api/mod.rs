@@ -42,6 +42,9 @@ mod agent_open_steps;
 #[cfg(test)]
 #[path = "tests/agent_open_steps_tests.rs"]
 mod agent_open_steps_tests;
+#[cfg(test)]
+#[path = "tests/agent_open_shared_folder_tests.rs"]
+mod agent_open_shared_folder_tests;
 pub(crate) mod agent_open_many;
 pub(crate) mod agent_open_remote;
 /// Re-exported for `server/mod.rs`'s `POST /api/v1/agent/open` handler (the

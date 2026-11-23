@@ -63,6 +63,7 @@ async fn opening_an_agent_live_in_another_instance_writes_nothing() {
             split_direction: None,
             split_reference_block_id: None,
             focus: None,
+            into_block_id: None,
         },
     )
     .await

@@ -19,7 +19,9 @@ fn check(state: &AppState, cmd: CommandFolderOverlapCheckData) -> Result<FolderO
         .map_err(|e| format!("folderoverlapcheck: {e}"))?
         .ok_or_else(|| format!("folderoverlapcheck: agent {} not found", cmd.agent_id))?;
     let folder = cmd.folder.as_deref().map(str::trim).filter(|dir| !dir.is_empty()).map(crate::backend::base::expand_home_dir_safe);
-    let overlaps = overlap::unchosen(overlap::of(&state.mstore, &def, folder.as_deref()));
+    // No folder named: the one `agent.open` runs the agent in, so the window asks about what srv would refuse.
+    let folder = folder.unwrap_or_else(|| overlap::open_folder(&def));
+    let overlaps = overlap::unchosen(overlap::of(&state.mstore, &def, Some(&folder)));
     Ok(FolderOverlapCheckResult { overlaps })
 }
 
