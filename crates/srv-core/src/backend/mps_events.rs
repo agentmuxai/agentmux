@@ -654,6 +654,45 @@ pub struct CaptureMaskEvent {
 pub struct OpenFloatingPaneEvent {
     pub block_id: String,
     pub workspace_id: String,
+    /// An agent's open: where the window goes and how it is shown. Absent for the person's own, which
+    /// opens where it always did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub place: Option<FloaterPlace>,
+}
+
+/// What an agent asked for a floating pane (SPEC_AGENT_PANE_PLACEMENT_FLOATING_2026_11_22.md §2.1, §3). The
+/// window resolves it against the work area of its own monitor and answers with `pane.floatplaced`.
+#[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FloaterPlace {
+    /// The id the window answers with.
+    pub request_id: String,
+    /// CSS pixels (a number) or a share of the work area (`"60%"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number | string")]
+    pub width: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number | string")]
+    pub height: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub spot: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub x: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub y: Option<f64>,
+    /// The largest share of the work area the window may take (a default size is held to it).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub max_share: Option<f64>,
+    /// Floating panes this agent already has open: with no position asked for, the window is offset by
+    /// 32 CSS pixels for each.
+    pub cascade: u32,
+    /// Whether the window may take the foreground. Always false for an agent's open.
+    pub activate: bool,
 }
 
 /// `agent:process-added`: a process joined an agent pane's tree.

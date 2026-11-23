@@ -167,4 +167,26 @@ line?: number,
  * (Settings, Vault, Kanban...): without it that pane is returned with `created: false`. Ignored for
  * other views. REPORT_ACTION_RESULTS_ALWAYS_VISIBLE_ACROSS_WINDOWS_2026_10_31.md §4, step 6b.
  */
-new?: boolean, };
+new?: boolean, 
+/**
+ * With `floating`: the window's width in CSS pixels (a number) or a share of the work area (`"60%"`).
+ * SPEC_AGENT_PANE_PLACEMENT_FLOATING_2026_11_22.md §2.1.
+ */
+width?: number | string, 
+/**
+ * With `floating`: the window's height, as `width`.
+ */
+height?: number | string, 
+/**
+ * With `floating`: a named place in the work area (`center`, `right`, `left`, `top`, `bottom`,
+ * `top-right`, `top-left`, `bottom-right`, `bottom-left`). `x` and `y` win over it.
+ */
+spot?: string, 
+/**
+ * With `floating`: the window's left edge in CSS pixels from the work area's left.
+ */
+x?: number, 
+/**
+ * With `floating`: the window's top edge in CSS pixels from the work area's top.
+ */
+y?: number, };

@@ -16,6 +16,7 @@ pub(crate) fn spawn(state: AppState) {
     super::browser_pane_gone::install();
     // The owners and site limits the last run kept, before anything can change them.
     super::browser_pane_records::restore(&state);
+    super::pane_openers::restore(&state);
     tokio::spawn(async move {
         loop {
             let _ = tokio::time::timeout(
@@ -24,6 +25,7 @@ pub(crate) fn spawn(state: AppState) {
             )
             .await;
             super::browser_pane_records::save();
+            super::pane_openers::save();
             push(&state).await;
         }
     });

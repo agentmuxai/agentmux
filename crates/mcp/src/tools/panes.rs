@@ -73,12 +73,7 @@ async fn run_open_editor(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         // true collapses, false opens it expanded, absent leaves it to the Editor (collapsed
         // for a file).
         tree_expanded: arguments.get("collapse_tree").and_then(|v| v.as_bool()).map(|collapse| !collapse),
-        // `floating: true` → open in a floating window instead of a docked split.
-        floating: if arguments.get("floating").and_then(|v| v.as_bool()) == Some(true) {
-            Some(true)
-        } else {
-            None
-        },
+        floating: arguments.get("floating").and_then(|v| v.as_bool()).filter(|f| *f),
         url: None,
         cwd: None,
         tab_id: None,
@@ -99,6 +94,7 @@ async fn run_open_editor(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         // agent's signed identity (remote terminals spec §8.2).
         auth: if connection.is_some() { Some(sign_ui_automation_auth()?) } else { None },
         connection,
+        place: PlaceArgs::of(arguments).map_err(|e| anyhow::anyhow!("INVALID_ARG: {e}"))?,
     };
 
     let resp = client
@@ -120,7 +116,7 @@ async fn run_open_editor(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         .await
         .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
 
-    let note = result.note.as_deref().map(|n| format!(" {n}")).unwrap_or_default();
+    let note = format!("{}{}", result.note.as_deref().map(|n| format!(" {n}")).unwrap_or_default(), placed_note(&result));
     Ok(if media {
         format!(
             "Opened {file} in the editor (block {}); OpenMedia is now an alias of OpenEditor.{note}",
@@ -129,6 +125,44 @@ async fn run_open_editor(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     } else {
         format!("Opened {file} in editor pane (block {}).{note}", result.block_id)
     })
+}
+
+/// What a floating open says about where its window went, for the agent: the rect it got, and whether it had
+/// to be pulled in; or that the window has not answered yet.
+pub(super) fn placed_note(r: &PaneOpenResponse) -> String {
+    if let Some(p) = &r.placed {
+        let n = |k: &str| p.get(k).and_then(Value::as_f64).unwrap_or(0.0);
+        let spot = p.get("spot").and_then(Value::as_str).map(|s| format!(", spot {s}")).unwrap_or_default();
+        let clamped = if p.get("clamped").and_then(Value::as_bool) == Some(true) {
+            " It was pulled into the work area or raised to the minimum size."
+        } else {
+            ""
+        };
+        return format!(
+            " Floating at x {}, y {}, {} x {} (CSS pixels from the work area's top-left{spot}; display scale {}).{clamped}",
+            n("x"),
+            n("y"),
+            n("width"),
+            n("height"),
+            n("display_scale")
+        );
+    }
+    if r.queued {
+        return " The floating window has not answered yet (it is hidden or starting): it takes its place when it opens.".to_string();
+    }
+    String::new()
+}
+
+/// What a floating `open` says about where its window went (`placed`, or `queued`), from srv's `data`.
+pub(super) fn floating_note(data: Option<&Value>) -> String {
+    let Some(d) = data else { return String::new() };
+    let answered = agentmux_common::api_types::PaneOpenResponse {
+        block_id: String::new(),
+        placed: d.get("placed").filter(|v| !v.is_null()).cloned(),
+        queued: d.get("queued").and_then(Value::as_bool) == Some(true),
+        note: None,
+    };
+    placed_note(&answered)
 }
 
 /// The deep link a `Pane` open names: `link` as given, or one written from `view`, `place` (an id, or ids joined by
@@ -293,6 +327,7 @@ async fn run_open_files(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         // agent's signed identity (remote terminals spec §8.2).
         auth: if connection.is_some() { Some(sign_ui_automation_auth()?) } else { None },
         connection,
+        place: PlaceArgs::of(arguments).map_err(|e| anyhow::anyhow!("INVALID_ARG: {e}"))?,
     };
 
     let resp = client
@@ -314,7 +349,7 @@ async fn run_open_files(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         .await
         .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
 
-    Ok(format!("Opened {path} in a Files pane (block {})", result.block_id))
+    Ok(format!("Opened {path} in a Files pane (block {}).{}", result.block_id, placed_note(&result)))
 }
 
 async fn run_open_agent(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {

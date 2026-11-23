@@ -16,6 +16,8 @@ pub use crate::browser_control_types::{
 };
 use std::collections::HashMap;
 
+pub use crate::place_args::PlaceArgs;
+
 fn is_zero(n: &usize) -> bool {
     *n == 0
 }
@@ -573,12 +575,21 @@ pub struct PaneOpenRequest {
     /// The calling agent's signed identity, for an SSH `connection`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth: Option<UiAutomationAuth>,
+    /// With `floating`: the window's size and place.
+    #[serde(flatten)]
+    pub place: PlaceArgs,
 }
 
 /// Response from `POST /api/v1/pane/open`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaneOpenResponse {
     pub block_id: String,
+    /// A floating open: where its window went (`x`, `y`, `width`, `height`, `spot`, `clamped`, `display_scale`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placed: Option<serde_json::Value>,
+    /// A floating open whose window had not answered yet: the pane is made and takes its place when its window opens.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub queued: bool,
     /// Something the agent should know about the pane (a container agent's file is a snapshot).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
@@ -1161,6 +1172,12 @@ pub struct UiBrowserOpenRequest {
     /// time (SPEC_AGENT_OWN_BROWSER_PROFILE_2026_11_04.md; SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §5).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<String>,
+    /// Open as a floating window instead of below the caller's pane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floating: Option<bool>,
+    /// With `floating`: its size and place. A floating browser with none is 1040 x 760, flush right.
+    #[serde(flatten)]
+    pub place: PlaceArgs,
 }
 
 /// Response for `POST /api/v1/ui/browser/open`: the new pane's block id,

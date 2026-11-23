@@ -494,10 +494,19 @@ fn cleanup_failed_pane_promote_orphan(state: &Arc<AppState>, label: &str) {
 /// foreground one at this point (the drag ran in its window), so the call is allowed. The hand-back from
 /// the pool refill's invisible window then returns activation to this floater, not to the window the
 /// user left.
+///
+/// With `activate` false (an agent's floating pane) the window is shown where it is and takes nothing:
+/// the person keeps the foreground window and their caret.
 #[cfg(target_os = "windows")]
-fn show_floater_in_front(outer_hwnd: usize, label: &str) {
+fn show_floater_in_front(outer_hwnd: usize, label: &str, activate: bool) {
     use windows_sys::Win32::Foundation::HWND;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, ShowWindow, SW_SHOWNORMAL};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, ShowWindow, SW_SHOWNOACTIVATE, SW_SHOWNORMAL};
+    if !activate {
+        // SAFETY: a stale HWND fails harmlessly.
+        unsafe { ShowWindow(outer_hwnd as HWND, SW_SHOWNOACTIVATE) };
+        tracing::info!(target: "pool:pane", label = %label, "[pane-pool] floater shown without taking the foreground");
+        return;
+    }
     // SAFETY: both calls on a stale HWND fail harmlessly.
     let ok = unsafe {
         ShowWindow(outer_hwnd as HWND, SW_SHOWNORMAL);
@@ -524,13 +533,14 @@ pub fn promote_pane_pool_window(
     height: i32,
     parent_hwnd: isize,
     snapshot: Option<&str>,
+    activate: bool,
 ) -> Option<String> {
     let (x, y) = agentmux_common::test_offscreen::place((x, y));
     #[cfg(target_os = "windows")]
     {
         use windows_sys::Win32::Foundation::HWND;
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            IsWindow, SetWindowPos, HWND_TOP,
+            IsWindow, SetWindowPos, HWND_TOP, SWP_NOACTIVATE,
         };
 
         let dispatch = state.host_dispatch(
@@ -578,11 +588,10 @@ pub fn promote_pane_pool_window(
         // same coordinate space as `CreateWindowExW` (physical screen coords).
         // SetWindowPos activates the window while it is still hidden, and with
         // a snapshot it stays hidden until the renderer has put it up; keep
-        // the invisible-activation hand-back off it until then (to the end of
-        // this function).
+        // the invisible-activation hand-back off it until then (to the end of this function).
         let _promoting = crate::client::wndproc::PromoteActivationGuard::new(outer_hwnd as _);
         unsafe {
-            let ok = SetWindowPos(outer_hwnd as HWND, HWND_TOP, x, y, width, height, 0);
+            let ok = SetWindowPos(outer_hwnd as HWND, HWND_TOP, x, y, width, height, if activate { 0 } else { SWP_NOACTIVATE });
             if ok == 0 {
                 let err = windows_sys::Win32::Foundation::GetLastError();
                 tracing::error!(
@@ -595,7 +604,7 @@ pub fn promote_pane_pool_window(
             // With a snapshot to show, stay hidden until the renderer has put
             // it up (below): otherwise the first visible frame is the splash.
             if snapshot.is_none() {
-                show_floater_in_front(outer_hwnd, &label);
+                show_floater_in_front(outer_hwnd, &label, activate);
             }
         }
 
@@ -677,7 +686,7 @@ pub fn promote_pane_pool_window(
         if let Some(shown) = snapshot_shown {
             let acked = wait_snapshot_shown(&new_label, shown);
             tracing::info!(target: "pool:pane", label = %new_label, acked, "[pane-pool] showing floater after its snapshot");
-            show_floater_in_front(outer_hwnd, &new_label);
+            show_floater_in_front(outer_hwnd, &new_label, activate);
         }
 
         defer_pane_pool_refill(state, &new_label);
@@ -693,7 +702,7 @@ pub fn promote_pane_pool_window(
         // it can be runtime-verified. The equivalent re-key + payload
         // `windowLabel` should be applied here (via `post_promote_pane_pool_window`)
         // as a follow-up on macOS/Linux.
-        let _ = parent_hwnd; // unused on non-Windows
+        let _ = (parent_hwnd, activate); // unused on non-Windows: CEF Views' show() activates (SPEC_AGENT_PANE_PLACEMENT_FLOATING_2026_11_22.md §8)
         let _ = snapshot; // Windows only for now (phase 3.1)
         let dispatch = state.host_dispatch(
             crate::reducer::HostCommand::PopAndPromoteFrontPanePoolWindow,
