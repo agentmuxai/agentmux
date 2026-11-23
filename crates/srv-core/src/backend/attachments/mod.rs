@@ -385,6 +385,40 @@ impl Service {
         })
     }
 
+    /// Store a file already sitting in `incoming/` exactly as it came: placed
+    /// under its hash and nothing read from it (no type sniffing, decode,
+    /// preview or text). It is derived when something opens it
+    /// ([`Self::ensure_derived`]). For a file whose sender is not proven.
+    pub async fn store_undecoded(self: &Arc<Self>, tmp: PathBuf, id: String, name: String) -> Result<(), process::ProcessError> {
+        let svc = Arc::clone(self);
+        blocking(move || svc.store.place_undecoded(&tmp, &id, &name)).await
+    }
+
+    /// The size of the stored original of `id`, from the file system alone.
+    pub fn stored_len(&self, id: &str) -> Option<u64> {
+        self.store.blob_len(id)
+    }
+
+    /// What the agent gets for `id` sent under `name` when nothing may be read
+    /// from the file: a named copy of the original and a note saying it was
+    /// not opened. A file that was derived before (the same bytes from a
+    /// sender that was proven, or the sender's own upload) is given as
+    /// [`Self::send_target`] gives it.
+    pub fn unread_target(&self, id: &str, name: &str) -> Option<SendTarget> {
+        let fp = store::fingerprint(self.limits().send_max_edge);
+        if self.store.meta(id, &fp).is_some() {
+            return self.send_target(id, name);
+        }
+        let path = self.store.named_link(id, name)?;
+        self.store.mark_sent(id);
+        Some(SendTarget {
+            path,
+            mime: "application/octet-stream".to_string(),
+            page_count: None,
+            note: Some("not opened: the sender isn't verified".to_string()),
+        })
+    }
+
     /// Reserve decode memory for a `w`×`h` image. Held until dropped.
     async fn reserve_memory(&self, w: u32, h: u32) -> Option<tokio::sync::OwnedSemaphorePermit> {
         let mib = process::decode_cost_bytes(w, h).div_ceil(1024 * 1024);

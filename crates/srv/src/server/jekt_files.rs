@@ -35,10 +35,16 @@ pub(crate) fn check(req: &InjectionRequest) -> Result<(), String> {
     Ok(())
 }
 
-/// A request's manifest is well formed and its msgid binds it.
+/// A request's manifest is well formed, within the limits of the tier it
+/// arrived on, and its msgid binds it. Nothing has been read or written yet.
 fn check_manifest(req: &InjectionRequest) -> Result<(), String> {
     let files = req.files.as_deref().unwrap_or_default();
     jekt_files::validate(files).map_err(|e| format!("files refused: {e}"))?;
+    // A tier with no limits takes no files at all: the caller says so in its own words.
+    let tier = req.delivery_tier.as_deref().unwrap_or("host");
+    if jekt_files::tier_limits(tier).is_some() {
+        jekt_files::check_tier_limits(files, tier).map_err(|e| format!("files refused: {e}"))?;
+    }
     let msgid = req.request_id.as_deref().unwrap_or("");
     if !jekt_files::msgid_binds(msgid, files) {
         return Err("files refused: they don't match the message id they were sent under".to_string());
@@ -102,12 +108,18 @@ async fn prepare_for(req: &mut InjectionRequest, svc: Option<Arc<attachments::Se
         req.files_delivery = Some(nothing_delivered(format!("{count} {noun} sent with this message couldn't be delivered: {why}")));
         return;
     }
-    // Re-derive anything stored under an older fingerprint, and check each
-    // file's size against the manifest: the hash names the file, the size
-    // is part of what was signed.
+    // For a proven sender: re-derive anything stored under an older
+    // fingerprint. Either way, check each file's size against the manifest:
+    // the hash names the file, the size is part of what was signed. A file
+    // from a sender that is not proven is only measured, never read.
+    let derive = derives_on_receipt(req);
     let mut present = Vec::with_capacity(count);
     for f in &files {
-        let ok = svc.ensure_derived(&f.sha256).await.is_some_and(|meta| meta.bytes == f.size);
+        let ok = if derive {
+            svc.ensure_derived(&f.sha256).await.is_some_and(|meta| meta.bytes == f.size)
+        } else {
+            svc.stored_len(&f.sha256) == Some(f.size)
+        };
         present.push(ok);
     }
     // Every name the sender controls is quoted before it is used, the stored
@@ -129,7 +141,8 @@ async fn prepare_for(req: &mut InjectionRequest, svc: Option<Arc<attachments::Se
         let mut missing = Vec::new();
         for (i, (f, ok)) in files.iter().zip(present).enumerate() {
             let name = quote_in_jekt(&f.name);
-            match ok.then(|| svc.send_target(&f.sha256, &name)).flatten() {
+            let target = ok.then(|| if derive { svc.send_target(&f.sha256, &name) } else { svc.unread_target(&f.sha256, &name) });
+            match target.flatten() {
                 Some(t) => found.push(prompt::Resolved {
                     number: i + 1,
                     name,
@@ -299,6 +312,23 @@ fn sender_verified(req: &InjectionRequest) -> bool {
             || req.lan_verified == Some(true)
             || req.channel_verified == Some(true)
             || wan_ok)
+}
+
+/// Whether a file received with this jekt may be read for a type, preview or
+/// text when it arrives or is delivered: only when the sender is proven for
+/// this message (the marker's `host-verified`, `channel-verified`,
+/// `lan-verified`, or `wan-verified` with an approved instance). Any other
+/// file is stored as it came and read only when someone opens it.
+pub(crate) fn derives_on_receipt(req: &InjectionRequest) -> bool {
+    use crate::backend::message_origin::OriginTrust;
+    let tier = req.delivery_tier.as_deref().unwrap_or("host");
+    let wan_pinned = tier == "wan"
+        && req.wan_verified == Some(true)
+        && req.wan_instance.as_ref().is_some_and(|i| i.status == WanInstanceStatus::Approved);
+    matches!(
+        crate::backend::reactive::sanitize::jekt_trust(tier, req.sig_verified, req.lan_verified, req.channel_verified, wan_pinned),
+        OriginTrust::HostVerified | OriginTrust::ChannelVerified | OriginTrust::LanVerified | OriginTrust::WanVerified
+    )
 }
 
 /// Where inline files may go: a persistent Claude agent that is running or
@@ -520,9 +550,6 @@ async fn receive<R: tokio::io::AsyncRead + Unpin>(
         return refused(&req, format!("files refused: not taken from the {tier} tier here"));
     }
     let files = req.files.clone().unwrap_or_default();
-    if let Err(e) = jekt_files::check_tier_limits(&files, &tier) {
-        return refused(&req, format!("files refused: {e}"));
-    }
     // Not here: the sender looks further, as for any forward.
     let target = req.target_agent.clone();
     if !state.reactive_handler.has_live_name(&target) && !state.reactive_handler.has_uid_registration(&target) {
@@ -553,19 +580,30 @@ async fn receive<R: tokio::io::AsyncRead + Unpin>(
     }
 
     // A transfer that stalls gives its slot back: what arrived whole is kept.
+    let derive = derives_on_receipt(&req);
     let read = async {
         if withheld {
             // Same machine, full key: read past the files unstored, so the
             // sender gets this answer rather than a reset connection.
-            let total: u64 = files.iter().map(|f| f.size).sum();
+            let total = files.iter().fold(0u64, |sum, f| sum.saturating_add(f.size));
             let mut rest = tokio::io::AsyncReadExt::take(reader, total);
             let _ = tokio::io::copy(&mut rest, &mut tokio::io::sink()).await;
+            Ok(())
         } else if let Some(svc) = attachments::get() {
-            store_files(&svc, &files, reader).await;
+            store_files(&svc, &files, reader, &tier, derive).await
+        } else {
+            Ok(())
         }
     };
-    if tokio::time::timeout(TRANSFER_TIMEOUT, read).await.is_err() {
-        tracing::warn!(target = %target, "jekt files: transfer timed out");
+    match tokio::time::timeout(TRANSFER_TIMEOUT, read).await {
+        Err(_) => tracing::warn!(target = %target, "jekt files: transfer timed out"),
+        Ok(Err(why)) => {
+            if claimed {
+                release(&msgid);
+            }
+            return refused(&req, format!("files refused: {why}"));
+        }
+        Ok(Ok(())) => {}
     }
     if let Some(unavailable) = waits_for {
         // The files that arrived whole are in the store, which keeps them for the hold; the replay
@@ -603,17 +641,38 @@ impl Drop for PartFile {
     }
 }
 
+/// How long to wait for a byte after the last file before taking the body as ended.
+const TRAILING_WAIT: std::time::Duration = std::time::Duration::from_millis(500);
+
 /// Stream each file into the store, keeping the ones whose bytes match
 /// their hash and size. A file that doesn't is dropped, and the list says it
 /// didn't arrive; a stream that ends early leaves the rest missing.
+///
+/// Held to the limits of `tier` here as well as by the caller's manifest
+/// check: nothing is created for a file whose declared size, or the running
+/// total of the message, is over them, and a body that goes on after the last
+/// file is refused. At most the declared bytes of a file are ever written, and
+/// a partial file is removed.
+///
+/// With `derive` unset (the sender is not proven) a file is stored as it
+/// arrived and nothing is read from it: no type sniffing, preview or text.
 async fn store_files<R: tokio::io::AsyncRead + Unpin>(
     svc: &std::sync::Arc<attachments::Service>,
     files: &[jekt_files::JektFile],
     reader: &mut R,
-) {
+    tier: &str,
+    derive: bool,
+) -> Result<(), String> {
     use sha2::Digest;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    jekt_files::check_tier_limits(files, tier)?;
+    let (per_file, per_jekt) = jekt_files::tier_limits(tier).unwrap_or((0, 0));
+    let mut stored = 0u64;
     for f in files {
+        if f.size > per_file || f.size > per_jekt.saturating_sub(stored) {
+            return Err("more bytes than the limits allow were declared".to_string());
+        }
+        stored += f.size;
         let tmp = svc.store().new_incoming_path();
         // Removes the partial file even when the copy is dropped mid-read
         // (the transfer's deadline); kept only once the store has it.
@@ -639,19 +698,31 @@ async fn store_files<R: tokio::io::AsyncRead + Unpin>(
         .await;
         match copied {
             Ok(sha) if sha == f.sha256 => {
-                if let Err(e) = svc.commit_upload(tmp.clone(), sha, f.name.clone()).await {
-                    tracing::warn!(file = %f.name, error = %e.message, "jekt files: received file not stored");
+                let placed = if derive {
+                    svc.commit_upload(tmp.clone(), sha, f.name.clone()).await.map(|_| ())
                 } else {
-                    guard.0 = None;
+                    svc.store_undecoded(tmp.clone(), sha, f.name.clone()).await
+                };
+                match placed {
+                    Ok(()) => guard.0 = None,
+                    Err(e) => tracing::warn!(file = %f.name, error = %e.message, "jekt files: received file not stored"),
                 }
             }
             Ok(_) => tracing::warn!(file = %f.name, "jekt files: received bytes don't match their hash"),
             Err(e) => {
                 tracing::warn!(file = %f.name, error = %e, "jekt files: transfer cut short");
-                return;
+                return Ok(());
             }
         }
     }
+    // The body ends with the last file: a byte after it was not declared.
+    let mut extra = [0u8; 1];
+    if let Ok(Ok(n)) = tokio::time::timeout(TRAILING_WAIT, reader.read(&mut extra)).await {
+        if n > 0 {
+            return Err("more bytes were sent than the message declared".to_string());
+        }
+    }
+    Ok(())
 }
 
 /// Whether a same-machine candidate can take this jekt: any can take a text
@@ -910,7 +981,7 @@ mod tests {
         assert_eq!(got.request_id, req.request_id, "the msgid that binds them travels too");
         assert!(got.files_delivery.is_none(), "a sender can't supply the list");
 
-        store_files(&receiver, &files, &mut reader).await;
+        store_files(&receiver, &files, &mut reader, "channel", true).await.unwrap();
         let (path, _) = receiver.store().find_blob(&id).expect("stored on the far side");
         assert_eq!(std::fs::read(path).unwrap(), bytes);
     }
@@ -924,7 +995,7 @@ mod tests {
         let body = framed(&req, &[b"jello", b"world"]);
         let mut reader = &body[..];
         read_request(&mut reader).await.unwrap();
-        store_files(&receiver, &files, &mut reader).await;
+        store_files(&receiver, &files, &mut reader, "lan", true).await.unwrap();
         assert!(receiver.store().find_blob(&sha(b"hello")).is_none());
         assert!(receiver.store().find_blob(&sha(b"jello")).is_none(), "nothing stored under another hash");
         assert!(receiver.store().find_blob(&sha(b"world")).is_some());
@@ -940,12 +1011,151 @@ mod tests {
         let body = framed(&req, &[b"hello", b"wor"]);
         let mut reader = &body[..];
         read_request(&mut reader).await.unwrap();
-        store_files(&receiver, &files, &mut reader).await;
+        store_files(&receiver, &files, &mut reader, "lan", true).await.unwrap();
         assert!(receiver.store().find_blob(&sha(b"hello")).is_some());
         assert!(receiver.store().find_blob(&sha(b"world")).is_none());
         let incoming = d.path().join("attachments").join("incoming");
         let left = std::fs::read_dir(&incoming).map(|r| r.count()).unwrap_or(0);
         assert_eq!(left, 0, "no partial file left behind");
+    }
+
+    const MIB: u64 = 1024 * 1024;
+
+    fn incoming_count(dir: &std::path::Path) -> usize {
+        std::fs::read_dir(dir.join("attachments").join("incoming")).map(|r| r.count()).unwrap_or(0)
+    }
+
+    fn sized(name: &str, size: u64) -> JektFile {
+        JektFile { sha256: "ab".repeat(32), name: name.into(), size }
+    }
+
+    #[test]
+    fn a_manifest_over_the_limit_of_its_tier_is_refused_before_anything_is_read() {
+        for (tier, size, limit) in [("host", 101 * MIB, "100 MB"), ("channel", 101 * MIB, "100 MB"), ("lan", 51 * MIB, "50 MB")] {
+            let f = vec![sized("big.bin", size)];
+            let err = check_manifest(&req_with(f.clone(), &jekt_files::bind_msgid("m", &f), tier)).unwrap_err();
+            assert!(err.contains(limit) && err.contains("big.bin"), "{tier}: {err}");
+        }
+        let f = vec![sized("a.bin", 40 * MIB), sized("b.bin", 40 * MIB), sized("c.bin", 40 * MIB)];
+        let err = check_manifest(&req_with(f.clone(), &jekt_files::bind_msgid("m", &f), "lan")).unwrap_err();
+        assert!(err.contains("100 MB limit per message"), "{err}");
+        let ok = vec![sized("a.bin", 50 * MIB), sized("b.bin", 50 * MIB)];
+        assert_eq!(check_manifest(&req_with(ok.clone(), &jekt_files::bind_msgid("m", &ok), "lan")), Ok(()));
+        // The same comparison for a file named by hash on this machine.
+        let f = vec![sized("big.bin", 101 * MIB)];
+        assert!(check(&req_with(f.clone(), &jekt_files::bind_msgid("m", &f), "host")).is_err());
+    }
+
+    #[tokio::test]
+    async fn the_store_writes_nothing_for_files_declared_over_the_limit() {
+        let d = tempfile::tempdir().unwrap();
+        let receiver = service(d.path());
+        for files in [
+            vec![sized("big.bin", 51 * MIB)],
+            vec![sized("a.bin", 40 * MIB), sized("b.bin", 40 * MIB), sized("c.bin", 40 * MIB)],
+        ] {
+            let body = vec![7u8; 4096];
+            let mut reader = &body[..];
+            let err = store_files(&receiver, &files, &mut reader, "lan", true).await.unwrap_err();
+            assert!(err.contains("limit"), "{err}");
+            assert_eq!(reader.len(), body.len(), "not a byte of the files was read");
+            assert_eq!(incoming_count(d.path()), 0, "nothing was created");
+        }
+        let mut empty = &b""[..];
+        assert!(store_files(&receiver, &[sized("a", 1)], &mut empty, "elsewhere", true).await.is_err(), "a tier with no limits takes no files");
+    }
+
+    #[tokio::test]
+    async fn bytes_beyond_the_declared_size_are_never_written_and_refuse_the_message() {
+        let d = tempfile::tempdir().unwrap();
+        let receiver = service(d.path());
+        let files = vec![manifest_entry("a.txt", b"hello")];
+        let mut body = b"hello".to_vec();
+        body.extend_from_slice(b"and more that was never declared");
+        let mut reader = &body[..];
+        let err = store_files(&receiver, &files, &mut reader, "lan", true).await.unwrap_err();
+        assert!(err.contains("more bytes were sent than the message declared"), "{err}");
+        assert_eq!(incoming_count(d.path()), 0, "no partial file left behind");
+        // A longer stream for a file than its declared size is never taken into that file.
+        let (path, _) = receiver.store().find_blob(&sha(b"hello")).expect("the declared bytes arrived whole");
+        assert_eq!(std::fs::read(path).unwrap(), b"hello");
+    }
+
+    #[tokio::test]
+    async fn a_file_from_a_sender_that_is_not_proven_is_stored_unread_and_derived_when_opened() {
+        let d = tempfile::tempdir().unwrap();
+        let receiver = service(d.path());
+        let files = vec![manifest_entry("notes.txt", NOTES)];
+        let mut reader = NOTES;
+        store_files(&receiver, &files, &mut reader, "channel", false).await.unwrap();
+        let id = sha(NOTES);
+        let fp = attachments::store::fingerprint(receiver.limits().send_max_edge);
+        assert_eq!(receiver.stored_len(&id), Some(NOTES.len() as u64), "stored");
+        assert!(receiver.store().meta(&id, &fp).is_none(), "nothing derived on receipt");
+        assert_eq!(incoming_count(d.path()), 0);
+
+        // Delivered: listed with a copy of the file, and still not derived.
+        let mut req = req_with(files.clone(), &jekt_files::bind_msgid("m", &files), "channel");
+        prepare_for(&mut req, Some(receiver.clone()), Destination::Host).await;
+        let delivery = req.files_delivery.unwrap();
+        assert_eq!(delivery.delivered, 1);
+        assert!(delivery.text.contains("notes.txt") && delivery.text.contains("not opened"), "{}", delivery.text);
+        assert!(!delivery.text.contains("text version") && delivery.inline.is_empty(), "{}", delivery.text);
+        assert!(receiver.store().meta(&id, &fp).is_none(), "nothing derived on delivery");
+        let listed = receiver.unread_target(&id, "notes.txt").unwrap();
+        assert_eq!(std::fs::read(listed.path).unwrap(), NOTES, "the agent gets the bytes as they came");
+
+        // Opened: derived then.
+        assert!(receiver.ensure_derived(&id).await.is_some());
+        assert!(receiver.store().meta(&id, &fp).is_some());
+    }
+
+    #[tokio::test]
+    async fn a_file_from_a_proven_sender_is_derived_on_receipt() {
+        let d = tempfile::tempdir().unwrap();
+        let receiver = service(d.path());
+        let files = vec![manifest_entry("notes.txt", NOTES)];
+        let mut reader = NOTES;
+        store_files(&receiver, &files, &mut reader, "channel", true).await.unwrap();
+        let fp = attachments::store::fingerprint(receiver.limits().send_max_edge);
+        assert!(receiver.store().meta(&sha(NOTES), &fp).is_some());
+    }
+
+    #[tokio::test]
+    async fn a_file_derived_before_is_listed_as_derived_even_from_an_unproven_sender() {
+        let d = tempfile::tempdir().unwrap();
+        let (svc, mut req) = jekt_with_notes(d.path()).await;
+        req.delivery_tier = Some("channel".into());
+        prepare_for(&mut req, Some(svc), Destination::Host).await;
+        let text = req.files_delivery.unwrap().text;
+        assert!(!text.contains("not opened"), "{text}");
+    }
+
+    #[test]
+    fn only_a_sender_proven_for_the_message_has_its_files_derived_on_receipt() {
+        let f = files();
+        let msgid = jekt_files::bind_msgid("m", &f);
+        let with = |tier: &str, set: &dyn Fn(&mut InjectionRequest)| {
+            let mut r = req_with(f.clone(), &msgid, tier);
+            set(&mut r);
+            derives_on_receipt(&r)
+        };
+        assert!(!with("host", &|_| {}), "self-declared");
+        assert!(with("host", &|r| r.sig_verified = Some(true)), "host-verified");
+        assert!(!with("host", &|r| r.sig_verified = Some(false)), "unverified");
+        assert!(!with("channel", &|_| {}), "self-declared over the channel");
+        assert!(with("channel", &|r| r.channel_verified = Some(true)), "channel-verified");
+        assert!(!with("lan", &|_| {}));
+        assert!(!with("lan", &|r| r.lan_verified = Some(false)), "a failed check");
+        assert!(with("lan", &|r| r.lan_verified = Some(true)), "lan-verified");
+        assert!(!with("wan", &|r| r.wan_verified = Some(true)), "a verdict with no instance");
+        for (status, derived) in [(WanInstanceStatus::Approved, true), (WanInstanceStatus::New, false), (WanInstanceStatus::Revoked, false)] {
+            let got = with("wan", &|r| {
+                r.wan_verified = Some(true);
+                r.wan_instance = Some(crate::backend::reactive::types::WanInstanceInfo { id: "i".repeat(26), label: "host~iiiiiiii".into(), status });
+            });
+            assert_eq!(got, derived, "{status:?}");
+        }
     }
 
     #[tokio::test]

@@ -561,6 +561,43 @@ impl Store {
         Ok((blob, kind))
     }
 
+    /// [`Self::place`] without reading the file: no classification (which opens
+    /// a ZIP's directory) and no derivation. The blob keeps the user's
+    /// extension only when it is one a kind would keep, else `bin`; what it is
+    /// is found when something opens it (`find_blob`).
+    pub fn place_undecoded(&self, incoming: &Path, id: &str, name: &str) -> Result<(), process::ProcessError> {
+        let cleanup = || {
+            let _ = std::fs::remove_file(incoming);
+        };
+        if let Some(existing) = self.existing_blob(id) {
+            cleanup();
+            let _ = set_mtime(&existing, filetime_now());
+            return Ok(());
+        }
+        let blob = self.blob_path(id, &undecoded_extension(name));
+        let placed = (|| {
+            std::fs::create_dir_all(blob.parent().unwrap())?;
+            std::fs::rename(incoming, &blob)
+        })();
+        placed.map_err(|e| {
+            cleanup();
+            io_error(e)
+        })
+    }
+
+    /// The size of the stored original of `id`, if there is one. Reads nothing from it.
+    pub fn blob_len(&self, id: &str) -> Option<u64> {
+        if !is_valid_id(id) {
+            return None;
+        }
+        std::fs::metadata(self.existing_blob(id)?).ok().map(|m| m.len())
+    }
+
+    /// Whether the original of `id` is stored. Reads nothing from it.
+    pub fn has_blob(&self, id: &str) -> bool {
+        is_valid_id(id) && self.existing_blob(id).is_some()
+    }
+
     /// Derive whatever `kind` needs and write the metadata. Images go through
     /// the image pipeline (decode, thumbnail, send-copy); other files get a
     /// text preview, a text version or PDF facts.
@@ -872,6 +909,29 @@ fn stored_extension(kind: FileKind, name: &str) -> String {
     }
 }
 
+/// The extension an original is stored under when nothing was read from it:
+/// the user's own when [`stored_extension`] would keep it for some kind
+/// (documents, PDF, SVG, archives, audio, video), else `bin`.
+fn undecoded_extension(name: &str) -> String {
+    let Some(user) = kind::extension_of(name) else {
+        return "bin".into();
+    };
+    let kept = [
+        FileKind::Svg,
+        FileKind::Pdf,
+        FileKind::Word,
+        FileKind::Excel,
+        FileKind::PowerPoint,
+        FileKind::Archive,
+        FileKind::Audio,
+        FileKind::Video,
+        FileKind::ImageFile,
+    ]
+    .into_iter()
+    .any(|k| stored_extension(k, name) == user);
+    if kept { user } else { "bin".into() }
+}
+
 /// The extension part of a stored blob's file name.
 fn blob_ext(blob: &Path) -> String {
     blob.extension()
@@ -1008,6 +1068,53 @@ mod tests {
         assert_eq!(std::fs::read(&second).unwrap(), std::fs::read(&src).unwrap());
         assert!(s.copy_original_to(&id, &work.join("missing"), "x.png").is_err());
         assert!(s.copy_original_to("../escape", &work, "x.png").is_err());
+    }
+
+    #[test]
+    fn an_undecoded_file_is_placed_as_it_came_and_derived_only_when_opened() {
+        let (dir, s) = store();
+        // A ZIP that names itself a Word document: placing it must not open it.
+        let src = dir.path().join("report.docx");
+        let bytes = b"PK\x03\x04 not really a zip";
+        std::fs::write(&src, bytes).unwrap();
+        let (tmp, id, _) = s.copy_in(&src, |_| true).unwrap();
+        s.place_undecoded(&tmp, &id, "report.docx").unwrap();
+        let fp = fingerprint(2000);
+        assert!(s.has_blob(&id) && s.blob_len(&id) == Some(bytes.len() as u64), "stored, sized from the file system");
+        assert!(s.meta(&id, &fp).is_none(), "nothing derived");
+        assert!(!tmp.exists(), "the incoming file moved");
+        assert!(s.blob_path(&id, "docx").is_file(), "an extension a kind keeps stays");
+        // The same bytes again are not stored twice.
+        let (tmp2, id2, _) = s.copy_in(&src, |_| true).unwrap();
+        s.place_undecoded(&tmp2, &id2, "other.bin").unwrap();
+        assert_eq!(id, id2);
+        assert!(!tmp2.exists());
+        // Opened: derived then.
+        let note = dir.path().join("note.txt");
+        std::fs::write(&note, b"plain words\n").unwrap();
+        let (tmp3, id3, _) = s.copy_in(&note, |_| true).unwrap();
+        s.place_undecoded(&tmp3, &id3, "note.txt").unwrap();
+        assert!(s.meta(&id3, &fp).is_none());
+        assert!(s.ensure_derived(&id3, 2000).is_some());
+        assert!(s.meta(&id3, &fp).is_some());
+    }
+
+    #[test]
+    fn an_undecoded_file_keeps_only_an_extension_a_kind_would_keep() {
+        for (name, ext) in [
+            ("a.docx", "docx"),
+            ("a.PDF", "pdf"),
+            ("a.zip", "zip"),
+            ("a.mp4", "mp4"),
+            ("a.svg", "svg"),
+            ("a.txt", "bin"),
+            ("a.png", "bin"),
+            ("a.exe", "bin"),
+            ("noext", "bin"),
+            ("a.not-an-ext", "bin"),
+        ] {
+            assert_eq!(undecoded_extension(name), ext, "{name}");
+        }
     }
 
     #[test]

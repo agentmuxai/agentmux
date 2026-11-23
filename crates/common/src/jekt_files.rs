@@ -94,11 +94,12 @@ pub fn is_sealed_key(key: &str) -> bool {
         .is_some_and(|(fp, body)| fp.len() == 43 && body.len() == SEALED_KEY_BODY_CHARS && b64url(fp) && b64url(body))
 }
 
-/// Why a cloud manifest is refused: the plain checks, plus a 44-character
-/// base64 key (or a sealed one) and a relay blob id on every entry.
+/// Why a cloud manifest is refused: the plain checks within the cloud relay's
+/// limits, plus a 44-character base64 key (or a sealed one) and a relay blob
+/// id on every entry.
 pub fn validate_cloud(files: &[CloudFile]) -> Result<(), String> {
     let plain: Vec<JektFile> = files.iter().map(|f| f.file.clone()).collect();
-    validate(&plain)?;
+    validate_for_tier(&plain, "wan")?;
     let blob_id = |s: &str| s.len() == 41 && s.starts_with("blob-") && s[5..].bytes().all(|b| b.is_ascii_hexdigit() || b == b'-');
     let key = |k: &str| (k.len() == 44 && k.ends_with('=')) || is_sealed_key(k);
     if files.iter().any(|f| !key(&f.key) || !blob_id(&f.blob_id)) {
@@ -107,18 +108,36 @@ pub fn validate_cloud(files: &[CloudFile]) -> Result<(), String> {
     Ok(())
 }
 
-/// Why `files` can't travel on `tier`, if they can't.
+/// How a tier's limit reads in a refusal: where the files are going.
+fn tier_place(tier: &str) -> &'static str {
+    match tier {
+        "host" | "channel" => "on this machine",
+        "lan" => "to another computer on the LAN",
+        _ => "through the cloud relay",
+    }
+}
+
+/// Why `files` can't travel on `tier`, if they can't. The text names the
+/// limit and where it applies.
 pub fn check_tier_limits(files: &[JektFile], tier: &str) -> Result<(), String> {
     let Some((per_file, per_jekt)) = tier_limits(tier) else {
         return Err(format!("files can't be sent over the {tier} tier yet"));
     };
+    let place = tier_place(tier);
     if let Some(f) = files.iter().find(|f| f.size > per_file) {
-        return Err(format!("{} is over the {} MB limit per file on this tier", f.name, per_file / MIB));
+        return Err(format!("{} is over the {} MB limit per file {place}", f.name, per_file / MIB));
     }
-    if files.iter().map(|f| f.size).sum::<u64>() > per_jekt {
-        return Err(format!("the files come to more than the {} MB limit per message on this tier", per_jekt / MIB));
+    if files.iter().fold(0u64, |sum, f| sum.saturating_add(f.size)) > per_jekt {
+        return Err(format!("the files come to more than the {} MB limit per message {place}", per_jekt / MIB));
     }
     Ok(())
+}
+
+/// [`validate`], and the comparison with the limits of `tier`: what a
+/// sender checks before it sends and a receiver checks before it reads a byte.
+pub fn validate_for_tier(files: &[JektFile], tier: &str) -> Result<(), String> {
+    validate(files)?;
+    check_tier_limits(files, tier)
 }
 /// A file name's length limit, in characters (the attachment store's).
 pub const MAX_NAME_CHARS: usize = 120;
@@ -321,6 +340,33 @@ mod tests {
         assert!(check_tier_limits(&[f(40 * MIB), f(40 * MIB), f(40 * MIB)], "lan").is_err(), "per jekt");
         assert!(check_tier_limits(&[f(30 * MIB)], "wan").is_err(), "cloud is tightest");
         assert!(check_tier_limits(&[f(1)], "elsewhere").is_err());
+    }
+
+    #[test]
+    fn a_manifest_over_a_tiers_limit_is_refused_with_the_limit_in_the_message() {
+        let f = |size| JektFile { sha256: "a".repeat(64), name: "big.bin".into(), size };
+        assert!(validate_for_tier(&[f(100 * MIB)], "host").is_ok());
+        let per_file = validate_for_tier(&[f(100 * MIB + 1)], "host").unwrap_err();
+        assert!(per_file.contains("big.bin") && per_file.contains("100 MB limit per file on this machine"), "{per_file}");
+        let lan = validate_for_tier(&[f(51 * MIB)], "lan").unwrap_err();
+        assert!(lan.contains("50 MB limit per file to another computer on the LAN"), "{lan}");
+        let total = validate_for_tier(&[f(25 * MIB), f(25 * MIB), f(1)], "wan").unwrap_err();
+        assert!(total.contains("50 MB limit per message through the cloud relay"), "{total}");
+        assert!(validate_for_tier(&[f(0)], "host").is_err(), "the plain checks still apply");
+    }
+
+    #[test]
+    fn sizes_that_would_wrap_a_sum_still_go_over_the_limit() {
+        let f = |size| JektFile { sha256: "a".repeat(64), name: "a".into(), size };
+        assert!(check_tier_limits(&[f(u64::MAX), f(2)], "host").is_err());
+        assert!(check_tier_limits(&vec![f(100 * MIB); 3], "host").is_err(), "per message on this machine");
+    }
+
+    #[test]
+    fn a_cloud_manifest_over_the_relays_limits_is_refused() {
+        let mut files = vec![cloud(1)];
+        files[0].file.size = 26 * MIB;
+        assert!(validate_cloud(&files).unwrap_err().contains("25 MB limit per file through the cloud relay"));
     }
 
     #[test]
