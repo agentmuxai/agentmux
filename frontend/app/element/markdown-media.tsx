@@ -3,6 +3,7 @@
 
 import {
     basenameOf,
+    NATIVE_PLAYER_CONTROLS_LIST,
     extOf,
     fetchMediaBlob,
     INLINE_IMAGE_MAX_BYTES,
@@ -355,7 +356,7 @@ function AudioCard(props: { s: LocalAvState; path: string }): JSX.Element {
                 </div>
             }
         >
-            {(url) => <audio class="am-media-player" src={url()} controls autoplay onError={s.onMediaError} />}
+            {(url) => <audio class="am-media-player" src={url()} controls controlslist={NATIVE_PLAYER_CONTROLS_LIST} autoplay onError={s.onMediaError} />}
         </Show>
     );
 }
@@ -433,6 +434,7 @@ function VideoStage(props: { s: LocalAvState; path: string; openGallery?: Markdo
                             class="am-media-player"
                             src={url()}
                             controls
+                            controlslist={NATIVE_PLAYER_CONTROLS_LIST}
                             autoplay
                             muted
                             playsinline

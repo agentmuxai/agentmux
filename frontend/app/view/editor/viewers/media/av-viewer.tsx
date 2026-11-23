@@ -12,7 +12,7 @@
  * docs/specs/SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.4.3, §4.13.
  */
 
-import { describeMediaError } from "@/app/element/local-media";
+import { describeMediaError, NATIVE_PLAYER_CONTROLS_LIST } from "@/app/element/local-media";
 import { formatBytes } from "@/util/format-bytes";
 import { EASE_STANDARD } from "@/app/motion/tokens";
 import { Button, IconButton } from "@/app/element/ui";
@@ -103,6 +103,7 @@ export function AvViewer(props: AvViewerProps): JSX.Element {
                                 style={fade()}
                                 src={bytes.url()!}
                                 controls
+                                controlslist={NATIVE_PLAYER_CONTROLS_LIST}
                                 preload="metadata"
                                 onLoadedData={(e) => loaded(e.currentTarget)}
                                 onError={(e) => bytes.setError(`Couldn't play the video: ${describeMediaError(e.currentTarget)}`)}
@@ -115,6 +116,7 @@ export function AvViewer(props: AvViewerProps): JSX.Element {
                             style={fade()}
                             src={bytes.url()!}
                             controls
+                            controlslist={NATIVE_PLAYER_CONTROLS_LIST}
                             preload="metadata"
                             onLoadedData={(e) => loaded(e.currentTarget)}
                             onError={(e) => bytes.setError(`Couldn't play the audio: ${describeMediaError(e.currentTarget)}`)}

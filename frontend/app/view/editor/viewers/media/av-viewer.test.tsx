@@ -55,6 +55,14 @@ describe("the audio and video viewer's controls", () => {
         expect(el.playbackRate).toBe(1.25);
     });
 
+    it("offers no native Download or cast entry, on a video or an audio file", () => {
+        for (const [mime, path] of [["video/mp4", "C:/clips/a.mp4"], ["audio/wav", "C:/clips/a.wav"]]) {
+            const { el, container } = mount(mime, path);
+            expect(el.getAttribute("controlslist")?.split(/\s+/)).toEqual(expect.arrayContaining(["nodownload", "noremoteplayback"]));
+            cleanup();
+        }
+    });
+
     it("starts at normal speed, without a loop", () => {
         const { el, container } = mount("video/mp4");
         expect(el.playbackRate).toBe(1);
