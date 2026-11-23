@@ -636,6 +636,8 @@ pub const COMMAND_CLIENT_AGREE_TOS: &str = "client.agreetos";
 /// AgentMux window alone.
 pub const COMMAND_FOLDER_OVERLAP_CHECK: &str = "folderoverlapcheck";
 pub const COMMAND_FOLDER_OVERLAP_ACCEPT: &str = "folderoverlapaccept";
+pub const COMMAND_FOLDER_OVERLAP_DECLINE: &str = "folderoverlapdecline";
+pub const COMMAND_FOLDER_OVERLAP_ASKS: &str = "folderoverlapasks";
 
 // Tower, the read-only task manager pane (backend::tower::sampler). The
 // window's, not an agent API: a registered agent connection is refused.

@@ -1246,6 +1246,15 @@
             "method": "FolderOverlapAcceptCommand"
         },
         {
+            "command": "folderoverlapdecline",
+            "method": "FolderOverlapDeclineCommand"
+        },
+        {
+            "command": "folderoverlapasks",
+            "method": "FolderOverlapAsksCommand",
+            "send": "data ?? {}"
+        },
+        {
             "command": "browsergrants.list",
             "method": "BrowserGrantsListCommand",
             "send": "data ?? {}"

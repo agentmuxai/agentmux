@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Wire types for a host agent that shares a folder with a container agent (`folderoverlapcheck`,
-//! `folderoverlapaccept`).
+//! `folderoverlapaccept`, `folderoverlapdecline`, `folderoverlapasks`).
 
 use serde::{Deserialize, Serialize};
 
@@ -35,4 +35,25 @@ pub struct CommandFolderOverlapAcceptData {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct FolderOverlapAcceptResult {
     pub chosen: bool,
+}
+
+/// `folderoverlapdecline`: the person says no to an agent's ask for the go-ahead with this pair. The pair stays asking.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandFolderOverlapDeclineData {
+    pub host_id: String,
+    pub container_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FolderOverlapDeclineResult {
+    pub declined: bool,
+}
+
+/// `folderoverlapasks`: the asks waiting for the person, for a window that starts after they were made.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FolderOverlapAsksResult {
+    pub asks: Vec<crate::backend::folder_overlap_asks::FolderAsk>,
 }

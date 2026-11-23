@@ -3493,6 +3493,25 @@
     }
   },
   {
+    "command": "folderoverlapasks",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "agentmux_srv_core::backend::rpc_types::folder_overlap::FolderOverlapAsksResult",
+    "responseName": "FolderOverlapAsksResult",
+    "responseTs": {
+      "imports": [
+        "FolderOverlapAsksResult"
+      ],
+      "name": "FolderOverlapAsksResult"
+    }
+  },
+  {
     "command": "folderoverlapcheck",
     "request": "agentmux_srv_core::backend::rpc_types::folder_overlap::CommandFolderOverlapCheckData",
     "requestName": "CommandFolderOverlapCheckData",
@@ -3509,6 +3528,25 @@
         "FolderOverlapCheckResult"
       ],
       "name": "FolderOverlapCheckResult"
+    }
+  },
+  {
+    "command": "folderoverlapdecline",
+    "request": "agentmux_srv_core::backend::rpc_types::folder_overlap::CommandFolderOverlapDeclineData",
+    "requestName": "CommandFolderOverlapDeclineData",
+    "requestTs": {
+      "imports": [
+        "CommandFolderOverlapDeclineData"
+      ],
+      "name": "CommandFolderOverlapDeclineData"
+    },
+    "response": "agentmux_srv_core::backend::rpc_types::folder_overlap::FolderOverlapDeclineResult",
+    "responseName": "FolderOverlapDeclineResult",
+    "responseTs": {
+      "imports": [
+        "FolderOverlapDeclineResult"
+      ],
+      "name": "FolderOverlapDeclineResult"
     }
   },
   {

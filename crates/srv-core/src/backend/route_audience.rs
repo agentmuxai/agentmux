@@ -239,6 +239,7 @@ pub const ROUTES: &[(Match, Audience)] = &[
     (Match::Route("/api/v1/agent/hide"), Audience::Everyone),
     (Match::Route("/api/v1/agent/unhide"), Audience::Everyone),
     (Match::Route("/api/v1/agent/seats"), Audience::Everyone),
+    (Match::Route("/api/v1/agent/folder-overlap-ask"), Audience::Everyone),
     (Match::Route("/api/v1/agent/self/compact"), Audience::Everyone),
     (Match::Route("/api/v1/agent/self/context"), Audience::Everyone),
     (Match::Route("/api/v1/agent/self/fresh"), Audience::Everyone),

@@ -80,6 +80,7 @@ pub mod pending_background_pids;
 pub mod agent_mcp_flag;
 pub mod mcp_config_file;
 pub mod folder_overlap;
+pub mod folder_overlap_asks;
 pub mod mcp_folder_rule;
 pub mod mcp_health;
 pub mod mcp_health_meta;

@@ -33,6 +33,9 @@ pub const EVENT_WIDGET_PACKAGES: &str = "widgetpackages";
 pub const EVENT_WIDGET_STORAGE: &str = "widgetstorage";
 /// Agents' widget install requests waiting for the user: `{ requests }`.
 pub const EVENT_WIDGET_REQUESTS: &str = "widgetrequests";
+/// The asks agents made for the person's go-ahead with a host agent that shares a folder with a container agent:
+/// `{ asks }` (`backend/folder_overlap_asks.rs`).
+pub const EVENT_FOLDER_OVERLAP_ASKS: &str = "folderoverlapasks";
 /// The Vault changed, or its agents' requests did: `{ requests, changed_ms }`,
 /// never an entry or a value.
 pub const EVENT_VAULT: &str = "vault";
