@@ -128,6 +128,10 @@ pub(crate) fn forget_because(block_id: &str, why: Lost) {
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .remove(block_id);
+    // The person's Take over ends the agent's say over where the pane is, as it does over what the page does.
+    if why == Lost::TookOver {
+        crate::server::pane_openers::forget(block_id);
+    }
     if let Some(agent) = removed {
         tracing::info!(pane = %block_id, agent_id = %agent, why = ?why, "[browser-owner] agent no longer drives the pane");
         // Only a Take over is worth telling the agent about: a closed pane's block is
