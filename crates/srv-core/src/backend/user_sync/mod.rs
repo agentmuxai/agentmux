@@ -10,6 +10,7 @@ pub mod adapter;
 pub mod chain_store;
 pub mod hlc;
 pub mod kanban;
+pub mod keys;
 pub mod lock;
 pub mod log;
 pub mod members;
@@ -19,6 +20,8 @@ pub mod seal;
 
 #[cfg(test)]
 mod kanban_tests;
+#[cfg(test)]
+mod keys_tests;
 #[cfg(test)]
 mod lock_tests;
 #[cfg(test)]

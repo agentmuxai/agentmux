@@ -99,7 +99,7 @@ impl Node {
     }
 
     fn found(&mut self, collection: &str, kind: &str, policy: Policy) {
-        ops::found(&self.conn, &mut self.chains, collection, kind, &self.subject, &self.private, policy, NOW).unwrap();
+        ops::found(&self.conn, &mut self.chains, &YES, collection, kind, &self.subject, &self.private, policy, NOW).unwrap();
     }
 
     fn write(&mut self, collection: &str, record: &str, body: &str) -> Record {

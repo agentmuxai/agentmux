@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::members::{Chain, Entry, MemberError};
+use super::ops::PendingJoin;
 
 pub(crate) const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS db_sync_chain (
@@ -19,6 +20,13 @@ pub(crate) const SCHEMA: &str = "
         idx        INTEGER NOT NULL,
         entry      TEXT NOT NULL,
         PRIMARY KEY (collection, slot, idx)
+    );
+    CREATE TABLE IF NOT EXISTS db_sync_pending (
+        collection TEXT NOT NULL,
+        machine    TEXT NOT NULL,
+        subject    TEXT NOT NULL,
+        asked_at   INTEGER NOT NULL,
+        PRIMARY KEY (collection, machine)
     );
     CREATE TABLE IF NOT EXISTS db_sync_chain_head (
         collection TEXT PRIMARY KEY,
@@ -96,4 +104,27 @@ pub fn load_all(conn: &Connection) -> Result<BTreeMap<String, Chain>, LoadError>
         }
     }
     Ok(out)
+}
+
+/// Stores the joins waiting for a person, replacing what was stored: a join asked of one call is still there for the call
+/// in which a person confirms it.
+pub fn save_pending(conn: &Connection, pending: &[PendingJoin]) -> rusqlite::Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute("DELETE FROM db_sync_pending", [])?;
+    for p in pending {
+        let subject = serde_json::to_string(&p.subject).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        tx.execute(
+            "INSERT INTO db_sync_pending (collection, machine, subject, asked_at) VALUES (?1, ?2, ?3, ?4)",
+            params![p.collection, p.subject.id, subject, p.asked_at],
+        )?;
+    }
+    tx.commit()
+}
+
+pub fn load_pending(conn: &Connection) -> Result<Vec<PendingJoin>, LoadError> {
+    let mut stmt = conn.prepare("SELECT collection, subject, asked_at FROM db_sync_pending ORDER BY asked_at, collection, machine")?;
+    let rows: Vec<(String, String, i64)> = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<Result<_, _>>()?;
+    rows.into_iter()
+        .map(|(collection, subject, asked_at)| Ok(PendingJoin { collection, subject: serde_json::from_str(&subject).map_err(|_| LoadError::Unreadable)?, asked_at }))
+        .collect()
 }

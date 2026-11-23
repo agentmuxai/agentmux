@@ -134,7 +134,8 @@ pub struct Signer<'a> {
 pub fn init(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(SCHEMA)?;
     conn.execute_batch(super::lock::SCHEMA)?;
-    conn.execute_batch(super::chain_store::SCHEMA)
+    conn.execute_batch(super::chain_store::SCHEMA)?;
+    conn.execute_batch(super::keys::SCHEMA)
 }
 
 pub fn ensure_collection(conn: &Connection, id: &str, kind: &str, now_ms: i64) -> rusqlite::Result<()> {
