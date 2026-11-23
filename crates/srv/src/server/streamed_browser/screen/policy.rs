@@ -161,6 +161,15 @@ mod tests {
         }
     }
 
+    /// The file the screen-mode image installs (docker/Dockerfile.srv, SCREEN_BROWSER) is exactly the policy this server wants for the proxy port
+    /// the image names, so the image's policy cannot drift from the check.
+    #[test]
+    fn the_images_policy_file_is_the_policy_this_server_wants() {
+        let file: Value = serde_json::from_str(include_str!("../../../../../../docker/screen-mode-policy.json")).expect("the image's policy file is JSON");
+        assert_eq!(file, wanted(41234));
+        assert!(holds(&file.to_string(), 41234));
+    }
+
     #[test]
     fn a_policy_that_leaves_something_open_does_not_hold() {
         assert!(!holds("not json", 1));
