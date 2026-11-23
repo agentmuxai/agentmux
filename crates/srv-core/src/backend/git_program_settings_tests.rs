@@ -79,6 +79,8 @@ fn only_a_host_agent_in_such_a_folder_is_given_them_whatever_its_harness() {
             let there = env_of(&pane("host", provider, folder.path()));
             assert_eq!(value_of(&there, "core.fsmonitor").as_deref(), Some("false"), "{provider}");
             assert_eq!(there.get("KEPT").map(String::as_str), Some("yes"));
+            assert_eq!(there.get(GIT_NO_EXT_DIFF_ENV).map(String::as_str), Some("1"), "{provider}");
+            assert_eq!(there.get(GIT_FUNCTION_NAME).map(String::as_str), Some(GIT_FLAGS_FUNCTION_BODY), "{provider}: the diff step, where there is no other git function");
         }
         for (why, meta) in [
             ("a folder no container agent has to do with", pane("host", "claude", other.path())),
@@ -96,9 +98,14 @@ fn run_git(repo: &Path, home: &Path, args: &[&str], env: &HashMap<String, String
 
 /// [`run_git`] with `input` on git's standard input.
 fn run_git_with(repo: &Path, home: &Path, args: &[&str], env: &HashMap<String, String>, input: &str) -> std::process::Output {
+    run_program("git", repo, home, args, env, input)
+}
+
+fn run_program(program: &str, repo: &Path, home: &Path, args: &[&str], env: &HashMap<String, String>, input: &str) -> std::process::Output {
     use std::io::Write;
-    let mut child = std::process::Command::new("git")
-        .args(args)
+    use agentmux_common::win32::NoWindow;
+    let mut cmd = std::process::Command::new(program);
+    cmd.args(args)
         .current_dir(repo)
         .env("HOME", home)
         .env("USERPROFILE", home)
@@ -111,9 +118,9 @@ fn run_git_with(repo: &Path, home: &Path, args: &[&str], env: &HashMap<String, S
         .envs(env)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .expect("git runs");
+        .stderr(std::process::Stdio::piped());
+    cmd.no_window();
+    let mut child = cmd.spawn().expect("git runs");
     let _ = child.stdin.take().expect("piped").write_all(input.as_bytes());
     child.wait_with_output().expect("git ends")
 }
@@ -307,4 +314,87 @@ fn the_brokers_helper_still_answers_and_the_folders_does_not() {
     // Without the reset, the folder's helper is run for a host the broker's does not cover.
     run_git_with(&folder.repo(), folder.dir.path(), &["credential", "fill"], &broker, "protocol=https\nhost=elsewhere.example\n\n");
     assert_eq!(folder.ran(), vec!["credential"], "what the folder's config runs by itself");
+}
+
+#[test]
+fn an_agents_own_git_function_is_kept_and_has_the_diff_step() {
+    let (data, folder) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    with_data_home(data.path(), || {
+        crate::backend::mcp_folder_rule::mark(&folder.path().to_string_lossy());
+        let mut env = HashMap::from([(GIT_FUNCTION_NAME.to_string(), agentmux_common::github_broker_shim::GIT_FUNCTION_BODY.to_string())]);
+        apply_for_spawn(&mut env, &pane("host", "claude", folder.path()));
+        assert_eq!(env[GIT_FUNCTION_NAME], agentmux_common::github_broker_shim::GIT_FUNCTION_BODY);
+        assert!(agentmux_common::github_broker_shim::GIT_FUNCTION_BODY.contains("--no-ext-diff"));
+        assert_eq!(env[GIT_NO_EXT_DIFF_ENV], "1");
+    });
+}
+
+/// The bash to run: Git's on Windows (a `bash` on the PATH can be the WSL one), else the PATH's.
+fn bash() -> String {
+    let git = std::env::var_os("ProgramFiles").map(|p| Path::new(&p).join("Git").join("bin").join("bash.exe"));
+    match git {
+        Some(path) if cfg!(windows) && path.exists() => path.to_string_lossy().into_owned(),
+        _ => "bash".to_string(),
+    }
+}
+
+/// Runs `script` in bash with `git` defined by `body`, in the folder's repository, with the settings an agent there is
+/// given; `flag` says whether the diff step is on. What it printed.
+fn through_the_function(folder: &Folder, body: &str, flag: bool, script: &str) -> String {
+    let mut env = as_env(entries_over(none, &HashMap::new()));
+    if flag {
+        env.insert(GIT_NO_EXT_DIFF_ENV.to_string(), "1".to_string());
+    }
+    let out = run_program(&bash(), &folder.repo(), folder.dir.path(), &["-c", &format!("git{body}\n{script}")], &env, "");
+    format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)).replace("\r\n", "\n")
+}
+
+#[test]
+fn the_function_keeps_the_folders_diff_programs_from_running_and_leaves_git_s_own_options_alone() {
+    let folder = Folder::new();
+    let repo = folder.repo();
+    let script = folder.dir.path().join("mark.sh");
+    std::fs::write(repo.join("b.txt"), "x\n").unwrap();
+    std::fs::write(repo.join(".gitattributes"), "a.txt diff=drvcmd\nb.txt diff=drvtext\n").unwrap();
+    std::fs::write(repo.join("w.txt"), "a\nb\nc\nd\ne\n").unwrap();
+    folder.git(&["add", "."], &HashMap::new());
+    folder.git(&["commit", "-q", "-m", "more"], &HashMap::new());
+    std::fs::write(repo.join("a.txt"), "two\n").unwrap();
+    std::fs::write(repo.join("b.txt"), "y\n").unwrap();
+    std::fs::write(repo.join("w.txt"), "a\nb\nc \nd\nE\n").unwrap();
+    let commands = [
+        "git diff",
+        "git -C . diff",
+        "git -c core.abbrev=9 diff -U0",
+        "git --no-pager diff --stat -p",
+        "git log -p -1",
+        "git show",
+        "git format-patch -1 --stdout",
+        "git diff HEAD~1 HEAD",
+    ];
+    for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
+        for (key, name) in [("diff.external", "diffext"), ("diff.drvcmd.command", "drvcmd"), ("diff.drvtext.textconv", "drvtext")] {
+            folder.git(&["config", key, &format!("sh {} {name}", slashes(&script))], &HashMap::new());
+            folder.forget();
+            through_the_function(&folder, body, false, "git diff");
+            assert_eq!(folder.ran(), vec![name], "{name}: without the step the folder's program runs");
+            folder.forget();
+            for command in commands {
+                through_the_function(&folder, body, true, command);
+            }
+            assert_eq!(folder.ran(), Vec::<String>::new(), "{name}: with the step none of {commands:?} runs it");
+            folder.git(&["config", "--unset", key], &HashMap::new());
+        }
+        // Git's own options still work through it.
+        let ignoring_whitespace = through_the_function(&folder, body, true, "git diff -w w.txt");
+        assert!(ignoring_whitespace.contains("-e") && ignoring_whitespace.contains("+E") && !ignoring_whitespace.contains("+c"), "{ignoring_whitespace}");
+        let no_context = through_the_function(&folder, body, true, "git diff -U0 w.txt");
+        assert!(!no_context.lines().any(|l| l.starts_with(' ')), "{no_context}");
+        let context = through_the_function(&folder, body, true, "git diff -U1 w.txt");
+        assert!(context.lines().any(|l| l == " d"), "{context}");
+        let stat = through_the_function(&folder, body, true, "git diff --stat");
+        assert!(stat.contains("a.txt") && stat.contains("b.txt"), "{stat}");
+        let plain = through_the_function(&folder, body, true, "git status --short");
+        assert!(plain.contains("a.txt"), "any other command is plain git: {plain}");
+    }
 }

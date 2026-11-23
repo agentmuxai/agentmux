@@ -71,10 +71,48 @@ pub const GH_FUNCTION_BODY: &str = r#"() {  if [ -n "${AGENTMUX_GITHUB_BROKER:-}
 /// The name bash gives an exported `git` function.
 pub const GIT_FUNCTION_NAME: &str = "BASH_FUNC_git%%";
 
+/// The variable that makes the `git` function keep a folder's own diff programs from running (srv sets it for a
+/// host agent in a folder a container agent can write).
+pub const GIT_NO_EXT_DIFF_ENV: &str = "AGENTMUX_GIT_NO_EXT_DIFF";
+
+/// The step of the `git` function that [`GIT_NO_EXT_DIFF_ENV`] turns on: `diff`, `log`, `show`, `format-patch` and
+/// `whatchanged` (after any leading `-C <dir>`, `-c <name=value>` and other global options) get `--no-ext-diff` and
+/// `--no-textconv` first, so the external diff program, a diff driver's `command` and a `textconv` of the folder's
+/// own configuration do not run; every other option is git's own. Any other command is left as it is.
+macro_rules! no_ext_diff_step {
+    () => {
+        r#"  if [ -n "${AGENTMUX_GIT_NO_EXT_DIFF:-}" ]; then
+    local _amx_g=() _amx_s;
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env) _amx_g+=("$1"); shift; if [ $# -gt 0 ]; then _amx_g+=("$1"); shift; fi;;
+        -*) _amx_g+=("$1"); shift;;
+        *) break;;
+      esac;
+    done;
+    case "${1:-}" in
+      diff|log|show|format-patch|whatchanged)
+        _amx_s=$1; shift;
+        command git ${_amx_g[@]+"${_amx_g[@]}"} "$_amx_s" --no-ext-diff --no-textconv "$@";
+        return $?;;
+    esac;
+    set -- ${_amx_g[@]+"${_amx_g[@]}"} "$@";
+  fi;
+"#
+    };
+}
+
+/// `git` for an agent that has nothing else of the function: only the diff step, then plain `git`.
+pub const GIT_FLAGS_FUNCTION_BODY: &str = concat!("() {\n", no_ext_diff_step!(), "  command git \"$@\"\n}");
+
 /// `git`, for the same agents: a push or a command that makes commits first asks
 /// `agentmux-bashwrap git-env`, which refuses what would skip the hooks (`git push --no-verify`) and
-/// names the App's bot as the commit's author. Any other git command is plain `git`.
-pub const GIT_FUNCTION_BODY: &str = r#"() {  if [ -n "${AGENTMUX_GITHUB_BROKER:-}" ]; then
+/// names the App's bot as the commit's author. Any other git command is plain `git`. It also has the diff step
+/// of [`GIT_FLAGS_FUNCTION_BODY`].
+pub const GIT_FUNCTION_BODY: &str = concat!(
+    "() {\n",
+    no_ext_diff_step!(),
+    r#"  if [ -n "${AGENTMUX_GITHUB_BROKER:-}" ]; then
     case " $* " in
       *" push "*|*" commit "*|*" merge "*|*" rebase "*|*" cherry-pick "*|*" am "*|*" revert "*|*" pull "*|*" stash "*)
         local _amx_e _amx_v=();
@@ -87,4 +125,5 @@ pub const GIT_FUNCTION_BODY: &str = r#"() {  if [ -n "${AGENTMUX_GITHUB_BROKER:-
     esac;
   fi;
   command git "$@"
-}"#;
+}"#
+);
