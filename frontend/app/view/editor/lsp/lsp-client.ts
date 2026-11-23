@@ -14,6 +14,7 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { onMuxEvent } from "@/app/store/mps";
+import { isWindows } from "@/util/platformutil";
 import type {
     LspInitializeResult,
     LspMessageEnvelope,
@@ -306,9 +307,10 @@ export class LspClient {
  *  Windows paths need extra care: backslashes → forward slashes,
  *  drive letter prefixed with /.  */
 function pathToFileUri(p: string): string {
-    // A Windows network path, `\\server\share\a.ts`, is `file://server/share/a.ts`: the server is the URI's host.
-    const unc = /^\\\\([^\\/]+)\\(.*)$/.exec(p);
-    if (unc) return "file://" + [unc[1], ...unc[2].split("\\")].map(encodeURIComponent).join("/");
+    // A Windows network path, `\\server\share\a.ts`, or the Editor's own form of it, `//server/share/a.ts`, is
+    // `file://server/share/a.ts`: the server is the URI's host. (`//a/b` is a path of its own anywhere else.)
+    const unc = /^\\\\([^\\/]+)\\(.*)$/.exec(p) ?? (isWindows() ? /^\/\/([^/]+)\/(.*)$/.exec(p) : null);
+    if (unc) return "file://" + [unc[1], ...unc[2].split(/[\\/]/)].map(encodeURIComponent).join("/");
     const isWin = /^[a-zA-Z]:[\\/]/.test(p);
     const normalized = isWin ? p.replace(/\\/g, "/") : p;
     // Encode each path segment individually so the slashes survive.

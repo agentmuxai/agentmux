@@ -29,6 +29,7 @@ vi.mock("@/app/store/mps", () => ({
     },
 }));
 
+import { setPlatform } from "@/util/platformutil";
 import { LspClient, NOT_A_FILE_ERROR, NOT_ON_HOST_ERROR, NOT_ON_HOST_NOTICE } from "./lsp-client";
 
 type Sent = { method?: string; id?: number; params?: { textDocument?: { uri?: string } } };
@@ -141,6 +142,15 @@ describe("a file's address as the server is given it", () => {
 
     it("is file:// and the path for a POSIX path", async () => {
         expect(await opened("/proj/src/a.ts")).toBe("file:///proj/src/a.ts");
+    });
+
+    it("is file://server/share/ for the Editor's own form of a network path (//server/share/) on Windows only", async () => {
+        setPlatform("win32");
+        expect(await opened("//fileserver/share/src/a b.ts")).toBe("file://fileserver/share/src/a%20b.ts");
+        send.mockClear();
+        setPlatform("linux");
+        expect(await opened("//proj/src/a.ts")).toBe("file:////proj/src/a.ts");
+        setPlatform("darwin");
     });
 });
 
