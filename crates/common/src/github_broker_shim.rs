@@ -75,10 +75,11 @@ pub const GIT_FUNCTION_NAME: &str = "BASH_FUNC_git%%";
 /// host agent in a folder a container agent can write).
 pub const GIT_NO_EXT_DIFF_ENV: &str = "AGENTMUX_GIT_NO_EXT_DIFF";
 
-/// The step of the `git` function that [`GIT_NO_EXT_DIFF_ENV`] turns on: `diff`, `log`, `show`, `format-patch` and
-/// `whatchanged` (after any leading `-C <dir>`, `-c <name=value>` and other global options) get `--no-ext-diff` and
-/// `--no-textconv` first, so the external diff program, a diff driver's `command` and a `textconv` of the folder's
-/// own configuration do not run; every other option is git's own. Any other command is left as it is.
+/// The step of the `git` function that [`GIT_NO_EXT_DIFF_ENV`] turns on: every command gets `--no-pager` (so a
+/// pager the folder's own configuration names does not run), and `diff`, `log`, `show`, `format-patch` and
+/// `whatchanged` (after any leading `-C <dir>`, `-c <name=value>` and other global options) also get
+/// `--no-ext-diff` and `--no-textconv`, so the external diff program, a diff driver's `command` and a `textconv` of
+/// the folder's own configuration do not run; every other option is git's own.
 macro_rules! no_ext_diff_step {
     () => {
         r#"  if [ -n "${AGENTMUX_GIT_NO_EXT_DIFF:-}" ]; then
@@ -93,10 +94,10 @@ macro_rules! no_ext_diff_step {
     case "${1:-}" in
       diff|log|show|format-patch|whatchanged)
         _amx_s=$1; shift;
-        command git ${_amx_g[@]+"${_amx_g[@]}"} "$_amx_s" --no-ext-diff --no-textconv "$@";
+        command git --no-pager ${_amx_g[@]+"${_amx_g[@]}"} "$_amx_s" --no-ext-diff --no-textconv "$@";
         return $?;;
     esac;
-    set -- ${_amx_g[@]+"${_amx_g[@]}"} "$@";
+    set -- --no-pager ${_amx_g[@]+"${_amx_g[@]}"} "$@";
   fi;
 "#
     };

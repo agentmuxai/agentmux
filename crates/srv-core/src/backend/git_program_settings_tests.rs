@@ -56,7 +56,7 @@ fn what_the_environment_already_carries_is_kept_beside_them() {
     let all = pairs(&env);
     assert_eq!(&all[..3], &[("core.hooksPath".into(), "/hooks".into()), ("credential.helper".into(), String::new()), ("credential.helper".into(), "broker".into())]);
     assert_eq!(all.iter().filter(|(k, _)| k == "credential.helper").count(), 2, "a list that is already there is not added to");
-    assert_eq!(all.len(), 3 + SETTINGS.len());
+    assert_eq!(all.len(), 3 + SETTINGS.len() + PAGED_COMMANDS.len());
     assert_eq!(env.get("GIT_PROXY_COMMAND").map(String::as_str), Some("the-persons-proxy"));
     let mut own = carried.clone();
     own.insert("GIT_CONFIG_KEY_1".into(), "core.editor".into());
@@ -154,6 +154,8 @@ impl Folder {
             ("core.sshCommand", mark("ssh")),
             ("core.gitProxy", mark("proxy")),
             ("core.pager", mark("pager")),
+            ("pager.log", mark("pagerlog")),
+            ("pager.status", mark("pagerstatus")),
             ("core.editor", mark("editor")),
             ("core.askPass", mark("askpass")),
             ("gpg.program", mark("gpg")),
@@ -397,4 +399,99 @@ fn the_function_keeps_the_folders_diff_programs_from_running_and_leaves_git_s_ow
         let plain = through_the_function(&folder, body, true, "git status --short");
         assert!(plain.contains("a.txt"), "any other command is plain git: {plain}");
     }
+}
+
+/// Runs `tool args` on a pseudoterminal in the folder's repository, as git sees a person's terminal (it pages
+/// only when its output is one). Ends, or fails, within a minute.
+fn on_a_terminal(folder: &Folder, tool: &str, args: &[&str], env: &HashMap<String, String>) -> String {
+    let (repo, home) = (folder.repo(), folder.dir.path().to_path_buf());
+    let (tool, args, env): (String, Vec<String>, HashMap<String, String>) = (tool.to_string(), args.iter().map(|a| a.to_string()).collect(), env.clone());
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let printed = run_on_a_terminal(&repo, &home, &tool, &args, &env);
+        let _ = done.send(printed);
+    });
+    finished.recv_timeout(std::time::Duration::from_secs(60)).expect("git on a terminal ended")
+}
+
+fn run_on_a_terminal(repo: &Path, home: &Path, tool: &str, args: &[String], env: &HashMap<String, String>) -> String {
+    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+    use std::io::Read;
+    let pair = native_pty_system().openpty(PtySize { rows: 30, cols: 100, pixel_width: 0, pixel_height: 0 }).expect("a pty");
+    let mut cmd = CommandBuilder::new(tool);
+    cmd.args(args);
+    cmd.cwd(repo);
+    for key in ["GIT_CONFIG_COUNT", "GIT_PROXY_COMMAND", "GIT_SSH_COMMAND", "GIT_EXTERNAL_DIFF", "GIT_PAGER", "PAGER"] {
+        cmd.env_remove(key);
+    }
+    cmd.env("HOME", home);
+    cmd.env("USERPROFILE", home);
+    cmd.env("GIT_CONFIG_NOSYSTEM", "1");
+    cmd.env("GIT_TERMINAL_PROMPT", "0");
+    cmd.env("TERM", "xterm");
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    let mut child = pair.slave.spawn_command(cmd).expect("starts");
+    drop(pair.slave);
+    let mut reader = pair.master.try_clone_reader().expect("reads");
+    let printed = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = printed.clone();
+    let mut writer = pair.master.take_writer().expect("writes");
+    std::thread::spawn(move || {
+        use std::io::Write;
+        let mut chunk = [0u8; 4096];
+        while let Ok(n) = reader.read(&mut chunk) {
+            if n == 0 {
+                break;
+            }
+            // The pseudoconsole asks where the cursor is and waits for the answer before it starts the program.
+            if chunk[..n].windows(4).any(|w| w == b"\x1b[6n") {
+                let _ = writer.write_all(b"\x1b[1;1R");
+                let _ = writer.flush();
+            }
+            sink.lock().unwrap().extend_from_slice(&chunk[..n]);
+        }
+    });
+    let started = std::time::Instant::now();
+    while child.try_wait().ok().flatten().is_none() && started.elapsed() < std::time::Duration::from_secs(30) {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let status = child.try_wait().ok().flatten();
+    let _ = child.kill();
+    std::thread::spawn(move || drop(pair.master));
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    format!("{status:?} {}", String::from_utf8_lossy(&printed.lock().unwrap()))
+}
+
+#[test]
+fn a_pager_the_folder_names_for_one_command_does_not_run_on_a_terminal() {
+    let folder = Folder::new();
+    let given = as_env(entries_over(none, &HashMap::new()));
+    folder.forget();
+    let mut printed = String::new();
+    for command in ["log", "status"] {
+        printed += &on_a_terminal(&folder, "git", &[command], &HashMap::new());
+    }
+    assert_eq!(folder.ran(), vec!["fsmonitor", "pagerlog", "pagerstatus"], "what the folder's config runs by itself on a terminal: {printed:?}");
+    folder.forget();
+    for command in ["log", "status", "diff", "show", "branch", "tag", "blame"] {
+        on_a_terminal(&folder, "git", &[command], &given);
+    }
+    assert_eq!(folder.ran(), Vec::<String>::new(), "with the settings, no pager the folder names runs");
+}
+
+#[test]
+fn the_function_keeps_a_pager_the_folder_names_from_running_on_a_terminal() {
+    let folder = Folder::new();
+    let body = agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY;
+    let script = format!("git{body}\ngit log; git status");
+    let flag = HashMap::from([(GIT_NO_EXT_DIFF_ENV.to_string(), "1".to_string())]);
+    folder.forget();
+    on_a_terminal(&folder, &bash(), &["-c", &script], &HashMap::new());
+    assert_eq!(folder.ran(), vec!["fsmonitor", "pagerlog", "pagerstatus"], "without the step the folder's pagers run");
+    folder.forget();
+    on_a_terminal(&folder, &bash(), &["-c", &script], &flag);
+    let pagers: Vec<String> = folder.ran().into_iter().filter(|name| name.starts_with("pager")).collect();
+    assert_eq!(pagers, Vec::<String>::new(), "with it none of the folder's pagers does");
 }

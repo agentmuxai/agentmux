@@ -19,7 +19,8 @@
 //! - `core.sshCommand` (`ssh`), `core.editor` and `sequence.editor` (`true`), `gpg.program` and
 //!   `gpg.openpgp.program` (`gpg`), `gpg.ssh.program` (`ssh-keygen`), `gpg.x509.program` (`gpgsm`): the person's
 //!   own value, else the one in brackets;
-//! - `core.fsmonitor` `false`, `core.pager` `cat`, `core.askPass` empty (no program asked, no fallback to
+//! - `core.fsmonitor` `false`, `core.pager` `cat`, `pager.<command>` `false` for every git command (a pager the
+//!   folder names for one command, such as `pager.log`, takes precedence over `core.pager`), `core.askPass` empty (no program asked, no fallback to
 //!   `SSH_ASKPASS`);
 //! - `protocol.ext.allow` `never`: the folder's remote cannot name a command (`ext::`) to run;
 //! - `credential.helper` empty, first of the entries, which clears every helper the files named, so the helpers the
@@ -52,6 +53,29 @@ const SETTINGS: &[(&str, &str)] = &[
     ("gpg.ssh.program", "ssh-keygen"),
     ("gpg.x509.program", "gpgsm"),
     ("protocol.ext.allow", "never"),
+];
+/// The commands of git 2.52 (`git --list-cmds=builtins`): `pager.<command>` is `false` for each, since a folder's own
+/// `pager.<command>` is read before `core.pager` and `GIT_PAGER`.
+const PAGED_COMMANDS: &[&str] = &[
+    "add", "am", "annotate", "apply", "archive", "backfill", "bisect", "blame", "branch", "bugreport", "bundle",
+    "cat-file", "check-attr", "check-ignore", "check-mailmap", "check-ref-format", "checkout",
+    "checkout--worker", "checkout-index", "cherry", "cherry-pick", "clean", "clone", "column", "commit",
+    "commit-graph", "commit-tree", "config", "count-objects", "credential", "credential-cache",
+    "credential-cache--daemon", "credential-store", "describe", "diagnose", "diff", "diff-files", "diff-index",
+    "diff-pairs", "diff-tree", "difftool", "fast-export", "fast-import", "fetch", "fetch-pack", "fmt-merge-msg",
+    "for-each-ref", "for-each-repo", "format-patch", "fsck", "fsck-objects", "fsmonitor--daemon", "gc",
+    "get-tar-commit-id", "grep", "hash-object", "help", "hook", "index-pack", "init", "init-db",
+    "interpret-trailers", "last-modified", "log", "ls-files", "ls-remote", "ls-tree", "mailinfo", "mailsplit",
+    "maintenance", "merge", "merge-base", "merge-file", "merge-index", "merge-ours", "merge-recursive",
+    "merge-recursive-ours", "merge-recursive-theirs", "merge-subtree", "merge-tree", "mktag", "mktree",
+    "multi-pack-index", "mv", "name-rev", "notes", "pack-objects", "pack-redundant", "pack-refs", "patch-id",
+    "pickaxe", "prune", "prune-packed", "pull", "push", "range-diff", "read-tree", "rebase", "receive-pack",
+    "reflog", "refs", "remote", "remote-ext", "remote-fd", "repack", "replace", "replay", "repo", "rerere",
+    "reset", "restore", "rev-list", "rev-parse", "revert", "rm", "send-pack", "shortlog", "show", "show-branch",
+    "show-index", "show-ref", "sparse-checkout", "stage", "stash", "status", "stripspace", "submodule--helper",
+    "survey", "switch", "symbolic-ref", "tag", "unpack-file", "unpack-objects", "update-index", "update-ref",
+    "update-server-info", "upload-archive", "upload-archive--writer", "upload-pack", "var", "verify-commit",
+    "verify-pack", "verify-tag", "version", "whatchanged", "worktree", "write-tree"
 ];
 /// The settings of [`SETTINGS`] a person chooses for themselves: their own value, from the system and global
 /// configuration, is kept.
@@ -129,6 +153,9 @@ pub fn entries_over(get: impl Fn(&str) -> Option<String>, own: &HashMap<String, 
     for (key, value) in SETTINGS {
         let kept = PERSONS.contains(key).then(|| own.get(&key.to_ascii_lowercase())).flatten();
         set(&mut out, key, kept.map_or(*value, String::as_str));
+    }
+    for command in PAGED_COMMANDS {
+        set(&mut out, &format!("pager.{command}"), "false");
     }
     if get(PROXY_COMMAND).is_none() {
         out.insert(PROXY_COMMAND.to_string(), String::new());
