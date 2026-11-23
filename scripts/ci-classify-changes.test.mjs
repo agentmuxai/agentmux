@@ -19,6 +19,7 @@ import {
     classifyChanges,
     classifyPullFiles,
     isCefInput,
+    isDependencyInput,
     isDocsOnlyPath,
     isFrontendOnlyPath,
     isRustOnlyPath,
@@ -586,6 +587,64 @@ describe("R9 — the production frontend build runs unless only Rust files chang
         expect(files.length).toBeGreaterThan(500);
         const reaching = files.filter((file) => /(?:\.\.\/)+crates\//.test(readFileSync(file, "utf8")));
         expect(reaching, "the build reads these out of crates/: take crates/ out of BUILD_NEVER_READS, or list what is read").toEqual([]);
+    });
+});
+
+describe("R11 — the known-vulnerability check runs when a lock file, a manifest or the check itself changes", () => {
+    it("runs for the lock files, the manifests, the ignore lists and the check's own files", () => {
+        for (const p of [
+            "Cargo.lock",
+            "Cargo.toml",
+            "crates/srv/Cargo.toml",
+            "crates/srv-core/Cargo.toml",
+            "deny.toml",
+            "package.json",
+            "package-lock.json",
+            ".github/npm-audit-ignore.json",
+            "scripts/advisory-ignores.mjs",
+            "scripts/advisory-ignores.test.mjs",
+            "scripts/npm-audit-gate.mjs",
+            "scripts/npm-audit-gate.test.mjs",
+            ".github/workflows/ci-pr.yml",
+        ]) {
+            expect(isDependencyInput(p), p).toBe(true);
+            expect(classifyChanges([p]).deps, p).toBe(true);
+        }
+    });
+
+    it("does not run for a source change, a doc or a nested look-alike", () => {
+        for (const p of ["crates/srv/src/lib.rs", "frontend/app/App.tsx", "docs/specs/A.md", "crates/srv/src/Cargo.toml", "docs/package.json.md", "xCargo.lock"]) {
+            expect(classifyChanges([p]).deps, p).toBe(false);
+        }
+        expect(classifyChanges(["docs/specs/A.md", ".changesets/1-x.md"]).deps).toBe(false);
+    });
+
+    it("runs when a lock file rides along with other files, and on a Windows-style path", () => {
+        expect(classifyChanges(["docs/a.md", "crates/srv/src/lib.rs", "Cargo.lock"]).deps).toBe(true);
+        expect(classifyChanges(["crates\\srv\\Cargo.toml"]).deps).toBe(true);
+    });
+
+    it("runs on anything unrecognised: an empty list, a malformed entry, a bad API answer", () => {
+        expect(classifyChanges([]).deps).toBe(true);
+        expect(classifyChanges(undefined).deps).toBe(true);
+        expect(classifyChanges(["docs/a.md", 7]).deps).toBe(true);
+        expect(classifyPullFiles([{ filename: "docs/a.md" }, { nothing: true }]).deps).toBe(true);
+    });
+
+    it("runs for a lock change that is not only the release version, and skips a release that moves only the version", () => {
+        expect(classifyPullFiles([{ filename: "Cargo.lock", patch: "@@ -1 +1 @@\n-name = \"a\"\n+name = \"b\"" }]).deps).toBe(true);
+        const lockOnly = classifyPullFiles([
+            { filename: "package.json", patch: '@@ -1,3 +1,3 @@\n {\n-    "version": "0.1.0",\n+    "version": "0.1.1",\n }' },
+            { filename: "Cargo.lock", patch: '@@ -1,3 +1,3 @@\n [[package]]\n-version = "0.1.0"\n+version = "0.1.1"' },
+        ]);
+        expect(lockOnly).toMatchObject({ version_only: true, deps: false });
+    });
+
+    it("prints the output the workflow reads", () => {
+        const repo = join(dirname(fileURLToPath(import.meta.url)), "..");
+        const run = (...files) => spawnSync(process.execPath, [join(repo, "scripts", "ci-classify-changes.mjs"), ...files], { encoding: "utf8" }).stdout;
+        expect(run("Cargo.lock")).toContain("deps=true\n");
+        expect(run("crates/srv/src/lib.rs")).toContain("deps=false\n");
     });
 });
 
