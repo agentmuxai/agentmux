@@ -14,6 +14,7 @@ ignore = [
     { id = "RUSTSEC-2026-0367", reason = "no patched release is published; review by 2027-02-20" },
     { id = "RUSTSEC-2026-0368", reason = "no patched release is published; review by 2027-02-20" },
     { id = "RUSTSEC-2026-0369", reason = "no patched release is published; review by 2027-02-20" },
+    { id = "RUSTSEC-2026-0386", reason = "the patched release is not taken yet; review by 2026-12-06" },
     { id = "RUSTSEC-2026-0429", reason = "no patched release is published; review by 2027-02-20" },
     { id = "RUSTSEC-2026-0436", reason = "no patched release is published; review by 2027-02-20" },
     { id = "RUSTSEC-2026-0543", reason = "no replacement chosen yet; review by 2027-02-20" },
