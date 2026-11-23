@@ -139,6 +139,63 @@ async fn the_service_route_asks_the_person_in_the_callers_name_and_ends_nothing_
     }
 }
 
+/// What is held for the caller's next turn, if the note arrives within a moment.
+async fn held_for(state: &AppState, uid: &str, caller_block: &str, request_id: &str) -> Option<String> {
+    let key = format!("shutdown:{request_id}");
+    for _ in 0..50 {
+        if state.reactive_handler.holds_system_note(uid, &key) {
+            let (message, notes) = crate::backend::reactive::held_notes::attach(caller_block, "next");
+            notes.delivered();
+            return Some(message);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    None
+}
+
+#[tokio::test]
+async fn the_answer_says_a_countdown_is_open_and_the_agent_caller_is_told_how_it_ended() {
+    let state = test_state();
+    known_agent(&state, "uid-quit-told");
+    let (caller_block, _) = running_pane(&state, "agent", "uid-quit-told");
+    state.reactive_handler.register_agent("uid-quit-told", &caller_block, None).unwrap();
+    for method in ["QuitAgent", "ShutdownAgent"] {
+        let (block_id, stopped) = running_pane(&state, "agent", "target-of-told");
+        let reply = crate::server::service::run_service_call_as(&state, &service_call(method, vec![json!(block_id)]), Some("uid-quit-told")).await;
+        assert!(reply.success, "{method}: {reply:?}");
+        let data = reply.data.as_ref().unwrap();
+        assert_eq!(data["status"], "pending_user_override", "{method}");
+        let note = data["note"].as_str().unwrap();
+        assert!(note.contains("countdown is open") && note.contains("nothing is stopped yet"), "{method}: {note}");
+        assert!(note.contains("can keep it running") && note.contains("Agents list"), "{method}: {note}");
+        let id = request_id(&reply);
+        assert!(!stopped.load(Ordering::SeqCst), "{method}: nothing is stopped by the call");
+        assert_eq!(ps::keep(&state, &block_id, &id), "kept_by_user");
+        let said = held_for(&state, "uid-quit-told", &caller_block, &id).await.expect("the caller is told the person kept it");
+        assert_eq!(said.matches("[AgentMux]").count(), 1, "{said}");
+        assert!(said.contains(method) && said.contains("keep") && said.contains("running"), "{method}: {said}");
+        assert!(!said.contains("Service"), "{said}");
+        assert!(!stopped.load(Ordering::SeqCst), "{method}: kept by the person");
+        blockcontroller::delete_controller(&block_id);
+    }
+    blockcontroller::delete_controller(&caller_block);
+}
+
+#[tokio::test]
+async fn a_second_request_for_an_agent_with_a_countdown_says_it_joined_it() {
+    let state = test_state();
+    known_agent(&state, "uid-quit-first");
+    known_agent(&state, "uid-quit-second");
+    let (block_id, _) = running_pane(&state, "agent", "target-of-joiners");
+    let first = quit_as(&state, &block_id, Some("uid-quit-first")).await;
+    let second = quit_as(&state, &block_id, Some("uid-quit-second")).await;
+    assert_eq!(request_id(&first), request_id(&second));
+    assert!(first.data.as_ref().unwrap()["note"].as_str().unwrap().contains("A countdown is open"));
+    assert!(second.data.as_ref().unwrap()["note"].as_str().unwrap().contains("already open"));
+    ps::keep(&state, &block_id, &request_id(&first));
+    blockcontroller::delete_controller(&block_id);
+}
+
 #[tokio::test]
 async fn a_service_request_with_no_agent_credential_is_refused_and_opens_no_countdown() {
     let state = test_state();

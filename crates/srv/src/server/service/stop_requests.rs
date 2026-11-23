@@ -99,7 +99,19 @@ pub(super) fn ask_the_person_to_stop(state: &AppState, block_id: &str, caller_ui
     if !pending.joined {
         LIMITER.charge(uid, now_ms());
     }
-    Ok(WebReturnType::success(serde_json::json!({ "pending": pending })))
+    // The call does not wait for the person: the answer says so, and the caller is told how the request ended, as any
+    // other requester is (a note when the person keeps the agent running or the close fails).
+    crate::sagas::pending_shutdown::tell_when_settled(state, &pending.request_id, &by, method);
+    let note = answer_note(block_id, pending.joined);
+    Ok(WebReturnType::success(serde_json::json!({ "status": "pending_user_override", "note": note, "pending": pending })))
+}
+
+/// What the answer says: the countdown is open, nothing is stopped yet, and where the outcome shows.
+fn answer_note(block_id: &str, joined: bool) -> String {
+    let open = if joined { "A countdown was already open for the agent in this block, and this request joined it" } else { "A countdown is open for the agent in this block" };
+    format!(
+        "{open} ({block_id}): nothing is stopped yet, and the person can keep it running. See Agents list for the outcome; if the person keeps it running or the close fails, one [AgentMux] note tells you."
+    )
 }
 
 #[cfg(test)]
