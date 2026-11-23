@@ -144,7 +144,7 @@ fn grant_for(granted: &[String], url: &Url) -> Option<Grant> {
 /// The permission a request to `url` needs, named the way the manifest
 /// writes it (for the error).
 fn needed(url: &Url) -> String {
-    format!("net:{}", url.origin().ascii_serialization())
+    format!("net:{}", agentmux_common::url_guard::origin_string(url).unwrap_or_else(|| "null".to_string()))
 }
 
 /// The host's addresses, looked up within `deadline` (the request's own
@@ -253,12 +253,15 @@ pub async fn fetch(pkg_name: &str, granted: &[String], req: FetchRequest) -> Res
         if status.is_redirection() {
             if let Some(loc) = resp.headers().get(reqwest::header::LOCATION).and_then(|v| v.to_str().ok()) {
                 let next = url.join(loc).map_err(|_| AccessError::network("a redirect to a bad url"))?;
+                let Some(next_origin) = agentmux_common::url_guard::checked_origin(&next) else {
+                    return Err(AccessError::network("a redirect to an address with no origin isn't allowed"));
+                };
                 if grant_for(granted, &next).is_none() {
-                    return Err(AccessError::network(format!("a redirect to {} isn't allowed", next.origin().ascii_serialization())));
+                    return Err(AccessError::network(format!("a redirect to {} isn't allowed", next_origin.ascii_serialization())));
                 }
                 // As browsers do: credentials meant for one origin don't
                 // follow a redirect to another, even an allowed one.
-                if next.origin() != url.origin() {
+                if Some(next_origin) != agentmux_common::url_guard::checked_origin(&url) {
                     for name in CREDENTIAL_HEADERS {
                         headers.remove(*name);
                     }
@@ -410,6 +413,20 @@ mod tests {
         assert_eq!(resp.url, format!("http://127.0.0.1:{target}/there"));
         // No content type: the bytes come back as base64.
         assert_eq!(resp.body_base64.as_deref(), Some("aGk="));
+    }
+
+    #[tokio::test]
+    async fn a_redirect_to_a_blob_address_that_carries_a_blob_address_is_refused() {
+        for depth in [2usize, 20_000] {
+            let reply: &'static str = Box::leak(
+                format!("HTTP/1.1 302 Found\r\nLocation: {}https://example.com/x\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", "blob:".repeat(depth))
+                    .into_boxed_str(),
+            );
+            let first = serve(reply).await;
+            let granted = vec![format!("net:http://127.0.0.1:{first}"), "net:https://example.com".to_string()];
+            let err = fetch("Test", &granted, FetchRequest { url: format!("http://127.0.0.1:{first}/"), ..Default::default() }).await.unwrap_err();
+            assert_eq!(err.code, 1004, "depth {depth}");
+        }
     }
 
     /// A one-shot server that answers whether the request carried Authorization.

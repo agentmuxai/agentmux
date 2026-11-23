@@ -42,6 +42,7 @@ pub mod agent_roots;
 pub mod allowed_origins;
 pub mod debug_privilege;
 pub mod popup_rules;
+pub mod url_guard;
 pub mod process;
 pub mod process_hardening;
 pub mod pii_mask;
