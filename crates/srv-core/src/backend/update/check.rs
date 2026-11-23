@@ -428,7 +428,7 @@ pub(crate) fn status_for_arch(current: &str, channel: &str, release: &Release, n
 /// What a person is told when this install is older than the latest release can upgrade from: the one message the check
 /// and the download both give, naming the version to install first.
 pub(crate) fn install_first_message(current: &str, latest: &str, floor: &str) -> String {
-    format!("This AgentMux ({current}) is older than {latest} can upgrade from; install {floor} first, then upgrade.")
+    agentmux_common::update_manifest::install_first_message(current, latest, floor)
 }
 
 static STATUS: OnceLock<RwLock<AppUpdateStatus>> = OnceLock::new();
