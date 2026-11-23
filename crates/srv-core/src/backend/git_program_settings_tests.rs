@@ -31,7 +31,7 @@ fn pane(mode: &str, provider: &str, cwd: &Path) -> crate::backend::obj::MetaMapT
 
 #[test]
 fn every_program_setting_is_given_a_value_that_runs_nothing_of_the_folders() {
-    let env = as_env(entries_over(none));
+    let env = as_env(entries_over(none, &HashMap::new()));
     for (key, value) in SETTINGS {
         assert_eq!(value_of(&env, key).as_deref(), Some(*value), "{key}");
     }
@@ -52,7 +52,7 @@ fn what_the_environment_already_carries_is_kept_beside_them() {
         ("GIT_PROXY_COMMAND".to_string(), "the-persons-proxy".to_string()),
     ]);
     let mut env = carried.clone();
-    env.extend(entries_over(|k| carried.get(k).cloned()));
+    env.extend(entries_over(|k| carried.get(k).cloned(), &HashMap::new()));
     let all = pairs(&env);
     assert_eq!(&all[..3], &[("core.hooksPath".into(), "/hooks".into()), ("credential.helper".into(), String::new()), ("credential.helper".into(), "broker".into())]);
     assert_eq!(all.iter().filter(|(k, _)| k == "credential.helper").count(), 2, "a list that is already there is not added to");
@@ -61,7 +61,7 @@ fn what_the_environment_already_carries_is_kept_beside_them() {
     let mut own = carried.clone();
     own.insert("GIT_CONFIG_KEY_1".into(), "core.editor".into());
     own.insert("GIT_CONFIG_VALUE_1".into(), "vim".into());
-    own.extend(entries_over(|k| own.get(k).cloned()));
+    own.extend(entries_over(|k| own.get(k).cloned(), &HashMap::new()));
     assert_eq!(value_of(&own, "core.editor").as_deref(), Some("true"), "over the agent's own value");
 }
 
@@ -91,19 +91,31 @@ fn only_a_host_agent_in_such_a_folder_is_given_them_whatever_its_harness() {
 
 /// Runs git in `repo` with none of the person's own configuration, and `env` on top.
 fn run_git(repo: &Path, home: &Path, args: &[&str], env: &HashMap<String, String>) -> std::process::Output {
-    std::process::Command::new("git")
+    run_git_with(repo, home, args, env, "")
+}
+
+/// [`run_git`] with `input` on git's standard input.
+fn run_git_with(repo: &Path, home: &Path, args: &[&str], env: &HashMap<String, String>, input: &str) -> std::process::Output {
+    use std::io::Write;
+    let mut child = std::process::Command::new("git")
         .args(args)
         .current_dir(repo)
         .env("HOME", home)
         .env("USERPROFILE", home)
         .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_TERMINAL_PROMPT", "0")
         .env_remove("GIT_CONFIG_COUNT")
         .env_remove("GIT_PROXY_COMMAND")
         .env_remove("GIT_SSH_COMMAND")
         .env_remove("GIT_EXTERNAL_DIFF")
         .envs(env)
-        .output()
-        .expect("git runs")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("git runs");
+    let _ = child.stdin.take().expect("piped").write_all(input.as_bytes());
+    child.wait_with_output().expect("git ends")
 }
 
 /// A repository whose own `.git/config` names a marker program for every setting that runs one, and a remote
@@ -186,7 +198,7 @@ fn slashes(path: &Path) -> String {
 fn git_in_the_folder_runs_nothing_its_own_config_names() {
     let folder = Folder::new();
     folder.forget();
-    let given = as_env(entries_over(none));
+    let given = as_env(entries_over(none, &HashMap::new()));
     // Without the settings the folder's config does run its programs: the check is not empty.
     for args in [vec!["status"], vec!["fetch", "viaext"], vec!["ls-remote", "viassh"]] {
         folder.git(&args, &HashMap::new());
@@ -216,7 +228,7 @@ fn git_in_the_folder_runs_nothing_its_own_config_names() {
 #[test]
 fn the_settings_are_what_git_reads_for_the_programs_a_person_is_not_present_for() {
     let folder = Folder::new();
-    let given = as_env(entries_over(none));
+    let given = as_env(entries_over(none, &HashMap::new()));
     let read = |args: &[&str]| String::from_utf8_lossy(&run_git(&folder.repo(), folder.dir.path(), args, &given).stdout).trim().to_string();
     assert_eq!(read(&["var", "GIT_PAGER"]), "cat", "the pager");
     assert_eq!(read(&["var", "GIT_EDITOR"]), "true", "the editor");
@@ -226,4 +238,73 @@ fn the_settings_are_what_git_reads_for_the_programs_a_person_is_not_present_for(
     let helpers = run_git(&folder.repo(), folder.dir.path(), &["config", "--get-all", "credential.helper"], &given);
     let helpers = String::from_utf8_lossy(&helpers.stdout).replace("\r\n", "\n");
     assert_eq!(helpers.strip_suffix('\n').unwrap_or(&helpers).rsplit('\n').next(), Some(""), "the last helper is the empty one, which clears those before it: {helpers:?}");
+}
+
+#[test]
+fn the_persons_own_values_are_read_from_the_system_and_global_configuration_alone() {
+    let scoped = "global\tcore.sshcommand ssh -i C:/keys/id -o IdentitiesOnly=yes\nsystem\tcore.editor nano\nglobal\tcore.editor code --wait\nlocal\tgpg.program /folder/evil\ncommand\tgpg.ssh.program /env/evil\nglobal\tgpg.program gpg2\n";
+    let own = parse_scoped(scoped);
+    assert_eq!(own.get("core.sshcommand").map(String::as_str), Some("ssh -i C:/keys/id -o IdentitiesOnly=yes"));
+    assert_eq!(own.get("core.editor").map(String::as_str), Some("code --wait"), "global over system");
+    assert_eq!(own.get("gpg.program").map(String::as_str), Some("gpg2"), "and a folder's or the environment's value is not the person's");
+    assert!(!own.contains_key("gpg.ssh.program"));
+    let env = as_env(entries_over(none, &own));
+    assert_eq!(value_of(&env, "core.sshCommand").as_deref(), Some("ssh -i C:/keys/id -o IdentitiesOnly=yes"));
+    assert_eq!(value_of(&env, "core.editor").as_deref(), Some("code --wait"));
+    assert_eq!(value_of(&env, "gpg.program").as_deref(), Some("gpg2"));
+    assert_eq!(value_of(&env, "gpg.ssh.program").as_deref(), Some("ssh-keygen"), "neutral where the person sets none");
+    assert_eq!(value_of(&env, "core.fsmonitor").as_deref(), Some("false"), "a setting the person does not choose is always neutral");
+}
+
+#[test]
+fn a_value_in_the_persons_global_configuration_wins_and_the_folders_is_never_used() {
+    let folder = Folder::new();
+    std::fs::write(
+        folder.dir.path().join(".gitconfig"),
+        "[core]\n\tsshCommand = ssh -o BatchMode=yes\n\teditor = myeditor --wait\n[gpg]\n\tprogram = mygpg\n[gpg \"ssh\"]\n\tprogram = mysshsign\n",
+    )
+    .unwrap();
+    let own = read_persons(Some(folder.dir.path()));
+    assert_eq!(own.get("core.sshcommand").map(String::as_str), Some("ssh -o BatchMode=yes"), "{own:?}");
+    assert_eq!(own.get("gpg.ssh.program").map(String::as_str), Some("mysshsign"));
+    let given = as_env(entries_over(none, &own));
+    let read = |key: &str| String::from_utf8_lossy(&run_git(&folder.repo(), folder.dir.path(), &["config", "--get", key], &given).stdout).trim().to_string();
+    assert_eq!(read("core.sshCommand"), "ssh -o BatchMode=yes", "the person's, not the folder's");
+    assert_eq!(read("core.editor"), "myeditor --wait");
+    assert_eq!(read("gpg.program"), "mygpg");
+    assert_eq!(read("gpg.ssh.program"), "mysshsign");
+    assert_eq!(read("gpg.x509.program"), "gpgsm", "neutral where the person sets none");
+    folder.forget();
+    for args in [vec!["status"], vec!["fetch", "origin"], vec!["fetch", "viaext"], vec!["ls-remote", "viassh"]] {
+        folder.git(&args, &given);
+    }
+    assert_eq!(folder.ran(), Vec::<String>::new(), "nothing the folder names runs");
+}
+
+#[test]
+fn the_brokers_helper_still_answers_and_the_folders_does_not() {
+    let folder = Folder::new();
+    let broker = HashMap::from([
+        ("GIT_CONFIG_COUNT".to_string(), "2".to_string()),
+        ("GIT_CONFIG_KEY_0".to_string(), "credential.https://github.com.helper".to_string()),
+        ("GIT_CONFIG_VALUE_0".to_string(), String::new()),
+        ("GIT_CONFIG_KEY_1".to_string(), "credential.https://github.com.helper".to_string()),
+        ("GIT_CONFIG_VALUE_1".to_string(), "!f() { echo username=the-bot; echo password=the-token; }; f".to_string()),
+    ]);
+    let mut given = broker.clone();
+    given.extend(entries_over(|k| broker.get(k).cloned(), &HashMap::new()));
+    let all = pairs(&given);
+    assert_eq!(all[0], ("credential.helper".to_string(), String::new()), "the reset comes before the broker's list");
+    assert_eq!(&all[1..3], &[("credential.https://github.com.helper".to_string(), String::new()), ("credential.https://github.com.helper".to_string(), "!f() { echo username=the-bot; echo password=the-token; }; f".to_string())]);
+    folder.forget();
+    let ask = |host: &str| {
+        let out = run_git_with(&folder.repo(), folder.dir.path(), &["credential", "fill"], &given, &format!("protocol=https\nhost={host}\n\n"));
+        String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n")
+    };
+    assert!(ask("github.com").contains("password=the-token"), "the broker's helper answers for GitHub");
+    assert!(!ask("elsewhere.example").contains("password="), "and nothing answers for another host");
+    assert_eq!(folder.ran(), Vec::<String>::new(), "the helper the folder names is not run for either");
+    // Without the reset, the folder's helper is run for a host the broker's does not cover.
+    run_git_with(&folder.repo(), folder.dir.path(), &["credential", "fill"], &broker, "protocol=https\nhost=elsewhere.example\n\n");
+    assert_eq!(folder.ran(), vec!["credential"], "what the folder's config runs by itself");
 }
