@@ -64,6 +64,19 @@ fn agent_of(state: &AppState, block_id: &str) -> Option<String> {
     state.reactive_handler.get_agent_by_block(block_id).map(|a| a.agent_id).or_else(from_meta)
 }
 
+/// A request carrying an agent's token may read only its own pane's state; one with no token (the window's own) is not
+/// asked. The token must name an agent srv knows.
+pub(super) fn own_pane_only(state: &AppState, block_id: &str, caller_uid: Option<&str>, method: &str) -> Result<(), WebReturnType> {
+    let Some(uid) = caller_uid else { return Ok(()) };
+    let Some(slug) = state.mstore.agent_names_by_id(uid).ok().flatten().map(|row| row.slug).filter(|slug| !slug.is_empty()) else {
+        return Err(refused(format!("{method}: FORBIDDEN: the token's agent is unknown")));
+    };
+    if agent_of(state, block_id).is_some_and(|owner| owner == uid || owner == slug) {
+        return Ok(());
+    }
+    Err(refused(format!("{method}: FORBIDDEN: an agent may read only its own pane; to see another agent's work use Agents list")))
+}
+
 /// Opens the person's countdown for the agent in `block_id`, in the name of the agent the request's token names, or
 /// says why not.
 pub(super) fn ask_the_person_to_stop(state: &AppState, block_id: &str, caller_uid: Option<&str>, method: &str) -> Result<WebReturnType, WebReturnType> {

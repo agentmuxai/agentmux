@@ -216,3 +216,27 @@ async fn the_service_route_refuses_a_block_with_no_running_agent() {
         assert!(!reply.success && reply.error.as_deref().unwrap_or_default().contains("no running agent"), "{method}: {reply:?}");
     }
 }
+
+async fn preview_as(state: &AppState, block_id: &str, caller: Option<&str>) -> crate::backend::service::WebReturnType {
+    crate::server::service::run_service_call_as(state, &service_call("ShutdownPreview", vec![json!(block_id)]), caller).await
+}
+
+#[tokio::test]
+async fn an_agent_reads_the_shutdown_preview_of_its_own_pane_only_and_the_window_reads_any() {
+    let state = test_state();
+    known_agent(&state, "uid-prev-reader");
+    let (own, _) = running_pane(&state, "agent", "uid-prev-reader");
+    let (other, _) = running_pane(&state, "agent", "uid-prev-other");
+    let reply = preview_as(&state, &own, Some("uid-prev-reader")).await;
+    assert!(reply.success && reply.data.as_ref().is_some_and(|d| d.get("claims").is_some()), "its own: {reply:?}");
+    let reply = preview_as(&state, &other, Some("uid-prev-reader")).await;
+    let error = reply.error.as_deref().unwrap_or_default();
+    assert!(!reply.success && reply.data.is_none() && error.contains("only its own pane") && error.contains("Agents list"), "another's: {reply:?}");
+    let reply = preview_as(&state, &other, Some("uid-prev-never-defined")).await;
+    assert!(!reply.success && reply.error.as_deref().unwrap_or_default().contains("the token's agent is unknown"), "{reply:?}");
+    for block_id in [&own, &other] {
+        let reply = preview_as(&state, block_id, None).await;
+        assert!(reply.success && reply.data.as_ref().is_some_and(|d| d.get("working").is_some()), "the window: {reply:?}");
+        blockcontroller::delete_controller(block_id);
+    }
+}
