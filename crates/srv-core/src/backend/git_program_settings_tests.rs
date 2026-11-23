@@ -525,7 +525,7 @@ fn the_function_keeps_a_remotes_upload_and_receive_programs_from_running() {
 fn the_function_leaves_the_reflog_subcommands_working() {
     let folder = Folder::new();
     for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
-        let out = through_the_function(&folder, body, true, "git reflog show -1 && git reflog exists HEAD && git reflog expire --all --dry-run && git reflog -1 && echo reflog-ok");
+        let out = through_the_function(&folder, body, true, "git reflog show -1 && git reflog exists HEAD && git reflog expire --all --dry-run && git reflog list && git reflog HEAD -1 && git reflog -1 && echo reflog-ok");
         assert!(out.contains("reflog-ok"), "{out}");
     }
 }

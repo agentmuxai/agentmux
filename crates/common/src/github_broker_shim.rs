@@ -78,7 +78,7 @@ pub const GIT_NO_EXT_DIFF_ENV: &str = "AGENTMUX_GIT_NO_EXT_DIFF";
 /// The step of the `git` function that [`GIT_NO_EXT_DIFF_ENV`] turns on. After any leading `-C <dir>`, `-c
 /// <name=value>` and other global options, every command gets `--no-pager` (so a pager the folder's own
 /// configuration names does not run); `diff`, `log`, `show`, `format-patch`, `whatchanged`, `blame` and `reflog`
-/// (after its `show`, and not for its `expire`, `delete` and `exists`) also get `--no-ext-diff` and `--no-textconv`
+/// (after its `show`, or with no subcommand, and not for another one) also get `--no-ext-diff` and `--no-textconv`
 /// (so the external diff program, a diff driver's `command` and a `textconv` of the folder's own configuration do not
 /// run); `fetch`, `pull`, `ls-remote` and `clone` get
 /// `--upload-pack=git-upload-pack` and `push` gets `--receive-pack=git-receive-pack` (so a remote's `uploadpack` and
@@ -100,9 +100,9 @@ macro_rules! no_ext_diff_step {
       reflog)
         _amx_s=$1; shift;
         case "${1:-}" in
-          expire|delete|exists) set -- "$_amx_s" "$@";;
           show) _amx_t=$1; shift; set -- "$_amx_s" "$_amx_t" --no-ext-diff --no-textconv "$@";;
-          *) set -- "$_amx_s" --no-ext-diff --no-textconv "$@";;
+          ""|-*) set -- "$_amx_s" --no-ext-diff --no-textconv "$@";;
+          *) set -- "$_amx_s" "$@";;
         esac;;
       fetch|pull|ls-remote|clone) _amx_s=$1; shift; set -- "$_amx_s" --upload-pack=git-upload-pack "$@";;
       push) _amx_s=$1; shift; set -- "$_amx_s" --receive-pack=git-receive-pack "$@";;
