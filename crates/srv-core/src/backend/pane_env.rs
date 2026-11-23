@@ -428,6 +428,8 @@ mod spawn_site_coverage {
          "test: re-runs the test harness as a child that appends lines in a loop until the test kills it, to prove a transcript reads back whole after a kill mid-append"),
         ("src/backend/gpu/nvml.rs", "\"cc\"", 1,
          "test: Linux only; compiles a tiny fake NVIDIA library (a C file written to a temp folder, fixed arguments) so the NVML calls can be exercised without a GPU; skipped where there is no C compiler"),
+        ("src/backend/git_program_settings_tests.rs", "\"git\"", 1,
+         "test: runs git in a scratch repository whose own configuration names marker programs, with none of the person's configuration, to prove they do not run; loopback addresses only, no agent code"),
         ("src/backend/transcript/framer_tests.rs", "&exe", 1,
          "test: re-runs the test harness as writer, framer and reader children on one scratch store (ignored; the multi-process stress)"),
         ("src/backend/blockcontroller/app_server.rs", "fake_server_binary(", 1,

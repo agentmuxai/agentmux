@@ -87,6 +87,11 @@ pub fn git_config_entries(get: impl Fn(&str) -> Option<String>, key: &str, value
     ]
 }
 
+/// Whether the `GIT_CONFIG_*` entries `get` sees name `key` (matched without case).
+pub fn git_config_has(get: &impl Fn(&str) -> Option<String>, key: &str) -> bool {
+    (0..parse_count(get)).any(|i| get(&format!("GIT_CONFIG_KEY_{i}")).is_some_and(|k| k.eq_ignore_ascii_case(key)))
+}
+
 /// `env` without its `core.hooksPath` entries, the others renumbered: for a
 /// container, where the host's hooks directory means nothing, but any other
 /// `GIT_CONFIG_*` setting the agent's env carries must still work.

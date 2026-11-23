@@ -789,6 +789,9 @@ fn reserve_agent_env(
 ) {
     crate::server::agent_handlers::identity_env::carry_block_slug_identity_env(mstore, agent_block_id, env);
     crate::backend::gh_guard::apply_gh_guard(env);
+    if let Some(block) = mstore.get::<crate::backend::obj::Block>(agent_block_id).ok().flatten() {
+        crate::backend::git_program_settings::apply_for_spawn(env, &block.meta);
+    }
     crate::backend::account_login_guard::strip_account_login(env);
 }
 
@@ -853,6 +856,36 @@ mod reserved_env_tests {
         }
         assert_eq!(env["GIT_AUTHOR_EMAIL"], "loap-3@agents.local");
         assert!(env["GH_CONFIG_DIR"].ends_with("gh-loap-3"));
+    }
+
+    /// A command an agent runs in a folder a container agent can write has git settings that run nothing of the
+    /// folder's own configuration; a command of an agent in any other folder has none added.
+    #[test]
+    fn a_shell_command_in_a_shared_folder_has_git_that_runs_nothing_the_folder_names() {
+        use crate::backend::storage::store::Store;
+        let (data, shared, plain) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        crate::backend::mcp_config_file::with_data_home(data.path(), || {
+            crate::backend::mcp_folder_rule::mark(&shared.path().to_string_lossy());
+            let store = Store::open_in_memory().unwrap();
+            for (id, folder) in [("block-shared", shared.path()), ("block-plain", plain.path())] {
+                let mut meta = crate::backend::obj::MetaMapType::new();
+                meta.insert("view".to_string(), serde_json::json!("agent"));
+                meta.insert("agentMode".to_string(), serde_json::json!("host"));
+                meta.insert("cmd:cwd".to_string(), serde_json::json!(folder.to_string_lossy()));
+                let mut block = crate::backend::obj::Block { oid: id.to_string(), meta, ..Default::default() };
+                store.insert(&mut block).unwrap();
+            }
+            let given = |block: &str| {
+                let mut env = std::collections::HashMap::new();
+                super::reserve_agent_env(&store, block, &mut env);
+                env
+            };
+            let shared_env = given("block-shared");
+            assert!(shared_env.values().any(|v| v == "core.fsmonitor"), "{shared_env:?}");
+            assert_eq!(shared_env.get("GIT_PROXY_COMMAND").map(String::as_str), Some(""));
+            let plain_env = given("block-plain");
+            assert!(!plain_env.values().any(|v| v == "core.fsmonitor") && !plain_env.contains_key("GIT_PROXY_COMMAND"), "{plain_env:?}");
+        });
     }
 }
 
