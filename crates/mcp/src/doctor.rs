@@ -245,8 +245,8 @@ fn check_handshakes(report: &mut Report, entry: Option<&Entry>, config: &Path, f
         report.info("no CLAUDE_CODE_SHELL_PREFIX: the CLI starts the server directly");
         return;
     };
-    // The CLI passes the prefix one argument: the command line, joined.
-    let joined = std::iter::once(command.as_str()).chain(args.iter().map(String::as_str)).collect::<Vec<_>>().join(" ");
+    // The CLI passes the prefix one argument: the command line, joined as the CLI joins it.
+    let joined = prefix_line(&command, &args);
     let name = Path::new(&prefix).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(prefix.clone());
     match handshake(Command::new(&prefix).arg(&joined)) {
         Ok(_) => report.ok(format!("it starts through the shell prefix ({name}), as the CLI starts it")),
@@ -254,6 +254,19 @@ fn check_handshakes(report: &mut Report, entry: Option<&Entry>, config: &Path, f
             "it does NOT start through the shell prefix ({name}), which is how the CLI starts it: {e}"
         )),
     }
+}
+
+/// The command line the CLI hands the shell prefix: the words joined by spaces, a word it finds unsafe (one with a
+/// backslash, a space or a quote) in single quotes, a quote inside it as `'\''`. A bare name is left as it is.
+fn prefix_line(command: &str, args: &[String]) -> String {
+    let word = |w: &str| {
+        if w.is_empty() || w.contains(['\\', ' ', '\'', '"']) {
+            format!("'{}'", w.replace('\'', "'\\''"))
+        } else {
+            w.to_string()
+        }
+    };
+    std::iter::once(command).chain(args.iter().map(String::as_str)).map(word).collect::<Vec<_>>().join(" ")
 }
 
 /// Send `initialize` and wait for the answer: the server's version, or why not.
@@ -476,6 +489,21 @@ fn log_outcome(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_prefix_is_handed_the_line_as_the_cli_joins_it() {
+        let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(prefix_line("agentmux-mcp", &args(&["serve", "--stdio"])), "agentmux-mcp serve --stdio", "a bare name is as it was");
+        assert_eq!(prefix_line(r"C:\Users\a\agentmux-mcp.exe", &[]), r"'C:\Users\a\agentmux-mcp.exe'", "a Windows path is quoted");
+        assert_eq!(
+            prefix_line(r"C:\Users\a\agentmux-mcp.exe", &args(&["--config", r"C:\x\mcp.json", "serve"])),
+            r"'C:\Users\a\agentmux-mcp.exe' --config 'C:\x\mcp.json' serve",
+            "with arguments, each unsafe word is quoted and the rest are not"
+        );
+        assert_eq!(prefix_line("/opt/my tools/mcp", &args(&["a"])), "'/opt/my tools/mcp' a", "a space is quoted");
+        assert_eq!(prefix_line("mcp", &args(&["it's"])), r"mcp 'it'\''s'", "a quote inside is closed, escaped and opened");
+        assert_eq!(prefix_line("mcp", &args(&[""])), "mcp ''", "an empty word is kept");
+    }
 
     /// #3680: a user's project keeps its own `.mcp.json`, so the doctor must read the agent's
     /// relocated config instead; an AgentMux-owned folder still reads the file in it.
