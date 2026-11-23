@@ -1038,6 +1038,7 @@ describe("AgentPicker — a pane that srv held an open for", () => {
 
     it("opens the agent into this pane once the person has gone ahead, and launches nothing else", async () => {
         const model = askingModel();
+        vi.mocked(RpcApi.AgentOpenCommand).mockResolvedValue({ block_id: "blk-1" } as any);
         render(() => <AgentPicker model={model as any} />);
         fireEvent.click(await screen.findByTestId("shared-folder-go-ahead"));
         await waitFor(() =>

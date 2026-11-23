@@ -46,6 +46,42 @@ describe("SharedFolderPanel", () => {
         expect(scroll.mock.contexts[0]).toBe(screen.getByTestId("shared-folder-panel"));
     });
 
+    it("looks again each time what is above it changes, and stops at the first thing the person does", async () => {
+        const scroll = vi.fn();
+        const had = Element.prototype.scrollIntoView;
+        Element.prototype.scrollIntoView = scroll as never;
+        try {
+            show();
+            const around = screen.getByTestId("shared-folder-panel").parentElement!;
+            around.prepend(document.createElement("div")); // a card finishes loading above it
+            await vi.waitFor(() => expect(scroll).toHaveBeenCalledTimes(2));
+            fireEvent.wheel(document);
+            around.prepend(document.createElement("div"));
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            expect(scroll).toHaveBeenCalledTimes(2);
+        } finally {
+            Element.prototype.scrollIntoView = had;
+        }
+    });
+
+    it("stops looking after ten seconds when the person does nothing", async () => {
+        vi.useFakeTimers();
+        const scroll = vi.fn();
+        const had = Element.prototype.scrollIntoView;
+        Element.prototype.scrollIntoView = scroll as never;
+        try {
+            show();
+            const around = screen.getByTestId("shared-folder-panel").parentElement!;
+            vi.advanceTimersByTime(10_001);
+            around.prepend(document.createElement("div"));
+            await Promise.resolve();
+            expect(scroll).toHaveBeenCalledTimes(1);
+        } finally {
+            Element.prototype.scrollIntoView = had;
+            vi.useRealTimers();
+        }
+    });
+
     it("says what to do instead", () => {
         show();
         const panel = screen.getByTestId("shared-folder-panel").textContent ?? "";

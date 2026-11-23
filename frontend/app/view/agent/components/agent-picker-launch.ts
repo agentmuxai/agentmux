@@ -26,7 +26,7 @@ import { isContainerAgentType } from "@/util/runtime-kind";
 import { attachRunningAgent } from "./attach-target";
 import type { HeldLaunch } from "../agent-model";
 import {
-    dropAskedOpen,
+    declineAskedOpen,
     goAheadWithSharedFolder,
     OPEN_ASK_META,
     openIntoPane,
@@ -52,7 +52,7 @@ function createLaunchNotices(model: AgentViewModel, setLaunching: (id: string | 
     const keepSharedFolderApart = () => {
         const held = sharedFolder()?.launch;
         setSharedFolder(null);
-        if (held?.reopen && held.targetBlockId) void dropAskedOpen(held.targetBlockId);
+        if (held?.reopen && held.targetBlockId) void declineAskedOpen(held.targetBlockId, held.agent.id);
     };
     const goAheadWithSharedFolderAsk = async () => {
         const ask = sharedFolder();
@@ -64,7 +64,7 @@ function createLaunchNotices(model: AgentViewModel, setLaunching: (id: string | 
             setSharedFolder(null);
             if (reopen && targetBlockId) {
                 noteOpenedByPerson(agent.id);
-                await openIntoPane(agent.id, targetBlockId);
+                await openIntoPane(agent.id, targetBlockId, agent.name);
                 return;
             }
             await model.launchAgentDefinition(agent, overrides, targetBlockId, targetTabId);

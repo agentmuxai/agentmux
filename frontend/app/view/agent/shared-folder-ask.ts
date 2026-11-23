@@ -10,9 +10,12 @@
  * then opens the agent into itself.
  */
 
-import { RpcApi } from "@/app/store/rpc-api";
+import { hasProcess } from "@/app/store/agent-runtime";
+import { openAgentInActiveTab, sharedAgentRuntime } from "@/app/store/agent-runtime-live";
 import { setBlockMeta } from "@/app/store/block-meta";
+import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { OPEN_ASK_META } from "@/app/store/shared-folder-open";
 import type { Overlap } from "@/types/rpc/Overlap";
 import { isContainerAgentType } from "@/util/runtime-kind";
 
@@ -42,20 +45,33 @@ export async function goAheadWithSharedFolder(overlaps: Overlap[]): Promise<void
     }
 }
 
-/** The block meta key of an agent pane that is to open an agent (a layout's placeholder, a pane the window made to ask in). */
-export const OPEN_ASK_META = "layout:agent";
+export { isSharedFolderRefusal, OPEN_ASK_META } from "@/app/store/shared-folder-open";
 
-/** Whether srv refused an `agent.open` because of a shared folder: its refusal starts with this word. */
-export function isSharedFolderRefusal(message: string): boolean {
-    return message.includes("SHARED_FOLDER: ");
-}
-
-/** The person has gone ahead: open the agent into the pane that asked (srv fills it and drops `layout:agent`). */
-export async function openIntoPane(agentId: string, blockId: string): Promise<void> {
-    await RpcApi.AgentOpenCommand(TabRpcClient, { agent_id: agentId, into_block_id: blockId, focus: true });
+/**
+ * The person has gone ahead: open the agent into the pane that asked (srv fills it and drops `layout:agent`). An agent
+ * that already has a block of its own (it runs with no pane, as restart resume leaves it, or its pane is in another
+ * tab) is not moved into this pane: srv answers with that block, so this pane becomes an ordinary picker and the agent
+ * is shown the usual way.
+ */
+export async function openIntoPane(agentId: string, blockId: string, name: string): Promise<void> {
+    const opened = await RpcApi.AgentOpenCommand(TabRpcClient, { agent_id: agentId, into_block_id: blockId, focus: true });
+    if (opened.block_id === blockId) return;
+    await dropAskedOpen(blockId);
+    const why = await openAgentInActiveTab({ agent_id: agentId, name });
+    if (why) throw new Error(why);
 }
 
 /** The person chose not to open it: the pane is an ordinary picker again. */
 export async function dropAskedOpen(blockId: string): Promise<void> {
     await setBlockMeta(blockId, { [OPEN_ASK_META]: null } as MetaType);
+}
+
+/**
+ * The person's no: the pane is an ordinary picker again, and an agent that already runs (restart resume started it
+ * before the person was asked) is stopped.
+ */
+export async function declineAskedOpen(blockId: string, agentId: string): Promise<void> {
+    await dropAskedOpen(blockId);
+    const row = sharedAgentRuntime().rowOf(agentId);
+    if (row?.block_id && hasProcess(row.state)) await RpcApi.AgentStopCommand(TabRpcClient, { blockid: row.block_id, force: true });
 }

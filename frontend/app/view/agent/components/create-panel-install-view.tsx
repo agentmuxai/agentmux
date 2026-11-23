@@ -64,6 +64,32 @@ export function keepInView(el: HTMLElement | undefined): void {
     el?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
 }
 
+const PERSON_SCROLLS = ["wheel", "touchmove", "keydown", "pointerdown"] as const;
+/** How long a panel that opened at once keeps itself in view while what is above it loads. */
+const SETTLE_MS = 10_000;
+
+/**
+ * [`keepInView`], and again each time the pane around the panel changes: the cards and sections above a panel that
+ * opens at once can still be loading, which pushes it down after the first look. It stops at the first thing the
+ * person does, and after ten seconds.
+ */
+export function keepInViewWhileItSettles(el: HTMLElement | undefined): void {
+    const parent = el?.parentElement;
+    if (!el || !parent) return;
+    keepInView(el);
+    const doc = el.ownerDocument;
+    const watch = new MutationObserver(() => keepInView(el));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stop = () => {
+        watch.disconnect();
+        clearTimeout(timer);
+        for (const type of PERSON_SCROLLS) doc.removeEventListener(type, stop);
+    };
+    watch.observe(parent, { childList: true, subtree: true });
+    timer = setTimeout(stop, SETTLE_MS);
+    for (const type of PERSON_SCROLLS) doc.addEventListener(type, stop, { passive: true });
+}
+
 export function NpmInstall(props: { p: PanelParts; session: Accessor<Session> }): JSX.Element {
     const { s, install } = props.p;
     const sess = props.session;

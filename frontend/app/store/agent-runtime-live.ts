@@ -14,7 +14,7 @@ import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { isSharedFolderRefusal, OPEN_ASK_META } from "@/app/view/agent/shared-folder-ask";
+import { isSharedFolderRefusal, OPEN_ASK_META } from "@/app/store/shared-folder-open";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import { createRoot } from "solid-js";
 import { createAgentRuntimeStore, type AgentRuntimeStore } from "./agent-runtime";

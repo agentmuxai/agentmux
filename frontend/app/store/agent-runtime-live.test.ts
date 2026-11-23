@@ -57,10 +57,6 @@ vi.mock("@/app/util/reveal-block", () => ({
     loadObject: async (_t: string, id: string) => (tabs.has(id) ? { oid: id } : null),
 }));
 
-vi.mock("@/app/view/agent/shared-folder-ask", () => ({
-    OPEN_ASK_META: "layout:agent",
-    isSharedFolderRefusal: (message: string) => message.includes("SHARED_FOLDER: "),
-}));
 let paneResult: () => Promise<string> = async () => "pane-1";
 const createBlock = vi.fn(async (_def: unknown) => {
     order.push("pane");
