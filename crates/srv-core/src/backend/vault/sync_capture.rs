@@ -14,8 +14,9 @@
 //! What this machine keeps to itself does not go: a sign-in that [`stays_here`], the agents an entry is shared with, and
 //! when it was last used (`EntryBody` leaves those out).
 
+use ring::hmac;
 use rusqlite::{params, Connection, OptionalExtension};
-use sha2::{Digest, Sha256};
+use zeroize::Zeroizing;
 
 use super::seal::{self, Key};
 use super::sync_links;
@@ -64,8 +65,14 @@ pub fn sealer<'a>(ring: &'a KeyRing, body: &'a [u8]) -> impl FnOnce(&SealAt) -> 
     }
 }
 
-fn digest(body: &[u8]) -> String {
-    Sha256::digest(body).iter().map(|b| format!("{b:02x}")).collect()
+/// What is kept of a body to tell later whether it changed: an HMAC under this machine's own key, never a bare hash. A
+/// hash of the body would let anyone holding the database test guesses at a low-entropy secret (everything else in the body
+/// is in the tables beside it) without either key.
+fn digest(key: &Key, body: &[u8]) -> String {
+    let mut ctx = hmac::Context::with_key(&hmac::Key::new(hmac::HMAC_SHA256, &key[..]));
+    ctx.update(b"agentmux-vault-sync-seen-v1\0");
+    ctx.update(body);
+    ctx.sign().as_ref().iter().map(|b| format!("{b:02x}")).collect()
 }
 
 struct Seen {
@@ -96,7 +103,8 @@ fn tombstone(conn: &Connection, signer: &mut Signer, collection: &str, record: &
 struct Pending {
     entry_id: String,
     record: String,
-    body: Vec<u8>,
+    /// The body in the clear, wiped when dropped, on an error return too.
+    body: Zeroizing<Vec<u8>>,
     hash: String,
 }
 
@@ -115,8 +123,8 @@ pub fn capture(store: &Store, signer: &mut Signer, vault_id: &str, ring: &KeyRin
         }
         let parts = seal::open(key, &row.id, &row.sealed)?;
         let body = EntryBody::of_row(row, &parts, profiles).with_link_ids(links_of(store, &row.id)?.ids());
-        let body = serde_json::to_vec(&body).map_err(|e| e.to_string())?;
-        let hash = digest(&body);
+        let body = Zeroizing::new(serde_json::to_vec(&body).map_err(|e| e.to_string())?);
+        let hash = digest(key, &body);
         pending.push(Pending { entry_id: row.id.clone(), record: record.clone(), body, hash });
     }
     let now_here: std::collections::HashSet<&str> = rows.iter().map(|r| r.id.as_str()).collect();

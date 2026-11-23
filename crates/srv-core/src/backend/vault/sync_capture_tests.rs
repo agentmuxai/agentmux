@@ -121,6 +121,16 @@ fn a_new_entry_is_one_sealed_record_under_its_link_id_and_an_unchanged_one_is_no
 }
 
 #[test]
+fn what_is_kept_to_tell_a_change_is_keyed_not_a_bare_hash_of_the_body() {
+    let (one, two) = (Zeroizing::new([1u8; 32]), Zeroizing::new([2u8; 32]));
+    let body = b"{\"secret\":\"guessable\"}";
+    assert_eq!(digest(&one, body), digest(&one, body));
+    assert_ne!(digest(&one, body), digest(&two, body), "another machine's key gives another digest");
+    let bare: String = ring::digest::digest(&ring::digest::SHA256, body).as_ref().iter().map(|b| format!("{b:02x}")).collect();
+    assert_ne!(digest(&one, body), bare, "and it is not the hash of the body");
+}
+
+#[test]
 fn an_entry_that_is_deleted_ends_its_record_once() {
     let mut a = machine("a", 1);
     a.store.vault_insert(&row("entry-1", "Invoice provider key", VAULT, "{}")).unwrap();
