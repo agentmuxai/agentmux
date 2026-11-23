@@ -520,3 +520,12 @@ fn the_function_keeps_a_remotes_upload_and_receive_programs_from_running() {
     let pushed = through_the_function(&folder, agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, true, "git push viaup HEAD:refs/heads/y && git ls-remote viaup");
     assert!(pushed.contains("refs/heads/y"), "a push still works through it: {pushed}");
 }
+
+#[test]
+fn the_function_leaves_the_reflog_subcommands_working() {
+    let folder = Folder::new();
+    for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
+        let out = through_the_function(&folder, body, true, "git reflog show -1 && git reflog exists HEAD && git reflog expire --all --dry-run && git reflog -1 && echo reflog-ok");
+        assert!(out.contains("reflog-ok"), "{out}");
+    }
+}

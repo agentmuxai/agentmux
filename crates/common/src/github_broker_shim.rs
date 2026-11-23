@@ -77,16 +77,17 @@ pub const GIT_NO_EXT_DIFF_ENV: &str = "AGENTMUX_GIT_NO_EXT_DIFF";
 
 /// The step of the `git` function that [`GIT_NO_EXT_DIFF_ENV`] turns on. After any leading `-C <dir>`, `-c
 /// <name=value>` and other global options, every command gets `--no-pager` (so a pager the folder's own
-/// configuration names does not run); `diff`, `log`, `show`, `format-patch`, `whatchanged`, `reflog` and `blame` also
-/// get `--no-ext-diff` and `--no-textconv` (so the external diff program, a diff driver's `command` and a `textconv`
-/// of the folder's own configuration do not run); `fetch`, `pull`, `ls-remote` and `clone` get
+/// configuration names does not run); `diff`, `log`, `show`, `format-patch`, `whatchanged`, `blame` and `reflog`
+/// (after its `show`, and not for its `expire`, `delete` and `exists`) also get `--no-ext-diff` and `--no-textconv`
+/// (so the external diff program, a diff driver's `command` and a `textconv` of the folder's own configuration do not
+/// run); `fetch`, `pull`, `ls-remote` and `clone` get
 /// `--upload-pack=git-upload-pack` and `push` gets `--receive-pack=git-receive-pack` (so a remote's `uploadpack` and
 /// `receivepack` of the folder's configuration do not run). Every other option is git's own, and the function goes on
 /// with the arguments so changed.
 macro_rules! no_ext_diff_step {
     () => {
         r#"  if [ -n "${AGENTMUX_GIT_NO_EXT_DIFF:-}" ]; then
-    local _amx_g=() _amx_s;
+    local _amx_g=() _amx_s _amx_t;
     while [ $# -gt 0 ]; do
       case "$1" in
         -C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env) _amx_g+=("$1"); shift; if [ $# -gt 0 ]; then _amx_g+=("$1"); shift; fi;;
@@ -95,7 +96,14 @@ macro_rules! no_ext_diff_step {
       esac;
     done;
     case "${1:-}" in
-      diff|log|show|format-patch|whatchanged|reflog|blame) _amx_s=$1; shift; set -- "$_amx_s" --no-ext-diff --no-textconv "$@";;
+      diff|log|show|format-patch|whatchanged|blame) _amx_s=$1; shift; set -- "$_amx_s" --no-ext-diff --no-textconv "$@";;
+      reflog)
+        _amx_s=$1; shift;
+        case "${1:-}" in
+          expire|delete|exists) set -- "$_amx_s" "$@";;
+          show) _amx_t=$1; shift; set -- "$_amx_s" "$_amx_t" --no-ext-diff --no-textconv "$@";;
+          *) set -- "$_amx_s" --no-ext-diff --no-textconv "$@";;
+        esac;;
       fetch|pull|ls-remote|clone) _amx_s=$1; shift; set -- "$_amx_s" --upload-pack=git-upload-pack "$@";;
       push) _amx_s=$1; shift; set -- "$_amx_s" --receive-pack=git-receive-pack "$@";;
     esac;
