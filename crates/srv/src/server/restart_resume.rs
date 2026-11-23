@@ -378,6 +378,10 @@ pub(crate) async fn run_once_with(state: &AppState, running_at_exit: &HashSet<St
                 tracing::info!("restart resume: {e}; the rest stay stopped and start on their first message");
                 break;
             }
+            Err(e) if e.contains(crate::backend::folder_overlap::OPEN_REFUSAL_CODE) => {
+                tracing::warn!(agent = %c.uid, "restart resume: left stopped, it waits for the person's go-ahead for a shared folder");
+                super::app_api::folder_overlap::ask_for_resumed(state, &c.uid, &c.block_id);
+            }
             Err(e) => tracing::warn!(agent = %c.uid, "restart resume: could not start it: {e}"),
         }
         if i < last {

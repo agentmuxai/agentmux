@@ -436,3 +436,42 @@ async fn an_idle_container_agent_is_up_at_exit_and_comes_back_past_its_idle_wind
     let at_exit: HashSet<String> = ["ag-container"].map(String::from).into_iter().collect();
     assert_eq!(candidates_with(&state, &at_exit).iter().filter(|c| c.block_id == container).count(), 1, "on the list");
 }
+
+/// A host agent in a folder a container agent can write is left stopped by restart resume: the person is asked in the agent's own
+/// block, the agent's state says why, and the agents after it still come back.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_host_agent_in_a_shared_folder_is_left_stopped_and_the_person_and_its_state_are_told() {
+    use crate::backend::folder_overlap as overlap;
+    crate::sagas::park_agents_tests::one_choices_dir_for_test();
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    set_always_available(&state, true);
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().join("shared").to_string_lossy().to_string();
+    let inside = root.path().join("shared/work").to_string_lossy().to_string();
+    let container_id = format!("ag-aria-{}", uuid::Uuid::new_v4().simple());
+    let mut aria = crate::backend::storage::agents::test_agent_def(&container_id, "Aria", "claude", "container", 1, "");
+    aria.working_directory = workspace;
+    state.mstore.agent_def_insert(&mut aria).unwrap();
+    let host_id = format!("ag-hosty-{}", uuid::Uuid::new_v4().simple());
+    let blocked = resumable(&state, &tabs[0], &host_id).await;
+    let mut hosty = state.mstore.agent_def_get(&host_id).unwrap().unwrap();
+    hosty.working_directory = inside;
+    state.mstore.agent_def_update(&mut hosty).unwrap();
+    let free = resumable(&state, &tabs[0], "ag-free-host").await;
+
+    assert_eq!(run_once(&state).await, 1, "only the agent that shares no folder came back");
+
+    assert!(blockcontroller::get_controller(&blocked).is_none(), "the one that shares a folder stays stopped");
+    let waiting: Vec<_> = crate::backend::folder_overlap_asks::asks().list(agentmux_common::time::now_ms_u64()).into_iter().filter(|a| a.host_id == host_id).collect();
+    assert_eq!(waiting.len(), 1, "the person is asked once for the pair");
+    assert_eq!((waiting[0].container_id.as_str(), waiting[0].agent.as_str(), waiting[0].block_id.as_str()), (container_id.as_str(), "", blocked.as_str()));
+    let why = crate::server::agent_lifecycle::start_blocked(&state, &host_id).expect("its state says why");
+    assert!(why.contains("waits for the person's go-ahead for a shared folder") && why.contains("Aria"), "{why}");
+    assert_eq!(crate::server::agent_lifecycle::start_blocked(&state, "ag-free-host"), None);
+
+    overlap::accept(&host_id, &container_id).unwrap();
+    assert_eq!(crate::server::agent_lifecycle::start_blocked(&state, &host_id), None, "after the go-ahead nothing waits");
+    crate::backend::folder_overlap_asks::asks().answer(&host_id, &container_id, true, agentmux_common::time::now_ms_u64());
+    blockcontroller::delete_controller(&free);
+}

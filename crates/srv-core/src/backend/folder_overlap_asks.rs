@@ -8,6 +8,10 @@
 //! person's answer reaches srv only through the window (`folderoverlapaccept`, `folderoverlapdecline`), which ends
 //! the ask. An agent can ask and look again; it can never answer. A declined pair is not asked about again for a
 //! while, and the pair stays unchosen: every other refusal for it stands.
+//!
+//! An ask with no asking agent (`agent` empty) is one AgentMux made itself: restart resume left the host agent stopped
+//! for want of the person's go-ahead. It waits in the host agent's own block until the person answers, and neither
+//! ends with the hour nor takes the room of the agents' asks.
 
 use std::sync::{Mutex, OnceLock};
 
@@ -21,7 +25,7 @@ pub struct FolderAsk {
     pub host_name: String,
     pub container_id: String,
     pub container_name: String,
-    /// The agent that asked, by its name.
+    /// The agent that asked, by its name; empty for the ask restart resume makes.
     pub agent: String,
     /// The asking agent's pane, where the card shows.
     pub block_id: String,
@@ -69,7 +73,7 @@ fn same_pair(ask: &FolderAsk, host_id: &str, container_id: &str) -> bool {
 impl Asks {
     fn lock(&self, now_ms: u64) -> std::sync::MutexGuard<'_, State> {
         let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
-        state.open.retain(|ask| now_ms.saturating_sub(ask.requested_ms) < OPEN_MS);
+        state.open.retain(|ask| ask.agent.is_empty() || now_ms.saturating_sub(ask.requested_ms) < OPEN_MS);
         state.declined.retain(|(_, _, at)| now_ms.saturating_sub(*at) < QUIET_MS);
         state
     }
@@ -86,8 +90,10 @@ impl Asks {
             kept.block_id = ask.block_id;
             return Asked::Waiting { ask: kept.clone(), new: false };
         }
-        if state.open.len() >= MAX_OPEN {
-            state.open.remove(0);
+        if state.open.iter().filter(|kept| !kept.agent.is_empty()).count() >= MAX_OPEN {
+            if let Some(oldest) = state.open.iter().position(|kept| !kept.agent.is_empty()) {
+                state.open.remove(oldest);
+            }
         }
         state.open.push(ask.clone());
         Asked::Waiting { ask, new: true }
@@ -153,6 +159,25 @@ mod tests {
         assert!(asks.list(100).is_empty());
         assert_eq!(asks.ask(ask("h", "c", "Lead", "b1", 200), 200), Asked::Declined { retry_after_ms: QUIET_MS - 100 });
         assert!(matches!(asks.ask(ask("h", "c", "Lead", "b1", 100 + QUIET_MS), 100 + QUIET_MS), Asked::Waiting { .. }));
+    }
+
+    #[test]
+    fn an_ask_restart_resume_makes_waits_for_the_person_and_takes_no_room_from_the_agents_asks() {
+        let asks = Asks::default();
+        asks.ask(ask("resumed", "c", "", "parked-block", 0), 0);
+        for i in 0..MAX_OPEN {
+            asks.ask(ask(&format!("h{i}"), "c", "Lead", "b", i as u64), i as u64);
+        }
+        asks.ask(ask("h-extra", "c", "Lead", "b", 99), 99);
+        let soon = asks.list(100);
+        assert_eq!(soon.len(), MAX_OPEN + 1, "the cap is for the agents' asks: the oldest of them went, the restart's stayed");
+        assert!(soon.iter().any(|a| a.host_id == "resumed") && !soon.iter().any(|a| a.host_id == "h0"));
+        let later = OPEN_MS + 1_000;
+        let left = asks.list(later);
+        assert_eq!(left.len(), 1, "the agents' asks ended with the hour and the oldest went first");
+        assert_eq!((left[0].host_id.as_str(), left[0].agent.as_str(), left[0].block_id.as_str()), ("resumed", "", "parked-block"));
+        assert!(asks.answer("resumed", "c", true, later));
+        assert!(asks.list(later).is_empty(), "the person's answer ends it");
     }
 
     #[test]
