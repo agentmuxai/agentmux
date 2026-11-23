@@ -138,7 +138,8 @@ pub(super) async fn upload(files: Vec<Local>, cx: &ToolCtx<'_>) -> Result<Vec<Je
         let size = info.get("bytes").and_then(Value::as_u64).unwrap_or(f.size);
         manifest.push(JektFile { sha256, name: f.name, size });
     }
-    jekt_files::validate(&manifest).map_err(|e| anyhow::anyhow!("files refused: {e}"))?;
+    // What srv stored may differ from what was on disk a moment ago: the same limits, compared again.
+    jekt_files::validate_for_tier(&manifest, "host").map_err(|e| anyhow::anyhow!("files refused: {e}"))?;
     Ok(manifest)
 }
 
