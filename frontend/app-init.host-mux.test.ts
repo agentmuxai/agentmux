@@ -205,6 +205,7 @@ vi.mock("@/app/block/pane-confirms", () => h.stub("startPaneConfirms"));
 vi.mock("@/app/deeplinks/agent-open-bridge", () => h.stub("startDeepLinkOpens"));
 vi.mock("@/app/capture/capture-mask-bridge", () => h.stub("startCaptureMasks"));
 vi.mock("@/app/view/agent/components/vault-request-card/vault-request-cards", () => h.stub("startVaultRequestCards"));
+vi.mock("@/app/view/agent/components/folder-overlap-ask-cards", () => h.stub("startFolderOverlapAsks"));
 vi.mock("@/app/view/agent/endpoint-notice-cards", () => h.stub("startEndpointNoticeCards"));
 vi.mock("@/app/notification/waiting-for-you", () => h.stub("installWaitingForYou"));
 vi.mock("@/app/platform/pane-overlay-auto", () => h.stub("startPaneOverlayAutoService"));
