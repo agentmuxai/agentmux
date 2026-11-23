@@ -441,6 +441,22 @@ pub fn judge_file_and_floor(keys: &[UpdateKey], tag: &str, fetched: Option<(&[u8
     (outcome, manifest.signed_floor())
 }
 
+/// The floor in force when a verified manifest carries a usable one: the higher of that and `build` (a build's own floor),
+/// which a signed floor never lowers. `None` when the manifest has none that can be used.
+pub fn signed_floor_in_force(build: Option<&str>, signed: &SignedFloor) -> Option<String> {
+    let SignedFloor::Valid(signed) = signed else { return None };
+    Some(match build.filter(|b| version_core(b) >= version_core(signed)) {
+        Some(build) => build.to_string(),
+        None => signed.clone(),
+    })
+}
+
+/// What a person reads when the installed version is older than a release can upgrade from. The app's check and download
+/// and the Linux package helper say the same thing.
+pub fn install_first_message(current: &str, latest: &str, floor: &str) -> String {
+    format!("This AgentMux ({current}) is older than {latest} can upgrade from; install {floor} first, then upgrade.")
+}
+
 /// What to do about `outcome` for `version`: `Ok` to go on, or the message to show (spec §7).
 /// The app's download and the Linux package helper say the same thing.
 pub fn decide(version: &str, outcome: &Outcome) -> Result<(), String> {
