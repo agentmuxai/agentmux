@@ -4,7 +4,7 @@
 //! `/shutdown` and Shut down are the person's own choices: the window makes them over its websocket, an agent's or
 //! an unproven connection is refused, and the generic service route asks the person (as `Agents stop` does) in
 //! the name of its caller instead of ending the agent as the person's slash or menu action, under the same
-//! who-may-stop-whom as `Stop agents` and a limit on the countdowns one caller opens.
+//! who-may-stop-whom as `Stop agents` (and none without an agent's token) and a limit on the countdowns one agent opens.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -140,31 +140,17 @@ async fn the_service_route_asks_the_person_in_the_callers_name_and_ends_nothing_
 }
 
 #[tokio::test]
-async fn a_service_request_with_no_agent_credential_is_named_as_unverified_and_may_open_fewer_countdowns() {
+async fn a_service_request_with_no_agent_credential_is_refused_and_opens_no_countdown() {
     let state = test_state();
-    // The one test that asks with no credential: those requests share one count.
-    let mut opened = Vec::new();
-    for _ in 0..3 {
-        let (block_id, _) = running_pane(&state, "agent", "target-of-nobody");
-        let reply = quit_as(&state, &block_id, None).await;
-        assert!(reply.success, "{reply:?}");
-        let pending = ps::status(&request_id(&reply)).unwrap();
-        assert_eq!(pending.by, "an unverified caller");
-        assert_ne!(pending.via, "UserSlash");
-        opened.push((block_id, request_id(&reply)));
-    }
-    let (block_id, _) = running_pane(&state, "agent", "target-of-nobody");
-    let reply = quit_as(&state, &block_id, None).await;
-    let error = reply.error.as_deref().unwrap_or_default();
-    assert!(!reply.success && error.contains("RATE_LIMITED") && error.contains("3 stop countdowns"), "{reply:?}");
-    assert!(ps::active_for(&block_id).is_none(), "a refused request opens nothing");
-    let again = quit_as(&state, &opened[0].0, None).await;
-    assert!(again.success && request_id(&again) == opened[0].1, "an agent that has a countdown is joined, not counted: {again:?}");
-    for (block_id, request_id) in opened {
-        ps::keep(&state, &block_id, &request_id);
+    for method in ["QuitAgent", "ShutdownAgent"] {
+        let (block_id, stopped) = running_pane(&state, "agent", "target-of-nobody");
+        let reply = crate::server::service::run_service_call(&state, &service_call(method, vec![json!(block_id)])).await;
+        let error = reply.error.as_deref().unwrap_or_default();
+        assert!(!reply.success && error.contains("FORBIDDEN") && error.contains("AGENTMUX_AGENT_TOKEN") && error.contains("from the window"), "{method}: {reply:?}");
+        assert!(ps::active_for(&block_id).is_none(), "{method}: nothing is put in front of the person");
+        assert!(!stopped.load(Ordering::SeqCst));
         blockcontroller::delete_controller(&block_id);
     }
-    blockcontroller::delete_controller(&block_id);
 }
 
 #[tokio::test]
@@ -224,8 +210,9 @@ async fn the_service_route_refuses_what_stop_agents_refuses_and_opens_no_countdo
 #[tokio::test]
 async fn the_service_route_refuses_a_block_with_no_running_agent() {
     let state = test_state();
+    known_agent(&state, "uid-quit-nowhere");
     for method in ["QuitAgent", "ShutdownAgent"] {
-        let reply = crate::server::service::run_service_call_as(&state, &service_call(method, vec![json!("blk-nowhere")]), None).await;
+        let reply = crate::server::service::run_service_call_as(&state, &service_call(method, vec![json!("blk-nowhere")]), Some("uid-quit-nowhere")).await;
         assert!(!reply.success && reply.error.as_deref().unwrap_or_default().contains("no running agent"), "{method}: {reply:?}");
     }
 }
