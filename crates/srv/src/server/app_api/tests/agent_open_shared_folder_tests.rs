@@ -13,9 +13,7 @@ use agentmux_common::ipc::Command;
 
 /// One folder for every test's choices; each test names its own agents.
 fn choices() {
-    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
-    let dir = DIR.get_or_init(|| tempfile::tempdir().unwrap());
-    overlap::set_choices_dir_for_test(Some(dir.path().to_path_buf()));
+    crate::sagas::park_agents_tests::one_choices_dir_for_test();
 }
 
 fn save(state: &AppState, tag: &str, kind: &str, folder: &str) -> String {

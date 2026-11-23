@@ -85,6 +85,14 @@ pub(crate) async fn seed_agent_block(state: &AppState, tab_id: &str, id: &str) -
     block
 }
 
+/// The one folder every srv test keeps the person's shared-folder choices in. The folder is process-wide, so two test
+/// files each naming their own would switch it under each other's tests.
+pub(crate) fn one_choices_dir_for_test() {
+    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    let dir = DIR.get_or_init(|| tempfile::tempdir().unwrap());
+    crate::backend::folder_overlap::set_choices_dir_for_test(Some(dir.path().to_path_buf()));
+}
+
 pub(crate) fn set_always_available(state: &AppState, on: bool) {
     state.config_watcher.update_settings(
         serde_json::from_value(serde_json::json!({ crate::backend::always_available::SETTING_ALWAYS_AVAILABLE: on })).unwrap(),

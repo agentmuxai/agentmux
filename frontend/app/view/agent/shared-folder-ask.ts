@@ -39,7 +39,7 @@ export async function sharedFolderOverlaps(agentId: string, agentType: string | 
 }
 
 /** The person goes ahead: kept for each pair, so the same two agents are not asked again. */
-export async function goAheadWithSharedFolder(overlaps: Overlap[]): Promise<void> {
+export async function goAheadWithSharedFolder(overlaps: Pick<Overlap, "host_id" | "container_id">[]): Promise<void> {
     for (const pair of overlaps) {
         await RpcApi.FolderOverlapAcceptCommand(TabRpcClient, { host_id: pair.host_id, container_id: pair.container_id });
     }

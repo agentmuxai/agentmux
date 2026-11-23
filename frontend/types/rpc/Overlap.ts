@@ -3,4 +3,9 @@
 /**
  * A host agent and a container agent whose folders overlap.
  */
-export type Overlap = { host_id: string, host_name: string, container_id: string, container_name: string, };
+export type Overlap = { host_id: string, host_name: string, container_id: string, container_name: string, 
+/**
+ * A choice for this pair is kept, but the audit log has no record that the person made it, so it does not
+ * count and the pair asks again.
+ */
+untrusted: boolean, };

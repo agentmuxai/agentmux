@@ -38,12 +38,17 @@ pub(crate) fn forget_asks_of(state: &AppState, id: &str) {
     publish_asks(state);
 }
 
-/// Records what the person answered, or what an agent asked, in the audit log: `by` is the asking agent's slug, and
-/// `None` for the person's own window.
+/// The name of agent `id`, or its id when it has none on record.
+fn name_of(state: &AppState, id: &str) -> String {
+    state.mstore.agent_def_get(id).ok().flatten().map(|def| def.name).unwrap_or_else(|| id.to_string())
+}
+
+/// Records what the person declined, or what an agent asked, in the audit log: `by` is the asking agent's slug, and
+/// `None` for the person's own window. The go-ahead is recorded by `backend::folder_overlap::accept_as`, which writes
+/// its row before the choice it records.
 pub(crate) fn audit(state: &AppState, by: Option<&str>, action: &str, host_id: &str, container_id: &str, block_id: &str) {
-    let name_of = |id: &str| state.mstore.agent_def_get(id).ok().flatten().map(|def| def.name).unwrap_or_else(|| id.to_string());
-    let (host, container) = (name_of(host_id), name_of(container_id));
-    let note = format!("{action}: host agent {host} ({host_id}) and container agent {container} ({container_id})");
+    let (host, container) = (name_of(state, host_id), name_of(state, container_id));
+    let note = overlap::row_note(action, (host_id, &host), (container_id, &container));
     tracing::info!(action, "{note}");
     let request_id = uuid::Uuid::new_v4().to_string();
     state.reactive_handler.log_fleet_action_audit(by, &host, block_id, action, true, None, &request_id, Some(&note));
@@ -53,11 +58,11 @@ fn accept(state: &AppState, cmd: CommandFolderOverlapAcceptData) -> Result<Folde
     if !overlap::is_a_pair(&state.mstore, &cmd.host_id, &cmd.container_id) {
         return Err("folderoverlapaccept: needs a host agent and a container agent".to_string());
     }
-    overlap::accept(&cmd.host_id, &cmd.container_id)?;
+    // The go-ahead is the window's: its audit row is written first, then the choice it records.
+    overlap::accept_as((&cmd.host_id, &name_of(state, &cmd.host_id)), (&cmd.container_id, &name_of(state, &cmd.container_id)))?;
     // An agent's ask for this pair is answered, whichever pane or window the person went ahead in.
     asks().answer(&cmd.host_id, &cmd.container_id, true, agentmux_common::time::now_ms_u64());
     publish_asks(state);
-    audit(state, None, "folder-overlap.go-ahead", &cmd.host_id, &cmd.container_id, "");
     Ok(FolderOverlapAcceptResult { chosen: true })
 }
 

@@ -18,9 +18,7 @@ use crate::server::AppState;
 
 /// One folder for every test's choices; each test names its own agents.
 fn choices() {
-    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
-    let dir = DIR.get_or_init(|| tempfile::tempdir().unwrap());
-    overlap::set_choices_dir_for_test(Some(dir.path().to_path_buf()));
+    crate::sagas::park_agents_tests::one_choices_dir_for_test();
 }
 
 async fn call(state: &AppState, ctx: RpcContext, command: &str, data: Value) -> (Value, String) {
@@ -303,4 +301,29 @@ async fn deleting_an_agent_ends_the_ask_that_names_it() {
     ask_again(&f);
     crate::server::app_api::folder_overlap::forget_asks_of(&f.state, &f.host);
     assert!(waiting(&f).is_empty());
+}
+
+#[tokio::test]
+async fn a_choice_file_that_nothing_records_is_not_the_persons_go_ahead_and_the_window_says_why() {
+    let f = fleet();
+    overlap::write_choice_without_a_record_for_test(&f.host, &f.container);
+    let host = f.state.mstore.agent_def_get(&f.host).unwrap().unwrap();
+
+    let (data, _) = call(&f.state, window(), "folderoverlapcheck", json!({ "agent_id": f.host })).await;
+    assert_eq!(data["overlaps"][0]["container_id"], json!(f.container), "the pair asks again");
+    assert_eq!(data["overlaps"][0]["untrusted"], json!(true), "and the window is told why");
+    let refused = overlap::check_open(&f.state.mstore, &host).unwrap_err();
+    assert!(refused.starts_with("SHARED_FOLDER") && refused.contains("no record that the person made it"), "{refused}");
+    assert!(audited(&f, "folder-overlap.go-ahead").is_empty());
+
+    // The person goes ahead from the window: the record is written, and the pair then counts.
+    let both = json!({ "host_id": f.host, "container_id": f.container });
+    let (_, error) = call(&f.state, window(), "folderoverlapaccept", both).await;
+    assert!(error.is_empty(), "{error}");
+    assert!(overlap::check_open(&f.state.mstore, &host).is_ok());
+    let (data, _) = call(&f.state, window(), "folderoverlapcheck", json!({ "agent_id": f.host })).await;
+    assert_eq!(data["overlaps"], json!([]));
+    let rows = audited(&f, "folder-overlap.go-ahead");
+    assert_eq!(rows.len(), 1, "the go-ahead is one row");
+    assert_eq!(rows[0].source_agent, None, "made by the window");
 }
