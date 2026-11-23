@@ -3,7 +3,8 @@
 
 //! `/shutdown` and Shut down are the person's own choices: the window makes them over its websocket, an agent's or
 //! an unproven connection is refused, and the generic service route asks the person (as `Agents stop` does) in
-//! the name of its caller instead of ending the agent as the person's slash or menu action.
+//! the name of its caller instead of ending the agent as the person's slash or menu action, under the same
+//! who-may-stop-whom as `Stop agents` (and none without an agent's token) and a limit on the countdowns one agent opens.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -11,6 +12,7 @@ use std::sync::Arc;
 use serde_json::{json, Value};
 
 use crate::backend::blockcontroller::{self, Controller};
+use crate::backend::obj::{Block, MetaMapType};
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{RpcContext, RpcMessage};
 use crate::backend::service::WebCallType;
@@ -83,6 +85,36 @@ fn running_agent() -> (String, Arc<AtomicBool>) {
     (block_id, stopped)
 }
 
+/// A running agent's pane: its controller, and the block that says whose pane it is (`view` "term" makes it no agent's).
+fn running_pane(state: &AppState, view: &str, agent_id: &str) -> (String, Arc<AtomicBool>) {
+    let (block_id, stopped) = running_agent();
+    let mut meta = MetaMapType::new();
+    meta.insert("view".to_string(), json!(view));
+    if !agent_id.is_empty() {
+        meta.insert("agentId".to_string(), json!(agent_id));
+    }
+    let mut block = Block { oid: block_id.clone(), parentoref: String::new(), version: 0, runtimeopts: None, stickers: None, meta, subblockids: None };
+    state.mstore.insert(&mut block).unwrap();
+    (block_id, stopped)
+}
+
+/// An agent srv knows, so that a request carrying its token is a known agent's.
+fn known_agent(state: &AppState, uid: &str) {
+    let mut def: crate::backend::storage::store::AgentDefinition = serde_json::from_value(json!({
+        "id": uid, "name": uid, "slug": uid, "icon": "wand-magic-sparkles", "provider": "claude", "description": "", "created_at": 1,
+    }))
+    .unwrap();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+}
+
+async fn quit_as(state: &AppState, block_id: &str, caller: Option<&str>) -> crate::backend::service::WebReturnType {
+    crate::server::service::run_service_call_as(state, &service_call("QuitAgent", vec![json!(block_id)]), caller).await
+}
+
+fn request_id(reply: &crate::backend::service::WebReturnType) -> String {
+    reply.data.as_ref().unwrap()["pending"]["request_id"].as_str().unwrap().to_string()
+}
+
 fn service_call(method: &str, args: Vec<Value>) -> WebCallType {
     WebCallType { service: "object".into(), method: method.into(), uicontext: None, args }
 }
@@ -90,8 +122,9 @@ fn service_call(method: &str, args: Vec<Value>) -> WebCallType {
 #[tokio::test]
 async fn the_service_route_asks_the_person_in_the_callers_name_and_ends_nothing_at_once() {
     let state = test_state();
+    known_agent(&state, "uid-quit-korp");
     for (method, args) in [("QuitAgent", vec![]), ("ShutdownAgent", vec![json!(true)])] {
-        let (block_id, stopped) = running_agent();
+        let (block_id, stopped) = running_pane(&state, "agent", "target-of-korp");
         let mut call_args = vec![json!(block_id)];
         call_args.extend(args);
         let reply = crate::server::service::run_service_call_as(&state, &service_call(method, call_args), Some("uid-quit-korp")).await;
@@ -107,24 +140,79 @@ async fn the_service_route_asks_the_person_in_the_callers_name_and_ends_nothing_
 }
 
 #[tokio::test]
-async fn a_service_request_with_no_agent_credential_is_named_as_unverified_never_as_the_person() {
+async fn a_service_request_with_no_agent_credential_is_refused_and_opens_no_countdown() {
     let state = test_state();
-    let (block_id, _) = running_agent();
-    let reply = crate::server::service::run_service_call(&state, &service_call("QuitAgent", vec![json!(block_id)])).await;
-    assert!(reply.success, "{reply:?}");
-    let request_id = reply.data.as_ref().unwrap()["pending"]["request_id"].as_str().unwrap().to_string();
-    let pending = ps::status(&request_id).unwrap();
-    assert_eq!(pending.by, "an unverified caller");
-    assert_ne!(pending.via, "UserSlash");
-    ps::keep(&state, &block_id, &request_id);
-    blockcontroller::delete_controller(&block_id);
+    for method in ["QuitAgent", "ShutdownAgent"] {
+        let (block_id, stopped) = running_pane(&state, "agent", "target-of-nobody");
+        let reply = crate::server::service::run_service_call(&state, &service_call(method, vec![json!(block_id)])).await;
+        let error = reply.error.as_deref().unwrap_or_default();
+        assert!(!reply.success && error.contains("FORBIDDEN") && error.contains("AGENTMUX_AGENT_TOKEN") && error.contains("from the window"), "{method}: {reply:?}");
+        assert!(ps::active_for(&block_id).is_none(), "{method}: nothing is put in front of the person");
+        assert!(!stopped.load(Ordering::SeqCst));
+        blockcontroller::delete_controller(&block_id);
+    }
+}
+
+#[tokio::test]
+async fn an_agent_may_open_ten_countdowns_a_minute_one_per_agent_and_another_agent_has_its_own_ten() {
+    let state = test_state();
+    let (busy, other) = ("uid-quit-busy", "uid-quit-other");
+    known_agent(&state, busy);
+    known_agent(&state, other);
+    let mut opened = Vec::new();
+    for i in 0..10 {
+        let (block_id, _) = running_pane(&state, "agent", &format!("target-{i}"));
+        let reply = quit_as(&state, &block_id, Some(busy)).await;
+        assert!(reply.success, "{i}: {reply:?}");
+        opened.push((block_id, request_id(&reply)));
+    }
+    let (extra, _) = running_pane(&state, "agent", "target-extra");
+    let refused = quit_as(&state, &extra, Some(busy)).await;
+    assert!(!refused.success && refused.error.as_deref().unwrap_or_default().contains("RATE_LIMITED"), "{refused:?}");
+    assert!(ps::active_for(&extra).is_none());
+    let first_deadline = ps::status(&opened[0].1).unwrap().deadline_ms;
+    let joined = quit_as(&state, &opened[0].0, Some(busy)).await;
+    assert!(joined.success && request_id(&joined) == opened[0].1, "a second request for the same agent joins its countdown: {joined:?}");
+    let other_asks = quit_as(&state, &opened[0].0, Some(other)).await;
+    assert!(other_asks.success && request_id(&other_asks) == opened[0].1, "another agent joins it too, and the clock does not restart");
+    assert_eq!(ps::status(&opened[0].1).unwrap().deadline_ms, first_deadline, "the clock never restarts");
+    let fresh = quit_as(&state, &extra, Some(other)).await;
+    assert!(fresh.success, "{fresh:?}");
+    ps::keep(&state, &extra, &request_id(&fresh));
+    for (block_id, request_id) in opened {
+        ps::keep(&state, &block_id, &request_id);
+        blockcontroller::delete_controller(&block_id);
+    }
+    blockcontroller::delete_controller(&extra);
+}
+
+#[tokio::test]
+async fn the_service_route_refuses_what_stop_agents_refuses_and_opens_no_countdown() {
+    let state = test_state();
+    known_agent(&state, "uid-quit-asker");
+    let (term, _) = running_pane(&state, "term", "");
+    let reply = quit_as(&state, &term, Some("uid-quit-asker")).await;
+    assert!(!reply.success && reply.error.as_deref().unwrap_or_default().contains("not an agent pane"), "{reply:?}");
+    assert!(ps::active_for(&term).is_none());
+    let (own, _) = running_pane(&state, "agent", "uid-quit-asker");
+    let reply = quit_as(&state, &own, Some("uid-quit-asker")).await;
+    assert!(!reply.success && reply.error.as_deref().unwrap_or_default().contains("Stop with action \"self\""), "{reply:?}");
+    assert!(ps::active_for(&own).is_none());
+    let (target, _) = running_pane(&state, "agent", "target-of-ghost");
+    let reply = quit_as(&state, &target, Some("uid-never-defined")).await;
+    assert!(!reply.success && reply.error.as_deref().unwrap_or_default().contains("the token's agent is unknown"), "{reply:?}");
+    assert!(ps::active_for(&target).is_none());
+    for block_id in [term, own, target] {
+        blockcontroller::delete_controller(&block_id);
+    }
 }
 
 #[tokio::test]
 async fn the_service_route_refuses_a_block_with_no_running_agent() {
     let state = test_state();
+    known_agent(&state, "uid-quit-nowhere");
     for method in ["QuitAgent", "ShutdownAgent"] {
-        let reply = crate::server::service::run_service_call_as(&state, &service_call(method, vec![json!("blk-nowhere")]), None).await;
+        let reply = crate::server::service::run_service_call_as(&state, &service_call(method, vec![json!("blk-nowhere")]), Some("uid-quit-nowhere")).await;
         assert!(!reply.success && reply.error.as_deref().unwrap_or_default().contains("no running agent"), "{method}: {reply:?}");
     }
 }
