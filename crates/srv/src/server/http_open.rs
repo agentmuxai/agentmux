@@ -20,6 +20,12 @@ pub(super) async fn handle_pane_open(
 ) -> impl IntoResponse {
     let by_agent = grant.is_some() || is_agent(caller.as_ref().map(|c| &c.0));
     quiet_pane_open(&mut req, by_agent);
+    // An agent's placement is checked before anything is opened. The identity that opened the pane is the
+    // caller's token's, never a field of the request.
+    let opener = caller.as_ref().and_then(|c| c.0.uid()).filter(|_| by_agent).map(str::to_string);
+    if let (true, Err(e)) = (by_agent, app_api::floater_place::check(&req)) {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
+    }
     // A container agent opens a read-only snapshot of a file in its workspace, or a Files pane confined to a folder of it, never a path a window would read freely.
     let mut snapshot = None;
     if let Some(axum::Extension(grant)) = grant {
@@ -68,11 +74,15 @@ pub(super) async fn handle_pane_open(
         opened_by_agent = Some(agent);
     }
     let title = req.title.clone();
+    // Set last: the snapshot step above may have rebuilt the request.
+    req.opener = opener.clone();
+    let floating = req.floating == Some(true);
     match app_api::open_pane(&state, req).await {
         Ok(result) => {
             if by_agent {
                 announce_agent_open(&state, &result.block_id, &result.tab_id, &result.view, title);
             }
+            crate::server::pane_openers::note_docked(opener.as_deref(), &result, floating);
             // The pane is the agent's: installing the helper from it is
             // always asked about (SPEC_REMOTES_PANE_2026_10_05.md §4.9).
             if let Some(agent) = &opened_by_agent {
@@ -90,15 +100,20 @@ pub(super) async fn handle_pane_open(
             if let Some(snap) = &snapshot {
                 snap.discard();
             }
-            // Argument/validation errors from build_pane_meta are the caller's
-            // fault (400); everything else is a server-side failure (500).
-            let status = if e.starts_with("MISSING_ARG") || e.starts_with("INVALID_VIEW") || e.starts_with("INVALID_ARG") {
-                StatusCode::BAD_REQUEST
-            } else {
-                StatusCode::INTERNAL_SERVER_ERROR
-            };
-            (status, Json(json!({ "error": e }))).into_response()
+            (pane_open_error_status(&e), Json(json!({ "error": e }))).into_response()
         }
+    }
+}
+
+/// The HTTP status for a `pane.open` that failed: the caller's own mistake (a missing or invalid argument, a view
+/// that does not exist) is 400, an agent already at its floating-pane limit is 429, anything else is srv's (500).
+pub(crate) fn pane_open_error_status(e: &str) -> StatusCode {
+    if e.starts_with("MISSING_ARG") || e.starts_with("INVALID_VIEW") || e.starts_with("INVALID_ARG") {
+        StatusCode::BAD_REQUEST
+    } else if e.starts_with("FLOATER_LIMIT") {
+        StatusCode::TOO_MANY_REQUESTS
+    } else {
+        StatusCode::INTERNAL_SERVER_ERROR
     }
 }
 

@@ -84,6 +84,7 @@ pub(crate) use agent_define::{check_provider_unchanged, check_volumes, validate_
 // `ClosePane` MCP tool's backing route) calls `pane::handle_close_pane`
 // directly, same as `fleet`'s exposure just below.
 pub(crate) mod pane;
+pub(crate) mod floater_place;
 mod pane_open_tab;
 mod pane_open_steps;
 #[cfg(test)]
@@ -664,6 +665,10 @@ mod cross_channel_tests;
 #[cfg(test)]
 #[path = "tests/pane_open_reducer_tests.rs"]
 mod pane_open_reducer_tests;
+
+#[cfg(test)]
+#[path = "tests/floater_open_tests.rs"]
+mod floater_open_tests;
 
 #[cfg(test)]
 #[path = "tests/stop_agents_tests.rs"]

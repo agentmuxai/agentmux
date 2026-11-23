@@ -919,6 +919,37 @@ pub struct CommandPaneOpenData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub new: Option<bool>,
+    /// With `floating`: the window's width in CSS pixels (a number) or a share of the work area (`"60%"`).
+    /// SPEC_AGENT_PANE_PLACEMENT_FLOATING_2026_11_22.md §2.1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number | string")]
+    pub width: Option<serde_json::Value>,
+    /// With `floating`: the window's height, as `width`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number | string")]
+    pub height: Option<serde_json::Value>,
+    /// With `floating`: a named place in the work area (`center`, `right`, `left`, `top`, `bottom`,
+    /// `top-right`, `top-left`, `bottom-right`, `bottom-left`). `x` and `y` win over it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub spot: Option<String>,
+    /// With `floating`: the window's left edge in CSS pixels from the work area's left.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub x: Option<f64>,
+    /// With `floating`: the window's top edge in CSS pixels from the work area's top.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub y: Option<f64>,
+    /// The agent that opened the pane, set by srv from the caller's identity and never read from a
+    /// request: a client that sends it gains nothing.
+    #[serde(skip)]
+    #[ts(skip)]
+    pub opener: Option<String>,
+    /// A floating open's default size is held to this share of the work area, set by srv with a default.
+    #[serde(skip)]
+    #[ts(skip)]
+    pub floater_max_share: Option<f64>,
 }
 
 /// Response from pane.open.
@@ -930,6 +961,66 @@ pub struct PaneOpenResult {
     pub tab_id: String,
     pub view: String,
     pub created: bool,
+    /// A floating open: where the window went, once its window said (absent for a docked pane).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub placed: Option<Placed>,
+    /// A floating open whose window did not answer in time (it is hidden or still starting): the pane is
+    /// made and the window takes its place when it opens.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub queued: bool,
+}
+
+impl PaneOpenResult {
+    /// A result for a pane that was opened docked, or not opened at all.
+    pub fn docked(block_id: String, tab_id: String, view: String, created: bool) -> Self {
+        Self { block_id, tab_id, view, created, placed: None, queued: false }
+    }
+}
+
+/// Where a floating window went: in CSS pixels from the work area's top-left corner of the monitor it is on.
+/// SPEC_AGENT_PANE_PLACEMENT_FLOATING_2026_11_22.md §2.1.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "snake_case")]
+pub struct Placed {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    /// The named place, when the request named one and no x/y overrode it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub spot: Option<String>,
+    /// The request had to be pulled into the work area or raised to the minimum size.
+    pub clamped: bool,
+    /// The monitor's scale (1 = 96 dpi).
+    pub display_scale: f64,
+}
+
+/// `pane.floatplaced`: the window named by `openfloatingpane` says where it put the floating pane (or why it could not).
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "snake_case")]
+pub struct CommandPaneFloatPlacedData {
+    /// The `request_id` the `openfloatingpane` event carried.
+    pub request_id: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub placed: Option<Placed>,
+    /// Why the window could not be opened, when `placed` is absent.
+    #[serde(default)]
+    #[ts(optional)]
+    pub error: Option<String>,
+}
+
+/// Result of `pane.floatplaced`.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "snake_case")]
+pub struct PaneFloatPlacedResult {
+    /// A caller was still waiting for this answer.
+    pub delivered: bool,
 }
 
 /// Request for pane.moveTab — reorder `block_id` within its own pane, or
@@ -1241,6 +1332,13 @@ mod app_api_manifest_contract_tests {
             select: None,
             line: None,
             new: None,
+            width: None,
+            height: None,
+            spot: None,
+            x: None,
+            y: None,
+            opener: None,
+            floater_max_share: None,
             connection: None,
             auth: None,
         };
@@ -1272,12 +1370,7 @@ mod app_api_manifest_contract_tests {
             .map(|v| v.as_str().expect("field name must be a string").to_string())
             .collect();
 
-        let instance = PaneOpenResult {
-            block_id: "b".to_string(),
-            tab_id: "t".to_string(),
-            view: "editor".to_string(),
-            created: true,
-        };
+        let instance = PaneOpenResult::docked("b".to_string(), "t".to_string(), "editor".to_string(), true);
         let value = serde_json::to_value(&instance).expect("PaneOpenResult must serialize");
         let struct_fields: HashSet<String> = value
             .as_object()
@@ -1300,201 +1393,11 @@ mod app_api_manifest_contract_tests {
 // that a generated type exists per command and is current. Neither ever
 // deserializes a real payload into the Rust struct.
 #[cfg(test)]
-mod blockfile_req_shape_tests {
-    use super::*;
-    use serde_json::json;
-
-    // AgentHistoryView.tsx's `load`, useHistoryPagination.ts's
-    // `needsHwmWidening` probe
-    #[test]
-    fn line_count_accepts_the_payload_the_stub_sends() {
-        serde_json::from_value::<CommandBlockfileLineCountData>(
-            json!({"block_id": "b1", "filename": "output"}),
-        )
-        .expect("blockfile:line_count must accept block_id and filename");
-    }
-
-    // AgentHistoryView.tsx's `load`
-    #[test]
-    fn read_range_accepts_the_payload_the_stub_sends() {
-        let r: CommandBlockfileReadRangeData = serde_json::from_value(
-            json!({"block_id": "b1", "filename": "output", "offset": 0, "limit": 500}),
-        )
-        .expect("blockfile:read_range must accept the full range payload");
-        assert_eq!((r.offset, r.limit), (0, 500));
-    }
-
-    // `offset`/`limit` are u64 carrying JS numbers, which is why the generated
-    // binding overrides them to `number` rather than `bigint`. A negative
-    // offset must be rejected rather than wrapping to a huge positive.
-    #[test]
-    fn read_range_rejects_a_negative_offset() {
-        assert!(
-            serde_json::from_value::<CommandBlockfileReadRangeData>(
-                json!({"block_id": "b1", "filename": "output", "offset": -1, "limit": 10}),
-            )
-            .is_err(),
-            "a negative offset must fail loudly, not wrap into a huge u64"
-        );
-    }
-
-    #[test]
-    fn the_state_commands_accept_their_payloads() {
-        serde_json::from_value::<CommandBlockfileReadStateData>(
-            json!({"block_id": "b1", "filename": "output.state.json"}),
-        )
-        .expect("blockfile:read_state");
-        serde_json::from_value::<CommandBlockfileWriteStateData>(
-            json!({"block_id": "b1", "filename": "output.state.json", "content": "{}"}),
-        )
-        .expect("blockfile:write_state");
-    }
-
-    // `stamps` is `skip_serializing_if = "Option::is_none"`, so the key is
-    // OMITTED rather than nulled when absent -- which is why the generated
-    // binding says `stamps?: number[]`. The doc comment on the field promises
-    // old frontends can ignore it and new ones tolerate absence; that promise
-    // only holds while it is genuinely omitted.
-    #[test]
-    fn read_range_result_omits_stamps_rather_than_nulling_them() {
-        let without = serde_json::to_value(BlockfileReadRangeResult {
-            lines: vec!["a".to_string()],
-            total: 1,
-            ..Default::default()
-        })
-        .expect("serializable");
-        assert_eq!(without, json!({"lines": ["a"], "total": 1}));
-
-        let with = serde_json::to_value(BlockfileReadRangeResult {
-            lines: vec!["a".to_string()],
-            total: 1,
-            stamps: Some(vec![7]),
-            ..Default::default()
-        })
-        .expect("serializable");
-        assert_eq!(with, json!({"lines": ["a"], "total": 1, "stamps": [7]}));
-
-        // The Phase 5a-3 fields follow the same rule: omitted when unset.
-        let positioned = serde_json::to_value(BlockfileReadRangeResult {
-            lines: vec![],
-            total: 3,
-            stream: Some("g:agent:x:current".to_string()),
-            gen: Some("0123456789abcdef".to_string()),
-            gen_mismatch: Some(true),
-            ..Default::default()
-        })
-        .expect("serializable");
-        assert_eq!(
-            positioned,
-            json!({"lines": [], "total": 3, "stream": "g:agent:x:current", "gen": "0123456789abcdef", "gen_mismatch": true})
-        );
-    }
-
-    // `content` is a plain `Option<String>` with NO skip_serializing_if, so the
-    // key is always present and carries null -- a different shape from
-    // `stamps` above, and the generated binding says `string | null` for
-    // exactly that reason. The two live side by side in one domain, so pin
-    // both rather than assuming they behave alike.
-    #[test]
-    fn read_state_result_nulls_content_rather_than_omitting_it() {
-        let v = serde_json::to_value(BlockfileReadStateResult { content: None })
-            .expect("serializable");
-        assert_eq!(v, json!({"content": null}));
-    }
-}
+#[path = "block_blockfile_tests.rs"]
+mod blockfile_req_shape_tests;
 
 // Request-shape tests for the eight websocket-hosted block commands migrated
 // in this slice.
 #[cfg(test)]
-mod block_ws_req_shape_tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn the_single_field_commands_accept_their_payloads() {
-        serde_json::from_value::<CommandDeleteBlockData>(json!({"blockid": "b1"}))
-            .expect("deletesubblock");
-        serde_json::from_value::<CommandListBackgroundTasksData>(json!({"blockid": "b1"}))
-            .expect("listbackgroundtasks");
-        serde_json::from_value::<CommandAgentCancelData>(
-            json!({"blockid": "b1", "tool_use_id": "t1"}),
-        )
-        .expect("agentcancel");
-        serde_json::from_value::<CommandAgentShutdownKeepData>(
-            json!({"blockid": "b1", "request_id": "r1"}),
-        )
-        .expect("agentshutdownkeep");
-    }
-
-    // `outcome` and `scope` are Rust `String`s carrying closed sets. The
-    // generated binding keeps the unions via #[ts(type = ...)], but the SERVER
-    // is the thing that actually enforces them -- the handler rejects an
-    // unknown outcome explicitly. Pin that the wire type stays permissive
-    // (a bad value deserializes, then fails with a domain error) so the
-    // union in TypeScript is understood as a caller-side aid, not the guard.
-    #[test]
-    fn tool_decision_parses_any_outcome_string_and_leaves_validation_to_the_handler() {
-        let good: CommandToolDecisionData = serde_json::from_value(
-            json!({"blockid": "b1", "request_id": "r1", "outcome": "allow", "scope": "once"}),
-        )
-        .expect("tooldecision must accept the payload the stub sends");
-        assert!(good.feedback.is_none(), "feedback is optional");
-
-        serde_json::from_value::<CommandToolDecisionData>(
-            json!({"blockid": "b1", "request_id": "r1", "outcome": "bogus", "scope": "once"}),
-        )
-        .expect("an unknown outcome still DESERIALIZES; the handler rejects it, not serde");
-    }
-
-    #[test]
-    fn ambient_narrate_accepts_the_payload_the_stub_sends() {
-        serde_json::from_value::<CommandAmbientNarrateData>(json!({
-            "blockid": "b1", "kind": "k", "context": "c", "dedupe_key": "d",
-        }))
-        .expect("ambientnarrate");
-    }
-
-    // `timestamp` / `run_in_background` are Options with no
-    // skip_serializing_if. serde treats a missing Option field as None, so the
-    // generated binding marks them optional -- which is what the hand-written
-    // declarations already said. Both halves matter, so pin both.
-    #[test]
-    fn dock_node_status_accepts_the_payload_with_and_without_its_optionals() {
-        let bare: CommandDockNodeStatusData = serde_json::from_value(
-            json!({"blockid": "b1", "node_id": "n1", "tool_name": "t", "status": "s"}),
-        )
-        .expect("docknodestatus must accept the bare payload");
-        assert!(bare.timestamp.is_none() && bare.run_in_background.is_none());
-
-        let full: CommandDockNodeStatusData = serde_json::from_value(json!({
-            "blockid": "b1", "node_id": "n1", "tool_name": "t", "status": "s",
-            "timestamp": 1_789_000_000_000_i64, "run_in_background": true,
-        }))
-        .expect("docknodestatus must accept the full payload");
-        assert_eq!(full.timestamp, Some(1_789_000_000_000));
-        assert_eq!(full.run_in_background, Some(true));
-    }
-
-    #[test]
-    fn background_task_commands_accept_their_payloads() {
-        let done: CommandBackgroundTaskCompletionData =
-            serde_json::from_value(json!({"blockid": "b1", "node_id": "n1", "status": "done"}))
-                .expect("backgroundtaskcompletion, timestamp omitted");
-        assert!(done.timestamp.is_none());
-
-        let pid: CommandBackgroundTaskPidData =
-            serde_json::from_value(json!({"blockid": "b1", "node_id": "n1", "pid": 4321}))
-                .expect("backgroundtaskpid");
-        assert_eq!(pid.pid, 4321);
-
-        // `pid` is a u32, so a negative must be rejected rather than wrapping
-        // into a huge process id.
-        assert!(
-            serde_json::from_value::<CommandBackgroundTaskPidData>(
-                json!({"blockid": "b1", "node_id": "n1", "pid": -1}),
-            )
-            .is_err(),
-            "a negative pid must fail loudly, not wrap"
-        );
-    }
-}
+#[path = "block_ws_req_tests.rs"]
+mod block_ws_req_shape_tests;

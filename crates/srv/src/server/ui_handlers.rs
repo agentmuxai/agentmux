@@ -745,23 +745,17 @@ pub(crate) async fn handle_ui_browser_open(
     };
     let mut cmd = crate::backend::rpc_types::CommandPaneOpenData {
         view: "browser".to_string(),
-        file: None,
         url: Some(url.to_string()),
-        cwd: None,
         title: req.title.clone(),
-        tab_id: None,
         split_direction: Some(split.to_string()),
         split_reference_block_id: Some(own.clone()),
         focus: Some(false),
-        tree_expanded: None,
-        floating: None,
-        meta: None,
-        skip_placement: None,
-        stack_onto_block_id: None,
-        connection: None,
-        auth: None,
         ..Default::default()
     };
+    // Floating, its size and place, and who opened it (docs/specs/SPEC_AGENT_PANE_PLACEMENT_FLOATING_2026_11_22.md).
+    if let Err(e) = crate::server::app_api::floater_place::for_browser(&mut cmd, &req, caller.as_ref().map(|c| &c.0)) {
+        return err_response(StatusCode::BAD_REQUEST, e);
+    }
     let mut meta = match crate::server::app_api::pane::build_pane_meta(&cmd) {
         Ok(m) => m,
         Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
@@ -773,21 +767,20 @@ pub(crate) async fn handle_ui_browser_open(
         Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
     };
     cmd.meta = Some(meta);
+    let (floating, opener) = (cmd.floating == Some(true), cmd.opener.clone());
     let result = match crate::server::app_api::open_pane(&state, cmd).await {
         Ok(r) => r,
-        Err(e) => return err_response(StatusCode::INTERNAL_SERVER_ERROR, e),
+        Err(e) => return err_response(super::http_open::pane_open_error_status(&e), e),
     };
     crate::server::browser_allowlist::limit_new_pane(&state, &result.block_id, allowed).await;
     crate::server::browser_owner::record(&result.block_id, &req.auth.agent_id);
+    crate::server::pane_openers::note_docked(opener.as_deref(), &result, floating);
     tracing::info!(
         agent_id = %req.auth.agent_id, own_block = %own, pane = %result.block_id, url = %url, browsing_as = %browsing_as, from_container = grant.is_some(),
         "[ui-automation] browser open (agent-owned)"
     );
-    (
-        StatusCode::OK,
-        Json(json!({ "ok": true, "data": { "pane": result.block_id, "browsing_as": browsing_as } })),
-    )
-        .into_response()
+    let data = crate::server::app_api::floater_place::open_answer(&result, &browsing_as);
+    (StatusCode::OK, Json(json!({ "ok": true, "data": data }))).into_response()
 }
 
 /// Proxy a browser-pane request to the host and pass its `data` through:

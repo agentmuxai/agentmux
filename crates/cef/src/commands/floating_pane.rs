@@ -80,6 +80,11 @@ pub struct OpenFloatingPaneArgs {
     /// SPEC_TEAROFF_PAINT_LATENCY_2026_09_30.md phase 3.1.
     #[serde(default)]
     pub snapshot: Option<String>,
+    /// Whether the window may take the foreground when it shows (absent: it does). An agent's floating pane
+    /// is shown without taking it, so the person's typing and caret stay where they were.
+    /// SPEC_AGENT_PANE_PLACEMENT_FLOATING_2026_11_22.md §2.4.
+    #[serde(default)]
+    pub activate: Option<bool>,
 }
 
 /// Keep a floater on the monitor its release point is on: its rect (physical pixels) is pulled inside that
@@ -245,12 +250,12 @@ pub fn open_floating_pane_window(
             state,
             &parsed.pane_id,
             parsed.workspace_id.as_deref().unwrap_or(""),
-            parsed.x,
-            parsed.y,
+            parsed.x, parsed.y,
             parsed.width,
             parsed.height,
             parent_main_hwnd,
             parsed.snapshot.as_deref(),
+            parsed.activate.unwrap_or(true),
         ) {
             return Ok(serde_json::to_value(OpenFloatingPaneResponse {
                 window_label: pool_label,
@@ -273,12 +278,12 @@ pub fn open_floating_pane_window(
             state,
             &parsed.pane_id,
             parsed.workspace_id.as_deref().unwrap_or(""),
-            parsed.x,
-            parsed.y,
+            parsed.x, parsed.y,
             parsed.width,
             parsed.height,
             0, // parent_hwnd: unused on non-Windows
             parsed.snapshot.as_deref(),
+            parsed.activate.unwrap_or(true),
         ) {
             return Ok(serde_json::to_value(OpenFloatingPaneResponse {
                 window_label: pool_label,

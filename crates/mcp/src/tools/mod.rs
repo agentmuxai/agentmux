@@ -19,6 +19,7 @@ mod browser;
 mod browser_account;
 mod browser_key_text;
 mod browser_locate;
+mod browser_open;
 mod browser_tool;
 mod browser_waiting;
 mod browser_zoom;

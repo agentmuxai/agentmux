@@ -1201,6 +1201,10 @@
             "method": "PaneRemoveTabCommand"
         },
         {
+            "command": "pane.floatplaced",
+            "method": "PaneFloatPlacedCommand"
+        },
+        {
             "command": "layout.open",
             "method": "OpenLayoutCommand"
         },

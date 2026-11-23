@@ -249,6 +249,7 @@ import type { CommandNativeMemoryWriteFileData } from "@/types/rpc/CommandNative
 import type { CommandNextPromptSuggestionData } from "@/types/rpc/CommandNextPromptSuggestionData";
 import type { CommandOtherBuildLayoutsData } from "@/types/rpc/CommandOtherBuildLayoutsData";
 import type { CommandPaneConfirmDecideData } from "@/types/rpc/CommandPaneConfirmDecideData";
+import type { CommandPaneFloatPlacedData } from "@/types/rpc/CommandPaneFloatPlacedData";
 import type { CommandPaneMoveTabData } from "@/types/rpc/CommandPaneMoveTabData";
 import type { CommandPaneMoveTabsData } from "@/types/rpc/CommandPaneMoveTabsData";
 import type { CommandPaneOpenData } from "@/types/rpc/CommandPaneOpenData";
@@ -521,6 +522,7 @@ import type { OpenInShellReq } from "@/types/rpc/OpenInShellReq";
 import type { OperatorChallengeResult } from "@/types/rpc/OperatorChallengeResult";
 import type { OtherBuildLayoutsResult } from "@/types/rpc/OtherBuildLayoutsResult";
 import type { PaneConfirmDecideResult } from "@/types/rpc/PaneConfirmDecideResult";
+import type { PaneFloatPlacedResult } from "@/types/rpc/PaneFloatPlacedResult";
 import type { PaneOpenResult } from "@/types/rpc/PaneOpenResult";
 import type { PaneTabEditResult } from "@/types/rpc/PaneTabEditResult";
 import type { PayloadSchemaReq } from "@/types/rpc/PayloadSchemaReq";
@@ -2319,6 +2321,14 @@ export const GeneratedApi = {
   // command "pane.removeTab"
   PaneRemoveTabCommand(client: RpcClient, data: CommandPaneTabData, opts?: RpcOpts): Promise<PaneTabEditResult> {
     return client.rpcCall("pane.removeTab", data, opts);
+  },
+  // command "pane.floatplaced"
+  PaneFloatPlacedCommand(
+    client: RpcClient,
+    data: CommandPaneFloatPlacedData,
+    opts?: RpcOpts
+  ): Promise<PaneFloatPlacedResult> {
+    return client.rpcCall("pane.floatplaced", data, opts);
   },
   // command "layout.open"
   OpenLayoutCommand(client: RpcClient, data: CommandLayoutOpenData, opts?: RpcOpts): Promise<LayoutOpenResult> {

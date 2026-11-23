@@ -6447,6 +6447,25 @@
     }
   },
   {
+    "command": "pane.floatplaced",
+    "request": "agentmux_srv_core::backend::rpc_types::block::CommandPaneFloatPlacedData",
+    "requestName": "CommandPaneFloatPlacedData",
+    "requestTs": {
+      "imports": [
+        "CommandPaneFloatPlacedData"
+      ],
+      "name": "CommandPaneFloatPlacedData"
+    },
+    "response": "agentmux_srv_core::backend::rpc_types::block::PaneFloatPlacedResult",
+    "responseName": "PaneFloatPlacedResult",
+    "responseTs": {
+      "imports": [
+        "PaneFloatPlacedResult"
+      ],
+      "name": "PaneFloatPlacedResult"
+    }
+  },
+  {
     "command": "pane.moveTab",
     "request": "agentmux_srv_core::backend::rpc_types::block::CommandPaneMoveTabData",
     "requestName": "CommandPaneMoveTabData",
