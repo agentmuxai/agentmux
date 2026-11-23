@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! `agentmux-launcher --verify-update <version> <dir> <file> [unreachable:<why>]`
+//! `agentmux-launcher --verify-update <version> <dir> <file> [installed:<version>] [unreachable:<why>]`
 //!
 //! Used by the root helper of a `.deb` or `.rpm` install (`agentmux-install-update`,
 //! `docs/specs/SPEC_LINUX_PACKAGE_UPGRADE_AND_REPOSITORY_2026_10_24.md` §3.2): the
@@ -12,6 +12,13 @@
 //! (`SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25.md`). One pinned key and one decision, so
 //! the shell script holds neither.
 //!
+//! With `installed:<version>` it also holds the release to its upgrade floor
+//! (`SPEC_UPGRADE_FLOOR_IN_SIGNED_MANIFEST`): the higher of the floor the verified
+//! manifest signs and this build's own, against the version the helper read from the
+//! package database. The helper runs as root on a caller's word, so it takes the floor
+//! from the manifest it verified and the installed version from the database, never from
+//! the caller; a release whose manifest signs no floor is checked as before.
+//!
 //! Exit status: 0 verified; 10 the release predates signing and has no manifest (the
 //! helper falls back to the checksum GitHub lists, as the app does); 1 refused, with the
 //! message the person reads on stderr.
@@ -19,7 +26,10 @@
 use std::io::Read;
 use std::path::Path;
 
-use agentmux_common::update_manifest::{decide, file_names, judge_file, Outcome, UpdateKey, MAX_ENVELOPE_BYTES, MAX_MANIFEST_BYTES, UPDATE_KEYS};
+use agentmux_common::update_manifest::{
+    decide, file_names, install_first_message, judge_file_and_floor, signed_floor_in_force, version_core, Outcome, SignedFloor, UpdateKey,
+    MAX_ENVELOPE_BYTES, MAX_MANIFEST_BYTES, UPDATE_KEYS,
+};
 use sha2::{Digest, Sha256};
 
 /// Exit status for a release made before signing existed, with no manifest.
@@ -66,11 +76,35 @@ fn size_and_hash(path: &Path) -> Result<(u64, String), String> {
     Ok((size, agentmux_common::update_manifest::hex(&hasher.finalize())))
 }
 
+/// The upgrade floor of the repository when this build was made (`UPGRADE_FLOOR`): a floor only rises, so no later
+/// release's is lower. The app's check holds the same value.
+const BUILD_FLOOR: &str = include_str!("../../../UPGRADE_FLOOR");
+
+/// [`BUILD_FLOOR`] when it is a version.
+fn build_floor() -> Option<&'static str> {
+    Some(BUILD_FLOOR.trim()).filter(|f| version_core(f).is_some())
+}
+
 /// Check `file` against the signed manifest files in `dir` for `version`, using `keys`.
-/// `unreachable` is the helper's reason when it couldn't fetch them at all.
+/// `unreachable` is the helper's reason when it couldn't fetch them at all. `installed` is the version the
+/// package database says is installed and about to be replaced: given, the release's upgrade floor is enforced.
 pub fn verify(keys: &[UpdateKey], version: &str, dir: &Path, file: &Path, unreachable: Option<&str>) -> Result<Verdict, String> {
+    verify_replacing(keys, build_floor(), version, dir, file, unreachable, None)
+}
+
+/// [`verify`], holding the release to its upgrade floor against `installed` when that is given. `build` is this build's own floor.
+pub fn verify_replacing(
+    keys: &[UpdateKey],
+    build: Option<&str>,
+    version: &str,
+    dir: &Path,
+    file: &Path,
+    unreachable: Option<&str>,
+    installed: Option<&str>,
+) -> Result<Verdict, String> {
     let tag = format!("v{}", version.trim_start_matches('v'));
     let name = file.file_name().and_then(|n| n.to_str()).ok_or_else(|| format!("{} has no file name", file.display()))?;
+    let mut signed_floor = SignedFloor::Absent;
     let outcome = if let Some(why) = unreachable {
         Outcome::Unreachable(why.to_string())
     } else {
@@ -84,28 +118,71 @@ pub fn verify(keys: &[UpdateKey], version: &str, dir: &Path, file: &Path, unreac
                     None => Outcome::Failed("the envelope has no manifest".into()),
                     Some(manifest) => {
                         let (size, sha256) = size_and_hash(file)?;
-                        judge_file(keys, &tag, Some((&envelope, &String::from_utf8_lossy(&signatures), &manifest)), name, size, &sha256)
+                        let (outcome, floor) = judge_file_and_floor(keys, &tag, Some((&envelope, &String::from_utf8_lossy(&signatures), &manifest)), name, size, &sha256);
+                        signed_floor = floor;
+                        outcome
                     }
                 },
             },
         }
     };
     decide(version, &outcome)?;
+    // Only a verified manifest has a floor (`signed_floor` is `Absent` for anything else). The installed version is read by
+    // the helper from the package database; one that can't be read as a version, beside a floor, is refused.
+    if let (Some(installed), Some(floor)) = (installed, signed_floor_in_force(build, &signed_floor)) {
+        let older = match (version_core(installed), version_core(&floor)) {
+            (Some(i), Some(f)) => i < f,
+            _ => true,
+        };
+        if older {
+            return Err(install_first_message(installed, version.trim_start_matches('v'), &floor));
+        }
+    }
     Ok(if outcome == Outcome::Unsigned { Verdict::UnsignedOld } else { Verdict::Verified })
+}
+
+/// What `--verify-update` was asked: the version, the folder of signed files, the package, and the optional parts.
+#[derive(Debug, PartialEq, Eq)]
+struct Request<'a> {
+    version: &'a str,
+    dir: &'a str,
+    file: &'a str,
+    /// The version the package database says is installed (`installed:<version>`).
+    installed: Option<&'a str>,
+    /// Why the helper could not fetch the signed files (`unreachable:<why>`), in one string.
+    unreachable: Option<String>,
+}
+
+/// Read the words after `--verify-update`. `installed:<version>` comes before the reason, which is one argument whose
+/// words were split apart and are put back together.
+fn parse_request(rest: &[String]) -> Option<Request<'_>> {
+    let (version, dir, file) = (rest.first()?, rest.get(1)?, rest.get(2)?);
+    let (installed, reason_from) = match rest.get(3).and_then(|a| a.strip_prefix("installed:")) {
+        Some(v) => (Some(v), 4),
+        None => (None, 3),
+    };
+    let reason = rest[reason_from..].join(" ");
+    let unreachable = reason.strip_prefix("unreachable:").map(str::to_string);
+    Some(Request { version, dir, file, installed, unreachable })
 }
 
 /// Handle `--verify-update` if it is what was asked, returning the exit status.
 pub fn run_if_requested(args: &[String]) -> Option<i32> {
     let at = args.iter().position(|a| a == "--verify-update")?;
-    let rest = &args[at + 1..];
-    let (Some(version), Some(dir), Some(file)) = (rest.first(), rest.get(1), rest.get(2)) else {
-        eprintln!("usage: agentmux-launcher --verify-update <version> <dir> <file> [unreachable:<why>]");
+    let Some(request) = parse_request(&args[at + 1..]) else {
+        eprintln!("usage: agentmux-launcher --verify-update <version> <dir> <file> [installed:<version>] [unreachable:<why>]");
         return Some(2);
     };
-    // The reason is one argument; words that were split apart are put back together.
-    let reason = rest[3..].join(" ");
-    let unreachable = reason.strip_prefix("unreachable:");
-    Some(match verify(UPDATE_KEYS, version, Path::new(dir), Path::new(file), unreachable) {
+    let result = verify_replacing(
+        UPDATE_KEYS,
+        build_floor(),
+        request.version,
+        Path::new(request.dir),
+        Path::new(request.file),
+        request.unreachable.as_deref(),
+        request.installed,
+    );
+    Some(match result {
         Ok(Verdict::Verified) => 0,
         Ok(Verdict::UnsignedOld) => EXIT_UNSIGNED_OLD,
         Err(message) => {
@@ -227,6 +304,116 @@ mod tests {
         assert!(verify(&keys, "0.60.9", &dir, &f, None).is_err());
         // The throwaway key isn't the one the app pins.
         assert!(verify(UPDATE_KEYS, "0.60.9", &dir, &f, None).is_err());
+    }
+
+    /// A release of our own under a throwaway key whose manifest signs `upgrade_json` (e.g. `,"upgrade":{"floor":"0.58.0"}`),
+    /// with the package it lists: the keys, the folder and the package's path.
+    fn floor_release(name: &str, upgrade_json: &str) -> ([UpdateKey; 1], std::path::PathBuf, std::path::PathBuf) {
+        use agentmux_common::update_manifest::hex;
+        use base64::Engine;
+        use ed25519_dalek::{Signer, SigningKey};
+        let body = b"the package bytes";
+        let sha = hex(&Sha256::digest(body));
+        let manifest = format!(
+            r#"{{"format":1,"version":"0.60.9","tag":"v0.60.9","files":[{{"name":"AgentMux_0.60.9_amd64.deb","size":{},"sha256":"{sha}"}}]{upgrade_json}}}"#,
+            body.len()
+        );
+        let envelope = format!(r#"{{"format":1,"tag":"v0.60.9","manifest_sha256":"{}","created_at":"2026-10-28T12:00:00Z"}}"#, hex(&Sha256::digest(manifest.as_bytes())));
+        let key = SigningKey::from_bytes(&[5; 32]);
+        let sig = format!("k1 {}\n", base64::engine::general_purpose::STANDARD.encode(key.sign(envelope.as_bytes()).to_bytes()));
+        let dir = scratch(name);
+        let (e, s, m) = file_names("0.60.9");
+        std::fs::write(dir.join(e), &envelope).unwrap();
+        std::fs::write(dir.join(s), &sig).unwrap();
+        std::fs::write(dir.join(m), &manifest).unwrap();
+        let f = put(&dir, "AgentMux_0.60.9_amd64.deb", body);
+        ([UpdateKey { id: "k1", public: key.verifying_key().to_bytes() }], dir, f)
+    }
+
+    #[test]
+    fn a_release_whose_signed_floor_is_above_the_installed_version_is_refused_naming_the_version_to_install_first() {
+        let (keys, dir, f) = floor_release("floor-above", r#","upgrade":{"floor":"0.58.0"}"#);
+        let e = verify_replacing(&keys, Some("0.55.0"), "0.60.9", &dir, &f, None, Some("0.57.3")).unwrap_err();
+        assert_eq!(e, "This AgentMux (0.57.3) is older than 0.60.9 can upgrade from; install 0.58.0 first, then upgrade.");
+        // The app says the same words for the same case.
+        assert_eq!(e, install_first_message("0.57.3", "0.60.9", "0.58.0"));
+    }
+
+    #[test]
+    fn at_or_above_the_signed_floor_the_release_installs_as_before() {
+        let (keys, dir, f) = floor_release("floor-at", r#","upgrade":{"floor":"0.58.0"}"#);
+        for installed in ["0.58.0", "0.58.1", "0.60.8", "0.60.8-1"] {
+            assert_eq!(verify_replacing(&keys, Some("0.55.0"), "0.60.9", &dir, &f, None, Some(installed)), Ok(Verdict::Verified), "{installed}");
+        }
+    }
+
+    #[test]
+    fn the_version_strings_of_real_packages_pass_beside_the_floor_every_release_signs() {
+        // Every release signs a floor today (0.55.0 in 0.60.39's manifest), so every Linux upgrade reaches this check with the
+        // installed package's version as the package database gives it: the control file's `Version` for a .deb, the header's
+        // `%{VERSION}` for an .rpm. These are the strings read out of the published 0.60.39 .deb and .rpm, and the version the
+        // nightly build gives its packages: `--version "$VERSION"` is package.json's version, and a build label only renames
+        // the file (scripts/build-deb-linux.sh, build-rpm-linux.sh), so a nightly's string has the same three numbers.
+        let (keys, dir, f) = floor_release("floor-real", r#","upgrade":{"floor":"0.55.0"}"#);
+        for (what, installed) in [("0.60.39 .deb Version", "0.60.39"), ("0.60.39 .rpm VERSION", "0.60.39"), ("nightly 0.60.38 .deb and .rpm", "0.60.38"), ("the floor itself", "0.55.0")] {
+            assert_eq!(verify_replacing(&keys, Some("0.55.0"), "0.60.9", &dir, &f, None, Some(installed)), Ok(Verdict::Verified), "{what}");
+        }
+        // A version with a package revision or a build suffix reads by its three numbers, as a dpkg or rpm revision would be.
+        for installed in ["0.60.39-1", "0.60.39+nightly"] {
+            assert_eq!(verify_replacing(&keys, Some("0.55.0"), "0.60.9", &dir, &f, None, Some(installed)), Ok(Verdict::Verified), "{installed}");
+        }
+    }
+
+    #[test]
+    fn a_manifest_with_no_usable_floor_is_checked_as_before_whatever_is_installed() {
+        for (name, upgrade) in [("none", ""), ("empty", r#","upgrade":{}"#), ("above", r#","upgrade":{"floor":"0.99.0"}"#), ("junk", r#","upgrade":{"floor":"soon"}"#)] {
+            let (keys, dir, f) = floor_release(&format!("nofloor-{name}"), upgrade);
+            assert_eq!(verify_replacing(&keys, None, "0.60.9", &dir, &f, None, Some("0.1.0")), Ok(Verdict::Verified), "{name}");
+        }
+    }
+
+    #[test]
+    fn the_higher_of_the_signed_floor_and_this_builds_floor_holds_and_a_signed_floor_never_lowers_it() {
+        let (keys, dir, f) = floor_release("floor-build", r#","upgrade":{"floor":"0.55.0"}"#);
+        let e = verify_replacing(&keys, Some("0.59.0"), "0.60.9", &dir, &f, None, Some("0.58.0")).unwrap_err();
+        assert!(e.contains("install 0.59.0 first"), "{e}");
+        assert_eq!(verify_replacing(&keys, Some("0.59.0"), "0.60.9", &dir, &f, None, Some("0.59.0")), Ok(Verdict::Verified));
+    }
+
+    #[test]
+    fn an_installed_version_that_cannot_be_read_is_refused_beside_a_floor_and_ignored_without_one() {
+        let (keys, dir, f) = floor_release("floor-unreadable", r#","upgrade":{"floor":"0.58.0"}"#);
+        assert!(verify_replacing(&keys, None, "0.60.9", &dir, &f, None, Some("nightly")).is_err());
+        assert!(verify_replacing(&keys, None, "0.60.9", &dir, &f, None, Some("")).is_err());
+        let (keys, dir, f) = floor_release("nofloor-unreadable", "");
+        assert_eq!(verify_replacing(&keys, None, "0.60.9", &dir, &f, None, Some("nightly")), Ok(Verdict::Verified));
+    }
+
+    #[test]
+    fn a_floor_is_read_only_from_a_manifest_that_verifies_and_never_asked_for_without_an_installed_version() {
+        // Going back to an older release passes no installed version: the floor is not asked.
+        let (keys, dir, f) = floor_release("floor-goback", r#","upgrade":{"floor":"0.58.0"}"#);
+        assert_eq!(verify_replacing(&keys, None, "0.60.9", &dir, &f, None, None), Ok(Verdict::Verified));
+        // A floor lowered after signing breaks the signature: refused whatever is installed, and nothing is read from it.
+        let manifest = std::fs::read_to_string(dir.join(file_names("0.60.9").2)).unwrap();
+        std::fs::write(dir.join(file_names("0.60.9").2), manifest.replace("0.58.0", "0.10.0")).unwrap();
+        assert!(verify_replacing(&keys, None, "0.60.9", &dir, &f, None, Some("0.57.0")).unwrap_err().contains("signature on v0.60.9 doesn't match"));
+    }
+
+    #[test]
+    fn the_installed_version_is_read_before_the_reason_and_the_reason_keeps_its_words() {
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let r = a(&["0.60.9", "/d", "/f", "installed:0.57.3", "unreachable:GitHub", "didn't", "answer"]);
+        let q = parse_request(&r).unwrap();
+        assert_eq!((q.version, q.dir, q.file, q.installed), ("0.60.9", "/d", "/f", Some("0.57.3")));
+        assert_eq!(q.unreachable.as_deref(), Some("GitHub didn't answer"));
+        let r = a(&["0.60.9", "/d", "/f"]);
+        assert_eq!(parse_request(&r).unwrap().installed, None);
+        // The old form, a reason alone, is still read.
+        let r = a(&["0.60.9", "/d", "/f", "unreachable:x"]);
+        let q = parse_request(&r).unwrap();
+        assert_eq!((q.installed, q.unreachable.as_deref()), (None, Some("x")));
+        assert!(parse_request(&a(&["0.60.9", "/d"])).is_none());
     }
 
     #[test]
