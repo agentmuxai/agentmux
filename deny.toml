@@ -2,7 +2,7 @@
 # (.github/workflows/ci-pr.yml `advisories`, nightly in ci-nightly-build.yml `advisories`).
 #
 # An advisory with no patched release yet is listed under `ignore`, one entry per line: its id, a reason, and a
-# "review by YYYY-MM-DD" date. scripts/check-advisory-ignores.mjs refuses an entry without a reason or a date (and the
+# "review by YYYY-MM-DD" date. scripts/advisory-ignores.mjs refuses an entry without a reason or a date (and the
 # nightly refuses one past its date), so the list can only shrink or be re-decided on purpose. A pull request fails only
 # on an advisory that is not listed here.
 
