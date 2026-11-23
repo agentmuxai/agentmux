@@ -348,6 +348,23 @@ mod tests {
     }
 
     #[test]
+    fn the_version_strings_of_real_packages_pass_beside_the_floor_every_release_signs() {
+        // Every release signs a floor today (0.55.0 in 0.60.39's manifest), so every Linux upgrade reaches this check with the
+        // installed package's version as the package database gives it: the control file's `Version` for a .deb, the header's
+        // `%{VERSION}` for an .rpm. These are the strings read out of the published 0.60.39 .deb and .rpm, and the version the
+        // nightly build gives its packages: `--version "$VERSION"` is package.json's version, and a build label only renames
+        // the file (scripts/build-deb-linux.sh, build-rpm-linux.sh), so a nightly's string has the same three numbers.
+        let (keys, dir, f) = floor_release("floor-real", r#","upgrade":{"floor":"0.55.0"}"#);
+        for (what, installed) in [("0.60.39 .deb Version", "0.60.39"), ("0.60.39 .rpm VERSION", "0.60.39"), ("nightly 0.60.38 .deb and .rpm", "0.60.38"), ("the floor itself", "0.55.0")] {
+            assert_eq!(verify_replacing(&keys, Some("0.55.0"), "0.60.9", &dir, &f, None, Some(installed)), Ok(Verdict::Verified), "{what}");
+        }
+        // A version with a package revision or a build suffix reads by its three numbers, as a dpkg or rpm revision would be.
+        for installed in ["0.60.39-1", "0.60.39+nightly"] {
+            assert_eq!(verify_replacing(&keys, Some("0.55.0"), "0.60.9", &dir, &f, None, Some(installed)), Ok(Verdict::Verified), "{installed}");
+        }
+    }
+
+    #[test]
     fn a_manifest_with_no_usable_floor_is_checked_as_before_whatever_is_installed() {
         for (name, upgrade) in [("none", ""), ("empty", r#","upgrade":{}"#), ("above", r#","upgrade":{"floor":"0.99.0"}"#), ("junk", r#","upgrade":{"floor":"soon"}"#)] {
             let (keys, dir, f) = floor_release(&format!("nofloor-{name}"), upgrade);
