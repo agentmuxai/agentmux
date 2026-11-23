@@ -119,7 +119,7 @@ pub fn site(raw: &str, resolved: &str) -> Result<String, String> {
         return Err("a call with a Vault credential has no user name or password in its URL".into());
     }
     let written = reqwest::Url::parse(&format!("https://{authority}")).map_err(|e| format!("invalid URL: {e}"))?;
-    let want = written.origin();
+    let want = agentmux_common::url_guard::checked_origin(&written).ok_or("a call with a Vault credential goes to a site with a host name")?;
     if !want.is_tuple() {
         return Err("a call with a Vault credential goes to a site with a host name".into());
     }
@@ -127,8 +127,11 @@ pub fn site(raw: &str, resolved: &str) -> Result<String, String> {
     if !got.username().is_empty() || got.password().is_some() {
         return Err("a call with a Vault credential has no user name or password in its URL".into());
     }
-    if got.origin() != want {
-        return Err(format!("the URL resolved to {}, not the site the drone names ({})", got.origin().ascii_serialization(), want.ascii_serialization()));
+    let Some(got_origin) = agentmux_common::url_guard::checked_origin(&got) else {
+        return Err(format!("the URL resolved to an address with no site, not the site the drone names ({})", want.ascii_serialization()));
+    };
+    if got_origin != want {
+        return Err(format!("the URL resolved to {}, not the site the drone names ({})", got_origin.ascii_serialization(), want.ascii_serialization()));
     }
     Ok(want.ascii_serialization())
 }
@@ -217,5 +220,13 @@ mod tests {
         // The host written out can't be a different one once resolved (the check is on the parsed URLs).
         assert!(site("https://api.example.com/x", "https://api.example.com.evil.example.net/x").is_err());
         assert!(site("https://api.example.com/x", "https://user:pass@api.example.com/x").is_err());
+    }
+
+    #[test]
+    fn a_resolved_address_that_is_a_nested_blob_is_refused() {
+        let deep = format!("{}https://api.example.com/x", "blob:".repeat(50_000));
+        for resolved in ["blob:blob:https://api.example.com/x", deep.as_str()] {
+            assert!(site("https://api.example.com/x", resolved).is_err(), "{}", &resolved[..resolved.len().min(40)]);
+        }
     }
 }

@@ -194,11 +194,24 @@ esac
 get_release_file "AgentMux-$VERSION-envelope.json" \
     && { [ ! -f "$SIGNED_DIR/AgentMux-$VERSION-envelope.json" ] || { get_release_file "AgentMux-$VERSION-envelope.json.sig" && get_release_file "AgentMux-$VERSION-manifest.json"; }; }
 [ -x "$LAUNCHER" ] || die "can't check the signature: $LAUNCHER is missing"
+# The release's upgrade floor is held here too, not left to the app having refused first: the launcher takes the floor from the
+# manifest it verifies and the version being replaced from this one, which reads it from the package database (never from the
+# caller). Going back to an older version is not an upgrade: it has no floor to hold.
+INSTALLED_ARG=
+if [ "$GO_BACK" != 1 ]; then
+    if [ "$OWNER" = deb ]; then
+        INSTALLED_NOW=$(dpkg-query -W -f='${Version}' agentmux 2>/dev/null)
+    else
+        INSTALLED_NOW=$(rpm -q --queryformat '%{VERSION}' agentmux 2>/dev/null)
+    fi
+    [ -n "$INSTALLED_NOW" ] || die "can't tell which AgentMux version is installed"
+    INSTALLED_ARG="installed:$INSTALLED_NOW"
+fi
 # One argument for the reason, quoted, so its words stay together.
 if [ -n "$UNREACHABLE" ]; then
-    VERIFY_MSG=$(env -i PATH="$PATH" LC_ALL=C "$LAUNCHER" --verify-update "$VERSION" "$SIGNED_DIR" "$COPY" "unreachable:$UNREACHABLE" 2>&1 >/dev/null)
+    VERIFY_MSG=$(env -i PATH="$PATH" LC_ALL=C "$LAUNCHER" --verify-update "$VERSION" "$SIGNED_DIR" "$COPY" ${INSTALLED_ARG:+"$INSTALLED_ARG"} "unreachable:$UNREACHABLE" 2>&1 >/dev/null)
 else
-    VERIFY_MSG=$(env -i PATH="$PATH" LC_ALL=C "$LAUNCHER" --verify-update "$VERSION" "$SIGNED_DIR" "$COPY" 2>&1 >/dev/null)
+    VERIFY_MSG=$(env -i PATH="$PATH" LC_ALL=C "$LAUNCHER" --verify-update "$VERSION" "$SIGNED_DIR" "$COPY" ${INSTALLED_ARG:+"$INSTALLED_ARG"} 2>&1 >/dev/null)
 fi
 VERIFY_RC=$?
 case "$VERIFY_RC" in

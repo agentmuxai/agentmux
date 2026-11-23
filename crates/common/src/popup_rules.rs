@@ -110,7 +110,7 @@ pub fn origin_of(url: &str) -> String {
     url::Url::parse(url)
         .ok()
         .filter(|u| matches!(u.scheme(), "http" | "https"))
-        .map(|u| u.origin().ascii_serialization())
+        .and_then(|u| crate::url_guard::origin_string(&u))
         .unwrap_or_default()
 }
 
@@ -160,7 +160,7 @@ pub fn popup_window_title(url: &str, page_title: &str) -> Option<String> {
 fn popup_place(url: &str) -> Option<String> {
     let u = url::Url::parse(url).ok()?;
     match u.scheme() {
-        "http" | "https" | "blob" => match u.origin() {
+        "http" | "https" | "blob" => match crate::url_guard::checked_origin(&u)? {
             url::Origin::Tuple(scheme, host, port) => {
                 let default_port = if scheme == "https" { 443 } else { 80 };
                 let mut place = if scheme == "http" { format!("http://{host}") } else { host.to_string() };
@@ -308,5 +308,15 @@ mod tests {
         // Nothing to show: leave the title alone.
         assert_eq!(t("devtools://devtools/bundled/inspector.html", "DevTools"), None);
         assert_eq!(t("not a url", "A"), None);
+    }
+
+    #[test]
+    fn an_address_that_nests_blob_addresses_has_no_place_and_no_origin() {
+        let deep = format!("{}https://example.com/", "blob:".repeat(50_000));
+        for url in ["blob:blob:https://example.com/0f0e", deep.as_str()] {
+            assert_eq!(popup_window_title(url, "A"), None);
+            assert_eq!(origin_of(url), "");
+        }
+        assert_eq!(origin_of("https://example.com:8443/x"), "https://example.com:8443");
     }
 }

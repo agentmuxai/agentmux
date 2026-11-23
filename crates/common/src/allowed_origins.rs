@@ -34,7 +34,7 @@ pub fn parse(entry: &str) -> Result<String, String> {
         return Err(format!("{entry:?} isn't an http or https site"));
     }
     let Some(host) = url.host() else { return Err(bad()) };
-    let origin = url.origin().ascii_serialization();
+    let Some(origin) = crate::url_guard::origin_string(&url) else { return Err(bad()) };
     if !wildcard {
         return Ok(origin);
     }
@@ -65,13 +65,12 @@ pub fn parse_list(entries: &[String]) -> Result<Vec<String>, String> {
 
 /// The origin a navigation to `url` goes to, as an entry would name it
 /// exactly (a `blob:` URL's is the origin it belongs to). `None` for an
-/// address with no such origin (`about:`, `data:`).
+/// address with no such origin (`about:`, `data:`, a `blob:` address that carries another `blob:` address).
 pub fn target_origin(url: &str) -> Option<String> {
     let u = url::Url::parse(url).ok()?;
-    match u.origin() {
-        url::Origin::Tuple(scheme, _, _) if scheme == "http" || scheme == "https" => {
-            Some(u.origin().ascii_serialization())
-        }
+    let origin = crate::url_guard::checked_origin(&u)?;
+    match &origin {
+        url::Origin::Tuple(scheme, _, _) if scheme == "http" || scheme == "https" => Some(origin.ascii_serialization()),
         _ => None,
     }
 }
@@ -243,5 +242,18 @@ mod tests {
         // What Allow adds then allows the same address.
         let added = vec![target_origin("https://new.example/path").unwrap()];
         assert!(allows(&added, "https://new.example/other"));
+    }
+
+    #[test]
+    fn an_address_that_nests_blob_addresses_has_no_origin_and_is_not_allowed() {
+        let list = parse_list(&["https://a.example".into()]).unwrap();
+        let deep = format!("{}https://a.example/id", "blob:".repeat(50_000));
+        for url in ["blob:blob:https://a.example/id", deep.as_str()] {
+            assert_eq!(target_origin(url), None);
+            assert!(!allows(&list, url));
+            assert!(!same_origin(url, "https://a.example/"));
+        }
+        // An ordinary blob address is as before.
+        assert!(allows(&list, "blob:https://a.example/id"));
     }
 }

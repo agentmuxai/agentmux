@@ -69,7 +69,7 @@ run() { # runs the helper with the fakes; args are the helper's. Output in $TMP/
     : > "$TMP/log"; : > "$TMP/curl.log"
     env -i HOME="$TMP" AGENTMUX_HELPER_TEST=1 AGENTMUX_HELPER_PATH="$BIN" AGENTMUX_QUIT_WAIT="${QUIT_WAIT:-2}" \
         AGENTMUX_CACHE_DIR="$TMP/cache" AGENTMUX_STATE_DIR="$TMP/state" AGENTMUX_INSTALL_ROOT="$TMP/opt" AGENTMUX_PROC_DIR="$TMP/proc" \
-        AGENTMUX_DOWNLOAD_BASE="${DOWNLOAD_BASE:-https://example.test/download}" FAKE_DOWNLOAD="$TMP/download" FAKE_LISTING="$TMP/listing.json" FAKE_LOG="$TMP/log" FAKE_CURL_LOG="$TMP/curl.log" FAKE_SIGNED_DIR="$TMP/signed" FAKE_SIGNED_FAIL="${FAKE_SIGNED_FAIL:-}" AGENTMUX_HELPER_STRICT_BASE="${STRICT_BASE:-}" FAKE_OWNER="${FAKE_OWNER:-deb}" FAKE_INSTALLED="${FAKE_INSTALLED:-0.60.1}" \
+        AGENTMUX_DOWNLOAD_BASE="${DOWNLOAD_BASE:-https://example.test/download}" FAKE_DOWNLOAD="$TMP/download" FAKE_LISTING="$TMP/listing.json" FAKE_LOG="$TMP/log" FAKE_CURL_LOG="$TMP/curl.log" FAKE_SIGNED_DIR="$TMP/signed" FAKE_SIGNED_FAIL="${FAKE_SIGNED_FAIL:-}" AGENTMUX_HELPER_STRICT_BASE="${STRICT_BASE:-}" FAKE_OWNER="${FAKE_OWNER:-deb}" FAKE_INSTALLED="${FAKE_INSTALLED-0.60.1}" \
         FAKE_NAME="${FAKE_NAME:-agentmux}" FAKE_VERSION="${FAKE_VERSION:-0.60.2}" FAKE_ARCH="${FAKE_ARCH:-}" \
         sh "$HELPER" "$@" > "$TMP/out" 2> "$TMP/err"
 }
@@ -126,12 +126,25 @@ verify 0
 FAKE_OWNER=deb run "$deb" 0.60.2 $dead_pid; st=$?
 if [ $st = 0 ] && grep -q '^READY$' "$TMP/out" && grep -q 'apt-get install' "$TMP/log" && ! grep -q 'api\|releases/tags' "$TMP/curl.log" \
     && grep -q "download/v0.60.2/AgentMux-0.60.2-envelope.json\$" "$TMP/curl.log" && grep -q "download/v0.60.2/AgentMux-0.60.2-manifest.json\$" "$TMP/curl.log" \
-    && grep -q -e "^--verify-update|0.60.2|.*/signed|.*/AgentMux_0.60.2_amd64.deb|\$" "$TMP/verify.args"; then
+    && grep -q -e "^--verify-update|0.60.2|.*/signed|.*/AgentMux_0.60.2_amd64.deb|installed:0.60.1|\$" "$TMP/verify.args"; then
     ok "a signed release: its files are fetched, the launcher verifies, GitHub's listing is not read, installed"
 else bad "a signed release" "status $st: $(cat "$TMP/out" "$TMP/err" "$TMP/log" "$TMP/verify.args") curl: $(cat "$TMP/curl.log")"; fi
 verify 1 "The signature on v0.60.2 doesn't match, so AgentMux won't download it. Don't install it; tell the AgentMux team."
 FAKE_OWNER=deb run "$deb" 0.60.2 $dead_pid; st=$?; refused "a file the signed manifest refuses"
 grep -q "signature on v0.60.2 doesn't match" "$TMP/err" && ok "...and the person reads the launcher's own words" || bad "the refusal's message" "$(cat "$TMP/err")"
+# The floor: the launcher is told the installed version the package database gives (the caller passes none), and says
+# the refusal in its own words, which the person reads.
+verify 0
+FAKE_INSTALLED=0.57.3 FAKE_OWNER=deb run "$deb" 0.60.2 $dead_pid; st=$?
+if [ $st = 0 ] && grep -q "|installed:0.57.3|\$" "$TMP/verify.args"; then ok "the installed version comes from the package database (.deb)"; else bad "installed version (.deb)" "$(cat "$TMP/verify.args" "$TMP/err")"; fi
+FAKE_INSTALLED=0.57.3 FAKE_OWNER=rpm run "$rpm" 0.60.2 $dead_pid; st=$?
+if [ $st = 0 ] && grep -q "|installed:0.57.3|\$" "$TMP/verify.args"; then ok "the installed version comes from the package database (.rpm)"; else bad "installed version (.rpm)" "$(cat "$TMP/verify.args" "$TMP/err")"; fi
+verify 1 "This AgentMux (0.57.3) is older than 0.60.2 can upgrade from; install 0.58.0 first, then upgrade."
+FAKE_INSTALLED=0.57.3 FAKE_OWNER=deb run "$deb" 0.60.2 $dead_pid; st=$?; refused "a release whose signed floor is above the installed version"
+grep -q "install 0.58.0 first" "$TMP/err" && ! grep -q READY "$TMP/out" && [ ! -s "$TMP/log" ] && ok "...nothing is installed and the person reads which version to install first" || bad "the floor refusal" "$(cat "$TMP/out" "$TMP/err" "$TMP/log")"
+verify 0
+FAKE_OWNER=deb FAKE_INSTALLED= run "$deb" 0.60.2 $dead_pid; st=$?; refused "an install whose version the package database can't give"
+verify 1 "The signature on v0.60.2 doesn't match, so AgentMux won't download it. Don't install it; tell the AgentMux team."
 FAKE_SIGNED_FAIL=1 FAKE_OWNER=deb run "$deb" 0.60.2 $dead_pid; st=$?; refused "a release whose files GitHub won't serve"
 grep -q "|unreachable:GitHub didn't answer|\$" "$TMP/verify.args" && ok "...which the launcher is told is unreachable, not unsigned" || bad "the unreachable hand-over" "$(cat "$TMP/verify.args")"
 rm -f "$TMP/opt/bin/agentmux-launcher"
@@ -173,6 +186,7 @@ listing "AgentMux_0.60.1_amd64.deb" "$(sha "$old_deb")"; cp "$old_deb" "$TMP/dow
 record 0.60.1 0.60.2
 FAKE_OWNER=deb FAKE_INSTALLED=0.60.2 FAKE_VERSION=0.60.1 run --go-back 0.60.1 $dead_pid; st=$?
 if [ $st = 0 ] && grep -q '^READY$' "$TMP/out" && grep -q 'apt-get install -y --allow-downgrades' "$TMP/log" && [ ! -e "$TMP/state/last-upgrade" ]; then ok "going back (.deb): downloaded, checked, installed with a downgrade, record used up"; else bad "go back .deb" "status $st: $(cat "$TMP/out" "$TMP/err" "$TMP/log")"; fi
+grep -q "^--verify-update|0.60.1|" "$TMP/verify.args" && ! grep -q "installed:" "$TMP/verify.args" && ok "going back is not an upgrade: the launcher is told no installed version, so no floor is held" || bad "go back passes no installed version" "$(cat "$TMP/verify.args")"
 FAKE_OWNER=deb FAKE_INSTALLED=0.60.2 FAKE_VERSION=0.60.1 run --go-back 0.60.1 $dead_pid; st=$?; refused "going back twice (the record is used up)"
 record 0.60.0 0.60.2
 FAKE_OWNER=deb FAKE_INSTALLED=0.60.2 FAKE_VERSION=0.60.1 run --go-back 0.60.1 $dead_pid; st=$?; refused "going back to a version the last upgrade didn't replace"
