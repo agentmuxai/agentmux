@@ -649,6 +649,22 @@ mod tests {
         assert!(matches!(supervisor.send(&id, not_a_file).await, Err(LspError::NotAFile(_))));
     }
 
+    fn did_open_uri(uri: &str) -> String {
+        format!(r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{uri}","languageId":"typescript","version":1,"text":""}}}}}}"#)
+    }
+
+    #[test]
+    fn a_network_path_is_the_file_it_names_on_windows_and_no_file_elsewhere() {
+        let opened = opened_document(&did_open_uri("file://fileserver/share/src/a%20b.ts")).expect("a didOpen");
+        if cfg!(windows) {
+            assert_eq!(opened, Some(PathBuf::from(r"\\fileserver\share\src\a b.ts")));
+        } else {
+            assert_eq!(opened, None, "a host in a file address is no path here");
+        }
+        let plain = opened_document(&did_open_uri("file:///proj/src/a.ts")).expect("a didOpen");
+        assert!(plain.is_some() || cfg!(windows), "a path's address still names its file");
+    }
+
     #[tokio::test]
     async fn the_last_client_to_stop_ends_the_process_even_while_a_send_holds_the_handle() {
         let tmp = tempfile::tempdir().unwrap();
