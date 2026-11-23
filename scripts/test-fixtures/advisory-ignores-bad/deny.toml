@@ -1,0 +1,5 @@
+[advisories]
+version = 2
+ignore = [
+    { id = "RUSTSEC-2026-0001", reason = "no review date here" },
+]

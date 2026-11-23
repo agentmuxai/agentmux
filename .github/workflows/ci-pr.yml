@@ -152,6 +152,8 @@ jobs:
       docs_index: ${{ steps.classify.outputs.docs_index }}
       # The agentmux-cef crate's tests (the `cef-crate` job): a PR that changes what the crate is built from (R10).
       cef: ${{ steps.classify.outputs.cef }}
+      # The known-vulnerability check (the `advisories` job): a lock file, a manifest or the check itself changed (R11).
+      deps: ${{ steps.classify.outputs.deps }}
       version_only: ${{ steps.classify.outputs.version_only }}
       # Set only in a merge queue (below); every other run uses the defaults
       # each job's matrix falls back to.
@@ -182,8 +184,10 @@ jobs:
         run: |
           # $2 is whether the agentmux-cef crate's check runs too: yes unless a caller says no (a push to main,
           # where the nightly owns that crate's tests).
+          # $3 is whether the known-vulnerability check runs: yes unless a caller says no (a push to main, where the
+          # nightly owns it).
           run_everything() {
-            printf 'rust=true\nfrontend=true\nfrontend_build=true\ndocs_only=false\ndocs_index=true\nversion_only=false\ncef=%s\n' "${2:-true}" >> "$GITHUB_OUTPUT"
+            printf 'rust=true\nfrontend=true\nfrontend_build=true\ndocs_only=false\ndocs_index=true\nversion_only=false\ncef=%s\ndeps=%s\n' "${2:-true}" "${3:-true}" >> "$GITHUB_OUTPUT"
             echo "::notice::running all checks — $1"
           }
 
@@ -194,7 +198,7 @@ jobs:
           # vitest). The rest of the Rust tests ran on each PR and run again on the push
           # to main.
           if [ "${{ github.event_name }}" = "merge_group" ]; then
-            printf 'rust=true\nfrontend=true\nfrontend_build=true\ndocs_only=false\ndocs_index=true\nversion_only=false\ncef=false\nqueue=true\n' >> "$GITHUB_OUTPUT"
+            printf 'rust=true\nfrontend=true\nfrontend_build=true\ndocs_only=false\ndocs_index=true\nversion_only=false\ncef=false\ndeps=false\nqueue=true\n' >> "$GITHUB_OUTPUT"
             printf 'rust_os=["ubuntu-latest"]\ndocs_index_os=["ubuntu-latest"]\n' >> "$GITHUB_OUTPUT"
             echo "::notice::merge queue: fast gates and the tests that read the tree"
             exit 0
@@ -203,7 +207,7 @@ jobs:
           # R4: only pull requests are eligible. Post-merge runs on main always
           # do the full job — low volume, and the last gate before a release.
           if [ "${{ github.event_name }}" != "pull_request" ]; then
-            run_everything "not a pull_request (R4)" false
+            run_everything "not a pull_request (R4)" false false
             exit 0
           fi
 
@@ -1232,6 +1236,39 @@ jobs:
         shell: bash
         run: bash scripts/gen-docs-index.sh --check
 
+  # Known-vulnerability check: Cargo.lock against the RustSec advisories (cargo-deny, deny.toml) and
+  # package-lock.json against the npm advisories (scripts/npm-audit-gate.mjs). Path-conditional (classify output
+  # `deps`, R11): it runs when a lock file, a manifest, an ignore list or the check itself changes, and on anything
+  # the classifier cannot read. It fails only on an advisory no ignore list names (deny.toml, and
+  # .github/npm-audit-ignore.json, each entry with a reason and a review date); a review date that has passed is a
+  # warning here and a failure in the nightly (ci-nightly-build.yml `advisories`, which reports the whole list).
+  # Not run in the merge queue or on a push to main. No secret: the advisory sources are public. Tool versions
+  # are pinned. A skipped run counts as passing in `ci-required`.
+  advisories:
+    name: known-vulnerability check
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.deps != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: clippy, rustfmt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.22.0
+      - name: Ignore lists carry a reason and a review date
+        run: node scripts/advisory-ignores.mjs
+      - name: Rust advisories (cargo-deny)
+        run: cargo deny --locked check advisories
+      - name: npm advisories
+        run: node scripts/npm-audit-gate.mjs
+
   # Two shards: the suite alone took about 3.6 min on one runner even with
   # jsdom limited to DOM tests (vitest.config.ts). `needs.frontend.result`
   # covers both legs, so "CI required" gates on them without naming either.
@@ -1416,7 +1453,7 @@ jobs:
   # evaluateRequiredJobs already treats `failure` as fatal.
   ci-required:
     name: CI required
-    needs: [changes, docs, docs-index, rust, frontend]
+    needs: [changes, docs, docs-index, rust, frontend, advisories]
     if: always()
     runs-on: ubuntu-latest
     steps:

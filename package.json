@@ -50,7 +50,7 @@
         "@types/unist": "^3.0.3",
         "@types/ws": "^8",
         "@typescript/native": "npm:typescript@^7.0.2",
-        "@vitest/coverage-istanbul": "^5.0.0",
+        "@vitest/coverage-istanbul": "5.0.3",
         "csstype": "^3.2.3",
         "eslint": "^8.57.0",
         "eslint-config-prettier": "^10.1.8",
@@ -73,7 +73,7 @@
         "vite-plugin-solid": "2.11.13",
         "vite-plugin-svgr": "^5.2.0",
         "vite-tsconfig-paths": "^6.1.1",
-        "vitest": "^5.0.0",
+        "vitest": "5.0.3",
         "ws": "^8.21.1"
     },
     "dependencies": {
@@ -138,6 +138,9 @@
     ],
     "overrides": {
         "brace-expansion@5.x": "^5.0.8",
+        "@typescript-eslint/typescript-estree": {
+            "minimatch": "^11.0.1"
+        },
         "tsconfck": {
             "typescript": "$typescript"
         }
