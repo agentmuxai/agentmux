@@ -284,9 +284,39 @@ impl Service {
         for id in ids {
             if let Some(meta) = self.ensure_derived(id).await {
                 out.push(meta.to_info(id, ""));
+            } else if let Some(info) = self.unread_info(id) {
+                out.push(info);
             }
         }
         out
+    }
+
+    /// What a tile shows for a stored file that nothing has been derived
+    /// from: its size and a type icon (`other`), no thumbnail or text.
+    fn unread_info(&self, id: &str) -> Option<AttachmentInfo> {
+        if !self.store.is_unread(id) {
+            return None;
+        }
+        let bytes = self.store.blob_len(id)?;
+        let mime = "application/octet-stream".to_string();
+        Some(AttachmentInfo {
+            id: id.to_string(),
+            name: String::new(),
+            send_mime: mime.clone(),
+            mime,
+            bytes,
+            width: 0,
+            height: 0,
+            send_bytes: bytes,
+            send_width: 0,
+            send_height: 0,
+            first_frame_only: false,
+            kind: FileKind::Other.as_str().to_string(),
+            page_count: None,
+            text_bytes: 0,
+            text_note: None,
+            macros: false,
+        })
     }
 
     /// Metadata under the current fingerprint. When the send edge or the
@@ -294,11 +324,28 @@ impl Service {
     /// from the stored original under the same CPU and memory limits as
     /// ingest, so a transcript full of old thumbnails can't start an
     /// unbounded number of decodes at once.
+    ///
+    /// A file stored unread (`store_undecoded`) is not derived here, so a pane
+    /// drawing its tile or a thumbnail request leaves it alone: that takes
+    /// [`Self::open_derived`].
     pub async fn ensure_derived(self: &Arc<Self>, id: &str) -> Option<store::StoredMeta> {
+        self.derive_for(id, false).await
+    }
+
+    /// [`Self::ensure_derived`] for a file someone has chosen to open or use:
+    /// one stored unread is derived now.
+    pub async fn open_derived(self: &Arc<Self>, id: &str) -> Option<store::StoredMeta> {
+        self.derive_for(id, true).await
+    }
+
+    async fn derive_for(self: &Arc<Self>, id: &str, opened: bool) -> Option<store::StoredMeta> {
         let edge = self.limits().send_max_edge;
         let fp = store::fingerprint(edge);
         if let Some(meta) = self.store.meta(id, &fp) {
             return Some(meta);
+        }
+        if !opened && self.store.is_unread(id) {
+            return None;
         }
         let (blob, kind) = self.store.find_blob(id)?;
         let _cpu = self.permits.clone().acquire_owned().await.ok()?;

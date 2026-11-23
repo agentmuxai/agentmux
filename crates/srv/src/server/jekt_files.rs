@@ -113,15 +113,7 @@ async fn prepare_for(req: &mut InjectionRequest, svc: Option<Arc<attachments::Se
     // the hash names the file, the size is part of what was signed. A file
     // from a sender that is not proven is only measured, never read.
     let derive = derives_on_receipt(req);
-    let mut present = Vec::with_capacity(count);
-    for f in &files {
-        let ok = if derive {
-            svc.ensure_derived(&f.sha256).await.is_some_and(|meta| meta.bytes == f.size)
-        } else {
-            svc.stored_len(&f.sha256) == Some(f.size)
-        };
-        present.push(ok);
-    }
+    let present = files_present(&svc, &files, derive).await;
     // Every name the sender controls is quoted before it is used, the stored
     // copy's name included, so neither a name nor the path it gives the copy
     // can close the jekt block or open a list.
@@ -181,6 +173,21 @@ async fn prepare_for(req: &mut InjectionRequest, svc: Option<Arc<attachments::Se
         inline_charge: None,
     });
     req.files_delivery = Some(delivery);
+}
+
+/// Whether each of `files` is in the store at the size the manifest says. With
+/// `derive`, anything stored under an older fingerprint is derived again; without
+/// it the file is only measured, never read.
+async fn files_present(svc: &Arc<attachments::Service>, files: &[jekt_files::JektFile], derive: bool) -> Vec<bool> {
+    let mut present = Vec::with_capacity(files.len());
+    for f in files {
+        present.push(if derive {
+            svc.open_derived(&f.sha256).await.is_some_and(|meta| meta.bytes == f.size)
+        } else {
+            svc.stored_len(&f.sha256) == Some(f.size)
+        });
+    }
+    present
 }
 
 /// What the agent gets when none of a jekt's files can be delivered: the reason, no list.
@@ -580,21 +587,7 @@ async fn receive<R: tokio::io::AsyncRead + Unpin>(
     }
 
     // A transfer that stalls gives its slot back: what arrived whole is kept.
-    let derive = derives_on_receipt(&req);
-    let read = async {
-        if withheld {
-            // Same machine, full key: read past the files unstored, so the
-            // sender gets this answer rather than a reset connection.
-            let total = files.iter().fold(0u64, |sum, f| sum.saturating_add(f.size));
-            let mut rest = tokio::io::AsyncReadExt::take(reader, total);
-            let _ = tokio::io::copy(&mut rest, &mut tokio::io::sink()).await;
-            Ok(())
-        } else if let Some(svc) = attachments::get() {
-            store_files(&svc, &files, reader, &tier, derive).await
-        } else {
-            Ok(())
-        }
-    };
+    let read = read_files(reader, &files, &tier, derives_on_receipt(&req), withheld);
     match tokio::time::timeout(TRANSFER_TIMEOUT, read).await {
         Err(_) => tracing::warn!(target = %target, "jekt files: transfer timed out"),
         Ok(Err(why)) => {
@@ -628,6 +621,29 @@ async fn receive<R: tokio::io::AsyncRead + Unpin>(
         obj.insert("files_delivered".into(), delivered.into());
     }
     value
+}
+
+/// Take the jekt's files off the body: into the store, or (`withheld`) read
+/// past unstored. `Err` says why the message is refused.
+async fn read_files<R: tokio::io::AsyncRead + Unpin>(
+    reader: &mut R,
+    files: &[jekt_files::JektFile],
+    tier: &str,
+    derive: bool,
+    withheld: bool,
+) -> Result<(), String> {
+    if withheld {
+        // Same machine, full key: read past the files unstored, so the
+        // sender gets this answer rather than a reset connection.
+        let total = files.iter().fold(0u64, |sum, f| sum.saturating_add(f.size));
+        let mut rest = tokio::io::AsyncReadExt::take(reader, total);
+        let _ = tokio::io::copy(&mut rest, &mut tokio::io::sink()).await;
+        return Ok(());
+    }
+    match attachments::get() {
+        Some(svc) => store_files(&svc, files, reader, tier, derive).await,
+        None => Ok(()),
+    }
 }
 
 /// A file in `incoming/` that is removed when dropped, unless taken.
@@ -1105,9 +1121,32 @@ mod tests {
         let listed = receiver.unread_target(&id, "notes.txt").unwrap();
         assert_eq!(std::fs::read(listed.path).unwrap(), NOTES, "the agent gets the bytes as they came");
 
-        // Opened: derived then.
-        assert!(receiver.ensure_derived(&id).await.is_some());
+        // Drawing its tile, or asking for its thumbnail, derives nothing: the tile is a type icon with the size.
+        assert!(receiver.ensure_derived(&id).await.is_none());
+        let shown = receiver.info(std::slice::from_ref(&id)).await;
+        assert_eq!((shown.len(), shown[0].kind.as_str(), shown[0].bytes), (1, "other", NOTES.len() as u64));
+        assert!(receiver.store().meta(&id, &fp).is_none(), "still nothing derived");
+
+        // Opened (sent by the person in a message of their own): derived then.
+        assert!(receiver.open_derived(&id).await.is_some());
         assert!(receiver.store().meta(&id, &fp).is_some());
+        assert!(!receiver.store().is_unread(&id));
+        assert!(receiver.ensure_derived(&id).await.is_some(), "and passive requests find it");
+    }
+
+    #[tokio::test]
+    async fn a_file_stored_unread_is_derived_when_a_proven_sender_sends_the_same_bytes() {
+        let d = tempfile::tempdir().unwrap();
+        let receiver = service(d.path());
+        let files = vec![manifest_entry("notes.txt", NOTES)];
+        store_files(&receiver, &files, &mut &NOTES[..], "channel", false).await.unwrap();
+        assert!(receiver.store().is_unread(&sha(NOTES)));
+        store_files(&receiver, &files, &mut &NOTES[..], "channel", true).await.unwrap();
+        let mut req = req_with(files.clone(), &jekt_files::bind_msgid("m", &files), "channel");
+        req.channel_verified = Some(true);
+        prepare_for(&mut req, Some(receiver.clone()), Destination::Host).await;
+        assert_eq!(req.files_delivery.unwrap().delivered, 1);
+        assert!(!receiver.store().is_unread(&sha(NOTES)), "derived for the proven sender");
     }
 
     #[tokio::test]

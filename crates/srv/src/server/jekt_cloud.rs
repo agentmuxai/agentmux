@@ -15,6 +15,7 @@
 //! (`GET /reactive/blob/:id`), decrypted and checked against its hash, then
 //! stored like any received file.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use agentmux_common::jekt_files::{self, CloudFile, JektFile};
@@ -301,20 +302,26 @@ pub(crate) async fn fetch(
             tracing::warn!(file = %f.file.name, "jekt cloud files: blob didn't decrypt to its file");
             continue;
         };
-        let tmp = svc.store().new_incoming_path();
-        let stored = if tokio::fs::write(&tmp, &plain).await.is_err() {
-            false
-        } else if derive {
-            svc.commit_upload(tmp.clone(), f.file.sha256.clone(), f.file.name.clone()).await.is_ok()
-        } else {
-            svc.store_undecoded(tmp.clone(), f.file.sha256.clone(), f.file.name.clone()).await.is_ok()
-        };
-        if !stored {
-            let _ = tokio::fs::remove_file(&tmp).await;
-            tracing::warn!(file = %f.file.name, "jekt cloud files: received file not stored");
-        }
+        store_fetched(&svc, &f.file, &plain, derive).await;
     }
     Ok(())
+}
+
+/// Put a fetched file's bytes in the store: derived on the way in when the
+/// sender is proven, else placed as they came.
+async fn store_fetched(svc: &Arc<attachments::Service>, f: &JektFile, plain: &[u8], derive: bool) {
+    let tmp = svc.store().new_incoming_path();
+    let stored = if tokio::fs::write(&tmp, plain).await.is_err() {
+        false
+    } else if derive {
+        svc.commit_upload(tmp.clone(), f.sha256.clone(), f.name.clone()).await.is_ok()
+    } else {
+        svc.store_undecoded(tmp.clone(), f.sha256.clone(), f.name.clone()).await.is_ok()
+    };
+    if !stored {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        tracing::warn!(file = %f.name, "jekt cloud files: received file not stored");
+    }
 }
 
 /// The key `f`'s blob opens with, using `agent_id`'s WAN key on this install

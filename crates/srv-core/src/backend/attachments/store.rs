@@ -572,6 +572,8 @@ impl Store {
         if let Some(existing) = self.existing_blob(id) {
             cleanup();
             let _ = set_mtime(&existing, filetime_now());
+            // The marker lives as long as the file does.
+            let _ = set_mtime(&self.unread_path(id), filetime_now());
             return Ok(());
         }
         let blob = self.blob_path(id, &undecoded_extension(name));
@@ -582,7 +584,32 @@ impl Store {
         placed.map_err(|e| {
             cleanup();
             io_error(e)
-        })
+        })?;
+        self.mark_unread(id);
+        Ok(())
+    }
+
+    fn unread_path(&self, id: &str) -> PathBuf {
+        self.root.join("unread").join(id)
+    }
+
+    /// Record that nothing has been derived from the original of `id` and
+    /// that passive requests (a pane drawing its tile) must not derive it.
+    fn mark_unread(&self, id: &str) {
+        let path = self.unread_path(id);
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(path, b"");
+    }
+
+    /// Whether `id` was stored without anything read from it and not opened since.
+    pub fn is_unread(&self, id: &str) -> bool {
+        is_valid_id(id) && self.unread_path(id).is_file()
+    }
+
+    fn clear_unread(&self, id: &str) {
+        let _ = std::fs::remove_file(self.unread_path(id));
     }
 
     /// The size of the stored original of `id`, if there is one. Reads nothing from it.
@@ -609,10 +636,12 @@ impl Store {
         name: &str,
         send_max_edge: u32,
     ) -> Result<StoredMeta, process::ProcessError> {
-        match kind {
+        let meta = match kind {
             FileKind::Image(format) => self.derive_image(id, blob, format, send_max_edge),
             _ => self.derive_file(id, blob, kind, name, send_max_edge),
-        }
+        }?;
+        self.clear_unread(id);
+        Ok(meta)
     }
 
     /// Decode a stored image and write its thumbnail, send-copy and
@@ -818,7 +847,7 @@ impl Store {
         let mut sent_cache: std::collections::HashMap<String, bool> =
             std::collections::HashMap::new();
         let mut removed = 0;
-        for sub in ["blobs", "derived", "incoming", "sessions", "named"] {
+        for sub in ["blobs", "derived", "incoming", "sessions", "named", "unread"] {
             let dir = self.root.join(sub);
             let Ok(entries) = walk_files(&dir) else {
                 continue;
@@ -1083,6 +1112,7 @@ mod tests {
         assert!(s.has_blob(&id) && s.blob_len(&id) == Some(bytes.len() as u64), "stored, sized from the file system");
         assert!(s.meta(&id, &fp).is_none(), "nothing derived");
         assert!(!tmp.exists(), "the incoming file moved");
+        assert!(s.is_unread(&id), "marked, so passive requests leave it alone");
         assert!(s.blob_path(&id, "docx").is_file(), "an extension a kind keeps stays");
         // The same bytes again are not stored twice.
         let (tmp2, id2, _) = s.copy_in(&src, |_| true).unwrap();
@@ -1097,6 +1127,7 @@ mod tests {
         assert!(s.meta(&id3, &fp).is_none());
         assert!(s.ensure_derived(&id3, 2000).is_some());
         assert!(s.meta(&id3, &fp).is_some());
+        assert!(!s.is_unread(&id3), "derived: no longer unread");
     }
 
     #[test]

@@ -183,7 +183,7 @@ The list comes from the same code as user attachments (`backend/attachments/prom
 
 Names are reduced by `safe_file_name` and stored under `named/<sha256>/`. Kind and MIME are sniffed from the content; nothing from the sender decides them. Nothing received is ever executed or opened automatically; executables and archives are stored and listed like any other file.
 
-A file from a sender that is not proven for the message (any trust but `host-verified`, `channel-verified`, `lan-verified`, or `wan-verified` with an `approved` instance) is stored as it came and listed with a note that it was not opened. No type check, preview, text version or other derived copy is made of it on receipt or on delivery; that is made when the receiving agent or person opens it.
+A file from a sender that is not proven for the message (any trust but `host-verified`, `channel-verified`, `lan-verified`, or `wan-verified` with an `approved` instance) is stored as it came and listed with a note that it was not opened. No type check, preview, text version or other derived copy is made of it on receipt or on delivery; that is made when the receiving person includes the file in a message of their own. Showing the message or its tile, and a request for a thumbnail, make nothing: the tile shows the file's size and a type icon.
 
 A sender's message text can't produce a file list: `<attached_files>` and `</attached_files>` in it are neutralised like marker text is, and the pane reads chips from a jekt only when its marker has `FILES=`.
 

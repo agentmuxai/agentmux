@@ -260,7 +260,6 @@
 147 crates/srv/src/server/http_shell.rs::try_attach_to_existing_shell
 146 crates/srv/src/server/http_viewer.rs::feed_stream
 133 crates/srv/src/server/http_viewer_input.rs::handle_viewer_input
-102 crates/srv/src/server/jekt_files.rs::receive
 104 crates/srv/src/server/jekt_hold.rs::hold_with_reason
 124 crates/srv/src/server/muxspect_handlers.rs::handle_muxspect_conversations
 118 crates/srv/src/server/muxspect_handlers.rs::handle_muxspect_find
