@@ -96,6 +96,8 @@ impl Screen {
         if (bw, bh) != from {
             self.set_screen(bw, bh)?;
         }
+        // Adding a mode and changing the screen's size can advance the screen's configuration time, which the change below must quote: ask for it now.
+        let res = self.conn.randr_get_screen_resources_current(self.root).map_err(|e| x(&e))?.reply().map_err(|e| x(&e))?;
         let set = self.conn.randr_set_crtc_config(crtc, CURRENT_TIME, res.config_timestamp, 0, 0, mode, Rotation::ROTATE0, &[output]).map_err(|e| x(&e))?.reply().map_err(|e| x(&e))?;
         if set.status != SetConfig::SUCCESS {
             return Err(format!("the screen could not be resized: the output refused the mode ({:?})", set.status));
