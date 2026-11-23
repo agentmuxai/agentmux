@@ -950,6 +950,10 @@ pub struct CommandPaneOpenData {
     #[serde(skip)]
     #[ts(skip)]
     pub floater_max_share: Option<f64>,
+    /// The `spot` is srv's default, not the agent's: such an open still cascades.
+    #[serde(skip)]
+    #[ts(skip)]
+    pub floater_default_place: bool,
 }
 
 /// Response from pane.open.
@@ -1339,6 +1343,7 @@ mod app_api_manifest_contract_tests {
             y: None,
             opener: None,
             floater_max_share: None,
+            floater_default_place: false,
             connection: None,
             auth: None,
         };

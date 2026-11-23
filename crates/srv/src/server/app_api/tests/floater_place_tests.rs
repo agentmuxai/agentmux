@@ -78,11 +78,32 @@ fn a_browser_keeps_what_the_agent_gave() {
 
 #[test]
 fn the_event_asks_for_an_inactive_window_and_caps_the_cascade() {
-    let cmd = CommandPaneOpenData { width: Some(json!(700)), x: Some(1.0), y: Some(2.0), ..floating() };
+    let cmd = CommandPaneOpenData { width: Some(json!(700)), ..floating() };
     let place = place_for(&cmd, "r1".into(), 9, Some(0.9));
-    assert_eq!((place.request_id.as_str(), place.x, place.y, place.max_share), ("r1", Some(1.0), Some(2.0), Some(0.9)));
+    assert_eq!((place.request_id.as_str(), place.width.clone(), place.max_share), ("r1", Some(json!(700)), Some(0.9)));
     assert!(!place.activate, "an agent's window never takes the foreground");
     assert_eq!(place.cascade as usize, MAX_FLOATERS);
+}
+
+#[test]
+fn a_place_the_agent_named_is_not_stepped_over() {
+    for named in [
+        CommandPaneOpenData { spot: Some("bottom-right".into()), ..floating() },
+        CommandPaneOpenData { x: Some(1.0), y: Some(2.0), ..floating() },
+    ] {
+        assert_eq!(place_for(&named, "r".into(), 3, None).cascade, 0, "{named:?}");
+    }
+}
+
+#[test]
+fn a_browser_with_no_place_of_its_own_still_steps() {
+    let mut cmd = CommandPaneOpenData { view: "browser".into(), ..floating() };
+    browser_defaults(&mut cmd);
+    assert_eq!(cmd.spot.as_deref(), Some("right"));
+    assert_eq!(place_for(&cmd, "r".into(), 2, None).cascade, 2, "the default spot is srv's, so the window steps");
+    let mut named = CommandPaneOpenData { view: "browser".into(), spot: Some("left".into()), ..floating() };
+    browser_defaults(&mut named);
+    assert_eq!(place_for(&named, "r".into(), 2, None).cascade, 0, "a spot the agent named is kept as it is");
 }
 
 #[tokio::test]

@@ -93,6 +93,7 @@ pub(crate) fn browser_defaults(cmd: &mut CommandPaneOpenData) -> Option<f64> {
     }
     if cmd.spot.is_none() && cmd.x.is_none() {
         cmd.spot = Some(BROWSER_SPOT.to_string());
+        cmd.floater_default_place = true;
     }
     (!sized).then_some(BROWSER_MAX_SHARE)
 }
@@ -129,7 +130,7 @@ pub(crate) fn open_answer(result: &crate::backend::rpc_types::PaneOpenResult, br
 }
 
 /// The event's `place` for `cmd`, with the id the window answers with. `cascade` is how many floating panes the
-/// agent already has open.
+/// agent already has open; it steps a window only when the agent named no place.
 pub(crate) fn place_for(cmd: &CommandPaneOpenData, request_id: String, cascade: usize, max_share: Option<f64>) -> FloaterPlace {
     FloaterPlace {
         request_id,
@@ -139,7 +140,8 @@ pub(crate) fn place_for(cmd: &CommandPaneOpenData, request_id: String, cascade: 
         x: cmd.x,
         y: cmd.y,
         max_share,
-        cascade: cascade.min(MAX_FLOATERS) as u32,
+        // A place the agent named is where it goes: only a window with no say in its place steps over.
+        cascade: if (cmd.spot.is_some() || cmd.x.is_some()) && !cmd.floater_default_place { 0 } else { cascade.min(MAX_FLOATERS) as u32 },
         activate: false,
     }
 }
