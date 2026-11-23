@@ -167,6 +167,7 @@ impl Folder {
             ("remote.viaext.url", format!("ext::sh {} ext %S", slashes(&script))),
             ("remote.viassh.url", "ssh://127.0.0.1:1/x".to_string()),
             ("remote.viagit.url", "git://127.0.0.1:9/x".to_string()),
+            ("remotes.grp", "viaup".to_string()),
             ("remote.viaup.url", slashes(&remote)),
             ("remote.viaup.uploadpack", mark("uploadpack")),
             ("remote.viaup.receivepack", mark("receivepack")),
@@ -360,13 +361,15 @@ fn the_function_keeps_the_folders_diff_programs_from_running_and_leaves_git_s_ow
     let repo = folder.repo();
     let script = folder.dir.path().join("mark.sh");
     std::fs::write(repo.join("b.txt"), "x\n").unwrap();
-    std::fs::write(repo.join(".gitattributes"), "a.txt diff=drvcmd\nb.txt diff=drvtext\n").unwrap();
+    std::fs::write(repo.join(".gitattributes"), "a.txt diff=drvcmd\nb.txt diff=drvtext\nc.txt filter=fx\n").unwrap();
+    std::fs::write(repo.join("c.txt"), "c\n").unwrap();
     std::fs::write(repo.join("w.txt"), "a\nb\nc\nd\ne\n").unwrap();
     folder.git(&["add", "."], &HashMap::new());
     folder.git(&["commit", "-q", "-m", "more"], &HashMap::new());
     std::fs::write(repo.join("b.txt"), "mid\n").unwrap();
     folder.git(&["commit", "-q", "-a", "-m", "again"], &HashMap::new());
     std::fs::write(repo.join("a.txt"), "two\n").unwrap();
+    std::fs::write(repo.join("c.txt"), "cc\n").unwrap();
     std::fs::write(repo.join("b.txt"), "y\n").unwrap();
     std::fs::write(repo.join("w.txt"), "a\nb\nc \nd\nE\n").unwrap();
     let commands = [
@@ -381,9 +384,10 @@ fn the_function_keeps_the_folders_diff_programs_from_running_and_leaves_git_s_ow
         "git blame b.txt",
         "git reflog -p",
         "git range-diff HEAD~2..HEAD~1 HEAD~1..HEAD",
+        "git status",
     ];
     for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
-        for (key, name) in [("diff.external", "diffext"), ("diff.drvcmd.command", "drvcmd"), ("diff.drvtext.textconv", "drvtext")] {
+        for (key, name) in [("diff.external", "diffext"), ("diff.drvcmd.command", "drvcmd"), ("diff.drvtext.textconv", "drvtext"), ("filter.fx.clean", "filterclean"), ("filter.fx.process", "filterprocess")] {
             folder.git(&["config", key, &format!("sh {} {name}", slashes(&script))], &HashMap::new());
             folder.forget();
             through_the_function(&folder, body, false, "git diff");
@@ -508,7 +512,7 @@ fn the_function_keeps_a_pager_the_folder_names_from_running_on_a_terminal() {
 fn the_function_keeps_a_remotes_upload_and_receive_programs_from_running() {
     let folder = Folder::new();
     let commands = ["git fetch viaup", "git ls-remote viaup", "git pull viaup HEAD", "git push viaup HEAD:refs/heads/x"];
-    let remote_commands = ["git remote update viaup", "git remote show viaup", "git remote prune viaup"];
+    let remote_commands = ["git remote update viaup", "git remote show viaup", "git remote prune viaup", "git remote -v update", "git remote set-head viaup -a", "git remote add -f other ../remote.git", "git fetch --all", "git fetch --multiple viaup", "git pull --all", "git fetch grp"];
     for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
         folder.forget();
         for command in commands {
