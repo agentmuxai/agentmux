@@ -64,6 +64,46 @@ describe("SharedFolderPanel", () => {
         }
     });
 
+    it("looks again when the panel, what is around it or the list changes size, with no change to the tree", () => {
+        const watching: Element[] = [];
+        let again: () => void = () => {};
+        let disconnected = 0;
+        vi.stubGlobal(
+            "ResizeObserver",
+            class {
+                constructor(callback: () => void) {
+                    again = callback;
+                }
+                observe(target: Element) {
+                    watching.push(target);
+                }
+                disconnect() {
+                    disconnected++;
+                }
+            }
+        );
+        const scroll = vi.fn();
+        const had = Element.prototype.scrollIntoView;
+        Element.prototype.scrollIntoView = scroll as never;
+        try {
+            const list = document.createElement("div");
+            list.style.overflowY = "auto";
+            document.body.append(list);
+            render(() => <SharedFolderPanel hostName="Korp" overlaps={[pair("Aria")]} busy={false} onGoAhead={vi.fn()} onKeepApart={vi.fn()} />, { container: list.appendChild(document.createElement("div")) });
+            const panel = screen.getByTestId("shared-folder-panel");
+            expect(watching).toEqual([panel, panel.parentElement, list]);
+            expect(scroll).toHaveBeenCalledTimes(1);
+            again();
+            expect(scroll).toHaveBeenCalledTimes(2);
+            fireEvent.wheel(document);
+            expect(disconnected).toBe(1);
+        } finally {
+            Element.prototype.scrollIntoView = had;
+            vi.unstubAllGlobals();
+            document.body.replaceChildren();
+        }
+    });
+
     it("stops looking after ten seconds when the person does nothing", async () => {
         vi.useFakeTimers();
         const scroll = vi.fn();
