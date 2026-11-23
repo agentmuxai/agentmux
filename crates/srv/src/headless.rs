@@ -302,7 +302,7 @@ fn normalize_origin(origin: &str) -> Result<String, String> {
     if !only_origin || origin.contains(['?', '#', '@']) {
         return Err(SHAPE.into());
     }
-    Ok(url.origin().ascii_serialization())
+    agentmux_common::url_guard::origin_string(&url).ok_or_else(|| SHAPE.to_string())
 }
 
 /// Where this user's headless srv keeps its generated key: `<data dir>/srv-auth-key`, with the
@@ -533,6 +533,15 @@ mod tests {
         let client = tokio::net::TcpStream::connect(addr).await.unwrap();
         let (_server_side, _) = held.accept().await.unwrap();
         drop(client);
+    }
+
+    #[test]
+    fn an_origin_must_be_a_plain_http_or_https_one() {
+        assert_eq!(normalize_origin("HTTPS://Example.com:443/").unwrap(), "https://example.com");
+        let deep = format!("{}https://example.com/", "blob:".repeat(50_000));
+        for bad in ["blob:https://example.com/", "blob:blob:https://example.com/", deep.as_str()] {
+            assert!(normalize_origin(bad).is_err(), "{}", &bad[..bad.len().min(40)]);
+        }
     }
 
     #[test]

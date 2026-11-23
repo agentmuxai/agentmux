@@ -101,7 +101,7 @@ pub(crate) fn pane_origins(auth_url: &str) -> Vec<String> {
     let mut out: Vec<String> = GOOGLE_ORIGINS.iter().map(|s| s.to_string()).collect();
     if let Ok(url) = url::Url::parse(auth_url) {
         let redirect = url.query_pairs().find(|(k, _)| k == "redirect_uri").map(|(_, v)| v.into_owned());
-        if let Some(origin) = redirect.and_then(|r| url::Url::parse(&r).ok()).map(|r| r.origin().ascii_serialization()) {
+        if let Some(origin) = redirect.and_then(|r| url::Url::parse(&r).ok()).and_then(|r| agentmux_common::url_guard::origin_string(&r)) {
             out.push(origin);
         }
     }
