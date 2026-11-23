@@ -113,7 +113,7 @@ ring = { version = "0.17", default-features = false, features = ["alloc"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 # The screen-mode Browser pane (streamed_browser/screen): reads the pixels of a virtual X screen and sends pointer and key events to it.
 # Pure Rust (no libxcb); already in the lock for other crates.
-x11rb = { version = "0.13", features = ["xtest", "damage"] }
+x11rb = { version = "0.13", features = ["xtest", "damage", "randr"] }
 
 [target.'cfg(windows)'.dependencies]
 # Out-of-process crash dump capture via VEH + named-pipe IPC.

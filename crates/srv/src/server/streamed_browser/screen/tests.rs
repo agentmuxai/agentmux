@@ -32,7 +32,7 @@ const PAGE: &str = "data:text/html,<html style=\"height:100%25\"><body style=\"h
 
 /// The colour (blue, green, red) of the pixel at (x, y) of a grabbed screen.
 fn pixel(screen: &x::Screen, bgrx: &[u8], x: usize, y: usize) -> [u8; 3] {
-    let i = (y * usize::from(screen.w) + x) * 4;
+    let i = (y * usize::from(screen.size().0) + x) * 4;
     [bgrx[i], bgrx[i + 1], bgrx[i + 2]]
 }
 
@@ -71,7 +71,7 @@ async fn screen_mode_real() {
     }
     let session = session::start(800, 600, PAGE, true).await.expect("the screen and the browser start");
     let screen = x::Screen::connect(&session.display).expect("the screen is reachable");
-    assert_eq!((screen.w, screen.h), (800, 600));
+    assert_eq!(screen.size(), (800, 600));
     // Under the browser's own tab strip and address bar: the page.
     let (px, py) = (400, 400);
     wait_for_colour(&screen, px, py, [0, 0, 255], 30).await.expect("the page is red: the browser does not say it is remote-controlled");
@@ -152,6 +152,34 @@ async fn screen_mode_copy_real() {
 
 fn click_at(kind: MouseKind) -> ClientMsg {
     ClientMsg::Mouse { kind, x: 400.0, y: 400.0, button: Button::Left, buttons: 1, clicks: 1, mods: 0 }
+}
+
+/// A page that is blue everywhere, so a screen that is bigger than the browser's window shows where the window ends.
+const BLUE_PAGE: &str = "data:text/html,<html style=\"height:100%25\"><body style=\"height:100%25;margin:0;background:blue\"></body></html>";
+
+/// The screen follows the size it is asked for, bigger and smaller, and the browser's maximised window follows the screen: the corner is still
+/// the page's. Run with the same command as `screen_mode_real`, by name `screen_mode_resize_real`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "needs Xvfb, openbox and a Chrome; run by hand on a Linux host"]
+async fn screen_mode_resize_real() {
+    if which::which("Xvfb").is_err() || which::which("openbox").is_err() || chromium_missing() {
+        eprintln!("screen_mode_resize_real: no Xvfb, openbox or Chrome here; nothing run");
+        return;
+    }
+    let session = session::start(800, 600, BLUE_PAGE, true).await.expect("the screen and the browser start");
+    let screen = x::Screen::connect(&session.display).expect("the screen is reachable");
+    assert_eq!(screen.size(), (800, 600), "the screen is the size the pane asked for");
+    wait_for_colour(&screen, 790, 590, [255, 0, 0], 30).await.expect("the page is up (blue)");
+    for (w, h) in [(1024u16, 700u16), (640, 480), (1200, 800), (800, 600)] {
+        screen.resize(w, h).unwrap_or_else(|e| panic!("resize to {w}x{h}: {e}"));
+        assert_eq!(screen.size(), (w, h));
+        assert_eq!(screen.grab().expect("the screen is read").len(), usize::from(w) * usize::from(h) * 4);
+        wait_for_colour(&screen, usize::from(w) - 10, usize::from(h) - 10, [255, 0, 0], 10).await.unwrap_or_else(|e| panic!("the window did not follow the screen to {w}x{h}: {e}"));
+    }
+    // A size that is too small or too large is cut, and the same size twice does nothing.
+    screen.resize(10, 10).unwrap();
+    assert_eq!(screen.size(), (randr::MIN_SIDE, randr::MIN_SIDE));
+    screen.resize(randr::MIN_SIDE, randr::MIN_SIDE).unwrap();
 }
 
 fn chromium_missing() -> bool {
