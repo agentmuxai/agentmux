@@ -86,8 +86,12 @@ impl Asks {
             return Asked::Declined { retry_after_ms: QUIET_MS.saturating_sub(now_ms.saturating_sub(*at)) };
         }
         if let Some(kept) = state.open.iter_mut().find(|k| same_pair(k, &ask.host_id, &ask.container_id)) {
-            kept.agent = ask.agent;
-            kept.block_id = ask.block_id;
+            // An ask restart resume made stays where it is, in the stopped agent's block, until the person answers; the
+            // asks of agents move to the newest asker's pane.
+            if !kept.agent.is_empty() && !ask.agent.is_empty() {
+                kept.agent = ask.agent;
+                kept.block_id = ask.block_id;
+            }
             return Asked::Waiting { ask: kept.clone(), new: false };
         }
         if state.open.iter().filter(|kept| !kept.agent.is_empty()).count() >= MAX_OPEN {
@@ -159,6 +163,16 @@ mod tests {
         assert!(asks.list(100).is_empty());
         assert_eq!(asks.ask(ask("h", "c", "Lead", "b1", 200), 200), Asked::Declined { retry_after_ms: QUIET_MS - 100 });
         assert!(matches!(asks.ask(ask("h", "c", "Lead", "b1", 100 + QUIET_MS), 100 + QUIET_MS), Asked::Waiting { .. }));
+    }
+
+    #[test]
+    fn an_agents_ask_for_a_pair_restart_resume_is_waiting_on_leaves_that_ask_where_it_is() {
+        let asks = Asks::default();
+        asks.ask(ask("h", "c", "", "parked-block", 0), 0);
+        let Asked::Waiting { ask: kept, new } = asks.ask(ask("h", "c", "Lead", "lead-pane", 10), 10) else { panic!("asked") };
+        assert!(!new);
+        assert_eq!((kept.agent.as_str(), kept.block_id.as_str(), kept.requested_ms), ("", "parked-block", 0));
+        assert_eq!(asks.list(OPEN_MS + 1_000).len(), 1, "and it still does not end with the hour");
     }
 
     #[test]

@@ -473,5 +473,8 @@ async fn a_host_agent_in_a_shared_folder_is_left_stopped_and_the_person_and_its_
     overlap::accept(&host_id, &container_id).unwrap();
     assert_eq!(crate::server::agent_lifecycle::start_blocked(&state, &host_id), None, "after the go-ahead nothing waits");
     crate::backend::folder_overlap_asks::asks().answer(&host_id, &container_id, true, agentmux_common::time::now_ms_u64());
+    resume_after_go_ahead(&state, &host_id, &blocked).await;
+    assert!(blockcontroller::get_controller(&blocked).is_some(), "the person's go-ahead brought it back");
+    blockcontroller::delete_controller(&blocked);
     blockcontroller::delete_controller(&free);
 }

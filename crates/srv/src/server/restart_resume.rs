@@ -343,6 +343,19 @@ fn candidates_with(state: &AppState, running_at_exit: &HashSet<String>) -> Vec<C
     found
 }
 
+/// The person went ahead with every pair that held parked agent `uid` (its block `block_id`) stopped at restart: it
+/// comes back as restart resume would have started it, unless something started or stopped it since.
+pub(crate) async fn resume_after_go_ahead(state: &AppState, uid: &str, block_id: &str) {
+    let c = Candidate { uid: uid.to_string(), block_id: block_id.to_string(), last_active_ms: 0, was_running: true };
+    if !still_wanted(state, &c) {
+        return;
+    }
+    match super::app_api::agent_attach::start_agent_without_eviction(state, uid).await {
+        Ok(_) => tracing::info!(agent = %uid, "restart resume: started after the person's go-ahead"),
+        Err(e) => tracing::warn!(agent = %uid, "restart resume: could not start it after the person's go-ahead: {e}"),
+    }
+}
+
 /// Resume the agents [`candidates`] names. Returns how many started.
 #[cfg(test)]
 pub(crate) async fn run_once(state: &AppState) -> usize {
