@@ -321,7 +321,13 @@ pub(crate) async fn open_agent_impl(
     state: &AppState,
     cmd: CommandAgentOpenData,
 ) -> Result<AgentOpenResult, String> {
-    open_agent_inner(state, cmd, None, MetaMapType::new()).await
+    let into_block = cmd.into_block_id.clone();
+    let mut cmd = cmd;
+    if let (None, Some(block)) = (&cmd.tab_id, &into_block) {
+        // The pane's own tab: where the window asks the person is not always the one srv has as active.
+        cmd.tab_id = resolve_tab_id_for_block(&state.mstore, block).ok();
+    }
+    open_agent_inner(state, cmd, into_block.as_deref(), MetaMapType::new()).await
 }
 
 /// `agent.open`, but launching into an existing, empty agent pane
@@ -346,6 +352,7 @@ pub(crate) async fn open_agent_into_block(
             split_direction: None,
             split_reference_block_id: None,
             focus: Some(false),
+            into_block_id: None,
         },
         Some(block_id),
         MetaMapType::new(),

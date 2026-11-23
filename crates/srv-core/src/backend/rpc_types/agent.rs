@@ -21,6 +21,10 @@ pub struct CommandAgentOpenData {
     pub split_reference_block_id: Option<String>,
     #[ts(optional)]
     pub focus: Option<bool>,
+    /// Open the agent into this empty agent pane of the tab (the picker, or a layout's placeholder) instead of
+    /// making a new pane: where the window retries an open that asked the person first.
+    #[ts(optional)]
+    pub into_block_id: Option<String>,
 }
 
 /// Request for agent.send — send a message to an agent pane.

@@ -353,6 +353,7 @@ async fn start_admitted(state: &AppState, agent_id: &str) -> Result<String, Stri
             split_direction: None,
             split_reference_block_id: None,
             focus: Some(false),
+            into_block_id: None,
         },
         None,
         marker,

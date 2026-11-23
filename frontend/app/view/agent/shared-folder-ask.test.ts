@@ -6,12 +6,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/store/rpc-api", () => ({
-    RpcApi: { FolderOverlapCheckCommand: vi.fn(), FolderOverlapAcceptCommand: vi.fn() },
+    RpcApi: { FolderOverlapCheckCommand: vi.fn(), FolderOverlapAcceptCommand: vi.fn(), AgentOpenCommand: vi.fn() },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+vi.mock("@/app/store/block-meta", () => ({ setBlockMeta: vi.fn(async () => {}) }));
 
+import { setBlockMeta } from "@/app/store/block-meta";
 import { RpcApi } from "@/app/store/rpc-api";
-import { goAheadWithSharedFolder, sharedFolderOverlaps } from "./shared-folder-ask";
+import { dropAskedOpen, goAheadWithSharedFolder, isSharedFolderRefusal, openIntoPane, sharedFolderOverlaps } from "./shared-folder-ask";
 
 const pair = (container: string) => ({ host_id: "h-1", host_name: "Korp", container_id: container, container_name: container });
 
@@ -54,5 +56,24 @@ describe("goAheadWithSharedFolder", () => {
         vi.mocked(RpcApi.FolderOverlapAcceptCommand).mockRejectedValue(new Error("only the person"));
         await expect(goAheadWithSharedFolder([pair("c-1"), pair("c-2")])).rejects.toThrow("only the person");
         expect(RpcApi.FolderOverlapAcceptCommand).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("a pane that srv held an open for", () => {
+    it("knows the refusal by its word, wherever the message starts", () => {
+        expect(isSharedFolderRefusal("SHARED_FOLDER: Korp (host) and Aria (container) share a folder")).toBe(true);
+        expect(isSharedFolderRefusal("agent.open: SHARED_FOLDER: Korp (host) and Aria (container) share a folder")).toBe(true);
+        expect(isSharedFolderRefusal("AGENT_LIVE_ELSEWHERE: it runs in another AgentMux")).toBe(false);
+    });
+
+    it("opens the agent into itself once the person has gone ahead", async () => {
+        vi.mocked(RpcApi.AgentOpenCommand).mockResolvedValue({} as any);
+        await openIntoPane("h-1", "pane-1");
+        expect(RpcApi.AgentOpenCommand).toHaveBeenCalledWith(expect.anything(), { agent_id: "h-1", into_block_id: "pane-1", focus: true });
+    });
+
+    it("stops being a pane that waits when the person does not open it", async () => {
+        await dropAskedOpen("pane-1");
+        expect(setBlockMeta).toHaveBeenCalledWith("pane-1", { "layout:agent": null });
     });
 });

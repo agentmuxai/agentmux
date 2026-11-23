@@ -245,6 +245,7 @@ mod quiet_open_tests {
                 split_direction: None,
                 split_reference_block_id: None,
                 focus: sent,
+                into_block_id: None,
             };
             quiet_agent_open(&mut agent, true);
             assert_eq!(agent.focus, Some(false), "agent.open {sent:?}");

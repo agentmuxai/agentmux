@@ -44,6 +44,10 @@ pub(super) async fn admit_open(state: &AppState, agent: &AgentDefinition) -> Res
     // before any spawn, so its block resolves to it. Templates
     // were refused above.
     require_local_agent_row(&mstore, &agent.id)?;
+
+    // A host agent in a folder a container agent can write opens once the person has gone ahead with that pair
+    // (the window asks them, then opens it again).
+    crate::backend::folder_overlap::check_open(mstore, agent)?;
     Ok(())
 }
 

@@ -201,7 +201,7 @@ pub(super) async fn layout_open_impl(
                     notes.push(format!("{who} is already open in {at}, so its pane there was kept and this pane shows the agent picker."));
                 }
                 Ok(_) => {}
-                Err(e) => notes.push(format!("An agent ({who}) didn't start, so its pane shows the agent picker: {e}")),
+                Err(e) => notes.push(not_started_note(&who, &e)),
             }
         }
     }
@@ -211,6 +211,14 @@ pub(super) async fn layout_open_impl(
     let _ = tokio::task::spawn_blocking(move || super::agent_reconcile::reconcile_duplicate_panes(&reconcile_state)).await;
 
     Ok(LayoutOpenResult { workspace_id: ws_id, tab_ids, notes })
+}
+
+/// What `layout.open` says of an agent that did not start. One held for a shared folder is not an error: its pane asks.
+pub(super) fn not_started_note(who: &str, error: &str) -> String {
+    if error.starts_with(crate::backend::folder_overlap::OPEN_REFUSAL_CODE) {
+        return format!("{who} works in a folder a container agent can write, so its pane asks you before it opens.");
+    }
+    format!("An agent ({who}) didn't start, so its pane shows the agent picker: {error}")
 }
 
 /// A workspace with no tabs yet, for "Open in a new window": unlike

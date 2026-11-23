@@ -57,6 +57,17 @@ vi.mock("@/app/util/reveal-block", () => ({
     loadObject: async (_t: string, id: string) => (tabs.has(id) ? { oid: id } : null),
 }));
 
+vi.mock("@/app/view/agent/shared-folder-ask", () => ({
+    OPEN_ASK_META: "layout:agent",
+    isSharedFolderRefusal: (message: string) => message.includes("SHARED_FOLDER: "),
+}));
+let paneResult: () => Promise<string> = async () => "pane-1";
+const createBlock = vi.fn(async (_def: unknown) => {
+    order.push("pane");
+    return paneResult();
+});
+vi.mock("@/app/store/block-layout-actions", () => ({ createBlock: (def: unknown) => createBlock(def) }));
+
 import { openAgentInActiveTab, sharedAgentRuntime } from "./agent-runtime-live";
 
 const row = (over: Partial<(typeof runtimeRows)[number]> = {}) => ({
@@ -81,6 +92,8 @@ describe("openAgentInActiveTab", () => {
         revealResult = { ok: true };
         runtimeRows = [];
         openResult = async () => ({ block_id: "b1" });
+        paneResult = async () => "pane-1";
+        createBlock.mockClear();
     });
 
     it("notes the open for the agent before it asks srv, since the pane can mount before the answer", async () => {
@@ -95,6 +108,38 @@ describe("openAgentInActiveTab", () => {
         const why = await openAgentInActiveTab({ agent_id: "a1", name: "Ada" });
         expect(why).toBe("open in another pane");
         expect(order[0]).toBe("note:a1");
+    });
+
+    describe("when srv holds the open for a shared folder", () => {
+        const held = "SHARED_FOLDER: Ada (host) and Aria (container) share a folder";
+
+        beforeEach(() => {
+            openResult = async () => {
+                throw new Error(held);
+            };
+        });
+
+        it("asks the person in an agent pane that carries the agent, and says nothing went wrong", async () => {
+            const why = await openAgentInActiveTab({ agent_id: "a1", name: "Ada" });
+            expect(why).toBeUndefined();
+            expect(createBlock).toHaveBeenCalledWith({ meta: { view: "agent", agentName: "Ada", "layout:agent": "a1" } });
+            expect(pushNotification).not.toHaveBeenCalled();
+        });
+
+        it("says why when the pane can't be made", async () => {
+            paneResult = async () => {
+                throw new Error("no tab");
+            };
+            expect(await openAgentInActiveTab({ agent_id: "a1", name: "Ada" })).toBe(held);
+        });
+
+        it("makes no pane for any other refusal", async () => {
+            openResult = async () => {
+                throw new Error("AGENT_LIVE_ELSEWHERE: it runs in another AgentMux");
+            };
+            expect(await openAgentInActiveTab({ agent_id: "a1", name: "Ada" })).toBe("AGENT_LIVE_ELSEWHERE: it runs in another AgentMux");
+            expect(createBlock).not.toHaveBeenCalled();
+        });
     });
 
     describe("a parked agent", () => {

@@ -53,6 +53,11 @@ vi.mock("@/app/store/rpc-api", () => {
         ListBundlesCommand: vi.fn().mockResolvedValue([]),
         // Fork flow (#2721 Phase 1 — continueSessionId/forkSession wiring).
         ForkAgentDefinitionCommand: vi.fn(),
+        // A pane that srv held an open for (a shared folder) asks, then opens the agent into itself.
+        FolderOverlapCheckCommand: vi.fn().mockResolvedValue({ overlaps: [] }),
+        FolderOverlapAcceptCommand: vi.fn().mockResolvedValue({ chosen: true }),
+        AgentOpenCommand: vi.fn().mockResolvedValue({}),
+        SetMetaCommand: vi.fn().mockResolvedValue(undefined),
     };
     return { RpcApi };
 });
@@ -1010,5 +1015,50 @@ describe("AgentPicker — agents:changed refetch", () => {
         render(() => <AgentPicker model={pickerModel()} />);
         await screen.findByTestId("agent-card-tpl-claude");
         expect(screen.getByTestId("agent-card-tpl-claude").getAttribute("data-block-id")).toBe("blk-1");
+    });
+});
+
+describe("AgentPicker — a pane that srv held an open for", () => {
+    const hosty = baseDef({ id: "user-hosty", slug: "hosty", name: "Hosty", is_seeded: 0, working_directory: "/w/shared/work" });
+    const pair = { host_id: "user-hosty", host_name: "Hosty", container_id: "user-aria", container_name: "Aria" };
+    const askingModel = () => ({ ...makeMockModel(), blockAtom: () => ({ meta: { "layout:agent": "user-hosty" } }) });
+
+    beforeEach(() => {
+        vi.mocked(RpcApi.ListAgentDefinitionsCommand).mockResolvedValue([claudeTemplate, hosty]);
+        vi.mocked(RpcApi.FolderOverlapCheckCommand).mockResolvedValue({ overlaps: [pair] } as any);
+    });
+
+    it("asks the person in place, naming both agents", async () => {
+        render(() => <AgentPicker model={askingModel() as any} />);
+        const panel = await screen.findByTestId("shared-folder-panel");
+        expect(panel.textContent).toContain("Hosty");
+        expect(panel.textContent).toContain("Aria");
+        expect(RpcApi.FolderOverlapCheckCommand).toHaveBeenCalledWith(expect.anything(), { agent_id: "user-hosty", folder: "/w/shared/work" });
+    });
+
+    it("opens the agent into this pane once the person has gone ahead, and launches nothing else", async () => {
+        const model = askingModel();
+        render(() => <AgentPicker model={model as any} />);
+        fireEvent.click(await screen.findByTestId("shared-folder-go-ahead"));
+        await waitFor(() =>
+            expect(RpcApi.AgentOpenCommand).toHaveBeenCalledWith(expect.anything(), { agent_id: "user-hosty", into_block_id: "blk-1", focus: true })
+        );
+        expect(RpcApi.FolderOverlapAcceptCommand).toHaveBeenCalledWith(expect.anything(), { host_id: "user-hosty", container_id: "user-aria" });
+        expect(model.launchAgentDefinition).not.toHaveBeenCalled();
+    });
+
+    it("is an ordinary picker again when the person does not open it", async () => {
+        render(() => <AgentPicker model={askingModel() as any} />);
+        fireEvent.click(await screen.findByTestId("shared-folder-cancel"));
+        await waitFor(() => expect(screen.queryByTestId("shared-folder-panel")).toBeNull());
+        expect(RpcApi.SetMetaCommand).toHaveBeenCalledWith(expect.anything(), { oref: "block:blk-1", meta: { "layout:agent": null } });
+        expect(RpcApi.AgentOpenCommand).not.toHaveBeenCalled();
+    });
+
+    it("asks nothing when the agent shares no folder, so the open that srv is making goes on", async () => {
+        vi.mocked(RpcApi.FolderOverlapCheckCommand).mockResolvedValue({ overlaps: [] } as any);
+        render(() => <AgentPicker model={askingModel() as any} />);
+        await waitFor(() => expect(RpcApi.FolderOverlapCheckCommand).toHaveBeenCalled());
+        expect(screen.queryByTestId("shared-folder-panel")).toBeNull();
     });
 });
