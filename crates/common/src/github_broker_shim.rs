@@ -75,11 +75,14 @@ pub const GIT_FUNCTION_NAME: &str = "BASH_FUNC_git%%";
 /// host agent in a folder a container agent can write).
 pub const GIT_NO_EXT_DIFF_ENV: &str = "AGENTMUX_GIT_NO_EXT_DIFF";
 
-/// The step of the `git` function that [`GIT_NO_EXT_DIFF_ENV`] turns on: every command gets `--no-pager` (so a
-/// pager the folder's own configuration names does not run), and `diff`, `log`, `show`, `format-patch` and
-/// `whatchanged` (after any leading `-C <dir>`, `-c <name=value>` and other global options) also get
-/// `--no-ext-diff` and `--no-textconv`, so the external diff program, a diff driver's `command` and a `textconv` of
-/// the folder's own configuration do not run; every other option is git's own.
+/// The step of the `git` function that [`GIT_NO_EXT_DIFF_ENV`] turns on. After any leading `-C <dir>`, `-c
+/// <name=value>` and other global options, every command gets `--no-pager` (so a pager the folder's own
+/// configuration names does not run); `diff`, `log`, `show`, `format-patch`, `whatchanged`, `reflog` and `blame` also
+/// get `--no-ext-diff` and `--no-textconv` (so the external diff program, a diff driver's `command` and a `textconv`
+/// of the folder's own configuration do not run); `fetch`, `pull`, `ls-remote` and `clone` get
+/// `--upload-pack=git-upload-pack` and `push` gets `--receive-pack=git-receive-pack` (so a remote's `uploadpack` and
+/// `receivepack` of the folder's configuration do not run). Every other option is git's own, and the function goes on
+/// with the arguments so changed.
 macro_rules! no_ext_diff_step {
     () => {
         r#"  if [ -n "${AGENTMUX_GIT_NO_EXT_DIFF:-}" ]; then
@@ -92,10 +95,9 @@ macro_rules! no_ext_diff_step {
       esac;
     done;
     case "${1:-}" in
-      diff|log|show|format-patch|whatchanged)
-        _amx_s=$1; shift;
-        command git --no-pager ${_amx_g[@]+"${_amx_g[@]}"} "$_amx_s" --no-ext-diff --no-textconv "$@";
-        return $?;;
+      diff|log|show|format-patch|whatchanged|reflog|blame) _amx_s=$1; shift; set -- "$_amx_s" --no-ext-diff --no-textconv "$@";;
+      fetch|pull|ls-remote|clone) _amx_s=$1; shift; set -- "$_amx_s" --upload-pack=git-upload-pack "$@";;
+      push) _amx_s=$1; shift; set -- "$_amx_s" --receive-pack=git-receive-pack "$@";;
     esac;
     set -- --no-pager ${_amx_g[@]+"${_amx_g[@]}"} "$@";
   fi;

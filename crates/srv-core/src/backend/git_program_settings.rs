@@ -27,8 +27,10 @@
 //!   environment lists after it (the GitHub broker's, under `credential.<url>.helper`) are the only ones; a
 //!   `credential.helper` the environment itself lists is left;
 //! - `GIT_PROXY_COMMAND` empty (no proxy command), unless the environment already has a value;
-//! - the agent's `git` shell function, which adds `--no-ext-diff` and `--no-textconv` to `diff`, `log`, `show`,
-//!   `format-patch` and `whatchanged` (`agentmux_common::github_broker_shim`).
+//! - the agent's `git` shell function (`agentmux_common::github_broker_shim`), which adds `--no-pager` to every
+//!   command, `--no-ext-diff` and `--no-textconv` to `diff`, `log`, `show`, `format-patch`, `whatchanged`, `reflog`
+//!   and `blame`, `--upload-pack=git-upload-pack` to `fetch`, `pull`, `ls-remote` and `clone`, and
+//!   `--receive-pack=git-receive-pack` to `push`.
 
 use std::collections::HashMap;
 use std::path::Path;

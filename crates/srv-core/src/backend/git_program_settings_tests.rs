@@ -167,6 +167,9 @@ impl Folder {
             ("remote.viaext.url", format!("ext::sh {} ext %S", slashes(&script))),
             ("remote.viassh.url", "ssh://127.0.0.1:1/x".to_string()),
             ("remote.viagit.url", "git://127.0.0.1:9/x".to_string()),
+            ("remote.viaup.url", slashes(&remote)),
+            ("remote.viaup.uploadpack", mark("uploadpack")),
+            ("remote.viaup.receivepack", mark("receivepack")),
         ] {
             folder.git(&["config", key, &value], &HashMap::new());
         }
@@ -373,6 +376,8 @@ fn the_function_keeps_the_folders_diff_programs_from_running_and_leaves_git_s_ow
         "git show",
         "git format-patch -1 --stdout",
         "git diff HEAD~1 HEAD",
+        "git blame b.txt",
+        "git reflog -p",
     ];
     for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
         for (key, name) in [("diff.external", "diffext"), ("diff.drvcmd.command", "drvcmd"), ("diff.drvtext.textconv", "drvtext")] {
@@ -494,4 +499,24 @@ fn the_function_keeps_a_pager_the_folder_names_from_running_on_a_terminal() {
     on_a_terminal(&folder, &bash(), &["-c", &script], &flag);
     let pagers: Vec<String> = folder.ran().into_iter().filter(|name| name.starts_with("pager")).collect();
     assert_eq!(pagers, Vec::<String>::new(), "with it none of the folder's pagers does");
+}
+
+#[test]
+fn the_function_keeps_a_remotes_upload_and_receive_programs_from_running() {
+    let folder = Folder::new();
+    let commands = ["git fetch viaup", "git ls-remote viaup", "git pull viaup HEAD", "git push viaup HEAD:refs/heads/x"];
+    for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
+        folder.forget();
+        for command in commands {
+            through_the_function(&folder, body, false, command);
+        }
+        assert_eq!(folder.ran(), vec!["receivepack", "uploadpack"], "without the step the remote's programs run");
+        folder.forget();
+        for command in commands {
+            through_the_function(&folder, body, true, command);
+        }
+        assert_eq!(folder.ran(), Vec::<String>::new(), "with it none of {commands:?} runs them");
+    }
+    let pushed = through_the_function(&folder, agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, true, "git push viaup HEAD:refs/heads/y && git ls-remote viaup");
+    assert!(pushed.contains("refs/heads/y"), "a push still works through it: {pushed}");
 }
