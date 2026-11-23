@@ -240,3 +240,24 @@ fn a_join_waiting_for_a_person_is_still_there_in_the_next_call() {
     chain_store::save_pending(&a.conn, &a.pending).unwrap();
     assert!(chain_store::load_pending(&a.conn).unwrap().is_empty());
 }
+
+#[test]
+fn a_removal_that_is_not_taken_leaves_no_key_and_a_joiner_is_never_given_an_epoch_the_chain_has_not_reached() {
+    let (mut a, mut b, mut c) = (n(1), n(2), n(3));
+    a.found("kanban", Policy::AutoProven);
+    join(&mut a, &mut b, "kanban");
+    // A removal that cannot be taken (it names no member, and a stale end) leaves no key for the epoch it would start.
+    let bad = a.with(|ctx| ops::change(ctx, C, Change::Remove { id: "nobody".into(), ended: BTreeMap::new() }));
+    assert_eq!(bad, Err(OpError::Bad));
+    assert_eq!(a.epochs(), vec![0], "no key was left for an epoch that has not started");
+    // Even a key that is there (made some other way) is not handed to a joiner: only the epochs the chain has reached.
+    assert!(keys::mint(&SqlKeys(&a.conn), C, 1));
+    let given = join(&mut a, &mut c, "kanban");
+    assert_eq!(given.iter().map(|(e, _)| *e).collect::<Vec<_>>(), vec![0]);
+    // A real removal then makes its own key, not the one that was left.
+    let stale = SqlKeys(&a.conn).get(C, 1).unwrap();
+    let (gone, bid) = (ended(&[(&a, 0), (&c, 0)]), b.id.clone());
+    a.with(|ctx| ops::change(ctx, C, Change::Remove { id: bid, ended: gone })).unwrap();
+    let fresh = SqlKeys(&a.conn).get(C, 1).unwrap();
+    assert_ne!(stale.as_slice(), fresh.as_slice(), "the removed machine never held the key of the epoch that excludes it");
+}

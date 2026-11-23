@@ -424,14 +424,30 @@ pub fn kind_of(conn: &Connection, collection: &str) -> Result<String, OpError> {
 /// the entry to hand to the other members. Nothing is signed unless this install holds the lock.
 pub fn change(ctx: &mut Ctx, collection: &str, change: Change) -> Result<Entry, OpError> {
     gate(ctx)?;
-    let chain = ctx.chains.get_mut(collection).ok_or(OpError::NotMember)?;
-    if matches!(change, Change::Remove { .. }) {
-        // A removal starts the next key epoch: its key is made first, so no member is removed that cannot be given one.
-        let next = chain.state(collection).map_err(|_| OpError::Bad)?.epoch + 1;
+    // A removal starts the next key epoch: its key is made first, fresh (one left by an earlier attempt is never
+    // reused), so no member is removed that cannot be given one. If the removal is not then signed and taken, the key
+    // is forgotten again, so no key exists for an epoch that has not started.
+    let starts = if matches!(change, Change::Remove { .. }) { Some(chain_epoch(ctx, collection)? + 1) } else { None };
+    if let Some(next) = starts {
+        ctx.keys.discard(collection, next);
         if !ctx.keys.mint(collection, next) {
             return Err(OpError::NoKey);
         }
     }
+    let done = sign_and_take(ctx, collection, change);
+    if let (Err(_), Some(next)) = (&done, starts) {
+        ctx.keys.discard(collection, next);
+    }
+    done
+}
+
+fn chain_epoch(ctx: &Ctx, collection: &str) -> Result<u32, OpError> {
+    let chain = ctx.chains.get(collection).ok_or(OpError::NotMember)?;
+    Ok(chain.state(collection).map_err(|_| OpError::Bad)?.epoch)
+}
+
+fn sign_and_take(ctx: &mut Ctx, collection: &str, change: Change) -> Result<Entry, OpError> {
+    let chain = ctx.chains.get_mut(collection).ok_or(OpError::NotMember)?;
     let entry = chain.next(ctx.me.private, collection, ctx.me.id, change).ok_or(OpError::Bad)?;
     chain.take(collection, entry.clone()).map_err(|_| OpError::Bad)?;
     sync_epoch(ctx.conn, collection, chain)?;
@@ -449,7 +465,9 @@ fn added(ctx: &Ctx, collection: &str, keys: Vec<(u32, String)>) -> Result<Joined
 
 /// The keys to hand a machine that is about to be a member: none means nothing is done.
 fn keys_or_refuse(ctx: &Ctx, collection: &str, subject: &Subject) -> Result<Vec<(u32, String)>, OpError> {
-    let keys = ctx.keys.keys_for(collection, subject);
+    // Only the epochs the chain has reached: a key for one that has not started is never handed out.
+    let reached = chain_epoch(ctx, collection)?;
+    let keys: Vec<(u32, String)> = ctx.keys.keys_for(collection, subject).into_iter().filter(|(epoch, _)| *epoch <= reached).collect();
     if keys.is_empty() {
         return Err(OpError::NoKey);
     }
