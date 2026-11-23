@@ -10,6 +10,7 @@ import { createMemo, createSignal } from "solid-js";
 import type { PaneTabHostContext, PaneTabInstance } from "@/app/store/pane-tab-registry";
 import { readZoom } from "@/app/store/zoom-factor";
 
+import { WAITS_FILTERS } from "./kanban-columns";
 import { KanbanSection } from "./kanban-section";
 
 /** The pane's title: the Kanban, and how many tasks need the operator (SPEC_WARDEN_KANBAN_2026_10_20.md §6.1). */
@@ -26,9 +27,16 @@ function storedCollapsed(value: unknown): string[] {
 export function create(ctx: PaneTabHostContext): PaneTabInstance {
     // Set by the board once it is mounted; it names the pane.
     const [needs, setNeeds] = createSignal(0);
+    // A pane saved as the Reviews pane (`view: "reviews"`, its task in `reviews:task`) opens here, on the filter that
+    // showed what it did: cards with open pull requests.
     const open = createMemo<string | null>(() => {
-        const id = ctx.meta()?.["kanban:open"];
+        const id = ctx.meta()?.["kanban:open"] ?? ctx.meta()?.["reviews:task"];
         return typeof id === "string" && id ? id : null;
+    });
+    const waits = createMemo<string>(() => {
+        const w = ctx.meta()?.["kanban:waits"];
+        if (typeof w === "string" && (WAITS_FILTERS as readonly string[]).includes(w)) return w;
+        return ctx.meta()?.view === "reviews" ? "open" : "";
     });
     return {
         component: () => (
@@ -36,7 +44,9 @@ export function create(ctx: PaneTabHostContext): PaneTabInstance {
                 <KanbanSection
                     visible={ctx.visibility() === "active"}
                     openRequest={open()}
-                    onOpenHandled={() => void ctx.setMeta({ "kanban:open": null })}
+                    onOpenHandled={() => void ctx.setMeta({ "kanban:open": null, "reviews:task": null })}
+                    waits={waits()}
+                    onWaits={(w) => void ctx.setMeta({ "kanban:waits": w })}
                     onNeedsCount={setNeeds}
                     lanes={ctx.meta()?.["kanban:lanes"] === true}
                     onLanes={(on) => void ctx.setMeta({ "kanban:lanes": on })}

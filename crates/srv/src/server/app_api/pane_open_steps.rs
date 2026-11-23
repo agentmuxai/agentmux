@@ -24,6 +24,24 @@ pub(super) fn fold_media_into_editor(cmd: &mut CommandPaneOpenData) -> Result<()
     Ok(())
 }
 
+/// The Reviews pane is folded into the Kanban (SPEC_FOLD_REVIEWS_INTO_THE_KANBAN_2026_11_22.md §7): an open of the
+/// `reviews` view is an open of the Kanban on the filter that showed what the pane did, cards with open pull requests.
+/// `reviews:task` (a task to show) becomes `kanban:open`. An agent's pane tool, an old pin or a saved link that still
+/// says `reviews` is not an error.
+pub(super) fn fold_reviews_into_kanban(cmd: &mut CommandPaneOpenData) {
+    if cmd.view != "reviews" {
+        return;
+    }
+    cmd.view = "kanban".to_string();
+    let mut meta = cmd.meta.take().unwrap_or_default();
+    meta.insert("view".to_string(), serde_json::json!("kanban"));
+    meta.entry("kanban:waits".to_string()).or_insert_with(|| serde_json::json!("open"));
+    if let Some(task) = meta.remove("reviews:task") {
+        meta.entry("kanban:open".to_string()).or_insert(task);
+    }
+    cmd.meta = Some(meta);
+}
+
 /// The Editor pane a `target_id` names, if any; it is only valid with an Editor open that is not floating.
 pub(super) fn named_editor_target(cmd: &CommandPaneOpenData) -> Result<Option<&str>, String> {
     // A `target_block_id` names the Editor pane to put the file in: it needs no other opt-in.

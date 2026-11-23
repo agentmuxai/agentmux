@@ -379,6 +379,13 @@ export const DEEPLINK_REGISTRY: DeepLinkRegistry = {
                     ]
                 },
                 {
+                    id: "pulls",
+                    labelKey: "deeplinks.places.kanban.pulls",
+                    segments: [
+                        "pulls"
+                    ]
+                },
+                {
                     id: "board-task",
                     labelKey: "deeplinks.places.kanban.task",
                     segments: [
@@ -505,20 +512,6 @@ export const DEEPLINK_REGISTRY: DeepLinkRegistry = {
             id: "atlas",
             labelKey: "deeplinks.views.atlas",
             icon: "map",
-            build: 1,
-            effect: "none",
-            sensitivity: "public",
-            agent: "yes",
-            surfaces: [
-                "desktop"
-            ],
-            group: "views",
-            places: []
-        },
-        {
-            id: "reviews",
-            labelKey: "deeplinks.views.reviews",
-            icon: "code-pull-request",
             build: 1,
             effect: "none",
             sensitivity: "public",
@@ -875,6 +868,15 @@ export const DEEPLINK_REGISTRY: DeepLinkRegistry = {
                 "kanban",
                 "task",
                 "{task}"
+            ]
+        },
+        {
+            from: [
+                "reviews"
+            ],
+            to: [
+                "kanban",
+                "pulls"
             ]
         }
     ],

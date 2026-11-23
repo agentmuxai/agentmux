@@ -17,6 +17,8 @@ use super::super::chromium;
 
 /// The virtual screen's colour depth.
 const DEPTH: u32 = 24;
+/// How long a new first session waits for the browser of the pane before it to finish going away.
+const LEFTOVER_WAIT: Duration = Duration::from_secs(5);
 
 /// What one session keeps alive: the processes end when it is dropped.
 pub struct Session {
@@ -24,8 +26,31 @@ pub struct Session {
     _xvfb: Child,
     _wm: Option<Child>,
     _chrome: Child,
+    /// The browser's process group: it and all its helpers (its crash handler, zygote, renderers) are ended together.
+    chrome_group: Option<u32>,
     _profile: tempfile::TempDir,
 }
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        if let Some(group) = self.chrome_group {
+            kill_group(group);
+        }
+    }
+}
+
+/// End every process in the process group `group` (the browser and what it started). Nothing is left running that the next session's
+/// "no other browser in this container" check would find.
+#[cfg(unix)]
+fn kill_group(group: u32) {
+    // SAFETY: `killpg` takes a group number and a signal and has no other effect; a group that is already gone answers an error that is ignored.
+    unsafe {
+        libc::killpg(group as libc::pid_t, libc::SIGKILL);
+    }
+}
+
+#[cfg(not(unix))]
+fn kill_group(_group: u32) {}
 
 /// The arguments of the virtual screen: a size, no network listener, and the display number written to standard output.
 pub fn xvfb_args(w: u32, h: u32) -> Vec<String> {
@@ -80,6 +105,14 @@ pub async fn start(w: u32, h: u32, url: &str, first: bool) -> Result<Session, St
     let chrome_bin = chromium::find_binary()?;
     // The one way out for the browser, as for every pane: if the proxy cannot start, nothing runs.
     let proxy_port = super::super::address_proxy::start().await.map_err(|e| format!("the browser's address proxy did not start: {e}"))?;
+    // The browser of the pane that just ended may still be going away (a page that is reloaded closes the old pane and opens the new one at
+    // once): wait for it to be gone before the check that this container holds one browser.
+    if first {
+        let until = std::time::Instant::now() + LEFTOVER_WAIT;
+        while super::policy::browser_running() && std::time::Instant::now() < until {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
     // What the browser may open and the network it has (the proxy's port) are its managed policy: nothing starts without it.
     super::policy::ensure(&chrome_bin, first, proxy_port)?;
 
@@ -100,10 +133,13 @@ pub async fn start(w: u32, h: u32, url: &str, first: bool) -> Result<Session, St
         Err(_) => None,
     };
     let args = chrome_args(profile.path(), w, h, url, wm.is_some());
-    let chrome = command(&chrome_bin, &args, Some(&display))
-        .spawn()
-        .map_err(|e| format!("cannot start {}: {e}", chrome_bin.display()))?;
-    Ok(Session { display, _xvfb: xvfb, _wm: wm, _chrome: chrome, _profile: profile })
+    let mut chrome = command(&chrome_bin, &args, Some(&display));
+    // The browser leads a process group of its own, so that it and everything it starts can be ended together.
+    #[cfg(unix)]
+    chrome.process_group(0);
+    let chrome = chrome.spawn().map_err(|e| format!("cannot start {}: {e}", chrome_bin.display()))?;
+    let chrome_group = chrome.id();
+    Ok(Session { display, _xvfb: xvfb, _wm: wm, _chrome: chrome, chrome_group, _profile: profile })
 }
 
 #[cfg(test)]
@@ -150,6 +186,33 @@ mod tests {
             let a = chrome_args(Path::new("/tmp/p"), 800, 600, "about:blank", has_wm);
             assert!(!a.iter().any(|x| x.contains("sandbox")), "{a:?}");
         }
+    }
+
+    /// A browser that starts helpers leaves none of them behind: ending its group ends them all.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn ending_the_group_ends_what_the_browser_started_too() {
+        use tokio::io::{AsyncBufReadExt, BufReader};
+        // A "browser" (the shell) that starts a helper (a long sleep) and prints the helper's number. Started the way the browser is.
+        let args = vec!["-c".to_string(), "/bin/sleep 60 & echo $!; wait".to_string()];
+        let mut leader = command(Path::new("/bin/sh"), &args, None);
+        leader.stdout(Stdio::piped()).process_group(0);
+        let mut leader = leader.spawn().expect("sh starts");
+        let mut line = String::new();
+        BufReader::new(leader.stdout.take().unwrap()).read_line(&mut line).await.unwrap();
+        let helper: u32 = line.trim().parse().expect("the helper's number");
+        // A process that has ended but is not yet collected (a zombie) is gone for this purpose.
+        let alive = |pid: u32| {
+            std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|s| !s.rsplit(')').next().unwrap_or("").trim_start().starts_with('Z'))
+        };
+        assert!(alive(helper));
+        kill_group(leader.id().expect("the shell is running"));
+        leader.wait().await.unwrap();
+        let until = std::time::Instant::now() + Duration::from_secs(3);
+        while alive(helper) && std::time::Instant::now() < until {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(!alive(helper), "the helper outlived its group");
     }
 
     #[test]

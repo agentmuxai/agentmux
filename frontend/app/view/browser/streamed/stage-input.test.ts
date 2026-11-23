@@ -3,8 +3,8 @@
 
 // @vitest-environment jsdom
 
-import { afterEach, describe, expect, it } from "vitest";
-import { attachStageInput } from "./stage-input";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { attachStageInput, COPY_DELAY_MS } from "./stage-input";
 
 let unwire: (() => void) | null = null;
 afterEach(() => unwire?.());
@@ -86,5 +86,44 @@ describe("a streamed pane's stage and the person's clipboard", () => {
         paste(stage, "");
         paste(button, "not for the page");
         expect(sent).toHaveLength(0);
+    });
+});
+
+describe("a streamed pane's stage and copying out of the remote browser", () => {
+    it("asks for what the browser copied a moment after the person's Ctrl+C or Ctrl+X, and only then", () => {
+        vi.useFakeTimers();
+        try {
+            const { stage, sent } = setup();
+            key(stage, "keydown", { key: "c", code: "KeyC", ctrlKey: true });
+            expect(sent.map((m) => m.t)).toEqual(["key"]);
+            vi.advanceTimersByTime(COPY_DELAY_MS + 1);
+            expect(sent.map((m) => m.t)).toEqual(["key", "copy"]);
+            key(stage, "keydown", { key: "x", code: "KeyX", ctrlKey: true });
+            vi.advanceTimersByTime(COPY_DELAY_MS + 1);
+            expect(sent.filter((m) => m.t === "copy")).toHaveLength(2);
+            // A plain C, a Ctrl+A and a paste ask for nothing.
+            sent.length = 0;
+            key(stage, "keydown", { key: "c", code: "KeyC" });
+            key(stage, "keydown", { key: "a", code: "KeyA", ctrlKey: true });
+            key(stage, "keydown", { key: "v", code: "KeyV", ctrlKey: true });
+            vi.advanceTimersByTime(COPY_DELAY_MS * 3);
+            expect(sent.filter((m) => m.t === "copy")).toHaveLength(0);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("does not ask after the stage is taken down", () => {
+        vi.useFakeTimers();
+        try {
+            const { stage, sent } = setup();
+            key(stage, "keydown", { key: "c", code: "KeyC", ctrlKey: true });
+            unwire?.();
+            unwire = null;
+            vi.advanceTimersByTime(COPY_DELAY_MS * 3);
+            expect(sent.filter((m) => m.t === "copy")).toHaveLength(0);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });

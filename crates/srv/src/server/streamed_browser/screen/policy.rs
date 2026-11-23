@@ -102,6 +102,11 @@ fn any_browser(names: &[String]) -> bool {
     names.iter().any(|n| n.starts_with("chrome") || n.starts_with("chromium"))
 }
 
+/// Is a browser (Chrome or Chromium, or one of its helpers) running in this container right now?
+pub fn browser_running() -> bool {
+    any_browser(&running_programs())
+}
+
 /// The names of the programs running in this container (each process's `comm`).
 fn running_programs() -> Vec<String> {
     let Ok(dir) = std::fs::read_dir("/proc") else { return Vec::new() };

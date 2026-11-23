@@ -10,7 +10,6 @@ import { Button, IconButton, MenuTrigger, Select, SidePanel, TextArea } from "@/
 import { t as tr } from "@/app/i18n/i18n";
 import { createBlock } from "@/app/store/block-layout-actions";
 import { openLink } from "@/app/store/misc-utils";
-import { openReviewsForTask } from "@/app/util/open-reviews-task";
 import { formatAge } from "@/app/view/warden-shared/warden-shared";
 
 import { writeText } from "@/util/clipboard";
@@ -254,16 +253,6 @@ function DrawerFacts(props: { m: DrawerState }): JSX.Element {
             <Show when={t().card.pr_url}>
                 <Button density="compact" tone="quiet" icon="code-pull-request" onClick={() => void openLink(t().card.pr_url)}>
                     Open the PR
-                </Button>
-            </Show>
-            <Show when={t().card.pr_url || t().card.branch}>
-                <Button
-                    density="compact"
-                    tone="quiet"
-                    icon="code-pull-request"
-                    onClick={() => void openReviewsForTask(t().card.task_ref ?? `#${t().card.num}`)}
-                >
-                    {tr("kanban.openPrs")}
                 </Button>
             </Show>
             <Show when={t().card.pr?.merged_at}>

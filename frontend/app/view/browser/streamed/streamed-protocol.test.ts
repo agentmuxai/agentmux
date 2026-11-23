@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { addressToUrl, clampSide } from "./use-streamed-pane";
-import { buttonName, frameBytes, isPasteChord, keyMessage, LABEL_MAX, modifiers, mouseMessage, parseServerMessage, plainText, typedText, wheelMessage, windowLabel } from "./streamed-protocol";
+import { buttonName, CLIPBOARD_MAX, frameBytes, isCopyChord, isPasteChord, keyMessage, LABEL_MAX, modifiers, mouseMessage, parseServerMessage, plainText, typedText, wheelMessage, windowLabel } from "./streamed-protocol";
 
 const none = { altKey: false, ctrlKey: false, metaKey: false, shiftKey: false };
 
@@ -140,5 +140,24 @@ describe("windows and notices", () => {
             message: "a.example opened a message box (“Signin to pay”). It was dismissed.",
         });
         expect(plainText("one\n  two\tthree")).toBe("one two three");
+    });
+});
+
+describe("copying out of the remote browser", () => {
+    it("reads the text the server brought over, cut at the limit, and nothing without text", () => {
+        expect(parseServerMessage(JSON.stringify({ t: "clipboard", text: "Hello\nW\u00f6rld" }))).toEqual({ t: "clipboard", text: "Hello\nW\u00f6rld" });
+        const long = parseServerMessage(JSON.stringify({ t: "clipboard", text: "x".repeat(CLIPBOARD_MAX + 5) }));
+        expect(long?.t === "clipboard" && long.text.length).toBe(CLIPBOARD_MAX);
+        expect(parseServerMessage(JSON.stringify({ t: "clipboard" }))).toBeNull();
+        expect(parseServerMessage(JSON.stringify({ t: "clipboard", text: 5 }))).toBeNull();
+    });
+
+    it("takes Ctrl with C or X as a copy, and nothing else", () => {
+        expect(isCopyChord({ ...none, key: "c", ctrlKey: true })).toBe(true);
+        expect(isCopyChord({ ...none, key: "X", ctrlKey: true })).toBe(true);
+        expect(isCopyChord({ ...none, key: "c" })).toBe(false);
+        expect(isCopyChord({ ...none, key: "v", ctrlKey: true })).toBe(false);
+        expect(isCopyChord({ ...none, key: "c", ctrlKey: true, altKey: true })).toBe(false);
+        expect(isCopyChord({ ...none, key: "c", metaKey: true })).toBe(false);
     });
 });

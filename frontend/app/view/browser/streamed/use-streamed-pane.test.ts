@@ -270,4 +270,24 @@ describe("a streamed pane's windows", () => {
         expect(starts[2].screen).toBe(false);
         dispose();
     });
+
+    it("puts the text the person copied in the remote browser on their own clipboard, and says so when it cannot", async () => {
+        const writes: string[] = [];
+        let fail = false;
+        vi.stubGlobal("navigator", { clipboard: { writeText: (t: string) => (fail ? Promise.reject(new Error("no")) : (writes.push(t), Promise.resolve())) } });
+        try {
+            const { pane, dispose } = live();
+            events!.onMessage({ t: "clipboard", text: "copied text" });
+            expect(writes).toEqual(["copied text"]);
+            expect(pane.notice()).toBe("");
+            fail = true;
+            events!.onMessage({ t: "clipboard", text: "again" });
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(pane.notice()).not.toBe("");
+            dispose();
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
 });

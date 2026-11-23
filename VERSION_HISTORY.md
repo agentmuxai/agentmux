@@ -1,5 +1,95 @@
 # AgentMux Version History
 
+## 0.60.39 — 2026-11-22
+
+- docs check: a denied term can be a regular expression, and one doc can keep a denied term with a stated reason
+- Every button gives pressed feedback at once, and a button whose click handler returns a promise locks and shows a spinner while it runs
+- A selection that starts in a pane stays in that pane: drags, Shift+click, Shift+arrows and Select all
+- A leader is told when an agent that owes it work goes quiet; the note at every silent turn end is gone
+- fix(startup): the splash says it is connecting when a start waits more than three seconds, and the new-agent panel keeps its install progress in view in a small pane
+- Deep links: one registry of every place AgentMux can open, with a parser on each side that reads agentmux:// links the same way (no visible change yet)
+- scripts/preflight.mjs runs every pre-push gate in one command, and the docs gates answer the same before and after the commit
+- A pane type's own header buttons (the agent pane's Find and Messages, the terminal's Start and Restart, the Vault's Import, Export and Info) are drawn inside the selected tab, right of its name, and leave when another tab is selected
+- A headless sign-in's confirm is refused when it comes from inside an agent's process tree, and each confirm is recorded in agentmux status
+- The Large text viewer's find can ignore case and take a regular expression (UTF-8 files)
+- The Drone pane has a New from a template panel: approve a Drone template, set its settings, and a drone made from it opens on the canvas
+- agentmux doctor takes --port, to check the port you mean to run on
+- Atlas: a line that passes behind a card shows through it as a faint stroke, so its two ends can be followed in a big fleet
+- A template's approval prompt in the Jobs pane is the person's own answer: the UI tool's click and key paths refuse it
+- Mark the Tower pairing control and the Swarm broadcast control as the person's own, so an agent's UI tool leaves them alone
+- A host agent opened in a folder a container agent can write asks the person first, and an API call to do the same is refused
+- fix(editor): Close Others and Close to the Right ask about every tab with unsaved changes first, and close nothing if any is refused
+- Palette: a failed first load is retried by the next press, and rows that join the list while it is open are built
+- A resized browser pane that is closing, or has no zoom, no longer logs a warning about its zoom
+- Open here no longer leaves the red "already open in another pane" line at the top of the new pane: srv leaves that one expected refusal out of the pane's history
+- Open here: closing the pane the agent moved out of no longer says the agent keeps running without a pane
+- A token srv hands an agent that is renewed, or a sign-in's access token that is refreshed, no longer stops the old one being hidden from transcripts before it expires
+- fix(startup): a pre-warmed window never gets the splash's connecting line, from its first load
+- fix(editor): the file tree keeps the row under the pointer within half a pixel through a run of zoom steps, where each step used to leave its own leftover
+- In the Jobs pane's New job list a Drone template makes a drone: it asks for its name and settings and opens the new drone, instead of offering Clone to a job
+- Deep links: the app opens a link's place in the right pane, beside an agent's conversation without taking focus
+- A singleton tile in a fresh pane moves the open pane of that view into this pane when it is in this tab, instead of bringing it back where it is
+- Browser: a page address that carries a sign-in redirect's state, nonce, code or token is shown to the agent as its host and path only
+- Post refusals fold look-alike characters, read a value first and say how to post anyway; the Vault activity log writes an agent as agent:<id>; a reserved sender name from the LAN or WAN without the relay's signature is shown as ?name (#48326)
+- Dragging a pane border now moves the border and pane frames at once and lays the pane's content out once on release, instead of on every move
+- Kanban: unlink a pull request from a task, add one by name, and list pull requests not matched to any task, from the board menu
+- Vault: a backed entry reads its value from AWS Secrets Manager at each use and keeps no copy; identity accounts can name a Secrets Manager secret too
+- The sync layer's core: a signed change log of versioned records that a collection's copies on several machines converge on (nothing is sent yet)
+- The New Agent picker lists the Preview agent CLIs in one collapsed section under the first-class ones, each marked Preview
+- An agent out of quota is not given relay notices: they stay at the relay unclaimed, and it is told once when it can work
+- An agent can replace another agent's identity token (Agents rotate_token): the old token stops working at once and the agent restarts with the new one
+- Two core tests that set the data folder no longer fail beside tests that set the root folder
+- Object updates that arrive as events are applied at the next frame in one reactive flush, in slices, so a burst no longer blocks the page
+- The sign-in values of Codex, Grok and Muse that srv reads from their files are hidden from transcripts
+- Deep links: an agent opens a place with MuxAPI's Pane open and a link, through srv's guard
+- A replaced refresh token or API key in a sign-in file stays hidden from transcripts, and a deleted account's sign-in values are released
+- Vault pane: an entry backed by AWS Secrets Manager is marked as managed there, readable outside the Vault, and keeps its mark when saved
+- Atlas: no box per host; each node says its host and wears a ring in the host's colour, with a legend for two hosts or more
+- Deep links: a UI window capture of an AgentMux window blacks out its Vault, Audit, Memory and personal-browser panes and the panels that show them, read from the same instant as the frame; a container agent is told what to use instead
+- Vault: a synced record is sealed with the Vault's collection key for its Vault, record, version and key epoch, so nothing readable leaves the machine
+- Remove the account usage strip from the top of the Swarm; on the account's panel, show the date of a reset more than a day away, name the model-specific weekly window plainly, never cut a window name with an ellipsis, and say where the numbers come from and how old they are
+- The Preview agent CLIs section in the New Agent picker stays closed once closed with a chip filter on
+- A sign-in value the CLI refreshes is hidden from transcripts within moments of the write, not at the next account tick
+- The Swarm's top is the Filter, a plain Broadcast input (Enter sends) and the selection's row with Stop and Mode; the Supervisor's switch and settings move to a Supervisor section of the Settings pane; the mode menu shows each mode's explanation on a wrapped line and opens the Supervisor settings; agent icons show when the Supervisor is switched off
+- Fix a flaky layout test of the My Agents tiles: its fixture read the clock once per row, so a millisecond tick reordered the rows and measured another layout
+- Vault: the rules for a synced record that arrives from another machine: two changes made apart are both kept and the later is current, a delete never beats an edit it did not see, a rotation in progress is not overwritten, 90-day tombstones, activity lines and site grants as records, and a sign-in's browser profile carried by name.
+- A sign-in value a container's CLI refreshes into its staged copy is hidden from transcripts within moments of the write
+- The registry of values hidden from transcripts is bounded and never turns hiding off: an oversized value is refused, and a matcher that cannot be built falls back to an exact search or hides whole lines
+- Deep links: each Vault entry has an opaque link id, so a link to an entry says nothing about it; the Vault pane and an agent's Vault list carry it, and opening such a link shows the entry
+- Vault: an entry's link ids travel in its synced body, so a link made on one machine of a shared Vault opens the entry on the others; two ids given before syncing are both kept, and an id is never reassigned or reused.
+- Transcript withhold: the matcher is rebuilt off the registry's lock; values registered meanwhile are withheld at once
+- Transcript withhold: an owner holds a bounded number of values with an expiry, and an expiry far beyond a token's life is not trusted
+- A forwarded Swarm broadcast is confirmed only by an AgentMux instance, not by a process inside an agent's process tree; if the instance cannot be identified the forward arrives as an ordinary message and the audit says so
+- Transcript withhold: an owner's expiring values and its release are matched by the exact owner, not by name prefix
+- Browser pane: a screen mode where the browser is an ordinary Chrome on a virtual screen and the pane's mouse and keyboard reach it as a person's would (off unless enabled; a prototype)
+- The While you were away line above the agent composer hides itself after 10 seconds and shows the seconds left
+- Sysinfo Everything: the four summary tiles go from one row of four straight to two by two as the pane narrows, with no three-and-one step
+- Status bar: the UI busy pill is gone; the Graphics item turns red while this window's page is busy (the panel keeps the figure)
+- Browser pane screen mode: a new window is noticed, typing is held for half a second after one opens, and the pane asks for the mode with ?screen=1
+- GPU panel: a virtual display adapter is no longer listed as a second GPU
+- An agent's id that is only another word no longer links that word as the agent: Pulse is plain text and Pulp links (#48391)
+- The sync layer's records name the version they replaced, a conflict says which side is current, and a member that missed an epoch's last record can still catch up
+- Zooming the title bar, status bar or a pane header is about twice as fast on a crowded window: steps in one frame are applied together, the zoom indicator no longer forces a full layout first, and tabs with no minimized pane skip a layout pass
+- A Swarm broadcast sent from a window with no agent running is also confirmed by its instance, so it reaches agents on other channels as the person's words
+- Vault: a shared Vault's link-id aliases and retired ids, and the activity lines other machines made, are kept in the store: a link made on another machine opens the entry, an id names one entry, and a removed entry's ids are not reused.
+- OS notifications no longer show a stale summary line: the line under the agent's name is its own status line when recent, else the task it holds, else none
+- The Kanban's tasks are written into the sync layer's change log, one record per field, when a capture runs (nothing is sent)
+- The Vault list reads properly at every width: the label keeps its room, the id is one line, agent chips stay whole, and a row changes layout instead of squeezing (#48403)
+- The Kanban's pull request intake reads the relay's own field names for a pull request event
+- Vault: the Vault's merge rule is now an adapter of the sync layer: an edit on top of what the other machine holds is applied, changes or deletes made apart keep both with the later one current on every machine, and a rotation in progress is not overwritten.
+- feat(headless): agentmux service install, uninstall, start, stop and status make AgentMux Headless a Windows service that starts when the computer does
+- A task's card now keeps what review, checks and merge notices said of its pull requests and what each waits on, so it survives a restart. Spec: docs/specs/SPEC_FOLD_REVIEWS_INTO_THE_KANBAN_2026_11_22.md
+- The sync layer can seal a record's body for the version, base and epoch it is written at, and a catch-up brings the oldest versions first
+- The sync layer keeps a collection's members as a signed chain: a change no member signed, or one that does not extend the chain, is refused
+- Screen mode: the start-up check of the browser's policy also requires the extension block and browser sign-in off (every key the policy names)
+- The sync layer has a computer-wide lock, so only one install on a computer acts as its member
+- Screen mode: frames are made when the screen says a part of it changed and only that part is read (a still page costs next to nothing), and come quickly for a moment after the person's input
+- A Kanban card with an open pull request shows who it waits on, with review and checks chips; the drawer lists each verdict and its commit; a Waits on filter and a search by pull request number or branch.
+- The Reviews pane is part of the Kanban: a saved Reviews pane, pin, link, deep link or agent request opens the Kanban on cards with open pull requests; the Reviews route stays.
+- The sync layer has the bodies of its sync ops as pure functions: hello, pull, push, members and join, with capped answers and a membership check before every op
+- A fire of this AgentMux's own scheduler arrives as a proven message (host-verified, naming the job and who it runs for) instead of self-declared
+- Screen mode: a window that opens stops the paste being typed, and a start without the browser's own sandbox is refused
+
 ## 0.60.38 — 2026-11-21
 
 - On macOS a toast over a browser pane no longer takes the page's keyboard or makes the whole pane ignore clicks: the page keeps both, and the mouse goes to the toast only over its own pixels

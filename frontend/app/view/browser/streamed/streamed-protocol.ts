@@ -17,6 +17,7 @@ export type ServerMsg =
     | { t: "notice"; message: string }
     | { t: "size"; w: number; h: number }
     | { t: "error"; message: string }
+    | { t: "clipboard"; text: string }
     | { t: "closed" };
 
 /** The JPEG in a binary message, or null for any other kind (a client ignores kinds it does not know). */
@@ -54,6 +55,9 @@ export function parseServerMessage(text: string): ServerMsg | null {
             return typeof m.w === "number" && typeof m.h === "number" ? { t: "size", w: m.w, h: m.h } : null;
         case "error":
             return { t: "error", message: String(m.message ?? "") };
+        case "clipboard":
+            // What the person's remote browser copied, brought over because they asked (Ctrl+C or Ctrl+X in the pane).
+            return typeof m.text === "string" ? { t: "clipboard", text: m.text.slice(0, CLIPBOARD_MAX) } : null;
         case "closed":
             return { t: "closed" };
         default:
@@ -148,6 +152,14 @@ export function typedText(e: { key: string; ctrlKey: boolean; metaKey: boolean }
 
 export function keyMessage(type: "down" | "up", e: Modifiers & { key: string; code: string; keyCode: number }) {
     return { t: "key", type, key: e.key, code: e.code, text: typedText(e), vk: e.keyCode, mods: modifiers(e) };
+}
+
+/** The most characters of a copy that are brought to the person's clipboard (the server's limit is in bytes). */
+export const CLIPBOARD_MAX = 1024 * 1024;
+
+/** Ctrl with C or X: the person copying or cutting in the remote browser. */
+export function isCopyChord(e: { key: string; ctrlKey: boolean; altKey: boolean; metaKey: boolean }): boolean {
+    return e.ctrlKey && !e.altKey && !e.metaKey && (e.key.toLowerCase() === "c" || e.key.toLowerCase() === "x");
 }
 
 /** Ctrl or Cmd with V: the browser's own paste event carries the text, so the key itself is not forwarded. */

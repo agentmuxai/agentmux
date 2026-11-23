@@ -119,6 +119,44 @@ async fn screen_mode_popup_real() {
     }
 }
 
+/// A page whose text box holds a text and has it selected, with a non-US letter in it.
+const COPY_PAGE: &str = "data:text/html,<html style=\"height:100%25\"><body style=\"height:100%25;margin:0\"><textarea autofocus onfocus=\"this.select()\" style=\"width:100%25;height:100%25;margin:0;background:blue\">copy me, W%C3%B6rld</textarea></body></html>";
+
+/// What the person copies in the remote browser (Ctrl+C) can be read out of the screen's clipboard, exactly, and nothing is read before that.
+/// Run with the same command as `screen_mode_real`, by name `screen_mode_copy_real`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "needs Xvfb and a Chrome; run by hand on a Linux host"]
+async fn screen_mode_copy_real() {
+    if which::which("Xvfb").is_err() || chromium_missing() {
+        eprintln!("screen_mode_copy_real: no Xvfb or no Chrome here; nothing run");
+        return;
+    }
+    let session = session::start(800, 600, COPY_PAGE, true).await.expect("the screen and the browser start");
+    let screen = x::Screen::connect(&session.display).expect("the screen is reachable");
+    wait_for_colour(&screen, 700, 500, [255, 0, 0], 30).await.expect("the page is up (blue)");
+    let clip = std::sync::Arc::new(clipboard::Clipboard::connect(&session.display).expect("the clipboard connects"));
+    let read = |clip: std::sync::Arc<clipboard::Clipboard>| async move { tokio::task::spawn_blocking(move || clip.fetch()).await.unwrap() };
+    // Nothing has been copied yet: nothing to bring over.
+    assert_eq!(read(clip.clone()).await.expect("a read of an empty clipboard answers"), None);
+    let key = |kind, code: &str, vk, mods| ClientMsg::Key { kind, key: String::new(), code: code.to_string(), text: String::new(), vk, mods };
+    send_input(&screen, &click_at(MouseKind::Down)).await.unwrap();
+    send_input(&screen, &click_at(MouseKind::Up)).await.unwrap();
+    send_input(&screen, &key(KeyKind::Down, "ControlLeft", 17, 2)).await.unwrap();
+    // The click put the caret in the text and dropped the page's own selection: select all again, then copy.
+    send_input(&screen, &key(KeyKind::Down, "KeyA", 65, 2)).await.unwrap();
+    send_input(&screen, &key(KeyKind::Up, "KeyA", 65, 2)).await.unwrap();
+    send_input(&screen, &key(KeyKind::Down, "KeyC", 67, 2)).await.unwrap();
+    send_input(&screen, &key(KeyKind::Up, "KeyC", 67, 2)).await.unwrap();
+    send_input(&screen, &key(KeyKind::Up, "ControlLeft", 17, 0)).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let text = read(clip).await.expect("the copy is read").expect("the browser put text on the clipboard");
+    assert_eq!(text, "copy me, Wörld");
+}
+
+fn click_at(kind: MouseKind) -> ClientMsg {
+    ClientMsg::Mouse { kind, x: 400.0, y: 400.0, button: Button::Left, buttons: 1, clicks: 1, mods: 0 }
+}
+
 fn chromium_missing() -> bool {
     super::super::chromium::find_binary().is_err()
 }
@@ -208,4 +246,39 @@ async fn screen_mode_paste_real() {
 line two".to_string();
     send_input(&screen, &ClientMsg::Paste { text }).await.unwrap();
     wait_for_colour(&screen, 700, 500, [0, 255, 0], 10).await.expect("the pasted text arrived exactly in the page");
+}
+
+#[tokio::test]
+async fn typing_that_is_cut_short_says_so_and_types_nothing_more() {
+    use std::cell::Cell;
+    let typed = std::cell::RefCell::new(Vec::new());
+    let calls = Cell::new(0);
+    // The screen changes before the fourth character is typed.
+    let stop = || {
+        calls.set(calls.get() + 1);
+        calls.get() > 3
+    };
+    let out = type_chars("abcdef", stop, |key, shift| {
+        typed.borrow_mut().push((key, shift));
+        Ok(())
+    })
+    .await
+    .unwrap();
+    assert_eq!(out, Typed::Interrupted);
+    assert_eq!(typed.borrow().len(), 3, "only what came before the change was typed");
+    let all = type_chars("ab", || false, |_, _| Ok(())).await.unwrap();
+    assert_eq!(all, Typed::Done);
+}
+
+#[tokio::test]
+async fn a_key_that_cannot_be_pressed_is_an_error_and_a_character_with_no_us_key_is_skipped() {
+    assert!(type_chars("a", || false, |_, _| Err("no".to_string())).await.is_err());
+    let n = std::cell::Cell::new(0);
+    type_chars("a\u{e9}b", || false, |_, _| {
+        n.set(n.get() + 1);
+        Ok(())
+    })
+    .await
+    .unwrap();
+    assert_eq!(n.get(), 2, "the accented letter has no US key and is skipped");
 }

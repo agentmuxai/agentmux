@@ -162,6 +162,14 @@ const VIEWS: &[View] = &[
                 params: &[],
             },
             Place {
+                id: "pulls",
+                label_key: Some("deeplinks.places.kanban.pulls"),
+                segments: &[Segment::Lit("pulls")],
+                sections: false,
+                anchor: None,
+                params: &[],
+            },
+            Place {
                 id: "board-task",
                 label_key: Some("deeplinks.places.kanban.task"),
                 segments: &[Segment::Lit("board"), Segment::Var(Var { name: "board", kind: Kind::Slug, values: &[], min: None, max: None, agent_own: false }), Segment::Lit("task"), Segment::Var(Var { name: "task", kind: Kind::Int, values: &[], min: Some(1), max: Some(999999999), agent_own: false })],
@@ -256,22 +264,6 @@ const VIEWS: &[View] = &[
         pane_view: Some("atlas"),
         label_key: "deeplinks.views.atlas",
         icon: "map",
-        build: 1,
-        effect: Effect::None,
-        sensitivity: Sensitivity::Public,
-        agent: AgentRule::Yes,
-        surfaces: &["desktop"],
-        command: None,
-        prefix: false,
-        requires_place: false,
-        places: &[
-        ],
-    },
-    View {
-        id: "reviews",
-        pane_view: Some("reviews"),
-        label_key: "deeplinks.views.reviews",
-        icon: "code-pull-request",
         build: 1,
         effect: Effect::None,
         sensitivity: Sensitivity::Public,
@@ -575,6 +567,7 @@ const VIEWS: &[View] = &[
 
 const ALIASES: &[Alias] = &[
     Alias { from: &["task", "{task}"], to: &["kanban", "task", "{task}"] },
+    Alias { from: &["reviews"], to: &["kanban", "pulls"] },
 ];
 
 const UNLINKED: &[Unlinked] = &[

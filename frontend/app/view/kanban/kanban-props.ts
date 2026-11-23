@@ -19,6 +19,9 @@ export interface KanbanSectionProps {
     /** Pane meta `kanban:collapsed`: the columns folded to a strip, by id. */
     collapsed: string[];
     onCollapsed(ids: string[]): void;
+    /** Pane meta `kanban:waits`: the "waits on" filter (kanban-columns WAITS_FILTERS), "" for none. */
+    waits?: string;
+    onWaits?(w: string): void;
     /** Pane meta `kanban:board`: the board shown, by slug (none: the default board). */
     board: string | null;
     onBoard(slug: string): void;

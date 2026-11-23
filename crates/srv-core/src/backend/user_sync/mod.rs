@@ -7,6 +7,7 @@
 //! implements. Nothing here sends anything; the transports come after it.
 
 pub mod adapter;
+pub mod chain_store;
 pub mod hlc;
 pub mod kanban;
 pub mod lock;
