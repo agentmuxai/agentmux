@@ -180,6 +180,8 @@ events! {
     WidgetStorage: super::mps::EVENT_WIDGET_STORAGE => WidgetStorageEvent,
     /// The agents' widget install requests waiting for the user.
     WidgetRequests: super::mps::EVENT_WIDGET_REQUESTS => WidgetRequestsEvent,
+    /// The agents' asks for the person's go-ahead with a host agent that shares a folder with a container agent.
+    FolderOverlapAsks: super::mps::EVENT_FOLDER_OVERLAP_ASKS => FolderOverlapAsksEvent,
     /// The Vault changed, or its agents' requests did; never an entry or a value.
     Vault: super::mps::EVENT_VAULT => VaultEvent,
     /// A pane's process status changed (`broker::process`).
@@ -499,6 +501,13 @@ pub struct WidgetStorageEvent {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct WidgetRequestsEvent {
     pub requests: Vec<crate::backend::widget::requests::WidgetInstallRequest>,
+}
+
+/// `folderoverlapasks`: the asks now waiting for the person.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FolderOverlapAsksEvent {
+    pub asks: Vec<crate::backend::folder_overlap_asks::FolderAsk>,
 }
 
 /// `vault`: the Vault changed (`changed_ms`), or its requests did. Any

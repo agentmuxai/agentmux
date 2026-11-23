@@ -620,6 +620,15 @@
     }
   },
   {
+    "event": "folderoverlapasks",
+    "payloadTs": {
+      "imports": [
+        "FolderOverlapAsksEvent"
+      ],
+      "name": "FolderOverlapAsksEvent"
+    }
+  },
+  {
     "event": "fs:renamed",
     "payloadTs": {
       "imports": [

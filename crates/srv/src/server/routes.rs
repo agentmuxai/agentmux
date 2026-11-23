@@ -1005,6 +1005,7 @@ fn browser_control_routes() -> Router<AppState> {
 fn agent_definition_routes() -> Router<AppState> {
     Router::new()
         .route("/api/v1/agent/seats", post(app_api::agent_seats::handle_agent_seats))
+        .route("/api/v1/agent/folder-overlap-ask", post(app_api::folder_overlap_ask::handle_folder_overlap_ask))
         .route("/api/v1/agent/migrate-ids", post(app_api::agent_migrate_ids::handle_agent_migrate_ids))
         .route("/api/v1/agent/rename", post(app_api::agent_rename::handle_agent_rename))
         .route("/api/v1/agent/update", post(app_api::agent_definition::handle_agent_update))

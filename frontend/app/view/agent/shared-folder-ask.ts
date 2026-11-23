@@ -45,6 +45,11 @@ export async function goAheadWithSharedFolder(overlaps: Overlap[]): Promise<void
     }
 }
 
+/** The person says no to an agent's ask for this pair: nothing is kept, and the pair stays asking. */
+export async function declineSharedFolder(pair: Pick<Overlap, "host_id" | "container_id">): Promise<void> {
+    await RpcApi.FolderOverlapDeclineCommand(TabRpcClient, { host_id: pair.host_id, container_id: pair.container_id });
+}
+
 export { isSharedFolderRefusal, OPEN_ASK_META } from "@/app/store/shared-folder-open";
 
 /**

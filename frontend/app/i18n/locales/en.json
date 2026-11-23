@@ -49,6 +49,7 @@
     "agentPicker.sharedFolder.title": "A container agent can write this folder",
     "agentPicker.sharedFolder.body": "{{containers}} can write the folder {{host}} works in, so a container agent can change what {{host}} runs.",
     "agentPicker.sharedFolder.hint": "To keep them apart, give them separate workspaces, or make the shared folder read-only for the container agent.",
+    "agentPicker.sharedFolder.askTitle": "{{agent}} asks you to open {{host}}",
     "agentPicker.sharedFolder.goAhead": "Go ahead",
     "agentPicker.sharedFolder.cancel": "Don't open",
     "agentPicker.notices.nodeRequired": "Node.js Required",

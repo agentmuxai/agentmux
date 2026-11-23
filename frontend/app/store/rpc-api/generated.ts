@@ -187,6 +187,7 @@ import type { CommandFleetGroupListData } from "@/types/rpc/CommandFleetGroupLis
 import type { CommandFleetGroupUpdateData } from "@/types/rpc/CommandFleetGroupUpdateData";
 import type { CommandFolderOverlapAcceptData } from "@/types/rpc/CommandFolderOverlapAcceptData";
 import type { CommandFolderOverlapCheckData } from "@/types/rpc/CommandFolderOverlapCheckData";
+import type { CommandFolderOverlapDeclineData } from "@/types/rpc/CommandFolderOverlapDeclineData";
 import type { CommandForkAgentDefinitionData } from "@/types/rpc/CommandForkAgentDefinitionData";
 import type { CommandForkAgentDefinitionSuggestData } from "@/types/rpc/CommandForkAgentDefinitionSuggestData";
 import type { CommandGetAgentBundlesData } from "@/types/rpc/CommandGetAgentBundlesData";
@@ -348,7 +349,9 @@ import type { FleetGroup } from "@/types/rpc/FleetGroup";
 import type { FleetGroupDeleteResult } from "@/types/rpc/FleetGroupDeleteResult";
 import type { FleetGroupListResult } from "@/types/rpc/FleetGroupListResult";
 import type { FolderOverlapAcceptResult } from "@/types/rpc/FolderOverlapAcceptResult";
+import type { FolderOverlapAsksResult } from "@/types/rpc/FolderOverlapAsksResult";
 import type { FolderOverlapCheckResult } from "@/types/rpc/FolderOverlapCheckResult";
+import type { FolderOverlapDeclineResult } from "@/types/rpc/FolderOverlapDeclineResult";
 import type { ForkAgentDefinitionSuggestResult } from "@/types/rpc/ForkAgentDefinitionSuggestResult";
 import type { FsAgentFolder } from "@/types/rpc/FsAgentFolder";
 import type { FsCreateReq } from "@/types/rpc/FsCreateReq";
@@ -2383,6 +2386,18 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<FolderOverlapAcceptResult> {
     return client.rpcCall("folderoverlapaccept", data, opts);
+  },
+  // command "folderoverlapdecline"
+  FolderOverlapDeclineCommand(
+    client: RpcClient,
+    data: CommandFolderOverlapDeclineData,
+    opts?: RpcOpts
+  ): Promise<FolderOverlapDeclineResult> {
+    return client.rpcCall("folderoverlapdecline", data, opts);
+  },
+  // command "folderoverlapasks"
+  FolderOverlapAsksCommand(client: RpcClient, data?: any, opts?: RpcOpts): Promise<FolderOverlapAsksResult> {
+    return client.rpcCall("folderoverlapasks", data ?? {}, opts);
   },
   // command "browsergrants.list"
   BrowserGrantsListCommand(

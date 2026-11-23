@@ -40,6 +40,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "env_get", tool: "AgentEnvGet", rename: &[] },
     Act { action: "env_set", tool: "AgentEnvSet", rename: &[] },
     Act { action: "set_seat", tool: "AgentSetSeat", rename: &[] },
+    Act { action: "ask_go_ahead", tool: "AgentAskGoAhead", rename: &[] },
     Act { action: "rename", tool: "AgentRename", rename: &[] },
     Act { action: "update", tool: "AgentUpdate", rename: &[] },
     Act { action: "bundles", tool: "AgentBundles", rename: &[] },
@@ -99,6 +100,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "AgentEnvGet" => env(cx, "get", &args).await,
                 "AgentEnvSet" => env(cx, "set", &args).await,
                 "AgentSetSeat" => set_seats(cx, &args).await,
+                "AgentAskGoAhead" => ask_go_ahead(cx, &args).await,
                 "AgentRename" => rename_agent(cx, &args).await,
                 "AgentUpdate" => definition_action(cx, "update", &args).await,
                 "AgentBundles" => definition_action(cx, "bundles", &args).await,
@@ -583,6 +585,30 @@ async fn set_seats(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
     let body: Value = resp.json().await.unwrap_or(Value::Null);
     if !status.is_success() {
         anyhow::bail!("Agents set_seat: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
+    }
+    Ok(serde_json::to_string_pretty(&body)?)
+}
+
+/// `ask_go_ahead`: asks the person to go ahead with a host agent that shares a folder with a container agent
+/// (`/api/v1/agent/folder-overlap-ask`); srv shows them the ask in this agent's pane and answers where it stands.
+async fn ask_go_ahead(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
+    require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
+    let (Some(host), Some(container)) = (str_arg(args, "host_agent"), str_arg(args, "container_agent")) else {
+        anyhow::bail!("Agents ask_go_ahead needs host_agent (the host agent) and container_agent (the container agent), each an id or slug");
+    };
+    let url = format!("{}/api/v1/agent/folder-overlap-ask", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&json!({ "host": host, "container": container }))
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("Agents ask_go_ahead: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
     }
     Ok(serde_json::to_string_pretty(&body)?)
 }

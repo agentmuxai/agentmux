@@ -46,6 +46,7 @@ import type { EventsDroppedEvent } from "@/types/rpc/EventsDroppedEvent";
 import type { FileRenamedEvent } from "@/types/rpc/FileRenamedEvent";
 import type { FilesChangedEvent } from "@/types/rpc/FilesChangedEvent";
 import type { FleetBroadcastProgressEvent } from "@/types/rpc/FleetBroadcastProgressEvent";
+import type { FolderOverlapAsksEvent } from "@/types/rpc/FolderOverlapAsksEvent";
 import type { FsOpEvent } from "@/types/rpc/FsOpEvent";
 import type { GoogleNoticeEvent } from "@/types/rpc/GoogleNoticeEvent";
 import type { GrantsEvent } from "@/types/rpc/GrantsEvent";
@@ -184,6 +185,7 @@ export type MuxEventPayloads = {
   "files:changed": FilesChangedEvent;
   "files:op": FsOpEvent;
   fleetbroadcastprogress: FleetBroadcastProgressEvent;
+  folderoverlapasks: FolderOverlapAsksEvent;
   "fs:renamed": FileRenamedEvent;
   "google:notice": GoogleNoticeEvent;
   "history:sessions:changed": null;
@@ -328,6 +330,7 @@ export const TYPED_MUX_EVENTS = [
   "files:changed",
   "files:op",
   "fleetbroadcastprogress",
+  "folderoverlapasks",
   "fs:renamed",
   "google:notice",
   "history:sessions:changed",

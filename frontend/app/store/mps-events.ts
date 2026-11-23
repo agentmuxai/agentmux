@@ -179,6 +179,8 @@ export const WpsEvent = {
     WidgetStorage: "widgetstorage",
     /** Agents' widget install requests waiting for the user: `{ requests }`. */
     WidgetRequests: "widgetrequests",
+    /** Agents' asks for the go-ahead with a host agent that shares a folder with a container agent: `{ asks }`. */
+    FolderOverlapAsks: "folderoverlapasks",
     /** The Vault changed, or agents' requests for entries did: `{ requests, changed_ms }`. */
     Vault: "vault",
     /** srv recorded an incident (a corrupt transcript zone, `backend::transcript::damage`): its notice shows now, not at the next window start. */

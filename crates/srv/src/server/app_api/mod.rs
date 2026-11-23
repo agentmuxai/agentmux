@@ -159,6 +159,7 @@ mod input_history;
 mod presence;
 pub(crate) mod client_terms;
 pub(crate) mod folder_overlap;
+pub(crate) mod folder_overlap_ask;
 pub(crate) mod agent_quit;
 pub(crate) mod tower_pane;
 mod gpu_panel;
