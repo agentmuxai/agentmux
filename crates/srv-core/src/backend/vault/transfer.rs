@@ -44,7 +44,13 @@ const MAX_ENTRIES: usize = 100_000;
 pub const MIN_PASSPHRASE: usize = 8;
 /// How long a staged import waits for the person to commit it.
 const STAGED_TTL: Duration = Duration::from_secs(10 * 60);
+/// The most imports staged at once: a new one drops the oldest.
+#[cfg(not(test))]
 const MAX_STAGED: usize = 4;
+/// Every test of this crate stages in the one process, so under four a test's import is dropped by the others' before it
+/// is committed: under test the cap is out of reach.
+#[cfg(test)]
+const MAX_STAGED: usize = 4096;
 const AGE_MAGIC: &[u8] = b"age-encryption.org/v1";
 
 #[derive(Serialize, Deserialize)]
