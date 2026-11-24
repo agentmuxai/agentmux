@@ -21,6 +21,7 @@ import { useOpenSessions, type Sessions } from "./history-sessions";
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./history.scss";
 import { tip } from "@/app/element/tip";
+import { t } from "@/app/i18n/i18n";
 
 /** srv announces a change at most every two seconds while a transcript grows; a write by another AgentMux sharing the store is not announced, so the list also reads again this often. */
 const SAFETY_POLL_MS = 30_000;
@@ -96,9 +97,9 @@ function useAgentsList(props: HistoryAgentsProps): AgentsList {
 
 const AgentsBar = (props: { list: AgentsList }): JSX.Element => (
     <div class="warden-history-bar">
-        <FilterInput class="warden-history-filter" value={props.list.filter()} onInput={props.list.setFilter} placeholder="Filter agents" />
+        <FilterInput class="warden-history-filter" value={props.list.filter()} onInput={props.list.setFilter} placeholder={t("history.agents.filter")} />
         <Button tone="quiet" density="compact" icon="rotate" busy={props.list.refreshing()} onClick={() => void props.list.refresh()}>
-            Refresh
+            {t("history.agents.refresh")}
         </Button>
     </div>
 );
@@ -111,18 +112,18 @@ const AgentNameCell = (props: { id: string; row: Accessor<AgentRow>; sessions: A
             <span class="warden-history-agent" style={{ "padding-left": `${props.row().depth * 1.25}em` }}>
                 <IconButton
                     icon={props.sessions() ? "chevron-down" : "chevron-right"}
-                    label={props.sessions() ? "Hide sessions" : "Show sessions"}
+                    label={props.sessions() ? t("history.agents.hideSessions") : t("history.agents.showSessions")}
                     tone="quiet"
                     density="compact"
                     onClick={() => void props.list.toggleSessions(props.id)}
                 />
-                <Show when={!a().deleted} fallback={<span class="warden-manager-dim">Deleted agent</span>}>
+                <Show when={!a().deleted} fallback={<span class="warden-manager-dim">{t("history.agents.deleted")}</span>}>
                     <span>{a().name}</span>
                 </Show>
                 <span class="warden-manager-mono warden-manager-dim warden-history-id">{props.id.slice(0, 8)}</span>
                 <Show when={a().fork_of}>
                     <span class="warden-manager-dim warden-history-fork">
-                        fork of {a().fork_of_name || a().fork_of.slice(0, 8)}
+                        {t("history.agents.forkOf", { name: a().fork_of_name || a().fork_of.slice(0, 8) })}
                     </span>
                 </Show>
             </span>
@@ -140,13 +141,13 @@ const AgentRowItem = (props: { id: string; list: AgentsList }): JSX.Element => {
         <>
             <tr data-agent={props.id} data-deleted={a().deleted ? "" : undefined}>
                 <AgentNameCell id={props.id} row={row} sessions={sessions} list={props.list} />
-                <td data-label="Provider">{a().provider || <span class="warden-manager-dim">—</span>}</td>
-                <td class="warden-history-num" data-label="History">{formatBytes(a().current_bytes + a().archive_bytes)}</td>
-                <td class="warden-history-num" data-label="Archived">{a().archives || <span class="warden-manager-dim">—</span>}</td>
-                <td data-label="Last active">{a().last_active_ms ? `${formatAge(ageMs(a().last_active_ms, now()))} ago` : "—"}</td>
+                <td data-label={t("history.agents.colProvider")}>{a().provider || <span class="warden-manager-dim">—</span>}</td>
+                <td class="warden-history-num" data-label={t("history.agents.colHistory")}>{formatBytes(a().current_bytes + a().archive_bytes)}</td>
+                <td class="warden-history-num" data-label={t("history.agents.colArchived")}>{a().archives || <span class="warden-manager-dim">—</span>}</td>
+                <td data-label={t("history.agents.colLastActive")}>{a().last_active_ms ? t("history.agents.ago", { age: formatAge(ageMs(a().last_active_ms, now())) }) : "—"}</td>
                 <td class="warden-history-actions warden-history-cell-wide">
                     <Button tone="quiet" density="compact" onClick={() => props.list.openHistory(a())}>
-                        Open history
+                        {t("history.agents.openHistory")}
                     </Button>
                 </td>
             </tr>
@@ -167,11 +168,11 @@ const AgentsTable = (props: { list: AgentsList }): JSX.Element => (
     <table class="warden-manager-table warden-history-table">
         <thead>
             <tr>
-                <th>Agent</th>
-                <th>Provider</th>
-                <th class="warden-history-num">History</th>
-                <th class="warden-history-num">Archived</th>
-                <th>Last active</th>
+                <th>{t("history.agents.colAgent")}</th>
+                <th>{t("history.agents.colProvider")}</th>
+                <th class="warden-history-num">{t("history.agents.colHistory")}</th>
+                <th class="warden-history-num">{t("history.agents.colArchived")}</th>
+                <th>{t("history.agents.colLastActive")}</th>
                 <th />
             </tr>
         </thead>
@@ -190,7 +191,7 @@ export const HistoryAgents = (props: HistoryAgentsProps): JSX.Element => {
             <AgentsBar list={list} />
             <Show when={list.agents()}>
                 <p class="warden-manager-summary">
-                    {totals().agents} agents · {formatBytes(totals().bytes)} kept · {totals().archives} archived conversations
+                    {t("history.agents.summary", { agents: totals().agents, size: formatBytes(totals().bytes), archives: totals().archives })}
                 </p>
             </Show>
             <Show when={list.error()}>
@@ -201,24 +202,24 @@ export const HistoryAgents = (props: HistoryAgentsProps): JSX.Element => {
                 fallback={
                     <div class="warden-section-stub">
                         {list.agents() === null && !list.error()
-                            ? "Loading…"
+                            ? t("history.agents.loading")
                             : list.filter()
-                              ? "No agent matches."
-                              : "No agent history yet."}
+                              ? t("history.agents.noMatch")
+                              : t("history.agents.none")}
                     </div>
                 }
             >
                 <AgentsTable list={list} />
             </Show>
             <div class="warden-manager-footnote">
-                Kept forever. "Open history" shows an agent's whole recorded conversation in this pane.
+                {t("history.agents.footnote")}
             </div>
         </div>
     );
 };
 
 const SessionList = (props: { sessions: Sessions }): JSX.Element => (
-    <Show when={!props.sessions.loading} fallback={<div class="warden-section-stub">Reading the record…</div>}>
+    <Show when={!props.sessions.loading} fallback={<div class="warden-section-stub">{t("history.sessions.reading")}</div>}>
         {(() => {
             const s = props.sessions as Extract<Sessions, { loading: false }>;
             return (
@@ -229,17 +230,17 @@ const SessionList = (props: { sessions: Sessions }): JSX.Element => (
                     <For each={s.data?.problems ?? []}>{(p) => <div class="warden-manager-error">⚠ {p}</div>}</For>
                     <Show
                         when={(s.data?.sessions.length ?? 0) > 0}
-                        fallback={<Show when={!s.error}><div class="warden-section-stub">No sessions in the record.</div></Show>}
+                        fallback={<Show when={!s.error}><div class="warden-section-stub">{t("history.sessions.none")}</div></Show>}
                     >
                         <table class="warden-manager-table warden-history-sessions">
                             <thead>
                                 <tr>
-                                    <th>Session</th>
-                                    <th>Started</th>
-                                    <th>Last</th>
-                                    <th class="warden-history-num">Size</th>
-                                    <th>Where</th>
-                                    <th>Folder</th>
+                                    <th>{t("history.sessions.colSession")}</th>
+                                    <th>{t("history.sessions.colStarted")}</th>
+                                    <th>{t("history.sessions.colLast")}</th>
+                                    <th class="warden-history-num">{t("history.sessions.colSize")}</th>
+                                    <th>{t("history.sessions.colWhere")}</th>
+                                    <th>{t("history.sessions.colFolder")}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -247,13 +248,13 @@ const SessionList = (props: { sessions: Sessions }): JSX.Element => (
                                     {(x) => (
                                         <tr data-session={x.session_id}>
                                             <td class="warden-manager-mono warden-history-cell-wide">{x.session_id.slice(0, 8)}</td>
-                                            <td data-label="Started">{formatWhen(x.first_ms)}</td>
-                                            <td data-label="Last">{formatWhen(x.last_ms)}</td>
-                                            <td class="warden-history-num" data-label="Size">{formatBytes(x.bytes)}</td>
-                                            <td data-label="Where">{x.archived ? "Archived" : "Current"}</td>
+                                            <td data-label={t("history.sessions.colStarted")}>{formatWhen(x.first_ms)}</td>
+                                            <td data-label={t("history.sessions.colLast")}>{formatWhen(x.last_ms)}</td>
+                                            <td class="warden-history-num" data-label={t("history.sessions.colSize")}>{formatBytes(x.bytes)}</td>
+                                            <td data-label={t("history.sessions.colWhere")}>{x.archived ? t("history.sessions.archived") : t("history.sessions.current")}</td>
                                             <td
                                                 class="warden-manager-mono warden-manager-dim warden-history-cwd warden-history-cell-wide"
-                                                data-label="Folder"
+                                                data-label={t("history.sessions.colFolder")}
                                                 {...tip(x.cwd)}
                                             >
                                                 {x.cwd || "—"}
