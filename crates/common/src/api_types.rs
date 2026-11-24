@@ -595,6 +595,18 @@ pub struct PaneOpenResponse {
     pub note: Option<String>,
 }
 
+/// `POST /api/v1/pane/place` — resize, move or place a floating pane the caller opened
+/// (docs/specs/SPEC_AGENT_PANE_PLACEMENT_FLOATING_2026_11_22.md §2.2).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PanePlaceRequest {
+    /// `resize` (width and/or height), `move` (spot, or x and y) or `place` (any of them, in one call).
+    pub op: String,
+    /// The pane to act on: a block id from `Pane layout`, one the caller opened.
+    pub target_id: String,
+    #[serde(flatten)]
+    pub place: crate::place_args::PlaceArgs,
+}
+
 /// `POST /api/v1/pane/title` — set a pane's display title.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaneTitleRequest {

@@ -594,6 +594,8 @@ fn agent_api_routes() -> Router<AppState> {
         .route("/api/v1/tab/activate", post(handle_tab_activate))
         .route("/api/v1/tab/new", post(handle_tab_new))
         .route("/api/v1/window/focus", post(handle_window_focus))
+        // An agent places a floating pane it opened (`Pane` resize, move, place): srv checks the opener, the pane's window answers.
+        .route("/api/v1/pane/place", post(super::pane_place::handle_pane_place))
 }
 
 /// `muxspect`, work facts and the coordination channel.

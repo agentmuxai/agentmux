@@ -18,7 +18,8 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use crate::backend::job_templates::graph;
-use crate::backend::sensitive_requests::Request;
+use crate::backend::sensitive_ops::VALUE_MAX;
+use crate::backend::sensitive_requests::{registry, Request};
 use crate::drone::storage::DroneStore;
 use crate::drone::types::DroneDefinition;
 use crate::drone::versions::graph_hash;
@@ -61,14 +62,19 @@ fn payload_fact(input: &Value) -> String {
 /// File the request for `slug` (whose uid is `uid`) to fire `drone` with `input`, and keep the payload for it.
 pub(crate) async fn ask(state: &AppState, (uid, slug): (&str, &str), drone: &DroneDefinition, input: Value) -> Result<Value, String> {
     let facts = BTreeMap::from([
-        ("drone".to_string(), format!("{} ({})", drone.name, drone.id)),
-        ("can_do".to_string(), can_do(drone)),
+        ("drone".to_string(), drone_fact(drone)),
+        ("can_do".to_string(), fit(&can_do(drone))),
         ("payload".to_string(), payload_fact(&input)),
     ]);
     let filed = crate::server::sensitive_handlers::file_request(state, uid, slug, "drone_fire", &facts, &format!("fire the drone {}", drone.name)).await?;
     let id = filed.get("id").and_then(Value::as_str).unwrap_or_default().to_string();
     if !id.is_empty() && filed.get("joined") != Some(&json!(true)) {
-        hold(&id, Held { drone_id: drone.id.clone(), graph_hash: graph_hash(&drone.graph), input, at: std::time::Instant::now() });
+        let entry = Held { drone_id: drone.id.clone(), graph_hash: graph_hash(&drone.graph), input, at: std::time::Instant::now() };
+        if !hold(&id, entry) {
+            // Without its payload the request could only fail at the end of the countdown: withdraw it now and say why.
+            let _ = registry().cancel(&id, uid, agentmux_common::time::now_ms());
+            return Err("LIMIT: too many drone fires are waiting for an answer; try again when one has been decided".to_string());
+        }
     }
     Ok(json!({
         "asked": true,
@@ -78,13 +84,40 @@ pub(crate) async fn ask(state: &AppState, (uid, slug): (&str, &str), drone: &Dro
     }))
 }
 
-fn hold(request_id: &str, entry: Held) {
+/// Keep the payload for `request_id`, after letting go of the payloads of requests that ended without running (cancelled,
+/// denied, vetoed or expired) or waited too long. False when the room is full.
+fn hold(request_id: &str, entry: Held) -> bool {
     let mut all = held();
-    all.retain(|_, h| h.at.elapsed() < HOLD);
+    all.retain(|id, h| h.at.elapsed() < HOLD && registry().get(id).is_some_and(|r| r.status.is_open()));
     if all.len() >= MAX_HELD {
-        return;
+        return false;
     }
     all.insert(request_id.to_string(), entry);
+    true
+}
+
+/// The drone as a fact: its name and its whole id. A long name is cut, never the id, so two drones are never one request.
+fn drone_fact(drone: &DroneDefinition) -> String {
+    let id = format!(" ({})", drone.id);
+    let room = VALUE_MAX.saturating_sub(id.chars().count());
+    let name = if drone.name.chars().count() <= room {
+        drone.name.clone()
+    } else {
+        let mut cut: String = drone.name.chars().take(room.saturating_sub(1)).collect();
+        cut.push('…');
+        cut
+    };
+    format!("{name}{id}")
+}
+
+/// `text` cut to what a fact of a request may hold.
+fn fit(text: &str) -> String {
+    if text.chars().count() <= VALUE_MAX {
+        return text.to_string();
+    }
+    let mut cut: String = text.chars().take(VALUE_MAX - 1).collect();
+    cut.push('…');
+    cut
 }
 
 /// The runner: the countdown ended unvetoed.
@@ -101,7 +134,7 @@ pub(crate) async fn run_after_countdown(state: AppState, request: Request) -> Re
     if let Some(why) = crate::server::drone_agent::why_not_fireable(&drone) {
         return Err(format!("an agent can't fire {:?}: {why}", drone.name));
     }
-    let run_id = crate::server::drone_handlers::start_agent_drone_run(&state, &drone.id, entry.input, &request.requester_uid).await?;
+    let run_id = crate::server::drone_handlers::start_agent_drone_run(&state, &drone, entry.input, &request.requester_uid).await?;
     crate::sagas::sensitive_window::tell_askers(&request, &format!("The person didn't stop it: {:?} is running as your fire (run {run_id}). Read it with Drone runs.", drone.name));
     Ok(())
 }

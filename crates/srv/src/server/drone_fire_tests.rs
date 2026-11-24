@@ -65,6 +65,28 @@ async fn a_deleted_drone_is_not_run() {
     assert!(err.contains("was deleted"), "{err}");
 }
 
+#[tokio::test]
+async fn a_payload_is_let_go_when_its_request_ends_without_running() {
+    let state = crate::server::tests::test_state();
+    let d = drone(&state, "Withdrawn");
+    let first = asked(&state, &d, json!({ "n": 1 })).await;
+    assert!(held().contains_key(&first.id));
+    registry().cancel(&first.id, "uid-clamk", 1).unwrap();
+    let second = asked(&state, &d, json!({ "n": 2 })).await;
+    assert!(!held().contains_key(&first.id), "the withdrawn request's payload is gone");
+    assert!(held().contains_key(&second.id));
+}
+
+#[tokio::test]
+async fn a_long_drone_name_still_files_the_request() {
+    let state = crate::server::tests::test_state();
+    let d = drone(&state, &"long ".repeat(200));
+    let request = asked(&state, &d, Value::Null).await;
+    assert!(request.facts["drone"].chars().count() <= VALUE_MAX, "the fact fits what a request holds");
+    assert!(request.facts["drone"].ends_with(&format!("({})", d.id)), "the id is never cut: {}", request.facts["drone"]);
+    assert_eq!(fit("short"), "short");
+}
+
 #[test]
 fn the_payload_is_told_by_size_and_a_short_digest_so_two_payloads_are_two_requests() {
     assert_eq!(payload_fact(&Value::Null), "none");

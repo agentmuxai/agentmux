@@ -54,6 +54,14 @@ describe("OriginContainer", () => {
         expect(label(node({ source: "earlier" }))).toContain("Earlier message");
     });
 
+    it("shows a sender srv marked with ? as a claim, never as a proven sender or a notice", () => {
+        const claimed = label(node({ origin: { kind: "agent", from: "?github-consumer" } }));
+        expect(claimed).toContain("claiming to be github-consumer");
+        expect(claimed).toContain("not proven");
+        expect(claimed).not.toContain("Notice from");
+        expect(claimed).not.toContain("Message from");
+    });
+
     it("says a genuine signature outside its window is expired and arrived late, muted, not as a warning", () => {
         const { container } = render(() => (
             <OriginContainer node={node({ origin: { kind: "service", from: "x", trust: "network-claimed", sig: "expired" } })} />

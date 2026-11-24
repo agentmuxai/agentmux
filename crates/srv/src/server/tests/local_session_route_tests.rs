@@ -668,6 +668,15 @@ async fn the_sign_in_page_and_its_files_carry_the_policy_and_cannot_be_framed() 
     let block = &js[no_code..no_code_end];
     assert!(block.contains("not signed in") && block.contains("agentmux open") && !block.contains("fail()") && !block.contains("not accepted"), "{block}");
     assert_eq!(js.matches("not accepted").count(), 1, "one refusal text, for every failed attempt");
+    // A new code in the fragment of the same tab (a hash-only navigation) starts a new attempt and ends the last: the refusal of an old
+    // attempt is never shown over the new one.
+    assert!(js.contains("addEventListener(\"hashchange\", begin)"), "a hash-only navigation starts again");
+    let fail = js.find("const fail = () => {").expect("the refusal");
+    let after_fail: String = js[fail..].split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(after_fail.starts_with("const fail = () => { if (!current()) return;"), "a superseded attempt shows nothing");
+    // A link that breaks across lines in a narrow terminal is not needed: the page takes the code pasted, and puts it where the link would.
+    assert!(body.contains(r#"id="paste""#) && body.contains(r#"id="code""#), "the paste form is on the page");
+    assert!(js.contains("location.hash = typed") && js.contains("paste.hidden = false"));
 }
 
 #[test]

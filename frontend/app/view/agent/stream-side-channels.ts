@@ -11,10 +11,9 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import { createTestProgressTracker } from "./status/test-progress";
+import { startCadencedPoll, type PollOutcome } from "./shared-zone-cadence";
 import type { TranscriptCursor } from "./transcript-cursor";
 
-/** How often a pane on an agent's shared zone checks for lines no event brought. */
-const SHARED_ZONE_POLL_MS = 5_000;
 /** At most this often a call's output is reported to the reducer: enough for "no output for 1m". */
 const OUTPUT_NOTE_MS = 5_000;
 
@@ -49,23 +48,15 @@ export function createToolOutputNoter(model: AgentPaneModel): (toolId: string, c
  */
 export function startSharedZonePoll(blockId: string, filename: string, cursor: Pick<TranscriptCursor, "position" | "observeCount">): () => void {
     let lastCount: { count: number; stream: string; gen: string } | null = null;
-    let polling = false;
-    const timer = setInterval(async () => {
+    return startCadencedPoll(async (): Promise<PollOutcome> => {
         const pin = cursor.position();
-        if (!pin || !pin.stream.startsWith("g:") || polling || document.hidden) return;
-        polling = true;
-        try {
-            const resp = await RpcApi.BlockfileLineCountCommand(TabRpcClient, { block_id: blockId, filename }, { timeout: 5_000 });
-            if (!resp?.stream || !resp.gen) return;
-            if (lastCount && lastCount.stream === resp.stream && lastCount.gen === resp.gen) {
-                cursor.observeCount(lastCount.count, resp.stream, resp.gen);
-            }
-            lastCount = { count: resp.count, stream: resp.stream, gen: resp.gen };
-        } catch {
-            // Soft: the next tick or event catches up.
-        } finally {
-            polling = false;
-        }
-    }, SHARED_ZONE_POLL_MS);
-    return () => clearInterval(timer);
+        if (!pin || !pin.stream.startsWith("g:") || document.hidden) return "skipped";
+        const resp = await RpcApi.BlockfileLineCountCommand(TabRpcClient, { block_id: blockId, filename }, { timeout: 5_000 });
+        if (!resp?.stream || !resp.gen) return "skipped";
+        const same = lastCount !== null && lastCount.stream === resp.stream && lastCount.gen === resp.gen;
+        if (same) cursor.observeCount(lastCount!.count, resp.stream, resp.gen);
+        const still = same && lastCount!.count === resp.count;
+        lastCount = { count: resp.count, stream: resp.stream, gen: resp.gen };
+        return still ? "still" : "moved";
+    });
 }
