@@ -200,7 +200,9 @@ if [ "$heavy" = 1 ]; then
     case "$arg" in
       --) break ;;
       --help|-h) heavy=0; break ;;
-      --version|-V) [ "$tool" = cargo ] && [ "${sub:-}" = install ] || { heavy=0; break; } ;;
+      --version) [ "$tool" = cargo ] && [ "${sub:-}" = install ] || { heavy=0; break; } ;;
+      # `-V` is cargo's spelling only: npm's `-V` is an unknown option that still runs the script.
+      -V) [ "$tool" = cargo ] && [ "${sub:-}" != install ] && { heavy=0; break; } ;;
     esac
   done
   [ "$tool" = cargo ] && [ "$(first_word "$@")" = help ] && heavy=0
