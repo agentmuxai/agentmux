@@ -10,6 +10,7 @@ import {
     DeveloperGroup,
     DragDropGroup,
     EnvironmentGroup,
+    HistoryGroup,
     SysinfoGroup,
     TerminalGroup,
 } from "./advanced-section-parts";
@@ -29,6 +30,7 @@ export function AdvancedSection(): JSX.Element {
             <SysinfoGroup />
             <DragDropGroup />
             <EnvironmentGroup />
+            <HistoryGroup />
             <DeveloperGroup />
             <UnrecognizedGroup />
         </div>

@@ -149,7 +149,11 @@ pub fn probe_bytes(head: &[u8], ext: Option<&str>, zip_kind: impl FnOnce() -> Op
         // Text bytes are text, whatever the name says (`.ts` is also MPEG
         // transport stream; a `.mp3` that holds words is words).
         Ok(t) => {
-            let mime = if ext.is_some_and(|e| e == "csv") { "text/csv" } else { "text/plain" };
+            let mime = match ext {
+                Some("csv") => "text/csv",
+                Some("tsv") => "text/tab-separated-values",
+                _ => "text/plain",
+            };
             return Probe { kind: "text", mime, text: Some(t), binary_reason: None };
         }
         Err(reason) => Some(reason),
@@ -429,6 +433,14 @@ mod tests {
         assert_eq!(p(&cut, None).text.unwrap().encoding, "utf-8");
         // An empty file is text.
         assert_eq!(p(b"", None).kind, "text");
+    }
+
+    #[test]
+    fn delimited_text_is_typed_by_its_extension() {
+        assert_eq!(p(b"a,b\n1,2\n", Some("csv")).mime, "text/csv");
+        assert_eq!(p(b"a\tb\n1\t2\n", Some("tsv")).mime, "text/tab-separated-values");
+        assert_eq!(p(b"a,b\n1,2\n", Some("txt")).mime, "text/plain");
+        assert_eq!(p(b"a\tb\n", Some("tsv")).kind, "text");
     }
 
     #[test]

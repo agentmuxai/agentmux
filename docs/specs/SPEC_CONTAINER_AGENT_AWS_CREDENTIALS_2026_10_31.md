@@ -126,6 +126,7 @@ Checks, in this order (the first that fails is the answer):
 | `agents` | agent slugs (lower case) or `"*"` | `[]`: nobody |
 | `max_mints_per_hour` | per agent, per grant | 12 |
 | `disabled` | keep the grant listed and refuse it with its `note` | `false` |
+| `caller_tag` | a command recipe only: `{ "key", "prefix" }`. The agent supplies one tag value with `AGENTMUX_AWS_TAG`; the grant fixes the key and what the value starts with (§7.1) | none |
 
 - **Defaults are closed:** no policy file, no grants. A fresh install shares nothing, and a container agent's `aws` says so (§10).
 - Grant names are `^[a-z][a-z0-9-]{0,40}$`. They are what the container's profiles are called.
@@ -133,13 +134,18 @@ Checks, in this order (the first that fails is the answer):
 
 ## 7. Minting on the host
 
-srv never runs a shell. A recipe is an argument vector; placeholders `{reason}`, `{seconds}`, `{session}` (`<agent slug>-<grant>-<unix ms>`), `{agent}` are substituted whole into one argument each and never split. The reason is cleaned to letters, digits, spaces and `_.:/=+-@`, at most 256 characters, because AWS accepts nothing else in a session tag.
+srv never runs a shell. A recipe is an argument vector; placeholders `{reason}`, `{seconds}`, `{session}` (`<agent slug>-<grant>-<unix ms>`), `{agent}`, and, for a grant with a `caller_tag`, `{tag}` and `{tag_key}` (§7.1) are substituted whole into one argument each and never split. The reason is cleaned to letters, digits, spaces and `_.:/=+-@`, at most 256 characters, because AWS accepts nothing else in a session tag.
 
+A grant with a command recipe may take **one caller-named session tag** (§7.1).
 - **`host_profile`:** `aws configure export-credentials --profile <profile> --format process`. It works for SSO, assumed-role profiles, `credential_process` profiles and IAM Roles Anywhere alike, and it returns the profile's own credentials with their own expiry (the AWS CLI v2 command; a CLI too old to have it is `AWS_CLI_MISSING` with the version needed). A profile whose SSO login has lapsed is `AWS_HOST_LOGIN_NEEDED`: "run `aws sso login --profile <p>` on this computer".
 - **`command`:** any program that prints `credential_process` JSON on stdout. This is how a fleet puts its own escalation (assume a role with a reason, in another account) behind a grant: the program does the assuming, srv does the policy, the cache and the audit. The fleet's recipe is in §13.
 - Both run with a 25-second limit (the GitHub path's), a clean environment (`PATH`, `HOME`, `AWS_*` of the host profile only, not the agent's), the container's agent id in `AGENTMUX_AGENT_ID`, and no stdin. Their stderr is kept (first 400 characters) for the refusal text; their stdout is parsed and dropped.
 - A recipe's stdout is read as its **last non-empty line**, which must be the credential JSON: a tool that prints a banner first still works, and nothing else on that line does. Credentials with no session token or no expiry (a long-lived key) are refused, whatever the recipe says: nothing that does not expire is handed to a container.
 - The result is held in a `Zeroizing` buffer; the secret and the token are never logged, never put in the Audit row or the pane row, never in an error. A recipe that prints something that is not credential JSON is `AWS_HOST_REFUSED` with only the program's stderr.
+
+### 7.1 A tag the caller names
+
+A grant with a command recipe may carry `"caller_tag": { "key": "<tag key>", "prefix": "<what the value starts with>" }`. The agent supplies the value with `AGENTMUX_AWS_TAG` (as it gives a reason), and the recipe receives the key as `{tag_key}` and the value as `{tag}`, each as one whole argument, so a recipe has to use `{tag}` if the grant has a `caller_tag`, and may not if it has none. srv checks the value and never changes it: it has to start with the prefix, hold only letters, digits and `_.:/=+-@` (no spaces), be at most 256 characters, and not start with `-`, because the program reads an argument that starts with it as an option (a prefix or key that starts with it is refused when the file loads). A value that is not allowed is a `400 TAG_REFUSED` with a sentence saying which rule, and nothing is minted. A key may not start with `aws:`. A session is cached per value: the same grant with another value is another session. The Audit row for the use records the key and the value under the agent's name; a refused value is not written into the Audit view. Changing a grant's tag rule counts as a wider recipe (§9a). A host-profile grant cannot take a tag.
 
 ## 8. Expiry, caching and refresh
 
@@ -185,6 +191,7 @@ The text goes to the SDK's stderr through `credential_process`; the AWS CLI prin
 | `AWS_CLI_MISSING` | "This computer has no AWS CLI (v2.9 or newer), which the 'read' grant uses. Install it, or use a grant with a command recipe." |
 | `AWS_HOST_REFUSED` | "The host's AWS refused: <its message, first 400 characters>" |
 | `AWS_TOOK_TOO_LONG` | "AWS credentials took too long (50 s). Try again in a minute." |
+| `TAG_REFUSED` | "The Scope tag for the grant 'x' has to start with 'team-a/'." (also: missing, not letters, digits and `_.:/=+-@`, too long, or starting with '-') |
 | `NATIVE_AGENT` | "This is for container agents. A native agent has the host's own AWS setup." |
 
 A person with no AWS at all gets `AWS_NOT_SHARED` first, and, with a policy but no AWS CLI on the host, `AWS_CLI_MISSING`. Neither falls back to another credential, the way the GitHub path never does.
@@ -197,7 +204,7 @@ A native agent runs on the host and already has the host's AWS setup (its own `~
 
 `aws-credentials --profile <name>` (synchronous, like `git-credential`, no async runtime to start):
 
-1. Reads `AGENTMUX_AWS_REASON` (the reason) and `AGENTMUX_AWS_DURATION` (seconds, optional) from its environment, which it inherits from the SDK process, which inherits the agent's command line.
+1. Reads `AGENTMUX_AWS_REASON` (the reason), `AGENTMUX_AWS_TAG` (the tag value, for a grant that takes one) and `AGENTMUX_AWS_DURATION` (seconds, optional) from its environment, which it inherits from the SDK process, which inherits the agent's command line.
 2. `POST /api/v1/aws/credentials` through `WpsClient::from_env()` with `AGENTMUX_AGENT_TOKEN`, 30-second limit.
 3. On `200`, prints the JSON on stdout and exits 0. On anything else prints the error sentence on stderr, nothing on stdout, and exits 1.
 4. Prints nothing but the JSON on stdout, so a broken answer cannot be mistaken for credentials.

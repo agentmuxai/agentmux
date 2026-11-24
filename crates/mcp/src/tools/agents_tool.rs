@@ -52,6 +52,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "container_caches", tool: "AgentContainerCaches", rename: &[] },
     Act { action: "migrate_ids", tool: "AgentMigrateIds", rename: &[] },
     Act { action: "rotate_token", tool: "AgentRotateToken", rename: &[] },
+    Act { action: "mute_quiet", tool: "AgentMuteQuiet", rename: &[] },
 ];
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
@@ -111,6 +112,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "AgentSetContainerLimits" => set_container_limits(cx, &args).await,
                 "AgentContainerCaches" => container_caches(cx, &args).await,
                 "AgentMigrateIds" => migrate_ids(cx, &args).await,
+                "AgentMuteQuiet" => mute_quiet(cx, &args).await,
                 _ => history::call(act.tool, &args, cx).await,
             };
             let result = result.map_err(|e| anyhow::anyhow!(public_params(&format!("{e:#}"), act.rename)));
@@ -741,6 +743,28 @@ async fn lifecycle(cx: &ToolCtx<'_>, action: &str, args: &Value) -> Result<Strin
     if !status.is_success() {
         let tool = if action == "rotate-token" { "AgentRotateToken".to_string() } else { format!("Agent{}", capitalised(action)) };
         anyhow::bail!("{tool}: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
+    }
+    Ok(serde_json::to_string_pretty(&body)?)
+}
+
+/// `mute_quiet`: a leader tells the quiet watch that one of its agents will be quiet for `minutes` (`/api/v1/agent/mute-quiet`).
+async fn mute_quiet(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
+    require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
+    let agent = str_arg(args, "agent").ok_or_else(|| anyhow::anyhow!("missing required parameter: agent"))?;
+    let minutes = args.get("minutes").and_then(Value::as_u64).ok_or_else(|| anyhow::anyhow!("missing required parameter: minutes (1 to 240; 0 lifts a mute)"))?;
+    let url = format!("{}/api/v1/agent/mute-quiet", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&json!({ "agent": agent, "minutes": minutes, "reason": str_arg(args, "reason").unwrap_or_default() }))
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("AgentMuteQuiet: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
     }
     Ok(serde_json::to_string_pretty(&body)?)
 }

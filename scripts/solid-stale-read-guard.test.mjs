@@ -103,10 +103,12 @@ describe.each(["solid.js", "dev.js"])("the installed %s, guarded", (name) => {
         expect(readerOfTheStaleAccessor).not.toThrow();
         expect(value).toEqual({ id: "b" });
         expect(warn).toHaveBeenCalledTimes(1);
-        const [message, error] = warn.mock.calls[0];
+        // Everything the log will keep is the first argument: the stack has to be in it.
+        expect(warn.mock.calls[0]).toHaveLength(1);
+        const message = warn.mock.calls[0][0];
         expect(message).toContain("[solid] a stale read from <Show>");
-        expect(error).toBeInstanceOf(Error);
-        expect(error.stack).toContain("readerOfTheStaleAccessor");
+        expect(message).toMatch(/the read:\nError: (Stale read from <Show>\.|Attempting to access a stale value from <Show>)/);
+        expect(message).toContain("readerOfTheStaleAccessor");
     });
 
     it("a stale read does not leave a computation stale, so one that reads it keeps running", async () => {

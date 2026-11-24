@@ -115,7 +115,7 @@ export const DEFAULT_KEYBINDINGS: KeyBindingRow[] = [
             ["open:swarm", "Open Swarm", "s"],
             ["open:kanban", "Open Kanban", "k"],
             ["open:vault", "Open Vault", "v"],
-            ["open:history", "Open History", "h"],
+            ["open:history", "Open Audit: Conversations", "h"],
             ["open:sysinfo", "Open System Info", "i"],
             ["app:connectors", "Connectors", "c"],
             ["app:memory", "Memory", "m"],

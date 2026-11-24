@@ -57,7 +57,6 @@ describe("the default widget bar", () => {
             "sysinfo",
             "drone",
             "vault",
-            "history",
             "toolchain",
             "tower",
             "audit",
@@ -85,7 +84,7 @@ describe("the singleton flag in the default widget config", () => {
 
     it("marks the management panes", () => {
         expect(keys(flagged)).toEqual(
-            ["atlas", "audit", "connectors", "drone", "help", "history", "kanban", "memory", "settings", "swarm", "toolchain", "tower", "vault"].sort()
+            ["atlas", "audit", "connectors", "drone", "help", "kanban", "memory", "settings", "swarm", "toolchain", "tower", "vault"].sort()
         );
     });
 
@@ -147,6 +146,15 @@ describe("openWidget", () => {
         } finally {
             store.atoms.fullConfigAtom = () => ({ widgets: wmap });
         }
+    });
+
+    it("asks a Kanban already open to take the filter the entry names, and leaves its filter alone when the entry names none", async () => {
+        const kanban = (meta: Record<string, unknown>) =>
+            ({ label: "Kanban", blockdef: { meta: { view: "kanban", ...meta } } }) as unknown as WidgetConfigType;
+        await openWidget(kanban({ "kanban:waits": "open" }));
+        await openWidget(kanban({}));
+        const focus = store.openOrFocusPaneByView.mock.calls.map((c) => (c as unknown[])[2]);
+        expect(focus).toEqual([{ "kanban:waits": "open" }, undefined]);
     });
 
     it("an installed widget's pane follows the singleton its manifest declares", async () => {
