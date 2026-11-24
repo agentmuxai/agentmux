@@ -293,8 +293,7 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
                 ref={registerShell}
                 class={`anchored-popover${props.shellClass ? ` ${props.shellClass}` : ""}`}
                 style={shellStyle()}
-                data-pane-overlay
-                data-operator-only={props.operatorOnly ? "" : undefined}
+                data-pane-overlay data-operator-only={props.operatorOnly ? "" : undefined}
                 data-window-tab-hidden={hiddenTab()}
                 data-zoom-scope={(props.zoom ?? "chrome") === "chrome" ? "chrome" : undefined}
             >
