@@ -379,3 +379,26 @@ fn a_write_cut_off_by_a_removal_is_written_again_in_the_round_that_learns_of_the
     let again = round(&mut a, &mut b);
     assert_eq!(again.reissued, 0, "nothing is written twice");
 }
+
+#[test]
+fn a_write_cut_off_by_a_removal_is_not_written_again_over_a_later_write_of_another_machine() {
+    let (mut a, mut b, c) = three("kanban");
+    a.write(C, "card", "first");
+    round(&mut b, &mut a);
+    a.write(C, "card", "second");
+    let gone = ended(&[(&a, 1), (&b, 0)]);
+    ops::change(&mut b.ctx(), C, Change::Remove { id: c.id.clone(), ended: gone }).unwrap();
+    // B then writes the same record at the new epoch, after A's cut-off write. A's clock is ahead of B's, so a write
+    // A signs again before it has seen B's would take a newer version than B's and win with the older content.
+    b.write(C, "card", "third");
+    b.write(C, "card", "third, again");
+    a.now += 60_000;
+    let r = round(&mut a, &mut b);
+    assert_eq!(r.ended, Ended::Synced, "{:?}", r.ended);
+    for node in [&a, &b] {
+        let held = log::current(&node.conn, C, "card").unwrap().unwrap();
+        let plain = super::seal::open(&node.ring, &held.header, &held.body).unwrap();
+        assert_eq!(&plain[..], b"third, again", "the later write stands on both machines");
+    }
+    assert_eq!(r.reissued, 0, "{r:?}");
+}

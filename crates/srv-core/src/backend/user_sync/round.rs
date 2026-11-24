@@ -242,7 +242,8 @@ fn take_keys<S: Session, P: PeerCalls>(s: &mut S, peer: &mut P, collection: &str
 
 /// Writes again, at the collection's current key epoch, what this machine wrote after the others had stopped at an
 /// older one (a removal cut it off): the peer would refuse it as it stands. Not while the removal is still contested, and
-/// not before the key of the new epoch has arrived: the next round does it.
+/// not before the key of the new epoch has arrived: the next round does it. Only what is still the record's state, so a
+/// later write of another machine is not written over.
 fn reissue<S: Session>(s: &mut S, collection: &str, out: &mut Round) -> Result<(), Ended> {
     let done = lent(s, |ctx| {
         if !ops::may_seal(ctx, collection) {
@@ -366,8 +367,10 @@ pub fn sync_collection<S: Session, P: PeerCalls>(s: &mut S, peer: &mut P, collec
     let steps = (|| {
         exchange_members(s, peer, collection, held.n, held.head.clone(), &mut out)?;
         take_keys(s, peer, collection, &mut out)?;
-        reissue(s, collection, &mut out)?;
         pull_all(s, peer, collection, adapter, &mut out)?;
+        // After the pull: what the others wrote to the same record meanwhile is then in its state, and a write this
+        // machine made that it no longer is the state of is not written again over it.
+        reissue(s, collection, &mut out)?;
         push_all(s, peer, collection, held.vector.clone(), &mut out)
     })();
     match steps {
