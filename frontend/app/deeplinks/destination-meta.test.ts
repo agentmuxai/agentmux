@@ -40,7 +40,9 @@ describe("a link's place is the pane's own meta (R14)", () => {
         ["agentmux://reviews", { view: "kanban", "kanban:waits": "open" }],
         ["agentmux://swarm/supervisor", { view: "swarm", "swarm:section": "supervisor" }],
         ["agentmux://audit/agent/sorrel", { view: "audit", "audit:agent": "sorrel", "audit:section": "events" }],
-        ["agentmux://history", { view: "history" }],
+        ["agentmux://audit/typed", { view: "audit", "audit:section": "typed" }],
+        // The History pane is the Audit pane's Conversations section: its link is an alias.
+        ["agentmux://history", { view: "audit", "audit:section": "conversations" }],
     ];
     it.each(rows)("%s", (link, meta) => {
         expect(plan(link).meta).toEqual(meta);
@@ -48,7 +50,7 @@ describe("a link's place is the pane's own meta (R14)", () => {
 
     it("merges only the place into a pane that is already open", () => {
         expect(plan("agentmux://vault/cards").focusMeta).toEqual({ "vault:section": "cards" });
-        expect(plan("agentmux://history").focusMeta).toEqual({});
+        expect(plan("agentmux://history").focusMeta).toEqual({ "audit:section": "conversations" });
     });
 
     it("says the setting to reveal", () => {

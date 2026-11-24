@@ -23,7 +23,6 @@ export const BUILTIN_SINGLETON_VIEWS: ReadonlySet<string> = new Set([
     "connectors",
     "drone",
     "help",
-    "history",
     "kanban",
     "memory",
     "settings",

@@ -172,8 +172,8 @@
 201 crates/srv-core/src/backend/lan/discovery.rs::LanDiscovery::handle_event
 176 crates/srv-core/src/backend/lan/discovery.rs::LanDiscovery::start
 141 crates/srv-core/src/backend/layout/mod.rs::validate_layout_invariants
-201 crates/srv-core/src/backend/layout_file.rs::PlanBuilder::view_meta
-134 crates/srv-core/src/backend/layout_file.rs::view_from_block
+188 crates/srv-core/src/backend/layout_file.rs::PlanBuilder::view_meta
+127 crates/srv-core/src/backend/layout_file.rs::view_from_block
 113 crates/srv-core/src/backend/lsp/supervisor.rs::LspSupervisor::start
 114 crates/srv-core/src/backend/memory/adopt.rs::adopt_under_lease
 159 crates/srv-core/src/backend/memory/reconcile.rs::reconcile_file
