@@ -269,6 +269,8 @@ class TermViewModel {
                 icon: iconName,
                 click: this.forceRestartController.bind(this),
                 title: title,
+                // The only way to start or restart the shell from the header: kept in a narrow one (mixins.scss).
+                className: "block-frame-end-keep",
             };
             return [buttonDecl];
         });
