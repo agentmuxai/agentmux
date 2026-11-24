@@ -161,7 +161,15 @@ export function remoteModifiers(e: Modifiers & { key: string }, mac: boolean): M
     return { ...own, ctrlKey: true, metaKey: false };
 }
 
+/** The screen backend presses the key the event's `code` names and ignores its modifier bits, so on a Mac the Cmd key itself is sent as the Control key. */
+const CMD_KEY_AS_CTRL_KEY: Record<string, string> = { MetaLeft: "ControlLeft", MetaRight: "ControlRight" };
+
 export function keyMessage(type: "down" | "up", e: Modifiers & { key: string; code: string; keyCode: number }, mac = false) {
+    const asCtrl = mac ? CMD_KEY_AS_CTRL_KEY[e.code] : undefined;
+    if (asCtrl) {
+        const mods = { altKey: e.altKey, ctrlKey: true, metaKey: false, shiftKey: e.shiftKey };
+        return { t: "key", type, key: "Control", code: asCtrl, text: "", vk: 17, mods: modifiers(mods) };
+    }
     const mods = remoteModifiers(e, mac);
     return { t: "key", type, key: e.key, code: e.code, text: typedText({ key: e.key, ...mods }), vk: e.keyCode, mods: modifiers(mods) };
 }

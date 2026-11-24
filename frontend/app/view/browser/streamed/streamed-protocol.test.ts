@@ -173,3 +173,15 @@ describe("copying out of the remote browser", () => {
         expect(isCopyChord({ ...none, key: "c", metaKey: true })).toBe(false);
     });
 });
+
+
+describe("the Cmd key on a Mac, in screen mode", () => {
+    const meta = { key: "Meta", code: "MetaLeft", keyCode: 91, altKey: false, ctrlKey: false, metaKey: true, shiftKey: false };
+    it("is pressed on the remote screen as the Control key, since that backend presses the key a code names", () => {
+        expect(keyMessage("down", meta, true)).toMatchObject({ t: "key", type: "down", key: "Control", code: "ControlLeft", mods: 2, text: "" });
+        expect(keyMessage("up", { ...meta, code: "MetaRight" }, true)).toMatchObject({ type: "up", code: "ControlRight" });
+    });
+    it("is left as it is off a Mac", () => {
+        expect(keyMessage("down", meta, false)).toMatchObject({ key: "Meta", code: "MetaLeft" });
+    });
+});
