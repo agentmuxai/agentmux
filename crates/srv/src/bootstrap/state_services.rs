@@ -395,6 +395,8 @@ fn install_turn_outcome_notes(state: &AppState) {
         Arc::clone(&state.filestore),
         Arc::clone(&state.config_watcher),
     );
+    // A lead on another machine is sent the same note over the LAN (section 19 of that spec).
+    crate::server::quiet_remote::install(state.clone());
     backend::sender_failure_note::install(Arc::clone(&state.broker), Arc::clone(&state.mstore));
 }
 

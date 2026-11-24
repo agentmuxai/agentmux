@@ -25,5 +25,5 @@
 2120 crates/srv-core/src/persist_subscriber.rs
 1509 crates/srv-core/src/registry/migrate.rs
 2107 crates/srv/src/server/muxspect_handlers.rs
-1792 crates/srv/src/server/reactive.rs
+1791 crates/srv/src/server/reactive.rs
 1849 frontend/app/view/swarm/swarm-model.ts

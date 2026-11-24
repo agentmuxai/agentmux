@@ -10,7 +10,7 @@
 import { createStore } from "solid-js/store";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { siteOf } from "./entities/bare-domain";
+import { plainWhenMissing, siteOf } from "./entities/bare-domain";
 
 export type FileCheck = { state: "found" | "missing" | "outside" | "limited"; reason: string; resolved: string };
 
@@ -62,6 +62,13 @@ export async function checkFileNow(blockId: string, path: string): Promise<FileC
 export function deadReason(blockId: string, path: string): string | undefined {
     // A name that is also a web site is not dead when no such file is there: it is the site.
     if (siteOf(path)) return undefined;
+    // A bare name with no such file is text, not a muted file (see `isPlain`).
+    if (plainWhenMissing(path) && fileCheck(blockId, path)?.state === "missing") return undefined;
     const got = fileCheck(blockId, path);
     return got && (got.state === "missing" || got.state === "outside") ? got.reason : undefined;
+}
+
+/** Whether a link to this file is drawn as plain text: a bare name that could be a site's, and srv says no such file. */
+export function isPlain(blockId: string, path: string): boolean {
+    return plainWhenMissing(path) && fileCheck(blockId, path)?.state === "missing";
 }
