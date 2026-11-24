@@ -118,6 +118,12 @@ function DroneField(props: SectionProps & { drones: readonly SelectOption[] }): 
     );
 }
 
+/** Switch the job's action. A drone has no run to cancel from outside, so that choice is left behind with the action that had it. */
+function chooseAction(props: SectionProps, kind: ActionKind): void {
+    props.set("actionKind", kind);
+    if (kind === "drone" && props.draft.overlap === "cancel_other") props.set("overlap", "skip");
+}
+
 /** A drone has no run to cancel from outside, so that choice is not offered for one. */
 function overlapOptions(kind: ActionKind): SelectOption[] {
     return OVERLAPS.filter((o) => kind !== "drone" || o !== "cancel_other").map((o) => ({
@@ -189,11 +195,7 @@ export function WhatSection(props: WhatProps): JSX.Element {
                 <SegmentedControl
                     options={ACTIONS}
                     value={props.draft.actionKind}
-                    onChange={(v) => {
-                        props.set("actionKind", v);
-                        // A drone has no run to cancel from outside: leave that choice behind with the action that had it.
-                        if (v === "drone" && props.draft.overlap === "cancel_other") props.set("overlap", "skip");
-                    }}
+                    onChange={(v) => chooseAction(props, v)}
                 />
             </Field>
             <Show when={props.draft.actionKind === "message"}>
