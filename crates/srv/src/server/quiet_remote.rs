@@ -141,6 +141,18 @@ fn finish(replay: &mut super::reactive::replay::Reservation, answer: Value) -> V
     answer
 }
 
+/// Puts the note, or the line that stands for the ones past the limit, where the lead reads it. A note joins a running turn
+/// or is held for the next, and never starts one. The folded line is only ever held, under one key: written into a running
+/// turn it could not be replaced by the next, and each note past the limit would be a message of its own.
+fn place(block_id: &str, sender: &str, machine: &str, ts: i64, n: &Note, admit: Admit) {
+    match admit {
+        Admit::Show => {
+            crate::backend::blockcontroller::system_note_into_turn_or_hold(block_id, &format!("lan-quiet:{sender}:{}", n.agent.to_lowercase()), &note::render(sender, machine, ts, n));
+        }
+        Admit::Fold { more } => crate::backend::reactive::held_notes::hold(block_id, &format!("lan-quiet-more:{sender}"), &note::render_folded(sender, machine, ts, more)),
+    }
+}
+
 fn answer(req_id: &str, ok: bool, error: &str) -> Value {
     if ok {
         json!({ "success": true, "request_id": req_id, "handled": "quiet-note" })
@@ -172,11 +184,7 @@ pub(crate) async fn intercept(state: &AppState, req: &crate::backend::reactive::
     let now_ms = agentmux_common::time::now_ms_u64();
     let ts = (now_ms / 1000) as i64;
     let admit = LIMITER.lock().unwrap_or_else(|e| e.into_inner()).admit(&lead.agent_id, &machine, now_ms);
-    let (key, text) = match admit {
-        Admit::Show => (format!("lan-quiet:{sender}:{}", n.agent.to_lowercase()), note::render(sender, &machine, ts, &n)),
-        Admit::Fold { more } => (format!("lan-quiet-more:{sender}"), note::render_folded(sender, &machine, ts, more)),
-    };
-    crate::backend::blockcontroller::system_note_into_turn_or_hold(&lead.block_id, &key, &text);
+    place(&lead.block_id, sender, &machine, ts, &n, admit);
     Some(finish(replay, answer(&req_id, true, "")))
 }
 

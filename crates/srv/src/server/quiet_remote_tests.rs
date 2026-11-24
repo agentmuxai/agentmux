@@ -111,3 +111,17 @@ fn a_taken_note_cannot_be_replayed_and_a_refused_one_leaves_its_id_free() {
     let _third = replay::reserve(&mut again, now);
     assert_eq!(again.lan_verified, Some(true), "a refused note does not use up its id");
 }
+
+/// Notes past the limit are one held line that the next replaces, even while the lead's turn is running: they are never
+/// written into the turn one by one.
+#[test]
+fn notes_past_the_limit_are_one_held_line_that_each_next_one_replaces() {
+    let n = Note::new("Wren", false, 35, &[1], "");
+    let (block, sender) = ("pane-quiet-fold-test", "swarm-starpower-00000001");
+    place(block, sender, "starpower", 5, &n, Admit::Fold { more: 1 });
+    place(block, sender, "starpower", 6, &n, Admit::Fold { more: 2 });
+    let (turn, _) = crate::backend::reactive::held_notes::attach(block, "hello");
+    assert_eq!(turn.matches("more quiet note").count(), 1, "{turn}");
+    assert!(turn.contains("2 more quiet notes from starpower in the last hour"), "{turn}");
+    assert!(!turn.contains("1 more quiet note "), "{turn}");
+}
