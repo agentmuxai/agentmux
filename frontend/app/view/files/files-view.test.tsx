@@ -1943,6 +1943,25 @@ describe("the Files pane: find in subfolders", () => {
         expect(v.model.deepMode()).toBe(false);
     });
 
+    it("indexes hidden folders once hidden files are turned on, though the setting is saved a moment later", async () => {
+        h.state.dirs.set(HOME, [d(".cache", { hidden: true }), d("src")]);
+        h.state.dirs.set(`${HOME}\\.cache`, [f("secret.ts")]);
+        const v = mount();
+        await waitFor(() => expect(v.names()).toEqual(["src"]));
+        v.model.toggleDeep();
+        v.model.setFilter("secret");
+        await new Promise((r) => setTimeout(r, 300));
+        expect(v.names()).toEqual([]);
+        // Saving the setting takes a round trip: the find must not read the old one in the meantime.
+        const save = v.ctx.setMeta;
+        (v.ctx as { setMeta: typeof save }).setMeta = async (patch) => {
+            await new Promise((r) => setTimeout(r, 40));
+            await save(patch);
+        };
+        v.model.toggleHidden();
+        await waitFor(() => expect(v.names()).toEqual(["secret.ts"]));
+    });
+
     it("leaves out a hidden folder's files unless hidden files are shown", async () => {
         h.state.dirs.set(HOME, [d(".cache", { hidden: true }), d("src")]);
         h.state.dirs.set(`${HOME}\\.cache`, [f("secret.ts")]);

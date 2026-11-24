@@ -416,9 +416,11 @@ export class FilesModel {
     }
 
     toggleHidden(): void {
-        void this.ctx.setMeta({ [META_HIDDEN]: this.showHidden() ? null : true });
-        // What was indexed was indexed with the old setting.
-        if (this.deep()) queueMicrotask(() => this.startFind());
+        const next = !this.showHidden();
+        void this.ctx.setMeta({ [META_HIDDEN]: next ? true : null });
+        // What was indexed was indexed with the old setting; the setting is read from the pane's meta only after it
+        // has been saved, so the new one is handed over.
+        if (this.deep()) this.startFind(next);
     }
 
     toggleSidebar(): void {
@@ -454,11 +456,10 @@ export class FilesModel {
     }
 
     /** Indexes the folders under the shown one, a few at a time, within limits; what is found shows as it comes. */
-    private startFind(): void {
+    private startFind(hidden: boolean = this.showHidden()): void {
         const run = ++this.findRun;
         this.findEntries = [];
         this.setFindVersion((n) => n + 1);
-        const hidden = this.showHidden();
         void crawlFolders(
             (rel) => this.listForFind(rel, run),
             (batch) => {
