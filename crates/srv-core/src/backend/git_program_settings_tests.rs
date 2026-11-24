@@ -602,6 +602,12 @@ fn the_function_does_not_run_an_alias_of_the_folder_that_names_a_program() {
     folder.git(&["config", "alias.opt", "--no-pager status"], &HashMap::new());
     folder.git(&["config", "alias.ruq", "remote \"update\""], &HashMap::new());
     folder.git(&["config", "alias.faq", "fetch \"--all\""], &HashMap::new());
+    folder.git(&["config", "alias.c1", "c2"], &HashMap::new());
+    folder.git(&["config", "alias.c2", "c3"], &HashMap::new());
+    folder.git(&["config", "alias.c3", "c4"], &HashMap::new());
+    folder.git(&["config", "alias.c4", "c5"], &HashMap::new());
+    folder.git(&["config", "alias.c5", "c6"], &HashMap::new());
+    folder.git(&["config", "alias.c6", "diff"], &HashMap::new());
     folder.git(&["config", "alias.rus", "remote 'update'"], &HashMap::new());
     folder.git(&["config", "alias.rub", "remote \\update"], &HashMap::new());
     for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
@@ -609,7 +615,7 @@ fn the_function_does_not_run_an_alias_of_the_folder_that_names_a_program() {
         through_the_function(&folder, body, false, "git rn");
         assert_eq!(folder.ran(), vec!["aliasrun"], "without the step the folder's alias runs its program");
         folder.forget();
-        for command in ["git rn", "git opt", "git ruq", "git faq", "git rus", "git rub"] {
+        for command in ["git rn", "git opt", "git ruq", "git faq", "git rus", "git rub", "git c1", "git fetch --recurse-submodules viaup", "git pull --rec viaup"] {
             let said = through_the_function(&folder, body, true, command);
             assert!(said.contains("is not run"), "{command}: {said}");
         }
@@ -632,4 +638,25 @@ fn git_in_the_folder_does_not_run_the_ssh_signing_key_command_its_config_names()
     let given = as_env(entries_over(none, &HashMap::new()));
     folder.git(&["commit", "--allow-empty", "-q", "-m", "signed"], &given);
     assert_eq!(folder.ran(), Vec::<String>::new(), "with them it does not");
+}
+
+#[test]
+fn the_function_does_not_fetch_a_submodule_whose_own_configuration_names_a_program() {
+    let folder = Folder::new();
+    let (repo, script) = (folder.repo(), folder.dir.path().join("mark.sh"));
+    let env = HashMap::new();
+    let added = folder.git(&["-c", "protocol.file.allow=always", "submodule", "add", "-q", &slashes(&repo.join(".git")), "sm"], &env);
+    folder.git(&["config", "protocol.file.allow", "always"], &env);
+    folder.git(&["config", "fetch.recurseSubmodules", "true"], &env);
+    folder.git(&["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"], &env);
+    folder.git(&["-C", "sm", "config", "protocol.file.allow", "always"], &env);
+    folder.git(&["-C", "sm", "config", "remote.origin.uploadpack", &format!("sh {} smup", slashes(&script))], &env);
+    for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
+        folder.forget();
+        through_the_function(&folder, body, false, "git fetch origin");
+        assert!(folder.ran().contains(&"smup".to_string()), "without the step the submodule's program runs: {:?} {added}", folder.ran());
+        folder.forget();
+        through_the_function(&folder, body, true, "git fetch origin");
+        assert!(!folder.ran().contains(&"smup".to_string()), "with it the submodule is not fetched: {:?}", folder.ran());
+    }
 }

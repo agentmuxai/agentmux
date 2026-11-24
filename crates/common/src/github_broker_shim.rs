@@ -92,7 +92,7 @@ pub const GIT_NO_EXT_DIFF_ENV: &str = "AGENTMUX_GIT_NO_EXT_DIFF";
 macro_rules! no_ext_diff_step {
     () => {
         r#"  if [ -n "${AGENTMUX_GIT_NO_EXT_DIFF:-}" ]; then
-    local _amx_g=() _amx_r=() _amx_e=() _amx_s _amx_t _amx_c _amx_k _amx_b _amx_n _amx_i _amx_w _amx_x=() _amx_y=() _amx_u=;
+    local _amx_g=() _amx_r=() _amx_e=() _amx_s _amx_t _amx_c _amx_k _amx_b _amx_n _amx_i _amx_w _amx_z _amx_x=() _amx_y=() _amx_u=;
     while [ $# -gt 0 ]; do
       case "$1" in
         -C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env|--attr-source) _amx_g+=("$1"); shift; if [ $# -gt 0 ]; then _amx_g+=("$1"); shift; fi;;
@@ -118,6 +118,7 @@ macro_rules! no_ext_diff_step {
     local -x GIT_CONFIG_COUNT=$_amx_n;
     _amx_w=${1:-};
     for _amx_i in 1 2 3 4 5; do
+      _amx_z=;
       case "$_amx_w" in diff|log|show|format-patch|whatchanged|blame|reflog|fetch|pull|ls-remote|clone|push|remote|"") break;; esac;
       _amx_t=$(command git ${_amx_g[@]+"${_amx_g[@]}"} config --show-scope --get "alias.$_amx_w" 2>/dev/null) || break;
       _amx_c=${_amx_t%%$'\t'*}; _amx_b=${_amx_t#*$'\t'}; read -r _amx_w _amx_t <<< "$_amx_b";
@@ -127,7 +128,16 @@ macro_rules! no_ext_diff_step {
         *:'!'*|*:-*) echo "git: an alias of this folder's configuration that runs a program or starts with an option is not run" >&2; return 1;;
         *) case "$_amx_b" in *'"'*|*"'"*|*'\'*) echo "git: an alias of this folder's configuration that quotes a word is not run" >&2; return 1;; esac;;
       esac;
+      _amx_z=1;
     done;
+    if [ -n "$_amx_z" ]; then
+      case "$_amx_w" in
+        diff|log|show|format-patch|whatchanged|blame|reflog|fetch|pull|ls-remote|clone|push|remote|"") ;;
+        *) if _amx_t=$(command git ${_amx_g[@]+"${_amx_g[@]}"} config --show-scope --get "alias.$_amx_w" 2>/dev/null); then
+             case "${_amx_t%%$'\t'*}" in global|system) ;; *) echo "git: an alias chain of this folder's configuration that is too long to follow is not run" >&2; return 1;; esac;
+           fi;;
+      esac;
+    fi;
     case "$_amx_w" in
       remote)
         if [ -n "$_amx_u" ]; then
@@ -156,6 +166,11 @@ macro_rules! no_ext_diff_step {
           *) set -- "$_amx_s" "$@";;
         esac;;
       fetch|pull)
+        for _amx_k in ${_amx_x[@]+"${_amx_x[@]}"} "$@"; do
+          case "$_amx_k" in
+            --?*) _amx_c=${_amx_k#--}; _amx_c=${_amx_c%%=*}; case "recurse-submodules" in "$_amx_c"*) echo "git $1 $_amx_k is not run: a submodule's own configuration can name a program for a remote; fetch the submodule on its own" >&2; return 1;; esac;;
+          esac;
+        done;
         if [ -n "$_amx_u" ]; then
           for _amx_k in ${_amx_x[@]+"${_amx_x[@]}"} "$@"; do
             _amx_b=;
@@ -168,7 +183,7 @@ macro_rules! no_ext_diff_step {
             done;
           done;
         fi;
-        _amx_s=$1; shift; _amx_g+=(-c fetch.all=false); set -- "$_amx_s" --upload-pack=git-upload-pack "$@";;
+        _amx_s=$1; shift; _amx_g+=(-c fetch.all=false); set -- "$_amx_s" --no-recurse-submodules --upload-pack=git-upload-pack "$@";;
       ls-remote|clone) _amx_s=$1; shift; set -- "$_amx_s" --upload-pack=git-upload-pack "$@";;
       push) _amx_s=$1; shift; set -- "$_amx_s" --receive-pack=git-receive-pack "$@";;
     esac;
