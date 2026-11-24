@@ -36,6 +36,7 @@ export function BrowserAttentionBanner(props: { model: BrowserViewModel; attenti
             class="browser-attention"
             classList={{ "browser-attention--agent": attentionLook(a()).agent }}
             data-kind={a().kind}
+            data-operator-only
             role="alertdialog"
             aria-live="assertive"
         >

@@ -197,6 +197,38 @@ mod launcher_parent_tests {
     }
 }
 
+/// Write this host's discovery file for test harnesses (see `dev_authfile`): the full `authkey.dev` for a dev build,
+/// `instance.json` without a key or token for any other.
+fn publish_discovery_file(app_state: &state::AppState, ipc_port: u16, is_dev: bool, debug_port: u16) {
+    let endpoints = app_state.backend_endpoints.lock().clone();
+    let auth_key = app_state.auth_key.lock().clone();
+    let ipc_token = app_state.ipc_token.clone();
+    let data_dir_str = app_state.version_data_dir.lock().clone().unwrap_or_default();
+    let data_dir_path = std::path::PathBuf::from(&data_dir_str);
+    let ipc_endpoint = format!("127.0.0.1:{}", ipc_port);
+    let instance = format!("v{}", env!("CARGO_PKG_VERSION"));
+    match dev_authfile::publish_discovery(
+        is_dev,
+        &data_dir_path,
+        &auth_key,
+        &endpoints.web_endpoint,
+        &endpoints.ws_endpoint,
+        &ipc_endpoint,
+        &ipc_token,
+        &instance,
+        std::process::id(),
+        debug_port,
+    ) {
+        Ok(p) => {
+            if p.removed_leftover {
+                tracing::info!("Removed a leftover authkey.dev from the data folder");
+            }
+            tracing::info!("Wrote discovery file: {}", p.path.display());
+        }
+        Err(e) => tracing::warn!("Failed to write discovery file: {}", e),
+    }
+}
+
 /// Run the AgentMux host.
 ///
 /// `windows_sandbox_info` is the `cef_sandbox_info_t *` created by
@@ -938,40 +970,10 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     // attached a debugger to a DIFFERENT running instance that way. A
     // well-known constant cannot identify an instance; the per-instance file
     // can. See docs/specs/SPEC_INSTANCE_DISCOVERY_FOR_TOOLING_2026_09_17.md.
-    // Write authkey.dev for ALL runtime modes (dev, portable, installed).
-    // The file lets bench-term-echo.mjs and the PowerShell test harnesses
-    // discover the running instance without manual --ws-url / --auth-key flags.
-    // Security: the WS server is loopback-only; any same-user process already
-    // has equivalent TCP access. See SPEC_TEST_API_ACCESS.md §3 and
-    // SPEC_BENCHMARK_PORTABLE_DISCOVERY_2026_05_20.md for rationale.
-    {
-        let endpoints = app_state.backend_endpoints.lock().clone();
-        let auth_key = app_state.auth_key.lock().clone();
-        let ipc_token = app_state.ipc_token.clone();
-        let data_dir_str = app_state
-            .version_data_dir
-            .lock()
-            .clone()
-            .unwrap_or_default();
-        let data_dir_path = std::path::PathBuf::from(&data_dir_str);
-        let ipc_endpoint = format!("127.0.0.1:{}", ipc_port);
-        let instance = format!("v{}", env!("CARGO_PKG_VERSION"));
-        let host_pid = std::process::id();
-        match dev_authfile::write_dev_auth_file(
-            &data_dir_path,
-            &auth_key,
-            &endpoints.web_endpoint,
-            &endpoints.ws_endpoint,
-            &ipc_endpoint,
-            &ipc_token,
-            &instance,
-            host_pid,
-            debug_port,
-        ) {
-            Ok(p) => tracing::info!("Wrote authkey file: {}", p.display()),
-            Err(e) => tracing::warn!("Failed to write authkey file: {}", e),
-        }
-    }
+    // A dev build writes authkey.dev (instance key and host token) for its test
+    // harnesses; an installed or portable build writes instance.json (endpoints,
+    // pid, version, debug port) and removes a leftover authkey.dev. See dev_authfile.
+    publish_discovery_file(&app_state, ipc_port, is_dev, debug_port);
 
     // Push this host's ipc_port/ipc_token to srv (host_ipc.Register) so
     // srv can proxy /api/v1/ui/{screenshot,click,query} (agent-facing UI
