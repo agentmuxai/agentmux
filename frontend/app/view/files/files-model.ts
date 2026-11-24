@@ -36,7 +36,7 @@ import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
 import { displayName, groupRemotes, remoteColor } from "@/app/view/remotes/remotes-sections";
 import { batch, createMemo, createSignal } from "solid-js";
 import { baseName, isWithin, joinPath, joinRel, normalizePath, parentOf, samePath } from "./files-path";
-import { flattenTree, isUnderRel, labelOf, MAX_EXPANDED, parentRel, type TreeRow } from "./files-tree";
+import { flattenTree, isUnderRel, labelOf, parentRel, type TreeRow } from "@/app/fs/tree/tree-rows";
 import { EMPTY_SELECTION, pruneSelection, type Selection } from "./files-selection";
 import { clipboard, FilesOps, opFinishedText, sameVolume, setClipboard } from "./files-ops";
 import { systemIconsAvailable } from "./files-icons";
@@ -54,6 +54,8 @@ const META_PREVIEW = "files:preview";
 /** Set by srv when a container agent opens a folder of its workspace: the one folder this pane may show. */
 const META_ROOT = "files:root";
 const META_VIEW = "files:view";
+/** The most folders a pane keeps open in place at once: each one is watched, and srv allows 64 watches to a pane. */
+const MAX_EXPANDED = 40;
 /** The tree view: folders open in place (`true`), on the details view. */
 const META_TREE = "files:tree";
 /** The SSH connection the pane is browsing (the key terminals use too);
