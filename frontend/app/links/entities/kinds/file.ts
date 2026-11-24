@@ -31,6 +31,15 @@ function readsAsHost(path: string): boolean {
     return path.includes("/") && first !== "." && first !== ".." && !/^[A-Za-z]:/.test(first) && first.indexOf(".", 1) > 0;
 }
 
+const WHOLE = new RegExp(`^(${PATH_FORMS.join("|")})${LINE}$`);
+
+/** Whether `raw` is, whole, what the file kind reads as a file: the web linker leaves such a word for it, so a name
+ *  like `findings.md` (which reads as a domain) is not made a web address first. */
+export function looksLikeFile(raw: string): boolean {
+    const m = WHOLE.exec(raw);
+    return m !== null && !readsAsHost(m[1]);
+}
+
 export const fileKind: EntityKind = {
     id: "file",
     priority: 45,

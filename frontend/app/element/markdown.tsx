@@ -151,7 +151,7 @@ import { onLinkAuxClick, onLinkClick } from "./link-open";
 import { classifyHref } from "./link-target";
 import { deadReason, requestFileCheck } from "@/app/links/file-check-store";
 import { getSettingsKeyAtom } from "../store/global";
-import { rehypeLinkify } from "./rehype-linkify";
+import { rehypeLinkifyWith } from "./rehype-linkify";
 import { Code, CodeBlock } from "./markdown-codeblock";
 import { MarkdownImg, type MarkdownMediaOpts, MuxBlock } from "./markdown-media";
 import type { SurfaceContext } from "@/app/links/link-context";
@@ -755,7 +755,11 @@ function buildProcessor(s: MarkdownState, withHighlight: boolean) {
               rehypeRaw,
               rehypeLocalImageSrc,
               rehypeAlignToClass,
-              rehypeLinkify,
+              // The files an agent's message names are the entity layer's, so the web linker leaves them alone.
+              rehypeLinkifyWith(() => {
+                  const author = s.entities()?.author;
+                  return author?.kind === "agent" && !author.remote;
+              }),
               () => rehypeEntities(s.entities),
               () =>
                   rehypeSanitize({
