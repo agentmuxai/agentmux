@@ -471,6 +471,9 @@ fn service_shell_and_vault_routes() -> Router<AppState> {
         // shares the exact pane.open logic with the WebSocket RPC handler
         // (app_api::open_pane). See ANALYSIS_AGENT_APP_API_OPEN_IN_EDITOR_2026_05_30.
         .route("/api/v1/pane/open", post(handle_pane_open))
+        // An agent's resize, move or place of a floating pane it opened (`Pane` resize, move, place): srv checks the
+        // opener record, then asks the pane's own window, which answers with where it went.
+        .route("/api/v1/pane/place", post(super::pane_place::handle_pane_place))
         // A deep link an agent opens (`Pane` open with `link`): srv's guard, then the window's executor.
         .route("/api/v1/pane/open_link", post(super::deeplink_guard::handle_pane_open_link))
         // Widgets for agents (WidgetList, WidgetInstall): an install waits
