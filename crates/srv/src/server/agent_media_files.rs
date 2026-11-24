@@ -245,6 +245,10 @@ mod tests {
         std::os::unix::fs::symlink(f.ws.join("img").join("later.png"), f.ws.join("soon.png")).unwrap();
         assert_eq!(resolve(&f.meta, "/workspace/gone.png").unwrap_err(), LEADS_OUT);
         assert_eq!(resolve(&f.meta, "/workspace/gone-dir/a.png").unwrap_err(), LEADS_OUT);
+        // A link to a folder that is there, with nothing at the end of the path, is refused as one with a file is.
+        std::os::unix::fs::symlink(&f.private, f.ws.join("up")).unwrap();
+        assert_eq!(resolve(&f.meta, "/workspace/up/nothing.png").unwrap_err(), LEADS_OUT);
+        assert_eq!(resolve(&f.meta, "/workspace/up/photo.png").unwrap_err(), LEADS_OUT);
         let host = format!("{}/gone.png", f.ws.to_string_lossy());
         assert_eq!(resolve(&f.meta, &host).unwrap_err(), LEADS_OUT);
         // A link inside the folder whose target is not there yet is only a file that is not there.

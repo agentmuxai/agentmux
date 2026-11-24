@@ -91,9 +91,9 @@ fn collapse(path: &Path) -> Option<PathBuf> {
 /// How many links in a row are followed by hand.
 const MAX_HOPS: usize = 16;
 
-/// Whether a link on the way down `path` points out of the folder (`inside`: the folder as written and as resolved)
-/// though what it points at is not there. Such a path can't be resolved, and it must answer as one that leaves the
-/// folder does when its target exists: what lies outside is not told by whether a file is there.
+/// Whether a link on the way down `path` leads out of the folder (`inside`: the folder as written and as resolved),
+/// whether what it points at is there or not, and whatever follows it. A path through such a link answers as one that
+/// leaves the folder does: what lies outside is not told by whether a file is there.
 pub(crate) fn dangling_link_leaves(path: &Path, inside: &[&Path]) -> bool {
     let mut at = PathBuf::new();
     for part in path.components() {
@@ -101,8 +101,14 @@ pub(crate) fn dangling_link_leaves(path: &Path, inside: &[&Path]) -> bool {
         let mut here = at.clone();
         for _ in 0..MAX_HOPS {
             let Ok(meta) = std::fs::symlink_metadata(&here) else { break };
-            // A link that resolves is judged by where it resolves to; only one that does not is followed by hand.
-            if !meta.file_type().is_symlink() || crate::server::browser_uploads::canonical(&here).is_ok() {
+            if !meta.file_type().is_symlink() {
+                break;
+            }
+            // A link that resolves leaves the folder when what it resolves to is not under it, whatever follows it.
+            if let Ok(resolved) = crate::server::browser_uploads::canonical(&here) {
+                if !inside.iter().any(|root| resolved.starts_with(root)) {
+                    return true;
+                }
                 break;
             }
             let Ok(target) = std::fs::read_link(&here) else { break };
@@ -260,7 +266,8 @@ mod tests {
         link("relative", std::path::Path::new("../not-there.txt"));
         link("chain-b", &dir.path().join("not-there.txt"));
         link("chain-a", &work.join("chain-b"));
-        for asked in ["gone.txt", "gone-dir/a.md", "gone-dir", "present.txt", "relative", "chain-a", "gone-dir/../plan.md"] {
+        link("up", dir.path());
+        for asked in ["gone.txt", "gone-dir/a.md", "gone-dir", "present.txt", "relative", "chain-a", "gone-dir/../plan.md", "up/nothing.txt", "up/secret.txt", "up/nothing/deeper.txt"] {
             assert_eq!(check(&dir, asked), (OUTSIDE.to_string(), OUTSIDE_WORDS.to_string()), "{asked}");
         }
     }
@@ -274,6 +281,10 @@ mod tests {
         std::os::unix::fs::symlink("notes/later.md", work.join("soon-relative.md")).unwrap();
         assert_eq!(check(&dir, "soon.md"), (MISSING.to_string(), NOT_FOUND_WORDS.to_string()));
         assert_eq!(check(&dir, "soon-relative.md"), (MISSING.to_string(), NOT_FOUND_WORDS.to_string()));
+        // A link to a folder of its own whose tail is not there is only a file that is not there.
+        std::os::unix::fs::symlink(work.join("notes"), work.join("inside-dir")).unwrap();
+        assert_eq!(check(&dir, "inside-dir/later.md"), (MISSING.to_string(), NOT_FOUND_WORDS.to_string()));
+        assert_eq!(check(&dir, "inside-dir/plan.md").0, FOUND);
     }
 
     #[test]
