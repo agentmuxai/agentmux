@@ -28,7 +28,7 @@ use crate::backend::storage::wan_identity::{self, WanIdentityStore};
 use crate::backend::user_sync::members::Kind;
 use crate::backend::user_sync::ops::{self, Ctx, Held, KeysAns, KeysReq, MembersAns, MembersReq, PullAns, PullReq, PushAns, PushReq};
 use crate::backend::user_sync::round::{self, CallError, Ended, PeerCalls, Round, Session};
-use crate::backend::user_sync::log;
+use crate::backend::user_sync::{chain_store, log};
 use crate::server::AppState;
 
 /// How often this machine checks whether it has something new for its peers.
@@ -104,6 +104,16 @@ pub(crate) fn install(state: AppState) {
 
 /// The collections to sync, read from this machine's state under the lock: none unless this install holds it.
 fn plans(store: &Store, wan: &WanIdentityStore) -> Result<Vec<Plan>, String> {
+    // An install with no collection never asks for the computer's sync lock: another install of this computer may be
+    // the one that holds collections, and the lock is theirs to keep.
+    let any = {
+        let conn = store.conn().lock().map_err(|_| "the store is busy".to_string())?;
+        log::init(&conn).map_err(|e| e.to_string())?;
+        !chain_store::load_all(&conn).map_err(|e| format!("{e:?}"))?.is_empty()
+    };
+    if !any {
+        return Ok(Vec::new());
+    }
     sync_ops::with_ctx(store, wan, None, |ctx: &mut Ctx| {
         if !ctx.active {
             return Vec::new();
