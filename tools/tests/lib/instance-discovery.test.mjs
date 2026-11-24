@@ -90,3 +90,17 @@ test("no live instances is an error, not an empty pick", () => {
     const root = fakeRoot([{ channel: "alpha", version: "0.56.4", pid: 111, debugPort: 42149 }]);
     assert.throws(() => resolveInstance({ root, alive: () => false }), /no live AgentMux instance/);
 });
+
+test("an installed build's instance.json is found, with its debug port and no key", () => {
+    const root = mkdtempSync(join(tmpdir(), "am-discovery-"));
+    const dir = join(root, "channels", "stable", "versions", "0.60.41", "data");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "instance.json"), JSON.stringify({
+        version: 1, web_endpoint: "127.0.0.1:9001", ws_endpoint: "127.0.0.1:9101", host_pid: 333,
+        instance: "v0.60.41", data_dir: dir, debug_port: 42150,
+    }));
+    const live = listLiveInstances({ root, alive: aliveOnly([333]) });
+    assert.equal(live.length, 1);
+    assert.equal(live[0].debugPort, 42150);
+    assert.equal(live[0].authKey, undefined);
+});

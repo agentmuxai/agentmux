@@ -60,6 +60,15 @@ function readableOn(hex: string, surfaces: Surfaces): string {
 }
 
 /**
+ * A pane's identity colour (the hue its tab shows; the agent pane's working-status text and spinner use it) as it reads
+ * inside the pane: kept as it is when it already reaches 4.5:1 on all three of the pane's layers, otherwise moved in
+ * lightness only, so its hue stays. A pane with no backdrop keeps the colour as it was.
+ */
+export function identityInPane(hex: string | undefined, derived: DerivedBackdrop): string | undefined {
+    return hex ? readableOn(hex, derived.surfaces) : hex;
+}
+
+/**
  * The custom properties for a pane's inline style, from what `deriveInk` made of its backdrop. `ansi` is the active
  * app theme's terminal palette (`themeAnsi`): each colour in it is set again on the pane, moved to read there, for the
  * transcript's syntax and status colours (spec §6). Without it the pane sets none, and they stay the theme's.

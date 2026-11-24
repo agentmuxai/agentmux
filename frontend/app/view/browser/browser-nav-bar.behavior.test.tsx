@@ -6,7 +6,7 @@
  * What the browser pane's nav bar does, pinned as ordered logs: the address bar's two-way sync
  * with the page's URL, what Enter and a picked suggestion navigate to, the suggestions (inline
  * completion, the arrow keys, Escape, blur, an IME composition), the pane shortcuts the host
- * sends (focus address, Home, a new tab, a new Incognito tab, close this tab), the Bookmarks menu (the first load, a refresh,
+ * sends (focus address, Home, find, a new tab, a new Incognito tab, close this tab), the Bookmarks menu (the first load, a refresh,
  * adding and removing, a failed save) and the Home page. The profile button and the sign-in key
  * are stand-ins; everything else is the real nav bar. A refactor of the nav bar must leave the
  * committed snapshots as they are; regenerate with `vitest -u` only for a change meant to behave
@@ -118,6 +118,7 @@ interface Rig {
 
 function mount(url = "https://example.com/"): Rig {
     const paneNavFails = { value: false };
+    const findOpen = { value: false };
     const [urlAtom, setUrl] = createSignal(url);
     const [controls, setControls] = createSignal(true);
     const [paneCreated, setPaneCreated] = createSignal(true);
@@ -161,6 +162,14 @@ function mount(url = "https://example.com/"): Rig {
         goBack: () => {},
         goForward: () => {},
         onError: (m: string) => log(`model onError ${m}`),
+        searchAtoms: {
+            isOpen: Object.assign(() => findOpen.value, {
+                _set: (v: boolean) => {
+                    findOpen.value = v;
+                    log(`find bar open=${v}`);
+                },
+            }),
+        },
     } as unknown as BrowserViewModel;
     const { container } = render(() => (
         <div class="browser-view">
@@ -568,6 +577,15 @@ describe("the pane shortcuts the host sends", () => {
         rig.input.dispatchEvent(plain);
         log(`plain prevented=${plain.defaultPrevented}`);
         await expect(out()).toMatchFileSnapshot(snap("shortcut-incognito"));
+    });
+
+    it("find opens the find bar after taking OS focus back, and leaves it open the second time", async () => {
+        mount();
+        await flush();
+        await send("block-1", "find");
+        await send("block-1", "find");
+        await send("other-block", "find");
+        await expect(out()).toMatchFileSnapshot(snap("shortcut-find"));
     });
 
     it("new-tab and close-tab open and close a tab, and so do Ctrl+T and Ctrl+W anywhere in the bar", async () => {

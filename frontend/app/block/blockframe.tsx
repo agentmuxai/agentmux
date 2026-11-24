@@ -29,7 +29,7 @@ import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { computeBgStyleFromMeta } from "@/util/muxutil";
 import { backdropSubmenuItem } from "@/app/backdrop/backdrop-menu";
 import { supportsBackdrop } from "@/app/backdrop/meta";
-import { getPaneScope } from "@/app/backdrop/scope";
+import { getPaneScope, identityInPane } from "@/app/backdrop/scope";
 import { usePaneBackdrop } from "@/app/backdrop/usePaneBackdrop";
 import * as util from "@/util/util";
 import { FaviconImage } from "@/app/element/FaviconImage";
@@ -1406,7 +1406,8 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                     "--magnified-block-opacity": s.magnifiedBlockOpacity(),
                     "--magnified-block-blur": `${s.magnifiedBlockBlur()}px`,
                     "--block-agent-color": s.blockAgentColor() ?? "transparent",
-                    "--block-identity-color": s.blockIdentityColor(),
+                    // Inside a backdrop the identity colour is moved, in lightness only, to read on the pane's layers.
+                    "--block-identity-color": backdrop() ? identityInPane(s.blockIdentityColor(), backdrop()!.derived) : s.blockIdentityColor(),
                     ...backdropVars(),
                 } as JSX.CSSProperties
             }

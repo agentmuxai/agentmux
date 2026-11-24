@@ -13,6 +13,7 @@ import {
     getEffectiveGroupedChildKeys,
     getHiddenKeys,
     getSavedPinNames,
+    pinsToSave,
     isWidgetHidden,
     pinIdOf,
     widgetMenuIconColor,
@@ -53,7 +54,7 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
             : [...current, shortName];
         setLocalPinned(next); // optimistic — drives UI immediately
         fireAndForget(async () => {
-            await RpcApi.SetConfigCommand(TabRpcClient, { "widget:pinned": next } as any);
+            await RpcApi.SetConfigCommand(TabRpcClient, { "widget:pinned": pinsToSave(next, settings()) } as any);
         });
     };
 

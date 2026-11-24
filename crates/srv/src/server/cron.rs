@@ -442,6 +442,9 @@ pub(crate) fn create_job(state: &AppState, caller: Option<&Caller>, body: Value,
     if let Err(e) = runnable_yet(&def) {
         return bad_request(e);
     }
+    if let Err(e) = super::drone_turn_on::allowed(state, &def) {
+        return bad_request(e);
+    }
     let notes = match job_caps::apply_rules(state, &mut def, None, origin) {
         Ok(notes) => notes,
         Err(refused) => return refused,
@@ -924,6 +927,9 @@ pub(crate) fn patch_job(state: &AppState, caller: Option<&Caller>, id: &str, bod
     if let Err(e) = runnable_yet(&def) {
         return bad_request(e);
     }
+    if let Err(e) = super::drone_turn_on::allowed(state, &def) {
+        return bad_request(e);
+    }
     let notes = match job_caps::apply_rules(state, &mut def, Some(&before), origin) {
         Ok(notes) => notes,
         Err(refused) => return refused,
@@ -958,6 +964,15 @@ fn set_enabled(state: &AppState, store: &Store, id: &str, action: &str) -> Answe
         "pause" => false,
         other => return bad_request(format!("unknown action '{other}' (use 'pause' or 'resume')")),
     };
+    if enabled {
+        if let Ok(Some(job)) = store.cron_get(id) {
+            let mut def = JobDefinition::from_job(&job);
+            def.enabled = true;
+            if let Err(e) = super::drone_turn_on::allowed(state, &def) {
+                return bad_request(e);
+            }
+        }
+    }
     match store.cron_set_enabled(id, enabled) {
         Ok(true) => {}
         Ok(false) => return (StatusCode::NOT_FOUND, Json(json!({"error": "job not found"}))),

@@ -9,7 +9,7 @@
  */
 
 import { Block } from "@/app/block/block";
-import { layoutBehind, markLayoutBehind, settleLayoutBehind, windowResizing } from "@/app/platform/window-resize";
+import { layoutBehind, markLayoutBehind, noteSplitterDrag, windowResizing } from "@/app/platform/window-resize";
 import { setKeepAliveBlockDormant } from "@/app/store/block-component-registry";
 import { AgentStalledBanner } from "@/app/tab/agent-stalled-banner";
 import { PaneStackMemberActiveProvider, usePaneStackMemberActive } from "@/app/tab/pane-stack-member";
@@ -28,7 +28,26 @@ export interface PaneMembersInput {
     lands?: (id: string) => boolean;
 }
 
-/** One kept-alive member: its dormant flag, its slot (visible or hidden) and its Block. */
+/**
+ * A splitter drag sends no window `resize` event, yet it resizes the pane's slot on every frame just the same: the
+ * catch-up of the other members pauses for it and resumes when it ends (window-resize.ts). Counted once per drag,
+ * and ended with the member if it goes while the drag does.
+ */
+function useSplitterDragPause(dragging: () => boolean): void {
+    let counted = false;
+    createEffect(
+        on(dragging, (now) => {
+            if (now === counted) return;
+            counted = now;
+            noteSplitterDrag(now);
+        })
+    );
+    onCleanup(() => {
+        if (counted) noteSplitterDrag(false);
+        counted = false;
+    });
+}
+
 function renderKeepAliveSlot(id: string, input: PaneMembersInput): JSX.Element {
     const { activeBlockId, keepAliveNodeModelFor } = input;
     // Every "all panes" consumer of the block-component registry
@@ -63,8 +82,7 @@ function renderKeepAliveSlot(id: string, input: PaneMembersInput): JSX.Element {
         // simply has no catch-up turn of its own, so it lays out when the drag settles.
         if ((windowResizing() || splitterDragging()) && untrack(() => id !== activeBlockId())) markLayoutBehind(behindKey);
     });
-    // A splitter drag sends no window `resize` event, yet it resizes the pane's slot on every frame just the same.
-    createEffect(on(splitterDragging, (dragging, was) => was && !dragging && settleLayoutBehind(), { defer: true }));
+    useSplitterDragPause(splitterDragging);
     const skipsLayout = () => id !== activeBlockId() && (windowResizing() || splitterDragging() || layoutBehind(behindKey));
 
     // The member's content, in an element of its own inside the slot: while the tab is dragged out of the

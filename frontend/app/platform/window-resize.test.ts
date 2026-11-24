@@ -13,6 +13,7 @@ import {
     installWindowResizeTracking,
     layoutBehind,
     markLayoutBehind,
+    noteSplitterDrag,
     noteWindowResize,
     resetWindowResizeForTests,
     WINDOW_RESIZE_SETTLE_MS,
@@ -121,6 +122,69 @@ describe("layoutBehind", () => {
         expect(layoutBehind("b")).toBe(true);
         vi.advanceTimersByTime(WINDOW_RESIZE_SETTLE_MS + 16);
         expect(layoutBehind("b")).toBe(false);
+        vi.unstubAllGlobals();
+    });
+});
+
+describe("a splitter drag during the catch-up", () => {
+    const behind = (ids: string[]) => ids.map(layoutBehind);
+
+    it("pauses the drain and keeps the queue, then releases one per idle period after the drag ends", () => {
+        vi.useFakeTimers();
+        vi.stubGlobal("requestIdleCallback", undefined);
+        noteWindowResize();
+        for (const id of ["a", "b", "c", "d"]) markLayoutBehind(id);
+        vi.advanceTimersByTime(WINDOW_RESIZE_SETTLE_MS + 16);
+        expect(behind(["a", "b", "c", "d"])).toEqual([false, true, true, true]);
+        noteSplitterDrag(true);
+        vi.advanceTimersByTime(500);
+        expect(behind(["a", "b", "c", "d"])).toEqual([false, true, true, true]);
+        noteSplitterDrag(false);
+        vi.advanceTimersByTime(16);
+        expect(behind(["a", "b", "c", "d"])).toEqual([false, false, true, true]);
+        vi.advanceTimersByTime(16);
+        expect(behind(["a", "b", "c", "d"])).toEqual([false, false, false, true]);
+        vi.unstubAllGlobals();
+    });
+
+    it("keeps the queue when the window's resize settles while the drag goes on", () => {
+        vi.useFakeTimers();
+        vi.stubGlobal("requestIdleCallback", undefined);
+        noteSplitterDrag(true);
+        noteWindowResize();
+        for (const id of ["a", "b", "c"]) markLayoutBehind(id);
+        vi.advanceTimersByTime(WINDOW_RESIZE_SETTLE_MS + 200);
+        expect(windowResizing()).toBe(false);
+        expect(behind(["a", "b", "c"])).toEqual([true, true, true]);
+        noteSplitterDrag(false);
+        vi.advanceTimersByTime(16);
+        expect(behind(["a", "b", "c"])).toEqual([false, true, true]);
+        vi.unstubAllGlobals();
+    });
+
+    it("waits for the last of two overlapping drags", () => {
+        vi.useFakeTimers();
+        vi.stubGlobal("requestIdleCallback", undefined);
+        markLayoutBehind("a");
+        noteSplitterDrag(true);
+        noteSplitterDrag(true);
+        noteSplitterDrag(false);
+        vi.advanceTimersByTime(200);
+        expect(layoutBehind("a")).toBe(true);
+        noteSplitterDrag(false);
+        vi.advanceTimersByTime(16);
+        expect(layoutBehind("a")).toBe(false);
+        vi.unstubAllGlobals();
+    });
+
+    it("ignores an end with no drag counted", () => {
+        vi.useFakeTimers();
+        vi.stubGlobal("requestIdleCallback", undefined);
+        markLayoutBehind("a");
+        noteSplitterDrag(false);
+        noteSplitterDrag(true);
+        vi.advanceTimersByTime(200);
+        expect(layoutBehind("a")).toBe(true);
         vi.unstubAllGlobals();
     });
 });
