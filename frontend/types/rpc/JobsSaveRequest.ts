@@ -14,4 +14,8 @@ definition: Record<string, unknown>,
 /**
  * Confirms a job whose agent's provider reports no cost (§5.3).
  */
-confirm_no_cost?: boolean, };
+confirm_no_cost?: boolean, 
+/**
+ * Confirms turning on a drone job after its prompt (what it changes outside AgentMux, the credentials it uses).
+ */
+confirm_turn_on?: boolean, };

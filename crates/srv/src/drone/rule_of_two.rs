@@ -85,12 +85,12 @@ fn texts_of<'a>(node: &'a FlowNode) -> Vec<(&'a str, &'a str)> {
     out
 }
 
-fn kind_of(node: &FlowNode) -> Option<BlockKind> {
+pub(crate) fn kind_of(node: &FlowNode) -> Option<BlockKind> {
     node.data.get("kind").and_then(Value::as_str).and_then(BlockKind::parse)
 }
 
 /// Whether `node` changes things outside AgentMux. A Drone block is counted: what the callee does is not known here.
-fn writes_outside(node: &FlowNode, kind: BlockKind) -> bool {
+pub(crate) fn writes_outside(node: &FlowNode, kind: BlockKind) -> bool {
     match kind {
         BlockKind::Api => {
             let method = node.data.get("method").and_then(Value::as_str).unwrap_or("GET").to_uppercase();
