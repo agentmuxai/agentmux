@@ -279,6 +279,54 @@ fn machines_that_appended_different_entries_at_the_same_position_settle_on_one_c
 }
 
 #[test]
+fn a_machine_whose_chain_is_shorter_settles_a_fork_with_the_longer_chain_that_won_it() {
+    let (mut a, mut b, c) = three("kanban");
+    ops::change(&mut a.ctx(), C, Change::SetPolicy { policy: Policy::Approve }).unwrap();
+    let gone = ended(&[(&a, 0), (&b, 0)]);
+    let remove = ops::change(&mut b.ctx(), C, Change::Remove { id: c.id.clone(), ended: gone }).unwrap();
+    // Which of the two entries at the fourth place wins is the same everywhere: the machine that wrote it goes on from
+    // there, and the other is left holding a chain one entry shorter than the winner's.
+    let mut probe = a.chains[C].clone();
+    let b_wins = matches!(probe.take(C, remove), Ok(super::members::Taken::Replaced(_)));
+    let (mut winner, mut loser, next) = if b_wins { (b, a, Policy::Approve) } else { (a, b, Policy::AutoProven) };
+    ops::change(&mut winner.ctx(), C, Change::SetPolicy { policy: next }).unwrap();
+    assert_eq!(winner.chains[C].entries.len(), loser.chains[C].entries.len() + 1);
+    let r = round(&mut loser, &mut winner);
+    assert_eq!(r.ended, Ended::Synced, "{:?}", r.ended);
+    assert_eq!(winner.chains[C].entries, loser.chains[C].entries);
+    assert_eq!(chain_store::load_all(&loser.conn).unwrap(), loser.chains);
+}
+
+#[test]
+fn a_peer_that_cannot_be_asked_for_membership_is_not_reported_as_one_that_does_not_list_this_machine() {
+    let (mut a, _, _) = three("kanban");
+    let mut stranger = node(9);
+    stranger.found(C, "kanban", Policy::Approve);
+    // The peer leaves the stranger out of its hello and then goes silent: the round says what happened.
+    struct Silent<'a>(Link<'a>);
+    impl PeerCalls for Silent<'_> {
+        fn hello(&mut self, c: &[String]) -> Result<Vec<Held>, CallError> {
+            self.0.hello(c)
+        }
+        fn members(&mut self, _: &MembersReq) -> Result<MembersAns, CallError> {
+            Err(CallError::Unreachable("gone quiet".into()))
+        }
+        fn keys(&mut self, r: &KeysReq) -> Result<KeysAns, CallError> {
+            self.0.keys(r)
+        }
+        fn pull(&mut self, r: &PullReq) -> Result<PullAns, CallError> {
+            self.0.pull(r)
+        }
+        fn push(&mut self, r: &PushReq) -> Result<PushAns, CallError> {
+            self.0.push(r)
+        }
+    }
+    let mut peer = Silent(link(&stranger, &mut a));
+    let r = sync_collection(&mut Mine(&mut stranger), &mut peer, C, &NewestWins);
+    assert_eq!(r.ended, Ended::Unreachable("gone quiet".into()));
+}
+
+#[test]
 fn a_record_for_another_collection_in_a_pull_is_refused_even_when_this_machine_holds_that_collection() {
     let (mut a, mut b, _) = three("kanban");
     // Both machines hold a second collection; b is in the first (the one being synced) and writes into the second.

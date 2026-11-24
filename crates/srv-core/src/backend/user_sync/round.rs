@@ -159,11 +159,13 @@ fn exchange_members<S: Session, P: PeerCalls>(s: &mut S, peer: &mut P, collectio
         let ask = s.with(|ctx| {
             let chain = ctx.chains.get(collection).ok_or(Ended::NotHere)?;
             let len = chain.entries.len();
-            // Chains as long as each other but with different heads each hold their own entry at the last place: not a
-            // shared prefix. One place back, each side is offered the other's entry beside its own, and settles it.
-            let apart = peer_n as usize == len && len > 1 && peer_head.is_some() && chain.entries.last().map(Entry::hash) != peer_head;
-            let back = usize::from(apart);
-            let offered = chain.entries.iter().skip(peer_n as usize - back).take(ops::MAX_ENTRIES).cloned().collect();
+            // The chains are the same up to the shorter one's head only when they are as long as each other with the same
+            // head, or the peer says nothing of its head. Otherwise each may hold its own entry at the last place, or at
+            // any place the longer one has gone on from: one place back, each side is offered the other's entry beside
+            // its own and settles it. An entry both hold is only a duplicate.
+            let same = peer_n as usize == len && chain.entries.last().map(Entry::hash) == peer_head;
+            let back = usize::from(len > 1 && peer_head.is_some() && !same);
+            let offered = chain.entries.iter().skip((peer_n as usize).saturating_sub(back)).take(ops::MAX_ENTRIES).cloned().collect();
             Ok::<_, Ended>(Ask { have: (len - back) as u64, offered })
         })?;
         peer_head = None;
@@ -327,8 +329,9 @@ pub fn sync_collection<S: Session, P: PeerCalls>(s: &mut S, peer: &mut P, collec
         // former member may still ask for the membership entries up to its own removal, so ask: that is how a removed
         // machine learns it was, and by whom.
         return match exchange_members(s, peer, collection, mine, None, &mut out) {
-            Err(Ended::Removed { by }) => out.end(Ended::Removed { by }),
-            _ => out.end(Ended::NotAMemberThere),
+            // Only what the peer's refusal says is "not a member there"; any other end is what happened.
+            Ok(()) | Err(Ended::NotAMemberThere) => out.end(Ended::NotAMemberThere),
+            Err(ended) => out.end(ended),
         };
     };
     let steps = (|| {
