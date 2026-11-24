@@ -42,6 +42,9 @@ struct Flow<'a> {
     nodes: Vec<(&'a FlowNode, Option<BlockKind>)>,
     index: HashMap<&'a str, usize>,
     out: HashMap<&'a str, Vec<&'a str>>,
+    /// Where an Approval's `error` edges go. A no and a silence fail the block, and only an `error` edge takes them, so these
+    /// blocks run exactly when the person did not approve: an Approval does not clear them.
+    past_no: HashMap<&'a str, Vec<&'a str>>,
     incoming: HashMap<&'a str, Vec<&'a str>>,
     roots: Vec<&'a str>,
     /// A for-each's body block, to the for-each.
@@ -114,10 +117,16 @@ impl<'a> Flow<'a> {
         let nodes: Vec<(&FlowNode, Option<BlockKind>)> = graph.nodes.iter().map(|n| (n, kind_of(n))).collect();
         let index: HashMap<&str, usize> = nodes.iter().enumerate().map(|(i, (n, _))| (n.id.as_str(), i)).collect();
         let mut out: HashMap<&str, Vec<&str>> = HashMap::new();
+        let mut past_no: HashMap<&str, Vec<&str>> = HashMap::new();
         let mut incoming: HashMap<&str, Vec<&str>> = HashMap::new();
         let mut foreach_of = HashMap::new();
         for e in &graph.edges {
-            out.entry(e.source.as_str()).or_default().push(e.target.as_str());
+            let from_approval = index.get(e.source.as_str()).is_some_and(|i| nodes[*i].1 == Some(BlockKind::Approval));
+            if from_approval && e.source_handle.as_deref() == Some("error") {
+                past_no.entry(e.source.as_str()).or_default().push(e.target.as_str());
+            } else {
+                out.entry(e.source.as_str()).or_default().push(e.target.as_str());
+            }
             incoming.entry(e.target.as_str()).or_default().push(e.source.as_str());
         }
         // A for-each's body has no edges of its own: it runs where the for-each does.
@@ -135,7 +144,7 @@ impl<'a> Flow<'a> {
             }
         }
         let roots = nodes.iter().map(|(n, _)| n.id.as_str()).filter(|id| !incoming.contains_key(id)).collect();
-        let mut flow = Self { nodes, index, out, incoming, roots, foreach_of, fields, outside: HashSet::new() };
+        let mut flow = Self { nodes, index, out, past_no, incoming, roots, foreach_of, fields, outside: HashSet::new() };
         flow.settle();
         flow
     }
@@ -149,8 +158,11 @@ impl<'a> Flow<'a> {
                 continue;
             }
             let approval = self.index.get(id).is_some_and(|i| self.nodes[*i].1 == Some(BlockKind::Approval));
-            if stop && approval {
-                continue;
+            if approval {
+                queue.extend(self.past_no.get(id).into_iter().flatten().copied());
+                if stop {
+                    continue;
+                }
             }
             queue.extend(self.out.get(id).into_iter().flatten().copied());
         }

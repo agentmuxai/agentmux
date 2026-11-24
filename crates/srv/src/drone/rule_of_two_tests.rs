@@ -43,6 +43,16 @@ fn a_write_that_reads_the_trigger_needs_an_approval_on_the_way() {
 }
 
 #[test]
+fn an_error_edge_out_of_an_approval_is_not_an_approval() {
+    // A no and a silence fail the Approval, and only its `error` edge takes them: the write on it runs when nobody approved.
+    let mut g = graph(&[("ok", approval()), ("post", comment("{{trigger.title}}"))], &[("ok", "post")]);
+    g.edges[0].source_handle = Some("error".to_string());
+    assert_eq!(broken(&g, &webhook()), ["post"]);
+    g.edges[0].source_handle = None;
+    assert!(check(&g, &webhook()).is_empty(), "the edge a yes takes does clear it");
+}
+
+#[test]
 fn a_write_from_a_log_through_an_agent_is_refused_unless_a_person_approves() {
     let nodes = [
         ("fetch", json!({ "kind": "api", "method": "GET", "url": "https://ci.example.com/log" })),
