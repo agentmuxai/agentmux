@@ -223,7 +223,7 @@ pub(crate) async fn run_agent_with_bin(
         // persistent-controller launch args in providers.rs. This spawn path
         // builds its own args independent of ProviderConfig, so the flag has
         // to be added here too — reagent P1 on PR #1964.
-        .arg("--exclude-dynamic-system-prompt-sections");
+        .arg("--exclude-dynamic-system-prompt-sections").args(task.tools.args());
     // Forward the configured turn cap so the CLI enforces it.
     // Previously stored on AgentTask but never passed to the
     // subprocess — silently ignored. Reagent P1 + codex P2 on
@@ -674,6 +674,7 @@ mod tests {
                 prompt: "What is 2+2? Respond with just the number.".to_string(),
                 context: serde_json::Map::new(),
                 max_turns: None,
+                tools: Default::default(),
             },
             tx,
         )
@@ -729,7 +730,7 @@ mod tests {
         let run = |dir: &std::path::Path| {
             let (tx, _rx) = mpsc::unbounded_channel();
             let agent = AgentRef { working_directory: dir.to_string_lossy().into_owned(), ..AgentRef::default() };
-            let task = AgentTask { prompt: "hi".to_string(), context: serde_json::Map::new(), max_turns: None };
+            let task = AgentTask { prompt: "hi".to_string(), context: serde_json::Map::new(), max_turns: None, tools: Default::default() };
             async move { run_agent_with_bin("/definitely/does/not/exist/claude-xyz-test", agent, task, tx).await }
         };
         match run(bound.path()).await {
@@ -786,6 +787,7 @@ mod tests {
                 prompt: "hi".to_string(),
                 context: serde_json::Map::new(),
                 max_turns: None,
+                tools: Default::default(),
             },
             tx,
         )
@@ -828,6 +830,7 @@ mod tests {
                 prompt: "hi".to_string(),
                 context: serde_json::Map::new(),
                 max_turns: None,
+                tools: Default::default(),
             },
             tx,
         )
@@ -883,6 +886,7 @@ mod tests {
                 prompt: "hi".to_string(),
                 context: serde_json::Map::new(),
                 max_turns: None,
+                tools: Default::default(),
             },
             tx,
         )
@@ -1008,6 +1012,40 @@ mod tests {
         }
     }
 
+    /// The CLI is started with the block's tool limit as flags: reading tools and no MCP server for a block with no
+    /// commands, `Bash` for exactly its command lines, and no flag at all for `allow_commands: true`.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_cli_is_started_with_the_blocks_tool_limit() {
+        use super::super::tool_limit::ToolLimit;
+        let dir = tempfile::tempdir().unwrap();
+        let argv_of = |tools: ToolLimit| {
+            let (stub, out) = (dir.path().join(format!("stub-{}.sh", uuid::Uuid::new_v4())), dir.path().join(format!("argv-{}.txt", uuid::Uuid::new_v4())));
+            write_stub_script(&stub, &[&format!("printf '%s\\n' \"$@\" > '{}'", out.display()), "exit 1"]);
+            async move {
+                let (tx, _rx) = mpsc::unbounded_channel();
+                let task = AgentTask { prompt: "hi".to_string(), context: serde_json::Map::new(), max_turns: None, tools };
+                let handle = run_stub(&stub, task, tx).await.expect("spawn ok");
+                let _ = handle.final_result.await;
+                std::fs::read_to_string(out).unwrap().lines().map(str::to_string).collect::<Vec<_>>()
+            }
+        };
+        let value_after = |argv: &[String], flag: &str| argv.iter().position(|a| a == flag).map(|i| argv[i + 1].clone());
+
+        let reading = argv_of(ToolLimit::default()).await;
+        assert_eq!(value_after(&reading, "--tools").as_deref(), Some("Read,Grep,Glob"), "{reading:?}");
+        assert!(reading.iter().any(|a| a == "--strict-mcp-config"), "{reading:?}");
+        assert_eq!(value_after(&reading, "--permission-mode").as_deref(), Some("dontAsk"), "{reading:?}");
+        assert!(!reading.iter().any(|a| a == "--allowedTools" || a.contains("Bash")), "no command may run: {reading:?}");
+
+        let some = argv_of(ToolLimit::Limited { commands: vec!["git status".to_string()] }).await;
+        assert_eq!(value_after(&some, "--tools").as_deref(), Some("Read,Grep,Glob,Bash"), "{some:?}");
+        assert_eq!(value_after(&some, "--allowedTools").as_deref(), Some("Bash(git status)"), "{some:?}");
+
+        let free = argv_of(ToolLimit::Unlimited).await;
+        assert!(!free.iter().any(|a| a == "--tools" || a == "--strict-mcp-config"), "{free:?}");
+    }
+
     /// End-to-end (Unix): claude can report an error on stdout and still
     /// exit 0; the runner must NOT treat that as success. codex P1 #1353.
     #[cfg(unix)]
@@ -1027,6 +1065,7 @@ mod tests {
                 prompt: "hi".to_string(),
                 context: serde_json::Map::new(),
                 max_turns: None,
+                tools: Default::default(),
             },
             tx,
         )
@@ -1063,7 +1102,7 @@ mod tests {
             )],
         );
         let (tx, _rx) = mpsc::unbounded_channel();
-        let task = AgentTask { prompt: "hi".to_string(), context: serde_json::Map::new(), max_turns: None };
+        let task = AgentTask { prompt: "hi".to_string(), context: serde_json::Map::new(), max_turns: None, tools: Default::default() };
         let handle = run_stub(&stub, task, tx).await.expect("spawn ok");
         let _ = handle.final_result.await;
         let text = std::fs::read_to_string(&report).expect("the stub reported");
@@ -1086,6 +1125,7 @@ mod tests {
             prompt: "x".into(),
             context: serde_json::Map::new(),
             max_turns: Some(7),
+            tools: Default::default(),
         };
         let v = serde_json::to_value(&task).unwrap();
         assert_eq!(v["maxTurns"], json!(7));

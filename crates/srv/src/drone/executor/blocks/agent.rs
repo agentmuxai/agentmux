@@ -47,6 +47,7 @@
 use serde_json::{json, Value};
 
 use crate::agents::runner::{run_agent, AgentError};
+use crate::agents::tool_limit::ToolLimit;
 use crate::agents::types::{AgentRef, AgentRunResult, AgentTask};
 use crate::drone::data_flow::ExecutionScope;
 use crate::drone::executor::blocks::agent_output::Schema;
@@ -110,6 +111,7 @@ pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, Strin
         // surface scope vars as a `system` message section.
         context: serde_json::Map::new(),
         max_turns,
+        tools: ToolLimit::from_allow_commands(node.data.get("allow_commands")),
     };
 
     // Forward AgentEvents into a local channel and discard for now.
