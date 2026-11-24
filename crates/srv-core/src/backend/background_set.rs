@@ -111,8 +111,29 @@ pub fn set_of(now_ms: u64, tasks: &[BackgroundTask], members: &[TrackedProcess])
 pub fn for_block(block_id: &str, now_ms: u64) -> Vec<Item> {
     let Some(registry) = crate::backend::process_tracker::registry::global() else { return Vec::new() };
     let members = registry.list_block(block_id);
-    let tasks = STORE.get().and_then(|s| s.background_task_list_for_block(block_id).ok()).unwrap_or_default();
-    set_of(now_ms, &tasks, &members)
+    let store = STORE.get();
+    let tasks = store.and_then(|s| s.background_task_list_for_block(block_id).ok()).unwrap_or_default();
+    let in_container: Vec<String> = store
+        .and_then(|s| s.background_container_running().ok())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|c| c.block_id == block_id)
+        .map(|c| c.id)
+        .collect();
+    with_container_shells(set_of(now_ms, &tasks, &members), &tasks, &in_container)
+}
+
+/// `items` and the declared shells of a container agent that still run: the host cannot see their processes (the
+/// pid is the container's own, kept apart), so they count while the container-side check says they run, however
+/// long that is. `in_container` is the ids of the running calls the container filed a pid for.
+fn with_container_shells(mut items: Vec<Item>, tasks: &[BackgroundTask], in_container: &[String]) -> Vec<Item> {
+    for t in tasks.iter().filter(|t| t.status == BackgroundTaskStatus::Running && t.pid.is_none() && in_container.contains(&t.id)) {
+        let item = Item { kind: Kind::Shell, label: t.label.clone(), started_at_ms: t.started_at_ms.max(0) as u64 };
+        if !items.contains(&item) {
+            items.push(item);
+        }
+    }
+    items
 }
 
 /// Who entered or left the would-be Background set since the last look, and how long each who left was in it.
