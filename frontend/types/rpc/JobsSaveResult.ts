@@ -20,4 +20,8 @@ provider: string | null,
 /**
  * Why the confirmation is needed, in words.
  */
-error: string | null, };
+error: string | null, 
+/**
+ * With `needs_confirmation: turn_on`: what turning the drone on lets it do, one line each.
+ */
+lines: Array<string>, };

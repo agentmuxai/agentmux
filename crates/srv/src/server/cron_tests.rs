@@ -718,3 +718,35 @@ async fn a_drone_job_that_breaks_the_rule_of_two_is_not_turned_on() {
     assert!(v["error"].as_str().unwrap().contains("Inner"), "{v}");
     state.cron_scheduler.cancel_job(uri.rsplit('/').next().unwrap());
 }
+
+/// The operator turning on a drone that changes things outside AgentMux is asked first: the answer lists what it will do,
+/// and a second save that says yes makes the job. A drone that only works inside asks nothing, and a paused job asks
+/// nothing until it is turned on.
+#[tokio::test(flavor = "multi_thread")]
+async fn turning_on_a_drone_that_writes_outside_asks_the_operator_first() {
+    use crate::server::job_caps::Origin;
+    let (state, _, _) = state();
+    let node = |id: &str, data: Value| json!({ "id": id, "position": { "x": 0, "y": 0 }, "data": data });
+    let save = |nodes: Vec<Value>| {
+        let drone: crate::drone::types::DroneDefinition =
+            serde_json::from_value(json!({ "id": "", "name": "D", "created_at": 0, "updated_at": 0, "graph": { "nodes": nodes, "edges": [] } })).unwrap();
+        crate::server::drone_handlers::upsert_drone(&state, drone).unwrap().id
+    };
+    let make = |id: &str, extra: Value| definition(json!({ "trigger": { "kind": "manual" }, "action": { "kind": "drone", "drone_id": id } })).as_object().cloned().map(|mut m| { m.extend(extra.as_object().unwrap().clone()); Value::Object(m) }).unwrap();
+    let host = |confirm: bool| Origin { from_host: true, confirm_turn_on: confirm, ..Default::default() };
+
+    let writes = save(vec![node("merge", json!({ "kind": "api", "method": "POST", "url": "https://api.example.com/merge", "body": "go" }))]);
+    let (status, axum::Json(v)) = crate::server::cron::create_job(&state, None, make(&writes, json!({})), host(false));
+    assert_eq!(status, StatusCode::CONFLICT, "{v}");
+    assert_eq!(v["needs_confirmation"], "turn_on");
+    let lines: Vec<&str> = v["lines"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+    assert_eq!(lines, ["Starts only when someone runs it", "merge: sends POST https://api.example.com/merge"]);
+    let (status, axum::Json(v)) = crate::server::cron::create_job(&state, None, make(&writes, json!({})), host(true));
+    assert_eq!(status, StatusCode::CREATED, "{v}");
+    let (status, axum::Json(v)) = crate::server::cron::create_job(&state, None, make(&writes, json!({ "enabled": false })), host(false));
+    assert_eq!(status, StatusCode::CREATED, "a paused job asks nothing: {v}");
+
+    let inside = save(vec![node("t", json!({ "kind": "task", "title": "x", "target": "opaz" }))]);
+    let (status, axum::Json(v)) = crate::server::cron::create_job(&state, None, make(&inside, json!({})), host(false));
+    assert_eq!(status, StatusCode::CREATED, "nothing to ask about: {v}");
+}
