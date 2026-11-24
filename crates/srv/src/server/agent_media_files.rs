@@ -109,7 +109,13 @@ pub(crate) fn resolve(meta: &MetaMapType, asked: &str) -> Result<Found, String> 
     let canonical = crate::server::browser_uploads::canonical;
     let root = canonical(&bind.host).map_err(|_| "The agent's folder can't be read right now.".to_string())?;
     let spelled = if rest.is_empty() { bind.host.clone() } else { bind.host.join(&rest) };
-    let file = canonical(&spelled).map_err(|_| "That file doesn't exist.".to_string())?;
+    let Ok(file) = canonical(&spelled) else {
+        // A link on the way that leads out of the folder with nothing at its end is refused as one with a file is.
+        if crate::server::link_file_check::dangling_link_leaves(&spelled, &[&bind.host, &root]) {
+            return Err(LEADS_OUT.to_string());
+        }
+        return Err("That file doesn't exist.".to_string());
+    };
     if !file.starts_with(&root) {
         return Err(LEADS_OUT.to_string());
     }
@@ -228,6 +234,21 @@ mod tests {
         std::os::unix::fs::symlink(f.ws.join("img").join("a.png"), f.ws.join("in.png")).unwrap();
         assert_eq!(resolve(&f.meta, "/workspace/out.png").unwrap_err(), LEADS_OUT);
         assert_eq!(read(open(&f.meta, "/workspace/in.png")), "the agent's picture");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_out_of_the_folder_is_refused_alike_whether_or_not_its_target_is_there() {
+        let f = fixture();
+        std::os::unix::fs::symlink(f.private.join("not-there.png"), f.ws.join("gone.png")).unwrap();
+        std::os::unix::fs::symlink(f.private.join("not-there-dir"), f.ws.join("gone-dir")).unwrap();
+        std::os::unix::fs::symlink(f.ws.join("img").join("later.png"), f.ws.join("soon.png")).unwrap();
+        assert_eq!(resolve(&f.meta, "/workspace/gone.png").unwrap_err(), LEADS_OUT);
+        assert_eq!(resolve(&f.meta, "/workspace/gone-dir/a.png").unwrap_err(), LEADS_OUT);
+        let host = format!("{}/gone.png", f.ws.to_string_lossy());
+        assert_eq!(resolve(&f.meta, &host).unwrap_err(), LEADS_OUT);
+        // A link inside the folder whose target is not there yet is only a file that is not there.
+        assert_eq!(resolve(&f.meta, "/workspace/soon.png").unwrap_err(), "That file doesn't exist.");
     }
 
     #[test]

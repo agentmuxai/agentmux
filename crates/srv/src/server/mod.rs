@@ -51,7 +51,7 @@ pub(crate) mod caller;
 pub(crate) mod agent_self_keys;
 pub(crate) mod agent_folder_open;
 pub(crate) mod agent_media_files;
-mod link_file_check;
+pub(crate) mod link_file_check;
 pub(crate) mod container_pane_snapshot;
 pub(crate) mod streamed_browser;
 pub(crate) mod files_root;

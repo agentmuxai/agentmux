@@ -88,6 +88,35 @@ fn collapse(path: &Path) -> Option<PathBuf> {
     Some(out)
 }
 
+/// How many links in a row are followed by hand.
+const MAX_HOPS: usize = 16;
+
+/// Whether a link on the way down `path` points out of the folder (`inside`: the folder as written and as resolved)
+/// though what it points at is not there. Such a path can't be resolved, and it must answer as one that leaves the
+/// folder does when its target exists: what lies outside is not told by whether a file is there.
+pub(crate) fn dangling_link_leaves(path: &Path, inside: &[&Path]) -> bool {
+    let mut at = PathBuf::new();
+    for part in path.components() {
+        at.push(part.as_os_str());
+        let mut here = at.clone();
+        for _ in 0..MAX_HOPS {
+            let Ok(meta) = std::fs::symlink_metadata(&here) else { break };
+            // A link that resolves is judged by where it resolves to; only one that does not is followed by hand.
+            if !meta.file_type().is_symlink() || crate::server::browser_uploads::canonical(&here).is_ok() {
+                break;
+            }
+            let Ok(target) = std::fs::read_link(&here) else { break };
+            let joined = if target.is_absolute() { target } else { here.parent().map_or(target.clone(), |parent| parent.join(&target)) };
+            let Some(next) = collapse(&joined) else { return true };
+            if !inside.iter().any(|root| next.starts_with(root)) {
+                return true;
+            }
+            here = next;
+        }
+    }
+    false
+}
+
 /// A file named in a message of a host agent whose pane works in `cwd`: found when it is a file inside that folder.
 fn check_in_folder(cwd: &str, asked: &str) -> FsLinkFileCheck {
     // A default agent folder is stored as `~/.agentmux/agents/<slug>`: the pane's own folder, expanded.
@@ -112,6 +141,8 @@ fn check_in_folder(cwd: &str, asked: &str) -> FsLinkFileCheck {
         }
         // It exists, and leads out of the folder (a link, a junction, a short name of something else).
         Ok(_) => answer(OUTSIDE, OUTSIDE_WORDS),
+        // A link on the way leads out of the folder and its target is not there: as outside as one whose target is.
+        Err(_) if dangling_link_leaves(&candidate, &[Path::new(cwd), &root]) => answer(OUTSIDE, OUTSIDE_WORDS),
         Err(_) if lexically_inside => answer(MISSING, NOT_FOUND_WORDS),
         // Not there, and not in the folder: nothing is said about whether it would have been.
         Err(_) => answer(OUTSIDE, OUTSIDE_WORDS),
@@ -215,6 +246,34 @@ mod tests {
         std::os::unix::fs::symlink(dir.path(), work.join("up")).unwrap();
         assert_eq!(check(&dir, "shortcut.txt"), (OUTSIDE.to_string(), OUTSIDE_WORDS.to_string()));
         assert_eq!(check(&dir, "up/secret.txt").0, OUTSIDE);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_that_leaves_the_folder_answers_outside_whether_or_not_its_target_is_there() {
+        let dir = folder();
+        let work = dir.path().join("work");
+        let link = |name: &str, to: &std::path::Path| std::os::unix::fs::symlink(to, work.join(name)).unwrap();
+        link("gone.txt", &dir.path().join("not-there.txt"));
+        link("gone-dir", &dir.path().join("not-there-dir"));
+        link("present.txt", &dir.path().join("secret.txt"));
+        link("relative", std::path::Path::new("../not-there.txt"));
+        link("chain-b", &dir.path().join("not-there.txt"));
+        link("chain-a", &work.join("chain-b"));
+        for asked in ["gone.txt", "gone-dir/a.md", "gone-dir", "present.txt", "relative", "chain-a", "gone-dir/../plan.md"] {
+            assert_eq!(check(&dir, asked), (OUTSIDE.to_string(), OUTSIDE_WORDS.to_string()), "{asked}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_inside_the_folder_whose_target_is_not_there_is_missing() {
+        let dir = folder();
+        let work = dir.path().join("work");
+        std::os::unix::fs::symlink(work.join("notes").join("later.md"), work.join("soon.md")).unwrap();
+        std::os::unix::fs::symlink("notes/later.md", work.join("soon-relative.md")).unwrap();
+        assert_eq!(check(&dir, "soon.md"), (MISSING.to_string(), NOT_FOUND_WORDS.to_string()));
+        assert_eq!(check(&dir, "soon-relative.md"), (MISSING.to_string(), NOT_FOUND_WORDS.to_string()));
     }
 
     #[test]
