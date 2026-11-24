@@ -134,7 +134,7 @@ describe("AgentCard other rendering", () => {
             <AgentCard agent={makeAgent()} launching={false} disabled={false} installed={true} onLaunch={() => {}} />
         ));
         expect(container.querySelector(".agent-card-title")?.textContent).toBe("Claude Code");
-        expect(container.querySelector(".agent-card-caption")?.textContent).toBe("Anthropic's coding agent");
+        expect(container.querySelector(".agent-card-caption")?.textContent).toBe("Anthropic's coding agent, on your Claude plan");
     });
 
     it("names the launch action after the CLI, not the blurb", () => {

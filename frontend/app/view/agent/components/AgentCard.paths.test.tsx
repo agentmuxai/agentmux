@@ -80,7 +80,7 @@ describe("AgentCard: title and caption", () => {
     it("names a catalogued provider by its CLI, whatever the definition is called", () => {
         const { container } = mount({ agent: makeAgent({ name: "My agent", description: "Mine" }) });
         expect(container.querySelector(".agent-card-title")).toHaveTextContent(/^Claude Code$/);
-        expect(container.querySelector(".agent-card-caption")).toHaveTextContent(/^Anthropic's coding agent$/);
+        expect(container.querySelector(".agent-card-caption")).toHaveTextContent(/^Anthropic's coding agent, on your Claude plan$/);
         expect(screen.getByRole("button", { name: "Launch Claude Code" })).toBeTruthy();
     });
 

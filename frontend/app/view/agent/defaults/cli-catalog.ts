@@ -50,7 +50,7 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         provider: "claude",
         displayName: "Claude Code",
         icon: "✖",
-        blurb: "Anthropic's coding agent",
+        blurb: "Anthropic's coding agent, on your Claude plan",
         primaryContextFile: "CLAUDE.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
@@ -63,7 +63,7 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         provider: "codex",
         displayName: "Codex CLI",
         icon: "✦",
-        blurb: "OpenAI's coding agent",
+        blurb: "OpenAI's coding agent, on your ChatGPT plan",
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http+oauth",
         popoverMarkdown:
@@ -104,7 +104,7 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         provider: "qwen",
         displayName: "Qwen Code",
         icon: "❖",
-        blurb: "Alibaba's open-source coding agent",
+        blurb: "Alibaba's open-source coding agent, with your own key",
         primaryContextFile: "QWEN.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
@@ -118,7 +118,7 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         provider: "kimi",
         displayName: "Kimi Code",
         icon: "◈",
-        blurb: "Moonshot's 262k-context agent",
+        blurb: "Moonshot's 262k-context agent, with your Moonshot key",
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
@@ -156,7 +156,7 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         provider: "copilot",
         displayName: "GitHub Copilot CLI",
         icon: "⛶",
-        blurb: "Microsoft's coding agent",
+        blurb: "Microsoft's coding agent, on your Copilot plan",
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
@@ -222,7 +222,7 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         provider: "grok",
         displayName: "Grok Build",
         icon: "X",
-        blurb: "xAI's coding agent",
+        blurb: "xAI's coding agent, signs in with your xAI account",
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
@@ -274,7 +274,7 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         provider: "muse",
         displayName: "Muse Code",
         icon: "M",
-        blurb: "Meta's coding agent",
+        blurb: "Meta's coding agent, signs in with your Meta account",
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
