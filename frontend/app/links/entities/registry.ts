@@ -5,11 +5,12 @@
 
 import { addressKind } from "./kinds/address";
 import { agentKind } from "./kinds/agent";
+import { fileKind } from "./kinds/file";
 import { pullKind } from "./kinds/pull";
 import { taskKind } from "./kinds/task";
 import type { Destination, EntityKind, EntityKindId, OpenOptions, OpenResult } from "./types";
 
-export const KINDS: readonly EntityKind[] = [addressKind, pullKind, taskKind, agentKind];
+export const KINDS: readonly EntityKind[] = [addressKind, fileKind, pullKind, taskKind, agentKind];
 
 const BY_ID = new Map<EntityKindId, EntityKind>(KINDS.map((k) => [k.id, k]));
 
@@ -21,6 +22,7 @@ const KIND_OF_DESTINATION: Record<Destination["kind"], EntityKindId> = {
     agent: "agent",
     task: "task",
     pull: "pull",
+    file: "file",
     url: "address",
 };
 

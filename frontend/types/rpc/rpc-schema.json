@@ -3683,6 +3683,25 @@
     }
   },
   {
+    "command": "fs.link_file_check",
+    "request": "agentmux_srv_core::backend::rpc_types::fs::FsLinkFileReq",
+    "requestName": "FsLinkFileReq",
+    "requestTs": {
+      "imports": [
+        "FsLinkFileReq"
+      ],
+      "name": "FsLinkFileReq"
+    },
+    "response": "agentmux_srv_core::backend::rpc_types::fs::FsLinkFileCheck",
+    "responseName": "FsLinkFileCheck",
+    "responseTs": {
+      "imports": [
+        "FsLinkFileCheck"
+      ],
+      "name": "FsLinkFileCheck"
+    }
+  },
+  {
     "command": "fs.list",
     "request": "agentmux_srv_core::backend::rpc_types::fs::FsListReq",
     "requestName": "FsListReq",
