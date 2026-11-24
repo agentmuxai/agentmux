@@ -23,33 +23,62 @@ function aliasStandsAlone(agent: AgentEntry, written: string): boolean {
 
 export type AgentIndexOptions = { localComputer?: string; neverAlone?: string[]; version?: number };
 
+/** The one agent in `list`; none when two agents answer to the same written name, since a wrong link is worse than none. */
+function onlyOne(list: AgentEntry[] | undefined): AgentEntry | undefined {
+    return list?.length === 1 ? list[0] : undefined;
+}
+
+function add(map: Map<string, AgentEntry[]>, key: string, agent: AgentEntry): void {
+    const list = map.get(key);
+    if (!list) map.set(key, [agent]);
+    else if (!list.some((other) => other.id === agent.id)) list.push(agent);
+}
+
+/** A display name with a number, as in `Loap #3`: the name and the number apart. */
+const NUMBERED = /^(.*\S) #\d+$/;
+
 export function buildAgentIndex(agents: AgentEntry[], options: AgentIndexOptions = {}): AgentIndex {
-    const byName = new Map<string, AgentEntry>();
-    const byKey = new Map<string, AgentEntry>();
+    const byName = new Map<string, AgentEntry[]>();
+    const byKey = new Map<string, AgentEntry[]>();
     const firsts = new Set<string>();
+    const spaced = new Map<string, string[]>();
+    const families = new Set<string>();
     for (const agent of agents) {
         const name = agent.name.trim();
         if (name) {
-            byName.set(name, agent);
+            add(byName, name, agent);
             firsts.add(name[0]);
+            const first = /^[A-Za-z][A-Za-z0-9_-]*/.exec(name)?.[0];
+            if (first && name.length > first.length && !spaced.get(first)?.includes(name)) spaced.set(first, [...(spaced.get(first) ?? []), name]);
+            const base = NUMBERED.exec(name)?.[1];
+            if (base) families.add(base);
         }
         for (const key of [agent.slug, agent.id]) {
             if (!key) continue;
-            byKey.set(key.toLowerCase(), agent);
+            add(byKey, key.toLowerCase(), agent);
             firsts.add(key[0]);
             firsts.add(key[0].toUpperCase());
         }
     }
+    // The longest name that starts with a word is tried first.
+    for (const names of spaced.values()) names.sort((x, y) => y.length - x.length);
     const never = new Set((options.neverAlone ?? NEVER_ALONE_WORDS).map((w) => w.toLowerCase()));
     return {
         version: options.version ?? 0,
         localComputer: options.localComputer,
         find: (written, withComputer = false) => {
             const named = byName.get(written);
-            if (named) return named;
-            const keyed = byKey.get(written.toLowerCase());
+            if (named) return onlyOne(named);
+            const keyed = onlyOne(byKey.get(written.toLowerCase()));
             return keyed && (withComputer || aliasStandsAlone(keyed, written)) ? keyed : undefined;
         },
+        longestName: (text, start) => {
+            const first = /^[A-Za-z][A-Za-z0-9_-]*/.exec(text.slice(start, start + 64))?.[0];
+            const names = first ? spaced.get(first) : undefined;
+            // The name must end where a word ends: `Loap #3` is not the start of `Loap #35` or `Loap #3x`.
+            return names?.find((name) => text.startsWith(name, start) && !/^(?:\w|-\w)/.test(text.slice(start + name.length, start + name.length + 2)));
+        },
+        isNumberedFamily: (base) => families.has(base),
         neverAlone: (written) => never.has(written.toLowerCase()),
         startsWith: (char) => firsts.has(char),
     };
