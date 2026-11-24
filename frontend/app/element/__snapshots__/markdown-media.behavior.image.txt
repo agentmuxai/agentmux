@@ -26,6 +26,4 @@ fetchMediaBlob C:/work/shots/gone.png max=26214400 type=undefined aborted=false
 -- image missing
 <div>
   <span class="am-muted">
-    "[image not found:"
-    "shots/gone.png"
-    "]"
+    "[image not found: shots/gone.png]"
