@@ -163,6 +163,8 @@ pub(crate) fn upsert_drone_as(state: &AppState, mut cmd: DroneDefinition, saved_
     }
     // An agent that makes a drone owns it. A save of a drone that is there already never changes its owner.
     let is_new = !matches!(state.id_store.drone_get(&cmd.id), Ok(Some(_)));
+    // A job that is on keeps firing the graph saved here: it must still pass where the job was turned on.
+    super::drone_turn_on::graph_allowed(state, &cmd)?;
     // The definition and its version are one immediate transaction, so a
     // concurrent save cannot leave the stored definition on a graph newer than
     // the one `Latest` returns.
