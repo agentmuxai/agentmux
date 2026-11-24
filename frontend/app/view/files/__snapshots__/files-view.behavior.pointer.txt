@@ -15,7 +15,7 @@ clipboard: ["/home/a/b.txt\n/home/a/a.md","/home/a/b.txt"]
 > the folder menu
 buildFolderMenu(openInNewTab)
 blank contextmenu notPrevented=false
-menu: ["New folder","New file","New tab here","Paste","Open terminal here","Open in File Manager","Copy folder path","Show hidden files","Show as a tree","Show as columns","Refresh","Undo"]
+menu: ["New folder","New file","New tab here","Pin to Places","Paste","Open terminal here","Open in File Manager","Copy folder path","Show hidden files","Show as a tree","Show as columns","Refresh","Undo"]
 openFolderInNewTab(["b1","/home/a",null])
 pane contextmenu notPrevented=false
 > the middle button
