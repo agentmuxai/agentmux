@@ -615,26 +615,39 @@ fn tell(mstore: &Store, filestore: &FileStore, config: &ConfigState, def: &Agent
         return false;
     }
     let words = if running { String::new() } else { notes::last_words_of(mstore, filestore, block_id) };
-    // A lead on another machine is sent the same facts by that machine's AgentMux (section 19): queued here, sent by srv.
-    if let Some(lead) = &remote_lead {
-        let nums: Vec<i64> = tasks.iter().map(|t| t.num).collect();
-        super::quiet_remote::queue(lead, super::quiet_remote::Note::new(&def.name, running, idle_minutes, &nums, &words));
-    }
-    if watchers.is_empty() {
-        return true;
-    }
-    let is_worker = crate::backend::agent_seat::worker_of(mstore, &def.id).is_some();
-    let background = if running { String::new() } else { background_label(block_id, now_ms) };
-    let body = quiet_body(&def.name, is_worker, tasks, idle_minutes, running, &words, &background);
-    let Some(body) = notes::admit(&def.id, body, now_ms) else { return false };
-    // Information that asks nothing: a cold leader hears it at its next turn, and with the other notes about its agents
-    // when they fall in the same window (`note_outbox`).
-    let line = super::note_outbox::Line {
-        agent: def.id.clone(),
-        text: crate::backend::reactive::sanitize::quote_in_system_note(&body),
-        held_key: Some(format!("quiet:{}", def.id)),
+    let local = || {
+        let is_worker = crate::backend::agent_seat::worker_of(mstore, &def.id).is_some();
+        let background = if running { String::new() } else { background_label(block_id, now_ms) };
+        let body = quiet_body(&def.name, is_worker, tasks, idle_minutes, running, &words, &background);
+        let Some(body) = notes::admit(&def.id, body, now_ms) else { return false };
+        // Information that asks nothing: a cold leader hears it at its next turn, and with the other notes about its
+        // agents when they fall in the same window (`note_outbox`).
+        let line = super::note_outbox::Line {
+            agent: def.id.clone(),
+            text: crate::backend::reactive::sanitize::quote_in_system_note(&body),
+            held_key: Some(format!("quiet:{}", def.id)),
+        };
+        super::note_outbox::queue(mstore, config, &watchers, &line, now_ms);
+        true
     };
-    super::note_outbox::queue(mstore, config, &watchers, &line, now_ms);
+    // A lead on another machine is sent the same facts by that machine's AgentMux (section 19): queued here, sent by srv.
+    let remote = || {
+        if let Some(lead) = &remote_lead {
+            let nums: Vec<i64> = tasks.iter().map(|t| t.num).collect();
+            super::quiet_remote::queue(lead, super::quiet_remote::Note::new(&def.name, running, idle_minutes, &nums, &words));
+        }
+    };
+    told_both(!watchers.is_empty(), local, remote)
+}
+
+/// The note for the watchers here, then, once that is taken (or when nobody here watches), the one for a lead on another
+/// machine. `false`, with nothing queued for the lead, when the local note is not taken yet: the watch asks again at its
+/// next sweep, and the lead hears once, at the sweep that tells.
+fn told_both(has_local: bool, local: impl FnOnce() -> bool, remote: impl FnOnce()) -> bool {
+    if has_local && !local() {
+        return false;
+    }
+    remote();
     true
 }
 
