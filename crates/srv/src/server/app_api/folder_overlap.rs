@@ -8,7 +8,7 @@
 
 use super::*;
 use crate::backend::folder_overlap as overlap;
-use crate::backend::folder_overlap_asks::asks;
+use crate::backend::folder_overlap_asks::{asks, FolderAsk};
 
 /// What a caller is told when it is not the window.
 pub(crate) const ONLY_THE_PERSON_GOES_AHEAD: &str = "only the person goes ahead with a host agent sharing a folder with a container agent, from the AgentMux window: give the agents separate workspaces, or bind the shared folder read-only into the container agent (a volume ending in :ro)";
@@ -30,6 +30,26 @@ fn check(state: &AppState, cmd: CommandFolderOverlapCheckData) -> Result<FolderO
 pub(crate) fn publish_asks(state: &AppState) {
     let event = crate::backend::mps_events::FolderOverlapAsksEvent { asks: asks().list(agentmux_common::time::now_ms_u64()) };
     state.broker.publish_event::<crate::backend::mps_events::FolderOverlapAsks>(&event, vec![], 0);
+}
+
+/// Restart resume left host agent `agent_id` (its parked block `block_id`) stopped for want of the person's go-ahead: one
+/// ask per pair it shares a folder with, with no asking agent, which the window shows as a card for the agent's block.
+pub(crate) fn ask_for_resumed(state: &AppState, agent_id: &str, block_id: &str) {
+    let Ok(Some(host)) = state.mstore.agent_def_get(agent_id) else { return };
+    let now = agentmux_common::time::now_ms_u64();
+    for o in overlap::unchosen(overlap::of(&state.mstore, &host, Some(&overlap::open_folder(&host)))) {
+        let ask = FolderAsk {
+            host_id: o.host_id,
+            host_name: o.host_name,
+            container_id: o.container_id,
+            container_name: o.container_name,
+            agent: String::new(),
+            block_id: block_id.to_string(),
+            requested_ms: now,
+        };
+        asks().ask(ask, now);
+    }
+    publish_asks(state);
 }
 
 /// An agent is deleted: what it asked, and what was asked about it, goes with it.
@@ -61,9 +81,24 @@ fn accept(state: &AppState, cmd: CommandFolderOverlapAcceptData) -> Result<Folde
     // The go-ahead is the window's: its audit row is written first, then the choice it records.
     overlap::accept_as((&cmd.host_id, &name_of(state, &cmd.host_id)), (&cmd.container_id, &name_of(state, &cmd.container_id)))?;
     // An agent's ask for this pair is answered, whichever pane or window the person went ahead in.
-    asks().answer(&cmd.host_id, &cmd.container_id, true, agentmux_common::time::now_ms_u64());
+    let now = agentmux_common::time::now_ms_u64();
+    let left_stopped_in = asks().list(now).into_iter().find(|a| a.agent.is_empty() && a.host_id == cmd.host_id && a.container_id == cmd.container_id).map(|a| a.block_id);
+    asks().answer(&cmd.host_id, &cmd.container_id, true, now);
     publish_asks(state);
+    if let Some(block_id) = left_stopped_in {
+        resume_when_nothing_waits(state, &cmd.host_id, block_id);
+    }
     Ok(FolderOverlapAcceptResult { chosen: true })
+}
+
+/// Restart resume left the host agent stopped for the pair just gone ahead with: once no pair holds it, it comes back.
+fn resume_when_nothing_waits(state: &AppState, host_id: &str, block_id: String) {
+    let waits = state.mstore.agent_def_get(host_id).ok().flatten().and_then(|def| overlap::waiting_reason(&state.mstore, &def)).is_some();
+    if waits {
+        return;
+    }
+    let (state, host_id) = (state.clone(), host_id.to_string());
+    tokio::spawn(async move { crate::server::restart_resume::resume_after_go_ahead(&state, &host_id, &block_id).await });
 }
 
 fn decline(state: &AppState, cmd: CommandFolderOverlapDeclineData) -> Result<FolderOverlapDeclineResult, String> {

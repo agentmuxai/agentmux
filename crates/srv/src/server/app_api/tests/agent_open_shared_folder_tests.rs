@@ -67,14 +67,14 @@ async fn a_host_agent_that_shares_a_folder_is_not_opened_until_the_person_has_go
 
     overlap::accept(&f.host, &f.container).unwrap();
     let agent = f.state.mstore.agent_def_get(&f.host).unwrap().unwrap();
-    agent_open_steps::admit_open(&f.state, &agent, false).await.expect("the person went ahead with that pair");
+    agent_open_steps::admit_open(&f.state, &agent).await.expect("the person went ahead with that pair");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_container_agent_is_not_asked_when_it_is_opened() {
     let f = fleet();
     let agent = f.state.mstore.agent_def_get(&f.container).unwrap().unwrap();
-    agent_open_steps::admit_open(&f.state, &agent, false).await.expect("a container agent is asked when its folders are saved");
+    agent_open_steps::admit_open(&f.state, &agent).await.expect("a container agent is asked when its folders are saved");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -125,19 +125,24 @@ async fn parked_host(f: &Fleet) -> (String, String, Vec<String>) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_host_agent_that_was_running_when_agentmux_stopped_resumes_without_a_recorded_choice() {
+async fn restart_resume_of_a_host_agent_that_shares_a_folder_is_refused_until_the_person_has_gone_ahead() {
     let f = fleet();
-    let agent = f.state.mstore.agent_def_get(&f.host).unwrap().unwrap();
+    let (host, _block, _tabs) = parked_host(&f).await;
 
-    agent_open_steps::admit_open(&f.state, &agent, true).await.expect("restart resume goes on as it did");
+    let err = agent_attach::start_agent_without_eviction(&f.state, &host).await.err().expect("restart resume is not exempt");
+    assert!(err.contains(overlap::OPEN_REFUSAL_CODE), "{err}");
 
-    // Only restart resume's own start carries the mark; every other start of the same agent does not.
-    let mut resume = agent_attach::start_markers(true);
-    assert_eq!(agent_open_steps::take_start_markers(&mut resume), (true, true));
-    assert!(resume.is_empty(), "the marks are not left on the block");
-    let mut plain = agent_attach::start_markers(false);
-    assert_eq!(agent_open_steps::take_start_markers(&mut plain), (true, false));
-    assert_eq!(agent_open_steps::take_start_markers(&mut MetaMapType::new()), (false, false), "an open has neither");
+    overlap::accept(&host, &f.container).unwrap();
+    let agent = f.state.mstore.agent_def_get(&host).unwrap().unwrap();
+    agent_open_steps::admit_open(&f.state, &agent).await.expect("the person went ahead with that pair");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_start_carries_only_the_mark_that_it_makes_no_pane() {
+    let mut start = agent_attach::start_markers();
+    assert!(agent_open_steps::take_start_marker(&mut start));
+    assert!(start.is_empty(), "the mark is not left on the block");
+    assert!(!agent_open_steps::take_start_marker(&mut MetaMapType::new()), "an open has none");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

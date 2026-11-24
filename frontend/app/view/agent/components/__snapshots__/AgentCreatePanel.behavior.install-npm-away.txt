@@ -16,8 +16,7 @@
           "Create"
     <div class="agent-create-install" data-testid="agent-create-npm-install">
       <p class="agent-create-panel-text">
-        "Codex"
-        "isn't installed yet. AgentMux installs its own copy, kept apart from any you installed yourself. It needs an internet connection, and keeps going if you close this."
+        "Codex isn't installed yet. AgentMux installs its own copy, kept apart from any you installed yourself. It needs an internet connection, and keeps going if you close this."
       <div class="install-view">
         <ol class="install-steps" aria-label="Install steps">
           <li class="install-step" data-status="active" aria-current="step">

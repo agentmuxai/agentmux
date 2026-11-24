@@ -456,14 +456,18 @@ pub(crate) fn start_blocked(state: &AppState, agent_id: &str) -> Option<String> 
 }
 
 pub(crate) fn start_blocked_with(state: &AppState, agent_id: &str, commit_pct: impl Fn() -> Option<f64>, commit_total: impl Fn() -> Option<f64>) -> Option<String> {
-    if !crate::sagas::park_agents::enabled(state) || is_reserved(state, agent_id) {
-        return None;
-    }
-    let policy = policy(state);
     let live = live_agents(state);
     if live.iter().any(|l| l.uid == agent_id || l.agent_id == agent_id) {
         return None;
     }
+    // A host agent in a folder a container agent can write waits for the person, whatever the limits say.
+    if let Some(why) = state.mstore.agent_def_get(agent_id).ok().flatten().and_then(|def| crate::backend::folder_overlap::waiting_reason(&state.mstore, &def)) {
+        return Some(why);
+    }
+    if !crate::sagas::park_agents::enabled(state) || is_reserved(state, agent_id) {
+        return None;
+    }
+    let policy = policy(state);
     let used = commit_pct();
     let over = over_limit(&policy, live.len() + pending_not_running(state, &live), used)?;
     if let Some((used, limit)) = commit_over(&policy, used) {

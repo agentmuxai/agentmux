@@ -5,7 +5,7 @@
  */
 export type FolderAsk = { host_id: string, host_name: string, container_id: string, container_name: string, 
 /**
- * The agent that asked, by its name.
+ * The agent that asked, by its name; empty for the ask restart resume makes.
  */
 agent: string, 
 /**

@@ -402,6 +402,14 @@ impl Store {
         Ok(n > 0)
     }
 
+    /// Every grant as `(entry id, origin, granted at)`.
+    pub fn vault_grant_rows(&self) -> Result<Vec<(String, String, i64)>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT entry_id, origin, granted_at FROM db_vault_grants ORDER BY entry_id, origin")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// Every entry's grants: entry id to its origins, oldest first.
     pub fn vault_grants(&self) -> Result<std::collections::HashMap<String, Vec<String>>, StoreError> {
         let conn = self.conn.lock().unwrap();
@@ -651,6 +659,14 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(&format!("SELECT {ACTIVITY_COLUMNS} FROM db_vault_activity ORDER BY seq DESC LIMIT ?1"))?;
         let rows = stmt.query_map(params![limit], activity_of)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// The activity rows after number `seq`, oldest first: the lines this machine has made since a sync last looked.
+    pub fn vault_activity_after(&self, seq: i64) -> Result<Vec<VaultActivityRow>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(&format!("SELECT {ACTIVITY_COLUMNS} FROM db_vault_activity WHERE seq > ?1 ORDER BY seq"))?;
+        let rows = stmt.query_map(params![seq], activity_of)?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
