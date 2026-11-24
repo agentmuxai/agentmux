@@ -760,12 +760,15 @@ export class EditorViewModel {
                 const probe = await RpcApi.FileProbeCommand(TabRpcClient, { path: filePath });
                 const tabNow = snapshot(this.blockId)?.tabs.find((t) => t.id === tabId);
                 if (!tabNow || tabNow.filePath !== canonical) return null;
-                this.viewerTabs.reprobe(tabId, probe as FileProbe, canonical);
-                const viewer = chooseViewer(probe, tabNow.viewerOverride);
+                // The viewer is chosen from the probe `reprobe` kept, which still knows a file found too wide for the
+                // Text viewer: the raw probe would send a changed wide-first-line file back to Text, read it whole,
+                // and have it refused again, on every change of a growing log.
+                const merged = this.viewerTabs.reprobe(tabId, probe as FileProbe, canonical);
+                const viewer = chooseViewer(merged, tabNow.viewerOverride);
                 if (tabNow.viewer !== viewer) dispatch(this.blockId, { type: "SetTabViewer", tabId, viewer, source: "system" });
                 if (viewer !== "text") return this._markViewerLoaded(tabId, `probe:${probe.size}:${probe.mtime}`, opts);
                 // "Open as text anyway" on a binary file: show its bytes.
-                allowBinaryText = isBinaryProbe(probe);
+                allowBinaryText = isBinaryProbe(merged);
             }
 
             const result = await RpcApi.ReadEditorFileCommand(
