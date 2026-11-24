@@ -15,6 +15,8 @@
 #   3. the whole command again, up to CI_APT_ATTEMPTS (3) times with a growing pause, each attempt bounded by
 #      `timeout` (CI_APT_UPDATE_LIMIT 120 s, CI_APT_INSTALL_LIMIT 240 s; killed outright 10 s after the signal),
 #      so a HUNG apt call costs one attempt, and no new attempt once the call has used CI_APT_BUDGET (600 s).
+#      An install that was killed part way leaves dpkg half done, which stops the next attempt at "dpkg was interrupted",
+#      so each retry of an install begins with `dpkg --configure -a`.
 #      The workflow steps add a timeout-minutes of their own as the last bound.
 #
 # `update` succeeds when no Ubuntu archive host failed in its log; a broken THIRD-PARTY index and apt's exit code
@@ -123,6 +125,9 @@ cmd_install() {
         n=$((n + 1))
         may_try "$n" "$started" || break
         pause_before "$n"
+        # An attempt that ran past its limit may have been killed while dpkg was unpacking: finish what it started, or the
+        # next attempt stops at "dpkg was interrupted" (the cause of two queue failures in a row of five).
+        sudo dpkg --configure -a > /dev/null 2>&1 || true
         # Lists that were stale or half fetched are the other way an install fails twice.
         sudo timeout -k "$KILL_AFTER" "$UPDATE_LIMIT" apt-get update >/dev/null 2>&1 || true
     done

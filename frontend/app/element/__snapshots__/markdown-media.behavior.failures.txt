@@ -5,11 +5,7 @@ fetchMediaRange C:/work/clips/gone.mp4 0-2097151 aborted=false
 -- missing at the probe
 <div>
   <span class="am-muted">
-    "["
-    "video"
-    "not found:"
-    "clips/gone.mp4"
-    "]"
+    "[video not found: clips/gone.mp4]"
 io.disconnect
 -- over the cap at the probe
 IntersectionObserver rootMargin=600px 0px
@@ -59,11 +55,7 @@ revokeObjectURL blob:test/2
 -- playback error, the file freed
 <div>
   <span class="am-muted">
-    "["
-    "video"
-    "can't play:"
-    "media error on video"
-    "]"
+    "[video can't play: media error on video]"
 io.disconnect
 revokeObjectURL blob:test/1
 -- the audio player fails
@@ -77,8 +69,4 @@ revokeObjectURL blob:test/3
 -- audio playback error
 <div>
   <span class="am-muted">
-    "["
-    "audio"
-    "can't play:"
-    "media error on audio"
-    "]"
+    "[audio can't play: media error on audio]"

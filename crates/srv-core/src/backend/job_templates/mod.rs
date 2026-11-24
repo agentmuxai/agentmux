@@ -85,6 +85,7 @@ pub static DRONE_BUILTINS: &[Builtin] = &[
     builtin_drone!("triage-failed-nightly"),
     builtin_drone!("rerun-flaky-job"),
     builtin_drone!("merged-pr-still-claimed"),
+    builtin_drone!("verify-release"),
 ];
 
 /// Every template AgentMux ships: the job templates, then the Drone ones.

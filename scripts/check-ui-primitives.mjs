@@ -124,6 +124,14 @@
 //                   an accessible name and a keyboard focus ring; a hand-made one has its own hover, or none. A hard
 //                   zero everywhere: CLOSE_CONTROLS_ALLOWLIST names the ✕ that is a status mark, not a control.
 //
+//  18. discardedClicks  a kit `Button`, `IconButton` or `CloseButton` whose `onClick` throws the promise of its
+//                   action away (`onClick={() => void save()}`), per file in .tsx outside element/ui/. The
+//                   kit's button locks and shows its spinner only while the handler's promise is pending
+//                   (SPEC_BUTTON_PRESSED_AND_PENDING_FEEDBACK_2026_11_20.md), so `() => save()` is the
+//                   handler; a `void` hides the promise from it. A quick action that really has nothing to
+//                   wait for (open a link, reveal a file, copy) says so with `// quick action` on the line
+//                   or the line above, and so does one that waits for a person (a file picker or a confirm).
+//
 // A count above the base's fails: use the element/ui/ components instead. A
 // count below it is reported and passes. There is no checked-in baseline:
 // one used to live in scripts/ui-primitives-baseline.json, and since every
@@ -200,6 +208,27 @@ export function countCloseControls(source) {
 /** A host stylesheet that sets the hover or press of the kit's close button, which would take the red from it. */
 export function closeHoverOverrides(source) {
     return (stripComments(source).match(/\.ui-close[^{}]*:(?:hover|active)[^{}]*\{/g) ?? []).length;
+}
+
+const KIT_BUTTONS = new Set(["Button", "IconButton", "CloseButton"]);
+
+/**
+ * The kit buttons whose `onClick` is an arrow function that starts with `void` (`() => void save()`, with a block
+ * too), so the button never sees the promise. A line that says `quick action` (on it or above) doesn't count.
+ */
+export function countDiscardedClicks(source) {
+    const lines = source.split("\n");
+    let n = 0;
+    for (const m of source.matchAll(/\bonClick=\{\s*(?:async\s*)?\(?[\w\s,]*\)?\s*=>\s*(?:\{\s*)?void\s/g)) {
+        const before = source.slice(Math.max(0, m.index - 600), m.index);
+        const tag = [...before.matchAll(/<([A-Za-z][\w.]*)/g)].at(-1)?.[1];
+        if (!KIT_BUTTONS.has(tag)) continue;
+        const at = source.slice(0, m.index).split("\n").length - 1;
+        if (/^\s*(?:\/\/|\*|\/\*)/.test(lines[at])) continue;
+        if (/quick action/.test(lines[at]) || /quick action/.test(lines[at - 1] ?? "")) continue;
+        n++;
+    }
+    return n;
 }
 
 export function countButtons(source) {
@@ -1045,6 +1074,7 @@ export function collect(files) {
     const rawFieldProblemCounts = {};
     const menus = {};
     const closeControls = {};
+    const discardedClicks = {};
     const styles = [];
 
     for (const { path, source } of files) {
@@ -1066,6 +1096,7 @@ export function collect(files) {
             countInto(disabledTips, path, tipsOnDisabledElements(source).length);
             countInto(rawFieldProblemCounts, path, rawFieldProblems(source).length);
             countInto(menus, path, countMenus(source));
+            countInto(discardedClicks, path, countDiscardedClicks(source));
         }
         // The close controls: any script outside the kit (a .ts data row too), and a host stylesheet's hover on the kit's button.
         if (isScript && !path.endsWith(".d.ts") && !path.startsWith(UI_DIR)) countInto(closeControls, path, countCloseControls(source));
@@ -1114,6 +1145,7 @@ export function collect(files) {
         rawFieldProblems: sortObject(rawFieldProblemCounts),
         menus: sortObject(menus),
         closeControls: sortObject(closeControls),
+        discardedClicks: sortObject(discardedClicks),
     };
 }
 
@@ -1159,7 +1191,7 @@ export function formatColourList(rows, kind) {
 
 // ── Compare ─────────────────────────────────────────────────────────────────
 
-const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings", "colours", "tsColours", "tags", "nativeTitles", "textFields", "controlTitles", "menus", "closeControls"];
+const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings", "colours", "tsColours", "tags", "nativeTitles", "textFields", "controlTitles", "menus", "closeControls", "discardedClicks"];
 
 /**
  * `baseline` with each renamed file's counts moved to its new path, so a file moved or renamed since the base is
@@ -1319,7 +1351,8 @@ if (isMain(import.meta.url)) {
         console.log("--success-bg, --tint-2, …) instead of a colour literal, and Tag / TagList /");
         console.log("FilterChip instead of a hand-drawn badge, chip, pill or ribbon, <Menu> instead of a new menu, and <Tooltip> (or an");
         console.log("IconButton tooltip) instead of a native title= hover label (or {...tip(text)} from element/tip.ts on text, never on a disabled element), and TextInput / TextArea /");
-        console.log("NumberInput / FilterInput instead of a hand-written text <input> or <textarea>.");
+        console.log("NumberInput / FilterInput instead of a hand-written text <input> or <textarea>, and");
+        console.log("onClick={() => save()} (no `void`) on a Button that starts a slow action, so it locks and shows its spinner.");
         process.exit(1);
     }
     const total = (o) => Object.values(o).reduce((a, b) => a + b, 0);
@@ -1332,7 +1365,8 @@ if (isMain(import.meta.url)) {
             `${total(current.colours)} colour literals in styles, ${total(current.tsColours)} in scripts, ` +
             `${total(current.tags)} hand-drawn tags, ` +
             `${total(current.nativeTitles)} native title= labels, ${total(current.textFields)} hand-written text fields, ` +
-            `${total(current.menus)} menus outside the kit's Menu, ${total(current.closeControls)} close controls outside CloseButton.`
+            `${total(current.menus)} menus outside the kit's Menu, ${total(current.closeControls)} close controls outside CloseButton, ` +
+            `${total(current.discardedClicks)} button actions that throw their promise away.`
     );
     if (shrank.length > 0) {
         console.log(`Down from the base branch (${shrank.length}):`);

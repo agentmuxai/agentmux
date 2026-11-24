@@ -256,8 +256,9 @@ fn set_meta(state: &AppState, ctx: &RpcContext, data: serde_json::Value) -> Resu
     Ok(())
 }
 
-/// `setmeta` from a connection registered as an agent: a block's meta is written only on the pane that agent runs,
-/// and Take over (clearing a browser pane's owner) is the person's, so an agent never writes it.
+/// `setmeta` from a connection registered as an agent: a block's meta is written only on the pane that agent runs, the
+/// meta of any other object (tab, window, workspace) is the person's, and Take over (clearing a browser pane's owner) is
+/// the person's too, so an agent never writes it.
 fn refuse_agent_meta_write(mstore: &Store, ctx: &RpcContext, oref: &str, meta: &MetaMapType) -> Result<(), String> {
     if ctx.agent_id.is_empty() {
         return Ok(());
@@ -265,10 +266,7 @@ fn refuse_agent_meta_write(mstore: &Store, ctx: &RpcContext, oref: &str, meta: &
     if meta.get(crate::server::browser_owner::OWNER_META_KEY).is_some_and(serde_json::Value::is_null) {
         return Err("FORBIDDEN: Take over a browser pane is the person's act; an agent that is done with a pane closes it or leaves it".to_string());
     }
-    match oref.strip_prefix("block:") {
-        Some(block_id) => super::pane_caller::agent_acts_on_own_pane(mstore, ctx, block_id, "writing pane meta"),
-        None => Ok(()),
-    }
+    super::pane_caller::agent_writes_meta_of(mstore, ctx, oref)
 }
 
 /// `getmeta`: an object's metadata (the whole object when it has no `meta` field).
@@ -352,9 +350,9 @@ fn register_block_controller(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // `Value` request, parsed into its struct below (a BlockDef); the stub keeps its
     // hand-written request type (generated-manifest.json `dataType`).
     let s = state.clone();
-    engine.register_typed(COMMAND_CREATE_SUB_BLOCK, move |data: serde_json::Value, _ctx| {
+    engine.register_typed(COMMAND_CREATE_SUB_BLOCK, move |data: serde_json::Value, ctx| {
         let s = s.clone();
-        async move { create_sub_block(&s, data) }
+        async move { create_sub_block(&s, &ctx, data) }
     });
 
     // deletesubblock → tear down a sub-block created via createsubblock.
@@ -364,9 +362,9 @@ fn register_block_controller(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let s = state.clone();
     engine.register_typed(
         COMMAND_DELETE_SUB_BLOCK,
-        move |cmd: CommandDeleteSubBlockData, _ctx| {
+        move |cmd: CommandDeleteSubBlockData, ctx| {
             let s = s.clone();
-            async move { delete_sub_block(&s, cmd) }
+            async move { delete_sub_block(&s, &ctx, cmd) }
         },
     );
 }
@@ -421,10 +419,11 @@ fn controller_resync(state: &AppState, ctx: &RpcContext, data: serde_json::Value
 }
 
 /// `createsubblock`: a headless sub-block parented to an existing block; resolves to its `block:<id>`.
-fn create_sub_block(state: &AppState, data: serde_json::Value) -> Result<String, String> {
+fn create_sub_block(state: &AppState, ctx: &RpcContext, data: serde_json::Value) -> Result<String, String> {
     let mstore = state.mstore.clone();
     let cmd: CommandCreateSubBlockData = serde_json::from_value(data)
         .map_err(|e| format!("createsubblock: {e}"))?;
+    super::pane_caller::agent_acts_on_own_pane(&mstore, ctx, &cmd.parentblockid, "creating a sub-block")?;
 
     let mut meta = cmd.blockdef.meta.clone();
     let raw_cwd = meta
@@ -493,8 +492,9 @@ fn create_sub_block(state: &AppState, data: serde_json::Value) -> Result<String,
 }
 
 /// `deletesubblock`: tear down a sub-block made by `createsubblock`.
-fn delete_sub_block(state: &AppState, cmd: CommandDeleteSubBlockData) -> Result<(), String> {
+fn delete_sub_block(state: &AppState, ctx: &RpcContext, cmd: CommandDeleteSubBlockData) -> Result<(), String> {
     let mstore = state.mstore.clone();
+    super::pane_caller::agent_deletes_own_sub_block(&mstore, ctx, &cmd.blockid)?;
     // Kill process FIRST — a lingering PTY tree is worse than a
     // delayed row delete.
     crate::sagas::agent_teardown::discard(&cmd.blockid);

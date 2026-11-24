@@ -251,7 +251,7 @@ attempt() {
     fi
     # Two LLVM threads in the srv test compile instead of four: see 4. in the header.
     export CARGO_BUILD_JOBS="$CARGO_JOBS"
-    # The packages the run at the end names: the queue's four, or all of them on a PR. Both builds before it name the
+    # The packages the run at the end names: the queue's four, or all of them on a PR. The builds before it name the
     # same ones, because cargo builds a dependency with the features of every package named in the call: named with
     # the core and the server layer only, agentmux-common is built without `local-http` (agentmux-mcp turns it on), and
     # the run then needs another common and compiles the core and the server layer a second time on top of it, both at
@@ -259,6 +259,27 @@ attempt() {
     # held of the 14 GB ceiling, the first attempt ended by its time limit).
     local pkgs="$CRATES"
     [ "${IN_QUEUE:-}" = true ] && pkgs="$QUEUE_CRATES"
+    if [ "${IN_QUEUE:-}" = true ]; then
+        # The merge queue skips the first call below. It built the core's test harness on its own (`--lib`), and the run's
+        # call built it again: a queue run on 2026-11-24 (job 138636759675) spent 13.2 of its 14.4 minutes compiling, and
+        # the core crate was built at +71 s, +288 s and +655 s. The verbose log of a run of the queue's shape (PR 8308)
+        # shows the two harnesses are the same unit built against two builds of one third-party dependency (age): the
+        # `--lib` call resolves it one way, and the server layer's call and the run's call resolve it the other way, so
+        # with the `--lib` call gone the run builds the harness once, after the server layer's. Why a call of `--lib`
+        # alone differs is not known. A single call for everything with one job was tried and is slower (14.3 minutes of
+        # compiling: with one job each rustc also gets one LLVM thread, and the core's harness took 5.5 minutes, not 3.5).
+        # The order keeps what the staged calls were for: the server layer's harness (8 to 9 GB) is built alone, and the
+        # run's call then builds the core's harness (about 10 GB) beside only small crates (mcp, common's one test).
+        # shellcheck disable=SC2086 # pkgs is a list of arguments
+        cargo nextest run --no-run $pkgs --bin agentmux-srv 2>&1 | tee -a "$BUILD_LOG" || return $?
+        # The queue builds only what its tests need: srv's unit tests (where most guards are), mcp's unit tests and
+        # common's one integration test. The other crates keep the cheaper check (srv's own is covered by its test
+        # build).
+        cargo check --tests -p agentmux-common -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats 2>&1 | tee -a "$BUILD_LOG" || return $?
+        # shellcheck disable=SC2086
+        cargo nextest run --profile queue $pkgs --lib --bin agentmux-srv --bin agentmux-mcp --test spawn_no_window_inventory 2>&1 | tee -a "$BUILD_LOG" || return $?
+        return 0
+    fi
     # The core's test harness first: it is the biggest compile (rustc reaches about 10 GB), and cargo would otherwise
     # run it beside the server layer's test harness (another 8 GB) on a 16 GB runner (2026-11-15, the PR that split the
     # core into its own package: both at once, the machine paging, the sampler starved 879 s). `--lib` builds the unit
@@ -270,15 +291,6 @@ attempt() {
     # a 14 GB ceiling (a 9 GB rustc and a second one) and the machine paged for 15 minutes (run 43768804420).
     # shellcheck disable=SC2086
     cargo nextest run --no-run $pkgs --bin agentmux-srv 2>&1 | tee -a "$BUILD_LOG" || return $?
-    if [ "${IN_QUEUE:-}" = true ]; then
-        # The queue builds only what its tests need: srv's unit tests (where most guards are), mcp's unit tests and
-        # common's one integration test. The other crates keep the cheaper check (srv's own is covered by its test
-        # build).
-        cargo check --tests -p agentmux-common -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats 2>&1 | tee -a "$BUILD_LOG" || return $?
-        # shellcheck disable=SC2086
-        cargo nextest run --profile queue $pkgs --lib --bin agentmux-srv --bin agentmux-mcp --test spawn_no_window_inventory 2>&1 | tee -a "$BUILD_LOG" || return $?
-        return 0
-    fi
     # The last build compiles the core and the server layer once more (the other targets of the packages change what they
     # are built with), and with two jobs their two rustc ran at once: 14.3 to 14.7 GB on a runner that has 15.6 and a
     # 14 GB ceiling, every run (see 7. in the header). One job keeps one rustc at a time; the run after it compiles nothing.

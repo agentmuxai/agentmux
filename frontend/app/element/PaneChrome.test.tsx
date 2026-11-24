@@ -22,6 +22,8 @@ import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { slotOf } from "@/app/theme/palette";
 import { deltaE, tabPaint } from "@/app/theme/paint";
+import { resolveBackdrop } from "@/app/backdrop/meta";
+import { registerPaneScope, releasePaneScope, scopeVars } from "@/app/backdrop/scope";
 
 const headerCalls: any[] = [];
 // When set, the header throws for the props it returns true for (a ViewModel that breaks the render).
@@ -561,6 +563,71 @@ describe("renderPaneChromeShell — per-tab pane color", () => {
 // changed color on every tab switch in a pane whose tabs have different
 // colors. A pane with several colors has no single color to be about, so
 // the tail goes app-default instead of picking one.
+describe("renderPaneChromeShell — a pane with a backdrop", () => {
+    const yellow = { kind: "color", hex: "#fff6b0", polarity: "follow", version: 1 };
+
+    afterEach(() => releasePaneScope("b1"));
+
+    it("takes the scope of the tab in front on its root, so the header and strip draw in the pane's colours", () => {
+        setObjectValue("block:b1", { meta: { view: "agent", "frame:hue": 270, backdrop: yellow } });
+        mockLayoutModel = fakeLayoutModel(["b1"]);
+        const vars = scopeVars(resolveBackdrop({ backdrop: yellow }, "dark")!.derived);
+        registerPaneScope("b1", vars);
+        const { container } = render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1" }), <div>content</div>) as any);
+        const root = container.querySelector<HTMLElement>(".pane-stack")!;
+        expect(root.hasAttribute("data-backdrop")).toBe(true);
+        expect(root.style.getPropertyValue("--surface")).toBe(vars["--surface"]);
+        expect(root.style.getPropertyValue("--ink-text")).toBe(vars["--ink-text"]);
+    });
+
+    it("a pane with no scope keeps the window's colours: no attribute and no properties", () => {
+        setObjectValue("block:b1", { meta: { view: "agent", "frame:hue": 270 } });
+        mockLayoutModel = fakeLayoutModel(["b1"]);
+        const { container } = render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1" }), <div>content</div>) as any);
+        const root = container.querySelector<HTMLElement>(".pane-stack")!;
+        expect(root.hasAttribute("data-backdrop")).toBe(false);
+        expect(root.style.getPropertyValue("--surface")).toBe("");
+    });
+
+    it("paints a pill for the side of the pane's own surface, with a fill its label reads on", () => {
+        setObjectValue("block:b1", { meta: { view: "agent", "frame:hue": 270, backdrop: yellow } });
+        mockLayoutModel = fakeLayoutModel(["b1"]);
+        render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1" }), <div>content</div>) as any);
+        const c = headerCalls.at(-1).getColor("b1")!;
+        const d = resolveBackdrop({ backdrop: yellow }, "dark")!.derived;
+        const own = tabPaint(slotOf(270)!, d.scheme === "light", { selected: d.ink.text, unselected: d.ink.muted });
+        expect(c.background).toBe(own.unselected);
+        expect(c.activeBackground).toBe(own.selected);
+        expect(c.neutralBackground).toBe(d.surfaces.surface);
+        expect(c.background).not.toBe(tabPaint(slotOf(270)!, false, undefined).unselected);
+    });
+});
+
+describe("renderPaneChromeShell — pills in a pane whose tabs differ", () => {
+    const yellow = { kind: "color", hex: "#fff6b0", polarity: "follow", version: 1 };
+
+    it("every pill is fitted to the ink of the tab in front, since the strip's labels are drawn in it", () => {
+        setObjectValue("block:b1", { meta: { view: "agent", "frame:hue": 270, backdrop: yellow } });
+        setObjectValue("block:b2", { meta: { view: "term", "frame:hue": 10 } }); // takes no backdrop
+        mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+        render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1" }), <div>content</div>) as any);
+        const d = resolveBackdrop({ backdrop: yellow }, "dark")!.derived;
+        const ink = { selected: d.ink.text, unselected: d.ink.muted };
+        const h = headerCalls.at(-1);
+        expect(h.getColor("b1").background).toBe(tabPaint(slotOf(270)!, true, ink).unselected);
+        expect(h.getColor("b2").background).toBe(tabPaint(slotOf(10)!, true, ink).unselected);
+        expect(h.getColor("b2").neutralBackground).toBe(d.surfaces.surface);
+    });
+
+    it("with a plain tab in front, a pill of a tab that has a backdrop is painted for the window, as the strip's labels are", () => {
+        setObjectValue("block:b1", { meta: { view: "agent", "frame:hue": 270, backdrop: yellow } });
+        setObjectValue("block:b2", { meta: { view: "term", "frame:hue": 10 } });
+        mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+        render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b2" }), <div>content</div>) as any);
+        expect(headerCalls.at(-1).getColor("b1").background).toBe(tabPaint(slotOf(270)!, false, undefined).unselected);
+    });
+});
+
 describe("renderPaneChromeShell — header tail color", () => {
     /** Renders with `activeId` active and returns the headerBgOverride the
      *  shell handed down. The whole point of the rule is that this value
