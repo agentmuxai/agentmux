@@ -41,7 +41,7 @@ impl Op {
             "resize" => Ok(Op::Resize),
             "move" => Ok(Op::Move),
             "place" => Ok(Op::Place),
-            other => Err(format!("INVALID_ARG: {other:?} is not a placement action: use resize, move or place")),
+            other => Err(format!("INVALID_ARG: {other:?} is not a placement action: use resize, move, place, dock or float")),
         }
     }
 
@@ -155,6 +155,12 @@ pub(super) async fn handle_pane_place(
     let Some(agent) = caller.as_ref().and_then(|c| c.0.uid()).map(str::to_string) else {
         return refuse(StatusCode::FORBIDDEN, "an agent known by its token places its own panes; the person drags a window".into());
     };
+    // Docking and floating move the pane between a tab and a window of its own (`pane_dock`); the rest set a rect.
+    match req.op.as_str() {
+        "dock" => return super::pane_dock::dock(&state, &agent, &req).await,
+        "float" => return super::pane_dock::float(&state, &agent, &req).await,
+        _ => {}
+    }
     let (op, cmd) = match check(&req.op, &req.place) {
         Ok(x) => x,
         Err(e) => return refuse(StatusCode::BAD_REQUEST, e),

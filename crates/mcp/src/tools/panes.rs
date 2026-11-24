@@ -24,6 +24,8 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         "ResizePane" => run_place_pane("resize", arguments, cx).await,
         "MovePane" => run_place_pane("move", arguments, cx).await,
         "PlacePane" => run_place_pane("place", arguments, cx).await,
+        "DockPane" => run_place_pane("dock", arguments, cx).await,
+        "FloatPane" => run_place_pane("float", arguments, cx).await,
         "QuitSelf" => run_quit_self(arguments, cx).await,
         "RegisterDevServer" => run_register_dev_server(arguments, cx).await,
         _ => Err(not_in_family()),
@@ -708,7 +710,14 @@ async fn run_place_pane(op: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result
     let resp = client
         .post(&url)
         .header(AUTH_KEY_HEADER, auth_key)
-        .json(&PanePlaceRequest { op: op.to_string(), target_id: target_id.to_string(), place })
+        .json(&PanePlaceRequest {
+            op: op.to_string(),
+            target_id: target_id.to_string(),
+            place,
+            split: arguments.get("split").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(str::to_string),
+            // The caller's own pane: `dock` goes into its tab, `float` is shown from its window.
+            block_id: Some(block_id.to_string()).filter(|b| !b.is_empty()),
+        })
         .send()
         .await
         .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -720,9 +729,14 @@ async fn run_place_pane(op: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result
         anyhow::bail!("Pane {op} failed ({status}): {}", said.unwrap_or(text));
     }
     let body: Value = resp.json().await.map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+    if op == "dock" {
+        let tab = body.get("tab_id").and_then(Value::as_str).unwrap_or("your tab");
+        return Ok(format!("Docked pane {target_id} into tab {tab}; its window closes."));
+    }
     let done = match op {
         "resize" => "Resized",
         "move" => "Moved",
+        "float" => "Floated",
         _ => "Placed",
     };
     Ok(format!("{done} pane {target_id}.{}", floating_note(Some(&body))))

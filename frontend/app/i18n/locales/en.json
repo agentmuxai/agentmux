@@ -1695,6 +1695,8 @@
     "editor.find.matchCaseTip": "Match case (turn off to ignore case: UTF-8 files)",
     "editor.find.regex": "Regular expression",
     "editor.find.regexTip": "Regular expression (UTF-8 files)",
+    "editor.large.follow": "Follow",
+    "editor.large.followTip": "Follow the end of the file as it grows; scrolling up stops it",
     "window.reloadOffer.tabs": "This window stopped switching tabs.",
     "window.reloadOffer.panes": "Some panes of this tab are not showing.",
     "window.reloadOffer.errors": "This window has hit repeated errors and may be out of date.",
@@ -1876,5 +1878,11 @@
     "jobs.droneTemplate.pill": "Drone",
     "jobs.droneTemplate.make": "Make a drone",
     "workspaceStop.chip": "Stops in {{left}}",
-    "workspaceStop.tip": "This workspace stops at {{time}} because {{reason}}. Your data is saved, and you can start it again from the Console."
+    "workspaceStop.tip": "This workspace stops at {{time}} because {{reason}}. Your data is saved, and you can start it again from the Console.",
+    "workspaceStop.keep": "Keep running",
+    "workspaceStop.stopNow": "Stop now",
+    "workspaceStop.open": "This workspace is going to stop. Open for choices.",
+    "workspaceStop.unreachable": "The workspace could not be reached. Try again.",
+    "workspaceStop.signedOut": "You are signed out. Sign in again to change this.",
+    "workspaceStop.failed": "That could not be done. Try again."
 }

@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The Files pane's tree view (docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §5.2, "expand in place"): the shown
- * folder's rows, with each expanded folder's rows under it. A row below the first level is named by its path from the
+ * The rows of a folder tree (docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §5.2, "expand in place"; section 12,
+ * phase 4): a folder's rows, with each expanded folder's rows under it. Shared by the Files pane's tree view and, in
+ * time, the Editor's side tree. It knows nothing of how rows are drawn or where listings come from. A row below the first level is named by its path from the
  * shown folder, `src/lib/a.ts`, always with `/`: the name is what selection, focus, rename and the operations key
  * their rows by, so a nested row needs a name no sibling in another folder shares. `pathOf` turns it back into a path.
  */
@@ -23,9 +24,6 @@ export interface TreeRow {
     /** Its rows are being listed. */
     loading: boolean;
 }
-
-/** The most folders a pane keeps open at once: each one is watched, and srv allows 64 watches to a pane. */
-export const MAX_EXPANDED = 40;
 
 /** The folder a nested row is in: `src/lib` for `src/lib/a.ts`, "" at the first level. */
 export function parentRel(rel: string): string {

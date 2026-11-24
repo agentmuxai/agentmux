@@ -16,7 +16,7 @@ pub use crate::browser_control_types::{
 };
 use std::collections::HashMap;
 
-pub use crate::place_args::PlaceArgs;
+pub use crate::place_args::{PanePlaceRequest, PlaceArgs};
 
 fn is_zero(n: &usize) -> bool {
     *n == 0
@@ -593,18 +593,6 @@ pub struct PaneOpenResponse {
     /// Something the agent should know about the pane (a container agent's file is a snapshot).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
-}
-
-/// `POST /api/v1/pane/place` — resize, move or place a floating pane the caller opened
-/// (docs/specs/SPEC_AGENT_PANE_PLACEMENT_FLOATING_2026_11_22.md §2.2).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PanePlaceRequest {
-    /// `resize` (width and/or height), `move` (spot, or x and y) or `place` (any of them, in one call).
-    pub op: String,
-    /// The pane to act on: a block id from `Pane layout`, one the caller opened.
-    pub target_id: String,
-    #[serde(flatten)]
-    pub place: crate::place_args::PlaceArgs,
 }
 
 /// `POST /api/v1/pane/title` — set a pane's display title.

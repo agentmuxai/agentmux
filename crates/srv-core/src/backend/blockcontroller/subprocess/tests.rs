@@ -577,7 +577,9 @@ async fn a_slow_container_startup_does_not_hold_up_the_caller_and_a_failed_one_e
     let began = std::time::Instant::now();
     ctrl.spawn_container_turn(cm, "agentmux-test-startup".to_string(), vec!["claude".to_string()], container_config())
         .expect("the turn is accepted");
-    assert!(began.elapsed() < std::time::Duration::from_millis(150), "the caller is not held up: {:?}", began.elapsed());
+    // The start-up step takes 400 ms; a caller that waited for it would be back after that. The bound leaves room for a busy
+    // machine (a whole test run shares it), and `ran` below says the step was not awaited.
+    assert!(began.elapsed() < std::time::Duration::from_millis(350), "the caller is not held up: {:?}", began.elapsed());
     assert_eq!(ran.load(std::sync::atomic::Ordering::SeqCst), 0, "the start-up has not finished yet");
     tokio::task::yield_now().await; // let the turn's task begin
     assert_eq!(container_turn_status(&ctrl).await.0, crate::backend::blockcontroller::STATUS_RUNNING);

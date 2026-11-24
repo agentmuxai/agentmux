@@ -16,12 +16,23 @@ fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 /// `blockfile:line_count`.
+///
+/// Every step reads a store: a lock on the one object-store connection, and a file-backed database that another srv
+/// instance can hold. The page asks about every agent it shows every few seconds, so the whole answer runs on the
+/// blocking pool: a store that is busy then holds a blocking thread, never a runtime worker.
 pub(crate) async fn blockfile_line_count(
     state: &AppState,
     cmd: CommandBlockfileLineCountData,
 ) -> Result<BlockfileLineCountResult, String> {
+    let state = state.clone();
+    tokio::task::spawn_blocking(move || line_count_blocking(&state, &cmd))
+        .await
+        .map_err(|e| format!("blockfile:line_count: the count task failed: {e}"))?
+}
+
+fn line_count_blocking(state: &AppState, cmd: &CommandBlockfileLineCountData) -> Result<BlockfileLineCountResult, String> {
     let wants_flag = cmd.filename == crate::backend::agent_session::OUTPUT_FILE && cmd.archive_zone.is_none();
-    let result = count_lines(state, &cmd).await;
+    let result = count_lines(state, cmd);
     // An empty count from the block's own copy of a damaged history is not "no history":
     // the pane tells the user earlier history may be missing.
     match result {
@@ -34,13 +45,8 @@ pub(crate) async fn blockfile_line_count(
 }
 
 /// The count itself, from the first source that has one: the agent's global transcript zone, the block's
-/// own counter, the `session:line_count` meta, and last the event ring buffer.
-async fn count_lines(state: &AppState, cmd: &CommandBlockfileLineCountData) -> Result<BlockfileLineCountResult, String> {
-    let broker = state.broker.clone();
-    let mstore = state.mstore.clone();
-    let filestore = state.filestore.clone();
-    let global_store = state.global_transcript_store.clone();
-
+/// own counter, the `session:line_count` meta, and last the event ring buffer. Blocking: call on the blocking pool.
+fn count_lines(state: &AppState, cmd: &CommandBlockfileLineCountData) -> Result<BlockfileLineCountResult, String> {
     tracing::info!(block_id = %cmd.block_id, filename = %cmd.filename, "blockfile:line_count");
 
     // Cross-channel fallback (checked first): when this channel has
@@ -50,38 +56,22 @@ async fn count_lines(state: &AppState, cmd: &CommandBlockfileLineCountData) -> R
     // agent's GLOBAL transcript zone instead. See
     // `docs/analysis/ANALYSIS_CROSS_CHANNEL_CONVERSATION_HISTORY_2026_06_14.md`.
     if let Some((gfs, zone)) = history_output_source(
-        &filestore,
-        &global_store,
-        &mstore,
+        &state.filestore,
+        &state.global_transcript_store,
+        &state.mstore,
         &cmd.block_id,
         &cmd.filename,
         cmd.archive_zone.as_deref(),
     )?
     {
-        // Blocking pool (#2841). A counted zone answers from its
-        // counter (O(1), Phase 5a-3); a zone without an epoch gets
-        // one first (`init_line_counter`, one read of the file,
-        // once). Only if it can't be counted does this extend or
-        // rebuild `output.idx`, as before.
-        let count = match tokio::task::spawn_blocking(move || {
-            let stream = format!("g:{zone}");
-            counted_line_count(&gfs, &zone, stream).or_else(|| {
-                global_zone_line_count(&gfs, &zone)
-                    .map(|count| BlockfileLineCountResult { count, ..Default::default() })
-            })
-        })
-        .await
-        {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::warn!(
-                    block_id = %cmd.block_id,
-                    error = %e,
-                    "blockfile:line_count: global zone count task failed; falling back"
-                );
-                None
-            }
-        };
+        // A counted zone answers from its counter (O(1), Phase 5a-3);
+        // a zone without an epoch gets one first (`init_line_counter`,
+        // one read of the file, once). Only if it can't be counted does
+        // this extend or rebuild `output.idx`, as before.
+        let stream = format!("g:{zone}");
+        let count = counted_line_count(&gfs, &zone, stream).or_else(|| {
+            global_zone_line_count(&gfs, &zone).map(|count| BlockfileLineCountResult { count, ..Default::default() })
+        });
         if let Some(result) = count {
             return Ok(result);
         }
@@ -91,15 +81,8 @@ async fn count_lines(state: &AppState, cmd: &CommandBlockfileLineCountData) -> R
     // counted transcript (Phase 5a-3): exact, O(1), and the same
     // count `read_range` serves lines from.
     if cmd.filename == crate::backend::agent_session::OUTPUT_FILE {
-        let (fs, block_id) = (filestore.clone(), cmd.block_id.clone());
-        let counted = tokio::task::spawn_blocking(move || {
-            let stream = format!("b:{block_id}");
-            counted_line_count(&fs, &block_id, stream)
-        })
-        .await
-        .ok()
-        .flatten();
-        if let Some(result) = counted {
+        let stream = format!("b:{}", cmd.block_id);
+        if let Some(result) = counted_line_count(&state.filestore, &cmd.block_id, stream) {
             return Ok(result);
         }
     }
@@ -113,14 +96,17 @@ async fn count_lines(state: &AppState, cmd: &CommandBlockfileLineCountData) -> R
     // lines is O(file size) which defeats the point of a fast
     // line_count endpoint.
     if cmd.filename == "output" {
-        if let Ok(Some(block)) = mstore.get::<Block>(&cmd.block_id) {
+        if let Ok(Some(block)) = state.mstore.get::<Block>(&cmd.block_id) {
             if let Some(count) = block.meta.get("session:line_count").and_then(|v| v.as_u64()) {
                 return Ok(BlockfileLineCountResult { count, ..Default::default() });
             }
         }
     }
 
-    Ok(BlockfileLineCountResult { count: count_from_event_history(&broker, &cmd.block_id, &cmd.filename), ..Default::default() })
+    Ok(BlockfileLineCountResult {
+        count: count_from_event_history(&state.broker, &cmd.block_id, &cmd.filename),
+        ..Default::default()
+    })
 }
 
 /// The non-empty lines of `filename` still in the block's event ring buffer (capped at MAX_PERSIST = 4096): the
@@ -849,14 +835,18 @@ pub(crate) async fn transcript_position(
     block_id: &str,
 ) -> Option<(String, String, u64)> {
     use crate::backend::agent_session::OUTPUT_FILE;
-    let (fs, zone, stream) = match global_output_source(filestore, global_store, mstore, block_id, OUTPUT_FILE) {
-        Some((gfs, zone)) => (gfs, zone.clone(), format!("g:{zone}")),
-        None => (filestore.clone(), block_id.to_string(), format!("b:{block_id}")),
-    };
-    let counted = tokio::task::spawn_blocking(move || counted_line_count(&fs, &zone, stream))
-        .await
-        .ok()
-        .flatten()?;
+    let (filestore, global_store, mstore, block_id) = (filestore.clone(), global_store.clone(), mstore.clone(), block_id.to_string());
+    // The source lookup reads the object store and the global transcript store, so it runs here with the count.
+    let counted = tokio::task::spawn_blocking(move || {
+        let (fs, zone, stream) = match global_output_source(&filestore, &global_store, &mstore, &block_id, OUTPUT_FILE) {
+            Some((gfs, zone)) => (gfs, zone.clone(), format!("g:{zone}")),
+            None => (filestore.clone(), block_id.clone(), format!("b:{block_id}")),
+        };
+        counted_line_count(&fs, &zone, stream)
+    })
+    .await
+    .ok()
+    .flatten()?;
     Some((counted.stream?, counted.gen?, counted.count))
 }
 
