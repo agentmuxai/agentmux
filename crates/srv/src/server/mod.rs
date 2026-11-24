@@ -112,6 +112,7 @@ mod ws_register;
 mod cli_version;
 mod ws_resync;
 mod drone_agent;
+pub(crate) mod drone_access_handlers;
 pub(crate) mod drone_fire;
 pub(crate) mod drone_handlers;
 pub(crate) mod drone_payload;
