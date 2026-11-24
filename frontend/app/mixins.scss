@@ -54,6 +54,23 @@
         margin-left: auto;
     }
 
+    // The kept button is the one thing the range holds in these tiers, so a narrow pane at a high chrome zoom keeps it
+    // whole: the header's gaps shrink to the least that still separates the controls, and the range's edge fade (which
+    // would take half of a button this size) is not drawn.
+    &[data-fit="tabs"],
+    &[data-fit="trim"],
+    &[data-fit="min"] {
+        gap: 2px;
+
+        .block-frame-end-icons > .pane-grip {
+            margin-right: 2px;
+        }
+
+        .block-frame-header-scroll {
+            mask-image: none;
+        }
+    }
+
     &[data-fit="tabs"] .block-frame-header-spacer,
     &[data-fit="trim"] .block-frame-header-spacer,
     &[data-fit="min"] .block-frame-header-spacer,

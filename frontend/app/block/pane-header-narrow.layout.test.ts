@@ -11,9 +11,11 @@
  * centre. It skips, rather than fails, on a machine with no usable browser (layout-browser.ts findBrowser).
  */
 
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildSync } from "esbuild";
 import * as sass from "sass";
+import { build } from "vite";
 import { beforeAll, describe, expect, it } from "vitest";
 import { findBrowser, measureInBrowser, NO_BROWSER_HINT } from "@/app/view/agent/components/layout-browser";
 
@@ -24,20 +26,26 @@ const ROOT = join(__dirname, "..", "..", "..");
 const css = ["block/block.scss", "element/PaneTabStrip.scss", "block/pane-tab-actions.scss"].map((f) => sass.compile(join(ROOT, "frontend/app", f)).css).join("\n");
 
 /** The real width fit and the header's measure, as one script that puts `__fit(header)` on the page. */
-const FIT_SCRIPT = buildSync({
-    stdin: {
-        contents: `import { fitToWidth } from "./frontend/app/element/width-fit.ts";
-import { headerOverrunPx } from "./frontend/app/block/header-fit-measure.ts";
-window.__fit = (el) => fitToWidth(el, ["tabs", "trim", "min"], headerOverrunPx);
-window.__clip = headerOverrunPx;`,
-        resolveDir: ROOT,
-        loader: "ts",
-    },
-    bundle: true,
-    format: "iife",
-    platform: "browser",
-    write: false,
-}).outputFiles[0].text;
+async function fitScript(): Promise<string> {
+    const dir = mkdtempSync(join(tmpdir(), "agentmux-header-fit-"));
+    const entry = join(dir, "entry.ts");
+    const at = (f: string) => JSON.stringify(join(ROOT, "frontend/app", f).replaceAll("\\", "/"));
+    writeFileSync(
+        entry,
+        `import { fitToWidth } from ${at("element/width-fit.ts")};
+import { headerOverrunPx } from ${at("block/header-fit-measure.ts")};
+(window as any).__fit = (el: HTMLElement) => fitToWidth(el, ["tabs", "trim", "min"], headerOverrunPx);
+(window as any).__clip = headerOverrunPx;`
+    );
+    const out = (await build({
+        configFile: false,
+        logLevel: "silent",
+        root: ROOT,
+        build: { write: false, minify: false, lib: { entry, formats: ["iife"], name: "HeaderFit" } },
+    })) as { output: { code: string }[] }[] | { output: { code: string }[] };
+    rmSync(dir, { recursive: true, force: true });
+    return (Array.isArray(out) ? out[0] : out).output[0].code;
+}
 
 const TOKENS = `:root{--main-text-color:#ddd;--secondary-text-color:#999;--accent-color:#58c142;--border-color:#333;--main-bg-color:#222;
 --block-bg-color:#1d1d1d;--block-border-radius:6px;--header-height:30px;--header-font:12px Arial,sans-serif;--font-sans:Arial,sans-serif;
@@ -55,7 +63,7 @@ function pane(id: string, view: View, width: number, zoom: number): string {
         view === "agent"
             ? `<button class="pane-tab-action ui-button--chrome" data-btn="find">F</button><button class="pane-tab-action ui-button--chrome block-frame-end-keep" data-btn="keep">M</button>`
             : `<button class="pane-tab-action ui-button--chrome block-frame-end-keep" data-btn="keep">S</button>`;
-    const kept = `<button class="ctl block-frame-end-keep" data-kept="keep">${view === "agent" ? "M" : "S"}</button>`;
+    const kept = `<button class="ctl ui-button--chrome block-frame-end-keep" data-kept="keep">${view === "agent" ? "M" : "S"}</button>`;
     return (
         `<div class="pane" id="${id}" style="width:${width}px;--zoomfactor:${zoom}"><div class="block block-frame-default"><div class="block-frame-default-inner">` +
         `<div class="block-frame-default-header block-frame-default-header--has-tabstrip" data-role="block-header">` +
@@ -66,15 +74,16 @@ function pane(id: string, view: View, width: number, zoom: number): string {
         `<button class="pane-tab-strip-add ctl" data-btn="add">+</button></div></div></div>` +
         `<div class="block-frame-textelems-wrapper"></div><div class="block-frame-header-spacer"></div>` +
         `<div class="block-frame-end-kept">${kept}</div></div></div>` +
-        `<div class="block-frame-end-icons"><span class="pane-grip ctl" data-btn="grip">g</span><button class="block-frame-minimize ctl" data-btn="min">-</button>` +
-        `<button class="block-frame-magnify ctl" data-btn="max">+</button><button class="block-frame-default-close ctl" data-btn="close">x</button></div>` +
+        `<div class="block-frame-end-icons"><span class="pane-grip ctl" data-btn="grip">g</span><button class="block-frame-minimize ctl ui-button--chrome" data-btn="min">-</button>` +
+        `<button class="block-frame-magnify ctl ui-button--chrome" data-btn="max">+</button><button class="block-frame-default-close ctl ui-button--chrome" data-btn="close">x</button></div>` +
         `</div></div></div></div>`
     );
 }
 
-const WIDTHS = [125, 197, 240, 320, 600];
+const WIDTHS = [125, 137, 197, 240, 320, 600];
 const CASES: Array<[View, number, number]> = [];
-for (const view of ["agent", "term"] as View[]) for (const zoom of [1, 1.5]) for (const w of WIDTHS) CASES.push([view, w, zoom]);
+// The macOS look check (#48360) could not drag a pane below 137 px on screen at 150% chrome zoom, so 125 px is tried at 100% only.
+for (const view of ["agent", "term"] as View[]) for (const zoom of [1, 1.5]) for (const w of WIDTHS) if (w >= 137 || zoom === 1) CASES.push([view, w, zoom]);
 const idOf = (view: View, w: number, z: number) => `${view}-${w}-${z}`;
 
 const MEASURE = `
@@ -100,6 +109,13 @@ for (const p of document.querySelectorAll('.pane')) {
     find: reached(q('[data-btn="find"]'), box),
     close: reached(q('[data-btn="close"]'), box),
     scrollsSideways: header.scrollWidth - header.clientWidth,
+    whole: (() => {
+      const k = q('[data-kept="keep"]'); if (!k || getComputedStyle(k.parentElement).display === 'none') return true;
+      const kb = k.getBoundingClientRect(), rb = q('.block-frame-header-scroll').getBoundingClientRect(), gb = q('[data-btn="grip"]').getBoundingClientRect();
+      const inside = kb.left >= rb.left - 0.5 && kb.right <= rb.right + 0.5;
+      const apart = kb.right <= gb.left + 0.5 || kb.left >= gb.right - 0.5;
+      return inside && apart;
+    })(),
     clipped: window.__clip(header),
     stripBox: (() => { const r = q('.block-frame-default-header-tabstrip').getBoundingClientRect(); return [Math.round(r.left), Math.round(r.right)]; })(),
     rangeBox: (() => { const r = q('.block-frame-header-scroll'); const b = r.getBoundingClientRect(); return [Math.round(b.left), Math.round(b.right), r.scrollWidth, r.clientWidth]; })(),
@@ -116,6 +132,7 @@ interface Measured {
     find: boolean;
     close: boolean;
     scrollsSideways: number;
+    whole: boolean;
     clipped: number;
     stripBox: number[];
     actionsBox: number[] | null;
@@ -130,12 +147,13 @@ beforeAll(async () => {
     const html = CASES.map(([view, w, z]) => pane(idOf(view, w, z), view, w, z)).join("");
     measured = await measureInBrowser<Record<string, Measured>>(
         BROWSER,
-        `<!doctype html><meta charset="utf-8"><style>${TOKENS}\n${css}</style>${html}<script>${FIT_SCRIPT}</script><script>window.addEventListener("load",()=>{${MEASURE}})</script>`,
+        `<!doctype html><meta charset="utf-8"><style>${TOKENS}\n${css}</style>${html}<script>${await fitScript()}</script><script>window.addEventListener("load",()=>{${MEASURE}})</script>`,
         { width: 800, height: 2400 }
     );
 }, 120_000);
 
 describe.skipIf(!BROWSER)("a pane header in a narrow pane", () => {
+
     it("keeps the agent's Messages reachable at every width, in the tab or in the header", () => {
         for (const [view, w, z] of CASES.filter(([v]) => v === "agent")) {
             expect(measured[idOf(view, w, z)].keep, `Messages at ${w}px, chrome zoom ${z}: ${JSON.stringify(measured[idOf(view, w, z)])}`).toBe(true);
@@ -146,6 +164,10 @@ describe.skipIf(!BROWSER)("a pane header in a narrow pane", () => {
         for (const [view, w, z] of CASES.filter(([v]) => v === "term")) {
             expect(measured[idOf(view, w, z)].keep, `Start at ${w}px, chrome zoom ${z}: ${JSON.stringify(measured[idOf(view, w, z)])}`).toBe(true);
         }
+    });
+
+    it("draws the kept button whole, inside the range and clear of the grip, at every width", () => {
+        for (const [view, w, z] of CASES) expect(measured[idOf(view, w, z)].whole, `kept button at ${w}px, ${view}, chrome zoom ${z}: ${JSON.stringify(measured[idOf(view, w, z)])}`).toBe(true);
     });
 
     it("keeps Close reachable at every width", () => {
