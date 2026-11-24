@@ -24,6 +24,7 @@ use super::sync_record::{stays_here, EntryBody, Profiles};
 use super::sync_seal::{self, Place};
 use super::sync_store::links_of;
 use crate::backend::storage::store::Store;
+use crate::backend::storage::vault::VaultRow;
 use crate::backend::user_sync::log::{self, SealAt, Signer};
 use crate::backend::user_sync::seal::KeyRing;
 
@@ -75,6 +76,31 @@ fn digest(key: &Key, body: &[u8]) -> String {
     ctx.sign().as_ref().iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// The body a record carries for `row`: the entry as [`EntryBody`] writes it, with its link ids, as the bytes that are
+/// sealed and compared. Wiped when dropped.
+pub(super) fn body_of(store: &Store, row: &VaultRow, key: &Key, profiles: &dyn Profiles) -> Result<Zeroizing<Vec<u8>>, String> {
+    let parts = seal::open(key, &row.id, &row.sealed)?;
+    let body = EntryBody::of_row(row, &parts, profiles).with_link_ids(links_of(store, &row.id)?.ids());
+    Ok(Zeroizing::new(serde_json::to_vec(&body).map_err(|e| e.to_string())?))
+}
+
+/// Notes that `row`, as it is stored now, is what the log holds for `record` in `vault_id`: a capture then finds nothing
+/// changed. Taking a record into the store ends with this, or the next capture would write the taken entry back as a new
+/// version made here.
+pub(super) fn mark_seen(store: &Store, row: &VaultRow, record: &str, key: &Key, profiles: &dyn Profiles) -> Result<(), String> {
+    let hash = digest(key, &body_of(store, row, key, profiles)?);
+    let conn = store.conn().lock().unwrap_or_else(|e| e.into_inner());
+    conn.execute("INSERT OR REPLACE INTO db_sync_vault_seen (entry_id, vault, record, hash) VALUES (?1, ?2, ?3, ?4)", params![row.id, row.vault_id, record, hash]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Forgets an entry that was deleted here because a record said so: its tombstone is already in the log.
+pub(super) fn forget(store: &Store, entry_id: &str) -> Result<(), String> {
+    let conn = store.conn().lock().unwrap_or_else(|e| e.into_inner());
+    conn.execute("DELETE FROM db_sync_vault_seen WHERE entry_id = ?1", params![entry_id]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 struct Seen {
     vault: String,
     record: String,
@@ -121,9 +147,7 @@ pub fn capture(store: &Store, signer: &mut Signer, vault_id: &str, ring: &KeyRin
         if !sync_links::is_link_id(record) {
             continue;
         }
-        let parts = seal::open(key, &row.id, &row.sealed)?;
-        let body = EntryBody::of_row(row, &parts, profiles).with_link_ids(links_of(store, &row.id)?.ids());
-        let body = Zeroizing::new(serde_json::to_vec(&body).map_err(|e| e.to_string())?);
+        let body = body_of(store, row, key, profiles)?;
         let hash = digest(key, &body);
         pending.push(Pending { entry_id: row.id.clone(), record: record.clone(), body, hash });
     }
