@@ -151,3 +151,22 @@ async fn the_claim_epoch_does_not_outlive_the_attempt() {
     assert!(!inner.stop_watch.claimed());
     assert!(!inner.spawning_in_progress);
 }
+
+/// A refusal by the credential gate gives the claim back, and the stop it saw goes with it in the same
+/// step: the spawn a later message wins is that message's own.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_gate_releases_the_stop_with_the_claim() {
+    let c = controller("blk-gate-refused");
+    assert!(c.try_claim_eager_resume_spawn());
+    Controller::stop(&c, true, STATUS_DONE).unwrap();
+    assert!(c.inner.lock().unwrap().stop_watch.stopped(), "a stop landed during the gate");
+
+    let gate_err = crate::identity::resolver::SpawnGateError::MissingCredentials { provider: "claude".to_string(), linked: true };
+    let outcome = c.refuse_after_gate(&gate_err);
+
+    assert!(matches!(outcome, EagerResumeOutcome::DeclinedTo(_)));
+    let inner = c.inner.lock().unwrap();
+    assert!(!inner.spawning_in_progress);
+    assert!(!inner.stop_watch.claimed());
+    assert!(!inner.stop_watch.stopped());
+}
