@@ -73,10 +73,27 @@ describe("the Table viewer", () => {
     it("shows the first row as the header and draws only the rows on screen, numbered from 1", async () => {
         await mount(csv(500));
         expect(cells(headRow()!)).toEqual(["id", "name", "note"]);
-        expect(bodyRows()).toHaveLength(VIEW_ROWS + 2);
+        expect(bodyRows()).toHaveLength(VIEW_ROWS - 1 + 2);
         expect(cells(bodyRows()[0])).toEqual(["1", "name 1", "note, 1"]);
         expect(bodyRows()[0].querySelector(".table-viewer-number")?.textContent).toBe("1");
         expect(facts().slice(0, 3)).toEqual(["500 rows", "3 columns", "comma"]);
+    });
+
+    it("reaches the last row with the keys while the header covers the top row of the view", async () => {
+        await mount(csv(100));
+        const grid = screen.getByRole("grid");
+        fireEvent.keyDown(grid, { key: "End", ctrlKey: true });
+        await settle();
+        const numbers = () => bodyRows().map((r) => r.querySelector(".table-viewer-number")?.textContent);
+        // The header takes one of the ten rows the scroller shows, so nine rows are left, and the last is among them.
+        expect(numbers()).toEqual(["92", "93", "94", "95", "96", "97", "98", "99", "100"]);
+        // With the header off the whole view is rows.
+        fireEvent.click(screen.getByRole("button", { name: "Header row" }));
+        await settle();
+        fireEvent.keyDown(grid, { key: "End", ctrlKey: true });
+        await settle();
+        expect(numbers().slice(-1)).toEqual(["101"]);
+        expect(numbers()).toHaveLength(VIEW_ROWS);
     });
 
     it("turns the header off and on: the first row joins the rows, and the count follows", async () => {

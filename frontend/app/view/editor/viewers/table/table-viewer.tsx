@@ -82,7 +82,12 @@ export function TableViewer(props: TableViewerProps): JSX.Element {
     const body = createMemo(() => (header() ? all().slice(1) : all()));
     const columns = createMemo(() => columnCount(all()));
     const widths = createMemo(() => columnWidths(all(), columns()));
-    const scroll = createLineScroll(() => body().length);
+    // The header row sits in the scroller and covers its top row, so the rows have one row less to show in.
+    const scroll = createLineScroll(
+        () => body().length,
+        0,
+        () => (head() ? ROW_H : 0)
+    );
     const digits = () => Math.max(3, String(body().length).length);
     const facts = () => {
         const p = parsed();
