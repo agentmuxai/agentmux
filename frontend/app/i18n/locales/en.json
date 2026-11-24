@@ -1695,6 +1695,8 @@
     "editor.find.matchCaseTip": "Match case (turn off to ignore case: UTF-8 files)",
     "editor.find.regex": "Regular expression",
     "editor.find.regexTip": "Regular expression (UTF-8 files)",
+    "editor.large.follow": "Follow",
+    "editor.large.followTip": "Follow the end of the file as it grows; scrolling up stops it",
     "window.reloadOffer.tabs": "This window stopped switching tabs.",
     "window.reloadOffer.panes": "Some panes of this tab are not showing.",
     "window.reloadOffer.errors": "This window has hit repeated errors and may be out of date.",
