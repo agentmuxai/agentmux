@@ -34,6 +34,7 @@ pub fn register_all() {
         }),
     );
     window::register_default_runner("disk_cleanup", Arc::new(|state, request| Box::pin(disk_cleanup(state, request))));
+    window::register_default_runner("drone_fire", Arc::new(|state, request| Box::pin(crate::server::drone_fire::run_after_countdown(state, request))));
 }
 
 /// Why a release can't be installed, as the requester is told.
