@@ -9,7 +9,7 @@ use serde_json::Value;
 
 /// What differs between the ask the person approved and the one the page shows now, as far as the person could see
 /// it: the destination, the button's name, or one field by its label. A change in what the person never saw (a
-/// hidden or secret value) says so without the value.
+/// hidden or secret value, or how the form is sent) says so without the value.
 pub(super) fn what_changed(approved: &Value, now: &Value) -> String {
     let text = |v: &Value, k: &str| v.get(k).map(|x| x.to_string());
     if text(approved, "action") != text(now, "action") {
@@ -40,7 +40,7 @@ pub(super) fn what_changed(approved: &Value, now: &Value) -> String {
             return format!("the state of \"{shown}\" changed");
         }
     }
-    "something it sends that the page does not show, a hidden or a secret value, changed".to_string()
+    "something the page does not show about what it sends or how it sends it changed".to_string()
 }
 
 #[cfg(test)]
@@ -71,6 +71,6 @@ mod tests {
         let flag = ask("Click \"Send\"", "https://x.test/a", json!([["Name", "Ann", true], ["Message", "hi", true]]));
         assert_eq!(what_changed(&base, &flag), "the state of \"Name\" changed");
         // Nothing the person saw differs: a hidden or secret value, said without it.
-        assert!(what_changed(&base, &base).contains("hidden or a secret value"));
+        assert!(what_changed(&base, &base).contains("does not show"));
     }
 }

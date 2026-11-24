@@ -27,7 +27,7 @@ describe("rotating_name: a hidden field the page rewrites by itself", () => {
     });
 
     it("does not take a field that carries what is sent or to whom, whatever its value looks like", () => {
-        for (const n of ["amount", "recipient", "account_number", "payment_token", "card_token", "price_total", "email", "user_id", "redirect", "plan", "next", "csrf_dest", "transfer_to", "token_url", "return_token", "access_token", "session_token", "reset_token", "invite_token", "order_token", "auth_token", "api_token", "transfer_token", "token"]) {
+        for (const n of ["amount", "recipient", "account_number", "payment_token", "card_token", "price_total", "email", "user_id", "redirect", "plan", "next", "csrf_dest", "transfer_to", "token_url", "return_token", "csrf_item", "nonce_order_id", "csrf_invoice", "csrf_plan", "nonce_id", "csrf_session", "csrf_org", "csrf_workspace", "csrf_group", "csrf_role", "csrf_scope", "csrf_repo", "csrf_action", "nonce_tenant", "access_token", "session_token", "reset_token", "invite_token", "order_token", "auth_token", "api_token", "transfer_token", "token"]) {
             expect(rotating(n, token), n).toBe("");
         }
     });
