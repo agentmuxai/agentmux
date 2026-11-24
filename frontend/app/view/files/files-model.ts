@@ -43,7 +43,7 @@ import { ColumnsState } from "./files-columns-state";
 import { EMPTY_SELECTION, pruneSelection, type Selection } from "./files-selection";
 import { addRecent } from "./files-pins";
 import { landedAsPlanned, movedOk, planMoveUndo, restorable, type MovedItem, type UndoPlan } from "./files-undo-move";
-import { clipboard, FilesOps, opFinishedText, sameVolume, setClipboard } from "./files-ops";
+import { clipboard, FilesOps, opFinishedText, sameVolume, setClipboard, type OpView } from "./files-ops";
 import { systemIconsAvailable } from "./files-icons";
 import { sortEntries, type SortDir, type SortKey } from "./files-sort";
 
@@ -391,18 +391,7 @@ export class FilesModel {
         this.order = createMemo(() => this.entries().map((e) => e.name));
 
         this.ops = new FilesOps(ctx.blockId);
-        this.ops.onFinished = (op) => {
-            const text = opFinishedText(op);
-            const ms = op.state === "done" && !op.failures?.length ? 4000 : 10000;
-            this.setStatus(text, ms);
-            // Undo is offered once the destination shows the move landed as planned.
-            void this.noteMoveForUndo(op).then((undoable) => {
-                if (undoable) this.setStatus({ ...text, undo: true }, ms);
-            });
-            // The watcher re-lists the folder shown; a move OUT of it (or a
-            // copy into a folder this pane isn't watching) may not be seen.
-            this.refresh();
-        };
+        this.ops.onFinished = (op) => this.onOpFinished(op);
         this.unsubscribe = onMuxEvent(WpsEvent.FilesChanged, (data) => {
                 const dir = data.dir;
                 if (!this.path()) return;
@@ -1210,6 +1199,20 @@ export class FilesModel {
             return null;
         }
         return names;
+    }
+
+    /** What a finished copy or move says, and Undo for a move that landed as planned. */
+    private onOpFinished(op: OpView): void {
+        const text = opFinishedText(op);
+        const ms = op.state === "done" && !op.failures?.length ? 4000 : 10000;
+        this.setStatus(text, ms);
+        // Undo is offered once the destination shows the move landed as planned.
+        void this.noteMoveForUndo(op).then((undoable) => {
+            if (undoable) this.setStatus({ ...text, undo: true }, ms);
+        });
+        // The watcher re-lists the folder shown; a move OUT of it (or a
+        // copy into a folder this pane isn't watching) may not be seen.
+        this.refresh();
     }
 
     private async planUndo(sources: string[], destDir: string): Promise<UndoPlan | null> {
