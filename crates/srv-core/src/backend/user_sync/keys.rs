@@ -133,6 +133,10 @@ impl KeyDelivery for StoreKeys<'_> {
         self.store.epochs(collection)
     }
 
+    fn ring(&self, collection: &str) -> KeyRing {
+        ring(self.store, collection)
+    }
+
     fn take(&self, collection: &str, keys: &[(u32, String)]) -> usize {
         keys.iter()
             .filter(|(epoch, sealed)| {

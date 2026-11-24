@@ -180,6 +180,19 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
             { id: "false", label: "seen", type: "any" },
         ],
     },
+    approval: {
+        kind: "approval",
+        emoji: "✋",
+        label: "Approval",
+        description: "Stop the run and ask the person. The card shows what is proposed and the items it was made from, with the ones from outside text marked. A yes goes on; a no, and silence, fail the block (approval_rejected, approval_timeout).",
+        color: "#ef4444", // colour: fixed (the block's identity colour)
+        defaultData: {
+            title: "",
+            show: [],
+        },
+        inputs: [{ id: "in", label: "in", type: "any" }],
+        outputs: [{ id: "out", label: "out", type: "object" }],
+    },
     transform: {
         kind: "transform",
         emoji: "🧮",
@@ -284,6 +297,7 @@ export const BLOCK_KINDS: BlockKind[] = [
     "api",
     "condition",
     "once",
+    "approval",
     "response",
 ];
 
