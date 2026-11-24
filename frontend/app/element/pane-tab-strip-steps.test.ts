@@ -90,6 +90,22 @@ describe("stripRoom", () => {
         Object.defineProperty(parent, "clientWidth", { value: 321 });
         expect(stripRoom(strip)).toBe(321);
     });
+
+    it("is the parent's width less what else is in its row, for a strip beside other items (the Editor's file tree toggle)", () => {
+        const parent = document.createElement("div");
+        const toggle = document.createElement("button");
+        const hidden = document.createElement("div");
+        const strip = document.createElement("div");
+        parent.append(toggle, hidden, strip);
+        document.body.append(parent);
+        Object.defineProperty(parent, "clientWidth", { value: 500 });
+        toggle.getBoundingClientRect = () => ({ width: 28 }) as DOMRect;
+        Object.defineProperty(toggle, "offsetParent", { value: document.body });
+        // Not shown: takes no room (its offsetParent is null, as for `display: none`).
+        hidden.getBoundingClientRect = () => ({ width: 99 }) as DOMRect;
+        // the toggle and one gap of 8
+        expect(stripRoom(strip)).toBe(500 - 28 - 8);
+    });
 });
 
 describe("createStripSteps", () => {
@@ -157,6 +173,32 @@ describe("createStripSteps", () => {
         // 338 for 2 tabs: 169 each
         expect(m.steps.step()).toBe("full");
         m.dispose();
+    });
+
+    it("measures again when an item joins its row outside a header (the Editor's file tree toggle)", async () => {
+        const parent = document.createElement("div");
+        const strip = document.createElement("div");
+        parent.append(strip);
+        document.body.append(parent);
+        Object.defineProperty(parent, "clientWidth", { value: 500 });
+        let steps!: ReturnType<typeof createStripSteps>;
+        const dispose = createRoot((d) => {
+            steps = createStripSteps({ strip: () => strip, tabCount: () => 2, zoom: () => 1, revision: () => 0 });
+            return d;
+        });
+        await vi.advanceTimersByTimeAsync(40);
+        expect(steps.room()).toBe(500);
+        // The tree is hidden: the toggle that shows it leads the row, and takes its width and a gap.
+        const toggle = document.createElement("button");
+        toggle.getBoundingClientRect = () => ({ width: 28 }) as DOMRect;
+        Object.defineProperty(toggle, "offsetParent", { value: document.body });
+        parent.prepend(toggle);
+        await vi.advanceTimersByTimeAsync(40);
+        expect(steps.room()).toBe(500 - 28 - 8);
+        toggle.remove();
+        await vi.advanceTimersByTimeAsync(40);
+        expect(steps.room()).toBe(500);
+        dispose();
     });
 
     it("holds its step while a tab is being renamed, and looks again when the input goes", async () => {

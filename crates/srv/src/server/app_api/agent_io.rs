@@ -669,11 +669,18 @@ pub(crate) async fn agent_send(state: &AppState, cmd: CommandAgentSendData) -> R
     })
 }
 
+/// `agent.send` from a connection: the text goes into the agent's input unmarked, as the person's own turn, so only the
+/// AgentMux window sends it. An agent reaches another agent with the Message tool, which is delivered as a jekt.
+pub(crate) async fn agent_send_from(state: &AppState, ctx: &RpcContext, cmd: CommandAgentSendData) -> Result<AgentSendResult, String> {
+    crate::server::agent_handlers::window_only(ctx)?;
+    agent_send(state, cmd).await
+}
+
 fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let s = state.clone();
-    engine.register_typed(COMMAND_AGENT_SEND, move |cmd: CommandAgentSendData, _ctx| {
+    engine.register_typed(COMMAND_AGENT_SEND, move |cmd: CommandAgentSendData, ctx| {
         let s = s.clone();
-        async move { agent_send(&s, cmd).await }
+        async move { agent_send_from(&s, &ctx, cmd).await }
     });
 }
 
