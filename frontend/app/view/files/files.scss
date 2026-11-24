@@ -240,6 +240,28 @@
     }
 }
 
+// A pinned folder: its row, and the button that unpins it, which shows while the row is hovered or focused.
+.files-place-row {
+    display: flex;
+    align-items: center;
+
+    .ui-button.files-place {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .files-place-unpin {
+        flex-shrink: 0;
+        margin-right: 4px;
+        visibility: hidden;
+    }
+
+    &:hover .files-place-unpin,
+    &:focus-within .files-place-unpin {
+        visibility: visible;
+    }
+}
+
 .files-list {
     position: relative;
     flex: 1;

@@ -37,6 +37,7 @@ import { displayName, groupRemotes, remoteColor } from "@/app/view/remotes/remot
 import { batch, createMemo, createSignal } from "solid-js";
 import { baseName, isWithin, joinPath, normalizePath, parentOf, samePath } from "./files-path";
 import { EMPTY_SELECTION, pruneSelection, type Selection } from "./files-selection";
+import { addRecent } from "./files-pins";
 import { clipboard, FilesOps, opFinishedText, sameVolume, setClipboard } from "./files-ops";
 import { systemIconsAvailable } from "./files-icons";
 import { sortEntries, type SortDir, type SortKey } from "./files-sort";
@@ -393,7 +394,7 @@ export class FilesModel {
         // On a host, its own home (`~`, which srv resolves there).
         const home = this.connection() ? "~" : (this.places().find((p) => p.kind === "home")?.path ?? "~");
         const target = typeof saved === "string" && saved !== "" ? saved : home;
-        await this.navigate(target, { push: false });
+        await this.navigate(target, { push: false, restore: true });
         void this.loadAgents();
         void this.loadRemotes();
     }
@@ -520,7 +521,7 @@ export class FilesModel {
      * breadcrumb, a restored pane); `consented` is the notice's Open button
      * (§9.1.4 items 2 and 7).
      */
-    async navigate(target: string, opts: { push?: boolean; consented?: boolean } = {}): Promise<void> {
+    async navigate(target: string, opts: { push?: boolean; consented?: boolean; restore?: boolean } = {}): Promise<void> {
         const root = this.root();
         if (root && !isWithin(target, root)) {
             this.setStatus({ text: "This pane shows only the agent's workspace folder it was opened on.", tone: "info" });
@@ -557,6 +558,9 @@ export class FilesModel {
             return;
         }
         await this.list(target, { silent: false, consented: true });
+        // A folder the person opened (not the one a restored pane came back to) goes into Places' recents, once
+        // its rows are on screen: a folder that couldn't be listed, or is waiting on macOS, is not one.
+        if (!opts.restore && !this.root() && this.phase() === "ready") addRecent({ path: this.path(), connection: this.connection() || undefined });
     }
 
     goBack(): void {

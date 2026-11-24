@@ -138,6 +138,7 @@ import { setPlatform } from "@/util/platformutil";
 import { FilesModel } from "./files-model";
 import { openTargetOf } from "./files-open";
 import { clipboard, setClipboard } from "./files-ops";
+import { resetPlacesForTests } from "./files-pins";
 import { resetThumbnailsForTests } from "./files-thumbs";
 import { noteToolCall, noteToolResult, resetTouchedForTests } from "@/app/store/touched-files";
 import { beginPathDrag, endPathDrag, installFileDropController, PATHS_MIME } from "@/app/drag/file-drop";
@@ -198,6 +199,7 @@ beforeEach(() => {
     h.state.handlers = [];
     h.state.byType = new Map();
     setClipboard(null);
+    resetPlacesForTests();
     icons.url = null;
     icons.asked = [];
     icons.settings = {};
