@@ -403,7 +403,7 @@
 105 frontend/app/view/warden-jobs/job-dry-run.tsx::JobDryRun
 101 frontend/app/view/warden-jobs/job-editor-fields.tsx::PolicySection
 102 frontend/app/view/warden-jobs/job-editor-fields.tsx::WhatSection
-137 frontend/app/view/warden-jobs/warden-jobs-manager.tsx::WardenJobsManager
+136 frontend/app/view/warden-jobs/warden-jobs-manager.tsx::WardenJobsManager
 107 frontend/app/window/pane-media-capture-indicator.tsx::PaneMediaCaptureIndicator
 112 frontend/app/window/titlebar-context-menu.tsx::TitleBarContextMenu
 128 frontend/app/window/use-widget-bar-responsive.ts::useWidgetBarResponsive
