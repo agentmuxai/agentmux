@@ -4,6 +4,8 @@
     "settings.language.beta": "Beta",
     "settings.language.replyLabel": "Agents reply in",
     "settings.language.replyFollow": "The language of my message",
+    "files.tree.open": "Open {{name}}",
+    "files.tree.close": "Close {{name}}",
     "signin.continueWithGoogle": "Continue with Google",
     "signin.continueWithApple": "Continue with Apple",
     "signin.or": "or",
@@ -1402,7 +1404,5 @@
     "drone.templates.review": "Review and approve",
     "pane.tab.actions": "Tab actions",
     "jobs.droneTemplate.pill": "Drone",
-    "jobs.droneTemplate.make": "Make a drone",
-    "files.tree.open": "Open {{name}}",
-    "files.tree.close": "Close {{name}}"
+    "jobs.droneTemplate.make": "Make a drone"
 }
