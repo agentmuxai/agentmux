@@ -26,7 +26,7 @@ import { focusManager } from "@/app/store/focusManager";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import { createMemo, createSignal, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
-import { getCliCatalogEntry } from "../defaults/cli-catalog";
+import { cardCaption, getCliCatalogEntry } from "../defaults/cli-catalog";
 import { accessTagsFor } from "../defaults/provider-access-model";
 import type { PinDrift } from "../providers/version-drift";
 import { AccessTagDetail } from "./AccessTagDetail";
@@ -105,7 +105,7 @@ interface CardState {
 function createCardState(props: AgentCardProps): CardState {
     const catalog = createMemo(() => getCliCatalogEntry(props.agent.provider));
     const title = () => catalog()?.displayName || props.agent.name;
-    const caption = () => catalog()?.blurb || props.agent.description || props.agent.name;
+    const caption = () => cardCaption(catalog()) || props.agent.description || props.agent.name;
     const tags = createMemo<TagSpec[]>(() => cardTags(props));
     const chipCount = createMemo(() => tags().filter((t) => t.kind !== "ribbon").length);
     // A corner action (the ribbon, or "+ New") the card shows now.
