@@ -93,6 +93,14 @@ describe("the choices it offers", () => {
         expect(screen.getByRole("dialog")).toBeTruthy();
     });
 
+    it("moves the keyboard into the panel when it opens, and back to the chip on Esc", async () => {
+        const { container } = openPanel();
+        await waitFor(() => expect((document.activeElement as HTMLElement | null)?.textContent).toBe("Keep running"));
+        fireEvent.keyDown(document, { key: "Escape" });
+        await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+        expect(document.activeElement).toBe(container.querySelector(".status-bar-item"));
+    });
+
     it("keeps the workspace running on Keep running, and closes the panel", async () => {
         openPanel();
         fireEvent.click(screen.getByRole("button", { name: "Keep running" }));

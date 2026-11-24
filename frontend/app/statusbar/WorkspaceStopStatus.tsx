@@ -27,6 +27,7 @@ const WorkspaceStopStatus = (): JSX.Element => {
     const [open, setOpen] = createSignal(false);
     const [problem, setProblem] = createSignal("");
     let chip: HTMLDivElement | undefined;
+    let actions: HTMLDivElement | undefined;
 
     const toggle = () => {
         setProblem("");
@@ -73,7 +74,12 @@ const WorkspaceStopStatus = (): JSX.Element => {
                                 anchor={chip}
                                 placement="top-end"
                                 fitHeight
-                                onDismiss={() => setOpen(false)}
+                                onDismiss={(reason) => {
+                                    setOpen(false);
+                                    // Esc gives the keyboard back to the chip it came from; an outside click leaves focus where the person put it.
+                                    if (reason === "escape") chip?.focus();
+                                }}
+                                onShown={() => actions?.querySelector("button")?.focus()}
                                 class="status-bar-popover"
                                 role="dialog"
                                 aria-label={t("workspaceStop.open")}
@@ -81,9 +87,16 @@ const WorkspaceStopStatus = (): JSX.Element => {
                             >
                                 <p>{tip()}</p>
                                 <Show when={problem()}>
-                                    <Notice tone="danger">{problem()}</Notice>
+                                    <div style={{ margin: "var(--space-2) 0" }}>
+                                        <Notice tone="danger">{problem()}</Notice>
+                                    </div>
                                 </Show>
-                                <div class="status-bar-popover-row">
+                                <div
+                                    class="status-bar-popover-row"
+                                    ref={(el) => {
+                                        actions = el;
+                                    }}
+                                >
                                     <Button tone="accent" onClick={() => choose(keepRunning)}>
                                         {t("workspaceStop.keep")}
                                     </Button>
