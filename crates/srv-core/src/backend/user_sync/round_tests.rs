@@ -8,7 +8,8 @@
 
 use super::adapter::NewestWins;
 use super::log::{self, Refused};
-use super::members::Change;
+use super::chain_store;
+use super::members::{Change, Entry, Policy};
 use super::ops::{self, Held, KeysAns, KeysReq, MembersAns, MembersReq, OpError, PullAns, PullReq, PushAns, PushReq};
 use super::ops_tests::{ended, node, three, Node, C};
 use super::ops::Ctx;
@@ -199,4 +200,57 @@ fn a_record_for_another_collection_is_refused_alone_and_the_one_beside_it_is_tak
     let ans = ops::push(&mut a.ctx(), &b.id, &PushReq { collection: C.into(), records: vec![rec, valid] }, &NewestWins).unwrap();
     assert_eq!(ans.results[0], Err(Refused::UnknownCollection));
     assert!(ans.results[1].is_ok());
+}
+
+/// A peer whose answer to a membership ask is the given entries, as when its chain moved between this machine's ask and
+/// the answer; every other call goes to the real ops.
+struct Answering<'a> {
+    inner: Link<'a>,
+    entries: Vec<Entry>,
+}
+
+impl PeerCalls for Answering<'_> {
+    fn hello(&mut self, collections: &[String]) -> Result<Vec<Held>, CallError> {
+        self.inner.hello(collections)
+    }
+    fn members(&mut self, _: &MembersReq) -> Result<MembersAns, CallError> {
+        Ok(MembersAns { entries: self.entries.clone(), n: 4, taken: vec![] })
+    }
+    fn keys(&mut self, req: &KeysReq) -> Result<KeysAns, CallError> {
+        self.inner.keys(req)
+    }
+    fn pull(&mut self, req: &PullReq) -> Result<PullAns, CallError> {
+        self.inner.pull(req)
+    }
+    fn push(&mut self, req: &PushReq) -> Result<PushAns, CallError> {
+        self.inner.push(req)
+    }
+}
+
+#[test]
+fn an_entry_that_loses_a_fork_is_a_result_of_the_round_not_a_reason_to_distrust_the_peer() {
+    let (mut a, mut b, c) = three("kanban");
+    ops::change(&mut a.ctx(), C, Change::SetPolicy { policy: Policy::Approve }).unwrap();
+    let gone = ended(&[(&a, 0), (&b, 0)]);
+    let remove = ops::change(&mut b.ctx(), C, Change::Remove { id: c.id.clone(), ended: gone }).unwrap();
+    // The peer's answer holds an entry beside this machine's head that loses to it.
+    let mut peer = Answering { inner: link(&a, &mut b), entries: vec![remove.clone()] };
+    let r = sync_collection(&mut Mine(&mut a), &mut peer, C, &NewestWins);
+    assert_eq!(r.ended, Ended::Synced, "{:?}", r.ended);
+    assert_eq!(a.chains[C].forks(), &[remove], "the fork is kept, unsettled");
+    assert_eq!(chain_store::load_all(&a.conn).unwrap(), a.chains, "and stored");
+}
+
+#[test]
+fn entries_taken_before_one_that_does_not_verify_are_stored() {
+    let (mut a, mut b, _) = three("kanban");
+    let good = ops::change(&mut b.ctx(), C, Change::SetPolicy { policy: Policy::Approve }).unwrap();
+    let mut bad = good.clone();
+    bad.n = 5;
+    let mut peer = Answering { inner: link(&a, &mut b), entries: vec![good, bad] };
+    let r = sync_collection(&mut Mine(&mut a), &mut peer, C, &NewestWins);
+    assert!(matches!(r.ended, Ended::Distrusted(_)), "{:?}", r.ended);
+    assert_eq!(a.chains[C].entries.len(), 4, "the entry before it was taken");
+    assert_eq!(chain_store::load_all(&a.conn).unwrap(), a.chains, "and stored, with its epoch");
+    assert_eq!(r.entries_taken, 1);
 }

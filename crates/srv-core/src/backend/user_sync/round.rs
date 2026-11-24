@@ -166,19 +166,32 @@ fn exchange_members<S: Session, P: PeerCalls>(s: &mut S, peer: &mut P, collectio
             return Err(Ended::Distrusted("a membership answer over the cap".into()));
         }
         out.entries_given += taken_count(&ans.taken);
-        let (took, now, removed) = s.with(|ctx| {
+        let (took, now, removed, unsound) = s.with(|ctx| {
             let chain = ctx.chains.get_mut(collection).ok_or(Ended::NotHere)?;
             let mut taken: Vec<Result<Taken, MemberError>> = Vec::new();
+            let mut unsound = None;
             for entry in ans.entries.iter().cloned() {
-                taken.push(Ok(chain.take(collection, entry).map_err(|e| Ended::Distrusted(format!("a membership entry that does not verify: {e:?}")))?));
+                match chain.take(collection, entry) {
+                    Ok(t) => taken.push(Ok(t)),
+                    // An entry beside this machine's head that loses to it is a result, as `ops::members` records it.
+                    Err(MemberError::ForkLost) => taken.push(Err(MemberError::ForkLost)),
+                    Err(e) => {
+                        unsound = Some(e);
+                        break;
+                    }
+                }
             }
+            // What was taken before an entry that does not verify is stored as it is for any other.
             ops::discard_lost_keys(ctx.keys, collection, chain, &taken);
             ops::sync_epoch(ctx.conn, collection, chain).map_err(|e| Ended::Failed(format!("{e:?}")))?;
             chain_store::save(ctx.conn, collection, chain).map_err(db)?;
             let removed = if is_member(ctx, collection) { None } else { Some(removed_by(&ctx.chains[collection].entries, ctx.me.id).unwrap_or_default()) };
-            Ok((taken_count(&taken), ctx.chains[collection].entries.len() as u64, removed))
+            Ok((taken_count(&taken), ctx.chains[collection].entries.len() as u64, removed, unsound))
         })?;
         out.entries_taken += took;
+        if let Some(e) = unsound {
+            return Err(Ended::Distrusted(format!("a membership entry that does not verify: {e:?}")));
+        }
         if let Some(by) = removed {
             return Err(Ended::Removed { by });
         }
