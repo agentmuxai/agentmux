@@ -8,4 +8,8 @@ export type FsPathReq = { path: string,
 /**
  * The pane asking; a pane confined to a folder gets only paths inside it.
  */
-block_id?: string, };
+block_id?: string, 
+/**
+ * For `fs.open`: the person has been asked and said yes to opening a file a container agent can write.
+ */
+confirmed?: boolean, };
