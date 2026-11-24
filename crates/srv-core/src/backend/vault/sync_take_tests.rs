@@ -12,6 +12,7 @@ use zeroize::Zeroizing;
 use super::*;
 use crate::backend::storage::vault::{VaultInfoRow, VaultRow};
 use crate::backend::user_sync::log::{Signer, Vector};
+use crate::backend::storage::vault_sync::TakeWrite;
 use crate::backend::user_sync::seal::KeyRing;
 use crate::backend::vault::sync_capture::{self, capture};
 use crate::backend::vault::sync_record::Known;
@@ -312,8 +313,53 @@ fn a_kind_this_machine_does_not_know_is_not_taken() {
     a.store.vault_insert(&entry("odd", "From a newer version", "hologram", "x", "[]")).unwrap();
     a.capture(VAULT, NOW);
     let taken = ship(&a, &mut b, &p, NOW + 5);
-    assert!(matches!(&taken[0].effect, Effect::Skipped(why) if why.contains("hologram")), "{taken:?}");
+    assert!(matches!(&taken[0].effect, Effect::Deferred(why) if why.contains("hologram")), "{taken:?}");
     assert!(b.store.vault_list().unwrap().is_empty());
+    // The log holds it, so it is not sent again: it stays noted, and a retake (after an upgrade) tries it again.
+    let again = Taker { store: &b.store, ring: &b.ring, key: &key(), profiles: &Known(&[]) }.retake(VAULT, NOW + 10).unwrap();
+    assert!(matches!(&again[..], [(_, Ok(Effect::Deferred(_)))]), "{again:?}");
+}
+
+#[test]
+fn a_record_the_store_could_not_take_is_taken_again_from_the_log_by_retake() {
+    let mut a = machine("a", 1);
+    let mut b = machine("b", 2);
+    let p = pins(&a, &b);
+    a.store.vault_insert(&entry("entry-a", "Invoice provider key", "api-key", "sk_test_invented_0001", "[]")).unwrap();
+    a.capture(VAULT, NOW);
+    // b has no key for the record's epoch yet: the layer holds the record, and the store cannot open it.
+    let vector: Vector = log::vector(&b.store.conn().lock().unwrap(), VAULT).unwrap();
+    let records = log::since(&a.store.conn().lock().unwrap(), VAULT, &vector, 100).unwrap();
+    let (own, none) = (key(), KeyRing::new());
+    let blind = Taker { store: &b.store, ring: &none, key: &own, profiles: &Known(&[]) };
+    let failed: Vec<_> = records.iter().map(|r| blind.receive(r, &p, &mut b.clock, NOW + 5)).collect();
+    assert!(failed.iter().all(|r| r.as_ref().is_err_and(|e| e.contains("no key for epoch") && e.contains("retake"))), "{failed:?}");
+    assert!(b.store.vault_list().unwrap().is_empty());
+    // A resend finds nothing to send: the log has the record. The key comes, and the retake takes it.
+    assert!(ship(&a, &mut b, &p, NOW + 6).is_empty());
+    let sighted = Taker { store: &b.store, ring: &b.ring, key: &own, profiles: &Known(&[]) };
+    let again = sighted.retake(VAULT, NOW + 10).unwrap();
+    assert!(matches!(&again[..], [(_, Ok(Effect::Wrote { .. }))]), "{again:?}");
+    let on_b = b.entry_of(&a.link("entry-a")).expect("the entry is taken");
+    assert_eq!(b.value(&on_b).as_deref(), Some("sk_test_invented_0001"));
+    // Taken once: nothing is left to retake.
+    assert!(sighted.retake(VAULT, NOW + 20).unwrap().is_empty());
+}
+
+#[test]
+fn a_label_edited_here_between_the_read_and_the_write_is_not_overwritten() {
+    let (_a, b, _p, _, on_b) = both_hold_one();
+    let read = b.store.vault_get(&on_b).unwrap().unwrap();
+    // A change made here after the read that touches neither the value nor the time of change.
+    let mut edited = read.clone();
+    edited.label = "Renamed here".into();
+    b.store.vault_update(&edited).unwrap();
+    let mut next = read.clone();
+    next.tags = "[\"from-the-record\"]".into();
+    let write = TakeWrite { row: &next, was: Some(&read), primary: None, aliases: &[], revive: None, kept: &[] };
+    assert!(!b.store.vault_take_write(&write).unwrap(), "the write sees that the entry is no longer as it was read");
+    let now = b.store.vault_get(&on_b).unwrap().unwrap();
+    assert_eq!((now.label.as_str(), now.tags.as_str()), ("Renamed here", read.tags.as_str()));
 }
 
 #[test]

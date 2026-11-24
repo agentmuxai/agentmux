@@ -65,8 +65,11 @@ pub enum Effect {
     Wrote { entry: String },
     /// The entry was deleted.
     Deleted { entry: String },
-    /// The record was not taken into the store, and why (no value in it).
+    /// The record was not taken into the store, and why (no value in it), and it is not going to be.
     Skipped(String),
+    /// The record was not taken into the store yet, and why: a kind this version does not know, or an id another entry holds.
+    /// The log holds it and does not send it again, so [`Taker::retake`] takes it again from the log.
+    Deferred(String),
     /// The side of a conflict that lost has nowhere in the store to be kept: it stays in the log, sealed.
     KeptInLog(String),
 }
@@ -159,8 +162,10 @@ fn version(entry_id: &str, created_at: i64, sealed: Vec<u8>, state: String, mach
 }
 
 impl Taker<'_> {
-    /// Hands `rec` to the layer, and takes its result into the store. Errors from the layer (a record that is refused, out of
-    /// sequence or at another epoch) and from the store come back as text, and change nothing in the store.
+    /// Hands `rec` to the layer, and takes its result into the store. An error from the layer (a record that is refused, out of
+    /// sequence or at another epoch) comes back as text and the log does not hold the record. An error from the store, or a
+    /// record the store cannot take yet ([`Effect::Deferred`]), comes back after the log holds the record, which the layer does
+    /// not hand over again: so it is noted, and [`Taker::retake`] takes it again from the log.
     pub fn receive(&self, rec: &Record, pins: &Pins, clock: &mut Clock, now_ms: i64) -> Result<Taken, String> {
         let h = &rec.header;
         // Everything that reads the store comes before the log is locked: the log is the store's own connection.
@@ -178,23 +183,47 @@ impl Taker<'_> {
         let none = |outcome| Taken { outcome, effect: Effect::None, kept: None };
         // The adapter is not asked about a record the layer already holds or voids.
         let Some(decision) = decision else { return Ok(none(outcome)) };
-        match decision {
-            Decision::KeptLocal => Ok(none(outcome)),
-            Decision::Applied => {
-                let effect = self.current(rec, None, now_ms)?;
-                Ok(Taken { outcome, effect, kept: None })
-            }
+        let result = match decision {
+            Decision::KeptLocal => return Ok(none(outcome)),
+            Decision::Applied => self.current(rec, None, now_ms).map(|effect| Taken { outcome, effect, kept: None }),
             Decision::Conflict { current: Chose::Incoming, kept, .. } => {
                 let label = kept.label();
-                let effect = self.current(rec, Some(&kept), now_ms)?;
-                Ok(Taken { outcome, effect, kept: Some(label) })
+                self.current(rec, Some(&kept), now_ms).map(|effect| Taken { outcome, effect, kept: Some(label) })
             }
             Decision::Conflict { current: Chose::Local, kept, .. } => {
                 let label = kept.label();
-                let effect = self.keep_incoming(rec, &kept, now_ms)?;
-                Ok(Taken { outcome, effect, kept: Some(label) })
+                self.keep_incoming(rec, &kept, now_ms).map(|effect| Taken { outcome, effect, kept: Some(label) })
             }
+        };
+        // The log holds the record now. What the store could not take of it is noted, so a record that is never sent again is
+        // still taken; what it took, or is not going to, is not.
+        let (vault, record) = (&h.collection, &h.record);
+        let _ = match &result {
+            Err(_) | Ok(Taken { effect: Effect::Deferred(_), .. }) => sync_capture::retake_mark(self.store, vault, record),
+            Ok(_) => sync_capture::retake_clear(self.store, vault, record),
+        };
+        result.map_err(|e| format!("{e}: the log holds the record, and `retake` takes it again"))
+    }
+
+    /// Takes again the records of `vault` that the log holds and the store did not take (an error, a key not here yet, a kind
+    /// this version does not know), from the log's current state of each, as a plain change that follows on: the side of a
+    /// conflict that lost stays in the log. A record taken, or no longer in the log, is not noted any more; one that fails again
+    /// stays. Run it at the start of a sync round and after an upgrade.
+    pub fn retake(&self, vault: &str, now_ms: i64) -> Result<Vec<(String, Result<Effect, String>)>, String> {
+        let mut out = Vec::new();
+        for record in sync_capture::retake_pending(self.store, vault)? {
+            let current = log::current(&self.store.conn().lock().unwrap_or_else(|e| e.into_inner()), vault, &record).map_err(|e| e.to_string())?;
+            let Some(rec) = current else {
+                sync_capture::retake_clear(self.store, vault, &record)?;
+                continue;
+            };
+            let effect = self.current(&rec, None, now_ms);
+            if !matches!(effect, Err(_) | Ok(Effect::Deferred(_))) {
+                sync_capture::retake_clear(self.store, vault, &record)?;
+            }
+            out.push((record, effect));
         }
+        Ok(out)
     }
 
     /// Whether the entry has a rotation waiting to be confirmed (spec 6.3).
@@ -211,14 +240,14 @@ impl Taker<'_> {
         }
         let body = open_body(self.ring, rec)?;
         if let Some(why) = refused(&body) {
-            return Ok(Effect::Skipped(why));
+            return Ok(Effect::Deferred(why));
         }
         for _ in 0..TRIES {
             if let Some(effect) = self.write(rec, &body, lost, now_ms)? {
                 return Ok(effect);
             }
         }
-        Err("the entry kept changing while its record was taken: it will be taken again when the record is next sent".to_string())
+        Err("the entry kept changing while its record was taken".to_string())
     }
 
     /// One try at writing `body` as the entry's value. `None` if the entry changed here between the read and the write.
@@ -236,7 +265,7 @@ impl Taker<'_> {
         let local = if existing.is_some() { links_of(store, &entry_id)? } else { Links::default() };
         let links = sync_links::settle(&Reviving { store, record: &h.record }, &entry_id, &local, &ids);
         if existing.is_none() && links.primary.as_deref() != Some(h.record.as_str()) {
-            return Ok(Some(Effect::Skipped("its id is held by another entry here".to_string())));
+            return Ok(Some(Effect::Deferred("its id is held by another entry here".to_string())));
         }
         let sealed = seal::seal(self.key, &entry_id, &Parts(body.parts.clone()))?;
         let mut row = body.into_row(&entry_id, &h.collection, sealed, existing.as_ref(), self.profiles);
@@ -261,7 +290,7 @@ impl Taker<'_> {
         }
         let write = TakeWrite {
             row: &row,
-            was: existing.as_ref().map(|r| r.sealed.as_slice()),
+            was: existing.as_ref(),
             primary: links.primary.as_deref(),
             aliases: &links.aliases,
             revive: existing.is_none().then_some(h.record.as_str()),
@@ -318,7 +347,7 @@ impl Taker<'_> {
             }
             let links = links_of(self.store, &id)?;
             let kept = [version(&id, row.created_at, sealed.clone(), state.clone(), machine, now_ms)];
-            let write = TakeWrite { row: &next, was: Some(row.sealed.as_slice()), primary: links.primary.as_deref(), aliases: &links.aliases, revive: None, kept: &kept };
+            let write = TakeWrite { row: &next, was: Some(&row), primary: links.primary.as_deref(), aliases: &links.aliases, revive: None, kept: &kept };
             if self.store.vault_take_write(&write).map_err(|e| e.to_string())? {
                 let stored = self.store.vault_get(&id).map_err(|e| e.to_string())?.ok_or_else(|| "the entry is not in the store".to_string())?;
                 sync_capture::mark_seen(self.store, &stored, &h.record, self.key, self.profiles)?;
