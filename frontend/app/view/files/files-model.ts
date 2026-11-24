@@ -42,6 +42,7 @@ import { crawlFolders, rankMatches, whereOf } from "./files-find";
 import { ColumnsState } from "./files-columns-state";
 import { EMPTY_SELECTION, pruneSelection, type Selection } from "./files-selection";
 import { addRecent } from "./files-pins";
+import { childNamesOf, namesIn } from "./files-names";
 import { landedAsPlanned, movedOk, planMoveUndo, restorable, type MovedItem, type UndoPlan } from "./files-undo-move";
 import { clipboard, FilesOps, opFinishedText, sameVolume, setClipboard, type OpView } from "./files-ops";
 import { systemIconsAvailable } from "./files-icons";
@@ -1185,22 +1186,8 @@ export class FilesModel {
         }
     }
 
-    /** The lower-case names in `dir`, or null when it can't be listed or is too big to be sure of. */
-    private async namesIn(dir: string): Promise<Set<string> | null> {
-        const names = new Set<string>();
-        let cursor: string | undefined;
-        try {
-            do {
-                const res = await RpcApi.FsListCommand(TabRpcClient, { path: dir, cursor, limit: PAGE, ...this.on() });
-                if (res.error) return null;
-                for (const e of res.entries) names.add(e.name.toLowerCase());
-                cursor = res.cursor ?? undefined;
-                if (names.size > 20_000) return null;
-            } while (cursor);
-        } catch {
-            return null;
-        }
-        return names;
+    private namesIn(dir: string): Promise<Set<string> | null> {
+        return namesIn(dir, this.on());
     }
 
     /** What a finished copy or move says, and Undo for a move that landed as planned. */
@@ -1217,16 +1204,8 @@ export class FilesModel {
         this.refresh();
     }
 
-    /** The lower-case names a folder holds, "file" for something that isn't a folder, or null when that isn't certain. */
-    private async childNamesOf(path: string): Promise<Set<string> | "file" | null> {
-        try {
-            const res = await RpcApi.FsListCommand(TabRpcClient, { path, limit: PAGE, ...this.on() });
-            if (res.error) return res.error.kind === "not_a_directory" ? "file" : null;
-            if (res.cursor) return null;
-            return new Set(res.entries.map((e) => e.name.toLowerCase()));
-        } catch {
-            return null;
-        }
+    private childNamesOf(path: string): Promise<Set<string> | "file" | null> {
+        return childNamesOf(path, this.on());
     }
 
     private async planUndo(sources: string[], destDir: string): Promise<UndoPlan | null> {
