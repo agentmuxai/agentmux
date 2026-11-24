@@ -19,6 +19,8 @@ import { getPaneTab, paneTabCapability, resolvePaneTabView } from "@/app/store/p
 import { blockIdentitySlot, isLightThemeActive } from "@/app/block/pane-identity";
 import { tabPaint } from "@/app/theme/paint";
 import { currentTabInk } from "@/app/tab/tab-ink";
+import { paneChromeInk } from "@/app/backdrop/meta";
+import { useBackdropSuppressed } from "@/app/backdrop/usePaneBackdrop";
 import { appliedWindowTheme } from "@/app/store/window-appearance";
 import { MOS, pushNotification } from "@/app/store/global";
 import { shouldReduceMotion } from "@/app/motion/motion";
@@ -307,6 +309,7 @@ export function createTabInfos(
  * window tab and the Pane Color menu's sample use too, made readable under the theme's own label colours.
  */
 export function createTabColors(tabIds: Accessor<string[]>): Accessor<Map<string, PaneTabColors>> {
+    const backdropSuppressed = useBackdropSuppressed();
     return createMemo(() => {
         const isLightTheme = isLightThemeActive();
         appliedWindowTheme(); // the label colours are the theme's own: read once its attribute is on the document
@@ -315,7 +318,10 @@ export function createTabColors(tabIds: Accessor<string[]>): Accessor<Map<string
         for (const blockId of tabIds()) {
             const meta = blockMeta(blockId);
             const slot = blockIdentitySlot(meta);
-            const paint = slot ? tabPaint(slot, isLightTheme, ink) : undefined;
+            // A pane with a backdrop draws its pill for the side of its own surface, with the ink its labels have there:
+            // the pill keeps its identity hue, and its fill is fitted so its label reads (spec §6, the header and tab pills).
+            const onBackdrop = backdropSuppressed() ? undefined : paneChromeInk(meta, isLightTheme ? "light" : "dark");
+            const paint = slot ? tabPaint(slot, onBackdrop ? onBackdrop.light : isLightTheme, onBackdrop ? onBackdrop.ink : ink) : undefined;
             colors.set(blockId, {
                 // The bar, moved in lightness until it is seen on the selected pill; an uncoloured tab falls back to accent.
                 underline: paint?.bar,
@@ -324,7 +330,7 @@ export function createTabColors(tabIds: Accessor<string[]>): Accessor<Map<string
                 hoverBackground: paint?.unselectedHover,
                 // Always set: the header behind the strip is tinted with the ACTIVE block's color,
                 // so a transparent uncolored pill would appear to take on whichever tab is selected.
-                neutralBackground: computeBlockTabPillNeutralBg(meta, isLightTheme),
+                neutralBackground: onBackdrop ? onBackdrop.surface : computeBlockTabPillNeutralBg(meta, isLightTheme),
             });
         }
         return colors;
