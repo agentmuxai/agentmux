@@ -26,6 +26,12 @@ pub(super) async fn handle_pane_open(
     if let (true, Err(e)) = (by_agent, app_api::floater_place::check(&req)) {
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
     }
+    // A floating open counts against the ten a minute an agent may open and place (`pane_place`), so a loop of them is stopped.
+    if let (true, Some(agent)) = (by_agent && req.floating == Some(true), opener.as_deref()) {
+        if let Err(e) = super::deeplink_guard::check_place_rate(agent) {
+            return (StatusCode::TOO_MANY_REQUESTS, Json(json!({ "error": e }))).into_response();
+        }
+    }
     // A container agent opens a read-only snapshot of a file in its workspace, or a Files pane confined to a folder of it, never a path a window would read freely.
     let mut snapshot = None;
     if let Some(axum::Extension(grant)) = grant {

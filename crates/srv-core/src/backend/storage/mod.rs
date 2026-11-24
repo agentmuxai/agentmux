@@ -66,6 +66,7 @@ pub mod skill_source;
 pub mod skills;
 pub mod snapshot;
 pub mod store;
+pub mod timed_mutex;
 pub mod vault;
 pub mod vault_sync;
 pub mod vault_versions;

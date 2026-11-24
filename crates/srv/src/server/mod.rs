@@ -177,6 +177,7 @@ pub(crate) mod browser_identity;
 pub(crate) mod browser_owner;
 pub(crate) mod browser_pane_gone;
 pub(crate) mod pane_openers;
+pub(crate) mod pane_place;
 pub(crate) mod browser_pane_records;
 pub(crate) mod browser_zoom;
 pub(crate) mod browser_popup;

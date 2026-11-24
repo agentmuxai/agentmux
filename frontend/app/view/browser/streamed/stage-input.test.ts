@@ -113,6 +113,26 @@ describe("a streamed pane's stage and copying out of the remote browser", () => 
         }
     });
 
+    it("lets go of the keys still held when the stage loses focus, once", () => {
+        const { stage, sent } = setup();
+        // Control pressed on the stage; the release will go to another control. A key pressed and released is not held.
+        key(stage, "keydown", { key: "Control", code: "ControlLeft", ctrlKey: true });
+        key(stage, "keydown", { key: "a", code: "KeyA" });
+        key(stage, "keyup", { key: "a", code: "KeyA" });
+        sent.length = 0;
+        stage.dispatchEvent(new FocusEvent("blur"));
+        expect(sent).toHaveLength(1);
+        expect(sent[0]).toMatchObject({ t: "key", type: "up", code: "ControlLeft" });
+        stage.dispatchEvent(new FocusEvent("blur"));
+        expect(sent).toHaveLength(1);
+        // A release that does arrive forgets the key: nothing is let go twice.
+        key(stage, "keydown", { key: "Shift", code: "ShiftLeft", shiftKey: true });
+        key(stage, "keyup", { key: "Shift", code: "ShiftLeft" });
+        sent.length = 0;
+        stage.dispatchEvent(new FocusEvent("blur"));
+        expect(sent).toHaveLength(0);
+    });
+
     it("does not ask after the stage is taken down", () => {
         vi.useFakeTimers();
         try {
