@@ -27,7 +27,7 @@ describe("rotating_name: a hidden field the page rewrites by itself", () => {
     });
 
     it("does not take a field that carries what is sent or to whom, whatever its value looks like", () => {
-        for (const n of ["amount", "recipient", "account_number", "payment_token", "card_token", "price_total", "email", "user_id", "redirect", "plan", "next", "csrf_dest", "transfer_to", "token_url", "return_token"]) {
+        for (const n of ["amount", "recipient", "account_number", "payment_token", "card_token", "price_total", "email", "user_id", "redirect", "plan", "next", "csrf_dest", "transfer_to", "token_url", "return_token", "access_token", "session_token", "reset_token", "invite_token", "order_token", "auth_token", "api_token", "transfer_token", "token"]) {
             expect(rotating(n, token), n).toBe("");
         }
     });
@@ -39,10 +39,10 @@ describe("rotating_name: a hidden field the page rewrites by itself", () => {
     });
 
     it("gives a different stand-in when the value's kind or length changes", () => {
-        const before = rotating("form_token", token);
-        expect(rotating("form_token", "f".repeat(31))).not.toBe(before);
-        expect(rotating("form_token", "x".repeat(32))).not.toBe(before);
-        expect(rotating("form_token", "0123456789abcdef0123456789abcdee")).toBe(before);
+        const before = rotating("form_nonce", token);
+        expect(rotating("form_nonce", "f".repeat(31))).not.toBe(before);
+        expect(rotating("form_nonce", "x".repeat(32))).not.toBe(before);
+        expect(rotating("form_nonce", "0123456789abcdef0123456789abcdee")).toBe(before);
     });
 
     it("takes nothing for an empty or missing name or a value that is not text", () => {
