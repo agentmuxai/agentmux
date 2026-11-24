@@ -812,8 +812,8 @@
     }
 }
 
-// With no label to carry it, a resting tab shows its icon; its close button takes the icon's place while the pointer is
-// on it (or the keyboard focus), so the tab can still be closed.
+// With no label to carry it, a resting tab shows its icon alone. To close it, select it first (its close button is
+// kept), or use its menu.
 .pane-tab-strip[data-step="icon-close"] .pane-tab:not(.pane-tab--active),
 .pane-tab-strip[data-step="icon"] .pane-tab:not(.pane-tab--active) {
     justify-content: center;
@@ -828,31 +828,30 @@
         }
     }
 
+    // No close button on a resting tab: a click anywhere on it selects it (an icon-sized tab has no spare room for a
+    // target that is not the icon). It shows only for the keyboard focus; the selected tab keeps its own.
     .pane-tab-close {
         position: absolute;
         inset: 0;
         margin: auto;
         opacity: 0;
+        pointer-events: none;
+
+        &:focus-visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
     }
 
-    &:hover,
-    &:focus-within {
+    &:has(.pane-tab-close:focus-visible) {
         .pane-tab-icon,
         &.doc-tab--no-icon .pane-tab-label {
             opacity: 0;
         }
-
-        .pane-tab-close {
-            opacity: 1;
-        }
     }
 
     // The unsaved mark was the close button, always shown: with the icon alone it becomes a dot on the icon.
-    &.pane-tab--attention:not(:hover):not(:focus-within) {
-        .pane-tab-close {
-            opacity: 0;
-        }
-
+    &.pane-tab--attention {
         .pane-tab-icon::after,
         &.doc-tab--no-icon::after {
             content: "";

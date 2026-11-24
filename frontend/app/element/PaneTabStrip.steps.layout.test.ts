@@ -88,6 +88,7 @@ for (const r of document.querySelectorAll('.row')) {
     labels: tips.map((t) => w(t.querySelector('.pane-tab-label'))),
     closeWidth: tips.map((t) => w(t.querySelector('.pane-tab-close'))),
     overlap: tips.some((t, i) => i > 0 && t.getBoundingClientRect().left < tips[i - 1].getBoundingClientRect().right - 0.5),
+    centreHitsClose: tips.map((t) => { const r = t.getBoundingClientRect(); const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!(el && el.closest('.pane-tab-close')); }),
   };
 }
 const out = document.createElement('pre'); out.id = 'result'; out.textContent = JSON.stringify(result); document.body.appendChild(out);`;
@@ -101,6 +102,7 @@ interface Measured {
     labels: number[];
     closeWidth: number[];
     overlap: boolean;
+    centreHitsClose: boolean[];
 }
 
 let measured: Record<string, Measured> = {};
@@ -173,6 +175,15 @@ describe.skipIf(!BROWSER)("a header's tab strip as its tabs run out of room", ()
         expect(m.labels[m.active], JSON.stringify(m)).toBeGreaterThan(60);
         expect(m.tips[m.active]).toBeGreaterThanOrEqual(110);
         expect(m.overlap).toBe(false);
+    });
+
+    it("leaves the middle of a resting tab to select it at the icon steps: only the selected tab's close is under the pointer", () => {
+        for (const id of ["noLabel", "iconOnly"]) {
+            const m = measured[id];
+            m.centreHitsClose.forEach((hit, i) => {
+                if (i !== m.active) expect(hit, `middle of tab ${i} in ${id}`).toBe(false);
+            });
+        }
     });
 
     it("scrolls the header, as it always did, once the floors no longer fit", () => {

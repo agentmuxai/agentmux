@@ -38,7 +38,7 @@ One decision per strip, not one per tab, so the tabs of a strip always look alik
 |---|---|---|
 | 0 full | all natural widths fit | as today |
 | 1 clipped | at least 90 px | icon, label ellipsised (tabs share the squeeze in proportion to their width, so the longest labels clip first), close on hover; none loses anything but characters |
-| 2 no label on resting tabs | 48 to 90 px | the active tab keeps icon, a clipped label and close; others show icon and close on hover (an ✕ replaces the icon's slot on hover, as Chrome does) |
+| 2 no label on resting tabs | 48 to 90 px | the active tab keeps icon, a clipped label and close; others show the icon alone, with no close button (a click anywhere on the tab selects it; the selected tab keeps its close) |
 | 3 icon only | 27 to 48 px | inactive tabs: icon only, a hover highlight and the tooltip that already carries the tab's title, seat, model and state; the active tab keeps icon and close (47 px) so it can be identified and closed |
 | 4 fallback | below 27 px for inactive, or the active floor does not fit | keep the scroll of today (the header range), with the reveal; add an "all tabs" list only if the operator wants one (cost in §5) |
 
@@ -47,7 +47,7 @@ The thresholds are starting points to be set with the look checks. Use hysteresi
 **What must hold at every step**
 
 - *The active tab is identifiable and closable.* It keeps its colour, underline and (steps 2 and 3) its close button; its floor is larger than the others'.
-- *No status mark is lost.* The progress line, the icon badge, the remote swatch and the selected check mark are positioned on the pill, not in the label, so they survive. The one that does not is the unsaved mark: it is the close button, always shown, which does not fit an icon-only tab. In steps 2 and 3 an unsaved tab shows the badge dot on its icon (the existing `PaneTabBadge`) in the attention colour, and its close stays reachable on hover.
+- *No status mark is lost.* The progress line, the icon badge, the remote swatch and the selected check mark are positioned on the pill, not in the label, so they survive. The one that does not is the unsaved mark: it is the close button, always shown, which does not fit an icon-only tab. In steps 2 and 3 an unsaved tab shows the badge dot on its icon (the existing `PaneTabBadge`) in the attention colour, and its close is reached by selecting the tab first.
 - *Names for keyboard and screen readers do not change.* The pill's accessible name stays the label; hiding is visual (`clip`, not `display: none`), and the tooltip already exists. The close button keeps its `aria-label`.
 - *Drag to reorder and drop targets.* Drop position uses the pill's own rect: at 27 px each half is 13 px, small but hit-able, and the 2 px insertion line is unchanged. A dragged ghost keeps the full label (drag data carries it). Double-click rename needs the label: at steps 2 and 3 the rename input takes the active tab's width and the strip stays at its step while it is open.
 - *Chrome zoom.* Steps are chosen in unzoomed px against room divided by the zoom factor. Add look checks at 100, 125 and 150 %.
