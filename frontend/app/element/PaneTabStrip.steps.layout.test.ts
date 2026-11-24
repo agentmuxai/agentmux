@@ -39,8 +39,9 @@ function row(id: string, width: number, tabs: number, step: string, zoom: number
     const pills = Array.from({ length: tabs }, (_, i) => {
         const active = i === 1 ? " pane-tab--active" : "";
         const attention = i === 2 ? " pane-tab--attention" : "";
+        const noIcon = i === 4 ? " doc-tab--no-icon" : ""; // a tab with no icon of its own keeps its label
         return (
-            `<div class="pane-tab-tip"><div class="pane-tab${active}${attention}" data-tab-id="t${i}">` +
+            `<div class="pane-tab-tip"><div class="pane-tab${active}${attention}${noIcon}" data-tab-id="t${i}">` +
             `<span class="pane-tab-icon"><i>*</i></span><span class="pane-tab-label">${LABELS[i % LABELS.length]}</span>` +
             `<button class="pane-tab-close" aria-label="Close tab">x</button></div></div>`
         );
@@ -130,18 +131,26 @@ describe.skipIf(!BROWSER)("a header's tab strip as its tabs run out of room", ()
         expect(m.labels.every((l) => l > 20)).toBe(true);
     });
 
-    it("hides the labels of tabs that are not selected at the steps, never the selected tab's", () => {
+    it("hides the labels of tabs that are not selected at the steps, and the selected tab's at the icon step", () => {
         for (const id of ["noLabel", "iconOnly"]) {
             const m = measured[id];
-            m.labels.forEach((l, i) => (i === m.active ? expect(l, `selected label in ${id}`).toBeGreaterThan(8) : expect(l, `label ${i} in ${id}`).toBeLessThanOrEqual(1)));
+            m.labels.forEach((l, i) => {
+                if (i === 4) return; // no icon: see below
+                if (i === m.active && id === "noLabel") expect(l, `selected label in ${id}`).toBeGreaterThan(8);
+                else expect(l, `label ${i} in ${id}`).toBeLessThanOrEqual(1);
+            });
         }
     });
 
-    it("keeps the selected tab wider than the others and above its floor, with room for its close button", () => {
+    it("keeps the label of a tab that has no icon, so it can still be told apart", () => {
+        for (const id of ["noLabel", "iconOnly"]) expect(measured[id].labels[4], id).toBeGreaterThan(1);
+    });
+
+    it("keeps the selected tab above its floor, with room for its close button, and wider than a resting tab with an icon", () => {
         for (const id of ["noLabel", "iconOnly"]) {
             const m = measured[id];
             expect(m.tips[m.active], id).toBeGreaterThanOrEqual(ACTIVE_FLOOR_PX - 1);
-            expect(m.tips[m.active], id).toBeGreaterThan(Math.max(...m.tips.filter((_, i) => i !== m.active)));
+            expect(m.tips[m.active], id).toBeGreaterThan(Math.max(...m.tips.filter((_, i) => i !== m.active && i !== 4)));
             expect(m.closeWidth[m.active], `selected tab's close button in ${id}`).toBeGreaterThan(8);
         }
     });

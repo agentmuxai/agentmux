@@ -41,12 +41,14 @@ function header(rangeWidth: number, addWidth: number, labels: Array<{ scroll: nu
         Object.defineProperty(el, "offsetParent", { value: document.body });
     }
     Object.defineProperty(holder, "offsetParent", { value: document.body });
-    return { range, host, holder, strip };
+    return { range, host, holder, strip, pre };
 }
 
 // jsdom has no layout and ignores `column-gap`: say what the header's computed style would be.
 const stubStyle = () =>
-    vi.spyOn(window, "getComputedStyle").mockImplementation(() => ({ columnGap: "8px", marginLeft: "0px", marginRight: "0px" }) as CSSStyleDeclaration);
+    vi.spyOn(window, "getComputedStyle").mockImplementation(
+        (el) => ({ columnGap: "8px", marginLeft: "0px", marginRight: "0px", flexGrow: (el as HTMLElement).dataset?.grow ?? "0" }) as CSSStyleDeclaration
+    );
 
 describe("stripRoom", () => {
     beforeEach(() => {
@@ -61,6 +63,18 @@ describe("stripRoom", () => {
         const { strip } = header(600, 28, []);
         // three other items (45, 0, 45) and three gaps of 8
         expect(stripRoom(strip)).toBe(600 - 90 - 24);
+    });
+
+    it("counts a growing item by its contents, not by the width it has grown to", () => {
+        const { strip, pre } = header(600, 28, []);
+        pre.dataset.grow = "1";
+        pre.getBoundingClientRect = () => ({ width: 300 }) as DOMRect; // grown into room the strip left
+        const inner = document.createElement("div");
+        inner.getBoundingClientRect = () => ({ width: 30 }) as DOMRect;
+        Object.defineProperty(inner, "offsetParent", { value: document.body });
+        pre.append(inner);
+        // 30 (its contents) + 0 + 45 and three gaps of 8
+        expect(stripRoom(strip)).toBe(600 - 75 - 24);
     });
 
     it("is undefined while the header has no width", () => {

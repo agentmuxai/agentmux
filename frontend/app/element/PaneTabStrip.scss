@@ -778,8 +778,10 @@
 // The steps of a strip that has run out of room (pane-tab-steps.ts; PaneTabStrip.tsx sets `data-step`). The tabs that are
 // not selected lose their label first, then their close button's place; the selected tab keeps its label, its close and its
 // underline. Hidden, not removed: a tab's accessible name is still its label, and its tooltip still names it.
-.pane-tab-strip[data-step="icon-close"] .pane-tab:not(.pane-tab--active) .pane-tab-label,
-.pane-tab-strip[data-step="icon"] .pane-tab:not(.pane-tab--active) .pane-tab-label {
+// A tab with no icon (a document tab) keeps its label: it has nothing else to say which it is. At the icon step the
+// selected tab is the icon and its close button too, so it is never left with a stub of a label.
+.pane-tab-strip[data-step="icon-close"] .pane-tab:not(.pane-tab--active):not(.doc-tab--no-icon) .pane-tab-label,
+.pane-tab-strip[data-step="icon"] .pane-tab:not(.doc-tab--no-icon) .pane-tab-label {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -816,6 +818,14 @@
     padding: 0;
     gap: 0;
 
+    &.doc-tab--no-icon {
+        padding: 0 var(--space-1);
+
+        .pane-tab-label {
+            flex: 0 1 auto;
+        }
+    }
+
     .pane-tab-close {
         position: absolute;
         inset: 0;
@@ -825,7 +835,8 @@
 
     &:hover,
     &:focus-within {
-        .pane-tab-icon {
+        .pane-tab-icon,
+        &.doc-tab--no-icon .pane-tab-label {
             opacity: 0;
         }
 
@@ -840,11 +851,12 @@
             opacity: 0;
         }
 
-        .pane-tab-icon::after {
+        .pane-tab-icon::after,
+        &.doc-tab--no-icon::after {
             content: "";
             position: absolute;
-            right: -2px;
-            top: -2px;
+            right: 3px;
+            top: 3px;
             width: 7px;
             height: 7px;
             border-radius: 50%;

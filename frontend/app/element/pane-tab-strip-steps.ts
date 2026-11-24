@@ -5,7 +5,7 @@
  * What a strip reads of its surroundings to take its step (pane-tab-steps.ts): the room it has for its tabs and what
  * that gives each tab. In a pane's header the strip is one item of the header's scrolling range, so its room is the
  * range's width less everything else the range holds; anywhere else it is its parent's width. It is set on the strip
- * as a width limit (`--pane-tab-room`), so the tabs share the squeeze in plain CSS, and as the step (`data-step`), so the
+ * as a width limit (`--pane-tab-room`, written to the strip's style here), so the tabs share the squeeze in plain CSS, and as the step (`data-step`), so the
  * labels go. Reads happen when the surroundings or the tab list change, never per tab per frame.
  */
 
@@ -29,6 +29,21 @@ function outerWidth(el: Element): number {
 }
 
 /**
+ * What a growing item of the header needs, not the width it has grown to: its own contents. An item that grows into
+ * free room (the header's inline elements, the spacer) would otherwise count the room the strip just left as its own.
+ */
+function contentWidth(el: HTMLElement): number {
+    let width = 0;
+    let count = 0;
+    for (const child of el.children) {
+        if (!(child instanceof HTMLElement) || child.offsetParent === null) continue;
+        width += outerWidth(child);
+        count++;
+    }
+    return width + (parseFloat(getComputedStyle(el).columnGap) || 0) * Math.max(0, count - 1);
+}
+
+/**
  * The strip's room in real px: the header range's width less what else the range holds, or the parent's width. Undefined
  * when the surroundings have no width (hidden).
  */
@@ -41,7 +56,7 @@ export function stripRoom(strip: HTMLElement): number | undefined {
         let count = 0;
         for (const child of host.children) {
             if (child === holder || !(child instanceof HTMLElement) || child.offsetParent === null) continue;
-            others += outerWidth(child);
+            others += (parseFloat(getComputedStyle(child).flexGrow) || 0) > 0 ? contentWidth(child) : outerWidth(child);
             count++;
         }
         const gap = parseFloat(getComputedStyle(host).columnGap) || 0;
@@ -76,6 +91,7 @@ export function createStripSteps(opts: {
     let frame: number | undefined;
 
     const measure = () => {
+        if (frame !== undefined) cancelAnimationFrame(frame);
         frame = undefined;
         const strip = opts.strip();
         const count = opts.tabCount();
@@ -95,6 +111,7 @@ export function createStripSteps(opts: {
         // A new limit changes how far the labels are cut: look once more when it has settled.
         if (room() === undefined || Math.abs((room() ?? 0) - limit) >= 0.5) {
             setRoom(limit);
+            strip.style.setProperty("--pane-tab-room", `${limit}px`);
             schedule();
         }
     };
@@ -121,6 +138,8 @@ export function createStripSteps(opts: {
             schedule();
         };
         watch();
+        // At once, not a frame later: the limit is on the strip before anything else first measures it.
+        measure();
         const host = strip.closest<HTMLElement>(HEADER_CONTENT);
         const mutations = host && typeof MutationObserver !== "undefined" ? new MutationObserver(watch) : undefined;
         if (host) mutations?.observe(host, { childList: true });
