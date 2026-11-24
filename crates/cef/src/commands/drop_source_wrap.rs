@@ -10,7 +10,7 @@
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-use windows_sys::Win32::Foundation::{GetLastError, BOOL, HMODULE, HWND};
+use windows_sys::Win32::Foundation::{GetLastError, GlobalFree, BOOL, HMODULE, HWND};
 use windows_sys::Win32::Graphics::Gdi::{CreateRectRgn, DeleteObject, GetWindowRgn, SetWindowRgn, NULLREGION};
 use windows_sys::Win32::System::Com::{DVASPECT_CONTENT, FORMATETC, STGMEDIUM, TYMED_HGLOBAL};
 use windows_sys::Win32::System::DataExchange::RegisterClipboardFormatW;
@@ -290,7 +290,10 @@ unsafe fn attach_files(data: *mut c_void) {
         }
     }
     ReleaseStgMedium(&mut medium);
-    let Some(files) = nonce.and_then(|n| super::file_drag::take(&n)) else { return };
+    let Some(files) = nonce.and_then(|n| super::file_drag::take(&n)) else {
+        tracing::debug!(target: "dnd:file-out", "[file-drag] no files for this drag: no marker, or its nonce was unknown, used or older than its time limit");
+        return;
+    };
     let bytes = super::file_drag::drop_files_bytes(&files);
     let hglobal = GlobalAlloc(GMEM_MOVEABLE, bytes.len());
     if hglobal.is_null() {
@@ -298,6 +301,7 @@ unsafe fn attach_files(data: *mut c_void) {
     }
     let dst = GlobalLock(hglobal) as *mut u8;
     if dst.is_null() {
+        GlobalFree(hglobal);
         return;
     }
     std::ptr::copy_nonoverlapping(bytes.as_ptr(), dst, bytes.len());

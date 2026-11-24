@@ -10,7 +10,7 @@ import { FILE_DRAG_MARKER, markFileDragOut, prepareFileDragOut } from "./file-dr
 const flush = () => new Promise((r) => setTimeout(r, 0));
 const dataTransfer = () => {
     const set = vi.fn();
-    return { dt: { setData: set } as unknown as DataTransfer, set };
+    return { dt: { setData: set, effectAllowed: "copyMove" } as unknown as DataTransfer, set };
 };
 
 describe("file-drag-out: the nonce a drag from a row carries", () => {
@@ -27,6 +27,8 @@ describe("file-drag-out: the nonce a drag from a row carries", () => {
         const { dt, set } = dataTransfer();
         expect(markFileDragOut(dt, ["C:\\a\\x.png"])).toBe(true);
         expect(set).toHaveBeenCalledWith(FILE_DRAG_MARKER, "nonce-1");
+        // The real files go out as a copy only: Explorer must not default a same-drive drop to moving the person's file.
+        expect(dt.effectAllowed).toBe("copy");
     });
 
     it("marks a drag once, and only for the paths it registered", async () => {
@@ -35,6 +37,7 @@ describe("file-drag-out: the nonce a drag from a row carries", () => {
         const other = dataTransfer();
         expect(markFileDragOut(other.dt, ["a"])).toBe(false);
         expect(other.set).not.toHaveBeenCalled();
+        expect(other.dt.effectAllowed).toBe("copyMove");
         // The mismatch used the registration up: a later drag must register again.
         const again = dataTransfer();
         expect(markFileDragOut(again.dt, ["a", "b"])).toBe(false);

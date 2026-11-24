@@ -45,5 +45,7 @@ export function markFileDragOut(dt: DataTransfer, paths: string[]): boolean {
     prepared = null;
     if (!ready || ready.key !== keyOf(paths)) return false;
     dt.setData(FILE_DRAG_MARKER, ready.nonce);
+    // The real files go out as a copy: a drop on an Explorer folder on the same drive would otherwise default to a move of the person's file.
+    dt.effectAllowed = "copy";
     return true;
 }
