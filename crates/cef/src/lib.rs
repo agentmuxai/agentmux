@@ -202,9 +202,7 @@ mod launcher_parent_tests {
 fn publish_discovery_file(app_state: &state::AppState, ipc_port: u16, is_dev: bool, debug_port: u16) {
     let endpoints = app_state.backend_endpoints.lock().clone();
     let auth_key = app_state.auth_key.lock().clone();
-    let ipc_token = app_state.ipc_token.clone();
-    let data_dir_str = app_state.version_data_dir.lock().clone().unwrap_or_default();
-    let data_dir_path = std::path::PathBuf::from(&data_dir_str);
+    let data_dir_path = std::path::PathBuf::from(app_state.version_data_dir.lock().clone().unwrap_or_default());
     let ipc_endpoint = format!("127.0.0.1:{}", ipc_port);
     let instance = format!("v{}", env!("CARGO_PKG_VERSION"));
     match dev_authfile::publish_discovery(
@@ -214,7 +212,7 @@ fn publish_discovery_file(app_state: &state::AppState, ipc_port: u16, is_dev: bo
         &endpoints.web_endpoint,
         &endpoints.ws_endpoint,
         &ipc_endpoint,
-        &ipc_token,
+        &app_state.ipc_token,
         &instance,
         std::process::id(),
         debug_port,
