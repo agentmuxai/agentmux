@@ -279,7 +279,14 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
     });
 
     // agentstop → stop the running agent subprocess
-    engine.register_typed(COMMAND_AGENT_STOP, |cmd: CommandAgentStopData, _ctx| async move { agent_stop(cmd) });
+    let state_stop = state.clone();
+    engine.register_typed(COMMAND_AGENT_STOP, move |cmd: CommandAgentStopData, ctx| {
+        let mstore = state_stop.mstore.clone();
+        async move {
+            crate::server::pane_caller::agent_acts_on_own_pane(&mstore, &ctx, &cmd.blockid, "stopping an agent")?;
+            agent_stop(cmd)
+        }
+    });
 }
 
 /// `subprocessspawn`: run the CLI for one turn in the block's subprocess controller, creating it if needed.
@@ -360,6 +367,7 @@ pub(crate) fn subprocess_spawn(state: &AppState, cmd: CommandSubprocessSpawnData
 /// `agentinput`: a message typed into the composer (or a hidden reinjection), started as a turn.
 pub(crate) async fn agent_input(deps: &AgentTurnDeps, ctx: &RpcContext, cmd: CommandAgentInputData) -> Result<(), String> {
     if cmd.prestart == Some(true) {
+        crate::server::pane_caller::agent_acts_on_own_pane(&deps.mstore, ctx, &cmd.blockid, "starting a pane's container")?;
         return super::container_turn::prestart(deps, cmd.blockid).await;
     }
     // From the connection, before anything else runs (composer_origin.rs).
