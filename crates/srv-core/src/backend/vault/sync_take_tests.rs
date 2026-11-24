@@ -311,6 +311,31 @@ fn a_rotation_started_while_a_delete_waited_is_not_deleted_with_the_entry() {
 }
 
 #[test]
+fn the_new_vaults_record_taken_before_the_old_vaults_history_keeps_the_entry_in_the_new_vault() {
+    let mut a = machine("a", 1);
+    let mut c = machine("c", 3);
+    let p = pins(&a, &c);
+    a.store.vault_insert(&entry("entry-a", "Invoice provider key", "api-key", "sk_test_invented_0001", "[]")).unwrap();
+    a.capture(VAULT, NOW);
+    a.edit("entry-a", "sk_test_invented_moved", "[]", NOW + 50);
+    a.store.vault_move_entry("entry-a", "vault-b").unwrap();
+    a.capture(VAULT, NOW + 100);
+    a.capture("vault-b", NOW + 100);
+    // A machine that is new: it takes the new Vault first, then the old Vault's whole history (a live record, then the tombstone).
+    let own = key();
+    let taker = Taker { store: &c.store, ring: &c.ring, key: &own, profiles: &Known(&[]) };
+    let all = |vault: &str| log::since(&a.store.conn().lock().unwrap(), vault, &Vector::default(), 100).unwrap();
+    for rec in all("vault-b").iter().chain(all(VAULT).iter()) {
+        taker.receive(rec, &p, &mut c.clock, NOW + 200).unwrap();
+    }
+    let on_c = c.entry_of(&a.link("entry-a")).expect("the entry is on c");
+    let row = c.store.vault_get(&on_c).unwrap().unwrap();
+    assert_eq!(row.vault_id, "vault-b", "the old Vault's earlier record does not move it back");
+    assert_eq!(c.value(&on_c).as_deref(), Some("sk_test_invented_moved"), "nor does it put the older value back");
+    assert_eq!(settle(&c, NOW + 300).len(), 0);
+}
+
+#[test]
 fn the_old_vaults_tombstone_taken_before_the_new_vaults_record_does_not_delete_the_entry() {
     let (mut a, mut b, p, _, on_b) = both_hold_one();
     // A kept earlier value the entry has on b: a delete and a re-make would lose it.

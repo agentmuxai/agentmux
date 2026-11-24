@@ -265,6 +265,14 @@ impl Taker<'_> {
             Some(id) => store.vault_get(&id).map_err(|e| e.to_string())?,
             None => None,
         };
+        // The entry is in another Vault here, and that Vault's record of it is live and later than this one: this record is the
+        // entry's past (the source Vault's, taken after the destination's), and does not move it back.
+        if let Some(old) = existing.as_ref().filter(|r| r.vault_id != h.collection) {
+            let there = log::current(&store.conn().lock().unwrap_or_else(|e| e.into_inner()), &old.vault_id, &h.record).map_err(|e| e.to_string())?;
+            if there.is_some_and(|t| !t.header.tombstone && t.header.version > h.version) {
+                return Ok(Some(Effect::None));
+            }
+        }
         let entry_id = existing.as_ref().map_or_else(|| uuid::Uuid::new_v4().to_string(), |r| r.id.clone());
         // The ids: the record's own, then the ones the sender says the entry has. A new entry takes the record's as its own.
         let mut ids = vec![h.record.clone()];
