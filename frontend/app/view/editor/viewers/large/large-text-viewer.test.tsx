@@ -212,6 +212,15 @@ describe("the Large text viewer", () => {
         expect(document.querySelector('[data-line="3"] .large-text-text')?.textContent).toBe("after");
     });
 
+    it("shows the note that expands a cut line with the link hand", async () => {
+        serve(`short
+${"x".repeat(LINE_SHOWN_MAX + 500)}
+after
+`);
+        await mount();
+        expect(document.querySelector('[data-line="2"] button.large-text-hidden')?.classList.contains("ui-button--opens")).toBe(true);
+    });
+
     it("shows the rest of a cut line when its note is clicked", async () => {
         serve(`short
 ${"x".repeat(LINE_SHOWN_MAX + 500)}
