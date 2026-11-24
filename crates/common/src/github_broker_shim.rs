@@ -77,8 +77,9 @@ pub const GIT_NO_EXT_DIFF_ENV: &str = "AGENTMUX_GIT_NO_EXT_DIFF";
 
 /// The step of the `git` function that [`GIT_NO_EXT_DIFF_ENV`] turns on. A `diff.<driver>.textconv` and a
 /// `filter.<name>.clean`, `smudge` and `process` of the folder's own configuration are set to `cat` (the `process` to
-/// nothing, and the filter not required), and a `merge.<name>.driver` to `false`, on the command line (`-c`, which every command git starts inherits, so
-/// `range-diff` is covered). After any leading `-C <dir>`, `-c <name=value>` and other global options, every command
+/// nothing, and the filter not required), and a `merge.<name>.driver` to `false`, as `GIT_CONFIG_KEY_<n>` and
+/// `GIT_CONFIG_VALUE_<n>` entries added to those the environment holds (which every command git starts inherits, so
+/// `range-diff` is covered, and which take the whole key, so a name with an `=` in it is covered too). After any leading `-C <dir>`, `-c <name=value>` and other global options, every command
 /// gets `--no-pager` (so a pager the folder's own configuration names does not run); `diff`, `log`, `show`,
 /// `format-patch`, `whatchanged`, `blame` and `reflog` (after its `show`, or with no subcommand, and not for another
 /// one) also get `--no-ext-diff` and `--no-textconv` (so the external diff program, a diff driver's `command` and a
@@ -91,7 +92,7 @@ pub const GIT_NO_EXT_DIFF_ENV: &str = "AGENTMUX_GIT_NO_EXT_DIFF";
 macro_rules! no_ext_diff_step {
     () => {
         r#"  if [ -n "${AGENTMUX_GIT_NO_EXT_DIFF:-}" ]; then
-    local _amx_g=() _amx_r=() _amx_s _amx_t _amx_c _amx_k _amx_b _amx_u=;
+    local _amx_g=() _amx_r=() _amx_e=() _amx_s _amx_t _amx_c _amx_k _amx_b _amx_n _amx_i _amx_u=;
     while [ $# -gt 0 ]; do
       case "$1" in
         -C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env|--attr-source) _amx_g+=("$1"); shift; if [ $# -gt 0 ]; then _amx_g+=("$1"); shift; fi;;
@@ -102,15 +103,19 @@ macro_rules! no_ext_diff_step {
     while IFS=$'\t' read -r _amx_c _amx_k; do
       case "$_amx_c" in global|system) continue;; esac;
       case "$_amx_k" in
-        *=*) ;;
-        *.textconv) _amx_g+=(-c "$_amx_k=cat");;
-        merge.*.driver) _amx_g+=(-c "$_amx_k=false");;
-        filter.*.clean|filter.*.smudge) _amx_g+=(-c "$_amx_k=cat" -c "${_amx_k%.*}.required=false");;
-        filter.*.process) _amx_g+=(-c "$_amx_k=" -c "${_amx_k%.*}.required=false");;
+        *.textconv) _amx_e+=("$_amx_k" cat);;
+        merge.*.driver) _amx_e+=("$_amx_k" false);;
+        filter.*.clean|filter.*.smudge) _amx_e+=("$_amx_k" cat "${_amx_k%.*}.required" false);;
+        filter.*.process) _amx_e+=("$_amx_k" "" "${_amx_k%.*}.required" false);;
         remotes.*) _amx_r+=("${_amx_k#remotes.}");;
         *.uploadpack|*.receivepack) _amx_u=1;;
       esac;
     done < <(command git ${_amx_g[@]+"${_amx_g[@]}"} config --show-scope --name-only --get-regexp '^(diff\..*\.textconv|merge\..*\.driver|filter\..*\.(clean|smudge|process)|remotes\..*|remote\..*\.(uploadpack|receivepack))$' 2>/dev/null);
+    _amx_n=${GIT_CONFIG_COUNT:-0}; case "$_amx_n" in ''|*[!0-9]*) _amx_n=0;; esac;
+    for ((_amx_i=0; _amx_i<${#_amx_e[@]}; _amx_i+=2)); do
+      local -x "GIT_CONFIG_KEY_$_amx_n=${_amx_e[_amx_i]}" "GIT_CONFIG_VALUE_$_amx_n=${_amx_e[_amx_i+1]}"; _amx_n=$((_amx_n+1));
+    done;
+    local -x GIT_CONFIG_COUNT=$_amx_n;
     case "${1:-}" in
       remote)
         if [ -n "$_amx_u" ]; then

@@ -361,8 +361,10 @@ fn the_function_keeps_the_folders_diff_programs_from_running_and_leaves_git_s_ow
     let repo = folder.repo();
     let script = folder.dir.path().join("mark.sh");
     std::fs::write(repo.join("b.txt"), "x\n").unwrap();
-    std::fs::write(repo.join(".gitattributes"), "a.txt diff=drvcmd\nb.txt diff=drvtext\nc.txt filter=fx\n").unwrap();
+    std::fs::write(repo.join(".gitattributes"), "a.txt diff=drvcmd\nb.txt diff=drvtext\nc.txt filter=fx\nd.txt diff=a=b\ne.txt filter=f=g\n").unwrap();
     std::fs::write(repo.join("c.txt"), "c\n").unwrap();
+    std::fs::write(repo.join("d.txt"), "d\n").unwrap();
+    std::fs::write(repo.join("e.txt"), "e\n").unwrap();
     std::fs::write(repo.join("w.txt"), "a\nb\nc\nd\ne\n").unwrap();
     folder.git(&["add", "."], &HashMap::new());
     folder.git(&["commit", "-q", "-m", "more"], &HashMap::new());
@@ -370,6 +372,8 @@ fn the_function_keeps_the_folders_diff_programs_from_running_and_leaves_git_s_ow
     folder.git(&["commit", "-q", "-a", "-m", "again"], &HashMap::new());
     std::fs::write(repo.join("a.txt"), "two\n").unwrap();
     std::fs::write(repo.join("c.txt"), "cc\n").unwrap();
+    std::fs::write(repo.join("d.txt"), "dd\n").unwrap();
+    std::fs::write(repo.join("e.txt"), "ee\n").unwrap();
     std::fs::write(repo.join("b.txt"), "y\n").unwrap();
     std::fs::write(repo.join("w.txt"), "a\nb\nc \nd\nE\n").unwrap();
     let commands = [
@@ -387,7 +391,7 @@ fn the_function_keeps_the_folders_diff_programs_from_running_and_leaves_git_s_ow
         "git status",
     ];
     for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
-        for (key, name) in [("diff.external", "diffext"), ("diff.drvcmd.command", "drvcmd"), ("diff.drvtext.textconv", "drvtext"), ("filter.fx.clean", "filterclean"), ("filter.fx.process", "filterprocess")] {
+        for (key, name) in [("diff.external", "diffext"), ("diff.drvcmd.command", "drvcmd"), ("diff.drvtext.textconv", "drvtext"), ("filter.fx.clean", "filterclean"), ("filter.fx.process", "filterprocess"), ("diff.a=b.textconv", "eqtext"), ("filter.f=g.clean", "eqclean")] {
             folder.git(&["config", key, &format!("sh {} {name}", slashes(&script))], &HashMap::new());
             folder.forget();
             through_the_function(&folder, body, false, "git diff");
