@@ -21,6 +21,7 @@ const rpc = vi.hoisted(() => ({
     template: vi.fn(),
     approve: vi.fn(),
     diff: vi.fn(),
+    drones: vi.fn(),
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/rpc-api", () => ({
@@ -35,6 +36,7 @@ vi.mock("@/app/store/rpc-api", () => ({
         JobsTemplatesGetCommand: (_c: unknown, d: unknown) => rpc.template(d),
         JobsTemplatesApproveCommand: (_c: unknown, d: unknown) => rpc.approve(d),
         JobsTemplatesUpdateDiffCommand: (_c: unknown, d: unknown) => rpc.diff(d),
+        ListDronesCommand: () => rpc.drones(),
     },
 }));
 vi.mock("@/app/store/mps", () => ({ onMuxEvent: () => () => {} }));
@@ -122,6 +124,19 @@ describe("New job", () => {
         expect(screen.getByLabelText("Cap per day ($)").getAttribute("placeholder")).toBe("20");
         type("Cap per run ($)", "50");
         expect(screen.getByText("Above the default of $5: you raise it for this job.")).toBeInTheDocument();
+    });
+
+    it("shows the drone to run when the action is switched to a drone", async () => {
+        rpc.templates.mockResolvedValue(templatesOf());
+        rpc.drones.mockResolvedValue([{ id: "d-1", name: "Echo" }]);
+        await openEditor();
+        expect(screen.queryByText("Drone")).toBeNull();
+        fireEvent.click(screen.getByRole("radio", { name: "Run a drone" }));
+        expect(await screen.findByText("Drone")).toBeInTheDocument();
+        // A drone keeps its timeout and may cancel the run it replaces; only retries are left out.
+        expect(screen.getByLabelText("Timeout (minutes)")).toBeInTheDocument();
+        expect(screen.queryByLabelText("Retries")).toBeNull();
+        expect(within(screen.getByLabelText("If the last run is still going")).getByRole("option", { name: "cancel other" })).toBeInTheDocument();
     });
 
     it("says what is missing and sends nothing", async () => {
