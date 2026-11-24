@@ -68,4 +68,9 @@ pending_switch?: string,
 /**
  * The short name of the model its definition asks for, when that is not the one it runs.
  */
-definition_model_label?: string, };
+definition_model_label?: string, 
+/**
+ * When it went quiet (unix ms), while it owes work and has done nothing for the quiet time: the Swarm shows
+ * "quiet 22 min" from it (SPEC_LEADER_TOLD_WHEN_AN_AGENT_GOES_QUIET_2026_11_21.md §6). From the last quiet sweep.
+ */
+quiet_since_ms?: number, };
