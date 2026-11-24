@@ -700,6 +700,7 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         async move { crate::server::drone_payload::get_payload_schema(&s, cmd) }
     });
 
+    crate::server::drone_approval_handlers::register(engine, state);
     crate::server::drone_access_handlers::register(engine, state);
 
     let s = state.clone();
