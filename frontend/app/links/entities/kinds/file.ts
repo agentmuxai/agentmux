@@ -13,7 +13,7 @@ import { openFileEntity } from "../openers";
 import type { Candidate, EntityKind } from "../types";
 
 const EXTENSIONS =
-    "md|mdx|txt|json|jsonl|ts|tsx|js|jsx|mjs|cjs|rs|toml|yaml|yml|py|go|java|kt|swift|c|h|cc|cpp|hpp|cs|rb|php|sh|ps1|bat|css|scss|html|htm|xml|csv|tsv|log|sql|lock|ini|cfg|conf|env|png|jpg|jpeg|gif|webp|svg|pdf|mp4|webm|wav|zip|tgz|patch|diff";
+    "md|mdx|txt|json|jsonl|ts|tsx|js|jsx|mjs|cjs|rs|toml|yaml|yml|py|pl|ml|go|java|kt|swift|c|h|cc|cpp|hpp|cs|rb|php|sh|ps1|bat|css|scss|html|htm|xml|csv|tsv|log|sql|lock|ini|cfg|conf|env|png|jpg|jpeg|gif|webp|svg|pdf|mp4|webm|wav|zip|tgz|patch|diff";
 
 const NAME = "[\\w.+-]+";
 const LINE = "(?::(\\d{1,6})(?::\\d{1,6})?)?";
