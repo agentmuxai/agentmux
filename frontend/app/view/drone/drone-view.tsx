@@ -905,8 +905,8 @@ const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element =
                 </NodeField>
             </Show>
             <Show when={p.node.data.kind === "once"}>
-                <NodeField label="key">
-                    <TextInput variant="plain" class="drone-input nodrag" value={(p.node.data["key"] as string) ?? ""} onInput={(e) => update({ key: e.currentTarget.value })} onContextMenu={showTextInputContextMenu} placeholder="{{trigger.run_id}}" />
+                <NodeField label={t("drone.once.key")}>
+                    <TextInput variant="plain" class="drone-input nodrag" value={(p.node.data["key"] as string) ?? ""} onInput={(e) => update({ key: e.currentTarget.value })} onContextMenu={showTextInputContextMenu} placeholder={t("drone.once.keyPlaceholder")} />
                 </NodeField>
             </Show>
             <Show when={p.node.data.kind === "response"}>
