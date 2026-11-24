@@ -1636,22 +1636,25 @@ fn claim_free_window_hwnd_skips_bound_ones_and_keeps_an_existing_bind() {
 /// (what `capture_hwnd_for_label` once did) lets both take the first.
 #[test]
 fn concurrent_claims_never_share_an_hwnd() {
-    use std::sync::{Arc, Barrier};
+    use std::sync::{Arc, Barrier, Mutex};
     for round in 0..200 {
-        let app = Arc::new(crate::state::AppState::default());
+        // The host state behind one lock, as `AppState::host_dispatch` holds it.
+        let state = Arc::new(Mutex::new(HostState::default()));
         let gate = Arc::new(Barrier::new(2));
         let handles: Vec<_> = ["window-a", "window-b"]
             .into_iter()
             .map(|label| {
-                let (app, gate) = (app.clone(), gate.clone());
+                let (state, gate) = (state.clone(), gate.clone());
                 std::thread::spawn(move || {
                     gate.wait();
-                    app.claim_free_window_hwnd(label, vec![0x10, 0x20])
+                    let cmd = HostCommand::ClaimFreeWindowHwnd { label: label.into(), candidates: vec![0x10, 0x20] };
+                    update(&mut state.lock().unwrap(), cmd).claimed_window_hwnd
                 })
             })
             .collect();
         let got: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
-        let (a, b) = (app.window_hwnd("window-a"), app.window_hwnd("window-b"));
+        let st = state.lock().unwrap();
+        let (a, b) = (st.window_hwnds.get("window-a").copied(), st.window_hwnds.get("window-b").copied());
         assert!(a.is_some() && b.is_some() && a != b, "round {round}: {a:?} vs {b:?}");
         assert_eq!(got, vec![a, b]);
     }
