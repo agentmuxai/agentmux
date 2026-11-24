@@ -148,6 +148,15 @@ describe("openWidget", () => {
         }
     });
 
+    it("asks a Kanban already open to take the filter the entry names, and leaves its filter alone when the entry names none", async () => {
+        const kanban = (meta: Record<string, unknown>) =>
+            ({ label: "Kanban", blockdef: { meta: { view: "kanban", ...meta } } }) as unknown as WidgetConfigType;
+        await openWidget(kanban({ "kanban:waits": "open" }));
+        await openWidget(kanban({}));
+        const focus = store.openOrFocusPaneByView.mock.calls.map((c) => (c as unknown[])[2]);
+        expect(focus).toEqual([{ "kanban:waits": "open" }, undefined]);
+    });
+
     it("an installed widget's pane follows the singleton its manifest declares", async () => {
         const pane = (view: string, singleton: boolean) =>
             registerPaneTab({ apiVersion: 1, view, label: view, icon: "puzzle-piece", singleton, create: () => ({}) as never });

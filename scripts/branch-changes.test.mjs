@@ -25,7 +25,8 @@ const write = (rel, text) => {
 };
 
 beforeEach(() => {
-    // The tests' repo has `main` and nothing else: a pull request's own base (a stacked one's is another branch) must not leak in.
+    // CI sets the PR's base, which the fixture repo does not have: on a PR whose base is not main (one stacked on another),
+    // `changedRows({ root })` would answer null. The fixture's base is main.
     vi.stubEnv("GITHUB_BASE_REF", "");
     root = mkdtempSync(join(tmpdir(), "branch-changes-"));
     git("init", "-q", "-b", "main");

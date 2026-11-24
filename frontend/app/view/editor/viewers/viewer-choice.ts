@@ -33,14 +33,18 @@ export function isViewerId(v: unknown): v is ViewerId {
 }
 
 /** The probe of a file, as far as the viewers need it. */
-export type FileProbe = FileProbeResult;
+export type FileProbe = FileProbeResult & {
+    /** The file's path (canonical) when the editor found its first line too wide for the Text viewer: a small file that
+     *  the Large text viewer shows. Not from srv; set when the file was read. */
+    wideFirstLine?: string;
+};
 
 /** The viewers that can show the file, the default first. Every file can
  *  be shown as hex: its bytes are read in parts, whatever its size. A file
  *  over the editor's cap is shown as text by the Large text viewer, which
  *  reads it in parts too. */
 export function viewerOptions(probe: FileProbe): ViewerId[] {
-    const text: ViewerId[] = [probe.size <= TEXT_MAX_BYTES ? "text" : "large"];
+    const text: ViewerId[] = [probe.size <= TEXT_MAX_BYTES && !probe.wideFirstLine ? "text" : "large"];
     switch (probe.kind) {
         case "text":
             return [...text, "info", "hex"];
