@@ -26,6 +26,7 @@ import { createEffect, createSignal, onCleanup, Show, type Accessor, type JSX, t
 
 import { AnchoredPopover } from "@/app/element/anchored-popover";
 import { Button } from "@/app/element/ui/Button";
+import { t } from "@/app/i18n/i18n";
 import { formatCompactNumber, formatExactNumber } from "@/util/format-count";
 import { formatDurationShort, formatTimeAgo } from "@/util/format-time";
 
@@ -72,9 +73,7 @@ function formatAgo(ts: number): string {
  * conversation, so these totals grow far faster than the context and are
  * not a context size (the Context row above is).
  */
-const PROCESSED_TITLE =
-    "Tokens sent and received across every API call in this pane's turns. Each call re-sends the conversation, " +
-    "so input here counts the context once per call: it tracks cost, not how full the context is.";
+const processedTitle = () => t("agent.sessionStats.processedTip");
 
 /** `$2.41`, or `—` when the provider reports no cost (codex/gemini). */
 function formatCost(usd: number | undefined): string {
@@ -241,12 +240,12 @@ function StatsPanel(props: { s: StatsState }): JSX.Element {
             shellClass="anchored-popover--menu"
             class="menu agent-session-stats-panel"
             role="dialog"
-            aria-label="Session stats"
+            aria-label={t("agent.sessionStats.aria")}
             ref={(el) => {
                 s.floatingEl = el;
             }}
         >
-            <div class="agent-session-stats-section">Session</div>
+            <div class="agent-session-stats-section">{t("agent.sessionStats.session")}</div>
 
             <ContextRows s={s} />
 
@@ -271,16 +270,16 @@ function ContextRows(props: { s: StatsState }): JSX.Element {
                 fallback={
                     <Show when={(s.props.contextTokens ?? 0) > 0}>
                         {statRow(
-                            "Context",
+                            t("agent.sessionStats.context"),
                             <span {...tip(s.props.contextNote)}>
-                                {formatCompactNumber(s.props.contextTokens ?? 0)} (window unknown)
+                                {t("agent.sessionStats.windowUnknown", { tokens: formatCompactNumber(s.props.contextTokens ?? 0) })}
                             </span>
                         )}
                     </Show>
                 }
             >
                 {statRow(
-                    "Context",
+                    t("agent.sessionStats.context"),
                     <span {...tip(s.props.contextNote)}>
                         {formatCompactNumber(s.props.contextTokens ?? 0)} /{" "}
                         {formatCompactNumber(s.props.contextWindow ?? 0)} ({contextPct(s)!.toFixed(0)}%)
@@ -300,12 +299,12 @@ function TotalsRows(props: { s: StatsState }): JSX.Element {
     return (
         <Show when={totals(s)}>
             {statRow(
-                "Cost",
+                t("agent.sessionStats.cost"),
                 <>
                     {formatCost(totals(s)?.cost_usd)}
                     <Show when={totals(s)?.num_turns}>
                         {" · "}
-                        {totals(s)!.num_turns} turns
+                        {t("agent.sessionStats.turns", { count: totals(s)!.num_turns })}
                     </Show>
                     <Show when={totals(s)?.duration_ms}>
                         {" · "}
@@ -314,12 +313,12 @@ function TotalsRows(props: { s: StatsState }): JSX.Element {
                 </>
             )}
             {statRow(
-                "Processed",
-                <span {...tip(PROCESSED_TITLE)}>
-                    {formatCompactNumber(totals(s)?.input_tokens ?? 0)} in
-                    <Show when={cacheShare(s) != null}> ({cacheShare(s)!.toFixed(0)}% cached)</Show>
+                t("agent.sessionStats.processed"),
+                <span {...tip(processedTitle())}>
+                    {t("agent.sessionStats.in", { tokens: formatCompactNumber(totals(s)?.input_tokens ?? 0) })}
+                    <Show when={cacheShare(s) != null}> {t("agent.sessionStats.cached", { pct: cacheShare(s)!.toFixed(0) })}</Show>
                     {" · "}
-                    {formatCompactNumber(totals(s)?.output_tokens ?? 0)} out
+                    {t("agent.sessionStats.out", { tokens: formatCompactNumber(totals(s)?.output_tokens ?? 0) })}
                 </span>
             )}
         </Show>
@@ -333,16 +332,16 @@ function HistoryRows(props: { s: StatsState }): JSX.Element {
         <>
             <Show when={lineCount(s) > 0}>
                 {statRow(
-                    "History",
-                    <span {...tip(`${formatExactNumber(lineCount(s))} lines`)}>
-                        {formatCompactNumber(lineCount(s))} lines ·{" "}
+                    t("agent.sessionStats.history"),
+                    <span {...tip(t("agent.sessionStats.lines", { count: lineCount(s), n: formatExactNumber(lineCount(s)) }))}>
+                        {t("agent.sessionStats.lines", { count: lineCount(s), n: formatCompactNumber(lineCount(s)) })} ·{" "}
                         {formatAgo(sessionLastActivityMs(() => blockAtom(s)))}
                     </span>
                 )}
             </Show>
 
             <Show when={archived(s)}>
-                {statRow("Archived", new Date(sessionArchivedAt(() => blockAtom(s))).toLocaleString())}
+                {statRow(t("agent.sessionStats.archived"), new Date(sessionArchivedAt(() => blockAtom(s))).toLocaleString())}
             </Show>
         </>
     );
@@ -362,9 +361,9 @@ function SessionActions(props: { s: StatsState }): JSX.Element {
                         onClick={() =>
                             void run(s.archiveBusy, s.setArchiveBusy, "archive", () => archiveSession(s.props.blockId))
                         }
-                        title="Compress and archive this session's history to free disk space, then start fresh"
+                        title={t("agent.sessionStats.archiveTip")}
                     >
-                        {s.archiveBusy() ? "Archiving…" : "Archive"}
+                        {s.archiveBusy() ? t("agent.sessionStats.archiving") : t("agent.sessionStats.archive")}
                     </Button>
                 }
             >
@@ -374,18 +373,18 @@ function SessionActions(props: { s: StatsState }): JSX.Element {
                     onClick={() =>
                         void run(s.restoreBusy, s.setRestoreBusy, "restore", () => restoreSession(s.props.blockId))
                     }
-                    title="Restore this session's history from the archive"
+                    title={t("agent.sessionStats.restoreTip")}
                 >
-                    {s.restoreBusy() ? "Restoring…" : "Restore"}
+                    {s.restoreBusy() ? t("agent.sessionStats.restoring") : t("agent.sessionStats.restore")}
                 </Button>
             </Show>
             <Button
                 density="compact"
                 disabled={s.exportBusy()}
                 onClick={() => void run(s.exportBusy, s.setExportBusy, "export", () => exportSession(s.props.blockId))}
-                title="Download this session's history as a .jsonl file"
+                title={t("agent.sessionStats.exportTip")}
             >
-                {s.exportBusy() ? "Exporting…" : "Export"}
+                {s.exportBusy() ? t("agent.sessionStats.exporting") : t("agent.sessionStats.export")}
             </Button>
         </div>
     );

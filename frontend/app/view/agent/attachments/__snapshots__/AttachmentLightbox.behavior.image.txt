@@ -21,12 +21,8 @@ initialFocus -> agent-attachment-lightbox__dialog agent-attachment-lightbox__dia
           "·"
           "2.4 MB"
           <span class="sent">
-            "· sent as"
-            "2000"
-            "×"
-            "1500"
-            ","
-            "391 KB"
+            "·"
+            "sent as 2,000×1,500, 391 KB"
         <span class="agent-attachment-lightbox__actions">
           <span data-stand="CloseButton" data-label="Close preview" data-tooltip="false">
 -- the image
@@ -47,12 +43,8 @@ initialFocus -> agent-attachment-lightbox__dialog agent-attachment-lightbox__dia
           "·"
           "2.4 MB"
           <span class="sent">
-            "· sent as"
-            "2000"
-            "×"
-            "1500"
-            ","
-            "391 KB"
+            "·"
+            "sent as 2,000×1,500, 391 KB"
         <span class="agent-attachment-lightbox__actions">
           <span data-stand="CloseButton" data-label="Close preview" data-tooltip="false">
 -- gone from the store
@@ -79,12 +71,8 @@ initialFocus -> agent-attachment-lightbox__dialog agent-attachment-lightbox__dia
           "·"
           "2.4 MB"
           <span class="sent">
-            "· sent as"
-            "2000"
-            "×"
-            "1500"
-            ","
-            "391 KB"
+            "·"
+            "sent as 2,000×1,500, 391 KB"
         <span class="agent-attachment-lightbox__actions">
           <span data-stand="CloseButton" data-label="Close preview" data-tooltip="false">
 -- a first frame, and a title hover
@@ -110,12 +98,8 @@ initialFocus -> agent-attachment-lightbox__dialog agent-attachment-lightbox__dia
           "·"
           "2.4 MB"
           <span class="sent">
-            "· sent as"
-            "2000"
-            "×"
-            "1500"
-            ","
-            "391 KB"
+            "·"
+            "sent as 2,000×1,500, 391 KB"
             "(first frame)"
         <span class="agent-attachment-lightbox__actions">
           <span data-stand="CloseButton" data-label="Close preview" data-tooltip="false">
