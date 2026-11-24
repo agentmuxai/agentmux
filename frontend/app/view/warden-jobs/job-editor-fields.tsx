@@ -9,6 +9,7 @@
 import { Show, type JSX } from "solid-js";
 import type { SetStoreFunction } from "solid-js/store";
 
+import { t } from "@/app/i18n/i18n";
 import { Field, SegmentedControl, Select, Switch, TextArea, TextInput, type SelectOption } from "@/app/element/ui";
 import type { CapDefaults } from "@/types/rpc/CapDefaults";
 
@@ -105,9 +106,9 @@ function DroneField(props: SectionProps & { drones: readonly SelectOption[] }): 
     if (props.draft.actionKind !== "drone") return null;
     return (
         <Field
-            label="Drone"
+            label={t("jobs.fields.drone")}
             layout="stacked"
-            description="The drone reads what started the run as {{trigger.*}}. Its Agent blocks spend as they do when you press Run."
+            description={t("jobs.fields.droneHint")}
         >
             <Select
                 value={props.draft.droneId}

@@ -1291,6 +1291,8 @@
     "window.reloadOffer.dismiss": "Dismiss",
     "jobs.openGraph": "Open graph",
     "jobs.openGraphTip": "Open this drone's graph in the Drone pane",
+    "jobs.fields.drone": "Drone",
+    "jobs.fields.droneHint": "The drone reads what started the run as {{trigger.*}}. Its Agent blocks spend as they do when you press Run.",
     "drone.node.queryMemory": "Global Memory entry",
     "drone.node.queryPresence": "Who is working on",
     "drone.node.memoryEntry": "Entry",
