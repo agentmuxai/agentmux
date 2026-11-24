@@ -112,6 +112,38 @@ pub fn summarize(graph: &DroneGraph) -> DroneSummary {
     out
 }
 
+/// Whether the graph has a node that writes outside AgentMux (an API call that is not a read) and an Approval block
+/// stands on every path to each of them, so no run reaches a write without a person's yes. False when it has no such
+/// write, or one of them can be reached without passing an Approval.
+pub fn approval_guards_every_write(graph: &DroneGraph) -> bool {
+    let kind = |n: &crate::backend::storage::drone_types::FlowNode| n.data.get("kind").and_then(|k| k.as_str()).and_then(BlockKind::parse);
+    let writes: Vec<&str> = graph
+        .nodes
+        .iter()
+        .filter(|n| kind(n) == Some(BlockKind::Api))
+        .filter(|n| {
+            let method = n.data.get("method").and_then(|m| m.as_str()).unwrap_or("GET").to_uppercase();
+            !matches!(method.as_str(), "GET" | "HEAD" | "OPTIONS")
+        })
+        .map(|n| n.id.as_str())
+        .collect();
+    if writes.is_empty() {
+        return false;
+    }
+    let approvals: HashSet<&str> = graph.nodes.iter().filter(|n| kind(n) == Some(BlockKind::Approval)).map(|n| n.id.as_str()).collect();
+    let targets: HashSet<&str> = graph.edges.iter().map(|e| e.target.as_str()).collect();
+    // Walk from every node nothing leads to, and do not go past an Approval.
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut stack: Vec<&str> = graph.nodes.iter().map(|n| n.id.as_str()).filter(|id| !targets.contains(id)).collect();
+    while let Some(id) = stack.pop() {
+        if !seen.insert(id) || approvals.contains(id) {
+            continue;
+        }
+        stack.extend(graph.edges.iter().filter(|e| e.source == id).map(|e| e.target.as_str()));
+    }
+    !approvals.is_empty() && writes.iter().all(|w| !seen.contains(w))
+}
+
 /// Every Vault entry the template reads a credential from, as `where: entry`: an `auth.vault` on a node or
 /// anywhere in the trigger (its poll's filter), whether the entry is a literal id or a `{{param.x}}`. This is
 /// what the template does, whatever its manifest's `secrets` says.

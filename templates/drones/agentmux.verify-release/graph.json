@@ -1,0 +1,149 @@
+{
+  "nodes": [
+    {
+      "id": "published",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "kind": "condition",
+        "expr": "!{{trigger.item.draft}} && !{{trigger.item.prerelease}}"
+      }
+    },
+    {
+      "id": "manifest",
+      "position": {
+        "x": 240,
+        "y": 0
+      },
+      "data": {
+        "kind": "transform",
+        "input": "{{trigger.item.assets}}",
+        "ops": [
+          {
+            "op": "filter",
+            "expr": "item.name == '{{param.manifest_asset}}'"
+          },
+          {
+            "op": "first"
+          }
+        ]
+      }
+    },
+    {
+      "id": "found",
+      "position": {
+        "x": 480,
+        "y": 0
+      },
+      "data": {
+        "kind": "condition",
+        "expr": "exists({{manifest.value.id}})"
+      }
+    },
+    {
+      "id": "tell",
+      "position": {
+        "x": 720,
+        "y": -80
+      },
+      "data": {
+        "kind": "message",
+        "to": "{{param.leader}}",
+        "body": "Release {{trigger.item.tag_name}} of {{param.repo}} was published two and a half hours ago and its manifest {{param.manifest_asset}} is among the assets ({{trigger.item.html_url}}). A card asks whether to merge pull request #{{param.held_pr}}. No reply needed."
+      }
+    },
+    {
+      "id": "missing",
+      "position": {
+        "x": 720,
+        "y": 80
+      },
+      "data": {
+        "kind": "message",
+        "to": "{{param.leader}}",
+        "body": "Release {{trigger.item.tag_name}} of {{param.repo}} was published two and a half hours ago and {{param.manifest_asset}} is NOT among its assets ({{trigger.item.html_url}}). Pull request #{{param.held_pr}} stays held. No reply needed."
+      }
+    },
+    {
+      "id": "approve",
+      "position": {
+        "x": 960,
+        "y": -80
+      },
+      "data": {
+        "kind": "approval",
+        "title": "Merge pull request #{{param.held_pr}} into {{param.repo}}",
+        "show": [
+          {
+            "label": "Release",
+            "value": "{{trigger.item.tag_name}}"
+          },
+          {
+            "label": "Release notes",
+            "value": "{{trigger.item.body}}"
+          }
+        ],
+        "timeout_seconds": 86400
+      }
+    },
+    {
+      "id": "merge",
+      "position": {
+        "x": 1200,
+        "y": -80
+      },
+      "data": {
+        "kind": "api",
+        "method": "PUT",
+        "url": "https://api.github.com/repos/{{param.repo}}/pulls/{{param.held_pr}}/merge",
+        "headers": {
+          "Accept": "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": "AgentMux-Drone"
+        },
+        "auth": {
+          "vault": "{{param.credential}}",
+          "as": "bearer"
+        },
+        "body": "{\"merge_method\":\"squash\"}"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "published-manifest",
+      "source": "published",
+      "target": "manifest",
+      "sourceHandle": "true"
+    },
+    {
+      "id": "manifest-found",
+      "source": "manifest",
+      "target": "found"
+    },
+    {
+      "id": "found-tell",
+      "source": "found",
+      "target": "tell",
+      "sourceHandle": "true"
+    },
+    {
+      "id": "found-missing",
+      "source": "found",
+      "target": "missing",
+      "sourceHandle": "false"
+    },
+    {
+      "id": "tell-approve",
+      "source": "tell",
+      "target": "approve"
+    },
+    {
+      "id": "approve-merge",
+      "source": "approve",
+      "target": "merge"
+    }
+  ]
+}
