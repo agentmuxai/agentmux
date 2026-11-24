@@ -9,7 +9,7 @@ import { attachStageInput, COPY_DELAY_MS } from "./stage-input";
 let unwire: (() => void) | null = null;
 afterEach(() => unwire?.());
 
-function setup() {
+function setup(mac = false) {
     const stage = document.createElement("div");
     stage.tabIndex = 0;
     const canvas = document.createElement("canvas");
@@ -17,7 +17,7 @@ function setup() {
     stage.append(canvas, button);
     document.body.append(stage);
     const sent: Record<string, unknown>[] = [];
-    unwire = attachStageInput(stage, () => canvas, (m) => sent.push(m as Record<string, unknown>));
+    unwire = attachStageInput(stage, () => canvas, (m) => sent.push(m as Record<string, unknown>), mac);
     return { stage, canvas, button, sent };
 }
 
@@ -106,6 +106,41 @@ describe("a streamed pane's stage and copying out of the remote browser", () => 
             key(stage, "keydown", { key: "c", code: "KeyC" });
             key(stage, "keydown", { key: "a", code: "KeyA", ctrlKey: true });
             key(stage, "keydown", { key: "v", code: "KeyV", ctrlKey: true });
+            vi.advanceTimersByTime(COPY_DELAY_MS * 3);
+            expect(sent.filter((m) => m.t === "copy")).toHaveLength(0);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("on a Mac, sends Cmd+C and Cmd+X as the remote browser's Ctrl chords and asks for the copy; Cmd+V stays the paste event", () => {
+        vi.useFakeTimers();
+        try {
+            const { stage, sent } = setup(true);
+            key(stage, "keydown", { key: "c", code: "KeyC", metaKey: true });
+            expect(sent[0]).toMatchObject({ t: "key", key: "c", mods: 2, text: "" });
+            vi.advanceTimersByTime(COPY_DELAY_MS + 1);
+            expect(sent.map((m) => m.t)).toEqual(["key", "copy"]);
+            key(stage, "keydown", { key: "x", code: "KeyX", metaKey: true });
+            vi.advanceTimersByTime(COPY_DELAY_MS + 1);
+            expect(sent.filter((m) => m.t === "copy")).toHaveLength(2);
+            // The release goes out as the same chord; Cmd+V is not a key at all (the paste event carries the text).
+            sent.length = 0;
+            key(stage, "keyup", { key: "c", code: "KeyC", metaKey: true });
+            key(stage, "keydown", { key: "v", code: "KeyV", metaKey: true });
+            expect(sent).toHaveLength(1);
+            expect(sent[0]).toMatchObject({ t: "key", type: "up", mods: 2 });
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("off a Mac, Cmd is sent as Meta and copies nothing", () => {
+        vi.useFakeTimers();
+        try {
+            const { stage, sent } = setup(false);
+            key(stage, "keydown", { key: "c", code: "KeyC", metaKey: true });
+            expect(sent[0]).toMatchObject({ t: "key", mods: 4 });
             vi.advanceTimersByTime(COPY_DELAY_MS * 3);
             expect(sent.filter((m) => m.t === "copy")).toHaveLength(0);
         } finally {

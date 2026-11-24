@@ -5,7 +5,8 @@
 // Keys and paste are taken only while the stage has focus (it is focusable and takes focus when pressed), so typing
 // elsewhere in the window is never sent. docs/specs/SPEC_STREAMED_BROWSER_PANE_DEMO_2026_11_15.md §4, §7.
 
-import { isCopyChord, isPasteChord, keyMessage, mouseMessage, wheelMessage } from "./streamed-protocol";
+import { isMacOS } from "@/util/platformutil";
+import { isCopyChord, isPasteChord, keyMessage, mouseMessage, remoteModifiers, wheelMessage } from "./streamed-protocol";
 
 /** How long after a copy chord the pane asks for what was copied: the browser has put it on its clipboard by then. */
 export const COPY_DELAY_MS = 150;
@@ -13,7 +14,7 @@ export const COPY_DELAY_MS = 150;
 type Send = (message: object) => void;
 
 /** Wire input from `stage` (focusable) to `send`, measuring positions on `canvas`. Returns the way to unwire it. */
-export function attachStageInput(stage: HTMLElement, canvas: () => HTMLElement | undefined, send: Send): () => void {
+export function attachStageInput(stage: HTMLElement, canvas: () => HTMLElement | undefined, send: Send, mac: boolean = isMacOS()): () => void {
     const box = () => (canvas() ?? stage).getBoundingClientRect();
     // Only the page itself (the stage or its canvas) is the page's: a control drawn over it (Reconnect) keeps its own keys and clicks.
     const onPage = (e: Event) => e.target === stage || e.target === canvas();
@@ -53,9 +54,9 @@ export function attachStageInput(stage: HTMLElement, canvas: () => HTMLElement |
     const onKey = (type: "down" | "up") => (e: KeyboardEvent) => {
         if (!onPage(e) || isPasteChord(e)) return;
         e.preventDefault();
-        send(keyMessage(type, e));
-        // The person copied or cut in the remote browser: ask for the text, to put it on their own clipboard (only on their say-so).
-        if (type === "down" && isCopyChord(e)) {
+        send(keyMessage(type, e, mac));
+        // The person copied or cut in the remote browser (Cmd+C and Cmd+X on a Mac are its Ctrl chords): ask for the text, to put it on their own clipboard (only on their say-so).
+        if (type === "down" && isCopyChord({ key: e.key, ...remoteModifiers(e, mac) })) {
             clearTimeout(copyTimer);
             copyTimer = setTimeout(() => send({ t: "copy" }), COPY_DELAY_MS);
         }

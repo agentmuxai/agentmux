@@ -150,8 +150,20 @@ export function typedText(e: { key: string; ctrlKey: boolean; metaKey: boolean }
     return [...e.key].length === 1 ? e.key : "";
 }
 
-export function keyMessage(type: "down" | "up", e: Modifiers & { key: string; code: string; keyCode: number }) {
-    return { t: "key", type, key: e.key, code: e.code, text: typedText(e), vk: e.keyCode, mods: modifiers(e) };
+/** Cmd letters a Mac person presses for what the remote Linux browser knows as Ctrl (copy, cut, select all, undo, find, address, reload). */
+const CMD_AS_CTRL = new Set(["c", "x", "a", "z", "f", "l", "r"]);
+
+/** The modifiers the remote browser is sent for a key: on a Mac, Cmd with one of those letters (and no Ctrl or Alt) is the Ctrl chord. */
+export function remoteModifiers(e: Modifiers & { key: string }, mac: boolean): Modifiers {
+    // Read the four flags out one by one: a keyboard event's own properties are not its modifiers, so it cannot be spread.
+    const own = { altKey: e.altKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, shiftKey: e.shiftKey };
+    if (!mac || !e.metaKey || e.ctrlKey || e.altKey || !CMD_AS_CTRL.has(e.key.toLowerCase())) return own;
+    return { ...own, ctrlKey: true, metaKey: false };
+}
+
+export function keyMessage(type: "down" | "up", e: Modifiers & { key: string; code: string; keyCode: number }, mac = false) {
+    const mods = remoteModifiers(e, mac);
+    return { t: "key", type, key: e.key, code: e.code, text: typedText({ key: e.key, ...mods }), vk: e.keyCode, mods: modifiers(mods) };
 }
 
 /** The most characters of a copy that are brought to the person's clipboard (the server's limit is in bytes). */
