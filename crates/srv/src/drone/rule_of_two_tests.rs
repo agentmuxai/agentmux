@@ -68,6 +68,47 @@ fn the_address_ends_at_the_first_slash_outside_a_reference() {
 }
 
 #[test]
+fn the_scheme_is_found_outside_a_reference() {
+    assert_eq!(address_of("{{trigger.url | default:https://api.example.com/path}}"), "{{trigger.url | default:https://api.example.com/path}}");
+    let get = graph(
+        &[("get", json!({ "kind": "api", "method": "GET", "url": "{{trigger.url | default:https://api.example.com/path}}", "headers": { "Authorization": "Bearer abc" } }))],
+        &[],
+    );
+    assert_eq!(broken(&get, &webhook()), ["get"]);
+}
+
+/// A graph with one Drone block that calls `callee` with `inputs`.
+fn caller(inputs: Value) -> DroneGraph {
+    graph(&[("call", json!({ "kind": "drone", "drone": "sub", "inputs": inputs }))], &[])
+}
+
+#[test]
+fn a_graph_moved_into_a_drone_it_calls_is_still_refused() {
+    let fetch = json!({ "kind": "api", "method": "GET", "url": "https://ci.example.com/log" });
+    let post = json!({ "kind": "api", "method": "POST", "url": "https://api.example.com/comments", "body": "{{fetch.body}}" });
+    let sub = graph(&[("fetch", fetch), ("post", post)], &[("fetch", "post")]);
+    let load = |id: &str, _v: Option<i64>| (id == "sub").then(|| ("Comment".to_string(), sub.clone()));
+    let calling = caller(json!({}));
+    assert!(check(&calling, &webhook()).is_empty(), "on its own the calling graph has nothing to refuse");
+    let found = check_tree(&calling, &webhook(), &load);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(found[0].why.contains("post:") && found[0].why.contains("Comment"), "{found:?}");
+    assert!(refuse(&calling, &webhook(), &load).is_err());
+    assert!(calls(&calling, "sub", &load) && !calls(&calling, "other", &load));
+    assert!(refuse(&calling, &webhook(), &|_, _| None).is_ok(), "a callee that is not there is for the runner to say");
+}
+
+#[test]
+fn what_a_caller_passes_in_is_clean_in_the_drone_it_calls() {
+    let rerun = json!({ "kind": "api", "method": "POST", "url": "https://ci.example.com/runs/{{trigger.run}}/rerun" });
+    let sub = graph(&[("rerun", rerun)], &[]);
+    let load = |id: &str, _v: Option<i64>| (id == "sub").then(|| ("Rerun".to_string(), sub.clone()));
+    assert!(check_tree(&caller(json!({ "run": "42" })), &webhook(), &load).is_empty());
+    let found = check_tree(&caller(json!({})), &webhook(), &load);
+    assert_eq!(found.len(), 1, "a name the caller did not pass is not clean: {found:?}");
+}
+
+#[test]
 fn an_error_edge_out_of_an_approval_is_not_an_approval() {
     // A no and a silence fail the Approval, and only its `error` edge takes them: the write on it runs when nobody approved.
     let mut g = graph(&[("ok", approval()), ("post", comment("{{trigger.title}}"))], &[("ok", "post")]);
@@ -195,9 +236,9 @@ fn a_command_and_a_callee_count_as_writes_and_a_read_only_agent_does_not() {
 #[test]
 fn a_graph_of_inside_nodes_and_a_timer_passes_and_the_refusal_says_every_node() {
     let quiet = graph(&[("t", json!({ "kind": "task", "title": "Look at the board", "target": "opaz" }))], &[]);
-    assert!(refuse(&quiet, &fields_of(None, &Map::new())).is_ok());
+    assert!(refuse(&quiet, &fields_of(None, &Map::new()), &|_, _| None).is_ok());
     let two = graph(&[("a", comment("{{trigger.x}}")), ("b", comment("{{trigger.y}}"))], &[]);
-    let said = refuse(&two, &webhook()).unwrap_err();
+    let said = refuse(&two, &webhook(), &|_, _| None).unwrap_err();
     assert!(said.starts_with("this drone cannot be turned on") && said.contains("a:") && said.contains("b:"), "{said}");
 }
 

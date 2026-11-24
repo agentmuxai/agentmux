@@ -704,5 +704,17 @@ async fn a_drone_job_that_breaks_the_rule_of_two_is_not_turned_on() {
     assert!(why.contains("Comment") || why.contains("is on"), "{why}");
     assert!(why.contains("post:") && why.contains("Approval"), "{why}");
     assert_eq!(agentmux_srv_core::backend::storage::drone_store::DroneStore::drone_get(&*state.id_store, &drone.id).unwrap().unwrap().graph.nodes.len(), 2, "the graph that passes is still the saved one");
+    // A drone this one calls is checked too, in what it is saved as and when it changes.
+    let mut inner = graph(vec![json!({ "id": "post", "kind": "api", "method": "POST", "url": "https://api.example.com/comments", "body": "{{trigger.title}}" })], vec![]);
+    inner.id = "inner".to_string();
+    inner.name = "Inner".to_string();
+    let inner = crate::server::drone_handlers::upsert_drone(&state, inner).unwrap();
+    let mut outer = graph(vec![json!({ "id": "call", "kind": "drone", "drone": inner.id })], vec![]);
+    outer.id = "outer".to_string();
+    outer.name = "Outer".to_string();
+    let outer = crate::server::drone_handlers::upsert_drone(&state, outer).unwrap();
+    let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(definition(json!({ "trigger": { "kind": "manual" }, "action": { "kind": "drone", "drone_id": outer.id } })))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "the drone it calls breaks the rule: {v}");
+    assert!(v["error"].as_str().unwrap().contains("Inner"), "{v}");
     state.cron_scheduler.cancel_job(uri.rsplit('/').next().unwrap());
 }

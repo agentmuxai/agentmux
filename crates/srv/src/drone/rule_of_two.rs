@@ -111,10 +111,25 @@ fn writes_outside(node: &FlowNode, kind: BlockKind) -> bool {
     }
 }
 
+/// The first `://` that is not inside a `{{reference}}`.
+fn scheme_end(url: &str) -> Option<usize> {
+    let mut i = 0;
+    while i < url.len() {
+        if url[i..].starts_with("{{") {
+            i = url[i + 2..].find("}}").map_or(url.len(), |close| i + 2 + close + 2);
+        } else if url[i..].starts_with("://") {
+            return Some(i + 3);
+        } else {
+            i += url[i..].chars().next().map_or(1, char::len_utf8);
+        }
+    }
+    None
+}
+
 /// The part of a request address that names where it goes: the scheme and the host. A `/`, `?` or `#` inside a
-/// `{{reference | filter:arg}}` does not end it.
+/// `{{reference | filter:arg}}` does not end it, and nor does a `://` inside one.
 fn address_of(url: &str) -> &str {
-    let after_scheme = url.find("://").map_or(0, |i| i + 3);
+    let after_scheme = scheme_end(url).unwrap_or(0);
     let bytes = url.as_bytes();
     let mut i = after_scheme;
     while i < bytes.len() {
@@ -342,9 +357,75 @@ pub fn check(graph: &DroneGraph, fields: &[PayloadField]) -> Vec<Finding> {
     findings
 }
 
+/// How deep a chain of Drone blocks calling drones is followed.
+const CALL_DEPTH: usize = 8;
+
+/// What a drone reads as `{{trigger.*}}` when another drone calls it: the names the caller passes. What a caller passes
+/// that is outside text is the caller's own finding (its Drone block reads it), so these count as clean here.
+fn callee_fields(inputs: &[(String, String)]) -> Vec<PayloadField> {
+    inputs
+        .iter()
+        .map(|(name, _)| PayloadField { path: name.clone(), kind: "any".to_string(), clean: true, note: "what the calling drone passed".to_string() })
+        .collect()
+}
+
+/// A drone `load` finds by id (and saved version): its name and graph.
+pub type LoadDrone<'a> = &'a dyn Fn(&str, Option<i64>) -> Option<(String, DroneGraph)>;
+
+/// `check`, and the same for every drone `graph` calls, however deep, a pinned version as pinned: moving a graph into a
+/// drone it calls does not get it past the rule. A finding in a callee names it.
+pub fn check_tree(graph: &DroneGraph, fields: &[PayloadField], load: LoadDrone) -> Vec<Finding> {
+    let mut findings = check(graph, fields);
+    let mut seen = HashSet::new();
+    check_callees(graph, load, &mut seen, 0, &mut findings);
+    findings
+}
+
+fn check_callees(graph: &DroneGraph, load: LoadDrone, seen: &mut HashSet<(String, Option<i64>)>, depth: usize, findings: &mut Vec<Finding>) {
+    if depth >= CALL_DEPTH {
+        return;
+    }
+    for node in graph.nodes.iter().filter(|n| kind_of(n) == Some(BlockKind::Drone)) {
+        let Ok(spec) = crate::drone::executor::blocks::call::parse(node) else { continue };
+        if !seen.insert((spec.drone.clone(), spec.version)) {
+            continue;
+        }
+        let Some((name, callee)) = load(&spec.drone, spec.version) else { continue };
+        for f in check(&callee, &callee_fields(&spec.inputs)) {
+            findings.push(Finding { node: node.id.clone(), why: format!("{} (in the drone {name:?}, which {} calls)", f.why, node.id) });
+        }
+        check_callees(&callee, load, seen, depth + 1, findings);
+    }
+}
+
+/// Whether `graph` calls the drone `id`, directly or through the drones it calls.
+pub fn calls(graph: &DroneGraph, id: &str, load: LoadDrone) -> bool {
+    fn walk(graph: &DroneGraph, id: &str, load: LoadDrone, seen: &mut HashSet<String>, depth: usize) -> bool {
+        if depth >= CALL_DEPTH {
+            return false;
+        }
+        for node in graph.nodes.iter().filter(|n| kind_of(n) == Some(BlockKind::Drone)) {
+            let Ok(spec) = crate::drone::executor::blocks::call::parse(node) else { continue };
+            if spec.drone == id {
+                return true;
+            }
+            if !seen.insert(spec.drone.clone()) {
+                continue;
+            }
+            if let Some((_, callee)) = load(&spec.drone, None) {
+                if walk(&callee, id, load, seen, depth + 1) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+    walk(graph, id, load, &mut HashSet::new(), 0)
+}
+
 /// The findings as one message for a refusal, or `Ok` when there are none.
-pub fn refuse(graph: &DroneGraph, fields: &[PayloadField]) -> Result<(), String> {
-    let findings = check(graph, fields);
+pub fn refuse(graph: &DroneGraph, fields: &[PayloadField], load: LoadDrone) -> Result<(), String> {
+    let findings = check_tree(graph, fields, load);
     if findings.is_empty() {
         return Ok(());
     }
