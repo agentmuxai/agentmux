@@ -1194,6 +1194,41 @@ function useCloseWhenTabEmpties(tabId: typeof atoms.activeTabId, windowLabel: ()
     });
 }
 
+const EMPTY_FLOATER_CHECK_MS = 1000;
+/** Ticks in a row a floater's tab must be empty before the backstop closes it (the saga's own close has had its turn). */
+export const EMPTY_FLOATER_TICKS = 2;
+
+/**
+ * The watcher above is a reactive effect. When the floater's own teardown throws inside Solid (the pane's views
+ * dispose in the same update that empties the tab), the runtime drops the queued effects and it never runs, which
+ * left an empty window behind, black, still showing the pane's name. This timer reads the tab's current value
+ * outside the reactive graph and closes the window itself, saying why.
+ */
+export function useCloseEmptyFloaterBackstop(tabId: typeof atoms.activeTabId, windowLabel: () => string): void {
+    let hadBlocks = false;
+    let emptyTicks = 0;
+    const timer = setInterval(() => {
+        const tid = tabId();
+        const label = windowLabel();
+        if (!tid || !label || redockInProgress()) {
+            emptyTicks = 0;
+            return;
+        }
+        const blockids = MOS.getObjectValue<Tab>(MOS.makeORef("tab", tid))?.blockids;
+        if (!blockids) return;
+        if (blockids.length > 0) {
+            hadBlocks = true;
+            emptyTicks = 0;
+            return;
+        }
+        if (!hadBlocks || ++emptyTicks < EMPTY_FLOATER_TICKS) return;
+        console.warn("[floating-pane] closing a floating window whose pane has left it (the empty-tab watcher did not run)", { label, tabId: tid });
+        clearInterval(timer);
+        getApi().closeWindowByLabel(label).catch((e) => console.error("[floating-pane] backstop close failed", e));
+    }, EMPTY_FLOATER_CHECK_MS);
+    onCleanup(() => clearInterval(timer));
+}
+
 function FloatingPaneWorkspaceElem(): JSX.Element {
     const tabId = atoms.activeTabId;
     const ws = atoms.workspace;
@@ -1211,6 +1246,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
     });
 
     useCloseWhenTabEmpties(tabId, windowLabel);
+    useCloseEmptyFloaterBackstop(tabId, windowLabel);
 
     // Pane-header drag — Windows: Win32BeginMoveTask host-side loop (PR #1276).
     // macOS + Linux: JS-driven get/set_window_position polling (see the
