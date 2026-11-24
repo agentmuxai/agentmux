@@ -14,6 +14,7 @@ import { followAgentNames } from "@/app/store/agent-names";
 import { pushNotification } from "@/app/store/global";
 import { takeFloatRequest } from "@/app/store/float-modifier";
 import { linkify } from "./entities/linkify";
+import { deadReason, requestFileCheck } from "./file-check-store";
 import { openEntity } from "./entities/registry";
 import type { Segment } from "./entities/types";
 import { hrefOf, webUrlOf } from "./entity-href";
@@ -43,14 +44,25 @@ function press(seg: LinkSegment, e: MouseEvent): void {
 
 function EntityLink(props: { seg: LinkSegment }): JSX.Element {
     const seg = () => props.seg;
+    const file = () => (seg().destination.kind === "file" ? (seg().destination as Extract<LinkSegment["destination"], { kind: "file" }>) : undefined);
+    const dead = () => {
+        const f = file();
+        return f ? deadReason(f.blockId, f.path) : seg().state === "dead" ? seg().reason : undefined;
+    };
+    const check = () => {
+        const f = file();
+        if (f) requestFileCheck(f.blockId, f.path);
+    };
     return (
         <a
             href={hrefOf(seg().destination)}
             class={`entity-link entity-link--${seg().kind}`}
-            classList={{ "entity-link--dead": seg().state === "dead" }}
-            aria-label={seg().name}
-            {...tip(seg().name)}
-            onClick={(e) => press(seg(), e)}
+            classList={{ "entity-link--dead": seg().state === "dead" || Boolean(dead()) }}
+            aria-label={dead() ?? seg().name}
+            {...tip(dead() ?? seg().name)}
+            onMouseEnter={check}
+            onFocus={check}
+            onClick={(e) => (dead() ? e.preventDefault() : press(seg(), e))}
             onAuxClick={(e) => {
                 e.stopPropagation();
                 const web = webUrlOf(seg().destination);

@@ -104,6 +104,8 @@ pub struct MintCtx<'a> {
     pub grant: &'a Grant,
     /// Already cleaned ([`clean_reason`]).
     pub reason: &'a str,
+    /// The caller's tag value, already checked (`CallerTag::check`); empty when the grant takes none.
+    pub tag: &'a str,
     pub seconds: u64,
     pub now_ms: i64,
 }
@@ -128,6 +130,8 @@ pub fn recipe_argv(ctx: &MintCtx<'_>) -> Vec<String> {
             .iter()
             .map(|arg| {
                 arg.replace("{reason}", ctx.reason)
+                    .replace("{tag_key}", ctx.grant.caller_tag.as_ref().map_or("", |t| t.key.as_str()))
+                    .replace("{tag}", ctx.tag)
                     .replace("{seconds}", &ctx.seconds.to_string())
                     .replace("{session}", &ctx.session_name())
                     .replace("{agent}", ctx.agent_slug)

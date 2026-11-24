@@ -21,7 +21,6 @@ export const OPEN_COMMAND_FOR_VIEW: Readonly<Record<string, string>> = {
     tower: "open:tower",
     kanban: "open:kanban",
     vault: "open:vault",
-    history: "open:history",
     audit: "open:audit",
     warden: "open:jobs",
     help: "open:help",

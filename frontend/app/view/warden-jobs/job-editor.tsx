@@ -6,7 +6,7 @@
 // sends it with `jobs.save`, which only the operator's own window may do. Dry run shows what the
 // definition would do and starts nothing. A template must be approved before a job is made from it.
 
-import { createMemo, createSignal, For, onMount, Show, type Accessor, type JSX, type Setter } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, onMount, Show, type Accessor, type JSX, type Setter } from "solid-js";
 import { createStore, reconcile, type SetStoreFunction } from "solid-js/store";
 
 import {
@@ -20,6 +20,10 @@ import {
     type SelectOption,
 } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
+import { onMuxEvent } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { sortByLastUsed } from "@/app/view/agent/agent-recency";
 import { useAgentList } from "@/app/view/agent/use-agent-list";
 import { refreshVault, vaultAvailable, vaultEntries } from "@/app/view/vault/vault-store";
@@ -91,8 +95,19 @@ interface EditorState {
     setConfirm: Setter<JobsSaveResult | null>;
     manifest: Accessor<JobTemplateInfo["manifest"]>;
     agentOptions: Accessor<SelectOption[]>;
+    droneOptions: Accessor<SelectOption[]>;
     nameOf: (id: string) => string;
     vault: () => readonly VaultEntryInfo[] | null;
+}
+
+/** The drones a job can run, by name. None when they can't be listed. */
+async function loadDroneOptions(): Promise<SelectOption[]> {
+    try {
+        const list = await RpcApi.ListDronesCommand(TabRpcClient, {});
+        return list.map((d) => ({ value: d.id, label: d.name || d.id }));
+    } catch {
+        return [];
+    }
 }
 
 function createEditorState(props: JobEditorProps): EditorState {
@@ -117,6 +132,11 @@ function createEditorState(props: JobEditorProps): EditorState {
             (a) => a.name
         ).map((a) => ({ value: a.id, label: a.name }))
     );
+    const [droneOptions, setDroneOptions] = createSignal<SelectOption[]>([]);
+    // The list follows drones made or removed while the editor is open.
+    const reloadDrones = () => void loadDroneOptions().then(setDroneOptions);
+    onMount(reloadDrones);
+    onCleanup(onMuxEvent(WpsEvent.DronesChanged, reloadDrones));
     const nameOf = (id: string) => agentOptions().find((o) => o.value === id)?.label ?? id;
     const vault = () => (vaultAvailable() ? (vaultEntries() ?? []) : null);
     return {
@@ -147,6 +167,7 @@ function createEditorState(props: JobEditorProps): EditorState {
         setConfirm,
         manifest,
         agentOptions,
+        droneOptions,
         nameOf,
         vault,
     };
@@ -215,7 +236,7 @@ function builtDefinition(ed: EditorState) {
     return b.errors.length > 0 ? null : b.definition;
 }
 
-async function saveJob(ed: EditorState, confirmNoCost = false): Promise<void> {
+async function saveJob(ed: EditorState, confirm: string | null = null): Promise<void> {
     ed.setFailure(null);
     const definition = builtDefinition(ed);
     if (!definition) return;
@@ -224,7 +245,8 @@ async function saveJob(ed: EditorState, confirmNoCost = false): Promise<void> {
         const res = await ed.props.model.save({
             ...(ed.draft.id ? { job_id: ed.draft.id } : {}),
             definition,
-            ...(confirmNoCost ? { confirm_no_cost: true } : {}),
+            ...(confirm === "no_cost" ? { confirm_no_cost: true } : {}),
+            ...(confirm === "turn_on" ? { confirm_turn_on: true } : {}),
         });
         if (res.needs_confirmation) ed.setConfirm(res);
         else ed.props.onClose();
@@ -382,6 +404,7 @@ function JobForm(p: { ed: EditorState }): JSX.Element {
                     draft={ed.draft}
                     set={ed.setDraft}
                     agents={ed.agentOptions()}
+                    drones={ed.droneOptions()}
                     templated={ed.draft.template != null}
                 />
                 <PolicySection draft={ed.draft} set={ed.setDraft} defaults={ed.props.defaults} />
@@ -394,14 +417,19 @@ function ConfirmNote(p: { ed: EditorState; result: JobsSaveResult }): JSX.Elemen
     return (
         <div class="warden-jobs-note" role="alert">
             {p.result.error}
+            <Show when={p.result.lines.length > 0}>
+                <ul class="warden-jobs-turn-on">
+                    <For each={p.result.lines}>{(line) => <li>{line}</li>}</For>
+                </ul>
+            </Show>
             <div class="warden-jobs-actions">
                 <Button
                     tone="danger"
                     icon="check"
                     busy={p.ed.busy() === "save"}
-                    onClick={() => void saveJob(p.ed, true)}
+                    onClick={() => void saveJob(p.ed, p.result.needs_confirmation)}
                 >
-                    Confirm and save
+                    {p.result.needs_confirmation === "turn_on" ? t("jobs.turnOn.confirm") : "Confirm and save"}
                 </Button>
                 <Button tone="quiet" onClick={() => p.ed.setConfirm(null)}>
                     Not now

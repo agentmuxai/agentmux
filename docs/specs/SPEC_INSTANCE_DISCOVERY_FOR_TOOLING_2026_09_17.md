@@ -1,5 +1,7 @@
 # SPEC: tooling must discover an instance, not assume a well-known port
 
+> **Update (2026-11-24):** an installed or portable build never writes the instance key or the host token to disk, and on start removes an `authkey.dev` an older build left in its data folder. Only a dev build (`task dev`) writes `authkey.dev`, as described below. An installed or portable build writes `instance.json` in the same folder instead: version, web and WebSocket endpoints, instance label, data folder, host pid, debug port and creation time, with nothing that authenticates a caller. A tool that needs the key for a non-dev build is given it on its command line. Sections below that describe the file in portable or installed builds are superseded by this note.
+
 **Author:** Opaz
 **Date:** 2026-09-17
 **Status:** implemented

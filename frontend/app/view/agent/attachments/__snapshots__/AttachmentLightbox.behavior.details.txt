@@ -19,12 +19,9 @@ initialFocus -> agent-attachment-lightbox__dialog agent-attachment-lightbox__dia
             "·"
             "1.1 MB"
             "·"
-            "12"
-            "pages"
+            "12 pages"
           <span class="facts">
-            "Text version extracted ("
-            "3.9 KB"
-            "); the agent gets both."
+            "Text version extracted (3.9 KB); the agent gets both."
           <span class="facts">
             "Scanned pages were skipped."
       <div class="agent-attachment-lightbox__bar">
@@ -60,8 +57,7 @@ initialFocus -> agent-attachment-lightbox__dialog agent-attachment-lightbox__dia
             "·"
             "2.0 KB"
             "·"
-            "1"
-            "page"
+            "1 page"
           <span class="warn">
             <i class="fa-solid fa-triangle-exclamation">
             "Contains macros. AgentMux never opens or runs them."

@@ -75,7 +75,7 @@ function deferred<T>(): Deferred<T> {
 }
 
 const templatesOf = (...templates: ReturnType<typeof mkTemplate>[]) => ({ templates, publishers: [], catalogs: [] });
-const saved = { ok: true, job_id: "new-1", notes: [], needs_confirmation: null, provider: null, error: null };
+const saved = { ok: true, job_id: "new-1", notes: [], needs_confirmation: null, provider: null, error: null, lines: [] };
 const STORED = {
     jobVersion: 1,
     id: "j1",
@@ -712,6 +712,27 @@ describe("save", () => {
         expect(note.closest('[role="alert"]')).not.toBeNull();
         fireEvent.click(btn("Not now"));
         expect(screen.queryByText(/codex doesn't report cost/)).toBeNull();
+    });
+
+    it("lists what a drone will do when it asks to be turned on, and sends the yes", async () => {
+        model.save.mockResolvedValueOnce({
+            ...saved,
+            ok: false,
+            needs_confirmation: "turn_on",
+            error: "Turning this drone on lets it change things outside AgentMux.",
+            lines: ["Starts only when someone runs it", "merge: sends POST https://api.example.com/merge"],
+        });
+        model.save.mockResolvedValueOnce(saved);
+        mount({ mode: "new" });
+        await fillBlank();
+        fireEvent.click(btn("Create job"));
+        await screen.findByText("merge: sends POST https://api.example.com/merge");
+        expect(screen.getByText("Starts only when someone runs it")).toBeTruthy();
+        expect(onClose).not.toHaveBeenCalled();
+        fireEvent.click(btn("Turn it on"));
+        await waitFor(() => expect(onClose).toHaveBeenCalled());
+        expect(model.save.mock.calls[1][0]).toMatchObject({ confirm_turn_on: true });
+        expect(model.save.mock.calls[1][0]).not.toHaveProperty("confirm_no_cost");
     });
 
     it("shows the Confirm and save button as busy while the confirmed save is sent", async () => {

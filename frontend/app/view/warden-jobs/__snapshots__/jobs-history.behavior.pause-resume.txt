@@ -11,8 +11,7 @@ loadRuns j1 before=- limit=50
         <span class="ui-pill ui-pill--warn">
           "Paused"
         <span class="warden-manager-dim">
-          "by"
-          "Builder"
+          "by Builder"
         <span class="warden-manager-dim">
           "→"
           "Builder"
@@ -105,8 +104,7 @@ loadRuns j1 before=- limit=50
         <span class="ui-pill ui-pill--neutral">
           "Ended"
         <span class="warden-manager-dim">
-          "by"
-          "Builder"
+          "by Builder"
         <span class="warden-manager-dim">
           "→"
           "Builder"

@@ -39,6 +39,10 @@ pub enum BlockKind {
     Join,
     /// Runs a fixed command line in a container.
     Run,
+    /// "Do this once for this key": the first run to reach it goes on, later ones take the other branch.
+    Once,
+    /// Stops the run until a person says yes or no.
+    Approval,
 }
 
 impl BlockKind {
@@ -60,6 +64,8 @@ impl BlockKind {
             "drone" => Some(Self::Drone),
             "join" => Some(Self::Join),
             "run" => Some(Self::Run),
+            "once" => Some(Self::Once),
+            "approval" => Some(Self::Approval),
             _ => None,
         }
     }

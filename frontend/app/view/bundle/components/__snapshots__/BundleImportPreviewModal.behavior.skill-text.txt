@@ -16,9 +16,7 @@
       <div class="bundle-import-hint">
         "A bundle named this already exists."
         <button type="button" class="ui-button ui-tone-accent ui-button--link">
-          "Use ""
-          "Release kit (2)"
-          "" instead"
+          "Use "Release kit (2)" instead"
     <section class="bundle-import-section">
       <label class="bundle-import-checkbox-row">
         <input type="checkbox" value="on" checked=true>
@@ -26,8 +24,7 @@
           "Include instructions"
       <div class="bundle-import-instructions-preview">
         <button type="button" class="ui-button ui-tone-accent ui-button--link">
-          "Show"
-          "preview"
+          "Show preview"
     <section class="bundle-import-section">
       <h3 class="bundle-import-section-title">
         "Context files"
@@ -55,8 +52,7 @@
           "A plain skill"
         <div class="bundle-import-skill-text-block">
           <button type="button" class="ui-button ui-tone-quiet wave-button">
-            "Show"
-            "skill text"
+            "Show skill text"
       <div class="bundle-import-skill-row">
         <label class="bundle-import-checkbox-row">
           <input type="checkbox" value="on" checked=true>
@@ -68,8 +64,7 @@
             <input placeholder="rename to import (leave blank to skip)" type="text" class="bundle-import-rename-input" value="">
         <div class="bundle-import-skill-text-block">
           <button type="button" class="ui-button ui-tone-quiet wave-button">
-            "Hide"
-            "skill text"
+            "Hide skill text"
           <pre class="bundle-import-skill-text">
             "Exists text."
       <div class="bundle-import-skill-row">
@@ -85,16 +80,11 @@
           "Duplicate"
         <div class="bundle-import-skill-text-block">
           <button type="button" class="ui-button ui-tone-quiet wave-button">
-            "Hide"
-            "skill text"
+            "Hide skill text"
           <pre class="bundle-import-skill-text">
             "Cut off…"
           <div class="bundle-import-hint bundle-import-hint-warn">
-            "Not fully shown —"
-            "8"
-            "of"
-            "5000"
-            "characters. The whole skill is imported if you tick it."
+            "Not fully shown — 8 of 5,000 characters. The whole skill is imported if you tick it."
       <div class="bundle-import-skill-row">
         <label class="bundle-import-checkbox-row">
           <input type="checkbox" value="on" checked=true>
@@ -126,8 +116,7 @@
             "1.2.0"
             "· by Acme"
         <div class="bundle-import-hint bundle-import-hint-warn">
-          "Can't be imported:"
-          "bundles can carry sandboxed widgets only"
+          "Can't be imported: bundles can carry sandboxed widgets only"
       <div class="bundle-import-skill-row" data-widget-id="acme.same">
         <label class="bundle-import-checkbox-row">
           <input type="checkbox" disabled="" value="on" checked=false>
@@ -150,9 +139,7 @@
             "1.2.0"
             "· by Acme"
         <div class="bundle-import-hint">
-          "Replaces version"
-          "1.0.0"
-          "you have."
+          "Replaces version 1.0.0 you have."
         <p class="bundle-import-item-description">
           "Not signed: AgentMux can't tell who made it."
         <p class="bundle-import-item-description">
@@ -186,10 +173,7 @@
       <h3 class="bundle-import-section-title">
         "Account requirements"
       <p class="bundle-import-requirements-summary">
-        "Depends on"
-        "2"
-        "account(s):"
-        "github (resolved), slack (not connected)"
+        "Depends on 2 account(s): github (resolved), slack (not connected)"
     <div class="bundle-import-warnings-banner">
       <button type="button" class="ui-close ui-close--sm bundle-import-warnings-dismiss" aria-label="Dismiss warnings">
         <i aria-hidden="true" class="fa-solid fa-xmark">
@@ -223,9 +207,7 @@
       <div class="bundle-import-hint">
         "A bundle named this already exists."
         <button type="button" class="ui-button ui-tone-accent ui-button--link">
-          "Use ""
-          "Release kit (2)"
-          "" instead"
+          "Use "Release kit (2)" instead"
     <section class="bundle-import-section">
       <label class="bundle-import-checkbox-row">
         <input type="checkbox" value="on" checked=true>
@@ -233,8 +215,7 @@
           "Include instructions"
       <div class="bundle-import-instructions-preview">
         <button type="button" class="ui-button ui-tone-accent ui-button--link">
-          "Show"
-          "preview"
+          "Show preview"
     <section class="bundle-import-section">
       <h3 class="bundle-import-section-title">
         "Context files"
@@ -262,8 +243,7 @@
           "A plain skill"
         <div class="bundle-import-skill-text-block">
           <button type="button" class="ui-button ui-tone-quiet wave-button">
-            "Hide"
-            "skill text"
+            "Hide skill text"
           <pre class="bundle-import-skill-text">
             "Plain text."
       <div class="bundle-import-skill-row">
@@ -277,8 +257,7 @@
             <input placeholder="rename to import (leave blank to skip)" type="text" class="bundle-import-rename-input" value="">
         <div class="bundle-import-skill-text-block">
           <button type="button" class="ui-button ui-tone-quiet wave-button">
-            "Hide"
-            "skill text"
+            "Hide skill text"
           <pre class="bundle-import-skill-text">
             "Exists text."
       <div class="bundle-import-skill-row">
@@ -294,16 +273,11 @@
           "Duplicate"
         <div class="bundle-import-skill-text-block">
           <button type="button" class="ui-button ui-tone-quiet wave-button">
-            "Hide"
-            "skill text"
+            "Hide skill text"
           <pre class="bundle-import-skill-text">
             "Cut off…"
           <div class="bundle-import-hint bundle-import-hint-warn">
-            "Not fully shown —"
-            "8"
-            "of"
-            "5000"
-            "characters. The whole skill is imported if you tick it."
+            "Not fully shown — 8 of 5,000 characters. The whole skill is imported if you tick it."
       <div class="bundle-import-skill-row">
         <label class="bundle-import-checkbox-row">
           <input type="checkbox" value="on" checked=true>
@@ -335,8 +309,7 @@
             "1.2.0"
             "· by Acme"
         <div class="bundle-import-hint bundle-import-hint-warn">
-          "Can't be imported:"
-          "bundles can carry sandboxed widgets only"
+          "Can't be imported: bundles can carry sandboxed widgets only"
       <div class="bundle-import-skill-row" data-widget-id="acme.same">
         <label class="bundle-import-checkbox-row">
           <input type="checkbox" disabled="" value="on" checked=false>
@@ -359,9 +332,7 @@
             "1.2.0"
             "· by Acme"
         <div class="bundle-import-hint">
-          "Replaces version"
-          "1.0.0"
-          "you have."
+          "Replaces version 1.0.0 you have."
         <p class="bundle-import-item-description">
           "Not signed: AgentMux can't tell who made it."
         <p class="bundle-import-item-description">
@@ -395,10 +366,7 @@
       <h3 class="bundle-import-section-title">
         "Account requirements"
       <p class="bundle-import-requirements-summary">
-        "Depends on"
-        "2"
-        "account(s):"
-        "github (resolved), slack (not connected)"
+        "Depends on 2 account(s): github (resolved), slack (not connected)"
     <div class="bundle-import-warnings-banner">
       <button type="button" class="ui-close ui-close--sm bundle-import-warnings-dismiss" aria-label="Dismiss warnings">
         <i aria-hidden="true" class="fa-solid fa-xmark">
@@ -431,9 +399,7 @@
       <div class="bundle-import-hint">
         "A bundle named this already exists."
         <button type="button" class="ui-button ui-tone-accent ui-button--link">
-          "Use ""
-          "Release kit (2)"
-          "" instead"
+          "Use "Release kit (2)" instead"
     <section class="bundle-import-section">
       <label class="bundle-import-checkbox-row">
         <input type="checkbox" value="on" checked=true>
@@ -441,8 +407,7 @@
           "Include instructions"
       <div class="bundle-import-instructions-preview">
         <button type="button" class="ui-button ui-tone-accent ui-button--link">
-          "Show"
-          "preview"
+          "Show preview"
     <section class="bundle-import-section">
       <h3 class="bundle-import-section-title">
         "Context files"
@@ -470,8 +435,7 @@
           "A plain skill"
         <div class="bundle-import-skill-text-block">
           <button type="button" class="ui-button ui-tone-quiet wave-button">
-            "Hide"
-            "skill text"
+            "Hide skill text"
           <pre class="bundle-import-skill-text">
             "Plain text."
       <div class="bundle-import-skill-row">
@@ -485,8 +449,7 @@
             <input placeholder="rename to import (leave blank to skip)" type="text" class="bundle-import-rename-input" value="">
         <div class="bundle-import-skill-text-block">
           <button type="button" class="ui-button ui-tone-quiet wave-button">
-            "Hide"
-            "skill text"
+            "Hide skill text"
           <pre class="bundle-import-skill-text">
             "Exists text."
       <div class="bundle-import-skill-row">
@@ -502,14 +465,9 @@
           "Duplicate"
         <div class="bundle-import-skill-text-block">
           <button type="button" class="ui-button ui-tone-quiet wave-button">
-            "Show"
-            "skill text"
+            "Show skill text"
           <div class="bundle-import-hint bundle-import-hint-warn">
-            "Not fully shown —"
-            "8"
-            "of"
-            "5000"
-            "characters. The whole skill is imported if you tick it."
+            "Not fully shown — 8 of 5,000 characters. The whole skill is imported if you tick it."
       <div class="bundle-import-skill-row">
         <label class="bundle-import-checkbox-row">
           <input type="checkbox" value="on" checked=true>
@@ -541,8 +499,7 @@
             "1.2.0"
             "· by Acme"
         <div class="bundle-import-hint bundle-import-hint-warn">
-          "Can't be imported:"
-          "bundles can carry sandboxed widgets only"
+          "Can't be imported: bundles can carry sandboxed widgets only"
       <div class="bundle-import-skill-row" data-widget-id="acme.same">
         <label class="bundle-import-checkbox-row">
           <input type="checkbox" disabled="" value="on" checked=false>
@@ -565,9 +522,7 @@
             "1.2.0"
             "· by Acme"
         <div class="bundle-import-hint">
-          "Replaces version"
-          "1.0.0"
-          "you have."
+          "Replaces version 1.0.0 you have."
         <p class="bundle-import-item-description">
           "Not signed: AgentMux can't tell who made it."
         <p class="bundle-import-item-description">
@@ -601,10 +556,7 @@
       <h3 class="bundle-import-section-title">
         "Account requirements"
       <p class="bundle-import-requirements-summary">
-        "Depends on"
-        "2"
-        "account(s):"
-        "github (resolved), slack (not connected)"
+        "Depends on 2 account(s): github (resolved), slack (not connected)"
     <div class="bundle-import-warnings-banner">
       <button type="button" class="ui-close ui-close--sm bundle-import-warnings-dismiss" aria-label="Dismiss warnings">
         <i aria-hidden="true" class="fa-solid fa-xmark">

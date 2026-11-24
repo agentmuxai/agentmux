@@ -30,6 +30,7 @@ mod misc;
 mod object;
 #[cfg(test)]
 mod object_tests;
+mod stop_requests;
 pub(crate) mod object_helpers;
 pub(crate) mod reducer_helpers;
 pub(crate) mod session_restore;
@@ -71,6 +72,7 @@ pub(crate) use layout_helpers::setup_torn_off_block_layout;
 pub(crate) use object_helpers::{schedule_agent_zoom_mirror, update_object_meta};
 pub(crate) use reducer_helpers::{dispatch_to_reducer, publish_events};
 pub(crate) use tab_lifecycle::handle_create_tab;
+pub(crate) use tear_off::{handle_redock_floating_pane, handle_tear_off_block};
 
 pub(super) async fn handle_service(
     State(state): State<AppState>,

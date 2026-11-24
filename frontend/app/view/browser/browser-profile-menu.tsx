@@ -50,6 +50,11 @@ async function openTabAs(blockId: string, url: string, identity: string | undefi
     }
 }
 
+/** Open a new tab in `model`'s pane, as the same person (Personal), at its page (or Home). */
+export function openNewTab(model: BrowserViewModel, home: string): void {
+    void openTabAs(model.blockId, newTabUrl(model.urlAtom(), home), undefined);
+}
+
 /** Open a new Incognito tab in `model`'s pane, at its page (or Home). */
 export function openIncognitoTab(model: BrowserViewModel, home: string): void {
     void openTabAs(model.blockId, newTabUrl(model.urlAtom(), home), newIncognitoIdentity());

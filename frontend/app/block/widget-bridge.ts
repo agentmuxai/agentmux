@@ -340,7 +340,7 @@ async function answer(host: BridgeHost, state: BridgeState, method: string, para
             // A section that is gone says where it went instead of opening something else.
             const retiredNow = !own && isObj(p.meta) ? retiredSection(String(p.view), String(p.meta[sectionKeyOf(String(p.view))])) : null;
             if (retiredNow) return fail(ERR.INVALID_PARAMS, `that section is gone: ${retiredNow}`);
-            const moved = !own && isObj(p.meta) ? movedMeta({ ...p.meta, view: p.view }) : undefined;
+            const moved = !own ? movedMeta({ ...(isObj(p.meta) ? p.meta : {}), view: p.view }) : undefined;
             const { view: movedView, ...movedRest } = moved ?? {};
             const openView = moved && movedView !== p.view ? (movedView as string) : p.view;
             const openMeta = moved && movedView !== p.view ? movedRest : isObj(p.meta) ? p.meta : {};

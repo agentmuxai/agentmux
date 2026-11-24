@@ -298,3 +298,76 @@ fn a_replay_takes_only_the_holders_notices_of_that_number() {
     replayed(&s, "a", 7, "lazo");
     assert_eq!(waits(&s, "a").1, "no_review", "the notice was for another agent's pull request");
 }
+
+/// [`flow_apply_with`] with `recent` standing for the notices srv kept.
+fn applied_against(s: &Store, n: &FlowNote, recent: &PrFlowSnapshot) -> usize {
+    let mut conn = s.conn().lock().unwrap();
+    let tx = conn.transaction().unwrap();
+    let changed = flow_apply_with(&tx, n, 300, recent).unwrap();
+    tx.commit().unwrap();
+    changed
+}
+
+fn kept_review(agent: &str, repo_id: u64, number: u64, at_ms: u64) -> ReviewFlowEvent {
+    ReviewFlowEvent {
+        id: format!("{agent}{number}"),
+        at_ms,
+        agent: agent.into(),
+        pr: PrRef { repo_id, number },
+        state: "approved".into(),
+        by: PrFlowBy::Bot,
+        head: Some("0123456789ab".into()),
+    }
+}
+
+#[test]
+fn learning_a_repository_id_replays_the_notice_that_was_left_unplaced() {
+    let (s, _d) = store();
+    card(&s, "a", "pell", "o/r", 7);
+    card(&s, "b", "pell", "o/other", 7);
+    card(&s, "c", "pell", "o/r", 9);
+    // The agent holds number 7 in two repositories: a notice for it is not guessed, and nothing is learned.
+    let early = note("pell", 42, 7, 100, review("muxreview", "approved", "0123456789ab"));
+    assert_eq!(s.work_card_pr_flow_apply(&early, 100).unwrap(), 0);
+    assert_eq!(waits(&s, "a").1, "no_review");
+
+    // Number 9 is in one repository only: its notice teaches id 42 for o/r, and the kept notice for number 7 is
+    // replayed onto o/r's row, and not onto the other repository's.
+    let recent = PrFlowSnapshot { review: vec![kept_review("pell", 42, 7, 100)], ..Default::default() };
+    let later = note("pell", 42, 9, 200, checks("passing", "h"));
+    assert!(applied_against(&s, &later, &recent) >= 1);
+
+    assert_eq!(s.work_card_prs("c").unwrap()[0].checks, "passing", "the notice itself landed");
+    let a = s.work_card_prs("a").unwrap().remove(0);
+    assert_eq!((a.review.as_str(), a.repo_id), ("approved", Some(42)), "the earlier notice reached o/r#7");
+    assert_eq!(s.work_card_prs("b").unwrap()[0].review, "none", "o/other#7 is not o/r");
+}
+
+#[test]
+fn a_kept_notice_is_not_applied_twice_when_it_is_the_notice_that_teaches_the_id() {
+    let (s, _d) = store();
+    card(&s, "a", "pell", "o/r", 7);
+    let recent = PrFlowSnapshot { review: vec![kept_review("pell", 42, 7, 100)], ..Default::default() };
+    let first = note("pell", 42, 7, 100, review("bot", "approved", "0123456789ab"));
+    assert_eq!(applied_against(&s, &first, &recent), 1, "one row changed, once");
+}
+
+#[test]
+fn a_new_link_takes_the_id_its_repository_already_has() {
+    let (s, _d) = store();
+    card(&s, "x", "lazo", "o/r", 3);
+    assert_eq!(s.work_card_pr_flow_apply(&note("lazo", 42, 3, 100, checks("passing", "h")), 100).unwrap(), 1);
+    assert_eq!(s.work_card_prs("x").unwrap()[0].repo_id, Some(42));
+
+    // pell then links number 7 of o/r and of o/other: a notice for id 42 and number 7 is o/r's, not a guess.
+    card(&s, "a", "pell", "o/r", 7);
+    s.work_card_pr_link("a", "o/other", 7, PrSource::Holder, 2).unwrap();
+    let rows = s.work_card_prs("a").unwrap();
+    assert_eq!(rows.iter().find(|p| p.repo == "o/r").unwrap().repo_id, Some(42), "inherited");
+    assert_eq!(rows.iter().find(|p| p.repo == "o/other").unwrap().repo_id, None, "a repository with no id learns none");
+
+    assert_eq!(s.work_card_pr_flow_apply(&note("pell", 42, 7, 200, review("muxreview", "approved", "h")), 200).unwrap(), 1);
+    let rows = s.work_card_prs("a").unwrap();
+    assert_eq!(rows.iter().find(|p| p.repo == "o/r").unwrap().review, "approved");
+    assert_eq!(rows.iter().find(|p| p.repo == "o/other").unwrap().review, "none");
+}

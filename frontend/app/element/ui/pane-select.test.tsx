@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DRAG_SLOP_PX, installPaneSelectGuard, OWNER_ATTR, paneOf, ROOT_ATTR } from "./pane-select";
 
 let uninstall: () => void;
@@ -125,6 +125,26 @@ describe("a selection that starts in a pane (drag)", () => {
         press(el("ta"), { pointerType: "touch" });
         pointer("pointermove", 1, el("tb"));
         expect(locked()).toBe(false);
+    });
+
+    it("sets nothing for a press on something that cannot start a selection (user-select: none), so a map or a button drag never restyles the document", () => {
+        const real = window.getComputedStyle.bind(window);
+        const spy = vi.spyOn(window, "getComputedStyle").mockImplementation((e: Element, pseudo?: string | null) => {
+            const style = real(e, pseudo);
+            return e.id === "tb" ? new Proxy(style, { get: (t, k) => (k === "userSelect" ? "none" : Reflect.get(t, k)) }) : style;
+        });
+        try {
+            press(el("tb"));
+            pointer("pointermove", 1, el("tb"));
+            expect(locked()).toBe(false);
+            expect(el("b").hasAttribute(OWNER_ATTR)).toBe(false);
+            // A press on text that can be selected still locks.
+            press(el("ta"));
+            pointer("pointermove", 1, el("tb"));
+            expect(locked()).toBe(true);
+        } finally {
+            spy.mockRestore();
+        }
     });
 
     it("moves the ownership with a new press (a second drag in another pane)", () => {

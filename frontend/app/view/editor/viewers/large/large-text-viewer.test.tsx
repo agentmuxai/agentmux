@@ -212,6 +212,30 @@ describe("the Large text viewer", () => {
         expect(document.querySelector('[data-line="3"] .large-text-text')?.textContent).toBe("after");
     });
 
+    it("shows the note that expands a cut line with the link hand", async () => {
+        serve(`short
+${"x".repeat(LINE_SHOWN_MAX + 500)}
+after
+`);
+        await mount();
+        expect(document.querySelector('[data-line="2"] button.large-text-hidden')?.classList.contains("ui-button--opens")).toBe(true);
+    });
+
+    it("shows the rest of a cut line when its note is clicked", async () => {
+        serve(`short
+${"x".repeat(LINE_SHOWN_MAX + 500)}
+after
+`);
+        await mount();
+        const note = () => document.querySelector('[data-line="2"] .large-text-hidden') as HTMLElement;
+        expect(document.querySelector('[data-line="2"] .large-text-text')?.textContent).toHaveLength(LINE_SHOWN_MAX + "…(+500 characters)".length);
+        fireEvent.click(note());
+        await settle();
+        expect(note()).toBeNull();
+        expect(document.querySelector('[data-line="2"] .large-text-text')?.textContent).toBe("x".repeat(LINE_SHOWN_MAX + 500));
+        expect(document.querySelector('[data-line="3"] .large-text-text')?.textContent).toBe("after");
+    });
+
     it("says an empty file is empty", async () => {
         serve("");
         await mount({ size: 0 });
@@ -237,6 +261,133 @@ describe("the Large text viewer", () => {
         first.unmount();
         await mount();
         expect(numbers()[0]).toBe(was);
+    });
+
+    it("follows the end of a log that grows while Follow is on, and stops when the reader scrolls away", async () => {
+        const [revision, setRevision] = createSignal(0);
+        render(() => (
+            <LargeTextViewer
+                path="C:/logs/big.log"
+                revision={revision()}
+                probe={{ size: FILE.length, mtime: 0, kind: "text", mime: "text/plain", read_only: false, text: { encoding: "utf-8", bom: "none" } }}
+                bar={{ viewer: "large", options: ["large", "info", "hex"], onReopenWith: () => {} }}
+            />
+        ));
+        await settle();
+        const follow = screen.getByRole("button", { name: "Follow" });
+        expect(follow.getAttribute("aria-pressed")).toBe("false");
+        // Off: a line that arrives leaves the view where it is.
+        serve(`${FILE}line 1001\n`);
+        setRevision(1);
+        await settle();
+        expect(numbers()[0]).toBe(1);
+        // On: the view goes to the end, and goes on to each new end.
+        fireEvent.click(follow);
+        await settle();
+        expect(follow.getAttribute("aria-pressed")).toBe("true");
+        expect(numbers()).toContain(1001);
+        serve(`${FILE}line 1001\nline 1002\nline 1003\n`);
+        setRevision(2);
+        await settle();
+        expect(numbers()).toContain(1003);
+        expect(facts()[0]).toMatch(/of 1,003$/);
+        // The reader scrolls to the top: following is over, and the next line doesn't pull them back.
+        key("Home", { ctrlKey: true });
+        await settle();
+        expect(follow.getAttribute("aria-pressed")).toBe("false");
+        expect(numbers()[0]).toBe(1);
+        serve(`${FILE}line 1001\nline 1002\nline 1003\nline 1004\n`);
+        setRevision(3);
+        await settle();
+        expect(numbers()[0]).toBe(1);
+    });
+
+    it("follows to the true end when the view is not a whole number of rows tall: the browser stops short of the row asked for", async () => {
+        Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get: () => ROW_H * VIEW_LINES + 17 });
+        const [revision, setRevision] = createSignal(0);
+        render(() => (
+            <LargeTextViewer
+                path="C:/logs/big.log"
+                revision={revision()}
+                probe={{ size: FILE.length, mtime: 0, kind: "text", mime: "text/plain", read_only: false, text: { encoding: "utf-8", bom: "none" } }}
+                bar={{ viewer: "large", options: ["large", "info", "hex"], onReopenWith: () => {} }}
+            />
+        ));
+        await settle();
+        // A scroller that ends where its content ends and says so in a scroll event, as a browser's does.
+        const el = grid();
+        let total = 1000;
+        let top = 0;
+        Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => total * ROW_H });
+        Object.defineProperty(el, "scrollTop", {
+            configurable: true,
+            get: () => top,
+            set: (v: number) => {
+                const next = Math.min(Math.max(0, el.scrollHeight - el.clientHeight), Math.max(0, v));
+                if (next === top) return;
+                top = next;
+                queueMicrotask(() => fireEvent.scroll(el));
+            },
+        });
+        const follow = screen.getByRole("button", { name: "Follow" });
+        fireEvent.click(follow);
+        await settle();
+        expect(follow.getAttribute("aria-pressed")).toBe("true");
+        expect(facts()[0]).toBe("Line 991 of 1,000");
+        serve(`${FILE}line 1001\n`);
+        total = 1001;
+        setRevision(1);
+        await settle();
+        expect(follow.getAttribute("aria-pressed")).toBe("true");
+        expect(facts()[0]).toBe("Line 992 of 1,001");
+    });
+
+    it("keeps following when the scroller gets a few pixels taller and the browser clamps it: a horizontal scrollbar going away is not the reader scrolling", async () => {
+        let height = ROW_H * VIEW_LINES + 3;
+        Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get: () => height });
+        const [revision, setRevision] = createSignal(0);
+        render(() => (
+            <LargeTextViewer
+                path="C:/logs/big.log"
+                revision={revision()}
+                probe={{ size: FILE.length, mtime: 0, kind: "text", mime: "text/plain", read_only: false, text: { encoding: "utf-8", bom: "none" } }}
+                bar={{ viewer: "large", options: ["large", "info", "hex"], onReopenWith: () => {} }}
+            />
+        ));
+        await settle();
+        const el = grid();
+        let total = 1000;
+        let top = 0;
+        Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => total * ROW_H });
+        Object.defineProperty(el, "scrollTop", {
+            configurable: true,
+            get: () => top,
+            set: (v: number) => {
+                const next = Math.min(Math.max(0, el.scrollHeight - el.clientHeight), Math.max(0, v));
+                if (next === top) return;
+                top = next;
+                queueMicrotask(() => fireEvent.scroll(el));
+            },
+        });
+        const follow = screen.getByRole("button", { name: "Follow" });
+        fireEvent.click(follow);
+        await settle();
+        expect(follow.getAttribute("aria-pressed")).toBe("true");
+        const atEnd = facts()[0];
+        // The content grew by a line, the scroller got 7 px taller (its scrollbar went), and the browser put its scrollTop back.
+        height += 7;
+        top = Math.min(top, el.scrollHeight - el.clientHeight);
+        fireEvent.scroll(el);
+        await settle();
+        expect(follow.getAttribute("aria-pressed")).toBe("true");
+        expect(facts()[0]).toBe(atEnd);
+        serve(`${FILE}line 1001\n`);
+        total = 1001;
+        setRevision(1);
+        await settle();
+        expect(follow.getAttribute("aria-pressed")).toBe("true");
+        expect(facts()[0]).toMatch(/of 1,001$/);
+        expect(numbers()).toContain(1001);
     });
 
     it("reads the file again when it changed on disk, and stays at the line it was at", async () => {
@@ -311,6 +462,31 @@ describe("the Large text viewer", () => {
         expect(searchText).toHaveBeenLastCalledWith({}, { path: "C:/logs/big.log", query: "LINE 5", regex: false, ignore_case: true, from: 0, backward: false });
         expect(markedLine()).toBe("5");
         expect(document.querySelector(".large-text-hit")?.textContent).toBe("line 5");
+    });
+
+    it("asks again at once when Match case or Regular expression is toggled with a text typed, and not with none", async () => {
+        await mount();
+        key("f", { ctrlKey: true });
+        await settle();
+        fireEvent.click(screen.getByRole("button", { name: "Match case" }));
+        await settle();
+        expect(searchText).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole("button", { name: "Match case" }));
+        fireEvent.input(findBox(), { target: { value: "LINE 5" } });
+        fireEvent.keyDown(findBox(), { key: "Enter" });
+        await settle();
+        expect(document.querySelector(".large-text-find-status")?.textContent).toBe("No match");
+        searchText.mockClear();
+        fireEvent.click(screen.getByRole("button", { name: "Match case" }));
+        await settle();
+        expect(searchText).toHaveBeenCalledTimes(1);
+        expect(searchText).toHaveBeenLastCalledWith({}, { path: "C:/logs/big.log", query: "LINE 5", regex: false, ignore_case: true, from: 0, backward: false });
+        expect(markedLine()).toBe("5");
+        searchText.mockClear();
+        fireEvent.click(screen.getByRole("button", { name: "Regular expression" }));
+        await settle();
+        expect(searchText).toHaveBeenCalledTimes(1);
+        expect(searchText).toHaveBeenLastCalledWith({}, { path: "C:/logs/big.log", query: "LINE 5", regex: true, ignore_case: true, from: 0, backward: false });
     });
 
     it("finds a regular expression on srv and marks what it matched", async () => {

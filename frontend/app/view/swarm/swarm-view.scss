@@ -102,6 +102,14 @@
     }
 }
 
+// Narrower, where the name would lose its room to the "quiet 22 min" note after the status chip: the note goes (the
+// Kanban card and the leader's note still say it), so the name keeps its words. The state word stays.
+@container swarm-tree (max-width: 260px) {
+    .swarm-tree .swarm-agent-row .swarm-quiet {
+        display: none;
+    }
+}
+
 // Narrower, where a seat badge would mostly be cut to its least width: the badge goes in every row. The name
 // then takes the room that is left, as a name with no badge does, so the row's other parts stay at its end.
 @container swarm-tree (max-width: 240px) {
@@ -308,6 +316,11 @@
         flex-shrink: 1;
         min-width: 0;
         overflow: hidden;
+
+        // With a "quiet 22 min" note after it the state keeps its whole word: the note, then the name, give up the width.
+        &:has(~ .swarm-quiet) {
+            flex-shrink: 0;
+        }
     }
 
     .swarm-status-countdown {
@@ -1013,6 +1026,7 @@
 .swarm-long-tool,
 .swarm-held,
 .swarm-build-slot,
+.swarm-quiet,
 .swarm-mcp-health {
     flex-shrink: 1;
     min-width: 0;
@@ -1021,6 +1035,12 @@
     font-size: var(--text-2xs);
     color: var(--secondary-text-color);
     white-space: nowrap;
+}
+
+// "quiet 22 min" gives up its width long before the status chip does: in a narrow row the state matters more, and the
+// note goes to an ellipsis (then to nothing) while "idle" stays whole.
+.swarm-quiet {
+    flex-shrink: 100;
 }
 
 // The tools down is a fault; being repaired is not yet.

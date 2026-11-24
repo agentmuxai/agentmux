@@ -9,8 +9,9 @@ import { revealInFileManagerLabel } from "@/app/util/file-manager-label";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import type { FsEntry } from "@/types/rpc/FsEntry";
 import { errorText, type FilesModel } from "./files-model";
-import { openInEditor, openTerminalHere, openWithOs, revealInOs } from "./files-open";
+import { openInEditor, openTerminalHere, revealInOs } from "./files-open";
 import { clipboard } from "./files-ops";
+import { isPinned, togglePin, type PlaceRef } from "./files-pins";
 import { CONFINED_MENU } from "./files-view-text";
 
 /** On a host, only what works there: nothing that hands its paths to
@@ -23,28 +24,40 @@ const forHost = (model: FilesModel, items: ContextMenuItem[]): ContextMenuItem[]
 };
 
 
+/** The menu item that pins a folder to Places, or takes it off. */
+const pinItem = (model: FilesModel, path: string): ContextMenuItem => {
+    const place: PlaceRef = { path, connection: model.connection() || undefined };
+    const pinned = isPinned(place);
+    return { type: "action", label: pinned ? "Unpin from Places" : "Pin to Places", icon: pinned ? MENU_ICON.unpin : MENU_ICON.pin, onSelect: () => togglePin(place) };
+};
+
 /** What a row menu calls back into the view for. */
 export type RowMenuActions = {
     openEntry: (entry: FsEntry) => void;
+    openWithDefaultApp: (entry: FsEntry) => void;
     openInNewTab: (dir: string) => void;
     copyPaths: (list: FsEntry[], quiet?: boolean) => void;
     askDeletePermanently: (list: FsEntry[]) => void;
 };
 
 export const buildRowMenu = (model: FilesModel, entry: FsEntry, actions: RowMenuActions): ContextMenuItem[] => {
-    const { openEntry, openInNewTab, copyPaths, askDeletePermanently } = actions;
-    const list = model.selectedEntries();
-    const many = list.length > 1;
+    const { openEntry, openWithDefaultApp, openInNewTab, copyPaths, askDeletePermanently } = actions;
+    // More than one row selected: the menu acts on the selection, as the topmost rows of it (a folder and the rows opened in it
+    // are the folder), which may be a single one.
+    const many = model.selectedEntries().length > 1;
+    const list = model.topmostSelected();
+    const count = list.length;
     const path = model.pathOf(entry.name);
     const fail = (err: unknown) => model.setStatus({ text: errorText(err), tone: "error" });
     const items: ContextMenuItem[] = [{ type: "action", label: "Open", icon: entry.is_dir ? MENU_ICON.openFolder : MENU_ICON.open, shortcut: "Enter", onSelect: () => openEntry(entry) }];
     if (entry.is_dir) {
         items.push({ type: "action", label: "Open in new tab", icon: MENU_ICON.open, shortcut: shortcutFor("files:openInNewTab"), onSelect: () => openInNewTab(path) });
+        items.push(pinItem(model, path));
     }
     if (!entry.is_dir) {
         items.push(
             { type: "action", label: "Open in Editor", icon: MENU_ICON.openInEditor, onSelect: () => void openInEditor(model, path).catch(fail) },
-            { type: "action", label: "Open with default app", icon: MENU_ICON.open, onSelect: () => void openWithOs(path, model.blockId).catch(fail) }
+            { type: "action", label: "Open with default app", icon: MENU_ICON.open, onSelect: () => openWithDefaultApp(entry) }
         );
     } else {
         items.push({ type: "action", label: "Open terminal here", icon: MENU_ICON.openTerminal, onSelect: () => void openTerminalHere(path, model.blockId, model.connection() || undefined).catch(fail) });
@@ -54,10 +67,10 @@ export const buildRowMenu = (model: FilesModel, entry: FsEntry, actions: RowMenu
         { type: "separator" },
         { type: "action", label: "Cut", icon: MENU_ICON.cut, shortcut: shortcutFor("files:cut"), onSelect: () => model.copyToClipboard("cut", many ? list : [entry]) },
         { type: "action", label: "Copy", icon: MENU_ICON.copy, shortcut: shortcutFor("files:copy"), onSelect: () => model.copyToClipboard("copy", many ? list : [entry]) },
-        { type: "action", label: many ? `Copy ${list.length} paths` : "Copy path", icon: MENU_ICON.copy, onSelect: () => copyPaths(many ? list : [entry]) },
+        { type: "action", label: many && count > 1 ? `Copy ${count} paths` : "Copy path", icon: MENU_ICON.copy, onSelect: () => copyPaths(many ? list : [entry]) },
         { type: "separator" },
         { type: "action", label: "Rename", icon: MENU_ICON.rename, shortcut: shortcutFor("files:rename"), disabled: many, onSelect: () => model.setRenaming(entry.name) },
-        { type: "action", label: many ? `Move ${list.length} items to Trash` : "Move to Trash", icon: MENU_ICON.delete, shortcut: shortcutFor("files:trash"), onSelect: () => void model.trash(many ? list : [entry]) },
+        { type: "action", label: many && count > 1 ? `Move ${count} items to Trash` : "Move to Trash", icon: MENU_ICON.delete, shortcut: shortcutFor("files:trash"), onSelect: () => void model.trash(many ? list : [entry]) },
         {
             type: "action",
             label: "Delete permanently…", icon: MENU_ICON.deletePermanently,
@@ -77,6 +90,7 @@ export const buildFolderMenu = (model: FilesModel, actions: Pick<RowMenuActions,
         { type: "action", label: "New folder", icon: MENU_ICON.newFolder, shortcut: shortcutFor("files:newFolder"), onSelect: () => void model.createNew("dir") },
         { type: "action", label: "New file", icon: MENU_ICON.newFile, onSelect: () => void model.createNew("file") },
         { type: "action", label: "New tab here", icon: MENU_ICON.add, shortcut: shortcutFor("files:newTabHere"), onSelect: () => openInNewTab(model.path()) },
+        pinItem(model, model.path()),
         {
             type: "action",
             label: clipboard()?.kind === "cut" ? `Paste (move ${clipboard()!.paths.length})` : clipboard() ? `Paste (copy ${clipboard()!.paths.length})` : "Paste",
@@ -90,6 +104,8 @@ export const buildFolderMenu = (model: FilesModel, actions: Pick<RowMenuActions,
         { type: "action", label: "Copy folder path", icon: MENU_ICON.copy, onSelect: () => void navigator.clipboard?.writeText(model.path()) },
         { type: "separator" },
         { type: "action", label: model.showHidden() ? "Hide hidden files" : "Show hidden files", icon: model.showHidden() ? MENU_ICON.hide : MENU_ICON.show, onSelect: () => model.toggleHidden() },
+        { type: "action", label: model.treeEnabled() ? "Show as a list" : "Show as a tree", icon: model.treeEnabled() ? "list" : "folder-tree", onSelect: () => model.toggleTree() },
+        { type: "action", label: model.columnsOn() ? "Show as a list" : "Show as columns", icon: model.columnsOn() ? "list" : "table-columns", onSelect: () => model.toggleColumns() },
         { type: "action", label: "Refresh", icon: MENU_ICON.refresh, shortcut: shortcutFor("files:refresh"), onSelect: () => model.refresh() },
         { type: "action", label: "Undo", icon: MENU_ICON.undo, shortcut: shortcutFor("files:undo"), onSelect: () => void model.undo() },
     ]);

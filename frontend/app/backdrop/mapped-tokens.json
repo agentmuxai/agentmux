@@ -24,6 +24,8 @@
         "--warning-text-color": "--ink-warning",
         "--success-color": "--ink-success",
         "--success-text-color": "--ink-success",
+        "--attention-color": "--ink-attention",
+        "--attention-text-color": "--ink-on-attention",
         "--hover-bg-color": "--ink-hover",
         "--grey-text-color": "--ink-faint"
     },

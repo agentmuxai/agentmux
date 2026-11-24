@@ -22,6 +22,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => {
     const createTab = vi.fn();
+    const reloadWindow = vi.fn();
     const openNewWindow = vi.fn(() => Promise.resolve());
     const openModal = vi.fn();
     const CommandPaletteModal = () => null;
@@ -32,6 +33,7 @@ const h = vi.hoisted(() => {
             openNewWindow,
             setKeyboardChordMode: vi.fn(),
             toggleDevtools: vi.fn(),
+            reloadWindow,
             openExternal: vi.fn(),
             closeWindow: vi.fn(() => Promise.resolve()),
         }),
@@ -68,7 +70,7 @@ const h = vi.hoisted(() => {
     // Dev mode (store/dev-mode.ts); a test can swap in a reactive source.
     const dev = { read: (): boolean => false };
     const registry = { getBlockComponentModel: () => null, getFocusedBlockId: () => null, openOrFocusPaneByView: vi.fn() };
-    return { registry, dev, workspaces, actions, createTab, openNewWindow, openModal, CommandPaletteModal, store, settings, caps, win, menu: { items: [] as MenuItem[], live: (): MenuItem[] => [], close: vi.fn() } };
+    return { registry, dev, workspaces, actions, createTab, reloadWindow, openNewWindow, openModal, CommandPaletteModal, store, settings, caps, win, menu: { items: [] as MenuItem[], live: (): MenuItem[] => [], close: vi.fn() } };
 });
 
 // keymodel.ts imports the store as "@/app/store/global", the menu as "@/store/global".
@@ -103,7 +105,27 @@ vi.mock("@/app/store/user-workspace", () => ({
     workspaceName: () => "Default Workspace",
 }));
 vi.mock("./workspaces", () => h.actions);
-vi.mock("@/app/store/command-registry", () => ({ commandRegistry: { run: vi.fn(() => false) } }));
+// The commands the menu names and runs by id, with the names and actions command-registry.ts gives them.
+vi.mock("@/app/store/command-registry", async () => {
+    const { openCommandPalette } = await import("@/app/store/open-command-palette");
+    const commands: Record<string, { label: string; execute: () => unknown }> = {
+        "tab:new": { label: "New Tab", execute: () => h.createTab() },
+        "window:new": { label: "New Window", execute: () => h.openNewWindow() },
+        "view:command-palette": { label: "Command Palette", execute: () => void openCommandPalette() },
+        "window:reload": { label: "Reload Window", execute: () => h.reloadWindow() },
+    };
+    return {
+        commandRegistry: {
+            get: (id: string) => commands[id],
+            // Like the real registry, a command that needs several windows declines on a host without them.
+            run: vi.fn((id: string) => {
+                if (!commands[id] || (id === "window:new" && !h.caps.multiWindow)) return false;
+                void commands[id].execute();
+                return true;
+            }),
+        },
+    };
+});
 vi.mock("@/app/hook/useVoiceInput", () => ({ getVoiceSession: vi.fn() }));
 vi.mock("@/util/host-caps", () => ({
     hostHas: (cap: string) => (cap === "multiWindow" ? h.caps.multiWindow : cap === "windowTransparency"),
@@ -145,6 +167,7 @@ vi.mock("@/app/element/flyoutmenu", () => ({
 
 import { formatCommand } from "@/app/keybindings/registry";
 import { registerGlobalKeys } from "@/app/store/keymodel";
+import { commandRegistry } from "@/app/store/command-registry";
 import { appHandleKeyDown, keyCommands } from "@/app/store/keymodel-dispatch";
 import { adaptFromReactOrNativeKeyEvent, setKeyUtilPlatform } from "@/util/keyutil";
 import { setPlatform } from "@/util/platformutil";
@@ -233,7 +256,9 @@ describe.each(["darwin", "win32", "linux"] as Platform[])("AgentMux logo menu sh
     describe.each(ITEMS)("$label", (spec) => {
         it("shows the command's shortcut from the shortcut table", () => {
             const mac = platform === "darwin" ? "mac" : "other";
-            expect(keyCommands.has(spec.command), `keymodel handles ${spec.command}`).toBe(true);
+            // The key runs the command through the registry when keymodel has no handler of its own.
+            const reachable = keyCommands.has(spec.command) || commandRegistry.get(spec.command) !== undefined;
+            expect(reachable, `the key reaches ${spec.command}`).toBe(true);
             expect(menuItem(spec.label).shortcut).toBe(formatCommand(spec.command, mac));
             expect(menuItem(spec.label).shortcut).toBe(spec.shown[platform]);
         });

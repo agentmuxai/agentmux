@@ -22,7 +22,6 @@ const COLOUR = /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|oklch|oklab)\(|\bcolor-mix\(/i
 
 /** Tokens the agent pane reads that stay a fixed colour inside a backdrop, and why that is right. */
 const KEEPS = {
-    "--attention-color": "an agent needs you: an identity colour, fixed on purpose (theme.scss)",
     "--shadow-lg": "a black drop shadow reads the same on any surface",
     "--window-close-hover-bg": "the Windows close-button red, fixed by the platform",
     "--window-close-press-bg": "the Windows close-button red, fixed by the platform",
@@ -97,7 +96,9 @@ describe("the agent pane inside a backdrop", () => {
 
     it("sees what it should: the scan finds the agent pane's files and a known fixed colour", () => {
         expect(agentSources().length).toBeGreaterThan(100);
-        expect(fixedColour.has("--attention-color")).toBe(true);
+        expect(fixedColour.has("--shadow-lg")).toBe(true);
+        // The attention magenta keeps its hue in a pane but is no longer a fixed colour: the scope gives it the ink that reads there.
+        expect(fixedColour.has("--attention-color")).toBe(false);
         expect(fixedColour.has("--main-text-color")).toBe(false);
     });
 });

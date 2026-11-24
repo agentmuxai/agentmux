@@ -41,6 +41,18 @@ export function useFilesLifecycle(fv: FilesLocal): void {
         )
     );
 
+    // Columns view: the folder chosen in a column opens as the next column a moment after the selection settles,
+    // so holding an arrow key doesn't list every folder it crosses.
+    createEffect(
+        on(
+            () => [model.columnsOn(), model.selection(), model.cols.activeColumn()] as const,
+            ([columns]) => {
+                if (!columns) return;
+                const timer = setTimeout(() => model.cols.sync(), 120);
+                onCleanup(() => clearTimeout(timer));
+            }
+        )
+    );
     // A long path shows its end: the folder you're in matters more than the
     // drive it's on. It is put there again whenever the row's width changes (a thinner pane, the filter
     // box opening, buttons moving into the More menu): a row that only got narrower would keep its start.

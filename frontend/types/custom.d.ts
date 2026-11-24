@@ -343,6 +343,12 @@ declare global {
         reload(blockId: string): Promise<void>;
         /** Stop the page's load (the toolbar's Reload turns into Stop while it loads). */
         stop(blockId: string): Promise<void>;
+        /** Search the pane's page for `text` (Ctrl/Cmd+F): the host highlights the matches and answers with
+         *  `browser-pane-find-result` events (count, current match). `findNext`: step to the next or previous
+         *  match of the same text (`forward`); otherwise a new search from the top. Empty text ends the search. */
+        find(blockId: string, text: string, opts?: { forward?: boolean; matchCase?: boolean; findNext?: boolean }): Promise<void>;
+        /** End the search in the pane's page; `clearSelection` drops the current match's selection too. */
+        stopFind(blockId: string, clearSelection?: boolean): Promise<void>;
         /** Stop a running download of the pane (the strip's Cancel); an id the host no longer holds does nothing. */
         cancelDownload(blockId: string, downloadId: number): Promise<void>;
         /** Save a link or an image of the page (the right-click menu): starts a download of `url` through the pane's
@@ -504,6 +510,8 @@ declare global {
         writeClipboardImage?(png: string): Promise<void>;
         /** Local paths of the files an OS drag just dropped into this window (`nativeFileDrop`). */
         consumeDroppedFilePaths(): Promise<string[]>;
+        /** Register the local files a drag out of AgentMux will carry: the nonce the drag holds (`file-drag-out.ts`), or null where this host cannot take files out to other apps. */
+        registerFileDrag?(paths: string[]): Promise<string | null>;
         /** The same paths while the drag is still hovering; doesn't consume them. */
         peekDroppedFilePaths?(): Promise<string[]>;
         /** Copy a local file into a directory; resolves to the destination path. */

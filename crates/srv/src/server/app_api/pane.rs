@@ -240,7 +240,7 @@ pub(super) async fn open_pane_floating(
 /// Tell the source window to open the floater. For an agent's open the event carries what it asked for, and
 /// the open waits for the window to say where the pane went (`placed`), or says `queued` when it does not
 /// answer in time.
-async fn announce_floater(
+pub(crate) async fn announce_floater(
     state: &AppState,
     source_ws_id: &str,
     new_ws_id: &str,
@@ -1319,6 +1319,7 @@ async fn open_checked(state: &AppState, mut cmd: CommandPaneOpenData) -> Result<
     if bring_back {
         if let Some((block_id, tab_id)) = super::pane_singleton::in_window(&mstore, &tab_id, &cmd.view) {
             tracing::info!(block_id = %block_id, view = %cmd.view, "pane.open: the window already has this pane");
+            super::pane_singleton::apply_to_existing(state, &block_id, &cmd.view, &meta).await;
             return Ok(PaneOpenResult::docked(block_id, tab_id, cmd.view, false));
         }
     }

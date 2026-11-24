@@ -16,7 +16,7 @@ pub use crate::browser_control_types::{
 };
 use std::collections::HashMap;
 
-pub use crate::place_args::PlaceArgs;
+pub use crate::place_args::{PanePlaceRequest, PlaceArgs};
 
 fn is_zero(n: &usize) -> bool {
     *n == 0

@@ -442,6 +442,9 @@ pub(crate) fn create_job(state: &AppState, caller: Option<&Caller>, body: Value,
     if let Err(e) = runnable_yet(&def) {
         return bad_request(e);
     }
+    if let Err(stop) = super::drone_turn_on::allowed(state, &def, origin, true) {
+        return stop.answer();
+    }
     let notes = match job_caps::apply_rules(state, &mut def, None, origin) {
         Ok(notes) => notes,
         Err(refused) => return refused,
@@ -673,7 +676,11 @@ pub(crate) async fn handle_host_jobs(
     if !super::ui_handlers::from_host(&state, &headers).await {
         return forbidden("only the AgentMux host can create, change or run a job that starts workers, or raise a spending cap").into_response();
     }
-    let origin = Origin { from_host: true, confirm_no_cost: body.get("confirm_no_cost").and_then(Value::as_bool) == Some(true) };
+    let origin = Origin {
+        from_host: true,
+        confirm_no_cost: body.get("confirm_no_cost").and_then(Value::as_bool) == Some(true),
+        confirm_turn_on: body.get("confirm_turn_on").and_then(Value::as_bool) == Some(true),
+    };
     match body.get("action").and_then(Value::as_str).unwrap_or("") {
         "create" => create_job(&state, None, body.get("definition").cloned().unwrap_or(Value::Null), origin).into_response(),
         "update" => {
@@ -884,7 +891,7 @@ pub(crate) fn patch_job(state: &AppState, caller: Option<&Caller>, id: &str, bod
         Err(refused) => return refused,
     };
     if let Some(action) = body.get("action").and_then(Value::as_str) {
-        return set_enabled(state, &store, id, action);
+        return set_enabled(state, &store, id, action, origin);
     }
     let Some(fields) = body.as_object() else { return bad_request("an edit is a JSON object of job fields") };
     if job.action_kind == "spawn" && !origin.from_host {
@@ -924,6 +931,10 @@ pub(crate) fn patch_job(state: &AppState, caller: Option<&Caller>, id: &str, bod
     if let Err(e) = runnable_yet(&def) {
         return bad_request(e);
     }
+    let asks = !before.enabled || fields.contains_key("action") || fields.contains_key("trigger");
+    if let Err(stop) = super::drone_turn_on::allowed(state, &def, origin, asks) {
+        return stop.answer();
+    }
     let notes = match job_caps::apply_rules(state, &mut def, Some(&before), origin) {
         Ok(notes) => notes,
         Err(refused) => return refused,
@@ -952,12 +963,21 @@ pub(crate) fn patch_job(state: &AppState, caller: Option<&Caller>, id: &str, bod
 }
 
 /// Pause or resume job `id`.
-fn set_enabled(state: &AppState, store: &Store, id: &str, action: &str) -> Answer {
+fn set_enabled(state: &AppState, store: &Store, id: &str, action: &str, origin: Origin) -> Answer {
     let enabled = match action {
         "resume" => true,
         "pause" => false,
         other => return bad_request(format!("unknown action '{other}' (use 'pause' or 'resume')")),
     };
+    if enabled {
+        if let Ok(Some(job)) = store.cron_get(id) {
+            let mut def = JobDefinition::from_job(&job);
+            def.enabled = true;
+            if let Err(stop) = super::drone_turn_on::allowed(state, &def, origin, true) {
+                return stop.answer();
+            }
+        }
+    }
     match store.cron_set_enabled(id, enabled) {
         Ok(true) => {}
         Ok(false) => return (StatusCode::NOT_FOUND, Json(json!({"error": "job not found"}))),

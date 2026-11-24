@@ -41,7 +41,7 @@ export const PaneSizeBadge = (props: PaneSizeBadgeProps): JSX.Element => {
     const inPage = (): boolean => !!props.blockId && isViewsPanesOnWindows() && getPaneRect(props.blockId) != null;
     createEffect(() => {
         const { w, h } = size();
-        if (!inPage() || !badgeEl) return;
+        if (w === 0 || !inPage() || !badgeEl) return;
         const css = getComputedStyle(badgeEl);
         void getApi().browserPanes.setBadge?.(props.blockId!, { text: `${w}×${h}`, color: css.color, background: css.backgroundColor, border: css.borderTopColor });
     });
@@ -52,12 +52,10 @@ export const PaneSizeBadge = (props: PaneSizeBadgeProps): JSX.Element => {
     onMount(() => {
         const el = props.target();
         if (!el) return;
-        // Seed with the border-box rect synchronously so the very first
-        // paint of the badge shows real numbers (without the seed the
-        // ResizeObserver fires once after mount, briefly showing 0×0).
-        const r = el.getBoundingClientRect();
-        setSize({ w: Math.round(r.width), h: Math.round(r.height) });
-
+        // No synchronous seed: every pane mounts a badge in the same moment a drag begins, and a
+        // measurement after each mount made the browser lay the page out once per pane. The observer's
+        // first callback (before the first paint, with the layout already done) gives the size, and
+        // the badge stays invisible until it has it, so it never shows 0×0.
         ro = new ResizeObserver((entries) => {
             for (const entry of entries) {
                 // borderBoxSize matches getBoundingClientRect (border-box).
@@ -84,7 +82,7 @@ export const PaneSizeBadge = (props: PaneSizeBadgeProps): JSX.Element => {
     });
 
     return (
-        <div class="pane-size-badge" aria-hidden="true" ref={(el) => (badgeEl = el)}>
+        <div class="pane-size-badge" aria-hidden="true" ref={(el) => (badgeEl = el)} style={size().w === 0 ? { visibility: "hidden" } : undefined}>
             {size().w}×{size().h}
         </div>
     );

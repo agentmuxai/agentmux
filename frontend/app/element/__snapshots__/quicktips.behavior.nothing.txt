@@ -15,9 +15,7 @@ tipLabel zoom mac
 <div>
   <div class="flex flex-col w-full gap-6 @container">
     <div class="quicktips-empty p-5 text-secondary">
-      "Nothing in Help matches “"
-      "zzz"
-      "”."
+      "Nothing in Help matches “zzz”."
 filter "  qqq  "
 shortcutFor pane:magnify
 shortcutFor pane:changeConnection
@@ -36,9 +34,7 @@ tipLabel zoom mac
 <div>
   <div class="flex flex-col w-full gap-6 @container">
     <div class="quicktips-empty p-5 text-secondary">
-      "Nothing in Help matches “"
-      "qqq"
-      "”."
+      "Nothing in Help matches “qqq”."
 filter ""
 keyPlatform
 getPlatform
@@ -231,10 +227,10 @@ shortcutFor pane:close
       <div class="flex flex-col gap-2 text-secondary text-sm">
         <p>
           "AgentMux is"
-          <b>
+          <strong>
             "alpha software"
           ". Features may be incomplete, unstable, or change between releases. AI agents generate code, text, and other outputs that may be"
-          <b>
+          <strong>
             "inaccurate, incomplete, or inappropriate"
           ". Always review agent outputs before using them."
         <p>

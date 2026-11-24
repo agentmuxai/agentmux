@@ -80,7 +80,7 @@ describe("AgentCard: title and caption", () => {
     it("names a catalogued provider by its CLI, whatever the definition is called", () => {
         const { container } = mount({ agent: makeAgent({ name: "My agent", description: "Mine" }) });
         expect(container.querySelector(".agent-card-title")).toHaveTextContent(/^Claude Code$/);
-        expect(container.querySelector(".agent-card-caption")).toHaveTextContent(/^Anthropic's coding agent$/);
+        expect(container.querySelector(".agent-card-caption")).toHaveTextContent(/^Your Claude plan · Anthropic's coding agent$/);
         expect(screen.getByRole("button", { name: "Launch Claude Code" })).toBeTruthy();
     });
 
@@ -316,14 +316,21 @@ describe("AgentCard: a narrow card", () => {
         expect(fresh.card).not.toHaveClass("agent-card--narrow");
     });
 
-    it("shows two chips and folds the rest into +N, and all three when wide", () => {
+    it("folds the chips a narrow card has no room for into +N, and shows them all when wide", () => {
         const seen = watchSize();
         const { container } = mount({ agent: makeAgent({ provider: "opencode" }), drift: "behind-pin" });
-        expect(chips(container)).toEqual(["Free", "Local", "Update available", "+1"]);
+        expect(chips(container)).toEqual(["Free", "Local", "Update available", "Preview"]);
         seen.fire!(width(250));
-        expect(chips(container)).toEqual(["Free", "Local", "+2"]);
-        seen.fire!(width(400));
         expect(chips(container)).toEqual(["Free", "Local", "Update available", "+1"]);
+        seen.fire!(width(400));
+        expect(chips(container)).toEqual(["Free", "Local", "Update available", "Preview"]);
+    });
+
+    it("keeps a narrow Preview card's Preview tag beside its Free and Local chips", () => {
+        const seen = watchSize();
+        const { container } = mount({ agent: makeAgent({ provider: "opencode" }) });
+        seen.fire!(width(250));
+        expect(chips(container)).toEqual(["Free", "Local", "Preview"]);
     });
 });
 

@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { chooseViewer, droppedViewerOptions, isProgramPath, TEXT_MAX_BYTES, viewerForDropped, viewerOptions, type FileProbe } from "./viewer-choice";
+import { chooseViewer, droppedViewerOptions, isProgramPath, TEXT_MAX_BYTES, textNeedsSwitch, viewerForDropped, viewerOptions, type FileProbe } from "./viewer-choice";
 
 const probe = (kind: string, size = 1000, extra: Partial<FileProbe> = {}): FileProbe => ({
     size,
@@ -69,6 +69,27 @@ describe("viewerOptions", () => {
         // Too large for the editor: the Large text viewer in place of the text editor.
         expect(viewerOptions(probe("other", TEXT_MAX_BYTES + 1))).toEqual(["hex", "info", "large"]);
         expect(viewerOptions(probe("text", TEXT_MAX_BYTES + 1))).toEqual(["large", "info", "hex"]);
+    });
+
+    it("gives a file shown as text the switch when it is not text, or is delimited", () => {
+        expect(textNeedsSwitch(probe("text"))).toBe(false);
+        expect(textNeedsSwitch({ ...probe("text"), mime: "text/csv" })).toBe(true);
+        expect(textNeedsSwitch(probe("image"))).toBe(true);
+    });
+
+    it("offers the Table viewer for a CSV or TSV file under the editor's cap, after Text and never first", () => {
+        expect(viewerOptions({ ...probe("text"), mime: "text/csv" })).toEqual(["text", "table", "info", "hex"]);
+        expect(viewerOptions({ ...probe("text"), mime: "text/tab-separated-values" })).toEqual(["text", "table", "info", "hex"]);
+        expect(viewerOptions({ ...probe("text", TEXT_MAX_BYTES + 1), mime: "text/csv" })).toEqual(["large", "info", "hex"]);
+        expect(chooseViewer({ ...probe("text"), mime: "text/csv" })).toBe("text");
+        expect(chooseViewer({ ...probe("text"), mime: "text/csv" }, "table")).toBe("table");
+        expect(chooseViewer(probe("text"), "table")).toBe("text");
+    });
+
+    it("offers the Large text viewer in place of Text for a small file whose first line was found too wide", () => {
+        const wide = { ...probe("text"), wideFirstLine: "C:/x/wide.log" };
+        expect(viewerOptions(wide)).toEqual(["large", "info", "hex"]);
+        expect(chooseViewer(wide, "text")).toBe("large");
     });
 });
 

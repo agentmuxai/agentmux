@@ -217,6 +217,8 @@ pub(super) fn launch_env(
         // and lines without a valid `NAME=` are skipped, and a repeated name takes its last value.
         for (k, v) in crate::backend::agent_env::effective(&env_blob.content) {
             if !env_vars.contains_key(&k) {
+                // A key written in the clear goes into the process as written; it is never written into a transcript.
+                crate::backend::transcript::withhold_sources::env_credential(&agent.id, &k, &v);
                 env_vars.insert(k, json!(v));
             }
         }

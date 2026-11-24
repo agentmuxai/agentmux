@@ -919,10 +919,10 @@ impl Handler {
             outcome_on_success,
             outcome_on_failure,
         };
-        if let Some(response) = self.deliver_structured(&delivery, &final_msg) {
-            return response;
-        }
-        self.deliver_to_pty(&delivery, &final_msg)
+        let response = self.deliver_structured(&delivery, &final_msg).unwrap_or_else(|| self.deliver_to_pty(&delivery, &final_msg));
+        // The quiet watch's record of an urgent message that names a task, made once the delivery is decided (backend::urgent_asks).
+        crate::backend::urgent_asks::note_delivery(&req, &response);
+        response
     }
 
     /// Deliver one of srv's own `[AgentMux]` system notes to `target_agent`

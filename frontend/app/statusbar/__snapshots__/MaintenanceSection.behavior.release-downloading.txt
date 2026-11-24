@@ -1,60 +1,63 @@
 rpc AppUpdateStatus
 -- downloading
 <div>
-  <div class="instance-panel-section-title">
-    "Maintenance"
-    <span class="maintenance-badge">
-      "↓ …"
-  <div class="maintenance-row">
-    <div class="maintenance-message">
-      <span aria-hidden="true" class="maintenance-icon maintenance-icon--working">
-        "↓"
-      <span class="maintenance-row-text maintenance-row-text--dim">
-        "Downloading v0.59.27… 25%"
-  <div class="maintenance-row">
-    <div class="maintenance-message">
-      <span class="maintenance-row-text maintenance-row-text--dim">
-        "Checked <time>"
-    <div class="maintenance-actions">
-      <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn" disabled="">
-        "Check again"
+  <div data-operator-only="">
+    <div class="instance-panel-section-title">
+      "Maintenance"
+      <span class="maintenance-badge">
+        "↓ …"
+    <div class="maintenance-row">
+      <div class="maintenance-message">
+        <span aria-hidden="true" class="maintenance-icon maintenance-icon--working">
+          "↓"
+        <span class="maintenance-row-text maintenance-row-text--dim">
+          "Downloading v0.59.27… 25%"
+    <div class="maintenance-row">
+      <div class="maintenance-message">
+        <span class="maintenance-row-text maintenance-row-text--dim">
+          "Checked <time>"
+      <div class="maintenance-actions">
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn" disabled="">
+          "Check again"
 rpc AppUpdateStatus
 -- downloading, size unknown
 <div>
-  <div class="instance-panel-section-title">
-    "Maintenance"
-    <span class="maintenance-badge">
-      "↓ …"
-  <div class="maintenance-row">
-    <div class="maintenance-message">
-      <span aria-hidden="true" class="maintenance-icon maintenance-icon--working">
-        "↓"
-      <span class="maintenance-row-text maintenance-row-text--dim">
-        "Downloading v0.59.27… 0%"
-  <div class="maintenance-row">
-    <div class="maintenance-message">
-      <span class="maintenance-row-text maintenance-row-text--dim">
-        "Checked <time>"
-    <div class="maintenance-actions">
-      <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn" disabled="">
-        "Check again"
+  <div data-operator-only="">
+    <div class="instance-panel-section-title">
+      "Maintenance"
+      <span class="maintenance-badge">
+        "↓ …"
+    <div class="maintenance-row">
+      <div class="maintenance-message">
+        <span aria-hidden="true" class="maintenance-icon maintenance-icon--working">
+          "↓"
+        <span class="maintenance-row-text maintenance-row-text--dim">
+          "Downloading v0.59.27… 0%"
+    <div class="maintenance-row">
+      <div class="maintenance-message">
+        <span class="maintenance-row-text maintenance-row-text--dim">
+          "Checked <time>"
+      <div class="maintenance-actions">
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn" disabled="">
+          "Check again"
 rpc AppUpdateStatus
 -- unpacking
 <div>
-  <div class="instance-panel-section-title">
-    "Maintenance"
-    <span class="maintenance-badge">
-      "↓ …"
-  <div class="maintenance-row">
-    <div class="maintenance-message">
-      <span aria-hidden="true" class="maintenance-icon maintenance-icon--working">
-        "↓"
-      <span class="maintenance-row-text maintenance-row-text--dim">
-        "Unpacking v0.59.27…"
-  <div class="maintenance-row">
-    <div class="maintenance-message">
-      <span class="maintenance-row-text maintenance-row-text--dim">
-        "Checked <time>"
-    <div class="maintenance-actions">
-      <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn" disabled="">
-        "Check again"
+  <div data-operator-only="">
+    <div class="instance-panel-section-title">
+      "Maintenance"
+      <span class="maintenance-badge">
+        "↓ …"
+    <div class="maintenance-row">
+      <div class="maintenance-message">
+        <span aria-hidden="true" class="maintenance-icon maintenance-icon--working">
+          "↓"
+        <span class="maintenance-row-text maintenance-row-text--dim">
+          "Unpacking v0.59.27…"
+    <div class="maintenance-row">
+      <div class="maintenance-message">
+        <span class="maintenance-row-text maintenance-row-text--dim">
+          "Checked <time>"
+      <div class="maintenance-actions">
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn" disabled="">
+          "Check again"
