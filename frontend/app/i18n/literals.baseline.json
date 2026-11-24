@@ -335,7 +335,6 @@
     "frontend/app/view/skill/skill-app.tsx": 22,
     "frontend/app/view/skill/skill-browse.tsx": 22,
     "frontend/app/view/skill/skill-import.tsx": 17,
-    "frontend/app/view/skill/skill-manager.tsx": 51,
     "frontend/app/view/skill/skill-matrix.tsx": 7,
     "frontend/app/view/ssh-approval/SshApprovalWindow.tsx": 2,
     "frontend/app/view/swarm/swarm-agent-card.tsx": 2,
