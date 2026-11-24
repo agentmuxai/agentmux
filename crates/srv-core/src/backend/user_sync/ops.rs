@@ -108,6 +108,10 @@ pub trait KeyDelivery {
     }
     /// Forgets the key this machine made for an epoch whose removal lost a fork to another entry.
     fn discard(&self, _collection: &str, _epoch: u32) {}
+    /// The epochs this machine holds a key for.
+    fn held(&self, _collection: &str) -> Vec<u32> {
+        Vec::new()
+    }
 }
 
 /// A machine waiting for a person to confirm its join on this member.
@@ -242,17 +246,23 @@ pub fn pull(ctx: &Ctx, caller: &str, req: &PullReq) -> Result<PullAns, OpError> 
     let mut records = log::since(ctx.conn, &req.collection, &req.vector, cap + 1)?;
     let mut more = records.len() > cap;
     records.truncate(cap);
+    more |= cap_bytes(&mut records);
+    Ok(PullAns { records, more, epoch: state.epoch, n: state.n })
+}
+
+/// Cuts a batch to the byte cap (a first record always stays): whether anything was cut.
+pub fn cap_bytes(records: &mut Vec<Record>) -> bool {
     let (mut bytes, mut keep) = (0, 0);
-    for r in &records {
+    for r in records.iter() {
         if keep > 0 && bytes + weight(r) > MAX_BATCH_BYTES {
-            more = true;
             break;
         }
         bytes += weight(r);
         keep += 1;
     }
+    let cut = keep < records.len();
     records.truncate(keep);
-    Ok(PullAns { records, more, epoch: state.epoch, n: state.n })
+    cut
 }
 
 /// The asker's side of the cap: an answer over what was asked, or over the byte cap, is refused whole.
@@ -362,7 +372,7 @@ fn epoch_to_chain(conn: &Connection, collection: &str, chain: &Chain) -> Result<
 
 /// A removal that lost a fork to another entry leaves no key behind for its epoch, whichever machine signed it or made
 /// the key: the winner's key is the one that counts, and is taken when it is offered.
-fn discard_lost_keys(keys: &dyn KeyDelivery, collection: &str, chain: &Chain, taken: &[Result<Taken, MemberError>]) {
+pub(super) fn discard_lost_keys(keys: &dyn KeyDelivery, collection: &str, chain: &Chain, taken: &[Result<Taken, MemberError>]) {
     for t in taken {
         if let Ok(Taken::Replaced(old)) = t {
             if matches!(old.change, Change::Remove { .. }) {
