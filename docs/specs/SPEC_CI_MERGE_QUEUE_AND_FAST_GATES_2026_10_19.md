@@ -147,6 +147,14 @@ On 2026-11-24 each queue entry took 13.5 to 18.5 minutes (the last twelve `merge
 - **Fail open (R2):** no sha, a failed fetch or diff, an empty list, an entry that is not a path, a classifier error: `rust=true`. The outputs are written once, after the decision. A workflow, a script, a manifest, a lock file, a Rust file or a path the classifier does not know runs the job. A release PR (R7) is not skipped in the queue: it changes manifests.
 - **`CI required`** reads a skipped `rust` job as passed, as for a pull request, and fails when it ran and failed or when `changes` failed.
 
+### Phase 10: the queue builds its test targets in one cargo call (2026-11-24)
+
+A queue entry that does change Rust took 14.4 minutes in the Ubuntu job (job 138636759675), of which 13.2 were cargo compiling in three staged calls of `scripts/ci-nextest-run.sh` and the 1,212 tests took 6.9 seconds. The verbose log of a queue-shaped run on a PR shows the core crate's test harness compiled in the first call and again in the third (3.5 minutes); the two compiles are the same unit built against a different build of one third-party dependency, and the third call is the only one that names mcp's binary and common's integration test. Why cargo resolves the dependency differently was not pinned down.
+
+- **What changes:** the queue builds with one `cargo nextest run --no-run` that names every target the run names (`--lib --bin agentmux-srv --bin agentmux-mcp --test spawn_no_window_inventory`), then the check of the other crates, then the run with the same arguments. One call has one set of targets, so each unit is built once whatever the cause was.
+- **Memory:** the staged calls existed so that the core's harness (about 10 GB) and the server layer's are not compiled at the same time on a 16 GB runner. The one call runs with one job (`CI_FINAL_JOBS`, as the PR lane's last build does), so only one rustc runs at a time. The resource trace, the memory ceiling, the time limits and the retry of a stalled attempt are unchanged.
+- **Unchanged:** the pull-request lane keeps its staged builds; the bindings checks and the tests the queue runs are the same.
+
 ## 6. Order and size
 
 1. Phase 0: #5118.
