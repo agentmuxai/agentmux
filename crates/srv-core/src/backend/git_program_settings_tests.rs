@@ -79,8 +79,6 @@ fn only_a_host_agent_in_such_a_folder_is_given_them_whatever_its_harness() {
             let there = env_of(&pane("host", provider, folder.path()));
             assert_eq!(value_of(&there, "core.fsmonitor").as_deref(), Some("false"), "{provider}");
             assert_eq!(there.get("KEPT").map(String::as_str), Some("yes"));
-            assert_eq!(there.get(GIT_NO_EXT_DIFF_ENV).map(String::as_str), Some("1"), "{provider}");
-            assert_eq!(there.get(GIT_FUNCTION_NAME).map(String::as_str), Some(GIT_FLAGS_FUNCTION_BODY), "{provider}: the diff step, where there is no other git function");
         }
         for (why, meta) in [
             ("a folder no container agent has to do with", pane("host", "claude", other.path())),
@@ -168,10 +166,6 @@ impl Folder {
             ("remote.viaext.url", format!("ext::sh {} ext %S", slashes(&script))),
             ("remote.viassh.url", "ssh://127.0.0.1:1/x".to_string()),
             ("remote.viagit.url", "git://127.0.0.1:9/x".to_string()),
-            ("remotes.grp", "viaup".to_string()),
-            ("remote.viaup.url", slashes(&remote)),
-            ("remote.viaup.uploadpack", mark("uploadpack")),
-            ("remote.viaup.receivepack", mark("receivepack")),
         ] {
             folder.git(&["config", key, &value], &HashMap::new());
         }
@@ -323,105 +317,6 @@ fn the_brokers_helper_still_answers_and_the_folders_does_not() {
     assert_eq!(folder.ran(), vec!["credential"], "what the folder's config runs by itself");
 }
 
-#[test]
-fn an_agents_own_git_function_is_kept_and_has_the_diff_step() {
-    let (data, folder) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    with_data_home(data.path(), || {
-        crate::backend::mcp_folder_rule::mark(&folder.path().to_string_lossy());
-        let mut env = HashMap::from([(GIT_FUNCTION_NAME.to_string(), agentmux_common::github_broker_shim::GIT_FUNCTION_BODY.to_string())]);
-        apply_for_spawn(&mut env, &pane("host", "claude", folder.path()));
-        assert_eq!(env[GIT_FUNCTION_NAME], agentmux_common::github_broker_shim::GIT_FUNCTION_BODY);
-        assert!(agentmux_common::github_broker_shim::GIT_FUNCTION_BODY.contains("--no-ext-diff"));
-        assert_eq!(env[GIT_NO_EXT_DIFF_ENV], "1");
-    });
-}
-
-/// The bash to run: Git's on Windows (a `bash` on the PATH can be the WSL one), else the PATH's.
-fn bash() -> String {
-    let git = std::env::var_os("ProgramFiles").map(|p| Path::new(&p).join("Git").join("bin").join("bash.exe"));
-    match git {
-        Some(path) if cfg!(windows) && path.exists() => path.to_string_lossy().into_owned(),
-        _ => "bash".to_string(),
-    }
-}
-
-/// Runs `script` in bash with `git` defined by `body`, in the folder's repository, with the settings an agent there is
-/// given; `flag` says whether the diff step is on. What it printed.
-fn through_the_function(folder: &Folder, body: &str, flag: bool, script: &str) -> String {
-    let mut env = as_env(entries_over(none, &HashMap::new()));
-    if flag {
-        env.insert(GIT_NO_EXT_DIFF_ENV.to_string(), "1".to_string());
-    }
-    let out = run_program(&bash(), &folder.repo(), folder.dir.path(), &["-c", &format!("git{body}\n{script}")], &env, "");
-    format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)).replace("\r\n", "\n")
-}
-
-#[test]
-fn the_function_keeps_the_folders_diff_programs_from_running_and_leaves_git_s_own_options_alone() {
-    let folder = Folder::new();
-    let repo = folder.repo();
-    let script = folder.dir.path().join("mark.sh");
-    std::fs::write(repo.join("b.txt"), "x\n").unwrap();
-    std::fs::write(repo.join(".gitattributes"), "a.txt diff=drvcmd\nb.txt diff=drvtext\nc.txt filter=fx\nd.txt diff=a=b\ne.txt filter=f=g\n").unwrap();
-    std::fs::write(repo.join("c.txt"), "c\n").unwrap();
-    std::fs::write(repo.join("d.txt"), "d\n").unwrap();
-    std::fs::write(repo.join("e.txt"), "e\n").unwrap();
-    std::fs::write(repo.join("w.txt"), "a\nb\nc\nd\ne\n").unwrap();
-    folder.git(&["add", "."], &HashMap::new());
-    folder.git(&["commit", "-q", "-m", "more"], &HashMap::new());
-    std::fs::write(repo.join("b.txt"), "mid\n").unwrap();
-    folder.git(&["commit", "-q", "-a", "-m", "again"], &HashMap::new());
-    std::fs::write(repo.join("a.txt"), "two\n").unwrap();
-    std::fs::write(repo.join("c.txt"), "cc\n").unwrap();
-    std::fs::write(repo.join("d.txt"), "dd\n").unwrap();
-    std::fs::write(repo.join("e.txt"), "ee\n").unwrap();
-    std::fs::write(repo.join("b.txt"), "y\n").unwrap();
-    std::fs::write(repo.join("w.txt"), "a\nb\nc \nd\nE\n").unwrap();
-    let commands = [
-        "git diff",
-        "git -C . diff",
-        "git -c core.abbrev=9 diff -U0",
-        "git --no-pager diff --stat -p",
-        "git log -p -1",
-        "git show",
-        "git format-patch -1 --stdout",
-        "git diff HEAD~1 HEAD",
-        "git blame b.txt",
-        "git reflog -p",
-        "git range-diff HEAD~2..HEAD~1 HEAD~1..HEAD",
-        "git status",
-        "git d",
-        "git dd -p",
-    ];
-    folder.git(&["config", "alias.d", "diff"], &HashMap::new());
-    folder.git(&["config", "alias.dd", "d"], &HashMap::new());
-    for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
-        for (key, name) in [("diff.external", "diffext"), ("diff.drvcmd.command", "drvcmd"), ("diff.drvtext.textconv", "drvtext"), ("filter.fx.clean", "filterclean"), ("filter.fx.process", "filterprocess"), ("diff.a=b.textconv", "eqtext"), ("filter.f=g.clean", "eqclean")] {
-            folder.git(&["config", key, &format!("sh {} {name}", slashes(&script))], &HashMap::new());
-            folder.forget();
-            through_the_function(&folder, body, false, "git diff");
-            assert_eq!(folder.ran(), vec![name], "{name}: without the step the folder's program runs");
-            folder.forget();
-            for command in commands {
-                through_the_function(&folder, body, true, command);
-            }
-            assert_eq!(folder.ran(), Vec::<String>::new(), "{name}: with the step none of {commands:?} runs it");
-            folder.git(&["config", "--unset", key], &HashMap::new());
-        }
-        // Git's own options still work through it.
-        let ignoring_whitespace = through_the_function(&folder, body, true, "git diff -w w.txt");
-        assert!(ignoring_whitespace.contains("-e") && ignoring_whitespace.contains("+E") && !ignoring_whitespace.contains("+c"), "{ignoring_whitespace}");
-        let no_context = through_the_function(&folder, body, true, "git diff -U0 w.txt");
-        assert!(!no_context.lines().any(|l| l.starts_with(' ')), "{no_context}");
-        let context = through_the_function(&folder, body, true, "git diff -U1 w.txt");
-        assert!(context.lines().any(|l| l == " d"), "{context}");
-        let stat = through_the_function(&folder, body, true, "git diff --stat");
-        assert!(stat.contains("a.txt") && stat.contains("b.txt"), "{stat}");
-        let plain = through_the_function(&folder, body, true, "git status --short");
-        assert!(plain.contains("a.txt"), "any other command is plain git: {plain}");
-    }
-}
-
 /// Runs `tool args` on a pseudoterminal in the folder's repository, as git sees a person's terminal (it pages
 /// only when its output is one). Ends, or fails, within a minute.
 fn on_a_terminal(folder: &Folder, tool: &str, args: &[&str], env: &HashMap<String, String>) -> String {
@@ -503,129 +398,6 @@ fn a_pager_the_folder_names_for_one_command_does_not_run_on_a_terminal() {
 }
 
 #[test]
-fn the_function_keeps_a_pager_the_folder_names_from_running_on_a_terminal() {
-    let folder = Folder::new();
-    let body = agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY;
-    let script = format!("git{body}\ngit log; git status");
-    let flag = HashMap::from([(GIT_NO_EXT_DIFF_ENV.to_string(), "1".to_string())]);
-    folder.forget();
-    on_a_terminal(&folder, &bash(), &["-c", &script], &HashMap::new());
-    assert_eq!(folder.ran(), vec!["fsmonitor", "pagerlog", "pagerstatus"], "without the step the folder's pagers run");
-    folder.forget();
-    on_a_terminal(&folder, &bash(), &["-c", &script], &flag);
-    let pagers: Vec<String> = folder.ran().into_iter().filter(|name| name.starts_with("pager")).collect();
-    assert_eq!(pagers, Vec::<String>::new(), "with it none of the folder's pagers does");
-}
-
-#[test]
-fn the_function_keeps_a_remotes_upload_and_receive_programs_from_running() {
-    let folder = Folder::new();
-    let commands = ["git fetch viaup", "git ls-remote viaup", "git pull viaup HEAD", "git push viaup HEAD:refs/heads/x"];
-    folder.git(&["config", "alias.fa", "fetch --all"], &HashMap::new());
-    folder.git(&["config", "alias.fm", "fetch --multiple viaup"], &HashMap::new());
-    folder.git(&["config", "alias.ru", "remote update"], &HashMap::new());
-    let remote_commands = ["git remote update viaup", "git remote show viaup", "git remote prune viaup", "git remote -v update", "git remote set-head viaup -a", "git remote add -f other ../remote.git", "git remote add --fe other ../remote.git", "git remote add -ft main other ../remote.git", "git fetch --al", "git fetch --mu viaup", "git pull --al", "git --attr-source HEAD fetch --all", "git fa", "git fm", "git ru", "git fetch --all", "git fetch --multiple viaup", "git pull --all", "git fetch grp"];
-    for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
-        folder.forget();
-        for command in commands {
-            through_the_function(&folder, body, false, command);
-        }
-        assert_eq!(folder.ran(), vec!["receivepack", "uploadpack"], "without the step the remote's programs run");
-        folder.forget();
-        for command in commands {
-            through_the_function(&folder, body, true, command);
-        }
-        assert_eq!(folder.ran(), Vec::<String>::new(), "with it none of {commands:?} runs them");
-    }
-    for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
-        folder.forget();
-        for command in remote_commands {
-            let said = through_the_function(&folder, body, true, command);
-            assert!(said.contains("is not run while"), "{command}: {said}");
-        }
-        assert_eq!(folder.ran(), Vec::<String>::new(), "with it none of {remote_commands:?} runs them");
-    }
-    folder.git(&["config", "fetch.all", "true"], &HashMap::new());
-    for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
-        folder.forget();
-        through_the_function(&folder, body, false, "git fetch");
-        assert_eq!(folder.ran(), vec!["uploadpack"], "a fetch of every remote, by the folder's own setting, runs the remote's program");
-        folder.forget();
-        through_the_function(&folder, body, true, "git fetch");
-        assert_eq!(folder.ran(), Vec::<String>::new(), "with the step it fetches the one remote and runs none");
-    }
-    folder.git(&["config", "--unset", "fetch.all"], &HashMap::new());
-    let pushed = through_the_function(&folder, agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, true, "git push viaup HEAD:refs/heads/y && git ls-remote viaup");
-    assert!(pushed.contains("refs/heads/y"), "a push still works through it: {pushed}");
-}
-
-#[test]
-fn the_function_leaves_the_reflog_subcommands_working() {
-    let folder = Folder::new();
-    for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
-        let out = through_the_function(&folder, body, true, "git reflog show -1 && git reflog exists HEAD && git reflog expire --all --dry-run && git reflog list && git reflog HEAD -1 && git reflog -1 && echo reflog-ok");
-        assert!(out.contains("reflog-ok"), "{out}");
-    }
-}
-
-#[test]
-fn the_function_keeps_a_merge_driver_the_folder_names_from_running() {
-    let folder = Folder::new();
-    let repo = folder.repo();
-    std::fs::write(repo.join(".gitattributes"), "m.txt merge=mx\n").unwrap();
-    std::fs::write(repo.join("m.txt"), "base\n").unwrap();
-    folder.git(&["add", "."], &HashMap::new());
-    folder.git(&["commit", "-q", "-m", "m0"], &HashMap::new());
-    folder.git(&["switch", "-q", "-c", "other"], &HashMap::new());
-    std::fs::write(repo.join("m.txt"), "theirs\n").unwrap();
-    folder.git(&["commit", "-q", "-a", "-m", "m1"], &HashMap::new());
-    folder.git(&["switch", "-q", "-"], &HashMap::new());
-    std::fs::write(repo.join("m.txt"), "mine\n").unwrap();
-    folder.git(&["commit", "-q", "-a", "-m", "m2"], &HashMap::new());
-    let script = folder.dir.path().join("mark.sh");
-    folder.git(&["config", "merge.mx.driver", &format!("sh {} mergedriver %O %A %B", slashes(&script))], &HashMap::new());
-    for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
-        folder.forget();
-        through_the_function(&folder, body, false, "git merge other; git merge --abort");
-        assert_eq!(folder.ran(), vec!["mergedriver"], "without the step the folder's merge driver runs");
-        folder.forget();
-        through_the_function(&folder, body, true, "git merge other; git merge --abort");
-        assert_eq!(folder.ran(), Vec::<String>::new(), "with it none runs");
-    }
-}
-
-#[test]
-fn the_function_does_not_run_an_alias_of_the_folder_that_names_a_program() {
-    let folder = Folder::new();
-    let script = folder.dir.path().join("mark.sh");
-    folder.git(&["config", "alias.rn", &format!("!sh {} aliasrun", slashes(&script))], &HashMap::new());
-    folder.git(&["config", "alias.opt", "--no-pager status"], &HashMap::new());
-    folder.git(&["config", "alias.ruq", "remote \"update\""], &HashMap::new());
-    folder.git(&["config", "alias.faq", "fetch \"--all\""], &HashMap::new());
-    folder.git(&["config", "alias.c1", "c2"], &HashMap::new());
-    folder.git(&["config", "alias.c2", "c3"], &HashMap::new());
-    folder.git(&["config", "alias.c3", "c4"], &HashMap::new());
-    folder.git(&["config", "alias.c4", "c5"], &HashMap::new());
-    folder.git(&["config", "alias.c5", "c6"], &HashMap::new());
-    folder.git(&["config", "alias.c6", "diff"], &HashMap::new());
-    folder.git(&["config", "alias.rus", "remote 'update'"], &HashMap::new());
-    folder.git(&["config", "alias.rub", "remote \\update"], &HashMap::new());
-    for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
-        folder.forget();
-        through_the_function(&folder, body, false, "git rn");
-        assert_eq!(folder.ran(), vec!["aliasrun"], "without the step the folder's alias runs its program");
-        folder.forget();
-        for command in ["git rn", "git opt", "git ruq", "git faq", "git rus", "git rub", "git c1", "git fetch --recurse-submodules viaup", "git pull --rec viaup"] {
-            let said = through_the_function(&folder, body, true, command);
-            assert!(said.contains("is not run"), "{command}: {said}");
-        }
-        assert_eq!(folder.ran(), Vec::<String>::new(), "with the step no alias of the folder runs a program");
-        let status = through_the_function(&folder, body, true, "git status --short && echo plain-ok");
-        assert!(status.contains("plain-ok"), "any other command is plain git: {status}");
-    }
-}
-
-#[test]
 fn git_in_the_folder_does_not_run_the_ssh_signing_key_command_its_config_names() {
     let folder = Folder::new();
     for (key, value) in [("gpg.format", "ssh"), ("commit.gpgsign", "true")] {
@@ -638,25 +410,4 @@ fn git_in_the_folder_does_not_run_the_ssh_signing_key_command_its_config_names()
     let given = as_env(entries_over(none, &HashMap::new()));
     folder.git(&["commit", "--allow-empty", "-q", "-m", "signed"], &given);
     assert_eq!(folder.ran(), Vec::<String>::new(), "with them it does not");
-}
-
-#[test]
-fn the_function_does_not_fetch_a_submodule_whose_own_configuration_names_a_program() {
-    let folder = Folder::new();
-    let (repo, script) = (folder.repo(), folder.dir.path().join("mark.sh"));
-    let env = HashMap::new();
-    let added = folder.git(&["-c", "protocol.file.allow=always", "submodule", "add", "-q", &slashes(&repo.join(".git")), "sm"], &env);
-    folder.git(&["config", "protocol.file.allow", "always"], &env);
-    folder.git(&["config", "fetch.recurseSubmodules", "true"], &env);
-    folder.git(&["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"], &env);
-    folder.git(&["-C", "sm", "config", "protocol.file.allow", "always"], &env);
-    folder.git(&["-C", "sm", "config", "remote.origin.uploadpack", &format!("sh {} smup", slashes(&script))], &env);
-    for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
-        folder.forget();
-        through_the_function(&folder, body, false, "git fetch origin");
-        assert!(folder.ran().contains(&"smup".to_string()), "without the step the submodule's program runs: {:?} {added}", folder.ran());
-        folder.forget();
-        through_the_function(&folder, body, true, "git fetch origin");
-        assert!(!folder.ran().contains(&"smup".to_string()), "with it the submodule is not fetched: {:?}", folder.ran());
-    }
 }

@@ -26,21 +26,13 @@
 //! - `credential.helper` empty, first of the entries, which clears every helper the files named, so the helpers the
 //!   environment lists after it (the GitHub broker's, under `credential.<url>.helper`) are the only ones; a
 //!   `credential.helper` the environment itself lists is left;
-//! - `GIT_PROXY_COMMAND` empty (no proxy command), unless the environment already has a value;
-//! - the agent's `git` shell function (`agentmux_common::github_broker_shim`), which sets the folder's
-//!   `diff.<driver>.textconv` and `filter.<name>.clean`, `smudge` and `process` to `cat` (the last to nothing) and
-//!   `merge.<name>.driver` to `false` on the command line, `fetch.all` to `false` for `fetch` and `pull`, refuses `fetch` of all remotes, several or a group and `remote update`, `show`, `prune`,
-//!   `set-head` and `add -f` while the folder names a remote's `uploadpack` or `receivepack`, and adds `--no-pager` to every
-//!   command, `--no-ext-diff` and `--no-textconv` to `diff`, `log`, `show`, `format-patch`, `whatchanged`, `reflog`
-//!   and `blame`, `--upload-pack=git-upload-pack` to `fetch`, `pull`, `ls-remote` and `clone`, and
-//!   `--receive-pack=git-receive-pack` to `push`.
+//! - `GIT_PROXY_COMMAND` empty (no proxy command), unless the environment already has a value.
 
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use agentmux_common::github_broker_shim::{GIT_FLAGS_FUNCTION_BODY, GIT_FUNCTION_NAME, GIT_NO_EXT_DIFF_ENV};
 use agentmux_common::win32::NoWindow;
 
 use crate::backend::publish_guard::{git_config_entries, git_config_has, git_config_prepend};
@@ -177,8 +169,6 @@ pub fn apply_for_spawn(env: &mut HashMap<String, String>, block_meta: &crate::ba
     }
     let entries = entries_over(|k| env.get(k).cloned().or_else(|| std::env::var(k).ok()), &persons_values());
     env.extend(entries);
-    env.insert(GIT_NO_EXT_DIFF_ENV.to_string(), "1".to_string());
-    env.entry(GIT_FUNCTION_NAME.to_string()).or_insert_with(|| GIT_FLAGS_FUNCTION_BODY.to_string());
 }
 
 #[cfg(test)]
