@@ -970,6 +970,21 @@ describe("the Files pane: preview and filter (Phase 2a)", () => {
         await waitFor(() => expect(v.container.querySelector(".files-notice")).toBeNull());
     });
 
+    it("takes Enter and Space on a notice button as pressing it, not as opening the selection or the preview", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        v.model.setFilter("zzz");
+        await waitFor(() => expect(v.container.querySelector(".files-notice button")).not.toBeNull());
+        const button = v.container.querySelector(".files-notice button")!;
+        const preview = v.model.showPreview();
+        // Not prevented: the browser's own activation of the button (a click) goes ahead.
+        expect(fireEvent.keyDown(button, { key: "Enter" })).toBe(true);
+        expect(fireEvent.keyDown(button, { key: " " })).toBe(true);
+        expect(v.model.showPreview()).toBe(preview);
+        // The list's own Space still toggles the preview.
+        expect(fireEvent.keyDown(v.list(), { key: " " })).toBe(false);
+    });
+
     it("a new folder clears the filter", async () => {
         const v = mount();
         await waitFor(() => expect(v.names()).toHaveLength(4));
@@ -2213,6 +2228,8 @@ describe("the Files pane: find in subfolders", () => {
         v.model.setFilter("util");
         await waitFor(() => expect(v.names()).toEqual(["util.ts"]));
         expect(where(v)).toEqual(["src/lib"]);
+        // The folder is whole in its tooltip, however little of it the row has room for.
+        expect(v.container.querySelector(".files-rows .files-where")?.getAttribute("data-hover-tip")).toBe("src/lib");
         expect(v.model.pathOf("src/lib/util.ts")).toBe(`${LIB}\\util.ts`);
         // Folders and files both match, best first.
         v.model.setFilter("lib");
