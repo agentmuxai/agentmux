@@ -249,6 +249,35 @@ fn the_settings_are_what_git_reads_for_the_programs_a_person_is_not_present_for(
 }
 
 #[test]
+fn a_helper_list_the_environment_carries_without_a_reset_is_put_behind_one() {
+    let carried = HashMap::from([
+        ("GIT_CONFIG_COUNT".to_string(), "1".to_string()),
+        ("GIT_CONFIG_KEY_0".to_string(), "credential.helper".to_string()),
+        ("GIT_CONFIG_VALUE_0".to_string(), "broker".to_string()),
+    ]);
+    let mut env = carried.clone();
+    env.extend(entries_over(|k| carried.get(k).cloned(), &HashMap::new()));
+    let all = pairs(&env);
+    assert_eq!(&all[..2], &[("credential.helper".into(), String::new()), ("credential.helper".into(), "broker".into())], "the reset first, the carried helper after it");
+}
+
+#[test]
+fn the_openpgp_program_is_the_one_set_last_of_gpg_program_and_its_new_name() {
+    for (scoped, expected) in [
+        ("global\tgpg.program custom\n", "custom"),
+        ("global\tgpg.openpgp.program named\n", "named"),
+        ("system\tgpg.openpgp.program first\nglobal\tgpg.program second\n", "second"),
+        ("global\tgpg.program first\nglobal\tgpg.openpgp.program second\n", "second"),
+    ] {
+        let env = as_env(entries_over(none, &parse_scoped(scoped)));
+        assert_eq!(value_of(&env, "gpg.program").as_deref(), Some(expected), "{scoped}");
+        assert_eq!(value_of(&env, "gpg.openpgp.program").as_deref(), Some(expected), "{scoped}");
+    }
+    let env = as_env(entries_over(none, &HashMap::new()));
+    assert_eq!(value_of(&env, "gpg.openpgp.program").as_deref(), Some("gpg"), "neutral where the person sets none");
+}
+
+#[test]
 fn the_persons_own_values_are_read_from_the_system_and_global_configuration_alone() {
     let scoped = "global\tcore.sshcommand ssh -i C:/keys/id -o IdentitiesOnly=yes\nsystem\tcore.editor nano\nglobal\tcore.editor code --wait\nlocal\tgpg.program /folder/evil\ncommand\tgpg.ssh.program /env/evil\nglobal\tgpg.program gpg2\n";
     let own = parse_scoped(scoped);

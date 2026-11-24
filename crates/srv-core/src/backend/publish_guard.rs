@@ -92,6 +92,13 @@ pub fn git_config_has(get: &impl Fn(&str) -> Option<String>, key: &str) -> bool 
     (0..parse_count(get)).any(|i| get(&format!("GIT_CONFIG_KEY_{i}")).is_some_and(|k| k.eq_ignore_ascii_case(key)))
 }
 
+/// Whether the `GIT_CONFIG_*` entries `get` sees give `key` exactly `value` somewhere (the name matched without case).
+pub fn git_config_has_value(get: &impl Fn(&str) -> Option<String>, key: &str, value: &str) -> bool {
+    (0..parse_count(get)).any(|i| {
+        get(&format!("GIT_CONFIG_KEY_{i}")).is_some_and(|k| k.eq_ignore_ascii_case(key)) && get(&format!("GIT_CONFIG_VALUE_{i}")).is_some_and(|v| v == value)
+    })
+}
+
 /// The variables that put `key = value` before every `GIT_CONFIG_*` entry `get` sees, the others renumbered after
 /// it: for a setting git reads in order, where an empty value clears the list built before it.
 pub fn git_config_prepend(get: &impl Fn(&str) -> Option<String>, key: &str, value: &str) -> Vec<(String, String)> {

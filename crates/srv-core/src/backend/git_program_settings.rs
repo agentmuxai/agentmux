@@ -35,7 +35,7 @@ use std::time::{Duration, Instant};
 
 use agentmux_common::win32::NoWindow;
 
-use crate::backend::publish_guard::{git_config_entries, git_config_has, git_config_prepend};
+use crate::backend::publish_guard::{git_config_entries, git_config_has_value, git_config_prepend};
 
 /// The settings that name a program, and the value that runs none of the folder's.
 const SETTINGS: &[(&str, &str)] = &[
@@ -80,6 +80,9 @@ const PAGED_COMMANDS: &[&str] = &[
 const PERSONS: &[&str] = &["core.sshCommand", "core.editor", "sequence.editor", "gpg.program", "gpg.openpgp.program", "gpg.ssh.program", "gpg.x509.program", "gpg.ssh.defaultKeyCommand"];
 /// The names of [`PERSONS`] as git matches them (section and name in lower case).
 const PERSONS_PATTERN: &str = r"^(core\.sshcommand|core\.editor|sequence\.editor|gpg\.program|gpg\.(openpgp|ssh|x509)\.program|gpg\.ssh\.defaultkeycommand)$";
+/// The key under which [`persons_values`] holds the OpenPGP program git uses: `gpg.program` is the legacy name of
+/// `gpg.openpgp.program`, so the one set last, of the two, is the person's.
+const OPENPGP_EFFECTIVE: &str = "gpg.(openpgp)";
 /// How long what was read from the person's configuration is kept.
 const PERSONS_KEPT: Duration = Duration::from_secs(30);
 const CREDENTIAL_HELPER: &str = "credential.helper";
@@ -132,7 +135,11 @@ fn parse_scoped(output: &str) -> HashMap<String, String> {
             continue;
         }
         let (name, value) = rest.split_once(' ').unwrap_or((rest, ""));
-        out.insert(name.to_ascii_lowercase(), value.trim_end_matches('\r').to_string());
+        let (name, value) = (name.to_ascii_lowercase(), value.trim_end_matches('\r').to_string());
+        if name == "gpg.program" || name == "gpg.openpgp.program" {
+            out.insert(OPENPGP_EFFECTIVE.to_string(), value.clone());
+        }
+        out.insert(name, value);
     }
     out
 }
@@ -141,7 +148,7 @@ fn parse_scoped(output: &str) -> HashMap<String, String> {
 /// [`persons_values`].
 pub fn entries_over(get: impl Fn(&str) -> Option<String>, own: &HashMap<String, String>) -> Vec<(String, String)> {
     let mut out: HashMap<String, String> = HashMap::new();
-    if !git_config_has(&get, CREDENTIAL_HELPER) {
+    if !git_config_has_value(&get, CREDENTIAL_HELPER, "") {
         out.extend(git_config_prepend(&get, CREDENTIAL_HELPER, ""));
     }
     let mut set = |out: &mut HashMap<String, String>, key: &str, value: &str| {
@@ -149,7 +156,8 @@ pub fn entries_over(get: impl Fn(&str) -> Option<String>, own: &HashMap<String, 
         out.extend(entries);
     };
     for (key, value) in SETTINGS {
-        let kept = PERSONS.contains(key).then(|| own.get(&key.to_ascii_lowercase())).flatten();
+        let lookup = if matches!(*key, "gpg.program" | "gpg.openpgp.program") { OPENPGP_EFFECTIVE.to_string() } else { key.to_ascii_lowercase() };
+        let kept = PERSONS.contains(key).then(|| own.get(&lookup)).flatten();
         set(&mut out, key, kept.map_or(*value, String::as_str));
     }
     for command in PAGED_COMMANDS {
