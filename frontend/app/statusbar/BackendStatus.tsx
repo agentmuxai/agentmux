@@ -15,6 +15,7 @@ import { healthLabel } from "@/app/store/health-signals-text";
 import { HealthNotices } from "./HealthNotices";
 import { RecentIncidents } from "./RecentIncidents";
 import { hasOpenIncident } from "@/app/init/incidents";
+import { t } from "@/app/i18n/i18n";
 import { statusDotColor, statusDotTip } from "./backend-dot";
 
 function gpuColor(c: ReturnType<typeof getGpuInfo>["classification"]): string {
@@ -72,30 +73,30 @@ const BackendStatusPanel = (props: BackendStatusPanelProps): JSX.Element => {
             onDismiss={props.onClose}
             class="status-bar-popover"
             role="dialog"
-            aria-label="Backend status"
+            aria-label={t("backendStatus.aria")}
             style={{ width: `${POPOVER_WIDTH}px` }}
         >
             <HealthNotices />
             <RecentIncidents />
             <div class="status-bar-popover-row">
-                <span class="status-bar-popover-label">Status</span>
+                <span class="status-bar-popover-label">{t("backendStatus.status")}</span>
                 <span style={{ color: color() }}>{backendStatus()}</span>
             </div>
             <Show when={backendInfo()?.pid}>
                 <div class="status-bar-popover-row">
-                    <span class="status-bar-popover-label">PID</span>
+                    <span class="status-bar-popover-label">{t("backendStatus.pid")}</span>
                     <span>{backendInfo().pid}</span>
                 </div>
             </Show>
             <Show when={props.startedAt() != null}>
                 <div class="status-bar-popover-row">
-                    <span class="status-bar-popover-label">Uptime</span>
+                    <span class="status-bar-popover-label">{t("backendStatus.uptime")}</span>
                     <span>{formatUptime(props.uptimeSecs())}</span>
                 </div>
             </Show>
             <Show when={backendInfo()?.web_endpoint}>
                 <div class="status-bar-popover-row">
-                    <span class="status-bar-popover-label">Endpoint</span>
+                    <span class="status-bar-popover-label">{t("backendStatus.endpoint")}</span>
                     <span class="status-bar-popover-mono">{backendInfo().web_endpoint}</span>
                 </div>
             </Show>
@@ -107,64 +108,64 @@ const BackendStatusPanel = (props: BackendStatusPanelProps): JSX.Element => {
                 Surfaces the silent DOM-renderer fallback when the GPU
                 process is unavailable. */}
             <div class="status-bar-popover-divider" />
-            <div class="status-bar-popover-section-title">GPU</div>
+            <div class="status-bar-popover-section-title">{t("backendStatus.gpu")}</div>
             <div class="status-bar-popover-row">
-                <span class="status-bar-popover-label">Status</span>
+                <span class="status-bar-popover-label">{t("backendStatus.status")}</span>
                 <span style={{ color: gpuColor(props.gpu.classification) }}>
                     {props.gpu.classification === "unavailable"
-                        ? "Disabled"
+                        ? t("backendStatus.gpuDisabled")
                         : props.gpu.classification === "software"
-                            ? "Enabled (software)"
-                            : "Enabled (hardware)"}
+                            ? t("backendStatus.gpuSoftware")
+                            : t("backendStatus.gpuHardware")}
                 </span>
             </div>
             <Show when={props.gpu.webgl}>
                 <div class="status-bar-popover-row">
-                    <span class="status-bar-popover-label">WebGL</span>
+                    <span class="status-bar-popover-label">{t("backendStatus.webgl")}</span>
                     <span>{props.gpu.webgl2 ? "2.0" : "1.0"}</span>
                 </div>
             </Show>
             <Show when={props.gpu.renderer}>
                 <div class="status-bar-popover-row">
-                    <span class="status-bar-popover-label">Driver</span>
+                    <span class="status-bar-popover-label">{t("backendStatus.driver")}</span>
                     <span class="status-bar-popover-mono">{props.gpu.renderer}</span>
                 </div>
             </Show>
             <Show when={props.gpu.vendor}>
                 <div class="status-bar-popover-row">
-                    <span class="status-bar-popover-label">Vendor</span>
+                    <span class="status-bar-popover-label">{t("backendStatus.vendor")}</span>
                     <span class="status-bar-popover-mono">{props.gpu.vendor}</span>
                 </div>
             </Show>
             <Show when={termRendererAtom() != null}>
                 <div class="status-bar-popover-row">
-                    <span class="status-bar-popover-label">Terminal</span>
+                    <span class="status-bar-popover-label">{t("backendStatus.terminal")}</span>
                     <span style={{ color: termRendererAtom() === "webgl" ? "var(--accent-color)" : "var(--warning-text-color)" }}>
-                        {termRendererAtom() === "webgl" ? "WebGL (GPU)" : "DOM (software)"}
+                        {termRendererAtom() === "webgl" ? t("backendStatus.termWebgl") : t("backendStatus.termDom")}
                     </span>
                 </div>
             </Show>
             <Show when={backendStatus() === "crashed" && backendDeathInfoAtom() != null}>
                 <div class="status-bar-popover-divider" />
                 <div class="status-bar-popover-row">
-                    <span class="status-bar-popover-label">Died at</span>
+                    <span class="status-bar-popover-label">{t("backendStatus.diedAt")}</span>
                     <span>{new Date(backendDeathInfoAtom()!.died_at).toLocaleTimeString()}</span>
                 </div>
                 <Show when={backendDeathInfoAtom()!.uptime_secs != null}>
                     <div class="status-bar-popover-row">
-                        <span class="status-bar-popover-label">Was up</span>
+                        <span class="status-bar-popover-label">{t("backendStatus.wasUp")}</span>
                         <span>{formatUptime(backendDeathInfoAtom()!.uptime_secs!)}</span>
                     </div>
                 </Show>
                 <Show when={backendDeathInfoAtom()!.code != null}>
                     <div class="status-bar-popover-row">
-                        <span class="status-bar-popover-label">Exit code</span>
+                        <span class="status-bar-popover-label">{t("backendStatus.exitCode")}</span>
                         <span class="status-bar-popover-mono">{backendDeathInfoAtom()!.code}</span>
                     </div>
                 </Show>
                 <Show when={backendDeathInfoAtom()!.signal != null}>
                     <div class="status-bar-popover-row">
-                        <span class="status-bar-popover-label">Signal</span>
+                        <span class="status-bar-popover-label">{t("backendStatus.signal")}</span>
                         <span class="status-bar-popover-mono">{backendDeathInfoAtom()!.signal}</span>
                     </div>
                 </Show>
@@ -177,7 +178,7 @@ const BackendStatusPanel = (props: BackendStatusPanelProps): JSX.Element => {
                         disabled={props.restarting()}
                         onClick={props.onRestart}
                     >
-                        {props.restarting() ? "Restarting…" : "Restart Backend"}
+                        {props.restarting() ? t("backendStatus.restarting") : t("backendStatus.restart")}
                     </Button>
                 </div>
             </Show>
@@ -305,10 +306,10 @@ const BackendStatus = (): JSX.Element => {
                     <span class="stat-incident-marker" aria-hidden="true">ⓘ</span>
                 </Show>
                 <Show when={backendStatus() === "connecting"}>
-                    <span style={{ color: color() }}>Connecting…</span>
+                    <span style={{ color: color() }}>{t("backendStatus.connecting")}</span>
                 </Show>
                 <Show when={backendStatus() === "crashed"}>
-                    <span style={{ color: color() }}>Offline</span>
+                    <span style={{ color: color() }}>{t("backendStatus.offline")}</span>
                 </Show>
             </div>
             <Show when={popoverOpen()}>
