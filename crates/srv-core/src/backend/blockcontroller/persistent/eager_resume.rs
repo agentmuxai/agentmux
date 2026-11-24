@@ -55,7 +55,7 @@ impl PersistentSubprocessController {
         }
         inner.restart_spawn_for = restart_generation;
         inner.spawning_in_progress = true;
-        inner.eager_resume_claim_epoch = Some(inner.stop_epoch);
+        inner.stop_watch.claim();
         true
     }
 
@@ -64,7 +64,7 @@ impl PersistentSubprocessController {
     /// through the registry, and it would race the replacement on the same `--resume` session. Always false for
     /// a spawn that is not an eager resume.
     pub(super) fn eager_resume_stopped_locked(inner: &PersistentInner) -> bool {
-        inner.eager_resume_claim_epoch.is_some_and(|claimed| claimed != inner.stop_epoch)
+        inner.stop_watch.stopped()
     }
 
     /// `start()`'s eager-resume attempt for a pane with a captured
@@ -201,6 +201,8 @@ impl PersistentSubprocessController {
             let mut discarded = 0;
             if n == 0 || no_fallback {
                 inner.spawning_in_progress = false;
+                // In the same acquisition, so a message that spawns next is not judged by this attempt's stop.
+                inner.stop_watch.release();
             }
             if no_fallback {
                 discarded = inner.pending_send_messages.len();
@@ -390,14 +392,48 @@ pub(super) const RESTART_OVERRIDDEN: &str = "a stop overrode the config restart 
 /// pane close landed during the credential gate or while the child was starting.
 pub(super) const STOPPED_WHILE_STARTING: &str = "a stop or a replacement landed before the eager resume's process started";
 
-/// Holds an eager resume's claim epoch (`eager_resume_claim_epoch`) for the length of the attempt and clears it
-/// on every way out, so a later spawn of another kind is never judged by a stale one.
+/// What an eager resume needs to know about stops that land while it is between its spawn claim and its child
+/// (the identity and credential gate in the middle can be slow): a Stop, a replacement's stop of the old
+/// controller or a pane close, but not a config restart's own stop, each counts. The count is compared with
+/// the one seen at the claim; a spawn that never claimed is never judged by it.
+#[derive(Default)]
+pub(super) struct StopWatch {
+    stops: u64,
+    claimed_at: Option<u64>,
+}
+
+impl StopWatch {
+    pub(super) fn note_stop(&mut self) {
+        self.stops += 1;
+    }
+
+    /// Records the count as it stands now, at the claim of an eager resume's spawn.
+    pub(super) fn claim(&mut self) {
+        self.claimed_at = Some(self.stops);
+    }
+
+    /// True when a stop has landed since the claim.
+    pub(super) fn stopped(&self) -> bool {
+        self.claimed_at.is_some_and(|at| at != self.stops)
+    }
+
+    pub(super) fn claimed(&self) -> bool {
+        self.claimed_at.is_some()
+    }
+
+    pub(super) fn release(&mut self) {
+        self.claimed_at = None;
+    }
+}
+
+/// Holds an eager resume's claim for the length of the attempt and releases it on every way out, so a later
+/// spawn of another kind is never judged by a stale one.
 struct EagerClaimEpoch<'a>(&'a Mutex<PersistentInner>);
 
 impl Drop for EagerClaimEpoch<'_> {
     fn drop(&mut self) {
         if let Ok(mut inner) = self.0.lock() {
-            inner.eager_resume_claim_epoch = None;
+            inner.stop_watch.release();
         }
     }
 }

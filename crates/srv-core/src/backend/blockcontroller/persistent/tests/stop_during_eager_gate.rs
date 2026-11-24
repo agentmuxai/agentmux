@@ -124,6 +124,7 @@ async fn a_cancelled_spawn_starts_no_process_and_discards_what_was_queued() {
     let inner = c.inner.lock().unwrap();
     assert!(inner.current_pid.is_none(), "no child was started");
     assert!(!inner.spawning_in_progress, "the claim is released");
+    assert!(!inner.stop_watch.claimed(), "and the stop it saw goes with it, in the same step: the next spawn is a message's own");
     assert!(inner.pending_send_messages.is_empty(), "no fallback respawn is left to start the agent");
     assert_eq!(inner.session_id.as_deref(), Some("sid-kept"));
 }
@@ -147,6 +148,6 @@ async fn the_claim_epoch_does_not_outlive_the_attempt() {
 
     assert!(matches!(outcome, EagerResumeOutcome::DeclinedTo("spawn failed")), "failed for its own reason, not as cancelled");
     let inner = c.inner.lock().unwrap();
-    assert_eq!(inner.eager_resume_claim_epoch, None);
+    assert!(!inner.stop_watch.claimed());
     assert!(!inner.spawning_in_progress);
 }

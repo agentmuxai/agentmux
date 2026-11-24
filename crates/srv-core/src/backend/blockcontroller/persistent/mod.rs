@@ -348,15 +348,7 @@ struct PersistentInner {
     /// restart token against it right before starting the child, so a Stop
     /// during the (possibly slow) credential gate still cancels it.
     restart_spawn_for: Option<u64>,
-    /// Counts the stop requests that reached this controller: every stop, a replacement's stop of the old
-    /// controller and a pane close, but not a config restart's own stop. Read only against
-    /// `eager_resume_claim_epoch`.
-    stop_epoch: u64,
-    /// `stop_epoch` as it stood when an eager resume claimed its spawn. While the claim is held (the
-    /// credential gate and the start of the child) a different `stop_epoch` means a Stop or a replacement
-    /// landed in the meantime, so the child must not start: it would belong to a controller nothing can
-    /// reach any more. `None` outside an eager resume, so no other spawn is ever judged by it.
-    eager_resume_claim_epoch: Option<u64>,
+    stop_watch: eager_resume::StopWatch,
     /// This spawn generation's stale-`--resume` retry decision, plus any
     /// held-back terminal error-result line — see
     /// `persistent_resume::ResumeState`'s own doc comment for the full
@@ -1081,8 +1073,7 @@ impl PersistentSubprocessController {
                 stop_pending: false,
                 config_restart_generation: None,
                 restart_spawn_for: None,
-                stop_epoch: 0,
-                eager_resume_claim_epoch: None,
+                stop_watch: Default::default(),
                 resume: persistent_resume::ResumeState::default(),
                 spawning_in_progress: false,
                 pending_send_messages: VecDeque::new(),
@@ -1366,8 +1357,7 @@ impl Controller for PersistentSubprocessController {
                 // install a child for a closed pane (codex P1 on #3990).
                 g.config_restart_generation = None;
                 g.restart_spawn_for = None;
-                // Likewise an eager resume still starting: the pane is closing, so no child for it.
-                g.stop_epoch += 1;
+                g.stop_watch.note_stop();
                 let running = if g.current_pid.is_none() {
                     // Never spawned (lazy), or already gone. A spawn still in
                     // flight is killed by the caller's tracker drop.
