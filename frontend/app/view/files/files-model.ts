@@ -40,7 +40,7 @@ import { treeMove } from "@/app/fs/tree/tree-keys";
 import { flattenTree, isUnderRel, labelOf, parentRel, type TreeRow } from "@/app/fs/tree/tree-rows";
 import { crawlFolders, rankMatches, whereOf } from "./files-find";
 import { ColumnsState } from "./files-columns-state";
-import { EMPTY_SELECTION, pruneSelection, type Selection } from "./files-selection";
+import { EMPTY_SELECTION, pruneSelection, topmost, type Selection } from "./files-selection";
 import { addRecent } from "./files-pins";
 import { childNamesOf, namesIn } from "./files-names";
 import { landedAsPlanned, movedOk, planMoveUndo, restorable, type MovedItem, type UndoPlan } from "./files-undo-move";
@@ -989,15 +989,9 @@ export class FilesModel {
         return this.entries().filter((e) => names.has(e.name));
     }
 
-    /**
-     * The selected entries an operation (copy, cut, trash, drag) takes: those not inside another selected folder. With a folder
-     * opened in place, Select All selects it and its rows, and a copy of both would put the rows in the destination twice
-     * (`dest/src/main.rs` and `dest/main.rs`), since each source goes under its own name.
-     */
+    /** The selected entries an operation (copy, cut, trash, drag) takes: those not inside another selected folder. */
     topmostSelected(): FsEntry[] {
-        const list = this.selectedEntries();
-        const folders = list.filter((e) => e.is_dir).map((e) => e.name);
-        return list.filter((e) => !folders.some((dir) => dir !== e.name && isUnderRel(e.name, dir)));
+        return topmost(this.selectedEntries());
     }
 
     /** The path of a row: its name is a path from the shown folder in the tree view (`src/a.ts`). */
