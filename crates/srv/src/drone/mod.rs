@@ -26,6 +26,7 @@ pub mod executor;
 pub mod payload_schema;
 pub(crate) mod host;
 pub mod recorder;
+pub mod rule_of_two;
 pub mod replay;
 pub mod state;
 pub use crate::backend::storage::drone_store as storage;

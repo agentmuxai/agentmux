@@ -661,3 +661,41 @@ async fn manual_once_and_every_triggers() {
     let (status, _) = send(&state, Method::POST, None, "/agentmux/jobs", Some(make(json!({ "kind": "every", "seconds": 600 })))).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "a request with no token never gets as far as the rule");
 }
+
+/// The Rule of Two is checked where a drone job is turned on: made, edited or resumed while enabled. A graph that reads
+/// outside text and then writes outside is refused with the node and the way out; a paused job is not checked until it
+/// resumes; an Approval on the path lets it through.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_drone_job_that_breaks_the_rule_of_two_is_not_turned_on() {
+    let (state, owner, _) = state();
+    let post = json!({ "kind": "api", "method": "POST", "url": "https://api.example.com/comments", "body": "{{trigger.title}}" });
+    let graph = |nodes: Vec<Value>, edges: Vec<Value>| -> crate::drone::types::DroneDefinition {
+        let nodes: Vec<Value> = nodes.into_iter().map(|(data)| json!({ "id": data["id"], "position": { "x": 0, "y": 0 }, "data": data })).collect();
+        serde_json::from_value(json!({ "id": "", "name": "Comment", "created_at": 0, "updated_at": 0, "graph": { "nodes": nodes, "edges": edges } })).unwrap()
+    };
+    let mut risky = post.clone();
+    risky["id"] = json!("post");
+    let drone = crate::server::drone_handlers::upsert_drone(&state, graph(vec![risky], vec![])).unwrap();
+    let make = |extra: Value| definition(json!({ "trigger": { "kind": "manual" }, "action": { "kind": "drone", "drone_id": drone.id } })).as_object().cloned().map(|mut m| { m.extend(extra.as_object().unwrap().clone()); Value::Object(m) }).unwrap();
+
+    let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(make(json!({})))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{v}");
+    let why = v["error"].as_str().unwrap();
+    assert!(why.contains("cannot be turned on") && why.contains("post:") && why.contains("{{trigger.title}}") && why.contains("Approval"), "{why}");
+
+    let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(make(json!({ "enabled": false })))).await;
+    assert_eq!(status, StatusCode::CREATED, "a paused job is not checked: {v}");
+    let uri = format!("/agentmux/jobs/{}", v["job"]["id"].as_str().unwrap());
+    let (status, v) = send(&state, Method::PATCH, Some(&owner), &uri, Some(json!({ "action": "resume" }))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "turning it on is where it is checked: {v}");
+
+    // An Approval before the write: the same drone saved again, and it resumes.
+    let mut ok = json!({ "kind": "approval", "title": "Post the comment" });
+    ok["id"] = json!("ok");
+    let mut fixed = graph(vec![ok, json!({ "id": "post", "kind": "api", "method": "POST", "url": "https://api.example.com/comments", "body": "{{trigger.title}}" })], vec![json!({ "id": "e1", "source": "ok", "target": "post" })]);
+    fixed.id = drone.id.clone();
+    crate::server::drone_handlers::upsert_drone(&state, fixed).unwrap();
+    let (status, v) = send(&state, Method::PATCH, Some(&owner), &uri, Some(json!({ "action": "resume" }))).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    state.cron_scheduler.cancel_job(uri.rsplit('/').next().unwrap());
+}
