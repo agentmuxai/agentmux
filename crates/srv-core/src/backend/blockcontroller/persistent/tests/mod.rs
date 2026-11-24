@@ -27,3 +27,4 @@ mod login_failure;
 mod system_notes;
 mod message_origin;
 mod spawn_process;
+mod stop_during_eager_gate;
