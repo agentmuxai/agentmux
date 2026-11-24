@@ -375,7 +375,7 @@ export class LayoutModel {
      * The panes (leaf node ids) whose size the splitter being dragged changes, or null when none is dragged.
      * Only these hold their body (pane-body-hold.ts); the others keep their size and have nothing to lay out.
      */
-    splitterHeldNodeIds: SignalAtom<ReadonlySet<string> | null>;
+    splitterHeldNodeIds: SignalAtom<ReadonlySet<string> | null> = createSignalAtom<ReadonlySet<string> | null>(null);
     /**
      * True if the whole TileLayout container is being resized.
      * @internal
@@ -511,7 +511,6 @@ export class LayoutModel {
             this.pendingTreeAction = atomWithThrottle<LayoutTreeAction>(null, 10);
 
             this.isContainerResizing = createSignalAtom(false);
-            this.splitterHeldNodeIds = createSignalAtom<ReadonlySet<string> | null>(null);
             this.isSplitterDragging = createMemo(() => {
                 const pendingAction = this.pendingTreeAction.throttledValueAtom();
                 return pendingAction?.type === LayoutTreeActionType.ResizeNode;

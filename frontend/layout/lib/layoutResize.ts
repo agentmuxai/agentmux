@@ -334,6 +334,21 @@ export function createStopContainerResizing(model: LayoutModel) {
     });
 }
 
+/** Each child of `parentNode`'s own floor, in the parent's size units (`minExtentPx` times the pixel-to-size ratio). */
+function siblingFloors(
+    model: LayoutModel,
+    parentNode: LayoutNode,
+    axis: FlexDirection,
+    pixelToSizeRatio: number
+): Map<string, number> {
+    return new Map(
+        (parentNode.children ?? []).map((child) => [
+            child.id,
+            minExtentPx(child, axis, isBrowserBlock, model.gapSizePx()) * pixelToSizeRatio,
+        ])
+    );
+}
+
 /** The leaf node ids under `nodes`: the panes whose size a drag of their shared border changes. */
 export function resizedLeafIds(nodes: readonly LayoutNode[]): Set<string> {
     const ids = new Set<string>();
@@ -393,12 +408,7 @@ export function onResizeMove(
             // Each sibling's own floor (a browser pane, or a group holding
             // one, is wider than the rest), in the parent's size units.
             const axis = parentIsRow ? FlexDirection.Row : FlexDirection.Column;
-            const floors = new Map(
-                (parentNode.children ?? []).map((child) => [
-                    child.id,
-                    minExtentPx(child, axis, isBrowserBlock, model.gapSizePx()) * pixelToSizeRatio,
-                ])
-            );
+            const floors = siblingFloors(model, parentNode, axis, pixelToSizeRatio);
             model.resizeContext = {
                 handleId: resizeHandle.id,
                 displayContainerRect: model.displayContainerRef.current?.getBoundingClientRect(),

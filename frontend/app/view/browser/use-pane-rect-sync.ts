@@ -547,23 +547,12 @@ export function usePaneRectSync(params: PaneRectSyncParams): PaneRectSync {
     });
 
     // A splitter drag starts or ends: leave (or give back) the size badge's
-    // strip at once, even before the pointer moves. During the drag the rect
-    // is re-sent every frame anyway (ResizeObserver), with the strip applied.
+    // strip at once, even before the pointer moves. During the drag the rect is
+    // re-sent every frame (ResizeObserver); a refresh tick lets the page catch up.
     createEffect(() => {
-        model.splitterDragging?.();
+        model.splitterDragging?.(); dragRefreshTick();
         if (placeholderRef()) syncPosition();
     });
-
-    // The drag's refresh clock ticked: send the page the size its pane has now (createDragHold lets it catch up).
-    createEffect(
-        on(
-            dragRefreshTick,
-            () => {
-                if (model.splitterDragging?.() && placeholderRef()) syncPosition();
-            },
-            { defer: true },
-        ),
-    );
 
     onCleanup(() => {
         disposed = true;
