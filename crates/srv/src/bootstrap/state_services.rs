@@ -358,6 +358,7 @@ pub fn spawn_state_services(state: &AppState) {
     crate::server::account_episodes::install(state.clone());
     // Fleet Global Memory: entries scoped to the fleet are sent to the machines on the LAN that are behind.
     crate::server::remote_ops::fleet_sync::install(state.clone());
+    crate::server::remote_ops::sync_loop::install(state.clone());
     // Agents' cargo caches are cleared as tasks finish, and the disk is watched
     // (SPEC_BUILD_CACHE_CLEANUP_2026_10_26.md).
     backend::build_cache_service::install(

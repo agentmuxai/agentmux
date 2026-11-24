@@ -36,7 +36,8 @@ pub enum CallError {
 
 /// This machine's side: its sync state, lent to one closure at a time.
 pub trait Session {
-    fn with<R>(&mut self, f: impl FnOnce(&mut Ctx) -> R) -> R;
+    /// Runs `f` with this machine's state, or says why it could not be had (the store is busy, say): `f` did not run.
+    fn with<R>(&mut self, f: impl FnOnce(&mut Ctx) -> R) -> Result<R, String>;
 }
 
 /// The calls to one peer. Each is one remote op; the transport signs and carries it.
@@ -139,6 +140,11 @@ fn removed_by(entries: &[Entry], me: &str) -> Option<String> {
     entries.iter().find(|e| matches!(&e.change, Change::Remove { id, .. } if id == me)).map(|e| e.signer.clone())
 }
 
+/// [`Session::with`], its failure as the end of the round.
+fn lent<S: Session, R>(s: &mut S, f: impl FnOnce(&mut Ctx) -> R) -> Result<R, Ended> {
+    s.with(f).map_err(Ended::Failed)
+}
+
 fn is_member(ctx: &Ctx, collection: &str) -> bool {
     ctx.chains.get(collection).and_then(|c| c.state(collection).ok()).is_some_and(|s| s.members.get(ctx.me.id).is_some_and(|m| m.kind == Kind::Machine))
 }
@@ -156,17 +162,17 @@ struct Ask {
 /// Learns the membership entries each side lacks. A removal of this machine ends the round.
 fn exchange_members<S: Session, P: PeerCalls>(s: &mut S, peer: &mut P, collection: &str, mut peer_n: u64, out: &mut Round) -> Result<(), Ended> {
     for _ in 0..MAX_MEMBER_ASKS {
-        let ask = s.with(|ctx| {
+        let ask = lent(s, |ctx| {
             let chain = ctx.chains.get(collection).ok_or(Ended::NotHere)?;
             let offered = chain.entries.iter().skip(peer_n as usize).take(ops::MAX_ENTRIES).cloned().collect();
             Ok::<_, Ended>(Ask { have: chain.entries.len() as u64, offered })
-        })?;
+        })??;
         let ans = peer.members(&MembersReq { collection: collection.to_string(), have_n: ask.have, offered: ask.offered }).map_err(stop)?;
         if ans.entries.len() > ops::MAX_ENTRIES {
             return Err(Ended::Distrusted("a membership answer over the cap".into()));
         }
         out.entries_given += taken_count(&ans.taken);
-        let (took, now, removed) = s.with(|ctx| {
+        let (took, now, removed) = lent(s, |ctx| {
             let chain = ctx.chains.get_mut(collection).ok_or(Ended::NotHere)?;
             let mut taken: Vec<Result<Taken, MemberError>> = Vec::new();
             for entry in ans.entries.iter().cloned() {
@@ -177,7 +183,7 @@ fn exchange_members<S: Session, P: PeerCalls>(s: &mut S, peer: &mut P, collectio
             chain_store::save(ctx.conn, collection, chain).map_err(db)?;
             let removed = if is_member(ctx, collection) { None } else { Some(removed_by(&ctx.chains[collection].entries, ctx.me.id).unwrap_or_default()) };
             Ok((taken_count(&taken), ctx.chains[collection].entries.len() as u64, removed))
-        })?;
+        })??;
         out.entries_taken += took;
         if let Some(by) = removed {
             return Err(Ended::Removed { by });
@@ -193,7 +199,7 @@ fn exchange_members<S: Session, P: PeerCalls>(s: &mut S, peer: &mut P, collectio
 
 /// Takes the keys of epochs this machine lacks.
 fn take_keys<S: Session, P: PeerCalls>(s: &mut S, peer: &mut P, collection: &str, out: &mut Round) -> Result<(), Ended> {
-    let have = s.with(|ctx| {
+    let have = lent(s, |ctx| {
         let epoch = ctx.chains.get(collection).and_then(|c| c.state(collection).ok()).map_or(0, |st| st.epoch);
         let have = ctx.keys.held(collection);
         if (0..=epoch).all(|e| have.contains(&e)) {
@@ -201,24 +207,24 @@ fn take_keys<S: Session, P: PeerCalls>(s: &mut S, peer: &mut P, collection: &str
         } else {
             Some(have)
         }
-    });
+    })?;
     let Some(have) = have else { return Ok(()) };
     let ans = peer.keys(&KeysReq { collection: collection.to_string(), have }).map_err(stop)?;
     if ans.keys.len() > ops::MAX_NAMES {
         return Err(Ended::Distrusted("a key answer over the cap".into()));
     }
-    out.keys_taken += s.with(|ctx| ctx.keys.take(collection, &ans.keys));
+    out.keys_taken += lent(s, |ctx| ctx.keys.take(collection, &ans.keys))?;
     Ok(())
 }
 
 /// Pulls and applies, batch by batch, until the peer has no more or a batch changes nothing.
 fn pull_all<S: Session, P: PeerCalls>(s: &mut S, peer: &mut P, collection: &str, adapter: &dyn Adapter, out: &mut Round) -> Result<(), Ended> {
     for _ in 0..MAX_BATCHES {
-        let before = s.with(|ctx| log::vector(ctx.conn, collection)).map_err(db)?;
+        let before = lent(s, |ctx| log::vector(ctx.conn, collection))?.map_err(db)?;
         let req = PullReq { collection: collection.to_string(), vector: before.clone(), limit: ops::MAX_BATCH_RECORDS };
         let ans = peer.pull(&req).map_err(stop)?;
         ops::check_pull_answer(&ans, req.limit).map_err(|_| Ended::Distrusted("a pull answer over the cap".into()))?;
-        let (after, stalled) = s.with(|ctx| {
+        let (after, stalled) = lent(s, |ctx| {
             let state = ctx.chains.get(collection).and_then(|c| c.state(collection).ok()).ok_or(Ended::NotHere)?;
             let pins = state.pins();
             let mut stalled = false;
@@ -239,7 +245,7 @@ fn pull_all<S: Session, P: PeerCalls>(s: &mut S, peer: &mut P, collection: &str,
                 }
             }
             Ok((log::vector(ctx.conn, collection).map_err(db)?, stalled))
-        })?;
+        })??;
         if !ans.more || after == before || stalled {
             break;
         }
@@ -250,11 +256,11 @@ fn pull_all<S: Session, P: PeerCalls>(s: &mut S, peer: &mut P, collection: &str,
 /// Pushes what the peer lacks, batch by batch, until it holds all of it or a batch moves nothing.
 fn push_all<S: Session, P: PeerCalls>(s: &mut S, peer: &mut P, collection: &str, mut theirs: log::Vector, out: &mut Round) -> Result<(), Ended> {
     for _ in 0..MAX_BATCHES {
-        let records = s.with(|ctx| {
+        let records = lent(s, |ctx| {
             let mut records = log::since(ctx.conn, collection, &theirs, ops::MAX_BATCH_RECORDS).map_err(db)?;
             ops::cap_bytes(&mut records);
             Ok::<_, Ended>(records)
-        })?;
+        })??;
         if records.is_empty() {
             break;
         }
@@ -281,7 +287,7 @@ fn push_all<S: Session, P: PeerCalls>(s: &mut S, peer: &mut P, collection: &str,
 /// One round with one peer for one collection.
 pub fn sync_collection<S: Session, P: PeerCalls>(s: &mut S, peer: &mut P, collection: &str, adapter: &dyn Adapter) -> Round {
     let mut out = Round::new();
-    let start = s.with(|ctx| {
+    let start = lent(s, |ctx| {
         if !ctx.active {
             Err(Ended::NotActive)
         } else if !is_member(ctx, collection) {
@@ -289,7 +295,8 @@ pub fn sync_collection<S: Session, P: PeerCalls>(s: &mut S, peer: &mut P, collec
         } else {
             Ok(ctx.chains[collection].entries.len() as u64)
         }
-    });
+    })
+    .and_then(|r| r);
     let mine = match start {
         Ok(n) => n,
         Err(ended) => return out.end(ended),

@@ -63,8 +63,8 @@ impl PeerCalls for Link<'_> {
 struct Mine<'a>(&'a mut Node);
 
 impl Session for Mine<'_> {
-    fn with<R>(&mut self, f: impl FnOnce(&mut Ctx) -> R) -> R {
-        f(&mut self.0.ctx())
+    fn with<R>(&mut self, f: impl FnOnce(&mut Ctx) -> R) -> Result<R, String> {
+        Ok(f(&mut self.0.ctx()))
     }
 }
 
