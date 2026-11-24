@@ -6,13 +6,11 @@ model.takeOver
     <div class="browser-driven-by-message">
       <span>
         "Driven by"
-        <b>
+        <strong>
           "Naki"
     <div class="browser-driven-by-actions">
       <button title="What Naki did in this pane" type="button" class="ui-button ui-tone-neutral ui-density-compact browser-actions-log-button" aria-pressed="false">
-        "Log ("
-        "0"
-        ")"
+        "Log (0)"
       <button title="Hold Naki's actions in this pane until you resume; auto-approve's time stops too." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-pause-button" aria-pressed="false">
         "Pause"
       <button title="Let Naki's clicks in this pane go through without asking you first." type="button" class="ui-button ui-tone-danger ui-density-compact browser-bypass-button" aria-pressed="false">

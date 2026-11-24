@@ -8,7 +8,27 @@
 use super::*;
 
 /// Starts every messaging bridge the settings turn on.
+/// The tokens in settings.json that the bridges sign in with are never written into an agent's transcript.
+fn withhold_bridge_tokens(config_watcher: &Arc<wconfig::ConfigState>) {
+    let settings = config_watcher.get_settings();
+    let tokens = [
+        ("discord", &settings.messaging_discord_token),
+        ("telegram", &settings.messaging_telegram_token),
+        ("slack:bot", &settings.messaging_slack_bot_token),
+        ("slack:app", &settings.messaging_slack_app_token),
+        ("whatsapp:access", &settings.messaging_whatsapp_access_token),
+        ("whatsapp:secret", &settings.messaging_whatsapp_app_secret),
+        ("whatsapp:verify", &settings.messaging_whatsapp_webhook_verify_token),
+    ];
+    for (bridge, token) in tokens {
+        if let Some(token) = token {
+            crate::backend::transcript::withhold_sources::bridge_token(bridge, token);
+        }
+    }
+}
+
 pub(super) fn start_messaging_bridges(config_watcher: &Arc<wconfig::ConfigState>) {
+    withhold_bridge_tokens(config_watcher);
     start_discord_bridge(config_watcher);
     start_telegram_bridge(config_watcher);
     start_slack_bridge(config_watcher);

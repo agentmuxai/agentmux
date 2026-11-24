@@ -80,6 +80,7 @@ import type { PaneConfirmView } from "@/types/rpc/PaneConfirmView";
 import type { PathChangedEvent } from "@/types/rpc/PathChangedEvent";
 import type { PendingClearedEvent } from "@/types/rpc/PendingClearedEvent";
 import type { PendingView } from "@/types/rpc/PendingView";
+import type { PlaceFloatingPaneEvent } from "@/types/rpc/PlaceFloatingPaneEvent";
 import type { ProcessAddedEvent } from "@/types/rpc/ProcessAddedEvent";
 import type { ProcessExitedEvent } from "@/types/rpc/ProcessExitedEvent";
 import type { ProcessStatus } from "@/types/rpc/ProcessStatus";
@@ -219,6 +220,7 @@ export type MuxEventPayloads = {
   "pane:agentopened": PaneAgentOpenedEvent;
   "pane:confirm": PaneConfirmView;
   "pins:changed": null;
+  placefloatingpane: PlaceFloatingPaneEvent;
   "processbroker:status-changed": ProcessStatus;
   "processbroker:tracked-blocks-changed": null;
   "record-flags": RecordFlagsEvent;
@@ -364,6 +366,7 @@ export const TYPED_MUX_EVENTS = [
   "pane:agentopened",
   "pane:confirm",
   "pins:changed",
+  "placefloatingpane",
   "processbroker:status-changed",
   "processbroker:tracked-blocks-changed",
   "record-flags",

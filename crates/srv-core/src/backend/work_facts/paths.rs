@@ -113,35 +113,61 @@ pub fn path_matches(file: &str, target: &str) -> bool {
     inside(target, file) || (file_dir.is_some() && inside(file, target))
 }
 
-/// `owner/repo`, lowercase, from a remote URL in any of git's spellings
-/// (`https://host/owner/repo.git`, `git@host:owner/repo`, `ssh://...`), or
-/// from an `owner/repo` a caller typed. Credentials in a URL never survive:
-/// only the last two path segments are kept.
+/// The key of a repository, lowercase, from a remote URL in any of git's spellings (`https://host/owner/repo.git`,
+/// `git@host:owner/repo`, `ssh://...`), or from an `owner/repo` a caller typed. Credentials in a URL never survive.
+///
+/// A GitHub remote (`github.com`) and a typed `owner/repo` are `owner/repo`: the key the GitHub-facing code (the PR
+/// poller, `pr_link`, the PR finder) accepts. A remote on any other host is `remote:<host>/<path>` with its whole path
+/// (a GitLab subgroup keeps its group), which that code never takes for a GitHub repository: the last two segments of
+/// a GitLab project's path name some unrelated GitHub repository, or none.
 pub fn normalize_repo(raw: &str) -> Option<String> {
     let s = raw.trim().trim_end_matches('/');
     let s = s.strip_suffix(".git").unwrap_or(s);
-    // Everything after the host: the part after `://host/`, or after the `:`
-    // of an scp-style `user@host:path`.
-    let path = if let Some((scheme, rest)) = s.split_once("://") {
+    // The host (when the text names one) and everything after it: the part after `://host/`, or after the `:` of an
+    // scp-style `user@host:path`.
+    let (host, path) = if let Some((scheme, rest)) = s.split_once("://") {
         if scheme.eq_ignore_ascii_case("file") {
             return None;
         }
-        rest.split_once('/').map(|(_, p)| p)?
+        let (authority, path) = rest.split_once('/')?;
+        (Some(host_of(authority)), path)
     } else if let Some((head, rest)) = s.split_once(':') {
         if head.contains('/') || is_absolute(s) {
             return None;
         }
-        rest
+        (Some(host_of(head)), rest)
     } else {
-        s
+        (None, s)
     };
     let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
     if parts.len() < 2 {
         return None;
     }
-    let (owner, repo) = (parts[parts.len() - 2], parts[parts.len() - 1]);
     let ok = |p: &str| p.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
-    (ok(owner) && ok(repo)).then(|| format!("{owner}/{repo}").to_ascii_lowercase())
+    match host.filter(|h| !is_github(h)) {
+        // Another host: the whole path, under the host's name.
+        Some(host) => {
+            let host_ok = !host.is_empty() && host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.'));
+            (host_ok && parts.iter().all(|p| ok(p))).then(|| format!("remote:{host}/{}", parts.join("/")).to_ascii_lowercase())
+        }
+        None => {
+            let (owner, repo) = (parts[parts.len() - 2], parts[parts.len() - 1]);
+            (ok(owner) && ok(repo)).then(|| format!("{owner}/{repo}").to_ascii_lowercase())
+        }
+    }
+}
+
+/// The host of a URL's authority (`user:password@host:port`) or of an scp-style `user@host`, lowercase.
+fn host_of(authority: &str) -> String {
+    let after_user = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    after_user.split(':').next().unwrap_or_default().to_ascii_lowercase()
+}
+
+/// Whether a remote's host is GitHub's own (not an Enterprise Server: the poller reads `api.github.com` only): its web
+/// and SSH-over-443 names, and a host alias from an SSH config (`github.com-work`, the usual way to keep several GitHub
+/// accounts), which names no dot after `github.com-`.
+fn is_github(host: &str) -> bool {
+    matches!(host, "github.com" | "www.github.com" | "ssh.github.com") || host.strip_prefix("github.com-").is_some_and(|alias| !alias.is_empty() && !alias.contains('.'))
 }
 
 /// The key bashwrap names an agent's cwd state file by: the block's
@@ -264,6 +290,40 @@ mod tests {
         assert_eq!(normalize_repo("agentmux"), None);
         assert_eq!(normalize_repo("C:/w/repo"), None, "a local path is not a repository name");
         assert_eq!(normalize_repo(""), None);
+    }
+
+    #[test]
+    fn a_remote_on_another_host_is_never_the_github_repository_of_the_same_name() {
+        for (url, key) in [
+            ("https://gitlab.com/group/api.git", "remote:gitlab.com/group/api"),
+            ("git@gitlab.com:group/api.git", "remote:gitlab.com/group/api"),
+            ("https://gitlab.com/group/sub/api", "remote:gitlab.com/group/sub/api"),
+            ("ssh://git@git.example.org:2222/team/api.git", "remote:git.example.org/team/api"),
+            ("https://user:secret@gitea.local/Team/API/", "remote:gitea.local/team/api"),
+            ("https://github.mycorp.com/team/api.git", "remote:github.mycorp.com/team/api"),
+            ("https://notgithub.com/team/api", "remote:notgithub.com/team/api"),
+        ] {
+            let got = normalize_repo(url);
+            assert_eq!(got.as_deref(), Some(key), "{url}");
+            assert!(crate::backend::storage::work_card_prs::github_repo(key).is_none(), "{key} is not a GitHub repository");
+        }
+        assert_eq!(normalize_repo("https://gitea.local/lonely.git"), None, "a path of one segment names no repository");
+        assert_eq!(normalize_repo("https://github.com/AgentMuxAI/agentmux.git").as_deref(), Some("agentmuxai/agentmux"));
+        assert_eq!(normalize_repo("https://www.github.com/a/b").as_deref(), Some("a/b"));
+    }
+
+    #[test]
+    fn every_spelling_of_a_github_host_is_the_github_repository() {
+        for url in [
+            "git@github.com-work:AgentMuxAI/agentmux.git",
+            "git@github.com-personal:agentmuxai/agentmux",
+            "ssh://git@ssh.github.com:443/agentmuxai/agentmux.git",
+            "git@ssh.github.com:agentmuxai/agentmux.git",
+        ] {
+            assert_eq!(normalize_repo(url).as_deref(), Some("agentmuxai/agentmux"), "{url}");
+        }
+        // A dotted name after `github.com-` is a host of its own, not an alias in an SSH config.
+        assert_eq!(normalize_repo("https://github.com-evil.example.org/team/api").as_deref(), Some("remote:github.com-evil.example.org/team/api"));
     }
 
     #[test]

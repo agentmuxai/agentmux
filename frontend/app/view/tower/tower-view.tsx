@@ -7,6 +7,8 @@
 // SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md). Read-only.
 
 import type { SelectOption } from "@/app/element/ui";
+import { t as tr } from "@/app/i18n/i18n";
+import { Rich } from "@/app/i18n/rich";
 import {
     Button,
     EmptyState,
@@ -33,7 +35,6 @@ import { ProcessName } from "./tower-process-name";
 import { SortHeader } from "./tower-sort-header";
 import { towerViewTabs } from "./tower-view-tabs";
 import {
-    count,
     filterProcesses,
     formatChange,
     formatClock,
@@ -70,8 +71,8 @@ const PAIR_OPTION = "__pair__";
  *  pane's list), and a way to pair another. The helper runs on Linux and
  *  macOS only, so other SSH hosts are listed but can't be picked. */
 function machineOptions(current: string, remotes: RemoteRecord[], peers: TowerPeerInfo[] = []): SelectOption[] {
-    const options: SelectOption[] = [{ value: "", label: "This computer" }];
-    for (const p of peers) options.push({ value: p.connection, label: `${p.hostname || p.address} (AgentMux)` });
+    const options: SelectOption[] = [{ value: "", label: tr("tower.view.thisComputer") }];
+    for (const p of peers) options.push({ value: p.connection, label: tr("tower.view.peerOption", { name: p.hostname || p.address }) });
     for (const r of remotes) {
         if (r.kind !== "ssh" && r.kind !== "wsl") continue;
         const os = r.platform?.os;
@@ -82,12 +83,12 @@ function machineOptions(current: string, remotes: RemoteRecord[], peers: TowerPe
             value: r.name,
             label: supported
                 ? r.name
-                : `${r.name} (${[os, r.platform?.arch].filter(Boolean).join(" ")}: not supported)`,
+                : tr("tower.view.unsupportedOption", { name: r.name, platform: [os, r.platform?.arch].filter(Boolean).join(" ") }),
             disabled: !supported,
         });
     }
     if (current && !options.some((o) => o.value === current)) options.push({ value: current, label: current });
-    options.push({ value: PAIR_OPTION, label: "Pair another AgentMux computer…" });
+    options.push({ value: PAIR_OPTION, label: tr("tower.view.pairOption") });
     return options;
 }
 
@@ -117,7 +118,7 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
             <div class="tower-toolbar">
                 <Select
                     density="compact"
-                    ariaLabel="Machine"
+                    ariaLabel={tr("tower.view.machineAria")}
                     class="tower-machine"
                     value={pairing() ? PAIR_OPTION : m.connection()}
                     onChange={(c) => {
@@ -129,7 +130,7 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
                 <Show when={isPeer() && !pairing()}>
                     <IconButton
                         icon="link-slash"
-                        label="Forget this computer"
+                        label={tr("tower.view.forget")}
                         density="compact"
                         onClick={() => void m.forget(m.connection())}
                     />
@@ -140,7 +141,7 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
                     value={m.effectiveView()}
                     onChange={(v) => m.setView(v)}
                     idPrefix={idPrefix}
-                    ariaLabel="Tower view"
+                    ariaLabel={tr("tower.view.viewAria")}
                     density="compact"
                 />
             </div>
@@ -150,11 +151,11 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
             <Show when={m.error()}>
                 {(err) => (
                     <div class="tower-error" role="alert">
-                        Couldn't read processes: {err()}
+                        {tr("tower.view.readError", { error: err() })}
                         <Show when={m.stalled()}>
                             {" "}
                             <Button density="compact" onClick={() => m.retry()}>
-                                Retry
+                                {tr("tower.view.retry")}
                             </Button>
                         </Show>
                     </div>
@@ -162,7 +163,7 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
             </Show>
             <Headline model={m} />
             <div id={tabPanelId(idPrefix)} role="tabpanel" class="tower-body">
-                <Show when={m.snapshot()} fallback={<EmptyState loading>Measuring…</EmptyState>}>
+                <Show when={m.snapshot()} fallback={<EmptyState loading>{tr("tower.view.measuring")}</EmptyState>}>
                     {(snap) => (
                         <Switch>
                             <Match when={m.effectiveView() === "memory"}>
@@ -175,7 +176,7 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
                                 <PanesView model={m} cpu={cpu} />
                             </Match>
                             <Match when={m.effectiveView() === "processes"}>
-                                <Show when={snap().host} fallback={<EmptyState loading>Measuring…</EmptyState>}>
+                                <Show when={snap().host} fallback={<EmptyState loading>{tr("tower.view.measuring")}</EmptyState>}>
                                     <HostTable model={m} cpu={cpu} />
                                 </Show>
                             </Match>
@@ -222,26 +223,22 @@ function Headline(props: { model: TowerViewModel }) {
                     <div
                         class="tower-headline"
                         data-testid="tower-headline"
-                        {...tip(
-                            `Memory that only AgentMux's processes use (${t().metric}), added up over everything AgentMux started: its own programs, the terminals, and each agent with its tools. Shared memory is not counted twice.`
-                        )}
+                        {...tip(tr("tower.view.headlineTip", { metric: t().metric }))}
                     >
-                        <span class="tower-headline-label">AgentMux</span>
+                        <span class="tower-headline-label">{tr("tower.view.agentmux")}</span>
                         <span class={clsx("tower-headline-mem tower-num", lvl() && `tower-level--${lvl()}`)}>
                             {formatMem(t().mem)}
                         </span>
-                        <span class="tower-headline-note tower-muted">{count(t().processes, "process")}</span>
+                        <span class="tower-headline-note tower-muted">{tr("tower.view.processes", { count: t().processes })}</span>
                         <Show when={change()}>
                             {(c) => (
                                 <span
                                     class="tower-headline-change tower-num tower-muted"
                                     data-testid="tower-headline-change"
-                                    {...tip(
-                                        "How AgentMux's memory changed over the last hour (since srv began keeping it, if that was less than an hour ago)"
-                                    )}
+                                    {...tip(tr("tower.view.hourTip"))}
                                 >
                                     {formatChange(c().change)}{" "}
-                                    {c().since === null ? "in the last hour" : `since ${formatClock(c().since!)}`}
+                                    {c().since === null ? tr("tower.view.inLastHour") : tr("tower.view.sinceClock", { time: formatClock(c().since!) })}
                                 </span>
                             )}
                         </Show>
@@ -250,7 +247,7 @@ function Headline(props: { model: TowerViewModel }) {
                                 class="tower-headline-grow"
                                 role="img"
                                 data-testid="tower-headline-grow"
-                                aria-label={`Grows unusually: ${grows().join("; ")}`}
+                                aria-label={tr("tower.view.growsAria", { list: grows().join("; ") })}
                                 {...tip(grows().join("; "))}
                             />
                         </Show>
@@ -282,16 +279,14 @@ function PairForm(props: { model: TowerViewModel; onDone: () => void }) {
     return (
         <div class="tower-pair" data-testid="tower-pair" data-operator-only="">
             <div class="tower-muted">
-                On the other computer, open <b>Pair a device</b> in the status bar, choose <b>Copy link</b>, and paste
-                it here. It works once, for two minutes. That computer shows its processes only if its user turns on
-                sharing in its Tower.
+                <Rich k="tower.view.pairHelp" />
             </div>
             <div class="tower-pair-row">
                 <TextInput
                     value={link()}
                     onInput={(e) => setLink(e.currentTarget.value)}
-                    placeholder="agentmux://pair?…"
-                    aria-label="Pairing link"
+                    placeholder={tr("tower.view.pairPlaceholder")}
+                    aria-label={tr("tower.view.pairLinkAria")}
                     density="compact"
                     class="tower-pair-input"
                 />
@@ -302,10 +297,10 @@ function PairForm(props: { model: TowerViewModel; onDone: () => void }) {
                     disabled={!link().trim()}
                     onClick={() => void submit()}
                 >
-                    Pair
+                    {tr("tower.view.pair")}
                 </Button>
                 <Button density="compact" onClick={() => props.onDone()}>
-                    Cancel
+                    {tr("tower.view.cancel")}
                 </Button>
             </div>
             <Show when={error()}>
@@ -412,7 +407,7 @@ function GroupRows(props: {
                     <div class="tower-name-line">
                         <IconButton
                             icon={open() ? "chevron-down" : "chevron-right"}
-                            label={open() ? "Hide processes" : "Show processes"}
+                            label={open() ? tr("tower.view.hideProcesses") : tr("tower.view.showProcesses")}
                             density="compact"
                             tooltip={false}
                             aria-expanded={open()}
@@ -485,8 +480,8 @@ function OwnerRows(props: { model: TowerViewModel; group: OwnerGroup; cpu: (f: n
                             icon={open() ? "chevron-down" : "chevron-right"}
                             label={
                                 open()
-                                    ? `Hide ${props.group.label}'s processes`
-                                    : `Show ${props.group.label}'s processes`
+                                    ? tr("tower.view.hideOwner", { label: props.group.label })
+                                    : tr("tower.view.showOwner", { label: props.group.label })
                             }
                             density="compact"
                             tooltip={false}
@@ -550,7 +545,7 @@ function KindRows(props: {
                     <div class="tower-name-line">
                         <IconButton
                             icon={open() ? "chevron-down" : "chevron-right"}
-                            label={open() ? `Hide ${label()}` : `Show ${label()}`}
+                            label={open() ? tr("tower.view.hideKind", { label: label() }) : tr("tower.view.showKind", { label: label() })}
                             density="compact"
                             tooltip={false}
                             aria-expanded={open()}
@@ -715,7 +710,7 @@ function HostTable(props: HostTableProps) {
             <ProcessTable s={s} />
             <Show when={s.shown() > HOST_ROW_LIMIT}>
                 <div class="tower-muted tower-more">
-                    {s.shown() - HOST_ROW_LIMIT} more not shown: filter to narrow the list.
+                    {tr("tower.view.moreNotShown", { n: s.shown() - HOST_ROW_LIMIT })}
                 </div>
             </Show>
         </>
@@ -726,25 +721,27 @@ function SummaryLine({ s }: { s: HostTableState }) {
     const host = s.host;
     return (
         <div class="tower-summary">
-            {count(host()?.total ?? 0, "process")} · Memory{" "}
+            {tr("tower.view.processes", { count: host()?.total ?? 0 })} · {tr("tower.view.memory")}{" "}
             <span class={clsx("tower-total tower-total--mem", s.memLevel() && `tower-level--${s.memLevel()}`)}>
                 {formatMem(host()?.mem)}
             </span>{" "}
-            · CPU{" "}
+            · {tr("tower.view.cpu")}{" "}
             <span class={clsx("tower-total tower-total--cpu", s.cpuLevel() && `tower-level--${s.cpuLevel()}`)}>
                 {s.props.cpu(host()?.cpu)}
             </span>
             <Show when={s.partial()}>
                 <span class="tower-muted">
                     {" "}
-                    · showing the {host()?.processes.length} busiest and largest
-                    {(host()?.matched ?? 0) < (host()?.total ?? 0) ? ` of ${host()?.matched} matching` : ""}
+                    ·{" "}
+                    {(host()?.matched ?? 0) < (host()?.total ?? 0)
+                        ? tr("tower.view.showingBusiestOf", { shown: host()?.processes.length ?? 0, matched: host()?.matched ?? 0 })
+                        : tr("tower.view.showingBusiest", { shown: host()?.processes.length ?? 0 })}
                 </span>
             </Show>
             <Show when={(host()?.unmeasured ?? 0) > 0}>
                 <span class="tower-muted">
                     {" "}
-                    · {host()?.unmeasured} owned by other users can't be measured without administrator rights
+                    · {tr("tower.view.unmeasured", { n: host()?.unmeasured ?? 0 })}
                 </span>
             </Show>
         </div>
@@ -759,9 +756,9 @@ function HostBar({ s }: { s: HostTableState }) {
                 {(kind) => (
                     <span class="tower-only" data-testid="tower-kind-only">
                         <KindIcon kind={kind()} />
-                        Only {KINDS[kind()].label}
+                        {tr("tower.view.only", { label: KINDS[kind()].label })}
                         <Button density="compact" tone="quiet" onClick={() => m.setKindFilter("")}>
-                            Show all
+                            {tr("tower.view.showAll")}
                         </Button>
                     </span>
                 )}
@@ -769,9 +766,9 @@ function HostBar({ s }: { s: HostTableState }) {
             <Show when={s.onlyLabel()}>
                 {(label) => (
                     <span class="tower-only" data-testid="tower-only">
-                        Only {label()}
+                        {tr("tower.view.only", { label: label() })}
                         <Button density="compact" tone="quiet" onClick={() => m.showAll()}>
-                            Show all
+                            {tr("tower.view.showAll")}
                         </Button>
                     </span>
                 )}
@@ -779,7 +776,7 @@ function HostBar({ s }: { s: HostTableState }) {
             <FilterInput
                 value={m.filter()}
                 onInput={(q) => m.setFilter(q)}
-                placeholder="Filter by name, PID or task"
+                placeholder={tr("tower.view.filterPlaceholder")}
                 class="tower-filter"
                 testId="tower-filter"
             />
@@ -793,28 +790,28 @@ function GroupingControl(props: { model: TowerViewModel }) {
     return (
         <SegmentedControl<ProcessGrouping>
             density="compact"
-            ariaLabel="Group by"
+            ariaLabel={tr("tower.view.groupByAria")}
             options={[
                 ...(m.hasTasks()
                     ? [
                           {
                               value: "agent" as const,
-                              label: "Agent",
-                              title: "Under the agent or terminal that started each",
+                              label: tr("tower.view.groupAgent"),
+                              title: tr("tower.view.groupAgentTitle"),
                           },
                       ]
                     : []),
                 {
                     value: "app" as const,
-                    label: "App",
-                    title: "Processes of the same app together, as Task Manager does",
+                    label: tr("tower.view.groupApp"),
+                    title: tr("tower.view.groupAppTitle"),
                 },
                 {
                     value: "type" as const,
-                    label: "Type",
-                    title: "By kind of process: agents, builds, browsers, the system…",
+                    label: tr("tower.view.groupType"),
+                    title: tr("tower.view.groupTypeTitle"),
                 },
-                { value: "none" as const, label: "None", title: "One flat list" },
+                { value: "none" as const, label: tr("tower.view.groupNone"), title: tr("tower.view.groupNoneTitle") },
             ]}
             value={m.grouping()}
             onChange={(v) => m.setGrouping(v)}
@@ -825,18 +822,18 @@ function GroupingControl(props: { model: TowerViewModel }) {
 function ProcessTable({ s }: { s: HostTableState }) {
     const m = s.props.model;
     return (
-        <table class="tower-table" aria-label="Processes">
+        <table class="tower-table" aria-label={tr("tower.view.tableAria")}>
             <thead>
                 <tr>
-                    <SortHeader model={m} key="name" label="Process" />
-                    <SortHeader model={m} key="mem" label="Memory" numeric />
-                    <SortHeader model={m} key="cpu" label="CPU" numeric />
+                    <SortHeader model={m} key="name" label={tr("tower.view.colProcess")} />
+                    <SortHeader model={m} key="mem" label={tr("tower.view.memory")} numeric />
+                    <SortHeader model={m} key="cpu" label={tr("tower.view.cpu")} numeric />
                     <SortHeader
                         model={m}
                         key="count"
-                        label={s.grouped() ? "Count" : "PID"}
+                        label={s.grouped() ? tr("tower.view.colCount") : tr("tower.view.colPid")}
                         numeric
-                        title={s.grouped() ? "Processes in the group, or the PID of one" : undefined}
+                        title={s.grouped() ? tr("tower.view.colCountTitle") : undefined}
                     />
                 </tr>
             </thead>

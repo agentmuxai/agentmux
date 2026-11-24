@@ -17,6 +17,7 @@ import type { FileProbe } from "../viewer-choice";
 import { rangeReaderOf } from "../hex/hex-chunks";
 import { takeOpenPosition, watchOpenPosition } from "../../open-position";
 import { LineSource, type LineText } from "./line-source";
+import { createFollow } from "./large-follow";
 import { createLargeFind } from "./large-find-state";
 import { hitOrdinal, type LineMatcher } from "./large-find";
 import { createLineScroll } from "./line-scroll";
@@ -281,6 +282,7 @@ export function createLargeText(props: LargeTextProps) {
     };
     useOpenLine(props, lines, goTo);
     const hit = createCurrentHit(feed, () => find.needle(), () => props.probe?.text?.encoding);
+    const follow = createFollow(lines, scroll);
     const find = createLargeFind({
         path: () => props.path,
         size: () => props.probe?.size ?? 0,
@@ -337,6 +339,7 @@ export function createLargeText(props: LargeTextProps) {
         clearBadLine: () => setBadLine(false),
         bindLineBox: (el: HTMLInputElement) => (lineBox = el),
         find,
+        follow,
         onKeyDown,
         onBarKeyDown,
         facts,

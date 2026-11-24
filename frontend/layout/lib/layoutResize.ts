@@ -334,6 +334,32 @@ export function createStopContainerResizing(model: LayoutModel) {
     });
 }
 
+/** Each child of `parentNode`'s own floor, in the parent's size units (`minExtentPx` times the pixel-to-size ratio). */
+function siblingFloors(
+    model: LayoutModel,
+    parentNode: LayoutNode,
+    axis: FlexDirection,
+    pixelToSizeRatio: number
+): Map<string, number> {
+    return new Map(
+        (parentNode.children ?? []).map((child) => [
+            child.id,
+            minExtentPx(child, axis, isBrowserBlock, model.gapSizePx()) * pixelToSizeRatio,
+        ])
+    );
+}
+
+/** The leaf node ids under `nodes`: the panes whose size a drag of their shared border changes. */
+export function resizedLeafIds(nodes: readonly LayoutNode[]): Set<string> {
+    const ids = new Set<string>();
+    const walk = (node: LayoutNode) => {
+        if (node.children?.length) node.children.forEach(walk);
+        else ids.add(node.id);
+    };
+    nodes.forEach(walk);
+    return ids;
+}
+
 /**
  * Callback to update pending node sizes when a resize handle is dragged.
  * @param model The LayoutModel instance.
@@ -382,12 +408,7 @@ export function onResizeMove(
             // Each sibling's own floor (a browser pane, or a group holding
             // one, is wider than the rest), in the parent's size units.
             const axis = parentIsRow ? FlexDirection.Row : FlexDirection.Column;
-            const floors = new Map(
-                (parentNode.children ?? []).map((child) => [
-                    child.id,
-                    minExtentPx(child, axis, isBrowserBlock, model.gapSizePx()) * pixelToSizeRatio,
-                ])
-            );
+            const floors = siblingFloors(model, parentNode, axis, pixelToSizeRatio);
             model.resizeContext = {
                 handleId: resizeHandle.id,
                 displayContainerRect: model.displayContainerRef.current?.getBoundingClientRect(),
@@ -402,6 +423,9 @@ export function onResizeMove(
                 stagedSizes: new Map(groupSiblingStartSizes.map((s) => [s.nodeId, s.size])),
                 floors,
             };
+            model.splitterHeldNodeIds?._set(
+                resizedLeafIds(groupResize ? (parentNode.children ?? []) : [beforeNode, afterNode])
+            );
         } else {
             console.error(
                 "Invalid resize handle, cannot get the additional properties for the nodes in the resize handle properties."
@@ -484,6 +508,7 @@ export function onResizeMove(
  * Callback to end the current resize operation and commit its pending action.
  */
 export function onResizeEnd(model: LayoutModel) {
+    model.splitterHeldNodeIds?._set(null);
     if (model.resizeContext) {
         model.resizeContext = undefined;
         model.treeReducer({ type: LayoutTreeActionType.CommitPendingAction });

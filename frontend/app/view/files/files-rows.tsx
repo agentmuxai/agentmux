@@ -17,7 +17,7 @@ import { type FilesModel, windowsNames } from "./files-model";
 import { nameProblem, stemLength } from "./files-path";
 import { extensionOf } from "./files-sort";
 import { cachedThumbnail, hasThumbnail, thumbnail } from "./files-thumbs";
-import { labelOf, type TreeRow } from "./files-tree";
+import { labelOf, type TreeRow } from "@/app/fs/tree/tree-rows";
 import { TypeIcon } from "./files-type-icon";
 export const ROW_HEIGHT = 24;
 /** A grid tile's box (thumbnail and a two-line name). */

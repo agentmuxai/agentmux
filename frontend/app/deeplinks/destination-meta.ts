@@ -125,6 +125,8 @@ export function planDestination(link: ParsedDeepLink, now: number = Date.now()):
             if (link.place === "agent") focus[DEST_META.auditAgent] = str(v.agent);
             if (link.place === "sound") focus[DEST_META.auditSound] = str(v.sound);
             if (link.place === "message") focus[DEST_META.auditMessage] = str(v.message);
+            // Each of these places is a row of the Events list: a pane left on another section shows Events (as open-audit.ts does).
+            if (link.place === "agent" || link.place === "sound" || link.place === "message") Object.assign(focus, sectionMetaOf(paneView, "events"));
             break;
         case "editor":
         case "media":

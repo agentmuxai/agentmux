@@ -1796,6 +1796,79 @@ describe("the Files pane: tree view", () => {
     });
 });
 
+describe("the Files pane: tree view, folders that change under it", () => {
+    const SRC = `${HOME}\\src`;
+    const LIB = `${SRC}\\lib`;
+    const changed = (dir: string) => h.state.byType.get("files:changed")?.forEach((fn) => fn({ data: { dir } }));
+    const twisty = (v: ReturnType<typeof mount>, label: string) => v.container.querySelector(`[aria-label="${label}"]`) as HTMLElement;
+
+    beforeEach(() => {
+        h.state.dirs.set(SRC, [f("main.rs"), d("lib")]);
+        h.state.dirs.set(LIB, [f("util.ts")]);
+    });
+
+    it("closes an open folder that was renamed or deleted, with no error, and stops watching it", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toContain("main.rs"));
+        // The folder is renamed on disk, and the pane is refreshed (as it is after the person's own rename).
+        h.state.dirs.set(HOME, [f("b.txt"), d("source"), f("a10.md"), f("a2.md")]);
+        h.state.dirs.delete(SRC);
+        h.state.errors.set(SRC, { kind: "not_found", message: "gone" });
+        v.model.refresh();
+        await waitFor(() => expect(v.names()).toEqual(["source", "a2.md", "a10.md", "b.txt"]));
+        await waitFor(() => expect(h.rpc.FsUnwatchCommand).toHaveBeenCalled());
+        expect(v.container.querySelector(".files-status")?.textContent ?? "").not.toContain("Couldn't open");
+        // A folder of the old name coming back is a closed folder, not one that silently reopens.
+        h.state.errors.delete(SRC);
+        h.state.dirs.set(HOME, [f("b.txt"), d("src"), f("a10.md"), f("a2.md")]);
+        h.state.dirs.set(SRC, [f("main.rs")]);
+        v.model.refresh();
+        await waitFor(() => expect(v.names()).toEqual(["src", "a2.md", "a10.md", "b.txt"]));
+        expect(twisty(v, "Open src")).not.toBeNull();
+    });
+
+    it("keeps the newest listing of an open folder when an older one ends last", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        const real = h.rpc.FsListCommand.getMockImplementation()!;
+        let release!: () => void;
+        const slow = new Promise<void>((resolve) => (release = resolve));
+        // The first listing of src is held back after it has read the folder as it was.
+        h.rpc.FsListCommand.mockImplementationOnce(async (c: unknown, req: { path: string; cursor?: string }) => {
+            const old = await real(c, req);
+            await slow;
+            return old;
+        });
+        fireEvent.click(twisty(v, "Open src"));
+        h.state.dirs.set(SRC, [f("main.rs"), d("lib"), f("new.txt")]);
+        changed(SRC);
+        await waitFor(() => expect(v.names()).toContain("new.txt"));
+        release();
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(v.names()).toContain("new.txt");
+    });
+
+    it("lets go of a second watch of a folder that was closed and opened again while the first was pending", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        const resolvers: Array<(id: string) => void> = [];
+        const pending = () => new Promise<{ watch_id: string }>((resolve) => resolvers.push((id) => resolve({ watch_id: id })));
+        h.rpc.FsWatchCommand.mockImplementationOnce(pending).mockImplementationOnce(pending);
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(resolvers).toHaveLength(1));
+        fireEvent.click(twisty(v, "Close src"));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(resolvers).toHaveLength(2));
+        resolvers[0]("w-first");
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        resolvers[1]("w-second");
+        await waitFor(() => expect(h.rpc.FsUnwatchCommand).toHaveBeenCalledWith(expect.anything(), { watch_id: "w-second" }));
+        expect(h.rpc.FsUnwatchCommand).not.toHaveBeenCalledWith(expect.anything(), { watch_id: "w-first" });
+    });
+});
+
 describe("the Files pane: find in subfolders", () => {
     const SRC = `${HOME}\\src`;
     const LIB = `${SRC}\\lib`;

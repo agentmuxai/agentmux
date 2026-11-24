@@ -491,6 +491,8 @@ export interface NodeModel {
      * Codex P2 on PR #1057.
      */
     isSplitterDragging: Accessor<boolean>;
+    /** True when the splitter being dragged changes this pane's size, so its body holds (pane-body-hold.ts). */
+    isSplitterHeld?: Accessor<boolean>;
     isFocused: Accessor<boolean>;
     isMagnified: Accessor<boolean>;
     isMinimized: Accessor<boolean>;

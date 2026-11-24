@@ -14,6 +14,7 @@ import { HostPopover } from "./HostPopover";
 import { InstancePanel } from "./InstancePanel";
 import { SummaryStatus } from "./SummaryStatus";
 import { LastSoundStatus } from "./LastSoundStatus";
+import { WorkspaceStopStatus } from "./WorkspaceStopStatus";
 import { useSummary } from "./use-summary";
 import { sharedUiBusyAlert } from "./ui-busy";
 import { ambientFailingCount } from "@/app/store/ambient-health";
@@ -131,6 +132,7 @@ function registerBuiltinStatusBarItems(): void {
         ["gpu", "left", () => <GpuStatus />],
         ["last-sound", "right", () => <LastSoundStatus />],
         ["summary", "right", () => <SummaryStatus />],
+        ["workspace-stop", "right", () => <WorkspaceStopStatus />],
         ["browser-pause-all", "right", () => <BrowserPauseAllStatus />],
         ["multi-input", "right", () => <MultiInputStatus />],
         ["history-usage", "right", () => <HistoryUsageIndicator />],

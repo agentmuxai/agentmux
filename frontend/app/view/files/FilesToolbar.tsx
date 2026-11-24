@@ -9,7 +9,7 @@
 import type { ContextMenuItem } from "@/app/components/context-menu";
 import { Button, IconButton } from "@/app/element/ui";
 import { useWidthFit } from "@/app/element/width-fit";
-import { shortcutFor } from "@/app/keybindings";
+import { keyLabel, shortcutFor } from "@/app/keybindings";
 import { tip } from "@/app/element/tip";
 import { t } from "@/app/i18n/i18n";
 import { For, Show, type JSX } from "solid-js";
@@ -107,7 +107,7 @@ export function FilesToolbar(props: {
             <FilterButton model={model} open={props.filterOpen} toggle={props.toggleFilter} buttonRef={props.filterButtonRef} />
             <IconButton icon="folder-plus" label="New folder" class="files-tool files-tool--action" onClick={() => void model.createNew("dir")} />
             <IconButton icon={model.showHidden() ? "eye" : "eye-slash"} label={model.showHidden() ? "Hide hidden files" : "Show hidden files"} pressed={model.showHidden()} class="files-tool files-tool--view" onClick={() => model.toggleHidden()} />
-            <IconButton icon="arrows-rotate" label="Refresh (F5)" class="files-tool files-tool--action" onClick={() => model.refresh()} />
+            <IconButton icon="arrows-rotate" label={`Refresh (${keyLabel("F5")})`} class="files-tool files-tool--action" onClick={() => model.refresh()} />
             <IconButton icon="table-columns" label={model.showSidebar() ? "Hide Places" : "Show Places"} pressed={model.showSidebar()} class="files-tool files-tool--places" onClick={() => model.toggleSidebar()} />
             <IconButton icon={props.grid() ? "list" : "table-cells-large"} label={props.grid() ? "Show as a list" : "Show as thumbnails"} pressed={props.grid()} class="files-tool files-tool--view" onClick={props.onToggleViewMode} />
             <IconButton icon="eye" label={model.showPreview() ? "Hide preview (Space)" : "Show preview (Space)"} pressed={model.showPreview()} class="files-tool files-tool--preview" onClick={() => model.togglePreview()} />

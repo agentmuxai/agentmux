@@ -86,6 +86,11 @@ pub(crate) fn floaters_of(agent: &str) -> Vec<String> {
     lock().iter().filter(|(_, e)| e.floating && e.agent.eq_ignore_ascii_case(agent)).map(|(b, _)| b.clone()).collect()
 }
 
+/// Whether `block_id` is a floating window an agent opened (a pane docked later is not).
+pub(crate) fn is_floating(block_id: &str) -> bool {
+    lock().get(block_id).is_some_and(|e| e.floating)
+}
+
 /// Note whether `block_id` is a floating window now (a pane docked or floated later keeps its opener).
 pub(crate) fn set_floating(block_id: &str, floating: bool) {
     if let Some(e) = lock().get_mut(block_id) {
@@ -165,6 +170,7 @@ mod tests {
         record("po-d1", "fl-agent", false);
         record("po-o1", "someone-else", true);
         assert_eq!(floaters_of("fl-agent"), vec!["po-f1".to_string(), "po-f2".to_string()]);
+        assert!(is_floating("po-f2") && !is_floating("po-d1") && !is_floating("po-never"));
         set_floating("po-f1", false);
         assert_eq!(floaters_of("fl-agent"), vec!["po-f2".to_string()], "a docked pane no longer counts");
         for b in ["po-f1", "po-f2", "po-d1", "po-o1"] {

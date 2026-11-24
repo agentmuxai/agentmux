@@ -36,8 +36,9 @@ import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
 import { displayName, groupRemotes, remoteColor } from "@/app/view/remotes/remotes-sections";
 import { batch, createMemo, createSignal } from "solid-js";
 import { baseName, isWithin, joinPath, joinRel, normalizePath, parentOf, samePath } from "./files-path";
+import { treeMove } from "@/app/fs/tree/tree-keys";
+import { flattenTree, isUnderRel, labelOf, parentRel, type TreeRow } from "@/app/fs/tree/tree-rows";
 import { crawlFolders, rankMatches, whereOf } from "./files-find";
-import { flattenTree, isUnderRel, labelOf, MAX_EXPANDED, parentRel, type TreeRow } from "./files-tree";
 import { EMPTY_SELECTION, pruneSelection, type Selection } from "./files-selection";
 import { clipboard, FilesOps, opFinishedText, sameVolume, setClipboard } from "./files-ops";
 import { systemIconsAvailable } from "./files-icons";
@@ -55,6 +56,8 @@ const META_PREVIEW = "files:preview";
 /** Set by srv when a container agent opens a folder of its workspace: the one folder this pane may show. */
 const META_ROOT = "files:root";
 const META_VIEW = "files:view";
+/** The most folders a pane keeps open in place at once: each one is watched, and srv allows 64 watches to a pane. */
+const MAX_EXPANDED = 40;
 /** The most matches a find shows. */
 const MAX_FOUND = 200;
 /** The tree view: folders open in place (`true`), on the details view. */
@@ -268,6 +271,9 @@ export class FilesModel {
     private readonly setKids: (m: ReadonlyMap<string, FsEntry[]>) => void;
     /** A watch on each opened folder, by the same path, and the ones being set up. */
     private readonly treeWatches = new Map<string, string>();
+    /** The newest listing started of each opened folder, so a slower, older one is dropped when it ends. */
+    private readonly kidsLoad = new Map<string, number>();
+    private kidsLoadSeq = 0;
     private readonly treeWatching = new Set<string>();
     /** The filter typed into the toolbar (spec §5.3.1, Ctrl+F). */
     readonly filter: () => string;
@@ -831,6 +837,7 @@ export class FilesModel {
                 this.setPartial(false);
                 this.setSelection(pruneSelection(this.selection(), opts.silent ? oldOrder : before, this.orderKeepingNested()));
             });
+            this.dropGoneFolders();
             this.applyRequestedSelection();
             void this.watch(this.path());
             this.refreshGit();
@@ -1187,38 +1194,54 @@ export class FilesModel {
         else void this.expand(rel);
     }
 
-    /** Right and Left in the tree: open the focused folder or step into it; close it or step out to its folder. */
+    /** Right and Left in the tree: open the focused folder or step into it; close it or step out to its folder (the keys of
+     *  app/fs/tree/tree-keys.ts, which the Editor's tree answers the same way). */
     treeArrow(dir: "right" | "left"): void {
         const focus = this.selection().focus;
-        const row = focus == null ? undefined : this.treeInfo().get(focus);
-        if (!focus || !row) return;
-        const go = (name: string): void => {
-            this.setSelection({ names: new Set([name]), focus: name, anchor: name });
-            this.setRevealRequest({ name });
-        };
-        if (dir === "right") {
-            if (row.expandable && !row.expanded) void this.expand(focus);
-            else if (row.expanded) {
-                const next = this.treeRows()[this.order().indexOf(focus) + 1];
-                if (next && next.depth === row.depth + 1) go(next.entry.name);
-            }
-        } else if (row.expanded) this.collapse(focus);
-        else if (row.depth > 0) go(parentRel(focus));
+        if (!focus || !this.treeInfo().has(focus)) return;
+        const rows = this.treeRows().map((r) => ({
+            id: r.entry.name,
+            expandable: r.expandable,
+            expanded: r.expanded,
+            parent: r.depth > 0 ? parentRel(r.entry.name) : null,
+        }));
+        const move = treeMove(rows, focus, dir === "right" ? "ArrowRight" : "ArrowLeft", 1);
+        if (move?.kind === "expand") void this.expand(move.id);
+        else if (move?.kind === "collapse") this.collapse(move.id);
+        else if (move?.kind === "select") {
+            this.setSelection({ names: new Set([move.id]), focus: move.id, anchor: move.id });
+            this.setRevealRequest({ name: move.id });
+        }
+    }
+
+    /** Closes an opened folder whose row is gone from the listing of the folder it was in (renamed, moved or deleted),
+     *  with the folders opened inside it. Not an error: the person's own operation did it. */
+    private dropGoneFolders(): void {
+        for (const rel of this.expanded()) {
+            if (!this.expanded().has(rel)) continue;
+            const parent = parentRel(rel);
+            const list = parent === "" ? this.rawEntries() : this.kids().get(parent);
+            if (list && !list.some((e) => e.name === labelOf(rel) && e.is_dir)) this.collapse(rel);
+        }
     }
 
     /** Lists the opened folder `rel` (all its pages) and keeps what it holds. A folder that can't be listed closes. */
     private async loadKids(rel: string): Promise<void> {
         const root = this.path();
+        // A listing that a later one of the same folder overtook is dropped, so an older answer can't overwrite a newer one.
+        const mine = ++this.kidsLoadSeq;
+        this.kidsLoad.set(rel, mine);
         const dir = this.pathOf(rel);
         const collected: FsEntry[] = [];
         let cursor: string | undefined;
         try {
             do {
                 const res = await RpcApi.FsListCommand(TabRpcClient, { path: dir, cursor, limit: PAGE, ...this.on() }, this.connection() ? { timeout: 180_000 } : undefined);
-                if (this.disposed || !samePath(root, this.path()) || !this.expanded().has(rel)) return;
+                if (this.disposed || !samePath(root, this.path()) || !this.expanded().has(rel) || this.kidsLoad.get(rel) !== mine) return;
                 if (res.error) {
                     this.collapse(rel);
-                    this.setStatus({ text: `Couldn't open ${labelOf(rel)}: ${res.error.message}`, tone: "error" });
+                    // A folder that is gone was renamed, moved or deleted: closed, not an error.
+                    if (res.error.kind !== "not_found") this.setStatus({ text: `Couldn't open ${labelOf(rel)}: ${res.error.message}`, tone: "error" });
                     return;
                 }
                 collected.push(...res.entries);
@@ -1231,6 +1254,7 @@ export class FilesModel {
             }
             return;
         }
+        if (this.kidsLoad.get(rel) !== mine) return;
         const next = new Map(this.kids());
         next.set(rel, collected);
         batch(() => {
@@ -1238,6 +1262,7 @@ export class FilesModel {
             this.setKids(next);
             this.setSelection(pruneSelection(this.selection(), before, this.order()));
         });
+        this.dropGoneFolders();
     }
 
     private async watchKid(rel: string): Promise<void> {
@@ -1247,7 +1272,7 @@ export class FilesModel {
         const path = this.pathOf(rel);
         try {
             const res = await RpcApi.FsWatchCommand(TabRpcClient, { path, block_id: this.blockId });
-            if (this.disposed || !this.treeWatching.has(rel) || !this.expanded().has(rel)) {
+            if (this.disposed || !this.treeWatching.has(rel) || !this.expanded().has(rel) || this.treeWatches.has(rel)) {
                 void RpcApi.FsUnwatchCommand(TabRpcClient, { watch_id: res.watch_id }).catch(() => {});
             } else {
                 this.treeWatches.set(rel, res.watch_id);
