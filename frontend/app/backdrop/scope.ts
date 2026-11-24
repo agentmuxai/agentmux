@@ -81,6 +81,8 @@ export function scopeVars(derived: DerivedBackdrop, ansi?: AnsiColours): ScopeVa
         "--ink-warning": ink.warning,
         "--ink-success": ink.success,
         "--ink-info": ink.info,
+        "--ink-attention": ink.attention,
+        "--ink-on-attention": ink.onAttention,
         "--ink-focus": ink.focus,
         "--ink-hover": ink.hover,
         "--ink-selected": ink.selected,
