@@ -69,9 +69,11 @@ afterEach(() => vi.clearAllMocks());
 
 describe("find in a browser pane's page", () => {
     it("hands the bar's atoms to the model, so the host can open it", async () => {
-        const { model, dispose } = mount();
+        const { bar, model, dispose } = mount();
         await flush();
         expect(model.searchAtoms?.isOpen()).toBe(false);
+        // The bar says whose it is, so Ctrl+F finds this pane's box among several open bars.
+        expect(bar.owner).toBe("block-1");
         dispose();
     });
 

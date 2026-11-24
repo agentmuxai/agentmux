@@ -32,6 +32,7 @@ const anchorRef = (anchor: () => HTMLElement | undefined) => ({
 export function useBrowserFind(model: BrowserViewModel, anchor: () => HTMLElement | undefined): SearchProps {
     const panes = () => getApi().browserPanes;
     const search = useSearch({ viewModel: model, anchorRef: anchorRef(anchor), caseSensitive: false });
+    search.owner = model.blockId;
     let text = "";
 
     // The page's own search, as the person types: a new search from the top of the page each time. A closed bar
