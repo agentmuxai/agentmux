@@ -90,6 +90,9 @@ fn collapse(path: &Path) -> Option<PathBuf> {
 
 /// A file named in a message of a host agent whose pane works in `cwd`: found when it is a file inside that folder.
 fn check_in_folder(cwd: &str, asked: &str) -> FsLinkFileCheck {
+    // A default agent folder is stored as `~/.agentmux/agents/<slug>`: the pane's own folder, expanded.
+    let cwd = crate::backend::base::expand_home_dir_safe(cwd).to_string_lossy().into_owned();
+    let cwd = cwd.as_str();
     let asked = asked.trim();
     if asked.is_empty() || asked.contains('\0') || asked.starts_with('~') || asked.starts_with("\\\\") || asked.starts_with("//") || cwd.trim().is_empty() {
         return answer(OUTSIDE, OUTSIDE_WORDS);
@@ -222,6 +225,15 @@ mod tests {
             let (state, reason) = check(&dir, asked);
             assert!(!reason.contains(&host) && !state.contains(&host), "{asked}");
         }
+    }
+
+    #[test]
+    fn a_working_folder_stored_with_a_home_prefix_is_the_folder_it_names() {
+        // `~/` is the person's home, which exists: a file that is not there is missing, not outside.
+        let got = check_in_folder("~/", "wren-no-such-file-for-this-test.md");
+        assert_eq!((got.state.as_str(), got.reason.as_str()), (MISSING, NOT_FOUND_WORDS));
+        assert_eq!(check_in_folder("~/", "../wren-no-such-file-for-this-test.md").state, OUTSIDE, "a path leaving the folder is still outside");
+        assert_eq!(check_in_folder("~user/x", "a.md").state, OUTSIDE, "another user's home is not a folder this pane has");
     }
 
     #[test]
