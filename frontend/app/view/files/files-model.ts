@@ -59,6 +59,8 @@ const META_PREVIEW = "files:preview";
 /** Set by srv when a container agent opens a folder of its workspace: the one folder this pane may show. */
 const META_ROOT = "files:root";
 const META_VIEW = "files:view";
+/** A move of more items than this is not offered Undo: each folder among them is listed to be sure of it. */
+const MAX_UNDO_ITEMS = 200;
 /** The most folders a pane keeps open in place at once: each one is watched, and srv allows 64 watches to a pane. */
 const MAX_EXPANDED = 40;
 /** The most matches a find shows. */
@@ -1215,19 +1217,48 @@ export class FilesModel {
         this.refresh();
     }
 
+    /** The lower-case names a folder holds, "file" for something that isn't a folder, or null when that isn't certain. */
+    private async childNamesOf(path: string): Promise<Set<string> | "file" | null> {
+        try {
+            const res = await RpcApi.FsListCommand(TabRpcClient, { path, limit: PAGE, ...this.on() });
+            if (res.error) return res.error.kind === "not_a_directory" ? "file" : null;
+            if (res.cursor) return null;
+            return new Set(res.entries.map((e) => e.name.toLowerCase()));
+        } catch {
+            return null;
+        }
+    }
+
     private async planUndo(sources: string[], destDir: string): Promise<UndoPlan | null> {
         const destNames = await this.namesIn(destDir);
-        const items = destNames ? planMoveUndo(sources, destDir, destNames) : null;
-        return items && destNames ? { items, destDir, before: destNames } : null;
+        const items = destNames && sources.length <= MAX_UNDO_ITEMS ? planMoveUndo(sources, destDir, destNames) : null;
+        if (!items || !destNames) return null;
+        const children = new Map<string, ReadonlySet<string>>();
+        for (const item of items) {
+            const names = await this.childNamesOf(item.from);
+            if (names === null) return null;
+            if (names !== "file") children.set(baseName(item.from).toLowerCase(), names);
+        }
+        return { items, destDir, before: destNames, children };
     }
 
     /** A finished move that went to plan joins the undo stack, once the destination shows it landed as planned
      *  (a conflict answered while the job ran puts an item under another name). True when it did. */
     private async noteMoveForUndo(op: { kind: string; state: string; tag?: unknown; failures?: { path: string }[] }): Promise<boolean> {
         const plan = op.tag as UndoPlan | undefined;
-        if (op.kind !== "move" || op.state !== "done" || !plan?.items) return false;
+        if (op.kind !== "move" || op.state !== "done" || !plan?.items || this.connection()) return false;
         const items = movedOk(plan.items, op.failures?.map((f) => f.path));
-        if (items.length === 0 || !landedAsPlanned(plan, items, await this.namesIn(plan.destDir))) return false;
+        if (items.length === 0) return false;
+        const after = await this.namesIn(plan.destDir);
+        const childrenAfter = new Map<string, ReadonlySet<string> | null>();
+        for (const key of plan.children.keys()) {
+            const item = items.find((i) => baseName(i.to).toLowerCase() === key);
+            if (!item) continue;
+            const names = await this.childNamesOf(item.to);
+            childrenAfter.set(key, names === "file" ? null : names);
+        }
+        // The pane may have been moved to a host while the destination was being read: the stack was cleared then.
+        if (this.connection() || !landedAsPlanned(plan, items, after, childrenAfter)) return false;
         this.undoStack.push({ kind: "move", items });
         return true;
     }

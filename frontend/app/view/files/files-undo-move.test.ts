@@ -38,6 +38,7 @@ describe("landedAsPlanned", () => {
         items: [{ from: "/a/x", to: "/b/x" }],
         destDir: "/b",
         before: names("old"),
+        children: new Map<string, ReadonlySet<string>>(),
     };
 
     it("is true when the destination gained exactly the names of the items that went through", () => {
@@ -50,6 +51,21 @@ describe("landedAsPlanned", () => {
         expect(landedAsPlanned(plan, plan.items, names("old", "x", "x (2)"))).toBe(false);
         expect(landedAsPlanned(plan, plan.items, names("old", "x", "other"))).toBe(false);
         expect(landedAsPlanned(plan, plan.items, names("old", "y"))).toBe(false);
+    });
+
+    it("is false when a folder met one of its name in the destination, and so was merged with what that held", () => {
+        const folderPlan: UndoPlan = {
+            items: [{ from: "/a/docs", to: "/b/docs" }],
+            destDir: "/b",
+            before: names("old"),
+            children: new Map([["docs", names("a.md")]]),
+        };
+        const after = names("old", "docs");
+        expect(landedAsPlanned(folderPlan, folderPlan.items, after, new Map([["docs", names("a.md")]]))).toBe(true);
+        // Something created docs with its own files after the check: the folder was merged into it.
+        expect(landedAsPlanned(folderPlan, folderPlan.items, after, new Map([["docs", names("a.md", "other.txt")]]))).toBe(false);
+        expect(landedAsPlanned(folderPlan, folderPlan.items, after, new Map([["docs", null]]))).toBe(false);
+        expect(landedAsPlanned(folderPlan, folderPlan.items, after, new Map())).toBe(false);
     });
 
     it("is false when the destination can't be listed or nothing went through", () => {

@@ -1154,6 +1154,36 @@ describe("the Files pane: dragging files (§8.2)", () => {
             expect(v.container.querySelector(".files-status")?.textContent).toContain("Nothing to undo");
         });
 
+        describe("a folder moved", () => {
+            const DOCS = `${HOME}\\docs`;
+            const movedFolder = async (v: ReturnType<typeof mount>, landed: FsEntry[]) => {
+                await waitFor(() => expect(v.names()).toHaveLength(5));
+                await v.model.transfer("move", [DOCS], SRC);
+                // What srv did: the folder is in src, with what it holds there.
+                h.state.dirs.set(SRC, [f("main.rs"), d("docs")]);
+                h.state.dirs.set(`${SRC}\\docs`, landed);
+                opEvent({ kind: "move", state: "done", done_items: 1 });
+            };
+            beforeEach(() => {
+                h.state.dirs.set(HOME, [f("b.txt"), d("src"), d("docs"), f("a10.md"), f("a2.md")]);
+                h.state.dirs.set(DOCS, [f("a.md")]);
+            });
+
+            it("is offered Undo when it holds what it held", async () => {
+                const v = mount();
+                await movedFolder(v, [f("a.md")]);
+                await waitFor(() => expect(undoButton(v)).not.toBeNull());
+            });
+
+            it("is offered no Undo when it was merged into a folder of that name that held other files", async () => {
+                const v = mount();
+                await movedFolder(v, [f("a.md"), f("other.txt")]);
+                await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toContain("Moved"));
+                await new Promise((resolve) => setTimeout(resolve, 50));
+                expect(undoButton(v)).toBeNull();
+            });
+        });
+
         it("does not start a move whose pane changed host while the destination was being read", async () => {
             const v = mount();
             await waitFor(() => expect(v.names()).toHaveLength(4));

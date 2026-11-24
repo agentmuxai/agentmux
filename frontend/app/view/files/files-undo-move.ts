@@ -17,11 +17,16 @@ export interface MovedItem {
     to: string;
 }
 
-/** A move that can be undone for certain: the items, and the names the destination held before it started. */
+/**
+ * A move that can be undone for certain: the items, the names the destination held before it started, and for each
+ * folder among the items (by lower-case name) the names it held, since a folder that meets one of its name in the
+ * destination is merged into it, which no name in the destination's own listing shows.
+ */
 export interface UndoPlan {
     items: MovedItem[];
     destDir: string;
     before: ReadonlySet<string>;
+    children: ReadonlyMap<string, ReadonlySet<string>>;
 }
 
 /**
@@ -50,11 +55,24 @@ export function planMoveUndo(sources: readonly string[], destDir: string, destNa
  * item was kept under another one) adds a name more or fewer, and then Undo would move the wrong file. `after` is the
  * lower-case names now in the destination, or null when it couldn't be listed.
  */
-export function landedAsPlanned(plan: UndoPlan, ok: readonly MovedItem[], after: ReadonlySet<string> | null): boolean {
+export function landedAsPlanned(
+    plan: UndoPlan,
+    ok: readonly MovedItem[],
+    after: ReadonlySet<string> | null,
+    childrenAfter: ReadonlyMap<string, ReadonlySet<string> | null> = new Map()
+): boolean {
     if (!after || ok.length === 0) return false;
     const expected = new Set(ok.map((i) => baseName(i.to).toLowerCase()));
     const added = [...after].filter((n) => !plan.before.has(n));
-    return added.length === expected.size && added.every((n) => expected.has(n));
+    if (added.length !== expected.size || !added.every((n) => expected.has(n))) return false;
+    // A folder holds what it held: nothing was merged into it on the way.
+    for (const key of expected) {
+        const had = plan.children.get(key);
+        if (!had) continue;
+        const has = childrenAfter.get(key);
+        if (!has || has.size !== had.size || ![...has].every((n) => had.has(n))) return false;
+    }
+    return true;
 }
 
 /** The items of a finished move that went through: those srv reports as failed are left out. */
