@@ -51,6 +51,7 @@ pub(super) async fn dispatch_scoped(node: &FlowNode, kind: BlockKind, scope: &mu
         BlockKind::Spawn => blocks::spawn::run(node, scope).await,
         BlockKind::Transform => blocks::transform::run(node, scope).await,
         BlockKind::Run => blocks::run::run(node, scope).await,
+        BlockKind::Once => blocks::once::run(node, scope).await,
         BlockKind::ForEach | BlockKind::Wait | BlockKind::Drone | BlockKind::Join => unreachable!("the scheduler runs these"),
     }
 }
@@ -84,7 +85,7 @@ fn default_timeout(kind: BlockKind) -> Option<Duration> {
         BlockKind::Agent => Some(Duration::from_secs(15 * 60)),
         BlockKind::Message | BlockKind::Task | BlockKind::Notify | BlockKind::AppQuery | BlockKind::Spawn | BlockKind::Run => Some(Duration::from_secs(5 * 60)),
         // A wait is for as long as it says, and its own `timeout_seconds` may cut it short.
-        BlockKind::Api | BlockKind::Condition | BlockKind::Response | BlockKind::Variables | BlockKind::Transform | BlockKind::ForEach | BlockKind::Wait | BlockKind::Join => None,
+        BlockKind::Api | BlockKind::Condition | BlockKind::Once | BlockKind::Response | BlockKind::Variables | BlockKind::Transform | BlockKind::ForEach | BlockKind::Wait | BlockKind::Join => None,
         // The callee has the limits of its own blocks, and the caller may set one for the whole call.
         BlockKind::Drone => None,
     }
@@ -129,7 +130,8 @@ fn carries_on(edge: &FlowEdge, source: &FlowNode, output: &Value, failed: bool) 
     if failed {
         return false;
     }
-    if source.data.get("kind").and_then(|v| v.as_str()) != Some("condition") {
+    // A Condition and a Once both answer true or false, and their edges carry the run on by that answer.
+    if !matches!(source.data.get("kind").and_then(|v| v.as_str()), Some("condition" | "once")) {
         return true;
     }
     match (edge.source_handle.as_deref(), output.get("result").and_then(|v| v.as_bool())) {
@@ -642,6 +644,11 @@ impl<'a> Scheduler<'a> {
             BlockKind::Agent | BlockKind::Api | BlockKind::Message | BlockKind::AppQuery | BlockKind::Run => (true, false),
             BlockKind::Condition => {
                 let (tainted, derived) = read("expr");
+                (false, tainted || derived)
+            }
+            // Whether a key was seen is a boolean made from what the key was read from.
+            BlockKind::Once => {
+                let (tainted, derived) = read("key");
                 (false, tainted || derived)
             }
             BlockKind::Response => read("template"),
