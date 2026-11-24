@@ -392,7 +392,7 @@
 128 frontend/app/view/swarm/swarm-view.tsx::SubagentRow
 127 frontend/app/view/sysinfo/sysinfo-model.ts::sampleReducer
 290 frontend/app/view/term/term.tsx::TerminalView
-224 frontend/app/view/term/termViewModel.ts::TermViewModel::constructor
+218 frontend/app/view/term/termViewModel.ts::TermViewModel::constructor
 127 frontend/app/view/term/termwrap.ts::TermWrap::constructor
 268 frontend/app/view/term/termwrap.ts::TermWrap::init
 128 frontend/app/view/toolchain/CliDiskSpace.tsx::CliDiskSpace
