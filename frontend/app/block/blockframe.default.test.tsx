@@ -343,6 +343,7 @@ describe("the backdrop", () => {
         for (const view of ["files", "editor", "kanban", "swarm"]) {
             const t = setup({ meta: { view, backdrop: record } });
             expect(frame(t.view.container).getAttribute("data-backdrop"), view).toBe("builtin:teal");
+            expect(frame(t.view.container).getAttribute("data-backdrop-scheme"), view).toMatch(/^(dark|light)$/);
             expect(style(t.view.container).getPropertyValue("--surface"), view).toMatch(/^#[0-9a-f]{6}$/);
             expect(getPaneScope(t.blockId)()?.["--ink-text"], view).toMatch(/^#[0-9a-f]{6}$/);
             cleanup();

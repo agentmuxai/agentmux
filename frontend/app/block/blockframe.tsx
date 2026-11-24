@@ -29,6 +29,7 @@ import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { computeBgStyleFromMeta } from "@/util/muxutil";
 import { backdropSubmenuItem } from "@/app/backdrop/backdrop-menu";
 import { supportsBackdrop } from "@/app/backdrop/meta";
+import { PaneBackdropContext } from "@/app/backdrop/pane-fit";
 import { getPaneScope, identityInPane } from "@/app/backdrop/scope";
 import { useResolvedBackdrop, usePaneBackdrop } from "@/app/backdrop/usePaneBackdrop";
 import * as util from "@/util/util";
@@ -1403,6 +1404,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
             })}
             data-blockid={nodeModel.blockId}
             data-backdrop={backdropVars() ? (backdrop()?.id ?? "preview") : undefined}
+            data-backdrop-scheme={backdropVars() ? backdrop()?.derived.scheme : undefined}
             onClick={props.blockModel?.onClick}
             onFocusIn={props.blockModel?.onFocusCapture}
             onContextMenu={s.onBodyContextMenu}
@@ -1431,7 +1433,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                     changeConnModalAtom={s.changeConnModalAtom}
                 />
             </Show>
-            {renderFrameInner(s)}
+            <PaneBackdropContext.Provider value={backdrop}>{renderFrameInner(s)}</PaneBackdropContext.Provider>
             {renderFrameOverlays(s)}
         </div>
     );

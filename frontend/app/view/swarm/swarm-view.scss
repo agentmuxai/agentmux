@@ -937,6 +937,10 @@
     &.swarm-activity-summary--fallback {
         opacity: 0.6;
         font-style: normal;
+        // The pane's muted ink is already chosen to read on its backdrop; dimming it again takes it under 3:1.
+        [data-backdrop] & {
+            opacity: 1;
+        }
     }
 }
 
