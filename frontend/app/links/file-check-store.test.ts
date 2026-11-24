@@ -7,7 +7,7 @@ const ask = vi.fn();
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { FsLinkFileCheckCommand: (...a: unknown[]) => ask(...a) } }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
-import { checkFileNow, deadReason, fileCheck, requestFileCheck } from "./file-check-store";
+import { checkFileNow, deadReason, fileCheck, isPlain, requestFileCheck } from "./file-check-store";
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
@@ -33,6 +33,17 @@ describe("the file check store", () => {
         expect(deadReason("pane-4", "docs.rs")).toBeUndefined();
         await checkFileNow("pane-4", "gone.md");
         expect(deadReason("pane-4", "gone.md")).toBe("Not found.");
+    });
+
+    it("draws a missing bare name that could be a site's as plain text, not dead; outside stays dead", async () => {
+        ask.mockResolvedValueOnce({ state: "missing", reason: "Not found.", resolved: "" }).mockResolvedValueOnce({ state: "outside", reason: "Outside this agent's folders.", resolved: "" });
+        expect(isPlain("pane-5", "parser.rs")).toBe(false);
+        await checkFileNow("pane-5", "parser.rs");
+        expect(isPlain("pane-5", "parser.rs")).toBe(true);
+        expect(deadReason("pane-5", "parser.rs")).toBeUndefined();
+        await checkFileNow("pane-5", "tool.sh");
+        expect(isPlain("pane-5", "tool.sh")).toBe(false);
+        expect(deadReason("pane-5", "tool.sh")).toBe("Outside this agent's folders.");
     });
 
     it("makes a missing file, and one outside the folders, dead with the reason srv gave", async () => {

@@ -620,3 +620,17 @@ fn every_sender_of_an_urgent_message_about_a_task_is_kept_and_an_ask_is_not_the_
     assert_eq!(held_moved_ms(&tasks), 100);
     assert_eq!(held_moved_ms(&[asked_by("first", 5_000)]), 0);
 }
+
+/// A lead on another machine hears once: nothing is queued for it while the note to the watchers here is not taken, so a
+/// sweep that asks again does not send a second one.
+#[test]
+fn a_lead_on_another_machine_is_sent_a_note_only_at_the_sweep_that_tells() {
+    use std::cell::Cell;
+    let sent = Cell::new(0);
+    assert!(!told_both(true, || false, || sent.set(sent.get() + 1)), "the local note is held: not told yet");
+    assert_eq!(sent.get(), 0, "and nothing went to the lead");
+    assert!(told_both(true, || true, || sent.set(sent.get() + 1)));
+    assert_eq!(sent.get(), 1);
+    assert!(told_both(false, || panic!("nobody here watches"), || sent.set(sent.get() + 1)), "no watcher here, only the remote lead");
+    assert_eq!(sent.get(), 2);
+}

@@ -380,6 +380,74 @@ fn a_member_that_missed_the_last_record_of_an_epoch_still_catches_up_across_the_
 }
 
 #[test]
+fn a_void_record_dated_far_ahead_is_refused_and_does_not_move_this_machines_clock() {
+    let mut a = machine("a", 1);
+    let b = machine("b", 2);
+    let all = pins(&[&a, &b]);
+    a.write("card", "before", NOW);
+    let ended: Vector = [("a".to_string(), 1)].into();
+    log::set_epoch(&b.conn, COLLECTION, 1, &ended).unwrap();
+    let mut clock = Clock::new("b");
+    let first = log::since(&a.conn, COLLECTION, &Vector::new(), 10).unwrap();
+    assert_eq!(log::apply_remote(&b.conn, &first[0], &all, &mut clock, NOW, &NewestWins).unwrap(), Outcome::Applied);
+    // A write of a at the old epoch, past its end, dated a day ahead: void, but its date is not taken in.
+    let far = Version { wall_ms: NOW + 24 * 60 * 60 * 1000, counter: 0, machine: "a".into() };
+    let header = Header { seq: 2, epoch: 0, version: far, ..first[0].header.clone() };
+    let late = Record::sign(&a.private, header, first[0].body.clone()).unwrap();
+    assert!(matches!(refused(log::apply_remote(&b.conn, &late, &all, &mut clock, NOW, &NewestWins)), Refused::Skew(_)));
+    assert_eq!(log::vector(&b.conn, COLLECTION).unwrap().get("a"), Some(&1), "not stored");
+    let mut b = b;
+    let mine = b.write("card", "mine", NOW + 1);
+    assert!(mine.header.version.wall_ms < NOW + 60_000, "this machine's next write is not dated a day ahead: {:?}", mine.header.version);
+}
+
+#[test]
+fn a_write_stored_as_void_under_a_removal_that_loses_its_fork_becomes_the_records_state() {
+    let mut a = machine("a", 1);
+    let b = machine("b", 2);
+    let all = pins(&[&a, &b]);
+    a.write("card", "before", NOW);
+    a.write("card", "late", NOW + 10);
+    // b learns of a removal that says a had written 1 record at epoch 0: a's second write is void on b.
+    let ended: Vector = [("a".to_string(), 1)].into();
+    log::set_epoch(&b.conn, COLLECTION, 1, &ended).unwrap();
+    let mut b = b;
+    let outcomes = b.pull(&a, &all, NOW + 20);
+    assert_eq!(outcomes.into_iter().map(Result::unwrap).collect::<Vec<_>>(), vec![Outcome::Applied, Outcome::Void]);
+    assert_eq!(b.state("card").as_deref(), Some("before"));
+    // The removal then loses a fork: no epoch and no end are left, so the write was within the epoch all along.
+    log::reset_epochs(&b.conn, COLLECTION, 0, &[]).unwrap();
+    log::recheck(&b.conn, COLLECTION, "b", &NewestWins).unwrap();
+    assert_eq!(b.state("card").as_deref(), Some("late"), "the write is applied now that it is no longer void");
+    assert_eq!(log::recheck(&b.conn, COLLECTION, "b", &NewestWins).unwrap(), 0, "nothing is left to settle");
+}
+
+#[test]
+fn a_record_that_a_removal_newly_makes_void_stops_being_the_state_of_its_record() {
+    let mut a = machine("a", 1);
+    let b = machine("b", 2);
+    let all = pins(&[&a, &b]);
+    a.write("card", "before", NOW);
+    a.write("card", "late", NOW + 10);
+    let mut b = b;
+    b.pull(&a, &all, NOW + 20);
+    assert_eq!(b.state("card").as_deref(), Some("late"));
+    // A removal now says a had written only 1 record at epoch 0: the second write was never within the epoch.
+    let ended: Vector = [("a".to_string(), 1)].into();
+    log::reset_epochs(&b.conn, COLLECTION, 1, &[(0, &ended)]).unwrap();
+    log::recheck(&b.conn, COLLECTION, "b", &NewestWins).unwrap();
+    assert_eq!(b.state("card").as_deref(), Some("before"), "what the others stopped at is the state again");
+    // Its own writes past an end are kept as they are: they are written again, not undone.
+    let mut own = machine("b", 3);
+    own.write("card", "mine, one", NOW);
+    own.write("card", "mine, two", NOW + 10);
+    let cut: Vector = [("b".to_string(), 1)].into();
+    log::reset_epochs(&own.conn, COLLECTION, 1, &[(0, &cut)]).unwrap();
+    log::recheck(&own.conn, COLLECTION, "b", &NewestWins).unwrap();
+    assert_eq!(own.state("card").as_deref(), Some("mine, two"));
+}
+
+#[test]
 fn the_counter_carries_into_the_wall_time_instead_of_overflowing() {
     let mut clock = Clock::new("a");
     let seen = Version { wall_ms: NOW, counter: u32::MAX, machine: "b".into() };

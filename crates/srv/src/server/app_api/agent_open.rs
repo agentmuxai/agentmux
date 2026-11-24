@@ -388,7 +388,7 @@ pub(super) async fn open_agent_inner(
     extra_meta: MetaMapType,
 ) -> Result<AgentOpenResult, String> {
     let mut extra_meta = extra_meta;
-    let (headless, resumed) = steps::take_start_markers(&mut extra_meta); // a start: no pane
+    let headless = steps::take_start_marker(&mut extra_meta); // a start: no pane
     let mstore = state.mstore.clone();
 
     tracing::info!(agent_id = %cmd.agent_id, "agent.open");
@@ -402,7 +402,7 @@ pub(super) async fn open_agent_inner(
     let open_lock = agent_open_lock(&agent.id);
     let _open_guard = open_lock.lock().await;
 
-    steps::admit_open(state, &agent, resumed).await?;
+    steps::admit_open(state, &agent).await?;
 
     // 2. Resolve provider
     let provider = providers::get_provider(&agent.provider)

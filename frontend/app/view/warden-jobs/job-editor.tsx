@@ -289,7 +289,8 @@ const showForm = (ed: EditorState) =>
     !ed.loading() && (ed.props.start.mode !== "new" || ed.source() === "blank" || ed.chosen());
 
 function TemplateItem(p: { ed: EditorState; t: JobTemplateInfo }): JSX.Element {
-    const pill = statePill(p.t.state);
+    // Read from the JSX, so the label follows a language change or a dictionary that loads after the mount.
+    const pill = () => statePill(p.t.state);
     const isDrone = p.t.manifest?.kind === "drone";
     // A Drone template makes a drone (its graph), not a job: its settings are asked for here.
     const [making, setMaking] = createSignal(false);
@@ -298,7 +299,7 @@ function TemplateItem(p: { ed: EditorState; t: JobTemplateInfo }): JSX.Element {
             <div class="warden-jobs-template-head">
                 <strong>{p.t.manifest?.name ?? p.t.id}</strong>
                 <span class="warden-manager-dim">{p.t.manifest?.version}</span>
-                <Pill tone={pill.tone}>{pill.label}</Pill>
+                <Pill tone={pill().tone}>{pill().label}</Pill>
                 <Show when={isDrone}>
                     <Pill>{t("jobs.droneTemplate.pill")}</Pill>
                 </Show>

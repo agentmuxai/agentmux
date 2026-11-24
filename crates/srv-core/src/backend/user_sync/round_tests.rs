@@ -381,6 +381,28 @@ fn a_write_cut_off_by_a_removal_is_written_again_in_the_round_that_learns_of_the
 }
 
 #[test]
+fn a_write_held_as_void_under_a_removal_the_chain_no_longer_has_is_applied_in_the_next_round() {
+    let (mut a, mut b, _) = three("kanban");
+    a.write(C, "card", "first");
+    round(&mut b, &mut a);
+    let second = a.write(C, "card", "second");
+    // B was told of a removal (that has since lost its fork) saying A had written one record at the first epoch: A's
+    // second write reaches B as void, and B's vector then counts it as held.
+    let ended = log::Vector::from([(a.id.clone(), 1)]);
+    log::reset_epochs(&b.conn, C, 1, &[(0, &ended)]).unwrap();
+    let pins = b.chains[C].state(C).unwrap().pins();
+    let outcome = log::apply_remote(&b.conn, &second, &pins, &mut b.clock, b.now, &NewestWins).unwrap();
+    assert_eq!(outcome, log::Outcome::Void);
+    // B's chain has no removal: the round puts the epoch where the chain says, and the write counts.
+    let r = round(&mut b, &mut a);
+    assert_eq!(r.ended, Ended::Synced, "{:?}", r.ended);
+    let held = log::current(&b.conn, C, "card").unwrap().unwrap();
+    let plain = super::seal::open(&b.ring, &held.header, &held.body).unwrap();
+    assert_eq!(&plain[..], b"second", "the write is the record's state, though the peer never sends it again");
+    assert!(!round(&mut b, &mut a).changed(), "nothing is left to settle");
+}
+
+#[test]
 fn a_write_cut_off_by_a_removal_is_not_written_again_over_a_later_write_of_another_machine() {
     let (mut a, mut b, c) = three("kanban");
     a.write(C, "card", "first");
