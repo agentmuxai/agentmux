@@ -1428,7 +1428,8 @@ export class FilesModel {
         } catch {
             // No live updates for this folder; Refresh still works.
         } finally {
-            this.treeWatching.delete(rel);
+            // An answer for a folder the name no longer means must leave the marker of the watch asked for the new one.
+            if (this.pathOf(rel) === path) this.treeWatching.delete(rel);
         }
     }
 

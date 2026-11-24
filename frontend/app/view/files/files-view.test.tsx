@@ -138,6 +138,7 @@ import { setPlatform } from "@/util/platformutil";
 import { FilesModel } from "./files-model";
 import { openTargetOf } from "./files-open";
 import { clipboard, setClipboard } from "./files-ops";
+import { buildRowMenu } from "./files-menus";
 import { recentPlaces, resetPlacesForTests } from "./files-pins";
 import { resetThumbnailsForTests } from "./files-thumbs";
 import { noteToolCall, noteToolResult, resetTouchedForTests } from "@/app/store/touched-files";
@@ -2032,6 +2033,19 @@ describe("the Files pane: tree view, rows that share a label or a name with anot
         expect(clipboard()?.paths).toEqual([`${HOME}\\lib`, SRC, `${HOME}\\a2.md`, `${HOME}\\b.txt`]);
     });
 
+    it("acts on the folder from the menu of a row opened in it, when both are selected", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toContain("main.rs"));
+        // Both rows selected: the menu of the inner one acts on the selection, which is the folder.
+        v.model.setSelection({ names: new Set(["src", "src/main.rs"]), focus: "src/main.rs", anchor: "src" });
+        const entry = v.model.entries().find((e) => e.name === "src/main.rs")!;
+        const menu = buildRowMenu(v.model, entry, { openEntry: () => {}, openInNewTab: () => {}, copyPaths: () => {}, askDeletePermanently: () => {} });
+        (menu.find((i) => i.type === "action" && i.label === "Copy") as { onSelect: () => void }).onSelect();
+        expect(clipboard()).toEqual({ kind: "copy", paths: [SRC] });
+    });
+
     it("keeps a row opened in a selected folder when the folder itself is not selected", async () => {
         const v = mount({ "files:tree": true });
         await waitFor(() => expect(v.names()).toHaveLength(4));
@@ -2078,7 +2092,10 @@ describe("the Files pane: tree view, a watch asked before the pane went elsewher
         await waitFor(() => expect(v.names()).toHaveLength(4));
         const resolvers: Array<(id: string) => void> = [];
         const pending = () => new Promise<{ watch_id: string }>((resolve) => resolvers.push((id) => resolve({ watch_id: id })));
-        h.rpc.FsWatchCommand.mockImplementationOnce(pending).mockImplementationOnce(pending);
+        // The watches asked for, in order: src here (held back), the other folder itself, then its src (held back).
+        h.rpc.FsWatchCommand.mockImplementationOnce(pending)
+            .mockImplementationOnce(async () => ({ watch_id: "w-pane" }))
+            .mockImplementationOnce(pending);
         fireEvent.click(twisty(v, "Open src"));
         await waitFor(() => expect(resolvers).toHaveLength(1));
         await v.model.navigate(OTHER);
@@ -2091,6 +2108,9 @@ describe("the Files pane: tree view, a watch asked before the pane went elsewher
         resolvers[1]("w-new");
         await new Promise((resolve) => setTimeout(resolve, 30));
         expect(h.rpc.FsUnwatchCommand).not.toHaveBeenCalledWith(expect.anything(), { watch_id: "w-new" });
+        // And it is the one kept: a change in the folder reaches it, and closing the folder lets it go.
+        fireEvent.click(twisty(v, "Close src"));
+        await waitFor(() => expect(h.rpc.FsUnwatchCommand).toHaveBeenCalledWith(expect.anything(), { watch_id: "w-new" }));
     });
 });
 
