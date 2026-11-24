@@ -110,6 +110,7 @@ export function FileRow(props: {
         <div
             id={props.inColumn?.id ?? `files-${props.model.blockId}-row-${props.index}`}
             class="files-row"
+            data-name={props.entry.name}
             classList={{
                 "files-row-in-column": !!props.inColumn,
                 "files-row-onpath": !!props.inColumn?.onPath && !props.selected,
@@ -245,6 +246,7 @@ export function GridTile(props: {
         <div
             id={`files-${props.model.blockId}-row-${props.index}`}
             class="files-tile"
+            data-name={props.entry.name}
             classList={{
                 "files-row-selected": props.selected,
                 "files-row-focused": props.focused,

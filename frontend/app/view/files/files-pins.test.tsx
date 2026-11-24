@@ -137,6 +137,7 @@ describe("the menus", () => {
             connection: () => "",
             root: () => undefined,
             selectedEntries: () => [],
+            topmostSelected: () => [],
             showHidden: () => false,
             treeEnabled: () => false,
             columnsOn: () => false,
