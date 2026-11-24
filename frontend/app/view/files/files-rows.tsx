@@ -102,12 +102,16 @@ export function FileRow(props: {
     onToggle?: () => void;
     /** A found row: the folder it is in, from the shown folder, shown after its name ("" at the first level). */
     where?: string;
+    /** In a column of the columns view: the name alone (and an arrow on a folder), no size, date or kind. */
+    inColumn?: { id?: string; onPath: boolean };
 }): JSX.Element {
     return (
         <div
-            id={`files-${props.model.blockId}-row-${props.index}`}
+            id={props.inColumn?.id ?? `files-${props.model.blockId}-row-${props.index}`}
             class="files-row"
             classList={{
+                "files-row-in-column": !!props.inColumn,
+                "files-row-onpath": !!props.inColumn?.onPath && !props.selected,
                 "files-row-selected": props.selected,
                 "files-row-focused": props.focused,
                 "files-row-hidden": props.entry.hidden,
@@ -159,7 +163,21 @@ export function FileRow(props: {
                         </span>
                     )}
                 </Show>
+                <Show when={props.inColumn && props.entry.is_dir && !props.entry.is_symlink}>
+                    <i class="fa fa-chevron-right files-column-arrow" aria-hidden="true" />
+                </Show>
             </div>
+            <Show when={!props.inColumn}>
+                <FileRowDetails entry={props.entry} />
+            </Show>
+        </div>
+    );
+}
+
+/** A details row's modified, size and kind cells. */
+function FileRowDetails(props: { entry: FsEntry }): JSX.Element {
+    return (
+        <>
             <div class="files-cell files-col-modified" role="gridcell">
                 {formatModified(props.entry.mtime)}
             </div>
@@ -169,7 +187,7 @@ export function FileRow(props: {
             <div class="files-cell files-col-kind" role="gridcell">
                 {kindOf(props.entry)}
             </div>
-        </div>
+        </>
     );
 }
 
