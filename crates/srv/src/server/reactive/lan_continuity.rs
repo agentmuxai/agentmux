@@ -96,8 +96,14 @@ pub(super) async fn on_first_contact(state: &AppState, claimed: &str, observed_k
 /// peer that trusts the install pins it at first contact (a Swarm broadcast, a quiet note) instead of waiting for the person.
 pub(super) fn with_sender_cert(state: &AppState, mut sender: serde_json::Value) -> serde_json::Value {
     let shown = sender.get("agent_id").zip(sender.get("lan_public_key")).and_then(|(a, k)| Some((a.as_str()?.to_string(), k.as_str()?.to_string())));
+    // Only this install's own sender name, and only for the key stored for it: nothing else is ever certified here.
+    let own = |agent: &str, key: &str| {
+        agent == crate::backend::lan::swarm_broadcast::this_sender_id(&state.hostname) && state.mstore.agent_lan_public_key_load(agent).ok().flatten().as_deref() == Some(key)
+    };
     if let (Some((agent, key)), Some(obj)) = (shown, sender.as_object_mut()) {
-        add_cert(state, &agent, &key, obj);
+        if own(&agent, &key) {
+            add_cert(state, &agent, &key, obj);
+        }
     }
     sender
 }

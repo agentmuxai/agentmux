@@ -603,7 +603,7 @@ async fn admit(
     verify_cross_channel_signature(state, req);
     lan_v2::log_receipt(req);
     let mut replay = replay::reserve(req, now_unix_secs());
-    if let Some(answer) = super::quiet_remote::intercept(state, req).await { return Err(answer); } // a quiet note is answered, never delivered
+    if let Some(answer) = super::quiet_remote::intercept(state, req, &mut replay).await { return Err(answer); } // a quiet note is answered, never delivered
     req.route_unsigned_target();
     resolve_transcript_request_tier_fields(&state.mstore, req);
 

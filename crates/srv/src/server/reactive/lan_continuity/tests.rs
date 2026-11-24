@@ -655,3 +655,51 @@ async fn a_hung_token_refresher_does_not_hold_the_check_past_its_wait() {
     let unpinned = within(std::time::Duration::from_millis(100), false, "inst", lookup).await.unwrap_err();
     assert!(unpinned.contains("did not answer in time"), "{unpinned}");
 }
+
+/// Only this install's own sender name, with the key stored for it, is certified by the sender-key lookup: another name,
+/// or the own name with another key, is answered as it was, with no certificate.
+#[tokio::test]
+async fn the_machines_sender_key_is_certified_by_this_install_and_no_other_name_is() {
+    let state = test_state();
+    let (_dir, wan) = host("starpower");
+    state.mstore.set_wan_identity(wan);
+    let own = crate::backend::lan::swarm_broadcast::this_sender_id(&state.hostname);
+    let own_pair = state.mstore.agent_lan_key_ensure(&own).unwrap();
+    let other_pair = state.mstore.agent_lan_key_ensure("swarm-elsewhere-00000001").unwrap();
+    let answered = with_sender_cert(&state, serde_json::json!({ "agent_id": own, "lan_public_key": own_pair.public_key }));
+    let cert: WanKeyRecord = serde_json::from_value(answered["lan_cert"].clone()).expect("the own sender key is certified");
+    assert_eq!((cert.agent_id.as_str(), cert.channel.as_str()), (own.as_str(), CERT_CHANNEL));
+    assert!(answered["lan_install_sig"].is_string());
+    let other = with_sender_cert(&state, serde_json::json!({ "agent_id": "swarm-elsewhere-00000001", "lan_public_key": other_pair.public_key }));
+    assert!(other.get("lan_cert").is_none() && other.get("lan_install_sig").is_none(), "another name: {other}");
+    let wrong_key = with_sender_cert(&state, serde_json::json!({ "agent_id": own, "lan_public_key": other_pair.public_key }));
+    assert!(wrong_key.get("lan_cert").is_none(), "the own name with a key that is not its stored one: {wrong_key}");
+    let plain = with_sender_cert(&state, serde_json::json!({ "something": "else" }));
+    assert_eq!(plain, serde_json::json!({ "something": "else" }));
+}
+
+/// A machine's sender key whose signature verifies is still refused for a quiet note while its install is new here or
+/// revoked: the install must be one this machine trusts.
+#[tokio::test]
+async fn a_machine_sender_is_approved_only_while_its_install_is_trusted_here() {
+    let state = test_state();
+    let (_sdir, sender_wan) = host("starpower");
+    let (_rdir, receiver) = host("narko");
+    state.mstore.set_wan_identity(receiver.clone());
+    let sender = "swarm-starpower-00000001";
+    let (public, _) = generate_lan_keypair([7u8; 32]);
+    pin(&state, sender, &public);
+    let vouched = cert(&sender_wan, sender, &public, now());
+    state.lan_discovery.seed_lan_pubkey_with_cert_for_test(sender, public.to_vec(), Some(vouched));
+    assert!(!crate::server::quiet_remote::install_approved(&state, sender).await, "an install this machine has never seen is new, not approved");
+    let installed = sender_wan.instance_ensure("starpower").unwrap();
+    receiver.agent_instance_pin_get_or_set("clare", "stable", &installed.instance_id, &installed.host_hint, now()).unwrap();
+    assert!(crate::server::quiet_remote::install_approved(&state, sender).await, "an install pinned here is trusted");
+    receiver.known_instance_observe(&installed.instance_id, &installed.host_hint, now()).unwrap();
+    receiver.known_instance_record_revocation_check(&installed.instance_id, true, now()).unwrap();
+    assert!(!crate::server::quiet_remote::install_approved(&state, sender).await, "a revoked install is not approved, though still pinned");
+    // A certificate for another key is no proof for this one.
+    let (other, _) = generate_lan_keypair([8u8; 32]);
+    state.lan_discovery.seed_lan_pubkey_with_cert_for_test(sender, public.to_vec(), Some(cert(&sender_wan, sender, &other, now())));
+    assert!(!crate::server::quiet_remote::install_approved(&state, sender).await);
+}

@@ -122,7 +122,7 @@ static LIMITER: LazyLock<Mutex<note::Limiter>> = LazyLock::new(Default::default)
 
 /// Whether the install behind `sender`'s pinned key is one this machine trusts: its certificate verifies for exactly
 /// that key, and the install is approved (not new, not revoked).
-async fn install_approved(state: &AppState, sender: &str) -> bool {
+pub(crate) async fn install_approved(state: &AppState, sender: &str) -> bool {
     let Ok(Some((pinned, _))) = state.mstore.lan_peer_pubkey_pin_since(sender) else { return false };
     let Ok(key) = BASE64.decode(pinned) else { return false };
     let Some(cert) = state.lan_discovery.cached_lan_cert(sender) else { return false };
@@ -130,6 +130,15 @@ async fn install_approved(state: &AppState, sender: &str) -> bool {
         return false;
     }
     super::lan_watch::during("install trust check", super::reactive::lan_continuity::instance_trust(state, &cert.instance_id)).await.is_ok()
+}
+
+/// Settles the claim on the note's message id: a note that was taken is counted, so a copy of it is not proven again;
+/// one that was refused releases it, as any refused jekt does. Returns `answer` unchanged.
+fn finish(replay: &mut super::reactive::replay::Reservation, answer: Value) -> Value {
+    if answer["success"] == true {
+        replay.delivered();
+    }
+    answer
 }
 
 fn answer(req_id: &str, ok: bool, error: &str) -> Value {
@@ -141,7 +150,7 @@ fn answer(req_id: &str, ok: bool, error: &str) -> Value {
 }
 
 /// A jekt that claims to be a quiet note: answered here (`Some`), never delivered as a jekt. `None` for every other jekt.
-pub(crate) async fn intercept(state: &AppState, req: &crate::backend::reactive::types::InjectionRequest) -> Option<Value> {
+pub(crate) async fn intercept(state: &AppState, req: &crate::backend::reactive::types::InjectionRequest, replay: &mut super::reactive::replay::Reservation) -> Option<Value> {
     let sender = req.source_agent.as_deref().unwrap_or_default();
     if req.delivery_tier.as_deref() != Some("lan") || !note::is_quiet_note(&req.message) || !is_machine_sender(sender) {
         return None;
@@ -168,7 +177,7 @@ pub(crate) async fn intercept(state: &AppState, req: &crate::backend::reactive::
         Admit::Fold { more } => (format!("lan-quiet-more:{sender}"), note::render_folded(sender, &machine, ts, more)),
     };
     crate::backend::blockcontroller::system_note_into_turn_or_hold(&lead.block_id, &key, &text);
-    Some(answer(&req_id, true, ""))
+    Some(finish(replay, answer(&req_id, true, "")))
 }
 
 #[cfg(test)]

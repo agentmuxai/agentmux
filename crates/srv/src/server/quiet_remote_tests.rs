@@ -76,3 +76,38 @@ fn the_answer_to_the_sender_says_whether_it_was_taken() {
     let refused = answer("m1", false, "the sender is not proven");
     assert_eq!((refused["success"].as_bool(), refused["refused"].as_bool()), (Some(false), Some(true)));
 }
+
+/// A note that was taken is counted against its message id, so a captured copy is not proven a second time; a refused one
+/// releases the id as any refused jekt does.
+#[test]
+fn a_taken_note_cannot_be_replayed_and_a_refused_one_leaves_its_id_free() {
+    use crate::backend::reactive::types::InjectionRequest;
+    use super::super::reactive::replay;
+    let signed = |id: &str| InjectionRequest {
+        source_agent: Some("swarm-starpower-00000001".into()),
+        request_id: Some(id.into()),
+        lan_sig: Some("sig".into()),
+        lan_verified: Some(true),
+        ts_secs: Some(1_000),
+        ..Default::default()
+    };
+    let now = agentmux_common::time::now_secs();
+    let mut first = signed("quiet-note-taken");
+    let mut claim = replay::reserve(&mut first, now);
+    assert_eq!(first.lan_verified, Some(true));
+    let kept = finish(&mut claim, answer("quiet-note-taken", true, ""));
+    assert_eq!(kept["success"], true, "the answer is passed on unchanged");
+    drop(claim);
+    let mut copy = signed("quiet-note-taken");
+    let _second = replay::reserve(&mut copy, now);
+    assert_eq!(copy.lan_verified, Some(false), "a copy of a taken note no longer verifies");
+    assert!(matches!(judge(&text("Wren"), "swarm-starpower-00000001", copy.lan_verified, true, &starpower()), Verdict::Refuse(_)));
+
+    let mut once = signed("quiet-note-refused");
+    let mut claim = replay::reserve(&mut once, now);
+    finish(&mut claim, answer("quiet-note-refused", false, "no"));
+    drop(claim);
+    let mut again = signed("quiet-note-refused");
+    let _third = replay::reserve(&mut again, now);
+    assert_eq!(again.lan_verified, Some(true), "a refused note does not use up its id");
+}
