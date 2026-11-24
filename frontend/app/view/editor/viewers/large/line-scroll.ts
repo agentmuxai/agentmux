@@ -22,11 +22,14 @@ export function createLineScroll(lines: Accessor<number>, initial = 0) {
     const showLine = (line: number): void => {
         const at = Math.min(maxFirstRow(lines(), viewPx()), Math.max(0, line));
         const to = scrollTopFor(at, lines(), viewPx());
-        own = to;
         setFirst(at);
         setTop(to);
+        own = reachable(to);
         if (el) el.scrollTop = to;
     };
+    // A view is rarely a whole number of rows tall, so the last first row asks for a little more scrolling than the
+    // scroller has: the browser stops at its end and says so in a scroll event. That is where this viewer put it.
+    const reachable = (to: number): number => (el && el.scrollHeight > 0 ? Math.max(0, Math.min(to, el.scrollHeight - el.clientHeight)) : to);
     const onScroll = (): void => {
         // A pane that is hidden has no height, and its scroller reports 0: not where the user scrolled to.
         if (!el || el.clientHeight === 0) return;

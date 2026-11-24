@@ -253,8 +253,7 @@ describe("the Large text viewer", () => {
         const follow = screen.getByRole("button", { name: "Follow" });
         expect(follow.getAttribute("aria-pressed")).toBe("false");
         // Off: a line that arrives leaves the view where it is.
-        serve(`${FILE}line 1001
-`);
+        serve(`${FILE}line 1001\n`);
         setRevision(1);
         await settle();
         expect(numbers()[0]).toBe(1);
@@ -263,10 +262,7 @@ describe("the Large text viewer", () => {
         await settle();
         expect(follow.getAttribute("aria-pressed")).toBe("true");
         expect(numbers()).toContain(1001);
-        serve(`${FILE}line 1001
-line 1002
-line 1003
-`);
+        serve(`${FILE}line 1001\nline 1002\nline 1003\n`);
         setRevision(2);
         await settle();
         expect(numbers()).toContain(1003);
@@ -276,14 +272,50 @@ line 1003
         await settle();
         expect(follow.getAttribute("aria-pressed")).toBe("false");
         expect(numbers()[0]).toBe(1);
-        serve(`${FILE}line 1001
-line 1002
-line 1003
-line 1004
-`);
+        serve(`${FILE}line 1001\nline 1002\nline 1003\nline 1004\n`);
         setRevision(3);
         await settle();
         expect(numbers()[0]).toBe(1);
+    });
+
+    it("follows to the true end when the view is not a whole number of rows tall: the browser stops short of the row asked for", async () => {
+        Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get: () => ROW_H * VIEW_LINES + 17 });
+        const [revision, setRevision] = createSignal(0);
+        render(() => (
+            <LargeTextViewer
+                path="C:/logs/big.log"
+                revision={revision()}
+                probe={{ size: FILE.length, mtime: 0, kind: "text", mime: "text/plain", read_only: false, text: { encoding: "utf-8", bom: "none" } }}
+                bar={{ viewer: "large", options: ["large", "info", "hex"], onReopenWith: () => {} }}
+            />
+        ));
+        await settle();
+        // A scroller that ends where its content ends and says so in a scroll event, as a browser's does.
+        const el = grid();
+        let total = 1000;
+        let top = 0;
+        Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => total * ROW_H });
+        Object.defineProperty(el, "scrollTop", {
+            configurable: true,
+            get: () => top,
+            set: (v: number) => {
+                const next = Math.min(Math.max(0, el.scrollHeight - el.clientHeight), Math.max(0, v));
+                if (next === top) return;
+                top = next;
+                queueMicrotask(() => fireEvent.scroll(el));
+            },
+        });
+        const follow = screen.getByRole("button", { name: "Follow" });
+        fireEvent.click(follow);
+        await settle();
+        expect(follow.getAttribute("aria-pressed")).toBe("true");
+        expect(facts()[0]).toBe("Line 991 of 1,000");
+        serve(`${FILE}line 1001\n`);
+        total = 1001;
+        setRevision(1);
+        await settle();
+        expect(follow.getAttribute("aria-pressed")).toBe("true");
+        expect(facts()[0]).toBe("Line 992 of 1,001");
     });
 
     it("reads the file again when it changed on disk, and stays at the line it was at", async () => {
