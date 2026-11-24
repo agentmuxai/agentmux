@@ -1110,9 +1110,11 @@ describe("the Files pane: dragging files (§8.2)", () => {
         const opEvent = (data: Record<string, unknown>) =>
             h.state.byType.get("files:op")?.forEach((fn) => fn({ data: { op_id: "op1", kind: "copy", done_items: 0, total_items: 1, done_bytes: 0, total_bytes: 0, ...data } }));
         const SRC = `${HOME}\\src`;
-        const moved = async (v: ReturnType<typeof mount>) => {
+        const moved = async (v: ReturnType<typeof mount>, extra: FsEntry[] = []) => {
             await waitFor(() => expect(v.names()).toHaveLength(4));
             await v.model.transfer("move", [`${HOME}\\b.txt`], SRC);
+            // What srv did: the item landed in the destination.
+            h.state.dirs.set(SRC, [f("main.rs"), f("b.txt"), ...extra]);
             opEvent({ kind: "move", state: "done", done_items: 1 });
         };
         const undoButton = (v: ReturnType<typeof mount>) => v.container.querySelector(".files-status-undo") as HTMLElement | null;
@@ -1141,6 +1143,36 @@ describe("the Files pane: dragging files (§8.2)", () => {
             expect(v.container.querySelector(".files-status")?.textContent).toContain("Nothing to undo");
         });
 
+        it("offers no Undo when a conflict answered while the move ran left the item under another name", async () => {
+            const v = mount();
+            // Something created b.txt in src after the check, so the moved one was kept as "b (2).txt".
+            await moved(v, [f("b (2).txt")]);
+            await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toContain("Moved"));
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            expect(undoButton(v)).toBeNull();
+            await v.model.undo();
+            expect(v.container.querySelector(".files-status")?.textContent).toContain("Nothing to undo");
+        });
+
+        it("does not start a move whose pane changed host while the destination was being read", async () => {
+            const v = mount();
+            await waitFor(() => expect(v.names()).toHaveLength(4));
+            const real = h.rpc.FsListCommand.getMockImplementation()!;
+            let release!: () => void;
+            const gate = new Promise<void>((resolve) => (release = resolve));
+            h.rpc.FsListCommand.mockImplementationOnce(async (c: unknown, req: { path: string; cursor?: string }) => {
+                const out = await real(c, req);
+                await gate;
+                return out;
+            });
+            h.rpc.FsOpStartCommand.mockClear();
+            const started = v.model.transfer("move", [`${HOME}\\b.txt`], SRC);
+            void v.model.openOn("user@box", "~");
+            release();
+            expect(await started).toBe(false);
+            expect(h.rpc.FsOpStartCommand).not.toHaveBeenCalled();
+        });
+
         it("offers no Undo for a copy, nor for a move that was canceled", async () => {
             const v = mount();
             await waitFor(() => expect(v.names()).toHaveLength(4));
@@ -1156,6 +1188,7 @@ describe("the Files pane: dragging files (§8.2)", () => {
             const v = mount();
             await waitFor(() => expect(v.names()).toHaveLength(4));
             await v.model.transfer("move", [`${HOME}\\b.txt`, `${HOME}\\a2.md`], SRC);
+            h.state.dirs.set(SRC, [f("main.rs"), f("b.txt")]);
             opEvent({ kind: "move", state: "done", done_items: 2, total_items: 2, failures: [{ path: `${HOME}\\a2.md`, ok: false, error: "in use" }] });
             await waitFor(() => expect(undoButton(v)).not.toBeNull());
             h.state.dirs.set(HOME, [d("src"), f("a2.md")]);

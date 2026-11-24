@@ -42,7 +42,7 @@ import { crawlFolders, rankMatches, whereOf } from "./files-find";
 import { ColumnsState } from "./files-columns-state";
 import { EMPTY_SELECTION, pruneSelection, type Selection } from "./files-selection";
 import { addRecent } from "./files-pins";
-import { movedOk, planMoveUndo, restorable, type MovedItem } from "./files-undo-move";
+import { landedAsPlanned, movedOk, planMoveUndo, restorable, type MovedItem, type UndoPlan } from "./files-undo-move";
 import { clipboard, FilesOps, opFinishedText, sameVolume, setClipboard } from "./files-ops";
 import { systemIconsAvailable } from "./files-icons";
 import { sortEntries, type SortDir, type SortKey } from "./files-sort";
@@ -393,8 +393,12 @@ export class FilesModel {
         this.ops = new FilesOps(ctx.blockId);
         this.ops.onFinished = (op) => {
             const text = opFinishedText(op);
-            const undoable = this.noteMoveForUndo(op);
-            this.setStatus(undoable ? { ...text, undo: true } : text, op.state === "done" && !op.failures?.length ? 4000 : 10000);
+            const ms = op.state === "done" && !op.failures?.length ? 4000 : 10000;
+            this.setStatus(text, ms);
+            // Undo is offered once the destination shows the move landed as planned.
+            void this.noteMoveForUndo(op).then((undoable) => {
+                if (undoable) this.setStatus({ ...text, undo: true }, ms);
+            });
             // The watcher re-lists the folder shown; a move OUT of it (or a
             // copy into a folder this pane isn't watching) may not be seen.
             this.refresh();
@@ -1164,16 +1168,22 @@ export class FilesModel {
         sourceConnection: string = ""
     ): Promise<boolean> {
         if (this.refuseInRoot("Copying and moving")) return false;
+        // Where it goes is fixed now: the pane may be moved to another host while the destination is being read.
+        const connection = this.connection();
         try {
             // A move on this computer is undoable when the names in the destination show where it will land.
-            const planned = kind === "move" && !this.connection() && !sourceConnection ? await this.planUndo(sources, destDir) : null;
+            const planned = kind === "move" && !connection && !sourceConnection ? await this.planUndo(sources, destDir) : null;
+            if (this.connection() !== connection) {
+                this.setStatus({ text: "The pane changed host before the move began, so nothing was moved.", tone: "info" });
+                return false;
+            }
             await this.ops.start(
                 kind,
                 sources,
                 destDir,
                 {
                     sourceConnection: sourceConnection || undefined,
-                    connection: this.connection() || undefined,
+                    connection: connection || undefined,
                 },
                 planned ?? undefined
             );
@@ -1202,16 +1212,19 @@ export class FilesModel {
         return names;
     }
 
-    private async planUndo(sources: string[], destDir: string): Promise<MovedItem[] | null> {
+    private async planUndo(sources: string[], destDir: string): Promise<UndoPlan | null> {
         const destNames = await this.namesIn(destDir);
-        return destNames ? planMoveUndo(sources, destDir, destNames) : null;
+        const items = destNames ? planMoveUndo(sources, destDir, destNames) : null;
+        return items && destNames ? { items, destDir, before: destNames } : null;
     }
 
-    /** A finished move that went to plan joins the undo stack. True when it did. */
-    private noteMoveForUndo(op: { kind: string; state: string; tag?: unknown; failures?: { path: string }[] }): boolean {
-        if (op.kind !== "move" || op.state !== "done" || !Array.isArray(op.tag)) return false;
-        const items = movedOk(op.tag as MovedItem[], op.failures?.map((f) => f.path));
-        if (items.length === 0) return false;
+    /** A finished move that went to plan joins the undo stack, once the destination shows it landed as planned
+     *  (a conflict answered while the job ran puts an item under another name). True when it did. */
+    private async noteMoveForUndo(op: { kind: string; state: string; tag?: unknown; failures?: { path: string }[] }): Promise<boolean> {
+        const plan = op.tag as UndoPlan | undefined;
+        if (op.kind !== "move" || op.state !== "done" || !plan?.items) return false;
+        const items = movedOk(plan.items, op.failures?.map((f) => f.path));
+        if (items.length === 0 || !landedAsPlanned(plan, items, await this.namesIn(plan.destDir))) return false;
         this.undoStack.push({ kind: "move", items });
         return true;
     }

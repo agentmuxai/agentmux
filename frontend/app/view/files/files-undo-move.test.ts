@@ -4,7 +4,7 @@
 /** Undo for a move: when a move is certain enough to undo, and what goes back (files-undo-move.ts). */
 
 import { describe, expect, it } from "vitest";
-import { movedOk, planMoveUndo, restorable } from "./files-undo-move";
+import { landedAsPlanned, movedOk, planMoveUndo, restorable, type UndoPlan } from "./files-undo-move";
 
 const names = (...n: string[]) => new Set(n.map((x) => x.toLowerCase()));
 
@@ -33,6 +33,31 @@ describe("planMoveUndo", () => {
     });
 });
 
+describe("landedAsPlanned", () => {
+    const plan: UndoPlan = {
+        items: [{ from: "/a/x", to: "/b/x" }],
+        destDir: "/b",
+        before: names("old"),
+    };
+
+    it("is true when the destination gained exactly the names of the items that went through", () => {
+        expect(landedAsPlanned(plan, plan.items, names("old", "x"))).toBe(true);
+        expect(landedAsPlanned(plan, plan.items, names("OLD", "X"))).toBe(true);
+    });
+
+    it("is false when a conflict put the item under another name, or the destination gained anything else", () => {
+        // Something took x after the check, so ours was kept as "x (2)".
+        expect(landedAsPlanned(plan, plan.items, names("old", "x", "x (2)"))).toBe(false);
+        expect(landedAsPlanned(plan, plan.items, names("old", "x", "other"))).toBe(false);
+        expect(landedAsPlanned(plan, plan.items, names("old", "y"))).toBe(false);
+    });
+
+    it("is false when the destination can't be listed or nothing went through", () => {
+        expect(landedAsPlanned(plan, plan.items, null)).toBe(false);
+        expect(landedAsPlanned(plan, [], names("old"))).toBe(false);
+    });
+});
+
 describe("movedOk", () => {
     it("leaves out the sources srv reports as failed", () => {
         const items = [
@@ -41,6 +66,23 @@ describe("movedOk", () => {
         ];
         expect(movedOk(items, ["/a/y"])).toEqual([items[0]]);
         expect(movedOk(items, undefined)).toEqual(items);
+    });
+});
+
+describe("restorable, on a volume that tells A from a", () => {
+    it("returns the items to the folder as spelled, not to one that differs only in case", () => {
+        const lists: Record<string, Set<string>> = { "/b": names("one", "two"), "/s/A": names(), "/s/a": names() };
+        const groups = restorable(
+            [
+                { from: "/s/A/one", to: "/b/one" },
+                { from: "/s/a/two", to: "/b/two" },
+            ],
+            (d) => lists[d] ?? null
+        );
+        expect(groups).toEqual([
+            { parent: "/s/A", paths: ["/b/one"] },
+            { parent: "/s/a", paths: ["/b/two"] },
+        ]);
     });
 });
 

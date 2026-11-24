@@ -17,6 +17,13 @@ export interface MovedItem {
     to: string;
 }
 
+/** A move that can be undone for certain: the items, and the names the destination held before it started. */
+export interface UndoPlan {
+    items: MovedItem[];
+    destDir: string;
+    before: ReadonlySet<string>;
+}
+
 /**
  * The items a move will leave at `<destDir>/<name>`, or null when the move can't be undone for certain: a name that
  * is already in the destination (any case: the volume may ignore it), two sources with one name, or a source that is
@@ -35,6 +42,19 @@ export function planMoveUndo(sources: readonly string[], destDir: string, destNa
         items.push({ from, to: joinPath(destDir, name) });
     }
     return items.length > 0 ? items : null;
+}
+
+/**
+ * Whether a finished move landed as planned: the destination now holds, besides what it held before, exactly the names of
+ * the items that went through. A conflict answered while the job ran (something created a name after the check, so the
+ * item was kept under another one) adds a name more or fewer, and then Undo would move the wrong file. `after` is the
+ * lower-case names now in the destination, or null when it couldn't be listed.
+ */
+export function landedAsPlanned(plan: UndoPlan, ok: readonly MovedItem[], after: ReadonlySet<string> | null): boolean {
+    if (!after || ok.length === 0) return false;
+    const expected = new Set(ok.map((i) => baseName(i.to).toLowerCase()));
+    const added = [...after].filter((n) => !plan.before.has(n));
+    return added.length === expected.size && added.every((n) => expected.has(n));
 }
 
 /** The items of a finished move that went through: those srv reports as failed are left out. */
@@ -61,10 +81,10 @@ export function restorable(
         if (!inDest || !inParent) continue;
         const name = baseName(item.to).toLowerCase();
         if (!inDest.has(name) || inParent.has(name)) continue;
-        const key = parent.toLowerCase();
-        const group = groups.get(key) ?? { parent, paths: [] };
+        // By the folder as spelled: on a volume that tells `A` from `a`, they are two folders.
+        const group = groups.get(parent) ?? { parent, paths: [] };
         group.paths.push(item.to);
-        groups.set(key, group);
+        groups.set(parent, group);
     }
     return [...groups.values()];
 }
