@@ -730,6 +730,8 @@ export function nodeSummary(n: FlowNode): string {
             return `${(n.data["method"] as string) ?? "GET"} ${truncate((n.data["url"] as string) ?? "")}`;
         case "condition":
             return `if ${truncate((n.data["expr"] as string) ?? "")}`;
+        case "once":
+            return `once ${truncate((n.data["key"] as string) ?? "")}`;
         case "response":
             return truncate((n.data["template"] as string) ?? "<empty>");
         case "variables": {
@@ -900,6 +902,11 @@ const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element =
                         onContextMenu={showTextInputContextMenu}
                         placeholder="{{var.count}} > 0"
                     />
+                </NodeField>
+            </Show>
+            <Show when={p.node.data.kind === "once"}>
+                <NodeField label="key">
+                    <TextInput variant="plain" class="drone-input nodrag" value={(p.node.data["key"] as string) ?? ""} onInput={(e) => update({ key: e.currentTarget.value })} onContextMenu={showTextInputContextMenu} placeholder="{{trigger.run_id}}" />
                 </NodeField>
             </Show>
             <Show when={p.node.data.kind === "response"}>
