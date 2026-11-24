@@ -426,7 +426,14 @@ fn a_leaders_mute_stops_the_clock_for_the_stated_time_and_no_longer() {
     let none = MetaMapType::new();
     let at = |t: u64| idle(paused_activity(&none, mute_of("mute-a", t).as_ref(), t));
     assert_eq!(w.step("mute-a", at(T0 + 20 * MIN), &l, T0 + 20 * MIN), None);
-    assert_eq!(mute_of("mute-a", T0 + 40 * MIN), None, "ended, and dropped");
+    assert_eq!(mute_of("mute-a", T0 + 40 * MIN), None, "ended: no longer in force");
+    // A sweep that comes late (the machine slept from minute 20 to 45) still starts the clock at the mute's end.
+    let late = mute_for_clock("mute-a", T0 + 45 * MIN);
+    assert_eq!(late.as_ref(), Some(&m), "kept for the clock");
+    assert_eq!(paused_activity(&none, late.as_ref(), T0 + 45 * MIN), T0 + 40 * MIN);
+    assert_eq!(w.step("mute-a", idle(paused_activity(&none, late.as_ref(), T0 + 45 * MIN)), &l, T0 + 45 * MIN), None, "5 of 15 minutes after the end: no nudge yet");
+    assert_eq!(w.step("mute-a", idle(paused_activity(&none, late.as_ref(), T0 + 55 * MIN)), &l, T0 + 55 * MIN), Some(Action::Nudge), "15 minutes after the end");
+    assert_eq!(mute_for_clock("mute-a", T0 + 40 * MIN + 24 * 60 * MIN), None, "a day after its end it is dropped");
     // The mute's own end is the clock's start again.
     assert_eq!(paused_activity(&none, Some(&m), T0 + 50 * MIN), T0 + 40 * MIN);
 }

@@ -225,17 +225,21 @@ pub fn unmute(def_id: &str, now_ms: u64) -> bool {
     MUTES.lock().remove(def_id).is_some_and(|m| m.until_ms > now_ms)
 }
 
-/// The mute of `def_id` in force at `now_ms`, if any (an ended one is dropped).
+/// The mute of `def_id` in force at `now_ms`, if any.
 pub fn mute_of(def_id: &str, now_ms: u64) -> Option<Mute> {
+    MUTES.lock().get(def_id).filter(|m| m.until_ms > now_ms).cloned()
+}
+
+/// How long an ended mute is kept for the quiet clock: the clock runs again from the mute's end, which a sweep that comes
+/// late (the machine slept) must still know.
+const ENDED_MUTE_KEPT_MS: u64 = 24 * 60 * 60_000;
+
+/// The mute of `def_id` as the quiet clock reads it: one in force, or one that ended at most a day ago (so a sweep that
+/// runs late still starts the clock at the mute's end, not at the last sweep). Older ones are dropped.
+fn mute_for_clock(def_id: &str, now_ms: u64) -> Option<Mute> {
     let mut mutes = MUTES.lock();
-    match mutes.get(def_id) {
-        Some(m) if m.until_ms > now_ms => Some(m.clone()),
-        Some(_) => {
-            mutes.remove(def_id);
-            None
-        }
-        None => None,
-    }
+    mutes.retain(|_, m| now_ms.saturating_sub(m.until_ms) < ENDED_MUTE_KEPT_MS);
+    mutes.get(def_id).cloned()
 }
 
 /// Whether `caller` leads `target` (both agent uids): it is the lead of the target's seat, which for a spawned worker is
@@ -460,7 +464,7 @@ fn read(mstore: &Store, block_id: &str, def: &AgentDefinition, tasks: &[OwedTask
     let sent = notes::last_message_by(&def.slug).unwrap_or(0);
     let moved = tasks.iter().map(|t| t.updated_ms).max().unwrap_or(0);
     let status = mstore.get::<crate::backend::obj::Block>(block_id).ok().flatten().map(|b| b.meta).unwrap_or_default();
-    let paused = paused_activity(&status, mute_of(&def.id, now_ms).as_ref(), now_ms);
+    let paused = paused_activity(&status, mute_for_clock(&def.id, now_ms).as_ref(), now_ms);
     Some(Reading { activity_ms: output.max(sent).max(moved).max(paused), turn_active: tracker.pass_started_ms().is_some() })
 }
 
