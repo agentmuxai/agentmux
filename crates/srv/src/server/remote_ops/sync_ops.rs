@@ -41,9 +41,9 @@ struct HelloReq {
     collections: Vec<String>,
 }
 
-#[derive(Serialize)]
-struct HelloAns {
-    held: Vec<Held>,
+#[derive(Serialize, Deserialize)]
+pub(super) struct HelloAns {
+    pub(super) held: Vec<Held>,
 }
 
 fn parse<T: DeserializeOwned>(op: &str, params: Value) -> Result<T, RemoteRefusal> {
@@ -66,16 +66,10 @@ fn failed(what: impl std::fmt::Display) -> RemoteRefusal {
     RemoteRefusal::failed(what.to_string())
 }
 
-/// Everything an op needs from this machine, then the op: this install's identity, the computer's lock, the chains
-/// read back from the store and the caller's proof.
-fn exec<Req, Ans>(
-    store: &Store,
-    wan: &WanIdentityStore,
-    machine: &str,
-    pinned_since: Option<i64>,
-    req: Req,
-    run: impl FnOnce(&mut Ctx, &str, Req) -> Result<Ans, OpError>,
-) -> Result<Ans, RemoteRefusal> {
+/// Everything an op needs from this machine, then `f`: this install's identity, the computer's lock, the chains read
+/// back from the store and the caller's proof. The store stays locked for as long as `f` runs and no longer, so `f`
+/// never waits on another machine (that one may be asking this one for the same store).
+pub(super) fn with_ctx<R>(store: &Store, wan: &WanIdentityStore, pinned_since: Option<i64>, f: impl FnOnce(&mut Ctx) -> R) -> Result<R, RemoteRefusal> {
     let me = wan.instance_ensure(&crate::backend::reactive::registry::local_host_label()).map_err(failed)?;
     let now = agentmux_common::time::now_ms();
     let conn = store.conn().lock().map_err(|_| failed("the store is busy"))?;
@@ -87,21 +81,34 @@ fn exec<Req, Ans>(
     let keystore = SqlKeys(&conn);
     let keys = StoreKeys { store: &keystore, wan_public: me.public_key, wan_seed: me.private_key };
     let proof = LanProof(pinned_since.is_some_and(|since| now - since >= MIN_PIN_AGE_MS));
-    let mut ctx = Ctx {
-        conn: &conn,
-        chains: &mut chains,
-        clock: &mut clock,
-        pending: &mut pending,
-        me: Me { id: &me.instance_id, private: &me.private_key },
-        proof: &proof,
-        keys: &keys,
-        now_ms: now,
-        chain_cap: ops::MAX_ENTRIES,
-        active,
+    let answer = {
+        let mut ctx = Ctx {
+            conn: &conn,
+            chains: &mut chains,
+            clock: &mut clock,
+            pending: &mut pending,
+            me: Me { id: &me.instance_id, private: &me.private_key },
+            proof: &proof,
+            keys: &keys,
+            now_ms: now,
+            chain_cap: ops::MAX_ENTRIES,
+            active,
+        };
+        f(&mut ctx)
     };
-    let answer = run(&mut ctx, machine, req).map_err(refusal);
     chain_store::save_pending(&conn, &pending).map_err(failed)?;
-    answer
+    Ok(answer)
+}
+
+fn exec<Req, Ans>(
+    store: &Store,
+    wan: &WanIdentityStore,
+    machine: &str,
+    pinned_since: Option<i64>,
+    req: Req,
+    run: impl FnOnce(&mut Ctx, &str, Req) -> Result<Ans, OpError>,
+) -> Result<Ans, RemoteRefusal> {
+    with_ctx(store, wan, pinned_since, |ctx| run(ctx, machine, req).map_err(refusal))?
 }
 
 async fn run<Req, Ans>(
@@ -130,7 +137,7 @@ where
 }
 
 /// The adapter for a collection's kind, or none for a kind this build does not merge.
-fn adapter_for(kind: &str) -> Option<Box<dyn Adapter>> {
+pub(super) fn adapter_for(kind: &str) -> Option<Box<dyn Adapter>> {
     match kind {
         "kanban" => Some(Box::new(KanbanAdapter)),
         _ => None,

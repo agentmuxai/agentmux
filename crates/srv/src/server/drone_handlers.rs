@@ -700,6 +700,8 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         async move { crate::server::drone_payload::get_payload_schema(&s, cmd) }
     });
 
+    crate::server::drone_access_handlers::register(engine, state);
+
     let s = state.clone();
     engine.register_typed(COMMAND_LIST_DRONE_RUNS, move |cmd: ListRunsReq, _ctx| {
         let s = s.clone();
@@ -740,6 +742,8 @@ mod tests {
             (COMMAND_RESOLVE_DRONE_RUN, "ResolveRunReq", "ResolveRunResp"),
             (COMMAND_RESUME_DRONE_WAIT, "ResumeWaitReq", "ResumeWaitResp"),
             (COMMAND_REPLAY_DRONE_RUN, "ReplayRunReq", "ReplayRunResp"),
+            (crate::backend::rpc_types::COMMAND_GET_DRONE_ACCESS, "GetDroneAccessReq", "DroneAccess"),
+            (crate::backend::rpc_types::COMMAND_SET_DRONE_AGENTS, "SetDroneAgentsReq", "DroneAccess"),
         ] {
             let row = find(cmd);
             assert_eq!(row["requestName"], req, "{cmd} request");

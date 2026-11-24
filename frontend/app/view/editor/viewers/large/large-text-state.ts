@@ -105,6 +105,16 @@ function createLineFeed(props: LargeTextProps) {
         setError("");
         setLoaded((v) => v + 1);
     };
+    /** Show more of a cut line (0-based). */
+    const expand = (n: number): void => {
+        const s = untrack(source);
+        if (!s) return;
+        void s.expand(n).then(
+            () => untrack(source) === s && setLoaded((v) => v + 1),
+            (e) => untrack(source) === s && setError(`Couldn't read the file: ${e instanceof Error ? e.message : String(e)}`)
+        );
+    };
+    const canExpand = (n: number): boolean => (void loaded(), source()?.canExpand(n) ?? false);
     /** The 0-based line that holds a byte of the file. */
     const lineOf = async (offset: number): Promise<number> => {
         const { path } = props;
@@ -116,7 +126,7 @@ function createLineFeed(props: LargeTextProps) {
         );
         return r.line_at ?? 0;
     };
-    return { source, total, loaded, error, want, lineAt, retry, lineOf };
+    return { source, total, loaded, error, want, lineAt, retry, lineOf, expand, canExpand };
 }
 
 /**

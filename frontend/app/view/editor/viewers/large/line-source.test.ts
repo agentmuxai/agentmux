@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { decoderLabel, LINE_READ_BYTES, LINE_SHOWN_MAX, linesOfBytes, LineSource, PAGE_BYTES_MAX, PAGE_LINES } from "./line-source";
+import { decoderLabel, EXPAND_MAX, EXPAND_STEP, LINE_READ_BYTES, LINE_SHOWN_MAX, linesOfBytes, LineSource, PAGE_BYTES_MAX, PAGE_LINES } from "./line-source";
 
 const enc = (s: string) => new TextEncoder().encode(s);
 
@@ -117,6 +117,38 @@ describe("LineSource", () => {
         // Nothing read was bigger than a line's start, and the index was asked once: it said where every line starts.
         for (const [a, b] of f.read.mock.calls) expect(b - a + 1).toBeLessThanOrEqual(LINE_READ_BYTES);
         expect(f.index).toHaveBeenCalledTimes(1);
+    });
+
+    it("shows more of a cut line a step at a time, reading only what the step needs, and stops at the most", async () => {
+        const big = "y".repeat(PAGE_BYTES_MAX + 10);
+        const f = fileOf(`first\n${big}\nlast\n`);
+        const s = new LineSource(f.index, f.read, "utf-8");
+        await s.ensure(0, 2);
+        expect(s.canExpand(0)).toBe(false);
+        expect(s.canExpand(1)).toBe(true);
+        f.read.mockClear();
+        await s.expand(1);
+        expect(s.lineAt(1)?.text).toHaveLength(LINE_SHOWN_MAX + EXPAND_STEP);
+        expect(s.lineAt(1)?.hidden).toMatch(/^\+3(\.\d+)? MB$/);
+        for (const [a, b] of f.read.mock.calls) expect(b - a + 1).toBeLessThanOrEqual((LINE_SHOWN_MAX + EXPAND_STEP) * 4);
+        await s.expand(1);
+        expect(s.lineAt(1)?.text).toHaveLength(LINE_SHOWN_MAX + 2 * EXPAND_STEP);
+        // The lines around it are as they were.
+        expect(s.lineAt(0)?.text).toBe("first");
+        expect(s.lineAt(2)?.text).toBe("last");
+        while (s.canExpand(1)) await s.expand(1);
+        expect(s.lineAt(1)?.text).toHaveLength(EXPAND_MAX);
+        expect(s.lineAt(1)?.hidden).toBeTruthy();
+    });
+
+    it("shows all of a line that was cut by a few characters, and then has nothing to expand", async () => {
+        const f = fileOf(`${"x".repeat(LINE_SHOWN_MAX + 500)}\nafter\n`);
+        const s = new LineSource(f.index, f.read, "utf-8");
+        await s.ensure(0, 1);
+        expect(s.lineAt(0)?.hidden).toBe("+500 characters");
+        await s.expand(0);
+        expect(s.lineAt(0)).toEqual({ text: "x".repeat(LINE_SHOWN_MAX + 500) });
+        expect(s.canExpand(0)).toBe(false);
     });
 
     it("decodes a legacy file with the encoding srv found in it, not a fixed code page", async () => {

@@ -11,6 +11,7 @@ import type { FsEntry } from "@/types/rpc/FsEntry";
 import { errorText, type FilesModel } from "./files-model";
 import { openInEditor, openTerminalHere, openWithOs, revealInOs } from "./files-open";
 import { clipboard } from "./files-ops";
+import { isPinned, togglePin, type PlaceRef } from "./files-pins";
 import { CONFINED_MENU } from "./files-view-text";
 
 /** On a host, only what works there: nothing that hands its paths to
@@ -22,6 +23,13 @@ const forHost = (model: FilesModel, items: ContextMenuItem[]): ContextMenuItem[]
     return items.filter((i) => i.type !== "action" || !local.test(i.label));
 };
 
+
+/** The menu item that pins a folder to Places, or takes it off. */
+const pinItem = (model: FilesModel, path: string): ContextMenuItem => {
+    const place: PlaceRef = { path, connection: model.connection() || undefined };
+    const pinned = isPinned(place);
+    return { type: "action", label: pinned ? "Unpin from Places" : "Pin to Places", icon: pinned ? MENU_ICON.unpin : MENU_ICON.pin, onSelect: () => togglePin(place) };
+};
 
 /** What a row menu calls back into the view for. */
 export type RowMenuActions = {
@@ -40,6 +48,7 @@ export const buildRowMenu = (model: FilesModel, entry: FsEntry, actions: RowMenu
     const items: ContextMenuItem[] = [{ type: "action", label: "Open", icon: entry.is_dir ? MENU_ICON.openFolder : MENU_ICON.open, shortcut: "Enter", onSelect: () => openEntry(entry) }];
     if (entry.is_dir) {
         items.push({ type: "action", label: "Open in new tab", icon: MENU_ICON.open, shortcut: shortcutFor("files:openInNewTab"), onSelect: () => openInNewTab(path) });
+        items.push(pinItem(model, path));
     }
     if (!entry.is_dir) {
         items.push(
@@ -77,6 +86,7 @@ export const buildFolderMenu = (model: FilesModel, actions: Pick<RowMenuActions,
         { type: "action", label: "New folder", icon: MENU_ICON.newFolder, shortcut: shortcutFor("files:newFolder"), onSelect: () => void model.createNew("dir") },
         { type: "action", label: "New file", icon: MENU_ICON.newFile, onSelect: () => void model.createNew("file") },
         { type: "action", label: "New tab here", icon: MENU_ICON.add, shortcut: shortcutFor("files:newTabHere"), onSelect: () => openInNewTab(model.path()) },
+        pinItem(model, model.path()),
         {
             type: "action",
             label: clipboard()?.kind === "cut" ? `Paste (move ${clipboard()!.paths.length})` : clipboard() ? `Paste (copy ${clipboard()!.paths.length})` : "Paste",
@@ -91,6 +101,7 @@ export const buildFolderMenu = (model: FilesModel, actions: Pick<RowMenuActions,
         { type: "separator" },
         { type: "action", label: model.showHidden() ? "Hide hidden files" : "Show hidden files", icon: model.showHidden() ? MENU_ICON.hide : MENU_ICON.show, onSelect: () => model.toggleHidden() },
         { type: "action", label: model.treeEnabled() ? "Show as a list" : "Show as a tree", icon: model.treeEnabled() ? "list" : "folder-tree", onSelect: () => model.toggleTree() },
+        { type: "action", label: model.columnsOn() ? "Show as a list" : "Show as columns", icon: model.columnsOn() ? "list" : "table-columns", onSelect: () => model.toggleColumns() },
         { type: "action", label: "Refresh", icon: MENU_ICON.refresh, shortcut: shortcutFor("files:refresh"), onSelect: () => model.refresh() },
         { type: "action", label: "Undo", icon: MENU_ICON.undo, shortcut: shortcutFor("files:undo"), onSelect: () => void model.undo() },
     ]);

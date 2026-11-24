@@ -38,7 +38,10 @@ import { batch, createMemo, createSignal } from "solid-js";
 import { baseName, isWithin, joinPath, joinRel, normalizePath, parentOf, samePath } from "./files-path";
 import { treeMove } from "@/app/fs/tree/tree-keys";
 import { flattenTree, isUnderRel, labelOf, parentRel, type TreeRow } from "@/app/fs/tree/tree-rows";
+import { crawlFolders, rankMatches, whereOf } from "./files-find";
+import { ColumnsState } from "./files-columns-state";
 import { EMPTY_SELECTION, pruneSelection, type Selection } from "./files-selection";
+import { addRecent } from "./files-pins";
 import { clipboard, FilesOps, opFinishedText, sameVolume, setClipboard } from "./files-ops";
 import { systemIconsAvailable } from "./files-icons";
 import { sortEntries, type SortDir, type SortKey } from "./files-sort";
@@ -57,6 +60,8 @@ const META_ROOT = "files:root";
 const META_VIEW = "files:view";
 /** The most folders a pane keeps open in place at once: each one is watched, and srv allows 64 watches to a pane. */
 const MAX_EXPANDED = 40;
+/** The most matches a find shows. */
+const MAX_FOUND = 200;
 /** The tree view: folders open in place (`true`), on the details view. */
 const META_TREE = "files:tree";
 /** The SSH connection the pane is browsing (the key terminals use too);
@@ -248,9 +253,21 @@ export class FilesModel {
 
     /** Sorted, hidden entries filtered unless shown. */
     readonly entries: () => FsEntry[];
+    /** The columns view: which column the keys are in, the columns, and the moves between them. */
+    readonly cols: ColumnsState;
     /** The tree view's rows (empty unless it is on), and each by its name. */
     readonly treeRows: () => TreeRow[];
     readonly treeInfo: () => ReadonlyMap<string, TreeRow>;
+    /** Finding by name in the folders under the shown one is on (the toolbar's second button), what has been indexed of them, and
+     *  a number that changes when more has been (the ranking reads it). */
+    private readonly deep: () => boolean;
+    private readonly setDeep: (v: boolean) => void;
+    private findEntries: FsEntry[] = [];
+    private readonly findVersion: () => number;
+    private readonly setFindVersion: (fn: (n: number) => number) => void;
+    private findRun = 0;
+    private findTimer: ReturnType<typeof setTimeout> | null = null;
+    private readonly ranked: () => FsEntry[];
     /** The folders opened in place, by path from the shown folder (`src/lib`), and what has been listed of each. */
     private readonly expanded: () => ReadonlySet<string>;
     private readonly setExpanded: (s: ReadonlySet<string>) => void;
@@ -320,6 +337,9 @@ export class FilesModel {
         this.canForward = () => (historyVersion(), this.forward.length > 0);
 
         [this.filter, this.setFilterSignal] = createSignal("");
+        [this.deep, this.setDeep] = createSignal(false);
+        [this.findVersion, this.setFindVersion] = createSignal(0);
+        this.ranked = createMemo(() => (this.findVersion(), rankMatches(this.findEntries, this.filter(), MAX_FOUND)));
         [this.expanded, this.setExpanded] = createSignal<ReadonlySet<string>>(new Set());
         [this.kids, this.setKids] = createSignal<ReadonlyMap<string, FsEntry[]>>(new Map());
         this.treeRows = createMemo(() =>
@@ -334,8 +354,31 @@ export class FilesModel {
                 : []
         );
         this.treeInfo = createMemo(() => new Map(this.treeRows().map((r) => [r.entry.name, r])));
+        this.cols = new ColumnsState({
+            on: () => this.columnsOn(),
+            expanded: () => this.expanded(),
+            setExpanded: (next) => this.setExpanded(next),
+            kids: () => this.kids(),
+            setKids: (next) => this.setKids(next),
+            rawEntries: () => this.rawEntries(),
+            shows: (e) => this.showHidden() || !e.hidden,
+            sort: (list) => sortEntries(list, this.sortKey(), this.sortDir()),
+            filter: () => this.filter(),
+            selection: () => this.selection(),
+            setSelection: (next) => this.setSelection(next),
+            reveal: (name) => this.setRevealRequest({ name }),
+            open: (rel) => {
+                void this.watchKid(rel);
+                void this.loadKids(rel);
+            },
+            close: (rel) => this.unwatchKid(rel),
+            listable: (rel) => !this.needsConsent(this.pathOf(rel)),
+            maxDepth: MAX_EXPANDED,
+        });
         this.entries = createMemo(() => {
+            if (this.columnsOn()) return this.cols.entries();
             if (this.treeOn()) return this.treeRows().map((r) => r.entry);
+            if (this.deepOn()) return this.ranked();
             const needle = this.filter().trim().toLowerCase();
             const shown = this.rawEntries().filter(
                 (e) => (this.showHidden() || !e.hidden) && (needle === "" || e.name.toLowerCase().includes(needle))
@@ -390,7 +433,12 @@ export class FilesModel {
      *  on a host (it would show whatever is at that path here). */
     readonly showPreview = (): boolean => this.ctx.meta()?.[META_PREVIEW] === true && !this.connection();
     /** Details (rows and columns) or a grid of thumbnails (§5.2). */
-    readonly viewMode = (): "details" | "grid" => (this.ctx.meta()?.[META_VIEW] === "grid" ? "grid" : "details");
+    readonly viewMode = (): "details" | "grid" | "columns" => {
+        const v = this.ctx.meta()?.[META_VIEW];
+        return v === "grid" || v === "columns" ? v : "details";
+    };
+    /** Columns (Miller) are chosen: one list per level, the folder chosen in each shown in the next. */
+    readonly columnsOn = (): boolean => this.viewMode() === "columns";
 
     /** Clicking a column header: sort by it, or flip its direction. */
     setSort(key: SortKey): void {
@@ -399,7 +447,11 @@ export class FilesModel {
     }
 
     toggleHidden(): void {
-        void this.ctx.setMeta({ [META_HIDDEN]: this.showHidden() ? null : true });
+        const next = !this.showHidden();
+        void this.ctx.setMeta({ [META_HIDDEN]: next ? true : null });
+        // What was indexed was indexed with the old setting; the setting is read from the pane's meta only after it
+        // has been saved, so the new one is handed over.
+        if (this.deep()) this.startFind(next);
     }
 
     toggleSidebar(): void {
@@ -407,7 +459,23 @@ export class FilesModel {
     }
 
     toggleViewMode(): void {
+        this.leaveColumns();
         void this.ctx.setMeta({ [META_VIEW]: this.viewMode() === "grid" ? null : "grid" });
+    }
+
+    /** Chooses the columns view, or goes back to the list. */
+    toggleColumns(): void {
+        // Folders opened in place by the tree are not a chain: start from the shown folder alone.
+        this.resetTree();
+        this.setSelection(EMPTY_SELECTION);
+        void this.ctx.setMeta(this.columnsOn() ? { [META_VIEW]: null } : { [META_VIEW]: "columns", [META_TREE]: null });
+    }
+
+    /** The folders opened in place and the rows chosen belong to the view being left: start the next one clean. */
+    private leaveColumns(): void {
+        if (!this.columnsOn()) return;
+        this.resetTree();
+        this.setSelection(EMPTY_SELECTION);
     }
 
     /** The tree view is chosen (it is the details view with folders that open in place). */
@@ -415,11 +483,93 @@ export class FilesModel {
     /** The tree is drawn: chosen, and no filter typed (a filter shows the matches of the shown folder alone). */
     readonly treeOn = (): boolean => this.treeEnabled() && this.filter().trim() === "";
 
+    /** Finding in subfolders is chosen (the details view only), whether or not anything is typed. */
+    readonly deepMode = (): boolean => this.deep() && this.viewMode() === "details";
+    /** The rows are the best matches of what is typed, from the shown folder and the folders under it. */
+    readonly deepOn = (): boolean => this.deepMode() && this.filter().trim() !== "";
+    /** A found row's folder, from the shown folder ("" at the first level); undefined when the rows are not found ones. */
+    readonly findWhere = (name: string): string | undefined => (this.deepOn() ? whereOf(name) : undefined);
+
+    toggleDeep(): void {
+        if (this.connection()) {
+            this.notOnHost("Searching subfolders");
+            return;
+        }
+        if (this.deep()) this.stopFind();
+        else {
+            this.setDeep(true);
+            this.startFind();
+        }
+    }
+
+    /** Indexes the folders under the shown one, a few at a time, within limits; what is found shows as it comes. */
+    private startFind(hidden: boolean = this.showHidden()): void {
+        const run = ++this.findRun;
+        this.findEntries = [];
+        this.setFindVersion((n) => n + 1);
+        void crawlFolders(
+            (rel) => this.listForFind(rel, run),
+            (batch) => {
+                if (run !== this.findRun) return;
+                for (const e of batch) this.findEntries.push(e);
+                this.scheduleFindRefresh(run);
+            },
+            () => run !== this.findRun || this.disposed,
+            hidden
+        ).then((res) => {
+            if (run !== this.findRun) return;
+            this.setFindVersion((n) => n + 1);
+            if (res.end === "limit") {
+                this.setStatus({ text: `Searched ${res.folders} folders and stopped at the limit: some folders were not searched.`, tone: "info" }, 8000);
+            }
+        });
+    }
+
+    /** Ranking is redone at most every 150 ms while folders are still coming in. */
+    private scheduleFindRefresh(run: number): void {
+        if (this.findTimer) return;
+        this.findTimer = setTimeout(() => {
+            this.findTimer = null;
+            if (run === this.findRun) this.setFindVersion((n) => n + 1);
+        }, 150);
+    }
+
+    private stopFind(): void {
+        this.findRun++;
+        if (this.findTimer) clearTimeout(this.findTimer);
+        this.findTimer = null;
+        this.findEntries = [];
+        batch(() => {
+            this.setDeep(false);
+            this.setFindVersion((n) => n + 1);
+        });
+    }
+
+    /** One folder's entries for the index, or null when it can't be read, or is somewhere macOS asks before it is listed. */
+    private async listForFind(rel: string, run: number): Promise<FsEntry[] | null> {
+        const dir = rel === "" ? this.path() : this.pathOf(rel);
+        if (rel !== "" && this.needsConsent(dir)) return null;
+        const got: FsEntry[] = [];
+        let cursor: string | undefined;
+        try {
+            do {
+                const res = await RpcApi.FsListCommand(TabRpcClient, { path: dir, cursor, limit: PAGE, ...this.on() });
+                if (run !== this.findRun || res.error) return run !== this.findRun || got.length === 0 ? null : got;
+                got.push(...res.entries);
+                cursor = res.cursor ?? undefined;
+            } while (cursor && got.length < 5 * PAGE);
+        } catch {
+            return got.length > 0 ? got : null;
+        }
+        return got;
+    }
+
     toggleTree(): void {
         if (this.treeEnabled()) {
             this.resetTree();
             void this.ctx.setMeta({ [META_TREE]: null });
         } else {
+            this.leaveColumns();
             void this.ctx.setMeta({ [META_TREE]: true, [META_VIEW]: null });
         }
     }
@@ -445,7 +595,7 @@ export class FilesModel {
         // On a host, its own home (`~`, which srv resolves there).
         const home = this.connection() ? "~" : (this.places().find((p) => p.kind === "home")?.path ?? "~");
         const target = typeof saved === "string" && saved !== "" ? saved : home;
-        await this.navigate(target, { push: false });
+        await this.navigate(target, { push: false, restore: true });
         void this.loadAgents();
         void this.loadRemotes();
     }
@@ -572,7 +722,7 @@ export class FilesModel {
      * breadcrumb, a restored pane); `consented` is the notice's Open button
      * (§9.1.4 items 2 and 7).
      */
-    async navigate(target: string, opts: { push?: boolean; consented?: boolean } = {}): Promise<void> {
+    async navigate(target: string, opts: { push?: boolean; consented?: boolean; restore?: boolean } = {}): Promise<void> {
         const root = this.root();
         if (root && !isWithin(target, root)) {
             this.setStatus({ text: "This pane shows only the agent's workspace folder it was opened on.", tone: "info" });
@@ -592,6 +742,7 @@ export class FilesModel {
             this.setGit(null);
         });
         this.resetTree();
+        if (this.deep()) this.stopFind();
         void this.ctx.setMeta({ [META_PATH]: target });
         if (opts.consented) {
             const place = this.protectedPlace(target);
@@ -610,6 +761,9 @@ export class FilesModel {
             return;
         }
         await this.list(target, { silent: false, consented: true });
+        // A folder the person opened (not the one a restored pane came back to, nor one reached by Back or Forward) goes into Places' recents, once
+        // its rows are on screen: a folder that couldn't be listed, or is waiting on macOS, is not one.
+        if (!opts.restore && !this.root() && this.phase() === "ready") addRecent({ path: this.path(), connection: this.connection() || undefined });
     }
 
     goBack(): void {
@@ -617,7 +771,7 @@ export class FilesModel {
         if (prev == null) return;
         this.forward.push(this.path());
         this.setHistoryVersion((n) => n + 1);
-        void this.navigate(prev, { push: false });
+        void this.navigate(prev, { push: false, restore: true });
     }
 
     goForward(): void {
@@ -625,7 +779,7 @@ export class FilesModel {
         if (next == null) return;
         this.back.push(this.path());
         this.setHistoryVersion((n) => n + 1);
-        void this.navigate(next, { push: false });
+        void this.navigate(next, { push: false, restore: true });
     }
 
     goUp(): void {
@@ -644,6 +798,7 @@ export class FilesModel {
     refresh(): void {
         void this.list(this.path(), { silent: true });
         for (const rel of this.expanded()) void this.loadKids(rel);
+        if (this.deep()) this.startFind();
     }
 
     /** Re-list a folder that changed while the pane was hidden. */
@@ -1028,6 +1183,7 @@ export class FilesModel {
 
     /** Forgets every opened folder and stops watching them (the folder shown changed, or the tree was turned off). */
     private resetTree(): void {
+        this.cols.reset();
         if (this.expanded().size === 0 && this.treeWatches.size === 0) return;
         for (const rel of [...this.treeWatches.keys()]) this.unwatchKid(rel);
         this.treeWatching.clear();
@@ -1219,6 +1375,8 @@ export class FilesModel {
     }
 
     dispose(): void {
+        this.findRun++;
+        if (this.findTimer) clearTimeout(this.findTimer);
         for (const rel of [...this.treeWatches.keys()]) this.unwatchKid(rel);
         if (this.gitTimer) clearTimeout(this.gitTimer);
         this.ops.dispose();
