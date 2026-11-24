@@ -34,13 +34,14 @@ use std::cell::RefCell;
 
 use super::kinds;
 use super::seal::{self, Key, Parts};
-use super::sync_adapter::{merge_of, Rotations, VaultAdapter};
+use super::sync_activity::{self, ActivityBody};
+use super::sync_adapter::{merge_of, Kind, Rotations, VaultAdapter};
 use super::sync_capture;
 use super::sync_links::{self, LinkOwners, Links};
 use super::sync_merge::{self, Decision, Kept, Side as Chose};
 use super::sync_record::{EntryBody, Profiles};
 use super::sync_seal::{self, Place};
-use super::sync_store::links_of;
+use super::sync_store::{apply_activity, links_of};
 use super::versions::{self, KEPT_PREFIX, PREVIOUS};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::vault::VaultRow;
@@ -65,6 +66,8 @@ pub enum Effect {
     Wrote { entry: String },
     /// The entry was deleted.
     Deleted { entry: String },
+    /// An activity line another machine made was added to the lines shown with a Machine column.
+    Line { machine: String, seq: i64 },
     /// The record was not taken into the store, and why (no value in it).
     Skipped(String),
     /// The side of a conflict that lost has nowhere in the store to be kept: it stays in the log, sealed.
@@ -130,7 +133,7 @@ pub struct Taker<'a> {
 }
 
 /// The body of `rec`, opened with the Vault's key at the place its header names.
-fn open_body(ring: &KeyRing, rec: &Record) -> Result<EntryBody, String> {
+fn open_body<T: serde::de::DeserializeOwned>(ring: &KeyRing, rec: &Record) -> Result<T, String> {
     let h = &rec.header;
     let key = ring.get(h.epoch).ok_or_else(|| format!("no key for epoch {}", h.epoch))?;
     let place = Place { vault: &h.collection, record: &h.record, version: &h.version, base: h.base.as_ref(), epoch: h.epoch };
@@ -164,7 +167,10 @@ impl Taker<'_> {
     pub fn receive(&self, rec: &Record, pins: &Pins, clock: &mut Clock, now_ms: i64) -> Result<Taken, String> {
         let h = &rec.header;
         // Everything that reads the store comes before the log is locked: the log is the store's own connection.
-        let holder = self.store.vault_entry_of_link(&h.record).map_err(|e| e.to_string())?;
+        let holder = match Kind::of(&h.record) {
+            Kind::Entry => self.store.vault_entry_of_link(&h.record).map_err(|e| e.to_string())?,
+            _ => None,
+        };
         let rotating = match &holder {
             Some(id) => self.rotation_waits(id)?,
             None => false,
@@ -206,10 +212,18 @@ impl Taker<'_> {
     /// `rec` is now the record's current state: the entry takes its value, or is deleted. `lost` is the other side of a
     /// conflict, which this machine held, and which is kept.
     fn current(&self, rec: &Record, lost: Option<&Kept>, now_ms: i64) -> Result<Effect, String> {
+        match Kind::of(&rec.header.record) {
+            Kind::Activity => return self.line(rec),
+            Kind::Grant => return Ok(Effect::Skipped("a site grant is not taken into the store yet".to_string())),
+            Kind::Entry => {}
+        }
+        if !sync_links::is_link_id(&rec.header.record) {
+            return Ok(Effect::Skipped("a record whose id is not an entry's".to_string()));
+        }
         if rec.header.tombstone {
             return self.delete(rec, lost);
         }
-        let body = open_body(self.ring, rec)?;
+        let body: EntryBody = open_body(self.ring, rec)?;
         if let Some(why) = refused(&body) {
             return Ok(Effect::Skipped(why));
         }
@@ -275,6 +289,24 @@ impl Taker<'_> {
         Ok(Some(Effect::Wrote { entry: entry_id }))
     }
 
+    /// An activity line another machine made: added once, to the lines of other machines. A line names the machine that made
+    /// it, and only that machine may make it; a line never changes, so a delete of one is not taken.
+    fn line(&self, rec: &Record) -> Result<Effect, String> {
+        let h = &rec.header;
+        let Some((machine, seq)) = sync_activity::parse_record_id(&h.record) else { return Ok(Effect::Skipped("not an activity line".to_string())) };
+        if h.tombstone {
+            return Ok(Effect::Skipped("an activity line is never deleted".to_string()));
+        }
+        if machine != h.origin {
+            return Ok(Effect::Skipped("an activity line named for another machine".to_string()));
+        }
+        let body: ActivityBody = open_body(self.ring, rec)?;
+        Ok(match apply_activity(self.store, machine, seq, &body)? {
+            Decision::Applied => Effect::Line { machine: machine.to_string(), seq },
+            _ => Effect::None,
+        })
+    }
+
     /// `rec`, a tombstone, is now the record's current state. A conflict's other side is the entry's last value, which the
     /// delete takes with it: it stays in the log.
     fn delete(&self, rec: &Record, lost: Option<&Kept>) -> Result<Effect, String> {
@@ -304,7 +336,7 @@ impl Taker<'_> {
         let (sealed, theirs) = if h.tombstone {
             (Vec::new(), None)
         } else {
-            let body = open_body(self.ring, rec)?;
+            let body: EntryBody = open_body(self.ring, rec)?;
             if let Some(why) = refused(&body) {
                 return Ok(Effect::Skipped(why));
             }

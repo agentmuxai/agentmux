@@ -15,6 +15,7 @@ use crate::backend::user_sync::log::{Signer, Vector};
 use crate::backend::user_sync::seal::KeyRing;
 use crate::backend::vault::sync_capture::{self, capture};
 use crate::backend::vault::sync_record::Known;
+use crate::backend::vault::{sync_activity, sync_grant};
 
 const NOW: i64 = 1_800_000_000_000;
 const VAULT: &str = "vault-a";
@@ -335,4 +336,75 @@ impl Machine {
     fn run_last_used(&self, entry_id: &str, at: i64) {
         self.store.vault_run_sql_for_tests(&format!("UPDATE db_vault_entries SET last_used_at = {at} WHERE id = '{entry_id}'"));
     }
+}
+
+/// Writes `body`, sealed for the place the record will have, as the machine's own record.
+fn write_sealed<T: serde::Serialize>(m: &mut Machine, record: &str, body: &T, at: i64) {
+    let bytes = serde_json::to_vec(body).unwrap();
+    let mut signer = Signer { machine: &m.id, private: &m.private, clock: &mut m.clock };
+    let conn = m.store.conn().lock().unwrap();
+    log::append_local_with(&conn, &mut signer, VAULT, record, false, at, sync_capture::sealer(&m.ring, &bytes)).unwrap();
+}
+
+fn line(label: &str) -> ActivityBody {
+    ActivityBody {
+        at: NOW,
+        entry_id: "entry-a".into(),
+        entry_label: label.into(),
+        actor: "you".into(),
+        action: "used".into(),
+        target: "example.com".into(),
+        outcome: "done".into(),
+        version: 1,
+        actor_kind: "person".into(),
+        host: "a".into(),
+        reason: String::new(),
+        refs: String::new(),
+    }
+}
+
+#[test]
+fn an_activity_line_from_another_machine_is_added_once_beside_this_machine_s_own() {
+    let mut a = machine("a", 1);
+    let mut b = machine("b", 2);
+    let p = pins(&a, &b);
+    write_sealed(&mut a, &sync_activity::record_id("a", 1), &line("Invoice provider key"), NOW);
+    let taken = ship(&a, &mut b, &p, NOW + 5);
+    assert_eq!(taken[0].effect, Effect::Line { machine: "a".into(), seq: 1 });
+    let shown = b.store.vault_activity_remote_list(10).unwrap();
+    assert_eq!(shown.len(), 1);
+    assert_eq!((shown[0].0.as_str(), shown[0].1.seq, shown[0].1.entry_label.as_str()), ("a", 1, "Invoice provider key"));
+    // Sent again, it is the same line: the layer holds it, and nothing is added.
+    let again = ship(&a, &mut b, &p, NOW + 10);
+    assert!(again.is_empty());
+    assert_eq!(b.store.vault_activity_remote_list(10).unwrap().len(), 1);
+}
+
+#[test]
+fn an_activity_line_named_for_another_machine_or_ended_is_not_taken() {
+    let mut a = machine("a", 1);
+    let mut b = machine("b", 2);
+    let p = pins(&a, &b);
+    // a makes a line that says machine b made it.
+    write_sealed(&mut a, &sync_activity::record_id("b", 1), &line("Forged"), NOW);
+    let taken = ship(&a, &mut b, &p, NOW + 5);
+    assert!(matches!(&taken[0].effect, Effect::Skipped(why) if why.contains("another machine")), "{taken:?}");
+    assert!(b.store.vault_activity_remote_list(10).unwrap().is_empty());
+}
+
+#[test]
+fn a_grant_or_a_record_that_is_not_an_entry_s_is_kept_in_the_log_and_not_taken_into_the_store() {
+    let mut a = machine("a", 1);
+    let mut b = machine("b", 2);
+    let p = pins(&a, &b);
+    let grant = format!("g-{}", "0123456789abcdef0123456789abcdef");
+    write_sealed(&mut a, &grant, &sync_grant::GrantBody::new("entry-a", "https://example.com", NOW, 1), NOW);
+    write_sealed(&mut a, "plain-name", &serde_json::json!({ "label": "Not an entry" }), NOW + 1);
+    let taken = ship(&a, &mut b, &p, NOW + 5);
+    assert_eq!(taken.len(), 2);
+    assert!(taken.iter().all(|t| matches!(t.effect, Effect::Skipped(_))), "{taken:?}");
+    assert!(b.store.vault_list().unwrap().is_empty());
+    // The layer still holds both, so the other members get them from here.
+    let conn = b.store.conn().lock().unwrap();
+    assert!(log::current(&conn, VAULT, &grant).unwrap().is_some());
 }
