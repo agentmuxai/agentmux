@@ -256,6 +256,19 @@ pub(crate) enum Who {
     Agent { uid: String, slug: String, container: bool },
 }
 
+/// Who stands behind a definition this request writes, as the request proves it: the app's own window, an agent by its
+/// token, or no one (a caller nothing identified, which the rest of this file treats as the operator but cannot prove is).
+/// A scheduled fire of the job is proven only as far as this goes (`CronJob::fire_proof`).
+fn writer_of(from_host: bool, caller: Option<&Caller>) -> String {
+    if from_host {
+        return crate::backend::storage::cron::WRITER_OPERATOR.to_string();
+    }
+    match caller.and_then(Caller::uid) {
+        Some(uid) => uid.to_string(),
+        None => crate::backend::storage::cron::WRITER_UNKNOWN.to_string(),
+    }
+}
+
 fn who(state: &AppState, caller: Option<&Caller>) -> Who {
     match caller.and_then(Caller::uid) {
         None => Who::Operator,
@@ -444,6 +457,7 @@ pub(crate) fn create_job(state: &AppState, caller: Option<&Caller>, body: Value,
         // Identity M4c-1 (§6.5.9): the creator's UID is the request's
         // `Caller` — its token — never a body field; `""` when Unattributed.
         created_by_uid: super::caller::attributed_uid(caller),
+        last_written_by: writer_of(from_host, caller),
         created_at: Utc::now().timestamp(),
         ..Default::default()
     };
@@ -915,6 +929,8 @@ pub(crate) fn patch_job(state: &AppState, caller: Option<&Caller>, id: &str, bod
         Err(refused) => return refused,
     };
     let mut edited = job.clone();
+    // Whoever wrote this edit now stands behind the job: a fire of it is proven only as far as they were.
+    edited.last_written_by = writer_of(origin.from_host, caller);
     if fields.contains_key("action") {
         def.apply_to(&mut edited, &|to| target_of(state, to));
     } else {
@@ -1015,6 +1031,21 @@ mod tests {
         assert_eq!(report_links(Some(Value::Array(many))).as_array().unwrap().len(), REPORT_LINKS_MAX);
         assert_eq!(report_links(Some(json!("https://example.com/one"))), json!(["https://example.com/one"]));
         assert_eq!(report_links(None), Value::Null);
+    }
+
+    #[test]
+    fn a_definition_is_written_by_whoever_the_request_proves() {
+        use super::super::caller::Caller;
+        use crate::backend::storage::cron::{WRITER_OPERATOR, WRITER_UNKNOWN};
+        let agent = Caller::Agent { uid: "uid-a".to_string() };
+        // The app's own window, whatever else the request carries.
+        assert_eq!(writer_of(true, None), WRITER_OPERATOR);
+        assert_eq!(writer_of(true, Some(&Caller::Unattributed)), WRITER_OPERATOR);
+        // An agent's token names the agent.
+        assert_eq!(writer_of(false, Some(&agent)), "uid-a");
+        // A caller nothing identified is not the operator, even though the rest of this file treats it as one.
+        assert_eq!(writer_of(false, Some(&Caller::Unattributed)), WRITER_UNKNOWN);
+        assert_eq!(writer_of(false, None), WRITER_UNKNOWN);
     }
 
     #[test]

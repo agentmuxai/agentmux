@@ -471,6 +471,8 @@ fn service_shell_and_vault_routes() -> Router<AppState> {
         // shares the exact pane.open logic with the WebSocket RPC handler
         // (app_api::open_pane). See ANALYSIS_AGENT_APP_API_OPEN_IN_EDITOR_2026_05_30.
         .route("/api/v1/pane/open", post(handle_pane_open))
+        // A deep link an agent opens (`Pane` open with `link`): srv's guard, then the window's executor.
+        .route("/api/v1/pane/open_link", post(super::deeplink_guard::handle_pane_open_link))
         // Widgets for agents (WidgetList, WidgetInstall): an install waits
         // for the user's answer, which only the host can carry.
         .route("/api/v1/widgets", get(super::widget_agent_handlers::handle_widgets_list))
@@ -536,6 +538,7 @@ fn agent_api_routes() -> Router<AppState> {
         .route("/api/v1/agent/start", post(app_api::agent_lifecycle::handle_agent_start))
         .route("/api/v1/agent/stop", post(app_api::agent_lifecycle::handle_agent_stop))
         .route("/api/v1/agent/detach", post(app_api::agent_lifecycle::handle_agent_detach))
+        .route("/api/v1/agent/rotate-token", post(app_api::agent_rotate_token::handle_agent_rotate_token))
         // Delete an agent the caller made, once it is stopped (`Agents delete`).
         .route("/api/v1/agent/delete", post(app_api::agent_lifecycle::handle_agent_delete))
         // Replay an agent's recent transcript, then tail it (`Agents watch`).
@@ -757,6 +760,8 @@ fn ui_and_host_routes() -> Router<AppState> {
         // is stamped by agentmux-mcp from AGENTMUX_BLOCKID, same trust model as
         // the agent/memory/preset/identity routes just above.
         .route("/api/v1/ui/screenshot", post(ui_handlers::handle_ui_screenshot))
+        // A `UI` window capture reads what each window blacks out, just before and just after its frame.
+        .route("/api/v1/ui/capture_mask", post(super::capture_mask_route::handle_capture_mask))
         .route("/api/v1/ui/record", post(ui_record::handle_ui_record))
         .route("/api/v1/ui/click", post(ui_handlers::handle_ui_click))
         .route("/api/v1/ui/query", post(ui_handlers::handle_ui_query))
@@ -1000,6 +1005,7 @@ fn browser_control_routes() -> Router<AppState> {
 fn agent_definition_routes() -> Router<AppState> {
     Router::new()
         .route("/api/v1/agent/seats", post(app_api::agent_seats::handle_agent_seats))
+        .route("/api/v1/agent/folder-overlap-ask", post(app_api::folder_overlap_ask::handle_folder_overlap_ask))
         .route("/api/v1/agent/migrate-ids", post(app_api::agent_migrate_ids::handle_agent_migrate_ids))
         .route("/api/v1/agent/rename", post(app_api::agent_rename::handle_agent_rename))
         .route("/api/v1/agent/update", post(app_api::agent_definition::handle_agent_update))

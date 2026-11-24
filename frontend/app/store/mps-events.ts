@@ -179,6 +179,8 @@ export const WpsEvent = {
     WidgetStorage: "widgetstorage",
     /** Agents' widget install requests waiting for the user: `{ requests }`. */
     WidgetRequests: "widgetrequests",
+    /** Agents' asks for the go-ahead with a host agent that shares a folder with a container agent: `{ asks }`. */
+    FolderOverlapAsks: "folderoverlapasks",
     /** The Vault changed, or agents' requests for entries did: `{ requests, changed_ms }`. */
     Vault: "vault",
     /** srv recorded an incident (a corrupt transcript zone, `backend::transcript::damage`): its notice shows now, not at the next window start. */
@@ -259,6 +261,10 @@ export const WpsEvent = {
     AgentNotice: "agent:notice",
     /** A question srv asks the person in a pane, as a modal over that pane, and its end (crates/srv/src/sagas/pane_confirm.rs). */
     PaneConfirm: "pane:confirm",
+    /** An agent's deep-link open, handed to the window that carries it out; it answers with deeplink.open.done (crates/srv/src/sagas/deeplink_open.rs). */
+    DeepLinkOpen: "deeplink:open",
+    /** A window capture asks for the rectangles of this window's private and secret panes; it answers with capture.mask.report (crates/srv/src/sagas/capture_mask.rs). */
+    CaptureMask: "capture:mask",
     /** The agents the person said "Always" to, after a change (crates/srv-core/src/backend/agent_grants.rs). */
     AgentGrants: "agent:grants",
     AmbientSpent: "ambient:spent",

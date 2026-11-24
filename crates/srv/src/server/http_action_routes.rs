@@ -68,6 +68,7 @@ pub(super) const ALWAYS: &[&str] = &[
     "POST /api/v1/window/focus", "POST /api/v1/window/name", "POST /api/v1/work-claims",
     "POST /api/v1/work-claims/release", "POST /api/v1/workspace/name",
     "POST /api/v1/agent/detach", "POST /api/v1/agent/start", "POST /api/v1/agent/stop", "POST /api/v1/agent/delete",
+    "POST /api/v1/agent/rotate-token",
 ];
 
 /// Window and host plumbing, and the service call the window makes.
@@ -88,7 +89,9 @@ pub(super) const HANDLER: &[&str] = &[
     "POST /agentmux/reactive/inject", "POST /agentmux/reactive/inject-files", "POST /api/v1/agent/env",
     "POST /api/v1/agent/seats", "POST /api/v1/agent/rename", "POST /api/v1/agent/migrate-ids",
     "POST /api/v1/agent/update", "POST /api/v1/agent/bundles", "POST /api/v1/agent/hide",
-    "POST /api/v1/agent/unhide",
+    "POST /api/v1/agent/unhide", "POST /api/v1/agent/folder-overlap-ask",
+    // Every open it decides, refused and queued ones too, with the link and the reason (deeplink_guard::record, G9).
+    "POST /api/v1/pane/open_link",
 ];
 
 /// Answers a question or carries a stream; nothing it changes is kept.
@@ -109,6 +112,8 @@ pub(super) const NEVER: &[&str] = &[
     "POST /api/v1/ptyshell/read", "POST /api/v1/ptyshell/status", "POST /api/v1/shell/output",
     "POST /api/v1/shell/status", "POST /api/v1/ui/browser/actions", "POST /api/v1/ui/browser/dialogs",
     "POST /api/v1/ui/browser/find", "POST /api/v1/ui/browser/focus_info", "POST /api/v1/ui/browser/handoff_status", "POST /api/v1/ui/browser/locate", "POST /api/v1/ui/browser/request", "POST /api/v1/ui/browser/snapshot",
+    // Asks the windows what a window capture blacks out; the capture itself is recorded by the agent's MCP.
+    "POST /api/v1/ui/capture_mask",
     "POST /api/v1/ui/browser/wait_for", "POST /api/v1/ui/query", "POST /api/v1/ui/record", "POST /api/v1/ui/screenshot",
     "POST /api/v1/ui/shortcuts/list", "POST /api/v1/vault/health", "POST /api/v1/vault/history", "POST /api/v1/vault/list", "POST /api/v1/vault/show",
     "POST /api/v1/vault/verify", "POST /webhook/whatsapp",

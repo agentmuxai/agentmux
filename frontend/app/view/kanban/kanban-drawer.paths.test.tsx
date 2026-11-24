@@ -12,9 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({
     createBlock: vi.fn(),
     openLink: vi.fn(),
-    openReviews: vi.fn(),
 }));
-vi.mock("@/app/util/open-reviews-task", () => ({ openReviewsForTask: h.openReviews }));
+
 
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { ListAgentDefinitionsCommand: () => Promise.resolve([]) } }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -261,20 +260,12 @@ describe("KanbanDrawer: the facts line", () => {
         expect(h.openLink).toHaveBeenCalledWith("https://github.com/agentmuxai/agentmux/pull/7");
     });
 
-    it("opens the Reviews pane at the task's PRs, by the ref the task is written with", () => {
-        mount(task({}, { pr_url: "https://github.com/agentmuxai/agentmux/pull/7", task_ref: "work#12" }));
-        fireEvent.click(button("Open PRs"));
-        expect(h.openReviews).toHaveBeenCalledWith("work#12");
-        cleanup();
-        mount(task({}, { branch: "naki-2/x", num: 5, task_ref: undefined }));
-        fireEvent.click(button("Open PRs"));
-        expect(h.openReviews).toHaveBeenLastCalledWith("#5");
-    });
-
-    it("offers the Reviews pane only for a task with a PR or a branch", () => {
-        mount(task());
+    it("has no Open PRs button: the drawer lists the pull requests itself", () => {
+        mount(task({}, { pr_url: "https://github.com/agentmuxai/agentmux/pull/7", branch: "naki-2/x" }));
         expect(screen.queryByRole("button", { name: "Open PRs" })).toBeNull();
     });
+
+
 
     it("offers no PR button without a PR", () => {
         mount(task());

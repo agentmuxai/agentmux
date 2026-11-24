@@ -232,6 +232,7 @@ impl Handler {
     /// caller gave none).
     pub(super) fn prepare_request(&mut self, req: &mut InjectionRequest) -> String {
         downgrade_untrusted_reagent(req);
+        req.prove_scheduler_fire(); // the scheduler's own in-process fire: proven (`types.rs`)
 
         self.refuse_former_slug_sender(req); // never speaks, on any path (`former_slug.rs`)
         // Generate request ID if missing

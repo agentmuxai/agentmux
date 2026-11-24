@@ -25,6 +25,8 @@ mod pane;
 #[cfg_attr(not(unix), allow(dead_code))]
 mod popups;
 mod protocol;
+#[cfg(target_os = "linux")]
+mod screen;
 #[cfg_attr(not(unix), allow(dead_code))]
 mod windows;
 
@@ -62,6 +64,8 @@ pub(in crate::server) struct Params {
     url: Option<String>,
     w: Option<u32>,
     h: Option<u32>,
+    /// `screen`: an ordinary Chrome on a virtual screen, with nothing attached (`screen`, on when `AGENTMUX_STREAMED_BROWSER_SCREEN=1`).
+    mode: Option<String>,
 }
 
 /// The pane's start: a web address (or none) and a size within the limits.
@@ -97,7 +101,49 @@ pub(in crate::server) async fn handle(
         Err(e) => return (StatusCode::BAD_REQUEST, e).into_response(),
     };
     let session = session.map(|Extension(s)| s);
-    upgrade(ws, start, session_ended(session))
+    open_pane(params.mode.as_deref(), ws, start, session_ended(session))
+}
+
+/// Open the pane's browser for the mode asked for: the full browser a person drives (`screen`), or the streamed browser. One dispatch for every
+/// route that opens a pane (this server's and the dedicated browser host's), so each honours the mode.
+pub(in crate::server) fn open_pane(
+    mode: Option<&str>,
+    ws: WebSocketUpgrade,
+    start: pane::Start,
+    ended: impl std::future::Future<Output = ()> + Send + 'static,
+) -> Response {
+    if mode == Some("screen") {
+        return screen_pane(ws, start, ended);
+    }
+    // A server with screen mode on (its policy file is the container's own) serves no streamed browser: the two would share one policy file.
+    if streamed_closed() {
+        return (StatusCode::NOT_FOUND, "this server's browser is the full browser only").into_response();
+    }
+    upgrade(ws, start, ended)
+}
+
+#[cfg(target_os = "linux")]
+fn streamed_closed() -> bool {
+    screen::enabled()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn streamed_closed() -> bool {
+    false
+}
+
+/// A screen-mode pane, when this server has that mode on.
+#[cfg(target_os = "linux")]
+fn screen_pane(ws: WebSocketUpgrade, start: pane::Start, ended: impl std::future::Future<Output = ()> + Send + 'static) -> Response {
+    if !screen::enabled() {
+        return (StatusCode::NOT_FOUND, "screen mode is not on in this server").into_response();
+    }
+    screen::upgrade(ws, start, ended)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn screen_pane(_ws: WebSocketUpgrade, _start: pane::Start, _ended: impl std::future::Future<Output = ()> + Send + 'static) -> Response {
+    (StatusCode::NOT_FOUND, "screen mode needs a Linux server").into_response()
 }
 
 /// Upgrade to the pane's WebSocket and run the pane until it ends (or `ended` does).
@@ -129,7 +175,7 @@ mod tests {
 
     #[test]
     fn a_pane_starts_with_a_web_address_or_a_blank_page_and_a_size_in_range() {
-        let p = |url: Option<&str>, w, h| Params { url: url.map(str::to_string), w, h };
+        let p = |url: Option<&str>, w, h| Params { url: url.map(str::to_string), w, h, mode: None };
         let s = start_from(&p(None, None, None)).unwrap();
         assert_eq!((s.url.as_str(), s.w, s.h), ("about:blank", 1024, 640));
         assert_eq!(start_from(&p(Some("https://example.com"), Some(800), Some(600))).unwrap().url, "https://example.com/");

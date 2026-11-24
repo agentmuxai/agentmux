@@ -20,7 +20,7 @@ import { EXPIRING_SOON_DAYS, expiryOf, formatWhen } from "./vault-format";
 import { CARD_BRANDS } from "./vault-card";
 import { kindsIn, SECTION_LABELS, vaultKind } from "./vault-kinds";
 import { copyCheck, machineCopy, MachineCopyLine } from "./vault-source";
-import { CopyPlaceButton, isLinked, LinkedBadges, LinkedDetails } from "./vault-linked";
+import { CopyPlaceButton, isBacked, isLinked, LinkedBadges, LinkedDetails } from "./vault-linked";
 import { ensureBrowserProfiles, profileById } from "@/app/view/browser/browser-profiles";
 import { EntryGrants } from "./vault-entry-grants";
 import { canShare, ShareButton } from "./vault-share";
@@ -131,7 +131,7 @@ function EntryLabel(props: { entry: VaultEntryInfo }): JSX.Element {
 
 /** The main value's last characters, and a card's brand before them. A linked entry has no value to show. */
 function EntryValue(props: { entry: VaultEntryInfo }): JSX.Element {
-    if (isLinked(props.entry.fields)) return <td class="warden-manager-dim vault-value">{t("vault.linked.noValue")}</td>;
+    if (isLinked(props.entry.fields)) return <td class="warden-manager-dim vault-value">{isBacked(props.entry.fields) ? t("vault.backed.noValue") : t("vault.linked.noValue")}</td>;
     return (
         <td class="warden-manager-mono vault-value">
             <Show when={props.entry.kind === "card" && CARD_BRANDS[props.entry.fields.brand ?? ""]}>
@@ -290,7 +290,9 @@ function EntryTable(props: { s: EntriesState; section: VaultSection; showVault: 
                         <tr data-entry={e.id}>
                             <td>
                                 <EntryLabel entry={e} />
-                                <span class="warden-manager-mono warden-manager-dim vault-id">{e.id}</span>
+                                <span class="warden-manager-mono warden-manager-dim vault-id" {...tip(e.id)}>
+                                    {e.id}
+                                </span>
                                 <EntryGrants entry={e} revoke={(grant) => s.revoke(e.id, grant)} />
                             </td>
                             <Show when={kinds()}>

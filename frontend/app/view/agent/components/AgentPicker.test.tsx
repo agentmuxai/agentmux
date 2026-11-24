@@ -53,6 +53,11 @@ vi.mock("@/app/store/rpc-api", () => {
         ListBundlesCommand: vi.fn().mockResolvedValue([]),
         // Fork flow (#2721 Phase 1 — continueSessionId/forkSession wiring).
         ForkAgentDefinitionCommand: vi.fn(),
+        // A pane that srv held an open for (a shared folder) asks, then opens the agent into itself.
+        FolderOverlapCheckCommand: vi.fn().mockResolvedValue({ overlaps: [] }),
+        FolderOverlapAcceptCommand: vi.fn().mockResolvedValue({ chosen: true }),
+        AgentOpenCommand: vi.fn().mockResolvedValue({}),
+        SetMetaCommand: vi.fn().mockResolvedValue(undefined),
     };
     return { RpcApi };
 });
@@ -90,11 +95,16 @@ const providerMock = vi.hoisted(() => ({
         { id: "codex", displayName: "Codex", npmPackage: "@openai/codex-cli", docsUrl: "https://example.test/codex" },
         { id: "grok", displayName: "Grok Build", npmPackage: "", managedInstall: true, docsUrl: "https://example.test/grok" },
     ] as Array<Record<string, unknown>>,
+    // Providers a test marks as Preview-tier (the others are first-class).
+    previewIds: [] as string[],
 }));
 
 vi.mock("../providers", () => ({
     getProviderList: () => providerMock.list,
     getProvider: (id: string) => {
+        if (providerMock.previewIds.includes(id)) {
+            return { id, tier: "preview", npmPackage: null, cliCommand: id, systemPrereqs: [] };
+        }
         if (id === "claude") {
             return {
                 id: "claude",
@@ -141,6 +151,7 @@ vi.mock("./AgentCard", () => ({
             data-installed={String(props.installed)}
             data-expanded={String(!!props.expanded)}
             data-block-id={props.blockId}
+            data-default-focus={String(!!props.defaultFocus)}
             data-has-ctx-menu={String(typeof props.onContextMenu === "function")}
             onClick={(e) => props.onLaunch(props.agent, e)}
             onContextMenu={(e) => {
@@ -724,6 +735,101 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
 // docs/analysis/ANALYSIS_NEW_WINDOW_TAB_LATENCY_2026_09_30.md: the mount-time
 // install check used to re-run for every still-pending agent each time one
 // answer came back, ~700 calls for ~37 agents on every new window tab.
+describe("AgentPicker — the Preview agent CLIs section", () => {
+    const template = (id: string, provider: string) => baseDef({ id, slug: id, name: id, provider, is_seeded: 1 });
+    const cardIn = (listId: string) => () =>
+        [...(screen.queryByTestId(listId)?.querySelectorAll("[data-testid^='agent-card-']") ?? [])].map((el) =>
+            el.getAttribute("data-testid")!.replace("agent-card-", "")
+        );
+
+    beforeEach(() => {
+        localStorage.removeItem("agentPicker:previewOpen");
+        providerMock.previewIds = ["kimi", "qwen"];
+        vi.mocked(RpcApi.ListAgentDefinitionsCommand).mockResolvedValue([
+            template("tpl-claude", "claude"),
+            template("tpl-kimi", "kimi"),
+            template("tpl-codex", "codex"),
+            template("tpl-qwen", "qwen"),
+        ]);
+    });
+
+    afterEach(() => {
+        providerMock.previewIds = [];
+        localStorage.removeItem("agentPicker:previewOpen");
+    });
+
+    it("keeps the Preview harnesses out of the main list and under one collapsed header with their count", async () => {
+        render(() => <AgentPicker model={makeMockModel() as any} />);
+        const toggle = await screen.findByTestId("agent-preview-toggle");
+        expect(toggle).toHaveTextContent("Preview agent CLIs (2)");
+        expect(toggle).toHaveAttribute("aria-expanded", "false");
+        expect(cardIn("agent-templates-list")()).toEqual(["tpl-claude", "tpl-codex"]);
+        // Closed: its cards are not drawn at all.
+        expect(screen.queryByTestId("agent-preview-list")).toBeNull();
+        expect(screen.queryByTestId("agent-card-tpl-kimi")).toBeNull();
+    });
+
+    it("opens on a click, lists them after the first-class cards, and is never the default choice", async () => {
+        render(() => <AgentPicker model={makeMockModel() as any} />);
+        fireEvent.click(await screen.findByTestId("agent-preview-toggle"));
+        await waitFor(() => expect(cardIn("agent-preview-list")()).toEqual(["tpl-kimi", "tpl-qwen"]));
+        expect(screen.getByTestId("agent-preview-toggle")).toHaveAttribute("aria-expanded", "true");
+        expect(screen.getByTestId("agent-card-tpl-claude")).toHaveAttribute("data-default-focus", "true");
+        expect(screen.getByTestId("agent-card-tpl-kimi")).toHaveAttribute("data-default-focus", "false");
+        expect(screen.getByTestId("agent-card-tpl-qwen")).toHaveAttribute("data-default-focus", "false");
+    });
+
+    it("remembers whether it was left open", async () => {
+        const first = render(() => <AgentPicker model={makeMockModel() as any} />);
+        fireEvent.click(await screen.findByTestId("agent-preview-toggle"));
+        await screen.findByTestId("agent-preview-list");
+        first.unmount();
+        render(() => <AgentPicker model={makeMockModel() as any} />);
+        await screen.findByTestId("agent-preview-list");
+        fireEvent.click(screen.getByTestId("agent-preview-toggle"));
+        expect(screen.queryByTestId("agent-preview-list")).toBeNull();
+        expect(localStorage.getItem("agentPicker:previewOpen")).toBe("0");
+    });
+
+    it("has no section when no harness is Preview", async () => {
+        providerMock.previewIds = [];
+        render(() => <AgentPicker model={makeMockModel() as any} />);
+        await screen.findByTestId("agent-card-tpl-claude");
+        expect(screen.queryByTestId("agent-preview-section")).toBeNull();
+    });
+
+    it("opens when a chip filter matches a Preview harness, so a match is never hidden", async () => {
+        vi.mocked(RpcApi.InstallCheckCommand).mockImplementation(
+            async (_client: unknown, req: { providerId: string }) => ({ installed: req.providerId === "kimi", version: null }) as any
+        );
+        render(() => <AgentPicker model={makeMockModel() as any} />);
+        await screen.findByTestId("agent-preview-toggle");
+        const installed = await screen.findByRole("button", { name: /Installed/ });
+        await waitFor(() => expect(installed).not.toBeDisabled());
+        fireEvent.click(installed);
+        await waitFor(() => expect(cardIn("agent-preview-list")()).toEqual(["tpl-kimi"]));
+        expect(screen.getByTestId("agent-preview-toggle")).toHaveTextContent("Preview agent CLIs (1)");
+        expect(localStorage.getItem("agentPicker:previewOpen")).not.toBe("1");
+    });
+
+    it("stays closed after the person closes it with a chip filter on, once things have settled", async () => {
+        vi.mocked(RpcApi.InstallCheckCommand).mockImplementation(
+            async (_client: unknown, req: { providerId: string }) => ({ installed: req.providerId === "kimi", version: null }) as any
+        );
+        render(() => <AgentPicker model={makeMockModel() as any} />);
+        const installed = await screen.findByRole("button", { name: /Installed/ });
+        await waitFor(() => expect(installed).not.toBeDisabled());
+        fireEvent.click(installed);
+        await screen.findByTestId("agent-preview-list");
+        fireEvent.click(screen.getByTestId("agent-preview-toggle"));
+        // Let any pending reactive work run: a closed section must not reopen on its own.
+        await Promise.resolve();
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(screen.queryByTestId("agent-preview-list")).toBeNull();
+        expect(screen.getByTestId("agent-preview-toggle")).toHaveAttribute("aria-expanded", "false");
+    });
+});
+
 describe("AgentPicker — install check on mount", () => {
     it("checks each agent once and each provider CLI once, whatever order the answers arrive in", async () => {
         const agents = Array.from({ length: 40 }, (_, i) =>
@@ -909,5 +1015,51 @@ describe("AgentPicker — agents:changed refetch", () => {
         render(() => <AgentPicker model={pickerModel()} />);
         await screen.findByTestId("agent-card-tpl-claude");
         expect(screen.getByTestId("agent-card-tpl-claude").getAttribute("data-block-id")).toBe("blk-1");
+    });
+});
+
+describe("AgentPicker — a pane that srv held an open for", () => {
+    const hosty = baseDef({ id: "user-hosty", slug: "hosty", name: "Hosty", is_seeded: 0, working_directory: "/w/shared/work" });
+    const pair = { host_id: "user-hosty", host_name: "Hosty", container_id: "user-aria", container_name: "Aria" };
+    const askingModel = () => ({ ...makeMockModel(), blockAtom: () => ({ meta: { "layout:agent": "user-hosty" } }) });
+
+    beforeEach(() => {
+        vi.mocked(RpcApi.ListAgentDefinitionsCommand).mockResolvedValue([claudeTemplate, hosty]);
+        vi.mocked(RpcApi.FolderOverlapCheckCommand).mockResolvedValue({ overlaps: [pair] } as any);
+    });
+
+    it("asks the person in place, naming both agents", async () => {
+        render(() => <AgentPicker model={askingModel() as any} />);
+        const panel = await screen.findByTestId("shared-folder-panel");
+        expect(panel.textContent).toContain("Hosty");
+        expect(panel.textContent).toContain("Aria");
+        expect(RpcApi.FolderOverlapCheckCommand).toHaveBeenCalledWith(expect.anything(), { agent_id: "user-hosty", folder: "/w/shared/work" });
+    });
+
+    it("opens the agent into this pane once the person has gone ahead, and launches nothing else", async () => {
+        const model = askingModel();
+        vi.mocked(RpcApi.AgentOpenCommand).mockResolvedValue({ block_id: "blk-1" } as any);
+        render(() => <AgentPicker model={model as any} />);
+        fireEvent.click(await screen.findByTestId("shared-folder-go-ahead"));
+        await waitFor(() =>
+            expect(RpcApi.AgentOpenCommand).toHaveBeenCalledWith(expect.anything(), { agent_id: "user-hosty", into_block_id: "blk-1", focus: true })
+        );
+        expect(RpcApi.FolderOverlapAcceptCommand).toHaveBeenCalledWith(expect.anything(), { host_id: "user-hosty", container_id: "user-aria" });
+        expect(model.launchAgentDefinition).not.toHaveBeenCalled();
+    });
+
+    it("is an ordinary picker again when the person does not open it", async () => {
+        render(() => <AgentPicker model={askingModel() as any} />);
+        fireEvent.click(await screen.findByTestId("shared-folder-cancel"));
+        await waitFor(() => expect(screen.queryByTestId("shared-folder-panel")).toBeNull());
+        expect(RpcApi.SetMetaCommand).toHaveBeenCalledWith(expect.anything(), { oref: "block:blk-1", meta: { "layout:agent": null } });
+        expect(RpcApi.AgentOpenCommand).not.toHaveBeenCalled();
+    });
+
+    it("asks nothing when the agent shares no folder, so the open that srv is making goes on", async () => {
+        vi.mocked(RpcApi.FolderOverlapCheckCommand).mockResolvedValue({ overlaps: [] } as any);
+        render(() => <AgentPicker model={askingModel() as any} />);
+        await waitFor(() => expect(RpcApi.FolderOverlapCheckCommand).toHaveBeenCalled());
+        expect(screen.queryByTestId("shared-folder-panel")).toBeNull();
     });
 });

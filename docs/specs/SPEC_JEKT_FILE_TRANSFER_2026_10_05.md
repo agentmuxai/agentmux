@@ -146,6 +146,8 @@ Only a jekt that started on the receiving instance is ever held (its target defi
 | Per jekt | 10 files, 200 MB | 10 files, 100 MB | 10 files, 50 MB |
 | Incoming transfers at once, per receiver | 4, 1 GB declared in total | (shared with host) | n/a |
 
+The receiver compares each file's declared size, and the message's declared total, with the limits of the tier the message arrived on before it creates a file, and refuses the message when either is over. It writes at most a file's declared size; a body that goes on past the last file refuses the message, and a partial file is removed. The sender makes the same comparison before it sends, and the refusal names the limit and where it applies.
+
 Settings keys follow the attachment store's (`jekt:files:maxfilemb`, `jekt:files:maxjektmb`, per tier). The receiver's normal attachment limits (total store size, image dimensions, text extraction) still apply; a file the store refuses is reported back as not delivered.
 
 ## 6. Receiving
@@ -181,6 +183,8 @@ The list comes from the same code as user attachments (`backend/attachments/prom
 
 Names are reduced by `safe_file_name` and stored under `named/<sha256>/`. Kind and MIME are sniffed from the content; nothing from the sender decides them. Nothing received is ever executed or opened automatically; executables and archives are stored and listed like any other file.
 
+A file from a sender that is not proven for the message (any trust but `host-verified`, `channel-verified`, `lan-verified`, or `wan-verified` with an `approved` instance) is stored as it came and listed with a note that it was not opened. No type check, preview, text version or other derived copy is made of it on receipt or on delivery; that is made when the receiving person includes the file in a message of their own. Showing the message or its tile, and a request for a thumbnail, make nothing: the tile shows the file's size and a type icon.
+
 A sender's message text can't produce a file list: `<attached_files>` and `</attached_files>` in it are neutralised like marker text is, and the pane reads chips from a jekt only when its marker has `FILES=`.
 
 ### 6.4 Trust
@@ -190,7 +194,7 @@ Files follow the jekt's trust and tier rules:
 | Sender | Files |
 |---|---|
 | **Verified** on its tier (`host-verified`, `channel-verified`, `lan-verified`, `wan-verified` with an `approved` or `new` instance, `SIG=verified`) | delivered; inline for persistent Claude from Phase 3 |
-| **No proof available**, same machine or cloud (`self-declared`, WAN `network-claimed`) | delivered and listed by path, never inlined, so a file from an unproven sender isn't put in front of the model unasked |
+| **No proof available**, same machine or cloud (`self-declared`, WAN `network-claimed`) | delivered and listed by path, never inlined and not opened (§6.3), so a file from an unproven sender isn't put in front of the model unasked |
 | **No proof available**, LAN (`network-claimed`) | refused before any byte is read (§4.3) |
 | **Active verification failure** (`TRUST=unverified`, `SIG=invalid`, a LAN, channel or WAN signature that was present and failed, a revoked instance) | withheld: none delivered, the marker says they were withheld |
 

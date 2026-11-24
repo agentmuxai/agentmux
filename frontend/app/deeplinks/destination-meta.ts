@@ -20,9 +20,11 @@ export const DEST_META = {
     settingsReveal: "settings:reveal",
     settingsRevealAsk: "settings:reveal-ask",
     vaultRequest: "vault:request",
+    vaultEntryLink: "vault:entry-link",
     memoryAgent: "memory:agent",
     kanbanOpen: "kanban:open",
     kanbanBoard: "kanban:board",
+    kanbanWaits: "kanban:waits",
     auditAgent: "audit:agent",
     auditSound: "audit:sound",
     auditMessage: "audit:message",
@@ -44,6 +46,8 @@ export interface PanePlan {
     focusMeta: Record<string, unknown>;
     /** A setting row to reveal (Settings' anchor). */
     revealSetting?: string;
+    /** A Vault entry to reveal, by its opaque link id (G2). */
+    vaultEntry?: string;
     /**
      * The place can't be shown by this build, so the view opens at its nearest place (§8): the words say which
      * part. The pane's own notice says it too where the pane has one.
@@ -72,6 +76,7 @@ export function planDestination(link: ParsedDeepLink, now: number = Date.now()):
     let focus: Record<string, unknown> = {};
     let revealSetting: string | undefined;
     let missing: string | undefined;
+    let vaultEntry: string | undefined;
 
     // A place whose one enum segment is the pane's section (R14).
     if (place?.sections) {
@@ -97,8 +102,10 @@ export function planDestination(link: ParsedDeepLink, now: number = Date.now()):
             break;
         case "vault":
             if (link.place === "request") focus[DEST_META.vaultRequest] = str(v.request);
-            // Entries have no opaque id in this build (D7): the Vault opens and the caller is told the entry is not there.
-            if (link.place === "entry") missing = "entry";
+            if (link.place === "entry") {
+                vaultEntry = str(v.entry);
+                focus[DEST_META.vaultEntryLink] = vaultEntry;
+            }
             break;
         case "memory":
             if (p.agent !== undefined) focus[DEST_META.memoryAgent] = str(p.agent);
@@ -106,6 +113,8 @@ export function planDestination(link: ParsedDeepLink, now: number = Date.now()):
         case "kanban":
             if (link.place === "task") focus[DEST_META.kanbanOpen] = str(v.task);
             if (link.place === "board") focus[DEST_META.kanbanBoard] = str(v.board);
+            // `agentmux://reviews` is an alias of this place: the board filtered to cards with open pull requests.
+            if (link.place === "pulls") focus[DEST_META.kanbanWaits] = "open";
             // The Kanban reads `<board>#<n>` as that board's task (kanban-section-state.ts).
             if (link.place === "board-task") focus[DEST_META.kanbanOpen] = `${str(v.board)}#${str(v.task)}`;
             break;
@@ -139,7 +148,7 @@ export function planDestination(link: ParsedDeepLink, now: number = Date.now()):
     const meta = movedMeta({ view: paneView, ...focus });
     const finalView = typeof meta.view === "string" ? meta.view : paneView;
     const { view: _v, ...focusMeta } = meta;
-    return { view: finalView, meta: { ...meta, view: finalView }, focusMeta, ...(revealSetting ? { revealSetting } : {}), ...(missing ? { missing } : {}) };
+    return { view: finalView, meta: { ...meta, view: finalView }, focusMeta, ...(revealSetting ? { revealSetting } : {}), ...(vaultEntry ? { vaultEntry } : {}), ...(missing ? { missing } : {}) };
 }
 
 export function isPlanProblem(x: PanePlan | PlanProblem): x is PlanProblem {

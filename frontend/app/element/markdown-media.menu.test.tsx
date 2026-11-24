@@ -140,6 +140,26 @@ describe("an inline video in a reply", () => {
     });
 });
 
+describe("the native player's own menu, which cannot save in this window", () => {
+    it("offers no Download or cast entry on an inline video once it plays", async () => {
+        mount("clips/demo.mp4");
+        await flush();
+        fireEvent.click(host.querySelector(".am-media-play")!);
+        await flush();
+        const list = host.querySelector("video.am-media-player")!.getAttribute("controlslist") ?? "";
+        expect(list.split(/\s+/)).toEqual(expect.arrayContaining(["nodownload", "noremoteplayback"]));
+    });
+
+    it("offers none on an inline audio either", async () => {
+        mount("sound/take.wav");
+        await flush();
+        fireEvent.click(host.querySelector(".am-media-play")!);
+        await flush();
+        const list = host.querySelector("audio.am-media-player")!.getAttribute("controlslist") ?? "";
+        expect(list.split(/\s+/)).toEqual(expect.arrayContaining(["nodownload", "noremoteplayback"]));
+    });
+});
+
 describe("an inline audio in a reply", () => {
     it("gives Copy path only, on its card before play and on the player after", async () => {
         mount("sound/take.wav");

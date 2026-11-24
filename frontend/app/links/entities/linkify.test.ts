@@ -21,8 +21,17 @@ describe("agents", () => {
         expect(links("Opazz and Camp and camper-0622hx")).toEqual([]);
     });
     it("does not link an ordinary-word name alone, but does with its computer or slug", () => {
-        expect(links("Will you look at Pulp?")).toEqual([]);
+        expect(links("Will you look at Pulp?")).toEqual(["agent:Pulp"]);
+        expect(links("Will you look at it?")).toEqual([]);
         expect(links("will-7 will do")).toEqual(["agent:will-7"]);
+    });
+    it("links an agent by its display name, never the plain word that is only its id (Pulp, id pulse)", () => {
+        expect(links("Pulp ran the Pulse QA and the Pulse group.")).toEqual(["agent:Pulp"]);
+        expect(links("pulse, PULSE and Pulse's cache, pulse-admin, https://example.com/pulse")).toEqual(["address:https://example.com/pulse"]);
+        expect(links("Ask pulse@narko, or Pulp")).toEqual(["agent:pulse@narko", "agent:Pulp"]);
+    });
+    it("links an agent whose name and id are the same word, in either case", () => {
+        expect(links("Posa and posa")).toEqual(["agent:Posa", "agent:posa"]);
     });
     it("never links an ordinary word alone in any case, even when it is the agent's slug", () => {
         expect(links("Mark it, mark it, MARK it and mark@narko")).toEqual(["agent:mark@narko"]);

@@ -15,7 +15,21 @@ export function workspaceCovers(root: string | null, filePath: string): boolean 
 
 // file:// → OS path (inverse of pathToFileUri in lsp-client.ts).
 // Percent-decodes each segment to undo the encoding applied on the way out.
-export function decodeFileUri(uri: string): string {
+export function decodeFileUri(address: string): string {
+    // This machine's own name is no host: `file://localhost/a.ts` is `file:///a.ts`.
+    const uri = address.replace(/^file:\/\/localhost\//i, "file:///");
+    // `file://server/share/a.ts` names a Windows network path: the server is the URI's host.
+    const network = /^file:\/\/([^/]+)\/(.*)$/.exec(uri);
+    if (network) {
+        const parts = [network[1], ...network[2].split("/")].map((seg) => {
+            try {
+                return decodeURIComponent(seg);
+            } catch {
+                return seg;
+            }
+        });
+        return "\\\\" + parts.join("\\");
+    }
     const isWin = uri.startsWith("file:///") && /^file:\/\/\/[a-zA-Z]:/.test(uri);
     const body = uri.startsWith("file:///")
         ? uri.slice(isWin ? 8 : 7) // Windows strips the leading "/" before the drive

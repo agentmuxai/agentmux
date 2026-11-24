@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Atlas's layout (docs/specs/SPEC_ATLAS_AGENT_MAP_2026_11_13.md §5.7): where each region and node stands, in map
- * pixels. It is deterministic and has no physics, so the map does not move when a refresh brings the same agents:
- * regions are placed left to right and wrap to a new row; inside one, the agents that have reports form trees
+ * Atlas's layout (docs/specs/SPEC_ATLAS_AGENT_MAP_2026_11_13.md §5.7): where each group of a host's nodes and each
+ * node stands, in map pixels. Nothing draws a group (the host is an attribute of the node, atlas-hosts.ts): it only keeps
+ * the nodes of one host together. It is deterministic and has no physics, so the map does not move when a refresh
+ * brings the same agents: groups are placed left to right and wrap to a new row; inside one, the agents that have reports form trees
  * (a lead above its reports, centred over them), and the agents with none and no lead stand in a wrapped grid below.
  * A machine's containers that no agent uses stand at the end of that grid. The review bot and CI stand in a region
  * of their own on a row of its own under the machines', so that a line from one of them to an agent crosses open
@@ -23,23 +24,19 @@ export const GAP_X = 14;
 export const GAP_Y = 40;
 /** Between the rows a lead's reports are wrapped into. */
 const REPORT_ROW_GAP = 24;
-/** Between a region's edge and its nodes: room for a container's frame (CONTAINER_FRAME_OUT) and little more. */
+/** Between the edge of the map and its nodes: room for a container's frame (CONTAINER_FRAME_OUT) and a host's ring. */
 const PAD = 10;
-/** The strip at the top of a region that its title and badge are written in. */
-export const REGION_TITLE_H = 30;
-const HEAD = REGION_TITLE_H;
-const FOLD_H = 30;
+/** Between the groups of two hosts, side by side or one row under another: wide enough that a group reads as one. */
 const REGION_GAP = 28;
 /** A row of regions wraps once it would be wider than this. */
 export const ROW_MAX_W = 1400;
 /** The columns of the grid the agents with no lead and no reports stand in. */
 const GRID_COLS = 5;
-const MIN_REGION_W = 220;
 
 /**
  * The gaps of the map. They are the ones above in the fitted view, and every one closes by the same share as the
  * person zooms in past it (`gapsAt`), so that a gap takes no more of the pane as the cards grow and more of them
- * are in view. The cards, a region's title strip and its folded chip keep their size.
+ * are in view. The cards keep their size.
  */
 export interface Gaps {
     /** The share of each full gap that is left: 1 in the fitted view. */
@@ -50,9 +47,9 @@ export interface Gaps {
     level: number;
     /** Between the rows a lead's reports are wrapped into. */
     reportRow: number;
-    /** Between a region's edge and its nodes. */
+    /** Between the edge of the map and its nodes. */
     pad: number;
-    /** Between two regions, side by side or one row under another. */
+    /** Between the groups of two hosts, side by side or one row under another. */
     region: number;
     /** How far the dashed frame of a container agent reaches past its node. */
     frame: number;
@@ -90,13 +87,11 @@ export interface Placed {
     y: number;
 }
 
+/** The room the nodes of one host take: not drawn, only kept together. */
 export interface RegionBox extends Placed {
     key: string;
     w: number;
     h: number;
-    /** Where the folded chip sits (its top left); unused when the region folds nothing. */
-    foldX: number;
-    foldY: number;
 }
 
 export interface AtlasLayout {
@@ -244,30 +239,24 @@ function reportColsChoices(graph: AtlasGraph): number[] {
     return [Number.POSITIVE_INFINITY, ...REPORT_COLS_CHOICES.filter((c) => widest > c)];
 }
 
-/** A region's box before it is placed: its inner layout and the size it needs. */
+/** A host's group before it is placed: its inner layout and the size it needs. */
 interface Slot {
     key: string;
-    folds: boolean;
     inner: RegionLayout;
     w: number;
     h: number;
-    innerH: number;
 }
 
 function slotOf(
     key: string,
     keys: readonly string[],
-    folds: boolean,
     edges: readonly AtlasEdge[],
     cols: number,
     reportCols = Number.POSITIVE_INFINITY,
     gaps: Gaps = FULL_GAPS
 ): Slot {
     const inner = layoutRegion(keys, edges, cols, reportCols, gaps);
-    const w = Math.max(MIN_REGION_W, inner.w + gaps.pad * 2);
-    const innerH = keys.length === 0 ? 0 : inner.h;
-    const h = HEAD + gaps.pad + innerH + (folds ? (innerH > 0 ? gaps.x : 0) + FOLD_H : 0) + gaps.pad;
-    return { key, folds, inner, w, h, innerH };
+    return keys.length === 0 ? { key, inner, w: 0, h: 0 } : { key, inner, w: inner.w, h: inner.h };
 }
 
 /** The slots a packed layout started a new row of regions at, by their index: what the same picture at closer gaps keeps. */
@@ -295,24 +284,27 @@ function shelfPack(
         y += rowH + gaps.region;
         rowH = 0;
     };
+    const m = gaps.pad;
     const place = (s: Slot, i: number) => {
+        // A host with no node to draw (its agents are stopped) takes no room.
+        if (s.w === 0) {
+            boxes.push({ key: s.key, x: x + m, y: y + m, w: 0, h: 0 });
+            return;
+        }
         if (typeof wrap === "number" ? x > 0 && x + s.w > wrap : wrap.has(i)) {
             newRow();
             rowStarts.add(i);
         }
-        // The nodes are centred in the region when it is wider than they are.
-        const offset = gaps.pad + (s.w - gaps.pad * 2 - s.inner.w) / 2;
-        const top = y + HEAD + gaps.pad;
-        for (const [node, p] of s.inner.nodes) nodes.set(node, { x: x + offset + p.x, y: top + p.y });
+        for (const [node, p] of s.inner.nodes) nodes.set(node, { x: m + x + p.x, y: m + y + p.y });
         for (const [report, lead] of s.inner.wrapped) wrapped.set(report, lead);
-        const foldY = top + s.innerH + (s.innerH > 0 ? gaps.x : 0);
-        boxes.push({ key: s.key, x, y, w: s.w, h: s.h, foldX: x + gaps.pad, foldY });
+        boxes.push({ key: s.key, x: m + x, y: m + y, w: s.w, h: s.h });
         x += s.w + gaps.region;
         rowH = Math.max(rowH, s.h);
         width = Math.max(width, x - gaps.region);
     };
     slots.forEach(place);
-    const layout = { regions: boxes, nodes, width, height: boxes.length === 0 ? 0 : y + rowH, wrapped, gaps };
+    const empty = nodes.size === 0;
+    const layout = { regions: boxes, nodes, width: empty ? 0 : width + m * 2, height: empty ? 0 : y + rowH + m * 2, wrapped, gaps };
     ROW_STARTS.set(layout, rowStarts);
     return layout;
 }
@@ -390,7 +382,6 @@ export function layoutAtlas(graph: AtlasGraph, pane?: PaneShape, spread = 1): At
             slotOf(
                 r.key,
                 [...r.shown, ...r.orphans].map((n) => n.key),
-                r.folded.length > 0,
                 graph.edges,
                 cols,
                 reportCols,
@@ -425,7 +416,7 @@ export function layoutAtlas(graph: AtlasGraph, pane?: PaneShape, spread = 1): At
 
 /**
  * The By seat layout: every shown agent in one picture, whatever machine it is on, a lead above its reports. No
- * regions: the machine is the node's tint. Stopped agents are not drawn (the bar counts them). The containers no
+ * regions: the host is the node's label and ring. Stopped agents are not drawn (the bar counts them). The containers no
  * agent uses stand with the agents that have no lead. With the pane's size, the columns of the grid of
  * agents with no lead are the ones that fit it best. `spread` under 1 closes the gaps, as in `layoutAtlas`: the
  * columns are the ones chosen at the full gaps.
@@ -466,6 +457,3 @@ function seatWithCols(
         gaps,
     };
 }
-
-/** The folded chip's height in its region's box (`RegionBox.foldX` and `foldY` say where it stands). */
-export const FOLD_CHIP = { h: FOLD_H - 6 };

@@ -19,7 +19,7 @@ vi.mock("./ui-busy", async (orig) => {
 });
 
 import { closeGpuPanel } from "./gpu-panel-state";
-import { GpuReadout, UiBusyReadout } from "./SystemStatsParts";
+import { GpuReadout } from "./SystemStatsParts";
 import type { SysStats } from "./SystemStatsState";
 
 const stats = (gpu: number | null, gpuMem: number | null = null): SysStats => ({
@@ -80,33 +80,5 @@ describe("the GPU meter beside CPU and Mem", () => {
         expect(container.querySelector("[data-stand=GpuPanel]")).toBeTruthy();
         fireEvent.click(meter);
         expect(container.querySelector("[data-stand=GpuPanel]")).toBeNull();
-    });
-});
-
-describe("the UI busy meter", () => {
-    it("is not there while this window has nothing to say", () => {
-        const { container } = render(() => <UiBusyReadout />);
-        expect(container.textContent).toBe("");
-    });
-
-    it("reads UI n%, and turns the warning colour above 50%", () => {
-        const { container } = render(() => <UiBusyReadout />);
-        h.setBusy(12);
-        const meter = container.querySelector<HTMLElement>(".stat-ui")!;
-        expect(meter.textContent).toBe("UI 12%");
-        expect(meter.style.color).toBe("var(--secondary-text-color)");
-        h.setBusy(51);
-        expect(container.querySelector<HTMLElement>(".stat-ui")!.style.color).toBe(WARN);
-        h.setBusy(null);
-        expect(container.querySelector(".stat-ui")).toBeNull();
-    });
-
-    it("says in its tooltip that it covers this window only", () => {
-        const { container } = render(() => <UiBusyReadout />);
-        h.setBusy(5);
-        const tip = container.querySelector<HTMLElement>(".stat-ui")!.getAttribute("data-tip")!;
-        expect(tip).toContain("this window only");
-        expect(tip).toContain("not agents");
-        expect(tip).toContain("background");
     });
 });

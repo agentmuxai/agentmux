@@ -2539,6 +2539,25 @@
     }
   },
   {
+    "command": "capture.mask.report",
+    "request": "agentmux_srv::sagas::capture_mask::CommandCaptureMaskReportData",
+    "requestName": "CommandCaptureMaskReportData",
+    "requestTs": {
+      "imports": [
+        "CommandCaptureMaskReportData"
+      ],
+      "name": "CommandCaptureMaskReportData"
+    },
+    "response": "agentmux_srv::sagas::capture_mask::CaptureMaskReportResult",
+    "responseName": "CaptureMaskReportResult",
+    "responseTs": {
+      "imports": [
+        "CaptureMaskReportResult"
+      ],
+      "name": "CaptureMaskReportResult"
+    }
+  },
+  {
     "command": "checkcliauth",
     "request": "agentmux_srv_core::backend::rpc_types::block::CommandCheckCliAuthData",
     "requestName": "CommandCheckCliAuthData",
@@ -2958,6 +2977,25 @@
     }
   },
   {
+    "command": "deeplink.open.done",
+    "request": "agentmux_srv::sagas::deeplink_open::CommandDeepLinkOpenDoneData",
+    "requestName": "CommandDeepLinkOpenDoneData",
+    "requestTs": {
+      "imports": [
+        "CommandDeepLinkOpenDoneData"
+      ],
+      "name": "CommandDeepLinkOpenDoneData"
+    },
+    "response": "agentmux_srv::sagas::deeplink_open::DeepLinkOpenDoneResult",
+    "responseName": "DeepLinkOpenDoneResult",
+    "responseTs": {
+      "imports": [
+        "DeepLinkOpenDoneResult"
+      ],
+      "name": "DeepLinkOpenDoneResult"
+    }
+  },
+  {
     "command": "deleteagent",
     "request": "agentmux_srv_core::backend::rpc_types::agent::CommandDeleteAgentDefinitionData",
     "requestName": "CommandDeleteAgentDefinitionData",
@@ -3284,6 +3322,25 @@
     }
   },
   {
+    "command": "filesearchtext",
+    "request": "agentmux_srv_core::backend::rpc_types::editor_read::FileSearchTextReq",
+    "requestName": "FileSearchTextReq",
+    "requestTs": {
+      "imports": [
+        "FileSearchTextReq"
+      ],
+      "name": "FileSearchTextReq"
+    },
+    "response": "agentmux_srv_core::backend::rpc_types::editor_read::FileSearchBytesResult",
+    "responseName": "FileSearchBytesResult",
+    "responseTs": {
+      "imports": [
+        "FileSearchBytesResult"
+      ],
+      "name": "FileSearchBytesResult"
+    }
+  },
+  {
     "command": "fleet.broadcast",
     "request": "agentmux_srv_core::backend::rpc_types::fleet::CommandFleetBroadcastData",
     "requestName": "CommandFleetBroadcastData",
@@ -3436,6 +3493,25 @@
     }
   },
   {
+    "command": "folderoverlapasks",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "agentmux_srv_core::backend::rpc_types::folder_overlap::FolderOverlapAsksResult",
+    "responseName": "FolderOverlapAsksResult",
+    "responseTs": {
+      "imports": [
+        "FolderOverlapAsksResult"
+      ],
+      "name": "FolderOverlapAsksResult"
+    }
+  },
+  {
     "command": "folderoverlapcheck",
     "request": "agentmux_srv_core::backend::rpc_types::folder_overlap::CommandFolderOverlapCheckData",
     "requestName": "CommandFolderOverlapCheckData",
@@ -3452,6 +3528,25 @@
         "FolderOverlapCheckResult"
       ],
       "name": "FolderOverlapCheckResult"
+    }
+  },
+  {
+    "command": "folderoverlapdecline",
+    "request": "agentmux_srv_core::backend::rpc_types::folder_overlap::CommandFolderOverlapDeclineData",
+    "requestName": "CommandFolderOverlapDeclineData",
+    "requestTs": {
+      "imports": [
+        "CommandFolderOverlapDeclineData"
+      ],
+      "name": "CommandFolderOverlapDeclineData"
+    },
+    "response": "agentmux_srv_core::backend::rpc_types::folder_overlap::FolderOverlapDeclineResult",
+    "responseName": "FolderOverlapDeclineResult",
+    "responseTs": {
+      "imports": [
+        "FolderOverlapDeclineResult"
+      ],
+      "name": "FolderOverlapDeclineResult"
     }
   },
   {
@@ -6406,6 +6501,25 @@
         "PaneConfirmDecideResult"
       ],
       "name": "PaneConfirmDecideResult"
+    }
+  },
+  {
+    "command": "pane.floatplaced",
+    "request": "agentmux_srv_core::backend::rpc_types::block::CommandPaneFloatPlacedData",
+    "requestName": "CommandPaneFloatPlacedData",
+    "requestTs": {
+      "imports": [
+        "CommandPaneFloatPlacedData"
+      ],
+      "name": "CommandPaneFloatPlacedData"
+    },
+    "response": "agentmux_srv_core::backend::rpc_types::block::PaneFloatPlacedResult",
+    "responseName": "PaneFloatPlacedResult",
+    "responseTs": {
+      "imports": [
+        "PaneFloatPlacedResult"
+      ],
+      "name": "PaneFloatPlacedResult"
     }
   },
   {

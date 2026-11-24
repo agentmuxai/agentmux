@@ -18,6 +18,7 @@ import { AgentStrip, BoardArea, KanbanToolbar, OpenDrawer } from "./kanban-secti
 import { createKanbanSection, type SectionProps } from "./kanban-section-state";
 import { KanbanBoardsPanel } from "./kanban-boards-panel";
 import { KanbanNewTask } from "./kanban-new-task";
+import { KanbanUnmatchedPrsPanel } from "./kanban-unmatched-prs";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./kanban.scss";
@@ -39,7 +40,10 @@ export const KanbanSection = (props: SectionProps): JSX.Element => {
                     )}
                 </Show>
 
-                <Show when={s.managing()}>
+                <Show when={s.managing() === "prs"}>
+                    <KanbanUnmatchedPrsPanel s={s} />
+                </Show>
+                <Show when={s.managing() === "new" || s.managing() === "manage"}>
                     <KanbanBoardsPanel s={s} />
                 </Show>
 

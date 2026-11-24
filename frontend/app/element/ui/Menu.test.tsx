@@ -9,6 +9,8 @@
  */
 
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@floating-ui/dom", () => ({
@@ -85,6 +87,41 @@ describe("Menu", () => {
         expect(menu.querySelector(".menu-divider")).not.toBeNull();
         expect(screen.getByTestId("delete").classList.contains("ui-menu-item--danger")).toBe(true);
         expect(screen.getByTestId("locked").getAttribute("aria-disabled")).toBe("true");
+    });
+
+    it("draws a described row as the name on one line and the explanation under it, the name alone being the row's name", async () => {
+        const long = "Keep it going through open questions on its own best judgement. Pause for what only you can provide.";
+        mount({
+            items: [
+                { label: "Drive", description: long, type: "radio", checked: true, testId: "drive" },
+                { label: "Plain", testId: "plain" },
+            ],
+        });
+        await placed();
+        const row = screen.getByTestId("drive");
+        const name = row.querySelector(".label")!;
+        const description = row.querySelector(".ui-menu-item__description")!;
+        // Two elements, the explanation whole, and one under the other inside the row.
+        expect(name.textContent).toBe("Drive");
+        expect(description.textContent).toBe(long);
+        expect(name.parentElement).toBe(description.parentElement);
+        expect(row.classList.contains("ui-menu-item--described")).toBe(true);
+        // A screen reader hears the name, then the explanation as its description.
+        expect(row.getAttribute("aria-labelledby")).toBe(name.id);
+        expect(row.getAttribute("aria-describedby")).toBe(description.id);
+        expect(name.id).not.toBe("");
+        // A row without one is as it was: no wrapper, no description.
+        expect(screen.getByTestId("plain").querySelector(".ui-menu-item__text")).toBeNull();
+        expect(screen.getByTestId("plain").hasAttribute("aria-describedby")).toBe(false);
+    });
+
+    it("never cuts a description with an ellipsis, and lets it wrap", () => {
+        const css = readFileSync(join(__dirname, "menu.scss"), "utf8");
+        const at = css.indexOf(".ui-menu-item__description {");
+        const rule = css.slice(at, css.indexOf("}", at));
+        expect(rule).toMatch(/white-space:\s*normal/);
+        expect(rule).toMatch(/overflow-wrap:\s*anywhere/);
+        expect(rule).not.toMatch(/text-overflow|ellipsis|overflow:\s*hidden|-webkit-line-clamp/);
     });
 
     it("draws a checkbox and a radio row with their own roles, aria-checked and a check while checked", async () => {

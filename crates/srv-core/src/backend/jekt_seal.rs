@@ -84,6 +84,12 @@ fn seal_secret(wan_seed: &[u8; 32]) -> Option<[u8; 32]> {
     Some(out)
 }
 
+/// The X25519 public key an install's WAN seed seals to: the key its offers carry, and the box key it lists in a
+/// collection's membership chain.
+pub fn box_public(wan_seed: &[u8; 32]) -> Option<[u8; 32]> {
+    Some(MontgomeryPoint::mul_base_clamped(seal_secret(wan_seed)?).to_bytes())
+}
+
 fn offer_material(agent_id: &str, instance: &str, key_fp: &str, key_b64: &str) -> String {
     let agent_id = agent_id.to_ascii_lowercase();
     format!("{SEAL_KEY_DOMAIN}{FIELD_SEP}{agent_id}{FIELD_SEP}{instance}{FIELD_SEP}{key_fp}{FIELD_SEP}{key_b64}")

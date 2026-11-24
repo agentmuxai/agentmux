@@ -28,7 +28,7 @@ const POSITIVES: Case[] = [
 ];
 
 const NEGATIVES: string[] = [
-    "Will you review it? Mark it done and move on, Pulp fiction aside.",
+    "Will you review it? Mark it done and move on, pulp fiction aside.",
     "Version 1.2.3 shipped at 10:30 on 2026-11-20; build 4567 passed.",
     "Heading # 12 and an HTML entity &#48247; and a colour #fff or #123abc.",
     "Email opaz@example.com and look in the docs/readme folder, nothing more.",

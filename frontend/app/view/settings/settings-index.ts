@@ -24,7 +24,7 @@ import { WIDGET_BAR_SETTINGS } from "./sections/widget-bar-settings";
 import { AGENTS_SETTINGS } from "./sections/agents-section";
 import { KANBAN_SETTINGS } from "./sections/kanban-section";
 import { ADVANCED_SETTINGS } from "./sections/advanced-section";
-import { SUPERVISOR_SETTINGS } from "./sections/supervisor-link";
+import { SUPERVISOR_SETTINGS } from "./sections/supervisor-section";
 
 export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     ...Object.values(APPEARANCE_SETTINGS),

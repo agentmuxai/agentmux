@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resetBlockedTracking, startBlockedTracking } from "@/app/diag/main-thread-blocked";
 import { resetSlowFrameTracking, startSlowFrameTracking } from "@/app/diag/slow-frames";
-import { busyPercent, createUiBusyMeter, pageBusyBetween, UI_BUSY_WARN_PCT, uiBusyColor } from "./ui-busy";
+import { busyPercent, createUiBusyMeter, nextUiBusyAlert, pageBusyBetween, UI_BUSY_CALM_TICKS, UI_BUSY_WARN_PCT, uiBusyColor } from "./ui-busy";
 
 describe("the UI busy share", () => {
     it("is the slow-frame time over the window, whole and within 0 to 100", () => {
@@ -18,6 +18,31 @@ describe("the UI busy share", () => {
         expect(UI_BUSY_WARN_PCT).toBe(50);
         expect(uiBusyColor(50)).toBe("var(--secondary-text-color)");
         expect(uiBusyColor(51)).toBe("var(--warning-text-color)");
+    });
+});
+
+describe("the busy alert behind the Graphics item's red", () => {
+    const off = { on: false, calm: 0 };
+    const run = (readings: Array<number | null>) => readings.reduce((s, r) => nextUiBusyAlert(s, r), off);
+
+    it("comes on at once above the warn share, never at it", () => {
+        expect(run([50]).on).toBe(false);
+        expect(run([51]).on).toBe(true);
+        expect(run([5, 5, 99]).on).toBe(true);
+    });
+
+    it("lets go only after UI_BUSY_CALM_TICKS calm readings in a row", () => {
+        expect(UI_BUSY_CALM_TICKS).toBe(2);
+        expect(run([80, 10]).on).toBe(true);
+        expect(run([80, 10, 10]).on).toBe(false);
+        // A busy reading between two calm ones starts the count again.
+        expect(run([80, 10, 70, 10]).on).toBe(true);
+        expect(run([80, 10, 70, 10, 10]).on).toBe(false);
+    });
+
+    it("is off while the window has no reading (in the background), and starts clean after it", () => {
+        expect(run([80, null]).on).toBe(false);
+        expect(run([80, null, 10, 10]).on).toBe(false);
     });
 });
 

@@ -42,6 +42,9 @@ mod agent_open_steps;
 #[cfg(test)]
 #[path = "tests/agent_open_steps_tests.rs"]
 mod agent_open_steps_tests;
+#[cfg(test)]
+#[path = "tests/agent_open_shared_folder_tests.rs"]
+mod agent_open_shared_folder_tests;
 pub(crate) mod agent_open_many;
 pub(crate) mod agent_open_remote;
 /// Re-exported for `server/mod.rs`'s `POST /api/v1/agent/open` handler (the
@@ -51,6 +54,7 @@ pub(crate) mod agent_open_remote;
 pub(crate) use agent_open::open_agent_impl;
 /// The `Agents` `spawn` action's route (SPEC_AGENT_WORKERS_2026_10_15.md).
 pub(crate) mod agent_migrate_ids;
+pub(crate) mod agent_rotate_token;
 pub(crate) mod agent_seats;
 pub(crate) mod agent_rename;
 pub(crate) mod agent_definition;
@@ -83,6 +87,7 @@ pub(crate) use agent_define::{check_provider_unchanged, check_volumes, validate_
 // `ClosePane` MCP tool's backing route) calls `pane::handle_close_pane`
 // directly, same as `fleet`'s exposure just below.
 pub(crate) mod pane;
+pub(crate) mod floater_place;
 mod pane_open_tab;
 mod pane_open_steps;
 #[cfg(test)]
@@ -155,6 +160,7 @@ mod input_history;
 mod presence;
 pub(crate) mod client_terms;
 pub(crate) mod folder_overlap;
+pub(crate) mod folder_overlap_ask;
 pub(crate) mod agent_quit;
 pub(crate) mod tower_pane;
 mod gpu_panel;
@@ -663,6 +669,10 @@ mod cross_channel_tests;
 #[cfg(test)]
 #[path = "tests/pane_open_reducer_tests.rs"]
 mod pane_open_reducer_tests;
+
+#[cfg(test)]
+#[path = "tests/floater_open_tests.rs"]
+mod floater_open_tests;
 
 #[cfg(test)]
 #[path = "tests/stop_agents_tests.rs"]

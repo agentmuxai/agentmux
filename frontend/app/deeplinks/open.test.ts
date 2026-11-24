@@ -74,6 +74,7 @@ function fakeWindow(start: Record<string, { view: string; tab?: string; facts?: 
         tabOf: (blockId) => panes.get(blockId)?.tab,
         tabExists: (tabId) => tabId === "t1" || tabId === "t2",
         settingExists: async (id) => id === "recording.engine",
+        vaultEntryExists: async (id) => id === "e_ab12cd34",
         locate: (blockId) => calls.located.push(blockId),
         announce: (text) => calls.announced.push(text),
         personInput: () => input,
@@ -129,7 +130,8 @@ describe("openDestination: outcomes", () => {
         expect(gone.place).toBe("missing");
         const there = await ex.open("agentmux://settings/recording#recording.engine", { source: PERSON });
         expect(there.place).toBeUndefined();
-        expect((await ex.open("agentmux://vault/entry/e_ab12cd34", { source: PERSON })).place).toBe("missing");
+        expect((await ex.open("agentmux://vault/entry/e_ab12cd34", { source: PERSON })).place).toBeUndefined();
+        expect((await ex.open("agentmux://vault/entry/e_ffff0000", { source: PERSON })).place).toBe("missing");
     });
 });
 
@@ -161,7 +163,7 @@ describe("agent opens", () => {
     it("stop at the caps of unused panes", async () => {
         const w = fakeWindow();
         const ex = new Executor(w.deps);
-        const views = ["history", "atlas", "reviews", "drone", "toolchain", "tower", "help", "shortcuts", "sysinfo"];
+        const views = ["history", "atlas", "swarm", "drone", "toolchain", "tower", "help", "shortcuts", "sysinfo"];
         const outs = [];
         for (const v of views) outs.push(await ex.open(`agentmux://${v}`, { source: AGENT }));
         expect(outs.slice(0, AGENT_PANES_PER_TAB).every((o) => o.outcome === "opened")).toBe(true);
@@ -219,7 +221,7 @@ describe("R5: never replaced", () => {
 describe("person opens", () => {
     it("are at most five a second (G11)", async () => {
         const ex = new Executor(fakeWindow().deps);
-        const views = ["history", "atlas", "reviews", "drone", "toolchain", "tower"];
+        const views = ["history", "atlas", "swarm", "drone", "toolchain", "tower"];
         const outs = [];
         for (const v of views) outs.push(await ex.open(`agentmux://${v}`, { source: PERSON }));
         expect(outs.slice(0, PERSON_OPENS_PER_SECOND).every((o) => o.outcome !== "refused")).toBe(true);

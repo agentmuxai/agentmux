@@ -8,6 +8,8 @@
 use serde_json::{json, Value};
 
 use crate::backend::folder_overlap as overlap;
+use crate::backend::folder_overlap_asks::asks;
+use crate::server::app_api::folder_overlap_ask::{ask, AskRequest, Asker};
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{RpcContext, RpcMessage};
 use crate::backend::storage::agents::test_agent_def;
@@ -16,9 +18,7 @@ use crate::server::AppState;
 
 /// One folder for every test's choices; each test names its own agents.
 fn choices() {
-    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
-    let dir = DIR.get_or_init(|| tempfile::tempdir().unwrap());
-    overlap::set_choices_dir_for_test(Some(dir.path().to_path_buf()));
+    crate::sagas::park_agents_tests::one_choices_dir_for_test();
 }
 
 async fn call(state: &AppState, ctx: RpcContext, command: &str, data: Value) -> (Value, String) {
@@ -87,6 +87,19 @@ async fn the_window_is_told_which_container_agents_a_host_agent_shares_a_folder_
 
     let (data, _) = call(&f.state, window(), "folderoverlapcheck", json!({ "agent_id": f.host, "folder": f.path("elsewhere") })).await;
     assert_eq!(data["overlaps"], json!([]), "opening in a folder of its own");
+}
+
+#[tokio::test]
+async fn a_host_agent_that_names_no_folder_is_asked_about_the_folder_it_opens_in() {
+    let f = fleet();
+    let blank = save(&f.state, "Blanky", "host", "", "[]");
+    let own = overlap::open_folder(&f.state.mstore.agent_def_get(&blank).unwrap().unwrap());
+    let holder = save(&f.state, "Holder", "container", &own.parent().unwrap().to_string_lossy(), "[]");
+
+    let (data, error) = call(&f.state, window(), "folderoverlapcheck", json!({ "agent_id": blank })).await;
+
+    assert!(error.is_empty(), "{error}");
+    assert_eq!(data["overlaps"][0]["container_id"].as_str(), Some(holder.as_str()), "{data}");
 }
 
 #[tokio::test]
@@ -164,4 +177,153 @@ async fn a_save_that_leaves_the_folders_alone_goes_on_even_where_the_pair_overla
     let rename = json!({ "id": f.host, "name": "Hosty renamed", "icon": "X", "provider": "claude", "agent_type": host.agent_type, "working_directory": host.working_directory });
     let (data, error) = call(&f.state, window(), "updateagent", rename).await;
     assert!(error.is_empty() && data["name"] == json!("Hosty renamed"), "{error}");
+}
+
+// An agent that was refused asks the person to go ahead; the person answers from the window.
+
+fn lead() -> Asker {
+    Asker { slug: "lead".into(), name: "Lead".into(), block_id: "pane-of-lead".into() }
+}
+
+fn pair_of(f: &Fleet) -> AskRequest {
+    AskRequest { host: f.host.clone(), container: f.container.clone() }
+}
+
+fn waiting(f: &Fleet) -> Vec<crate::backend::folder_overlap_asks::FolderAsk> {
+    asks().list(agentmux_common::time::now_ms_u64()).into_iter().filter(|a| a.host_id == f.host && a.container_id == f.container).collect()
+}
+
+fn audited(f: &Fleet, action: &str) -> Vec<crate::backend::reactive::AuditLogEntry> {
+    f.state
+        .reactive_handler
+        .get_audit_log(usize::MAX)
+        .into_iter()
+        .filter(|e| e.reason.as_deref().is_some_and(|r| r.starts_with(action) && r.contains(&f.host)))
+        .collect()
+}
+
+#[tokio::test]
+async fn an_agent_asks_and_the_person_is_told_who_asked_and_which_two_agents() {
+    let f = fleet();
+    let asked = ask(&f.state, &lead(), &pair_of(&f), agentmux_common::time::now_ms_u64()).unwrap();
+    assert_eq!(asked["status"], json!("asked"));
+    let card = waiting(&f);
+    assert_eq!(card.len(), 1);
+    let ask = &card[0];
+    assert_eq!((ask.agent.as_str(), ask.host_name.as_str(), ask.container_name.as_str(), ask.block_id.as_str()), ("Lead", "Hosty", "Aria", "pane-of-lead"));
+    assert!(!overlap::accepted(&f.host, &f.container), "asking keeps nothing");
+
+    let again = ask_again(&f);
+    assert_eq!(again["status"], json!("asked"), "asking again says where it stands");
+    assert_eq!(waiting(&f).len(), 1, "the pair is asked once");
+    let rows = audited(&f, "folder-overlap.ask");
+    assert_eq!(rows.len(), 1, "the ask is recorded once");
+    assert_eq!(rows[0].source_agent.as_deref(), Some("lead"), "as the agent that asked");
+}
+
+fn ask_again(f: &Fleet) -> serde_json::Value {
+    ask(&f.state, &lead(), &pair_of(f), agentmux_common::time::now_ms_u64()).unwrap()
+}
+
+#[tokio::test]
+async fn an_agent_can_ask_but_cannot_answer() {
+    let f = fleet();
+    ask_again(&f);
+    let both = json!({ "host_id": f.host, "container_id": f.container });
+    for command in ["folderoverlapaccept", "folderoverlapdecline"] {
+        for ctx in [agent(), unproven()] {
+            let (_, error) = call(&f.state, ctx, command, both.clone()).await;
+            assert!(error.contains("only the person goes ahead") || error.contains("isn't the AgentMux window"), "{command}: {error}");
+        }
+    }
+    assert!(!overlap::accepted(&f.host, &f.container), "nothing was kept for a caller that is not the person");
+    assert_eq!(waiting(&f).len(), 1, "the ask is still waiting for the person");
+}
+
+#[tokio::test]
+async fn the_persons_go_ahead_answers_the_ask_and_is_recorded_as_theirs() {
+    let f = fleet();
+    ask_again(&f);
+    let both = json!({ "host_id": f.host, "container_id": f.container });
+    let (data, error) = call(&f.state, window(), "folderoverlapaccept", both).await;
+    assert!(error.is_empty(), "{error}");
+    assert_eq!(data["chosen"], json!(true));
+    assert!(waiting(&f).is_empty(), "the ask is answered");
+    assert_eq!(ask_again(&f)["status"], json!("chosen"), "the agent sees it and can retry what was refused");
+    let rows = audited(&f, "folder-overlap.go-ahead");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].source_agent, None, "the person's window, not an agent");
+}
+
+#[tokio::test]
+async fn a_declined_ask_leaves_the_pair_asking() {
+    let f = fleet();
+    ask_again(&f);
+    let both = json!({ "host_id": f.host, "container_id": f.container });
+    let (data, error) = call(&f.state, window(), "folderoverlapdecline", both).await;
+    assert!(error.is_empty(), "{error}");
+    assert_eq!(data["declined"], json!(true));
+    assert!(waiting(&f).is_empty(), "the ask is answered");
+    assert!(!overlap::accepted(&f.host, &f.container), "no choice was kept");
+    let (data, _) = call(&f.state, window(), "folderoverlapcheck", json!({ "agent_id": f.host })).await;
+    assert_eq!(data["overlaps"][0]["container_id"], json!(f.container), "the pair still asks");
+    assert!(overlap::check(&f.state.mstore, &f.state.mstore.agent_def_get(&f.host).unwrap().unwrap(), None).is_err(), "and a caller that is not the person is still refused");
+
+    let asked = ask_again(&f);
+    assert_eq!(asked["status"], json!("declined"), "the pair is not asked about again at once");
+    assert!(asked["retry_after_seconds"].as_u64().unwrap() > 0);
+    assert!(waiting(&f).is_empty(), "so no new card is made");
+    assert_eq!(audited(&f, "folder-overlap.decline").len(), 1);
+}
+
+#[tokio::test]
+async fn an_ask_names_a_host_agent_and_a_container_agent_that_share_a_folder_and_needs_a_pane_to_show_in() {
+    let f = fleet();
+    let swapped = AskRequest { host: f.container.clone(), container: f.host.clone() };
+    let err = ask(&f.state, &lead(), &swapped, 1).unwrap_err();
+    assert!(err.message.contains("needs host: a host agent and container: a container agent"), "{}", err.message);
+    let nobody = AskRequest { host: "no-such-agent".into(), container: f.container.clone() };
+    assert_eq!(ask(&f.state, &lead(), &nobody, 1).unwrap_err().status, axum::http::StatusCode::NOT_FOUND);
+
+    let elsewhere = save(&f.state, "Korp", "host", &f.path("elsewhere"), "[]");
+    let apart = ask(&f.state, &lead(), &AskRequest { host: elsewhere, container: f.container.clone() }, 1).unwrap();
+    assert_eq!(apart["status"], json!("not_needed"), "no shared folder, nothing to go ahead with");
+
+    let no_pane = Asker { block_id: String::new(), ..lead() };
+    let err = ask(&f.state, &no_pane, &pair_of(&f), 1).unwrap_err();
+    assert_eq!(err.status, axum::http::StatusCode::CONFLICT);
+    assert!(waiting(&f).is_empty());
+}
+
+#[tokio::test]
+async fn deleting_an_agent_ends_the_ask_that_names_it() {
+    let f = fleet();
+    ask_again(&f);
+    crate::server::app_api::folder_overlap::forget_asks_of(&f.state, &f.host);
+    assert!(waiting(&f).is_empty());
+}
+
+#[tokio::test]
+async fn a_choice_file_that_nothing_records_is_not_the_persons_go_ahead_and_the_window_says_why() {
+    let f = fleet();
+    overlap::write_choice_without_a_record_for_test(&f.host, &f.container);
+    let host = f.state.mstore.agent_def_get(&f.host).unwrap().unwrap();
+
+    let (data, _) = call(&f.state, window(), "folderoverlapcheck", json!({ "agent_id": f.host })).await;
+    assert_eq!(data["overlaps"][0]["container_id"], json!(f.container), "the pair asks again");
+    assert_eq!(data["overlaps"][0]["untrusted"], json!(true), "and the window is told why");
+    let refused = overlap::check_open(&f.state.mstore, &host).unwrap_err();
+    assert!(refused.starts_with("SHARED_FOLDER") && refused.contains("no record that the person made it"), "{refused}");
+    assert!(audited(&f, "folder-overlap.go-ahead").is_empty());
+
+    // The person goes ahead from the window: the record is written, and the pair then counts.
+    let both = json!({ "host_id": f.host, "container_id": f.container });
+    let (_, error) = call(&f.state, window(), "folderoverlapaccept", both).await;
+    assert!(error.is_empty(), "{error}");
+    assert!(overlap::check_open(&f.state.mstore, &host).is_ok());
+    let (data, _) = call(&f.state, window(), "folderoverlapcheck", json!({ "agent_id": f.host })).await;
+    assert_eq!(data["overlaps"], json!([]));
+    let rows = audited(&f, "folder-overlap.go-ahead");
+    assert_eq!(rows.len(), 1, "the go-ahead is one row");
+    assert_eq!(rows[0].source_agent, None, "made by the window");
 }

@@ -822,6 +822,7 @@ pub(crate) async fn delete_agent_definition(state: &AppState, id: &str, via: &'s
     state.mstore.agent_def_delete(id).map_err(|e| format!("{via}: {e}"))?;
     // What the person chose for a pair this agent was in is not kept for the pair it was.
     crate::backend::folder_overlap::forget_agent(id);
+    crate::server::app_api::folder_overlap::forget_asks_of(state, id);
     // A key account's gateway token ends with the agent, before the container's own cleanup (which also ends it) runs.
     crate::backend::model_gateway::token::revoke(id, crate::backend::model_gateway::catalog::KEY_ROUTE_ID);
     super::purge_identity_store_rows(&state.identity_store, &state.id_store, id, via);

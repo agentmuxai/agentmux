@@ -29,6 +29,8 @@ export class VaultViewModel {
     requestAtom: Accessor<string>;
     /** A pending use or ask to show in the Requests list, set by openVaultAt. */
     focusAtom: Accessor<string>;
+    /** An entry to show, by its opaque link id: set by a deep link (`agentmux://vault/entry/<link id>`). */
+    entryLinkAtom: Accessor<string>;
     /** Whether the pane is on screen (its tab active, its window shown). */
     shown: Accessor<boolean>;
     /** The note on what may ask the person: open until they dismiss it. */
@@ -62,6 +64,10 @@ export class VaultViewModel {
         this.focusAtom = createMemo<string>(() => {
             const f = meta()?.["vault:focus"];
             return typeof f === "string" ? f : "";
+        });
+        this.entryLinkAtom = createMemo<string>(() => {
+            const l = meta()?.["vault:entry-link"];
+            return typeof l === "string" ? l : "";
         });
         this.promptsOpen = createMemo<boolean>(() => meta()?.["vault:prompts-read"] !== true);
         const [transfer, setTransfer] = createSignal<"export" | "import" | null>(null);

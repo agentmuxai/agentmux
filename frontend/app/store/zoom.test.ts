@@ -582,3 +582,66 @@ describe("a block with a higher top (a PDF)", () => {
         release();
     });
 });
+
+describe("chrome zoom in a burst of steps", () => {
+    let frames: FrameRequestCallback[];
+    beforeEach(() => {
+        sessionStorage.clear();
+        frames = [];
+        vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => frames.push(cb));
+        vi.stubGlobal("cancelAnimationFrame", () => {});
+        initChromeZoom();
+    });
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+    const css = () => document.documentElement.style.getPropertyValue("--zoomfactor");
+    const nextFrame = () => frames.shift()?.(0);
+
+    it("shows the first step at once and the rest of the frame's steps as one change in the next frame", () => {
+        const writes: string[] = [];
+        const set = document.documentElement.style.setProperty.bind(document.documentElement.style);
+        const spy = vi.spyOn(document.documentElement.style, "setProperty").mockImplementation((name, value) => {
+            if (name === "--zoomfactor") writes.push(String(value));
+            set(name, value);
+        });
+        chromeZoomIn(0.05);
+        expect(css()).toBe("1.05");
+        chromeZoomIn(0.05);
+        chromeZoomIn(0.05);
+        // The page still shows the first step; each step counted from the one before it.
+        expect(css()).toBe("1.05");
+        expect(writes).toEqual(["1.05"]);
+        nextFrame();
+        expect(css()).toBe("1.15");
+        expect(chromeZoomAtom()).toBeCloseTo(1.15);
+        expect(writes).toEqual(["1.05", "1.15"]);
+        spy.mockRestore();
+    });
+
+    it("says each step in the indicator at once, and keeps the stored level to what the page shows", () => {
+        chromeZoomIn(0.05);
+        chromeZoomIn(0.05);
+        expect(zoomIndicatorTextAtom()).toBe("Chrome 110%");
+        expect(sessionStorage.getItem("agentmux:chrome-zoom")).toBe("1.05");
+        nextFrame();
+        expect(sessionStorage.getItem("agentmux:chrome-zoom")).toBe("1.1");
+    });
+
+    it("does not hold a step that comes after a quiet frame", () => {
+        chromeZoomIn(0.05);
+        nextFrame();
+        chromeZoomIn(0.05);
+        expect(css()).toBe("1.1");
+    });
+
+    it("forgets a step still waiting when the window's zoom is set again from storage", () => {
+        chromeZoomIn(0.05);
+        chromeZoomIn(0.05);
+        initChromeZoom({ fresh: true });
+        nextFrame();
+        expect(chromeZoomAtom()).toBe(1);
+        chromeZoomIn(0.05);
+        expect(css()).toBe("1.05");
+    });
+});

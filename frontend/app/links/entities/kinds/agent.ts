@@ -3,7 +3,8 @@
 
 /**
  * Agent names (spec §3, D3). A name links only when it is in the roster, written whole as the roster shows it (its
- * display name with the capital, or its slug or id), and not an ordinary word standing alone. `Name@computer` links
+ * display name with the capital, or its slug or id when that is the name's own word or carries a digit; an id that is
+ * another plain word links only with its computer), and not an ordinary word standing alone. `Name@computer` links
  * only when that agent is on that computer, so an email address is never a link.
  */
 
@@ -42,7 +43,7 @@ export const agentKind: EntityKind = {
             if (!ctx.agents.startsWith(m[0][0])) continue;
             const { written, computer } = splitComputer(m[0]);
             const name = trimToken(written);
-            const agent = ctx.agents.find(name);
+            const agent = ctx.agents.find(name, computer !== undefined);
             if (!agent) continue;
             if (computer !== undefined ? !onComputer(agent, computer, ctx) : ctx.agents.neverAlone(name)) continue;
             const end = m.index + (computer !== undefined ? written.length + 1 + computer.length : name.length);

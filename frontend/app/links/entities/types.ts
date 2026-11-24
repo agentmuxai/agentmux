@@ -48,8 +48,11 @@ export type TaskEntry = { board: string; number: number; title: string; state: s
 /** The roster, looked up by the written name. Built once per roster change; see indexes.ts. */
 export type AgentIndex = {
     version: number;
-    /** The agent written as `written` (exact display name, or slug or id in any case), if any. */
-    find(written: string): AgentEntry | undefined;
+    /**
+     * The agent written as `written` (exact display name, or slug or id in any case), if any. A slug or id that is
+     * another plain word than the display name counts only with its computer (`withComputer`).
+     */
+    find(written: string, withComputer?: boolean): AgentEntry | undefined;
     /** Whether `written` is one of the names that link only with their computer (D3). */
     neverAlone(written: string): boolean;
     /** First characters any name starts with, to skip most words without a lookup. */

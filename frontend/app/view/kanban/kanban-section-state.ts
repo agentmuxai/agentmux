@@ -17,6 +17,7 @@ import {
     columnOf,
     KANBAN_NARROW_PX,
     matchesQuery,
+    matchesWaits,
     needsCountOf,
     repoLanes,
     reviewLimitOf,
@@ -147,13 +148,17 @@ export function createKanbanSection(props: SectionProps) {
     const now = () => (tick(), Date.now());
     const [query, setQuery] = createSignal("");
     const [repo, setRepo] = createSignal("");
+    // The "waits on" filter (kanban-columns WAITS_FILTERS): cards by what their open pull requests wait on.
+    const [ownWaits, setOwnWaits] = createSignal("");
+    const waits = () => props.waits ?? ownWaits();
+    const setWaits = (w: string) => (props.onWaits ? props.onWaits(w) : setOwnWaits(w));
     // "Reports to …" (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §4): the owner's seat names its lead.
     const [lead, setLead] = createSignal("");
     const seats = useSeatIndex();
     const [showUntracked, setShowUntracked] = createSignal(true);
     const [adding, setAdding] = createSignal(false);
     // The panel that creates and manages boards (a panel, never a modal).
-    const [managing, setManaging] = createSignal<false | "new" | "manage">(false);
+    const [managing, setManaging] = createSignal<false | "new" | "manage" | "prs">(false);
     const [openId, setOpenId] = createSignal<string | null>(null);
     const [ownLanes, setOwnLanes] = createSignal(false);
     const lanes = () => props.lanes ?? ownLanes();
@@ -188,7 +193,11 @@ export function createKanbanSection(props: SectionProps) {
     const repos = createMemo(() => [...new Set((board()?.tasks ?? []).map((t) => t.card.repo).filter(Boolean))].sort());
     const tasks = createMemo(() =>
         (board()?.tasks ?? []).filter(
-            (t) => (!repo() || t.card.repo === repo()) && matchesQuery(t, query()) && taskReportsTo(seats(), t, lead())
+            (t) =>
+                (!repo() || t.card.repo === repo()) &&
+                matchesWaits(t.card, waits()) &&
+                matchesQuery(t, query()) &&
+                taskReportsTo(seats(), t, lead())
         )
     );
     const openTask = () => (board()?.tasks ?? []).find((t) => t.id === openId()) ?? null;
@@ -211,7 +220,7 @@ export function createKanbanSection(props: SectionProps) {
 
     return {
         model, bindContainer, narrow, now,
-        query, setQuery, repo, setRepo, lead, setLead, showUntracked, setShowUntracked,
+        query, setQuery, repo, setRepo, waits, setWaits, lead, setLead, showUntracked, setShowUntracked,
         boards, defaultSlug, selectedSlug, selectedInfo, selectBoard: select, needsOn, readOnly, managing, setManaging,
         stages, adding, setAdding, setOpenId, lanes, setLanes, collapsed, toggleColumn, folded, fold, reviewLimit,
         board, agents, repos, tasks, openTask, holding, untracked, laneList, reviewTotal, open, openAgent,

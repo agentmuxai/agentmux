@@ -443,6 +443,15 @@
     }
   },
   {
+    "event": "capture:mask",
+    "payloadTs": {
+      "imports": [
+        "CaptureMaskEvent"
+      ],
+      "name": "CaptureMaskEvent"
+    }
+  },
+  {
     "event": "checks-flow",
     "payloadTs": {
       "imports": [
@@ -519,6 +528,15 @@
     "payloadTs": {
       "imports": [],
       "name": "null"
+    }
+  },
+  {
+    "event": "deeplink:open",
+    "payloadTs": {
+      "imports": [
+        "DeepLinkOpenEvent"
+      ],
+      "name": "DeepLinkOpenEvent"
     }
   },
   {
@@ -599,6 +617,15 @@
         "FleetBroadcastProgressEvent"
       ],
       "name": "FleetBroadcastProgressEvent"
+    }
+  },
+  {
+    "event": "folderoverlapasks",
+    "payloadTs": {
+      "imports": [
+        "FolderOverlapAsksEvent"
+      ],
+      "name": "FolderOverlapAsksEvent"
     }
   },
   {

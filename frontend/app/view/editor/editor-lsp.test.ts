@@ -44,8 +44,8 @@ describe("decodeFileUri", () => {
         expect(decodeFileUri("file:///home/u/100%.ts")).toBe("/home/u/100%.ts");
     });
 
-    it("takes a two-slash URI as host and path, and leaves a plain path alone", () => {
-        expect(decodeFileUri("file://host/share/a.ts")).toBe("host/share/a.ts");
+    it("takes a two-slash URI as a network path, and leaves a plain path alone", () => {
+        expect(decodeFileUri("file://host/share/a.ts")).toBe("\\\\host\\share\\a.ts");
         expect(decodeFileUri("/already/a/path")).toBe("/already/a/path");
     });
 });
@@ -80,5 +80,17 @@ describe("the language server's status", () => {
         expect(lspBannerKey({ kind: "missing", language: "python" })).toBe("python");
         expect(lspBannerKey({ kind: "ready", capabilities: {} as never })).toBeNull();
         expect(english["editor.lsp.notOnHost"]).toContain("no language server runs on the host");
+    });
+});
+
+describe("decodeFileUri for a network path", () => {
+    it("gives the host and the share as a Windows network path", () => {
+        expect(decodeFileUri("file://fileserver/share/src/a%20b.ts")).toBe("\\\\fileserver\\share\\src\\a b.ts");
+    });
+
+    it("leaves a drive path, a POSIX path and a localhost path as they were", () => {
+        expect(decodeFileUri("file:///C:/proj/a.ts")).toBe("C:\\proj\\a.ts");
+        expect(decodeFileUri("file:///proj/a.ts")).toBe("/proj/a.ts");
+        expect(decodeFileUri("file://localhost/proj/a.ts")).toBe("/proj/a.ts");
     });
 });

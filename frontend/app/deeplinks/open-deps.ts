@@ -145,6 +145,11 @@ export function windowDeps(): ExecutorDeps {
             const { SETTINGS_INDEX } = await import("@/app/view/settings/settings-index");
             return SETTINGS_INDEX.some((e) => e.id === id);
         },
+        async vaultEntryExists(linkId) {
+            const { refreshVault, vaultEntries } = await import("@/app/view/vault/vault-store");
+            await refreshVault();
+            return (vaultEntries() ?? []).some((e) => e.link_id === linkId);
+        },
         locate: (blockId) => emitPaneLocate(blockId, { focus: false }),
         announce: announcePolite,
         personInput: () => ({ ...input }),

@@ -51,6 +51,8 @@ pub enum ClientMsg {
         mods: u32,
     },
     Paste { text: String },
+    /// The person asked for what the browser copied (they pressed Ctrl+C or Ctrl+X): screen mode answers with that text.
+    Copy,
     Resize { w: u32, h: u32 },
     Nav { go: Go, #[serde(default)] url: String },
     /// Show or close one of the pane's windows (`windows.rs`).
@@ -192,6 +194,16 @@ pub fn input_call(msg: &ClientMsg) -> Option<(&'static str, Value)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_copy_request_has_no_fields_and_a_paste_keeps_its_text_exactly() {
+        assert_eq!(parse(r#"{"t":"copy"}"#), Ok(ClientMsg::Copy));
+        let text = "Hello, Wörld! #42
+line two	日本";
+        let sent = serde_json::json!({ "t": "paste", "text": text }).to_string();
+        assert_eq!(parse(&sent), Ok(ClientMsg::Paste { text: text.to_string() }));
+        assert!(input_call(&ClientMsg::Copy).is_none(), "a copy request is not an input of the streamed pane");
+    }
 
     #[test]
     fn a_mouse_press_becomes_a_cdp_press_with_a_click_count() {

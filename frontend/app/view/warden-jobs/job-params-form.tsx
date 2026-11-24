@@ -78,6 +78,7 @@ export function JobParamsForm(props: {
                             >
                                 {(entries) => (
                                     <Select
+                                        class="job-vault-entry"
                                         value={text(name)}
                                         onChange={(v) => props.onChange(name, v)}
                                         options={[

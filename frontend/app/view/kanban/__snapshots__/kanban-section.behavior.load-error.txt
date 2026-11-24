@@ -10,9 +10,18 @@ subscribe agents:changed
 <span class="ui-filter">
 <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
 </i>
-<input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Find a task, #number, agent or repository" aria-label="Find a task">
+<input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Find a task, PR or branch" aria-label="Find a task">
 </span>
 </div>
+<select class="ui-input ui-density-compact" aria-label="Waits on">
+<option value="">Waits on anyone</option>
+<option value="open">Open pull requests</option>
+<option value="author">Waits on the author</option>
+<option value="reviewer">Waits on a reviewer</option>
+<option value="ci">Waits on checks</option>
+<option value="queue">In the merge queue</option>
+<option value="person">Waits on a person</option>
+</select>
 <select class="ui-input ui-density-compact kanban-toolbar__reports" aria-label="Reports to">
 <option value="">Reports to anyone</option>
 <option value="operator">Reports to the operator</option>
@@ -68,9 +77,18 @@ subscribe agents:changed
 <span class="ui-filter">
 <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
 </i>
-<input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Find a task, #number, agent or repository" aria-label="Find a task">
+<input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Find a task, PR or branch" aria-label="Find a task">
 </span>
 </div>
+<select class="ui-input ui-density-compact" aria-label="Waits on">
+<option value="">Waits on anyone</option>
+<option value="open">Open pull requests</option>
+<option value="author">Waits on the author</option>
+<option value="reviewer">Waits on a reviewer</option>
+<option value="ci">Waits on checks</option>
+<option value="queue">In the merge queue</option>
+<option value="person">Waits on a person</option>
+</select>
 <select class="ui-input ui-density-compact kanban-toolbar__reports" aria-label="Reports to">
 <option value="">Reports to anyone</option>
 <option value="operator">Reports to the operator</option>

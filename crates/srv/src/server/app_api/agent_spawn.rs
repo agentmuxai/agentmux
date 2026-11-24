@@ -881,6 +881,7 @@ async fn open_worker(
             split_direction: beside.then(|| "right".to_string()),
             split_reference_block_id: beside.then(|| leader.block_id.clone()),
             focus: Some(false),
+            into_block_id: None,
         },
         None,
         meta,

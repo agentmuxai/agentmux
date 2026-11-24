@@ -9,6 +9,7 @@
  * (SPEC_AGENT_PANE_IMAGE_ARROWS_2026_11_06.md).
  */
 
+import { NATIVE_PLAYER_CONTROLS_LIST } from "@/app/element/local-media";
 import { showMediaCopyMenu, sourceFromUrl } from "@/app/element/media-copy";
 import { Modal } from "@/app/element/modal";
 import { t } from "@/app/i18n/i18n";
@@ -55,6 +56,7 @@ function Picture(props: { s: MessageLightboxState }): JSX.Element {
                         ref={s.setVideo}
                         src={src()}
                         controls
+                        controlslist={NATIVE_PLAYER_CONTROLS_LIST}
                         playsinline
                         aria-label={s.item()?.alt || s.item()?.name}
                         onContextMenu={(e) => {

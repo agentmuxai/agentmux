@@ -12,6 +12,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     match name {
         "OpenEditor" | "OpenMedia" => run_open_editor(name, arguments, cx).await,
         "OpenFiles" => run_open_files(arguments, cx).await,
+        "OpenLink" => run_open_link(arguments, cx).await,
         "OpenAgent" => run_open_agent(arguments, cx).await,
         "WhoAmI" => run_who_am_i(arguments, cx).await,
         "SetName" => run_set_name(arguments, cx).await,
@@ -72,12 +73,7 @@ async fn run_open_editor(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         // true collapses, false opens it expanded, absent leaves it to the Editor (collapsed
         // for a file).
         tree_expanded: arguments.get("collapse_tree").and_then(|v| v.as_bool()).map(|collapse| !collapse),
-        // `floating: true` → open in a floating window instead of a docked split.
-        floating: if arguments.get("floating").and_then(|v| v.as_bool()) == Some(true) {
-            Some(true)
-        } else {
-            None
-        },
+        floating: arguments.get("floating").and_then(|v| v.as_bool()).filter(|f| *f),
         url: None,
         cwd: None,
         tab_id: None,
@@ -98,6 +94,7 @@ async fn run_open_editor(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         // agent's signed identity (remote terminals spec §8.2).
         auth: if connection.is_some() { Some(sign_ui_automation_auth()?) } else { None },
         connection,
+        place: PlaceArgs::of(arguments).map_err(|e| anyhow::anyhow!("INVALID_ARG: {e}"))?,
     };
 
     let resp = client
@@ -119,7 +116,7 @@ async fn run_open_editor(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         .await
         .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
 
-    let note = result.note.as_deref().map(|n| format!(" {n}")).unwrap_or_default();
+    let note = format!("{}{}", result.note.as_deref().map(|n| format!(" {n}")).unwrap_or_default(), placed_note(&result));
     Ok(if media {
         format!(
             "Opened {file} in the editor (block {}); OpenMedia is now an alias of OpenEditor.{note}",
@@ -128,6 +125,142 @@ async fn run_open_editor(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     } else {
         format!("Opened {file} in editor pane (block {}).{note}", result.block_id)
     })
+}
+
+/// What a floating open says about where its window went, for the agent: the rect it got, and whether it had
+/// to be pulled in; or that the window has not answered yet.
+pub(super) fn placed_note(r: &PaneOpenResponse) -> String {
+    if let Some(p) = &r.placed {
+        let n = |k: &str| p.get(k).and_then(Value::as_f64).unwrap_or(0.0);
+        let spot = p.get("spot").and_then(Value::as_str).map(|s| format!(", spot {s}")).unwrap_or_default();
+        let clamped = if p.get("clamped").and_then(Value::as_bool) == Some(true) {
+            " It was pulled into the work area or raised to the minimum size."
+        } else {
+            ""
+        };
+        return format!(
+            " Floating at x {}, y {}, {} x {} (CSS pixels from the work area's top-left{spot}; display scale {}).{clamped}",
+            n("x"),
+            n("y"),
+            n("width"),
+            n("height"),
+            n("display_scale")
+        );
+    }
+    if r.queued {
+        return " The floating window has not answered yet (it is hidden or starting): it takes its place when it opens.".to_string();
+    }
+    String::new()
+}
+
+/// What a floating `open` says about where its window went (`placed`, or `queued`), from srv's `data`.
+pub(super) fn floating_note(data: Option<&Value>) -> String {
+    let Some(d) = data else { return String::new() };
+    let answered = agentmux_common::api_types::PaneOpenResponse {
+        block_id: String::new(),
+        placed: d.get("placed").filter(|v| !v.is_null()).cloned(),
+        queued: d.get("queued").and_then(Value::as_bool) == Some(true),
+        note: None,
+    };
+    placed_note(&answered)
+}
+
+/// The deep link a `Pane` open names: `link` as given, or one written from `view`, `place` (an id, or ids joined by
+/// `/`), `params` and `anchor`. srv's parser is the judge of it; this only writes it in its one form.
+pub(super) fn link_of(arguments: &Value) -> Result<String> {
+    use agentmux_common::deeplinks::{parse::encode_part, REGISTRY};
+    if let Some(link) = arguments.get("link").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()) {
+        return Ok(link.to_string());
+    }
+    let view = arguments.get("view").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty());
+    let Some(view) = view else { anyhow::bail!("Pane open needs link (agentmux://…) or view") };
+    let mut link = format!("agentmux://{}", encode_part(view));
+    if let Some(place) = arguments.get("place").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()) {
+        use agentmux_common::deeplinks::{Kind, Segment};
+        // A view whose place is a path takes it whole, as one segment; any other place is ids joined by `/`.
+        let by_path = REGISTRY.view(view).is_some_and(|v| {
+            v.places.iter().any(|p| matches!(p.segments, [Segment::Var(var)] if var.kind == Kind::Path))
+        });
+        let segments: Vec<&str> = if by_path { vec![place] } else { place.split('/').collect() };
+        for seg in segments {
+            link.push('/');
+            link.push_str(&encode_part(seg));
+        }
+    }
+    if let Some(params) = arguments.get("params").and_then(|v| v.as_object()).filter(|m| !m.is_empty()) {
+        // In the registry's order, which the parser requires (R7); a name it doesn't know goes last and is refused there.
+        let order: Vec<&str> = REGISTRY.view(view).map(|v| v.places.iter().flat_map(|p| p.params.iter().map(|x| x.name)).collect()).unwrap_or_default();
+        let mut pairs: Vec<(&String, String)> = params
+            .iter()
+            .map(|(k, v)| (k, v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string())))
+            .collect();
+        pairs.sort_by_key(|(k, _)| order.iter().position(|o| o == k).unwrap_or(usize::MAX));
+        let written: Vec<String> = pairs.iter().map(|(k, v)| format!("{k}={}", encode_part(v))).collect();
+        link.push('?');
+        link.push_str(&written.join("&"));
+    }
+    if let Some(anchor) = arguments.get("anchor").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()) {
+        link.push('#');
+        link.push_str(&encode_part(anchor));
+    }
+    Ok(link)
+}
+
+/// A place opened by its deep link (docs/specs/SPEC_DEEP_LINKS_ONE_FRAMEWORK_2026_11_20.md R16): srv's guard
+/// decides, the window opens it, and the answer is the outcome (opened, reused, queued or refused, with the reason).
+/// srv answers within 13 s (`queued` if the window hasn't finished by then), so the wait is longer than that.
+const OPEN_LINK_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
+
+async fn run_open_link(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, client, .. } = *cx;
+    if local_url.is_empty() || auth_key.is_empty() {
+        anyhow::bail!("AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. Is this agent pane opened via AgentMux?");
+    }
+    let link = link_of(arguments)?;
+    // `open_in`, because Pane's `target` is rename's (what to rename).
+    let target = arguments.get("open_in").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+    let url = format!("{}/api/v1/pane/open_link", local_url.trim_end_matches('/'));
+    let resp = client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, auth_key)
+        .json(&json!({ "link": link, "target": target }))
+        .timeout(OPEN_LINK_WAIT)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or_else(|_| json!({}));
+    if !status.is_success() {
+        anyhow::bail!("Pane open: HTTP {status} — {}", body.get("error").and_then(|v| v.as_str()).unwrap_or(""));
+    }
+    Ok(describe_open_outcome(&body))
+}
+
+/// The answer an agent reads: what happened, where, and for a refusal why and what would work.
+pub(super) fn describe_open_outcome(body: &Value) -> String {
+    let s = |k: &str| body.get(k).and_then(|v| v.as_str()).unwrap_or("");
+    let label = s("label");
+    let mut out = match s("outcome") {
+        "opened" => format!("Opened {label} beside this conversation"),
+        "reused" => format!("Showed {label} again, in the pane that already had it"),
+        "queued" => format!("Queued {label}: {}", s("reason")),
+        "refused" => format!("Not opened: {}", s("reason")),
+        other => format!("Pane open: {other}"),
+    };
+    if !s("block_id").is_empty() {
+        out.push_str(&format!(" (block {})", s("block_id")));
+    }
+    if s("place") == "missing" {
+        out.push_str(". The place inside it is gone, so the view opened at its nearest place");
+    }
+    if !s("remedy").is_empty() {
+        out.push_str(&format!(". {}", s("remedy")));
+    }
+    if !s("link").is_empty() {
+        out.push_str(&format!(". Link: {}", s("link")));
+    }
+    out.push('.');
+    out
 }
 
 /// A Files pane on a folder, optionally with entries selected.
@@ -194,6 +327,7 @@ async fn run_open_files(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         // agent's signed identity (remote terminals spec §8.2).
         auth: if connection.is_some() { Some(sign_ui_automation_auth()?) } else { None },
         connection,
+        place: PlaceArgs::of(arguments).map_err(|e| anyhow::anyhow!("INVALID_ARG: {e}"))?,
     };
 
     let resp = client
@@ -215,7 +349,7 @@ async fn run_open_files(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         .await
         .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
 
-    Ok(format!("Opened {path} in a Files pane (block {})", result.block_id))
+    Ok(format!("Opened {path} in a Files pane (block {}).{}", result.block_id, placed_note(&result)))
 }
 
 async fn run_open_agent(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {

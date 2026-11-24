@@ -70,7 +70,7 @@ describe("layoutAtlas", () => {
         expect(boss.x).toBeCloseTo((w1.x + w2.x) / 2);
     });
 
-    it("ends a machine of a lead and its reports as close under its lowest box as one with a grid under them", () => {
+    it("ends a host's group at its lowest node, with a lead and its reports alone or a grid under them, and leaves the map's margin round it", () => {
         const tree = [agent("boss", "a"), agent("w1", "a", "boss"), agent("w2", "a", "boss")];
         const under = (l: AtlasLayout) => {
             const [box] = l.regions;
@@ -78,8 +78,13 @@ describe("layoutAtlas", () => {
         };
         const alone = layoutAtlas(buildAtlasGraph([machine("a")], tree));
         const withGrid = layoutAtlas(buildAtlasGraph([machine("a")], [...tree, agent("solo", "a")]));
-        expect(under(alone)).toBe(gapsAt().pad);
-        expect(under(withGrid)).toBe(gapsAt().pad);
+        expect(under(alone)).toBe(0);
+        expect(under(withGrid)).toBe(0);
+        // The map's margin: room for a container's frame and a host's ring at its edge.
+        const pad = gapsAt().pad;
+        expect(Math.min(...[...alone.nodes.values()].map((p) => p.x))).toBe(pad);
+        expect(Math.min(...[...alone.nodes.values()].map((p) => p.y))).toBe(pad);
+        expect(alone.height).toBe(Math.max(...[...alone.nodes.values()].map((p) => p.y + NODE_H)) + pad);
     });
 
     it("puts agents with no lead and no reports in a grid below the trees, and no two nodes overlap", () => {
@@ -116,7 +121,7 @@ describe("layoutAtlas", () => {
         }
     });
 
-    it("makes room for the folded chip, and a region of only stopped agents has the chip alone", () => {
+    it("gives a host of only stopped agents no room: they are not drawn, and the stopped chip lists them", () => {
         const l = layoutAtlas(
             buildAtlasGraph(
                 [machine("a"), machine("b")],
@@ -124,9 +129,10 @@ describe("layoutAtlas", () => {
             )
         );
         const [a, b] = l.regions;
-        expect(a.foldY).toBeGreaterThan(l.nodes.get("a/x")!.y);
-        expect(b.h).toBeLessThan(a.h);
+        expect(a.h).toBe(NODE_H);
+        expect(b).toMatchObject({ w: 0, h: 0 });
         expect(l.nodes.size).toBe(1);
+        expect(l.width).toBe(a.w + gapsAt().pad * 2);
     });
 
     it("keeps agents in a lead cycle, not lost", () => {
@@ -210,7 +216,8 @@ describe("layoutAtlas for a pane", () => {
             const l = layoutAtlas(g, pane);
             const s = shown(l, pane);
             expect(s.k, `${name}: scale`).toBeGreaterThanOrEqual(MIN_READABLE_K);
-            expect(s.cover, `${name}: share of the pane`).toBeGreaterThan(0.55);
+            // Without a box round each host (its title strip, padding and least width), the same cards take less of the map.
+            expect(s.cover, `${name}: share of the pane`).toBeGreaterThan(0.5);
         }
     });
 
@@ -459,7 +466,7 @@ describe("the gaps close as the map is zoomed in", () => {
         }
     });
 
-    it("stands no node on another and none outside its machine's box, at any spread", () => {
+    it("stands no node on another and none outside its host's group, at any spread", () => {
         for (const spread of [0.8, 0.5, 0.1]) {
             for (const pane of panes) {
                 const graph = wideLeaderFleet(true);
@@ -473,9 +480,9 @@ describe("the gaps close as the map is zoomed in", () => {
                     for (const a of region.shown) {
                         const p = l.nodes.get(a.key)!;
                         expect(p.x).toBeGreaterThanOrEqual(box.x);
-                        expect(p.x + NODE_W).toBeLessThanOrEqual(box.x + box.w);
+                        expect(p.x + NODE_W).toBeLessThanOrEqual(box.x + box.w + 1e-6);
                         expect(p.y).toBeGreaterThanOrEqual(box.y);
-                        expect(p.y + NODE_H).toBeLessThanOrEqual(box.y + box.h);
+                        expect(p.y + NODE_H).toBeLessThanOrEqual(box.y + box.h + 1e-6);
                     }
                 }
             }

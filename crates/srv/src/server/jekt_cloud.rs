@@ -15,6 +15,7 @@
 //! (`GET /reactive/blob/:id`), decrypted and checked against its hash, then
 //! stored like any received file.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use agentmux_common::jekt_files::{self, CloudFile, JektFile};
@@ -222,7 +223,8 @@ pub(crate) async fn fetch(
         req.files_delivery = Some(FilesDelivery { delivered: 0, text: text.to_string(), inline: Vec::new(), inline_charge: None });
     };
     let plain: Vec<JektFile> = files.iter().map(|f| f.file.clone()).collect();
-    if jekt_files::validate_cloud(&files).is_err() || jekt_files::check_tier_limits(&plain, "wan").is_err() {
+    // Before anything is fetched: malformed, or over the relay's limits for a file or the message.
+    if jekt_files::validate_cloud(&files).is_err() {
         note(req, "The files sent with this message were malformed or over the cloud's limits, so none were delivered.");
         return Ok(());
     }
@@ -239,8 +241,9 @@ pub(crate) async fn fetch(
         return Ok(());
     };
     let base = base.trim_end_matches('/');
+    let derive = super::jekt_files::derives_on_receipt(req);
     for f in &files {
-        if svc.store().find_blob(&f.file.sha256).is_some() {
+        if svc.store().has_blob(&f.file.sha256) {
             continue; // already here: a retry, or the same file sent before
         }
         let key = match file_key(f, agent_id) {
@@ -299,15 +302,26 @@ pub(crate) async fn fetch(
             tracing::warn!(file = %f.file.name, "jekt cloud files: blob didn't decrypt to its file");
             continue;
         };
-        let tmp = svc.store().new_incoming_path();
-        if tokio::fs::write(&tmp, &plain).await.is_err()
-            || svc.commit_upload(tmp.clone(), f.file.sha256.clone(), f.file.name.clone()).await.is_err()
-        {
-            let _ = tokio::fs::remove_file(&tmp).await;
-            tracing::warn!(file = %f.file.name, "jekt cloud files: received file not stored");
-        }
+        store_fetched(&svc, &f.file, &plain, derive).await;
     }
     Ok(())
+}
+
+/// Put a fetched file's bytes in the store: derived on the way in when the
+/// sender is proven, else placed as they came.
+async fn store_fetched(svc: &Arc<attachments::Service>, f: &JektFile, plain: &[u8], derive: bool) {
+    let tmp = svc.store().new_incoming_path();
+    let stored = if tokio::fs::write(&tmp, plain).await.is_err() {
+        false
+    } else if derive {
+        svc.commit_upload(tmp.clone(), f.sha256.clone(), f.name.clone()).await.is_ok()
+    } else {
+        svc.store_undecoded(tmp.clone(), f.sha256.clone(), f.name.clone()).await.is_ok()
+    };
+    if !stored {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        tracing::warn!(file = %f.name, "jekt cloud files: received file not stored");
+    }
 }
 
 /// The key `f`'s blob opens with, using `agent_id`'s WAN key on this install

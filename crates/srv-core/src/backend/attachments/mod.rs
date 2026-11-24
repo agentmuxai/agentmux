@@ -284,9 +284,39 @@ impl Service {
         for id in ids {
             if let Some(meta) = self.ensure_derived(id).await {
                 out.push(meta.to_info(id, ""));
+            } else if let Some(info) = self.unread_info(id) {
+                out.push(info);
             }
         }
         out
+    }
+
+    /// What a tile shows for a stored file that nothing has been derived
+    /// from: its size and a type icon (`other`), no thumbnail or text.
+    fn unread_info(&self, id: &str) -> Option<AttachmentInfo> {
+        if !self.store.is_unread(id) {
+            return None;
+        }
+        let bytes = self.store.blob_len(id)?;
+        let mime = "application/octet-stream".to_string();
+        Some(AttachmentInfo {
+            id: id.to_string(),
+            name: String::new(),
+            send_mime: mime.clone(),
+            mime,
+            bytes,
+            width: 0,
+            height: 0,
+            send_bytes: bytes,
+            send_width: 0,
+            send_height: 0,
+            first_frame_only: false,
+            kind: FileKind::Other.as_str().to_string(),
+            page_count: None,
+            text_bytes: 0,
+            text_note: None,
+            macros: false,
+        })
     }
 
     /// Metadata under the current fingerprint. When the send edge or the
@@ -294,11 +324,28 @@ impl Service {
     /// from the stored original under the same CPU and memory limits as
     /// ingest, so a transcript full of old thumbnails can't start an
     /// unbounded number of decodes at once.
+    ///
+    /// A file stored unread (`store_undecoded`) is not derived here, so a pane
+    /// drawing its tile or a thumbnail request leaves it alone: that takes
+    /// [`Self::open_derived`].
     pub async fn ensure_derived(self: &Arc<Self>, id: &str) -> Option<store::StoredMeta> {
+        self.derive_for(id, false).await
+    }
+
+    /// [`Self::ensure_derived`] for a file someone has chosen to open or use:
+    /// one stored unread is derived now.
+    pub async fn open_derived(self: &Arc<Self>, id: &str) -> Option<store::StoredMeta> {
+        self.derive_for(id, true).await
+    }
+
+    async fn derive_for(self: &Arc<Self>, id: &str, opened: bool) -> Option<store::StoredMeta> {
         let edge = self.limits().send_max_edge;
         let fp = store::fingerprint(edge);
         if let Some(meta) = self.store.meta(id, &fp) {
             return Some(meta);
+        }
+        if !opened && self.store.is_unread(id) {
+            return None;
         }
         let (blob, kind) = self.store.find_blob(id)?;
         let _cpu = self.permits.clone().acquire_owned().await.ok()?;
@@ -382,6 +429,40 @@ impl Service {
             mime,
             page_count: meta.page_count,
             note: file_note(&meta, text_path.as_deref()),
+        })
+    }
+
+    /// Store a file already sitting in `incoming/` exactly as it came: placed
+    /// under its hash and nothing read from it (no type sniffing, decode,
+    /// preview or text). It is derived when something opens it
+    /// ([`Self::ensure_derived`]). For a file whose sender is not proven.
+    pub async fn store_undecoded(self: &Arc<Self>, tmp: PathBuf, id: String, name: String) -> Result<(), process::ProcessError> {
+        let svc = Arc::clone(self);
+        blocking(move || svc.store.place_undecoded(&tmp, &id, &name)).await
+    }
+
+    /// The size of the stored original of `id`, from the file system alone.
+    pub fn stored_len(&self, id: &str) -> Option<u64> {
+        self.store.blob_len(id)
+    }
+
+    /// What the agent gets for `id` sent under `name` when nothing may be read
+    /// from the file: a named copy of the original and a note saying it was
+    /// not opened. A file that was derived before (the same bytes from a
+    /// sender that was proven, or the sender's own upload) is given as
+    /// [`Self::send_target`] gives it.
+    pub fn unread_target(&self, id: &str, name: &str) -> Option<SendTarget> {
+        let fp = store::fingerprint(self.limits().send_max_edge);
+        if self.store.meta(id, &fp).is_some() {
+            return self.send_target(id, name);
+        }
+        let path = self.store.named_link(id, name)?;
+        self.store.mark_sent(id);
+        Some(SendTarget {
+            path,
+            mime: "application/octet-stream".to_string(),
+            page_count: None,
+            note: Some("not opened: the sender isn't verified".to_string()),
         })
     }
 

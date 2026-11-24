@@ -196,6 +196,17 @@ pub fn resume_note(at_ms: i64, delivered: Option<usize>, expired: &[ExpiredItem]
     out
 }
 
+/// The note an agent gets once, when it can work again after relay messages were left at the relay for it
+/// (`first_ms` to `last_ms`) because it was out of quota or signed out.
+pub fn limited_note(first_ms: i64, last_ms: i64) -> String {
+    format!(
+        "{NOTE_MARKER} Cloud messages were left at the relay {}\u{2013}{} while you could not work. Review and CI notices from that \
+         time may not have arrived; check your PRs directly.",
+        hhmm(first_ms),
+        hhmm(last_ms)
+    )
+}
+
 /// The note for messages that expired outside a pause.
 pub fn expired_note(expired: &[ExpiredItem]) -> Option<String> {
     expired_summary(expired).map(|s| format!("{NOTE_MARKER} Cloud messages expired undelivered: {s}."))
@@ -244,6 +255,8 @@ pub enum NoteKind {
     Outage { seen: String },
     Resumed,
     Expired,
+    /// Messages were left at the relay while the agent could not work.
+    Limited,
 }
 
 /// Where a pause note waits.
@@ -252,6 +265,8 @@ pub const PAUSED_KEY: &str = "muxbus:paused";
 pub const OUTAGE_KEY: &str = "muxbus:outage";
 /// Where a resume note waits.
 pub const RESUMED_KEY: &str = "muxbus:resumed";
+/// Where a note about messages left at the relay waits.
+pub const LIMITED_KEY: &str = "muxbus:limited";
 
 impl Note {
     fn new(agent: &str, text: String, kind: NoteKind) -> Note {
@@ -266,6 +281,7 @@ impl Note {
             NoteKind::Outage { .. } => OUTAGE_KEY.to_string(),
             NoteKind::Resumed => RESUMED_KEY.to_string(),
             NoteKind::Expired => format!("muxbus:expired:{}", self.text),
+            NoteKind::Limited => LIMITED_KEY.to_string(),
         }
     }
 }
@@ -284,6 +300,8 @@ pub struct NoteBook {
     /// Since when each agent's last outage note says delivery was paused,
     /// should that note still be waiting when the next pause ends.
     outage_since: HashMap<String, i64>,
+    /// For each agent that could not work: when its first and its latest relay message were left at the relay.
+    left_at_relay: HashMap<String, (i64, i64)>,
 }
 
 impl NoteBook {
@@ -340,6 +358,23 @@ impl NoteBook {
             self.resume = Some((at_ms, after_pull));
         }
         out
+    }
+
+    /// A relay message for `agent` was left at the relay at `now_ms`, because the agent could not work.
+    pub fn left_at_relay(&mut self, agent: &str, now_ms: i64) {
+        let slot = self.left_at_relay.entry(agent.to_string()).or_insert((now_ms, now_ms));
+        slot.1 = now_ms;
+    }
+
+    /// Whether messages for `agent` were left at the relay and it has not been told.
+    pub fn has_left_at_relay(&self, agent: &str) -> bool {
+        self.left_at_relay.contains_key(agent)
+    }
+
+    /// `agent` can work again: its one note about the messages left at the relay, when there were any.
+    pub fn can_work_again(&mut self, agent: &str) -> Option<Note> {
+        let (first, last) = self.left_at_relay.remove(agent)?;
+        Some(Note::new(agent, limited_note(first, last), NoteKind::Limited))
     }
 
     /// An agent's pull came back with `delivered` messages and `expired`
@@ -425,6 +460,24 @@ mod tests {
         assert_eq!(due.len(), 1);
         assert!(due[0].0.text.contains("resumed"));
         assert!(q.take().is_empty());
+    }
+
+    #[test]
+    fn an_agent_that_could_not_work_is_told_once_and_only_if_relay_messages_were_left() {
+        let mut book = NoteBook::default();
+        assert!(book.can_work_again("a").is_none(), "nothing was left: no note");
+        assert!(!book.has_left_at_relay("a"));
+
+        book.left_at_relay("a", T0);
+        book.left_at_relay("a", T0 + 5 * 60_000);
+        book.left_at_relay("b", T0);
+        assert!(book.has_left_at_relay("a"));
+        let note = book.can_work_again("a").expect("something was left");
+        assert_eq!((note.kind.clone(), note.key()), (NoteKind::Limited, LIMITED_KEY.to_string()));
+        assert_eq!(note.text, limited_note(T0, T0 + 5 * 60_000), "from the first to the latest");
+        assert!(note.text.starts_with(NOTE_MARKER) && note.text.contains("check your PRs directly"), "{}", note.text);
+        assert!(book.can_work_again("a").is_none(), "once");
+        assert!(book.can_work_again("b").is_some(), "each agent has its own");
     }
 
     fn item(kind: ExpiredKind, from: &str, pr: Option<&str>) -> ExpiredItem {

@@ -196,6 +196,7 @@ fn list_and_show_tell_an_agent_the_place_the_readers_and_the_copies_and_never_th
         key: "api.token".into(),
         checked: None,
         link_only: true,
+        backed: false,
         readers: lines(READERS_TEXT).into_iter().map(str::to_string).collect(),
         rotated: Some("2026-10-01".into()),
         copies: lines(COPIES_TEXT).into_iter().map(str::to_string).collect(),
@@ -231,7 +232,7 @@ async fn a_check_reads_the_places_description_and_never_the_key() {
 
     // A line for the entry's own place and one for each copy that was asked, each naming its place.
     let own = rows(&s, CHECKED);
-    assert_eq!(own.iter().map(|r| (r.target.as_str(), r.outcome.as_str(), r.actor.as_str(), r.reason.as_str())).collect::<Vec<_>>(), [("aws-secret:prod/invoice-sync#api.token", PRESENT, "builder", REASON)]);
+    assert_eq!(own.iter().map(|r| (r.target.as_str(), r.outcome.as_str(), r.actor.as_str(), r.reason.as_str())).collect::<Vec<_>>(), [("aws-secret:prod/invoice-sync#api.token", PRESENT, "agent:builder", REASON)]);
     let other = rows(&s, CHECKED_COPY);
     assert_eq!(other.iter().map(|r| (r.target.as_str(), r.outcome.as_str())).collect::<Vec<_>>()[0], ("github-secret:example-org/example-app#EXAMPLE_TOKEN", PRESENT));
     assert_eq!(other[1].target, "aws-secret:prod/invoice-sync-replica#api.token");

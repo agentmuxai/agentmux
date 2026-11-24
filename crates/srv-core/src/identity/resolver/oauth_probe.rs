@@ -60,28 +60,50 @@ pub fn claude_token_expiry_ms(dir: &str) -> Option<i64> {
     json.get("claudeAiOauth").and_then(|o| o.get("expiresAt")).and_then(|v| v.as_i64())
 }
 
+/// The file `probe_oauth_status` reads the sign-in of `provider` from under config dir `dir`, or `None` for a provider
+/// it does not read a file for.
+pub fn sign_in_file(provider: &str, dir: &Path) -> Option<std::path::PathBuf> {
+    match provider {
+        "claude" | "openclaw" => Some(dir.join(".credentials.json")),
+        "codex" => Some(dir.join("auth.json")),
+        _ => super::cli_sign_in_files::credential_path(provider, dir),
+    }
+}
+
+/// The longest sign-in value that is withheld (bytes). A file a container can write could hold a value so large that
+/// the matcher of every withheld value no longer builds, so a longer one is not withheld.
+pub const MAX_SIGN_IN_VALUE: usize = 8 * 1024;
+
 /// Who holds a sign-in file's access or refresh token in the transcript withhold registry, named by the config dir.
-fn sign_in_owner(dir: &str, what: &str) -> String {
+pub(super) fn sign_in_owner(dir: &str, what: &str) -> String {
     format!("sign-in:{dir}:{what}")
+}
+
+/// Stops withholding every value read from the sign-in files under config dir `dir`: the account that owned the
+/// directory is deleted, and its credentials with it.
+pub fn release_sign_in(dir: &str) {
+    crate::backend::transcript::withhold::release_prefix(&sign_in_owner(dir, ""));
 }
 
 /// Keeps the tokens in a sign-in file just read out of every transcript: the CLI reads the file itself and renews both
 /// tokens while an agent runs, so each look at the file holds what is there now. An access token is withheld until
-/// its own expiry, even after a renewed one is in the file (the old one still works); the refresh token until the
-/// file holds another. A look that finds no token (a sign-out) leaves what was held, so a token an agent may still
-/// hold stays withheld.
-fn withhold_sign_in(dir: &str, json: &serde_json::Value) {
+/// its own expiry, even after a renewed one is in the file (the old one still works); a value with no known expiry
+/// stays withheld after the file holds another (up to `withhold::KEPT_PER_OWNER` per owner). A look that finds no
+/// token (a sign-out) leaves what was held.
+pub fn withhold_sign_in(dir: &str, json: &serde_json::Value) {
     let oauth = json.get("claudeAiOauth").unwrap_or(json);
-    let text = |keys: [&str; 2]| keys.iter().find_map(|k| oauth.get(k).and_then(|v| v.as_str())).filter(|s| !s.is_empty());
+    let text = |keys: [&str; 2]| {
+        keys.iter().find_map(|k| oauth.get(k).and_then(|v| v.as_str())).filter(|s| !s.is_empty() && s.len() <= MAX_SIGN_IN_VALUE)
+    };
     let expires_at = oauth.get("expiresAt").and_then(|v| v.as_i64());
     if let Some(access) = text(["accessToken", "access_token"]) {
         match expires_at {
             Some(at) => crate::backend::transcript::withhold::hold_until(&sign_in_owner(dir, "access"), access, at),
-            None => crate::backend::transcript::withhold::hold(&sign_in_owner(dir, "access"), access, None),
+            None => crate::backend::transcript::withhold::hold_kept(&sign_in_owner(dir, "access"), access),
         }
     }
     if let Some(refresh) = text(["refreshToken", "refresh_token"]) {
-        crate::backend::transcript::withhold::hold(&sign_in_owner(dir, "refresh"), refresh, None);
+        crate::backend::transcript::withhold::hold_kept(&sign_in_owner(dir, "refresh"), refresh);
     }
 }
 
@@ -95,6 +117,7 @@ fn probe_codex_auth(dir: &Path) -> OAuthProbeStatus {
     let json: Option<serde_json::Value> = std::fs::read_to_string(&path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok());
+    json.iter().for_each(|j| super::sign_in_withhold::withhold_file("codex", dir, j));
     let non_empty = |v: Option<&serde_json::Value>| v.and_then(|v| v.as_str()).is_some_and(|s| !s.is_empty());
     let signed_in = json.as_ref().is_some_and(|j| {
         non_empty(j.get("tokens").and_then(|t| t.get("refresh_token"))) || non_empty(j.get("OPENAI_API_KEY"))
@@ -312,6 +335,25 @@ mod tests {
     }
 
     #[test]
+    fn a_deleted_accounts_sign_in_values_are_released_and_another_accounts_stay() {
+        use crate::backend::transcript::withhold;
+        let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let now = agentmux_common::time::now_ms();
+        write_sign_in(a.path(), "canary-release-access-A1", "canary-release-refresh-A1", now + 3_600_000);
+        write_sign_in(b.path(), "canary-release-access-B1", "canary-release-refresh-B1", now + 3_600_000);
+        for dir in [a.path(), b.path()] {
+            probe_oauth_status("claude", dir.to_str().unwrap(), now);
+        }
+        release_sign_in(a.path().to_str().unwrap());
+        for value in ["canary-release-access-A1", "canary-release-refresh-A1"] {
+            assert_eq!(withhold::text(value), value, "released with its account");
+        }
+        for value in ["canary-release-access-B1", "canary-release-refresh-B1"] {
+            assert_eq!(withhold::text(value), withhold::MARK, "another account's stays");
+        }
+    }
+
+    #[test]
     fn probe_oauth_status_unknown_provider_returns_none() {
         // Probing a provider that isn't in the oauth-class set is a
         // signal to the caller to leave `status` alone — None ≠
@@ -404,14 +446,14 @@ mod tests {
         assert_eq!(withhold::text("a canary-signin-access-0001"), format!("a {}", withhold::MARK));
         assert_eq!(withhold::text("r canary-signin-refresh-0001"), format!("r {}", withhold::MARK));
 
-        // The CLI renews both: the next look withholds the new pair. The replaced refresh token is dropped; the
-        // replaced access token still works until it expires, so it stays withheld.
+        // The CLI renews both: the next look withholds the new pair, and the replaced ones stay withheld: the
+        // access token works until it expires, the refresh token is kept.
         write_sign_in(tmp.path(), "canary-signin-access-0002", "canary-signin-refresh-0002", now + 7_200_000);
         probe_oauth_status("claude", dir, now);
         assert_eq!(withhold::text("a canary-signin-access-0002"), format!("a {}", withhold::MARK));
         assert_eq!(withhold::text("r canary-signin-refresh-0002"), format!("r {}", withhold::MARK));
         assert_eq!(withhold::text("a canary-signin-access-0001"), format!("a {}", withhold::MARK));
-        assert_eq!(withhold::text("r canary-signin-refresh-0001"), "r canary-signin-refresh-0001");
+        assert_eq!(withhold::text("r canary-signin-refresh-0001"), format!("r {}", withhold::MARK));
 
         // A sign-out leaves what was held: an agent may still hold the refresh token.
         std::fs::write(tmp.path().join(".credentials.json"), r#"{"claudeAiOauth":{}}"#).unwrap();

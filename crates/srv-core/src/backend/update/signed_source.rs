@@ -94,11 +94,7 @@ pub(crate) fn floor_for(build: Option<&str>, file: Result<Option<Vec<u8>>, Strin
 /// (`build`), which a signed floor never lowers. `None` when the manifest has none that can be used: the floor is then
 /// read the way it was before the manifest carried one ([`floor_for`]).
 pub(crate) fn signed_floor_in_force(build: Option<&str>, signed: &SignedFloor) -> Option<String> {
-    let SignedFloor::Valid(signed) = signed else { return None };
-    Some(match build.filter(|b| version_core(b) >= version_core(signed)) {
-        Some(build) => build.to_string(),
-        None => signed.clone(),
-    })
+    agentmux_common::update_manifest::signed_floor_in_force(build, signed)
 }
 
 /// The floor for a release: the signed one when the manifest carries a usable one, else what the floor file at the

@@ -321,7 +321,33 @@ pub(crate) async fn open_agent_impl(
     state: &AppState,
     cmd: CommandAgentOpenData,
 ) -> Result<AgentOpenResult, String> {
-    open_agent_inner(state, cmd, None, MetaMapType::new()).await
+    let into_block = cmd.into_block_id.clone();
+    let cmd = CommandAgentOpenData { tab_id: tab_for_open(state, &cmd), ..cmd };
+    open_agent_inner(state, cmd, into_block.as_deref(), MetaMapType::new()).await
+}
+
+/// What a restore or an import calls an agent in a note: the name its pane carries, else its definition's name, else
+/// what the layout named it.
+pub(crate) fn agent_label(store: &Store, named_in_pane: &str, wanted: &str) -> String {
+    if !named_in_pane.is_empty() {
+        return named_in_pane.to_string();
+    }
+    store.agent_def_get(wanted).ok().flatten().map(|def| def.name).filter(|name| !name.is_empty()).unwrap_or_else(|| wanted.to_string())
+}
+
+/// What a restore or an import says of an agent that did not start. One held for a shared folder is not an error: its
+/// pane asks the person.
+pub(crate) fn not_started_note(who: &str, error: &str) -> String {
+    if error.starts_with(crate::backend::folder_overlap::OPEN_REFUSAL_CODE) {
+        return format!("{who} works in a folder a container agent can write, so its pane asks you before it opens.");
+    }
+    format!("An agent ({who}) didn't start, so its pane shows the agent picker: {error}")
+}
+
+/// The tab an open is for: the one it names, else the tab of the pane it opens into (where the window asks the person is
+/// not always the tab srv has as active), else none.
+pub(super) fn tab_for_open(state: &AppState, cmd: &CommandAgentOpenData) -> Option<String> {
+    cmd.tab_id.clone().or_else(|| cmd.into_block_id.as_deref().and_then(|block| resolve_tab_id_for_block(&state.mstore, block).ok()))
 }
 
 /// `agent.open`, but launching into an existing, empty agent pane
@@ -346,6 +372,7 @@ pub(crate) async fn open_agent_into_block(
             split_direction: None,
             split_reference_block_id: None,
             focus: Some(false),
+            into_block_id: None,
         },
         Some(block_id),
         MetaMapType::new(),
@@ -361,7 +388,7 @@ pub(super) async fn open_agent_inner(
     extra_meta: MetaMapType,
 ) -> Result<AgentOpenResult, String> {
     let mut extra_meta = extra_meta;
-    let headless = extra_meta.remove(super::agent_attach::START_PARKED).is_some(); // a start: no pane
+    let (headless, resumed) = steps::take_start_markers(&mut extra_meta); // a start: no pane
     let mstore = state.mstore.clone();
 
     tracing::info!(agent_id = %cmd.agent_id, "agent.open");
@@ -375,7 +402,7 @@ pub(super) async fn open_agent_inner(
     let open_lock = agent_open_lock(&agent.id);
     let _open_guard = open_lock.lock().await;
 
-    steps::admit_open(state, &agent).await?;
+    steps::admit_open(state, &agent, resumed).await?;
 
     // 2. Resolve provider
     let provider = providers::get_provider(&agent.provider)

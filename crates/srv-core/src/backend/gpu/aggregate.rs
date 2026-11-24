@@ -7,7 +7,7 @@
 
 use super::names::{parse_adapter, parse_engine, parse_process_memory};
 use crate::backend::rpc_types::{GpuAdapter, GpuAdapterKind};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// One counter's instances: the name and the value.
 pub type Instances = Vec<(String, f64)>;
@@ -26,14 +26,41 @@ pub struct RawCounters {
     pub process_shared: Option<Instances>,
 }
 
-/// What DXGI says an adapter is: its name and the memory it was built with. The counters name an adapter by its id only.
+/// What Windows says an adapter is: its name and the memory it was built with (DXGI), and what kind of device it is
+/// (the kernel's adapter type, [`AdapterType`]). The counters name an adapter by its id only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdapterInfo {
     pub luid: String,
     pub name: String,
     pub software: bool,
+    /// A display adapter that is not a GPU to be listed: an indirect display device (a remote-desktop or virtual
+    /// monitor driver's), or an adapter that cannot render. Decided by [`AdapterType::is_virtual_display`], never by name.
+    pub virtual_display: bool,
     pub dedicated_total: u64,
     pub shared_total: u64,
+}
+
+/// The kernel's account of an adapter (`D3DKMT_ADAPTERTYPE`, the bits of its `Value`): what Windows says the adapter is,
+/// which no name can say. Only the bits this module reads are named.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AdapterType(pub u32);
+
+impl AdapterType {
+    const RENDER_SUPPORTED: u32 = 1 << 0;
+    const SOFTWARE_DEVICE: u32 = 1 << 2;
+    const INDIRECT_DISPLAY_DEVICE: u32 = 1 << 6;
+
+    /// The OS's software renderer.
+    pub fn is_software(self) -> bool {
+        self.0 & Self::SOFTWARE_DEVICE != 0
+    }
+
+    /// An adapter that is no GPU of its own to list: an indirect display device (the driver of a remote-desktop or virtual
+    /// monitor, which DXGI lists under the name and memory of the GPU that draws for it), or one that cannot render (a
+    /// display-only or compute-only device). A paravirtualized adapter, the GPU a virtual machine is given, renders and is kept.
+    pub fn is_virtual_display(self) -> bool {
+        !self.is_software() && (self.0 & Self::INDIRECT_DISPLAY_DEVICE != 0 || self.0 & Self::RENDER_SUPPORTED == 0)
+    }
 }
 
 /// One process's figures, before it is named.
@@ -112,22 +139,40 @@ fn sum_by<K: std::hash::Hash + Eq>(
     sums
 }
 
+/// The adapters the panel does not list, by id: the OS's software renderer (DXGI always lists it, and no one asked about it)
+/// and any virtual display adapter, as Windows says what each is ([`AdapterInfo`]). Only while another adapter is listed: a
+/// machine with nothing else (a virtual machine without a GPU, a software-only one) shows its one adapter. What the counters
+/// report under a dropped id (use, memory, a process's share) is left out of every figure: Windows does not say which
+/// adapter a virtual display draws on, so none is credited with it.
+fn unlisted_adapters(infos: &[AdapterInfo]) -> HashSet<String> {
+    let real = |i: &AdapterInfo| !i.software && !i.virtual_display;
+    if !infos.iter().any(real) {
+        return HashSet::new();
+    }
+    infos.iter().filter(|i| !real(i)).map(|i| i.luid.clone()).collect()
+}
+
 /// The figures of one read. `infos` are the adapters DXGI lists, which name them and give their memory; an adapter
 /// the counters know and DXGI doesn't (one that went away) is shown by its id.
 pub fn aggregate(raw: &RawCounters, infos: &[AdapterInfo]) -> Reading {
+    let dropped = unlisted_adapters(infos);
     // One engine's load is the sum of what every process asks of it; an adapter is as busy as its busiest engine
     // (what Task Manager shows too), and a process as busy as its engines added up, within a whole.
     let mut engine_load: HashMap<(String, String), f64> = HashMap::new();
     let mut process_use: HashMap<u32, HashMap<String, f64>> = HashMap::new();
     for (name, v) in raw.engines.iter().flatten() {
         let Some(e) = parse_engine(name) else { continue };
+        if dropped.contains(&e.adapter) {
+            continue;
+        }
         *engine_load.entry((e.adapter.clone(), e.engine)).or_insert(0.0) += v.max(0.0);
         *process_use.entry(e.pid).or_default().entry(e.adapter).or_insert(0.0) += v.max(0.0);
     }
-    let dedicated = raw.adapter_dedicated.as_ref().map(|i| sum_by(i, parse_adapter));
-    let shared = raw.adapter_shared.as_ref().map(|i| sum_by(i, parse_adapter));
+    let listed = |name: &str| parse_adapter(name).filter(|l| !dropped.contains(l));
+    let dedicated = raw.adapter_dedicated.as_ref().map(|i| sum_by(i, listed));
+    let shared = raw.adapter_shared.as_ref().map(|i| sum_by(i, listed));
 
-    let mut ids: Vec<String> = infos.iter().map(|i| i.luid.clone()).collect();
+    let mut ids: Vec<String> = infos.iter().filter(|i| !dropped.contains(&i.luid)).map(|i| i.luid.clone()).collect();
     let known = |luid: &str, ids: &mut Vec<String>| {
         if !ids.iter().any(|i| i == luid) {
             ids.push(luid.to_string());
@@ -169,13 +214,9 @@ pub fn aggregate(raw: &RawCounters, infos: &[AdapterInfo]) -> Reading {
             }
         })
         .collect();
-    // DXGI always lists the OS's software renderer, which no one asked about: it is a row only when it is all there is.
-    if adapters.iter().any(|a| a.kind != GpuAdapterKind::Software) {
-        adapters.retain(|a| a.kind != GpuAdapterKind::Software);
-    }
-
-    let pdm = raw.process_dedicated.as_ref().map(|i| sum_by(i, |n| parse_process_memory(n).map(|(pid, _)| pid)));
-    let psm = raw.process_shared.as_ref().map(|i| sum_by(i, |n| parse_process_memory(n).map(|(pid, _)| pid)));
+    let held_by_listed = |n: &str| parse_process_memory(n).filter(|(_, l)| !dropped.contains(l)).map(|(pid, _)| pid);
+    let pdm = raw.process_dedicated.as_ref().map(|i| sum_by(i, held_by_listed));
+    let psm = raw.process_shared.as_ref().map(|i| sum_by(i, held_by_listed));
     let mut pids: Vec<u32> = process_use.keys().copied().collect();
     for map in [&pdm, &psm].into_iter().flatten() {
         pids.extend(map.keys().copied().filter(|p| !process_use.contains_key(p)));
@@ -218,10 +259,16 @@ mod tests {
             luid: luid.into(),
             name: name.into(),
             software: false,
+            virtual_display: false,
             dedicated_total: dedicated_mb << 20,
             shared_total: 16 << 30,
         }
     }
+    /// What DXGI says of a virtual display adapter: the name and memory of the GPU that draws for it.
+    fn twin(luid: &str, of: &AdapterInfo) -> AdapterInfo {
+        AdapterInfo { luid: luid.into(), virtual_display: true, ..of.clone() }
+    }
+    const C: &str = "0x00000000_0x0001D96F";
 
     #[test]
     fn an_adapter_is_as_busy_as_its_busiest_engine() {
@@ -294,6 +341,91 @@ mod tests {
         let alone = aggregate(&RawCounters::default(), &[soft]);
         assert_eq!(alone.adapters.len(), 1);
         assert_eq!(alone.adapters[0].kind, GpuAdapterKind::Software);
+    }
+
+    fn names(r: &Reading) -> Vec<&str> {
+        r.adapters.iter().map(|a| a.name.as_str()).collect()
+    }
+
+    #[test]
+    fn a_virtual_display_adapter_with_nothing_on_it_is_not_a_second_copy_of_the_gpu() {
+        let rtx = info(A, "RTX", 12288);
+        let raw = RawCounters {
+            engines: Some(vec![engine(10, A, 0, "3D", 30.0)]),
+            adapter_dedicated: Some(vec![inst("luid_0x00000000_0x0000F3A8_phys_0", 4e9), inst("luid_0x00000000_0x00010AAA_phys_0", 0.0)]),
+            adapter_shared: Some(vec![inst("luid_0x00000000_0x0000F3A8_phys_0", 1e9), inst("luid_0x00000000_0x00010AAA_phys_0", 8192.0)]),
+            ..Default::default()
+        };
+        let r = aggregate(&raw, &[rtx.clone(), twin(B, &rtx)]);
+        assert_eq!(names(&r), ["RTX"]);
+        assert_eq!(r.adapters[0].luid, A);
+        assert_eq!((r.adapters[0].use_pct, r.adapters[0].dedicated_used, r.adapters[0].shared_used), (Some(30.0), Some(4_000_000_000), Some(1_000_000_000)));
+    }
+
+    #[test]
+    fn what_is_counted_on_a_virtual_display_adapter_is_left_out_of_every_figure() {
+        let rtx = info(A, "RTX", 12288);
+        let raw = RawCounters {
+            engines: Some(vec![engine(10, A, 0, "3D", 30.0), engine(20, B, 0, "3D", 70.0), engine(10, B, 1, "Copy", 90.0)]),
+            adapter_dedicated: Some(vec![inst("luid_0x00000000_0x0000F3A8_phys_0", 4e9), inst("luid_0x00000000_0x00010AAA_phys_0", 2e9)]),
+            process_dedicated: Some(vec![
+                inst("pid_10_luid_0x00000000_0x0000F3A8_phys_0", 100.0),
+                inst("pid_20_luid_0x00000000_0x00010AAA_phys_0", 500.0),
+                inst("pid_10_luid_0x00000000_0x00010AAA_phys_0", 7.0),
+            ]),
+            ..Default::default()
+        };
+        let r = aggregate(&raw, &[rtx.clone(), twin(B, &rtx)]);
+        assert_eq!(names(&r), ["RTX"]);
+        // The adapter is as busy as it is: not 90%, which the virtual one's engine reads.
+        assert_eq!((r.adapters[0].use_pct, r.adapters[0].dedicated_used), (Some(30.0), Some(4_000_000_000)));
+        // A process that only used the virtual adapter has nothing to show; one that used both shows the real one's share.
+        assert!(r.processes.iter().all(|p| p.pid != 20));
+        let p10 = r.processes.iter().find(|p| p.pid == 10).unwrap();
+        assert_eq!((p10.use_pct, p10.dedicated), (Some(30.0), Some(100)));
+    }
+
+    #[test]
+    fn two_real_identical_cards_stay_two_rows() {
+        let card = info(A, "RTX", 12288);
+        let other = AdapterInfo { luid: B.into(), ..card.clone() };
+        let r = aggregate(&RawCounters::default(), &[card, other]);
+        assert_eq!(names(&r), ["RTX", "RTX"]);
+        assert_eq!(r.adapters.iter().map(|a| a.luid.as_str()).collect::<Vec<_>>(), [A, B]);
+    }
+
+    #[test]
+    fn a_real_card_a_twin_of_it_and_a_second_real_card_leave_both_real_cards() {
+        let a = info(A, "RTX", 12288);
+        let r = aggregate(&RawCounters::default(), &[a.clone(), twin(B, &a), AdapterInfo { luid: C.into(), ..a }]);
+        assert_eq!(r.adapters.iter().map(|x| x.luid.as_str()).collect::<Vec<_>>(), [A, C]);
+    }
+
+    #[test]
+    fn the_only_adapter_is_shown_even_if_it_is_a_virtual_display_one() {
+        let only = twin(A, &info(A, "RTX", 12288));
+        let r = aggregate(&RawCounters::default(), &[only]);
+        assert_eq!(r.adapters.len(), 1);
+        // And it is not dropped when the OS's software renderer is the other one.
+        let soft = AdapterInfo { software: true, ..info(B, "Microsoft Basic Render Driver", 0) };
+        let r = aggregate(&RawCounters::default(), &[twin(A, &info(A, "RTX", 12288)), soft]);
+        assert_eq!(r.adapters.len(), 2, "neither is a real GPU: both stay rather than none");
+    }
+
+    #[test]
+    fn the_kernels_adapter_type_says_which_adapter_is_virtual() {
+        // The bits of D3DKMT_ADAPTERTYPE: render 0, display 1, software 2, post 3, hybrid discrete 4, hybrid integrated 5,
+        // indirect display 6, paravirtualized 7, compute only 11.
+        let bits = |v: &[u32]| AdapterType(v.iter().fold(0, |a, b| a | (1 << b)));
+        assert!(!bits(&[0, 1]).is_virtual_display(), "an ordinary GPU renders and displays");
+        assert!(!bits(&[0, 1, 4]).is_virtual_display(), "a hybrid laptop's discrete GPU");
+        assert!(!bits(&[0, 1, 5]).is_virtual_display(), "a hybrid laptop's integrated GPU");
+        assert!(!bits(&[0, 7]).is_virtual_display(), "the GPU a virtual machine is given is kept");
+        assert!(bits(&[0, 1, 6]).is_virtual_display(), "an indirect display device, even one that says it renders");
+        assert!(bits(&[1]).is_virtual_display(), "an adapter that cannot render");
+        assert!(bits(&[11]).is_virtual_display(), "a compute-only device is no display GPU");
+        assert!(bits(&[2, 0, 1]).is_software() && !bits(&[2, 0, 1]).is_virtual_display(), "the software renderer is its own case");
+        assert!(!AdapterType(0).is_software());
     }
 
     #[test]

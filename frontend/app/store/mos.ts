@@ -13,6 +13,7 @@ import { retryTransient } from "@/util/transient-network";
 import { type SignalAtom, fireAndForget } from "@/util/util";
 import { batch, createSignal, getOwner, onCleanup } from "solid-js";
 import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
+import { flushPendingMuxUpdates, setMuxUpdateApplier } from "./mos-update-queue";
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -162,7 +163,12 @@ function callBackendService(service: string, method: string, args: any[], noUICo
         })
         .then((respData: WebReturnType) => {
             if (respData == null) return null;
-            if (respData.updates != null) updateMuxObjects(respData.updates);
+            if (respData.updates != null) {
+                // Updates the event stream delivered before this response are applied first, so the response's own
+                // (older or newer by version) are judged against them.
+                flushPendingMuxUpdates();
+                updateMuxObjects(respData.updates);
+            }
             if (respData.error != null) throw new Error(`call ${methodName} error: ${respData.error}`);
             debugLogBackendCall(methodName, Date.now() - startTs, args);
             return respData.data;
@@ -399,6 +405,7 @@ function updateMuxObject(update: MuxObjUpdate) {
  * machine that dropped events is one that is already struggling. Returns how many changed.
  */
 async function resyncMuxObjects(concurrency = 4): Promise<number> {
+    flushPendingMuxUpdates();
     const now = Date.now();
     const orefs: string[] = [];
     for (const [oref, wov] of muxObjectValueCache) {
@@ -448,6 +455,9 @@ function updateMuxObjects(vals: MuxObjUpdate[]) {
         }
     });
 }
+
+// Single-object update events are applied a frame later through the queue, in one reactive flush per slice.
+setMuxUpdateApplier(updateMuxObjects);
 
 function cleanMuxObjectCache() {
     const now = Date.now();

@@ -3,6 +3,12 @@
 //
 // The account usage rows (account-usage.tsx): a thin bar beside the words, in the existing tokens.
 
+.account-usage__wrap {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
 .account-usage {
     display: flex;
     flex-direction: column;
@@ -22,14 +28,12 @@
     font-size: var(--text-xs);
 }
 
-// One line, a fixed width so the bars line up; a longer name ("7-day Sonnet") is cut with an ellipsis and
-// whole in its tooltip.
+// A fixed width so the bars line up, wide enough for the longest name ("7-day Sonnet"); a name never gets
+// an ellipsis, it wraps if the zoom leaves it too little room.
 .account-usage__name {
-    flex: 0 0 7.5em;
+    flex: 0 0 8.5em;
     color: var(--secondary-text-color);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    overflow-wrap: anywhere;
 }
 
 .account-usage__bar {
@@ -60,34 +64,12 @@
     overflow-wrap: anywhere;
 }
 
-.account-usage__age,
+.account-usage__source,
 .account-usage__none {
     color: var(--secondary-text-color);
-}
-
-.account-usage__none {
     font-size: var(--text-xs);
 }
 
-.account-usage-strip {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 20px;
-    padding: 4px 8px;
-    margin: 4px 0;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-}
-
-.account-usage-strip__account {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-}
-
-.account-usage-strip__label {
-    font-size: var(--text-xs);
-    font-weight: 600;
-    overflow-wrap: anywhere;
+.account-usage__source {
+    margin-top: 2px;
 }

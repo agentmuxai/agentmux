@@ -10,7 +10,6 @@ import { Button, IconButton, MenuTrigger, Select, SidePanel, TextArea } from "@/
 import { t as tr } from "@/app/i18n/i18n";
 import { createBlock } from "@/app/store/block-layout-actions";
 import { openLink } from "@/app/store/misc-utils";
-import { openReviewsForTask } from "@/app/util/open-reviews-task";
 import { formatAge } from "@/app/view/warden-shared/warden-shared";
 
 import { writeText } from "@/util/clipboard";
@@ -124,6 +123,7 @@ interface DrawerState {
     specUnlocks: () => string;
     runningAgents: () => KanbanAgent[];
     act: (req: KanbanActRequest) => Promise<KanbanActResult | null>;
+    prAct: (req: KanbanActRequest) => Promise<KanbanActResult | null>;
     takeBack: (req: KanbanActRequest) => Promise<void>;
     /** The board it would move to, waiting for the operator's yes because moving drops its dependencies. */
     moving: Accessor<KanbanBoardInfo | null>;
@@ -200,6 +200,9 @@ function createDrawerState(props: DrawerProps): DrawerState {
         return res;
     };
 
+    /** A pull request action: it does not clear the operator's unsent words, which `act` does after a move. */
+    const prAct = (req: KanbanActRequest) => props.model.act({ id: t().id, ...req });
+
     /** `release` or `reassign`; when srv asks, show its words and wait for the operator's yes. */
     const takeBack = async (req: KanbanActRequest) => {
         const res = await act(req);
@@ -222,7 +225,7 @@ function createDrawerState(props: DrawerProps): DrawerState {
     return {
         props, t, detail, text, setText, startOn, setStartOn, busy, confirming, setConfirming, giveTo, setGiveTo,
         cancelBuild, setCancelBuild, openFollowers, docs, column, heldByAgent, otherAgents, specUnlocks,
-        runningAgents, act, takeBack, moving, setMoving, moveToBoard,
+        runningAgents, act, prAct, takeBack, moving, setMoving, moveToBoard,
     };
 }
 
@@ -252,16 +255,6 @@ function DrawerFacts(props: { m: DrawerState }): JSX.Element {
                     Open the PR
                 </Button>
             </Show>
-            <Show when={t().card.pr_url || t().card.branch}>
-                <Button
-                    density="compact"
-                    tone="quiet"
-                    icon="code-pull-request"
-                    onClick={() => void openReviewsForTask(t().card.task_ref ?? `#${t().card.num}`)}
-                >
-                    {tr("kanban.openPrs")}
-                </Button>
-            </Show>
             <Show when={t().card.pr?.merged_at}>
                 {(at) => (
                     <span class="warden-manager-dim">
@@ -270,7 +263,7 @@ function DrawerFacts(props: { m: DrawerState }): JSX.Element {
                     </span>
                 )}
             </Show>
-            <DrawerPrs card={t().card} now={m.props.now} />
+            <DrawerPrs card={t().card} now={m.props.now} act={m.prAct} />
         </div>
     );
 }

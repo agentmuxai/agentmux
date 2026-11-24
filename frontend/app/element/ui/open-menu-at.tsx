@@ -33,6 +33,7 @@ export function menuEntriesFrom(items: ContextMenuItem[]): MenuEntry[] {
                 swatchColor: item.swatchColor,
                 swatchBar: item.swatchBar,
                 sublabel: item.sublabel,
+                description: item.description,
                 submenu: item.submenu?.length ? menuEntriesFrom(item.submenu) : undefined,
                 get disabled() {
                     return (item.live ? item.live().enabled : item.enabled) === false;
@@ -43,8 +44,16 @@ export function menuEntriesFrom(items: ContextMenuItem[]): MenuEntry[] {
         });
 }
 
-/** Show `items` as a kit `Menu` at the pointer of `ev` (a right-click's `contextmenu` event); the arguments of `showContextMenu`, so a site swaps one call. */
-export function openMenuAt(items: ContextMenuItem[], ev: { stopPropagation(): void; clientX?: number; clientY?: number; target?: EventTarget | null }): void {
+/**
+ * Show `items` as a kit `Menu` at the pointer of `ev` (a right-click's `contextmenu` event); the arguments of
+ * `showContextMenu`, so a site swaps one call. `header`: lines above the rows that say what the menu is about (or why
+ * some rows are off, once); not rows.
+ */
+export function openMenuAt(
+    items: ContextMenuItem[],
+    ev: { stopPropagation(): void; clientX?: number; clientY?: number; target?: EventTarget | null },
+    options?: { header?: string[] }
+): void {
     ev.stopPropagation();
     closeMenuAt();
     const entries = menuEntriesFrom(items);
@@ -71,7 +80,17 @@ export function openMenuAt(items: ContextMenuItem[], ev: { stopPropagation(): vo
     setOpenMenuAt(close);
     document.body.appendChild(host);
     dispose = render(
-        () => <Menu anchor={{ x: Math.round(ev.clientX ?? 0), y: Math.round(ev.clientY ?? 0) }} items={entries} scope={scope} alignIcons placement="bottom-start" onClose={close} />,
+        () => (
+            <Menu
+                anchor={{ x: Math.round(ev.clientX ?? 0), y: Math.round(ev.clientY ?? 0) }}
+                items={entries}
+                scope={scope}
+                alignIcons
+                placement="bottom-start"
+                header={options?.header?.length ? options.header.map((line) => <div>{line}</div>) : undefined}
+                onClose={close}
+            />
+        ),
         host,
     );
 }

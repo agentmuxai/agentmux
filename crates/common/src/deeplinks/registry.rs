@@ -36,7 +36,7 @@ const VIEWS: &[View] = &[
             Place {
                 id: "section",
                 label_key: None,
-                segments: &[Segment::Var(Var { name: "section", kind: Kind::Enum, values: &[EnumValue { id: "appearance", label_key: "settings.sections.appearance" }, EnumValue { id: "animations", label_key: "settings.sections.animations" }, EnumValue { id: "window", label_key: "settings.sections.window" }, EnumValue { id: "browser", label_key: "settings.sections.browser" }, EnumValue { id: "terminal", label_key: "settings.sections.terminal" }, EnumValue { id: "keyboard", label_key: "settings.sections.keyboard" }, EnumValue { id: "sounds", label_key: "settings.sections.sounds" }, EnumValue { id: "notifications", label_key: "settings.sections.notifications" }, EnumValue { id: "recording", label_key: "settings.sections.recording" }, EnumValue { id: "devices", label_key: "settings.sections.devices" }, EnumValue { id: "widgets", label_key: "settings.sections.widgets" }, EnumValue { id: "agents", label_key: "settings.sections.agents" }, EnumValue { id: "kanban", label_key: "settings.sections.kanban" }, EnumValue { id: "advanced", label_key: "settings.sections.advanced" }], min: None, max: None, agent_own: false })],
+                segments: &[Segment::Var(Var { name: "section", kind: Kind::Enum, values: &[EnumValue { id: "appearance", label_key: "settings.sections.appearance" }, EnumValue { id: "animations", label_key: "settings.sections.animations" }, EnumValue { id: "window", label_key: "settings.sections.window" }, EnumValue { id: "browser", label_key: "settings.sections.browser" }, EnumValue { id: "terminal", label_key: "settings.sections.terminal" }, EnumValue { id: "keyboard", label_key: "settings.sections.keyboard" }, EnumValue { id: "sounds", label_key: "settings.sections.sounds" }, EnumValue { id: "notifications", label_key: "settings.sections.notifications" }, EnumValue { id: "recording", label_key: "settings.sections.recording" }, EnumValue { id: "devices", label_key: "settings.sections.devices" }, EnumValue { id: "widgets", label_key: "settings.sections.widgets" }, EnumValue { id: "agents", label_key: "settings.sections.agents" }, EnumValue { id: "supervisor", label_key: "settings.sections.supervisor" }, EnumValue { id: "kanban", label_key: "settings.sections.kanban" }, EnumValue { id: "advanced", label_key: "settings.sections.advanced" }], min: None, max: None, agent_own: false })],
                 sections: true,
                 anchor: Some(Anchor { label_key: "deeplinks.anchors.setting" }),
                 params: &[Param { name: "board", kind: Kind::Slug, label_key: "deeplinks.params.board", values: &[], min: None, max: None, only_with: Some(("section", &["kanban"])), agent_own: false }],
@@ -162,6 +162,14 @@ const VIEWS: &[View] = &[
                 params: &[],
             },
             Place {
+                id: "pulls",
+                label_key: Some("deeplinks.places.kanban.pulls"),
+                segments: &[Segment::Lit("pulls")],
+                sections: false,
+                anchor: None,
+                params: &[],
+            },
+            Place {
                 id: "board-task",
                 label_key: Some("deeplinks.places.kanban.task"),
                 segments: &[Segment::Lit("board"), Segment::Var(Var { name: "board", kind: Kind::Slug, values: &[], min: None, max: None, agent_own: false }), Segment::Lit("task"), Segment::Var(Var { name: "task", kind: Kind::Int, values: &[], min: Some(1), max: Some(999999999), agent_own: false })],
@@ -256,22 +264,6 @@ const VIEWS: &[View] = &[
         pane_view: Some("atlas"),
         label_key: "deeplinks.views.atlas",
         icon: "map",
-        build: 1,
-        effect: Effect::None,
-        sensitivity: Sensitivity::Public,
-        agent: AgentRule::Yes,
-        surfaces: &["desktop"],
-        command: None,
-        prefix: false,
-        requires_place: false,
-        places: &[
-        ],
-    },
-    View {
-        id: "reviews",
-        pane_view: Some("reviews"),
-        label_key: "deeplinks.views.reviews",
-        icon: "code-pull-request",
         build: 1,
         effect: Effect::None,
         sensitivity: Sensitivity::Public,
@@ -575,6 +567,7 @@ const VIEWS: &[View] = &[
 
 const ALIASES: &[Alias] = &[
     Alias { from: &["task", "{task}"], to: &["kanban", "task", "{task}"] },
+    Alias { from: &["reviews"], to: &["kanban", "pulls"] },
 ];
 
 const UNLINKED: &[Unlinked] = &[

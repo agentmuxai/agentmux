@@ -27,6 +27,7 @@
     "onSelect",
     "onTabContextMenu",
     "onTabDoubleClick",
+    "renderActions",
     "renderLabel",
     "selection",
     "tabs",

@@ -6,15 +6,12 @@ import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-hold
 import { createEffect, createMemo, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { SwarmViewModel } from "./swarm-model";
 import { AccountAvailabilityStrip } from "@/app/view/account-availability/account-availability-strip";
-import { AccountUsageStrip } from "@/app/view/account-usage/account-usage";
 import { selectTrace } from "@/app/util/select-trace";
 import { readZoom } from "@/app/store/zoom-factor";
 import { SwarmAgentList, useSwarmAgents, type SwarmAgents } from "./swarm-agent-list";
 import type { SwarmFilterFocus } from "./swarm-filter-bar";
 import { ClearCompletedButton } from "./swarm-view";
-import { SwarmSections } from "./swarm-section-panel";
 import { RegistrationFlagsProvider } from "./swarm-row-registration";
-import { createOpenSwarmSections, swarmDensityOf, toggledMeta, type SwarmSection } from "./swarm-section";
 import { EmptyState } from "@/app/element/ui";
 import "./swarm-view.scss";
 
@@ -60,9 +57,6 @@ export function SwarmView(props: {
     });
 
     const zoomFactor = createMemo(() => readZoom(ctx.meta()));
-    const open = createOpenSwarmSections(ctx.meta);
-    const density = createMemo(() => swarmDensityOf(open()));
-    const toggle = (id: SwarmSection) => void ctx.setMeta(toggledMeta(ctx.meta(), id));
     // Trace presses on agent rows whose click never arrives (select-trace.ts).
     // Capture listeners on the root, which a rebuild of the rows never replaces.
     onMount(() => {
@@ -106,15 +100,12 @@ export function SwarmView(props: {
             >
                 <RegistrationFlagsProvider visible={() => ctx.visibility() === "active"}>
                     <AccountAvailabilityStrip />
-                    <AccountUsageStrip />
-                    {/* The area above the list follows the open sections; the list itself is rendered once and
-                        never remounted by opening or closing one, which is what keeps a press on a row from
-                        being lost (#5208). */}
+                    {/* The list is rendered once and never remounted by what is above it, which is what keeps a
+                        press on a row from being lost (#5208). */}
                     <div class="swarm-section-body">
                         <div class="swarm-agents-pane">
-                            <SwarmSections model={model} agents={agents} open={open} onToggle={toggle} />
                             <SectionListNotes model={model} agents={agents} />
-                            <SwarmAgentList model={model} ctx={ctx} agents={agents} density={density} filterFocusRef={props.filterFocusRef} />
+                            <SwarmAgentList model={model} ctx={ctx} agents={agents} filterFocusRef={props.filterFocusRef} />
                         </div>
                     </div>
                 </RegistrationFlagsProvider>

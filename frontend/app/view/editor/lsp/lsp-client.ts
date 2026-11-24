@@ -14,6 +14,7 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { onMuxEvent } from "@/app/store/mps";
+import { isWindows } from "@/util/platformutil";
 import type {
     LspInitializeResult,
     LspMessageEnvelope,
@@ -33,6 +34,10 @@ export type LspState =
 
 /** What `lspstart` answers for a file in a folder a container agent can write (srv's `LspError::ContainerAgentFolder`). */
 export const NOT_ON_HOST_ERROR = "no_host_server_for_container_agent_folder";
+
+/** What `lspsend` answers for a document whose address is not a file's path (srv's `LspError::NotAFile`): that document is
+ *  not served, and the server is fine. */
+export const NOT_A_FILE_ERROR = "not a file";
 
 /** The method of the message srv sends, as a message of the server, when it stops a running server because its project
  *  folder came to be one a container agent can write (srv's `NOT_ON_HOST_NOTICE`). */
@@ -246,6 +251,8 @@ export class LspClient {
         }).catch((e: unknown) => {
             if (this.state.kind === "ready") {
                 const error = e instanceof Error ? e.message : String(e);
+                // A document that is no file is not served; the server and its other documents are fine.
+                if (error.includes(NOT_A_FILE_ERROR)) return;
                 // srv refuses a file that is a container agent's, even on a server that is already running.
                 this.setState(error.includes(NOT_ON_HOST_ERROR) ? { kind: "notOnHost" } : { kind: "crashed", error });
             }
@@ -300,6 +307,10 @@ export class LspClient {
  *  Windows paths need extra care: backslashes → forward slashes,
  *  drive letter prefixed with /.  */
 function pathToFileUri(p: string): string {
+    // A Windows network path, `\\server\share\a.ts`, or the Editor's own form of it, `//server/share/a.ts`, is
+    // `file://server/share/a.ts`: the server is the URI's host. (`//a/b` is a path of its own anywhere else.)
+    const unc = /^\\\\([^\\/]+)\\(.*)$/.exec(p) ?? (isWindows() ? /^\/\/([^/]+)\/(.*)$/.exec(p) : null);
+    if (unc) return "file://" + [unc[1], ...unc[2].split(/[\\/]/)].map(encodeURIComponent).join("/");
     const isWin = /^[a-zA-Z]:[\\/]/.test(p);
     const normalized = isWin ? p.replace(/\\/g, "/") : p;
     // Encode each path segment individually so the slashes survive.

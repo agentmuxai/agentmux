@@ -24,6 +24,7 @@ import { allConnStatus } from "./conn-status";
 import { flashErrors, notificationPopoverMode, notifications, pushNotification } from "./flash-notifications";
 import * as MOS from "./mos";
 import { getFileSubject, onMuxEvent } from "./mps";
+import { enqueueMuxUpdate } from "./mos-update-queue";
 import { acceptMuxbusDelivery, MUXBUS_STATUS_EVENT } from "./muxbus-delivery";
 import {
     activeTabId,
@@ -236,7 +237,8 @@ function initGlobalSignals(initOpts: GlobalInitOptions) {
 }
 
 export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
-    onMuxEvent(WpsEvent.MuxObjUpdate, (update) => MOS.updateMuxObject(update));
+    // Applied at the next frame with the other updates pending then (mos-update-queue.ts), not one by one in this task.
+    onMuxEvent(WpsEvent.MuxObjUpdate, (update) => enqueueMuxUpdate(update));
     onMuxEvent(WpsEvent.BlockFile, (fileData) => {
         const fileSubject = getFileSubject(fileData.zoneid, fileData.filename);
         if (fileSubject != null) fileSubject.next(fileData);
@@ -253,23 +255,10 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
         (data) => {
             void (async () => {
                 try {
-                    // width/height are DIP on all platforms; x/y are physical
-                    // px on Windows, DIP on macOS/Linux (see floating_pane.rs).
-                    // Center a default-sized floater over the current window.
-                    const dpr = window.devicePixelRatio || 1;
-                    const isWindows = /Windows/i.test(navigator.userAgent);
-                    const width = Math.max(600, Math.min(1200, Math.round(window.innerWidth * 0.5)));
-                    const height = Math.max(400, Math.min(900, Math.round(window.innerHeight * 0.6)));
-                    const cssX = window.screenX + Math.max(0, (window.outerWidth - width) / 2);
-                    const cssY = window.screenY + Math.max(0, (window.outerHeight - height) / 2);
-                    await getApi().windows.openFloatingPane({
-                        pane_id: data.block_id,
-                        workspace_id: data.workspace_id,
-                        x: isWindows ? Math.round(cssX * dpr) : Math.round(cssX),
-                        y: isWindows ? Math.round(cssY * dpr) : Math.round(cssY),
-                        width,
-                        height,
-                    });
+                    // Placement, the host call and the answer to srv: open-floating-pane.ts. Imported
+                    // here, not at the top: it reaches srv through the RPC client, which imports this module.
+                    const { handleOpenFloatingPaneEvent } = await import("@/app/store/open-floating-pane-live");
+                    await handleOpenFloatingPaneEvent(data);
                 } catch (e) {
                     console.error("[openfloatingpane] failed to open floating window", e);
                 }

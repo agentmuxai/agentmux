@@ -176,3 +176,99 @@ fn a_container_worker_as_spawn_records_it_is_a_container_agent_here() {
     assert_eq!((found.len(), found[0].container_id.as_str(), found[0].container_name.as_str()), (1, worker.id.as_str(), "Pell"));
     assert_eq!(of(&store, &worker, None).len(), 1, "and the worker's own save finds the host agent");
 }
+
+// A choice file is not proof the person made it: the audit log has to record the go-ahead.
+
+use crate::backend::reactive::AuditLogEntry;
+use std::io::Write;
+
+fn go_ahead_row(host_id: &str, container_id: &str, by: Option<&str>) -> AuditLogEntry {
+    AuditLogEntry {
+        source_agent: by.map(str::to_string),
+        outcome: Some(GO_AHEAD_ACTION.to_string()),
+        event_kind: "action".to_string(),
+        reason: Some(row_note(GO_AHEAD_ACTION, (host_id, "Hosty"), (container_id, "Aria"))),
+        ..Default::default()
+    }
+}
+
+fn recorded_by_the_window(host_id: &str, container_id: &str) -> Vec<AuditLogEntry> {
+    let prefix = row_prefix(host_id, container_id);
+    crate::backend::reactive::get_global_handler()
+        .get_audit_log(usize::MAX)
+        .into_iter()
+        .filter(|e| e.outcome.as_deref() == Some(GO_AHEAD_ACTION) && e.reason.as_deref().is_some_and(|r| r.starts_with(&prefix)))
+        .collect()
+}
+
+#[test]
+fn a_go_ahead_is_recorded_as_the_windows_and_the_choice_counts() {
+    choices();
+    let host = format!("h-{}", uuid::Uuid::new_v4().simple());
+    let container = format!("c-{}", uuid::Uuid::new_v4().simple());
+    accept_as((&host, "Hosty"), (&container, "Aria")).unwrap();
+    let rows = recorded_by_the_window(&host, &container);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].source_agent, None, "the person's window, not an agent");
+    assert_eq!(rows[0].event_kind, "action");
+    let note = rows[0].reason.as_deref().unwrap();
+    assert!(note.contains("Hosty") && note.contains("Aria") && note.contains(&host) && note.contains(&container), "both agents by id and name: {note}");
+    assert!(accepted(&host, &container));
+    assert!(choice_file(&host, &container).unwrap().is_file(), "and the choice is kept");
+}
+
+#[test]
+fn a_choice_file_with_no_record_does_not_count_and_the_pair_asks_again_and_says_why() {
+    choices();
+    set_audit_files_for_test(Vec::new());
+    let store = Store::open_in_memory().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let container = saved(&store, definition("container", "Aria", &path(&root, "w"), "[]"));
+    let host = saved(&store, definition("host", "Hosty", &path(&root, "w"), "[]"));
+    write_choice_without_a_record_for_test(&host.id, &container.id);
+
+    assert!(!accepted(&host.id, &container.id), "a file an agent can write is not the person's word");
+    assert!(untrusted(&host.id, &container.id));
+    let asking = unchosen(of(&store, &host, None));
+    assert_eq!(asking.len(), 1, "the pair asks again");
+    assert!(asking[0].untrusted);
+    let told = refusal(&asking);
+    assert!(told.contains("Hosty and Aria") && told.contains("no record that the person made it"), "{told}");
+    assert!(check(&store, &host, None).is_err());
+
+    // The person goes ahead for real: the same pair then counts and says nothing of it.
+    accept_as((&host.id, "Hosty"), (&container.id, "Aria")).unwrap();
+    assert!(accepted(&host.id, &container.id) && !untrusted(&host.id, &container.id));
+    assert!(check(&store, &host, None).is_ok());
+}
+
+#[test]
+fn a_record_in_the_audit_file_counts_after_a_restart_and_only_the_windows_for_that_pair_does() {
+    choices();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("jekt-audit.jsonl");
+    let (host, container) = ("h-restart", "c-restart");
+    let lines = [
+        serde_json::to_string(&go_ahead_row(host, "c-another", None)).unwrap(),
+        serde_json::to_string(&go_ahead_row("h-another", container, None)).unwrap(),
+        "{torn".to_string(),
+    ];
+    std::fs::write(&file, lines.join("\n") + "\n").unwrap();
+    set_audit_files_for_test(vec![file.clone()]);
+    write_choice_without_a_record_for_test(host, container);
+    forget_what_was_recorded_for_test();
+    assert!(!accepted(host, container), "a row for another pair is not a row for this one");
+
+    let by_an_agent = serde_json::to_string(&go_ahead_row(host, container, Some("agent:korp"))).unwrap();
+    std::fs::OpenOptions::new().append(true).open(&file).unwrap().write_all(format!("{by_an_agent}\n").as_bytes()).unwrap();
+    assert!(!accepted(host, container), "a row an agent made is not the window's");
+
+    let by_the_window = serde_json::to_string(&go_ahead_row(host, container, None)).unwrap();
+    std::fs::OpenOptions::new().append(true).open(&file).unwrap().write_all(format!("{by_the_window}\n").as_bytes()).unwrap();
+    forget_what_was_recorded_for_test();
+    assert!(accepted(host, container), "the row survived the restart, in the file");
+
+    forget_agent(container);
+    assert!(!accepted(host, container), "deleting the agent forgets the choice, and what was found on record");
+    set_audit_files_for_test(Vec::new());
+}

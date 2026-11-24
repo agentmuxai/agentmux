@@ -10,7 +10,10 @@ deployments.
 
 **Do not** open public GitHub issues for security vulnerabilities.
 
-Email: **security@agentmux.ai**
+Report it privately through GitHub's private vulnerability reporting:
+[open a private report](https://github.com/agentmuxai/agentmux/security/advisories/new)
+(on this repository, the **Security** tab, then **Report a vulnerability**).
+Only you and the maintainers can see it.
 
 Please include:
 

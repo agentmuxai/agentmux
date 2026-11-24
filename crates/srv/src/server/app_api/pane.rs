@@ -7,6 +7,19 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_pane_move_tab(engine, state);
     register_pane_move_tabs(engine, state);
     register_pane_tab_edits(engine, state);
+    register_pane_float_placed(engine);
+}
+
+/// `pane.floatplaced`: the window an agent's floating open went to says where it put the pane, which the
+/// open is waiting for (`floater_place`).
+fn register_pane_float_placed(engine: &Arc<WshRpcEngine>) {
+    engine.register_typed("pane.floatplaced", move |cmd: crate::backend::rpc_types::CommandPaneFloatPlacedData, _ctx| async move {
+        let answer = match (cmd.placed, cmd.error) {
+            (Some(placed), _) => Ok(placed),
+            (None, why) => Err(why.unwrap_or_else(|| "the window gave no reason".to_string())),
+        };
+        Ok(crate::backend::rpc_types::PaneFloatPlacedResult { delivered: super::floater_place::answered(&cmd.request_id, answer) })
+    });
 }
 
 fn register_pane_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -76,11 +89,21 @@ pub(super) async fn open_pane_floating(
     state: &AppState,
     mstore: &Store,
     event_bus: &crate::backend::eventbus::EventBus,
-    view: String,
+    cmd: &CommandPaneOpenData,
     source_tab_id: String,
     meta: MetaMapType,
 ) -> Result<PaneOpenResult, String> {
     use agentmux_common::ipc::{Command, Event};
+    let view = cmd.view.clone();
+
+    // An agent has at most `MAX_FLOATERS` floating panes open: checked before anything is made.
+    let open_already = match cmd.opener.as_deref() {
+        Some(agent) => super::floater_place::live_floaters(state, agent).await,
+        None => Vec::new(),
+    };
+    if open_already.len() >= super::floater_place::MAX_FLOATERS {
+        return Err(super::floater_place::limit_text(&open_already));
+    }
 
     // Source workspace from the reducer's canonical tab→workspace map.
     let source_ws_id = {
@@ -206,32 +229,54 @@ pub(super) async fn open_pane_floating(
     // to that window (mirrors the window-scoped `userinput` event) so exactly
     // one window acts. The frontend handler calls the host
     // `open_floating_pane_window` command.
+    if let Some(agent) = cmd.opener.as_deref() {
+        crate::server::pane_openers::record(&block_id, agent, true);
+    }
+    let mut result = PaneOpenResult::docked(block_id.clone(), new_tab_id, view, true);
+    announce_floater(state, &source_ws_id, &new_ws_id, cmd, &mut result, open_already.len()).await;
+    Ok(result)
+}
+
+/// Tell the source window to open the floater. For an agent's open the event carries what it asked for, and
+/// the open waits for the window to say where the pane went (`placed`), or says `queued` when it does not
+/// answer in time.
+async fn announce_floater(
+    state: &AppState,
+    source_ws_id: &str,
+    new_ws_id: &str,
+    cmd: &CommandPaneOpenData,
+    result: &mut PaneOpenResult,
+    already_open: usize,
+) {
     let window_id = {
         let s = state.srv_state.lock().await;
-        s.windows
-            .iter()
-            .find(|(_, w)| w.workspace_id == source_ws_id)
-            .map(|(id, _)| id.clone())
+        s.windows.iter().find(|(_, w)| w.workspace_id == source_ws_id).map(|(id, _)| id.clone())
     };
-    match window_id {
-        Some(win) => {
-            let open = crate::backend::mps_events::OpenFloatingPaneEvent { block_id: block_id.to_string(), workspace_id: new_ws_id.to_string() };
-            state.broker.publish_event::<crate::backend::mps_events::OpenFloatingPane>(&open, vec![win], 0);
+    let Some(win) = window_id else {
+        tracing::warn!(source_ws = %source_ws_id, "pane.open: floating: no window mapped to source workspace — floater not opened");
+        return;
+    };
+    let (place, waiting) = match cmd.opener {
+        Some(_) => {
+            let id = uuid::Uuid::new_v4().to_string();
+            let max_share = cmd.floater_max_share;
+            // Registered before the window is told, so an answer cannot beat the waiter.
+            let rx = super::floater_place::expect(&id);
+            (Some(super::floater_place::place_for(cmd, id.clone(), already_open, max_share)), Some((id, rx)))
         }
-        None => {
-            tracing::warn!(
-                source_ws = %source_ws_id,
-                "pane.open: floating: no window mapped to source workspace — floater not opened"
-            );
+        None => (None, None),
+    };
+    let open = crate::backend::mps_events::OpenFloatingPaneEvent { block_id: result.block_id.clone(), workspace_id: new_ws_id.to_string(), place };
+    state.broker.publish_event::<crate::backend::mps_events::OpenFloatingPane>(&open, vec![win], 0);
+    let Some((id, rx)) = waiting else { return };
+    match tokio::time::timeout(super::floater_place::WAIT, rx).await {
+        Ok(Ok(Ok(placed))) => result.placed = Some(placed),
+        Ok(Ok(Err(why))) => tracing::warn!(block = %result.block_id, "pane.open: floating: the window could not open it: {why}"),
+        _ => {
+            super::floater_place::forget(&id);
+            result.queued = true;
         }
     }
-
-    Ok(PaneOpenResult {
-        block_id,
-        tab_id: new_tab_id,
-        view,
-        created: true,
-    })
 }
 
 /// The title the opener gave the pane. A browser pane also records the address it was opened at, so it keeps
@@ -593,12 +638,7 @@ pub(super) async fn maybe_reuse_editor_pane(
         "pane.open: reused existing editor pane instead of creating a new one"
     );
 
-    Ok(Some(PaneOpenResult {
-        block_id: existing.oid,
-        tab_id,
-        view: "editor".to_string(),
-        created: false,
-    }))
+    Ok(Some(PaneOpenResult::docked(existing.oid, tab_id, "editor".to_string(), false)))
 }
 
 /// Translate `split_direction` + `split_reference_block_id` into a placement:
@@ -1221,6 +1261,7 @@ mod close_pane_tests {
 /// block/tab/layout updates so the frontend renders the new pane.
 pub async fn open_pane(state: &AppState, mut cmd: CommandPaneOpenData) -> Result<PaneOpenResult, String> {
     steps::fold_media_into_editor(&mut cmd)?;
+    steps::fold_reviews_into_kanban(&mut cmd);
     // A file of a container agent's folder opens as a read-only copy, which goes with the pane it opened in.
     let copy = crate::server::agent_folder_open::bind(state, &mut cmd).await?;
     let opened = open_checked(state, cmd).await;
@@ -1278,7 +1319,7 @@ async fn open_checked(state: &AppState, mut cmd: CommandPaneOpenData) -> Result<
     if bring_back {
         if let Some((block_id, tab_id)) = super::pane_singleton::in_window(&mstore, &tab_id, &cmd.view) {
             tracing::info!(block_id = %block_id, view = %cmd.view, "pane.open: the window already has this pane");
-            return Ok(PaneOpenResult { block_id, tab_id, view: cmd.view, created: false });
+            return Ok(PaneOpenResult::docked(block_id, tab_id, cmd.view, false));
         }
     }
 
@@ -1287,7 +1328,7 @@ async fn open_checked(state: &AppState, mut cmd: CommandPaneOpenData) -> Result<
     // the existing tear_off_block saga) and signal the source window's frontend
     // to materialize the chromeless OS window — srv can't open windows itself.
     if cmd.floating == Some(true) {
-        return pane::open_pane_floating(state, &mstore, &event_bus, cmd.view, tab_id, meta).await;
+        return pane::open_pane_floating(state, &mstore, &event_bus, &cmd, tab_id, meta).await;
     }
 
     if let Some(target) = cmd.stack_onto_block_id.clone().filter(|t| !t.is_empty()) {

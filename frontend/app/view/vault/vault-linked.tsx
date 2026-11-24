@@ -19,9 +19,15 @@ export const UNCHECKED_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const AWS = "aws-secret";
 
-/** Whether the entry with these fields is a link: it holds no value. */
+/** Whether the entry with these fields is a link: it holds no value. A backed entry is one: its key stays in AWS
+ *  Secrets Manager and the Vault reads it there at each use. */
 export function isLinked(fields: Record<string, string>): boolean {
-    return fields.link === "only";
+    return fields.link === "only" || fields.link === "backed";
+}
+
+/** Whether the entry is backed by AWS Secrets Manager (`link: backed`, made by an agent's import). */
+export function isBacked(fields: Record<string, string>): boolean {
+    return fields.link === "backed";
 }
 
 /** The lines of a field that holds one thing a line (`readers`, `copies`). */
@@ -36,7 +42,7 @@ export function linesOf(text: string | undefined): string[] {
 export function linkFields(fields: Record<string, string>): Record<string, string> {
     const linked = isLinked(fields);
     const kept: [string, string][] = [
-        ["link", linked ? "only" : ""],
+        ["link", linked ? fields.link : ""],
         ["readers", linesOf(fields.readers).join("\n")],
         ["rotated", linked ? (fields.rotated ?? "").trim() : ""],
         ["copies", linesOf(fields.copies).join("\n")],
@@ -52,15 +58,17 @@ export function uncheckedDays(e: Pick<VaultEntryInfo, "fields" | "source_checked
     return days > UNCHECKED_DAYS ? days : null;
 }
 
-/** The two badges of a linked entry: that it holds no value, and that the key is read without asking the Vault. */
+/** The two badges of a linked entry: that it holds no value (a backed one says it is managed in AWS Secrets Manager),
+ *  and that the key is read without asking the Vault. */
 export function LinkedBadges(props: { entry: VaultEntryInfo }): JSX.Element {
+    const backed = () => isBacked(props.entry.fields);
     return (
         <Show when={isLinked(props.entry.fields)}>
             <span class="vault-linked-badges">
-                <Pill tone="accent" icon="link" title={t("vault.linked.badgeTip")}>
-                    {t("vault.linked.badge")}
+                <Pill tone="accent" icon="link" title={backed() ? t("vault.backed.badgeTip") : t("vault.linked.badgeTip")}>
+                    {backed() ? t("vault.backed.badge") : t("vault.linked.badge")}
                 </Pill>
-                <Pill tone="warn" icon="eye" title={t("vault.linked.outsideTip")}>
+                <Pill tone="warn" icon="eye" title={backed() ? t("vault.backed.outsideTip") : t("vault.linked.outsideTip")}>
                     {t("vault.linked.outside")}
                 </Pill>
             </span>

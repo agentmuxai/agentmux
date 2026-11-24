@@ -47,6 +47,11 @@ pub struct CronJob {
     /// was Unattributed; never guessed.
     #[serde(default)]
     pub created_by_uid: String,
+    /// Who last wrote the definition (its prompt, target or trigger), as the request that wrote it proved: an agent's
+    /// UID from its token, [`WRITER_OPERATOR`] for the app's own window, [`WRITER_UNKNOWN`] for a caller nothing
+    /// identified. Empty: not recorded yet (a job from before this), so the creator stands.
+    #[serde(default)]
+    pub last_written_by: String,
     pub enabled: bool,
     pub last_fired: Option<i64>,
     pub fire_count: i64,
@@ -112,7 +117,35 @@ pub struct CronJob {
     pub secrets: Vec<SecretRef>,
 }
 
+/// The app's own window wrote the definition.
+pub const WRITER_OPERATOR: &str = "operator";
+/// The definition was written by a caller nothing identified (no agent token, not the app's own window).
+pub const WRITER_UNKNOWN: &str = "unknown";
+
+/// Who stands behind a job's current definition, when a fire of it can be proven.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FireProof {
+    /// The app's own window wrote it.
+    Operator,
+    /// This agent's token wrote it (its UID).
+    Agent(String),
+}
+
 impl CronJob {
+    /// Who stands behind the job's definition as it is now, or `None` when nothing identified its writer: a job that
+    /// was created or last edited by a caller without an agent token or the app's own proof fires unproven.
+    pub fn fire_proof(&self) -> Option<FireProof> {
+        let writer = match self.last_written_by.trim() {
+            "" => self.created_by_uid.trim(),
+            writer => writer,
+        };
+        match writer {
+            "" | WRITER_UNKNOWN => None,
+            WRITER_OPERATOR => Some(FireProof::Operator),
+            uid => Some(FireProof::Agent(uid.to_string())),
+        }
+    }
+
     /// The owner's UID: the definition's `owner`, else the creator's.
     pub fn owner_uid(&self) -> &str {
         match self.owner.trim() {
@@ -137,7 +170,7 @@ fn default_catch_up() -> String {
 /// `db_cron_jobs.catch_up` defaults to `latest` so every job from before it
 /// keeps the startup catch-up. `db_cron_jobs` is no longer written; older
 /// builds still use it.
-pub(super) const JOB_TABLES: [&str; 6] = [
+pub(super) const JOB_TABLES: [&str; 7] = [
     "ALTER TABLE db_cron_jobs ADD COLUMN catch_up TEXT NOT NULL DEFAULT 'latest'",
     // The miss record (`CronJob::missed_count`).
     "ALTER TABLE db_cron_jobs ADD COLUMN missed_count INTEGER NOT NULL DEFAULT 0",
@@ -146,6 +179,8 @@ pub(super) const JOB_TABLES: [&str; 6] = [
     JOBS_SCHEMA,
     // An event trigger's source and filter (`CronJob::trigger_event`).
     "ALTER TABLE db_jobs ADD COLUMN trigger_event TEXT NOT NULL DEFAULT ''",
+    // Who last wrote the definition (`CronJob::last_written_by`).
+    "ALTER TABLE db_jobs ADD COLUMN last_written_by TEXT NOT NULL DEFAULT ''",
 ];
 
 /// `db_jobs` and its index. Columns added later go after it in
@@ -190,7 +225,8 @@ const JOBS_SCHEMA: &str = "
 
 const COLS: &str = "id, name, expression, prompt, target, created_by, enabled, last_fired, fire_count, max_fires, \
      created_at, max_age_secs, target_uid, created_by_uid, catch_up, missed_count, last_missed_at, last_miss_reason, \
-     owner, trigger_kind, tz, every_secs, once_at_ms, action_kind, action, policy, template, params, outputs, secrets, trigger_event";
+     owner, trigger_kind, tz, every_secs, once_at_ms, action_kind, action, policy, template, params, outputs, secrets, trigger_event, \
+     last_written_by";
 
 fn json_text<T: Serialize>(v: &T) -> String {
     serde_json::to_string(v).unwrap_or_else(|_| "null".to_string())
@@ -202,7 +238,7 @@ impl Store {
         conn.execute(
             &format!(
                 "INSERT INTO db_jobs ({COLS}) VALUES \
-                 (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31)"
+                 (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32)"
             ),
             params![
                 job.id,
@@ -236,6 +272,7 @@ impl Store {
                 json_text(&job.outputs),
                 json_text(&job.secrets),
                 json_text(&job.trigger_event),
+                job.last_written_by,
             ],
         )?;
         Ok(())
@@ -248,7 +285,8 @@ impl Store {
         let n = conn.execute(
             "UPDATE db_jobs SET name = ?2, expression = ?3, prompt = ?4, target = ?5, target_uid = ?6, enabled = ?7,
                 catch_up = ?8, owner = ?9, trigger_kind = ?10, tz = ?11, every_secs = ?12, once_at_ms = ?13,
-                action_kind = ?14, action = ?15, policy = ?16, template = ?17, params = ?18, outputs = ?19, secrets = ?20, trigger_event = ?21
+                action_kind = ?14, action = ?15, policy = ?16, template = ?17, params = ?18, outputs = ?19, secrets = ?20, trigger_event = ?21,
+                last_written_by = ?22
              WHERE id = ?1",
             params![
                 job.id,
@@ -272,6 +310,7 @@ impl Store {
                 json_text(&job.outputs),
                 json_text(&job.secrets),
                 json_text(&job.trigger_event),
+                job.last_written_by,
             ],
         )?;
         Ok(n > 0)
@@ -387,5 +426,6 @@ fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronJob> {
         outputs:       json_col(row, 28)?,
         secrets:       json_col(row, 29)?,
         trigger_event: json_col(row, 30)?,
+        last_written_by: row.get(31)?,
     })
 }

@@ -1177,6 +1177,14 @@
             "method": "PaneConfirmDecideCommand"
         },
         {
+            "command": "deeplink.open.done",
+            "method": "DeepLinkOpenDoneCommand"
+        },
+        {
+            "command": "capture.mask.report",
+            "method": "CaptureMaskReportCommand"
+        },
+        {
             "command": "pane.open",
             "method": "PaneOpenCommand"
         },
@@ -1195,6 +1203,10 @@
         {
             "command": "pane.removeTab",
             "method": "PaneRemoveTabCommand"
+        },
+        {
+            "command": "pane.floatplaced",
+            "method": "PaneFloatPlacedCommand"
         },
         {
             "command": "layout.open",
@@ -1236,6 +1248,15 @@
         {
             "command": "folderoverlapaccept",
             "method": "FolderOverlapAcceptCommand"
+        },
+        {
+            "command": "folderoverlapdecline",
+            "method": "FolderOverlapDeclineCommand"
+        },
+        {
+            "command": "folderoverlapasks",
+            "method": "FolderOverlapAsksCommand",
+            "send": "data ?? {}"
         },
         {
             "command": "browsergrants.list",
@@ -1302,6 +1323,10 @@
         {
             "command": "filesearchbytes",
             "method": "FileSearchBytesCommand"
+        },
+        {
+            "command": "filesearchtext",
+            "method": "FileSearchTextCommand"
         },
         {
             "command": "readeditorfile",

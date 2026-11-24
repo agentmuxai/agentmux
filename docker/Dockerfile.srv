@@ -114,6 +114,17 @@ RUN if [ -n "$STREAMED_BROWSER" ]; then \
       && rm -rf /var/lib/apt/lists/*; \
     fi
 
+# Screen mode's browser (docs/specs/SPEC_SIGN_IN_BROWSER_PERSON_DRIVEN_SCREEN_MODE_2026_11_22.md): a virtual screen, a window manager
+# and the Google Chrome package (an ordinary Chrome that a person drives), with the browser's managed policy installed where Chrome reads
+# it (root-owned: srv checks it and never writes it). Only when asked: `--build-arg SCREEN_BROWSER=1`, for linux/amd64 (Google's package is
+# built for it). The mode itself stays off until the server is started with AGENTMUX_STREAMED_BROWSER_SCREEN=1 and
+# AGENTMUX_STREAMED_BROWSER_PROXY_PORT=41234 (the port the policy names); run it with `--streamed-browser-host` as the hosted browser does.
+# The browser's own sandbox is on: the container must let it make namespaces (a seccomp profile that allows clone and unshare, with only the
+# SYS_CHROOT capability), never --privileged.
+ARG SCREEN_BROWSER=
+COPY docker/screen-mode-policy.json /usr/local/share/agentmux/screen-mode-policy.json
+RUN if [ -n "$SCREEN_BROWSER" ]; then       [ "$(dpkg --print-architecture)" = amd64 ] || { echo "SCREEN_BROWSER needs linux/amd64: Google Chrome's Linux package is built for it"; exit 1; };       apt-get update && apt-get install -y --no-install-recommends xvfb openbox fonts-liberation fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji       && curl -fsSL -o /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb       && apt-get install -y --no-install-recommends /tmp/google-chrome.deb       && rm -f /tmp/google-chrome.deb       && install -d -m 0755 /etc/opt/chrome/policies/managed       && install -m 0644 /usr/local/share/agentmux/screen-mode-policy.json /etc/opt/chrome/policies/managed/agentmux-screen-mode.json       && install -d -m 1777 /tmp/.X11-unix       && rm -rf /var/lib/apt/lists/*;     fi
+
 # node:24-slim ships a 'node' user at UID 1000; rename it rather than adding a
 # second UID-1000 user.
 RUN usermod -l agentmux -d /home/agentmux -m node \

@@ -9,10 +9,16 @@
 //! share a folder, the person is asked and the choice is kept for that pair of agents. Nothing but the person's
 //! window records the choice ([`accept`]); a caller that is not the person is refused with [`refusal`].
 //!
+//! A choice is a file, and a file is not proof that the person made it: each go-ahead is also recorded as a row of
+//! the audit log made by the window, written before the file, and a choice file with no such row does not count
+//! ([`accepted`]): the pair asks again and says why ([`Overlap::untrusted`]).
+//!
 //! The folders are those of the two agents' definitions: a container agent's workspace and its writable host
 //! volumes (`container::mounts::writable`), a host agent's working folder.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
@@ -28,6 +34,10 @@ pub struct Overlap {
     pub host_name: String,
     pub container_id: String,
     pub container_name: String,
+    /// A choice for this pair is kept, but the audit log has no record that the person made it, so it does not
+    /// count and the pair asks again.
+    #[serde(default)]
+    pub untrusted: bool,
 }
 
 /// The folder an agent definition works in as set, expanded; `None` when it names none.
@@ -62,6 +72,7 @@ fn between(host: &AgentDefinition, folder: &Path, container: &AgentDefinition) -
             host_name: host.name.clone(),
             container_id: container.id.clone(),
             container_name: container.name.clone(),
+            untrusted: untrusted(&host.id, &container.id),
         })
 }
 
@@ -111,22 +122,138 @@ fn choice_file(host_id: &str, container_id: &str) -> Option<PathBuf> {
     Some(choices_dir()?.join(key))
 }
 
-/// Whether the person has gone ahead with this host agent and this container agent sharing a folder.
-pub fn accepted(host_id: &str, container_id: &str) -> bool {
+/// The audit action that records the person's go-ahead for a pair.
+pub const GO_AHEAD_ACTION: &str = "folder-overlap.go-ahead";
+
+/// The note of an audit row about a pair: the action and the two agents' ids, which find the row (a name changes), then
+/// the names, for whoever reads the Audit view.
+pub fn row_note(action: &str, host: (&str, &str), container: (&str, &str)) -> String {
+    format!("{action} {} {}: host agent {} and container agent {}", host.0, container.0, host.1, container.1)
+}
+
+fn row_prefix(host_id: &str, container_id: &str) -> String {
+    format!("{GO_AHEAD_ACTION} {host_id} {container_id}:")
+}
+
+/// Whether `entry` is the window's record of a go-ahead for the pair `prefix` names: an action row, made by the window
+/// (no agent made it), that went through.
+fn is_go_ahead_row(entry: &crate::backend::reactive::AuditLogEntry, prefix: &str) -> bool {
+    entry.event_kind == "action"
+        && entry.outcome.as_deref() == Some(GO_AHEAD_ACTION)
+        && entry.source_agent.is_none()
+        && entry.success
+        && entry.reason.as_deref().is_some_and(|reason| reason.starts_with(prefix))
+}
+
+/// The audit files to read for a record: the one every srv on this machine shares, and this channel's own.
+fn audit_files() -> Vec<PathBuf> {
+    #[cfg(any(test, feature = "test-support"))]
+    return AUDIT_FILES_FOR_TEST.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    #[cfg(not(any(test, feature = "test-support")))]
+    return [super::reactive::audit_store::shared_path_for_reading(), super::reactive::audit_store::own_path()].into_iter().flatten().collect();
+}
+
+#[cfg(any(test, feature = "test-support"))]
+static AUDIT_FILES_FOR_TEST: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+/// Sets the audit files a test reads a record from (none by default), and returns the ones set before.
+#[cfg(any(test, feature = "test-support"))]
+pub fn set_audit_files_for_test(files: Vec<PathBuf>) -> Vec<PathBuf> {
+    std::mem::replace(&mut *AUDIT_FILES_FOR_TEST.lock().unwrap_or_else(|e| e.into_inner()), files)
+}
+
+/// Whether any line of the audit file at `path` is the record `prefix` names. The file is never rotated, so a line
+/// is parsed only when it holds the prefix.
+fn file_has_record(path: &Path, prefix: &str) -> bool {
+    use std::io::BufRead;
+    let Ok(file) = std::fs::File::open(path) else { return false };
+    std::io::BufReader::new(file)
+        .lines()
+        .map_while(Result::ok)
+        .filter(|line| line.contains(prefix))
+        .filter_map(|line| serde_json::from_str::<crate::backend::reactive::AuditLogEntry>(&line).ok())
+        .any(|entry| is_go_ahead_row(&entry, prefix))
+}
+
+/// The pairs whose go-ahead was found on record in this process, as `host\ncontainer`: a record does not go away, so it
+/// is looked for once.
+fn recorded_pairs() -> &'static Mutex<HashSet<String>> {
+    static RECORDED: std::sync::OnceLock<Mutex<HashSet<String>>> = std::sync::OnceLock::new();
+    RECORDED.get_or_init(Mutex::default)
+}
+
+fn recorded_key(host_id: &str, container_id: &str) -> String {
+    format!("{host_id}\n{container_id}")
+}
+
+/// Whether the audit log records the person's go-ahead for the pair: in the rows this srv still holds in memory (the
+/// row is on its way to the file when the person has only just gone ahead), or in the audit file, which survives a
+/// restart.
+fn recorded(host_id: &str, container_id: &str) -> bool {
+    let key = recorded_key(host_id, container_id);
+    if recorded_pairs().lock().unwrap_or_else(|e| e.into_inner()).contains(&key) {
+        return true;
+    }
+    let prefix = row_prefix(host_id, container_id);
+    let in_memory = super::reactive::get_global_handler().get_audit_log(usize::MAX).iter().any(|entry| is_go_ahead_row(entry, &prefix));
+    let found = in_memory || audit_files().iter().any(|file| file_has_record(file, &prefix));
+    if found {
+        recorded_pairs().lock().unwrap_or_else(|e| e.into_inner()).insert(key);
+    }
+    found
+}
+
+fn has_choice_file(host_id: &str, container_id: &str) -> bool {
     choice_file(host_id, container_id).is_some_and(|file| file.is_file())
 }
 
-/// Keeps the person's choice for the pair. Only the person's window calls this (`app_api::folder_overlap`).
+/// Whether the person has gone ahead with this host agent and this container agent sharing a folder: a choice is kept
+/// and the audit log records that the person made it.
+pub fn accepted(host_id: &str, container_id: &str) -> bool {
+    has_choice_file(host_id, container_id) && recorded(host_id, container_id)
+}
+
+/// Whether a choice is kept for the pair that the audit log has no record of: it does not count.
+pub fn untrusted(host_id: &str, container_id: &str) -> bool {
+    has_choice_file(host_id, container_id) && !recorded(host_id, container_id)
+}
+
+/// Keeps the person's choice for the pair, naming both agents by their ids. Only the person's window calls this
+/// (`app_api::folder_overlap`).
 pub fn accept(host_id: &str, container_id: &str) -> Result<(), String> {
-    let file = choice_file(host_id, container_id).ok_or("the choice can't be kept: AgentMux has no shared folder here")?;
+    accept_as((host_id, host_id), (container_id, container_id))
+}
+
+/// [`accept`], with the agents' names (id, name) for the record. The audit row is written first and the file after, so a
+/// file is never kept without the record of who made it.
+pub fn accept_as(host: (&str, &str), container: (&str, &str)) -> Result<(), String> {
+    let file = choice_file(host.0, container.0).ok_or("the choice can't be kept: AgentMux has no shared folder here")?;
     if let Some(dir) = file.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("the choice can't be kept: {e}"))?;
     }
-    std::fs::write(&file, format!("{host_id}\n{container_id}\n")).map_err(|e| format!("the choice can't be kept: {e}"))
+    let note = row_note(GO_AHEAD_ACTION, host, container);
+    super::reactive::get_global_handler().log_fleet_action_audit(None, host.1, "", GO_AHEAD_ACTION, true, None, &uuid::Uuid::new_v4().to_string(), Some(&note));
+    recorded_pairs().lock().unwrap_or_else(|e| e.into_inner()).insert(recorded_key(host.0, container.0));
+    std::fs::write(&file, format!("{}\n{}\n", host.0, container.0)).map_err(|e| format!("the choice can't be kept: {e}"))
+}
+
+/// A choice file with no audit row, as an agent that wrote the folder would leave it.
+#[cfg(any(test, feature = "test-support"))]
+pub fn write_choice_without_a_record_for_test(host_id: &str, container_id: &str) {
+    let file = choice_file(host_id, container_id).expect("a choices folder is set");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(&file, format!("{host_id}\n{container_id}\n")).unwrap();
+}
+
+/// Forgets which pairs were found on record, as a restart does.
+#[cfg(any(test, feature = "test-support"))]
+pub fn forget_what_was_recorded_for_test() {
+    recorded_pairs().lock().unwrap_or_else(|e| e.into_inner()).clear();
 }
 
 /// Forgets every choice the person made for a pair that includes agent `id`: the agent is deleted.
 pub fn forget_agent(id: &str) {
+    recorded_pairs().lock().unwrap_or_else(|e| e.into_inner()).retain(|key| !key.lines().any(|line| line == id));
     let Some(dir) = choices_dir() else { return };
     let Ok(entries) = std::fs::read_dir(&dir) else { return };
     for entry in entries.flatten() {
@@ -150,8 +277,14 @@ pub fn refusal(overlaps: &[Overlap]) -> String {
         .map(|o| format!("{} (host) and {} (container)", o.host_name, o.container_name))
         .collect::<Vec<_>>()
         .join("; ");
+    let untrusted = overlaps.iter().filter(|o| o.untrusted).map(|o| format!("{} and {}", o.host_name, o.container_name)).collect::<Vec<_>>().join("; ");
+    let why = if untrusted.is_empty() {
+        String::new()
+    } else {
+        format!(" A choice is kept for {untrusted}, but AgentMux has no record that the person made it, so it does not count.")
+    };
     format!(
-        "{pairs} share a folder, so the container agent can change what the host agent runs. Only the person can go ahead with that, from the AgentMux window. Give them separate workspaces, or bind the shared folder read-only into the container agent (a volume ending in :ro)"
+        "{pairs} share a folder, so the container agent can change what the host agent runs.{why} Only the person can go ahead with that, from the AgentMux window. Give them separate workspaces, or bind the shared folder read-only into the container agent (a volume ending in :ro)"
     )
 }
 
@@ -160,6 +293,25 @@ pub fn refusal(overlaps: &[Overlap]) -> String {
 pub fn check(store: &Store, def: &AgentDefinition, host_folder: Option<&Path>) -> Result<(), String> {
     let pending = unchosen(of(store, def, host_folder));
     if pending.is_empty() { Ok(()) } else { Err(refusal(&pending)) }
+}
+
+/// What an `agent.open` refusal for a shared folder starts with, so the window knows to ask the person and try again.
+pub const OPEN_REFUSAL_CODE: &str = "SHARED_FOLDER";
+
+/// The folder `agent.open` runs a host agent in, expanded: the one it names, else its own folder.
+pub fn open_folder(def: &AgentDefinition) -> PathBuf {
+    let named = def.working_directory.trim();
+    let dir = if named.is_empty() { crate::backend::storage::agents::default_agent_working_dir(&def.name) } else { named.to_string() };
+    crate::backend::base::expand_home_dir_safe(&dir)
+}
+
+/// [`check`] for an agent being opened, in [`open_folder`], with the refusal marked [`OPEN_REFUSAL_CODE`]. A container
+/// agent is not refused here: it is asked when its own folders are saved.
+pub fn check_open(store: &Store, def: &AgentDefinition) -> Result<(), String> {
+    if is_container(def) {
+        return Ok(());
+    }
+    check(store, def, Some(&open_folder(def))).map_err(|refusal| format!("{OPEN_REFUSAL_CODE}: {refusal}"))
 }
 
 /// Whether a save of `new` over `old` changes a folder an agent works in or can write.

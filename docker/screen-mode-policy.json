@@ -1,0 +1,24 @@
+{
+  "URLBlocklist": [
+    "file://*",
+    "chrome://*",
+    "chrome-untrusted://*",
+    "chrome-extension://*",
+    "chrome-search://*",
+    "chrome-error://*",
+    "devtools://*",
+    "view-source:*",
+    "javascript:*",
+    "ftp://*"
+  ],
+  "DeveloperToolsAvailability": 2,
+  "ExtensionInstallBlocklist": ["*"],
+  "BrowserSignin": 0,
+  "AllowFileSelectionDialogs": false,
+  "DownloadRestrictions": 3,
+  "ProxyMode": "fixed_servers",
+  "ProxyServer": "socks5://127.0.0.1:41234",
+  "ProxyBypassList": "<-loopback>",
+  "QuicAllowed": false,
+  "DnsOverHttpsMode": "off"
+}

@@ -19,6 +19,7 @@ mod browser;
 mod browser_account;
 mod browser_key_text;
 mod browser_locate;
+mod browser_open;
 mod browser_tool;
 mod browser_waiting;
 mod browser_zoom;
@@ -235,6 +236,7 @@ const REPLACED: &[(&str, &str)] = &[
     ("OpenEditor", "Pane with action \"open\" and view \"editor\""),
     ("OpenMedia", "Pane with action \"open\" and view \"media\""),
     ("OpenFiles", "Pane with action \"open\" and view \"files\""),
+    ("OpenLink", "Pane with action \"open\" and link"),
     ("NewTab", "Pane with action \"new_tab\""),
     ("SetActiveTab", "Pane with action \"activate_tab\""),
     ("FocusWindow", "Pane with action \"focus_window\""),

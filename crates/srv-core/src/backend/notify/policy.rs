@@ -196,7 +196,7 @@ pub struct Settings {
     /// Behaves like a pause, but is NOT shown as one in the tray (it isn't
     /// something "Resume" can undo — it's a schedule).
     pub quiet_until_ms: i64,
-    /// `notify:os:summary` — show the agent's session summary line.
+    /// `notify:os:summary` — show what the agent is on (its status line or held task) as a line.
     pub show_summary: bool,
     /// `notify:os:turncompleted:external` — also notify when a turn something
     /// other than the user started finishes (a jekt, a service notice, a
@@ -260,7 +260,8 @@ pub struct Request {
     pub block_id: String,
     pub agent_name: String,
     pub body: Option<String>,
-    /// The agent's session summary (`term:ambient_summary`), sanitized.
+    /// What the agent is on: its own fresh status line, else its held task's number and title,
+    /// sanitized (`toast_line`). Never the ambient title.
     pub summary: Option<String>,
     /// For `ShutdownPending`: when the window ends and what happens then.
     pub shutdown: Option<ShutdownInfo>,

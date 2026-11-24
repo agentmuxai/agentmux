@@ -27,6 +27,7 @@ const OPENS_BY_THEMSELVES: Record<string, string> = {
     "app/store/open-floating.ts": "the float modifier: always a new floating window",
     "app/util/open-config-file.ts": "opens a config file in the Editor",
     "app/view/agent/agent-open-in-editor.tsx": "opens a file the agent touched, beside the agent",
+    "app/view/agent/shared-folder-ask.ts": "opens the agent into the pane that asked, once the person has gone ahead",
     "app/view/editor/editor-model.ts": "open to the side / in a terminal, beside its own pane",
     "app/view/editor/viewers/viewer-host.tsx": "opens a URL beside the viewer",
     "app/view/files/files-open.ts": "opens a file or folder from Files, beside it",
@@ -39,6 +40,7 @@ const OPENS_BY_THEMSELVES: Record<string, string> = {
 const LOOKS_UP_BY_VIEW: Record<string, string> = {
     "app/store/block-component-registry.ts": "revealOrOpen's host",
     "app/util/reveal-block.ts": "defines it",
+    "app/view/shortcuts/move-singleton-here.ts": "finds the open pane of a singleton view to swap it into the shortcuts pane's place",
     "app/view/shortcuts/shortcuts.tsx": "lists the panes of a view for the shortcuts page",
 };
 

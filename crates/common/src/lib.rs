@@ -5,6 +5,7 @@
 
 pub mod agent_create_types;
 pub mod api_types;
+pub mod place_args;
 pub mod appimage_record;
 pub mod file_rename_types;
 pub mod ui_record_types;
@@ -42,6 +43,7 @@ pub mod agent_roots;
 pub mod allowed_origins;
 pub mod debug_privilege;
 pub mod popup_rules;
+pub mod url_guard;
 pub mod process;
 pub mod process_hardening;
 pub mod pii_mask;
@@ -56,6 +58,7 @@ pub mod capture_shape;
 pub mod secret_shape;
 pub mod typed_secrets;
 pub mod shown_once;
+pub mod shown_url;
 pub mod secret_eq;
 pub mod secret_env;
 pub mod system_certs;

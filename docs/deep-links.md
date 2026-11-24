@@ -24,7 +24,7 @@ Agents: yes. Surfaces: desktop.
 | Link | Opens |
 |---|---|
 | `agentmux://settings` | Settings |
-| `agentmux://settings/<section>?board=<slug>#<id>` | `appearance` (Appearance), `animations` (Animations), `window` (Window & Panes), `browser` (Browser), `terminal` (Terminal), `keyboard` (Keyboard shortcuts), `sounds` (Sounds), `notifications` (Notifications & Tray), `recording` (Recording), `devices` (Paired devices), `widgets` (Widgets), `agents` (Agents), `kanban` (Kanban), `advanced` (Advanced) |
+| `agentmux://settings/<section>?board=<slug>#<id>` | `appearance` (Appearance), `animations` (Animations), `window` (Window & Panes), `browser` (Browser), `terminal` (Terminal), `keyboard` (Keyboard shortcuts), `sounds` (Sounds), `notifications` (Notifications & Tray), `recording` (Recording), `devices` (Paired devices), `widgets` (Widgets), `agents` (Agents), `supervisor` (Supervisor), `kanban` (Kanban), `advanced` (Advanced) |
 
 ## Vault (`vault`)
 
@@ -64,6 +64,7 @@ Agents: yes. Surfaces: desktop.
 | `agentmux://kanban` | Kanban |
 | `agentmux://kanban/task/<task: int>` | Task |
 | `agentmux://kanban/board/<board: slug>` | Board |
+| `agentmux://kanban/pulls` | Open pull requests |
 | `agentmux://kanban/board/<board: slug>/task/<task: int>` | Task |
 
 ## Swarm (`swarm`)
@@ -101,14 +102,6 @@ Agents: yes. Surfaces: desktop.
 | Link | Opens |
 |---|---|
 | `agentmux://atlas` | Atlas |
-
-## Reviews (`reviews`)
-
-Agents: yes. Surfaces: desktop.
-
-| Link | Opens |
-|---|---|
-| `agentmux://reviews` | Reviews |
 
 ## Drone (`drone`)
 
@@ -230,3 +223,4 @@ Agents: an approved package only. Surfaces: desktop. Not yet available: this vie
 | Link | Is the same as |
 |---|---|
 | `agentmux://task/{task}` | `agentmux://kanban/task/{task}` |
+| `agentmux://reviews` | `agentmux://kanban/pulls` |

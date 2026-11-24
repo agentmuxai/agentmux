@@ -302,7 +302,7 @@ fn normalize_origin(origin: &str) -> Result<String, String> {
     if !only_origin || origin.contains(['?', '#', '@']) {
         return Err(SHAPE.into());
     }
-    Ok(url.origin().ascii_serialization())
+    agentmux_common::url_guard::origin_string(&url).ok_or_else(|| SHAPE.to_string())
 }
 
 /// Where this user's headless srv keeps its generated key: `<data dir>/srv-auth-key`, with the
@@ -348,6 +348,17 @@ pub(crate) fn publish_port(port: u16) {
     use std::io::Write;
     if let Err(e) = opts.open(&path).and_then(|mut f| f.write_all(format!("{port}\n").as_bytes())) {
         tracing::warn!(file = %path.display(), error = %e, "could not write the web port file; `agentmux-srv open` needs --port");
+        return;
+    }
+    // As a Windows service, the person who installed it reads the port as well as the key (`agentmux open` finds the server by it).
+    #[cfg(windows)]
+    {
+        let readers = agentmux_common::owner_only::key_readers();
+        if !readers.is_empty() {
+            if let Err(e) = agentmux_common::owner_only::restrict_to_user_and_readers(&path, &readers) {
+                tracing::warn!(file = %path.display(), error = %e, "could not let the person who installed the service read the web port file; `agentmux open` needs --port");
+            }
+        }
     }
 }
 
@@ -434,7 +445,8 @@ fn write_generated_key(dir: &Path) -> Result<(String, PathBuf), String> {
     // Windows has no mode bits: the file's own access list gives it to the user and the system only, whatever the
     // folder it is in lets others do.
     #[cfg(windows)]
-    agentmux_common::owner_only::restrict_to_user(&path).map_err(|e| format!("the auth key at {} could not be limited to you: {e}", path.display()))?;
+    agentmux_common::owner_only::restrict_to_user_and_readers(&path, &agentmux_common::owner_only::key_readers())
+        .map_err(|e| format!("the auth key at {} could not be limited to you: {e}", path.display()))?;
     Ok((key, path))
 }
 
@@ -521,6 +533,15 @@ mod tests {
         let client = tokio::net::TcpStream::connect(addr).await.unwrap();
         let (_server_side, _) = held.accept().await.unwrap();
         drop(client);
+    }
+
+    #[test]
+    fn an_origin_must_be_a_plain_http_or_https_one() {
+        assert_eq!(normalize_origin("HTTPS://Example.com:443/").unwrap(), "https://example.com");
+        let deep = format!("{}https://example.com/", "blob:".repeat(50_000));
+        for bad in ["blob:https://example.com/", "blob:blob:https://example.com/", deep.as_str()] {
+            assert!(normalize_origin(bad).is_err(), "{}", &bad[..bad.len().min(40)]);
+        }
     }
 
     #[test]

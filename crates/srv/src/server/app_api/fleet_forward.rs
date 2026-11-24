@@ -10,7 +10,10 @@
 //! labelled self-declared. The sending instance keeps what it is about to forward in memory
 //! (`vouch_for_forward`, called only by `fleet_broadcast_impl`, which only the operator's window
 //! reaches) and answers a confirmation once, for exactly that forward; a confirmation carries the
-//! body's SHA-256, never the words.
+//! body's SHA-256, never the words. An answer counts only when the listener that gives it is an
+//! AgentMux instance: one held by a process inside an agent's process tree, or one the system
+//! cannot identify, does not count and the forward is delivered as an ordinary agent message, with
+//! the audit saying which case it was.
 
 use agentmux_common::AUTH_KEY_HEADER;
 
@@ -20,6 +23,7 @@ use crate::backend::reactive::broadcast_turn_message;
 use super::fleet::{deliver_broadcast_turn, BroadcastForward, FLEET_BROADCAST_AUDIT_ACTION, NO_REGISTERED_AGENT};
 use super::AppState;
 use crate::server::agent_handlers::AgentTurnDeps;
+use crate::server::peer_process::{self, Descriptors, Listeners};
 
 /// The broadcasts this instance has sent on to another channel and not yet had confirmed.
 static VOUCHED_FORWARDS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<(String, String), VouchedForward>>> = std::sync::OnceLock::new();
@@ -66,33 +70,201 @@ pub(crate) fn confirm_forward(msg_id: &str, block_id: &str, body_sha256: &str, r
     }
 }
 
-/// Asks the other instances on this machine (the shared registry's loopback entries, never this one)
-/// whether one of them sent this forward. The channel that did answers yes, once.
-async fn forward_confirmed_by_a_sender(state: &AppState, block_id: &str, body: &str, msg_id: &str, recipients: usize) -> Option<String> {
-    let dir = crate::registry::resolve_shared_reactive_dir()?;
-    let mut asked = std::collections::HashSet::new();
-    for entry in crate::backend::reactive::registry::list_all_shared(&dir) {
-        let url = entry.local_url.clone();
-        let loopback = url.starts_with("http://127.0.0.1") || url.starts_with("http://localhost") || url.starts_with("http://[::1]");
-        if !loopback || url == state.local_web_url || !asked.insert(url.clone()) {
-            continue;
+/// Who holds the listener that would answer a confirmation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Standing {
+    /// The listener's processes (all of them), none inside an agent's process tree: an AgentMux instance. A listener whose
+    /// holder hides its descriptors (a packaged srv on Linux) counts when no process in any agent's tree hides its own.
+    Instance(Listeners),
+    /// A process of this agent's tree listens there: its answer does not count.
+    InsideAgent(String),
+    /// The lookup could not say (not supported, the table could not be read, the process tracker is not running, or the
+    /// address is not an IPv4 loopback address).
+    Unknown,
+}
+
+/// The standing of the listener at `url`. It reads the process table, so it runs off the async threads.
+async fn listener_standing(state: &AppState, url: &str) -> Standing {
+    let Some(addr) = loopback_addr(url) else { return Standing::Unknown };
+    #[cfg(test)]
+    if let Some(standing) = hook::standing_of(addr) {
+        return standing;
+    }
+    let state = state.clone();
+    tokio::task::spawn_blocking(move || listener_standing_now(&state, addr)).await.unwrap_or(Standing::Unknown)
+}
+
+fn listener_standing_now(state: &AppState, addr: std::net::SocketAddr) -> Standing {
+    let Some(found) = peer_process::listeners_at(addr) else { return Standing::Unknown };
+    let Some(registry) = crate::backend::process_tracker::registry::global() else { return Standing::Unknown };
+    standing_from(
+        found,
+        |pid| {
+            let block = registry.agent_block_holding(&crate::server::confirm_peer::with_ancestors(pid))?;
+            Some(crate::identity::resolver::block_agent_id(&state.mstore, &block).unwrap_or(block))
+        },
+        || registry.agent_member_pids().into_iter().map(|(_, pid)| pid).collect(),
+        peer_process::descriptors_of,
+    )
+}
+
+/// The standing of what was found listening. `agent_holding(pid)` names the agent whose process tree holds `pid`;
+/// `agent_pids` lists every process in every agent's tree; `descriptors(pid)` says whether a process's descriptors can be read.
+fn standing_from(
+    found: Listeners,
+    agent_holding: impl Fn(u32) -> Option<String>,
+    agent_pids: impl FnOnce() -> Vec<u32>,
+    descriptors: impl Fn(u32) -> Descriptors,
+) -> Standing {
+    match &found {
+        Listeners::Held(pids) => {
+            if let Some(agent) = pids.iter().find_map(|pid| agent_holding(*pid)) {
+                return Standing::InsideAgent(agent);
+            }
         }
-        let mut http = state
-            .http_client
-            .post(format!("{url}/agentmux/agent/broadcast/confirm"))
-            .timeout(std::time::Duration::from_secs(3))
-            // The digest, not the words: an instance asked here is not necessarily one of ours.
-            .json(&serde_json::json!({ "block_id": block_id, "body_sha256": body_digest(body), "msg_id": msg_id, "recipients": recipients }));
-        if !entry.auth_key.is_empty() {
-            http = http.header(AUTH_KEY_HEADER, entry.auth_key.as_str());
-        }
-        let Ok(resp) = http.send().await else { continue };
-        let Ok(answer) = resp.json::<serde_json::Value>().await else { continue };
-        if answer.get("confirmed").and_then(|v| v.as_bool()) == Some(true) {
-            return Some(url);
+        Listeners::Hidden(_) => {
+            // No readable process holds the socket, so its holder hides its descriptors. It is outside every agent's tree
+            // only if nothing in those trees hides its own: a hidden process of an agent could be the holder.
+            if agent_pids().into_iter().any(|pid| descriptors(pid) == Descriptors::Hidden) {
+                return Standing::Unknown;
+            }
         }
     }
-    None
+    Standing::Instance(found)
+}
+
+/// `http://127.0.0.1:<port>` (or `localhost`) as an address; anything else is not looked up.
+fn loopback_addr(url: &str) -> Option<std::net::SocketAddr> {
+    let parsed = reqwest::Url::parse(url).ok()?;
+    let ip = match parsed.host_str()? {
+        "localhost" => std::net::Ipv4Addr::LOCALHOST,
+        host => host.parse::<std::net::Ipv4Addr>().ok().filter(|ip| ip.is_loopback())?,
+    };
+    Some(std::net::SocketAddr::new(ip.into(), parsed.port_or_known_default()?))
+}
+
+/// The base URL a confirmation is sent to: the IPv4 loopback address of `url`, as a literal address.
+fn confirm_target(url: &str) -> Option<String> {
+    loopback_addr(url).map(|addr| format!("http://{addr}"))
+}
+
+/// What asking the other instances found, and so how the forward is delivered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ForwardProof {
+    /// An instance that is not inside an agent's process tree confirmed it sent this forward.
+    Confirmed,
+    /// No instance confirmed it.
+    NoInstanceConfirmed,
+    /// An answer came from a process inside this agent's process tree: it does not count.
+    AnsweredFromAgent(String),
+    /// The listener could not be identified, so its answer was not asked for or does not count.
+    ListenerNotIdentified,
+}
+
+impl ForwardProof {
+    /// How the audit says the forward was delivered.
+    fn how(&self) -> String {
+        match self {
+            ForwardProof::Confirmed => "forwarded from another channel on this machine".to_string(),
+            ForwardProof::NoInstanceConfirmed => "forward no other instance confirmed sending: delivered as an agent message, not as the person".to_string(),
+            ForwardProof::AnsweredFromAgent(agent) => format!("a listener inside agent:{agent}'s process tree answered, which does not count: delivered as an agent message, not as the person"),
+            ForwardProof::ListenerNotIdentified => "the instance that answered could not be identified: delivered as an agent message, not as the person".to_string(),
+        }
+    }
+
+    /// Which finding is kept when several instances were asked: an answer from inside an agent over an unidentified listener
+    /// over nothing.
+    fn weight(&self) -> u8 {
+        match self {
+            ForwardProof::Confirmed => 3,
+            ForwardProof::AnsweredFromAgent(_) => 2,
+            ForwardProof::ListenerNotIdentified => 1,
+            ForwardProof::NoInstanceConfirmed => 0,
+        }
+    }
+}
+
+/// Asks one instance whether it sent this forward. Its answer counts only when the listener that gives it is an AgentMux
+/// instance and not a process inside an agent's process tree: that is checked before the question is sent, and again on the
+/// answer (the same processes must still hold the listener).
+async fn ask_instance(state: &AppState, url: &str, auth_key: &str, block_id: &str, body: &str, msg_id: &str, recipients: usize) -> ForwardProof {
+    // The question goes to the very address that was looked up, never to a name that could resolve elsewhere (`localhost`
+    // can resolve to `::1`, which is not looked up).
+    let Some(target) = confirm_target(url) else { return ForwardProof::ListenerNotIdentified };
+    let before = match listener_standing(state, &target).await {
+        Standing::Instance(pids) => pids,
+        Standing::InsideAgent(agent) => return ForwardProof::AnsweredFromAgent(agent),
+        Standing::Unknown => return ForwardProof::ListenerNotIdentified,
+    };
+    let mut http = state
+        .http_client
+        .post(format!("{target}/agentmux/agent/broadcast/confirm"))
+        .timeout(std::time::Duration::from_secs(3))
+        // The digest, not the words: an instance asked here is not necessarily one of ours.
+        .json(&serde_json::json!({ "block_id": block_id, "body_sha256": body_digest(body), "msg_id": msg_id, "recipients": recipients }));
+    if !auth_key.is_empty() {
+        http = http.header(AUTH_KEY_HEADER, auth_key);
+    }
+    let Ok(resp) = http.send().await else { return ForwardProof::NoInstanceConfirmed };
+    let Ok(answer) = resp.json::<serde_json::Value>().await else { return ForwardProof::NoInstanceConfirmed };
+    if answer.get("confirmed").and_then(|v| v.as_bool()) != Some(true) {
+        return ForwardProof::NoInstanceConfirmed;
+    }
+    match listener_standing(state, &target).await {
+        Standing::Instance(after) if after == before => ForwardProof::Confirmed,
+        Standing::InsideAgent(agent) => ForwardProof::AnsweredFromAgent(agent),
+        _ => ForwardProof::ListenerNotIdentified,
+    }
+}
+
+/// The loopback address and key of every other instance on this machine that might have sent a forward: the shared agent
+/// registry's entries and the shared instance registry's live records, so a channel with no agent registered is asked too.
+async fn candidate_instances(state: &AppState) -> Vec<(String, String)> {
+    let agents: Vec<(String, String)> = crate::registry::resolve_shared_reactive_dir()
+        .map(|dir| crate::backend::reactive::registry::list_all_shared(&dir).into_iter().map(|e| (e.local_url, e.auth_key)).collect())
+        .unwrap_or_default();
+    // Under `cargo test` the instance records are not read: a test must not ask a developer's real instances.
+    #[cfg(not(test))]
+    let instances = tokio::task::spawn_blocking(|| {
+        crate::registry::resolve_shared_instances_dir().map(|dir| crate::backend::instance_registry::live_instances(&dir)).unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default();
+    #[cfg(test)]
+    let instances = Vec::new();
+    candidates_from(agents, instances, &state.local_web_url, std::process::id())
+}
+
+/// The addresses to ask, in the order found, each once: never this instance, and only loopback ones. An instance record is
+/// listed only while its srv lives; either source is a file any local process can write, so each address is looked at
+/// (who listens there) before it is asked.
+fn candidates_from(agents: Vec<(String, String)>, instances: Vec<crate::backend::instance_registry::InstanceRecord>, own_url: &str, own_pid: u32) -> Vec<(String, String)> {
+    let from_instances = instances.into_iter().filter(|r| r.pid != own_pid).map(|r| (r.local_url, r.auth_key));
+    let mut asked = std::collections::HashSet::new();
+    agents
+        .into_iter()
+        .chain(from_instances)
+        .filter(|(url, _)| {
+            let loopback = url.starts_with("http://127.0.0.1") || url.starts_with("http://localhost") || url.starts_with("http://[::1]");
+            loopback && url != own_url && asked.insert(url.clone())
+        })
+        .collect()
+}
+
+/// Asks the other instances on this machine (never this one) whether one of them sent this forward. The channel that did
+/// answers yes, once.
+async fn forward_confirmed_by_a_sender(state: &AppState, block_id: &str, body: &str, msg_id: &str, recipients: usize) -> ForwardProof {
+    let mut found = ForwardProof::NoInstanceConfirmed;
+    for (url, auth_key) in candidate_instances(state).await {
+        let proof = ask_instance(state, &url, &auth_key, block_id, body, msg_id, recipients).await;
+        if proof == ForwardProof::Confirmed {
+            return proof;
+        }
+        if proof.weight() > found.weight() {
+            found = proof;
+        }
+    }
+    found
 }
 
 /// The receiving end of `forward_broadcast_to_channel`. A forward that another instance of this
@@ -108,9 +280,12 @@ pub(crate) async fn deliver_forwarded_broadcast(
     msg_id: &str,
     recipients: usize,
 ) -> Result<(), String> {
-    let confirmed = state.reactive_handler.get_agent_by_block(block_id).is_some()
-        && forward_confirmed_by_a_sender(state, block_id, body, msg_id, recipients).await.is_some();
-    deliver_forward(state, block_id, body, msg_id, recipients, confirmed).await.1
+    let proof = if state.reactive_handler.get_agent_by_block(block_id).is_some() {
+        forward_confirmed_by_a_sender(state, block_id, body, msg_id, recipients).await
+    } else {
+        ForwardProof::NoInstanceConfirmed
+    };
+    deliver_forward(state, block_id, body, msg_id, recipients, proof).await.1
 }
 
 /// How a forwarded broadcast was delivered.
@@ -128,19 +303,18 @@ async fn deliver_forward(
     body: &str,
     msg_id: &str,
     recipients: usize,
-    confirmed: bool,
+    proof: ForwardProof,
 ) -> (ForwardedAs, Result<(), String>) {
-    let mut how = "forwarded from another channel on this machine";
+    let how = proof.how();
     let mut kind = ForwardedAs::Person;
     let result = match state.reactive_handler.get_agent_by_block(block_id) {
         None => Err(NO_REGISTERED_AGENT.to_string()),
-        Some(agent) if confirmed => {
+        Some(agent) if proof == ForwardProof::Confirmed => {
             let text = broadcast_turn_message(&agent.agent_id, recipients, msg_id, body);
             let deps = AgentTurnDeps::from_state(state);
             deliver_broadcast_turn(&deps, block_id.to_string(), text, MessageOrigin::broadcast()).await
         }
         Some(agent) => {
-            how = "forward no other instance confirmed sending: delivered as an agent message, not as the person";
             kind = ForwardedAs::AgentMessage;
             deliver_unconfirmed_forward(state, &agent.agent_id, body).await
         }
@@ -158,7 +332,7 @@ async fn deliver_forward(
         result.is_ok(),
         result.as_ref().err().map(String::as_str),
         msg_id,
-        Some(how),
+        Some(how.as_str()),
     );
     (kind, result)
 }
@@ -204,9 +378,202 @@ mod tests {
     async fn only_a_confirmed_forward_arrives_as_the_person() {
         let state = crate::server::tests::test_state();
         state.reactive_handler.register_agent("fwd-target", "blk-fwd-target", None).unwrap();
-        let (kind, _) = deliver_forward(&state, "blk-fwd-target", "hi", "m-2", 1, false).await;
+        let (kind, _) = deliver_forward(&state, "blk-fwd-target", "hi", "m-2", 1, ForwardProof::NoInstanceConfirmed).await;
         assert_eq!(kind, ForwardedAs::AgentMessage, "no instance vouched for it");
-        let (kind, _) = deliver_forward(&state, "blk-fwd-target", "hi", "m-2", 1, true).await;
+        let (kind, _) = deliver_forward(&state, "blk-fwd-target", "hi", "m-2", 1, ForwardProof::AnsweredFromAgent("some-agent".into())).await;
+        assert_eq!(kind, ForwardedAs::AgentMessage, "an answer from inside an agent's tree does not count");
+        let (kind, _) = deliver_forward(&state, "blk-fwd-target", "hi", "m-2", 1, ForwardProof::ListenerNotIdentified).await;
+        assert_eq!(kind, ForwardedAs::AgentMessage, "a failed lookup falls back to an ordinary message");
+        let (kind, _) = deliver_forward(&state, "blk-fwd-target", "hi", "m-2", 1, ForwardProof::Confirmed).await;
         assert_eq!(kind, ForwardedAs::Person);
+    }
+
+    #[test]
+    fn each_case_is_recorded_as_what_it_was() {
+        let hows: Vec<String> = [
+            ForwardProof::Confirmed,
+            ForwardProof::NoInstanceConfirmed,
+            ForwardProof::AnsweredFromAgent("some-agent".into()),
+            ForwardProof::ListenerNotIdentified,
+        ]
+        .iter()
+        .map(ForwardProof::how)
+        .collect();
+        for (i, a) in hows.iter().enumerate() {
+            for b in &hows[i + 1..] {
+                assert_ne!(a, b, "two cases are recorded the same way");
+            }
+        }
+        assert!(hows[2].contains("some-agent"), "the agent whose tree held the listener is named");
+    }
+
+    /// A listener that answers every confirmation "yes", and how many times it was asked.
+    async fn confirming_listener() -> (String, std::net::SocketAddr, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        let asked = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = asked.clone();
+        let app = axum::Router::new().route(
+            "/agentmux/agent/broadcast/confirm",
+            axum::routing::post(move || {
+                let count = count.clone();
+                async move {
+                    count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    axum::Json(serde_json::json!({ "confirmed": true }))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+        (format!("http://{addr}"), addr, asked)
+    }
+
+    #[tokio::test]
+    async fn an_answer_from_a_real_second_instance_counts() {
+        let state = crate::server::tests::test_state();
+        let (url, addr, asked) = confirming_listener().await;
+        hook::set(addr, Standing::Instance(Listeners::Held(vec![4242])));
+        assert_eq!(ask_instance(&state, &url, "", "blk", "hi", "m-3", 1).await, ForwardProof::Confirmed);
+        assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn an_answer_from_a_listener_inside_an_agents_tree_does_not_count() {
+        let state = crate::server::tests::test_state();
+        let (url, addr, asked) = confirming_listener().await;
+        hook::set(addr, Standing::InsideAgent("some-agent".into()));
+        assert_eq!(ask_instance(&state, &url, "", "blk", "hi", "m-4", 1).await, ForwardProof::AnsweredFromAgent("some-agent".into()));
+        assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 0, "the question is not even sent to it");
+    }
+
+    #[tokio::test]
+    async fn a_failed_lookup_does_not_count_and_nothing_is_sent() {
+        let state = crate::server::tests::test_state();
+        let (url, addr, asked) = confirming_listener().await;
+        hook::set(addr, Standing::Unknown);
+        assert_eq!(ask_instance(&state, &url, "", "blk", "hi", "m-5", 1).await, ForwardProof::ListenerNotIdentified);
+        assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn a_listener_that_changes_hands_during_the_question_does_not_count() {
+        let state = crate::server::tests::test_state();
+        let (url, addr, _) = confirming_listener().await;
+        hook::set_sequence(addr, vec![Standing::Instance(Listeners::Held(vec![1])), Standing::Instance(Listeners::Held(vec![2]))]);
+        assert_eq!(ask_instance(&state, &url, "", "blk", "hi", "m-6", 1).await, ForwardProof::ListenerNotIdentified);
+        hook::set_sequence(addr, vec![Standing::Instance(Listeners::Held(vec![1])), Standing::InsideAgent("some-agent".into())]);
+        assert_eq!(ask_instance(&state, &url, "", "blk", "hi", "m-6", 1).await, ForwardProof::AnsweredFromAgent("some-agent".into()));
+    }
+
+    fn record(channel: &str, url: &str, pid: u32) -> crate::backend::instance_registry::InstanceRecord {
+        crate::backend::instance_registry::InstanceRecord {
+            channel: channel.to_string(),
+            version: "0.0.0".to_string(),
+            pid,
+            local_url: url.to_string(),
+            auth_key: format!("key-{channel}"),
+            started_at: 1,
+            updated_at: 2,
+            agent_count: 0,
+        }
+    }
+
+    #[test]
+    fn a_channel_with_no_agent_registered_is_asked_through_its_instance_record() {
+        let agents = vec![("http://127.0.0.1:7001".to_string(), "agent-key".to_string())];
+        let instances = vec![record("with-agent", "http://127.0.0.1:7001", 11), record("no-agent", "http://127.0.0.1:7002", 12)];
+        let found = candidates_from(agents, instances, "http://127.0.0.1:7000", 10);
+        assert_eq!(
+            found,
+            vec![("http://127.0.0.1:7001".to_string(), "agent-key".to_string()), ("http://127.0.0.1:7002".to_string(), "key-no-agent".to_string())],
+            "the instance with no agent is asked, and an instance listed twice once"
+        );
+    }
+
+    #[test]
+    fn this_instance_and_addresses_off_this_machine_are_never_asked() {
+        let agents = vec![("http://203.0.113.9:7003".to_string(), "k".to_string()), ("http://127.0.0.1:7000".to_string(), "own".to_string())];
+        let instances = vec![record("self-by-pid", "http://127.0.0.1:7004", 10), record("self-by-url", "http://127.0.0.1:7000", 13)];
+        assert!(candidates_from(agents, instances, "http://127.0.0.1:7000", 10).is_empty());
+    }
+
+    fn nobody_holds(_: u32) -> Option<String> {
+        None
+    }
+
+    #[test]
+    fn a_listener_held_by_a_process_in_an_agents_tree_is_that_agents() {
+        let standing = standing_from(Listeners::Held(vec![10, 11]), |pid| (pid == 11).then(|| "some-agent".to_string()), Vec::new, |_| Descriptors::Readable);
+        assert_eq!(standing, Standing::InsideAgent("some-agent".into()));
+        let standing = standing_from(Listeners::Held(vec![10, 11]), nobody_holds, Vec::new, |_| Descriptors::Readable);
+        assert_eq!(standing, Standing::Instance(Listeners::Held(vec![10, 11])));
+    }
+
+    #[test]
+    fn a_hidden_listener_counts_only_when_nothing_in_an_agents_tree_is_hidden_too() {
+        let hidden = || Listeners::Hidden(vec![555]);
+        // A packaged srv hides its descriptors; the agents' processes can all be read: it is not inside any tree.
+        assert_eq!(standing_from(hidden(), nobody_holds, || vec![1, 2, 3], |_| Descriptors::Readable), Standing::Instance(hidden()));
+        // A process that is gone since the list was made does not make it uncertain.
+        assert_eq!(standing_from(hidden(), nobody_holds, || vec![1, 2], |pid| if pid == 2 { Descriptors::Gone } else { Descriptors::Readable }), Standing::Instance(hidden()));
+        // A process in an agent's tree that hides its descriptors could be the holder: it is not said to be an instance.
+        assert_eq!(standing_from(hidden(), nobody_holds, || vec![1, 2, 3], |pid| if pid == 2 { Descriptors::Hidden } else { Descriptors::Readable }), Standing::Unknown);
+        // The same listener is what is looked at twice: the sockets must be the same ones.
+        assert_ne!(Standing::Instance(Listeners::Hidden(vec![555])), Standing::Instance(Listeners::Hidden(vec![556])));
+    }
+
+    #[test]
+    fn the_question_goes_to_the_address_that_was_looked_up() {
+        assert_eq!(confirm_target("http://localhost:7380").as_deref(), Some("http://127.0.0.1:7380"), "localhost is not sent as a name");
+        assert_eq!(confirm_target("http://127.0.0.1:7380/").as_deref(), Some("http://127.0.0.1:7380"));
+        assert_eq!(confirm_target("http://[::1]:7380"), None, "an address that is not looked up is not asked");
+        assert_eq!(confirm_target("http://127.0.0.1.example.com:7380"), None, "a name that only starts like loopback is not asked");
+        assert_eq!(confirm_target("http://127.0.0.1@example.com:7380"), None, "an address in the user part is not the host");
+    }
+
+    #[tokio::test]
+    async fn a_localhost_entry_is_asked_at_the_looked_up_ipv4_address() {
+        let state = crate::server::tests::test_state();
+        let (_, addr, asked) = confirming_listener().await;
+        hook::set(addr, Standing::Instance(Listeners::Held(vec![4243])));
+        let url = format!("http://localhost:{}", addr.port());
+        assert_eq!(ask_instance(&state, &url, "", "blk", "hi", "m-7", 1).await, ForwardProof::Confirmed);
+        assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn only_an_ipv4_loopback_url_is_looked_up() {
+        assert_eq!(loopback_addr("http://127.0.0.1:7380"), Some("127.0.0.1:7380".parse().unwrap()));
+        assert_eq!(loopback_addr("http://localhost:7380"), Some("127.0.0.1:7380".parse().unwrap()));
+        assert_eq!(loopback_addr("http://[::1]:7380"), None);
+        assert_eq!(loopback_addr("http://203.0.113.9:7380"), None);
+        assert_eq!(loopback_addr("not a url"), None);
+    }
+}
+
+/// What a test makes the standing of a listener: no process lookup, no tracker.
+#[cfg(test)]
+mod hook {
+    use super::Standing;
+    use std::collections::{HashMap, VecDeque};
+    use std::net::SocketAddr;
+    use std::sync::Mutex;
+
+    static BY_ADDR: Mutex<Option<HashMap<SocketAddr, VecDeque<Standing>>>> = Mutex::new(None);
+
+    pub(super) fn set(addr: SocketAddr, standing: Standing) {
+        set_sequence(addr, vec![standing]);
+    }
+
+    /// The standing returned by each lookup in turn; the last one stays.
+    pub(super) fn set_sequence(addr: SocketAddr, standing: Vec<Standing>) {
+        BY_ADDR.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(addr, standing.into());
+    }
+
+    pub(super) fn standing_of(addr: SocketAddr) -> Option<Standing> {
+        let mut all = BY_ADDR.lock().unwrap_or_else(|e| e.into_inner());
+        let queue = all.as_mut()?.get_mut(&addr)?;
+        if queue.len() > 1 { queue.pop_front() } else { queue.front().cloned() }
     }
 }

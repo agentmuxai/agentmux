@@ -22,7 +22,7 @@ pub struct Other {
 }
 
 /// What a person reads for the principals a list can name by alias, and the SID of each; any other is its own SID.
-fn say_who(principal: &str) -> Other {
+pub fn say_who(principal: &str) -> Other {
     let (name, sid) = match principal {
         "WD" | "S-1-1-0" => ("Everyone", "S-1-1-0"),
         "BU" | "S-1-5-32-545" => ("all Users of this computer", "S-1-5-32-545"),
@@ -77,6 +77,50 @@ pub fn private_sddl(user_sid: &str, folder: bool) -> String {
     format!("D:P(A;{inherit};FA;;;{user_sid})(A;{inherit};FA;;;SY)")
 }
 
+/// [`private_sddl`] for a file that also names `readers` (SIDs) with read rights: the one file a service writes and a person
+/// who is not its account must read (the key `agentmux open` signs a browser in with).
+pub fn private_sddl_with_readers(user_sid: &str, folder: bool, readers: &[String]) -> String {
+    let mut out = private_sddl(user_sid, folder);
+    let inherit = if folder { "OICI" } else { "" };
+    for reader in readers {
+        out.push_str(&format!("(A;{inherit};{};;;{reader})", if folder { "0x1200a9" } else { "FR" }));
+    }
+    out
+}
+
+/// The accounts, besides the server's own, that may read its key file: the Windows service's installing person
+/// (`agentmux service install` names them, `service run` passes them on in this variable), who signs a browser in with
+/// `agentmux open` from their own terminal.
+pub const KEY_READERS_ENV: &str = "AGENTMUX_KEY_READER_SIDS";
+
+/// [`KEY_READERS_ENV`], as SIDs.
+pub fn key_readers() -> Vec<String> {
+    key_readers_of(std::env::var(KEY_READERS_ENV).ok().as_deref())
+}
+
+/// The accounts in a comma-separated value. Whitespace and empty entries are dropped, and so is anything that is not the SID of a
+/// person's own account, so a value another program put there cannot be spliced into an access list.
+fn key_readers_of(value: Option<&str>) -> Vec<String> {
+    value.unwrap_or("").split(',').map(str::trim).filter(|s| is_account_sid(s)).map(str::to_string).collect()
+}
+
+/// Is this the SID of one person's own account, as text: `S-1-5-21-<a>-<b>-<c>-<rid>` (a local or a domain account) or
+/// `S-1-12-1-<a>-<b>-<c>-<d>` (an account of an organisation's directory), every part digits only? A group, a well-known SID
+/// (Everyone, Authenticated Users, Users, Anonymous, the system, the administrators) and a built-in account that nobody signs in
+/// with (Guest and the like, relative ids 501 to 999) are not.
+pub fn is_account_sid(sid: &str) -> bool {
+    let digits = |s: &str| !s.is_empty() && s.len() <= 10 && s.chars().all(|c| c.is_ascii_digit());
+    if let Some(rest) = sid.strip_prefix("S-1-5-21-") {
+        let parts: Vec<&str> = rest.split('-').collect();
+        return parts.len() == 4 && parts.iter().all(|p| digits(p)) && parts[3].parse::<u64>().is_ok_and(|rid| rid == 500 || rid >= 1000);
+    }
+    if let Some(rest) = sid.strip_prefix("S-1-12-1-") {
+        let parts: Vec<&str> = rest.split('-').collect();
+        return parts.len() == 4 && parts.iter().all(|p| digits(p));
+    }
+    false
+}
+
 /// The words to a person whose folder lets others in: which folder, who, and the one command that fixes it: it stops what
 /// is inherited from above, takes away each of those named, and gives the folder to the person and the system.
 pub fn refusal(folder: &Path, others: &[Other], user: &str) -> String {
@@ -107,8 +151,8 @@ mod windows {
         GetNamedSecurityInfoW, SetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
     };
     use windows_sys::Win32::Security::{
-        GetSecurityDescriptorDacl, GetTokenInformation, TokenUser, DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
-        TOKEN_QUERY, TOKEN_USER,
+        GetSecurityDescriptorDacl, GetTokenInformation, LookupAccountNameW, TokenElevation, TokenUser, DACL_SECURITY_INFORMATION,
+        OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, TOKEN_ELEVATION, TOKEN_QUERY, TOKEN_USER,
     };
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
@@ -145,6 +189,72 @@ mod windows {
         }
     }
 
+    /// Is this process running with an administrator's full token (elevated)? A person who is an administrator but did not
+    /// choose "Run as administrator" is not.
+    pub fn is_elevated() -> bool {
+        // SAFETY: this process's own token, closed on every path; the buffer is the size the call asked for.
+        unsafe {
+            let mut token: HANDLE = null_mut();
+            if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+                return false;
+            }
+            let mut elevation = TOKEN_ELEVATION { TokenIsElevated: 0 };
+            let mut len = 0u32;
+            let got = GetTokenInformation(token, TokenElevation, (&mut elevation as *mut TOKEN_ELEVATION).cast(), std::mem::size_of::<TOKEN_ELEVATION>() as u32, &mut len) != 0;
+            CloseHandle(token);
+            got && elevation.TokenIsElevated != 0
+        }
+    }
+
+    /// Does Windows say this SID is a user account (and not a group, an alias or anything else)?
+    pub fn sid_is_user(sid: &str) -> bool {
+        use windows_sys::Win32::Security::Authorization::ConvertStringSidToSidW;
+        use windows_sys::Win32::Security::{LookupAccountSidW, SidTypeUser};
+        let text: Vec<u16> = sid.encode_utf16().chain(std::iter::once(0)).collect();
+        // SAFETY: a NUL-terminated text that outlives the calls; the SID Windows allocates is freed here on every path; the name
+        // buffers are the sizes the first call asked for.
+        unsafe {
+            let mut raw: *mut std::ffi::c_void = null_mut();
+            if ConvertStringSidToSidW(text.as_ptr(), &mut raw) == 0 || raw.is_null() {
+                return false;
+            }
+            let (mut name_len, mut domain_len, mut kind) = (0u32, 0u32, 0i32);
+            LookupAccountSidW(null_mut(), raw, null_mut(), &mut name_len, null_mut(), &mut domain_len, &mut kind);
+            let mut name = vec![0u16; name_len.max(1) as usize];
+            let mut domain = vec![0u16; domain_len.max(1) as usize];
+            let found = LookupAccountSidW(null_mut(), raw, name.as_mut_ptr(), &mut name_len, domain.as_mut_ptr(), &mut domain_len, &mut kind) != 0;
+            LocalFree(raw);
+            found && kind == SidTypeUser
+        }
+    }
+
+    /// The SID, as text, of an account Windows knows by name (`NT SERVICE\AgentMuxHeadless` is one once that service exists).
+    pub fn account_sid(account: &str) -> Result<String, String> {
+        let name: Vec<u16> = account.encode_utf16().chain(std::iter::once(0)).collect();
+        // SAFETY: NUL-terminated names that outlive the calls, buffers of the sizes the first call asked for, and a text
+        // that is freed here on every path.
+        unsafe {
+            let (mut sid_len, mut domain_len, mut kind) = (0u32, 0u32, 0i32);
+            LookupAccountNameW(null_mut(), name.as_ptr(), null_mut(), &mut sid_len, null_mut(), &mut domain_len, &mut kind);
+            if sid_len == 0 {
+                return Err(format!("Windows has no account named {account}"));
+            }
+            let mut sid = vec![0u64; (sid_len as usize).div_ceil(8)];
+            let mut domain = vec![0u16; domain_len.max(1) as usize];
+            if LookupAccountNameW(null_mut(), name.as_ptr(), sid.as_mut_ptr().cast(), &mut sid_len, domain.as_mut_ptr(), &mut domain_len, &mut kind) == 0 {
+                return Err(format!("Windows has no account named {account}"));
+            }
+            let mut text: *mut u16 = null_mut();
+            if ConvertSidToStringSidW(sid.as_mut_ptr().cast(), &mut text) == 0 || text.is_null() {
+                return Err(format!("cannot write the SID of {account}"));
+            }
+            let n = (0..).take_while(|&i| *text.add(i) != 0).count();
+            let out = String::from_utf16_lossy(std::slice::from_raw_parts(text, n));
+            LocalFree(text.cast());
+            Ok(out)
+        }
+    }
+
     /// The access list of a file or folder, as SDDL text.
     pub fn sddl_of(path: &Path) -> Result<String, String> {
         let name = wide(path);
@@ -172,8 +282,18 @@ mod windows {
     /// Give a file or folder an access list of the user and the system only, with nothing inherited from above; a folder's
     /// list is what everything made inside it inherits.
     pub fn restrict_to_user(path: &Path) -> Result<(), String> {
+        restrict_to_user_and_readers(path, &[])
+    }
+
+    /// [`restrict_to_user`], and the accounts in `readers` (SIDs) may read it too.
+    pub fn restrict_to_user_and_readers(path: &Path, readers: &[String]) -> Result<(), String> {
         let user = user_sid().ok_or_else(|| "cannot find your Windows account".to_string())?;
-        let sddl: Vec<u16> = super::private_sddl(&user, path.is_dir()).encode_utf16().chain(std::iter::once(0)).collect();
+        apply_sddl(path, &super::private_sddl_with_readers(&user, path.is_dir(), readers))
+    }
+
+    /// Replace a file or folder's access list with `sddl` (its DACL part), protected: nothing is inherited from above.
+    pub fn apply_sddl(path: &Path, sddl: &str) -> Result<(), String> {
+        let sddl: Vec<u16> = sddl.encode_utf16().chain(std::iter::once(0)).collect();
         let mut name = wide(path);
         let mut sd: PSECURITY_DESCRIPTOR = null_mut();
         // SAFETY: both strings are NUL-terminated and outlive the calls; the descriptor is LocalAlloc'd and freed on every path; the
@@ -192,10 +312,138 @@ mod windows {
             };
             LocalFree(sd);
             if code != 0 {
-                return Err(format!("cannot limit {} to you (Windows error {code})", path.display()));
+                return Err(format!("cannot set who may open {} (Windows error {code})", path.display()));
             }
         }
         Ok(())
+    }
+
+    /// Make a folder that has the access list `sddl` from the moment it exists, so nobody can put anything in it before the
+    /// list is set. Fails if the folder is already there (check `ErrorKind::AlreadyExists`).
+    pub fn create_dir_with_sddl(path: &Path, sddl: &str) -> std::io::Result<()> {
+        use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
+        use windows_sys::Win32::Storage::FileSystem::CreateDirectoryW;
+        let text: Vec<u16> = sddl.encode_utf16().chain(std::iter::once(0)).collect();
+        let name = wide(path);
+        let mut sd: PSECURITY_DESCRIPTOR = null_mut();
+        // SAFETY: NUL-terminated strings that outlive the calls; the descriptor is LocalAlloc'd and freed on every path, after the
+        // call that reads it.
+        unsafe {
+            if ConvertStringSecurityDescriptorToSecurityDescriptorW(text.as_ptr(), SDDL_REVISION_1, &mut sd, null_mut()) == 0 || sd.is_null() {
+                return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "cannot make the access list"));
+            }
+            let attributes = SECURITY_ATTRIBUTES { nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32, lpSecurityDescriptor: sd, bInheritHandle: 0 };
+            let made = CreateDirectoryW(name.as_ptr(), &attributes) != 0;
+            let error = std::io::Error::last_os_error();
+            LocalFree(sd);
+            if made { Ok(()) } else { Err(error) }
+        }
+    }
+
+    /// Turn on a privilege this process's token has (an administrator's does, switched off).
+    fn enable_privilege(name: &str) -> bool {
+        use windows_sys::Win32::Security::{AdjustTokenPrivileges, LookupPrivilegeValueW, LUID_AND_ATTRIBUTES, SE_PRIVILEGE_ENABLED, TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES};
+        let name: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+        // SAFETY: this process's own token, closed on every path; a NUL-terminated name that outlives the call.
+        unsafe {
+            let mut token: HANDLE = null_mut();
+            if OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &mut token) == 0 {
+                return false;
+            }
+            let mut privileges = TOKEN_PRIVILEGES { PrivilegeCount: 1, Privileges: [LUID_AND_ATTRIBUTES { Luid: std::mem::zeroed(), Attributes: SE_PRIVILEGE_ENABLED }] };
+            let found = LookupPrivilegeValueW(null_mut(), name.as_ptr(), &mut privileges.Privileges[0].Luid) != 0;
+            let done = found && AdjustTokenPrivileges(token, 0, &privileges, 0, null_mut(), null_mut()) != 0;
+            CloseHandle(token);
+            done
+        }
+    }
+
+    /// Make the administrators the owner of a file or folder and give them (and the system) full control of it, whatever its
+    /// list said before: what an administrator does to delete what a service made for its own account alone. Needs an elevated
+    /// token (it uses the right to take ownership and to restore).
+    ///
+    /// The change is made through a handle opened on the entry itself, never on what a link points to: `Ok(false)` says the entry
+    /// is a link (a junction or a symbolic link) and nothing was changed, so what an account that can still write there swaps in
+    /// between a check and this call is not followed.
+    pub fn take_over(path: &Path) -> Result<bool, String> {
+        use std::os::windows::io::FromRawHandle;
+        use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+        use windows_sys::Win32::Security::Authorization::SetSecurityInfo;
+        use windows_sys::Win32::Security::GetSecurityDescriptorOwner;
+        use windows_sys::Win32::Storage::FileSystem::{
+            CreateFileW, GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+            FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
+        };
+        let _ = enable_privilege("SeTakeOwnershipPrivilege");
+        let _ = enable_privilege("SeRestorePrivilege");
+        let sddl: Vec<u16> = "O:BAD:P(A;OICI;FA;;;BA)(A;OICI;FA;;;SY)".encode_utf16().chain(std::iter::once(0)).collect();
+        let name = wide(path);
+        let mut sd: PSECURITY_DESCRIPTOR = null_mut();
+        // SAFETY: NUL-terminated strings that outlive the calls; the handle is owned by a `File` (closed on every path); the
+        // descriptor is LocalAlloc'd, read only before it is freed, and freed on every path.
+        unsafe {
+            let handle = CreateFileW(
+                name.as_ptr(),
+                READ_CONTROL | WRITE_OWNER | WRITE_DAC,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                null_mut(),
+                OPEN_EXISTING,
+                FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+                null_mut(),
+            );
+            if handle == INVALID_HANDLE_VALUE {
+                return Err(format!("cannot open {}: {}", path.display(), std::io::Error::last_os_error()));
+            }
+            let held = std::fs::File::from_raw_handle(handle as _);
+            let mut info: BY_HANDLE_FILE_INFORMATION = std::mem::zeroed();
+            if GetFileInformationByHandle(handle, &mut info) == 0 {
+                return Err(format!("cannot read {}: {}", path.display(), std::io::Error::last_os_error()));
+            }
+            if info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+                return Ok(false);
+            }
+            if ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.as_ptr(), SDDL_REVISION_1, &mut sd, null_mut()) == 0 || sd.is_null() {
+                return Err("cannot make the access list".to_string());
+            }
+            let (mut owner, mut defaulted) = (null_mut(), 0i32);
+            let (mut present, mut dacl) = (0i32, null_mut());
+            let got = GetSecurityDescriptorOwner(sd, &mut owner, &mut defaulted) != 0 && !owner.is_null() && GetSecurityDescriptorDacl(sd, &mut present, &mut dacl, &mut defaulted) != 0 && present != 0;
+            let code = if got {
+                SetSecurityInfo(handle, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION, owner, null_mut(), dacl, null_mut())
+            } else {
+                1
+            };
+            LocalFree(sd);
+            drop(held);
+            if code != 0 {
+                return Err(format!("cannot take over {} (Windows error {code})", path.display()));
+            }
+        }
+        Ok(true)
+    }
+
+    /// The owner and the access list of a file or folder, as SDDL text (`O:...D:...`).
+    pub fn owner_and_sddl_of(path: &Path) -> Result<String, String> {
+        let name = wide(path);
+        let mut sd: PSECURITY_DESCRIPTOR = null_mut();
+        // SAFETY: as `sddl_of`: a NUL-terminated name, and a descriptor and a text that are freed here on every path.
+        unsafe {
+            let info = OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
+            let code = GetNamedSecurityInfoW(name.as_ptr(), SE_FILE_OBJECT, info, null_mut(), null_mut(), null_mut(), null_mut(), &mut sd);
+            if code != 0 || sd.is_null() {
+                return Err(format!("cannot read who owns {} (Windows error {code})", path.display()));
+            }
+            let mut text: *mut u16 = null_mut();
+            let ok = ConvertSecurityDescriptorToStringSecurityDescriptorW(sd, SDDL_REVISION_1, info, &mut text, null_mut());
+            LocalFree(sd);
+            if ok == 0 || text.is_null() {
+                return Err(format!("cannot read who owns {}", path.display()));
+            }
+            let n = (0..).take_while(|&i| *text.add(i) != 0).count();
+            let out = String::from_utf16_lossy(std::slice::from_raw_parts(text, n));
+            LocalFree(text.cast());
+            Ok(out)
+        }
     }
 
     /// Who besides the user, the system and the administrators may open this file or folder.
@@ -206,13 +454,58 @@ mod windows {
 }
 
 #[cfg(windows)]
-pub use windows::{others_who_can_open, restrict_to_user, sddl_of, user_sid};
+pub use windows::{account_sid, apply_sddl, create_dir_with_sddl, is_elevated, sid_is_user, take_over, others_who_can_open, owner_and_sddl_of, restrict_to_user, restrict_to_user_and_readers, sddl_of, user_sid};
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const USER: &str = "S-1-5-21-1111-2222-3333-1001";
+
+    #[test]
+    fn only_sids_are_taken_as_the_accounts_that_may_read_the_key() {
+        assert!(key_readers_of(None).is_empty());
+        assert_eq!(key_readers_of(Some(" S-1-5-21-1-2-3-1001 ,S-1-5-21-1-2-3-500,,")), vec!["S-1-5-21-1-2-3-1001", "S-1-5-21-1-2-3-500"]);
+        // A name, a trailing entry, or anything else that is not a SID is dropped.
+        assert!(key_readers_of(Some("Everyone,(A;;FA;;;WD),S-1-1-0)x,S-1-5-21-1;FA")).is_empty());
+    }
+
+    #[test]
+    fn only_the_sid_of_a_persons_own_account_is_one_that_may_read_the_key() {
+        for ok in ["S-1-5-21-3904905834-1961560920-3170238172-1001", "S-1-5-21-1-2-3-500", "S-1-5-21-1-2-3-1000", "S-1-12-1-1-2-3-4"] {
+            assert!(is_account_sid(ok), "{ok}");
+        }
+        for (bad, what) in [
+            ("S-1-1-0", "Everyone"),
+            ("S-1-5-11", "Authenticated Users"),
+            ("S-1-5-32-545", "Users"),
+            ("S-1-5-32-544", "the administrators"),
+            ("S-1-5-7", "Anonymous"),
+            ("S-1-5-18", "the system"),
+            ("S-1-5-4", "interactive users"),
+            ("S-1-5-21-1-2-3-513", "Domain Users"),
+            ("S-1-5-21-1-2-3-512", "Domain Admins"),
+            ("S-1-5-21-1-2-3-501", "Guest"),
+            ("S-1-5-21-1-2-3", "a domain, no account"),
+            ("S-1-5-21-1-2-3-1001-5", "too many parts"),
+            ("S-1-5-21-1-2-3-10a", "not digits"),
+            ("S-1-5-21-1-2-3-+1001", "a sign"),
+            ("S-1-12-1-1-2-3", "too few parts"),
+            ("S-1-5-80-1-2-3-4-5", "a service"),
+            ("Everyone", "a name"),
+            ("", "nothing"),
+        ] {
+            assert!(!is_account_sid(bad), "{what}: {bad}");
+        }
+    }
+
+    #[test]
+    fn a_file_list_can_name_readers_and_a_folder_list_gives_them_read_and_traverse() {
+        let readers = vec!["S-1-5-21-9-9-9-1001".to_string()];
+        assert_eq!(private_sddl_with_readers(USER, false, &readers), format!("D:P(A;;FA;;;{USER})(A;;FA;;;SY)(A;;FR;;;S-1-5-21-9-9-9-1001)"));
+        assert_eq!(private_sddl_with_readers(USER, true, &readers), format!("D:P(A;OICI;FA;;;{USER})(A;OICI;FA;;;SY)(A;OICI;0x1200a9;;;S-1-5-21-9-9-9-1001)"));
+        assert_eq!(private_sddl_with_readers(USER, false, &[]), private_sddl(USER, false));
+    }
 
     #[test]
     fn a_default_profile_list_has_nobody_else() {

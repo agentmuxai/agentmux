@@ -12,6 +12,8 @@
         { "link": "agentmux://connectors/accounts#github", "ok": { "view": "connectors", "place": "section", "values": { "section": "accounts" }, "params": {}, "anchor": "github" } },
         { "link": "agentmux://memory/personal?agent=sorrel", "ok": { "view": "memory", "place": "section", "values": { "section": "personal" }, "params": { "agent": "sorrel" }, "anchor": null } },
         { "link": "agentmux://kanban/task/48139", "ok": { "view": "kanban", "place": "task", "values": { "task": 48139 }, "params": {}, "anchor": null } },
+        { "link": "agentmux://kanban/pulls", "ok": { "view": "kanban", "place": "pulls", "values": {}, "params": {}, "anchor": null } },
+        { "link": "agentmux://reviews", "canonical": "agentmux://kanban/pulls", "ok": { "view": "kanban", "place": "pulls", "values": {}, "params": {}, "anchor": null } },
         { "link": "agentmux://task/48139", "canonical": "agentmux://kanban/task/48139", "ok": { "view": "kanban", "place": "task", "values": { "task": 48139 }, "params": {}, "anchor": null } },
         { "link": "agentmux://kanban/board/work", "ok": { "view": "kanban", "place": "board", "values": { "board": "work" }, "params": {}, "anchor": null } },
         { "link": "agentmux://kanban/board/work/task/12", "ok": { "view": "kanban", "place": "board-task", "values": { "board": "work", "task": 12 }, "params": {}, "anchor": null } },

@@ -49,6 +49,7 @@ pub mod inject;
 pub mod oauth_probe;
 pub mod provider;
 pub mod secret;
+mod sign_in_withhold;
 
 pub use errors::SpawnGateError;
 pub use inject::block_agent_id;
@@ -58,5 +59,5 @@ pub use inject::{
 };
 pub use effective_links::effective_identity_links;
 pub use cli_sign_in_files::signed_in as cli_file_signed_in;
-pub use oauth_probe::{claude_token_expiry_ms, oauth_status, probe_oauth_status, OAuthProbeStatus};
+pub use oauth_probe::{claude_token_expiry_ms, oauth_status, probe_oauth_status, release_sign_in, sign_in_file, OAuthProbeStatus};
 pub use provider::{provider_class, ProviderClass};

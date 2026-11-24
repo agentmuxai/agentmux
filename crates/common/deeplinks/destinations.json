@@ -56,6 +56,7 @@
                                 { "id": "devices", "label": "settings.sections.devices" },
                                 { "id": "widgets", "label": "settings.sections.widgets" },
                                 { "id": "agents", "label": "settings.sections.agents" },
+                                { "id": "supervisor", "label": "settings.sections.supervisor" },
                                 { "id": "kanban", "label": "settings.sections.kanban" },
                                 { "id": "advanced", "label": "settings.sections.advanced" }
                             ]
@@ -198,6 +199,11 @@
                     "segments": ["board", { "var": "board", "kind": "slug" }]
                 },
                 {
+                    "id": "pulls",
+                    "label": "deeplinks.places.kanban.pulls",
+                    "segments": ["pulls"]
+                },
+                {
                     "id": "board-task",
                     "label": "deeplinks.places.kanban.task",
                     "segments": ["board", { "var": "board", "kind": "slug" }, "task", { "var": "task", "kind": "int", "min": 1, "max": 999999999 }]
@@ -262,7 +268,6 @@
         },
         { "id": "history", "label": "deeplinks.views.history", "icon": "clock-rotate-left", "build": 1, "effect": "none", "sensitivity": "public", "agent": "yes", "surfaces": ["desktop"], "command": "open:history", "group": "views", "places": [] },
         { "id": "atlas", "label": "deeplinks.views.atlas", "icon": "map", "build": 1, "effect": "none", "sensitivity": "public", "agent": "yes", "surfaces": ["desktop"], "group": "views", "places": [] },
-        { "id": "reviews", "label": "deeplinks.views.reviews", "icon": "code-pull-request", "build": 1, "effect": "none", "sensitivity": "public", "agent": "yes", "surfaces": ["desktop"], "group": "views", "places": [] },
         { "id": "drone", "label": "deeplinks.views.drone", "icon": "diagram-project", "build": 1, "effect": "none", "sensitivity": "public", "agent": "yes", "surfaces": ["desktop"], "group": "views", "places": [] },
         { "id": "toolchain", "label": "deeplinks.views.toolchain", "icon": "wrench", "build": 1, "effect": "none", "sensitivity": "public", "agent": "yes", "surfaces": ["desktop"], "group": "views", "places": [] },
         { "id": "tower", "label": "deeplinks.views.tower", "icon": "tower-observation", "build": 1, "effect": "none", "sensitivity": "public", "agent": "yes", "surfaces": ["desktop"], "group": "views", "places": [] },
@@ -416,7 +421,8 @@
         }
     ],
     "aliases": [
-        { "from": ["task", "{task}"], "to": ["kanban", "task", "{task}"] }
+        { "from": ["task", "{task}"], "to": ["kanban", "task", "{task}"] },
+        { "from": ["reviews"], "to": ["kanban", "pulls"] }
     ],
     "unlinked": [
         { "view": "identity", "reason": "retired: its parts live in Connectors and the agent pane" },

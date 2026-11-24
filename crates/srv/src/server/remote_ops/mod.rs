@@ -30,6 +30,7 @@ mod upgrade_op;
 mod upgrade_watch;
 pub(crate) mod send;
 pub(crate) mod signin_ops;
+mod sync_ops;
 pub(crate) mod tasks;
 
 use futures_util::future::BoxFuture;
@@ -196,6 +197,15 @@ pub(crate) fn lookup(op: &str) -> Option<Op> {
         // The listing is the ids and content hashes of the person's private instructions: a peer
         // known only by its first-seen pin does not see it.
         "memory.global.list" => Op::read_personal(|state, caller, params| Box::pin(memory::list(state, caller, params))),
+        // A collection's membership and records, between a person's own machines: write ops (a certificate from an
+        // approved install), answered only by the install that holds the computer's sync lock and only to a member of the
+        // collection named. A push and a membership offer carry a batch, so they take more params than the default.
+        "sync.hello" => Op::write(|state, caller, params| Box::pin(sync_ops::hello(state, caller, params))),
+        "sync.pull" => Op::write(|state, caller, params| Box::pin(sync_ops::pull(state, caller, params))),
+        "sync.push" => Op::write(|state, caller, params| Box::pin(sync_ops::push(state, caller, params))).with_max_params(crate::backend::user_sync::ops::MAX_WIRE_BYTES),
+        "sync.members" => Op::write(|state, caller, params| Box::pin(sync_ops::members(state, caller, params))).with_max_params(crate::backend::user_sync::ops::MAX_WIRE_BYTES),
+        "sync.join" => Op::write(|state, caller, params| Box::pin(sync_ops::join(state, caller, params))),
+        "sync.keys" => Op::write(|state, caller, params| Box::pin(sync_ops::keys(state, caller, params))),
         #[cfg(test)]
         "test.big" => Op::read(|_, _, params| Box::pin(async move { Ok(serde_json::json!({ "bytes": params.to_string().len() })) })).with_max_params(1_200_000),
         // Sizes of build folders and older versions, with a time budget: a read that deletes nothing.
