@@ -9,6 +9,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const { opened } = vi.hoisted(() => ({ opened: vi.fn(async () => undefined) }));
 vi.mock("@/app/store/misc-utils", () => ({ openLink: opened }));
+const { connectors } = vi.hoisted(() => ({ connectors: vi.fn(async () => undefined) }));
+vi.mock("@/app/store/section-panes", () => ({ openConnectors: connectors }));
 
 import { DrawerPrs, prChip, prFlow, PrFlowLine, prsOf, prStateWords, PrChip, WaitingOnLine } from "./kanban-prs";
 import type { KanbanActResult, KanbanCardFields, KanbanCardPr, KanbanPrRollup } from "./kanban-types";
@@ -208,6 +210,17 @@ describe("the drawer's moves on a card's pull requests", () => {
     it("marks a pull request srv does not follow (a private repository)", () => {
         const { getByText } = render(() => <DrawerPrs card={card([pr(12, { followed: false }), pr(11)])} now={NOW} act={act} />);
         expect(getByText("Not followed")).toBeTruthy();
+    });
+
+    it("offers Connect GitHub beside Not followed where the drawer can act, and opens the Accounts pane", () => {
+        const { getByText } = render(() => <DrawerPrs card={card([pr(12, { followed: false }), pr(11)])} now={NOW} act={act} />);
+        fireEvent.click(getByText("Connect GitHub"));
+        expect(connectors).toHaveBeenCalledWith("accounts");
+    });
+
+    it("offers no action where the card is only shown", () => {
+        const shown = render(() => <DrawerPrs card={card([pr(12, { followed: false })])} now={NOW} />);
+        expect(shown.queryByText("Connect GitHub")).toBeNull();
     });
 
     it("marks the only pull request of a card too, with or without the actions", () => {

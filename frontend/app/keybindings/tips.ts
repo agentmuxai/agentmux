@@ -479,7 +479,15 @@ export const TIPS: TipRow[] = [
         gesture: "mod+key:L / mod+key:R / alt+key:← / alt+key:→",
         where: "in a browser pane",
         label: "Address bar / reload / back / forward",
-        source: { file: "crates/cef/src/client/handlers.rs", anchor: "Alt+Left — back" },
+        source: { file: "crates/cef/src/client/pane_shortcuts.rs", anchor: "Alt+Left — back" },
+    },
+    {
+        id: "browser:tabs",
+        area: "Browser",
+        gesture: "mod+key:T / mod+key:W",
+        where: "in a browser pane",
+        label: "New tab / close this tab (the pane's last tab stays)",
+        source: { file: "crates/cef/src/client/pane_shortcuts.rs", anchor: "Ctrl+W — close this tab" },
     },
     {
         id: "browser:sidebutton",

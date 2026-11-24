@@ -27,7 +27,8 @@ export class TypeAhead {
         const from = this.buffer.length === 1 || cycling ? start + 1 : Math.max(start, 0);
         for (let k = 0; k < order.length; k++) {
             const name = order[(from + k) % order.length];
-            if (name.toLowerCase().startsWith(prefix)) return name;
+            // A row of the tree, of a find or of a later column is named by its path: it is its own name that is typed.
+            if (name.slice(name.lastIndexOf("/") + 1).toLowerCase().startsWith(prefix)) return name;
         }
         return null;
     }

@@ -170,20 +170,20 @@ pub fn set_epoch(conn: &Connection, id: &str, epoch: u32, ended: &Vector) -> rus
 
 /// Sets the collection's key epoch and the ends of the epochs before it to exactly what the membership chain says now,
 /// in either direction: a removal that lost a fork to another entry leaves no epoch and no ends behind. `cuts` holds,
-/// for each epoch left, what each remaining member had written at it.
+/// for each epoch left, what each remaining member had written at it. Several statements: the caller makes them one
+/// (`ops::sync_epoch` and `ops::store_chain` do), so a failure part-way leaves nothing changed.
 pub fn reset_epochs(conn: &Connection, id: &str, epoch: u32, cuts: &[(u32, &Vector)]) -> rusqlite::Result<()> {
-    let tx = conn.unchecked_transaction()?;
-    tx.execute("DELETE FROM db_sync_epoch_cut WHERE collection = ?1", params![id])?;
+    conn.execute("DELETE FROM db_sync_epoch_cut WHERE collection = ?1", params![id])?;
     for (left, ended) in cuts {
         for (origin, last) in ended.iter() {
-            tx.execute(
+            conn.execute(
                 "INSERT INTO db_sync_epoch_cut (collection, epoch, origin, last_seq) VALUES (?1, ?2, ?3, ?4)",
                 params![id, left, origin, *last as i64],
             )?;
         }
     }
-    tx.execute("UPDATE db_sync_collections SET epoch = ?2 WHERE id = ?1", params![id, epoch])?;
-    tx.commit()
+    conn.execute("UPDATE db_sync_collections SET epoch = ?2 WHERE id = ?1", params![id, epoch])?;
+    Ok(())
 }
 
 /// The last sequence its origin had written at the epoch `h` is at, as the membership change that ended the epoch
@@ -277,6 +277,18 @@ pub fn current(conn: &Connection, collection: &str, record: &str) -> rusqlite::R
         record_of,
     )
     .optional()
+}
+
+/// Whether a collection other than `collection` holds `record` as a live record (not a tombstone): a record the log has
+/// moved to another collection is live in the new one while the old one ends it.
+pub fn live_elsewhere(conn: &Connection, collection: &str, record: &str) -> rusqlite::Result<bool> {
+    let n: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM db_sync_state s JOIN db_sync_log l ON l.collection = s.collection AND l.origin = s.origin AND l.seq = s.seq
+         WHERE s.collection != ?1 AND s.record = ?2 AND l.tombstone = 0",
+        params![collection, record],
+        |r| r.get(0),
+    )?;
+    Ok(n > 0)
 }
 
 /// The highest version this store holds in a collection, from any origin.

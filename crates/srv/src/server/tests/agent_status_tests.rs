@@ -139,6 +139,40 @@ async fn a_second_line_replaces_the_first_and_a_long_one_is_cut_and_says_so() {
 }
 
 #[tokio::test]
+async fn a_waiting_line_says_how_long_the_quiet_watch_leaves_the_agent_alone() {
+    let (state, token, block) = state_with_agent("ps-waiting", true).await;
+    let (status, body) = post(&state, &token, "/api/v1/agent/status", json!({ "line": "Waiting for the build", "state": "waiting", "until_minutes": 45 })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let d = kept(&state, &block).unwrap();
+    let meta = state.mstore.must_get::<Block>(&block).unwrap().meta;
+    assert_eq!(live_phrase::waiting_until(&meta), Some(d.at_ms + 45 * 60_000));
+    assert_eq!(body["quiet_watch_paused_until"].as_u64(), Some(d.at_ms + 45 * 60_000));
+    // A waiting line with no time pauses it for half an hour; a new line of another state ends the pause.
+    let (_, body) = post(&state, &token, "/api/v1/agent/status", json!({ "line": "Waiting for an answer", "state": "waiting" })).await;
+    let d = kept(&state, &block).unwrap();
+    assert_eq!(body["quiet_watch_paused_until"].as_u64(), Some(d.at_ms + 30 * 60_000));
+    post(&state, &token, "/api/v1/agent/status", json!({ "line": "Fixing the build", "state": "working" })).await;
+    let meta = state.mstore.must_get::<Block>(&block).unwrap().meta;
+    assert_eq!(live_phrase::waiting_until(&meta), None);
+}
+
+#[tokio::test]
+async fn until_minutes_goes_with_waiting_and_is_one_to_240() {
+    let (state, token, block) = state_with_agent("ps-until", true).await;
+    for (body, wanted) in [
+        (json!({ "line": "Fixing a bug", "state": "working", "until_minutes": 10 }), "goes with state"),
+        (json!({ "line": "Fixing a bug", "until_minutes": 10 }), "goes with state"),
+        (json!({ "line": "Waiting for the build", "state": "waiting", "until_minutes": 0 }), "1 to 240"),
+        (json!({ "line": "Waiting for the build", "state": "waiting", "until_minutes": 241 }), "1 to 240"),
+    ] {
+        let (status, answer) = post(&state, &token, "/api/v1/agent/status", body.clone()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(answer["error"].as_str().unwrap().contains(wanted), "{body}: {answer}");
+    }
+    assert_eq!(kept(&state, &block), None, "a refused call keeps nothing");
+}
+
+#[tokio::test]
 async fn an_agent_without_a_pane_here_cannot_set_a_line() {
     let (state, token, _block) = state_with_agent("ps-nopane", false).await;
     let (status, body) = post(&state, &token, "/api/v1/agent/status", json!({ "line": "Fixing a bug" })).await;

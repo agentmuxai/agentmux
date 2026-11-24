@@ -463,6 +463,8 @@ pub const COMMAND_GET_DRONE_PAYLOAD_SCHEMA: &str = "getdronepayloadschema";
 pub const COMMAND_RESOLVE_DRONE_RUN: &str = "resolvedronerun";
 pub const COMMAND_RESUME_DRONE_WAIT: &str = "resumedronewait";
 pub const COMMAND_REPLAY_DRONE_RUN: &str = "replaydronerun";
+pub const COMMAND_GET_DRONE_ACCESS: &str = "getdroneaccess";
+pub const COMMAND_SET_DRONE_AGENTS: &str = "setdroneagents";
 
 // MuxAPI Tier 1 — agent lifecycle commands
 pub const COMMAND_AGENT_OPEN: &str = "agent.open";

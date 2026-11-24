@@ -564,6 +564,11 @@ pub enum HostCommand {
     /// Forget `label`'s HWND; returns it via `DispatchOutput::evicted_window_hwnd`.
     #[cfg(any(target_os = "windows", test))]
     EvictWindowHwnd { label: String },
+    /// Bind `label` to the first of `candidates` no label is bound to, unless
+    /// `label` already has one; returns it via `DispatchOutput::claimed_window_hwnd`.
+    /// Looking and binding are one dispatch, so two labels can't take the same one.
+    #[cfg(any(target_os = "windows", test))]
+    ClaimFreeWindowHwnd { label: String, candidates: Vec<isize> },
 }
 
 impl std::fmt::Debug for HostCommand {
@@ -708,6 +713,8 @@ impl std::fmt::Debug for HostCommand {
                 .debug_struct("EvictWindowHwnd")
                 .field("label", label)
                 .finish(),
+            #[cfg(any(target_os = "windows", test))]
+            HostCommand::ClaimFreeWindowHwnd { label, candidates } => write!(f, "ClaimFreeWindowHwnd({label}, {} candidates)", candidates.len()),
         }
     }
 }
@@ -1010,6 +1017,10 @@ pub struct DispatchOutput {
     /// Set by `EvictWindowHwnd`: the HWND the label was bound to, if any.
     #[cfg(any(target_os = "windows", test))]
     pub evicted_window_hwnd: Option<isize>,
+
+    /// Set by `ClaimFreeWindowHwnd`: the HWND the label was bound to, if any.
+    #[cfg(any(target_os = "windows", test))]
+    pub claimed_window_hwnd: Option<isize>,
 }
 
 // Manual Debug — `cef::Browser` doesn't impl Debug.
@@ -1116,7 +1127,9 @@ fn is_quit_relevant(cmd: &HostCommand) -> bool {
         #[cfg(any(target_os = "windows", test))]
         HostCommand::SetFloatingAlwaysOnTop { .. } | HostCommand::RestoreFloatingForDrag { .. } => false,
         #[cfg(any(target_os = "windows", test))]
-        HostCommand::BindWindowHwnd { .. } | HostCommand::EvictWindowHwnd { .. } => false,
+        HostCommand::BindWindowHwnd { .. }
+        | HostCommand::EvictWindowHwnd { .. }
+        | HostCommand::ClaimFreeWindowHwnd { .. } => false,
         #[cfg(target_os = "windows")]
         HostCommand::RelabelBrowser { .. } => false,
         _ => true,
@@ -1223,6 +1236,8 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         }
         #[cfg(any(target_os = "windows", test))]
         HostCommand::EvictWindowHwnd { label } => window_hwnds::handle_evict_window_hwnd(state, label),
+        #[cfg(any(target_os = "windows", test))]
+        HostCommand::ClaimFreeWindowHwnd { label, candidates } => window_hwnds::handle_claim_free_window_hwnd(state, label, &candidates),
     };
     // Pillar 2 — level-triggered quit reconciliation. After any transition that
     // can change the decision's inputs, recompute the pure `reconcile_quit` over

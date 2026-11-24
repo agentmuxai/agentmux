@@ -266,6 +266,22 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
         },
         initOpts.windowId
     );
+    // An agent's resize, move or place of a floating pane it opened, or `Pane layout`'s question where the
+    // window is: sent to the floating window itself, which sets its own rect and answers srv.
+    onMuxEvent(
+        WpsEvent.PlaceFloatingPane,
+        (data) => {
+            void (async () => {
+                try {
+                    const { handlePlaceFloatingPaneEvent } = await import("@/app/store/open-floating-pane-live");
+                    await handlePlaceFloatingPaneEvent(data);
+                } catch (e) {
+                    console.error("[placefloatingpane] failed to place floating window", e);
+                }
+            })();
+        },
+        initOpts.windowId
+    );
     onMuxEvent(WpsEvent.MuxObjBatchedUpdates, (updates) => {
         // All updates from one atomic backend transition, applied in
         // one batch() flush (updateMuxObjects) so the UI can't paint

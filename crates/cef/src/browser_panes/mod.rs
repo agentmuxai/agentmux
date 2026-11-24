@@ -50,6 +50,7 @@ use crate::state::AppState;
 mod autocomplete;
 pub(crate) mod bounds;
 mod clip;
+mod find;
 mod close;
 pub(crate) mod discard;
 pub(crate) mod media_grants;

@@ -5,6 +5,8 @@
 
 import { createSignal, For, Match, Show, Switch, type Accessor, type JSX } from "solid-js";
 import { Button } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
+import { Rich } from "@/app/i18n/rich";
 import { tip } from "@/app/element/tip";
 import { agentDisplayName, followAgentNames } from "@/app/store/agent-names";
 import { attentionLook, dialogMessage } from "./attention-kinds";
@@ -12,6 +14,16 @@ import { asksEachLine, hasEnterSpacePower, hasTerminalPower, hasUploadsPower, LA
 import type { BrowserViewModel } from "./browser-model";
 
 type Part = { attention: Accessor<BrowserAttention> };
+
+/** The agent's name, or the words for an agent that has none. */
+function whoName(a: BrowserAttention): string {
+    return agentDisplayName(a.agent ?? "") || t("browser.attention.anAgent");
+}
+
+/** The sites a bypass names, as one list. */
+function sitesOf(a: BrowserAttention): string {
+    return (a.origins ?? []).map(siteLabel).join(", ");
+}
 /** A long terminal line is read in full ("Show all") before Run it works. */
 type LineView = { open: Accessor<boolean>; setOpen: (open: boolean) => void };
 
@@ -34,6 +46,13 @@ export function BrowserAttentionBanner(props: { model: BrowserViewModel; attenti
     );
 }
 
+/** The sentence a page's dialog starts with: asking to leave or asking something, and after whose action if an agent's. */
+function dialogKey(a: BrowserAttention): string {
+    const leave = a.dialogKind === "beforeunload";
+    if (a.agent) return leave ? "browser.attention.dialogLeaveAfter" : "browser.attention.dialogAskAfter";
+    return leave ? "browser.attention.dialogLeave" : "browser.attention.dialogAsk";
+}
+
 /** The icon and the sentence that says who wants what. */
 function AttentionHead(props: Part): JSX.Element {
     const a = props.attention;
@@ -43,54 +62,56 @@ function AttentionHead(props: Part): JSX.Element {
             <Switch
                 fallback={
                     <span>
-                        <b>{agentDisplayName(a().agent ?? "") || "An agent"}</b>{" "}
-                        {a().kind === "handoff"
-                            ? "needs you: "
-                            : a().kind === "bypass"
-                              ? "asks you to auto-approve its clicks: "
-                              : "wants to: "}
-                        {a().kind === "handoff" || a().kind === "bypass" ? a().reason : a().what}
+                        <Rich
+                            k={
+                                a().kind === "handoff"
+                                    ? "browser.attention.needs"
+                                    : a().kind === "bypass"
+                                      ? "browser.attention.bypassAsk"
+                                      : "browser.attention.wants"
+                            }
+                            params={{
+                                agent: whoName(a()),
+                                what: (a().kind === "handoff" || a().kind === "bypass" ? a().reason : a().what) ?? "",
+                            }}
+                        />
                     </span>
                 }
             >
                 <Match when={attentionLook(a()).text}>{(text) => <span>{text()}</span>}</Match>
                 <Match when={a().kind === "line"}>
                     <span>
-                        <b>{agentDisplayName(a().agent ?? "") || "An agent"}</b> typed a line in the terminal on <b>{siteLabel(a().origin ?? "")}</b> and wants to run it
-                        {a().reason ? <>: {a().reason}</> : null}
+                        <Rich
+                            k={a().reason ? "browser.attention.lineWhy" : "browser.attention.line"}
+                            params={{ agent: whoName(a()), site: siteLabel(a().origin ?? ""), reason: a().reason ?? "" }}
+                        />
                     </span>
                 </Match>
                 <Match when={a().kind === "take"}>
                     <span>
-                        <b>{agentDisplayName(a().agent ?? "") || "An agent"}</b> wants to drive this pane
-                        {a().reason ? <> ({a().reason})</> : null}
+                        <Rich
+                            k={a().reason ? "browser.attention.takeWhy" : "browser.attention.take"}
+                            params={{ agent: whoName(a()), reason: a().reason ?? "" }}
+                        />
                     </span>
                 </Match>
                 <Match when={a().kind === "navigation"}>
                     <span>
-                        This pane is limited to the sites it was opened for. The page wants to{" "}
-                        {a().popup ? "open a window at " : "go to "}
-                        <b>{a().origin}</b>.
+                        <Rich
+                            k={a().popup ? "browser.attention.navigationPopup" : "browser.attention.navigationGo"}
+                            params={{ origin: a().origin ?? "" }}
+                        />
                     </span>
                 </Match>
                 <Match when={a().kind === "dialog"}>
                     <span>
-                        {a().dialogKind === "beforeunload" ? (
-                            <>
-                                The page at <b>{a().origin || "this site"}</b> asks whether to leave it
-                            </>
-                        ) : (
-                            <>
-                                The page at <b>{a().origin || "this site"}</b> asks
-                            </>
-                        )}
-                        {a().agent ? (
-                            <>
-                                {" "}
-                                (after <b>{agentDisplayName(a().agent ?? "")}</b>'s action)
-                            </>
-                        ) : null}
-                        :
+                        <Rich
+                            k={dialogKey(a())}
+                            params={{
+                                origin: a().origin || t("browser.attention.thisSite"),
+                                agent: agentDisplayName(a().agent ?? ""),
+                            }}
+                        />
                     </span>
                 </Match>
             </Switch>
@@ -114,7 +135,7 @@ function AttentionDetails(props: Part & LineView): JSX.Element {
                 </div>
             </Show>
             <Show when={a().kind === "approval" && a().why}>
-                <div class="browser-attention-target">Asked because {a().why}.</div>
+                <div class="browser-attention-target">{t("browser.attention.askedBecause", { why: a().why ?? "" })}</div>
             </Show>
             {/* The page's own words, as text in a box of their own, so
                 they can't pass for AgentMux's (dialogs spec §8.1). */}
@@ -128,49 +149,36 @@ function AttentionDetails(props: Part & LineView): JSX.Element {
             </Show>
             <Show when={a().kind === "navigation"}>
                 <div class="browser-attention-target">
-                    {a().popup
-                        ? "Allow adds this site to the pane's list; then click again to open the window."
-                        : "Allow adds this site to the pane's list and goes there. A form's data isn't sent again."}
+                    {t(a().popup ? "browser.attention.navigationPopupNote" : "browser.attention.navigationGoNote")}
                 </div>
             </Show>
             <Show when={a().kind === "bypass"}>
                 <div class="browser-attention-target">
-                    On <b>{(a().origins ?? []).map(siteLabel).join(", ")}</b>, for{" "}
-                    <b>{minutesLabel(a().minutes ?? 60)}</b>: its clicks that submit, delete or send go
-                    through without asking you, and so does the page's own "Are you sure?" that follows one. It still can't type passwords or codes or run scripts, and
-                    payments still ask. Stop it any time from the red strip.
+                    <Rich k="browser.attention.bypass" params={{ sites: sitesOf(a()), time: minutesLabel(a().minutes ?? 60) }} />
                 </div>
             </Show>
             <Show when={a().kind === "bypass" && asksEachLine(a().powers)}>
                 <div class="browser-attention-target">
-                    It also asks to <b>type in the terminal</b> on {(a().origins ?? []).map(siteLabel).join(", ")}: you are shown each line
-                    here, with Run it and Don't run, before it goes in. Passwords and codes stay yours to type.
+                    <Rich k="browser.attention.bypassAskEach" params={{ sites: sitesOf(a()) }} />
                 </div>
             </Show>
             <Show when={a().kind === "bypass" && hasTerminalPower(a().powers) && !asksEachLine(a().powers)}>
                 <div class="browser-attention-target">
-                    It also asks to <b>run commands in the terminal</b> on {(a().origins ?? []).map(siteLabel).join(", ")}:
-                    it types real keys and presses Enter with no question per line. You can read every line in the
-                    pane's Log, and Stop or Pause end it at once. Passwords and codes stay yours to type.{" "}
-                    One limit: {LATE_PROMPT_LIMIT}
+                    <Rich k="browser.attention.bypassTerminal" params={{ sites: sitesOf(a()), limit: LATE_PROMPT_LIMIT }} />
                 </div>
             </Show>
             <Show when={a().kind === "bypass" && hasEnterSpacePower(a().powers)}>
                 <div class="browser-attention-target">
-                    It also asks to <b>press Enter and Space</b> on {(a().origins ?? []).map(siteLabel).join(", ")}. Each one is taken as the
-                    click it is (a form's default button, a button, a link, a checkbox) and checked like any click; a payment still asks, and a
-                    key whose click can't be named is refused.
+                    <Rich k="browser.attention.bypassEnterSpace" params={{ sites: sitesOf(a()) }} />
                 </div>
             </Show>
             <Show when={a().kind === "bypass" && hasUploadsPower(a().powers)}>
                 <div class="browser-attention-target">
-                    It also asks to <b>upload files</b> on {(a().origins ?? []).map(siteLabel).join(", ")}: when the page opens its file chooser,
-                    the agent can fill it with files from its own workspace, and only those. A chooser it does not fill within 30 seconds is
-                    cancelled, and the page still sees an ordinary pick.
+                    <Rich k="browser.attention.bypassUploads" params={{ sites: sitesOf(a()) }} />
                 </div>
             </Show>
             <Show when={a().window}>
-                <div class="browser-attention-target">In its popup window: {a().window}</div>
+                <div class="browser-attention-target">{t("browser.attention.popupWindow", { window: a().window ?? "" })}</div>
             </Show>
             <Show when={a().kind === "approval" && (a().fields?.length ?? 0) > 0}>
                 <table class="browser-attention-fields">
@@ -181,7 +189,7 @@ function AttentionDetails(props: Part & LineView): JSX.Element {
                                     <td>{f[0]}</td>
                                     <td>
                                         {f[1]}
-                                        {f[2] === false ? <span class="browser-attention-field-note"> already on the page</span> : null}
+                                        {f[2] === false ? <span class="browser-attention-field-note"> {t("browser.attention.alreadyOnPage")}</span> : null}
                                     </td>
                                 </tr>
                             )}
@@ -190,7 +198,7 @@ function AttentionDetails(props: Part & LineView): JSX.Element {
                 </table>
             </Show>
             <Show when={a().kind === "approval" && a().action}>
-                <div class="browser-attention-target">Sends to {a().action}</div>
+                <div class="browser-attention-target">{t("browser.attention.sendsTo", { action: a().action ?? "" })}</div>
             </Show>
         </>
     );
@@ -203,18 +211,18 @@ function LineDetails(props: Part & LineView): JSX.Element {
     const shown = () => (a().long && !props.open() ? `${line().slice(0, LINE_PREVIEW_CHARS)}…` : line());
     return (
         <>
-            <pre class="browser-attention-line" aria-label="The line that will run">
+            <pre class="browser-attention-line" aria-label={t("browser.attention.lineLabel")}>
                 {shown()}
             </pre>
             <Show when={a().long && !props.open()}>
                 <div class="browser-attention-actions">
                     <Button density="compact" onClick={() => props.setOpen(true)}>
-                        Show all ({line().length} characters)
+                        {t("browser.attention.showAll", { length: line().length })}
                     </Button>
                 </div>
             </Show>
             <Show when={(a().rows?.length ?? 0) > 0}>
-                <div class="browser-attention-target">What the terminal shows now (the page's words, not AgentMux's):</div>
+                <div class="browser-attention-target">{t("browser.attention.terminalShows")}</div>
                 <pre class="browser-attention-page-text">{(a().rows ?? []).join("\n")}</pre>
             </Show>
         </>
@@ -233,7 +241,7 @@ function AttentionActions(props: Part & LineView & { model: BrowserViewModel }):
                     disabled={!model.canGoBackAtom()}
                     onClick={() => model.resolveAttention("back").catch(() => {})}
                 >
-                    Back
+                    {t("browser.attention.back")}
                 </Button>
             </Show>
             <Show when={attentionLook(a()).yes}>
@@ -242,7 +250,7 @@ function AttentionActions(props: Part & LineView & { model: BrowserViewModel }):
                         tone={attentionLook(a()).tone}
                         density={attentionLook(a()).density}
                         disabled={a().kind === "line" && !!a().long && !props.open()}
-                        title={a().kind === "line" && a().long && !props.open() ? "Show all of the line first" : undefined}
+                        title={a().kind === "line" && a().long && !props.open() ? t("browser.attention.showAllFirst") : undefined}
                         onClick={() => model.resolveAttention(attentionLook(a()).answer).catch(() => {})}
                     >
                         {yes()}
@@ -252,19 +260,21 @@ function AttentionActions(props: Part & LineView & { model: BrowserViewModel }):
             <Show when={a().kind === "bypass" && !a().local && hasTerminalPower(a().powers) && !asksEachLine(a().powers)}>
                 <Button
                     density={attentionLook(a()).density}
-                    title="Allow it for the time you chose, but see each terminal line here and press Run it before it goes in"
+                    title={t("browser.attention.allowAskTitle")}
                     onClick={() => model.resolveAttention("approve_ask").catch(() => {})}
                 >
-                    Allow, but show me each line
+                    {t("browser.attention.allowAsk")}
                 </Button>
             </Show>
             <Show when={a().kind === "bypass" && !a().local}>
                 <Button
                     density={attentionLook(a()).density}
-                    title="Keep this: it is added to Settings, Agents on sites, where you can revoke it"
+                    title={t("browser.attention.alwaysTitle")}
                     onClick={() => model.resolveAttention("approve_always").catch(() => {})}
                 >
-                    Always for {a().agent ? agentDisplayName(a().agent ?? "") : "this agent"} on this site
+                    {t("browser.attention.always", {
+                        agent: a().agent ? agentDisplayName(a().agent ?? "") : t("browser.attention.thisAgent"),
+                    })}
                 </Button>
             </Show>
             <Button

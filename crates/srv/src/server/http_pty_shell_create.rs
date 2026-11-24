@@ -175,6 +175,17 @@ pub(super) fn shell_block_meta(state: &AppState, req: &PtyShellCreateRequest, ta
             json!(hooks.to_string_lossy()),
         );
     }
+    // And the git settings that keep the folder's own configuration from running a program, for an agent in a
+    // folder a container agent can write. A host path again, so local shells only.
+    let in_shared_folder = state
+        .mstore
+        .get::<crate::backend::obj::Block>(&req.agent_block_id)
+        .ok()
+        .flatten()
+        .is_some_and(|b| crate::backend::mcp_folder_rule::folder_of(&b.meta).is_some());
+    if local && in_shared_folder {
+        meta.insert(crate::backend::git_program_settings::META_KEY_PTYSHELL_GIT_PROGRAM_SETTINGS.to_string(), json!(true));
+    }
     meta.insert("view".to_string(), json!("term"));
     meta.insert(
         blockcontroller::META_KEY_CONTROLLER.to_string(),

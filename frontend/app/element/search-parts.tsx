@@ -12,6 +12,7 @@ import { CloseButton } from "@/app/element/ui/CloseButton";
 import { tip } from "./tip";
 import { Input } from "./input";
 import type { SearchState } from "./search-state";
+import { keyLabel } from "@/app/keybindings";
 
 function AdditionalButtons(props: { s: SearchState }): JSX.Element {
     const s = props.s;
@@ -32,10 +33,13 @@ function AdditionalButtons(props: { s: SearchState }): JSX.Element {
     );
 }
 
+const closeLabel = (): string => `Close (${keyLabel("Escape")})`;
+
 export function SearchBar(props: { s: SearchState }): JSX.Element {
     const s = props.s;
+    // `data-pane-overlay`: over a browser pane's page the bar punches a hole through the native window.
     return (
-        <div class="search-container" style={s.style()} ref={s.register}>
+        <div class="search-container" style={s.style()} ref={s.register} data-pane-overlay data-search-owner={s.owner}>
             <Input
                 placeholder="Search"
                 value={s.searchValue()}
@@ -57,7 +61,7 @@ export function SearchBar(props: { s: SearchState }): JSX.Element {
             <div class="right-buttons">
                 <DeclIconButton decl={s.prevDecl} />
                 <DeclIconButton decl={s.nextDecl} />
-                <CloseButton size="sm" label="Close (Esc)" tooltip={false} {...tip("Close (Esc)")} onClick={() => s.close()} />
+                <CloseButton size="sm" label={closeLabel()} tooltip={false} {...tip(closeLabel())} onClick={() => s.close()} />
             </div>
         </div>
     );

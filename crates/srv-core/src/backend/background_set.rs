@@ -105,6 +105,37 @@ pub fn set_of(now_ms: u64, tasks: &[BackgroundTask], members: &[TrackedProcess])
     items
 }
 
+/// What the agent in pane `block_id` has running in the background now: its declared background shells and the process
+/// trees its calls left behind, past the grace period and not a daemon on the denylist. Empty when none, or when the
+/// tracker or the store is not up. Blocking: reads the tracker and the store.
+pub fn for_block(block_id: &str, now_ms: u64) -> Vec<Item> {
+    let Some(registry) = crate::backend::process_tracker::registry::global() else { return Vec::new() };
+    let members = registry.list_block(block_id);
+    let store = STORE.get();
+    let tasks = store.and_then(|s| s.background_task_list_for_block(block_id).ok()).unwrap_or_default();
+    let in_container: Vec<String> = store
+        .and_then(|s| s.background_container_running().ok())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|c| c.block_id == block_id)
+        .map(|c| c.id)
+        .collect();
+    with_container_shells(set_of(now_ms, &tasks, &members), &tasks, &in_container)
+}
+
+/// `items` and the declared shells of a container agent that still run: the host cannot see their processes (the
+/// pid is the container's own, kept apart), so they count while the container-side check says they run, however
+/// long that is. `in_container` is the ids of the running calls the container filed a pid for.
+fn with_container_shells(mut items: Vec<Item>, tasks: &[BackgroundTask], in_container: &[String]) -> Vec<Item> {
+    for t in tasks.iter().filter(|t| t.status == BackgroundTaskStatus::Running && t.pid.is_none() && in_container.contains(&t.id)) {
+        let item = Item { kind: Kind::Shell, label: t.label.clone(), started_at_ms: t.started_at_ms.max(0) as u64 };
+        if !items.contains(&item) {
+            items.push(item);
+        }
+    }
+    items
+}
+
 /// Who entered or left the would-be Background set since the last look, and how long each who left was in it.
 /// `before` is the set (block id → when it entered) the last look left; `now` is this look's.
 fn changes(before: &mut HashMap<String, u64>, now: &HashMap<String, u64>, at_ms: u64) -> (Vec<String>, Vec<(String, u64)>) {

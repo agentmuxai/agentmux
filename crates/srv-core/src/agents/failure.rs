@@ -301,26 +301,27 @@ fn capitalize_provider(id: &str) -> String {
     }
 }
 
-/// Best-effort error text from a terminal stream-json `result` frame:
-/// `error.message`, else a string `error`/`result`, else the `subtype`.
+/// Best-effort error text from a terminal stream-json `result` frame: every field that can carry the cause
+/// (`error.message`, a string `error`, a string `result`, the first of `errors`), each once, one per line; the
+/// `subtype` only when none of them says anything. The CLI puts a cause in one of them and a generic word in
+/// another, so reading only the first hid a limit sentence in `result` behind an `error` of "rate_limit"'s kind.
 fn frame_error_text(frame: &Value) -> String {
-    if let Some(msg) = frame.pointer("/error/message").and_then(|v| v.as_str()) {
-        return msg.to_string();
+    let fields = [
+        frame.pointer("/error/message").and_then(|v| v.as_str()),
+        frame.get("error").and_then(|v| v.as_str()),
+        frame.get("result").and_then(|v| v.as_str()),
+        first_cli_error(frame),
+    ];
+    let mut parts: Vec<&str> = Vec::new();
+    for text in fields.into_iter().flatten().filter(|t| !t.trim().is_empty()) {
+        if !parts.contains(&text) {
+            parts.push(text);
+        }
     }
-    if let Some(err) = frame.get("error").and_then(|v| v.as_str()) {
-        return err.to_string();
+    if parts.is_empty() {
+        return frame.get("subtype").and_then(|v| v.as_str()).unwrap_or_default().to_string();
     }
-    if let Some(res) = frame.get("result").and_then(|v| v.as_str()) {
-        return res.to_string();
-    }
-    if let Some(err) = first_cli_error(frame) {
-        return err.to_string();
-    }
-    frame
-        .get("subtype")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default()
-        .to_string()
+    parts.join("\n")
 }
 
 /// The first entry of a result frame's `errors` list, where Claude Code puts

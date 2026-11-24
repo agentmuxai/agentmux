@@ -148,8 +148,10 @@ import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { onLinkAuxClick, onLinkClick } from "./link-open";
+import { classifyHref } from "./link-target";
+import { deadReason, requestFileCheck } from "@/app/links/file-check-store";
 import { getSettingsKeyAtom } from "../store/global";
-import { rehypeLinkify } from "./rehype-linkify";
+import { rehypeLinkifyWith } from "./rehype-linkify";
 import { Code, CodeBlock } from "./markdown-codeblock";
 import { MarkdownImg, type MarkdownMediaOpts, MuxBlock } from "./markdown-media";
 import type { SurfaceContext } from "@/app/links/link-context";
@@ -200,8 +202,25 @@ const Link = ({
     media?: MarkdownMediaOpts;
 }) => {
     const owner = () => (media ? { blockId: media.blockId, confined: media.confined } : undefined);
+    // A file the message names: srv says on hover whether it is in the agent's folders, and a dead one is a muted word.
+    const fileOf = () => {
+        const target = classifyHref((props as any).href);
+        return target.kind === "entityfile" && media?.blockId ? target.path : undefined;
+    };
+    const dead = () => {
+        const path = fileOf();
+        return path && media?.blockId ? deadReason(media.blockId, path) : undefined;
+    };
+    const check = () => {
+        const path = fileOf();
+        if (path && media?.blockId) requestFileCheck(media.blockId, path);
+    };
     const onClick = (e: MouseEvent) => {
         const href = (props as any).href as string;
+        if (dead()) {
+            e.preventDefault();
+            return;
+        }
         if (href?.startsWith("#")) {
             e.preventDefault();
             setFocusedHeading(href);
@@ -223,7 +242,17 @@ const Link = ({
     const p = props as any;
     const name: string | undefined = p["aria-label"] ?? p.ariaLabel;
     return (
-        <a href={p.href} class={p.class ?? p.className} aria-label={name} {...tip(name)} onClick={onClick} onAuxClick={onAuxClick}>
+        <a
+            href={p.href}
+            class={p.class ?? p.className}
+            classList={{ "entity-link--dead": Boolean(dead()) }}
+            aria-label={dead() ?? name}
+            {...tip(dead() ?? name)}
+            onClick={onClick}
+            onAuxClick={onAuxClick}
+            onMouseEnter={check}
+            onFocus={check}
+        >
             {p.children}
         </a>
     );
@@ -726,7 +755,11 @@ function buildProcessor(s: MarkdownState, withHighlight: boolean) {
               rehypeRaw,
               rehypeLocalImageSrc,
               rehypeAlignToClass,
-              rehypeLinkify,
+              // The files an agent's message names are the entity layer's, so the web linker leaves them alone.
+              rehypeLinkifyWith(() => {
+                  const author = s.entities()?.author;
+                  return author?.kind === "agent" && !author.remote;
+              }),
               () => rehypeEntities(s.entities),
               () =>
                   rehypeSanitize({

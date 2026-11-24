@@ -86,14 +86,7 @@ Agents: its own place only. Surfaces: desktop.
 | `agentmux://audit/agent/<agent: id>` | Agent. An agent may name only itself |
 | `agentmux://audit/sound/<sound: id>` | Sound |
 | `agentmux://audit/message/<message: id>` | Message |
-
-## History (`history`)
-
-Agents: yes. Surfaces: desktop.
-
-| Link | Opens |
-|---|---|
-| `agentmux://history` | History |
+| `agentmux://audit/<section>` | `events` (Events), `conversations` (Conversations), `typed` (Typed), `storage` (Storage) |
 
 ## Atlas (`atlas`)
 
@@ -224,3 +217,4 @@ Agents: an approved package only. Surfaces: desktop. Not yet available: this vie
 |---|---|
 | `agentmux://task/{task}` | `agentmux://kanban/task/{task}` |
 | `agentmux://reviews` | `agentmux://kanban/pulls` |
+| `agentmux://history` | `agentmux://audit/conversations` |

@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 import {
     classifyChanges,
     classifyPullFiles,
+    classifyQueueEntry,
     isCefInput,
     isDependencyInput,
     isDocsOnlyPath,
@@ -504,6 +505,115 @@ describe("R8 — every frontend path a crate names is one the classifier sends t
         expect(found.size).toBeGreaterThanOrEqual(4);
         const unlisted = [...found].filter(([path]) => isFrontendOnlyPath(path)).map(([path, file]) => `${path} (${file})`);
         expect(unlisted, "add these to RUST_READS_FRONTEND in scripts/ci-classify-changes.mjs").toEqual([]);
+    });
+});
+
+describe("R8 in the merge queue — an entry that changes only documentation and frontend files skips the Rust job", () => {
+    const repo = join(dirname(fileURLToPath(import.meta.url)), "..");
+    const queue = (...paths) => classifyQueueEntry(paths).rust;
+
+    it("skips the Rust job for a frontend-only entry, and for one that adds a changeset beside it", () => {
+        expect(queue("frontend/app/store/app-update.ts", "frontend/app/statusbar/UpdateStatus.test.tsx")).toBe(false);
+        expect(queue("frontend/app/a.ts", ".changesets/1795-x.md")).toBe(false);
+        expect(queue("docs/specs/SPEC_X.md")).toBe(false);
+    });
+
+    it("runs the Rust job for one Rust file, however many frontend files ride along", () => {
+        expect(queue("crates/srv/src/lib.rs")).toBe(true);
+        expect(queue("frontend/app/a.ts", "crates/srv/src/lib.rs")).toBe(true);
+    });
+
+    it("runs the Rust job for each path the Rust side reads from frontend/", () => {
+        for (const read of [
+            "frontend/types/rpc/Foo.ts",
+            "frontend/types/rpc/rpc-schema.json",
+            "frontend/app/keybindings/host-keys.json",
+            "frontend/app/store/rpc-api/generated-manifest.json",
+            "frontend/app/store/widget-singleton.ts",
+        ]) {
+            expect(queue("frontend/app/a.ts", read), read).toBe(true);
+        }
+    });
+
+    it("runs the Rust job for a workflow, a script, a manifest and a lock file", () => {
+        for (const p of [".github/workflows/ci-pr.yml", "scripts/ci-classify-changes.mjs", "package.json", "Cargo.toml", "Cargo.lock", "Taskfile.yml"]) {
+            expect(queue("frontend/app/a.ts", p), p).toBe(true);
+        }
+    });
+
+    it("runs the Rust job for a path the classifier does not recognise", () => {
+        expect(queue("somewhere/new/file.txt")).toBe(true);
+        expect(queue("frontend/app/a.ts", "somewhere/new/file.txt")).toBe(true);
+    });
+
+    it("runs the Rust job when the list is empty or has an entry that is not a path (R2)", () => {
+        expect(queue()).toBe(true);
+        expect(classifyQueueEntry(undefined).rust).toBe(true);
+        expect(classifyQueueEntry("frontend/a.ts").rust).toBe(true);
+        expect(classifyQueueEntry([null, "frontend/a.ts"]).rust).toBe(true);
+        expect(classifyQueueEntry(["", "frontend/a.ts"]).rust).toBe(true);
+        expect(classifyQueueEntry([5]).rust).toBe(true);
+    });
+
+    it("runs the Rust job when a Rust file was moved into frontend/ (a rename lists both names)", () => {
+        expect(queue("frontend/app/x.ts", "crates/srv/src/x.rs")).toBe(true);
+    });
+
+    it("takes the frontend-only answer from the same rule a pull request uses", () => {
+        for (const files of [["frontend/a.ts"], ["frontend/types/rpc/A.ts"], ["crates/x.rs"], ["docs/a.md", "frontend/b.ts"], ["scripts/a.sh"]]) {
+            expect(classifyQueueEntry(files).rust, files.join(",")).toBe(classifyChanges(files).rust);
+        }
+    });
+
+    describe("the command the workflow calls", () => {
+        const run = (input) => spawnSync(process.execPath, [join(repo, "scripts", "ci-classify-changes.mjs"), "--queue"], { encoding: "utf8", input });
+
+        it("prints one rust= line and exits 0", () => {
+            const skip = run("frontend/app/a.ts\nfrontend/app/b.ts\n");
+            expect(skip.status).toBe(0);
+            expect(skip.stdout).toBe("rust=false\n");
+            const keep = run("frontend/app/a.ts\ncrates/srv/src/lib.rs\n");
+            expect(keep.stdout).toBe("rust=true\n");
+        });
+
+        it("runs the Rust job on empty input", () => {
+            expect(run("").stdout).toBe("rust=true\n");
+            expect(run("\n\n").stdout).toBe("rust=true\n");
+        });
+    });
+
+    describe("the workflow step", () => {
+        const yml = readFileSync(join(repo, ".github/workflows/ci-pr.yml"), "utf8");
+        const start = yml.indexOf('if [ "${{ github.event_name }}" = "merge_group" ]; then');
+        const block = yml.slice(start, yml.indexOf("exit 0", start));
+
+        it("starts from rust=true and lowers it only when the classifier says rust=false", () => {
+            expect(start).toBeGreaterThan(0);
+            expect(block).toContain("QUEUE_RUST=true");
+            expect(block).toMatch(/\[ "\$VERDICT" = "rust=false" \]/);
+            expect([...block.matchAll(/QUEUE_RUST=false/g)]).toHaveLength(1);
+        });
+
+        it("needs both shas and a clean fetch, diff and classifier run, or it leaves the Rust job on", () => {
+            expect(block).toContain('[ -n "$MG_BASE_SHA" ] && [ -n "$MG_HEAD_SHA" ]');
+            expect(block).toMatch(/git fetch [^\n]*"\$MG_BASE_SHA" "\$MG_HEAD_SHA"/);
+            expect(block).toContain('git diff --name-only --no-renames "$MG_BASE_SHA" "$MG_HEAD_SHA"');
+            expect(block).toContain("ci-classify-changes.mjs --queue");
+            expect(block).toMatch(/else.*the Rust job runs [(]R2[)]/s);
+        });
+
+        it("writes the outputs once, after the decision, and keeps everything else the queue set", () => {
+            expect([...block.matchAll(/>> "\$GITHUB_OUTPUT"/g)]).toHaveLength(2);
+            expect(block).toContain("rust=%s");
+            for (const kept of ["frontend=true", "frontend_build=true", "docs_index=true", "cef=false", "deps=false", "queue=true", 'rust_os=["ubuntu-latest"]']) {
+                expect(block, kept).toContain(kept);
+            }
+        });
+
+        it("reads the shas from the merge_group event", () => {
+            expect(yml).toContain("MG_BASE_SHA: ${{ github.event.merge_group.base_sha }}");
+            expect(yml).toContain("MG_HEAD_SHA: ${{ github.event.merge_group.head_sha }}");
+        });
     });
 });
 

@@ -30,6 +30,7 @@ mod upgrade_op;
 mod upgrade_watch;
 pub(crate) mod send;
 pub(crate) mod signin_ops;
+pub(crate) mod sync_loop;
 mod sync_ops;
 pub(crate) mod tasks;
 

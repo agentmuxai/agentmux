@@ -19,7 +19,7 @@ import { linkContext, type SurfaceContext } from "./link-context";
 import "./linkified.scss";
 
 /** The kinds this plugin makes links of, and the sanitizer lets through with their class. */
-export const ENTITY_LINK_CLASSES = ["entity-link", "entity-link--agent", "entity-link--task", "entity-link--pull"];
+export const ENTITY_LINK_CLASSES = ["entity-link", "entity-link--agent", "entity-link--task", "entity-link--pull", "entity-link--file", "entity-link--dead"];
 
 const SKIP_ANCESTORS = new Set(["a", "code", "pre", "script", "style", "button"]);
 

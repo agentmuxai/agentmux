@@ -7,6 +7,7 @@ import { IconButton, Tag } from "@/app/element/ui";
 import { tip } from "@/app/element/tip";
 import { DISPLAY_NAME_MAX_LEN } from "@/util/window-title";
 import { LAST_WINDOW_TITLE } from "@/app/store/user-workspace";
+import { keyLabel } from "@/app/keybindings";
 
 /** What an open window's row reads from the panel, and what it asks the panel to do. */
 export interface OpenWindowRowProps {
@@ -59,7 +60,7 @@ export const OpenWindowRow = (props: OpenWindowRowProps): JSX.Element => (
                 props.enterRename();
             }
         }}
-        {...tip(props.isCurrent() ? "This window — double-click to rename (F2)" : `Click to focus, double-click to rename (F2)`)}
+        {...tip(props.isCurrent() ? `This window — double-click to rename (${keyLabel("F2")})` : `Click to focus, double-click to rename (${keyLabel("F2")})`)}
         role="button"
         tabIndex={0}
     >

@@ -55,6 +55,12 @@ describe("agentEntries", () => {
         });
     });
 
+    it("carries the agent's stored colour for the row to draw, and none for an agent without one", () => {
+        const [coloured, plain] = entries([{ ...row("k", "Korp"), color: "#4f8cff" }, row("x", "Plain")]);
+        expect(coloured.identity).toBe("#4f8cff");
+        expect(plain.identity).toBeUndefined();
+    });
+
     it("shows an agent with no seat or icon by its name and state alone", () => {
         const [plain] = entries([{ ...row("x", "Plain", "stopped"), icon: "" }]);
         expect(plain.detail).toBe("stopped");

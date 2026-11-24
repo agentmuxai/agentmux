@@ -103,6 +103,8 @@ pub mod model_label;
 pub mod agent_context_usage;
 pub mod agent_api_retry;
 pub mod providers;
+pub mod providers_custom;
+pub mod harness_manifest;
 pub mod cli_download;
 pub mod cli_install;
 pub mod cli_prune;
@@ -133,6 +135,7 @@ pub mod operator_config_seed;
 pub mod history;
 pub mod slug_migration;
 pub mod host_agent_files;
+pub mod git_program_settings;
 pub mod host_os;
 pub mod lan;
 pub mod lsp;
@@ -204,7 +207,9 @@ pub mod sampler;
 // The commit attribution that uses it is Windows-only; the logic is tested everywhere.
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub mod own_instance;
+pub mod stall_load;
 pub mod stall_watch;
+pub mod thread_roles;
 pub mod net_counters;
 pub mod sysinfo;
 pub mod blockstats_detail;
@@ -298,5 +303,7 @@ pub mod worker_failure_note;
 /// A leader hears when its workers (and the agents that hold its tasks) fail, stop or wait on a question.
 pub mod worker_notes;
 pub mod quiet_watch;
+pub mod urgent_asks;
+pub mod note_outbox;
 
 pub use oref::ORef;
