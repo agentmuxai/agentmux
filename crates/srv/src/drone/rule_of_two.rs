@@ -287,7 +287,8 @@ fn join(refs: &[String]) -> String {
 /// whose value reads the environment or the Vault, or any text in it that reads them.
 fn sends_credential(node: &FlowNode) -> bool {
     const NAMES: [&str; 6] = ["auth", "token", "key", "secret", "cookie", "password"];
-    let reads_secret = |t: &str| t.contains("{{env.") || t.contains("{{vault");
+    // A reference to the environment or the Vault, however it is spaced: the references are parsed, not matched as text.
+    let reads_secret = |t: &str| refs_in(t).iter().any(|r| matches!(r.split('.').next().unwrap_or(""), "env" | "vault" | "secret" | "secrets"));
     if node.data.get("auth").is_some() {
         return true;
     }
@@ -398,21 +399,22 @@ fn check_callees(graph: &DroneGraph, load: LoadDrone, seen: &mut HashSet<(String
     }
 }
 
-/// Whether `graph` calls the drone `id`, directly or through the drones it calls.
+/// Whether `graph` calls the drone `id` as it is saved now, directly or through the drones it calls (a pinned version is followed as pinned).
 pub fn calls(graph: &DroneGraph, id: &str, load: LoadDrone) -> bool {
-    fn walk(graph: &DroneGraph, id: &str, load: LoadDrone, seen: &mut HashSet<String>, depth: usize) -> bool {
+    fn walk(graph: &DroneGraph, id: &str, load: LoadDrone, seen: &mut HashSet<(String, Option<i64>)>, depth: usize) -> bool {
         if depth >= CALL_DEPTH {
             return false;
         }
         for node in graph.nodes.iter().filter(|n| kind_of(n) == Some(BlockKind::Drone)) {
             let Ok(spec) = crate::drone::executor::blocks::call::parse(node) else { continue };
-            if spec.drone == id {
+            // A call pinned to a saved version runs that version, which a later save does not change.
+            if spec.drone == id && spec.version.is_none() {
                 return true;
             }
-            if !seen.insert(spec.drone.clone()) {
+            if !seen.insert((spec.drone.clone(), spec.version)) {
                 continue;
             }
-            if let Some((_, callee)) = load(&spec.drone, None) {
+            if let Some((_, callee)) = load(&spec.drone, spec.version) {
                 if walk(&callee, id, load, seen, depth + 1) {
                     return true;
                 }

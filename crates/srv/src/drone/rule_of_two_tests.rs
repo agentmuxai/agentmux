@@ -109,6 +109,38 @@ fn what_a_caller_passes_in_is_clean_in_the_drone_it_calls() {
 }
 
 #[test]
+fn a_spaced_reference_to_the_environment_is_a_credential() {
+    let read = |value: &str| {
+        graph(&[("get", json!({ "kind": "api", "method": "GET", "url": "{{trigger.url}}", "headers": { "X-Thing": value } }))], &[])
+    };
+    assert_eq!(broken(&read("{{ env.AGENTMUX_DR_TOKEN }}"), &webhook()), ["get"]);
+    assert_eq!(broken(&read("{{env.AGENTMUX_DR_TOKEN | trim}}"), &webhook()), ["get"]);
+    assert!(check(&read("text/plain"), &webhook()).is_empty());
+}
+
+#[test]
+fn a_pinned_call_is_followed_as_pinned() {
+    let call = |version: Option<i64>| {
+        let mut data = json!({ "kind": "drone", "drone": "a" });
+        if let Some(v) = version {
+            data["version"] = json!(v);
+        }
+        graph(&[("call", data)], &[])
+    };
+    let a_v1 = graph(&[("call", json!({ "kind": "drone", "drone": "b" }))], &[]);
+    let a_latest = graph(&[("x", json!({ "kind": "notify", "text": "hi" }))], &[]);
+    let load = |id: &str, version: Option<i64>| match (id, version) {
+        ("a", Some(1)) => Some(("A".to_string(), a_v1.clone())),
+        ("a", None) => Some(("A".to_string(), a_latest.clone())),
+        _ => None,
+    };
+    assert!(calls(&call(Some(1)), "b", &load), "a at version 1 calls b, though the latest a does not");
+    assert!(!calls(&call(None), "b", &load));
+    assert!(!calls(&call(Some(1)), "a", &load), "a pinned call does not run what is saved now");
+    assert!(calls(&call(None), "a", &load));
+}
+
+#[test]
 fn an_error_edge_out_of_an_approval_is_not_an_approval() {
     // A no and a silence fail the Approval, and only its `error` edge takes them: the write on it runs when nobody approved.
     let mut g = graph(&[("ok", approval()), ("post", comment("{{trigger.title}}"))], &[("ok", "post")]);
