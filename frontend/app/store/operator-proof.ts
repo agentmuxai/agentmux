@@ -160,6 +160,16 @@ export function isOperatorCommand(command: string): boolean {
     return OPERATOR_COMMANDS.has(command);
 }
 
+/** srv's words for a refusal of a connection it has not seen proven (or whose proof lapsed). */
+export function isUnprovenMessage(message: string): boolean {
+    return message.includes(UNPROVEN);
+}
+
+/** The connection's proof lapsed and srv refused input for it: prove it again. False when there is no host to vouch or it would not. */
+export function reproveForInput(): Promise<boolean> {
+    return reprove();
+}
+
 function isUnproven(e: unknown): boolean {
     const message = e instanceof Error ? e.message : String(e);
     return message.includes(UNPROVEN);

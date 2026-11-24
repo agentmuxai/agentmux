@@ -11,7 +11,7 @@ import { DefaultRouter, setDefaultRouter } from "./rpc-util-base";
 import { getApi } from "./global";
 import { noteSrvConnectionOpened, noteSrvInfoMessage } from "./srv-info";
 import { noteEventsDroppedMessage } from "./resync";
-import { expectOperatorProof, onOperatorProofSettled, operatorProofPending, proveOperatorConnection } from "./operator-proof";
+import { expectOperatorProof, isUnprovenMessage, onOperatorProofSettled, operatorProofPending, proveOperatorConnection, reproveForInput } from "./operator-proof";
 import { noteInputNotSent } from "./ws-input-hold";
 import { RpcApi } from "./rpc-api";
 
@@ -22,10 +22,19 @@ function initWshrpc(tabId: string): WSControl {
     setDefaultRouter(router);
     // The window's keystrokes wait for its proof (ws-input-hold.ts); what srv still refuses as not the window's is told to the person.
     setInputProofGate(operatorProofPending);
-    onOperatorProofSettled(() => globalWS?.releaseHeldInput());
+    onOperatorProofSettled((proven) => globalWS?.releaseHeldInput(proven));
     const handleFn = (event: WSEventType) => {
         const frame = event as { type?: string; error?: unknown };
         if (frame.type === "bus:error" && typeof frame.error === "string" && frame.error.startsWith("FORBIDDEN")) {
+            // A proof that lapsed (a host's lease ended): prove the connection again and send what srv refused once more.
+            if (isUnprovenMessage(frame.error) && globalWS?.noteInputRefused()) {
+                void reproveForInput().then((proven) => {
+                    if (proven) return;
+                    globalWS?.dropRefusedInput();
+                    noteInputNotSent("refused");
+                });
+                return;
+            }
             noteInputNotSent("refused");
             return;
         }

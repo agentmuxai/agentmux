@@ -25,6 +25,11 @@ function setInputProofGate(pending: () => boolean): void {
     inputProofPending = pending;
 }
 const gateClosed = () => !inputGateForcedOpen && inputProofPending();
+/** The most input frames (and payload bytes) kept after sending, to send again the ones srv refused for a lapsed proof. */
+const RECENT_INPUT_MAX_FRAMES = 256;
+const RECENT_INPUT_MAX_BYTES = 1 << 20;
+/** A refusal this soon after the refused frames were sent again is not answered with another resend. */
+const RESEND_COOLDOWN_MS = 3000;
 const StableConnTime = 2000;
 // Gap between queued `blockinput` chunks when the queue drains after a
 // reconnect. Mirrors PASTE_CHUNK_DELAY_MS in block-input-sender.ts (not
@@ -49,8 +54,13 @@ class WSControl {
     msgQueue: any[] = [];
     heldInput = new InputHold<any>(() => {
         inputGateForcedOpen = true;
-        this.releaseHeldInput();
+        this.releaseHeldInput(false);
     });
+    /** The input frames sent last, oldest first, and how many of the newest srv refused as from an unproven connection. */
+    recentInput: any[] = [];
+    recentInputBytes = 0;
+    refusedInput = 0;
+    lastResendAt = 0;
     msgQueueTimer: ReturnType<typeof setTimeout> = null;
     inReconnectHandlers: boolean = false;
     tabId: string;
@@ -280,20 +290,59 @@ class WSControl {
         if (byteSize > WarnWebSocketSendSize) {
             console.log("ws message large", byteSize, data.wscommand, msg.substring(0, 100));
         }
+        if (isInputFrame(data)) this.keepRecentInput(data);
         this.wsConn.send(msg);
     }
 
-    /// The window's proof has settled (or the wait ran out): send what was held, in order, ahead of what queued since.
-    releaseHeldInput() {
-        const frames = this.heldInput.take();
+    private keepRecentInput(frame: any) {
+        this.recentInput.push(frame);
+        this.recentInputBytes += (frame.inputdata64?.length ?? 0) + 64;
+        while (this.recentInput.length > RECENT_INPUT_MAX_FRAMES || this.recentInputBytes > RECENT_INPUT_MAX_BYTES) {
+            const old = this.recentInput.shift();
+            this.recentInputBytes -= (old.inputdata64?.length ?? 0) + 64;
+        }
+    }
+
+    /// srv refused an input frame because this connection's proof had lapsed. True when it is to be sent again once the
+    /// proof is made anew; false for a refusal that follows a resend at once (the proof did not help), which is final.
+    noteInputRefused(now: number = Date.now()): boolean {
+        if (now - this.lastResendAt < RESEND_COOLDOWN_MS) return false;
+        this.refusedInput++;
+        return true;
+    }
+
+    /// The proof could not be made anew: the refused frames are not sent again.
+    dropRefusedInput() {
+        this.refusedInput = 0;
+    }
+
+    /// The refused frames, oldest first. srv refuses every frame from the moment the proof lapses, so they are the newest
+    /// ones sent; the proof is made anew over the same ordered connection, so every refusal has arrived by then.
+    private takeRefusedInput(now: number = Date.now()): any[] {
+        const n = Math.min(this.refusedInput, this.recentInput.length);
+        this.refusedInput = 0;
+        if (n === 0) return [];
+        const frames = this.recentInput.splice(this.recentInput.length - n, n);
+        this.recentInputBytes = this.recentInput.reduce((sum, f) => sum + (f.inputdata64?.length ?? 0) + 64, 0);
+        this.lastResendAt = now;
+        return frames;
+    }
+
+    /// The window's proof has settled (or the wait ran out): send the frames srv refused for a lapsed proof, then what was
+    /// held, in order, ahead of what queued since.
+    releaseHeldInput(proven: boolean) {
+        // Without a proof the refused frames are not sent again: srv would refuse them again.
+        if (!proven) this.dropRefusedInput();
+        const frames = [...(proven ? this.takeRefusedInput() : []), ...this.heldInput.take()];
         if (frames.length === 0) return;
         this.msgQueue.unshift(...frames);
         this.runMsgQueue();
     }
 
     pushMessage(data: WSCommandType) {
-        // Input waits for the connection's proof, behind what is already held so order is kept.
-        if (isInputFrame(data) && (this.heldInput.size > 0 || (this.open && gateClosed()))) {
+        // Input waits for the connection's proof, behind what is already held so order is kept. Not while older frames
+        // are still queued (a paste draining across a reconnect): it goes behind them, and the drain holds each in turn.
+        if (isInputFrame(data) && this.msgQueue.length === 0 && (this.heldInput.size > 0 || (this.open && gateClosed()))) {
             this.heldInput.hold(data);
             return;
         }

@@ -119,7 +119,7 @@ describe("WSControl input waits for the window's proof", () => {
     };
     const settle = (ws: WSControl) => {
         pending = false;
-        ws.releaseHeldInput();
+        ws.releaseHeldInput(true);
     };
 
     beforeEach(() => {
@@ -156,7 +156,7 @@ describe("WSControl input waits for the window's proof", () => {
         pending = false; // the proof settled but the release has not run yet: a new frame still goes behind the held one
         ws.pushMessage(cmd({ wscommand: "blockinput", tag: "after" }));
         expect(tagsOf()).toEqual(["now"]);
-        ws.releaseHeldInput();
+        ws.releaseHeldInput(true);
         vi.advanceTimersByTime(1000);
         expect(tagsOf()).toEqual(["now", "held", "after"]);
     });
@@ -199,5 +199,47 @@ describe("WSControl input waits for the window's proof", () => {
         // The gate stays open for the rest of this connection, so later frames are not held for a proof that is not coming.
         ws.pushMessage(cmd({ wscommand: "blockinput", tag: "k2" }));
         expect(tagsOf()).toEqual(["k", "k2"]);
+    });
+
+    it("sends again, once the proof is made anew, the frames srv refused for a lapsed proof, ahead of what was held meanwhile", () => {
+        const ws = open();
+        for (const tag of ["k1", "k2", "k3"]) ws.pushMessage(cmd({ wscommand: "blockinput", tag }));
+        // srv refused the last two (the proof lapsed between the first and the second); proving again begins, so input is held
+        expect(ws.noteInputRefused()).toBe(true);
+        expect(ws.noteInputRefused()).toBe(true);
+        pending = true;
+        ws.pushMessage(cmd({ wscommand: "blockinput", tag: "k4" }));
+        settle(ws);
+        vi.advanceTimersByTime(1000);
+        expect(tagsOf()).toEqual(["k1", "k2", "k3", "k2", "k3", "k4"]);
+    });
+
+    it("does not send refused frames again when the proof could not be made anew, nor answer a refusal right after a resend with another", () => {
+        const ws = open();
+        ws.pushMessage(cmd({ wscommand: "blockinput", tag: "k1" }));
+        expect(ws.noteInputRefused()).toBe(true);
+        ws.releaseHeldInput(false);
+        vi.advanceTimersByTime(1000);
+        expect(tagsOf()).toEqual(["k1"]);
+
+        expect(ws.noteInputRefused()).toBe(true);
+        ws.releaseHeldInput(true);
+        vi.advanceTimersByTime(1000);
+        expect(tagsOf()).toEqual(["k1", "k1"]);
+        expect(ws.noteInputRefused()).toBe(false); // refused again at once: the proof did not help, so it is final
+    });
+
+    it("keeps order when a reconnect interrupts a paste that is still draining", () => {
+        const ws = new WSControl("ws://127.0.0.1:1", "tab", () => {});
+        ws.connectNow("test");
+        for (const tag of ["A", "B", "C"]) ws.pushMessage(cmd({ wscommand: "blockinput", tag }));
+        lastSocket.onopen(new Event("open"));
+        expect(tagsOf()).toEqual(["A"]); // B and C wait for the pacing timer
+        pending = true; // the connection dropped and came back: its proof is pending again
+        ws.pushMessage(cmd({ wscommand: "blockinput", tag: "D" }));
+        vi.advanceTimersByTime(100);
+        settle(ws);
+        vi.advanceTimersByTime(1000);
+        expect(tagsOf()).toEqual(["A", "B", "C", "D"]);
     });
 });
