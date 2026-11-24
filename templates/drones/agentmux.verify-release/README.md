@@ -8,7 +8,7 @@ The Vault entry (`credential`) must hold a GitHub token that can read the releas
 
 What it does not do, against the full acceptance case in the Drone spec (§9 c):
 
-- It does not run the repository's release-check script. A template cannot run a command, and an Agent block here cannot be given a named command to run. The check is the one it can make from the release itself: not a draft, not a pre-release, the manifest asset present.
+- It does not run the repository's release-check script. The check is the one it can make from the release itself: not a draft, not a pre-release, the manifest asset present.
 - It merges one pull request, the one you name, not a list.
 
 Why this is allowed to merge: it reads text nobody vouches for (a poll of GitHub), it uses a credential and it writes outside AgentMux, which a template may do only with a person in between. The merge is behind an Approval block on its only path, and the turn-on check refuses the drone if that stops being true. The pull request number and the repository are the template's own values, not text from the release.
