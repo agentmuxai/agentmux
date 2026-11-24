@@ -172,6 +172,13 @@ fn member(ctx: &Ctx, collection: &str, caller: &str) -> Result<State, OpError> {
     }
 }
 
+/// The checks every op that reads or writes makes first (this install holds the lock, the caller is a current member),
+/// for a caller that has more to look up before the op itself: nothing about a collection (its kind, whether this build
+/// merges it) is told to a caller that fails them.
+pub fn admit(ctx: &Ctx, collection: &str, caller: &str) -> Result<(), OpError> {
+    member(ctx, collection, caller).map(|_| ())
+}
+
 fn weight(r: &Record) -> usize {
     r.body.len() + HEADER_WEIGHT
 }
