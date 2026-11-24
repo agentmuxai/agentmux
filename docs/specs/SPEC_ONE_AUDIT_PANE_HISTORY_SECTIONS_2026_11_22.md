@@ -2,7 +2,7 @@
 
 **Task:** #48399 (spec); build #48400 follows approval.
 **Author:** Agent1@narko, 2026-11-22.
-**Status:** approved (2026-11-24); build in progress (#48400). The direction is the operator's, given in conversation on 2026-11-22: the History and Audit panes are not different enough to be two panes, and the name "History" is confusing next to an individual agent's own history; the two become one pane, named Audit.
+**Status:** active. Approved 2026-11-24; build in progress (#48400). The direction is the operator's, given in conversation on 2026-11-22: the History and Audit panes are not different enough to be two panes, and the name "History" is confusing next to an individual agent's own history; the two become one pane, named Audit.
 **Verified against:** `agentmux` `origin/main` @ `31c769e45a` (2026-11-22), by reading the code named below. Nothing was run. Where a claim rests on a file I did not open, it says so.
 **Builds on:** [SPEC_WARDEN_SPLIT_INTO_VAULT_HISTORY_AUDIT_2026_10_28.md](SPEC_WARDEN_SPLIT_INTO_VAULT_HISTORY_AUDIT_2026_10_28.md) (the split this partly undoes), [SPEC_AUDIT_LIVE_LOG_OF_EVERY_AGENT_ACTION_2026_11_03.md](SPEC_AUDIT_LIVE_LOG_OF_EVERY_AGENT_ACTION_2026_11_03.md), [SPEC_WARDEN_HISTORY_SECTION_2026_10_18.md](SPEC_WARDEN_HISTORY_SECTION_2026_10_18.md).
 
