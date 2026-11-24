@@ -822,6 +822,7 @@
     "kanban.prs.addPlaceholder": "owner/repo#12 or its address",
     "kanban.prs.already": "Already on this task",
     "kanban.prs.close": "Close",
+    "kanban.prs.connectGithub": "Connect GitHub",
     "kanban.prs.dismiss": "Dismiss",
     "kanban.prs.itsHolder": "its holder",
     "kanban.prs.linkTo": "Link to task",
