@@ -7,6 +7,13 @@ import { closeBrowserTab } from "./browser-close-tab";
 import { openIncognitoTab, openNewTab } from "./browser-profile-menu";
 import type { AddressBarState, BrowserNavBarProps } from "./browser-nav-address";
 
+/** The find bar's box, when it is already open: Ctrl+F again puts the cursor back in it with its text selected. */
+function focusFindBox(): void {
+    const box = document.querySelector<HTMLInputElement>(".search-container input");
+    box?.focus();
+    box?.select();
+}
+
 /**
  * The host's pane shortcuts for this bar: focus the address, go Home, open a tab or an Incognito tab, close this tab.
  * Ctrl+L (Cmd+L on macOS) is dead by default in a browser pane — CEF
@@ -40,6 +47,14 @@ export function useBrowserPaneShortcuts(
                 }
                 if (payload.action === "new-tab") {
                     openNewTab(model, home());
+                    return;
+                }
+                if (payload.action === "find") {
+                    diag(`shortcut-find`);
+                    // The page holds OS keyboard focus: the find box needs it handed back first, as the address bar does.
+                    getApi().reclaimWindowFocus(windowLabel).catch(() => {});
+                    if (model.searchAtoms?.isOpen()) focusFindBox();
+                    else model.searchAtoms?.isOpen._set(true);
                     return;
                 }
                 if (payload.action === "close-tab") {

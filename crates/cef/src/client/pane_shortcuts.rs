@@ -13,6 +13,7 @@ pub(super) const VK_LEFT: i32 = 0x25; // Alt+Left — back
 pub(super) const VK_RIGHT: i32 = 0x27; // Alt+Right — forward
 pub(super) const VK_T: i32 = 0x54; // Ctrl+T — new tab in this pane
 pub(super) const VK_W: i32 = 0x57; // Ctrl+W — close this tab
+pub(super) const VK_F: i32 = 0x46; // Ctrl+F — find in the page
 
 /// Reserved chrome-style shortcuts intercepted only when the focused CEF
 /// browser is a browser pane (see issue #1190 — browser panes are native
@@ -32,10 +33,10 @@ pub(super) enum BrowserPaneShortcut {
     /// Ctrl/Cmd+T: a new tab (a pane tab) beside this one; Ctrl/Cmd+W closes this one (never the pane's last).
     NewTab,
     CloseTab,
+    /// Ctrl/Cmd+F: the find bar over the page (the app's own Find in pane has nothing to search here).
+    Find,
 }
 
-/// Ctrl+F (in-page find) is deferred: it needs a find-bar UI (input + match-count display), not just an intercepted key.
-///
 /// `shift` must be false to match: codex P2 on #2548 — without this,
 /// Ctrl+Shift+R (Chromium's hard-reload chord) was silently downgraded to a
 /// plain cached reload, and Ctrl+Shift+L was hijacked as focus-address too.
@@ -53,6 +54,7 @@ pub(super) fn browser_pane_shortcut_for(ctrl: bool, alt: bool, shift: bool, vk: 
             VK_R => Some(BrowserPaneShortcut::Reload),
             VK_T => Some(BrowserPaneShortcut::NewTab),
             VK_W => Some(BrowserPaneShortcut::CloseTab),
+            VK_F => Some(BrowserPaneShortcut::Find),
             _ => None,
         }
     } else if alt && !ctrl {
@@ -76,7 +78,7 @@ pub(super) fn browser_pane_shortcut_for(ctrl: bool, alt: bool, shift: bool, vk: 
 /// (`pane_shortcuts_are_reachable`).
 pub(super) fn pane_shortcut_before_app_keys(primary: bool, alt: bool, shift: bool, vk: i32) -> Option<BrowserPaneShortcut> {
     browser_pane_shortcut_for(primary, alt, shift, vk).filter(|s| {
-        matches!(s, BrowserPaneShortcut::NewIncognito | BrowserPaneShortcut::NewTab | BrowserPaneShortcut::CloseTab)
+        matches!(s, BrowserPaneShortcut::NewIncognito | BrowserPaneShortcut::NewTab | BrowserPaneShortcut::CloseTab | BrowserPaneShortcut::Find)
     })
 }
 
@@ -114,6 +116,7 @@ mod browser_pane_shortcut_tests {
             (true, false, true, VK_N),
             (true, false, false, VK_T),
             (true, false, false, VK_W),
+            (true, false, false, VK_F),
         ];
         for mac in [false, true] {
             for (primary, alt, shift, vk) in chords {
@@ -206,6 +209,14 @@ mod browser_pane_shortcut_tests {
     }
 
     #[test]
+    fn ctrl_f_finds_in_the_page() {
+        assert_eq!(browser_pane_shortcut_for(true, false, false, VK_F), Some(BrowserPaneShortcut::Find));
+        assert_eq!(browser_pane_shortcut_for(false, false, false, VK_F), None);
+        assert_eq!(browser_pane_shortcut_for(true, true, false, VK_F), None);
+        assert_eq!(browser_pane_shortcut_for(true, false, true, VK_F), None);
+    }
+
+    #[test]
     fn a_panes_tab_keys_win_over_the_apps_on_macos() {
         let _g = crate::client::host_keys::TEST_LOCK.lock();
         // The app's own Cmd+T is "new tab" and Cmd+W "close pane"...
@@ -214,6 +225,8 @@ mod browser_pane_shortcut_tests {
         // ...and a focused browser pane takes them first, on every platform's primary key.
         assert_eq!(pane_shortcut_before_app_keys(true, false, false, VK_T), Some(BrowserPaneShortcut::NewTab));
         assert_eq!(pane_shortcut_before_app_keys(true, false, false, VK_W), Some(BrowserPaneShortcut::CloseTab));
+        // Ctrl+F: a browser pane takes it for its page, whatever the app has on those keys.
+        assert_eq!(pane_shortcut_before_app_keys(true, false, false, VK_F), Some(BrowserPaneShortcut::Find));
         // The pane's reload and address keys are still not taken ahead of the app's.
         assert_eq!(pane_shortcut_before_app_keys(true, false, false, VK_R), None);
     }

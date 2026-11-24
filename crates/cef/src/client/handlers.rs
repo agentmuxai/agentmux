@@ -80,6 +80,15 @@ wrap_client! {
             Some(AgentMuxDragHandler::new(self.inner.clone()))
         }
 
+        fn find_handler(&self) -> Option<FindHandler> {
+            // Real web panes only: the app's own windows have no find bar of this kind.
+            if !self.is_browser_pane || self.drag_capture {
+                return None;
+            }
+            let state = self.inner.lock().state.clone();
+            Some(super::page_find::AgentMuxFindHandler::new(state))
+        }
+
         fn focus_handler(&self) -> Option<FocusHandler> {
             // For browser panes only: reports a page taking focus to the input
             // owner (see the handler below).
@@ -465,6 +474,7 @@ fn run_browser_pane_shortcut(
         BrowserPaneShortcut::NewIncognito => Some("new-incognito"),
         BrowserPaneShortcut::NewTab => Some("new-tab"),
         BrowserPaneShortcut::CloseTab => Some("close-tab"),
+        BrowserPaneShortcut::Find => Some("find"),
         _ => None,
     };
     match shortcut {
@@ -472,7 +482,8 @@ fn run_browser_pane_shortcut(
         | BrowserPaneShortcut::Home
         | BrowserPaneShortcut::NewIncognito
         | BrowserPaneShortcut::NewTab
-        | BrowserPaneShortcut::CloseTab => {
+        | BrowserPaneShortcut::CloseTab
+        | BrowserPaneShortcut::Find => {
             // codex P2 on #2548: emit_event_from_state always targets "main" —
             // wrong when the pane was torn off into a floating window, since
             // that window's own BrowserNavBar (not main's) owns the matching
