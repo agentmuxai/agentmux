@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { addressToUrl, clampSide } from "./use-streamed-pane";
-import { buttonName, CLIPBOARD_MAX, frameBytes, isCopyChord, isPasteChord, keyMessage, LABEL_MAX, modifiers, mouseMessage, parseServerMessage, plainText, typedText, wheelMessage, windowLabel } from "./streamed-protocol";
+import { buttonName, CLIPBOARD_MAX, frameBytes, isCopyChord, isPasteChord, keyMessage, LABEL_MAX, modifiers, mouseMessage, parseServerMessage, plainText, remoteModifiers, typedText, wheelMessage, windowLabel } from "./streamed-protocol";
 
 const none = { altKey: false, ctrlKey: false, metaKey: false, shiftKey: false };
 
@@ -152,6 +152,18 @@ describe("copying out of the remote browser", () => {
         expect(parseServerMessage(JSON.stringify({ t: "clipboard", text: 5 }))).toBeNull();
     });
 
+    it("on a Mac, sends Cmd with C, X, A, Z, F, L or R as Ctrl, and nothing else", () => {
+        const cmd = { ...none, metaKey: true };
+        for (const k of ["c", "X", "a", "z", "f", "l", "r"]) expect(remoteModifiers({ ...cmd, key: k }, true)).toMatchObject({ ctrlKey: true, metaKey: false });
+        // Shift stays (redo), and the key message carries the Ctrl bit, not Meta.
+        expect(keyMessage("down", { ...cmd, shiftKey: true, key: "z", code: "KeyZ", keyCode: 90 }, true)).toMatchObject({ mods: 2 | 8, text: "" });
+        // Not on another platform; not for a letter the remote browser takes differently (T, W, Q); not with Ctrl or Alt held.
+        expect(remoteModifiers({ ...cmd, key: "c" }, false).metaKey).toBe(true);
+        for (const k of ["t", "w", "q"]) expect(remoteModifiers({ ...cmd, key: k }, true).metaKey).toBe(true);
+        expect(remoteModifiers({ ...cmd, ctrlKey: true, key: "c" }, true).metaKey).toBe(true);
+        expect(remoteModifiers({ ...cmd, altKey: true, key: "c" }, true).metaKey).toBe(true);
+    });
+
     it("takes Ctrl with C or X as a copy, and nothing else", () => {
         expect(isCopyChord({ ...none, key: "c", ctrlKey: true })).toBe(true);
         expect(isCopyChord({ ...none, key: "X", ctrlKey: true })).toBe(true);
@@ -159,5 +171,17 @@ describe("copying out of the remote browser", () => {
         expect(isCopyChord({ ...none, key: "v", ctrlKey: true })).toBe(false);
         expect(isCopyChord({ ...none, key: "c", ctrlKey: true, altKey: true })).toBe(false);
         expect(isCopyChord({ ...none, key: "c", metaKey: true })).toBe(false);
+    });
+});
+
+
+describe("the Cmd key on a Mac, in screen mode", () => {
+    const meta = { key: "Meta", code: "MetaLeft", keyCode: 91, altKey: false, ctrlKey: false, metaKey: true, shiftKey: false };
+    it("is pressed on the remote screen as the Control key, since that backend presses the key a code names", () => {
+        expect(keyMessage("down", meta, true)).toMatchObject({ t: "key", type: "down", key: "Control", code: "ControlLeft", mods: 2, text: "" });
+        expect(keyMessage("up", { ...meta, code: "MetaRight" }, true)).toMatchObject({ type: "up", code: "ControlRight" });
+    });
+    it("is left as it is off a Mac", () => {
+        expect(keyMessage("down", meta, false)).toMatchObject({ key: "Meta", code: "MetaLeft" });
     });
 });

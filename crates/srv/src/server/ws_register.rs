@@ -9,7 +9,8 @@ use std::sync::Arc;
 use crate::backend::background_task_feed::publish_background_task_updated;
 use crate::backend::blockcontroller;
 use crate::backend::base::normalize_working_dir;
-use crate::backend::obj::{Block, MuxObjUpdate, mux_obj_to_value};
+use crate::backend::obj::{Block, MetaMapType, MuxObjUpdate, mux_obj_to_value};
+use crate::backend::storage::store::Store;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
     AgentShutdownKeepResult, AiRateLimitResult, AppInfoResult, CommandAgentAnswerData, CommandAgentCancelData,
@@ -162,9 +163,9 @@ fn register_object_meta(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // `Value` request, parsed into its struct below (which uses the hand-written ORef/MetaType); the stub keeps its
     // hand-written request type (generated-manifest.json `dataType`).
     let s = state.clone();
-    engine.register_typed(COMMAND_SET_META, move |data: serde_json::Value, _ctx| {
+    engine.register_typed(COMMAND_SET_META, move |data: serde_json::Value, ctx| {
         let s = s.clone();
-        async move { set_meta(&s, data) }
+        async move { set_meta(&s, &ctx, data) }
     });
 
     // getmeta → return metadata for a wave object
@@ -203,12 +204,13 @@ fn register_object_meta(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 /// `setmeta`: update an object's metadata, then tell every client about the new block.
-fn set_meta(state: &AppState, data: serde_json::Value) -> Result<(), String> {
+fn set_meta(state: &AppState, ctx: &RpcContext, data: serde_json::Value) -> Result<(), String> {
     let mstore = state.mstore.clone();
     let event_bus = state.event_bus.clone();
     let cmd: CommandSetMetaData =
         serde_json::from_value(data).map_err(|e| format!("setmeta: {e}"))?;
     let oref_str = cmd.oref.to_string();
+    refuse_agent_meta_write(&mstore, ctx, &oref_str, &cmd.meta)?;
     let meta_keys: Vec<&String> = cmd.meta.keys().collect();
     // debug, not info: fires on every metadata write (zoom, title,
     // view-state edits); at info this became a meaningful slice of
@@ -254,6 +256,21 @@ fn set_meta(state: &AppState, data: serde_json::Value) -> Result<(), String> {
     Ok(())
 }
 
+/// `setmeta` from a connection registered as an agent: a block's meta is written only on the pane that agent runs,
+/// and Take over (clearing a browser pane's owner) is the person's, so an agent never writes it.
+fn refuse_agent_meta_write(mstore: &Store, ctx: &RpcContext, oref: &str, meta: &MetaMapType) -> Result<(), String> {
+    if ctx.agent_id.is_empty() {
+        return Ok(());
+    }
+    if meta.get(crate::server::browser_owner::OWNER_META_KEY).is_some_and(serde_json::Value::is_null) {
+        return Err("FORBIDDEN: Take over a browser pane is the person's act; an agent that is done with a pane closes it or leaves it".to_string());
+    }
+    match oref.strip_prefix("block:") {
+        Some(block_id) => super::pane_caller::agent_acts_on_own_pane(mstore, ctx, block_id, "writing pane meta"),
+        None => Ok(()),
+    }
+}
+
 /// `getmeta`: an object's metadata (the whole object when it has no `meta` field).
 fn get_meta(state: &AppState, data: serde_json::Value) -> Result<serde_json::Value, String> {
     let mstore = state.mstore.clone();
@@ -278,9 +295,9 @@ fn register_block_controller(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // `Value` request, parsed into its struct below (termsize and the rest); the stub keeps its
     // hand-written request type (generated-manifest.json `dataType`).
     let s = state.clone();
-    engine.register_typed(COMMAND_CONTROLLER_RESYNC, move |data: serde_json::Value, _ctx| {
+    engine.register_typed(COMMAND_CONTROLLER_RESYNC, move |data: serde_json::Value, ctx| {
         let s = s.clone();
-        async move { controller_resync(&s, data) }
+        async move { controller_resync(&s, &ctx, data) }
     });
 
     // controllerinput → route keyboard input / signals / resize to block controller
@@ -355,7 +372,7 @@ fn register_block_controller(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 /// `controllerresync`: load the block from the store and create or restart its controller.
-fn controller_resync(state: &AppState, data: serde_json::Value) -> Result<(), String> {
+fn controller_resync(state: &AppState, ctx: &RpcContext, data: serde_json::Value) -> Result<(), String> {
     let mstore = state.mstore.clone();
     let broker = state.broker.clone();
     let event_bus = state.event_bus.clone();
@@ -367,6 +384,7 @@ fn controller_resync(state: &AppState, data: serde_json::Value) -> Result<(), St
     let config_watcher = state.config_watcher.clone();
     let cmd: CommandControllerResyncData = serde_json::from_value(data)
         .map_err(|e| format!("controllerresync: {e}"))?;
+    super::pane_caller::agent_acts_on_own_pane(&mstore, ctx, &cmd.blockid, "restarting a pane's controller")?;
     tracing::info!(
         block_id = %cmd.blockid,
         tab_id = %cmd.tabid,

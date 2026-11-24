@@ -35,10 +35,14 @@ pub enum Answer {
 }
 
 /// The request body: the grant, and what the agent said about why and for how long, if anything.
-pub fn request_body(profile: &str, reason: Option<&str>, duration: Option<&str>) -> Value {
+pub fn request_body(profile: &str, reason: Option<&str>, tag: Option<&str>, duration: Option<&str>) -> Value {
     let mut body = json!({ "profile": profile });
     if let Some(reason) = reason.map(str::trim).filter(|r| !r.is_empty()) {
         body["reason"] = json!(reason);
+    }
+    // The value of the one tag a grant takes from the caller; srv checks it, and says why when it is not allowed.
+    if let Some(tag) = tag.map(str::trim).filter(|t| !t.is_empty()) {
+        body["tag"] = json!(tag);
     }
     if let Some(seconds) = duration.and_then(|d| d.trim().parse::<u64>().ok()) {
         body["duration_seconds"] = json!(seconds);
@@ -71,8 +75,9 @@ pub fn ask(profile: &str) -> Answer {
         Err(e) => return Answer::Refused(format!("couldn't start: {e}")),
     };
     let reason = std::env::var("AGENTMUX_AWS_REASON").ok();
+    let tag = std::env::var("AGENTMUX_AWS_TAG").ok();
     let duration = std::env::var("AGENTMUX_AWS_DURATION").ok();
-    let body = request_body(profile, reason.as_deref(), duration.as_deref());
+    let body = request_body(profile, reason.as_deref(), tag.as_deref(), duration.as_deref());
     match rt.block_on(client.post_json_status("/api/v1/aws/credentials", agent_token.as_deref(), &body, ASK_TIMEOUT)) {
         Ok((status, answer)) => answer_of(status, &answer),
         Err(e) => Answer::Refused(format!("couldn't reach AgentMux: {e}")),
@@ -104,10 +109,10 @@ mod tests {
 
     #[test]
     fn the_request_names_the_grant_and_carries_the_reason_and_lifetime_only_when_given() {
-        assert_eq!(request_body("deploy", None, None), json!({ "profile": "deploy" }));
-        assert_eq!(request_body("deploy", Some("  "), Some("soon")), json!({ "profile": "deploy" }));
+        assert_eq!(request_body("deploy", None, None, None), json!({ "profile": "deploy" }));
+        assert_eq!(request_body("deploy", Some("  "), Some(" "), Some("soon")), json!({ "profile": "deploy" }));
         assert_eq!(
-            request_body("deploy", Some(" deploy stack X "), Some("1800")),
+            request_body("deploy", Some(" deploy stack X "), None, Some("1800")),
             json!({ "profile": "deploy", "reason": "deploy stack X", "duration_seconds": 1800 })
         );
     }

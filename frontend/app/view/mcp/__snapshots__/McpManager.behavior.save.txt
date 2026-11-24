@@ -533,8 +533,7 @@
                 <span>
                   "Connected"
                   "·"
-                  "3"
-                  "tools"
+                  "3 tools"
             <span class="mcp-detail-label">
               "Transport"
             <pre class="mcp-detail-value">

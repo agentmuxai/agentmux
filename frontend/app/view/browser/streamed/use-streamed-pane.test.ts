@@ -18,6 +18,8 @@ vi.mock("./streamed-client", () => ({
     },
 }));
 
+const writeTextMock = vi.hoisted(() => vi.fn());
+vi.mock("@/util/clipboard", () => ({ writeText: writeTextMock }));
 import { useStreamedPane } from "./use-streamed-pane";
 
 function mount() {
@@ -274,11 +276,15 @@ describe("a streamed pane's windows", () => {
     it("puts the text the person copied in the remote browser on their own clipboard, and says so when it cannot", async () => {
         const writes: string[] = [];
         let fail = false;
-        vi.stubGlobal("navigator", { clipboard: { writeText: (t: string) => (fail ? Promise.reject(new Error("no")) : (writes.push(t), Promise.resolve())) } });
+        // The copy goes through the app's clipboard helper, not navigator.clipboard (which the desktop host's embedded browser may refuse).
+        writeTextMock.mockImplementation((text: string) => (fail ? Promise.reject(new Error("no")) : (writes.push(text), Promise.resolve())));
+        const pageClipboard = vi.fn();
+        vi.stubGlobal("navigator", { clipboard: { writeText: pageClipboard } });
         try {
             const { pane, dispose } = live();
             events!.onMessage({ t: "clipboard", text: "copied text" });
             expect(writes).toEqual(["copied text"]);
+            expect(pageClipboard).not.toHaveBeenCalled();
             expect(pane.notice()).toBe("");
             fail = true;
             events!.onMessage({ t: "clipboard", text: "again" });

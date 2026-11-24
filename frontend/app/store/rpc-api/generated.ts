@@ -330,6 +330,7 @@ import type { DeleteDroneResp } from "@/types/rpc/DeleteDroneResp";
 import type { DeleteEditorFileReq } from "@/types/rpc/DeleteEditorFileReq";
 import type { DeleteIdentityAccountResult } from "@/types/rpc/DeleteIdentityAccountResult";
 import type { DesktopEvent } from "@/types/rpc/DesktopEvent";
+import type { DroneAccess } from "@/types/rpc/DroneAccess";
 import type { DroneDefinition } from "@/types/rpc/DroneDefinition";
 import type { DroneRun } from "@/types/rpc/DroneRun";
 import type { EditorRootsReq } from "@/types/rpc/EditorRootsReq";
@@ -377,6 +378,7 @@ import type { FsTrashReq } from "@/types/rpc/FsTrashReq";
 import type { FsUnwatchReq } from "@/types/rpc/FsUnwatchReq";
 import type { FsWatchReq } from "@/types/rpc/FsWatchReq";
 import type { FsWatchResult } from "@/types/rpc/FsWatchResult";
+import type { GetDroneAccessReq } from "@/types/rpc/GetDroneAccessReq";
 import type { GetDroneReq } from "@/types/rpc/GetDroneReq";
 import type { GetEditorHomeResult } from "@/types/rpc/GetEditorHomeResult";
 import type { GetEditorRootsResult } from "@/types/rpc/GetEditorRootsResult";
@@ -566,6 +568,7 @@ import type { SessionArchiveResult } from "@/types/rpc/SessionArchiveResult";
 import type { SessionExportResult } from "@/types/rpc/SessionExportResult";
 import type { SessionRestoreResult } from "@/types/rpc/SessionRestoreResult";
 import type { SessionResumePreflightResult } from "@/types/rpc/SessionResumePreflightResult";
+import type { SetDroneAgentsReq } from "@/types/rpc/SetDroneAgentsReq";
 import type { ShellExecResult } from "@/types/rpc/ShellExecResult";
 import type { ShellList } from "@/types/rpc/ShellList";
 import type { ShellStatusResult } from "@/types/rpc/ShellStatusResult";
@@ -1986,6 +1989,14 @@ export const GeneratedApi = {
   // command "listmemories"
   ListBundlesCommand(client: RpcClient, data?: CommandListBundlesData, opts?: RpcOpts): Promise<Array<Bundle>> {
     return client.rpcCall("listmemories", data ?? {}, opts);
+  },
+  // command "getdroneaccess"
+  GetDroneAccessCommand(client: RpcClient, data: GetDroneAccessReq, opts?: RpcOpts): Promise<DroneAccess> {
+    return client.rpcCall("getdroneaccess", data, opts);
+  },
+  // command "setdroneagents"
+  SetDroneAgentsCommand(client: RpcClient, data: SetDroneAgentsReq, opts?: RpcOpts): Promise<DroneAccess> {
+    return client.rpcCall("setdroneagents", data, opts);
   },
   // command "getdronepayloadschema"
   GetDronePayloadSchemaCommand(client: RpcClient, data: PayloadSchemaReq, opts?: RpcOpts): Promise<PayloadSchemaResp> {

@@ -13,6 +13,7 @@ import { Modal } from "@/app/element/modal";
 import { ModalBody, ModalFooter, ModalHeader } from "@/app/element/modal-parts";
 import { Button, Field, Pill, SegmentedControl, Select, TextInput } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
+import { Rich } from "@/app/i18n/rich";
 import { ensureBrowserProfiles } from "@/app/view/browser/browser-profiles";
 import type { ImportPreview } from "@/types/rpc/ImportPreview";
 import type { ImportResult } from "@/types/rpc/ImportResult";
@@ -42,10 +43,11 @@ const MAPPABLE = VAULT_KINDS.filter((k) => k.name !== "card" && k.name !== "bank
     main: k.parts[0].label,
 }));
 
-const DUPLICATE_CHOICES: { value: Duplicates; label: string }[] = [
-    { value: "skip", label: "Skip them" },
-    { value: "replace", label: "Replace mine" },
-    { value: "keep_both", label: "Keep both" },
+// Built when drawn, so a change of language shows.
+const duplicateChoices = (): { value: Duplicates; label: string }[] => [
+    { value: "skip", label: t("vault.import.dup.skip") },
+    { value: "replace", label: t("vault.import.dup.replace") },
+    { value: "keep_both", label: t("vault.import.dup.keepBoth") },
 ];
 
 /** What makes an entry of the file one the Vault already has. A linked entry has no value to compare: it is the
@@ -61,15 +63,15 @@ function DuplicatesChoice(props: { count: number; links: number; value: Duplicat
     return (
         <Show when={props.count > 0}>
             <Field
-                label={`${props.count} already in your Vault`}
+                label={t("vault.import.alreadyCount", { n: props.count })}
                 layout="stacked"
                 description={duplicatesAbout(props.count, props.links)}
             >
                 <SegmentedControl
-                    options={DUPLICATE_CHOICES}
+                    options={duplicateChoices()}
                     value={props.value}
                     onChange={props.onChange}
-                    ariaLabel="What to do with entries already in the Vault"
+                    ariaLabel={t("vault.import.dupAria")}
                 />
             </Field>
         </Show>
@@ -250,7 +252,7 @@ async function commit(s: ImportState, preview: ImportPreview) {
 
 function title(s: ImportState): string {
     const cur = s.step();
-    return cur ? `Import ${cur.kind === "preview" ? cur.preview.file_name : cur.fileName}` : "Import into the Vault";
+    return cur ? t("vault.import.title", { file: cur.kind === "preview" ? cur.preview.file_name : cur.fileName }) : t("vault.import.titleBlank");
 }
 
 /** `into` is the Vault the new entries go to when the dialog opens (Personal when left out). */
@@ -273,12 +275,12 @@ export function VaultImportDialog(props: { onClose: () => void; into?: string })
             closeOnBackdropClick={false}
             panelClass="vault-form"
         >
-            <ModalHeader title={title(s)} description="Nothing is added until you press Import." />
+            <ModalHeader title={title(s)} description={t("vault.import.description")} />
             <ModalBody>
                 <Show when={s.result()}>{(r) => <ImportedView s={s} r={r} />}</Show>
                 <Show when={!s.result()}>
                     <Show when={s.busy() && !s.step()}>
-                        <p class="warden-manager-dim">Choose the file in the window that opened…</p>
+                        <p class="warden-manager-dim">{t("vault.import.choosing")}</p>
                     </Show>
                     <Show when={stepOf(s, "needs_passphrase")}>{(cur) => <PassphraseStep s={s} cur={cur} />}</Show>
                     <Show when={stepOf(s, "needs_mapping")}>{(cur) => <MappingStep s={s} cur={cur} />}</Show>
@@ -294,7 +296,7 @@ export function VaultImportDialog(props: { onClose: () => void; into?: string })
             </ModalBody>
             <ModalFooter>
                 <Button data-modal-dismiss onClick={props.onClose} disabled={s.busy() && !!s.result()}>
-                    {s.result() ? "Close" : "Cancel"}
+                    {s.result() ? t("vault.import.close") : t("vault.import.cancel")}
                 </Button>
                 <FooterActions s={s} />
             </ModalFooter>
@@ -308,41 +310,30 @@ function ImportedView(props: { s: ImportState; r: Accessor<ImportResult> }): JSX
     const previewStep = () => stepOf(s, "preview");
     return (
         <div role="status">
-            <p>
-                Imported: {props.r().added} added, {props.r().replaced} replaced, {props.r().skipped} skipped.
-            </p>
+            <p>{t("vault.import.done", { added: props.r().added, replaced: props.r().replaced, skipped: props.r().skipped })}</p>
             <Show
                 when={previewStep()?.preview.plaintext_file}
-                fallback={<p class="warden-manager-dim">The file stays where it is. Delete it if you don't need it.</p>}
+                fallback={<p class="warden-manager-dim">{t("vault.import.fileStays")}</p>}
             >
                 <p class="warden-manager-dim">
-                    {
-                        "That file holds every secret in it unencrypted, so anything that can read your disk can read it. Delete it once you've checked the import."
-                    }
+                    {t("vault.import.plaintext")}
                 </p>
                 <Show when={previewStep()?.preview.source === "chrome"}>
-                    <p class="warden-manager-dim">
-                        The passwords are also still saved in the browser, and in Google Password Manager if you sync
-                        them. Remove them there too if you want the Vault to be their only copy.
-                    </p>
+                    <p class="warden-manager-dim">{t("vault.import.chromeCopies")}</p>
                 </Show>
                 <Show when={previewStep()?.syncedFolder}>
                     <p class="warden-manager-error" role="alert">
-                        It is in your {previewStep()!.syncedFolder} folder: a copy may already be in the cloud, and in
-                        that service's file history. Deleting it here doesn't remove those.
+                        {t("vault.import.syncedFolder", { folder: previewStep()!.syncedFolder })}
                     </p>
                 </Show>
                 <Show
                     when={!s.deleted()}
                     fallback={
-                        <p role="status">
-                            Deleted. (A deleted file isn't securely erased: on an SSD an overwrite doesn't reliably
-                            reach the old blocks.)
-                        </p>
+                        <p role="status">{t("vault.import.deleted")}</p>
                     }
                 >
                     <Button tone="danger" density="compact" icon="trash" onClick={() => void removeFile(s)}>
-                        Delete the file
+                        {t("vault.import.deleteFile")}
                     </Button>
                 </Show>
             </Show>
@@ -361,9 +352,9 @@ function PassphraseStep(props: { s: ImportState; cur: Accessor<Step<"needs_passp
                 }}
             >
                 <Field
-                    label="Passphrase"
+                    label={t("vault.import.passphrase")}
                     layout="stacked"
-                    description="This file is encrypted. Type the passphrase it was exported with: a Vault file's, a KeePass database's master password, or the password a Bitwarden export was protected with."
+                    description={t("vault.import.passphraseHelp")}
                 >
                     <TextInput
                         type="password"
@@ -387,12 +378,12 @@ function KeyFileRow(props: { s: ImportState; cur: Accessor<Step<"needs_passphras
     const s = props.s;
     return (
         <div class="vault-keyfile">
-            <span class="warden-manager-dim">A KeePass database can also need a key file.</span>{" "}
+            <span class="warden-manager-dim">{t("vault.import.keyFileNote")}</span>{" "}
             <Show
                 when={props.cur().keyFileName}
                 fallback={
                     <Button density="compact" disabled={s.busy()} onClick={() => void keyFile(s, "choose")}>
-                        Choose a key file…
+                        {t("vault.import.chooseKeyFile")}
                     </Button>
                 }
             >
@@ -400,7 +391,7 @@ function KeyFileRow(props: { s: ImportState; cur: Accessor<Step<"needs_passphras
                     <>
                         <span class="warden-manager-mono">{name()}</span>{" "}
                         <Button density="compact" disabled={s.busy()} onClick={() => void keyFile(s, "clear")}>
-                            Remove
+                            {t("vault.import.removeKeyFile")}
                         </Button>
                     </>
                 )}
@@ -411,7 +402,7 @@ function KeyFileRow(props: { s: ImportState; cur: Accessor<Step<"needs_passphras
 
 /** The columns of a CSV as choices, a column with no heading called by its place. */
 const columnOptions = (columns: string[]) =>
-    columns.map((c, i) => ({ value: String(i), label: c || `Column ${i + 1}` }));
+    columns.map((c, i) => ({ value: String(i), label: c || t("vault.import.column", { n: i + 1 }) }));
 
 function MappingStep(props: { s: ImportState; cur: Accessor<Step<"needs_mapping">> }): JSX.Element {
     const s = props.s;
@@ -419,35 +410,34 @@ function MappingStep(props: { s: ImportState; cur: Accessor<Step<"needs_mapping"
     return (
         <div class="vault-import-mapping">
             <p>
-                {"AgentMux doesn't know this file's format. Say what each column is: it has "}
-                <strong>{props.cur().rows}</strong> rows.
+                <Rich k="vault.import.mappingIntro" params={{ rows: props.cur().rows }} />
             </p>
-            <Field label="Each row becomes" layout="stacked">
+            <Field label={t("vault.import.eachRow")} layout="stacked">
                 <Select
                     value={s.mapKind()}
                     onChange={s.setMapKind}
                     options={MAPPABLE.map((k) => ({ value: k.value, label: k.label }))}
                 />
             </Field>
-            <Field label="Label (its name)" layout="stacked">
+            <Field label={t("vault.import.labelColumn")} layout="stacked">
                 <Select value={s.mapLabel()} onChange={s.setMapLabel} options={columns()} />
             </Field>
-            <Field label={MAPPABLE.find((k) => k.value === s.mapKind())?.main ?? "Value"} layout="stacked">
+            <Field label={MAPPABLE.find((k) => k.value === s.mapKind())?.main ?? t("vault.import.valueColumn")} layout="stacked">
                 <Select value={s.mapValue()} onChange={s.setMapValue} options={columns()} />
             </Field>
             <Show when={s.mapKind() === "login"}>
-                <Field label="Site (optional)" layout="stacked">
+                <Field label={t("vault.import.siteColumn")} layout="stacked">
                     <Select
                         value={s.mapSite()}
                         onChange={s.setMapSite}
-                        options={[{ value: "", label: "none" }, ...columns()]}
+                        options={[{ value: "", label: t("vault.import.noColumn") }, ...columns()]}
                     />
                 </Field>
-                <Field label="Username (optional)" layout="stacked">
+                <Field label={t("vault.import.userColumn")} layout="stacked">
                     <Select
                         value={s.mapUser()}
                         onChange={s.setMapUser}
-                        options={[{ value: "", label: "none" }, ...columns()]}
+                        options={[{ value: "", label: t("vault.import.noColumn") }, ...columns()]}
                     />
                 </Field>
             </Show>
@@ -461,15 +451,14 @@ function PreviewStep(props: { s: ImportState; preview: Accessor<ImportPreview> }
     return (
         <div class="vault-import-preview">
             <p>
-                <strong>{preview().total}</strong> {preview().total === 1 ? "entry" : "entries"} to import, from{" "}
-                {preview().source_label}.
+                <Rich k="vault.import.toImport" params={{ count: preview().total, source: preview().source_label }} />
             </p>
             <For each={preview().sections}>{(section) => <SectionPreview section={section} />}</For>
             <VaultField
-                label="Import into"
+                label={t("vault.import.into")}
                 value={s.into()}
                 onChange={s.setInto}
-                description="New entries go to this Vault. One you replace stays in the Vault it is in."
+                description={t("vault.import.intoHelp")}
             />
             <Show when={preview().browser_signins > 0}>
                 <BrowserProfileField s={s} count={preview().browser_signins} />
@@ -493,23 +482,20 @@ function BrowserProfileField(props: { s: ImportState; count: number }): JSX.Elem
     ensureBrowserProfiles();
     const vaultName = () => {
         const id = signinVaultOf()[s.profile()] ?? "personal";
-        return vaultChoices().find((v) => v.value === id)?.label ?? "Personal";
+        return vaultChoices().find((v) => v.value === id)?.label ?? t("vault.import.personal");
     };
     // "Above" points at the Import-into field, which is hidden while there is only one Vault.
     const description = () => {
-        const logins = `${props.count} ${props.count === 1 ? "login" : "logins"}`;
-        const where = `go to this profile's sign-in Vault (${vaultName()}), where its browser offers them`;
-        return vaultList().length > 1
-            ? `${logins} with a site ${where}, whatever Vault is chosen above. The rest go to the Vault above.`
-            : `${logins} with a site ${where}.`;
+        const params = { count: props.count, vault: vaultName() };
+        return vaultList().length > 1 ? t("vault.import.profileHelpMany", params) : t("vault.import.profileHelpOne", params);
     };
     return (
-        <Field label="Browser profile for the sign-ins" layout="stacked" description={description()}>
+        <Field label={t("vault.import.profile")} layout="stacked" description={description()}>
             <Select
                 value={s.profile()}
                 onChange={s.setProfile}
                 options={profileRows().map((p) => ({ value: p.key, label: p.label }))}
-                ariaLabel="Browser profile for the sign-ins"
+                ariaLabel={t("vault.import.profile")}
             />
         </Field>
     );
@@ -533,13 +519,13 @@ function SectionPreview(props: { section: ImportPreview["sections"][number] }): 
                                 </Pill>
                             </Show>
                             <Show when={e.duplicate}>
-                                <span class="vault-dup"> · already in your Vault</span>
+                                <span class="vault-dup"> · {t("vault.import.alreadyIn")}</span>
                             </Show>
                         </li>
                     )}
                 </For>
                 <Show when={sec().count > sec().first.length}>
-                    <li class="warden-manager-dim">and {sec().count - sec().first.length} more</li>
+                    <li class="warden-manager-dim">{t("vault.import.andMore", { n: sec().count - sec().first.length })}</li>
                 </Show>
             </ul>
         </div>
@@ -549,7 +535,7 @@ function SectionPreview(props: { section: ImportPreview["sections"][number] }): 
 function SkippedList(props: { skipped: ImportPreview["skipped"] }): JSX.Element {
     return (
         <div class="vault-import-skipped">
-            <strong>{props.skipped.length} can't be imported</strong>
+            <strong>{t("vault.import.cantImport", { n: props.skipped.length })}</strong>
             <ul>
                 <For each={props.skipped}>
                     {(k) => (
@@ -570,7 +556,7 @@ function FooterActions(props: { s: ImportState }): JSX.Element {
         <>
             <Show when={!s.result() && s.step()?.kind === "needs_mapping"}>
                 <Button tone="accent" busy={s.busy()} onClick={() => void map(s)}>
-                    Continue
+                    {t("vault.import.continue")}
                 </Button>
             </Show>
             <Show when={!s.result() && stepOf(s, "needs_passphrase")}>
@@ -581,7 +567,7 @@ function FooterActions(props: { s: ImportState }): JSX.Element {
                         disabled={!s.pass() && !cur().keyFileName}
                         onClick={() => void unlock(s)}
                     >
-                        Open file
+                        {t("vault.import.openFile")}
                     </Button>
                 )}
             </Show>
@@ -593,7 +579,7 @@ function FooterActions(props: { s: ImportState }): JSX.Element {
                         disabled={preview().total === 0}
                         onClick={() => void commit(s, preview())}
                     >
-                        Import
+                        {t("vault.import.import")}
                     </Button>
                 )}
             </Show>

@@ -16,9 +16,7 @@
       <div class="bundle-import-hint">
         "A bundle named this already exists."
         <button type="button" class="ui-button ui-tone-accent ui-button--link">
-          "Use ""
-          "Release kit (2)"
-          "" instead"
+          "Use "Release kit (2)" instead"
     <section class="bundle-import-section">
       <label class="bundle-import-checkbox-row">
         <input type="checkbox" value="on" checked=true>

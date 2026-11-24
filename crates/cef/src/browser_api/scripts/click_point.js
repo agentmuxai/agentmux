@@ -10,7 +10,7 @@ function () {
   const choice = this.tagName === "INPUT" && /^(checkbox|radio)$/i.test(this.type);
   if (choice && this.getClientRects().length === 0) {
     const label = Array.from(this.labels || []).find(l => l.getClientRects().length > 0);
-    if (!label) return { error: "the element is not visible" };
+    if (!label) return { error: "the element is not visible: it has no box (display: none) and no label that is shown" };
     label.scrollIntoView({ block: "center", inline: "center" });
     const clear = (x, y) => {
       const at = doc.elementFromPoint(x, y);
@@ -30,7 +30,21 @@ function () {
   }
   this.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
   const rect = this.getBoundingClientRect();
-  if (rect.width === 0 && rect.height === 0) return { error: "the element is not visible" };
+  if (rect.width === 0 && rect.height === 0) {
+    // No box at all means it or something around it is display: none; a box of no size is a 0 x 0 element.
+    let why = "it is 0 x 0 on the page";
+    if (this.getClientRects().length === 0) {
+      why = "it or something around it is not displayed (display: none)";
+      for (let p = this; p && p.nodeType !== 9; p = p.parentNode || p.host) {
+        const s = p.tagName ? win.getComputedStyle(p) : null;
+        if (s && s.display === "none") {
+          why = (p === this ? "it is" : "it is inside something that is") + " not displayed (display: none)";
+          break;
+        }
+      }
+    }
+    return { error: "the element is not visible: " + why };
+  }
   const vw = win.innerWidth, vh = win.innerHeight;
   // No viewport to measure against (a frame with no size yet): the centre, as before.
   if (!(vw > 0 && vh > 0)) return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
@@ -105,12 +119,33 @@ function () {
   const cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
   const dw = (box.right - box.left) / 4, dh = (box.bottom - box.top) / 4;
   const points = [[cx, cy], [cx - dw, cy - dh], [cx + dw, cy - dh], [cx - dw, cy + dh], [cx + dw, cy + dh]];
+  // Why a person can't see `n` (or null when they can): a click at a point it holds lands on it all the same, because
+  // hit-testing ignores opacity and a hidden panel's overflow, so the answer says so instead of "covered by".
+  const unseen = n => {
+    for (let x = n; x; x = x.parentNode || x.host) {
+      const s = x.nodeType === 1 || x.tagName ? win.getComputedStyle(x) : null;
+      if (s && s.visibility === "hidden") return "visibility: hidden";
+      if (s && parseFloat(s.opacity) === 0) return "opacity 0";
+      if (x.hasAttribute && x.hasAttribute("hidden")) return "hidden";
+      if (x.getAttribute && x.getAttribute("role") === "tabpanel" && x.getAttribute("aria-hidden") === "true") return "in a tab panel that is not showing";
+    }
+    return null;
+  };
   let covering = null;
+  let unseenCover = null;
   for (const [x, y] of points) {
     const at = hit(x, y);
     if (at && related(at)) return { x, y };
-    if (at && !covering) covering = at;
+    if (!at) continue;
+    if (unseen(at)) unseenCover = unseenCover || at;
+    else covering = covering || at;
   }
-  if (!covering) return { error: "not clicked: nothing at " + name(this) + " takes a click" + hint };
-  return { error: "not clicked: " + name(this) + " is covered by " + name(covering) + hint };
+  if (covering) return { error: "not clicked: " + name(this) + " is covered by " + name(covering) + hint };
+  if (unseenCover) {
+    return {
+      error: "not clicked: " + name(this) + " is covered by " + name(unseenCover) + ", which nobody can see (" + unseen(unseenCover) +
+        ") but which still takes the mouse: a click there would land on it, not on the target. Focus the target (Browser focus) and press Enter or Space (Browser key) instead",
+    };
+  }
+  return { error: "not clicked: nothing at " + name(this) + " takes a click" + hint };
 }

@@ -159,6 +159,23 @@ pub fn is_login_failure_frame(frame: &Value) -> bool {
         && frame.get("error").and_then(Value::as_str) == Some("authentication_failed")
 }
 
+/// What a synthetic assistant message says failed, for the result frame that ends its turn: Claude Code writes
+/// the cause there (`"error": "rate_limit"` with "You've hit your 5-hour limit · resets 8:10pm", `authentication_failed`)
+/// and its result frame carries only a generic error. A login failure keeps its fixed word; any other message with
+/// an `error` field gives that field and its text; an ordinary assistant message gives nothing.
+pub fn assistant_error_evidence(frame: &Value) -> String {
+    if frame.get("type").and_then(Value::as_str) != Some("assistant") {
+        return String::new();
+    }
+    if is_login_failure_frame(frame) {
+        return "authentication_failed".to_string();
+    }
+    match frame.get("error").and_then(Value::as_str) {
+        Some(error) if !error.is_empty() => inband_error_text(frame).trim().to_string(),
+        _ => String::new(),
+    }
+}
+
 /// Codex's `try again at 9:44 PM.` / `try again at Nov 3rd, 2025 9:44 PM.`.
 /// A time with no date is its next occurrence after `now`: Codex leaves the
 /// date out only for today.
@@ -324,6 +341,23 @@ mod tests {
         assert_eq!(reset_from_text("or try again at Nov 3rd, 2026 12:05 AM.", now, None), Some(ms(at(2026, 11, 3, 0, 5))));
         assert_eq!(reset_from_text("or try again later.", now, None), None, "no time named");
         assert_eq!(reset_from_text("or try again at soon.", now, None), None);
+    }
+
+    #[test]
+    fn an_assistant_message_with_an_error_field_is_the_evidence_for_its_result_frame() {
+        let limit = serde_json::json!({
+            "type": "assistant", "error": "rate_limit",
+            "message": { "content": [{ "type": "text", "text": "You've hit your 5-hour limit · resets 8:10pm (America/Los_Angeles)" }] }
+        });
+        let said = assistant_error_evidence(&limit);
+        assert!(said.starts_with("rate_limit") && said.contains("5-hour limit"), "{said}");
+        let login = serde_json::json!({ "type": "assistant", "error": "authentication_failed" });
+        assert_eq!(assistant_error_evidence(&login), "authentication_failed");
+        // An ordinary reply, a reply with an empty error, and any other frame give nothing.
+        let plain = serde_json::json!({ "type": "assistant", "message": { "content": [{ "type": "text", "text": "done" }] } });
+        assert_eq!(assistant_error_evidence(&plain), "");
+        assert_eq!(assistant_error_evidence(&serde_json::json!({ "type": "assistant", "error": "" })), "");
+        assert_eq!(assistant_error_evidence(&serde_json::json!({ "type": "result", "error": "rate_limit" })), "");
     }
 
     #[test]

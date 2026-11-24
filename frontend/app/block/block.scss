@@ -533,7 +533,8 @@
 }
 
 .block-frame-header-scroll .pane-tab-strip {
-    max-width: none;
+    // The room the header leaves it (pane-tab-strip-steps.ts), so the tabs shrink in steps instead of scrolling the range.
+    max-width: var(--pane-tab-room, none);
     overflow-x: visible;
 }
 

@@ -42,6 +42,7 @@ pub mod combobox;
 pub mod dates;
 pub mod file_chooser;
 mod filled;
+mod form_change;
 pub mod frame_scope;
 pub mod frames;
 pub mod hibernation;

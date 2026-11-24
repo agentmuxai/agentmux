@@ -8,6 +8,7 @@
 import { createResource, createUniqueId, For, onCleanup, Show, type JSX } from "solid-js";
 
 import { Button, Field, Select, StatusDot, Switch, TextArea, TextInput, type StatusTone } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { getMcpCapability, watchMcpCapability, type McpCapabilityStatus } from "@/app/store/mcp-capabilities";
 import type { McpServerCatalogItem } from "@/types/rpc/McpServerCatalogItem";
@@ -17,13 +18,22 @@ import { reachLabel, type McpCatalogModel, type McpDraft } from "./mcp-model";
 import type { ServerUse } from "./mcp-observed";
 import { findPreloadEntryByName, MCP_PRELOAD_CATALOG } from "./mcp-preload-catalog";
 
-const PROBE: Record<McpCapabilityStatus, { tone: StatusTone; label: string }> = {
-    unknown: { tone: "idle", label: "Not checked" },
-    checking: { tone: "busy", label: "Checking…" },
-    connected: { tone: "ok", label: "Connected" },
-    unreachable: { tone: "error", label: "Unreachable" },
-    handshake_failed: { tone: "error", label: "Not responding" },
-    invalid_config: { tone: "error", label: "Invalid config" },
+// Built when drawn, so a change of language shows.
+const probeOf = (status: McpCapabilityStatus): { tone: StatusTone; label: string } => {
+    switch (status) {
+        case "unknown":
+            return { tone: "idle", label: t("mcp.probe.unknown") };
+        case "checking":
+            return { tone: "busy", label: t("mcp.probe.checking") };
+        case "connected":
+            return { tone: "ok", label: t("mcp.probe.connected") };
+        case "unreachable":
+            return { tone: "error", label: t("mcp.probe.unreachable") };
+        case "handshake_failed":
+            return { tone: "error", label: t("mcp.probe.handshakeFailed") };
+        case "invalid_config":
+            return { tone: "error", label: t("mcp.probe.invalidConfig") };
+    }
 };
 
 /** The live probe, polled while this is mounted: only while a card is open. */
@@ -43,7 +53,7 @@ function McpProbeStatus(props: { serverId: string; serverName: string }): JSX.El
     // then, not disappear the moment the server starts working (spec §4
     // policy #2; this is what Codex flagged on #2298).
     const riskNote = () => findPreloadEntryByName(props.serverName)?.riskNote ?? null;
-    const probe = () => PROBE[cap().status];
+    const probe = () => probeOf(cap().status);
 
     return (
         <div class="mcp-probe">
@@ -52,7 +62,7 @@ function McpProbeStatus(props: { serverId: string; serverName: string }): JSX.El
                 <span>
                     {probe().label}
                     <Show when={cap().status === "connected" && cap().toolCount !== undefined}>
-                        {" "}· {cap().toolCount} tools
+                        {" "}· {t("mcp.probe.tools", { count: cap().toolCount })}
                     </Show>
                 </span>
             </span>
@@ -89,22 +99,22 @@ export function McpServerDetail(props: {
         ({ server }) => model.boundAgents(server),
     );
     const agentOptions = () => [
-        { value: "", label: "Select an agent…" },
+        { value: "", label: t("mcp.detail.selectAgent") },
         ...model.agentsAtom().map((a) => ({ value: a.id, label: a.name })),
     ];
 
     return (
         <div class="mcp-detail">
             <p class="mcp-detail-note">
-                {server().all_agents ? "Every agent gets it" : `Bound to ${reachLabel(server())}`}
+                {server().all_agents ? t("mcp.detail.everyAgent") : t("mcp.detail.boundTo", { reach: reachLabel(server()) })}
             </p>
             <Show when={props.notLoaded}>{(text) => <p class="mcp-not-loaded">{text()}</p>}</Show>
-            <Field label="All agents" description="Every agent gets it at launch, not only the ones it is bound to.">
+            <Field label={t("mcp.detail.allAgents")} description={t("mcp.detail.allAgentsHelp")}>
                 <Switch checked={server().all_agents} onChange={(on) => setReach({ all_agents: on })} />
             </Field>
             <Field
-                label="Containers too"
-                description="Container agents get it as well. Leave off for a server that runs a program on this computer."
+                label={t("mcp.detail.containers")}
+                description={t("mcp.detail.containersHelp")}
             >
                 <Switch checked={server().in_containers} onChange={(on) => setReach({ in_containers: on })} />
             </Field>
@@ -117,29 +127,29 @@ export function McpServerDetail(props: {
                 <McpUsesList uses={props.uses} />
             </Show>
             <Show when={(bound() ?? []).length > 0}>
-                <span class="mcp-detail-label">Bound to</span>
-                <ul class="mcp-bound" aria-label="Agents it is bound to">
+                <span class="mcp-detail-label">{t("mcp.detail.boundLabel")}</span>
+                <ul class="mcp-bound" aria-label={t("mcp.detail.boundAria")}>
                     <For each={bound()}>
                         {(agent) => (
                             <li class="mcp-bound-agent">
                                 <span class="mcp-use-agent">{agent.name}</span>
                                 <Button
                                     density="compact"
-                                    aria-label={`Unbind ${agent.name}`}
+                                    aria-label={t("mcp.detail.unbindAria", { name: agent.name })}
                                     onClick={() => void model.unbindFromAgent(server().id, agent.id)}
                                 >
-                                    Unbind
+                                    {t("mcp.detail.unbind")}
                                 </Button>
                             </li>
                         )}
                     </For>
                 </ul>
             </Show>
-            <span class="mcp-detail-label">Transport</span>
+            <span class="mcp-detail-label">{t("mcp.detail.transport")}</span>
             <pre class="mcp-detail-value">{server().transport}</pre>
-            <span class="mcp-detail-label">Config</span>
+            <span class="mcp-detail-label">{t("mcp.detail.config")}</span>
             <pre class="mcp-detail-value">{server().config}</pre>
-            <Field label="Bind to agent" layout="stacked">
+            <Field label={t("mcp.detail.bindTo")} layout="stacked">
                 <div class="mcp-detail-row">
                     <Select
                         value={model.bindAgentIdAtom()}
@@ -150,14 +160,14 @@ export function McpServerDetail(props: {
                         disabled={!model.bindAgentIdAtom()}
                         onClick={() => void model.bindToAgent(server().id, model.bindAgentIdAtom())}
                     >
-                        Bind
+                        {t("mcp.detail.bind")}
                     </Button>
                 </div>
             </Field>
             <div class="mcp-detail-actions">
-                <Button onClick={() => model.startEdit(server())}>Edit</Button>
+                <Button onClick={() => model.startEdit(server())}>{t("mcp.detail.edit")}</Button>
                 <Button tone="danger" onClick={() => props.onDelete()}>
-                    Delete…
+                    {t("mcp.detail.delete")}
                 </Button>
             </div>
         </div>
@@ -175,7 +185,7 @@ export function McpServerForm(props: { model: McpCatalogModel; draft: McpDraft }
     return (
         <form
             class="mcp-detail mcp-server-form"
-            aria-label={draft().id ? `Edit ${draft().name}` : "New MCP server"}
+            aria-label={draft().id ? t("mcp.form.editAria", { name: draft().name }) : t("mcp.form.newAria")}
             onSubmit={(e) => {
                 e.preventDefault();
                 void model.saveDraft();
@@ -193,17 +203,17 @@ export function McpServerForm(props: { model: McpCatalogModel; draft: McpDraft }
                     </>
                 )}
             </Show>
-            <Field label="Name" layout="stacked">
+            <Field label={t("mcp.form.name")} layout="stacked">
                 <TextInput
                     value={draft().name}
                     onInput={(e) => model.setDraft({ ...draft(), name: e.currentTarget.value })}
                     onContextMenu={showTextInputContextMenu}
-                    placeholder="e.g. filesystem"
+                    placeholder={t("mcp.form.namePlaceholder")}
                     required
                     ref={(el) => focusOnOpen(el, { select: true })}
                 />
             </Field>
-            <Field label="Transport" layout="stacked">
+            <Field label={t("mcp.detail.transport")} layout="stacked">
                 <TextInput
                     value={draft().transport}
                     onInput={(e) => model.setDraft({ ...draft(), transport: e.currentTarget.value })}
@@ -211,7 +221,7 @@ export function McpServerForm(props: { model: McpCatalogModel; draft: McpDraft }
                     placeholder="stdio"
                 />
             </Field>
-            <Field label="Config (JSON)" layout="stacked" id={configId}>
+            <Field label={t("mcp.form.config")} layout="stacked" id={configId}>
                 <TextArea
                     id={configId}
                     mono
@@ -224,10 +234,10 @@ export function McpServerForm(props: { model: McpCatalogModel; draft: McpDraft }
             </Field>
             <div class="mcp-detail-actions">
                 <Button onClick={() => model.cancelDraft()} disabled={model.savingAtom()}>
-                    Cancel
+                    {t("mcp.form.cancel")}
                 </Button>
                 <Button type="submit" tone="accent" disabled={model.savingAtom() || !draft().name.trim()}>
-                    {model.savingAtom() ? "Saving…" : "Save"}
+                    {model.savingAtom() ? t("mcp.form.saving") : t("mcp.form.save")}
                 </Button>
             </div>
         </form>

@@ -39,7 +39,7 @@ describe("a link's place is the pane's own meta (R14)", () => {
         ["agentmux://kanban/pulls", { view: "kanban", "kanban:waits": "open" }],
         ["agentmux://reviews", { view: "kanban", "kanban:waits": "open" }],
         ["agentmux://swarm/supervisor", { view: "swarm", "swarm:section": "supervisor" }],
-        ["agentmux://audit/agent/sorrel", { view: "audit", "audit:agent": "sorrel" }],
+        ["agentmux://audit/agent/sorrel", { view: "audit", "audit:agent": "sorrel", "audit:section": "events" }],
         ["agentmux://audit/typed", { view: "audit", "audit:section": "typed" }],
         // The History pane is the Audit pane's Conversations section: its link is an alias.
         ["agentmux://history", { view: "audit", "audit:section": "conversations" }],

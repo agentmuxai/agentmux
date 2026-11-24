@@ -30,11 +30,11 @@ use crate::backend::wconfig;
 
 use super::{Migration, MigrationContext, MigrationError, MigrationScope, VerifyOutcome};
 
-pub struct M0052HistoryIntoAudit;
+pub struct M0053HistoryIntoAudit;
 
-impl Migration for M0052HistoryIntoAudit {
+impl Migration for M0053HistoryIntoAudit {
     fn id(&self) -> &'static str {
-        "0052_history_into_audit"
+        "0053_history_into_audit"
     }
     fn scope(&self) -> MigrationScope {
         MigrationScope::Channel

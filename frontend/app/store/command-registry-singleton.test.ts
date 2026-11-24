@@ -46,7 +46,18 @@ describe("the palette's open entries", () => {
         const command = commandRegistry.get("open:history")!;
         expect(command.hidden).toBe(true);
         await command.execute();
-        expect(h.openOrFocusPaneByView).toHaveBeenCalledWith("audit", { meta: { view: "audit", "audit:section": "conversations" } });
+        // The third argument is what an Audit pane that is already open is switched to.
+        expect(h.openOrFocusPaneByView).toHaveBeenCalledWith(
+            "audit",
+            { meta: { view: "audit", "audit:section": "conversations" } },
+            { "audit:section": "conversations" },
+        );
+    });
+
+    it("open:history on Shift opens another Audit pane on Conversations", async () => {
+        await commandRegistry.get("open:history")!.execute({ forceNew: true });
+        expect(h.createBlock).toHaveBeenCalledWith({ meta: { view: "audit", "audit:section": "conversations" } });
+        expect(h.openOrFocusPaneByView).not.toHaveBeenCalled();
     });
 
     it("opens a new pane on Shift", async () => {

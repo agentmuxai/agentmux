@@ -7,6 +7,7 @@ import { For, Show, type JSX } from "solid-js";
 
 import { Button } from "@/element/button";
 import { Tag, TextInput } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import type { BundleImportPreviewResponse } from "@/app/store/rpc-api";
 import { describePermission, describeSignature } from "@/app/view/settings/sections/widget-permissions";
 import type { BundleImportPreviewActions, BundleImportPreviewState } from "./bundle-import-preview-state";
@@ -38,13 +39,13 @@ function SkillRow(props: ItemsProps & { skill: BundleImportPreviewResponse["skil
                         <span class="bundle-import-skill-collision">
                             <Tag size="xs" tone="warn">
                                 {skill.collision === "name_conflict"
-                                    ? "already exists in your library"
-                                    : "another skill in this import uses this name"}
+                                    ? t("bundle.import.nameExists")
+                                    : t("bundle.import.nameDuplicate")}
                             </Tag>
                             <span class="bundle-import-item-name-readonly">{skill.slug}</span>
                             <TextInput variant="plain"
                                 class="bundle-import-rename-input"
-                                placeholder="rename to import (leave blank to skip)"
+                                placeholder={t("bundle.import.renamePlaceholder")}
                                 value={row().renameValue}
                                 disabled={!row().checked}
                                 onInput={(e) => act.updateSkill(skill.source_dir, { renameValue: e.currentTarget.value })}
@@ -69,22 +70,21 @@ function SkillRow(props: ItemsProps & { skill: BundleImportPreviewResponse["skil
                             }))
                         }
                     >
-                        {s.skillTextHidden()[skill.source_dir] ? "Show" : "Hide"} skill text
+                        {s.skillTextHidden()[skill.source_dir] ? t("bundle.import.showSkillText") : t("bundle.import.hideSkillText")}
                     </Button>
                     <Show when={!s.skillTextHidden()[skill.source_dir]}>
                         <pre class="bundle-import-skill-text">{skill.content}</pre>
                     </Show>
                     <Show when={skill.content_truncated}>
                         <div class="bundle-import-hint bundle-import-hint-warn">
-                            Not fully shown — {Array.from(skill.content).length} of {skill.content_total_chars}{" "}
-                            characters. The whole skill is imported if you tick it.
+                            {t("bundle.import.notFullyShown", { shown: Array.from(skill.content).length, total: skill.content_total_chars })}
                         </div>
                     </Show>
                 </div>
             </Show>
             <Show when={renameConflict()}>
                 <div class="bundle-import-hint bundle-import-hint-warn">
-                    This name is also taken — pick another.
+                    {t("bundle.import.nameTaken")}
                 </div>
             </Show>
         </div>
@@ -95,7 +95,7 @@ export function SkillsSection(props: ItemsProps): JSX.Element {
     return (
         <Show when={props.s.preview.skills.length > 0}>
             <section class="bundle-import-section">
-                <h3 class="bundle-import-section-title">Skills</h3>
+                <h3 class="bundle-import-section-title">{t("bundle.import.skills")}</h3>
                 <For each={props.s.preview.skills}>
                     {(skill) => <SkillRow s={props.s} act={props.act} skill={skill} />}
                 </For>
@@ -119,24 +119,24 @@ function WidgetRow(props: { s: BundleImportPreviewState; w: NonNullable<BundleIm
                 <span class="bundle-import-item-name">{w.name}</span>
                 <span class="bundle-import-item-meta">
                     {w.version}
-                    {w.author ? ` · by ${w.author}` : ""}
+                    {w.author ? ` · ${t("bundle.import.by", { author: w.author })}` : ""}
                 </span>
             </label>
             <Show
                 when={!w.error}
-                fallback={<div class="bundle-import-hint bundle-import-hint-warn">Can't be imported: {w.error}</div>}
+                fallback={<div class="bundle-import-hint bundle-import-hint-warn">{t("bundle.import.cantImport", { error: w.error })}</div>}
             >
                 <Show when={w.same_as_installed}>
-                    <div class="bundle-import-hint">Already installed at this version.</div>
+                    <div class="bundle-import-hint">{t("bundle.import.sameVersion")}</div>
                 </Show>
                 <Show when={!w.same_as_installed && w.installed_version}>
-                    <div class="bundle-import-hint">Replaces version {w.installed_version} you have.</div>
+                    <div class="bundle-import-hint">{t("bundle.import.replaces", { version: w.installed_version })}</div>
                 </Show>
                 <p class={`bundle-import-item-description${sig.warning ? " bundle-import-hint-warn" : ""}`}>{sig.text}</p>
                 <p class="bundle-import-item-description">
                     {w.permissions.length > 0
-                        ? `It can: ${w.permissions.map((p) => describePermission(p).text).join(" · ")}`
-                        : "It asks for no permissions."}
+                        ? t("bundle.import.itCan", { list: w.permissions.map((p) => describePermission(p).text).join(" · ") })
+                        : t("bundle.import.noPermissions")}
                 </p>
             </Show>
         </div>
@@ -148,8 +148,8 @@ export function WidgetsSection(props: { s: BundleImportPreviewState }): JSX.Elem
     return (
         <Show when={(preview.widgets ?? []).length > 0}>
             <section class="bundle-import-section">
-                <h3 class="bundle-import-section-title">Widgets</h3>
-                <div class="bundle-import-hint">Each widget asks for your approval before it runs.</div>
+                <h3 class="bundle-import-section-title">{t("bundle.import.widgets")}</h3>
+                <div class="bundle-import-hint">{t("bundle.import.widgetsAsk")}</div>
                 <For each={preview.widgets}>{(w) => <WidgetRow s={props.s} w={w} />}</For>
             </section>
         </Show>

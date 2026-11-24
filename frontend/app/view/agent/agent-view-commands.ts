@@ -20,6 +20,7 @@ export function registerAgentViewCommands(): () => void {
         // The third way into the find bar, with Ctrl+F and the header magnifier: the same open (search/search-bridge.ts).
         commandRegistry.register({
             id: "agent:search:open",
+            keyOf: "pane:find",
             label: "Find in conversation",
             category: "Agent",
             icon: "magnifying-glass",

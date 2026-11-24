@@ -200,6 +200,7 @@ export const WpsEvent = {
     McpObserved: "mcp:observed",
     MemoriesChanged: "memories:changed",
     OpenFloatingPane: "openfloatingpane",
+    PlaceFloatingPane: "placefloatingpane",
     SigninLink: "identity:signinlink",
     GoogleNotice: "google:notice",
     ProcessBrokerTrackedBlocksChanged: "processbroker:tracked-blocks-changed",

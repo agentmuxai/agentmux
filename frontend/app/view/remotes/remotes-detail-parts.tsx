@@ -11,6 +11,7 @@ import { Button, Select, TextInput } from "@/app/element/ui";
 import { connectionAction, runConnectionAction } from "./remotes-connection";
 import type { RemotesViewModel } from "./remotes-model";
 import { isHidden, isPinned, REMOTE_COLORS, remoteColor } from "./remotes-sections";
+import { t } from "@/app/i18n/i18n";
 
 /** What a detail view works on: the remote, the model, and the model's `run` with the action's name for the notice. */
 export interface DetailProps {
@@ -29,20 +30,20 @@ export function DetailActions(props: DetailProps): JSX.Element {
                 {(action) => <Button onClick={run(action(), () => runConnectionAction(model, r(), action()))}>{action()}</Button>}
             </Show>
             <Show when={r().kind === "ssh"}>
-                <Button onClick={run("Sessions", () => model.showSessions(r().name))}>Sessions…</Button>
+                <Button onClick={run("Sessions", () => model.showSessions(r().name))}>{t("remotes.detail.sessions")}</Button>
             </Show>
             <Button onClick={run(isPinned(r()) ? "Unpin" : "Pin", () => model.setPinned(r().name, !isPinned(r())))}>
-                {isPinned(r()) ? "Unpin" : "Pin"}
+                {isPinned(r()) ? t("remotes.detail.unpin") : t("remotes.detail.pin")}
             </Button>
             <Button onClick={run(isHidden(r()) ? "Unhide" : "Hide", () => model.setHidden(r().name, !isHidden(r())))}>
-                {isHidden(r()) ? "Unhide" : "Hide"}
+                {isHidden(r()) ? t("remotes.detail.unhide") : t("remotes.detail.hide")}
             </Button>
             <Show when={r().sources.includes("recent")}>
-                <Button onClick={run("Forget", () => model.forget(r().name))}>Forget</Button>
+                <Button onClick={run("Forget", () => model.forget(r().name))}>{t("remotes.detail.forget")}</Button>
             </Show>
             <Show when={r().helper.installed}>
                 <Button tone="danger" onClick={run("Remove helper", () => model.removeHelper(r().name))}>
-                    Remove helper
+                    {t("remotes.detail.removeHelper")}
                 </Button>
             </Show>
             <Show when={r().kind === "ssh"}>
@@ -50,11 +51,11 @@ export function DetailActions(props: DetailProps): JSX.Element {
                     disabled={model.testing() === r().name}
                     onClick={run("Test connection", () => model.testConnection(r().name))}
                 >
-                    {model.testing() === r().name ? "Testing…" : "Test connection"}
+                    {model.testing() === r().name ? t("remotes.detail.testing") : t("remotes.detail.test")}
                 </Button>
             </Show>
             <Show when={r().sources.includes("ssh_config")}>
-                <Button onClick={run("Edit in ssh config", () => model.editInSshConfig(r().name))}>Edit in ssh config</Button>
+                <Button onClick={run("Edit in ssh config", () => model.editInSshConfig(r().name))}>{t("remotes.detail.editConfig")}</Button>
             </Show>
         </div>
     );
@@ -67,7 +68,7 @@ export function TestResult(props: Pick<DetailProps, "r" | "model">): JSX.Element
         <Show when={model.testResults()[r().name]}>
             {(result) => (
                 <div class={result() === true ? "remotes-test-ok" : "remotes-detail-error"} role="status">
-                    {result() === true ? "Connected and ran a command." : `Test failed: ${result()}`}
+                    {result() === true ? t("remotes.detail.testOk") : t("remotes.detail.testFailed", { error: String(result()) })}
                 </div>
             )}
         </Show>
@@ -88,7 +89,7 @@ export function DetailSettings(props: DetailProps): JSX.Element {
     return (
         <div class="remotes-settings">
             <label class="remotes-setting">
-                <span>Nickname</span>
+                <span>{t("remotes.detail.nickname")}</span>
                 <TextInput
                     placeholder={r().name}
                     value={(r().settings?.["display:name"] as string | undefined) ?? ""}
@@ -100,15 +101,15 @@ export function DetailSettings(props: DetailProps): JSX.Element {
                 />
             </label>
             <div class="remotes-setting">
-                <span>Colour</span>
-                <div class="remotes-colors" role="radiogroup" aria-label="Colour">
+                <span>{t("remotes.detail.colour")}</span>
+                <div class="remotes-colors" role="radiogroup" aria-label={t("remotes.detail.colour")}>
                     <Button
                         class="remotes-color"
                         icon="ban"
                         role="radio"
                         aria-checked={!remoteColor(r())}
-                        title="None"
-                        aria-label="None"
+                        title={t("remotes.detail.none")}
+                        aria-label={t("remotes.detail.none")}
                         onClick={run("Colour", () => model.setColor(r().name, null))}
                     />
                     <For each={REMOTE_COLORS}>
@@ -129,7 +130,7 @@ export function DetailSettings(props: DetailProps): JSX.Element {
             </div>
             <Show when={r().kind === "ssh"}>
                 <label class="remotes-setting">
-                    <span>Keep sessions alive</span>
+                    <span>{t("remotes.detail.keepAlive")}</span>
                     <Select
                         value={durable() === true ? "on" : durable() === false ? "off" : "default"}
                         onChange={(v) =>
@@ -138,21 +139,21 @@ export function DetailSettings(props: DetailProps): JSX.Element {
                             )
                         }
                         options={[
-                            { value: "default", label: "As in Settings" },
-                            { value: "on", label: "On" },
-                            { value: "off", label: "Off" },
+                            { value: "default", label: t("remotes.detail.asInSettings") },
+                            { value: "on", label: t("remotes.detail.on") },
+                            { value: "off", label: t("remotes.detail.off") },
                         ]}
                     />
                 </label>
                 <label class="remotes-setting">
-                    <span>Install the helper</span>
+                    <span>{t("remotes.detail.installHelper")}</span>
                     <Select
                         value={(r().settings?.["conn:helper"] as string | undefined) || "ask"}
                         onChange={(v) => void model.run("Install the helper", () => model.setHelperPolicy(r().name, v))}
                         options={[
-                            { value: "ask", label: "As in Settings" },
-                            { value: "always", label: "Always" },
-                            { value: "never", label: "Never" },
+                            { value: "ask", label: t("remotes.detail.asInSettings") },
+                            { value: "always", label: t("remotes.detail.always") },
+                            { value: "never", label: t("remotes.detail.never") },
                         ]}
                     />
                 </label>
@@ -167,7 +168,7 @@ export function DetailAgents(props: DetailProps): JSX.Element {
     return (
         <Show when={r().agents.length > 0}>
             <div class="remotes-agents">
-                <span>Agents always allowed here (as you, with your SSH keys):</span>
+                <span>{t("remotes.detail.agents")}</span>
                 <ul>
                     <For each={r().agents}>
                         {(agent) => (
@@ -175,10 +176,10 @@ export function DetailAgents(props: DetailProps): JSX.Element {
                                 <span class="remotes-agent-name">{agent}</span>
                                 <Button
                                     tone="quiet"
-                                    aria-label={`Revoke ${agent} on ${r().name}`}
+                                    aria-label={t("remotes.detail.revokeAria", { agent, name: r().name })}
                                     onClick={run("Revoke", () => model.revokeAgent(r().name, agent))}
                                 >
-                                    Revoke
+                                    {t("remotes.detail.revoke")}
                                 </Button>
                             </li>
                         )}

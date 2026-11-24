@@ -246,10 +246,11 @@ impl Store {
         Ok(conn.execute("UPDATE db_vault_versions SET state = ?2 WHERE seq = ?1", params![seq, state])? > 0)
     }
 
-    /// Deletes the versions replaced before `before_ms`; returns how many.
-    pub fn vault_versions_prune(&self, before_ms: i64) -> Result<usize, StoreError> {
+    /// Deletes the versions replaced before `before_ms`; returns how many. A version a sync conflict kept (`state` starts
+    /// with `kept_prefix`) is not pruned: the person settles it.
+    pub fn vault_versions_prune(&self, before_ms: i64, kept_prefix: &str) -> Result<usize, StoreError> {
         let conn = self.conn.lock().unwrap();
-        Ok(conn.execute("DELETE FROM db_vault_versions WHERE replaced_at < ?1", params![before_ms])?)
+        Ok(conn.execute("DELETE FROM db_vault_versions WHERE replaced_at < ?1 AND substr(state, 1, length(?2)) != ?2", params![before_ms, kept_prefix])?)
     }
 
     /// How many earlier values each entry has, for the pane's list.

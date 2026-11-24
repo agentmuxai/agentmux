@@ -48,12 +48,25 @@ fn shown(value: &str) -> String {
     withhold::text(&format!("TOKEN={value}")).into_owned()
 }
 
+/// Asserts `value` is no longer withheld. A release marks the matcher stale and the next read rebuilds it, but a
+/// read that arrives while another thread's rebuild is running (tests in one process share the registry) is
+/// served by the matcher in use, which still holds the value until that rebuild is swapped in. So a release is
+/// checked as taking effect within a few seconds, never in the same instant.
+fn no_longer_held(value: &str, why: &str) {
+    let want = format!("TOKEN={value}");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while shown(value) != want && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert_eq!(shown(value), want, "{why}");
+}
+
 #[test]
 fn a_container_token_is_withheld_until_its_block_is_revoked() {
     let token = crate::backend::container::credential::token_for_block("withhold-revoke-block", None);
     assert_eq!(shown(&token), format!("TOKEN={MARK}"));
     crate::backend::container::credential::revoke_block("withhold-revoke-block");
-    assert_eq!(shown(&token), format!("TOKEN={token}"), "a revoked token no longer works, so it is no longer held");
+    no_longer_held(&token, "a revoked token no longer works, so it is no longer held");
     let next = crate::backend::container::credential::token_for_block("withhold-revoke-block", None);
     assert_ne!(next, token);
     assert_eq!(shown(&next), format!("TOKEN={MARK}"));
@@ -67,9 +80,9 @@ fn a_gateway_token_is_withheld_until_it_is_replaced_or_ended() {
     let renewed = token::renew_for_account("withhold-gw-agent", "withhold-gw-def", "withhold-gw-route", "other", None);
     assert_ne!(first, renewed);
     assert_eq!(shown(&renewed), format!("TOKEN={MARK}"));
-    assert_eq!(shown(&first), format!("TOKEN={first}"), "the token it replaced is dropped");
+    no_longer_held(&first, "the token it replaced is dropped");
     token::revoke("withhold-gw-def", "withhold-gw-route");
-    assert_eq!(shown(&renewed), format!("TOKEN={renewed}"), "a route that was changed ends its token, and its hold");
+    no_longer_held(&renewed, "a route that was changed ends its token, and its hold");
 }
 
 #[test]
@@ -79,7 +92,7 @@ fn a_devices_token_is_withheld_until_the_device_is_unpaired() {
     store.viewer_device_insert("withhold-device", &crate::backend::viewer::pairing::token_hash(&token), "phone", "", 1).unwrap();
     assert_eq!(shown(&token), format!("TOKEN={MARK}"));
     store.viewer_device_delete("withhold-device").unwrap();
-    assert_eq!(shown(&token), format!("TOKEN={token}"));
+    no_longer_held(&token, "an unpaired device's token no longer works, so it is no longer held");
 }
 
 #[test]
@@ -113,5 +126,92 @@ fn only_the_secret_values_of_a_connector_config_are_withheld() {
     }
     for ordinary in ["production-mode", "application/json"] {
         assert_eq!(withhold::text(ordinary), ordinary, "ordinary text is left alone");
+    }
+}
+
+fn file_store() {
+    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    let dir = DIR.get_or_init(|| tempfile::tempdir().unwrap());
+    let _ = crate::identity::secret_store::use_file_store(dir.path().join("secrets"));
+    assert_eq!(crate::identity::secret_store::backend_name(), "file", "these tests never touch the OS keychain");
+}
+
+#[test]
+fn a_keychain_secret_is_withheld_once_srv_writes_it_and_the_account_fields_around_it_are_not() {
+    file_store();
+    let (access, refresh, client) = ("keychain-access-7731-QwErTy", "keychain-refresh-7732-AsDfGh", "keychain-client-7733-ZxCvBn");
+    let blob = json!({ "access_token": access, "refresh_token": refresh, "expires_at": 1, "client_secret": client, "email": "person@example.com" });
+    crate::identity::secret_store::put("withhold-account-blob", &blob.to_string()).unwrap();
+    for secret in [access, refresh, client] {
+        withheld(secret);
+    }
+    assert_eq!(withhold::text("person@example.com"), "person@example.com", "a field that is not a credential is left alone");
+
+    let pat = "keychain-pat-7734-PoIuYt";
+    crate::identity::secret_store::put("withhold-account-pat", pat).unwrap();
+    withheld(pat);
+}
+
+#[test]
+fn a_keychain_secret_is_withheld_when_srv_reads_it() {
+    file_store();
+    let secret = "keychain-read-7741-MnBvCx";
+    crate::identity::secret_store::put("withhold-account-read", secret).unwrap();
+    // As if this process had not written it: another srv, or an earlier run, did.
+    withhold::release_all("keychain:withhold-account-read");
+    assert!(shown(secret).contains(secret), "not known until it is read");
+    let read = crate::identity::secret_store::get_optional("withhold-account-read").unwrap().unwrap();
+    assert_eq!(read.as_str(), secret);
+    withheld(secret);
+}
+
+#[test]
+fn the_cloud_sign_in_is_withheld_whole() {
+    let (access, refresh, id) = ("cloud-access-7751-LkJhGf", "cloud-refresh-7752-DsAqWe", "cloud-id-7753-RtYuIo");
+    super::withhold_sources::cloud_sign_in(access, refresh, id, agentmux_common::time::now_secs() + 3600);
+    for secret in [access, refresh, id] {
+        withheld(secret);
+    }
+}
+
+#[test]
+fn an_agents_relay_credential_is_withheld_when_saved_and_when_loaded() {
+    let store = Store::open_in_memory().unwrap();
+    let (secret, token) = ("relay-secret-7761-ZaXsCd", "relay-access-7762-VfBgNh");
+    let agent = "withhold-relay-agent";
+    store.agent_credential_save(agent, "client-id-1", secret, "https://example.invalid/token").unwrap();
+    withheld(secret);
+    store.agent_credential_save_token(agent, token, agentmux_common::time::now_secs() + 3600).unwrap();
+    withheld(token);
+
+    // As if this process had not saved them: an earlier run did.
+    withhold::release_all(&format!("relay-credential:{agent}:secret"));
+    withhold::release_all(&format!("relay-credential:{agent}:access"));
+    withhold::release_prefix(&format!("relay-credential:{agent}:"));
+    assert!(shown(secret).contains(secret) && shown(token).contains(token), "not known until it is loaded");
+    store.agent_credential_load(agent).unwrap().unwrap();
+    withheld(secret);
+    withheld(token);
+}
+
+#[test]
+fn a_bridge_token_a_relay_token_and_a_key_written_in_an_agents_environment_are_withheld() {
+    super::withhold_sources::bridge_token("discord", "bridge-token-7771-QaWsEd");
+    withheld("bridge-token-7771-QaWsEd");
+    super::withhold_sources::relay_token("relay-token-7772-RfTgYh");
+    withheld("relay-token-7772-RfTgYh");
+
+    super::withhold_sources::env_credential("withhold-env-agent", "GITHUB_TOKEN", "env-token-7773-UjIkOl");
+    withheld("env-token-7773-UjIkOl");
+    for (name, value) in [
+        ("SERVICE_API_KEY", "vault:entry-7774-abcdef"),
+        ("OPENAI_API_KEY", "ollama"),
+        ("EDITOR_NAME", "env-plain-7775-PlMkNj"),
+        ("EMPTY_TOKEN", ""),
+    ] {
+        super::withhold_sources::env_credential("withhold-env-agent", name, value);
+    }
+    for ordinary in ["vault:entry-7774-abcdef", "env-plain-7775-PlMkNj"] {
+        assert_eq!(withhold::text(ordinary), ordinary, "{ordinary}: a reference, a placeholder and a value under an ordinary name hold no secret");
     }
 }

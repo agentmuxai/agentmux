@@ -47,8 +47,8 @@ export const isAgentUse = (a: VaultActivity): boolean => {
 function NoUses(props: { loading: boolean; readFull: boolean; lines: number; canReadMore: boolean; onMore: () => void }): JSX.Element {
     return (
         <div class="warden-section-stub">
-            <Show when={!props.loading} fallback="Loading…">
-                <Show when={props.readFull} fallback="No agent has used a secret yet.">
+            <Show when={!props.loading} fallback={t("vault.secrets.loading")}>
+                <Show when={props.readFull} fallback={t("vault.secrets.noneYet")}>
                     {t("vault.secrets.noneInWindow", { lines: props.lines })}{" "}
                     <Show when={props.canReadMore} fallback={t("vault.secrets.olderNotRead")}>
                         <Button density="compact" onClick={props.onMore}>
@@ -111,11 +111,11 @@ function StandingGrants(props: { granted: GrantedEntry[]; revoke: (entryId: stri
     const names = createAgentNames(() => props.granted.find((e) => e.grants.some((g) => g.startsWith(SIGNIN_GRANT)))?.id ?? false);
     return (
         <Show when={props.granted.length > 0}>
-            <table class="warden-manager-table" aria-label="Standing permissions">
+            <table class="warden-manager-table" aria-label={t("vault.secrets.standingAria")}>
                 <thead>
                     <tr>
-                        <th>Entry</th>
-                        <th>May be used without asking</th>
+                        <th>{t("vault.secrets.colEntry")}</th>
+                        <th>{t("vault.secrets.colMayUse")}</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -128,7 +128,7 @@ function StandingGrants(props: { granted: GrantedEntry[]; revoke: (entryId: stri
                                         {(g) => (
                                             <span class="vault-grant" data-origin={g}>
                                                 {grantText(g, names)}
-                                                <CloseButton size="sm" label={`Stop ${grantText(g, names)} for ${e.label}`} onClick={() => void props.revoke(e.id, g)} />
+                                                <CloseButton size="sm" label={t("vault.secrets.stop", { grant: grantText(g, names), label: e.label })} onClick={() => void props.revoke(e.id, g)} />
                                             </span>
                                         )}
                                     </For>
@@ -157,12 +157,12 @@ export function VaultSecrets(props: { visible?: boolean }): JSX.Element {
         }
     };
     return (
-        <section class="vault-secrets" aria-label="Secrets">
-            <h3 class="warden-manager-summary">Secrets: what agents did with them</h3>
+        <section class="vault-secrets" aria-label={t("vault.secrets.aria")}>
+            <h3 class="warden-manager-summary">{t("vault.secrets.heading")}</h3>
             <p class="warden-manager-dim">
-                Every use of a Vault entry by an agent, and where each may use one without asking. Never a value.{" "}
+                {t("vault.secrets.about")}{" "}
                 <Button density="compact" onClick={() => void openVault("activity")}>
-                    Open the Vault
+                    {t("vault.secrets.openVault")}
                 </Button>
             </p>
             <Show when={error()}>
@@ -173,15 +173,15 @@ export function VaultSecrets(props: { visible?: boolean }): JSX.Element {
                 when={(rows() ?? []).length > 0}
                 fallback={<NoUses loading={rows() === null} readFull={readFull()} lines={lines()} canReadMore={moreToRead()} onMore={showMore} />}
             >
-                <table class="warden-manager-table vault-uses" aria-label="Agents' use of secrets">
+                <table class="warden-manager-table vault-uses" aria-label={t("vault.secrets.usesAria")}>
                     <thead>
                         <tr>
-                            <th>When</th>
-                            <th>Agent</th>
-                            <th>What</th>
-                            <th>Entry</th>
-                            <th>Where</th>
-                            <th>Outcome</th>
+                            <th>{t("vault.activity.when")}</th>
+                            <th>{t("vault.secrets.colAgent")}</th>
+                            <th>{t("vault.activity.what")}</th>
+                            <th>{t("vault.secrets.colEntry")}</th>
+                            <th>{t("vault.activity.where")}</th>
+                            <th>{t("vault.secrets.outcome")}</th>
                         </tr>
                     </thead>
                     <tbody>
