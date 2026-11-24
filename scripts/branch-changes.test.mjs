@@ -25,6 +25,8 @@ const write = (rel, text) => {
 };
 
 beforeEach(() => {
+    // The tests' repo has `main` and nothing else: a pull request's own base (a stacked one's is another branch) must not leak in.
+    vi.stubEnv("GITHUB_BASE_REF", "");
     root = mkdtempSync(join(tmpdir(), "branch-changes-"));
     git("init", "-q", "-b", "main");
     write("README.md", "base\n");
@@ -34,7 +36,10 @@ beforeEach(() => {
     git("checkout", "-q", "-b", "feature");
 });
 
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => {
+    vi.unstubAllEnvs();
+    rmSync(root, { recursive: true, force: true });
+});
 
 describe("branch-changes", () => {
     it("finds the base branch, and null when there is none", () => {
