@@ -289,6 +289,23 @@ describe("a retired pin", () => {
         expect(getSavedPinNames({ "widget:pinned": ["kanban", "reviews"] }, withKanban)).toEqual(["kanban"]);
     });
 
+    it("opens the Kanban a saved Reviews pin became on the cards with open pull requests", () => {
+        const withKanban = { ...wmap(), "defwidget@kanban": widget({ label: "Kanban", blockdef: { meta: { view: "kanban" } } }) };
+        const [, kanban] = getPinnedWidgets({ "widget:pinned": ["term", "reviews"] }, withKanban);
+        expect(kanban.key).toBe("defwidget@kanban");
+        expect(kanban.widget.blockdef.meta).toEqual({ view: "kanban", "kanban:waits": "open" });
+        // The configured entry itself is not changed.
+        expect(withKanban["defwidget@kanban"].blockdef.meta).toEqual({ view: "kanban" });
+    });
+
+    it("leaves a Kanban pin the person made alone, also beside a saved Reviews pin", () => {
+        const withKanban = { ...wmap(), "defwidget@kanban": widget({ label: "Kanban", blockdef: { meta: { view: "kanban" } } }) };
+        for (const saved of [["kanban"], ["kanban", "reviews"], ["reviews", "kanban"]]) {
+            const [kanban] = getPinnedWidgets({ "widget:pinned": saved }, withKanban);
+            expect(kanban.widget.blockdef.meta, saved.join(",")).toEqual({ view: "kanban" });
+        }
+    });
+
     it("isn't pinned twice when the Editor already is", () => {
         expect(getSavedPinNames({ "widget:pinned": ["editor", "media"] }, wmap())).toEqual(["editor"]);
     });

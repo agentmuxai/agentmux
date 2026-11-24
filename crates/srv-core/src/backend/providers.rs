@@ -61,6 +61,8 @@ pub struct AppServerConfig {
 pub enum Tier {
     FirstClass,
     Preview,
+    /// A harness the person registered with a manifest (`providers_custom.rs`): AgentMux promises nothing about it.
+    Custom,
 }
 
 impl Tier {
@@ -69,6 +71,7 @@ impl Tier {
         match self {
             Tier::FirstClass => "first_class",
             Tier::Preview => "preview",
+            Tier::Custom => "custom",
         }
     }
 }
@@ -559,8 +562,11 @@ pub fn get_provider(id: &str) -> Option<&'static ProviderConfig> {
         return Some(p);
     }
     // Fall back to alias resolution.
-    let canonical = ALIASES.get(id).copied()?;
-    REGISTRY.get(canonical).copied()
+    if let Some(canonical) = ALIASES.get(id).copied() {
+        return REGISTRY.get(canonical).copied();
+    }
+    // A registered custom harness: its id always starts `custom-`, so it never shadows a built-in or an alias.
+    super::providers_custom::get_custom_provider(id)
 }
 
 /// Every registered provider, for callers that must act on all of them

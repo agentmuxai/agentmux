@@ -23,6 +23,7 @@
 
 import { createEffect, createSignal, on, onCleanup, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { CloseButton, IconButton, TextInput } from "@/app/element/ui";
+import { keyLabel } from "@/app/keybindings";
 
 /** The announced count changes at most this often. */
 export const LIVE_COUNT_MS = 400;
@@ -136,8 +137,8 @@ export const AgentSearchBar = (props: AgentSearchBarProps): JSX.Element => {
                         {announced()}
                     </span>
                 </Show>
-                <IconButton icon="caret-up" label="Previous match (Shift+Enter, Shift+F3)" density="compact" onClick={() => props.onPrev()} />
-                <IconButton icon="caret-down" label="Next match (Enter, F3)" density="compact" onClick={() => props.onNext()} />
+                <IconButton icon="caret-up" label={`Previous match (${keyLabel("shift+Enter")}, ${keyLabel("shift+F3")})`} density="compact" onClick={() => props.onPrev()} />
+                <IconButton icon="caret-down" label={`Next match (${keyLabel("Enter")}, ${keyLabel("F3")})`} density="compact" onClick={() => props.onNext()} />
                 <Show when={props.dim && props.onDimChange}>
                     <IconButton
                         icon="circle-half-stroke"
@@ -147,7 +148,7 @@ export const AgentSearchBar = (props: AgentSearchBarProps): JSX.Element => {
                         onClick={() => props.onDimChange!(!props.dim!())}
                     />
                 </Show>
-                <CloseButton size="sm" label="Close search (Esc)" onClick={() => props.onClose()} />
+                <CloseButton size="sm" label={`Close search (${keyLabel("Escape")})`} onClick={() => props.onClose()} />
             </div>
         </Show>
     );
