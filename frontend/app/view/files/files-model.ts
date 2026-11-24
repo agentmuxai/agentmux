@@ -37,6 +37,7 @@ import { displayName, groupRemotes, remoteColor } from "@/app/view/remotes/remot
 import { batch, createMemo, createSignal } from "solid-js";
 import { baseName, isWithin, joinPath, normalizePath, parentOf, samePath } from "./files-path";
 import { EMPTY_SELECTION, pruneSelection, type Selection } from "./files-selection";
+import { movedOk, planMoveUndo, restorable, type MovedItem } from "./files-undo-move";
 import { clipboard, FilesOps, opFinishedText, sameVolume, setClipboard } from "./files-ops";
 import { systemIconsAvailable } from "./files-icons";
 import { sortEntries, type SortDir, type SortKey } from "./files-sort";
@@ -86,7 +87,9 @@ export interface AgentPlace {
 type UndoEntry =
     | { kind: "trash"; paths: string[] }
     | { kind: "rename"; from: string; to: string }
-    | { kind: "create"; path: string };
+    | { kind: "create"; path: string }
+    /** A finished move that is certain to have put each item at `<destination>/<its name>` (files-undo-move.ts). */
+    | { kind: "move"; items: MovedItem[] };
 
 /** An SSH host in the Remote section of Places. */
 export interface FilesRemote {
@@ -311,7 +314,9 @@ export class FilesModel {
 
         this.ops = new FilesOps(ctx.blockId);
         this.ops.onFinished = (op) => {
-            this.setStatus(opFinishedText(op), op.state === "done" && !op.failures?.length ? 4000 : 10000);
+            const text = opFinishedText(op);
+            const undoable = this.noteMoveForUndo(op);
+            this.setStatus(undoable ? { ...text, undo: true } : text, op.state === "done" && !op.failures?.length ? 4000 : 10000);
             // The watcher re-lists the folder shown; a move OUT of it (or a
             // copy into a folder this pane isn't watching) may not be seen.
             this.refresh();
@@ -862,7 +867,7 @@ export class FilesModel {
         }
     }
 
-    /** Ctrl+Z, or Undo in the status line: reverses the last rename, new
+    /** Ctrl+Z, or Undo in the status line: reverses the last rename, move, new
      *  item, or move to Trash. */
     async undo(): Promise<void> {
         if (this.refuseInRoot("Undo")) return;
@@ -875,6 +880,8 @@ export class FilesModel {
             if (last.kind === "rename") {
                 await RpcApi.FsRenameCommand(TabRpcClient, { path: last.to, new_name: baseName(last.from), ...this.on() });
                 this.setStatus({ text: `Renamed back to ${baseName(last.from)}`, tone: "info" });
+            } else if (last.kind === "move") {
+                await this.undoMove(last.items);
             } else if (last.kind === "create" && this.connection()) {
                 // Undoing a new item moves it to the Trash, and a host has
                 // none: deleting it for good is not an undo.
@@ -938,15 +945,70 @@ export class FilesModel {
     ): Promise<boolean> {
         if (this.refuseInRoot("Copying and moving")) return false;
         try {
-            await this.ops.start(kind, sources, destDir, {
-                sourceConnection: sourceConnection || undefined,
-                connection: this.connection() || undefined,
-            });
+            // A move on this computer is undoable when the names in the destination show where it will land.
+            const planned = kind === "move" && !this.connection() && !sourceConnection ? await this.planUndo(sources, destDir) : null;
+            await this.ops.start(
+                kind,
+                sources,
+                destDir,
+                {
+                    sourceConnection: sourceConnection || undefined,
+                    connection: this.connection() || undefined,
+                },
+                planned ?? undefined
+            );
             return true;
         } catch (err) {
             this.setStatus({ text: errorText(err), tone: "error" });
             return false;
         }
+    }
+
+    /** The lower-case names in `dir`, or null when it can't be listed or is too big to be sure of. */
+    private async namesIn(dir: string): Promise<Set<string> | null> {
+        const names = new Set<string>();
+        let cursor: string | undefined;
+        try {
+            do {
+                const res = await RpcApi.FsListCommand(TabRpcClient, { path: dir, cursor, limit: PAGE, ...this.on() });
+                if (res.error) return null;
+                for (const e of res.entries) names.add(e.name.toLowerCase());
+                cursor = res.cursor ?? undefined;
+                if (names.size > 20_000) return null;
+            } while (cursor);
+        } catch {
+            return null;
+        }
+        return names;
+    }
+
+    private async planUndo(sources: string[], destDir: string): Promise<MovedItem[] | null> {
+        const destNames = await this.namesIn(destDir);
+        return destNames ? planMoveUndo(sources, destDir, destNames) : null;
+    }
+
+    /** A finished move that went to plan joins the undo stack. True when it did. */
+    private noteMoveForUndo(op: { kind: string; state: string; tag?: unknown; failures?: { path: string }[] }): boolean {
+        if (op.kind !== "move" || op.state !== "done" || !Array.isArray(op.tag)) return false;
+        const items = movedOk(op.tag as MovedItem[], op.failures?.map((f) => f.path));
+        if (items.length === 0) return false;
+        this.undoStack.push({ kind: "move", items });
+        return true;
+    }
+
+    /** Ctrl+Z on a move: each item back where it came from, if it is still where the move left it. */
+    private async undoMove(items: MovedItem[]): Promise<void> {
+        const dirs = new Set<string>();
+        for (const i of items) for (const p of [parentOf(i.from), parentOf(i.to)]) if (p) dirs.add(p);
+        const listed = new Map<string, Set<string> | null>();
+        for (const d of dirs) listed.set(d, await this.namesIn(d));
+        const groups = restorable(items, (d) => listed.get(d) ?? null);
+        if (groups.length === 0) {
+            this.setStatus({ text: "Can't undo that move: the items aren't where it left them.", tone: "error" });
+            return;
+        }
+        // Each group moves back as its own job; srv asks if something has since taken a name.
+        for (const g of groups) await this.ops.start("move", g.paths, g.parent);
     }
 
     /** What dropping `sources` here does: move within a drive when the drag
