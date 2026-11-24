@@ -65,6 +65,77 @@ fn what_the_environment_already_carries_is_kept_beside_them() {
     assert_eq!(value_of(&own, "core.editor").as_deref(), Some("true"), "over the agent's own value");
 }
 
+/// An environment that carries `n` settings of its own, `user.carried<i> = v<i>`.
+fn carrying(n: usize) -> HashMap<String, String> {
+    let mut env = HashMap::from([("GIT_CONFIG_COUNT".to_string(), n.to_string())]);
+    for i in 0..n {
+        env.insert(format!("GIT_CONFIG_KEY_{i}"), format!("user.carried{i}"));
+        env.insert(format!("GIT_CONFIG_VALUE_{i}"), format!("v{i}"));
+    }
+    env
+}
+
+fn the_settings_are_all_there(env: &HashMap<String, String>) {
+    for (key, value) in SETTINGS {
+        assert_eq!(value_of(env, key).as_deref(), Some(*value), "{key}");
+    }
+    for command in PAGED_COMMANDS {
+        assert_eq!(value_of(env, &format!("pager.{command}")).as_deref(), Some("false"), "pager.{command}");
+    }
+    assert_eq!(value_of(env, "credential.helper").as_deref(), Some(""));
+}
+
+#[test]
+fn an_environment_with_many_entries_keeps_every_one_and_gets_every_setting() {
+    // 100 and 300 entries: each sum passes 256, and 300 does by itself.
+    for n in [100, 300] {
+        let carried = carrying(n);
+        let mut env = carried.clone();
+        env.extend(entries_over(|k| carried.get(k).cloned(), &HashMap::new()));
+        let all = pairs(&env);
+        assert_eq!(all.len(), n + 1 + SETTINGS.len() + PAGED_COMMANDS.len(), "{n} carried");
+        let names: Vec<_> = all.iter().filter(|(k, _)| k.starts_with("user.carried")).collect();
+        assert_eq!(names.len(), n, "{n} carried");
+        for i in 0..n {
+            assert_eq!(value_of(&env, &format!("user.carried{i}")), Some(format!("v{i}")), "{n} carried");
+        }
+        the_settings_are_all_there(&env);
+        // What is added afterwards (the hooks directory) still finds the whole list.
+        let after = crate::backend::publish_guard::git_config_entries(|k| env.get(k).cloned(), "core.hooksPath", "/hooks");
+        env.extend(after);
+        assert_eq!(pairs(&env).len(), n + 2 + SETTINGS.len() + PAGED_COMMANDS.len(), "{n} carried");
+        assert_eq!(value_of(&env, "user.carried0").as_deref(), Some("v0"));
+    }
+}
+
+#[test]
+fn more_entries_than_fit_are_cut_to_the_first_ones_and_every_setting_is_still_given() {
+    use crate::backend::publish_guard::{MAX_CARRIED, MAX_ENTRIES};
+    let carried = carrying(MAX_ENTRIES);
+    let mut env = carried.clone();
+    env.extend(entries_over(|k| carried.get(k).cloned(), &HashMap::new()));
+    let all = pairs(&env);
+    assert!(all.len() <= MAX_ENTRIES, "{}", all.len());
+    assert_eq!(value_of(&env, "user.carried0").as_deref(), Some("v0"));
+    assert_eq!(value_of(&env, &format!("user.carried{}", MAX_CARRIED - 1)), Some(format!("v{}", MAX_CARRIED - 1)));
+    assert_eq!(value_of(&env, &format!("user.carried{MAX_CARRIED}")), None, "the ones past what fits");
+    the_settings_are_all_there(&env);
+    // A count no list can have is read as none, and the settings are still all given.
+    let mut huge = carrying(10);
+    huge.insert("GIT_CONFIG_COUNT".to_string(), "100000".to_string());
+    let mut env = huge.clone();
+    env.extend(entries_over(|k| huge.get(k).cloned(), &HashMap::new()));
+    assert!(pairs(&env).len() <= MAX_ENTRIES);
+    the_settings_are_all_there(&env);
+}
+
+#[test]
+fn what_we_add_always_fits_in_the_room_left_for_it() {
+    use crate::backend::publish_guard::{MAX_CARRIED, MAX_ENTRIES};
+    let env = as_env(entries_over(none, &HashMap::new()));
+    assert!(MAX_CARRIED + pairs(&env).len() <= MAX_ENTRIES, "{} entries of ours", pairs(&env).len());
+}
+
 #[test]
 fn only_a_host_agent_in_such_a_folder_is_given_them_whatever_its_harness() {
     let (data, folder, other) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());

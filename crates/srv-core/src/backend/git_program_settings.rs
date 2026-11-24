@@ -35,7 +35,7 @@ use std::time::{Duration, Instant};
 
 use agentmux_common::win32::NoWindow;
 
-use crate::backend::publish_guard::{git_config_entries, git_config_has_value, git_config_prepend};
+use crate::backend::publish_guard::{declared_count, git_config_entries, git_config_has_value, git_config_prepend, with_count, MAX_CARRIED, MAX_ENTRIES};
 
 /// The settings that name a program, and the value that runs none of the folder's.
 const SETTINGS: &[(&str, &str)] = &[
@@ -147,6 +147,15 @@ fn parse_scoped(output: &str) -> HashMap<String, String> {
 /// The variables that give git the settings above, on top of the entries `get` already sees; `own` is
 /// [`persons_values`].
 pub fn entries_over(get: impl Fn(&str) -> Option<String>, own: &HashMap<String, String>) -> Vec<(String, String)> {
+    // What the environment carries is kept, up to what leaves room for ours: a list longer than
+    // `MAX_CARRIED` is cut to its first entries (and said so), never the settings below left out.
+    // A count no list can have (past `MAX_ENTRIES`) is read as none, as everywhere else.
+    let declared = declared_count(&get);
+    let carried = if declared > MAX_ENTRIES { 0 } else { declared.min(MAX_CARRIED) };
+    if carried < declared {
+        tracing::warn!(declared, carried, "git program settings: the environment carries more GIT_CONFIG entries than fit beside them; only the first ones are kept");
+    }
+    let get = with_count(&get, carried);
     let mut out: HashMap<String, String> = HashMap::new();
     if !git_config_has_value(&get, CREDENTIAL_HELPER, "") {
         out.extend(git_config_prepend(&get, CREDENTIAL_HELPER, ""));

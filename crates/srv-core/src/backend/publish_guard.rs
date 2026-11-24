@@ -28,7 +28,10 @@ use std::sync::Once;
 const COUNT: &str = "GIT_CONFIG_COUNT";
 pub(crate) const HOOKS_PATH_KEY: &str = "core.hooksPath";
 /// Larger counts already in the env are not trusted (and not looped over).
-const MAX_ENTRIES: usize = 256;
+pub(crate) const MAX_ENTRIES: usize = 1024;
+/// How many entries of its own an environment can hold: the room an addition to a count of
+/// this size (`git_program_settings::entries_over`) is sure to fit in below `MAX_ENTRIES`.
+pub(crate) const MAX_CARRIED: usize = MAX_ENTRIES - 256;
 /// The line `gh-agent` writes into every hook it generates.
 const MARKER: &str = "gh-agent publish guard";
 
@@ -64,6 +67,16 @@ fn parse_count(get: &impl Fn(&str) -> Option<String>) -> usize {
         .and_then(|c| c.trim().parse().ok())
         .filter(|c: &usize| *c <= MAX_ENTRIES)
         .unwrap_or(0)
+}
+
+/// The count `GIT_CONFIG_COUNT` names, as written (0 when it is absent or not a number).
+pub(crate) fn declared_count(get: &impl Fn(&str) -> Option<String>) -> usize {
+    get(COUNT).and_then(|c| c.trim().parse().ok()).unwrap_or(0)
+}
+
+/// `get` that reads `GIT_CONFIG_COUNT` as `count`: for a list cut to what fits.
+pub(crate) fn with_count<'a>(get: &'a impl Fn(&str) -> Option<String>, count: usize) -> impl Fn(&str) -> Option<String> + 'a {
+    move |name: &str| if name == COUNT { Some(count.to_string()) } else { get(name) }
 }
 
 /// The variables that set `key = value` on top of the `GIT_CONFIG_*` entries
