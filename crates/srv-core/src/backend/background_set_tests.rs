@@ -115,3 +115,21 @@ fn changes_names_who_entered_who_left_and_keeps_when_each_began() {
     assert_eq!(left, vec![("a".to_string(), 60)], "a left after 60 ms in the set");
     assert_eq!(before.get("b"), Some(&100), "b's start is kept, not reset by a later look");
 }
+
+/// A container agent's declared shell has no host pid, so it was dropped after half an hour even while it ran.
+#[test]
+fn a_container_shell_counts_for_as_long_as_the_container_check_says_it_runs() {
+    let long = NOW as i64 - 3 * 60 * 60_000;
+    let t = task(None, long, BackgroundTaskStatus::Running);
+    assert!(set_of(NOW, &[t.clone()], &[]).is_empty(), "the host alone drops it after half an hour");
+    let items = with_container_shells(set_of(NOW, &[t.clone()], &[]), &[t.clone()], &["t".to_string()]);
+    assert_eq!(items.len(), 1);
+    assert_eq!((items[0].kind, items[0].label.as_str()), (Kind::Shell, "cargo test"));
+    // Not once the container check no longer lists it, nor once it ended.
+    assert!(with_container_shells(vec![], &[t], &[]).is_empty());
+    let ended = task(None, long, BackgroundTaskStatus::Done);
+    assert!(with_container_shells(vec![], &[ended], &["t".to_string()]).is_empty());
+    // A shell the host already counts is not counted twice.
+    let young = task(None, NOW as i64 - 1000, BackgroundTaskStatus::Running);
+    assert_eq!(with_container_shells(set_of(NOW, &[young.clone()], &[]), &[young], &["t".to_string()]).len(), 1);
+}

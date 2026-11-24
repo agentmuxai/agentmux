@@ -682,6 +682,7 @@ async fn route_command(
             state.browser_panes.reload(block_id, state);
             Ok(serde_json::json!(true))
         }
+        "browser_pane_find" | "browser_pane_stop_find" => { state.browser_panes.run_find_command(cmd, args, state); Ok(serde_json::json!(true)) }
         "browser_pane_stop" => {
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
             state.browser_panes.stop(block_id, state);

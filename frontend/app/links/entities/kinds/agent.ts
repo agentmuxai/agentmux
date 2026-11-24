@@ -62,8 +62,11 @@ export const agentKind: EntityKind = {
                 name = trimToken(split.written);
                 computer = split.computer;
                 end = m.index + (computer !== undefined ? split.written.length + 1 + computer.length : name.length);
-                // `Loap #4` is a numbered agent's name when some `Loap #N` exists: `Loap` alone is not who is meant.
-                if (computer === undefined && NUMBER_AFTER.test(text.slice(end, end + 12)) && ctx.agents.isNumberedFamily(name)) continue;
+            }
+            // `Loap #4` is a numbered agent's name when some `Loap #N` exists: `Loap` alone is not who is meant.
+            if (computer === undefined && NUMBER_AFTER.test(text.slice(end, end + 12)) && ctx.agents.isNumberedFamily(name)) {
+                consumed = end;
+                continue;
             }
             const agent = ctx.agents.find(name, computer !== undefined);
             if (!agent) continue;

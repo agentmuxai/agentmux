@@ -40,8 +40,9 @@ const DEFAULT_QUIET_RUNNING_MINUTES: i64 = 30;
 const DEFAULT_ESCALATE_MINUTES: i64 = 5;
 /// An agent is nudged at most this often.
 const NUDGE_SPACING_MS: u64 = 60 * 60_000;
-/// After its watchers were told, they are not told again about the same quiet for this long.
-const RETELL_MS: u64 = 60 * 60_000;
+/// An agent whose turn ended with a command of its own still running in the background is waiting on that command, not
+/// stuck: its quiet time is this many times the usual one, and it is not nudged (a nudge would only cost it a turn).
+const BACKGROUND_FACTOR: u64 = 4;
 /// How often the sweep looks.
 const SWEEP_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -76,6 +77,17 @@ pub struct Reading {
     pub activity_ms: u64,
     /// A turn is running.
     pub turn_active: bool,
+    /// Between turns, with a command or job the agent started still running in the background (`background_set`).
+    pub background: bool,
+}
+
+/// The quiet time of an agent between turns: longer while a command of its own runs in the background.
+fn idle_limit(background: bool, lim: &Limits) -> u64 {
+    if background {
+        lim.quiet_ms.saturating_mul(BACKGROUND_FACTOR)
+    } else {
+        lim.quiet_ms
+    }
 }
 
 /// What a quiet agent is owed.
@@ -116,15 +128,20 @@ impl Watch {
             *ep = Episode { activity_at: reading.activity_ms, ..Episode::default() };
         }
         let idle = now_ms.saturating_sub(ep.activity_at);
-        let may_tell = |ep: &Episode| ep.told_at.map_or(true, |t| now_ms.saturating_sub(t) >= RETELL_MS);
+        // Told once for a quiet: the same agent is not told again until it moves (a new episode).
+        let may_tell = |ep: &Episode| ep.told_at.is_none();
         if reading.turn_active {
             if idle >= lim.running_ms.saturating_add(lim.escalate_ms) && may_tell(ep) {
                 return Some(Action::Tell { running: true, idle_ms: idle });
             }
             return None;
         }
-        if idle < lim.quiet_ms {
+        if idle < idle_limit(reading.background, lim) {
             return None;
+        }
+        if reading.background {
+            // It is waiting on its own command: no nudge, its watchers are told (naming the command).
+            ep.nudge_skipped = true;
         }
         if ep.nudged_at.is_none() && !ep.nudge_skipped {
             let nudged_lately = self.last_nudge.get(key).is_some_and(|at| now_ms.saturating_sub(*at) < NUDGE_SPACING_MS);
@@ -146,13 +163,13 @@ impl Watch {
     /// When the quiet that `step` is looking at began (unix ms), if the agent `key` is quiet at `now_ms`: it is between
     /// turns and idle for the quiet time, or in a turn that has written nothing for the longer running time. Whether
     /// it was nudged or its watchers told does not matter: this is what the Swarm and the Kanban show.
-    pub fn quiet_since(&self, key: &str, turn_active: bool, lim: &Limits, now_ms: u64) -> Option<u64> {
+    pub fn quiet_since(&self, key: &str, turn_active: bool, background: bool, lim: &Limits, now_ms: u64) -> Option<u64> {
         let at = self.episodes.get(key)?.activity_at;
-        let limit = if turn_active { lim.running_ms } else { lim.quiet_ms };
+        let limit = if turn_active { lim.running_ms } else { idle_limit(background, lim) };
         (now_ms.saturating_sub(at) >= limit).then_some(at)
     }
 
-    /// The watchers of `key` were told at `now_ms`: it is not told again for an hour. Called only once a note went
+    /// The watchers of `key` were told at `now_ms`: it is not told again until it moves. Called only once a note went
     /// out, so a note nobody could receive (no watcher open) or that the one-a-minute gap held is tried again at the
     /// next sweep.
     pub fn mark_told(&mut self, key: &str, now_ms: u64) {
@@ -248,6 +265,19 @@ fn mute_for_clock(def_id: &str, now_ms: u64) -> Option<Mute> {
 pub fn leads(mstore: &Store, caller: &str, target: &str) -> bool {
     let seat_lead = crate::backend::agent_seat::effective_seat_by_id(mstore, target).and_then(|seat| seat.lead);
     seat_lead.as_deref() == Some(caller) || crate::backend::agent_seat::worker_of(mstore, target).as_deref() == Some(caller)
+}
+
+/// When the newest of the tasks the agent holds moved (unix ms; 0 for none). An urgent message sent to it is not
+/// the agent's own activity, so the tasks it only asked about do not count.
+fn held_moved_ms(tasks: &[OwedTask]) -> u64 {
+    tasks.iter().filter(|t| !t.asked).map(|t| t.updated_ms).max().unwrap_or(0)
+}
+
+/// Whether the agent holds on purpose while quota mode is tight: it set its own `waiting` status line (the leader's
+/// note would only cost the leader a turn to read "idle by design"). The clock is stopped for as long as that line
+/// is its current one and the mode stays tight.
+pub fn holding_for_quota(status: &MetaMapType, quota_tight: bool) -> bool {
+    quota_tight && live_phrase::declared_of(status).is_some_and(|line| line.state.as_deref() == Some("waiting") && line.src == live_phrase::SRC_AGENT)
 }
 
 /// What the agent's status line and a mute add to its clock (unix ms; 0 for nothing). A new status line is something
@@ -378,7 +408,7 @@ fn open_asks_by_def(mstore: &Store, work: &Store, defs: &[AgentDefinition], clai
         }
         let entry = open.entry(def.id.clone()).or_default();
         for num in &ask.tasks {
-            if !entry.iter().any(|t| t.num == *num) {
+            if !entry.iter().any(|t| t.num == *num && t.filer_uid == sender.id) {
                 entry.push(OwedTask { num: *num, filer_uid: sender.id.clone(), updated_ms: ask.at_ms, asked: true });
             }
         }
@@ -424,11 +454,14 @@ fn split_asked(tasks: &[OwedTask]) -> (Vec<OwedTask>, Vec<OwedTask>) {
 }
 
 fn task_list(tasks: &[OwedTask]) -> String {
-    tasks.iter().map(|t| format!("#{}", t.num)).collect::<Vec<_>>().join(", ")
+    let mut nums: Vec<i64> = tasks.iter().map(|t| t.num).collect();
+    nums.sort_unstable();
+    nums.dedup();
+    nums.iter().map(|n| format!("#{n}")).collect::<Vec<_>>().join(", ")
 }
 
 /// The note to a watcher about the quiet agent `name`.
-pub fn quiet_body(name: &str, is_worker: bool, tasks: &[OwedTask], idle_minutes: u64, running: bool, last_words: &str) -> String {
+pub fn quiet_body(name: &str, is_worker: bool, tasks: &[OwedTask], idle_minutes: u64, running: bool, last_words: &str, background: &str) -> String {
     let who = if is_worker { "worker" } else { "agent" };
     let (held, asked) = split_asked(tasks);
     let on = match (held.is_empty(), asked.is_empty()) {
@@ -439,6 +472,8 @@ pub fn quiet_body(name: &str, is_worker: bool, tasks: &[OwedTask], idle_minutes:
     };
     let state = if running {
         "Its turn is still running but has written nothing.".to_string()
+    } else if !background.is_empty() {
+        format!("Its turn ended, and a background command is still running: {background}")
     } else if last_words.is_empty() {
         "It is idle.".to_string()
     } else {
@@ -470,7 +505,7 @@ pub fn install(mstore: Arc<Store>, work: Arc<Store>, filestore: Arc<FileStore>, 
 /// the words name the message as well as the task.
 fn with_asked(mut held: Vec<OwedTask>, asked: Vec<OwedTask>) -> Vec<OwedTask> {
     for more in asked {
-        if !held.iter().any(|t| t.asked && t.num == more.num) {
+        if !held.iter().any(|t| t.asked && t.num == more.num && t.filer_uid == more.filer_uid) {
             held.push(more);
         }
     }
@@ -490,6 +525,7 @@ pub fn sweep(watch: &mut Watch, mstore: &Store, work: &Store, filestore: &FileSt
     notes::absorb(&crate::backend::reactive::get_global_handler().get_audit_log(usize::MAX));
     let claimed = claimed_by_holder(&read_claimed(work, now_ms as i64));
     let mut asked = open_asks_by_def(mstore, work, &defs, &claimed, now_ms);
+    let quota_tight = crate::backend::quota_mode::is_tight(&config.get_settings().extra);
     let mut keep = HashSet::new();
     let mut quiet_now = HashMap::new();
     for def in &defs {
@@ -499,10 +535,10 @@ pub fn sweep(watch: &mut Watch, mstore: &Store, work: &Store, filestore: &FileSt
             continue;
         }
         let state = crate::backend::agent_state::current_state(mstore, block_id);
-        let Some(reading) = read(mstore, block_id, def, &tasks, state, now_ms) else { continue };
+        let Some(reading) = read(mstore, block_id, def, &tasks, state, now_ms, quota_tight) else { continue };
         keep.insert(def.id.clone());
         let action = watch.step(&def.id, reading, &lim, now_ms);
-        if let Some(since_ms) = watch.quiet_since(&def.id, reading.turn_active, &lim, now_ms) {
+        if let Some(since_ms) = watch.quiet_since(&def.id, reading.turn_active, reading.background, &lim, now_ms) {
             let filers: Vec<String> = tasks.iter().map(|t| t.filer_uid.clone()).collect();
             let watchers = watcher_panes(mstore, &def.id, &filers).iter().filter_map(|p| agent_name_of_pane(mstore, &defs, p)).collect();
             let mut nums: Vec<i64> = tasks.iter().map(|t| t.num).collect();
@@ -533,7 +569,7 @@ fn agent_name_of_pane(mstore: &Store, defs: &[AgentDefinition], block_id: &str) 
 
 /// What the controller and the stores say about `def`'s pane, or `None` when it cannot be called quiet: it cannot
 /// run, waits for the user, or its controller cannot say when it last wrote (a controller with no turn tracker).
-fn read(mstore: &Store, block_id: &str, def: &AgentDefinition, tasks: &[OwedTask], state: Option<AgentState>, now_ms: u64) -> Option<Reading> {
+fn read(mstore: &Store, block_id: &str, def: &AgentDefinition, tasks: &[OwedTask], state: Option<AgentState>, now_ms: u64, quota_tight: bool) -> Option<Reading> {
     if !callable(state) {
         return None;
     }
@@ -541,10 +577,12 @@ fn read(mstore: &Store, block_id: &str, def: &AgentDefinition, tasks: &[OwedTask
     let tracker = ctrl.turn_tracker()?;
     let output = ctrl.last_output_ms().and_then(|v| u64::try_from(v).ok()).unwrap_or(0);
     let sent = notes::last_message_by(&def.slug).unwrap_or(0);
-    let moved = tasks.iter().map(|t| t.updated_ms).max().unwrap_or(0);
+    let moved = held_moved_ms(tasks);
     let status = mstore.get::<crate::backend::obj::Block>(block_id).ok().flatten().map(|b| b.meta).unwrap_or_default();
-    let paused = paused_activity(&status, mute_for_clock(&def.id, now_ms).as_ref(), now_ms);
-    Some(Reading { activity_ms: output.max(sent).max(moved).max(paused), turn_active: tracker.pass_started_ms().is_some() })
+    let paused = if holding_for_quota(&status, quota_tight) { now_ms } else { paused_activity(&status, mute_for_clock(&def.id, now_ms).as_ref(), now_ms) };
+    let turn_active = tracker.pass_started_ms().is_some();
+    let background = !turn_active && !super::background_set::for_block(block_id, now_ms).is_empty();
+    Some(Reading { activity_ms: output.max(sent).max(moved).max(paused), turn_active, background })
 }
 
 fn nudge(def_id: &str, block_id: &str, tasks: &[OwedTask], quiet_minutes: u64) {
@@ -557,6 +595,18 @@ fn nudge(def_id: &str, block_id: &str, tasks: &[OwedTask], quiet_minutes: u64) {
 }
 
 #[allow(clippy::too_many_arguments)]
+/// What the agent in `block_id` has running in the background, in a few words (one line, cut): the first command, and how
+/// many more there are.
+fn background_label(block_id: &str, now_ms: u64) -> String {
+    let items = super::background_set::for_block(block_id, now_ms);
+    let Some(first) = items.first() else { return String::new() };
+    let one_line: String = first.label.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(90).collect();
+    match items.len() {
+        1 => one_line,
+        n => format!("{one_line} (and {} more)", n - 1),
+    }
+}
+
 fn tell(mstore: &Store, filestore: &FileStore, config: &ConfigState, def: &AgentDefinition, block_id: &str, tasks: &[OwedTask], running: bool, idle_minutes: u64, now_ms: u64) -> bool {
     let filers: Vec<String> = tasks.iter().map(|t| t.filer_uid.clone()).collect();
     let watchers = watcher_panes(mstore, &def.id, &filers);
@@ -565,7 +615,8 @@ fn tell(mstore: &Store, filestore: &FileStore, config: &ConfigState, def: &Agent
     }
     let words = if running { String::new() } else { notes::last_words_of(mstore, filestore, block_id) };
     let is_worker = crate::backend::agent_seat::worker_of(mstore, &def.id).is_some();
-    let body = quiet_body(&def.name, is_worker, tasks, idle_minutes, running, &words);
+    let background = if running { String::new() } else { background_label(block_id, now_ms) };
+    let body = quiet_body(&def.name, is_worker, tasks, idle_minutes, running, &words, &background);
     let Some(body) = notes::admit(&def.id, body, now_ms) else { return false };
     // Information that asks nothing: a cold leader hears it at its next turn, and with the other notes about its agents
     // when they fall in the same window (`note_outbox`).

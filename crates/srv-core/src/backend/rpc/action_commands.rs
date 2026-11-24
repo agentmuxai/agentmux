@@ -96,7 +96,7 @@ pub const READ_ONLY: &[&str] = &[
     "bundle.get", "bundle.import.preview", "bundle.list", "bundle.self.get", "bundle.validate", "checkcliauth",
     "connectivity.status", "connlist", "connlistaws", "connsessions", "containerimagecheck",
     "containerruntimeavailable", "eventreadhistory", "exportagents", "fileindexlines", "fileprobe", "filesearchbytes", "filesearchtext", "fleet.group.list",
-    "folderoverlapasks", "folderoverlapcheck", "forkagentdefinitionsuggest", "fs.agent_folder", "fs.git_status", "fs.list", "fs.places", "getagentbundles", "getagentcontent",
+    "folderoverlapasks", "folderoverlapcheck", "forkagentdefinitionsuggest", "fs.agent_folder", "fs.git_status", "fs.link_file_check", "fs.list", "fs.places", "getagentbundles", "getagentcontent",
     "getagentinstance", "getallagentcontent", "getbuildslot", "getclaudeglobalconfig", "getcontainercaches", "getcontainerlimits", "getdrone", "getdroneaccess", "getdronepayloadschema", "geteditorhome",
     "geteditorroots", "getfullconfig", "getidentityaccount", "getmemory", "getmeta", "gettoolstatus",
     "getwaveairatelimit", "globalmemory:diff", "globalmemory:history", "globalmemory:import_sources",

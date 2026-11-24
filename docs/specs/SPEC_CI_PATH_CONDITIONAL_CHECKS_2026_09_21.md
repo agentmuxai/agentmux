@@ -173,9 +173,12 @@ plain frontend path still runs the Rust legs.
 What the skipped Rust job used to check for these files is not lost: the RPC codegen hygiene check (pure node over the
 committed generated types and `frontend/app`) moved into the frontend job, which every non-documentation PR runs; the
 bindings gate, the ts-rs warnings check and the tests only read what the list above sends to the Rust legs. A skipped
-job counts as passed for `CI required` (R5's aggregate), as for a documentation-only PR, and the merge queue runs
-everything on the merged result (the Ubuntu leg, the fast gates and both frontend legs), so a frontend change that
-breaks a Rust test through a path nobody listed is caught at merge time, not released.
+job counts as passed for `CI required` (R5's aggregate), as for a documentation-only PR. The merge queue applies the
+same rule to each entry's own diff against the entry ahead of it (`classifyQueueEntry`, `ci-classify-changes.mjs
+--queue`; `SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19.md` Phase 9) and takes only `rust` from it: an entry that
+changes no Rust input has its base's Rust result, so the queue skips the Rust job for it and still runs the fast gates
+and both frontend legs on the merged result. (Until 2026-11-24 the queue ran the Ubuntu Rust leg for every entry, as a
+second chance for a path nobody listed; now the list and its test are the guard, and the push to main runs the suite.)
 
 The nextest step itself no longer costs 40 silent minutes when a runner stalls: `scripts/ci-nextest-run.sh` keeps a
 5-second resource trace in a file (uploaded when the step fails or is cancelled), kills the biggest process when memory

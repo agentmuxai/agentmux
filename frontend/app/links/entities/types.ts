@@ -6,14 +6,17 @@
  * out, and a link's destination is built from the entity a recogniser found, never from the characters written.
  */
 
-export type EntityKindId = "address" | "pull" | "task" | "agent";
+export type EntityKindId = "address" | "pull" | "task" | "agent" | "file";
 
 /** Where a click goes. Built by a kind from the entity it resolved; the text never supplies one. */
 export type Destination =
     | { kind: "agent"; id: string; name: string; computer?: string }
     | { kind: "task"; number: number; board?: string }
     | { kind: "pull"; repo: string; number: number; issue: boolean }
-    | { kind: "url"; url: string };
+    | { kind: "url"; url: string }
+    /** A file a message names: `blockId` is the pane the message is shown in (never read from the text), which tells
+     *  srv whose folders the path may lead into. */
+    | { kind: "file"; path: string; blockId: string; confined: boolean };
 
 export type LinkState = "ready" | "unchecked" | "dead";
 

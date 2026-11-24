@@ -4,12 +4,14 @@
 import type { Root, Element, Text, ElementContent } from "hast";
 import type { Plugin } from "unified";
 import { visitParents, SKIP } from "unist-util-visit-parents";
+import { looksLikeFile } from "@/app/links/entities/kinds/file";
 import { linkify, normalizeHref, isLikelyFilename } from "./linkify-config";
 
 // Don't linkify text inside these elements — already an anchor, or code/pre
 const SKIP_ANCESTORS = new Set(["a", "code", "pre", "script", "style"]);
 
-export const rehypeLinkify: Plugin<[], Root> = () => (tree) => {
+/** `filesLinked`: the surface links the files its text names, so a scheme-less word that is one is left for that. */
+export const rehypeLinkifyWith = (filesLinked: () => boolean): Plugin<[], Root> => () => (tree) => {
     visitParents(tree, "text", (node: Text, ancestors) => {
         // Walk ancestor chain — skip if we're inside a, code, pre, etc.
         for (const ancestor of ancestors) {
@@ -27,7 +29,7 @@ export const rehypeLinkify: Plugin<[], Root> = () => (tree) => {
         for (const match of matches) {
             // Drop fuzzy matches that are actually source-code filenames
             // (e.g. README.md, main.rs, setup.py treated as ccTLD URLs)
-            if (isLikelyFilename(match.schema, match.url)) {
+            if (isLikelyFilename(match.schema, match.url) || (!match.schema && filesLinked() && looksLikeFile(match.raw))) {
                 if (match.index > lastIndex) {
                     newNodes.push({ type: "text", value: node.value.slice(lastIndex, match.index) });
                 }
@@ -62,3 +64,5 @@ export const rehypeLinkify: Plugin<[], Root> = () => (tree) => {
         return [SKIP, index + newNodes.length];
     });
 };
+
+export const rehypeLinkify: Plugin<[], Root> = rehypeLinkifyWith(() => false);

@@ -41,7 +41,7 @@ function assertTargets(d: DerivedBackdrop, text: number, label: string) {
         at("faint", d.ink.faint, INK_TARGETS.faint.floor);
         at("border", d.ink.border, INK_TARGETS.border.floor);
         at("divider", d.ink.divider, INK_TARGETS.divider.floor);
-        for (const k of ["accent", "error", "warning", "success", "info", "focus"] as const) {
+        for (const k of ["accent", "error", "warning", "success", "info", "attention", "focus"] as const) {
             at(k, d.ink[k], INK_TARGETS.signal.floor);
         }
         // The text stays readable over a hovered and a selected row.

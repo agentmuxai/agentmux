@@ -131,6 +131,7 @@ function Line(props: { t: LargeTextState; n: number }): JSX.Element {
                     <Show when={props.t.canExpand(props.n)} fallback={<span class="large-text-hidden">…({line()?.hidden})</span>}>
                         <Button
                             variant="link"
+                            opens
                             class="large-text-hidden"
                             {...tip(tr("editor.large.expandTip"))}
                             onClick={() => props.t.expand(props.n)}
