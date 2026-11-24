@@ -62,7 +62,7 @@ fn payload_fact(input: &Value) -> String {
 /// File the request for `slug` (whose uid is `uid`) to fire `drone` with `input`, and keep the payload for it.
 pub(crate) async fn ask(state: &AppState, (uid, slug): (&str, &str), drone: &DroneDefinition, input: Value) -> Result<Value, String> {
     let facts = BTreeMap::from([
-        ("drone".to_string(), fit(&format!("{} ({})", drone.name, drone.id))),
+        ("drone".to_string(), drone_fact(drone)),
         ("can_do".to_string(), fit(&can_do(drone))),
         ("payload".to_string(), payload_fact(&input)),
     ]);
@@ -96,6 +96,20 @@ fn hold(request_id: &str, entry: Held) -> bool {
     true
 }
 
+/// The drone as a fact: its name and its whole id. A long name is cut, never the id, so two drones are never one request.
+fn drone_fact(drone: &DroneDefinition) -> String {
+    let id = format!(" ({})", drone.id);
+    let room = VALUE_MAX.saturating_sub(id.chars().count());
+    let name = if drone.name.chars().count() <= room {
+        drone.name.clone()
+    } else {
+        let mut cut: String = drone.name.chars().take(room.saturating_sub(1)).collect();
+        cut.push('…');
+        cut
+    };
+    format!("{name}{id}")
+}
+
 /// `text` cut to what a fact of a request may hold.
 fn fit(text: &str) -> String {
     if text.chars().count() <= VALUE_MAX {
@@ -120,7 +134,7 @@ pub(crate) async fn run_after_countdown(state: AppState, request: Request) -> Re
     if let Some(why) = crate::server::drone_agent::why_not_fireable(&drone) {
         return Err(format!("an agent can't fire {:?}: {why}", drone.name));
     }
-    let run_id = crate::server::drone_handlers::start_agent_drone_run(&state, &drone.id, entry.input, &request.requester_uid).await?;
+    let run_id = crate::server::drone_handlers::start_agent_drone_run(&state, &drone, entry.input, &request.requester_uid).await?;
     crate::sagas::sensitive_window::tell_askers(&request, &format!("The person didn't stop it: {:?} is running as your fire (run {run_id}). Read it with Drone runs.", drone.name));
     Ok(())
 }

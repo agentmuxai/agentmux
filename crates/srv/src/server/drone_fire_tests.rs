@@ -83,6 +83,7 @@ async fn a_long_drone_name_still_files_the_request() {
     let d = drone(&state, &"long ".repeat(200));
     let request = asked(&state, &d, Value::Null).await;
     assert!(request.facts["drone"].chars().count() <= VALUE_MAX, "the fact fits what a request holds");
+    assert!(request.facts["drone"].ends_with(&format!("({})", d.id)), "the id is never cut: {}", request.facts["drone"]);
     assert_eq!(fit("short"), "short");
 }
 

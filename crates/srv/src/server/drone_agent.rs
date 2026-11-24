@@ -102,7 +102,7 @@ async fn act(state: &AppState, who: (&str, &str), action: &str, body: &Value) ->
             if !state.id_store.access_get(&drone.id).map_err(|e| format!("drone: {e}"))?.allows(who.1) {
                 return crate::server::drone_fire::ask(state, who, &drone, input).await;
             }
-            let run_id = start_agent_drone_run(state, &drone.id, input, who.0).await.map_err(|e| format!("drone fire: {e}"))?;
+            let run_id = start_agent_drone_run(state, &drone, input, who.0).await.map_err(|e| format!("drone fire: {e}"))?;
             Ok(json!({
                 "run_id": run_id,
                 "drone_id": drone.id,
