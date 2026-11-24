@@ -17,6 +17,7 @@ use serde_json::{json, Value};
 use super::Scheduler;
 use crate::drone::executor::schedule;
 use crate::backend::drone_wait;
+use crate::drone::executor::blocks::approval::{self, Card};
 use crate::drone::executor::blocks::wait::{self as config, Wait};
 use crate::drone::executor::engine::RunEvent;
 use crate::drone::types::FlowNode;
@@ -24,11 +25,14 @@ use agentmux_common::time::now_ms;
 
 /// Closes the wait on its key when the block ends however it ends, including
 /// when the run is stopped and the block is dropped.
-struct OpenKey(String);
+struct OpenKey(String, Option<(String, String)>);
 
 impl Drop for OpenKey {
     fn drop(&mut self) {
         drone_wait::close(&self.0);
+        if let Some((run, block)) = &self.1 {
+            crate::backend::drone_approval::forget(run, block);
+        }
     }
 }
 
@@ -36,14 +40,33 @@ impl<'a> Scheduler<'a> {
     /// Wait as `node` says, keeping the checkpoint first, and give what the wait
     /// came to: when it ended and whether it was late, or the event's payload.
     pub(super) async fn run_wait(&mut self, node: &'a FlowNode) -> Result<Value, String> {
+        let wait = config::parse(node, &|t| self.scope.resolve(t), now_ms())?;
+        self.wait_for(node, wait, None).await
+    }
+
+    /// An Approval block: wait for the person's answer on a key that stays inside AgentMux, showing `card`.
+    /// A yes is the block's output; a no and silence fail it.
+    pub(super) async fn run_approval(&mut self, node: &'a FlowNode) -> Result<Value, String> {
+        let card = approval::card(node, &self.scope)?;
+        let limit = schedule::timeout_seconds(node)?.unwrap_or(approval::DEFAULT_TIMEOUT_S);
+        match self.wait_for(node, Wait::On("approval".to_string()), Some((card, limit))).await {
+            Ok(done) => approval::decide(done.get("payload").unwrap_or(&Value::Null)),
+            Err(e) if e.starts_with("timed out") => Err(format!("approval_timeout: nobody answered ({e})")),
+            Err(e) => Err(e),
+        }
+    }
+
+    async fn wait_for(&mut self, node: &'a FlowNode, wait: Wait, approval: Option<(Card, u64)>) -> Result<Value, String> {
         let id = node.id.as_str();
         let now = now_ms();
-        let wait = config::parse(node, &|t| self.scope.resolve(t), now)?;
         let restored_at = self.deadlines.get(id).copied();
         let restored_key = self.resume_on.get(id).cloned();
         let restored = restored_at.is_some() || restored_key.is_some();
         // The block's own limit, kept so a restart finds how much of it is left.
-        let limit_s = schedule::timeout_seconds(node)?;
+        let limit_s = match &approval {
+            Some((_, limit)) => Some(*limit),
+            None => schedule::timeout_seconds(node)?,
+        };
         let timeout_at = self.wait_timeouts.get(id).copied().or_else(|| limit_s.map(|s| now.saturating_add(i64::try_from(s).unwrap_or(i64::MAX) * 1000)));
         let timed_out = || Err(format!("timed out after {}", super::plain_duration(std::time::Duration::from_secs(limit_s.unwrap_or(0)))));
 
@@ -66,7 +89,20 @@ impl<'a> Scheduler<'a> {
                 return timed_out();
             }
         }
-        let _open = event.as_ref().map(|(_, key, _)| OpenKey(key.clone()));
+        let _open = event.as_ref().map(|(_, key, _)| OpenKey(key.clone(), approval.as_ref().map(|_| (self.run_id.to_string(), id.to_string()))));
+        if let (Some((card, _)), Some((_, key, _)), Some(deadline)) = (&approval, &event, timeout_at) {
+            crate::backend::drone_approval::register(
+                crate::backend::drone_approval::DroneApproval {
+                    run_id: self.run_id.to_string(),
+                    block_id: id.to_string(),
+                    drone_id: self.scope.drone_id.clone(),
+                    title: card.title.clone(),
+                    items: card.items.clone(),
+                    deadline_ms: deadline,
+                },
+                key,
+            );
+        }
         if let Some(at) = at {
             self.deadlines.insert(id.to_string(), at);
         }
@@ -85,7 +121,8 @@ impl<'a> Scheduler<'a> {
             block_id: id.to_string(),
             resume_at: at,
             on: event.as_ref().map(|(label, _, _)| label.clone()),
-            key: event.as_ref().map(|(_, key, _)| key.clone()),
+            // An approval's key stays inside AgentMux: whoever reads the run's events cannot answer with it.
+            key: event.as_ref().filter(|_| approval.is_none()).map(|(_, key, _)| key.clone()),
         });
 
         // How long until the block's limit, if it has one: it may already be past.

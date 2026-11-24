@@ -12,8 +12,11 @@ use super::chain_store;
 use super::members::{Change, Entry, Policy};
 use super::ops::{self, Held, KeysAns, KeysReq, MembersAns, MembersReq, OpError, PullAns, PullReq, PushAns, PushReq};
 use super::ops_tests::{ended, node, three, Node, C};
-use super::ops::Ctx;
+use super::ops::{Ctx, KeyDelivery};
 use super::record::Record;
+use super::members::Subject;
+use super::seal::KeyRing;
+use zeroize::Zeroizing;
 use super::round::{sync_collection, CallError, Ended, PeerCalls, Round, Session};
 
 /// The calls of `asker` to `host`, answered by the real ops of `host`.
@@ -64,9 +67,27 @@ impl PeerCalls for Link<'_> {
 /// A node as the asking side of a round: its state, lent for one closure.
 struct Mine<'a>(&'a mut Node);
 
+/// The keys every test node holds (epochs 0 and 1), and a sealed key for any member.
+struct RingKeys;
+
+impl KeyDelivery for RingKeys {
+    fn keys_for(&self, _: &str, _: &Subject) -> Vec<(u32, String)> {
+        vec![(0, "sealed-key".to_string())]
+    }
+    fn ring(&self, _: &str) -> KeyRing {
+        let mut ring = KeyRing::new();
+        ring.insert(0, Zeroizing::new([7u8; 32]));
+        ring.insert(1, Zeroizing::new([8u8; 32]));
+        ring
+    }
+}
+
 impl Session for Mine<'_> {
     fn with<R>(&mut self, f: impl FnOnce(&mut Ctx) -> R) -> Result<R, String> {
-        Ok(f(&mut self.0.ctx()))
+        let keys = RingKeys;
+        let mut ctx = self.0.ctx();
+        ctx.keys = &keys;
+        Ok(f(&mut ctx))
     }
 }
 
@@ -337,4 +358,47 @@ fn a_record_for_another_collection_in_a_pull_is_refused_even_when_this_machine_h
     let r = sync_collection(&mut Mine(&mut a), &mut peer, C, &NewestWins);
     assert!(log::current(&a.conn, "board.other", "task.9").unwrap().is_none(), "not applied to a collection the peer was not asked about");
     assert!(r.refused.iter().any(|x| x == "unknown_collection"), "{:?}", r.refused);
+}
+
+#[test]
+fn a_write_cut_off_by_a_removal_is_written_again_in_the_round_that_learns_of_the_removal() {
+    let (mut a, mut b, c) = three("kanban");
+    a.write(C, "card", "first");
+    round(&mut b, &mut a);
+    // A writes again before it hears of the removal; B removes C having seen only A's first write.
+    a.write(C, "card", "second");
+    let gone = ended(&[(&a, 1), (&b, 0)]);
+    ops::change(&mut b.ctx(), C, Change::Remove { id: c.id.clone(), ended: gone }).unwrap();
+    let r = round(&mut a, &mut b);
+    assert_eq!(r.ended, Ended::Synced);
+    assert_eq!(r.reissued, 1, "{r:?}");
+    let held = log::current(&b.conn, C, "card").unwrap().unwrap();
+    let plain = super::seal::open(&b.ring, &held.header, &held.body).unwrap();
+    assert_eq!(&plain[..], b"second", "the others now hold the write the removal cut off");
+    assert_eq!(a.vector(C), b.vector(C));
+    let again = round(&mut a, &mut b);
+    assert_eq!(again.reissued, 0, "nothing is written twice");
+}
+
+#[test]
+fn a_write_cut_off_by_a_removal_is_not_written_again_over_a_later_write_of_another_machine() {
+    let (mut a, mut b, c) = three("kanban");
+    a.write(C, "card", "first");
+    round(&mut b, &mut a);
+    a.write(C, "card", "second");
+    let gone = ended(&[(&a, 1), (&b, 0)]);
+    ops::change(&mut b.ctx(), C, Change::Remove { id: c.id.clone(), ended: gone }).unwrap();
+    // B then writes the same record at the new epoch, after A's cut-off write. A's clock is ahead of B's, so a write
+    // A signs again before it has seen B's would take a newer version than B's and win with the older content.
+    b.write(C, "card", "third");
+    b.write(C, "card", "third, again");
+    a.now += 60_000;
+    let r = round(&mut a, &mut b);
+    assert_eq!(r.ended, Ended::Synced, "{:?}", r.ended);
+    for node in [&a, &b] {
+        let held = log::current(&node.conn, C, "card").unwrap().unwrap();
+        let plain = super::seal::open(&node.ring, &held.header, &held.body).unwrap();
+        assert_eq!(&plain[..], b"third, again", "the later write stands on both machines");
+    }
+    assert_eq!(r.reissued, 0, "{r:?}");
 }

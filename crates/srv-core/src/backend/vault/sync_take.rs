@@ -123,8 +123,18 @@ impl LinkOwners for Reviving<'_> {
     }
 }
 
+/// The entry a record is about.
+enum Found {
+    None,
+    One(String),
+    /// The record's ids belong to two entries here.
+    Two,
+}
+
 /// This machine's side of the sync layer for the Vault: its store, the Vault's keys, this machine's own key, and its profiles.
 pub struct Taker<'a> {
+    /// This machine's id in the layer (the origin of its own records): the machine a version of its own is "changed on".
+    pub machine: &'a str,
     pub store: &'a Store,
     pub ring: &'a KeyRing,
     /// This machine's own key, which seals the values it keeps.
@@ -170,7 +180,10 @@ impl Taker<'_> {
         let h = &rec.header;
         // Everything that reads the store comes before the log is locked: the log is the store's own connection.
         let holder = match Kind::of(&h.record) {
-            Kind::Entry => self.store.vault_entry_of_link(&h.record).map_err(|e| e.to_string())?,
+            Kind::Entry => match self.find(&self.ids_of(rec))? {
+                Found::One(id) => Some(id),
+                _ => None,
+            },
             _ => None,
         };
         let rotating = match &holder {
@@ -238,6 +251,36 @@ impl Taker<'_> {
         Ok(out)
     }
 
+    /// The ids a record names its entry by: its own, then the ones its body says the entry has (a body that does not open, or
+    /// a tombstone, names only its own).
+    fn ids_of(&self, rec: &Record) -> Vec<String> {
+        let mut ids = vec![rec.header.record.clone()];
+        if !rec.header.tombstone {
+            if let Ok(body) = open_body::<EntryBody>(self.ring, rec) {
+                ids.extend(body.link_ids.iter().filter(|i| sync_links::is_link_id(i) && **i != rec.header.record).cloned());
+            }
+        }
+        ids
+    }
+
+    /// The entry here that has any of `ids`. Ids that belong to two entries here are not an entry: they are told apart, and
+    /// a record that names both is not taken (it would make one entry of two).
+    fn find(&self, ids: &[String]) -> Result<Found, String> {
+        let mut found: Vec<String> = Vec::new();
+        for id in ids {
+            if let Some(entry) = self.store.vault_entry_of_link(id).map_err(|e| e.to_string())? {
+                if !found.contains(&entry) {
+                    found.push(entry);
+                }
+            }
+        }
+        Ok(match found.len() {
+            0 => Found::None,
+            1 => Found::One(found.remove(0)),
+            _ => Found::Two,
+        })
+    }
+
     /// Whether the entry has a rotation waiting to be confirmed (spec 6.3).
     fn rotation_waits(&self, entry_id: &str) -> Result<bool, String> {
         let Some(row) = self.store.vault_get(entry_id).map_err(|e| e.to_string())? else { return Ok(false) };
@@ -275,9 +318,12 @@ impl Taker<'_> {
     fn write(&self, rec: &Record, body: &EntryBody, lost: Option<&str>, now_ms: i64) -> Result<Option<Effect>, String> {
         let h = &rec.header;
         let store = self.store;
-        let existing = match store.vault_entry_of_link(&h.record).map_err(|e| e.to_string())? {
-            Some(id) => store.vault_get(&id).map_err(|e| e.to_string())?,
-            None => None,
+        let mut ids = vec![h.record.clone()];
+        ids.extend(body.link_ids.iter().filter(|i| **i != h.record).cloned());
+        let existing = match self.find(&ids)? {
+            Found::None => None,
+            Found::One(id) => store.vault_get(&id).map_err(|e| e.to_string())?,
+            Found::Two => return Ok(Some(Effect::Deferred("its ids belong to two entries here".to_string()))),
         };
         // The entry is in another Vault here, and that Vault's record of it is live and later than this one: this record is the
         // entry's past (the source Vault's, taken after the destination's), and does not move it back.
@@ -287,10 +333,27 @@ impl Taker<'_> {
                 return Ok(Some(Effect::None));
             }
         }
+        // One entry is one record. An entry that is written under another record than this one has two: the smaller id's is
+        // the one every machine follows, so the larger's is not taken (it names the entry's ids, so a link made from it
+        // opens it), and this machine's own larger one is left for the smaller (below).
+        let mut adopting: Option<(String, String)> = None;
+        if let Some(old) = &existing {
+            if let Some((vault, mine)) = sync_capture::identity_of(store, &old.id)? {
+                if mine != h.record {
+                    if h.record > mine {
+                        let local = links_of(store, &old.id)?;
+                        let settled = sync_links::settle(store, &old.id, &local, &ids);
+                        if settled != local {
+                            store.vault_links_set(&old.id, settled.primary.as_deref(), &settled.aliases).map_err(|e| e.to_string())?;
+                        }
+                        return Ok(Some(Effect::Skipped("another record of an entry here: the one with the smaller id is followed".to_string())));
+                    }
+                    adopting = Some((vault, mine));
+                }
+            }
+        }
         let entry_id = existing.as_ref().map_or_else(|| uuid::Uuid::new_v4().to_string(), |r| r.id.clone());
         // The ids: the record's own, then the ones the sender says the entry has. A new entry takes the record's as its own.
-        let mut ids = vec![h.record.clone()];
-        ids.extend(body.link_ids.iter().filter(|i| **i != h.record).cloned());
         let local = if existing.is_some() { links_of(store, &entry_id)? } else { Links::default() };
         let links = sync_links::settle(&Reviving { store, record: &h.record }, &entry_id, &local, &ids);
         if existing.is_none() && links.primary.as_deref() != Some(h.record.as_str()) {
@@ -299,6 +362,13 @@ impl Taker<'_> {
         let sealed = seal::seal(self.key, &entry_id, &Parts(body.parts.clone()))?;
         let mut row = body.into_row(&entry_id, &h.collection, sealed, existing.as_ref(), self.profiles);
         let machine = h.version.machine.as_str();
+        // This machine's own larger record is left for the smaller: if what the entry holds here is not what that record
+        // says, this machine's value is kept beside it as a version of its own, as for a change made at the same time.
+        let adopt_label = Kept::SameTime { machine: self.machine.to_string() }.label();
+        let lost = match (&adopting, &existing) {
+            (Some(_), Some(old)) if lost.is_none() && self.differs(old, &row, body) => Some(adopt_label.as_str()),
+            _ => lost,
+        };
         let mut kept = Vec::new();
         match (&existing, lost) {
             // A conflict: the value this machine held is kept as it was, and the tags are the two sides' together.
@@ -331,6 +401,11 @@ impl Taker<'_> {
         // What was written is what is marked as seen, not what the store holds by now: a change made here after the write is
         // not in the log, and the next capture has to send it.
         sync_capture::mark_seen(store, &row, &h.record, self.key, self.profiles)?;
+        // The record this machine wrote it under is ended by its next capture, so a machine that has only that one (a
+        // new member) does not make a second entry of it.
+        if let Some((vault, mine)) = adopting.filter(|(vault, _)| !vault.is_empty()) {
+            sync_capture::end_record(store, &vault, &mine)?;
+        }
         Ok(Some(Effect::Wrote { entry: entry_id }))
     }
 
@@ -368,6 +443,10 @@ impl Taker<'_> {
         if row.vault_id != h.collection {
             return Ok(Effect::None);
         }
+        // Nor by the end of a record it is no longer written under (it follows another's, see `write`).
+        if sync_capture::identity_of(self.store, &id)?.is_some_and(|(_, mine)| mine != h.record) {
+            return Ok(Effect::None);
+        }
         let moved = log::live_elsewhere(&self.store.conn().lock().unwrap_or_else(|e| e.into_inner()), &h.collection, &h.record).map_err(|e| e.to_string())?;
         if moved {
             return Ok(Effect::None);
@@ -387,6 +466,12 @@ impl Taker<'_> {
             Some(why) => Effect::KeptInLog(why.to_string()),
             None => Effect::Deleted { entry: id },
         })
+    }
+
+    /// Whether `old`, the entry as it is stored, differs from `new`, the row `body` makes of it.
+    fn differs(&self, old: &VaultRow, new: &VaultRow, body: &EntryBody) -> bool {
+        let same_parts = seal::open(self.key, &old.id, &old.sealed).is_ok_and(|p| p.0 == body.parts);
+        old.kind != new.kind || old.label != new.label || old.fields != new.fields || old.tags != new.tags || !same_parts
     }
 
     /// `rec` lost a conflict: this machine's value stays, and `rec` is kept beside it as a version, with its tags.

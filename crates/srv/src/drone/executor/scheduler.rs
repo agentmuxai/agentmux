@@ -52,7 +52,7 @@ pub(super) async fn dispatch_scoped(node: &FlowNode, kind: BlockKind, scope: &mu
         BlockKind::Transform => blocks::transform::run(node, scope).await,
         BlockKind::Run => blocks::run::run(node, scope).await,
         BlockKind::Once => blocks::once::run(node, scope).await,
-        BlockKind::ForEach | BlockKind::Wait | BlockKind::Drone | BlockKind::Join => unreachable!("the scheduler runs these"),
+        BlockKind::ForEach | BlockKind::Wait | BlockKind::Approval | BlockKind::Drone | BlockKind::Join => unreachable!("the scheduler runs these"),
     }
 }
 
@@ -85,7 +85,7 @@ fn default_timeout(kind: BlockKind) -> Option<Duration> {
         BlockKind::Agent => Some(Duration::from_secs(15 * 60)),
         BlockKind::Message | BlockKind::Task | BlockKind::Notify | BlockKind::AppQuery | BlockKind::Spawn | BlockKind::Run => Some(Duration::from_secs(5 * 60)),
         // A wait is for as long as it says, and its own `timeout_seconds` may cut it short.
-        BlockKind::Api | BlockKind::Condition | BlockKind::Once | BlockKind::Response | BlockKind::Variables | BlockKind::Transform | BlockKind::ForEach | BlockKind::Wait | BlockKind::Join => None,
+        BlockKind::Api | BlockKind::Condition | BlockKind::Once | BlockKind::Response | BlockKind::Variables | BlockKind::Transform | BlockKind::ForEach | BlockKind::Wait | BlockKind::Approval | BlockKind::Join => None,
         // The callee has the limits of its own blocks, and the caller may set one for the whole call.
         BlockKind::Drone => None,
     }
@@ -437,7 +437,7 @@ impl<'a> Scheduler<'a> {
             self.loop_started.entry(guard).or_insert_with(Instant::now);
         }
         self.mark_in_flight(node, forced)?;
-        let waits = kind_of(node).is_ok_and(|k| k == BlockKind::Wait);
+        let waits = kind_of(node).is_ok_and(|k| matches!(k, BlockKind::Wait | BlockKind::Approval));
         if waits {
             self.waiting = Some((id, forced));
         }
@@ -527,7 +527,7 @@ impl<'a> Scheduler<'a> {
     async fn attempt(&mut self, node: &'a FlowNode, kind: BlockKind) -> Result<Value, String> {
         // A wait keeps its own time out in the checkpoint, so a restart does not start it over.
         let limit = match schedule::timeout_seconds(node)? {
-            _ if kind == BlockKind::Wait => None,
+            _ if matches!(kind, BlockKind::Wait | BlockKind::Approval) => None,
             Some(secs) => Some(Duration::from_secs(secs)),
             None => default_timeout(kind),
         };
@@ -551,6 +551,9 @@ impl<'a> Scheduler<'a> {
         }
         if kind == BlockKind::Wait {
             return self.run_wait(node).await;
+        }
+        if kind == BlockKind::Approval {
+            return self.run_approval(node).await;
         }
         if kind == BlockKind::Drone {
             return self.run_call(node).await;
@@ -656,6 +659,8 @@ impl<'a> Scheduler<'a> {
             // What an event brought is outside text; a wait for a time brings nothing.
             BlockKind::Wait if node.data.get("on").is_some() => (true, false),
             BlockKind::Wait => (false, false),
+            // A yes is the person's: what it gives is not outside text.
+            BlockKind::Approval => (false, false),
             // What a callee said is outside text: nothing yet promises its outputs are clean.
             BlockKind::Drone => (true, false),
             BlockKind::Join => self.join_bits(&node.id),

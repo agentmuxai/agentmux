@@ -41,6 +41,8 @@ pub enum BlockKind {
     Run,
     /// "Do this once for this key": the first run to reach it goes on, later ones take the other branch.
     Once,
+    /// Stops the run until a person says yes or no.
+    Approval,
 }
 
 impl BlockKind {
@@ -63,6 +65,7 @@ impl BlockKind {
             "join" => Some(Self::Join),
             "run" => Some(Self::Run),
             "once" => Some(Self::Once),
+            "approval" => Some(Self::Approval),
             _ => None,
         }
     }

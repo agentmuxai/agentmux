@@ -124,14 +124,14 @@ fn ship(from: &Machine, to: &mut Machine, pins: &Pins, at: i64) -> Vec<Taken> {
     records.extend(log::since(&from.store.conn().lock().unwrap(), "vault-b", &other, 100).unwrap());
     records.sort_by(|x, y| x.header.version.cmp(&y.header.version));
     let own = key();
-    let taker = Taker { store: &to.store, ring: &to.ring, key: &own, profiles: &Known(&[]) };
+    let taker = Taker { machine: &to.id, store: &to.store, ring: &to.ring, key: &own, profiles: &Known(&[]) };
     records.iter().map(|r| taker.receive(r, pins, &mut to.clock, at).unwrap()).collect()
 }
 
 /// What a sync round does first: takes again what was deferred in the last one, which settles the deletes that waited.
 fn settle(to: &Machine, at: i64) -> Vec<(String, Result<Effect, String>)> {
     let own = key();
-    Taker { store: &to.store, ring: &to.ring, key: &own, profiles: &Known(&[]) }.retake(VAULT, at).unwrap()
+    Taker { machine: &to.id, store: &to.store, ring: &to.ring, key: &own, profiles: &Known(&[]) }.retake(VAULT, at).unwrap()
 }
 
 /// Two machines that both hold one entry, written on `a` and taken by `b`.
@@ -324,7 +324,7 @@ fn the_new_vaults_record_taken_before_the_old_vaults_history_keeps_the_entry_in_
     a.capture("vault-b", NOW + 100);
     // A machine that is new: it takes the new Vault first, then the old Vault's whole history (a live record, then the tombstone).
     let own = key();
-    let taker = Taker { store: &c.store, ring: &c.ring, key: &own, profiles: &Known(&[]) };
+    let taker = Taker { machine: &c.id, store: &c.store, ring: &c.ring, key: &own, profiles: &Known(&[]) };
     let all = |vault: &str| log::since(&a.store.conn().lock().unwrap(), vault, &Vector::default(), 100).unwrap();
     for rec in all("vault-b").iter().chain(all(VAULT).iter()) {
         taker.receive(rec, &p, &mut c.clock, NOW + 200).unwrap();
@@ -347,7 +347,7 @@ fn the_old_vaults_tombstone_taken_before_the_new_vaults_record_does_not_delete_t
     a.capture(VAULT, NOW + 100);
     a.capture("vault-b", NOW + 100);
     let own = key();
-    let taker = Taker { store: &b.store, ring: &b.ring, key: &own, profiles: &Known(&[]) };
+    let taker = Taker { machine: &b.id, store: &b.store, ring: &b.ring, key: &own, profiles: &Known(&[]) };
     let first = |vault: &str| log::since(&a.store.conn().lock().unwrap(), vault, &Vector::default(), 100).unwrap();
     // The old Vault's tombstone comes first, on its own.
     let old = first(VAULT);
@@ -403,7 +403,7 @@ fn a_kind_this_machine_does_not_know_is_not_taken() {
     assert!(matches!(&taken[0].effect, Effect::Deferred(why) if why.contains("hologram")), "{taken:?}");
     assert!(b.store.vault_list().unwrap().is_empty());
     // The log holds it, so it is not sent again: it stays noted, and a retake (after an upgrade) tries it again.
-    let again = Taker { store: &b.store, ring: &b.ring, key: &key(), profiles: &Known(&[]) }.retake(VAULT, NOW + 10).unwrap();
+    let again = Taker { machine: &b.id, store: &b.store, ring: &b.ring, key: &key(), profiles: &Known(&[]) }.retake(VAULT, NOW + 10).unwrap();
     assert!(matches!(&again[..], [(_, Ok(Effect::Deferred(_)))]), "{again:?}");
 }
 
@@ -418,13 +418,13 @@ fn a_record_the_store_could_not_take_is_taken_again_from_the_log_by_retake() {
     let vector: Vector = log::vector(&b.store.conn().lock().unwrap(), VAULT).unwrap();
     let records = log::since(&a.store.conn().lock().unwrap(), VAULT, &vector, 100).unwrap();
     let (own, none) = (key(), KeyRing::new());
-    let blind = Taker { store: &b.store, ring: &none, key: &own, profiles: &Known(&[]) };
+    let blind = Taker { machine: &b.id, store: &b.store, ring: &none, key: &own, profiles: &Known(&[]) };
     let failed: Vec<_> = records.iter().map(|r| blind.receive(r, &p, &mut b.clock, NOW + 5)).collect();
     assert!(failed.iter().all(|r| r.as_ref().is_err_and(|e| e.contains("no key for epoch") && e.contains("retake"))), "{failed:?}");
     assert!(b.store.vault_list().unwrap().is_empty());
     // A resend finds nothing to send: the log has the record. The key comes, and the retake takes it.
     assert!(ship(&a, &mut b, &p, NOW + 6).is_empty());
-    let sighted = Taker { store: &b.store, ring: &b.ring, key: &own, profiles: &Known(&[]) };
+    let sighted = Taker { machine: &b.id, store: &b.store, ring: &b.ring, key: &own, profiles: &Known(&[]) };
     let again = sighted.retake(VAULT, NOW + 10).unwrap();
     assert!(matches!(&again[..], [(_, Ok(Effect::Wrote { .. }))]), "{again:?}");
     let on_b = b.entry_of(&a.link("entry-a")).expect("the entry is taken");
@@ -444,7 +444,7 @@ fn a_conflict_won_by_a_record_that_could_not_be_taken_is_kept_as_a_conflict_when
     let vector: Vector = log::vector(&b.store.conn().lock().unwrap(), VAULT).unwrap();
     let records = log::since(&a.store.conn().lock().unwrap(), VAULT, &vector, 100).unwrap();
     let (own, none) = (key(), KeyRing::new());
-    let blind = Taker { store: &b.store, ring: &none, key: &own, profiles: &Known(&[]) };
+    let blind = Taker { machine: &b.id, store: &b.store, ring: &none, key: &own, profiles: &Known(&[]) };
     assert!(records.iter().all(|r| blind.receive(r, &p, &mut b.clock, NOW + 300).is_err()));
     // The retake takes it as the conflict it was: the value b held is kept for good, not for 7 days, and the tags are both sides'.
     let again = settle(&b, NOW + 400);
@@ -561,4 +561,79 @@ fn a_grant_or_a_record_that_is_not_an_entry_s_is_kept_in_the_log_and_not_taken_i
     // The layer still holds both, so the other members get them from here.
     let conn = b.store.conn().lock().unwrap();
     assert!(log::current(&conn, VAULT, &grant).unwrap().is_some());
+}
+
+const P_A: &str = "e_0000000000000001";
+const P_B: &str = "e_0000000000000002";
+
+/// Two machines that hold the same entry under different link ids, and b knows a's as its alias (as when the person has said
+/// the two are one entry). The ids are picked so that a's is the smaller. Each has written its own record.
+fn diverged(value_on_b: &str) -> (Machine, Machine, Pins) {
+    let mut a = machine("a", 1);
+    let mut b = machine("b", 2);
+    let p = pins(&a, &b);
+    a.store.vault_insert(&entry("entry-a", "Invoice provider key", "api-key", "sk_test_invented_0001", "[\"prod\"]")).unwrap();
+    b.store.vault_insert(&entry("entry-b", "Invoice provider key", "api-key", value_on_b, "[\"prod\"]")).unwrap();
+    a.store.vault_link_id_assign("entry-a", P_A).unwrap();
+    b.store.vault_link_id_assign("entry-b", P_B).unwrap();
+    b.store.vault_links_set("entry-b", Some(P_B), &[P_A.to_string()]).unwrap();
+    a.capture(VAULT, NOW);
+    b.capture(VAULT, NOW + 1);
+    (a, b, p)
+}
+
+#[test]
+fn an_entry_with_two_ids_is_followed_under_the_smaller_one_and_the_larger_record_is_ended() {
+    let (mut a, mut b, p) = diverged("sk_test_invented_0001");
+    // b's record is the larger: a does not take it, but learns its id, so a link made on b opens the entry.
+    let on_a = ship(&b, &mut a, &p, NOW + 10);
+    assert!(matches!(&on_a[0].effect, Effect::Skipped(why) if why.contains("smaller id")), "{on_a:?}");
+    assert_eq!(a.entry_of(P_B).as_deref(), Some("entry-a"));
+    assert_eq!(a.store.vault_list().unwrap().len(), 1);
+    // b takes a's record, which it holds as an alias: it follows that record from now on.
+    let on_b = ship(&a, &mut b, &p, NOW + 20);
+    assert_eq!(on_b[0].effect, Effect::Wrote { entry: "entry-b".into() });
+    assert_eq!(b.store.vault_list().unwrap().len(), 1, "one entry, not two");
+    assert_eq!(b.capture(VAULT, NOW + 30), sync_capture::Captured { written: 0, tombstoned: 1 }, "its own record is ended");
+    // The end of the larger record does not delete the entry on a, which follows the smaller.
+    let ended = ship(&b, &mut a, &p, NOW + 40);
+    assert_eq!(ended[0].effect, Effect::None);
+    assert!(a.store.vault_get("entry-a").unwrap().is_some());
+    // An edit on either end is taken by the other, as one record.
+    a.edit("entry-a", "sk_test_invented_0002", "[\"prod\"]", NOW + 100);
+    a.capture(VAULT, NOW + 100);
+    ship(&a, &mut b, &p, NOW + 110);
+    assert_eq!(b.value("entry-b").as_deref(), Some("sk_test_invented_0002"));
+    b.edit("entry-b", "sk_test_invented_0003", "[\"prod\"]", NOW + 200);
+    b.capture(VAULT, NOW + 200);
+    ship(&b, &mut a, &p, NOW + 210);
+    assert_eq!(a.value("entry-a").as_deref(), Some("sk_test_invented_0003"));
+}
+
+#[test]
+fn a_delete_made_under_the_followed_record_ends_the_entry_on_both_machines() {
+    let (mut a, mut b, p) = diverged("sk_test_invented_0001");
+    ship(&b, &mut a, &p, NOW + 10);
+    ship(&a, &mut b, &p, NOW + 20);
+    b.capture(VAULT, NOW + 30);
+    ship(&b, &mut a, &p, NOW + 40);
+    a.store.vault_delete("entry-a").unwrap();
+    a.capture(VAULT, NOW + 100);
+    // A delete in a Vault waits one round, in case the entry moved: the next round deletes it.
+    let on_b = ship(&a, &mut b, &p, NOW + 110);
+    assert!(matches!(on_b.last().unwrap().effect, Effect::Deferred(_)), "{on_b:?}");
+    let settled = settle(&b, NOW + 120);
+    assert_eq!(settled.last().unwrap().1, Ok(Effect::Deleted { entry: "entry-b".into() }));
+    assert!(b.store.vault_list().unwrap().is_empty());
+}
+
+#[test]
+fn what_this_machine_held_under_its_larger_record_is_kept_beside_the_smaller_one() {
+    let (mut a, mut b, p) = diverged("sk_test_invented_only_on_b");
+    ship(&b, &mut a, &p, NOW + 10);
+    let on_b = ship(&a, &mut b, &p, NOW + 20);
+    assert_eq!(b.value("entry-b").as_deref(), Some("sk_test_invented_0001"), "the smaller record's value is current");
+    let kept = b.versions("entry-b");
+    assert_eq!(kept, [(format!("{KEPT_PREFIX}changed on b at the same time"), true)], "b's own value is still there");
+    assert_eq!(b.capture(VAULT, NOW + 30).written, 0, "and taking it is not a change to write back");
 }
