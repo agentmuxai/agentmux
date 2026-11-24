@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// The agent pane inside a backdrop (docs/specs/SPEC_PANE_BACKGROUND_THEMES_2026_11_15.md §7.6, check 3, the part that
+// The panes that follow a backdrop (the agent pane, files, editor, Kanban and Swarm; docs/specs/SPEC_PANE_BACKGROUND_THEMES_2026_11_15.md §7.6, check 3, the part that
 // needs no browser). A pane's scope re-points a list of tokens (frontend/app/backdrop/mapped-tokens.json) and the
 // generated `_aliases.scss` re-resolves what reads them. A token that theme.scss sets to a FIXED colour on `:root` and
 // is in neither group stays window-themed inside a pane, so the agent pane must not read one unless it is named here,
@@ -17,10 +17,10 @@ import { describe, expect, it } from "vitest";
 import { dependentAliases, mappedNames, rootDefaults, varsIn } from "./gen-backdrop-aliases.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const AGENT_DIR = join(ROOT, "frontend/app/view/agent");
+const PANE_DIRS = ["agent", "files", "editor", "kanban", "swarm"].map((view) => join(ROOT, "frontend/app/view", view));
 const COLOUR = /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|oklch|oklab)\(|\bcolor-mix\(/i;
 
-/** Tokens the agent pane reads that stay a fixed colour inside a backdrop, and why that is right. */
+/** Tokens these panes read that stay a fixed colour inside a backdrop, and why that is right. */
 const KEEPS = {
     "--shadow-lg": "a black drop shadow reads the same on any surface",
     "--window-close-hover-bg": "the Windows close-button red, fixed by the platform",
@@ -29,10 +29,10 @@ const KEEPS = {
 
 const stripComments = (text) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
 
-function agentSources(dir = AGENT_DIR, out = []) {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+function agentSources(dirs = PANE_DIRS, out = []) {
+    for (const dir of dirs) for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const full = join(dir, entry.name);
-        if (entry.isDirectory()) agentSources(full, out);
+        if (entry.isDirectory()) agentSources([full], out);
         else if (/\.(s?css|tsx?)$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) && !entry.name.endsWith(".d.ts")) out.push(full);
     }
     return out;
@@ -50,7 +50,7 @@ const fixedColour = new Set(
         .map(([name]) => name)
 );
 
-/** Each fixed-colour token the agent pane reads, with the files that read it. */
+/** Each fixed-colour token these panes read, with the files that read it. */
 function fixedColourUses() {
     const uses = new Map();
     for (const file of agentSources()) {
@@ -63,7 +63,7 @@ function fixedColourUses() {
     return uses;
 }
 
-describe("the agent pane inside a backdrop", () => {
+describe("a pane that follows a backdrop", () => {
     const uses = fixedColourUses();
     const named = new Set(Object.keys(KEEPS));
 

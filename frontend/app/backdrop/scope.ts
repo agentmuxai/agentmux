@@ -41,18 +41,22 @@ function rgbTriplet(hex: string): string | undefined {
 /** What the transcript's terminal-palette colours are held to on a pane's surfaces (WCAG, as for muted text). */
 export const ANSI_CONTRAST = 4.5;
 
+/** What a file-type icon colour is held to: it is a graphic, not text (WCAG 1.4.11), and its shape and label carry the type. */
+export const GLYPH_CONTRAST = 3;
+const GLYPH_SET: ReadonlySet<string> = new Set(mapped.glyphs);
+
 /**
  * A palette colour moved, in lightness only, to read on all three of the pane's layers. The layer that is hardest for
  * the colour changes as it moves (a colour that clears the raised layer can still miss the overlay one), so it is
  * moved again against whichever layer it is worst on, until it reads on all of them or stops moving.
  */
-function readableOn(hex: string, surfaces: Surfaces): string {
+function readableOn(hex: string, surfaces: Surfaces, min: number = ANSI_CONTRAST): string {
     const layers = [surfaces.surface, surfaces.raised, surfaces.overlay];
     let out = hex;
     for (let pass = 0; pass < layers.length + 1; pass++) {
         const worst = layers.reduce((a, b) => (contrastRatio(out, b) < contrastRatio(out, a) ? b : a));
-        if (contrastRatio(out, worst) >= ANSI_CONTRAST) break;
-        const next = toneMove(out, worst, ANSI_CONTRAST).hex;
+        if (contrastRatio(out, worst) >= min) break;
+        const next = toneMove(out, worst, min).hex;
         if (next === out) break;
         out = next;
     }
@@ -92,6 +96,7 @@ export function scopeVars(derived: DerivedBackdrop, ansi?: AnsiColours): ScopeVa
         "--ink-info": ink.info,
         "--ink-attention": ink.attention,
         "--ink-on-attention": ink.onAttention,
+        "--ink-on-accent": ink.onAccent,
         "--ink-focus": ink.focus,
         "--ink-hover": ink.hover,
         "--ink-selected": ink.selected,
@@ -101,7 +106,7 @@ export function scopeVars(derived: DerivedBackdrop, ansi?: AnsiColours): ScopeVa
     // `rgba(var(--accent-color-rgb), a)` is how the theme tints with the accent, and it needs the channels, not a colour.
     const triplet = rgbTriplet(ink.accent);
     if (triplet) vars["--accent-color-rgb"] = triplet;
-    for (const [token, hex] of Object.entries(ansi ?? {})) vars[token] = readableOn(hex, surfaces);
+    for (const [token, hex] of Object.entries(ansi ?? {})) vars[token] = readableOn(hex, surfaces, GLYPH_SET.has(token) ? GLYPH_CONTRAST : ANSI_CONTRAST);
     return vars;
 }
 

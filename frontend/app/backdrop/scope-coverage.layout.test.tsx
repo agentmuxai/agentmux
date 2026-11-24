@@ -49,6 +49,7 @@ const SENTINELS: Record<string, string> = {
     "--ink-info": "#00ffa6",
     "--ink-attention": "#ff7ad9",
     "--ink-on-attention": "#2bffd6",
+    "--ink-on-accent": "#d6ff2b",
     "--ink-focus": "#ff6a00",
     "--ink-hover": "#7a7aff",
     "--ink-selected": "#e63b00",

@@ -62,6 +62,8 @@ export interface Ink {
     attention: string;
     /** The text on a fill of `attention` (a filled button): whichever of near-black and white reads better on it. */
     onAttention: string;
+    /** The text on a fill of `accent` (an active pill, a primary button): whichever of near-black and white reads better on it. */
+    onAccent: string;
     focus: string;
     /** The ink at 8 percent, as `#rrggbbaa`: a wash over the surface. */
     hover: string;
@@ -298,6 +300,7 @@ export function deriveInk(chosen: string, signals: Signals = APP_SIGNALS): Deriv
         info: tone(signals.info),
         attention,
         onAttention: readableOnFill(attention),
+        onAccent: readableOnFill(accent),
         focus: accent,
         hover: withAlpha(text, 0.08),
         selected: withAlpha(text, SELECTED_WASH),
@@ -317,6 +320,7 @@ export function deriveInk(chosen: string, signals: Signals = APP_SIGNALS): Deriv
         ["info", ink.info, INK_TARGETS.signal.floor],
         ["attention", ink.attention, INK_TARGETS.signal.floor],
         ["onAttention", ink.onAttention, INK_TARGETS.signal.floor, attention],
+        ["onAccent", ink.onAccent, INK_TARGETS.signal.floor, accent],
     ];
     return {
         scheme: light ? "dark" : "light",
