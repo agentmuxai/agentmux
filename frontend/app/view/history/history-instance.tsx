@@ -6,7 +6,7 @@
 import type { PaneTabHostContext, PaneTabInstance } from "@/app/store/pane-tab-registry";
 import { readZoom } from "@/app/store/zoom-factor";
 import { HistoryManager } from "./history-manager";
-import "./history.scss";
+import "@/app/view/audit/history-sections.scss";
 
 export function create(ctx: PaneTabHostContext): PaneTabInstance {
     return {

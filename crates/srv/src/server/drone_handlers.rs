@@ -33,6 +33,7 @@ use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::RpcContext;
 use crate::backend::drone_decision::{self, Decision};
 use crate::drone::executor::{run_drone, RunEvent};
+use crate::drone::access::DroneAccessStore;
 use crate::drone::storage::DroneStore;
 use crate::drone::types::{RunStatus, DroneDefinition, DroneRun};
 use crate::drone::checkpoint::GraphRef;
@@ -160,6 +161,8 @@ pub(crate) fn upsert_drone_as(state: &AppState, mut cmd: DroneDefinition, saved_
     if cmd.id.is_empty() {
         cmd.id = uuid::Uuid::new_v4().to_string();
     }
+    // An agent that makes a drone owns it. A save of a drone that is there already never changes its owner.
+    let is_new = !matches!(state.id_store.drone_get(&cmd.id), Ok(Some(_)));
     // The definition and its version are one immediate transaction, so a
     // concurrent save cannot leave the stored definition on a graph newer than
     // the one `Latest` returns.
@@ -173,6 +176,12 @@ pub(crate) fn upsert_drone_as(state: &AppState, mut cmd: DroneDefinition, saved_
             "upsertdrone: the definition was saved but its version was not"
         ),
         Err(e) => return Err(format!("upsertdrone: {e}")),
+    }
+    if let (true, Some(agent)) = (is_new, saved_by.strip_prefix("agent:")) {
+        if let Err(e) = state.id_store.access_set_owner(&cmd.id, agent, now) {
+            // Without an owner the agent's own fires take the countdown: slower, never wider.
+            tracing::warn!(drone_id = %cmd.id, error = %e, "upsertdrone: the drone was saved but its owner was not");
+        }
     }
     state.broker.publish_event::<crate::backend::mps_events::DronesChanged>(&(), vec![], 0);
     Ok(cmd)
@@ -205,6 +214,9 @@ pub(crate) fn delete_drone_as(state: &AppState, cmd: DeleteDroneReq, by: &str) -
     if let Err(e) = state.id_store.versions_delete_for(&cmd.id) {
         state.broker.publish_event::<crate::backend::mps_events::DronesChanged>(&(), vec![], 0);
         return Err(format!("deletedrone: the drone was deleted, but removing its versions failed: {e}"));
+    }
+    if let Err(e) = state.id_store.access_delete_for(&cmd.id) {
+        tracing::warn!(drone_id = %cmd.id, error = %e, "deletedrone: the drone's owner and grants were not removed");
     }
     if deleted {
         state.broker.publish_event::<crate::backend::mps_events::DronesChanged>(&(), vec![], 0);
@@ -391,9 +403,17 @@ pub(crate) fn run_allowed_for(state: &AppState, ctx: &RpcContext, drone_id: &str
     let Ok(Some(drone)) = state.id_store.drone_get(drone_id) else {
         return Ok(());
     };
-    match crate::server::drone_agent::why_not_fireable(&drone) {
-        Some(why) => Err(format!("FORBIDDEN: an agent can't run {:?}: {why}. A person runs it from the Drone pane", drone.name)),
-        None => Ok(()),
+    if let Some(why) = crate::server::drone_agent::why_not_fireable(&drone) {
+        return Err(format!("FORBIDDEN: an agent can't run {:?}: {why}. A person runs it from the Drone pane", drone.name));
+    }
+    // A drone the agent made or was given runs now. Any other is the Drone tool's `fire`, which asks the person.
+    let Actor::Agent(agent) = actor_of(ctx) else { return Ok(()) };
+    match state.id_store.access_get(drone_id) {
+        Ok(access) if access.allows(&agent) => Ok(()),
+        _ => Err(format!(
+            "FORBIDDEN: {:?} is not yours and was not given to you. Use the Drone tool's fire: it asks the person, who has a few seconds to stop it",
+            drone.name
+        )),
     }
 }
 
@@ -416,14 +436,17 @@ pub(crate) async fn start_drone_run_as(state: &AppState, cmd: RunDroneReq, by: O
 
 /// Start a run an agent fires with `Drone` `fire`: the ledger row says which agent did it (`by_agent`
 /// is the agent's id), as `agent:<id>` like every other path, so no agent id can read as the operator.
+///
+/// It runs `drone` as the caller loaded and checked it: the graph is not fetched again, so a drone saved in between is not
+/// the one that runs.
 pub(crate) async fn start_agent_drone_run(
     state: &AppState,
-    drone_id: &str,
+    drone: &DroneDefinition,
     input: serde_json::Value,
     by_agent: &str,
 ) -> Result<String, String> {
     let by = Actor::Agent(by_agent.to_string()).label();
-    launch_run(state, drone_id, input, None, None, Some(&by)).await
+    launch_loaded(state, drone.clone(), input, None, None, Some(&by)).await
 }
 
 /// Start the run a job's `drone` action asks for. `job_run_id` is the job
@@ -463,11 +486,6 @@ async fn launch_run(
     run_cap_usd: Option<f64>,
     by_agent: Option<&str>,
 ) -> Result<String, String> {
-    let size = trigger.to_string().len();
-    if size > MAX_INPUT_BYTES {
-        return Err(format!("rundrone: the input is {size} bytes; at most {MAX_INPUT_BYTES}"));
-    }
-    let ledger = state.cron_scheduler.runs().cloned();
     let wf = state
         .id_store
         .drone_get(drone_id)
@@ -475,6 +493,23 @@ async fn launch_run(
         .ok_or_else(|| {
             format!("rundrone: drone {drone_id} not found")
         })?;
+    launch_loaded(state, wf, trigger, job_run_id, run_cap_usd, by_agent).await
+}
+
+/// [`launch_run`] for a drone already loaded: it runs exactly this definition.
+async fn launch_loaded(
+    state: &AppState,
+    wf: DroneDefinition,
+    trigger: serde_json::Value,
+    job_run_id: Option<&str>,
+    run_cap_usd: Option<f64>,
+    by_agent: Option<&str>,
+) -> Result<String, String> {
+    let size = trigger.to_string().len();
+    if size > MAX_INPUT_BYTES {
+        return Err(format!("rundrone: the input is {size} bytes; at most {MAX_INPUT_BYTES}"));
+    }
+    let ledger = state.cron_scheduler.runs().cloned();
     let started_at = now_ms();
     // The run keeps its checkpoints beside its row, and the graph version it started on.
     let persist = Persist { sink: state.mstore.clone(), graph: graph_ref_of(state, &wf) };
@@ -856,6 +891,30 @@ mod tests {
         // A save with no caller behind it (a template the person installed) is the operator's, as before.
         let plain = upsert_drone(&state, drone_named("installed")).unwrap();
         assert_eq!(saved_by(&plain.id), "operator");
+    }
+
+    /// The agent that makes a drone owns it; a person's drone has no owner; a later save, by anyone, leaves the
+    /// owner as it was; deleting the drone forgets it.
+    #[tokio::test]
+    async fn an_agent_that_makes_a_drone_owns_it_and_a_later_save_changes_nothing() {
+        let state = crate::server::tests::test_state();
+        let owner_of = |id: &str| state.id_store.access_get(id).unwrap().owner;
+        let opaz = RpcContext { agent_id: "Opaz".into(), ..Default::default() };
+        let korp = RpcContext { agent_id: "korp".into(), ..Default::default() };
+        let made = upsert_drone_as(&state, drone_named("opaz's"), &recorded_as(&opaz)).unwrap();
+        assert_eq!(owner_of(&made.id), "opaz", "kept in lower case");
+        let mut renamed = made.clone();
+        renamed.name = "renamed by korp".into();
+        upsert_drone_as(&state, renamed, &recorded_as(&korp)).unwrap();
+        assert_eq!(owner_of(&made.id), "opaz", "another agent's edit does not take the drone");
+        let by_window = upsert_drone_as(&state, drone_named("the person's"), &recorded_as(&RpcContext::operator_for_tests())).unwrap();
+        assert_eq!(owner_of(&by_window.id), "", "a person's drone has no owner");
+        let mut taken = by_window.clone();
+        taken.name = "an agent edits it".into();
+        upsert_drone_as(&state, taken, &recorded_as(&opaz)).unwrap();
+        assert_eq!(owner_of(&by_window.id), "", "editing a person's drone does not make it the agent's");
+        delete_drone_as(&state, DeleteDroneReq { id: made.id.clone() }, "operator").unwrap();
+        assert_eq!(state.id_store.access_get(&made.id).unwrap(), crate::drone::access::DroneAccess::default());
     }
 
     #[tokio::test]

@@ -26,7 +26,7 @@ import { focusManager } from "@/app/store/focusManager";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import { createMemo, createSignal, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
-import { getCliCatalogEntry } from "../defaults/cli-catalog";
+import { cardCaption, getCliCatalogEntry } from "../defaults/cli-catalog";
 import { accessTagsFor } from "../defaults/provider-access-model";
 import type { PinDrift } from "../providers/version-drift";
 import { AccessTagDetail } from "./AccessTagDetail";
@@ -105,7 +105,7 @@ interface CardState {
 function createCardState(props: AgentCardProps): CardState {
     const catalog = createMemo(() => getCliCatalogEntry(props.agent.provider));
     const title = () => catalog()?.displayName || props.agent.name;
-    const caption = () => catalog()?.blurb || props.agent.description || props.agent.name;
+    const caption = () => cardCaption(catalog()) || props.agent.description || props.agent.name;
     const tags = createMemo<TagSpec[]>(() => cardTags(props));
     const chipCount = createMemo(() => tags().filter((t) => t.kind !== "ribbon").length);
     // A corner action (the ribbon, or "+ New") the card shows now.
@@ -159,6 +159,12 @@ function cardTags(props: AgentCardProps): TagSpec[] {
         out.push({ id: "preview", label: t("agentCard.preview"), group: "fact", title: t("agentCard.previewTitle") });
     }
     return out;
+}
+
+/** How many chips a card shows before folding the rest into "+N": three, two when narrow, and one more for a Preview card, so
+ *  its Preview tag is never what a Free or Local chip pushes behind the "+N". */
+export function chipSlots(narrow: boolean, preview: boolean): number {
+    return (narrow ? 2 : 3) + (preview ? 1 : 0);
 }
 
 // A narrow card shows two chips, the rest folding into "+N", and its corner action
@@ -301,7 +307,7 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
             {/* The ribbon (what a click will do) and the chips (Free, Local, an update
                 note), as the kit's Tag. The old install ribbon and upgrade badge were
                 hand-rolled copies of it. */}
-            <TagList tags={tags()} max={narrow() ? 2 : 3} size="xs" class="agent-card-tags" />
+            <TagList tags={tags()} max={chipSlots(narrow(), isPreviewAgent(props.agent))} size="xs" class="agent-card-tags" />
             <NewSessionButton s={s} />
             <Show when={props.launching}>
                 <span class="agent-card-spinner" />

@@ -47,14 +47,14 @@ export function HexFindBar(props: { find: HexFind }): JSX.Element {
                 <IconButton
                     icon="chevron-up"
                     density="compact"
-                    label={`Previous match (Shift+Enter)`}
+                    label={`Previous match (${keyLabel("shift+Enter")})`}
                     disabled={!f.canSearch()}
                     onClick={f.previous}
                 />
                 <IconButton
                     icon="chevron-down"
                     density="compact"
-                    label={`Next match (Enter)`}
+                    label={`Next match (${keyLabel("Enter")})`}
                     disabled={!f.canSearch()}
                     onClick={f.next}
                 />

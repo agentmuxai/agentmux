@@ -19,6 +19,8 @@ fn a_link_names_a_pr_as_an_address_a_reference_or_a_number() {
     assert_eq!(parse_pr_ref("#7", "o/r"), pr("o/r", 7));
     assert_eq!(parse_pr_ref(" 7 ", "o/r"), pr("o/r", 7));
     assert_eq!(parse_pr_ref("#7", "local:C:/work/x"), None, "a folder isn't a GitHub repository");
+    assert_eq!(parse_pr_ref("#7", "remote:gitlab.com/group/api"), None, "a repository on another host isn't one either");
+    assert_eq!(parse_pr_ref(" 7 ", "remote:gitlab.com/group/api"), None);
     assert_eq!(parse_pr_ref("#7", ""), None);
     assert_eq!(parse_pr_ref("https://github.com/o/r/issues/7", ""), None, "an issue isn't a PR");
     assert_eq!(parse_pr_ref("feature/x", "o/r"), None);
@@ -34,6 +36,7 @@ fn a_result_links_the_one_pr_it_names() {
     assert_eq!(pr_in_text("fixed issue #12", "o/r"), None, "an issue number isn't a PR");
     assert_eq!(pr_in_text("SPR #12", "o/r"), None);
     assert_eq!(pr_in_text("PR #12", ""), None, "no repository to find it in");
+    assert_eq!(pr_in_text("Merged as PR #12", "remote:gitlab.com/group/api"), None, "a number on another host is not a GitHub PR");
 }
 
 #[test]
