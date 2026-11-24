@@ -24,19 +24,20 @@ describe("door card captions: billing by sign-in class", () => {
     it("the key doors say the key is the bill", () => {
         expect(billing("kimi")).toBe("Your Moonshot key");
         expect(billing("qwen")).toBe("Your own key");
+        expect(billing("gemini")).toBe("Your Gemini key");
     });
 
     it("only the three plan doors use the word plan, and no harness without a claim has a billing line", () => {
         const ids = ["claude", "codex", "gemini", "antigravity", "qwen", "kimi", "pi", "openclaw", "copilot", "kilo", "cline", "opencode", "goose", "grok", "dsh", "aider", "crush", "muse", "muxcode"];
         expect(ids.filter((id) => billing(id)?.toLowerCase().includes("plan")).sort()).toEqual(["claude", "codex", "copilot"]);
-        // The preview harnesses and Gemini (its blurb already says it takes a key) carry none.
-        expect(ids.filter((id) => !billing(id)).sort()).toEqual(["aider", "antigravity", "cline", "crush", "dsh", "gemini", "goose", "kilo", "muxcode", "openclaw", "opencode", "pi"]);
+        // The preview harnesses carry none.
+        expect(ids.filter((id) => !billing(id)).sort()).toEqual(["aider", "antigravity", "cline", "crush", "dsh", "goose", "kilo", "muxcode", "openclaw", "opencode", "pi"]);
     });
 
     it("the caption leads with the billing words and the blurb is left as it was", () => {
         expect(caption("claude")).toBe("Your Claude plan · Anthropic's coding agent");
         expect(getCliCatalogEntry("claude")?.blurb).toBe("Anthropic's coding agent");
-        expect(caption("gemini")).toBe(getCliCatalogEntry("gemini")?.blurb);
+        expect(caption("gemini")).toBe(`Your Gemini key · ${getCliCatalogEntry("gemini")?.blurb}`);
         expect(cardCaption(null)).toBe("");
     });
 });

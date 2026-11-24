@@ -88,6 +88,7 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         // Since 2026-06-18 Gemini CLI no longer serves personal Google
         // accounts (free, AI Pro, Ultra); Antigravity replaced it for those.
         blurb: "Google's coding agent, with a Gemini API key",
+        billing: "Your Gemini key",
         primaryContextFile: "GEMINI.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
