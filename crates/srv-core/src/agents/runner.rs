@@ -214,7 +214,7 @@ pub(crate) async fn run_agent_with_bin(
     // Same policy as the agent pane: the CLI is one of ours and may use the
     // in-pane helpers, so the keep-set applies. (ReAgent P0, round 3, on #3326.)
     crate::backend::pane_env::sanitize_process_command(&mut cmd);
-    cmd.arg("--print")
+    cmd.args(task.tools.args()).arg("--print") // tool flags take lists: first, so a flag follows them and the prompt is not read as a tool
         .arg("--output-format=stream-json")
         .arg("--verbose")
         .arg("--include-partial-messages")
@@ -223,7 +223,7 @@ pub(crate) async fn run_agent_with_bin(
         // persistent-controller launch args in providers.rs. This spawn path
         // builds its own args independent of ProviderConfig, so the flag has
         // to be added here too — reagent P1 on PR #1964.
-        .arg("--exclude-dynamic-system-prompt-sections").args(task.tools.args());
+        .arg("--exclude-dynamic-system-prompt-sections");
     // Forward the configured turn cap so the CLI enforces it.
     // Previously stored on AgentTask but never passed to the
     // subprocess — silently ignored. Reagent P1 + codex P2 on
@@ -1041,6 +1041,16 @@ mod tests {
         let some = argv_of(ToolLimit::Limited { commands: vec!["git status".to_string()] }).await;
         assert_eq!(value_after(&some, "--tools").as_deref(), Some("Read,Grep,Glob,Bash"), "{some:?}");
         assert_eq!(value_after(&some, "--allowedTools").as_deref(), Some("Bash(git status)"), "{some:?}");
+
+        // A tool flag takes a list: the prompt is the last argument and never one of its values.
+        for argv in [&reading, &some] {
+            assert_eq!(argv.last().map(String::as_str), Some("hi"), "{argv:?}");
+            for flag in ["--tools", "--allowedTools"] {
+                let Some(at) = argv.iter().position(|a| a == flag) else { continue };
+                let values = argv[at + 1..].iter().take_while(|a| !a.starts_with("--"));
+                assert!(!values.clone().any(|v| v == "hi"), "{flag} reads the prompt as a value: {argv:?}");
+            }
+        }
 
         let free = argv_of(ToolLimit::Unlimited).await;
         assert!(!free.iter().any(|a| a == "--tools" || a == "--strict-mcp-config"), "{free:?}");
