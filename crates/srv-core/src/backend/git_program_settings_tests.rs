@@ -130,6 +130,26 @@ fn more_entries_than_fit_are_cut_to_the_first_ones_and_every_setting_is_still_gi
 }
 
 #[test]
+fn a_list_that_is_cut_keeps_the_publish_guards_hooks_path_wherever_it_is() {
+    use crate::backend::publish_guard::{MAX_CARRIED, MAX_ENTRIES};
+    // The guard's entry is appended last, after the environment's own: with 900 entries it is past what fits.
+    let mut carried = carrying(899);
+    carried.insert("GIT_CONFIG_KEY_899".to_string(), "core.hooksPath".to_string());
+    carried.insert("GIT_CONFIG_VALUE_899".to_string(), "/guard".to_string());
+    carried.insert("GIT_CONFIG_COUNT".to_string(), "900".to_string());
+    let mut env = carried.clone();
+    env.extend(entries_over(|k| carried.get(k).cloned(), &HashMap::new()));
+    let all = pairs(&env);
+    assert!(all.len() <= MAX_ENTRIES, "{}", all.len());
+    assert_eq!(value_of(&env, "core.hooksPath").as_deref(), Some("/guard"));
+    assert_eq!(all.iter().filter(|(k, _)| k == "core.hooksPath").count(), 1);
+    assert_eq!(value_of(&env, "user.carried0").as_deref(), Some("v0"));
+    assert_eq!(value_of(&env, &format!("user.carried{}", MAX_CARRIED - 2)), Some(format!("v{}", MAX_CARRIED - 2)));
+    assert_eq!(value_of(&env, &format!("user.carried{}", MAX_CARRIED - 1)), None, "one place is the hooks path's");
+    the_settings_are_all_there(&env);
+}
+
+#[test]
 fn what_we_add_always_fits_in_the_room_left_for_it() {
     use crate::backend::publish_guard::{MAX_CARRIED, MAX_ENTRIES};
     let env = as_env(entries_over(none, &HashMap::new()));

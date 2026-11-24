@@ -74,9 +74,15 @@ pub(crate) fn declared_count(get: &impl Fn(&str) -> Option<String>) -> usize {
     get(COUNT).and_then(|c| c.trim().parse().ok()).unwrap_or(0)
 }
 
-/// `get` that reads `GIT_CONFIG_COUNT` as `count`: for a list cut to what fits.
-pub(crate) fn with_count<'a>(get: &'a impl Fn(&str) -> Option<String>, count: usize) -> impl Fn(&str) -> Option<String> + 'a {
-    move |name: &str| if name == COUNT { Some(count.to_string()) } else { get(name) }
+/// The variables that make `entries` the whole `GIT_CONFIG_*` list: the slots numbered from 0, and the count.
+pub(crate) fn git_config_slots(entries: &[(String, String)]) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::with_capacity(entries.len() * 2 + 1);
+    for (i, (k, v)) in entries.iter().enumerate() {
+        out.push((format!("GIT_CONFIG_KEY_{i}"), k.clone()));
+        out.push((format!("GIT_CONFIG_VALUE_{i}"), v.clone()));
+    }
+    out.push((COUNT.to_string(), entries.len().to_string()));
+    out
 }
 
 /// The variables that set `key = value` on top of the `GIT_CONFIG_*` entries

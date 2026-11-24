@@ -35,7 +35,7 @@ use std::time::{Duration, Instant};
 
 use agentmux_common::win32::NoWindow;
 
-use crate::backend::publish_guard::{declared_count, git_config_entries, git_config_has_value, git_config_prepend, with_count, MAX_CARRIED, MAX_ENTRIES};
+use crate::backend::publish_guard::{declared_count, git_config_entries, git_config_has_value, git_config_prepend, git_config_slots, HOOKS_PATH_KEY, MAX_CARRIED, MAX_ENTRIES};
 
 /// The settings that name a program, and the value that runs none of the folder's.
 const SETTINGS: &[(&str, &str)] = &[
@@ -144,19 +144,43 @@ fn parse_scoped(output: &str) -> HashMap<String, String> {
     out
 }
 
+/// The `GIT_CONFIG_*` list `get` carries cut to what leaves room for the settings added beside it, as the
+/// variables that replace it; none when it already fits. What is kept: the first entries, and the last
+/// `core.hooksPath` wherever it is (the publish guard), in their order.
+fn cut_to_fit(get: &impl Fn(&str) -> Option<String>) -> Vec<(String, String)> {
+    let declared = declared_count(get);
+    if declared > MAX_ENTRIES {
+        tracing::warn!(declared, "git program settings: the GIT_CONFIG count is more than any list has; read as none");
+        return git_config_slots(&[]);
+    }
+    if declared <= MAX_CARRIED {
+        return Vec::new();
+    }
+    let all: Vec<(String, String)> =
+        (0..declared).filter_map(|i| Some((get(&format!("GIT_CONFIG_KEY_{i}"))?, get(&format!("GIT_CONFIG_VALUE_{i}")).unwrap_or_default()))).collect();
+    let guard = all.iter().rposition(|(k, _)| k.eq_ignore_ascii_case(HOOKS_PATH_KEY));
+    let mut kept: Vec<(String, String)> = Vec::new();
+    for (i, entry) in all.iter().enumerate() {
+        let is_guard = guard == Some(i);
+        let others_left = MAX_CARRIED - usize::from(guard.is_some()) - kept.iter().filter(|(k, _)| !k.eq_ignore_ascii_case(HOOKS_PATH_KEY)).count();
+        let is_hooks = entry.0.eq_ignore_ascii_case(HOOKS_PATH_KEY);
+        if is_guard || (!is_hooks && others_left > 0) {
+            kept.push(entry.clone());
+        }
+    }
+    tracing::warn!(declared, kept = kept.len(), "git program settings: the environment carries more GIT_CONFIG entries than fit beside them; the first ones and the hooks path are kept");
+    git_config_slots(&kept)
+}
+
 /// The variables that give git the settings above, on top of the entries `get` already sees; `own` is
 /// [`persons_values`].
 pub fn entries_over(get: impl Fn(&str) -> Option<String>, own: &HashMap<String, String>) -> Vec<(String, String)> {
     // What the environment carries is kept, up to what leaves room for ours: a list longer than
-    // `MAX_CARRIED` is cut to its first entries (and said so), never the settings below left out.
-    // A count no list can have (past `MAX_ENTRIES`) is read as none, as everywhere else.
-    let declared = declared_count(&get);
-    let carried = if declared > MAX_ENTRIES { 0 } else { declared.min(MAX_CARRIED) };
-    if carried < declared {
-        tracing::warn!(declared, carried, "git program settings: the environment carries more GIT_CONFIG entries than fit beside them; only the first ones are kept");
-    }
-    let get = with_count(&get, carried);
-    let mut out: HashMap<String, String> = HashMap::new();
+    // `MAX_CARRIED` is cut to its first entries and the last `core.hooksPath` (and said so), never the
+    // settings below left out. A count no list can have (past `MAX_ENTRIES`) is read as none, as everywhere else.
+    let carried: HashMap<String, String> = cut_to_fit(&get).into_iter().collect();
+    let get = |name: &str| carried.get(name).cloned().or_else(|| get(name));
+    let mut out: HashMap<String, String> = carried.clone();
     if !git_config_has_value(&get, CREDENTIAL_HELPER, "") {
         out.extend(git_config_prepend(&get, CREDENTIAL_HELPER, ""));
     }
