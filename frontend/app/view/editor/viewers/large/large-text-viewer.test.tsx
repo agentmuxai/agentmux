@@ -239,6 +239,53 @@ describe("the Large text viewer", () => {
         expect(numbers()[0]).toBe(was);
     });
 
+    it("follows the end of a log that grows while Follow is on, and stops when the reader scrolls away", async () => {
+        const [revision, setRevision] = createSignal(0);
+        render(() => (
+            <LargeTextViewer
+                path="C:/logs/big.log"
+                revision={revision()}
+                probe={{ size: FILE.length, mtime: 0, kind: "text", mime: "text/plain", read_only: false, text: { encoding: "utf-8", bom: "none" } }}
+                bar={{ viewer: "large", options: ["large", "info", "hex"], onReopenWith: () => {} }}
+            />
+        ));
+        await settle();
+        const follow = screen.getByRole("button", { name: "Follow" });
+        expect(follow.getAttribute("aria-pressed")).toBe("false");
+        // Off: a line that arrives leaves the view where it is.
+        serve(`${FILE}line 1001
+`);
+        setRevision(1);
+        await settle();
+        expect(numbers()[0]).toBe(1);
+        // On: the view goes to the end, and goes on to each new end.
+        fireEvent.click(follow);
+        await settle();
+        expect(follow.getAttribute("aria-pressed")).toBe("true");
+        expect(numbers()).toContain(1001);
+        serve(`${FILE}line 1001
+line 1002
+line 1003
+`);
+        setRevision(2);
+        await settle();
+        expect(numbers()).toContain(1003);
+        expect(facts()[0]).toMatch(/of 1,003$/);
+        // The reader scrolls to the top: following is over, and the next line doesn't pull them back.
+        key("Home", { ctrlKey: true });
+        await settle();
+        expect(follow.getAttribute("aria-pressed")).toBe("false");
+        expect(numbers()[0]).toBe(1);
+        serve(`${FILE}line 1001
+line 1002
+line 1003
+line 1004
+`);
+        setRevision(3);
+        await settle();
+        expect(numbers()[0]).toBe(1);
+    });
+
     it("reads the file again when it changed on disk, and stays at the line it was at", async () => {
         const [revision, setRevision] = createSignal(0);
         render(() => (
