@@ -213,7 +213,6 @@
     "frontend/app/view/browser/browser-view.tsx": 5,
     "frontend/app/view/browser/components/BrowserAuthModal.tsx": 9,
     "frontend/app/view/browser/download-strip.tsx": 11,
-    "frontend/app/view/browser/driven-by-strip-parts.tsx": 52,
     "frontend/app/view/browser/driven-by-strip.tsx": 3,
     "frontend/app/view/browser/give-back-strip.tsx": 4,
     "frontend/app/view/browser/new-profile-modal.tsx": 9,
