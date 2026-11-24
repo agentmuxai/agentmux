@@ -158,4 +158,21 @@ describe("createStripSteps", () => {
         expect(m.steps.step()).toBe("full");
         m.dispose();
     });
+
+    it("holds its step while a tab is being renamed, and looks again when the input goes", async () => {
+        const m = mount(480, 6, Array.from({ length: 6 }, () => ({ scroll: 80, client: 10 })));
+        await vi.advanceTimersByTimeAsync(40);
+        expect(m.steps.step()).toBe("icon-close");
+        const input = document.createElement("input");
+        input.className = "pane-tab-label pane-tab-rename-input";
+        m.strip.append(input);
+        m.setTabCount(2);
+        await vi.advanceTimersByTimeAsync(40);
+        expect(m.steps.step()).toBe("icon-close");
+        input.remove();
+        m.setRevision(1);
+        await vi.advanceTimersByTimeAsync(40);
+        expect(m.steps.step()).toBe("full");
+        m.dispose();
+    });
 });

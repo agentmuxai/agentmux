@@ -32,7 +32,7 @@ const OTHERS_PX = 90; // the header's other controls inside the range (an icon b
 const GAP_PX = 8;
 const ADD_PX = 28;
 
-function row(id: string, width: number, tabs: number, step: string, zoom: number): string {
+function row(id: string, width: number, tabs: number, step: string, zoom: number, renaming = false): string {
     // What pane-tab-strip-steps.ts sets: the room the range leaves the strip, never under the tabs' floors.
     const total = width - OTHERS_PX - GAP_PX * 3; // three other items (the spacer too), three gaps
     const limit = Math.max(total, minTabsRoom(tabs) * zoom + ADD_PX * zoom);
@@ -40,9 +40,14 @@ function row(id: string, width: number, tabs: number, step: string, zoom: number
         const active = i === 1 ? " pane-tab--active" : "";
         const attention = i === 2 ? " pane-tab--attention" : "";
         const noIcon = i === 4 ? " doc-tab--no-icon" : ""; // a tab with no icon of its own keeps its label
+        // The inline rename input (PaneTabRenameInput) takes the selected tab's label's place.
+        const label =
+            renaming && i === 1
+                ? `<input class="pane-tab-label pane-tab-rename-input" value="${LABELS[i]}">`
+                : `<span class="pane-tab-label">${LABELS[i % LABELS.length]}</span>`;
         return (
             `<div class="pane-tab-tip"><div class="pane-tab${active}${attention}${noIcon}" data-tab-id="t${i}">` +
-            `<span class="pane-tab-icon"><i>*</i></span><span class="pane-tab-label">${LABELS[i % LABELS.length]}</span>` +
+            `<span class="pane-tab-icon"><i>*</i></span>${label}` +
             `<button class="pane-tab-close" aria-label="Close tab">x</button></div></div>`
         );
     }).join("");
@@ -56,7 +61,8 @@ function row(id: string, width: number, tabs: number, step: string, zoom: number
 }
 
 // [id, header width, tab count, step, zoom]
-const CASES: Array<[string, number, number, string, number]> = [
+const CASES: Array<[string, number, number, string, number, boolean?]> = [
+    ["renaming", 400, 8, "icon", 1, true],
     ["fit", 900, 3, "full", 1],
     ["clipped", 700, 6, "full", 1],
     ["noLabel", 480, 7, "icon-close", 1],
@@ -101,7 +107,7 @@ let measured: Record<string, Measured> = {};
 
 beforeAll(async () => {
     if (!BROWSER) return;
-    const html = CASES.map(([id, w, n, step, z]) => row(id, w, n, step, z)).join("");
+    const html = CASES.map(([id, w, n, step, z, renaming]) => row(id, w, n, step, z, renaming)).join("");
     measured = await measureInBrowser<Record<string, Measured>>(
         BROWSER,
         `<!doctype html><meta charset="utf-8"><style>${TOKENS}\n${css}</style>${html}<script>window.addEventListener("load",()=>{${MEASURE}})</script>`,
@@ -160,6 +166,13 @@ describe.skipIf(!BROWSER)("a header's tab strip as its tabs run out of room", ()
             const m = measured[id];
             m.tips.forEach((t, i) => i !== m.active && expect(t, `tab ${i} in ${id}`).toBeGreaterThanOrEqual(RESTING_FLOOR_PX - 1));
         }
+    });
+
+    it("keeps the rename input of the selected tab visible and wide enough to type in, at the icon step", () => {
+        const m = measured.renaming;
+        expect(m.labels[m.active], JSON.stringify(m)).toBeGreaterThan(60);
+        expect(m.tips[m.active]).toBeGreaterThanOrEqual(110);
+        expect(m.overlap).toBe(false);
     });
 
     it("scrolls the header, as it always did, once the floors no longer fit", () => {

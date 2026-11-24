@@ -105,6 +105,8 @@ export function createStripSteps(opts: {
         let next = stepFor(share, false, previous);
         // Labels are laid out at "full": if none is cut short the tabs fit as they are and nothing needs to give.
         if (next !== "full" && previous === "full" && !anyLabelCut(strip)) next = "full";
+        // A rename in progress holds the step: the input must not change under the typing.
+        if (strip.querySelector(".pane-tab-rename-input")) next = previous;
         if (next !== previous) setStep(next);
         // Never narrower than the tabs' own floors: past that the header scrolls, as it always did.
         const limit = Math.max(total, minTabsRoom(count) * zoom + addWidth);

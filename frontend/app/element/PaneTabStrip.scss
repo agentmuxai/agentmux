@@ -226,12 +226,10 @@
 
 // Tooltip wrapper (shared Tooltip component) — carries the flex sizing the
 // tab used to own, so wrapping the tab for a hover tooltip doesn't change
-// layout. `flex: 0 0 auto` — no grow (doesn't stretch into free strip
+// layout. `flex: 0 1 auto` — no grow (doesn't stretch into free strip
 // space), hypothetical size follows content (the tab's label + padding),
-// hard-clamped at max-width regardless of shrink factor. `min-width: 0` lets
-// that clamp actually squeeze the box below its content's natural width
-// instead of overflowing it — required for the tab's ellipsis (below) to
-// ever engage.
+// hard-clamped at max-width, and it shrinks with its neighbours when the
+// strip has less room than the tabs' own widths, down to the floors below.
 .pane-tab-tip {
     // Shrinks with its neighbours when the strip has less room than the tabs' own widths, down to a floor
     // (pane-tab-steps.ts): the label is cut with an ellipsis first. The selected tab's floor keeps its icon and its close.
@@ -242,13 +240,17 @@
     align-items: stretch;
 }
 
-// A LONE tab may shrink to the strip and ellipsize instead of scrolling: in a
-// ~318 px pane the "CPU, memory and network" tab used to keep its width and
-// the strip scrolled ("u, memory and network", #30300). Several tabs are left
-// exactly as before: each at its own width, the strip scrolling once they no
-// longer fit — no short tab is widened by a floor.
+// The selected tab keeps a floor wide enough for its icon and its close button, so
+// the squeeze takes the label (and then the other tabs' labels) before it takes
+// the selected tab's controls. A lone tab may shrink below it, to the strip (#30300).
 .pane-tab-tip:has(.pane-tab--active) {
     min-width: 47px;
+}
+
+// A tab being renamed has the input in the place of its label: it keeps room to type in,
+// at every step (the strip holds its step while an input is open, pane-tab-strip-steps.ts).
+.pane-tab-tip:has(.pane-tab-rename-input) {
+    min-width: 120px;
 }
 
 // A lone tab may shrink to the strip and ellipsize, with no floor but the strip's.
@@ -780,8 +782,8 @@
 // underline. Hidden, not removed: a tab's accessible name is still its label, and its tooltip still names it.
 // A tab with no icon (a document tab) keeps its label: it has nothing else to say which it is. At the icon step the
 // selected tab is the icon and its close button too, so it is never left with a stub of a label.
-.pane-tab-strip[data-step="icon-close"] .pane-tab:not(.pane-tab--active):not(.doc-tab--no-icon) .pane-tab-label,
-.pane-tab-strip[data-step="icon"] .pane-tab:not(.doc-tab--no-icon) .pane-tab-label {
+.pane-tab-strip[data-step="icon-close"] .pane-tab:not(.pane-tab--active):not(.doc-tab--no-icon) .pane-tab-label:not(.pane-tab-rename-input),
+.pane-tab-strip[data-step="icon"] .pane-tab:not(.doc-tab--no-icon) .pane-tab-label:not(.pane-tab-rename-input) {
     position: absolute;
     width: 1px;
     height: 1px;
