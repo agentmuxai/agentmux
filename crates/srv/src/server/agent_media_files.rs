@@ -265,6 +265,8 @@ mod tests {
         std::os::unix::fs::symlink(&f.ws, f.ws.join("x").join("y").join("dirlink")).unwrap();
         std::os::unix::fs::symlink("../probe.png", f.ws.join("d.png")).unwrap();
         assert_eq!(resolve(&f.meta, "/workspace/x/y/dirlink/d.png").unwrap_err(), LEADS_OUT);
+        std::os::unix::fs::symlink("up/../probe.png", f.ws.join("dotdot.png")).unwrap();
+        assert_eq!(resolve(&f.meta, "/workspace/dotdot.png").unwrap_err(), LEADS_OUT);
         assert_eq!(resolve(&f.meta, "/workspace/via-up.png").unwrap_err(), LEADS_OUT);
         assert_eq!(resolve(&f.meta, "/workspace/via-up-file.png").unwrap_err(), LEADS_OUT);
         let host = format!("{}/gone.png", f.ws.to_string_lossy());

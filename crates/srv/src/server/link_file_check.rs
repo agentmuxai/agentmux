@@ -91,51 +91,53 @@ fn collapse(path: &Path) -> Option<PathBuf> {
 /// How many links in a row are followed by hand.
 const MAX_HOPS: usize = 16;
 
-/// Whether a link on the way down `path` leads out of the folder (`inside`: the folder as written and as resolved),
-/// whether what it points at is there or not, and whatever follows it. A path through such a link answers as one that
-/// leaves the folder does: what lies outside is not told by whether a file is there.
-pub(crate) fn dangling_link_leaves(path: &Path, inside: &[&Path]) -> bool {
-    leaves_by_links(path, inside, 0)
-}
-
-/// [`dangling_link_leaves`] after `hops` links have been followed by hand; where a link points is walked the same way.
-fn leaves_by_links(path: &Path, inside: &[&Path], hops: usize) -> bool {
-    let mut at = PathBuf::new();
-    for part in path.components() {
-        at.push(part.as_os_str());
-        // The folder's own place (a link above it, such as a short name of a data disk) is where the agent lives, not a way out of it.
-        if inside.iter().any(|root| root.starts_with(&at)) {
-            continue;
-        }
-        let Ok(meta) = std::fs::symlink_metadata(&at) else { break };
-        if !meta.file_type().is_symlink() {
-            continue;
-        }
-        // A link that resolves leaves the folder when what it resolves to is not under it, whatever follows it.
-        if let Ok(resolved) = crate::server::browser_uploads::canonical(&at) {
-            if !inside.iter().any(|root| resolved.starts_with(root)) {
-                return true;
+/// Where `path` would lead if it were there: every link on the way followed (a dangling one too, by what it says), a
+/// `..` taken from where the link before it leads, and what is not there left as written. `None` when links go round.
+fn leads_to(path: &Path) -> Option<PathBuf> {
+    // What is left to walk, as paths, the next one first: a link's target is put in front of the rest.
+    let mut rest: Vec<PathBuf> = vec![path.to_path_buf()];
+    let mut here = PathBuf::new();
+    let mut hops = 0;
+    while let Some(next_path) = rest.pop() {
+        let parts: Vec<Component> = next_path.components().collect();
+        for (index, part) in parts.iter().enumerate() {
+            match part {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    here.pop();
+                }
+                Component::RootDir | Component::Prefix(_) => here.push(part.as_os_str()),
+                Component::Normal(name) => {
+                    let next = here.join(name);
+                    let target = std::fs::symlink_metadata(&next)
+                        .ok()
+                        .filter(|meta| meta.file_type().is_symlink())
+                        .and_then(|_| std::fs::read_link(&next).ok());
+                    let Some(target) = target else {
+                        here = next;
+                        continue;
+                    };
+                    hops += 1;
+                    if hops > MAX_HOPS {
+                        return None;
+                    }
+                    // What follows the link is walked after where it points; a relative target starts from the folder that holds it.
+                    rest.push(parts[index + 1..].iter().collect());
+                    rest.push(target);
+                    break;
+                }
             }
-            continue;
-        }
-        let Ok(target) = std::fs::read_link(&at) else { break };
-        // A relative target is read from the real folder that holds the link, which is not where the path says when a link led to it.
-        let joined = if target.is_absolute() {
-            target
-        } else {
-            let holder = at.parent().map(|parent| crate::server::browser_uploads::canonical(parent).unwrap_or_else(|_| parent.to_path_buf()));
-            holder.map_or(target.clone(), |holder| holder.join(&target))
-        };
-        let Some(next) = collapse(&joined) else { return true };
-        if !inside.iter().any(|root| next.starts_with(root)) {
-            return true;
-        }
-        // Where the link points may itself run through a link that leaves the folder.
-        if hops < MAX_HOPS && leaves_by_links(&next, inside, hops + 1) {
-            return true;
         }
     }
-    false
+    Some(here)
+}
+
+/// Whether `path`, which is not there, would lead out of the folder (`inside`: the folder as written and as resolved)
+/// were it there: what a link on the way points at is followed whether it is there or not, so that a path through a
+/// link that leaves the folder answers as one that leaves it does, and what lies outside is not told by whether a file is
+/// there.
+pub(crate) fn dangling_link_leaves(path: &Path, inside: &[&Path]) -> bool {
+    leads_to(path).map_or(true, |at| !inside.iter().any(|root| at.starts_with(root)))
 }
 
 /// A file named in a message of a host agent whose pane works in `cwd`: found when it is a file inside that folder.
@@ -290,6 +292,9 @@ mod tests {
         link("x/y/dirlink", &work);
         std::os::unix::fs::symlink("../probe", work.join("d")).unwrap();
         assert_eq!(check(&dir, "x/y/dirlink/d"), (OUTSIDE.to_string(), OUTSIDE_WORDS.to_string()));
+        // A `..` in a link's own target goes up from where a link before it leads.
+        std::os::unix::fs::symlink("up/../probe", work.join("dotdot")).unwrap();
+        assert_eq!(check(&dir, "dotdot"), (OUTSIDE.to_string(), OUTSIDE_WORDS.to_string()));
         for asked in ["through-up", "through-up-to-a-file"] {
             assert_eq!(check(&dir, asked), (OUTSIDE.to_string(), OUTSIDE_WORDS.to_string()), "{asked}");
         }
