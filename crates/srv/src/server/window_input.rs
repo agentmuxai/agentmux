@@ -10,8 +10,8 @@
 //! id, is not proof. An agent writes into its own terminal with the Terminal tool and reaches another agent with
 //! Message send.
 //!
-//! For development only, a debug build run on an isolated home can be told to let a test harness type without the
-//! window's proof ([`DEV_SWITCH`]). A release build never honours it.
+//! For development only, a source-tree build (`task dev`) run on an isolated home can be told to let a test harness type
+//! without the window's proof ([`DEV_SWITCH`]). An installed build never honours it.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
@@ -20,7 +20,7 @@ use crate::backend::rpc_types::RpcContext;
 
 const WHY: &str = "only the person's window writes input into a pane; ask the person, or use the Terminal tool for your own pane and Message send for another agent";
 
-/// The environment variable that lets a harness type into panes of an isolated debug build without the window's proof.
+/// The environment variable that lets a harness type into panes of an isolated source-tree build (`task dev`) without the window's proof.
 pub(crate) const DEV_SWITCH: &str = "AGENTMUX_DEV_INPUT_WITHOUT_PROOF";
 
 /// The refusals logged in a window of this length are one line per kind, so a stream of refused keystrokes cannot fill the log.
@@ -28,21 +28,22 @@ const LOG_EVERY_MS: u64 = 10_000;
 
 static LAST_LOGGED: [AtomicU64; 3] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
 
-/// Whether this process honours [`DEV_SWITCH`]: only a debug build, on an isolated home, with the variable set to `1`.
-/// Read once: the check on every keystroke is a flag read, never an environment lookup.
+/// Whether this process honours [`DEV_SWITCH`]: only a source-tree build (`task dev`: the binary runs from `dist/cef-dev*` or
+/// a cargo target folder, which `is_dev_self` answers from the binary's own path, never from the environment), on an isolated
+/// home, with the variable set to `1`. Read once: the check on every keystroke is a flag read, never an environment lookup.
 fn dev_switch_on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| dev_switch_in(cfg!(debug_assertions), |name| std::env::var(name).ok()))
+    *ON.get_or_init(|| dev_switch_in(agentmux_common::is_dev_self(), |name| std::env::var(name).ok()))
 }
 
-fn dev_switch_in(debug_build: bool, var: impl Fn(&str) -> Option<String>) -> bool {
-    debug_build && var(DEV_SWITCH).as_deref() == Some("1") && var("AGENTMUX_HOME_OVERRIDE").is_some_and(|v| !v.is_empty())
+fn dev_switch_in(source_tree_build: bool, var: impl Fn(&str) -> Option<String>) -> bool {
+    source_tree_build && var(DEV_SWITCH).as_deref() == Some("1") && var("AGENTMUX_HOME_OVERRIDE").is_some_and(|v| !v.is_empty())
 }
 
 /// Logs once at start when the dev switch is in force, so a build that types without proof is never a surprise.
 pub(crate) fn log_dev_switch_at_start() {
     if dev_switch_on() {
-        tracing::warn!("{DEV_SWITCH} is set: this isolated debug build accepts input into panes from connections without the window's proof");
+        tracing::warn!("{DEV_SWITCH} is set: this isolated source-tree build accepts input into panes from connections without the window's proof");
     }
 }
 
@@ -104,11 +105,11 @@ mod tests {
     }
 
     #[test]
-    fn a_release_build_a_shared_home_or_a_missing_value_never_honours_the_switch() {
+    fn an_installed_build_a_shared_home_or_a_missing_value_never_honours_the_switch() {
         let env = |pairs: &'static [(&'static str, &'static str)]| move |name: &str| pairs.iter().find(|(k, _)| *k == name).map(|(_, v)| v.to_string());
         let all = &[(DEV_SWITCH, "1"), ("AGENTMUX_HOME_OVERRIDE", "C:/dev-home")];
         assert!(dev_switch_in(true, env(all)));
-        assert!(!dev_switch_in(false, env(all)), "a release build");
+        assert!(!dev_switch_in(false, env(all)), "an installed build");
         assert!(!dev_switch_in(true, env(&[(DEV_SWITCH, "1")])), "no isolated home");
         assert!(!dev_switch_in(true, env(&[(DEV_SWITCH, "1"), ("AGENTMUX_HOME_OVERRIDE", "")])), "an empty home override");
         assert!(!dev_switch_in(true, env(&[(DEV_SWITCH, "yes"), ("AGENTMUX_HOME_OVERRIDE", "C:/dev-home")])), "any value but 1");

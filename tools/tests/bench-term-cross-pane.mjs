@@ -24,7 +24,7 @@
 // should land close to "baseline", not blow up the way the naive-FIFO
 // egress lane does under a sustained flood from a different pane.
 //
-// Needs a dev srv started with AGENTMUX_DEV_INPUT_WITHOUT_PROOF=1 (a debug build on an isolated
+// Needs a dev srv started with AGENTMUX_DEV_INPUT_WITHOUT_PROOF=1 (a `task dev` build on an isolated
 // AGENTMUX_HOME_OVERRIDE home): input into a pane is accepted only from the AgentMux window's
 // proven connection, and this script is not that. An installed instance, or a dev srv started
 // without the switch, refuses its keystrokes ("FORBIDDEN: only the person's window writes input").
