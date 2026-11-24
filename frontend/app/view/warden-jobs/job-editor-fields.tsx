@@ -119,21 +119,7 @@ function DroneField(props: SectionProps & { drones: readonly SelectOption[] }): 
     );
 }
 
-/** Switch the job's action. A drone has no run to cancel from outside, so that choice is left behind with the action that had it. */
-function chooseAction(props: SectionProps, kind: ActionKind): void {
-    props.set("actionKind", kind);
-    if (kind === "drone" && props.draft.overlap === "cancel_other") props.set("overlap", "skip");
-}
-
-/** A drone has no run to cancel from outside, so that choice is not offered for one. */
-function overlapOptions(kind: ActionKind): SelectOption[] {
-    return OVERLAPS.filter((o) => kind !== "drone" || o !== "cancel_other").map((o) => ({
-        value: o,
-        label: o.replace("_", " "),
-    }));
-}
-
-/** Timeout and retries: they govern an agent run, which a drone does not have. */
+/** Timeout, and retries for an agent run: a drone is not run again after a failure. */
 function RunLimitFields(props: SectionProps): JSX.Element {
     return (
         <>
@@ -145,15 +131,17 @@ function RunLimitFields(props: SectionProps): JSX.Element {
                     onInput={(e) => props.set("timeoutMinutes", e.currentTarget.value)}
                 />
             </Field>
-            <Field label={t("jobs.fields.retries")} layout="stacked" description={t("jobs.fields.retriesHelp")}>
-                <TextInput
-                    type="number"
-                    min="0"
-                    max="3"
-                    value={props.draft.retries}
-                    onInput={(e) => props.set("retries", e.currentTarget.value)}
-                />
-            </Field>
+            <Show when={props.draft.actionKind !== "drone"}>
+                <Field label={t("jobs.fields.retries")} layout="stacked" description={t("jobs.fields.retriesHelp")}>
+                    <TextInput
+                        type="number"
+                        min="0"
+                        max="3"
+                        value={props.draft.retries}
+                        onInput={(e) => props.set("retries", e.currentTarget.value)}
+                    />
+                </Field>
+            </Show>
         </>
     );
 }
@@ -196,7 +184,7 @@ export function WhatSection(props: WhatProps): JSX.Element {
                 <SegmentedControl
                     options={actions()}
                     value={props.draft.actionKind}
-                    onChange={(v) => chooseAction(props, v)}
+                    onChange={(v) => props.set("actionKind", v)}
                 />
             </Field>
             <Show when={props.draft.actionKind === "message"}>
@@ -281,7 +269,7 @@ export function PolicySection(props: SectionProps & { defaults: CapDefaults | un
                     <Select
                         value={props.draft.overlap}
                         onChange={(v) => props.set("overlap", v)}
-                        options={overlapOptions(props.draft.actionKind)}
+                        options={OVERLAPS.map((o) => ({ value: o, label: o.replace("_", " ") }))}
                     />
                 </Field>
                 <Field
@@ -295,9 +283,7 @@ export function PolicySection(props: SectionProps & { defaults: CapDefaults | un
                         options={CATCH_UPS.map((o) => ({ value: o, label: o }))}
                     />
                 </Field>
-                <Show when={props.draft.actionKind !== "drone"}>
-                    <RunLimitFields {...props} />
-                </Show>
+                <RunLimitFields {...props} />
                 <Field label={t("jobs.fields.group")} layout="stacked" description={t("jobs.fields.groupHelp")}>
                     <TextInput value={props.draft.group} onInput={(e) => props.set("group", e.currentTarget.value)} />
                 </Field>

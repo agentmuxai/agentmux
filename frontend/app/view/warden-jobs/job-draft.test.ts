@@ -101,12 +101,12 @@ describe("a blank job's definition", () => {
         const built = buildDefinition(d, null);
         expect(built.errors).toEqual([]);
         expect(built.definition.action).toEqual({ kind: "drone", drone_id: "d-1" });
-        expect(built.definition.policy).not.toHaveProperty("timeout_minutes");
+        expect(built.definition.policy).toHaveProperty("timeout_minutes", 30);
         expect(built.definition.policy).not.toHaveProperty("retries");
         expect(buildDefinition({ ...d, droneId: "" }, null).errors).toContain("Choose the drone to run.");
-        expect(buildDefinition({ ...d, overlap: "cancel_other" }, null).errors).toContain(
-            "A drone run can't be cancelled yet, so a later run can't replace it."
-        );
+        const cancel = buildDefinition({ ...d, overlap: "cancel_other" }, null);
+        expect(cancel.errors).toEqual([]);
+        expect(cancel.definition.policy).toHaveProperty("overlap", "cancel_other");
         const back = draftFromDefinition(built.definition, null, "edit");
         expect([back.actionKind, back.droneId]).toEqual(["drone", "d-1"]);
     });

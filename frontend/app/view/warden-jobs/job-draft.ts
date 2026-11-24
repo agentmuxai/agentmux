@@ -389,14 +389,9 @@ function buildPolicy(d: JobDraft, errors: string[]): Json {
         if (n == null) errors.push(`${what}: a whole number.`);
         else apply(n);
     };
-    // A drone run can't be stopped or run again yet (srv refuses these for a drone job).
-    if (d.actionKind === "drone") {
-        if (d.overlap === "cancel_other")
-            errors.push("A drone run can't be cancelled yet, so a later run can't replace it.");
-    } else {
-        whole(d.timeoutMinutes, "Timeout (minutes)", (n) => (policy.timeout_minutes = n));
-        whole(d.retries, "Retries", (n) => (policy.retries = n));
-    }
+    whole(d.timeoutMinutes, "Timeout (minutes)", (n) => (policy.timeout_minutes = n));
+    // A drone run is not run again after a failure (srv refuses retries for a drone job).
+    if (d.actionKind !== "drone") whole(d.retries, "Retries", (n) => (policy.retries = n));
     if (d.group.trim()) policy.group = d.group.trim();
     const caps: Json = {};
     for (const [text, key, what] of [
