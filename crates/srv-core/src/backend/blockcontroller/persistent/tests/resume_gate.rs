@@ -566,11 +566,16 @@ async fn the_other_pane_holding_the_conversation_is_reported_as_held_elsewhere()
 /// callers settle queued prompts instead of falling back to a fresh session.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_stale_pane_refused_by_the_agents_live_pane_is_held_elsewhere() {
-    let f = fixture(&[]);
+    // The live pane is put in the process-wide controller registry, where a spawn of any other test
+    // that holds the same agent uid would find it and be told "another pane" instead of what it
+    // asked about. An agent uid of this test's own keeps the pane out of their reach.
+    let uid = format!("{UID}-{}", uuid::Uuid::new_v4());
+    let mut f = fixture(&[]);
+    f.config.env_vars.insert("AGENTMUX_AGENT_UID".to_string(), uid.clone());
     let (_reg, registry) = lease_registry();
     let store = crate::backend::agent_admission::lease_store_for(Some(Arc::clone(&registry))).unwrap();
     let live_block = format!("live-{}", uuid::Uuid::new_v4());
-    let held = crate::backend::agent_admission::acquire(&store, UID, "AgentA", &Arc::from("this-srv"), &live_block, None, |_| {}).unwrap();
+    let held = crate::backend::agent_admission::acquire(&store, &uid, "AgentA", &Arc::from("this-srv"), &live_block, None, |_| {}).unwrap();
     let live = Arc::new(PersistentSubprocessController::new("tab".into(), live_block.clone(), None, None, None, None));
     {
         let mut g = live.inner.lock().unwrap();
