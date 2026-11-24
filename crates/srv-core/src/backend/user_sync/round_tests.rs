@@ -11,7 +11,8 @@ use super::log::{self, Refused};
 use super::members::Change;
 use super::ops::{self, Held, KeysAns, KeysReq, MembersAns, MembersReq, OpError, PullAns, PullReq, PushAns, PushReq};
 use super::ops_tests::{ended, node, three, Node, C};
-use super::round::{sync_collection, CallError, Ended, PeerCalls, Round};
+use super::ops::Ctx;
+use super::round::{sync_collection, CallError, Ended, PeerCalls, Round, Session};
 
 /// The calls of `asker` to `host`, answered by the real ops of `host`.
 struct Link<'a> {
@@ -58,9 +59,18 @@ impl PeerCalls for Link<'_> {
     }
 }
 
+/// A node as the asking side of a round: its state, lent for one closure.
+struct Mine<'a>(&'a mut Node);
+
+impl Session for Mine<'_> {
+    fn with<R>(&mut self, f: impl FnOnce(&mut Ctx) -> R) -> R {
+        f(&mut self.0.ctx())
+    }
+}
+
 fn round(asker: &mut Node, host: &mut Node) -> Round {
     let mut l = link(asker, host);
-    sync_collection(&mut asker.ctx(), &mut l, C, &NewestWins)
+    sync_collection(&mut Mine(asker), &mut l, C, &NewestWins)
 }
 
 #[test]
@@ -150,7 +160,7 @@ fn an_answer_over_the_cap_is_not_taken() {
     a.write(C, "task.1", "x");
     let mut l = link(&b, &mut a);
     l.pad_pull = true;
-    let r = sync_collection(&mut b.ctx(), &mut l, C, &NewestWins);
+    let r = sync_collection(&mut Mine(&mut b), &mut l, C, &NewestWins);
     assert!(matches!(r.ended, Ended::Distrusted(_)), "{:?}", r.ended);
     assert!(b.vector(C).is_empty(), "nothing from a padded answer was applied");
 }
@@ -161,7 +171,7 @@ fn an_unreachable_peer_ends_the_round_and_changes_nothing() {
     b.write(C, "task.1", "x");
     let mut l = link(&b, &mut a);
     l.down = true;
-    let r = sync_collection(&mut b.ctx(), &mut l, C, &NewestWins);
+    let r = sync_collection(&mut Mine(&mut b), &mut l, C, &NewestWins);
     assert_eq!(r.ended, Ended::Unreachable("no route".into()));
     assert!(!r.changed());
     assert!(a.vector(C).is_empty());
@@ -172,7 +182,7 @@ fn a_machine_that_lacks_a_key_asks_for_it_once() {
     let (mut a, mut b, _) = three("kanban");
     // The fake key store holds nothing, so the round asks once.
     let mut l = link(&b, &mut a);
-    let r = sync_collection(&mut b.ctx(), &mut l, C, &NewestWins);
+    let r = sync_collection(&mut Mine(&mut b), &mut l, C, &NewestWins);
     assert_eq!(r.ended, Ended::Synced);
     assert_eq!(l.keys_asked, 1);
 }
