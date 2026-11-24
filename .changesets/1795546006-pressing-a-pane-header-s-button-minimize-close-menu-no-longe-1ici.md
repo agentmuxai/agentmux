@@ -2,4 +2,4 @@
 type: patch
 ---
 
-Pressing a pane header's button (minimize, close, menu) no longer builds the drag-preview picture, which made the first click lag in a window with several busy panes (#48231)
+Pressing a pane header's button (minimize, close, menu) is no longer treated as the start of a pane drag, so the drag-preview picture is not started for it (#48231)
