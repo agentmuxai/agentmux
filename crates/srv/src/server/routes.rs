@@ -537,6 +537,8 @@ fn agent_api_routes() -> Router<AppState> {
         // Start, stop or detach an agent (`Agents start`, `stop`, `detach`); a stop of another agent waits for the person's override window.
         .route("/api/v1/agent/start", post(app_api::agent_lifecycle::handle_agent_start))
         .route("/api/v1/agent/stop", post(app_api::agent_lifecycle::handle_agent_stop))
+        // A leader mutes one of its agents' quiet watch for a stated time.
+        .route("/api/v1/agent/mute-quiet", post(app_api::agent_mute_quiet::handle_agent_mute_quiet))
         .route("/api/v1/agent/detach", post(app_api::agent_lifecycle::handle_agent_detach))
         .route("/api/v1/agent/rotate-token", post(app_api::agent_rotate_token::handle_agent_rotate_token))
         // Delete an agent the caller made, once it is stopped (`Agents delete`).

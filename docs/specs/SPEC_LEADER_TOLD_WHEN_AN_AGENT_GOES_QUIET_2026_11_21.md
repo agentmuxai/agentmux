@@ -182,3 +182,11 @@ The grouped note and the `quiet` group are built; the Swarm and Kanban chips (th
 - **Kanban card:** the same "quiet 22 min" as a pill on a claimed card whose holder is quiet, counted from the card's own clock.
 - **Lag.** Both read the runtime store's refresh (every 20 seconds) after the sweep (every 30), so a chip can appear up to about a minute after the quiet time and clear about as late after the agent moves.
 - Text through `swarm.quiet.*` and `kanban.quiet.*`. No new pane, no modal, nothing asks anything.
+
+
+## 16. Phase 3, muting, as built (task #48288)
+
+- **Waiting with a time.** `Presence status` takes `until_minutes` (1 to 240) with state `waiting`; srv keeps the end time in the line's pane meta (`term:live_phrase_until`). While it is in force the sweep counts the agent as active now, and when it ends the quiet clock runs again from the end. A `waiting` line with no time stops it for 30 minutes from when it was set, and a longer time, however it arrives, is cut to 240.
+- **Any new status line is activity,** at the time it was set. A line that srv wrote for a task claim counts the same, which the claim already did.
+- **A leader's mute.** `Agents mute_quiet` (`POST /api/v1/agent/mute-quiet`): `agent`, `minutes` (1 to 240; 0 lifts it) and a short `reason`. Only the agent's lead may: the lead of its seat, which for a spawned worker is the agent that spawned it. Not the agent itself (it has the status line), and not without an agent token. It is recorded in the audit log as the calling agent. The mute is kept in memory, by agent, until its end; a restart of srv gives the agent a whole quiet time, which is what a mute of at most four hours would give anyway.
+- **Not in this build.** The Swarm does not show a mute or its reason yet; the urgent-message watch (§2, third row) and the other-machine case (§8) are the next phases.

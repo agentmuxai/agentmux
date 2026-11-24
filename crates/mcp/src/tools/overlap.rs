@@ -124,6 +124,9 @@ async fn run_set_status(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     if let Some(state) = arguments.get("state").filter(|v| !v.is_null()) {
         body.insert("state".into(), state.clone());
     }
+    if let Some(minutes) = arguments.get("until_minutes").filter(|v| !v.is_null()) {
+        body.insert("until_minutes".into(), minutes.clone());
+    }
     body.insert("agent".into(), json!(std::env::var("AGENTMUX_AGENT_ID").unwrap_or_default().trim()));
     body.insert("block".into(), json!(block_id.trim()));
     let url = format!("{}/api/v1/agent/status", local_url.trim_end_matches('/'));
