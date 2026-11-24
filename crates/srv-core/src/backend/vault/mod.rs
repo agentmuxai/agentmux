@@ -43,6 +43,7 @@ pub mod source_link;
 pub mod sync_activity;
 pub mod sync_adapter;
 pub mod sync_capture;
+mod sync_capture_kinds;
 pub mod sync_grant;
 pub mod sync_links;
 pub mod sync_merge;

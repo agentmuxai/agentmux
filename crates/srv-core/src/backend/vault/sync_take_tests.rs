@@ -440,7 +440,7 @@ fn an_entry_with_two_ids_is_followed_under_the_smaller_one_and_the_larger_record
     let on_b = ship(&a, &mut b, &p, NOW + 20);
     assert_eq!(on_b[0].effect, Effect::Wrote { entry: "entry-b".into() });
     assert_eq!(b.store.vault_list().unwrap().len(), 1, "one entry, not two");
-    assert_eq!(b.capture(VAULT, NOW + 30), sync_capture::Captured { written: 0, tombstoned: 1 }, "its own record is ended");
+    assert_eq!(b.capture(VAULT, NOW + 30), sync_capture::Captured { tombstoned: 1, ..Default::default() }, "its own record is ended");
     // The end of the larger record does not delete the entry on a, which follows the smaller.
     let ended = ship(&b, &mut a, &p, NOW + 40);
     assert_eq!(ended[0].effect, Effect::None);

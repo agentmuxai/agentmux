@@ -10,13 +10,15 @@ use agentmux_common::jekt_sign::generate_lan_keypair;
 use zeroize::Zeroizing;
 
 use super::*;
-use crate::backend::storage::vault::{VaultInfoRow, VaultRow};
+use crate::backend::storage::vault::{VaultActivityRow, VaultInfoRow, VaultRow};
 use crate::backend::user_sync::hlc::Clock;
 use crate::backend::user_sync::log::{Outcome, Pins};
 use crate::backend::user_sync::record::Record;
 use crate::backend::vault::seal::Parts;
 use crate::backend::vault::signins::PROFILE;
+use crate::backend::vault::sync_activity;
 use crate::backend::vault::sync_adapter::{Rotations, VaultAdapter};
+use crate::backend::vault::sync_grant;
 use crate::backend::vault::sync_record::Known;
 
 const NOW: i64 = 1_800_000_000_000;
@@ -100,7 +102,7 @@ fn opened(ring: &KeyRing, r: &Record) -> EntryBody {
 fn a_new_entry_is_one_sealed_record_under_its_link_id_and_an_unchanged_one_is_not_written_again() {
     let mut a = machine("a", 1);
     a.store.vault_insert(&row("entry-1", "Invoice provider key", VAULT, "{}")).unwrap();
-    assert_eq!(a.capture(VAULT, NOW), Captured { written: 1, tombstoned: 0 });
+    assert_eq!(a.capture(VAULT, NOW), Captured { written: 1, ..Captured::default() });
     let first = a.record(VAULT, "entry-1").expect("the entry has a record");
     assert!(sync_links::is_link_id(&first.header.record), "the record is named by the link id, not the entry's own id");
     // The log holds the label and the value only sealed.
@@ -114,7 +116,7 @@ fn a_new_entry_is_one_sealed_record_under_its_link_id_and_an_unchanged_one_is_no
     let mut edited = a.store.vault_get("entry-1").unwrap().unwrap();
     edited.label = "Invoice provider key (live)".into();
     a.store.vault_update(&edited).unwrap();
-    assert_eq!(a.capture(VAULT, NOW + 20), Captured { written: 1, tombstoned: 0 });
+    assert_eq!(a.capture(VAULT, NOW + 20), Captured { written: 1, ..Captured::default() });
     let second = a.record(VAULT, "entry-1").unwrap();
     assert_eq!(second.header.base.as_ref(), Some(&first.header.version));
     assert_eq!(opened(&a.ring, &second).label, "Invoice provider key (live)");
@@ -136,7 +138,7 @@ fn an_entry_that_is_deleted_ends_its_record_once() {
     a.store.vault_insert(&row("entry-1", "Invoice provider key", VAULT, "{}")).unwrap();
     a.capture(VAULT, NOW);
     a.store.vault_delete("entry-1").unwrap();
-    assert_eq!(a.capture(VAULT, NOW + 10), Captured { written: 0, tombstoned: 1 });
+    assert_eq!(a.capture(VAULT, NOW + 10), Captured { tombstoned: 1, ..Captured::default() });
     assert_eq!(a.capture(VAULT, NOW + 20), Captured::default());
 }
 
@@ -160,7 +162,7 @@ fn an_entry_moved_to_another_vault_is_written_there_and_ended_in_the_first() {
     // The first Vault's capture leaves it alone: it still exists, in another Vault.
     assert_eq!(a.capture(VAULT, NOW + 10), Captured::default());
     // The second writes it and ends the record in the first.
-    assert_eq!(a.capture("vault-b", NOW + 20), Captured { written: 1, tombstoned: 1 });
+    assert_eq!(a.capture("vault-b", NOW + 20), Captured { written: 1, tombstoned: 1, ..Captured::default() });
     let old = log::current(&a.store.conn().lock().unwrap(), VAULT, &link).unwrap().unwrap();
     assert!(old.header.tombstone);
     assert_eq!(a.capture("vault-b", NOW + 30), Captured::default());
@@ -184,4 +186,88 @@ fn another_machine_takes_the_record_through_the_layer_and_opens_it() {
     let held = log::current(&conn, VAULT, &sent[0].header.record).unwrap().unwrap();
     let body = opened(&b.ring, &held);
     assert_eq!((body.label.as_str(), body.fields.get("site").map(String::as_str)), ("Invoice provider key", Some("example.com")));
+}
+
+fn made(entry: &str, label: &str, action: &str) -> VaultActivityRow {
+    VaultActivityRow { at: NOW, entry_id: entry.into(), entry_label: label.into(), actor: "you".into(), action: action.into(), target: "example.com".into(), actor_kind: "person".into(), host: "a".into(), ..Default::default() }
+}
+
+impl Machine {
+    fn line_record(&self, vault: &str, seq: i64) -> Option<Record> {
+        log::current(&self.store.conn().lock().unwrap(), vault, &sync_activity::record_id(&self.id, seq)).unwrap()
+    }
+}
+
+#[test]
+fn an_activity_line_of_an_entry_is_written_once_sealed_and_a_line_with_no_entry_stays_here() {
+    let mut a = machine("a", 1);
+    a.store.vault_insert(&row("entry-1", "Invoice provider key", VAULT, "{}")).unwrap();
+    let first = a.store.vault_activity_add(&made("entry-1", "Invoice provider key", "revealed")).unwrap();
+    a.store.vault_activity_add(&made("", "", "locked")).unwrap();
+    assert_eq!(a.capture(VAULT, NOW), Captured { written: 1, lines: 1, ..Captured::default() });
+    let record = a.line_record(VAULT, first.seq).expect("the line is a record named for the machine and its number");
+    assert!(!String::from_utf8_lossy(&record.body).contains("Invoice provider key"), "the label is sealed");
+    assert!(a.line_record(VAULT, first.seq + 1).is_none(), "a line of no entry is not written");
+    // Nothing new, nothing written; a later line is.
+    assert_eq!(a.capture(VAULT, NOW + 10), Captured::default());
+    let later = a.store.vault_activity_add(&made("entry-1", "Invoice provider key", "copied")).unwrap();
+    assert_eq!(a.capture(VAULT, NOW + 20), Captured { lines: 1, ..Captured::default() });
+    assert!(a.line_record(VAULT, later.seq).is_some());
+}
+
+#[test]
+fn the_last_lines_of_an_entry_that_was_deleted_are_written_and_a_line_of_another_vault_is_not() {
+    let mut a = machine("a", 1);
+    a.store.vault_insert(&row("entry-1", "Invoice provider key", VAULT, "{}")).unwrap();
+    a.store.vault_insert(&row("elsewhere", "Other Vault key", "vault-b", "{}")).unwrap();
+    a.capture(VAULT, NOW);
+    let gone = a.store.vault_activity_add(&made("entry-1", "Invoice provider key", "deleted")).unwrap();
+    let other = a.store.vault_activity_add(&made("elsewhere", "Other Vault key", "revealed")).unwrap();
+    a.store.vault_delete("entry-1").unwrap();
+    assert_eq!(a.capture(VAULT, NOW + 10), Captured { tombstoned: 1, lines: 1, ..Captured::default() });
+    assert!(a.line_record(VAULT, gone.seq).is_some(), "the delete's own line goes with the tombstone");
+    assert!(a.line_record(VAULT, other.seq).is_none(), "a line of an entry in another Vault does not go here");
+    assert_eq!(a.capture("vault-b", NOW + 20), Captured { written: 1, lines: 1, ..Captured::default() });
+    assert!(a.line_record("vault-b", other.seq).is_some());
+}
+
+fn grant_record(m: &Machine, vault: &str, entry: &str, origin: &str) -> Option<Record> {
+    log::current(&m.store.conn().lock().unwrap(), vault, &sync_grant::record_id(entry, origin)).unwrap()
+}
+
+#[test]
+fn a_site_grant_is_written_once_sealed_and_ended_when_it_is_revoked() {
+    let mut a = machine("a", 1);
+    a.store.vault_insert(&row("entry-1", "Invoice provider key", VAULT, "{}")).unwrap();
+    a.store.vault_grant_add("entry-1", "https://billing.example.com", NOW, 1).unwrap();
+    assert_eq!(a.capture(VAULT, NOW), Captured { written: 1, grants: 1, ..Captured::default() });
+    let record = grant_record(&a, VAULT, "entry-1", "https://billing.example.com").expect("a record named for the entry and the site");
+    assert!(!String::from_utf8_lossy(&record.body).contains("billing.example.com"), "the site is sealed, the id says neither");
+    assert_eq!(a.capture(VAULT, NOW + 10), Captured::default(), "an unchanged grant is not written again");
+    a.store.vault_grant_revoke("entry-1", "https://billing.example.com").unwrap();
+    assert_eq!(a.capture(VAULT, NOW + 20), Captured { tombstoned: 1, ..Captured::default() });
+    assert!(grant_record(&a, VAULT, "entry-1", "https://billing.example.com").unwrap().header.tombstone);
+    assert_eq!(a.capture(VAULT, NOW + 30), Captured::default(), "the revoke is written once");
+    // Granted again: a newer version of the same record.
+    a.store.vault_grant_add("entry-1", "https://billing.example.com", NOW + 40, 1).unwrap();
+    assert_eq!(a.capture(VAULT, NOW + 40), Captured { grants: 1, ..Captured::default() });
+    assert!(!grant_record(&a, VAULT, "entry-1", "https://billing.example.com").unwrap().header.tombstone);
+}
+
+#[test]
+fn a_grant_follows_its_entry_out_of_a_vault_and_one_of_an_entry_that_stays_here_is_kept() {
+    let mut a = machine("a", 1);
+    a.store.vault_insert(&row("entry-1", "Invoice provider key", VAULT, "{}")).unwrap();
+    let own = format!("{{\"{PROFILE}\":\"profile:agent-own\"}}");
+    a.store.vault_insert(&row("signin", "A sign-in", VAULT, &own)).unwrap();
+    a.store.vault_grant_add("entry-1", "https://billing.example.com", NOW, 1).unwrap();
+    a.store.vault_grant_add("signin", "https://billing.example.com", NOW, 1).unwrap();
+    a.capture(VAULT, NOW);
+    assert!(grant_record(&a, VAULT, "signin", "https://billing.example.com").is_none(), "the grant of an entry that stays here does not go");
+    // The entry moves to another Vault: its grant ends here and is written there.
+    a.store.vault_move_entry("entry-1", "vault-b").unwrap();
+    assert_eq!(a.capture(VAULT, NOW + 10).tombstoned, 1);
+    assert!(grant_record(&a, VAULT, "entry-1", "https://billing.example.com").unwrap().header.tombstone);
+    assert_eq!(a.capture("vault-b", NOW + 20).grants, 1);
+    assert!(!grant_record(&a, "vault-b", "entry-1", "https://billing.example.com").unwrap().header.tombstone);
 }
