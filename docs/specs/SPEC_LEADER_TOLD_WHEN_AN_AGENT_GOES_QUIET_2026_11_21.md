@@ -164,3 +164,21 @@ Not in this spec: restarting or stopping a quiet agent (the leader decides), a j
 - **Notes now cover any watched agent.** The failed, exited and asked notes, which were for spawned workers, are sent for every agent that holds a claimed task too, to the same watchers (§3 rows 1 and 2); the text says "Your agent" for one that is not a spawned worker. A turn that ends with a question for the leader and no report is still a note (the worker waits for the answer); a turn that ends any other way is not.
 - **Not in phase 1.** The status line as something that resets the clock and `Presence status waiting` as a mute (phase 3, with `until_minutes`); the commands still running in the nudge text (the list is not read by srv yet); the grouped note, the `quiet` live-facts group and the chips (phase 2). Each quiet note is one note to each watcher.
 - **Settings.** `agents:quietminutes` 15 (0 turns the watch off), `agents:quietrunningminutes` 30, `agents:quietescalateminutes` 5.
+
+## 14. Phase 2, the data side, as built (task #48288)
+
+The grouped note and the `quiet` group are built; the Swarm and Kanban chips (the visible half of §6) follow in their own PR with the macOS and Linux look checks.
+
+- **`backend/note_outbox.rs`** holds the per-leader outbox (§7). `Outbox` is pure and takes the time as an argument: the first note that can wait opens a leader's window; whatever else arrives for that leader within 20 seconds joins it, and a later note about the same agent replaces that agent's line. A note that must be heard now (a failure, an exit, a question) goes out at once when the leader has no window open, so a lone failure is never delayed; one that arrives inside an open window leaves with it. `worker_notes::install`'s two-second tick delivers the windows that have run their time.
+- **One line is the old note.** A window of one line sends today's text and today's wait key. Several lines send `[AgentMux] N of your agents need a look:` and a line each, the existing texts kept. A group waits for a cold leader's next turn only when every line can, under a key of its own (`group:<leader pane>:<opened>`), so a later group never replaces an earlier one's lines. A group with any line that must be heard is delivered at once, with the held lines riding along.
+- **Callers.** The failed, exited and asked notes and the quiet note all queue through it (`worker_notes::note_line_for` is `note_for` before it is addressed). The one-a-minute gap per agent still applies before a note is queued.
+- **Not in this build.** Folding the 75% and 90% usage notes in (D3): they still go on their own, once per lead, as before. The spec allows shipping without it.
+- **`quiet` live-facts group** (`since_ms`, `quiet_ms`, `tasks`, `watchers`), asked for by name or in the `facts` and `full` details, read from the last sweep (at most 30 seconds old). An agent is shown as quiet from the quiet time (the running time for a turn that is running), whether or not it was nudged or its watchers told. `Agents status` adds `quiet 22m` after the state.
+
+## 15. Phase 2, the chips, as built (task #48288)
+
+- **One source.** srv's last quiet sweep (`quiet_watch::quiet_view`) feeds the `quiet` live-facts group (§14), the runtime row the Swarm reads (`quiet_since_ms`) and the holder the Kanban card carries (`holder.quiet_since_ms`), so the three show the same fact.
+- **Swarm row:** a muted "quiet 22 min" after the status chip, in the row's own note style, counting up with the row's tick; the row's state is unchanged. Hover says the agent holds work and has done nothing for that long.
+- **Kanban card:** the same "quiet 22 min" as a pill on a claimed card whose holder is quiet, counted from the card's own clock.
+- **Lag.** Both read the runtime store's refresh (every 20 seconds) after the sweep (every 30), so a chip can appear up to about a minute after the quiet time and clear about as late after the agent moves.
+- Text through `swarm.quiet.*` and `kanban.quiet.*`. No new pane, no modal, nothing asks anything.

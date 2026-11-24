@@ -85,6 +85,12 @@ describe("viewerOptions", () => {
         expect(chooseViewer({ ...probe("text"), mime: "text/csv" }, "table")).toBe("table");
         expect(chooseViewer(probe("text"), "table")).toBe("text");
     });
+
+    it("offers the Large text viewer in place of Text for a small file whose first line was found too wide", () => {
+        const wide = { ...probe("text"), wideFirstLine: "C:/x/wide.log" };
+        expect(viewerOptions(wide)).toEqual(["large", "info", "hex"]);
+        expect(chooseViewer(wide, "text")).toBe("large");
+    });
 });
 
 describe("viewerForDropped", () => {

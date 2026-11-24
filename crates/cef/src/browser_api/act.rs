@@ -30,6 +30,7 @@ use super::click_delivery;
 use super::combobox;
 pub(super) use super::hidden_choices::hidden_choices;
 use super::dates;
+use super::form_change::what_changed;
 use super::frames::{self, FrameRef};
 use super::key_typing;
 use super::nav_settle::NavWatch;
@@ -260,6 +261,9 @@ const COMMIT_INFO: &str = concat!(
   const fieldChanged = "#,
     include_str!("scripts/field_changed.js"),
     r#";
+  const rotatingName = "#,
+    include_str!("scripts/rotating_name.js"),
+    r#";
   const fields = [];
   const secret = el => {
     const ty = (el.type || "").toLowerCase();
@@ -325,9 +329,12 @@ const COMMIT_INFO: &str = concat!(
   const sent = [];
   const secrets = [];
   if (form) {
-    const secretNames = new Set();
+    // Hidden fields a page rewrites by itself (scripts/rotating_name.js): their names count, and so do the kind and length of a value that looks like a token; the value itself doesn't. A name another control shares (a visible one, a disabled hidden one) is never exempt: its value is what the person chose.
+    const secretNames = new Set(), hiddenNames = new Set(), sharedNames = new Set();
     for (const el of Array.from(formGet("elements"))) {
-      if (secret(el) && el.getAttribute("name")) secretNames.add(el.getAttribute("name"));
+      const nm = el.getAttribute("name");
+      if (secret(el) && nm) secretNames.add(nm);
+      if (nm) { if ((el.type || "").toLowerCase() === "hidden" && !el.disabled) hiddenNames.add(nm); else sharedNames.add(nm); }
     }
     let entries;
     try { entries = Array.from(new FormData(form, submits ? this : undefined)); }
@@ -335,7 +342,7 @@ const COMMIT_INFO: &str = concat!(
     for (const [k, v] of entries) {
       if (typeof v !== "string") sent.push([k, "file", v.name, v.size, v.type]);
       else if (secretNames.has(k)) { secrets.push(v); sent.push([k, "[secret]"]); }
-      else sent.push([k, v]);
+      else sent.push([k, hiddenNames.has(k) && !sharedNames.has(k) && rotatingName(k, v) || v]);
     }
   }
   const sub = ["formmethod", "formenctype", "formtarget", "name", "value"].map(a => this.getAttribute(a));
@@ -566,9 +573,11 @@ pub(super) async fn check_click(
         // change the destination or the values. Click only if it
         // still shows what the user approved.
         if !committing || approved_as != Some(&ask) {
-            return Err("the form changed while the user was reading the approval, so nothing was clicked; \
-                        click it again to show them what it sends now"
-                .to_string());
+            let what = approved_as.map_or_else(String::new, |old| format!(" ({})", what_changed(old, &ask)));
+            return Err(format!(
+                "the form changed while the user was reading the approval{what}, so nothing was clicked; \
+                 click it again to show them what it sends now"
+            ));
         }
     } else if committing {
         return Ok(ClickCheck::Ask(ask));

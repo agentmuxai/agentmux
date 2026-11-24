@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::*;
+use crate::drone::access::DroneAccessStore;
 use crate::drone::storage::DroneStore;
 use crate::server::drone_handlers::upsert_drone;
 
@@ -19,7 +20,12 @@ fn node(id: &str, data: Value) -> Value {
 }
 
 async fn call(state: &AppState, action: &str, body: Value) -> Result<Value, String> {
-    act(state, "agent-uid-1", action, &body).await
+    act(state, ("agent-uid-1", "opaz"), action, &body).await
+}
+
+/// The drone is `opaz`'s own: the agent in `call` made it.
+fn made_by_opaz(state: &AppState, d: &DroneDefinition) {
+    state.id_store.access_set_owner(&d.id, "opaz", 1).unwrap();
 }
 
 /// A drone that changes nothing outside AgentMux can be fired, and the run is there when the call returns.
@@ -27,6 +33,7 @@ async fn call(state: &AppState, action: &str, body: Value) -> Result<Value, Stri
 async fn an_agent_fires_a_harmless_drone_with_a_payload() {
     let state = crate::server::tests::test_state();
     let drone = saved(&state, "Say hello", json!([node("v", json!({ "kind": "variables" }))]));
+    made_by_opaz(&state, &drone);
     let fired = call(&state, "fire", json!({ "drone_id": drone.id, "input": { "who": "world" } })).await.unwrap();
     let run_id = fired["run_id"].as_str().expect("a run id").to_string();
     let runs = state.mstore.drone_runs_for(&drone.id, 10).unwrap();
@@ -99,7 +106,10 @@ async fn an_agents_own_run_call_is_held_to_what_an_agent_may_fire() {
         assert!(run_allowed_for(&state, &window, &d.id).is_ok(), "{}: the window's own run is unchanged", d.name);
     }
     let harmless = saved(&state, "harmless", json!([node("v", json!({ "kind": "variables" }))]));
-    assert!(run_allowed_for(&state, &agent, &harmless.id).is_ok());
+    let err = run_allowed_for(&state, &agent, &harmless.id).unwrap_err();
+    assert!(err.starts_with("FORBIDDEN") && err.contains("not yours") && err.contains("Drone tool's fire"), "{err}");
+    made_by_opaz(&state, &harmless);
+    assert!(run_allowed_for(&state, &agent, &harmless.id).is_ok(), "its own drone runs");
     assert!(run_allowed_for(&state, &agent, "ghost").is_ok(), "a drone that does not exist is the run's error to give");
     // The refusal is before any run starts (the check is not a run).
     assert!(state.mstore.drone_runs_for(&posts.id, 10).unwrap().is_empty());
@@ -110,6 +120,7 @@ async fn an_agents_own_run_call_is_held_to_what_an_agent_may_fire() {
 async fn the_payload_is_an_object_within_the_limit() {
     let state = crate::server::tests::test_state();
     let d = saved(&state, "takes input", json!([]));
+    made_by_opaz(&state, &d);
     for bad in [json!("text"), json!([1, 2]), json!(7)] {
         let err = call(&state, "fire", json!({ "drone_id": d.id, "input": bad })).await.unwrap_err();
         assert!(err.starts_with("INVALID_ARG"), "{err}");
@@ -192,4 +203,46 @@ async fn get_names_what_the_drone_writes_and_which_credentials_it_reads() {
     assert!(!got.to_string().contains("entry-1"), "{got}");
     assert_eq!(got["kinds"], json!(["agent", "api"]));
     assert_eq!(got["fireable"], false);
+}
+
+/// A drone the agent did not make and was not given is not started: the person is asked, with the drone, what
+/// its graph can do and what goes in, and nothing runs until the countdown ends.
+#[tokio::test]
+async fn a_drone_that_is_not_the_agents_asks_the_person_instead_of_running() {
+    let state = crate::server::tests::test_state();
+    let d = saved(&state, "Someone else's", json!([node("v", json!({ "kind": "variables" })), node("a", json!({ "kind": "agent", "task": "look" }))]));
+    let answer = call(&state, "fire", json!({ "drone_id": d.id, "input": { "n": 1 } })).await.unwrap();
+    assert_eq!(answer["asked"], true, "{answer}");
+    assert!(answer.get("run_id").is_none(), "no run: {answer}");
+    assert!(state.mstore.drone_runs_for(&d.id, 10).unwrap().is_empty(), "nothing started");
+    let request = crate::backend::sensitive_requests::registry().get(answer["request_id"].as_str().unwrap()).expect("the request is open");
+    assert_eq!(request.op, "drone_fire");
+    assert!(request.facts["drone"].contains("Someone else's") && request.facts["drone"].contains(&d.id), "{:?}", request.facts);
+    assert!(request.facts["can_do"].contains("agent, variables") && request.facts["can_do"].contains("1 start an agent"), "{:?}", request.facts);
+    assert!(request.facts["payload"].starts_with("7 bytes, sha256 "), "{:?}", request.facts);
+}
+
+/// The owner and an agent the drone was given to fire it at once; another agent's name does not count.
+#[tokio::test]
+async fn the_owner_and_a_given_agent_fire_at_once() {
+    let state = crate::server::tests::test_state();
+    let d = saved(&state, "Shared", json!([node("v", json!({ "kind": "variables" }))]));
+    state.id_store.access_set_owner(&d.id, "korp", 1).unwrap();
+    state.id_store.access_set_agents(&d.id, &["Opaz".to_string()], "operator", 2).unwrap();
+    let given = call(&state, "fire", json!({ "drone_id": d.id })).await.unwrap();
+    assert!(given["run_id"].is_string(), "a given agent runs it now: {given}");
+    let owner = act(&state, ("agent-uid-2", "korp"), "fire", &json!({ "drone_id": d.id })).await.unwrap();
+    assert!(owner["run_id"].is_string(), "the owner runs it now: {owner}");
+    let other = act(&state, ("agent-uid-3", "clamk"), "fire", &json!({ "drone_id": d.id })).await.unwrap();
+    assert_eq!(other["asked"], true, "{other}");
+}
+
+/// What the Rule of Two refuses stays refused whoever owns the drone: the countdown is not a way round it.
+#[tokio::test]
+async fn owning_a_drone_that_writes_outside_does_not_let_an_agent_fire_it() {
+    let state = crate::server::tests::test_state();
+    let d = saved(&state, "posts", json!([node("p", json!({ "kind": "api", "method": "POST", "url": "https://example.com/hook" }))]));
+    made_by_opaz(&state, &d);
+    let err = call(&state, "fire", json!({ "drone_id": d.id })).await.unwrap_err();
+    assert!(err.starts_with("FORBIDDEN") && err.contains("writes outside"), "{err}");
 }

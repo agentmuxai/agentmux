@@ -9,12 +9,12 @@
 import { createSignal, type JSX } from "solid-js";
 
 import { SegmentedControl } from "@/app/element/ui";
-import { HistoryAgents } from "./history-agents";
-import { HistoryStorage } from "./history-storage";
-import { HistoryTyped } from "./history-typed";
+import { HistoryAgents } from "@/app/view/audit/conversations/history-agents";
+import { HistoryStorage } from "@/app/view/audit/storage/history-storage";
+import { HistoryTyped } from "@/app/view/audit/typed/history-typed";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
-import "./history.scss";
+import "@/app/view/audit/history-sections.scss";
 
 type HistoryView = "agents" | "typed" | "storage";
 

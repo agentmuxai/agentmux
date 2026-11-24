@@ -17,6 +17,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { Button, Notice, SectionHeader } from "@/app/element/ui";
 import { formatBytes } from "@/util/format-bytes";
 import { tip } from "@/app/element/tip";
+import { t } from "@/app/i18n/i18n";
 
 type State =
     | { kind: "idle" }
@@ -56,7 +57,7 @@ export const CliDiskSpace = (): JSX.Element => {
                 {(c) => (
                     <li {...tip(c.dir)}>
                         {c.provider} {c.version}
-                        {c.legacy ? " (old layout)" : ""} · {formatBytes(c.bytes)} · unused for {c.idle_days} days
+                        {c.legacy ? t("toolchain.prune.oldLayout") : ""} · {formatBytes(c.bytes)} · {t("toolchain.prune.unused", { count: c.idle_days })}
                     </li>
                 )}
             </For>
@@ -65,22 +66,21 @@ export const CliDiskSpace = (): JSX.Element => {
 
     return (
         <section class="toolchain-section" data-testid="cli-disk-space">
-            <SectionHeader variant="group" level={4} title="Old CLI versions" />
+            <SectionHeader variant="group" level={4} title={t("toolchain.prune.title")} />
             <Show when={state().kind === "idle" || state().kind === "error"}>
                 <div class="toolchain-env-line">
-                    Agent CLIs are kept after an upgrade. This lists the ones nothing has used for 30 days and nothing is
-                    running, and frees their space only when you ask.
+                    {t("toolchain.prune.about")}
                 </div>
                 <Button tone="quiet" onClick={check}>
-                    Check for old versions
+                    {t("toolchain.prune.check")}
                 </Button>
             </Show>
             <Show when={state().kind === "error"}>
-                <Notice tone="danger">Couldn't check: {(state() as { message: string }).message}</Notice>
+                <Notice tone="danger">{t("toolchain.prune.checkFailed", { message: (state() as { message: string }).message })}</Notice>
             </Show>
             <Show when={state().kind === "working"}>
                 <div class="toolchain-env-line">
-                    {(state() as { what: string }).what === "check" ? "Checking…" : "Removing…"}
+                    {(state() as { what: string }).what === "check" ? t("toolchain.prune.checking") : t("toolchain.prune.removing")}
                 </div>
             </Show>
             <Show when={state().kind === "checked"}>
@@ -90,24 +90,23 @@ export const CliDiskSpace = (): JSX.Element => {
                         <>
                             <Show when={!r().scan_ok}>
                                 <div class="toolchain-env-line">
-                                    Couldn't tell which CLIs are running, so nothing is offered for removal.
+                                    {t("toolchain.prune.scanFailedCheck")}
                                 </div>
                             </Show>
                             <Show when={r().scan_ok && r().candidates.length === 0}>
-                                <div class="toolchain-env-line">Nothing to remove — every installed CLI is current or recently used.</div>
+                                <div class="toolchain-env-line">{t("toolchain.prune.nothing")}</div>
                             </Show>
                             <Show when={r().candidates.length > 0}>
                                 <div class="toolchain-env-line">
-                                    {r().candidates.length} old {r().candidates.length === 1 ? "install" : "installs"} ·{" "}
-                                    {formatBytes(r().reclaimable_bytes)} can be freed
+                                    {t("toolchain.prune.found", { count: r().candidates.length, size: formatBytes(r().reclaimable_bytes) })}
                                 </div>
                                 {list(r().candidates)}
                                 <Button tone="danger" icon="trash" onClick={() => remove(r().candidates.map((c) => c.dir))}>
-                                    Remove {r().candidates.length} · free {formatBytes(r().reclaimable_bytes)}
+                                    {t("toolchain.prune.remove", { n: r().candidates.length, size: formatBytes(r().reclaimable_bytes) })}
                                 </Button>
                             </Show>
                             <Button tone="quiet" onClick={check}>
-                                Check again
+                                {t("toolchain.prune.checkAgain")}
                             </Button>
                         </>
                     );
@@ -121,30 +120,29 @@ export const CliDiskSpace = (): JSX.Element => {
                         <>
                             <Show when={!r().scan_ok}>
                                 <div class="toolchain-env-line">
-                                    Couldn't tell which CLIs are running, so nothing was removed.
+                                    {t("toolchain.prune.scanFailedRemove")}
                                 </div>
                             </Show>
                             <Show when={r().scan_ok && r().removed.length > 0}>
                                 <div class="toolchain-env-line">
-                                    Removed {r().removed.length} · freed {formatBytes(freed())}
+                                    {t("toolchain.prune.removed", { n: r().removed.length, size: formatBytes(freed()) })}
                                 </div>
                             </Show>
                             {/* Nothing removed with a working scan: every listed install was
                                 no longer removable by then (now in use, or used again). */}
                             <Show when={r().scan_ok && r().removed.length === 0}>
                                 <div class="toolchain-env-line">
-                                    Nothing was removed — the listed installs are in use again or were used since the check.
+                                    {t("toolchain.prune.noneRemoved")}
                                 </div>
                             </Show>
                             {list(r().removed)}
                             <Show when={r().skipped.length > 0}>
                                 <div class="toolchain-env-line">
-                                    Left in place ({r().skipped.length}): something started using {r().skipped.length === 1 ? "it" : "them"}{" "}
-                                    or {r().skipped.length === 1 ? "it was" : "they were"} locked.
+                                    {t("toolchain.prune.skipped", { count: r().skipped.length })}
                                 </div>
                             </Show>
                             <Button tone="quiet" onClick={check}>
-                                Check again
+                                {t("toolchain.prune.checkAgain")}
                             </Button>
                         </>
                     );

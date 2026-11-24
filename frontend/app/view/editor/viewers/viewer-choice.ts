@@ -34,7 +34,11 @@ export function isViewerId(v: unknown): v is ViewerId {
 }
 
 /** The probe of a file, as far as the viewers need it. */
-export type FileProbe = FileProbeResult;
+export type FileProbe = FileProbeResult & {
+    /** The file's path (canonical) when the editor found its first line too wide for the Text viewer: a small file that
+     *  the Large text viewer shows. Not from srv; set when the file was read. */
+    wideFirstLine?: string;
+};
 
 /** CSV and TSV, as the probe types them: files the Table viewer can show. */
 export function isDelimitedMime(mime: string | undefined): boolean {
@@ -52,7 +56,7 @@ export function textNeedsSwitch(probe: FileProbe): boolean {
  *  over the editor's cap is shown as text by the Large text viewer, which
  *  reads it in parts too. */
 export function viewerOptions(probe: FileProbe): ViewerId[] {
-    const text: ViewerId[] = [probe.size <= TEXT_MAX_BYTES ? "text" : "large"];
+    const text: ViewerId[] = [probe.size <= TEXT_MAX_BYTES && !probe.wideFirstLine ? "text" : "large"];
     // A delimited file can also be read as a table (an option, never the default).
     const table: ViewerId[] = text[0] === "text" && isDelimitedMime(probe.mime) ? ["table"] : [];
     switch (probe.kind) {

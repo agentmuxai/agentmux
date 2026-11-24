@@ -17,7 +17,8 @@ use crate::server::tests::test_state;
 
 const POLICY: &str = r#"{ "version": 1, "grants": {
     "read": { "tier": "read", "mint": { "kind": "command", "argv": ["/opt/read"] }, "agents": ["*"] },
-    "deploy": { "tier": "write", "mint": { "kind": "command", "argv": ["/opt/escalate", "--reason", "{reason}"] }, "agents": ["*"] }
+    "deploy": { "tier": "write", "mint": { "kind": "command", "argv": ["/opt/escalate", "--reason", "{reason}"] }, "agents": ["*"] },
+    "scoped": { "tier": "read", "mint": { "kind": "command", "argv": ["/opt/mint", "{tag_key}={tag}"] }, "agents": ["*"], "caller_tag": { "key": "Scope", "prefix": "team-a/" } }
 } }"#;
 
 /// Credentials that expire `mins` minutes from the real clock, which the handler reads.
@@ -38,6 +39,10 @@ fn agent(state: &AppState, agent_type: &str) -> AgentDefinition {
 
 fn request(profile: &str, reason: Option<&str>) -> AwsCredentialsRequest {
     serde_json::from_value(json!({ "profile": profile, "reason": reason })).unwrap()
+}
+
+fn request_with_tag(profile: &str, tag: &str) -> AwsCredentialsRequest {
+    serde_json::from_value(json!({ "profile": profile, "tag": tag })).unwrap()
 }
 
 async fn answer(resp: Response) -> (StatusCode, Value) {
@@ -170,4 +175,25 @@ fn only_a_refusal_the_person_can_fix_is_shown_in_the_agents_pane() {
     for code in ["UNKNOWN_PROFILE", "NOT_ALLOWED_FOR_YOU", "REASON_REQUIRED", "TOO_MANY_MINTS", "AWS_TOOK_TOO_LONG", "AWS_CLI_MISSING", "NATIVE_AGENT", "AWS_NOT_SHARED"] {
         assert!(!the_persons_to_fix(&refusal(code)), "{code}");
     }
+}
+
+#[tokio::test]
+async fn a_tag_the_grant_takes_is_in_the_audit_row_of_the_session_and_a_refused_one_is_a_failed_row() {
+    let state = test_state();
+    let me = agent(&state, "container");
+    let (fake, sessions) = (Fake::ok(creds_json(60)), Sessions::default());
+    let (status, _) = call(&state, &me, &fake, &sessions, request_with_tag("scoped", "team-a/one")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(fake.seen.lock().unwrap()[0].1, ["Scope=team-a/one"]);
+    let (status, body) = call(&state, &me, &fake, &sessions, request_with_tag("scoped", "team-b/other")).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["error"].as_str().unwrap().starts_with("TAG_REFUSED: "), "{body}");
+    assert_eq!(fake.runs(), 1, "the refused value minted nothing");
+    let rows = audited(&me);
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    let granted = rows.iter().find(|r| r.success).unwrap();
+    assert!(granted.reason.as_deref().unwrap().contains("tag Scope: team-a/one"), "{granted:?}");
+    let refused = rows.iter().find(|r| !r.success).unwrap();
+    assert_eq!(refused.error_message.as_deref(), Some("TAG_REFUSED"));
+    assert!(!refused.reason.as_deref().unwrap().contains("team-b"), "a refused value is not written into the Audit view");
 }
