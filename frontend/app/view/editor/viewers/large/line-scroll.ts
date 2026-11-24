@@ -11,7 +11,8 @@
 import { createEffect, createMemo, createSignal, on, onCleanup, type Accessor } from "solid-js";
 import { firstRowAt, isScaled, maxFirstRow, ROW_H, rowsInView, scrollTopFor } from "../hex/hex-layout";
 
-export function createLineScroll(lines: Accessor<number>, initial = 0) {
+/** `inset` is the height at the top of the scroller that the lines don't use (a sticky header row). */
+export function createLineScroll(lines: Accessor<number>, initial = 0, inset: Accessor<number> = () => 0) {
     const [first, setFirst] = createSignal(initial);
     const [viewPx, setViewPx] = createSignal(0);
     const [top, setTop] = createSignal(0);
@@ -32,9 +33,10 @@ export function createLineScroll(lines: Accessor<number>, initial = 0) {
     const reachable = (to: number): number => (el && el.scrollHeight > 0 ? Math.max(0, Math.min(to, el.scrollHeight - el.clientHeight)) : to);
     // A hidden pane puts a scroller's scrollTop back to 0 and says nothing: a resize is the word that it
     // is shown again, so put the scroller where the lines are.
+    const viewOf = (): number => Math.max(0, (el?.clientHeight ?? 0) - inset());
     const measure = (): void => {
         if (!el) return;
-        setViewPx(Math.max(0, el.clientHeight));
+        setViewPx(viewOf());
         const at = top();
         if (el.clientHeight > 0 && Math.abs(el.scrollTop - at) >= 1) {
             own = reachable(at);
@@ -46,7 +48,7 @@ export function createLineScroll(lines: Accessor<number>, initial = 0) {
         if (!el || el.clientHeight === 0) return;
         // The scroller's own height changed (a horizontal scrollbar came or went as the content grew) and the
         // browser clamped its scrollTop: that is not the user scrolling. Measure it and put the view right.
-        if (Math.round(el.clientHeight) !== viewPx()) {
+        if (viewOf() !== viewPx()) {
             measure();
             return;
         }
@@ -82,6 +84,17 @@ export function createLineScroll(lines: Accessor<number>, initial = 0) {
     };
     // The file got longer or shorter: put the first line and the scroller right for the new count.
     createEffect(on(lines, () => showLine(first()), { defer: true }));
+    // The inset came or went: the view is taller or shorter by it.
+    createEffect(
+        on(
+            inset,
+            () => {
+                measure();
+                showLine(first());
+            },
+            { defer: true }
+        )
+    );
     const fits = () => rowsInView(viewPx());
     /** Scroll as little as shows `line`. */
     const reveal = (line: number): void => {
