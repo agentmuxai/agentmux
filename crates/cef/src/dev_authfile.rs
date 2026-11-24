@@ -1,23 +1,23 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Dev-only auth-key file writer for external test harnesses.
+//! The files a running host publishes so external test harnesses can find it.
 //!
-//! Writes `<data_dir>/authkey.dev` containing the random per-process
-//! `auth_key`, IPC token, backend endpoints, and instance metadata so a
-//! harness in any language can call `POST /agentmux/service` against a
-//! running `task dev` instance.
+//! * A dev build (`task dev`) writes `<data_dir>/authkey.dev`: the random
+//!   per-process `auth_key`, IPC token, backend endpoints and instance
+//!   metadata, so a harness in any language can call `POST /agentmux/service`
+//!   against it.
+//! * An installed or portable build never writes the instance key or the host
+//!   token to disk. It writes `<data_dir>/instance.json` instead: endpoints,
+//!   pid, version and debug port, nothing that authenticates a caller. On
+//!   start it also removes a leftover `authkey.dev` in its data folder.
 //!
-//! Gated at the call site by a runtime `AGENTMUX_DEV=1` env-var check
-//! (see `main.rs`). The first revision of this module used
-//! `cfg(debug_assertions)`, but `task dev` builds with `--release`
-//! (Taskfile.yml `build:host:windows`), which made the gate a no-op
-//! exactly where we needed the file. The runtime env-var gate matches
-//! the same signal `sidecar.rs` uses to pick the dev data dir.
+//! The split is by the runtime mode (`RuntimeMode::Dev`), the same signal that
+//! gates the debugging port. See [`publish_discovery`].
 //!
-//! On Windows the file is created with an owner-only DACL via
+//! On Windows each file is created with an owner-only DACL via
 //! `SetNamedSecurityInfoW`, with `PROTECTED_DACL_SECURITY_INFORMATION`
-//! to break parent-dir inheritance — defense against a hostile parent
+//! to break parent-dir inheritance: defense against a hostile parent
 //! ACL change after file creation. On Unix the file is chmod'd 0600
 //! after creation to override the default umask.
 //!
@@ -47,6 +47,76 @@ pub struct DevAuthFile<'a> {
     /// this rather than assume the constant, or it targets another instance.
     pub debug_port: u16,
     pub created_at: String,
+}
+
+const DISCOVERY_FILE: &str = "instance.json";
+
+/// What a non-dev build publishes. Endpoints and identity only: no field of
+/// this type may hold a key, token or secret (a test pins the field list).
+#[derive(Serialize)]
+pub struct InstanceInfo<'a> {
+    pub version: u32,
+    pub web_endpoint: &'a str,
+    pub ws_endpoint: &'a str,
+    pub instance: &'a str,
+    pub data_dir: String,
+    pub host_pid: u32,
+    pub debug_port: u16,
+    pub created_at: String,
+}
+
+/// What [`publish_discovery`] did, for the caller to log.
+pub struct Published {
+    pub path: std::path::PathBuf,
+    /// A leftover `authkey.dev` was found and removed (non-dev builds only).
+    pub removed_leftover: bool,
+}
+
+/// Publish this host's discovery file. A dev build writes the full
+/// `authkey.dev`; any other build removes a leftover `authkey.dev` and writes
+/// `instance.json`, which carries no key and no token.
+pub fn publish_discovery(
+    is_dev: bool,
+    data_dir: &Path,
+    auth_key: &str,
+    web_endpoint: &str,
+    ws_endpoint: &str,
+    ipc_endpoint: &str,
+    ipc_token: &str,
+    instance: &str,
+    host_pid: u32,
+    debug_port: u16,
+) -> Result<Published, String> {
+    if is_dev {
+        let path = write_dev_auth_file(
+            data_dir, auth_key, web_endpoint, ws_endpoint, ipc_endpoint, ipc_token, instance, host_pid, debug_port,
+        )?;
+        return Ok(Published { path, removed_leftover: false });
+    }
+    let removed_leftover = remove_leftover(data_dir);
+    let info = InstanceInfo {
+        version: 1,
+        web_endpoint,
+        ws_endpoint,
+        instance,
+        data_dir: data_dir.to_string_lossy().into_owned(),
+        host_pid,
+        debug_port,
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+    let json = serde_json::to_string_pretty(&info).map_err(|e| format!("serialize {}: {}", DISCOVERY_FILE, e))?;
+    let path = data_dir.join(DISCOVERY_FILE);
+    std::fs::write(&path, json.as_bytes()).map_err(|e| format!("write {}: {}", path.display(), e))?;
+    #[cfg(unix)]
+    apply_owner_only_mode(&path)?;
+    #[cfg(target_os = "windows")]
+    apply_owner_only_dacl(&path)?;
+    Ok(Published { path, removed_leftover })
+}
+
+/// Remove an `authkey.dev` an earlier build left in `data_dir`. True when one was there.
+fn remove_leftover(data_dir: &Path) -> bool {
+    std::fs::remove_file(data_dir.join(FILE_NAME)).is_ok()
 }
 
 /// Write `authkey.dev` to `data_dir`. Returns the absolute file path on
@@ -437,5 +507,91 @@ mod debug_port_tests {
         assert_eq!(v["host_pid"], 4242);
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
+
+#[cfg(test)]
+mod discovery_tests {
+    use super::*;
+
+    fn tmp(label: &str) -> std::path::PathBuf {
+        let p = std::env::temp_dir().join(format!("am-discovery-{}-{}", label, std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    fn publish(is_dev: bool, dir: &Path) -> Published {
+        publish_discovery(
+            is_dev, dir, "SECRET-KEY", "127.0.0.1:1", "127.0.0.1:2", "127.0.0.1:3", "SECRET-TOKEN", "v0.0.0", 4242,
+            42149,
+        )
+        .expect("publish")
+    }
+
+    #[test]
+    fn a_non_dev_build_writes_no_key_and_no_token() {
+        let dir = tmp("nodev");
+        let out = publish(false, &dir);
+        assert_eq!(out.path, dir.join("instance.json"));
+        assert!(!dir.join("authkey.dev").exists());
+        let body = std::fs::read_to_string(&out.path).unwrap();
+        assert!(!body.contains("SECRET"), "{body}");
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["debug_port"], 42149);
+        assert_eq!(v["host_pid"], 4242);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_non_dev_build_removes_a_leftover_file_from_an_older_build() {
+        let dir = tmp("leftover");
+        std::fs::write(dir.join("authkey.dev"), "{\"auth_key\":\"old\"}").unwrap();
+        let out = publish(false, &dir);
+        assert!(out.removed_leftover);
+        assert!(!dir.join("authkey.dev").exists());
+        assert!(!publish(false, &dir).removed_leftover, "nothing left to remove the second time");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_dev_build_still_writes_the_full_file() {
+        let dir = tmp("dev");
+        let out = publish(true, &dir);
+        assert_eq!(out.path, dir.join("authkey.dev"));
+        assert!(!out.removed_leftover);
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&out.path).unwrap()).unwrap();
+        assert_eq!(v["auth_key"], "SECRET-KEY");
+        assert_eq!(v["ipc_token"], "SECRET-TOKEN");
+        assert!(!dir.join("instance.json").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A field added to what a non-dev build publishes must be a deliberate choice: this list is the whole shape,
+    /// and none of its names may read as a credential.
+    #[test]
+    fn the_non_dev_shape_has_only_these_fields() {
+        let info = InstanceInfo {
+            version: 1,
+            web_endpoint: "",
+            ws_endpoint: "",
+            instance: "",
+            data_dir: String::new(),
+            host_pid: 0,
+            debug_port: 0,
+            created_at: String::new(),
+        };
+        let v = serde_json::to_value(&info).unwrap();
+        let mut keys: Vec<&str> = v.as_object().unwrap().keys().map(|k| k.as_str()).collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            ["created_at", "data_dir", "debug_port", "host_pid", "instance", "version", "web_endpoint", "ws_endpoint"]
+        );
+        for k in keys {
+            for word in ["key", "token", "secret", "auth", "password"] {
+                assert!(!k.contains(word), "{k} reads as a credential");
+            }
+        }
     }
 }

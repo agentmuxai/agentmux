@@ -29,13 +29,17 @@ function isAlive(pid) {
     try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
+// A dev build writes authkey.dev (with its key); an installed or portable build writes instance.json, which
+// has the endpoints, pid, version and debug port and no key, so `authKey` is undefined for those.
+const DISCOVERY_FILES = ["authkey.dev", "instance.json"];
+
 function walkForAuthfiles(root, depth, out) {
     if (depth < 0 || !existsSync(root)) return out;
     let entries;
     try { entries = readdirSync(root, { withFileTypes: true }); } catch { return out; }
     for (const e of entries) {
         const p = join(root, e.name);
-        if (e.isFile() && e.name === "authkey.dev") out.push(p);
+        if (e.isFile() && DISCOVERY_FILES.includes(e.name)) out.push(p);
         else if (e.isDirectory()) walkForAuthfiles(p, depth - 1, out);
     }
     return out;
