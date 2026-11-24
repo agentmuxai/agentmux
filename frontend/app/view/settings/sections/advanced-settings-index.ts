@@ -4,6 +4,11 @@
 import { DEV_MODE_KEY } from "@/app/store/dev-mode";
 import { settingEntry, type SettingsIndexEntry } from "../settings-model";
 
+/** Opens the Audit pane on its Storage section. Imported when it is chosen, so Settings does not load the Audit with it. */
+export function openHistoryStorage(): void {
+    void import("@/app/view/audit/open-audit").then((m) => m.openAuditSection("storage"));
+}
+
 // ── Search index — see appearance-section.tsx's header comment for the pattern. ──
 
 export const ADVANCED_SETTINGS = {
@@ -166,6 +171,15 @@ export const ADVANCED_SETTINGS = {
         section: "advanced",
         groupKey: "settings.advanced.group.dragDrop",
         keywords: ["upload concurrency", "parallel uploads", "dnd:concurrency"],
+    }),
+    historyStorage: settingEntry({
+        id: "advanced.history_storage",
+        labelKey: "settings.advanced.historyStorage.label",
+        descriptionKey: "settings.advanced.historyStorage.description",
+        section: "advanced",
+        groupKey: "settings.advanced.group.history",
+        keywords: ["history", "storage", "disk space", "retention", "conversations", "audit", "how long", "delete history"],
+        opens: openHistoryStorage,
     }),
     globalEnvVars: settingEntry({
         id: "advanced.global_env_vars",
