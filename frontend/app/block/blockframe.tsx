@@ -554,7 +554,7 @@ function BlockFrame_Header(
     // header, instead.
     const [headerHovering, setHeaderHovering] = createSignal(false);
     let headerRef: HTMLDivElement | undefined;
-    useHeaderFit(() => headerRef);
+    useHeaderFit(() => headerRef, () => util.useAtomValueSafe(props.viewModel?.endIconButtons));
     // One horizontal range (#29325, SPEC_PANE_HEADER_SCROLL_RANGE_2026_11_10.md); the window controls stay pinned.
     const headerScroll = useHeaderScrollRange(() => headerRef);
     const viewName = createMemo(() => {

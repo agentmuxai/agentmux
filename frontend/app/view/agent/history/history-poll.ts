@@ -5,10 +5,8 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { SHARED_ZONE_POLL_MS, startCadencedPoll, type PollOutcome } from "../shared-zone-cadence";
 import type { TranscriptCursor } from "../transcript-cursor";
-
-/** Line-count poll cadence — same as the live pane. */
-const SHARED_ZONE_POLL_MS = 5_000;
 
 /** Only while shown; a hidden reader catches up from the first poll after reveal. Returns the stop. */
 export function startHistoryPoll(p: {
@@ -21,34 +19,31 @@ export function startHistoryPoll(p: {
 }): () => void {
     const { readBlockId, cursor, hidden, reloadIfSkipped, recover } = p;
     let lastCount: { count: number; stream: string; gen: string } | null = null;
-    let polling = false;
-    const timer = setInterval(async () => {
-        reloadIfSkipped();
+    // Local and cheap, so it keeps the steady pace whatever the count does.
+    const skipCheck = setInterval(reloadIfSkipped, SHARED_ZONE_POLL_MS);
+    const stopPoll = startCadencedPoll(async (): Promise<PollOutcome> => {
         const pin = cursor()?.position();
-        if (!pin || !pin.stream.startsWith("g:") || polling || hidden() || document.hidden) return;
-        polling = true;
-        try {
-            const resp = await RpcApi.BlockfileLineCountCommand(
-                TabRpcClient,
-                { block_id: readBlockId, filename: "output" },
-                { timeout: 5_000 }
-            );
-            if (!resp?.stream || !resp.gen) return;
-            if (resp.stream !== pin.stream || resp.gen !== pin.gen) {
-                // Recreated under us (see appendRecords): start over.
-                lastCount = null;
-                recover();
-                return;
-            }
-            if (lastCount && lastCount.stream === resp.stream && lastCount.gen === resp.gen) {
-                cursor()?.observeCount(lastCount.count, resp.stream, resp.gen);
-            }
-            lastCount = { count: resp.count, stream: resp.stream, gen: resp.gen };
-        } catch {
-            // Soft: the next tick or event catches up.
-        } finally {
-            polling = false;
+        if (!pin || !pin.stream.startsWith("g:") || hidden() || document.hidden) return "skipped";
+        const resp = await RpcApi.BlockfileLineCountCommand(
+            TabRpcClient,
+            { block_id: readBlockId, filename: "output" },
+            { timeout: 5_000 }
+        );
+        if (!resp?.stream || !resp.gen) return "skipped";
+        if (resp.stream !== pin.stream || resp.gen !== pin.gen) {
+            // Recreated under us (see appendRecords): start over.
+            lastCount = null;
+            recover();
+            return "moved";
         }
-    }, SHARED_ZONE_POLL_MS);
-    return () => clearInterval(timer);
+        const same = lastCount !== null && lastCount.stream === resp.stream && lastCount.gen === resp.gen;
+        if (same) cursor()?.observeCount(lastCount!.count, resp.stream, resp.gen);
+        const still = same && lastCount!.count === resp.count;
+        lastCount = { count: resp.count, stream: resp.stream, gen: resp.gen };
+        return still ? "still" : "moved";
+    });
+    return () => {
+        clearInterval(skipCheck);
+        stopPoll();
+    };
 }

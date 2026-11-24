@@ -258,6 +258,9 @@ export class FilesModel {
     private readonly setKids: (m: ReadonlyMap<string, FsEntry[]>) => void;
     /** A watch on each opened folder, by the same path, and the ones being set up. */
     private readonly treeWatches = new Map<string, string>();
+    /** The newest listing started of each opened folder, so a slower, older one is dropped when it ends. */
+    private readonly kidsLoad = new Map<string, number>();
+    private kidsLoadSeq = 0;
     private readonly treeWatching = new Set<string>();
     /** The filter typed into the toolbar (spec §5.3.1, Ctrl+F). */
     readonly filter: () => string;
@@ -731,6 +734,7 @@ export class FilesModel {
                 this.setPartial(false);
                 this.setSelection(pruneSelection(this.selection(), opts.silent ? oldOrder : before, this.orderKeepingNested()));
             });
+            this.dropGoneFolders();
             this.applyRequestedSelection();
             void this.watch(this.path());
             this.refreshGit();
@@ -1107,19 +1111,34 @@ export class FilesModel {
         }
     }
 
+    /** Closes an opened folder whose row is gone from the listing of the folder it was in (renamed, moved or deleted),
+     *  with the folders opened inside it. Not an error: the person's own operation did it. */
+    private dropGoneFolders(): void {
+        for (const rel of this.expanded()) {
+            if (!this.expanded().has(rel)) continue;
+            const parent = parentRel(rel);
+            const list = parent === "" ? this.rawEntries() : this.kids().get(parent);
+            if (list && !list.some((e) => e.name === labelOf(rel) && e.is_dir)) this.collapse(rel);
+        }
+    }
+
     /** Lists the opened folder `rel` (all its pages) and keeps what it holds. A folder that can't be listed closes. */
     private async loadKids(rel: string): Promise<void> {
         const root = this.path();
+        // A listing that a later one of the same folder overtook is dropped, so an older answer can't overwrite a newer one.
+        const mine = ++this.kidsLoadSeq;
+        this.kidsLoad.set(rel, mine);
         const dir = this.pathOf(rel);
         const collected: FsEntry[] = [];
         let cursor: string | undefined;
         try {
             do {
                 const res = await RpcApi.FsListCommand(TabRpcClient, { path: dir, cursor, limit: PAGE, ...this.on() }, this.connection() ? { timeout: 180_000 } : undefined);
-                if (this.disposed || !samePath(root, this.path()) || !this.expanded().has(rel)) return;
+                if (this.disposed || !samePath(root, this.path()) || !this.expanded().has(rel) || this.kidsLoad.get(rel) !== mine) return;
                 if (res.error) {
                     this.collapse(rel);
-                    this.setStatus({ text: `Couldn't open ${labelOf(rel)}: ${res.error.message}`, tone: "error" });
+                    // A folder that is gone was renamed, moved or deleted: closed, not an error.
+                    if (res.error.kind !== "not_found") this.setStatus({ text: `Couldn't open ${labelOf(rel)}: ${res.error.message}`, tone: "error" });
                     return;
                 }
                 collected.push(...res.entries);
@@ -1132,6 +1151,7 @@ export class FilesModel {
             }
             return;
         }
+        if (this.kidsLoad.get(rel) !== mine) return;
         const next = new Map(this.kids());
         next.set(rel, collected);
         batch(() => {
@@ -1139,6 +1159,7 @@ export class FilesModel {
             this.setKids(next);
             this.setSelection(pruneSelection(this.selection(), before, this.order()));
         });
+        this.dropGoneFolders();
     }
 
     private async watchKid(rel: string): Promise<void> {
@@ -1148,7 +1169,7 @@ export class FilesModel {
         const path = this.pathOf(rel);
         try {
             const res = await RpcApi.FsWatchCommand(TabRpcClient, { path, block_id: this.blockId });
-            if (this.disposed || !this.treeWatching.has(rel) || !this.expanded().has(rel)) {
+            if (this.disposed || !this.treeWatching.has(rel) || !this.expanded().has(rel) || this.treeWatches.has(rel)) {
                 void RpcApi.FsUnwatchCommand(TabRpcClient, { watch_id: res.watch_id }).catch(() => {});
             } else {
                 this.treeWatches.set(rel, res.watch_id);

@@ -22,7 +22,7 @@ import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import { createToolOutputNoter, startSharedZonePoll } from "./stream-side-channels";
 
 beforeEach(() => {
-    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
     vi.setSystemTime(new Date("2026-11-03T10:00:00Z"));
     lineCounts.length = 0;
     countCalls.length = 0;
@@ -118,5 +118,34 @@ describe("startSharedZonePoll", () => {
         stop();
         await tick();
         expect(countCalls).toHaveLength(0);
+    });
+
+    it("asks less often while the count stands still, and at the steady pace again once it moves", async () => {
+        const { cursor } = cursorOn("g:agent");
+        const same = { stream: "g:agent", gen: "1", count: 10 };
+        lineCounts.push(same, same, same, same, same, { ...same, count: 11 }, { ...same, count: 12 });
+        const stop = startSharedZonePoll("blk", "output", cursor);
+        // The first answer is news; each unchanged one after it doubles the wait: 5 s, 5 s, 10 s, 20 s, 30 s.
+        for (const [wait, calls] of [[5_000, 1], [5_000, 2], [10_000, 3], [20_000, 4], [30_000, 5]] as const) {
+            await vi.advanceTimersByTimeAsync(wait - 1);
+            expect(countCalls).toHaveLength(calls - 1);
+            await vi.advanceTimersByTimeAsync(1);
+            expect(countCalls).toHaveLength(calls);
+        }
+        // The count moved: the next ask is five seconds on, and so is the one after.
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(countCalls).toHaveLength(6);
+        await tick();
+        expect(countCalls).toHaveLength(7);
+        stop();
+    });
+
+    it("keeps the pace it has while the pane is hidden or has no cursor", async () => {
+        const { cursor } = cursorOn(null);
+        const stop = startSharedZonePoll("blk", "output", cursor);
+        await tick();
+        await tick();
+        expect(countCalls).toHaveLength(0);
+        stop();
     });
 });
