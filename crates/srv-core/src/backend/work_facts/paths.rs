@@ -163,9 +163,11 @@ fn host_of(authority: &str) -> String {
     after_user.split(':').next().unwrap_or_default().to_ascii_lowercase()
 }
 
-/// Whether a remote's host is GitHub's own (not an Enterprise Server: the poller reads `api.github.com` only).
+/// Whether a remote's host is GitHub's own (not an Enterprise Server: the poller reads `api.github.com` only): its web
+/// and SSH-over-443 names, and a host alias from an SSH config (`github.com-work`, the usual way to keep several GitHub
+/// accounts), which names no dot after `github.com-`.
 fn is_github(host: &str) -> bool {
-    matches!(host, "github.com" | "www.github.com")
+    matches!(host, "github.com" | "www.github.com" | "ssh.github.com") || host.strip_prefix("github.com-").is_some_and(|alias| !alias.is_empty() && !alias.contains('.'))
 }
 
 /// The key bashwrap names an agent's cwd state file by: the block's
@@ -308,6 +310,20 @@ mod tests {
         assert_eq!(normalize_repo("https://gitea.local/lonely.git"), None, "a path of one segment names no repository");
         assert_eq!(normalize_repo("https://github.com/AgentMuxAI/agentmux.git").as_deref(), Some("agentmuxai/agentmux"));
         assert_eq!(normalize_repo("https://www.github.com/a/b").as_deref(), Some("a/b"));
+    }
+
+    #[test]
+    fn every_spelling_of_a_github_host_is_the_github_repository() {
+        for url in [
+            "git@github.com-work:AgentMuxAI/agentmux.git",
+            "git@github.com-personal:agentmuxai/agentmux",
+            "ssh://git@ssh.github.com:443/agentmuxai/agentmux.git",
+            "git@ssh.github.com:agentmuxai/agentmux.git",
+        ] {
+            assert_eq!(normalize_repo(url).as_deref(), Some("agentmuxai/agentmux"), "{url}");
+        }
+        // A dotted name after `github.com-` is a host of its own, not an alias in an SSH config.
+        assert_eq!(normalize_repo("https://github.com-evil.example.org/team/api").as_deref(), Some("remote:github.com-evil.example.org/team/api"));
     }
 
     #[test]
