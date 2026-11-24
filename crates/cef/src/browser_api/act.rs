@@ -332,9 +332,12 @@ const COMMIT_INFO: &str = concat!(
     const secretNames = new Set();
     // Hidden fields a page rewrites by itself (scripts/rotating_name.js): their names count, and so do the kind and length of a value that looks like a token; the value itself doesn't.
     const hiddenNames = new Set();
+    // A name another control shares (a visible one, or a disabled hidden one) is never exempt: its value is what the person chose.
+    const sharedNames = new Set();
     for (const el of Array.from(formGet("elements"))) {
       if (secret(el) && el.getAttribute("name")) secretNames.add(el.getAttribute("name"));
-      if ((el.type || "").toLowerCase() === "hidden" && el.getAttribute("name")) hiddenNames.add(el.getAttribute("name"));
+      const nm = el.getAttribute("name");
+      if (nm) { if ((el.type || "").toLowerCase() === "hidden" && !el.disabled) hiddenNames.add(nm); else sharedNames.add(nm); }
     }
     let entries;
     try { entries = Array.from(new FormData(form, submits ? this : undefined)); }
@@ -342,7 +345,7 @@ const COMMIT_INFO: &str = concat!(
     for (const [k, v] of entries) {
       if (typeof v !== "string") sent.push([k, "file", v.name, v.size, v.type]);
       else if (secretNames.has(k)) { secrets.push(v); sent.push([k, "[secret]"]); }
-      else sent.push([k, hiddenNames.has(k) && rotatingName(k, v) || v]);
+      else sent.push([k, hiddenNames.has(k) && !sharedNames.has(k) && rotatingName(k, v) || v]);
     }
   }
   const sub = ["formmethod", "formenctype", "formtarget", "name", "value"].map(a => this.getAttribute(a));
