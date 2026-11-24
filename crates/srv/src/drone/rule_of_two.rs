@@ -111,11 +111,24 @@ fn writes_outside(node: &FlowNode, kind: BlockKind) -> bool {
     }
 }
 
-/// The part of a request address that names where it goes: the scheme and the host.
+/// The part of a request address that names where it goes: the scheme and the host. A `/`, `?` or `#` inside a
+/// `{{reference | filter:arg}}` does not end it.
 fn address_of(url: &str) -> &str {
     let after_scheme = url.find("://").map_or(0, |i| i + 3);
-    let end = url[after_scheme..].find(['/', '?', '#']).map_or(url.len(), |i| after_scheme + i);
-    &url[..end]
+    let bytes = url.as_bytes();
+    let mut i = after_scheme;
+    while i < bytes.len() {
+        if bytes[i..].starts_with(b"{{") {
+            // Skip the whole reference; one that never closes runs to the end of the address.
+            i = url[i + 2..].find("}}").map_or(bytes.len(), |close| i + 2 + close + 2);
+            continue;
+        }
+        if matches!(bytes[i], b'/' | b'?' | b'#') {
+            break;
+        }
+        i += 1;
+    }
+    &url[..i]
 }
 
 impl<'a> Flow<'a> {

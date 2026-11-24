@@ -57,6 +57,17 @@ fn a_read_that_sends_a_credential_may_not_follow_an_address_from_outside() {
 }
 
 #[test]
+fn the_address_ends_at_the_first_slash_outside_a_reference() {
+    assert_eq!(address_of("https://api.example.com/pulls/1"), "https://api.example.com");
+    assert_eq!(address_of("https://{{trigger.host}}/x?y=1"), "https://{{trigger.host}}");
+    assert_eq!(address_of("https://{{trigger.host | default:a/b}}/x"), "https://{{trigger.host | default:a/b}}");
+    assert_eq!(address_of("https://{{trigger.host | default:a/b"), "https://{{trigger.host | default:a/b");
+    let post = graph(&[("post", json!({ "kind": "api", "method": "POST", "url": "https://{{trigger.host | default:a/b}}/x" }))], &[]);
+    let found = check(&post, &webhook());
+    assert!(found.iter().any(|f| f.why.contains("the address a request goes to")), "{found:?}");
+}
+
+#[test]
 fn an_error_edge_out_of_an_approval_is_not_an_approval() {
     // A no and a silence fail the Approval, and only its `error` edge takes them: the write on it runs when nobody approved.
     let mut g = graph(&[("ok", approval()), ("post", comment("{{trigger.title}}"))], &[("ok", "post")]);
