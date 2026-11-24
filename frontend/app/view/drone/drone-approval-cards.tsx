@@ -7,7 +7,7 @@
 
 import { createSignal, For, Show, type JSX } from "solid-js";
 
-import { Button } from "@/app/element/ui";
+import { Button, Tag } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -46,7 +46,7 @@ export const DroneApprovals = (p: { droneId: () => string }): JSX.Element => {
                             <div class="drone-approval-item">
                                 <span class="drone-approval-label">{item.label}</span>
                                 <Show when={item.tainted}>
-                                    <span class="drone-approval-outside">{t("drone.approval.outside")}</span>
+                                    <Tag tone="warn" class="drone-approval-outside">{t("drone.approval.outside")}</Tag>
                                 </Show>
                                 <pre class="drone-approval-text">{item.text}</pre>
                             </div>
