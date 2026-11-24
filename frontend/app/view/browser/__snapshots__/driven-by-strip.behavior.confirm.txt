@@ -5,13 +5,11 @@
     <div class="browser-driven-by-message">
       <span>
         "Driven by"
-        <b>
+        <strong>
           "Naki"
     <div class="browser-driven-by-actions">
       <button title="What Naki did in this pane" type="button" class="ui-button ui-tone-neutral ui-density-compact browser-actions-log-button" aria-pressed="false">
-        "Log ("
-        "0"
-        ")"
+        "Log (0)"
       <button title="Hold Naki's actions in this pane until you resume; auto-approve's time stops too." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-pause-button" aria-pressed="false">
         "Pause"
       <button title="Let Naki's clicks in this pane go through without asking you first." type="button" class="ui-button ui-tone-danger ui-density-compact browser-bypass-button" aria-pressed="true">
@@ -23,17 +21,15 @@
       <i class="fa-solid fa-bolt" aria-hidden="true">
       <span>
         "Auto-approve"
-        <b>
+        <strong>
           "Naki"
         "'s clicks?"
     <div class="browser-bypass-confirm-text">
       "In this pane, on"
-      <b>
+      <strong>
         "github.com, *.example.com"
-      ","
-      "Naki"
-      "'s clicks that submit forms, delete or send go through"
-      <b>
+      ", Naki's clicks that submit forms, delete or send go through"
+      <strong>
         "without asking you first"
       ", and so does the page's own "Are you sure?" that follows one. It still can't type passwords or codes or run scripts, and payments still ask."
     <div class="browser-bypass-confirm-minutes" role="radiogroup" aria-label="For how long">
@@ -55,13 +51,11 @@
     <div class="browser-driven-by-message">
       <span>
         "Driven by"
-        <b>
+        <strong>
           "Naki"
     <div class="browser-driven-by-actions">
       <button title="What Naki did in this pane" type="button" class="ui-button ui-tone-neutral ui-density-compact browser-actions-log-button" aria-pressed="false">
-        "Log ("
-        "0"
-        ")"
+        "Log (0)"
       <button title="Hold Naki's actions in this pane until you resume; auto-approve's time stops too." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-pause-button" aria-pressed="false">
         "Pause"
       <button title="Let Naki's clicks in this pane go through without asking you first." type="button" class="ui-button ui-tone-danger ui-density-compact browser-bypass-button" aria-pressed="true">
@@ -73,17 +67,15 @@
       <i class="fa-solid fa-bolt" aria-hidden="true">
       <span>
         "Auto-approve"
-        <b>
+        <strong>
           "Naki"
         "'s clicks?"
     <div class="browser-bypass-confirm-text">
       "In this pane, on"
-      <b>
+      <strong>
         "github.com, *.example.com"
-      ","
-      "Naki"
-      "'s clicks that submit forms, delete or send go through"
-      <b>
+      ", Naki's clicks that submit forms, delete or send go through"
+      <strong>
         "without asking you first"
       ", and so does the page's own "Are you sure?" that follows one. It still can't type passwords or codes or run scripts, and payments still ask."
     <div class="browser-bypass-confirm-minutes" role="radiogroup" aria-label="For how long">
@@ -105,13 +97,11 @@
     <div class="browser-driven-by-message">
       <span>
         "Driven by"
-        <b>
+        <strong>
           "Naki"
     <div class="browser-driven-by-actions">
       <button title="What Naki did in this pane" type="button" class="ui-button ui-tone-neutral ui-density-compact browser-actions-log-button" aria-pressed="false">
-        "Log ("
-        "0"
-        ")"
+        "Log (0)"
       <button title="Hold Naki's actions in this pane until you resume; auto-approve's time stops too." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-pause-button" aria-pressed="false">
         "Pause"
       <button title="Let Naki's clicks in this pane go through without asking you first." type="button" class="ui-button ui-tone-danger ui-density-compact browser-bypass-button" aria-pressed="false">
@@ -125,13 +115,11 @@
     <div class="browser-driven-by-message">
       <span>
         "Driven by"
-        <b>
+        <strong>
           "Naki"
     <div class="browser-driven-by-actions">
       <button title="What Naki did in this pane" type="button" class="ui-button ui-tone-neutral ui-density-compact browser-actions-log-button" aria-pressed="false">
-        "Log ("
-        "0"
-        ")"
+        "Log (0)"
       <button title="Hold Naki's actions in this pane until you resume; auto-approve's time stops too." type="button" class="ui-button ui-tone-neutral ui-density-compact browser-pause-button" aria-pressed="false">
         "Pause"
       <button title="Let Naki's clicks in this pane go through without asking you first." type="button" class="ui-button ui-tone-danger ui-density-compact browser-bypass-button" aria-pressed="false">
