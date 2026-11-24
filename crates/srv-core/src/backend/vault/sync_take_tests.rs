@@ -306,7 +306,8 @@ fn a_rotation_started_while_a_delete_waited_is_not_deleted_with_the_entry() {
     let again = settle(&b, NOW + 200);
     assert!(matches!(&again[..], [(_, Ok(Effect::Wrote { .. }))]), "{again:?}");
     assert!(b.store.vault_get(&on_b).unwrap().is_some(), "the entry and its pending value stay");
-    assert!(b.versions(&on_b).iter().any(|(s, v)| s == &format!("{KEPT_PREFIX}deleted on a while this was being rotated") && *v));
+    // The delete holds no value, so there is nothing in it to put back: the flag is false, as for any kept delete.
+    assert!(b.versions(&on_b).iter().any(|(s, v)| s == &format!("{KEPT_PREFIX}deleted on a while this was being rotated") && !*v), "{:?}", b.versions(&on_b));
 }
 
 #[test]
