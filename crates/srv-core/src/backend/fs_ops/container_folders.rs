@@ -251,6 +251,17 @@ pub fn written_by_a_container_agent(dir: &Path) -> bool {
     !matches!(place(&dir.to_string_lossy()), Place::Host)
 }
 
+/// What opening a file at `place` with the system's own app has to ask first: the id of the container agent that can
+/// write it (empty when the panes can't be read, so no agent can be named), or `None` for a path no container agent
+/// can write.
+pub fn open_asks_first(place: &Place) -> Option<String> {
+    match place {
+        Place::Host => None,
+        Place::Inside(inside) => Some(inside.container.strip_prefix("agentmux-").unwrap_or(&inside.container).to_string()),
+        Place::Unknown => Some(String::new()),
+    }
+}
+
 /// Count `folder` as bound writable into `container` at `target`, for the tests of this crate (each test
 /// names its own temp folder and container).
 #[cfg(test)]
@@ -333,6 +344,16 @@ mod tests {
         // Written inside one and resolving outside every one: still the container's, at the place it is written.
         let out = inside_of(&["/w/aria/link".to_string(), "/elsewhere".to_string()], &folders).unwrap();
         assert_eq!(out.dir, "/workspace/link");
+    }
+
+    #[test]
+    fn opening_with_the_systems_app_asks_first_only_for_a_folder_a_container_agent_can_write() {
+        let inside = inside_of(&asked("/w/aria/repo/a.docx"), &[folder("/w/aria", "agentmux-aria", "/workspace")]).unwrap();
+        assert_eq!(open_asks_first(&Place::Inside(inside)).as_deref(), Some("aria"), "the agent's id, from its container's name");
+        assert_eq!(open_asks_first(&Place::Host), None, "a path no container agent can write asks nothing");
+        assert_eq!(open_asks_first(&Place::Unknown).as_deref(), Some(""), "when that can't be told, it asks without a name");
+        let unnamed = inside_of(&asked("/v/x"), &[folder("/v", "", "/vol")]).unwrap();
+        assert_eq!(open_asks_first(&Place::Inside(unnamed)).as_deref(), Some(""), "a pane that names no agent asks without a name");
     }
 
     #[test]

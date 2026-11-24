@@ -1,0 +1,79 @@
+{
+  "templateVersion": 1,
+  "id": "agentmux.verify-release",
+  "name": "Verify a release, then merge the held pull request",
+  "version": "1.0.0",
+  "kind": "drone",
+  "description": "Every 10 minutes it looks at the repository's newest releases. Two and a half hours after it first sees one, it fetches the release again and checks that the release is not a draft or a pre-release and that its update manifest is among the assets, and tells the leader what it found. When the release is good, a card asks you to merge the one pull request that was held for it; only your yes merges it.",
+  "params": {
+    "type": "object",
+    "properties": {
+      "repo": {
+        "type": "string",
+        "title": "Repository",
+        "description": "The GitHub repository whose releases to watch, as owner/name."
+      },
+      "credential": {
+        "type": "string",
+        "title": "Vault entry",
+        "description": "The id of the Vault entry that holds a GitHub token that can read the releases and merge the pull request. The first call asks you once; the token goes only to api.github.com.",
+        "default": "api-key-github"
+      },
+      "manifest_asset": {
+        "type": "string",
+        "title": "The update manifest",
+        "description": "The file name of the release asset that must be there for the release to count as good, such as latest.json. Leave out quote marks.",
+        "default": "latest.json"
+      },
+      "held_pr": {
+        "type": "number",
+        "title": "The held pull request",
+        "description": "The number of the pull request that waits for this release and is merged when you say yes."
+      },
+      "leader": {
+        "type": "string",
+        "title": "Who to tell",
+        "description": "The id of the agent that gets one line about each release."
+      }
+    },
+    "required": [
+      "repo",
+      "held_pr",
+      "leader"
+    ]
+  },
+  "trigger": {
+    "kind": "event",
+    "source": "poll",
+    "filter": {
+      "query": "api",
+      "every_minutes": 10,
+      "url": "https://api.github.com/repos/{{param.repo}}/releases?per_page=5",
+      "auth": {
+        "vault": "{{param.credential}}",
+        "as": "bearer"
+      },
+      "headers": {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "AgentMux-Drone"
+      },
+      "items": "",
+      "id": "id"
+    },
+    "delay": 150,
+    "max_per_hour": 3
+  },
+  "policy": {
+    "overlap": "skip",
+    "catch_up": "skip",
+    "caps": {
+      "run_usd": 1
+    }
+  },
+  "outputs": [
+    "message:owner",
+    "pull_request"
+  ],
+  "secrets": []
+}

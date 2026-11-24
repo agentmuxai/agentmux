@@ -2,7 +2,7 @@ onSearch ""
 -- the first call
 requestAnimationFrame
 -- opened
-<div class="search-container" data-pane-overlay="" style="position: absolute; left: 0px; top: 0px;">
+<div class="search-container" style="position: absolute; left: 0px; top: 0px;">
   <input data-stand="Input" placeholder="Search" data-autofocus="true" data-autoselect="true">
   <div aria-live="polite" aria-label="Search Results" class="search-results hidden">
     "1"
@@ -16,7 +16,7 @@ state: open=true search="" index=0 count=0
 state: open=true search="" index=3 count=4
 onSearch "needle"
 -- typed 'needle'
-<div class="search-container" data-pane-overlay="" style="position: absolute; left: 0px; top: 0px;">
+<div class="search-container" style="position: absolute; left: 0px; top: 0px;">
   <input data-stand="Input" placeholder="Search" data-autofocus="true" data-autoselect="true">
   <div aria-live="polite" aria-label="Search Results" class="search-results hidden">
     "1"
@@ -28,7 +28,7 @@ onSearch "needle"
     <button data-stand="DeclIconButton" data-elemtype="closebutton" title="Close (Esc)">
 state: open=true search="needle" index=0 count=0
 -- the same text again, nothing re-runs
-<div class="search-container" data-pane-overlay="" style="position: absolute; left: 0px; top: 0px;">
+<div class="search-container" style="position: absolute; left: 0px; top: 0px;">
   <input data-stand="Input" placeholder="Search" data-autofocus="true" data-autoselect="true">
   <div aria-live="polite" aria-label="Search Results" class="search-results">
     "2"
@@ -41,7 +41,7 @@ state: open=true search="needle" index=0 count=0
 state: open=true search="needle" index=1 count=2
 onSearch "needles"
 -- typed 'needles'
-<div class="search-container" data-pane-overlay="" style="position: absolute; left: 0px; top: 0px;">
+<div class="search-container" style="position: absolute; left: 0px; top: 0px;">
   <input data-stand="Input" placeholder="Search" data-autofocus="true" data-autoselect="true">
   <div aria-live="polite" aria-label="Search Results" class="search-results hidden">
     "1"
@@ -59,7 +59,7 @@ onSearch ""
 state: open=false search="" index=0 count=0
 requestAnimationFrame
 -- opened again, empty
-<div class="search-container" data-pane-overlay="" style="position: absolute; left: 0px; top: 0px;">
+<div class="search-container" style="position: absolute; left: 0px; top: 0px;">
   <input data-stand="Input" placeholder="Search" data-autofocus="true" data-autoselect="true">
   <div aria-live="polite" aria-label="Search Results" class="search-results hidden">
     "1"

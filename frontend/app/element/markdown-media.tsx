@@ -130,6 +130,11 @@ function reasonOf(state: { kind: string; reason?: string }): string {
     return state.kind === "missing" && state.reason ? " " + state.reason : "";
 }
 
+/** The placeholder for a file that isn't there: the key's text for `src`, then srv's reason when it gave one. */
+function missingText(key: string, src: string, state: { kind: string; reason?: string }): string {
+    return t(key, { src }) + reasonOf(state);
+}
+
 type LocalImageProps = { path: string; src: string; alt: string; openGallery?: MarkdownMediaOpts["openGallery"]; owner?: MediaOwner };
 
 /** A click on an image of an agent's message opens the preview over the tab; with no pane to show it, the Editor. */
@@ -144,7 +149,7 @@ function galleryKeys(open: () => void, name: string) {
     return {
         tabIndex: 0,
         role: "button" as const,
-        "aria-label": `Open image: ${name}`,
+        "aria-label": t("markdownMedia.openImage", { name }),
         onKeyDown: (e: KeyboardEvent) => {
             if (e.key !== "Enter" && e.key !== " ") return;
             e.preventDefault();
@@ -154,7 +159,7 @@ function galleryKeys(open: () => void, name: string) {
             const img = e.currentTarget as HTMLElement;
             const figure = img.closest<HTMLElement>("figure[data-am-media-path]");
             const { items, index } = figure ? messageGallery(figure) : { items: [], index: -1 };
-            if (items.length > 1) img.setAttribute("aria-label", `Open image: ${name}, ${index + 1} of ${items.length}`);
+            if (items.length > 1) img.setAttribute("aria-label", t("markdownMedia.openImageOf", { name, index: index + 1, total: items.length }));
         },
     };
 }
@@ -273,7 +278,7 @@ function LocalImage(props: LocalImageProps): JSX.Element {
                                 class="am-media-img"
                                 src={src()}
                                 alt={props.alt}
-                                {...tip(props.openGallery ? "Open image" : "Open in the editor")}
+                                {...tip(props.openGallery ? t("markdownMedia.openImageTip") : t("markdownMedia.openInEditor"))}
                                 style={ratio() ? { "aspect-ratio": ratio() } : undefined}
                                 {...(props.openGallery ? galleryKeys(open, props.alt || basenameOf(props.path)) : {})}
                                 onClick={open}
@@ -294,7 +299,7 @@ function LocalImage(props: LocalImageProps): JSX.Element {
             }
         >
             <Match when={state().kind === "missing"}>
-                <span class="am-muted">[image not found: {props.src}]{reasonOf(state())}</span>
+                <span class="am-muted">{missingText("markdownMedia.imageMissing", props.src, state())}</span>
             </Match>
             <Match when={state().kind === "too-large"}>
                 <MediaCard path={props.path} owner={props.owner} size={tooLargeSize()} icon="fa-image" />
@@ -310,7 +315,7 @@ function MediaCard(props: { path: string; size: number; icon: string; owner?: Me
             <i class={`fa ${props.icon}`} aria-hidden="true" />
             <span class="am-media-card-name">{basenameOf(props.path)}</span>
             <span class="am-muted">{formatBytes(props.size)}</span>
-            <span class="am-media-card-action">Open in the editor</span>
+            <span class="am-media-card-action">{t("markdownMedia.openInEditor")}</span>
         </Button>
     );
 }
@@ -336,7 +341,7 @@ function PlayButton(props: { s: LocalAvState; path: string }): JSX.Element {
                 class="am-media-play"
                 disabled={s.state().kind !== "ready"}
                 onClick={() => void s.play()}
-                aria-label={`Play ${basenameOf(props.path)}`}
+                aria-label={t("markdownMedia.play", { name: basenameOf(props.path) })}
             >
                 <i class={s.state().kind === "loading" ? "fa fa-spinner fa-spin" : "fa fa-play"} aria-hidden="true" />
             </button>
@@ -390,7 +395,7 @@ function VideoStage(props: { s: LocalAvState; path: string; openGallery?: Markdo
                     icon="expand"
                     label={t("mediaPreview.enlarge", { name: basenameOf(props.path) })}
                     tooltip={false}
-                    {...tip("Enlarge")}
+                    {...tip(t("markdownMedia.enlarge"))}
                     onClick={() => enlargeVideo(stage, props.path, props.openGallery!)}
                 />
             </Show>
@@ -494,13 +499,12 @@ function LocalAV(props: {
         <Switch fallback={<AvFigure s={s} path={props.path} kind={props.kind} openGallery={props.openGallery} />}>
             <Match when={s.state().kind === "missing"}>
                 <span class="am-muted">
-                    [{props.kind} not found: {props.src}]{reasonOf(s.state())}
+                    {t(`markdownMedia.avMissing.${props.kind}`, { src: props.src })}
+                    {reasonOf(s.state())}
                 </span>
             </Match>
             <Match when={s.state().kind === "error"}>
-                <span class="am-muted">
-                    [{props.kind} can't play: {s.errorState()}]
-                </span>
+                <span class="am-muted">{t(`markdownMedia.avError.${props.kind}`, { error: String(s.errorState() ?? "") })}</span>
             </Match>
             <Match when={s.state().kind === "too-large"}>
                 <MediaCard path={props.path} owner={props.owner} size={s.tooLargeSize()} icon={props.kind === "video" ? "fa-film" : "fa-music"} />
@@ -528,7 +532,7 @@ function RemoteImage(props: { src: string; alt: string }): JSX.Element {
             when={load()}
             fallback={
                 <Button class="am-media-chip" onClick={() => setLoad(true)} title={props.src}>
-                    🌐 image from {host} — load{insecure ? " (http, not encrypted)" : ""}
+                    🌐 {t(insecure ? "markdownMedia.chipInsecure" : "markdownMedia.chip", { host })}
                 </Button>
             }
         >
@@ -558,7 +562,7 @@ const MarkdownImg = (p: { props: JSX.ImgHTMLAttributes<HTMLImageElement>; media?
     const alt = ((p.props as any)?.alt as string | undefined) ?? "";
     if (!p.media) return <span>[img:{src.startsWith("data:") ? "data" : src}]</span>;
     if (RASTER_DATA_URI.test(src)) return <img src={src} alt={alt} />;
-    if (/^data:/i.test(src)) return <span class="am-muted">[image: inline data — unsupported type]</span>;
+    if (/^data:/i.test(src)) return <span class="am-muted">{t("markdownMedia.inlineData")}</span>;
     if (/^https?:\/\//i.test(src)) {
         // Remote video/audio isn't supported inline (§5): a link, never loaded.
         const remoteKind = inlineMediaKind(src.split(/[?#]/)[0]);
@@ -578,11 +582,11 @@ const MarkdownImg = (p: { props: JSX.ImgHTMLAttributes<HTMLImageElement>; media?
         return <RemoteImage src={src} alt={alt} />;
     }
     const path = resolveMediaPath(src, p.media.baseDir);
-    if (path == null) return <span class="am-muted">[image not found: {src}]</span>;
+    if (path == null) return <span class="am-muted">{t("markdownMedia.imageMissing", { src })}</span>;
     // A drive path arrives as the file:/// URL rehype-local-image-src made of
     // it; name it the way the agent wrote it.
     const shown = /^file:/i.test(src) ? path : src;
-    if (isNetworkPath(path)) return <span class="am-muted">[image: {shown} — network paths aren't loaded]</span>;
+    if (isNetworkPath(path)) return <span class="am-muted">{t("markdownMedia.network", { path: shown })}</span>;
     const kind = inlineMediaKind(path);
     // Fail closed: a message of an agent not known to run on this computer, with no pane to name, reads nothing. srv
     // decides by the pane's runtime; this flag only picks the route, and without a pane there is no route.
@@ -590,7 +594,7 @@ const MarkdownImg = (p: { props: JSX.ImgHTMLAttributes<HTMLImageElement>; media?
     const owner: MediaOwner = { blockId: p.media.blockId, confined: p.media.confined };
     if (kind === "image") return <LocalImage path={path} src={shown} alt={alt} openGallery={p.media.openGallery} owner={owner} />;
     if (kind === "video" || kind === "audio") return <LocalAV path={path} src={shown} kind={kind} openGallery={p.media.openGallery} owner={owner} />;
-    return <span class="am-muted">[image: {shown} — unsupported type]</span>;
+    return <span class="am-muted">{t("markdownMedia.unsupported", { path: shown })}</span>;
 };
 
 export { MarkdownImg, MuxBlock };

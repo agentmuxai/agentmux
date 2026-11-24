@@ -15,34 +15,20 @@ import type {
     TowerMemoryRow,
     TowerMemorySeries,
 } from "@/app/store/rpc-api";
+import { t } from "@/app/i18n/i18n";
 import clsx from "clsx";
 import { type Accessor, createEffect, createMemo, For, type JSX, Show } from "solid-js";
 import { Chart } from "./tower-history";
 import { KindIcon } from "./tower-kind-ui";
 import type { HistoryPoint, TowerViewModel } from "./tower-model";
 import { LongRun } from "./tower-record";
-import { count, formatClock, formatMem, growthText } from "./tower-util";
+import { formatClock, formatMem, growthText } from "./tower-util";
 import { tip } from "@/app/element/tip";
 
-/** What each part is called, and what is in it. */
-const PARTS: Record<TowerMemoryPartId, { label: string; hint: string }> = {
-    core: {
-        label: "Core",
-        hint: "AgentMux's own programs: the launcher, the server, the browser host and its GPU and service processes",
-    },
-    panes: {
-        label: "Panes",
-        hint: "What draws and hosts the panes: the window renderers, and each terminal with what runs in it",
-    },
-    agents: {
-        label: "Agents",
-        hint: "Each agent: its CLI, what runs for it (MCP servers, helpers), and what it started",
-    },
-    not_placed: {
-        label: "Not placed",
-        hint: "AgentMux started these and no pane claims them",
-    },
-};
+/** What each part is called, and what is in it (read when drawn, so a change of language shows). */
+const partWord = (id: TowerMemoryPartId): string => (id === "not_placed" ? "notPlaced" : id);
+const partLabel = (id: TowerMemoryPartId): string => t(`tower.memory.part.${partWord(id)}`);
+const partHint = (id: TowerMemoryPartId): string => t(`tower.memory.hint.${partWord(id)}`);
 
 /** A part's share of the whole, as a word: "44%", "<1%". */
 export function formatShare(part: number, whole: number): string {
@@ -151,7 +137,7 @@ export function MemoryView(props: { model: TowerViewModel }): JSX.Element {
         trend: createMemo(() => buildTrend(m.memoryHistory())),
     };
     return (
-        <Show when={memory()} fallback={<EmptyState loading>Measuring…</EmptyState>}>
+        <Show when={memory()} fallback={<EmptyState loading>{t("tower.panes.measuring")}</EmptyState>}>
             {(v) => (
                 <div class="tower-memory" data-testid="tower-memory">
                     <PartsBar model={m} memory={v()} />
@@ -177,9 +163,9 @@ export function chartKey(picked: string, memory: TowerMemory, trend: Trend | nul
 
 /** What a ledger key is called. */
 export function seriesLabel(key: string, memory: TowerMemory): string {
-    if (key === "total") return "AgentMux";
+    if (key === "total") return t("tower.memory.total");
     for (const p of memory.parts) {
-        if (partSeriesKey(p.part) === key) return PARTS[p.part].label;
+        if (partSeriesKey(p.part) === key) return partLabel(p.part);
         const row = p.rows.find((r) => r.key === key);
         if (row) return row.label;
     }
@@ -209,13 +195,15 @@ function MemoryChart(props: { model: TowerViewModel; memory: TowerMemory; trend:
                         {seriesLabel(key(), props.memory)}
                     </span>
                     <span class="tower-toolbar-spacer" />
-                    <Show when={since()}>{(t) => <span class="tower-muted">since {formatClock(t())}</span>}</Show>
+                    <Show when={since()}>
+                        {(at) => <span class="tower-muted">{t("tower.memory.since", { time: formatClock(at()) })}</span>}
+                    </Show>
                     <SegmentedControl<"10m" | "1h">
                         density="compact"
-                        ariaLabel="Time span of the memory chart"
+                        ariaLabel={t("tower.memory.spanAria")}
                         options={[
-                            { value: "10m", label: "10 min" },
-                            { value: "1h", label: "1 hour" },
+                            { value: "10m", label: t("tower.memory.span10m") },
+                            { value: "1h", label: t("tower.memory.span1h") },
                         ]}
                         value={m.memoryWindow()}
                         onChange={m.setMemoryWindow}
@@ -225,7 +213,7 @@ function MemoryChart(props: { model: TowerViewModel; memory: TowerMemory; trend:
                     points={points()}
                     windowMs={m.memoryWindow() === "10m" ? 10 * 60_000 : 60 * 60_000}
                     series={{
-                        label: "Memory",
+                        label: t("tower.agents.memory"),
                         value: (p) => p.mem,
                         format: (v) => formatMem(v),
                         floor: 64 * 1024 * 1024,
@@ -240,13 +228,17 @@ function MemoryChart(props: { model: TowerViewModel; memory: TowerMemory; trend:
 /** One bar split into the four parts: each a button that opens its part. */
 function PartsBar(props: { model: TowerViewModel; memory: TowerMemory }): JSX.Element {
     const describe = (p: TowerMemoryPart) =>
-        `${PARTS[p.part].label}: ${formatMem(p.mem)}, ${formatShare(p.mem, props.memory.total)}`;
+        t("tower.memory.describe", {
+            part: partLabel(p.part),
+            mem: formatMem(p.mem),
+            share: formatShare(p.mem, props.memory.total),
+        });
     return (
         <div class="tower-memory-bar-wrap">
             <div
                 class="tower-memory-bar"
                 role="group"
-                aria-label={`AgentMux's memory by part: ${props.memory.parts.map(describe).join("; ")}`}
+                aria-label={t("tower.memory.barAria", { parts: props.memory.parts.map(describe).join("; ") })}
             >
                 <For each={props.memory.parts}>
                     {(p) => (
@@ -256,7 +248,7 @@ function PartsBar(props: { model: TowerViewModel; memory: TowerMemory }): JSX.El
                                 tabindex="0"
                                 class={clsx("tower-memory-segment", `tower-memory-part--${p.part}`)}
                                 style={{ width: `${(p.mem / props.memory.total) * 100}%` }}
-                                {...tip(`${describe(p)}. ${PARTS[p.part].hint}`)}
+                                {...tip(t("tower.memory.segmentTip", { describe: describe(p), hint: partHint(p.part) }))}
                                 aria-label={describe(p)}
                                 data-testid={`tower-memory-segment-${p.part}`}
                                 onClick={() => props.model.open([partKey(p.part)])}
@@ -274,12 +266,12 @@ function PartsBar(props: { model: TowerViewModel; memory: TowerMemory }): JSX.El
             <div class="tower-memory-legend">
                 <For each={props.memory.parts}>
                     {(p) => (
-                        <span class="tower-memory-key" {...tip(PARTS[p.part].hint)}>
+                        <span class="tower-memory-key" {...tip(partHint(p.part))}>
                             <span
                                 class={clsx("tower-memory-swatch", `tower-memory-part--${p.part}`)}
                                 aria-hidden="true"
                             />
-                            <span>{PARTS[p.part].label}</span>
+                            <span>{partLabel(p.part)}</span>
                             <span class="tower-num tower-muted">{formatMem(p.mem)}</span>
                         </span>
                     )}
@@ -291,13 +283,13 @@ function PartsBar(props: { model: TowerViewModel; memory: TowerMemory }): JSX.El
 
 function PartsTable(props: { model: TowerViewModel; memory: TowerMemory; shared: Shared }): JSX.Element {
     return (
-        <table class="tower-table tower-memory-table" aria-label="Memory by part">
+        <table class="tower-table tower-memory-table" aria-label={t("tower.memory.tableAria")}>
             <thead>
                 <tr>
-                    <th>Part</th>
-                    <th class="tower-num">Memory</th>
-                    <th class="tower-num">Share</th>
-                    <th class="tower-memory-trend-head">Last hour</th>
+                    <th>{t("tower.memory.col.part")}</th>
+                    <th class="tower-num">{t("tower.agents.memory")}</th>
+                    <th class="tower-num">{t("tower.memory.col.share")}</th>
+                    <th class="tower-memory-trend-head">{t("tower.memory.col.lastHour")}</th>
                 </tr>
             </thead>
             <tbody>
@@ -329,7 +321,7 @@ function PartRows(props: {
                     m.memoryChart() === partSeriesKey(props.part.part) && "tower-memory-picked"
                 )}
                 data-testid={`tower-memory-part-${props.part.part}`}
-                {...tip(PARTS[props.part.part].hint)}
+                {...tip(partHint(props.part.part))}
                 {...pick(m, partSeriesKey(props.part.part))}
             >
                 <td class="tower-name">
@@ -342,8 +334,8 @@ function PartRows(props: {
                                 icon={open() ? "chevron-down" : "chevron-right"}
                                 label={
                                     open()
-                                        ? `Hide what's in ${PARTS[props.part.part].label}`
-                                        : `Show what's in ${PARTS[props.part.part].label}`
+                                        ? t("tower.memory.hidePart", { part: partLabel(props.part.part) })
+                                        : t("tower.memory.showPart", { part: partLabel(props.part.part) })
                                 }
                                 density="compact"
                                 tooltip={false}
@@ -352,7 +344,7 @@ function PartRows(props: {
                             />
                         </Show>
                         <span class="tower-memory-swatch" aria-hidden="true" />
-                        <span class="tower-label">{PARTS[props.part.part].label}</span>
+                        <span class="tower-label">{partLabel(props.part.part)}</span>
                         <span class="tower-muted">({props.part.processes})</span>
                         <Show when={grows()}>
                             {(g) => (
@@ -369,7 +361,7 @@ function PartRows(props: {
                 <Show when={props.part.part === "not_placed" && props.part.rows.length > 0}>
                     <tr class="tower-memory-hint">
                         <td colspan={4} class="tower-muted">
-                            {PARTS.not_placed.hint}.
+                            {partHint("not_placed")}.
                         </td>
                     </tr>
                 </Show>
@@ -420,7 +412,11 @@ function ItemRows(props: {
                         >
                             <IconButton
                                 icon={open() ? "chevron-down" : "chevron-right"}
-                                label={open() ? `Hide ${props.row.label}'s parts` : `Show ${props.row.label}'s parts`}
+                                label={
+                                    open()
+                                        ? t("tower.memory.hideRow", { name: props.row.label })
+                                        : t("tower.memory.showRow", { name: props.row.label })
+                                }
                                 density="compact"
                                 tooltip={false}
                                 aria-expanded={open()}
@@ -435,7 +431,7 @@ function ItemRows(props: {
                         <Show when={goes()}>
                             <IconButton
                                 icon="arrow-up-right-from-square"
-                                label={`Show ${props.row.label} in the Agents view`}
+                                label={t("tower.memory.showInAgents", { name: props.row.label })}
                                 density="compact"
                                 onClick={() => showInAgents(m, props.row, props.part)}
                             />
@@ -503,16 +499,17 @@ function Footnote(props: { memory: TowerMemory }): JSX.Element {
     return (
         <div class="tower-memory-note tower-muted" data-testid="tower-memory-note">
             <div>
-                {count(props.memory.processes, "process")}, measured as {props.memory.metric}: the memory only
-                AgentMux's processes use, added up over everything AgentMux started. Shared libraries and shared memory
-                aren't counted twice, and video memory isn't counted.
+                {t("tower.memory.note", {
+                    processes: t("tower.view.processes", { count: props.memory.processes }),
+                    metric: props.memory.metric,
+                })}
             </div>
             <Show when={props.memory.unreadable > 0}>
-                <div>{count(props.memory.unreadable, "process")} couldn't be read and add nothing.</div>
+                <div>{t("tower.memory.unreadable", { processes: t("tower.view.processes", { count: props.memory.unreadable }) })}</div>
             </Show>
             <Show when={(props.memory.other_instances ?? 0) > 0}>
                 <div data-testid="tower-memory-others">
-                    Another AgentMux on this computer uses {formatMem(props.memory.other_instances)}, not counted here.
+                    {t("tower.memory.otherInstances", { mem: formatMem(props.memory.other_instances) })}
                 </div>
             </Show>
         </div>

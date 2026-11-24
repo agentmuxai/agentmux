@@ -21,9 +21,7 @@ rpc AgentInputHistory agent=a1 before=undefined limit=200
     <div class="warden-section-stub">
       "Loading…"
     <div class="warden-manager-footnote">
-      "What was typed to an agent is kept with the agent, up to its limit (the agent:inputhistory:max setting), and goes when the agent is deleted. Forgotten entries can be restored for"
-      "7"
-      "days, then they are gone."
+      "What was typed to an agent is kept with the agent, up to its limit (the agent:inputhistory:max setting), and goes when the agent is deleted. Forgotten entries can be restored for 7 days, then they are gone."
 rpc AgentInputHistoryTrash agent=a2
 rpc AgentInputHistory agent=a2 before=undefined limit=200
 -- a2 shown
@@ -64,9 +62,7 @@ rpc AgentInputHistory agent=a2 before=undefined limit=200
             <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
               "Forget"
     <div class="warden-manager-footnote">
-      "What was typed to an agent is kept with the agent, up to its limit (the agent:inputhistory:max setting), and goes when the agent is deleted. Forgotten entries can be restored for"
-      "7"
-      "days, then they are gone."
+      "What was typed to an agent is kept with the agent, up to its limit (the agent:inputhistory:max setting), and goes when the agent is deleted. Forgotten entries can be restored for 7 days, then they are gone."
 -- a1 answered late
 <div>
   <div class="warden-history-typed">
@@ -105,6 +101,4 @@ rpc AgentInputHistory agent=a2 before=undefined limit=200
             <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
               "Forget"
     <div class="warden-manager-footnote">
-      "What was typed to an agent is kept with the agent, up to its limit (the agent:inputhistory:max setting), and goes when the agent is deleted. Forgotten entries can be restored for"
-      "7"
-      "days, then they are gone."
+      "What was typed to an agent is kept with the agent, up to its limit (the agent:inputhistory:max setting), and goes when the agent is deleted. Forgotten entries can be restored for 7 days, then they are gone."

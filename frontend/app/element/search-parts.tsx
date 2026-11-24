@@ -6,6 +6,7 @@
 
 import clsx from "clsx";
 import { Show, type JSX } from "solid-js";
+import { usePaneOverlay } from "@/app/platform/pane-overlay";
 
 import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
 import { CloseButton } from "@/app/element/ui/CloseButton";
@@ -37,9 +38,20 @@ const closeLabel = (): string => `Close (${keyLabel("Escape")})`;
 
 export function SearchBar(props: { s: SearchState }): JSX.Element {
     const s = props.s;
-    // `data-pane-overlay`: over a browser pane's page the bar punches a hole through the native window.
+    let el: HTMLDivElement | undefined;
+    // Over a browser pane's page (a native window above the DOM) the bar is a pane overlay: a hole on Windows, the
+    // page hidden behind a still on macOS and Linux. Over any other pane it clips nothing.
+    usePaneOverlay(() => el);
     return (
-        <div class="search-container" style={s.style()} ref={s.register} data-pane-overlay data-search-owner={s.owner}>
+        <div
+            class="search-container"
+            style={s.style()}
+            ref={(e) => {
+                el = e;
+                s.register(e);
+            }}
+            data-search-owner={s.owner}
+        >
             <Input
                 placeholder="Search"
                 value={s.searchValue()}

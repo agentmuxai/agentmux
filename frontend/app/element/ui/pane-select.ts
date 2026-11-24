@@ -12,8 +12,9 @@
  *  - a drag, also a double- or triple-click drag: while the primary button is held after a press in pane P,
  *    the root carries `data-pane-select` and P carries `data-pane-select-owner`, and the stylesheet makes
  *    everything outside P `user-select: none`. The engine never has anything outside P to extend to, so
- *    nothing patches the selection afterwards. The attributes go on at the first move past `DRAG_SLOP_PX`
- *    (a click sets nothing, so a click never restyles the document), and off at the release, a cancel, a
+ *    nothing patches the selection afterwards. The attributes go on at the first move past `DRAG_SLOP_PX` that is over
+ *    something other than the pane (a click, or a drag that stays inside the pane, sets nothing, so it never restyles
+ *    the document), and off at the release, a cancel, a
  *    drag of the text out, the window losing focus or P leaving the page;
  *  - Shift+click: a press that would extend a selection from one pane into another drops the selection
  *    first, so the click starts a new one where it landed;
@@ -127,7 +128,8 @@ export function installPaneSelectGuard(win: Window = window): () => void {
             end();
             return;
         }
-        if (!drag.marked && Math.hypot(p.clientX - drag.x, p.clientY - drag.y) >= DRAG_SLOP_PX) mark(drag);
+        // Only a pointer over something that is not the pane can reach another pane; marking restyles the whole window.
+        if (!drag.marked && Math.hypot(p.clientX - drag.x, p.clientY - drag.y) >= DRAG_SLOP_PX && paneOf(p.target) !== drag.pane) mark(drag);
     };
 
     /** A selection that began in a pane and whose far end has left it: the end goes back to the pane's edge. */

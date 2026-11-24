@@ -30,7 +30,7 @@ import { computeBgStyleFromMeta } from "@/util/muxutil";
 import { backdropSubmenuItem } from "@/app/backdrop/backdrop-menu";
 import { supportsBackdrop } from "@/app/backdrop/meta";
 import { getPaneScope, identityInPane } from "@/app/backdrop/scope";
-import { usePaneBackdrop } from "@/app/backdrop/usePaneBackdrop";
+import { useResolvedBackdrop, usePaneBackdrop } from "@/app/backdrop/usePaneBackdrop";
 import * as util from "@/util/util";
 import { FaviconImage } from "@/app/element/FaviconImage";
 import clsx from "clsx";
@@ -481,6 +481,46 @@ function EndIcons(props: {
 }
 
 /**
+ * A header row's own colours, for a pane with no backdrop: the identity tint (or the fixed default of a non-agent pane) and
+ * the text that reads on it. `bgOverride` is the tab strip's tail colour (set only by PaneChrome).
+ */
+function plainHeaderStyle(meta: Block["meta"] | undefined, bgOverride: string | undefined): JSX.CSSProperties {
+    const style: JSX.CSSProperties = {};
+    // One rule for every color source (pane-identity.ts): an explicit
+    // "Pane Color" pick (frame:hue) wins over the agent's identity color
+    // (SPEC_AGENT_COLOR_2026_08_08.md's `frame:activebordercolor`), which
+    // wins over the widget type's color. Whichever it is, the header gets
+    // the same subtle OKLCH tint in both themes (pane-color-scheme.ts
+    // `headerTint`, since 2026-10-02).
+    const isLightTheme = isLightThemeActive();
+    // An explicit override wins over this block's own color: the row is
+    // shared with the tab strip's leftover "tail", which must not track
+    // whichever tab is active when the pane's tabs disagree on a color
+    // (SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md). Set only by
+    // PaneChrome; every other BlockFrame consumer leaves it undefined
+    // and keeps the behavior below unchanged.
+    const bg = bgOverride ?? computeBlockColorBg(meta, isLightTheme);
+    if (bg) {
+        style["background-color"] = bg;
+        style.color = pickReadableTextColor(bg) ?? undefined;
+    } else if (paneTabCapability(meta?.view, "header") !== "surface") {
+        // Every non-agent pane (terminal, browser, editor, preview,
+        // etc.) gets ONE fixed header color instead of the default
+        // near-black (--block-bg-solid-color: rgb(0,0,0)) — a single
+        // constant, not per-pane-type or randomized. User request
+        // 2026-09-20. Dark theme only: see computeNonAgentHeaderBg.
+        const fallback = computeNonAgentHeaderBg(isLightTheme);
+        style["background-color"] = fallback;
+        style.color = pickReadableTextColor(fallback) ?? undefined;
+    }
+    return style;
+}
+
+/** A pane with a backdrop has the backdrop's surface and ink in its header: its identity colour stays on the pill and its bar,
+ * not on the row (the tinted row is a pair chosen for the window's own theme, and would not match the pane). */
+const BACKDROP_HEADER_STYLE: JSX.CSSProperties = { "background-color": "var(--block-bg-solid-color)", color: "var(--main-text-color)" };
+
+/**
  * Floating content anchored to an existing DOM ref, shown while `visible`.
  * Unlike the shared `Tooltip` component (element/tooltip.tsx), which always
  * wraps its children in a NEW div to own the hover listeners itself, this
@@ -676,37 +716,8 @@ function BlockFrame_Header(
     // squeeze the name region. Used to conditionally apply max-width to
     // that region — see block.scss .block-frame-default-header--has-summary.
     const hasSummary = createMemo(() => props.error != null || splitHeaderElems().inline.length > 0);
-    const headerStyle = createMemo<JSX.CSSProperties>(() => {
-        const style: JSX.CSSProperties = {};
-        // One rule for every color source (pane-identity.ts): an explicit
-        // "Pane Color" pick (frame:hue) wins over the agent's identity color
-        // (SPEC_AGENT_COLOR_2026_08_08.md's `frame:activebordercolor`), which
-        // wins over the widget type's color. Whichever it is, the header gets
-        // the same subtle OKLCH tint in both themes (pane-color-scheme.ts
-        // `headerTint`, since 2026-10-02).
-        const isLightTheme = isLightThemeActive();
-        // An explicit override wins over this block's own color: the row is
-        // shared with the tab strip's leftover "tail", which must not track
-        // whichever tab is active when the pane's tabs disagree on a color
-        // (SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md). Set only by
-        // PaneChrome; every other BlockFrame consumer leaves it undefined
-        // and keeps the behavior below unchanged.
-        const bg = props.headerBgOverride ?? computeBlockColorBg(blockData()?.meta, isLightTheme);
-        if (bg) {
-            style["background-color"] = bg;
-            style.color = pickReadableTextColor(bg) ?? undefined;
-        } else if (paneTabCapability(blockData()?.meta?.view, "header") !== "surface") {
-            // Every non-agent pane (terminal, browser, editor, preview,
-            // etc.) gets ONE fixed header color instead of the default
-            // near-black (--block-bg-solid-color: rgb(0,0,0)) — a single
-            // constant, not per-pane-type or randomized. User request
-            // 2026-09-20. Dark theme only: see computeNonAgentHeaderBg.
-            const fallback = computeNonAgentHeaderBg(isLightTheme);
-            style["background-color"] = fallback;
-            style.color = pickReadableTextColor(fallback) ?? undefined;
-        }
-        return style;
-    });
+    const headerBackdrop = useResolvedBackdrop(() => (supportsBackdrop(blockData()?.meta?.view) ? { backdrop: blockData()?.meta?.backdrop, bg: blockData()?.meta?.bg } : {}));
+    const headerStyle = createMemo<JSX.CSSProperties>(() => (headerBackdrop() ? BACKDROP_HEADER_STYLE : plainHeaderStyle(blockData()?.meta, props.headerBgOverride)));
 
     return (
         <div

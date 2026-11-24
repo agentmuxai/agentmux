@@ -21,6 +21,26 @@ const BACKDROP_VIEWS: ReadonlySet<string> = new Set(["agent"]);
 /** Whether a pane of this view takes a backdrop: it is offered in its menu, and a record on any other view is ignored. */
 export const supportsBackdrop = (view: unknown): boolean => typeof view === "string" && BACKDROP_VIEWS.has(view);
 
+/**
+ * What a pane's tab pill and header need to know about its backdrop: which side its surface is on and the ink its
+ * labels are drawn in. The pill's fill is fitted to these (`tabPaint`), so its label reads on it.
+ */
+export interface PaneChromeInk {
+    light: boolean;
+    ink: { selected: string; unselected: string };
+    surface: string;
+}
+
+/** The chrome ink of the backdrop a pane's meta resolves to, or undefined for a pane with none (or a view that takes none). */
+export function paneChromeInk(
+    meta: { view?: unknown; backdrop?: unknown; bg?: unknown } | undefined,
+    appScheme: AppScheme
+): PaneChromeInk | undefined {
+    if (!supportsBackdrop(meta?.view)) return undefined;
+    const d = resolveBackdrop(meta, appScheme)?.derived;
+    return d && { light: d.scheme === "light", ink: { selected: d.ink.text, unselected: d.ink.muted }, surface: d.surfaces.surface };
+}
+
 /** The shape the record is written in. A reader that finds a newer `version` ignores the record. */
 export const BACKDROP_VERSION = 1;
 
