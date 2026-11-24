@@ -16,7 +16,8 @@ const OWNER: &str = "owner";
 const GRANTED: &str = "granted";
 
 /// What an agent may do with a drone, as far as firing goes.
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct DroneAccess {
     /// The agent that created the drone, or empty.
     pub owner: String,
