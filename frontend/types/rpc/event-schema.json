@@ -914,6 +914,15 @@
     }
   },
   {
+    "event": "placefloatingpane",
+    "payloadTs": {
+      "imports": [
+        "PlaceFloatingPaneEvent"
+      ],
+      "name": "PlaceFloatingPaneEvent"
+    }
+  },
+  {
     "event": "processbroker:status-changed",
     "payloadTs": {
       "imports": [

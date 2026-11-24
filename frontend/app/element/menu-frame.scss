@@ -28,5 +28,5 @@
 /// A menu: the surface, with the padding every `.menu` shares.
 @mixin menu-frame {
     @include menu-surface;
-    padding: var(--space-0-5);
+    padding: var(--menu-pad);
 }
