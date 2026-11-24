@@ -504,25 +504,7 @@ fn view_from_block(store: &Store, meta: &MetaMapType, ctx: &ExportContext, warni
         view_type = "connectors".to_string();
         config.insert("section".into(), Value::String("remotes".to_string()));
     }
-    // Warden was split: a block saved on a section that has a pane of its own now (the app moves it
-    // when the block loads) is written as that pane. What is left of Warden is Jobs, which a live
-    // block does not name (the Jobs pane has no other section), so it is written as such.
-    if view_type == "warden" {
-        if let Some(pane) = warden_section_pane(Some(meta_str(meta, "warden:section").unwrap_or("jobs"))) {
-            view_type = pane.to_string();
-        }
-    }
-    // History became the Audit pane's Conversations section; a block saved before that (or a Warden one on
-    // History) is written as it, and an Audit pane keeps the section it shows.
-    if view_type == "history" {
-        view_type = "audit".to_string();
-        config.insert("section".into(), Value::String("conversations".to_string()));
-    }
-    if view_type == "audit" && !config.contains_key("section") {
-        if let Some(section) = meta_str(meta, "audit:section").filter(|s| AUDIT_SECTIONS.contains(s)) {
-            config.insert("section".into(), Value::String(section.to_string()));
-        }
-    }
+    fold_moved_panes(&mut view_type, &mut config, meta);
     match view_type.as_str() {
         "agent" => {
             // The definition's portable identity, never its local row id.
@@ -1175,23 +1157,7 @@ impl PlanBuilder<'_> {
             // `warden_section_pane`; a file's `vault/<sub>` section keeps its sub.
             "warden" | "settings" | "vault" => {
                 let section = cfg_str(view, "section");
-                let (pane, section, sub): (&str, Option<&str>, Option<&str>) = match kind {
-                    "warden" => {
-                        let (id, sub) = match section.map(|s| s.split_once('/').unwrap_or((s, ""))) {
-                            Some((id, sub)) => (Some(id), Some(sub).filter(|s| !s.is_empty())),
-                            None => (None, None),
-                        };
-                        match warden_section_pane(id) {
-                            None => ("warden", id, None),
-                            Some("vault") => ("vault", None, sub),
-                            Some("history") => ("audit", Some("conversations"), None),
-                            Some(pane) => (pane, None, None),
-                        }
-                    }
-                    // A Vault pane's file names its own section.
-                    "vault" => ("vault", None, section),
-                    pane => (pane, section, None),
-                };
+                let (pane, section, sub) = pane_section_for(kind, section);
                 meta.insert("view".into(), pane.into());
                 if let Some(s) = section {
                     meta.insert(format!("{pane}:section"), Value::String(s.to_string()));
@@ -1203,18 +1169,7 @@ impl PlanBuilder<'_> {
             }
             "reviews" => fold_reviews_meta(view, &mut meta, &mut self.summary),
             // The History pane is the Audit pane's Conversations section now; an Audit pane's file names its section.
-            "history" => {
-                meta.insert("view".into(), Value::String("audit".to_string()));
-                meta.insert("audit:section".into(), Value::String("conversations".to_string()));
-                self.summary.push("audit".to_string());
-            }
-            "audit" => {
-                meta.insert("view".into(), Value::String("audit".to_string()));
-                if let Some(section) = cfg_str(view, "section").filter(|s| AUDIT_SECTIONS.contains(s)) {
-                    meta.insert("audit:section".into(), Value::String(section.to_string()));
-                }
-                self.summary.push("audit".to_string());
-            }
+            "history" | "audit" => fold_audit_meta(kind == "history", view, &mut meta, &mut self.summary),
             k if PLAIN_VIEWS.contains(&k) => {
                 meta.insert("view".into(), Value::String(k.to_string()));
                 self.summary.push(k.to_string());
@@ -1229,6 +1184,61 @@ impl PlanBuilder<'_> {
             }
         }
         Value::Object(meta)
+    }
+}
+
+/// The pane, section and Vault sub-section a Warden, Settings or Vault file entry opens: Warden's sections that are panes of
+/// their own now are read through `warden_section_pane`; a Vault pane's file names its own section, and a file's
+/// `vault/<sub>` section keeps its sub.
+fn pane_section_for<'a>(kind: &'a str, section: Option<&'a str>) -> (&'a str, Option<&'a str>, Option<&'a str>) {
+    match kind {
+        "warden" => {
+            let (id, sub) = match section.map(|s| s.split_once('/').unwrap_or((s, ""))) {
+                Some((id, sub)) => (Some(id), Some(sub).filter(|s| !s.is_empty())),
+                None => (None, None),
+            };
+            match warden_section_pane(id) {
+                None => ("warden", id, None),
+                Some("vault") => ("vault", None, sub),
+                Some("history") => ("audit", Some("conversations"), None),
+                Some(pane) => (pane, None, None),
+            }
+        }
+        "vault" => ("vault", None, section),
+        pane => (pane, section, None),
+    }
+}
+
+/// An Audit pane's file entry: `history` (the pane that became Audit's Conversations section) opens Conversations, and
+/// an Audit pane's file names its own section.
+fn fold_audit_meta(history: bool, view: &LayoutView, meta: &mut Map<String, Value>, summary: &mut Vec<String>) {
+    meta.insert("view".into(), Value::String("audit".to_string()));
+    let section = if history { Some("conversations") } else { cfg_str(view, "section").filter(|s| AUDIT_SECTIONS.contains(s)) };
+    if let Some(section) = section {
+        meta.insert("audit:section".into(), Value::String(section.to_string()));
+    }
+    summary.push("audit".to_string());
+}
+
+/// A block saved on a pane or section that has moved is written as the pane that holds it now.
+/// Warden was split: a block saved on a section that has a pane of its own now (the app moves it when the block
+/// loads) is written as that pane; what is left of Warden is Jobs, which a live block does not name (the Jobs pane
+/// has no other section), so it is written as such. History became the Audit pane's Conversations section, so a
+/// block saved before that (or a Warden one on History) is written as it, and an Audit pane keeps the section it shows.
+fn fold_moved_panes(view_type: &mut String, config: &mut Map<String, Value>, meta: &MetaMapType) {
+    if view_type == "warden" {
+        if let Some(pane) = warden_section_pane(Some(meta_str(meta, "warden:section").unwrap_or("jobs"))) {
+            *view_type = pane.to_string();
+        }
+    }
+    if view_type == "history" {
+        *view_type = "audit".to_string();
+        config.insert("section".into(), Value::String("conversations".to_string()));
+    }
+    if view_type == "audit" && !config.contains_key("section") {
+        if let Some(section) = meta_str(meta, "audit:section").filter(|s| AUDIT_SECTIONS.contains(s)) {
+            config.insert("section".into(), Value::String(section.to_string()));
+        }
     }
 }
 
