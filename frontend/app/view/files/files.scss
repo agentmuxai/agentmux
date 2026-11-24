@@ -313,6 +313,39 @@
     }
 }
 
+// The columns view: a strip of lists, one per level, filling the list's room.
+.files-columns {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.files-column {
+    position: relative;
+    flex: 0 0 240px;
+    overflow-y: auto;
+    border-right: 1px solid var(--border-color);
+
+    // A folder in the way to the last column: marked, lighter than the one chosen in the column the keys are in.
+    .files-row-onpath {
+        background: var(--hover-bg-color);
+    }
+
+    .files-row-in-column .files-col-name {
+        flex: 1;
+        min-width: 0;
+    }
+}
+
+.files-column-arrow {
+    margin-left: auto;
+    padding-left: 6px;
+    font-size: var(--text-2xs);
+    color: var(--secondary-text-color);
+}
+
 .files-header {
     position: sticky;
     top: 0;

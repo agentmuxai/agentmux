@@ -52,6 +52,8 @@ export function useFilesKeys(fv: FilesLocal, win: FilesWindow, opening: FilesOpe
         const listKey = (): boolean => {
             if (e.key === "ArrowDown") move({ delta: step });
             else if (e.key === "ArrowUp") move({ delta: -step });
+            else if (model.columnsOn() && (e.key === "ArrowRight" || e.key === "ArrowLeft") && !e.altKey && !e.shiftKey && !isMod(e))
+                model.cols.arrow(e.key === "ArrowRight" ? "right" : "left");
             else if (model.treeOn() && (e.key === "ArrowRight" || e.key === "ArrowLeft") && !e.altKey && !e.shiftKey && !isMod(e))
                 model.treeArrow(e.key === "ArrowRight" ? "right" : "left");
             else if (grid() && e.key === "ArrowRight" && !e.altKey) move({ delta: 1 });

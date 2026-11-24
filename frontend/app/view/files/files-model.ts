@@ -39,6 +39,7 @@ import { baseName, isWithin, joinPath, joinRel, normalizePath, parentOf, samePat
 import { treeMove } from "@/app/fs/tree/tree-keys";
 import { flattenTree, isUnderRel, labelOf, parentRel, type TreeRow } from "@/app/fs/tree/tree-rows";
 import { crawlFolders, rankMatches, whereOf } from "./files-find";
+import { ColumnsState } from "./files-columns-state";
 import { EMPTY_SELECTION, pruneSelection, type Selection } from "./files-selection";
 import { clipboard, FilesOps, opFinishedText, sameVolume, setClipboard } from "./files-ops";
 import { systemIconsAvailable } from "./files-icons";
@@ -251,6 +252,8 @@ export class FilesModel {
 
     /** Sorted, hidden entries filtered unless shown. */
     readonly entries: () => FsEntry[];
+    /** The columns view: which column the keys are in, the columns, and the moves between them. */
+    readonly cols: ColumnsState;
     /** The tree view's rows (empty unless it is on), and each by its name. */
     readonly treeRows: () => TreeRow[];
     readonly treeInfo: () => ReadonlyMap<string, TreeRow>;
@@ -350,7 +353,29 @@ export class FilesModel {
                 : []
         );
         this.treeInfo = createMemo(() => new Map(this.treeRows().map((r) => [r.entry.name, r])));
+        this.cols = new ColumnsState({
+            on: () => this.columnsOn(),
+            expanded: () => this.expanded(),
+            setExpanded: (next) => this.setExpanded(next),
+            kids: () => this.kids(),
+            setKids: (next) => this.setKids(next),
+            rawEntries: () => this.rawEntries(),
+            shows: (e) => this.showHidden() || !e.hidden,
+            sort: (list) => sortEntries(list, this.sortKey(), this.sortDir()),
+            filter: () => this.filter(),
+            selection: () => this.selection(),
+            setSelection: (next) => this.setSelection(next),
+            reveal: (name) => this.setRevealRequest({ name }),
+            open: (rel) => {
+                void this.watchKid(rel);
+                void this.loadKids(rel);
+            },
+            close: (rel) => this.unwatchKid(rel),
+            listable: (rel) => !this.needsConsent(this.pathOf(rel)),
+            maxDepth: MAX_EXPANDED,
+        });
         this.entries = createMemo(() => {
+            if (this.columnsOn()) return this.cols.entries();
             if (this.treeOn()) return this.treeRows().map((r) => r.entry);
             if (this.deepOn()) return this.ranked();
             const needle = this.filter().trim().toLowerCase();
@@ -407,7 +432,12 @@ export class FilesModel {
      *  on a host (it would show whatever is at that path here). */
     readonly showPreview = (): boolean => this.ctx.meta()?.[META_PREVIEW] === true && !this.connection();
     /** Details (rows and columns) or a grid of thumbnails (§5.2). */
-    readonly viewMode = (): "details" | "grid" => (this.ctx.meta()?.[META_VIEW] === "grid" ? "grid" : "details");
+    readonly viewMode = (): "details" | "grid" | "columns" => {
+        const v = this.ctx.meta()?.[META_VIEW];
+        return v === "grid" || v === "columns" ? v : "details";
+    };
+    /** Columns (Miller) are chosen: one list per level, the folder chosen in each shown in the next. */
+    readonly columnsOn = (): boolean => this.viewMode() === "columns";
 
     /** Clicking a column header: sort by it, or flip its direction. */
     setSort(key: SortKey): void {
@@ -428,7 +458,23 @@ export class FilesModel {
     }
 
     toggleViewMode(): void {
+        this.leaveColumns();
         void this.ctx.setMeta({ [META_VIEW]: this.viewMode() === "grid" ? null : "grid" });
+    }
+
+    /** Chooses the columns view, or goes back to the list. */
+    toggleColumns(): void {
+        // Folders opened in place by the tree are not a chain: start from the shown folder alone.
+        this.resetTree();
+        this.setSelection(EMPTY_SELECTION);
+        void this.ctx.setMeta(this.columnsOn() ? { [META_VIEW]: null } : { [META_VIEW]: "columns", [META_TREE]: null });
+    }
+
+    /** The folders opened in place and the rows chosen belong to the view being left: start the next one clean. */
+    private leaveColumns(): void {
+        if (!this.columnsOn()) return;
+        this.resetTree();
+        this.setSelection(EMPTY_SELECTION);
     }
 
     /** The tree view is chosen (it is the details view with folders that open in place). */
@@ -522,6 +568,7 @@ export class FilesModel {
             this.resetTree();
             void this.ctx.setMeta({ [META_TREE]: null });
         } else {
+            this.leaveColumns();
             void this.ctx.setMeta({ [META_TREE]: true, [META_VIEW]: null });
         }
     }
@@ -1132,6 +1179,7 @@ export class FilesModel {
 
     /** Forgets every opened folder and stops watching them (the folder shown changed, or the tree was turned off). */
     private resetTree(): void {
+        this.cols.reset();
         if (this.expanded().size === 0 && this.treeWatches.size === 0) return;
         for (const rel of [...this.treeWatches.keys()]) this.unwatchKid(rel);
         this.treeWatching.clear();
