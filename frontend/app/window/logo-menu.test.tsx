@@ -22,6 +22,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => {
     const createTab = vi.fn();
+    const reloadWindow = vi.fn();
     const openNewWindow = vi.fn(() => Promise.resolve());
     const openModal = vi.fn();
     const CommandPaletteModal = () => null;
@@ -32,6 +33,7 @@ const h = vi.hoisted(() => {
             openNewWindow,
             setKeyboardChordMode: vi.fn(),
             toggleDevtools: vi.fn(),
+            reloadWindow,
             openExternal: vi.fn(),
             closeWindow: vi.fn(() => Promise.resolve()),
         }),
@@ -68,7 +70,7 @@ const h = vi.hoisted(() => {
     // Dev mode (store/dev-mode.ts); a test can swap in a reactive source.
     const dev = { read: (): boolean => false };
     const registry = { getBlockComponentModel: () => null, getFocusedBlockId: () => null, openOrFocusPaneByView: vi.fn() };
-    return { registry, dev, workspaces, actions, createTab, openNewWindow, openModal, CommandPaletteModal, store, settings, caps, win, menu: { items: [] as MenuItem[], live: (): MenuItem[] => [], close: vi.fn() } };
+    return { registry, dev, workspaces, actions, createTab, reloadWindow, openNewWindow, openModal, CommandPaletteModal, store, settings, caps, win, menu: { items: [] as MenuItem[], live: (): MenuItem[] => [], close: vi.fn() } };
 });
 
 // keymodel.ts imports the store as "@/app/store/global", the menu as "@/store/global".
@@ -103,7 +105,22 @@ vi.mock("@/app/store/user-workspace", () => ({
     workspaceName: () => "Default Workspace",
 }));
 vi.mock("./workspaces", () => h.actions);
-vi.mock("@/app/store/command-registry", () => ({ commandRegistry: { run: vi.fn(() => false) } }));
+// The commands the menu names and runs by id, with the names and actions command-registry.ts gives them.
+vi.mock("@/app/store/command-registry", async () => {
+    const { openCommandPalette } = await import("@/app/store/open-command-palette");
+    const commands: Record<string, { label: string; execute: () => unknown }> = {
+        "tab:new": { label: "New Tab", execute: () => h.createTab() },
+        "window:new": { label: "New Window", execute: () => h.openNewWindow() },
+        "view:command-palette": { label: "Command Palette", execute: () => void openCommandPalette() },
+        "window:reload": { label: "Reload Window", execute: () => h.reloadWindow() },
+    };
+    return {
+        commandRegistry: {
+            get: (id: string) => commands[id],
+            run: vi.fn((id: string) => (commands[id] ? (void commands[id].execute(), true) : false)),
+        },
+    };
+});
 vi.mock("@/app/hook/useVoiceInput", () => ({ getVoiceSession: vi.fn() }));
 vi.mock("@/util/host-caps", () => ({
     hostHas: (cap: string) => (cap === "multiWindow" ? h.caps.multiWindow : cap === "windowTransparency"),
