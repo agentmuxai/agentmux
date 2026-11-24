@@ -65,6 +65,7 @@ export const RestartToUpdatePopover = (props: RestartToUpdatePopoverProps): JSX.
             placement="top-end"
             fitHeight
             onDismiss={props.onClose}
+            operatorOnly
             class="update-popover"
             role="dialog"
             aria-label="Restart to update AgentMux"

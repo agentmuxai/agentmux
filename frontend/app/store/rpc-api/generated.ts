@@ -364,6 +364,8 @@ import type { FsCreateResult } from "@/types/rpc/FsCreateResult";
 import type { FsDeleteReq } from "@/types/rpc/FsDeleteReq";
 import type { FsEmptyResult } from "@/types/rpc/FsEmptyResult";
 import type { FsGitStatus } from "@/types/rpc/FsGitStatus";
+import type { FsLinkFileCheck } from "@/types/rpc/FsLinkFileCheck";
+import type { FsLinkFileReq } from "@/types/rpc/FsLinkFileReq";
 import type { FsListReq } from "@/types/rpc/FsListReq";
 import type { FsListResult } from "@/types/rpc/FsListResult";
 import type { FsOpCancelReq } from "@/types/rpc/FsOpCancelReq";
@@ -1501,6 +1503,10 @@ export const GeneratedApi = {
   // command "fs.agent_folder"
   FsAgentFolderCommand(client: RpcClient, data: FsPathReq, opts?: RpcOpts): Promise<FsAgentFolder> {
     return client.rpcCall("fs.agent_folder", data, opts);
+  },
+  // command "fs.link_file_check"
+  FsLinkFileCheckCommand(client: RpcClient, data: FsLinkFileReq, opts?: RpcOpts): Promise<FsLinkFileCheck> {
+    return client.rpcCall("fs.link_file_check", data, opts);
   },
   // command "fs.git_status"
   FsGitStatusCommand(client: RpcClient, data: FsPathReq, opts?: RpcOpts): Promise<FsGitStatus> {

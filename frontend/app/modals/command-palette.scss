@@ -16,8 +16,8 @@
     // With no backdrop behind it the panel is the one thing that sets it off from the window: the menu family's
     // surface, opaque at any window opacity, with an edge, a ring and a shadow (R5).
     @include menu-frame.menu-surface;
-    // A row's least height. The list shows at most twelve of them (R2).
-    --palette-row-h: 30px;
+    // A row's least height. The list shows at most sixteen of them (R2).
+    --palette-row-h: 24px;
     width: 600px;
     // The panel is zoomed with the chrome and the root is not: a length from the window (vw, vh) is divided by the
     // zoom so the scaled panel keeps 8px of the window each side and 48px of its height.
@@ -73,15 +73,15 @@
 
 .command-palette-input-row {
     // The kit's magnifier is a square cell of (--ui-height - 2px), so the glyph has the same room on all four sides.
-    // The row sets --ui-height to its own height (the input's line, 14px x 1.5, and its 10px of padding above and
-    // below, plus the divider), so the cell is as tall as the row and the row has nothing else to size it by.
-    --ui-height: 42px;
+    // The row sets --ui-height to its own height (the input's 20px line, its 5px of padding above and below, and the
+    // divider, in a row of 32px), so the cell is as tall as the row and the row has nothing else to size it by.
+    --ui-height: 32px;
     display: flex;
     align-items: center;
     box-sizing: border-box;
     min-height: var(--ui-height);
-    // As much room right of the input as the cell leaves left of the glyph: (40px cell - the glyph's 10px) / 2.
-    padding: 0 15px 0 0;
+    // As much room right of the input as the cell leaves left of the glyph: (30px cell - the glyph's 10px) / 2.
+    padding: 0 10px 0 0;
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
 
@@ -96,10 +96,10 @@
     border: none;
     outline: none;
     color: var(--main-text-color);
-    font-size: var(--text-md);
+    font-size: var(--text-base);
     font-family: var(--font-sans);
-    line-height: 1.5;
-    padding: 10px 0;
+    line-height: 20px;
+    padding: 5px 0;
     // The input may shrink with a narrow panel. (An input's text-overflow does not reach its placeholder in Chromium,
     // so the placeholder is short enough to fit a 280px window whole instead.)
     min-width: 0;
@@ -114,8 +114,8 @@
     flex: 1;
     padding: var(--space-1) 0;
     overflow-x: hidden;
-    // Twelve rows, then it scrolls and the search row stays (R2).
-    max-height: calc(12 * var(--palette-row-h) + 2 * var(--space-1));
+    // Sixteen rows, then it scrolls and the search row stays (R2).
+    max-height: calc(16 * var(--palette-row-h) + 2 * var(--space-1));
 
     &::-webkit-scrollbar-track {
         background: transparent;
@@ -129,10 +129,10 @@
 .command-palette-item {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-2);
     box-sizing: border-box;
     min-height: var(--palette-row-h);
-    padding: 0 14px;
+    padding: 0 10px;
     cursor: default;
     user-select: none;
 
@@ -158,6 +158,12 @@
         outline-offset: -2px;
     }
 
+    // An agent's row: a bar down its left edge in the agent's own colour (the identity tone its pane's ring and its
+    // Swarm row use), so the eye finds it at this height. The name stays the name; the colour only backs it up.
+    &.has-identity {
+        box-shadow: inset 3px 0 0 var(--palette-identity);
+    }
+
     // The first row of a group below the first: a hairline above it (R12).
     &.group-start {
         border-top: 1px solid var(--border-color);
@@ -165,11 +171,16 @@
 }
 
 .command-palette-item-icon {
-    font-size: var(--text-base);
+    font-size: var(--text-sm);
     color: var(--secondary-text-color);
-    width: 16px;
+    width: 14px;
     text-align: center;
     flex-shrink: 0;
+}
+
+// An agent's icon is drawn in its colour as well as marked by the bar.
+.command-palette-item.has-identity .command-palette-item-icon {
+    color: var(--palette-identity);
 }
 
 // The label, then what is said about it (an agent's seat and state), on one line that gives way to the category.
@@ -237,7 +248,7 @@
 }
 
 .command-palette-empty {
-    padding: var(--space-6) 14px;
+    padding: var(--space-6) 10px;
     text-align: center;
     color: var(--secondary-text-color);
     font-size: var(--text-base);

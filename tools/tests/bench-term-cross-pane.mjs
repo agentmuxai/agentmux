@@ -115,7 +115,8 @@ function findAuthFile(overrideWsUrl, overrideAuthKey) {
     if (candidates.length === 0) {
         throw new Error(
             `No authkey.dev found under ~/.agentmux/dev/*/data/ or ~/.agentmux/versions/*/data/.\n` +
-                `Start an instance: task dev  (dev)  or launch the portable build.\n` +
+                `Start a dev instance: task dev. An installed or portable build does not publish its key:\n` +
+            `pass --ws-url and --auth-key to drive one.\n` +
                 `See docs/specs/SPEC_TEST_API_ACCESS.md §5`,
         );
     }

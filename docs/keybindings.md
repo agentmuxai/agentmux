@@ -39,6 +39,8 @@ The same list is in the app: press F1, or open the Help pane. A terminal keeps e
 | Move tab left | ⇧⌘PgUp | Ctrl+Alt+Shift+PgUp |
 | Move tab right | ⇧⌘PgDn | Ctrl+Alt+Shift+PgDn |
 | Rename tab | F2 | F2 |
+| New tab (browser pane) | ⌘T | Ctrl+T |
+| Close this tab (browser pane) | ⌘W | Ctrl+W |
 | New Incognito tab (browser pane) | ⇧⌘N | Ctrl+Shift+N |
 
 ## Panes
@@ -230,6 +232,7 @@ Gestures that aren't plain keys: modifier + mouse, double- and middle-click, dra
 | What it does | Where | macOS | Windows / Linux |
 |---|---|---|---|
 | Address bar / reload / back / forward | in a browser pane | ⌘ + L or ⌘ + R or ⌥ + ← or ⌥ + → | Ctrl + L or Ctrl + R or Alt + ← or Alt + → |
+| New tab / close this tab (the pane's last tab stays) | in a browser pane | ⌘ + T or ⌘ + W | Ctrl + T or Ctrl + W |
 | Back / forward in that page (a plain side button re-selects panes) | over a browser pane | ⌃ + sidebutton | Ctrl + sidebutton |
 
 ### Memory

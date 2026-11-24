@@ -24,7 +24,7 @@ use std::sync::Arc;
 use crate::backend::fs_ops;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
-    FsAgentFolder, FsCreateReq, FsDeleteReq, FsEmptyResult, FsGitStatus, FsListReq, FsListResult, FsOpCancelReq, FsOpResolveReq,
+    FsAgentFolder, FsCreateReq, FsDeleteReq, FsEmptyResult, FsGitStatus, FsLinkFileReq, FsListReq, FsListResult, FsOpCancelReq, FsOpResolveReq,
     FsOpResult, FsOpResults, FsOpStartReq, FsOpStartResult, FsPathReq, FsPlace, FsPlaceKind, FsPlacesReq, FsPlacesResult,
     FsCreateResult, FsRenameReq, FsRenameResult, FsRestoreReq, FsTrashReq, FsUnwatchReq, FsWatchReq,
     FsWatchResult,
@@ -341,6 +341,11 @@ fn register_fs_browsing(engine: &Arc<WshRpcEngine>, state: &AppState) {
         async move { fs_git_status(&s, cmd).await }
     });
     engine.register_typed("fs.agent_folder", |cmd: FsPathReq, _ctx| async move { fs_agent_folder(cmd).await });
+    let s = state.clone();
+    engine.register_typed("fs.link_file_check", move |cmd: FsLinkFileReq, _ctx| {
+        let s = s.clone();
+        async move { super::link_file_check::fs_link_file_check(&s, cmd).await }
+    });
 }
 
 fn register_fs_mutations(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -442,6 +447,7 @@ mod tests {
             ("fs.op.cancel", "FsOpCancelReq", "FsEmptyResult"),
             ("fs.git_status", "FsPathReq", "FsGitStatus"),
             ("fs.agent_folder", "FsPathReq", "FsAgentFolder"),
+            ("fs.link_file_check", "FsLinkFileReq", "FsLinkFileCheck"),
         ] {
             let row = find(cmd);
             assert_eq!(row["requestName"], req, "{cmd} request");

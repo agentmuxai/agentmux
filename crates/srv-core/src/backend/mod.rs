@@ -135,6 +135,7 @@ pub mod operator_config_seed;
 pub mod history;
 pub mod slug_migration;
 pub mod host_agent_files;
+pub mod git_program_settings;
 pub mod host_os;
 pub mod lan;
 pub mod lsp;
@@ -302,6 +303,7 @@ pub mod worker_failure_note;
 /// A leader hears when its workers (and the agents that hold its tasks) fail, stop or wait on a question.
 pub mod worker_notes;
 pub mod quiet_watch;
+pub mod urgent_asks;
 pub mod note_outbox;
 
 pub use oref::ORef;

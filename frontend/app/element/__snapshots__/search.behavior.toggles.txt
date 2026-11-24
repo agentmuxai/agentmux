@@ -1,6 +1,6 @@
 requestAnimationFrame
 -- all off
-<div class="search-container" style="position: absolute; left: 0px; top: 0px;">
+<div class="search-container" data-pane-overlay="" style="position: absolute; left: 0px; top: 0px;">
   <input data-stand="Input" placeholder="Search" data-autofocus="true" data-autoselect="true">
   <div aria-live="polite" aria-label="Search Results" class="search-results hidden">
     "1"
@@ -19,7 +19,7 @@ DeclIconButton Case Sensitive click
 DeclIconButton Regular Expression click
 regex=true caseSensitive=true wholeWord=false
 -- case and regex on
-<div class="search-container" style="position: absolute; left: 0px; top: 0px;">
+<div class="search-container" data-pane-overlay="" style="position: absolute; left: 0px; top: 0px;">
   <input data-stand="Input" placeholder="Search" data-autofocus="true" data-autoselect="true">
   <div aria-live="polite" aria-label="Search Results" class="search-results hidden">
     "1"
@@ -38,7 +38,7 @@ DeclIconButton Whole Word click
 DeclIconButton Case Sensitive click
 regex=true caseSensitive=false wholeWord=true
 -- whole word and regex on
-<div class="search-container" style="position: absolute; left: 0px; top: 0px;">
+<div class="search-container" data-pane-overlay="" style="position: absolute; left: 0px; top: 0px;">
   <input data-stand="Input" placeholder="Search" data-autofocus="true" data-autoselect="true">
   <div aria-live="polite" aria-label="Search Results" class="search-results hidden">
     "1"

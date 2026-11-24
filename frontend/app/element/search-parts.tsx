@@ -37,8 +37,9 @@ const closeLabel = (): string => `Close (${keyLabel("Escape")})`;
 
 export function SearchBar(props: { s: SearchState }): JSX.Element {
     const s = props.s;
+    // `data-pane-overlay`: over a browser pane's page the bar punches a hole through the native window.
     return (
-        <div class="search-container" style={s.style()} ref={s.register}>
+        <div class="search-container" style={s.style()} ref={s.register} data-pane-overlay data-search-owner={s.owner}>
             <Input
                 placeholder="Search"
                 value={s.searchValue()}

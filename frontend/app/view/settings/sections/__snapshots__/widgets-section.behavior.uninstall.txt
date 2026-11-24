@@ -47,9 +47,7 @@
               <i aria-hidden="true" class="fa-solid fa-folder-open">
               "Show folder"
             <span class="widget-row-confirm">
-              "Delete"
-              "Notes"
-              "and its data?"
+              "Delete Notes and its data?"
             <button type="button" class="ui-button ui-tone-danger">
               "Delete"
             <button type="button" class="ui-button ui-tone-neutral">

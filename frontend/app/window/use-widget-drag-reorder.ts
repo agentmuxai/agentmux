@@ -31,8 +31,10 @@ export function useWidgetDragReorder(opts: {
     /** The pins as saved, hidden ones included (getSavedPinNames), so a drag doesn't drop a pin
      *  that is hidden right now. Without it the visible order is written as is. */
     savedPins?: () => string[];
+    /** The names as they are written to `widget:pinned` (pinsToSave), so a migrated pin keeps where it opens. */
+    pinsToSave?: (names: string[]) => string[];
 }) {
-    const { containerRef, pinnedWidgets, savedPins } = opts;
+    const { containerRef, pinnedWidgets, savedPins, pinsToSave } = opts;
 
     const [dragState, setDragState] = createSignal<DragState>(DRAG_IDLE);
 
@@ -102,8 +104,8 @@ export function useWidgetDragReorder(opts: {
         next.splice(adjustedDrop, 0, dragShort);
         if (next.join(",") !== shortNames.join(",")) {
             fireAndForget(async () => {
-                const toSave = savedPins ? withVisibleOrder(savedPins(), next) : next;
-                await RpcApi.SetConfigCommand(TabRpcClient, { "widget:pinned": toSave });
+                const ordered = savedPins ? withVisibleOrder(savedPins(), next) : next;
+                await RpcApi.SetConfigCommand(TabRpcClient, { "widget:pinned": pinsToSave ? pinsToSave(ordered) : ordered });
             });
         }
     };

@@ -297,6 +297,16 @@ impl ShellController {
                 cmd.env(key, value);
             }
         }
+        // And the git settings that keep a shared folder's own configuration from running a program.
+        if obj::meta_get_bool(block_meta, crate::backend::git_program_settings::META_KEY_PTYSHELL_GIT_PROGRAM_SETTINGS, false) {
+            let entries = crate::backend::git_program_settings::entries_over(
+                |k| cmd.get_env(k).and_then(|v| v.to_str()).map(str::to_string),
+                &crate::backend::git_program_settings::persons_values(),
+            );
+            for (key, value) in entries {
+                cmd.env(key, value);
+            }
+        }
         // Identity M4a: a terminal pane never carries a token. No counter —
         // most panes are not agents — but an agent CLI that registers from
         // this block shows in the live gauge.

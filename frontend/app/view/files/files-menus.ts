@@ -41,8 +41,11 @@ export type RowMenuActions = {
 
 export const buildRowMenu = (model: FilesModel, entry: FsEntry, actions: RowMenuActions): ContextMenuItem[] => {
     const { openEntry, openInNewTab, copyPaths, askDeletePermanently } = actions;
-    const list = model.selectedEntries();
-    const many = list.length > 1;
+    // More than one row selected: the menu acts on the selection, as the topmost rows of it (a folder and the rows opened in it
+    // are the folder), which may be a single one.
+    const many = model.selectedEntries().length > 1;
+    const list = model.topmostSelected();
+    const count = list.length;
     const path = model.pathOf(entry.name);
     const fail = (err: unknown) => model.setStatus({ text: errorText(err), tone: "error" });
     const items: ContextMenuItem[] = [{ type: "action", label: "Open", icon: entry.is_dir ? MENU_ICON.openFolder : MENU_ICON.open, shortcut: "Enter", onSelect: () => openEntry(entry) }];
@@ -63,10 +66,10 @@ export const buildRowMenu = (model: FilesModel, entry: FsEntry, actions: RowMenu
         { type: "separator" },
         { type: "action", label: "Cut", icon: MENU_ICON.cut, shortcut: shortcutFor("files:cut"), onSelect: () => model.copyToClipboard("cut", many ? list : [entry]) },
         { type: "action", label: "Copy", icon: MENU_ICON.copy, shortcut: shortcutFor("files:copy"), onSelect: () => model.copyToClipboard("copy", many ? list : [entry]) },
-        { type: "action", label: many ? `Copy ${list.length} paths` : "Copy path", icon: MENU_ICON.copy, onSelect: () => copyPaths(many ? list : [entry]) },
+        { type: "action", label: many && count > 1 ? `Copy ${count} paths` : "Copy path", icon: MENU_ICON.copy, onSelect: () => copyPaths(many ? list : [entry]) },
         { type: "separator" },
         { type: "action", label: "Rename", icon: MENU_ICON.rename, shortcut: shortcutFor("files:rename"), disabled: many, onSelect: () => model.setRenaming(entry.name) },
-        { type: "action", label: many ? `Move ${list.length} items to Trash` : "Move to Trash", icon: MENU_ICON.delete, shortcut: shortcutFor("files:trash"), onSelect: () => void model.trash(many ? list : [entry]) },
+        { type: "action", label: many && count > 1 ? `Move ${count} items to Trash` : "Move to Trash", icon: MENU_ICON.delete, shortcut: shortcutFor("files:trash"), onSelect: () => void model.trash(many ? list : [entry]) },
         {
             type: "action",
             label: "Delete permanently…", icon: MENU_ICON.deletePermanently,

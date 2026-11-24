@@ -74,6 +74,8 @@ import { registerPaneTab } from "@/app/store/pane-tab-registry";
 import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
 import * as util from "@/util/util";
 import { BlockFrame, computeBlockActiveBorderColor, computeBlockIdentityColor } from "./blockframe";
+import { deriveInk } from "@/app/backdrop/ink";
+import { contrastRatio } from "./pane-color-scheme";
 
 registerPaneTab({
     apiVersion: 1,
@@ -319,6 +321,35 @@ describe("the colours", () => {
         expect(style(lightPane.view.container).getPropertyValue("--block-identity-color")).toBe(
             computeBlockIdentityColor(meta, true)
         );
+    });
+});
+
+describe("the identity colour inside a backdrop", () => {
+    // The agent pane's working-status text, spinner and progress bar read it (`var(--block-identity-color)`).
+    const base = { view: "agent", "frame:hue": 270 };
+    const identityOf = (meta: Record<string, unknown>) => {
+        const t = setup({ meta });
+        const value = style(t.view.container).getPropertyValue("--block-identity-color");
+        cleanup();
+        return value;
+    };
+    const pick = (hex: string) => ({ ...base, backdrop: { kind: "color", hex, polarity: "follow", version: 1 } });
+    const layersOf = (hex: string) => Object.values(deriveInk(hex).surfaces);
+
+    it("is as it was with no backdrop", () => {
+        expect(identityOf(base)).toBe(computeBlockIdentityColor(base as never, false));
+    });
+
+    it.each(["#ffffff", "#fff6b0", "#e8f4ff"])("reads on a light backdrop (%s): moved in lightness until it clears 4.5:1 on every layer", (hex) => {
+        const own = computeBlockIdentityColor(base as never, false)!;
+        const inside = identityOf(pick(hex));
+        expect(inside).not.toBe(own);
+        for (const layer of layersOf(hex)) expect(contrastRatio(inside, layer), `${inside} on ${layer}`).toBeGreaterThanOrEqual(4.5);
+    });
+
+    it.each(["#000000", "#101820", "#1b1b2f"])("is left as it was on a dark backdrop (%s) where it already reads", (hex) => {
+        const own = computeBlockIdentityColor(base as never, false)!;
+        expect(identityOf(pick(hex))).toBe(own);
     });
 });
 

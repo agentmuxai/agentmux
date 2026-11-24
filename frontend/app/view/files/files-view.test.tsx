@@ -138,6 +138,7 @@ import { setPlatform } from "@/util/platformutil";
 import { FilesModel } from "./files-model";
 import { openTargetOf } from "./files-open";
 import { clipboard, setClipboard } from "./files-ops";
+import { buildRowMenu } from "./files-menus";
 import { recentPlaces, resetPlacesForTests } from "./files-pins";
 import { resetThumbnailsForTests } from "./files-thumbs";
 import { noteToolCall, noteToolResult, resetTouchedForTests } from "@/app/store/touched-files";
@@ -2002,6 +2003,114 @@ describe("the Files pane: tree view, folders that change under it", () => {
         resolvers[1]("w-second");
         await waitFor(() => expect(h.rpc.FsUnwatchCommand).toHaveBeenCalledWith(expect.anything(), { watch_id: "w-second" }));
         expect(h.rpc.FsUnwatchCommand).not.toHaveBeenCalledWith(expect.anything(), { watch_id: "w-first" });
+    });
+});
+
+describe("the Files pane: tree view, rows that share a label or a name with another folder's", () => {
+    const SRC = `${HOME}\\src`;
+    const LIB = `${SRC}\\lib`;
+    const twisty = (v: ReturnType<typeof mount>, label: string) => v.container.querySelector(`[aria-label="${label}"]`) as HTMLElement;
+    const rowOf = (v: ReturnType<typeof mount>, name: string) => v.container.querySelector(`.files-row[data-name="${name}"]`) as HTMLElement;
+
+    beforeEach(() => {
+        tabs.opened = [];
+        h.state.dirs.set(HOME, [f("b.txt"), d("src"), d("lib"), f("a2.md")]);
+        h.state.dirs.set(SRC, [f("main.rs"), d("lib")]);
+        h.state.dirs.set(LIB, [f("util.ts")]);
+        h.state.dirs.set(`${HOME}\\lib`, [f("top.ts")]);
+    });
+
+    it("copies a folder and the rows opened inside it as the folder alone", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toContain("main.rs"));
+        fireEvent.keyDown(v.list(), { key: "a", ctrlKey: true });
+        fireEvent.keyDown(v.list(), { key: "c", ctrlKey: true });
+        // Not `src\\main.rs` besides `src`: pasted, each would land under its own name, and main.rs would be twice in the destination.
+        expect(clipboard()).toEqual({ kind: "copy", paths: [`${HOME}\\lib`, SRC, `${HOME}\\a2.md`, `${HOME}\\b.txt`] });
+        fireEvent.keyDown(v.list(), { key: "x", ctrlKey: true });
+        expect(clipboard()?.paths).toEqual([`${HOME}\\lib`, SRC, `${HOME}\\a2.md`, `${HOME}\\b.txt`]);
+    });
+
+    it("acts on the folder from the menu of a row opened in it, when both are selected", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toContain("main.rs"));
+        // Both rows selected: the menu of the inner one acts on the selection, which is the folder.
+        v.model.setSelection({ names: new Set(["src", "src/main.rs"]), focus: "src/main.rs", anchor: "src" });
+        const entry = v.model.entries().find((e) => e.name === "src/main.rs")!;
+        const menu = buildRowMenu(v.model, entry, { openEntry: () => {}, openInNewTab: () => {}, copyPaths: () => {}, askDeletePermanently: () => {} });
+        (menu.find((i) => i.type === "action" && i.label === "Copy") as { onSelect: () => void }).onSelect();
+        expect(clipboard()).toEqual({ kind: "copy", paths: [SRC] });
+    });
+
+    it("keeps a row opened in a selected folder when the folder itself is not selected", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toContain("main.rs"));
+        fireEvent.click(rowOf(v, "src/main.rs"));
+        fireEvent.keyDown(v.list(), { key: "c", ctrlKey: true });
+        expect(clipboard()).toEqual({ kind: "copy", paths: [`${SRC}\\main.rs`] });
+    });
+
+    it("drags a folder and the rows opened inside it as the folder alone", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toContain("main.rs"));
+        fireEvent.keyDown(v.list(), { key: "a", ctrlKey: true });
+        const data = new Map<string, string>();
+        const dt = { setData: (k: string, val: string) => data.set(k, val), effectAllowed: "" };
+        fireEvent.dragStart(rowOf(v, "src"), { dataTransfer: dt });
+        expect(JSON.parse(data.get(PATHS_MIME)!)).toEqual([`${HOME}\\lib`, SRC, `${HOME}\\a2.md`, `${HOME}\\b.txt`]);
+    });
+
+    it("opens the folder a middle-click is on in a new tab, not another of the same label", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toContain("main.rs"));
+        // src\lib shows as `lib`, as the folder `lib` of the shown folder does.
+        fireEvent(rowOf(v, "src/lib"), new MouseEvent("auxclick", { bubbles: true, button: 1 }));
+        await waitFor(() => expect(tabs.opened).toEqual([["b1", LIB]]));
+        fireEvent(rowOf(v, "lib"), new MouseEvent("auxclick", { bubbles: true, button: 1 }));
+        await waitFor(() => expect(tabs.opened).toEqual([["b1", LIB], ["b1", `${HOME}\\lib`]]));
+    });
+});
+
+describe("the Files pane: tree view, a watch asked before the pane went elsewhere", () => {
+    const OTHER = "C:\\Users\\b";
+    const twisty = (v: ReturnType<typeof mount>, label: string) => v.container.querySelector(`[aria-label="${label}"]`) as HTMLElement;
+
+    it("lets go of the old folder's watch when a folder of the same name was opened in the new one", async () => {
+        h.state.dirs.set(OTHER, [d("src")]);
+        h.state.dirs.set(`${OTHER}\\src`, [f("x.rs")]);
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        const resolvers: Array<(id: string) => void> = [];
+        const pending = () => new Promise<{ watch_id: string }>((resolve) => resolvers.push((id) => resolve({ watch_id: id })));
+        // The watches asked for, in order: src here (held back), the other folder itself, then its src (held back).
+        h.rpc.FsWatchCommand.mockImplementationOnce(pending)
+            .mockImplementationOnce(async () => ({ watch_id: "w-pane" }))
+            .mockImplementationOnce(pending);
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(resolvers).toHaveLength(1));
+        await v.model.navigate(OTHER);
+        await waitFor(() => expect(v.names()).toEqual(["src"]));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(resolvers).toHaveLength(2));
+        // The first answer is for C:\\Users\\a\\src: it must not take the place of the watch of C:\\Users\\b\\src.
+        resolvers[0]("w-old");
+        await waitFor(() => expect(h.rpc.FsUnwatchCommand).toHaveBeenCalledWith(expect.anything(), { watch_id: "w-old" }));
+        resolvers[1]("w-new");
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        expect(h.rpc.FsUnwatchCommand).not.toHaveBeenCalledWith(expect.anything(), { watch_id: "w-new" });
+        // And it is the one kept: a change in the folder reaches it, and closing the folder lets it go.
+        fireEvent.click(twisty(v, "Close src"));
+        await waitFor(() => expect(h.rpc.FsUnwatchCommand).toHaveBeenCalledWith(expect.anything(), { watch_id: "w-new" }));
     });
 });
 

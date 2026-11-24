@@ -40,7 +40,7 @@ import { treeMove } from "@/app/fs/tree/tree-keys";
 import { flattenTree, isUnderRel, labelOf, parentRel, type TreeRow } from "@/app/fs/tree/tree-rows";
 import { crawlFolders, rankMatches, whereOf } from "./files-find";
 import { ColumnsState } from "./files-columns-state";
-import { EMPTY_SELECTION, pruneSelection, type Selection } from "./files-selection";
+import { EMPTY_SELECTION, pruneSelection, topmost, type Selection } from "./files-selection";
 import { addRecent } from "./files-pins";
 import { childNamesOf, namesIn } from "./files-names";
 import { landedAsPlanned, movedOk, planMoveUndo, restorable, type MovedItem, type UndoPlan } from "./files-undo-move";
@@ -989,6 +989,11 @@ export class FilesModel {
         return this.entries().filter((e) => names.has(e.name));
     }
 
+    /** The selected entries an operation (copy, cut, trash, drag) takes: those not inside another selected folder. */
+    topmostSelected(): FsEntry[] {
+        return topmost(this.selectedEntries());
+    }
+
     /** The path of a row: its name is a path from the shown folder in the tree view (`src/a.ts`). */
     pathOf(name: string): string {
         return joinRel(this.path(), name);
@@ -1413,7 +1418,9 @@ export class FilesModel {
         const path = this.pathOf(rel);
         try {
             const res = await RpcApi.FsWatchCommand(TabRpcClient, { path, block_id: this.blockId });
-            if (this.disposed || !this.treeWatching.has(rel) || !this.expanded().has(rel) || this.treeWatches.has(rel)) {
+            // The name may mean another folder now: the pane went elsewhere while this was asked, and `src` was opened there.
+            const same = this.pathOf(rel) === path;
+            if (this.disposed || !same || !this.treeWatching.has(rel) || !this.expanded().has(rel) || this.treeWatches.has(rel)) {
                 void RpcApi.FsUnwatchCommand(TabRpcClient, { watch_id: res.watch_id }).catch(() => {});
             } else {
                 this.treeWatches.set(rel, res.watch_id);
@@ -1421,7 +1428,8 @@ export class FilesModel {
         } catch {
             // No live updates for this folder; Refresh still works.
         } finally {
-            this.treeWatching.delete(rel);
+            // An answer for a folder the name no longer means must leave the marker of the watch asked for the new one.
+            if (this.pathOf(rel) === path) this.treeWatching.delete(rel);
         }
     }
 
