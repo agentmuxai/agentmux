@@ -7,7 +7,7 @@
 //! write only [`mark`]s, which costs one atomic store, and one task publishes
 //! `history:sessions:changed` at most once per [`TICK`] while something was
 //! marked. A window that shows the list reloads it on the event
-//! (`frontend/app/view/history/history-agents.tsx`).
+//! (`frontend/app/view/audit/conversations/history-agents.tsx`).
 //!
 //! A write by another AgentMux sharing the transcript store (another channel)
 //! never reaches [`mark`]; the list's own safety poll covers it.

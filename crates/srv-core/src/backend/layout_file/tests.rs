@@ -693,7 +693,8 @@ fn wardens_other_sections_are_written_as_the_panes_that_replaced_them() {
     for (m, kind) in [
         (json!({ "view": "vault" }), "vault"),
         (json!({ "view": "warden", "warden:section": "vault" }), "vault"),
-        (json!({ "view": "warden", "warden:section": "history" }), "history"),
+        (json!({ "view": "warden", "warden:section": "history" }), "audit"),
+        (json!({ "view": "history" }), "audit"),
         (json!({ "view": "warden", "warden:section": "audit" }), "audit"),
         (json!({ "view": "warden", "warden:section": "host" }), "swarm"),
         (json!({ "view": "warden" }), "warden"),
@@ -706,7 +707,11 @@ fn wardens_other_sections_are_written_as_the_panes_that_replaced_them() {
         let v = view_from_block(&store, &meta(m.clone()), &ctx(false), &mut Vec::new());
         assert_eq!(v.view_type, kind, "{m}");
         // What is left of Warden is Jobs, and a file says so.
-        let want = if kind == "warden" { json!({ "section": "jobs" }) } else { json!({}) };
+        let want = match (kind, m["view"].as_str(), m.get("warden:section").and_then(|s| s.as_str())) {
+            ("warden", _, _) => json!({ "section": "jobs" }),
+            ("audit", Some("history"), _) | ("audit", Some("warden"), Some("history")) => json!({ "section": "conversations" }),
+            _ => json!({}),
+        };
         assert_eq!(Value::Object(v.config.clone()), want, "{m}");
     }
 }
@@ -778,7 +783,7 @@ fn old_warden_files_open_the_panes_that_replaced_its_sections() {
     let store = Store::open_in_memory().unwrap();
     for (view, pane) in [
         (json!({ "type": "warden", "config": { "section": "vault" } }), "vault"),
-        (json!({ "type": "warden", "config": { "section": "history" } }), "history"),
+        (json!({ "type": "warden", "config": { "section": "history" } }), "audit"),
         (json!({ "type": "warden", "config": { "section": "audit" } }), "audit"),
         (json!({ "type": "warden", "config": { "section": "host" } }), "swarm"),
         (json!({ "type": "warden" }), "audit"),
@@ -786,7 +791,7 @@ fn old_warden_files_open_the_panes_that_replaced_its_sections() {
         (json!({ "type": "warden", "config": { "section": "lan" } }), "audit"),
         (json!({ "type": "warden", "config": { "section": "internet" } }), "audit"),
         (json!({ "type": "warden", "config": { "section": "ambient" } }), "audit"),
-        (json!({ "type": "history" }), "history"),
+        (json!({ "type": "history" }), "audit"),
         (json!({ "type": "audit" }), "audit"),
     ] {
         let plan = plan_from_doc(&store, &one_pane(view.clone()), &opts(home.path(), false));
@@ -874,4 +879,32 @@ fn an_old_reviews_pane_opens_the_kanban_on_open_pull_requests() {
     // The task it showed is the card the Kanban opens.
     let plan = plan_from_doc(&store, &one_pane(json!({ "type": "reviews", "config": { "task": "work#12" } })), &opts(home.path(), false));
     assert_eq!(block_meta(&plan, 0, 0)["kanban:open"], "work#12");
+}
+
+#[test]
+fn history_and_audit_files_open_the_audit_pane_on_the_right_section() {
+    let home = tempfile::tempdir().unwrap();
+    let store = Store::open_in_memory().unwrap();
+    for (view, section) in [
+        (json!({ "type": "history" }), Some("conversations")),
+        (json!({ "type": "warden", "config": { "section": "history" } }), Some("conversations")),
+        (json!({ "type": "audit" }), None),
+        (json!({ "type": "audit", "config": { "section": "storage" } }), Some("storage")),
+        (json!({ "type": "audit", "config": { "section": "nope" } }), None),
+    ] {
+        let plan = plan_from_doc(&store, &one_pane(view.clone()), &opts(home.path(), false));
+        let m = block_meta(&plan, 0, 0);
+        assert_eq!(m["view"], "audit", "{view}");
+        assert_eq!(m.get("audit:section").and_then(|s| s.as_str()), section, "{view}");
+    }
+}
+
+#[test]
+fn an_audit_block_is_written_with_the_section_it_shows() {
+    let store = Store::open_in_memory().unwrap();
+    let v = view_from_block(&store, &meta(json!({ "view": "audit", "audit:section": "typed" })), &ctx(false), &mut Vec::new());
+    assert_eq!(v.view_type, "audit");
+    assert_eq!(Value::Object(v.config.clone()), json!({ "section": "typed" }));
+    let v = view_from_block(&store, &meta(json!({ "view": "audit" })), &ctx(false), &mut Vec::new());
+    assert_eq!(Value::Object(v.config.clone()), json!({}));
 }

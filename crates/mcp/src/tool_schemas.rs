@@ -328,7 +328,7 @@ pub(crate) const PANE_TOOL: &str = r#"{
     "properties": {
       "action":        { "type": "string", "enum": ["whoami", "layout", "open", "new_tab", "activate_tab", "focus_window", "rename", "resize", "move", "place", "dock", "float"], "description": "What to do" },
       "query":         { "type": "string", "enum": ["layout", "windows", "workspaces", "tabs"], "description": "layout: what to return (default layout)" },
-      "view":          { "type": "string", "enum": ["editor", "media", "files", "settings", "vault", "connectors", "memory", "kanban", "swarm", "audit", "history", "atlas", "drone", "toolchain", "tower", "help", "shortcuts", "sysinfo"], "description": "open: the kind of pane; with path for editor, media and files, else with place" },
+      "view":          { "type": "string", "enum": ["editor", "media", "files", "settings", "vault", "connectors", "memory", "kanban", "swarm", "audit", "atlas", "drone", "toolchain", "tower", "help", "shortcuts", "sysinfo"], "description": "open: the kind of pane; with path for editor, media and files, else with place" },
       "link":          { "type": "string", "description": "open: a deep link, agentmux://view/place?key=value#anchor (for example agentmux://settings/recording#recording.engine or agentmux://kanban/task/48139)" },
       "place":         { "type": "string", "description": "open: the place inside view, as ids joined by / (recording, task/48139, entry/e_4f2a9c7b1d); for editor and files the absolute path" },
       "params":        { "type": "object", "description": "open: the place's parameters by name (board, agent, line, select)" },

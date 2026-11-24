@@ -98,6 +98,7 @@ pub mod m0049_drone_versions;
 pub mod m0050_drone_checkpoints;
 pub mod m0051_palette_12_snap;
 pub mod m0052_drone_access;
+pub mod m0053_history_into_audit;
 pub mod backup;
 pub mod gate;
 pub mod prepare;
@@ -281,4 +282,5 @@ static REGISTRY: &[&(dyn Migration + Sync)] = &[
     &m0050_drone_checkpoints::M0050DroneCheckpoints,
     &m0051_palette_12_snap::M0051Palette12Snap,
     &m0052_drone_access::M0052DroneAccess,
+    &m0053_history_into_audit::M0053HistoryIntoAudit,
 ];
