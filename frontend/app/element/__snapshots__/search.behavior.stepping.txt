@@ -17,7 +17,7 @@ DeclIconButton Previous Result (Shift+Enter) click
 DeclIconButton Previous Result (Shift+Enter) click
 state: open=true search="" index=0 count=3
 -- buttons, 3 results
-<div class="search-container" data-pane-overlay="" style="position: absolute; left: 0px; top: 0px;">
+<div class="search-container" style="position: absolute; left: 0px; top: 0px;">
   <input data-stand="Input" placeholder="Search" data-autofocus="true" data-autoselect="true">
   <div aria-live="polite" aria-label="Search Results" class="search-results">
     "1"
@@ -29,7 +29,7 @@ state: open=true search="" index=0 count=3
     <button data-stand="DeclIconButton" data-elemtype="closebutton" title="Close (Esc)">
 state: open=true search="" index=0 count=3
 -- no results: the step buttons are off
-<div class="search-container" data-pane-overlay="" style="position: absolute; left: 0px; top: 0px;">
+<div class="search-container" style="position: absolute; left: 0px; top: 0px;">
   <input data-stand="Input" placeholder="Search" data-autofocus="true" data-autoselect="true">
   <div aria-live="polite" aria-label="Search Results" class="search-results hidden">
     "1"
@@ -44,7 +44,7 @@ state: open=true search="" index=0 count=0
 preventDefault Enter
 state: open=true search="" index=NaN count=0
 -- Enter with no results
-<div class="search-container" data-pane-overlay="" style="position: absolute; left: 0px; top: 0px;">
+<div class="search-container" style="position: absolute; left: 0px; top: 0px;">
   <input data-stand="Input" placeholder="Search" data-autofocus="true" data-autoselect="true">
   <div aria-live="polite" aria-label="Search Results" class="search-results hidden">
     "NaN"
