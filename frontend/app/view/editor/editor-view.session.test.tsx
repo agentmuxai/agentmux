@@ -422,6 +422,20 @@ describe("switching and closing tabs", () => {
         expect(v.model.activeTabAtom()?.loadError).toMatch(/binary/);
     });
 
+    it("a wide-first-line file that changes on disk stays in the Large text viewer without being read whole again", async () => {
+        const v = await mountView();
+        h.files.set("/home/u/wide.log", "x".repeat(100_001));
+        await open(v.model, "/home/u/wide.log");
+        expect(v.model.activeViewer()).toBe("large");
+        h.files.set("/home/u/wide.log", "x".repeat(100_050));
+        const mark = h.log.length;
+        await (v.model as any)._handleExternalFileChanged("/home/u/wide.log");
+        await settle();
+        expect(v.model.activeViewer()).toBe("large");
+        expect(h.log.slice(mark).filter((l) => l.startsWith("rpc ReadEditorFile"))).toEqual([]);
+        expect(v.model.activeTabAtom()?.loadError ?? null).toBeNull();
+    });
+
     it("a tab in another viewer leaves CodeMirror hidden, and coming back restores the text", async () => {
         const v = await mountView();
         const a = await open(v.model, "/home/u/a.ts");

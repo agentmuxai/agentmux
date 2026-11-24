@@ -191,6 +191,13 @@ fn find_context(mut hwnd: *mut std::ffi::c_void) -> Option<BrowserPaneContext> {
     None
 }
 
+/// Whether the pane window procedure takes a Ctrl+wheel to step the page's zoom itself: only for a real browser pane.
+/// A floating pane's window also carries this subclass (for the focus fix) but has no pane block id; its page is the
+/// app's own, whose zoom handlers need the wheel delivered to the DOM, so it is passed on to Chromium (#48454).
+pub(crate) fn takes_ctrl_wheel(block_id: &str) -> bool {
+    !block_id.is_empty()
+}
+
 /// The block id of the pane `hwnd` is a window of, if any.
 pub fn pane_block_for_hwnd(hwnd: *mut std::ffi::c_void) -> Option<String> {
     find_context(hwnd).map(|ctx| ctx.block_id)
@@ -261,7 +268,7 @@ pub unsafe fn install_browser_pane_subclass(
         // through to the same native zoom with Chromium's own steps.
         if msg == WM_MOUSEWHEEL {
             let ctrl_held = (wparam & 0x0008) != 0; // MK_CONTROL, low word of wParam
-            if ctrl_held {
+            if ctrl_held && find_context(hwnd).is_some_and(|c| takes_ctrl_wheel(&c.block_id)) {
                 // High word of wParam, signed: positive = wheel rotated
                 // forward/away from the user (the conventional "zoom in"
                 // direction), negative = toward the user ("zoom out").
@@ -455,4 +462,15 @@ pub unsafe fn install_browser_pane_subclass(
     windows_sys::Win32::UI::WindowsAndMessaging::EnumChildWindows(
         hwnd, Some(enum_children), 0,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::takes_ctrl_wheel;
+
+    #[test]
+    fn a_floating_pane_window_passes_ctrl_wheel_on_to_its_page() {
+        assert!(takes_ctrl_wheel("0c1f5a52-block"), "a browser pane steps its own page zoom");
+        assert!(!takes_ctrl_wheel(""), "a floater's window has no pane block: the app's zoom handlers get the wheel");
+    }
 }

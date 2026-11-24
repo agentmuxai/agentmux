@@ -73,7 +73,7 @@ function Control(props: ConnectorCardProps): JSX.Element {
         >
             <Show when={e().control !== "open"} fallback={chevron()}>
                 <Button
-                    density="compact"
+                    density="comfortable"
                     tone={e().control === "howto" ? "neutral" : "accent"}
                     icon={e().control === "reconnect" ? "rotate-right" : undefined}
                     aria-label={named()}
