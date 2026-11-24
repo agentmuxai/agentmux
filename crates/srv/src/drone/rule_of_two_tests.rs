@@ -43,6 +43,20 @@ fn a_write_that_reads_the_trigger_needs_an_approval_on_the_way() {
 }
 
 #[test]
+fn a_read_that_sends_a_credential_may_not_follow_an_address_from_outside() {
+    let read = |extra: Value| {
+        let mut data = json!({ "kind": "api", "method": "GET", "url": "{{trigger.url}}" });
+        data.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        graph(&[("get", data)], &[])
+    };
+    assert!(check(&read(json!({})), &webhook()).is_empty(), "a plain read may follow an address it was given");
+    assert_eq!(broken(&read(json!({ "headers": { "Authorization": "Bearer abc" } })), &webhook()), ["get"]);
+    assert_eq!(broken(&read(json!({ "headers": { "X-Thing": "{{env.AGENTMUX_DR_TOKEN}}" } })), &webhook()), ["get"]);
+    assert_eq!(broken(&read(json!({ "headers": { "Accept": "text/plain", "Cookie": "a=b" } })), &webhook()), ["get"]);
+    assert!(check(&read(json!({ "headers": { "Accept": "text/plain" } })), &webhook()).is_empty(), "a header that carries no secret is not one");
+}
+
+#[test]
 fn an_error_edge_out_of_an_approval_is_not_an_approval() {
     // A no and a silence fail the Approval, and only its `error` edge takes them: the write on it runs when nobody approved.
     let mut g = graph(&[("ok", approval()), ("post", comment("{{trigger.title}}"))], &[("ok", "post")]);

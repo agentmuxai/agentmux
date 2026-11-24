@@ -255,6 +255,23 @@ fn join(refs: &[String]) -> String {
     refs.iter().map(|r| format!("{{{{{r}}}}}")).collect::<Vec<_>>().join(", ")
 }
 
+/// Whether a request carries a credential: its `auth`, a header that names one (`Authorization`, a key, a token, a cookie) or
+/// whose value reads the environment or the Vault, or any text in it that reads them.
+fn sends_credential(node: &FlowNode) -> bool {
+    const NAMES: [&str; 6] = ["auth", "token", "key", "secret", "cookie", "password"];
+    let reads_secret = |t: &str| t.contains("{{env.") || t.contains("{{vault");
+    if node.data.get("auth").is_some() {
+        return true;
+    }
+    let header = node.data.get("headers").and_then(Value::as_object).is_some_and(|m| {
+        m.iter().any(|(name, value)| {
+            let name = name.to_lowercase();
+            NAMES.iter().any(|n| name.contains(n)) || reads_secret(&value.to_string())
+        })
+    });
+    header || texts_of(node).iter().any(|(_, t)| reads_secret(t))
+}
+
 /// The places in `node` that outside text may not choose, each with what it is.
 fn forbidden_places<'a>(node: &'a FlowNode, kind: BlockKind) -> Vec<(&'static str, String)> {
     let text = |key: &str| node.data.get(key).and_then(Value::as_str).unwrap_or("").to_string();
@@ -265,7 +282,7 @@ fn forbidden_places<'a>(node: &'a FlowNode, kind: BlockKind) -> Vec<(&'static st
             // Where a request goes matters when it carries a credential or changes something. A plain read with no
             // credential may follow an address an earlier answer gave (a redirect to a log, a next page): what it can
             // reach is limited by the engine's own refusal of private addresses, and it sends nothing secret.
-            if writes_outside(node, kind) || node.data.get("auth").is_some() {
+            if writes_outside(node, kind) || sends_credential(node) {
                 places.push(("the address a request goes to", address_of(&text("url")).to_string()));
             }
             places
