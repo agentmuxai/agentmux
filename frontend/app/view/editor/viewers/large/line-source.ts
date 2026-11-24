@@ -29,6 +29,15 @@ export const PAGE_BYTES_MAX = 4 * 1024 * 1024;
 /** Bytes read of a line in a page that is read a line at a time: room for LINE_SHOWN_MAX characters of any width. */
 export const LINE_READ_BYTES = 40_000;
 
+/** Characters one click on a cut line's note shows more of it. */
+export const EXPAND_STEP = 100_000;
+
+/** The most characters of one line that can be shown: one row is one text node, and it stays a size a page can draw. */
+export const EXPAND_MAX = 2_000_000;
+
+/** Lines shown longer than the cut that are kept: the reader's few, not a file's worth. */
+const EXPANDED_KEPT = 16;
+
 /** Which lines hold which bytes: `fileindexlines`. */
 export type IndexLines = (from: number, count: number) => Promise<FileIndexLinesResult>;
 
@@ -76,6 +85,8 @@ export class LineSource {
     private stamp = "";
     // Insertion order is use order: the first key is the least recently used.
     private readonly pages = new Map<number, LineText[]>();
+    /** Lines the reader asked to see more of, by line number (0-based): longer than the page's cut one. */
+    private readonly expanded = new Map<number, LineText>();
     private readonly loading = new Map<number, Promise<void>>();
 
     constructor(
@@ -99,7 +110,25 @@ export class LineSource {
 
     /** Line `n` (0-based), when its page is here. */
     lineAt(n: number): LineText | undefined {
-        return this.pages.get(Math.floor(n / PAGE_LINES))?.[n % PAGE_LINES];
+        return this.expanded.get(n) ?? this.pages.get(Math.floor(n / PAGE_LINES))?.[n % PAGE_LINES];
+    }
+
+    /** Whether line `n` (0-based) is cut and can show more of itself. */
+    canExpand(n: number): boolean {
+        const line = this.lineAt(n);
+        return !!line?.hidden && line.text.length < EXPAND_MAX;
+    }
+
+    /** Show EXPAND_STEP more characters of the cut line `n` (0-based), as far as EXPAND_MAX. */
+    async expand(n: number): Promise<void> {
+        const line = this.lineAt(n);
+        if (!line?.hidden || line.text.length >= EXPAND_MAX) return;
+        const r = await this.index(n, 1);
+        this.note(r);
+        const longer = await this.longLine(r.start, r.end, Math.min(EXPAND_MAX, line.text.length + EXPAND_STEP));
+        this.expanded.delete(n);
+        this.expanded.set(n, longer);
+        while (this.expanded.size > EXPANDED_KEPT) this.expanded.delete(this.expanded.keys().next().value as number);
     }
 
     /** Whether every line of `first..=last` that the file has is here. */
@@ -147,7 +176,10 @@ export class LineSource {
     /** A line index that is another file's (it changed while it was shown): what was read of the old one goes. */
     private note(r: FileIndexLinesResult): void {
         const stamp = `${r.size}:${r.mtime}`;
-        if (this.stamp && this.stamp !== stamp) this.pages.clear();
+        if (this.stamp && this.stamp !== stamp) {
+            this.pages.clear();
+            this.expanded.clear();
+        }
         this.stamp = stamp;
         this.total = r.total_lines;
         // What srv found in the file's own bytes beats the probe's "legacy".
@@ -167,15 +199,15 @@ export class LineSource {
         return lines;
     }
 
-    /** The line holding bytes `[start, end)`: its first LINE_READ_BYTES are read. */
-    private async longLine(start: number, end: number): Promise<LineText> {
+    /** The line holding bytes `[start, end)`: the bytes that hold its first `shown` characters are read. */
+    private async longLine(start: number, end: number, shown = LINE_SHOWN_MAX): Promise<LineText> {
         const length = end - start;
         if (length <= 0) return { text: "" };
-        const got = Math.min(length, LINE_READ_BYTES);
+        const got = Math.min(length, Math.max(LINE_READ_BYTES, shown * 4));
         const bytes = await this.read(start, start + got - 1);
         const text = decoderOf(this.encoding).decode(bytes).replace(/\r?\n$/, "");
         // What isn't read is known in bytes only; what was read and not shown, in characters (about as many bytes).
-        const hidden = length - got + Math.max(0, text.length - LINE_SHOWN_MAX);
-        return hidden > 0 ? { text: text.slice(0, LINE_SHOWN_MAX), hidden: `+${formatBytes(hidden)}` } : { text };
+        const hidden = length - got + Math.max(0, text.length - shown);
+        return hidden > 0 ? { text: text.slice(0, shown), hidden: `+${formatBytes(hidden)}` } : { text };
     }
 }

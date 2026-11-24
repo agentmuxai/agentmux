@@ -8,6 +8,7 @@
  * docs/specs/SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.4.6.
  */
 
+import { t as tr } from "@/app/i18n/i18n";
 import { Button } from "@/app/element/ui";
 import { tip } from "@/app/element/tip";
 import { keyLabel } from "@/app/keybindings";
@@ -116,7 +117,16 @@ function Line(props: { t: LargeTextState; n: number }): JSX.Element {
                     }
                 </For>
                 <Show when={line()?.hidden}>
-                    <span class="large-text-hidden">…({line()?.hidden})</span>
+                    <Show when={props.t.canExpand(props.n)} fallback={<span class="large-text-hidden">…({line()?.hidden})</span>}>
+                        <Button
+                            variant="link"
+                            class="large-text-hidden"
+                            {...tip(tr("editor.large.expandTip"))}
+                            onClick={() => props.t.expand(props.n)}
+                        >
+                            …({line()?.hidden})
+                        </Button>
+                    </Show>
                 </Show>
             </span>
         </div>
