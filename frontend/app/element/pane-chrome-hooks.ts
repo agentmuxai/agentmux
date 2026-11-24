@@ -308,19 +308,20 @@ export function createTabInfos(
  * collapse every underline to one shared color. The tones come from `theme/paint.ts`, the call a
  * window tab and the Pane Color menu's sample use too, made readable under the theme's own label colours.
  */
-export function createTabColors(tabIds: Accessor<string[]>): Accessor<Map<string, PaneTabColors>> {
+export function createTabColors(tabIds: Accessor<string[]>, activeBlockId: Accessor<string>): Accessor<Map<string, PaneTabColors>> {
     const backdropSuppressed = useBackdropSuppressed();
     return createMemo(() => {
         const isLightTheme = isLightThemeActive();
         appliedWindowTheme(); // the label colours are the theme's own: read once its attribute is on the document
         const ink = currentTabInk();
         const colors = new Map<string, PaneTabColors>();
+        // A pane with a backdrop draws its strip in the tab in front's ink: the scope on the pane's root is that tab's, so
+        // every pill's label is drawn in it whichever tab the pill is for. Each pill keeps its own identity hue, and its fill
+        // is fitted so the label in effect reads on it (spec §6, the header and tab pills).
+        const onBackdrop = backdropSuppressed() ? undefined : paneChromeInk(blockMeta(activeBlockId()), isLightTheme ? "light" : "dark");
         for (const blockId of tabIds()) {
             const meta = blockMeta(blockId);
             const slot = blockIdentitySlot(meta);
-            // A pane with a backdrop draws its pill for the side of its own surface, with the ink its labels have there:
-            // the pill keeps its identity hue, and its fill is fitted so its label reads (spec §6, the header and tab pills).
-            const onBackdrop = backdropSuppressed() ? undefined : paneChromeInk(meta, isLightTheme ? "light" : "dark");
             const paint = slot ? tabPaint(slot, onBackdrop ? onBackdrop.light : isLightTheme, onBackdrop ? onBackdrop.ink : ink) : undefined;
             colors.set(blockId, {
                 // The bar, moved in lightness until it is seen on the selected pill; an uncoloured tab falls back to accent.

@@ -103,7 +103,7 @@ function createShellTabs(nodeModel: NodeModel, s: ShellState) {
     const extraTabs = createMemo(() => model()?.extraTabs?.() ?? []);
     const tabIds = createTabIds(s.stackIds, extraTabs);
     const tabInfos = createTabInfos(nodeModel, s.stackIds, tabIds, extraTabs, s.activeBlockId);
-    const tabColors = createTabColors(tabIds);
+    const tabColors = createTabColors(tabIds, s.activeBlockId);
     const headerTailBg = createHeaderTailBg(tabIds);
     const { renamingId, setRenamingId, labelOf, confirmRename } = createTabRename(tabInfos);
     const summaryOf = (id: string) => tabSummaryOf(id, tabInfos);

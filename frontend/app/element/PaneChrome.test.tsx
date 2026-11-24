@@ -603,6 +603,31 @@ describe("renderPaneChromeShell — a pane with a backdrop", () => {
     });
 });
 
+describe("renderPaneChromeShell — pills in a pane whose tabs differ", () => {
+    const yellow = { kind: "color", hex: "#fff6b0", polarity: "follow", version: 1 };
+
+    it("every pill is fitted to the ink of the tab in front, since the strip's labels are drawn in it", () => {
+        setObjectValue("block:b1", { meta: { view: "agent", "frame:hue": 270, backdrop: yellow } });
+        setObjectValue("block:b2", { meta: { view: "term", "frame:hue": 10 } }); // takes no backdrop
+        mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+        render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1" }), <div>content</div>) as any);
+        const d = resolveBackdrop({ backdrop: yellow }, "dark")!.derived;
+        const ink = { selected: d.ink.text, unselected: d.ink.muted };
+        const h = headerCalls.at(-1);
+        expect(h.getColor("b1").background).toBe(tabPaint(slotOf(270)!, true, ink).unselected);
+        expect(h.getColor("b2").background).toBe(tabPaint(slotOf(10)!, true, ink).unselected);
+        expect(h.getColor("b2").neutralBackground).toBe(d.surfaces.surface);
+    });
+
+    it("with a plain tab in front, a pill of a tab that has a backdrop is painted for the window, as the strip's labels are", () => {
+        setObjectValue("block:b1", { meta: { view: "agent", "frame:hue": 270, backdrop: yellow } });
+        setObjectValue("block:b2", { meta: { view: "term", "frame:hue": 10 } });
+        mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+        render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b2" }), <div>content</div>) as any);
+        expect(headerCalls.at(-1).getColor("b1").background).toBe(tabPaint(slotOf(270)!, false, undefined).unselected);
+    });
+});
+
 describe("renderPaneChromeShell — header tail color", () => {
     /** Renders with `activeId` active and returns the headerBgOverride the
      *  shell handed down. The whole point of the rule is that this value
