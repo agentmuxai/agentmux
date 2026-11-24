@@ -4,10 +4,11 @@
 // Global command registry — the single source of truth for all palette commands.
 // Both the Ctrl+P UI and the `run_command` IPC endpoint use this registry.
 
-import { atoms, getApi, MOS } from "@/app/store/global";
-import { createBlock, createBlockSplitHorizontally, createBlockSplitVertically } from "@/app/store/block-layout-actions";
-import { createTab, setActiveTab } from "@/app/store/tab-actions";
-import { shortcutsSplitBlockDef } from "@/app/store/split-block-def";
+import { atoms, getApi } from "@/app/store/global";
+import { createBlock } from "@/app/store/block-layout-actions";
+import { handleSplitHorizontal, handleSplitVertical } from "@/app/store/keymodel-blockcreate";
+import { switchTab } from "@/app/store/keymodel-nav";
+import { createTab } from "@/app/store/tab-actions";
 import { hostHas } from "@/util/host-caps";
 import { WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
@@ -119,33 +120,13 @@ export const commandRegistry = new CommandRegistry();
 // Helpers
 // ---------------------------------------------------------------------------
 
-function getFocusedBlockIdForSplit(): string | null {
-    const layoutModel = getLayoutModelForStaticTab();
-    const focusedNode = layoutModel.focusedNode?.();
-    return focusedNode?.data?.blockId ?? null;
-}
 
-/** What a palette split of `blockId` creates: a Shortcuts pane (its tiles start where the pane
- *  was). SPEC_SHORTCUTS_PANE_FOR_SPLITS_2026_10_28.md. */
-function getSplitBlockDef(blockId: string): BlockDef {
-    return shortcutsSplitBlockDef(MOS.getObjectValue<Block>(MOS.makeORef("block", blockId)), () => ({
-        meta: { view: "shortcuts" },
-    }));
-}
 
-function getAllTabs(ws: any): string[] {
-    return [...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])];
-}
 
-function switchTab(offset: number) {
-    const ws = atoms.workspace();
-    const curTabId = atoms.activeTabId();
-    const tabids = getAllTabs(ws);
-    const tabIdx = tabids.indexOf(curTabId);
-    if (tabIdx === -1) return;
-    const newTabIdx = (tabIdx + offset + tabids.length) % tabids.length;
-    setActiveTab(tabids[newTabIdx]);
-}
+
+
+
+
 
 // ---------------------------------------------------------------------------
 // Registration
@@ -297,20 +278,15 @@ function registerSplitCommands(): void {
         label: "Split Right",
         category: "Split",
         icon: "table-columns",
-        execute: async () => {
-            const blockId = getFocusedBlockIdForSplit();
-            if (blockId) await createBlockSplitHorizontally(getSplitBlockDef(blockId), blockId, "after");
-        },
+        // What its key does (a Shortcuts pane that starts where the focused pane was).
+        execute: () => handleSplitHorizontal("after"),
     });
     commandRegistry.register({
         id: "split:down",
         label: "Split Down",
         category: "Split",
         icon: "table-list",
-        execute: async () => {
-            const blockId = getFocusedBlockIdForSplit();
-            if (blockId) await createBlockSplitVertically(getSplitBlockDef(blockId), blockId, "after");
-        },
+        execute: () => handleSplitVertical("after"),
     });
 }
 
