@@ -22,11 +22,10 @@ use super::seal::{self, Key};
 use super::sync_capture_kinds as kinds;
 use super::sync_links;
 use super::sync_record::{stays_here, EntryBody, Profiles};
-use super::sync_seal::{self, Place};
 use super::sync_store::links_of;
 use crate::backend::storage::store::Store;
 use crate::backend::storage::vault::VaultRow;
-use crate::backend::user_sync::log::{self, SealAt, Signer};
+use crate::backend::user_sync::log::{self, Signer};
 use crate::backend::user_sync::seal::KeyRing;
 
 /// The kind of a Vault's collection.
@@ -70,14 +69,9 @@ pub struct Captured {
 }
 
 /// For `log::append_local_with`: seals `body` for the place the record will have, under the Vault's key at the epoch the
-/// record carries. The associated data is the Vault's (`sync_seal::AAD_PREFIX`).
-pub fn sealer<'a>(ring: &'a KeyRing, body: &'a [u8]) -> impl FnOnce(&SealAt) -> Result<Vec<u8>, String> + 'a {
-    move |at| {
-        let key = ring.get(at.epoch).ok_or_else(|| format!("no key for epoch {}", at.epoch))?;
-        let place = Place { vault: &at.collection, record: &at.record, version: &at.version, base: at.base.as_ref(), epoch: at.epoch };
-        sync_seal::seal_raw(key, &place, body)
-    }
-}
+/// record carries. It is the layer's own seal, so the layer can open what a Vault wrote when it writes the record again at a
+/// new epoch (`ops::reissue`) without knowing anything of the Vault.
+pub use crate::backend::user_sync::seal::sealer;
 
 /// What is kept of a body to tell later whether it changed: an HMAC under this machine's own key, never a bare hash. A
 /// hash of the body would let anyone holding the database test guesses at a low-entropy secret (everything else in the body

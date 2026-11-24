@@ -51,7 +51,7 @@ use crate::backend::user_sync::adapter::{Adapter, Merge};
 use crate::backend::user_sync::hlc::Clock;
 use crate::backend::user_sync::log::{self, Outcome, Pins};
 use crate::backend::user_sync::record::{Header, Record};
-use crate::backend::user_sync::seal::KeyRing;
+use crate::backend::user_sync::seal::{self as user_seal, KeyRing};
 
 /// How many times a take reads the entry again when a change made here lands between its read and its write.
 const TRIES: usize = 3;
@@ -148,10 +148,8 @@ pub struct Taker<'a> {
 
 /// The body of `rec`, opened with the Vault's key at the place its header names.
 pub(super) fn open_body<T: serde::de::DeserializeOwned>(ring: &KeyRing, rec: &Record) -> Result<T, String> {
-    let h = &rec.header;
-    let key = ring.get(h.epoch).ok_or_else(|| format!("no key for epoch {}", h.epoch))?;
-    let place = Place { vault: &h.collection, record: &h.record, version: &h.version, base: h.base.as_ref(), epoch: h.epoch };
-    sync_seal::open_record(key, &place, &rec.body)
+    let plain = user_seal::open(ring, &rec.header, &rec.body).map_err(|e| format!("a record that does not open: {e:?}"))?;
+    serde_json::from_slice(&plain).map_err(|_| "a record whose body is not what its id says".to_string())
 }
 
 /// Why a body is not taken, if it is not: it would make an entry the Vault cannot show or use.
