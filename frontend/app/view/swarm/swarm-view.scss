@@ -308,6 +308,11 @@
         flex-shrink: 1;
         min-width: 0;
         overflow: hidden;
+
+        // With a "quiet 22 min" note after it the state keeps its whole word: the note, then the name, give up the width.
+        &:has(~ .swarm-quiet) {
+            flex-shrink: 0;
+        }
     }
 
     .swarm-status-countdown {
