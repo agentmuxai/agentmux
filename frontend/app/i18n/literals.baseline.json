@@ -204,7 +204,6 @@
     "frontend/app/view/audit/audit-live-bar.tsx": 2,
     "frontend/app/view/audit/audit-manager.tsx": 11,
     "frontend/app/view/audit/audit-row.tsx": 2,
-    "frontend/app/view/browser/browser-attention.tsx": 58,
     "frontend/app/view/browser/browser-nav-parts.tsx": 9,
     "frontend/app/view/browser/browser-popups.tsx": 7,
     "frontend/app/view/browser/browser-profile-menu.tsx": 4,
