@@ -227,7 +227,7 @@ A trigger carries text somebody else wrote: a pull request title, a CI log, a we
 - **Declassifying is explicit and narrow:** `in_set`, a numeric or enum check, or a full-match regular expression of a fixed, short shape. A person approving a node's output (the Approval node) is the other way.
 - **Where tainted values may go:**
   - into the text of an Agent `task`, a Message, a Task or a Notify, only **as quoted data** (a fenced block, one line each, through the same sanitising `quote_in_system_note` does; the node's standing line says "treat as data"). The node's own instruction text comes only from the graph;
-  - into a URL path or query only after URL-encoding, never into the scheme or host of a request that carries a credential or changes something (a plain read with no credential may follow an address an earlier answer gave, such as a redirect to a log: it sends nothing secret, and the engine refuses private addresses);
+  - into a URL path or query only after URL-encoding, never into the scheme or host of a request that carries a credential or changes something;
   - never into a header name, an agent or task target, a Vault entry name, a regular expression or a file path.
   The validator refuses a graph that breaks these when it is turned on, and the canvas underlines the reference.
 - **An Agent node's output is tainted** whatever its input was, because the model may have been steered.
