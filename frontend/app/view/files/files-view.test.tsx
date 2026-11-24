@@ -1852,6 +1852,9 @@ describe("the Files pane: find in subfolders", () => {
             expect(b).not.toBeNull();
             return b!;
         });
+        // A real press goes pointerdown first: it must not count as a press outside the box and hide it.
+        fireEvent.pointerDown(button);
+        expect(v.container.querySelector(".files-filter-input")).not.toBeNull();
         fireEvent.click(button);
         await waitFor(() => expect(v.container.querySelector(".files-filter-input")?.getAttribute("placeholder")).toBe("Find in this folder and its subfolders"));
         await v.model.navigate(SRC);

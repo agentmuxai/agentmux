@@ -569,6 +569,8 @@
 .files-where {
     margin-left: 8px;
     min-width: 0;
+    // The folder gives way before the name does: it takes the ellipsis while the name is whole.
+    flex: 0 100 auto;
     overflow: hidden;
     text-overflow: ellipsis;
     color: var(--secondary-text-color);
