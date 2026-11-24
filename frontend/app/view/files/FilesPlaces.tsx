@@ -3,7 +3,7 @@
 
 /** The Files pane's sidebar: Places, Drives, WSL, Remote hosts and the agents' folders. */
 
-import { Button, IconButton } from "@/app/element/ui";
+import { Button, CloseButton, IconButton } from "@/app/element/ui";
 import { openRemotesInPane } from "@/app/view/remotes/open-remotes";
 import { For, Show, type JSX } from "solid-js";
 import { readableAgentColor, type FilesModel } from "./files-model";
@@ -19,7 +19,7 @@ function PlaceRow(props: { model: FilesModel; place: PlaceRef; pinned?: boolean 
                 <span>{placeLabel(props.place)}</span>
             </Button>
             <Show when={props.pinned}>
-                <IconButton icon="xmark" label={`Unpin ${placeLabel(props.place)}`} density="compact" class="files-place-unpin" onClick={() => unpinPlace(props.place)} />
+                <CloseButton size="sm" tooltip={false} label={`Unpin ${placeLabel(props.place)}`} class="files-place-unpin" onClick={() => unpinPlace(props.place)} />
             </Show>
         </div>
     );
