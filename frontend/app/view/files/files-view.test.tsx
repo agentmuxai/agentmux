@@ -903,6 +903,10 @@ describe("the Files pane: preview and filter (Phase 2a)", () => {
         v.model.toggleColumns();
         await waitFor(() => expect(v.model.columnsOn()).toBe(true));
         expect(v.container.querySelector(".files-notice p")?.textContent).toBe("Nothing here matches “zzz”.");
+        // The columns layer covers the whole list area: the notice must come after it, to be painted above it (a click on its
+        // button reaches it).
+        const columns = v.container.querySelector(".files-columns")!;
+        expect(columns.compareDocumentPosition(v.container.querySelector(".files-notice")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
         fireEvent.click(v.getByText("Clear filter"));
         await waitFor(() => expect(v.model.filter()).toBe(""));
         await waitFor(() => expect(v.container.querySelector(".files-notice")).toBeNull());

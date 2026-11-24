@@ -587,6 +587,8 @@
 // ── States: waiting, denied, empty, the macOS notice ───────────────────────
 
 .files-notice {
+    // Painted after (so above) the columns view's layer, which covers the whole list area, in the view's order.
+    position: relative;
     padding: 24px 16px;
     color: var(--secondary-text-color);
     text-align: center;

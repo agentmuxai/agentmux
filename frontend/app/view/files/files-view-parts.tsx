@@ -223,7 +223,6 @@ function FilesList({ v }: { v: FilesViewParts }): JSX.Element {
             <Show when={!model.columnsOn()}>
                 <FilesColumnHeader model={model} fv={fv} />
             </Show>
-            <FilesNotices v={v} />
             <Show when={model.phase() === "ready" && model.columnsOn()}>
                 <FilesColumns v={v} />
             </Show>
@@ -233,6 +232,8 @@ function FilesList({ v }: { v: FilesViewParts }): JSX.Element {
             <Show when={model.phase() === "ready" && !win.grid() && !model.columnsOn()}>
                 <FilesDetailRows v={v} />
             </Show>
+            {/* Last: its buttons must not sit under the columns view's layer, which covers the whole list area. */}
+            <FilesNotices v={v} />
         </div>
     );
 }
