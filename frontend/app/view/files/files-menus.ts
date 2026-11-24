@@ -90,6 +90,7 @@ export const buildFolderMenu = (model: FilesModel, actions: Pick<RowMenuActions,
         { type: "action", label: "Copy folder path", icon: MENU_ICON.copy, onSelect: () => void navigator.clipboard?.writeText(model.path()) },
         { type: "separator" },
         { type: "action", label: model.showHidden() ? "Hide hidden files" : "Show hidden files", icon: model.showHidden() ? MENU_ICON.hide : MENU_ICON.show, onSelect: () => model.toggleHidden() },
+        { type: "action", label: model.treeEnabled() ? "Show as a list" : "Show as a tree", icon: model.treeEnabled() ? "list" : "folder-tree", onSelect: () => model.toggleTree() },
         { type: "action", label: "Refresh", icon: MENU_ICON.refresh, shortcut: shortcutFor("files:refresh"), onSelect: () => model.refresh() },
         { type: "action", label: "Undo", icon: MENU_ICON.undo, shortcut: shortcutFor("files:undo"), onSelect: () => void model.undo() },
     ]);

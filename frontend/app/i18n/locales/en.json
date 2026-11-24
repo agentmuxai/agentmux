@@ -1402,5 +1402,7 @@
     "drone.templates.review": "Review and approve",
     "pane.tab.actions": "Tab actions",
     "jobs.droneTemplate.pill": "Drone",
-    "jobs.droneTemplate.make": "Make a drone"
+    "jobs.droneTemplate.make": "Make a drone",
+    "files.tree.open": "Open {{name}}",
+    "files.tree.close": "Close {{name}}"
 }

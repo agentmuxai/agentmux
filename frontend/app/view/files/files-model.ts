@@ -35,7 +35,8 @@ import { blockRoleColor, isLightThemeActive } from "@/app/block/pane-identity";
 import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
 import { displayName, groupRemotes, remoteColor } from "@/app/view/remotes/remotes-sections";
 import { batch, createMemo, createSignal } from "solid-js";
-import { baseName, isWithin, joinPath, normalizePath, parentOf, samePath } from "./files-path";
+import { baseName, isWithin, joinPath, joinRel, normalizePath, parentOf, samePath } from "./files-path";
+import { flattenTree, isUnderRel, labelOf, MAX_EXPANDED, parentRel, type TreeRow } from "./files-tree";
 import { EMPTY_SELECTION, pruneSelection, type Selection } from "./files-selection";
 import { clipboard, FilesOps, opFinishedText, sameVolume, setClipboard } from "./files-ops";
 import { systemIconsAvailable } from "./files-icons";
@@ -53,6 +54,8 @@ const META_PREVIEW = "files:preview";
 /** Set by srv when a container agent opens a folder of its workspace: the one folder this pane may show. */
 const META_ROOT = "files:root";
 const META_VIEW = "files:view";
+/** The tree view: folders open in place (`true`), on the details view. */
+const META_TREE = "files:tree";
 /** The SSH connection the pane is browsing (the key terminals use too);
  *  absent for this computer. Remote terminals spec §6.3. */
 const META_CONN = "connection";
@@ -242,6 +245,17 @@ export class FilesModel {
 
     /** Sorted, hidden entries filtered unless shown. */
     readonly entries: () => FsEntry[];
+    /** The tree view's rows (empty unless it is on), and each by its name. */
+    readonly treeRows: () => TreeRow[];
+    readonly treeInfo: () => ReadonlyMap<string, TreeRow>;
+    /** The folders opened in place, by path from the shown folder (`src/lib`), and what has been listed of each. */
+    private readonly expanded: () => ReadonlySet<string>;
+    private readonly setExpanded: (s: ReadonlySet<string>) => void;
+    private readonly kids: () => ReadonlyMap<string, FsEntry[]>;
+    private readonly setKids: (m: ReadonlyMap<string, FsEntry[]>) => void;
+    /** A watch on each opened folder, by the same path, and the ones being set up. */
+    private readonly treeWatches = new Map<string, string>();
+    private readonly treeWatching = new Set<string>();
     /** The filter typed into the toolbar (spec §5.3.1, Ctrl+F). */
     readonly filter: () => string;
     private readonly setFilterSignal: (v: string) => void;
@@ -300,7 +314,22 @@ export class FilesModel {
         this.canForward = () => (historyVersion(), this.forward.length > 0);
 
         [this.filter, this.setFilterSignal] = createSignal("");
+        [this.expanded, this.setExpanded] = createSignal<ReadonlySet<string>>(new Set());
+        [this.kids, this.setKids] = createSignal<ReadonlyMap<string, FsEntry[]>>(new Map());
+        this.treeRows = createMemo(() =>
+            this.treeOn()
+                ? flattenTree(
+                      this.rawEntries(),
+                      this.expanded(),
+                      (rel) => this.kids().get(rel),
+                      (e) => this.showHidden() || !e.hidden,
+                      (list) => sortEntries(list, this.sortKey(), this.sortDir())
+                  )
+                : []
+        );
+        this.treeInfo = createMemo(() => new Map(this.treeRows().map((r) => [r.entry.name, r])));
         this.entries = createMemo(() => {
+            if (this.treeOn()) return this.treeRows().map((r) => r.entry);
             const needle = this.filter().trim().toLowerCase();
             const shown = this.rawEntries().filter(
                 (e) => (this.showHidden() || !e.hidden) && (needle === "" || e.name.toLowerCase().includes(needle))
@@ -318,12 +347,15 @@ export class FilesModel {
         };
         this.unsubscribe = onMuxEvent(WpsEvent.FilesChanged, (data) => {
                 const dir = data.dir;
-                if (!this.path() || !samePath(dir, this.path())) return;
+                if (!this.path()) return;
+                const inTree = samePath(dir, this.path()) ? undefined : this.expandedAt(dir);
+                if (!samePath(dir, this.path()) && inTree === undefined) return;
                 if (this.ctx.visibility() !== "active") {
                     this.staleWhileHidden = true;
                     return;
                 }
-                void this.list(this.path(), { silent: true });
+                if (inTree !== undefined) void this.loadKids(inTree);
+                else void this.list(this.path(), { silent: true });
             }, makeORef("block", ctx.blockId));
     }
 
@@ -370,6 +402,20 @@ export class FilesModel {
 
     toggleViewMode(): void {
         void this.ctx.setMeta({ [META_VIEW]: this.viewMode() === "grid" ? null : "grid" });
+    }
+
+    /** The tree view is chosen (it is the details view with folders that open in place). */
+    readonly treeEnabled = (): boolean => this.ctx.meta()?.[META_TREE] === true && this.viewMode() === "details";
+    /** The tree is drawn: chosen, and no filter typed (a filter shows the matches of the shown folder alone). */
+    readonly treeOn = (): boolean => this.treeEnabled() && this.filter().trim() === "";
+
+    toggleTree(): void {
+        if (this.treeEnabled()) {
+            this.resetTree();
+            void this.ctx.setMeta({ [META_TREE]: null });
+        } else {
+            void this.ctx.setMeta({ [META_TREE]: true, [META_VIEW]: null });
+        }
     }
 
     togglePreview(): void {
@@ -539,6 +585,7 @@ export class FilesModel {
             this.setFilterSignal("");
             this.setGit(null);
         });
+        this.resetTree();
         void this.ctx.setMeta({ [META_PATH]: target });
         if (opts.consented) {
             const place = this.protectedPlace(target);
@@ -590,6 +637,7 @@ export class FilesModel {
 
     refresh(): void {
         void this.list(this.path(), { silent: true });
+        for (const rel of this.expanded()) void this.loadKids(rel);
     }
 
     /** Re-list a folder that changed while the pane was hidden. */
@@ -678,7 +726,7 @@ export class FilesModel {
                 const before = this.order();
                 this.setRawEntries([...collected]);
                 this.setPartial(false);
-                this.setSelection(pruneSelection(this.selection(), opts.silent ? oldOrder : before, this.order()));
+                this.setSelection(pruneSelection(this.selection(), opts.silent ? oldOrder : before, this.orderKeepingNested()));
             });
             this.applyRequestedSelection();
             void this.watch(this.path());
@@ -692,6 +740,14 @@ export class FilesModel {
             });
             this.settleFirst();
         }
+    }
+
+    /** The order, with the selected rows inside open folders added: this listing is of the shown folder alone, and
+     *  those rows are checked when their own folder is listed again (`loadKids`). */
+    private orderKeepingNested(): string[] {
+        const sel = this.selection();
+        const nested = [...sel.names, sel.focus, sel.anchor].filter((n): n is string => n != null && n.includes("/"));
+        return nested.length > 0 ? [...this.order(), ...nested] : this.order();
     }
 
     /** `files:select` (written by the OpenFiles tool): select those entries
@@ -770,18 +826,20 @@ export class FilesModel {
         return this.entries().filter((e) => names.has(e.name));
     }
 
+    /** The path of a row: its name is a path from the shown folder in the tree view (`src/a.ts`). */
     pathOf(name: string): string {
-        return joinPath(this.path(), name);
+        return joinRel(this.path(), name);
     }
 
     async rename(name: string, newName: string): Promise<boolean> {
         if (this.refuseInRoot("Renaming")) return false;
-        if (newName === name) return true;
+        if (newName === labelOf(name)) return true;
         const from = this.pathOf(name);
         try {
             const res = await RpcApi.FsRenameCommand(TabRpcClient, { path: from, new_name: newName, ...this.on() });
             this.undoStack.push({ kind: "rename", from, to: res.new_path });
-            this.setSelection({ names: new Set([newName]), focus: newName, anchor: newName });
+            const renamed = parentRel(name) ? `${parentRel(name)}/${newName}` : newName;
+            this.setSelection({ names: new Set([renamed]), focus: renamed, anchor: renamed });
             this.refresh();
             return true;
         } catch (err) {
@@ -959,6 +1017,152 @@ export class FilesModel {
         return fromFiles && sameVolume(sources, destDir) ? "move" : "copy";
     }
 
+    // ── Tree view: folders opened in place ───────────────────────────────────
+
+    /** Forgets every opened folder and stops watching them (the folder shown changed, or the tree was turned off). */
+    private resetTree(): void {
+        if (this.expanded().size === 0 && this.treeWatches.size === 0) return;
+        for (const rel of [...this.treeWatches.keys()]) this.unwatchKid(rel);
+        this.treeWatching.clear();
+        batch(() => {
+            this.setExpanded(new Set());
+            this.setKids(new Map());
+        });
+    }
+
+    /** The opened folder that is `dir`, by its path from the shown folder. */
+    private expandedAt(dir: string): string | undefined {
+        for (const rel of this.expanded()) if (samePath(this.pathOf(rel), dir)) return rel;
+        return undefined;
+    }
+
+    /** Opens the folder row `rel` in place. A protected macOS folder is opened (the pane's notice) instead. */
+    async expand(rel: string): Promise<void> {
+        const row = this.treeInfo().get(rel);
+        if (!row?.expandable || row.expanded) return;
+        const path = this.pathOf(rel);
+        if (this.needsConsent(path)) {
+            void this.navigate(path);
+            return;
+        }
+        if (this.expanded().size >= MAX_EXPANDED) {
+            this.setStatus({ text: `Only ${MAX_EXPANDED} folders can stay open in place: close one first.`, tone: "info" });
+            return;
+        }
+        this.setExpanded(new Set([...this.expanded(), rel]));
+        void this.watchKid(rel);
+        await this.loadKids(rel);
+    }
+
+    /** Closes the folder row `rel`, and the folders opened inside it. */
+    collapse(rel: string): void {
+        if (!this.expanded().has(rel)) return;
+        const gone = [...this.expanded()].filter((r) => isUnderRel(r, rel));
+        const next = new Set(this.expanded());
+        const kids = new Map(this.kids());
+        for (const r of gone) {
+            next.delete(r);
+            kids.delete(r);
+            this.unwatchKid(r);
+        }
+        batch(() => {
+            // Rows that were inside it are gone from the list: the selection falls back to the folder.
+            const sel = this.selection();
+            const inside = (n: string | null | undefined): boolean => n != null && n.startsWith(`${rel}/`);
+            if ([...sel.names].some(inside) || inside(sel.focus) || inside(sel.anchor)) {
+                const names = new Set([...sel.names].filter((n) => !inside(n)));
+                names.add(rel);
+                this.setSelection({ names, focus: rel, anchor: rel });
+            }
+            this.setExpanded(next);
+            this.setKids(kids);
+        });
+    }
+
+    toggleExpanded(rel: string): void {
+        if (this.expanded().has(rel)) this.collapse(rel);
+        else void this.expand(rel);
+    }
+
+    /** Right and Left in the tree: open the focused folder or step into it; close it or step out to its folder. */
+    treeArrow(dir: "right" | "left"): void {
+        const focus = this.selection().focus;
+        const row = focus == null ? undefined : this.treeInfo().get(focus);
+        if (!focus || !row) return;
+        const go = (name: string): void => {
+            this.setSelection({ names: new Set([name]), focus: name, anchor: name });
+            this.setRevealRequest({ name });
+        };
+        if (dir === "right") {
+            if (row.expandable && !row.expanded) void this.expand(focus);
+            else if (row.expanded) {
+                const next = this.treeRows()[this.order().indexOf(focus) + 1];
+                if (next && next.depth === row.depth + 1) go(next.entry.name);
+            }
+        } else if (row.expanded) this.collapse(focus);
+        else if (row.depth > 0) go(parentRel(focus));
+    }
+
+    /** Lists the opened folder `rel` (all its pages) and keeps what it holds. A folder that can't be listed closes. */
+    private async loadKids(rel: string): Promise<void> {
+        const root = this.path();
+        const dir = this.pathOf(rel);
+        const collected: FsEntry[] = [];
+        let cursor: string | undefined;
+        try {
+            do {
+                const res = await RpcApi.FsListCommand(TabRpcClient, { path: dir, cursor, limit: PAGE, ...this.on() }, this.connection() ? { timeout: 180_000 } : undefined);
+                if (this.disposed || !samePath(root, this.path()) || !this.expanded().has(rel)) return;
+                if (res.error) {
+                    this.collapse(rel);
+                    this.setStatus({ text: `Couldn't open ${labelOf(rel)}: ${res.error.message}`, tone: "error" });
+                    return;
+                }
+                collected.push(...res.entries);
+                cursor = res.cursor ?? undefined;
+            } while (cursor);
+        } catch (err) {
+            if (!this.disposed && samePath(root, this.path()) && this.expanded().has(rel)) {
+                this.collapse(rel);
+                this.setStatus({ text: `Couldn't open ${labelOf(rel)}: ${errorText(err)}`, tone: "error" });
+            }
+            return;
+        }
+        const next = new Map(this.kids());
+        next.set(rel, collected);
+        batch(() => {
+            const before = this.order();
+            this.setKids(next);
+            this.setSelection(pruneSelection(this.selection(), before, this.order()));
+        });
+    }
+
+    private async watchKid(rel: string): Promise<void> {
+        // A host's folders aren't watched: Refresh (F5) shows changes there.
+        if (this.connection() || this.treeWatches.has(rel) || this.treeWatching.has(rel)) return;
+        this.treeWatching.add(rel);
+        const path = this.pathOf(rel);
+        try {
+            const res = await RpcApi.FsWatchCommand(TabRpcClient, { path, block_id: this.blockId });
+            if (this.disposed || !this.treeWatching.has(rel) || !this.expanded().has(rel)) {
+                void RpcApi.FsUnwatchCommand(TabRpcClient, { watch_id: res.watch_id }).catch(() => {});
+            } else {
+                this.treeWatches.set(rel, res.watch_id);
+            }
+        } catch {
+            // No live updates for this folder; Refresh still works.
+        } finally {
+            this.treeWatching.delete(rel);
+        }
+    }
+
+    private unwatchKid(rel: string): void {
+        this.treeWatching.delete(rel);
+        const id = this.treeWatches.get(rel);
+        this.treeWatches.delete(rel);
+        if (id) void RpcApi.FsUnwatchCommand(TabRpcClient, { watch_id: id }).catch(() => {});
+    }
+
     // ── Git markers ──────────────────────────────────────────────────────────
 
     /** Ask git about the folder shown, once things settle: a burst of
@@ -990,6 +1194,7 @@ export class FilesModel {
     }
 
     dispose(): void {
+        for (const rel of [...this.treeWatches.keys()]) this.unwatchKid(rel);
         if (this.gitTimer) clearTimeout(this.gitTimer);
         this.ops.dispose();
         this.disposed = true;

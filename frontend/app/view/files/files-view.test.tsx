@@ -1642,3 +1642,156 @@ describe("the Files pane: a narrow pane (#47504)", () => {
         expect(menuLabels()).toEqual(["Hide hidden files", "Show as a list"]);
     });
 });
+
+describe("the Files pane: tree view", () => {
+    const SRC = `${HOME}\\src`;
+    const LIB = `${SRC}\\lib`;
+    const changed = (dir: string) => h.state.byType.get("files:changed")?.forEach((fn) => fn({ data: { dir } }));
+    const twisty = (v: ReturnType<typeof mount>, label: string) => v.container.querySelector(`[aria-label="${label}"]`) as HTMLElement;
+    const indentOf = (v: ReturnType<typeof mount>, name: string) =>
+        (v.row(name).querySelector(".files-tree-indent") as HTMLElement | null)?.style.width;
+    const key = (v: ReturnType<typeof mount>, k: string) => fireEvent.keyDown(v.list(), { key: k });
+    const focused = (v: ReturnType<typeof mount>) => v.model.selection().focus;
+
+    beforeEach(() => {
+        h.state.dirs.set(SRC, [f("main.rs"), d("lib")]);
+        h.state.dirs.set(LIB, [f("util.ts")]);
+    });
+
+    it("is off until chosen, and the folder menu turns it on and off", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        expect(v.container.querySelector(".files-twisty")).toBeNull();
+        v.model.toggleTree();
+        await waitFor(() => expect(v.meta()["files:tree"]).toBe(true));
+        await waitFor(() => expect(twisty(v, "Open src")).not.toBeNull());
+        v.model.toggleTree();
+        await waitFor(() => expect(v.meta()["files:tree"]).toBeUndefined());
+        expect(v.container.querySelector(".files-twisty")).toBeNull();
+    });
+
+    it("opens a folder in place under its row, indented, and closes it again", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toEqual(["src", "a2.md", "a10.md", "b.txt"]));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toEqual(["src", "lib", "main.rs", "a2.md", "a10.md", "b.txt"]));
+        expect(indentOf(v, "src")).toBe("0px");
+        expect(indentOf(v, "lib")).toBe("16px");
+        // The folder is watched while it is open, and only then.
+        expect(h.rpc.FsWatchCommand).toHaveBeenCalledWith(expect.anything(), { path: SRC, block_id: "b1" });
+        fireEvent.click(twisty(v, "Close src"));
+        await waitFor(() => expect(v.names()).toEqual(["src", "a2.md", "a10.md", "b.txt"]));
+        expect(h.rpc.FsUnwatchCommand).toHaveBeenCalled();
+    });
+
+    it("opens folders inside folders, and closing the outer one closes the inner", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(twisty(v, "Open lib")).not.toBeNull());
+        fireEvent.click(twisty(v, "Open lib"));
+        await waitFor(() => expect(v.names()).toContain("util.ts"));
+        expect(indentOf(v, "util.ts")).toBe("32px");
+        fireEvent.click(twisty(v, "Close src"));
+        await waitFor(() => expect(v.names()).toEqual(["src", "a2.md", "a10.md", "b.txt"]));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toContain("lib"));
+        expect(v.names()).not.toContain("util.ts");
+    });
+
+    it("moves with Right and Left: open, step in, open, close, step out, close", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(v.row("src"));
+        key(v, "ArrowRight");
+        await waitFor(() => expect(v.names()).toContain("lib"));
+        key(v, "ArrowRight");
+        expect(focused(v)).toBe("src/lib");
+        key(v, "ArrowRight");
+        await waitFor(() => expect(v.names()).toContain("util.ts"));
+        key(v, "ArrowLeft");
+        await waitFor(() => expect(v.names()).not.toContain("util.ts"));
+        expect(focused(v)).toBe("src/lib");
+        key(v, "ArrowLeft");
+        expect(focused(v)).toBe("src");
+        key(v, "ArrowLeft");
+        await waitFor(() => expect(v.names()).toEqual(["src", "a2.md", "a10.md", "b.txt"]));
+    });
+
+    it("keeps the selection on the folder when what was selected inside it closes with it", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toContain("main.rs"));
+        fireEvent.click(v.row("main.rs"));
+        expect(focused(v)).toBe("src/main.rs");
+        fireEvent.click(twisty(v, "Close src"));
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        expect([...v.model.selection().names]).toEqual(["src"]);
+        expect(focused(v)).toBe("src");
+    });
+
+    it("acts on a row inside a folder by its real path", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toContain("main.rs"));
+        expect(v.model.pathOf("src/main.rs")).toBe(`${SRC}\\main.rs`);
+        // srv has renamed it by the time the folder is listed again.
+        h.state.dirs.set(SRC, [f("app.rs"), d("lib")]);
+        await v.model.rename("src/main.rs", "app.rs");
+        expect(h.rpc.FsRenameCommand).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ path: `${SRC}\\main.rs`, new_name: "app.rs" }));
+        expect(focused(v)).toBe("src/app.rs");
+    });
+
+    it("re-lists an open folder when it changes on disk", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toContain("main.rs"));
+        h.state.dirs.set(SRC, [f("main.rs"), f("new.rs"), d("lib")]);
+        changed(SRC);
+        await waitFor(() => expect(v.names()).toContain("new.rs"));
+    });
+
+    it("shows the matches of the shown folder alone while a filter is typed, and the open folders after", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toContain("main.rs"));
+        v.model.setFilter("txt");
+        await waitFor(() => expect(v.names()).toEqual(["b.txt"]));
+        v.model.setFilter("");
+        await waitFor(() => expect(v.names()).toContain("main.rs"));
+    });
+
+    it("closes the open folders when another folder is shown", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toContain("main.rs"));
+        fireEvent.dblClick(v.row("src"));
+        await waitFor(() => expect(v.names()).toEqual(["lib", "main.rs"]));
+        h.rpc.FsUnwatchCommand.mockClear();
+        await v.model.navigate(HOME);
+        await waitFor(() => expect(v.names()).toEqual(["src", "a2.md", "a10.md", "b.txt"]));
+    });
+
+    it("says why a folder can't be opened, and leaves it closed", async () => {
+        h.state.errors.set(SRC, { kind: "permission_denied", message: "Access is denied." });
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toContain("Couldn't open src"));
+        expect(v.names()).toEqual(["src", "a2.md", "a10.md", "b.txt"]);
+        expect(twisty(v, "Open src")).not.toBeNull();
+    });
+
+    it("has no tree on the grid: choosing the tree leaves the grid for the list", async () => {
+        const v = mount({ "files:view": "grid" });
+        await waitFor(() => expect(v.container.querySelector(".files-grid")).not.toBeNull());
+        v.model.toggleTree();
+        await waitFor(() => expect(v.meta()["files:tree"]).toBe(true));
+        expect(v.meta()["files:view"]).toBeUndefined();
+    });
+});
