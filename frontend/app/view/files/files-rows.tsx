@@ -100,12 +100,16 @@ export function FileRow(props: {
     /** In the tree view: the row's depth and whether it is open; `onToggle` opens or closes it. */
     tree?: TreeRow;
     onToggle?: () => void;
+    /** In a column of the columns view: the name alone (and an arrow on a folder), no size, date or kind. */
+    inColumn?: { id?: string; onPath: boolean };
 }): JSX.Element {
     return (
         <div
-            id={`files-${props.model.blockId}-row-${props.index}`}
+            id={props.inColumn?.id ?? `files-${props.model.blockId}-row-${props.index}`}
             class="files-row"
             classList={{
+                "files-row-in-column": !!props.inColumn,
+                "files-row-onpath": !!props.inColumn?.onPath && !props.selected,
                 "files-row-selected": props.selected,
                 "files-row-focused": props.focused,
                 "files-row-hidden": props.entry.hidden,
@@ -141,7 +145,7 @@ export function FileRow(props: {
                         />
                     )}
                 </Show>
-                <Show when={props.renaming} fallback={<span class="files-name">{props.tree?.label ?? props.entry.name}</span>}>
+                <Show when={props.renaming} fallback={<span class="files-name">{props.tree?.label ?? labelOf(props.entry.name)}</span>}>
                     <RenameInput model={props.model} entry={props.entry} onDone={props.onRenameDone} />
                 </Show>
                 <Show when={props.entry.error}>
@@ -154,16 +158,21 @@ export function FileRow(props: {
                         </span>
                     )}
                 </Show>
+                <Show when={props.inColumn && props.entry.is_dir && !props.entry.is_symlink}>
+                    <i class="fa fa-chevron-right files-column-arrow" aria-hidden="true" />
+                </Show>
             </div>
-            <div class="files-cell files-col-modified" role="gridcell">
-                {formatModified(props.entry.mtime)}
-            </div>
-            <div class="files-cell files-col-size" role="gridcell">
-                {props.entry.is_dir || props.entry.size == null ? "" : formatBytes(props.entry.size)}
-            </div>
-            <div class="files-cell files-col-kind" role="gridcell">
-                {kindOf(props.entry)}
-            </div>
+            <Show when={!props.inColumn}>
+                <div class="files-cell files-col-modified" role="gridcell">
+                    {formatModified(props.entry.mtime)}
+                </div>
+                <div class="files-cell files-col-size" role="gridcell">
+                    {props.entry.is_dir || props.entry.size == null ? "" : formatBytes(props.entry.size)}
+                </div>
+                <div class="files-cell files-col-kind" role="gridcell">
+                    {kindOf(props.entry)}
+                </div>
+            </Show>
         </div>
     );
 }

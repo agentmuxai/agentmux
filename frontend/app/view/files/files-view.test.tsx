@@ -1795,3 +1795,108 @@ describe("the Files pane: tree view", () => {
         expect(v.meta()["files:view"]).toBeUndefined();
     });
 });
+
+describe("the Files pane: columns view", () => {
+    const SRC = `${HOME}\\src`;
+    const LIB = `${SRC}\\lib`;
+    const columns = (v: ReturnType<typeof mount>) => [...v.container.querySelectorAll(".files-column")] as HTMLElement[];
+    const labels = (v: ReturnType<typeof mount>, i: number) => [...(columns(v)[i]?.querySelectorAll(".files-name") ?? [])].map((n) => n.textContent);
+    const rowIn = (v: ReturnType<typeof mount>, i: number, label: string) =>
+        [...columns(v)[i].querySelectorAll(".files-row")].find((r) => r.querySelector(".files-name")?.textContent === label) as HTMLElement;
+    const key = (v: ReturnType<typeof mount>, k: string) => fireEvent.keyDown(v.list(), { key: k });
+
+    beforeEach(() => {
+        h.state.dirs.set(SRC, [f("main.rs"), d("lib")]);
+        h.state.dirs.set(LIB, [f("util.ts")]);
+    });
+
+    it("is chosen from the folder menu, shows the folder as one column, and goes back to the list", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        expect(columns(v)).toHaveLength(0);
+        v.model.toggleColumns();
+        await waitFor(() => expect(v.meta()["files:view"]).toBe("columns"));
+        await waitFor(() => expect(labels(v, 0)).toEqual(["src", "a2.md", "a10.md", "b.txt"]));
+        expect(columns(v)).toHaveLength(1);
+        // The arrow on a folder; none on a file.
+        expect(rowIn(v, 0, "src").querySelector(".files-column-arrow")).not.toBeNull();
+        expect(rowIn(v, 0, "b.txt").querySelector(".files-column-arrow")).toBeNull();
+        v.model.toggleColumns();
+        await waitFor(() => expect(v.meta()["files:view"]).toBeUndefined());
+        expect(columns(v)).toHaveLength(0);
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+    });
+
+    it("shows what is in a chosen folder as the next column, and drops it when a file is chosen instead", async () => {
+        const v = mount({ "files:view": "columns" });
+        await waitFor(() => expect(labels(v, 0)).toHaveLength(4));
+        fireEvent.click(rowIn(v, 0, "src"));
+        await waitFor(() => expect(labels(v, 1)).toEqual(["lib", "main.rs"]));
+        expect(h.rpc.FsWatchCommand).toHaveBeenCalledWith(expect.anything(), { path: SRC, block_id: "b1" });
+        fireEvent.click(rowIn(v, 1, "lib"));
+        await waitFor(() => expect(labels(v, 2)).toEqual(["util.ts"]));
+        expect(columns(v)).toHaveLength(3);
+        // A file in the first column ends the chain after it.
+        fireEvent.click(rowIn(v, 0, "b.txt"));
+        await waitFor(() => expect(columns(v)).toHaveLength(1));
+        expect(h.rpc.FsUnwatchCommand).toHaveBeenCalled();
+    });
+
+    it("moves with Up and Down inside the column, Right into the next one and Left back out", async () => {
+        const v = mount({ "files:view": "columns" });
+        await waitFor(() => expect(labels(v, 0)).toHaveLength(4));
+        fireEvent.click(rowIn(v, 0, "src"));
+        await waitFor(() => expect(labels(v, 1)).toHaveLength(2));
+        key(v, "ArrowRight");
+        await waitFor(() => expect(v.model.selection().focus).toBe("src/lib"));
+        expect(v.model.cols.activeColumn()).toBe(1);
+        key(v, "ArrowDown");
+        expect(v.model.selection().focus).toBe("src/main.rs");
+        key(v, "ArrowUp");
+        await waitFor(() => expect(labels(v, 2)).toEqual(["util.ts"]));
+        key(v, "ArrowRight");
+        await waitFor(() => expect(v.model.selection().focus).toBe("src/lib/util.ts"));
+        expect(v.model.cols.activeColumn()).toBe(2);
+        key(v, "ArrowLeft");
+        expect(v.model.selection().focus).toBe("src/lib");
+        key(v, "ArrowLeft");
+        expect(v.model.selection().focus).toBe("src");
+        await waitFor(() => expect(columns(v)).toHaveLength(2));
+        expect(v.model.cols.activeColumn()).toBe(0);
+    });
+
+    it("works on a row of a later column by its real path", async () => {
+        const v = mount({ "files:view": "columns" });
+        await waitFor(() => expect(labels(v, 0)).toHaveLength(4));
+        fireEvent.click(rowIn(v, 0, "src"));
+        await waitFor(() => expect(labels(v, 1)).toHaveLength(2));
+        fireEvent.click(rowIn(v, 1, "main.rs"));
+        expect(v.model.selection().names).toEqual(new Set(["src/main.rs"]));
+        expect(v.model.pathOf("src/main.rs")).toBe(`${SRC}\\main.rs`);
+        await v.model.rename("src/main.rs", "app.rs");
+        expect(h.rpc.FsRenameCommand).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ path: `${SRC}\\main.rs`, new_name: "app.rs" }));
+    });
+
+    it("starts again from one column when another folder is shown", async () => {
+        const v = mount({ "files:view": "columns" });
+        await waitFor(() => expect(labels(v, 0)).toHaveLength(4));
+        fireEvent.click(rowIn(v, 0, "src"));
+        await waitFor(() => expect(columns(v)).toHaveLength(2));
+        await v.model.navigate(SRC);
+        await waitFor(() => expect(labels(v, 0)).toEqual(["lib", "main.rs"]));
+        expect(columns(v)).toHaveLength(1);
+        expect(v.model.cols.activeColumn()).toBe(0);
+    });
+
+    it("keeps the grid and the tree out of it: choosing either leaves the columns", async () => {
+        const v = mount({ "files:view": "columns" });
+        await waitFor(() => expect(labels(v, 0)).toHaveLength(4));
+        fireEvent.click(rowIn(v, 0, "src"));
+        await waitFor(() => expect(columns(v)).toHaveLength(2));
+        v.model.toggleTree();
+        await waitFor(() => expect(v.meta()["files:tree"]).toBe(true));
+        expect(v.meta()["files:view"]).toBeUndefined();
+        expect(columns(v)).toHaveLength(0);
+        await waitFor(() => expect(v.names()).toEqual(["src", "a2.md", "a10.md", "b.txt"]));
+    });
+});
