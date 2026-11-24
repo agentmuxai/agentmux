@@ -20,8 +20,8 @@ use super::ops::{self, Ctx, JoinNo, JoinReq, Joined, KeyDelivery, Me, MembersReq
 use super::record::Record;
 use super::seal::KeyRing;
 
-const NOW: i64 = 1_800_000_000_000;
-const C: &str = "board.1";
+pub(super) const NOW: i64 = 1_800_000_000_000;
+pub(super) const C: &str = "board.1";
 
 struct Fake(bool);
 impl Proof for Fake {
@@ -41,23 +41,23 @@ impl KeyDelivery for Fake {
 static YES: Fake = Fake(true);
 static NO: Fake = Fake(false);
 
-struct Node {
-    id: String,
-    private: [u8; 32],
-    subject: Subject,
-    conn: Connection,
-    chains: BTreeMap<String, Chain>,
-    clock: Clock,
-    pending: Vec<PendingJoin>,
-    ring: KeyRing,
-    active: bool,
-    proven: bool,
-    keys: bool,
-    now: i64,
-    chain_cap: usize,
+pub(super) struct Node {
+    pub(super) id: String,
+    pub(super) private: [u8; 32],
+    pub(super) subject: Subject,
+    pub(super) conn: Connection,
+    pub(super) chains: BTreeMap<String, Chain>,
+    pub(super) clock: Clock,
+    pub(super) pending: Vec<PendingJoin>,
+    pub(super) ring: KeyRing,
+    pub(super) active: bool,
+    pub(super) proven: bool,
+    pub(super) keys: bool,
+    pub(super) now: i64,
+    pub(super) chain_cap: usize,
 }
 
-fn node(seed: u8) -> Node {
+pub(super) fn node(seed: u8) -> Node {
     let private = [seed; 32];
     let subject = Subject::machine(&private, &[seed.wrapping_add(100); 32], "label").unwrap();
     let conn = Connection::open_in_memory().unwrap();
@@ -83,7 +83,7 @@ fn node(seed: u8) -> Node {
 }
 
 impl Node {
-    fn ctx(&mut self) -> Ctx<'_> {
+    pub(super) fn ctx(&mut self) -> Ctx<'_> {
         Ctx {
             conn: &self.conn,
             chains: &mut self.chains,
@@ -98,30 +98,30 @@ impl Node {
         }
     }
 
-    fn found(&mut self, collection: &str, kind: &str, policy: Policy) {
+    pub(super) fn found(&mut self, collection: &str, kind: &str, policy: Policy) {
         ops::found(&self.conn, &mut self.chains, &YES, collection, kind, &self.subject, &self.private, policy, NOW).unwrap();
     }
 
-    fn write(&mut self, collection: &str, record: &str, body: &str) -> Record {
+    pub(super) fn write(&mut self, collection: &str, record: &str, body: &str) -> Record {
         self.write_bytes(collection, record, body.as_bytes())
     }
 
-    fn write_bytes(&mut self, collection: &str, record: &str, body: &[u8]) -> Record {
+    pub(super) fn write_bytes(&mut self, collection: &str, record: &str, body: &[u8]) -> Record {
         let mut signer = Signer { machine: &self.id, private: &self.private, clock: &mut self.clock };
         log::append_local_with(&self.conn, &mut signer, collection, record, false, NOW, super::seal::sealer(&self.ring, body)).unwrap()
     }
 
-    fn vector(&self, collection: &str) -> log::Vector {
+    pub(super) fn vector(&self, collection: &str) -> log::Vector {
         log::vector(&self.conn, collection).unwrap()
     }
 
-    fn pull_req(&self, collection: &str, limit: usize) -> PullReq {
+    pub(super) fn pull_req(&self, collection: &str, limit: usize) -> PullReq {
         PullReq { collection: collection.to_string(), vector: self.vector(collection), limit }
     }
 }
 
 /// `joiner` joins `host`'s collection and takes the chain it is given, trusting only `host` itself.
-fn join(host: &mut Node, joiner: &mut Node, collection: &str, kind: &str) {
+pub(super) fn join(host: &mut Node, joiner: &mut Node, collection: &str, kind: &str) {
     let req = JoinReq { collection: collection.to_string(), subject: joiner.subject.clone() };
     let Joined::Added { entries, .. } = ops::join(&mut host.ctx(), &joiner.id, &req).unwrap() else { panic!("joined") };
     let host_id = host.id.clone();
@@ -131,7 +131,7 @@ fn join(host: &mut Node, joiner: &mut Node, collection: &str, kind: &str) {
 }
 
 /// `to` asks `from` for the membership entries it lacks and takes them.
-fn catch_up(to: &mut Node, from: &mut Node, collection: &str) {
+pub(super) fn catch_up(to: &mut Node, from: &mut Node, collection: &str) {
     let have = to.chains[collection].entries.len() as u64;
     let ans = ops::members(&mut from.ctx(), &to.id, &MembersReq { collection: collection.to_string(), have_n: have, offered: vec![] }).unwrap();
     let chain = to.chains.get_mut(collection).unwrap();
@@ -142,7 +142,7 @@ fn catch_up(to: &mut Node, from: &mut Node, collection: &str) {
 }
 
 /// Everything `to` lacks from `from`, through pull and push of whole answers.
-fn sync_records(to: &mut Node, from: &mut Node, collection: &str) {
+pub(super) fn sync_records(to: &mut Node, from: &mut Node, collection: &str) {
     loop {
         let req = to.pull_req(collection, 1000);
         let ans = ops::pull(&from.ctx(), &to.id, &req).unwrap();
@@ -155,7 +155,7 @@ fn sync_records(to: &mut Node, from: &mut Node, collection: &str) {
     }
 }
 
-fn three(kind: &str) -> (Node, Node, Node) {
+pub(super) fn three(kind: &str) -> (Node, Node, Node) {
     let (mut a, mut b, mut c) = (node(1), node(2), node(3));
     a.found(C, kind, Policy::AutoProven);
     join(&mut a, &mut b, C, kind);
@@ -164,7 +164,7 @@ fn three(kind: &str) -> (Node, Node, Node) {
     (a, b, c)
 }
 
-fn ended(pairs: &[(&Node, u64)]) -> BTreeMap<String, u64> {
+pub(super) fn ended(pairs: &[(&Node, u64)]) -> BTreeMap<String, u64> {
     pairs.iter().map(|(n, s)| (n.id.clone(), *s)).collect()
 }
 
