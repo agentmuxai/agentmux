@@ -7,6 +7,7 @@
  * `open` calls one of these and never opens a pane itself; the registry test reads the kinds' source to prove it.
  */
 
+import { siteOf } from "./bare-domain";
 import type { Destination, OpenOptions, OpenResult } from "./types";
 
 const OK: OpenResult = { ok: true };
@@ -66,7 +67,17 @@ export function openFileEntity(dest: Extract<Destination, { kind: "file" }>, opt
     return attempt(async () => {
         const { checkFileNow } = await import("../file-check-store");
         const found = await checkFileNow(dest.blockId, dest.path);
-        if (found.state !== "found") throw new Error(found.reason || "That file can't be opened.");
+        if (found.state !== "found") {
+            // A name that is also a web site is the site when srv says no such file is there; a check that could not be
+            // made, or a path outside the folders, says its reason instead.
+            const site = found.state === "missing" ? siteOf(dest.path) : null;
+            if (site) {
+                const opened = await openUrlEntity(site, options);
+                if ("reason" in opened) throw new Error(opened.reason);
+                return;
+            }
+            throw new Error(found.reason || "That file can't be opened.");
+        }
         const { openPathLink } = await import("@/app/element/link-destinations");
         await openPathLink(dest.confined ? dest.path : found.resolved || dest.path, {
             floating: options.floating,

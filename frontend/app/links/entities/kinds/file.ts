@@ -8,6 +8,7 @@
  * muted word with the reason. The recogniser never reads the disk and never builds a path of its own.
  */
 
+import { siteOf } from "../bare-domain";
 import { openFileEntity } from "../openers";
 import type { Candidate, EntityKind } from "../types";
 
@@ -59,7 +60,7 @@ export const fileKind: EntityKind = {
         return {
             destination: { kind: "file", path, blockId: ctx.author.id, confined: ctx.author.confined },
             state: "unchecked",
-            name: `Open file ${path}`,
+            name: siteOf(path) ? `Open ${path}` : `Open file ${path}`,
         };
     },
     open(destination, options) {

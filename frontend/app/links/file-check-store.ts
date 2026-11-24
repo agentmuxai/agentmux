@@ -10,6 +10,7 @@
 import { createStore } from "solid-js/store";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { siteOf } from "./entities/bare-domain";
 
 export type FileCheck = { state: "found" | "missing" | "outside" | "limited"; reason: string; resolved: string };
 
@@ -59,6 +60,8 @@ export async function checkFileNow(blockId: string, path: string): Promise<FileC
 
 /** Whether a link to this file should be drawn dead, and why. */
 export function deadReason(blockId: string, path: string): string | undefined {
+    // A name that is also a web site is not dead when no such file is there: it is the site.
+    if (siteOf(path)) return undefined;
     const got = fileCheck(blockId, path);
     return got && (got.state === "missing" || got.state === "outside") ? got.reason : undefined;
 }
