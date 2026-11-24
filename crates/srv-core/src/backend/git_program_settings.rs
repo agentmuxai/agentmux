@@ -28,8 +28,8 @@
 //!   `credential.helper` the environment itself lists is left;
 //! - `GIT_PROXY_COMMAND` empty (no proxy command), unless the environment already has a value;
 //! - the agent's `git` shell function (`agentmux_common::github_broker_shim`), which sets the folder's
-//!   `diff.<driver>.textconv` and `filter.<name>.clean`, `smudge` and `process` to `cat` (the last to nothing) on the
-//!   command line, refuses `fetch` of all remotes, several or a group and `remote update`, `show`, `prune`,
+//!   `diff.<driver>.textconv` and `filter.<name>.clean`, `smudge` and `process` to `cat` (the last to nothing) and
+//!   `merge.<name>.driver` to `false` on the command line, `fetch.all` to `false` for `fetch` and `pull`, refuses `fetch` of all remotes, several or a group and `remote update`, `show`, `prune`,
 //!   `set-head` and `add -f` while the folder names a remote's `uploadpack` or `receivepack`, and adds `--no-pager` to every
 //!   command, `--no-ext-diff` and `--no-textconv` to `diff`, `log`, `show`, `format-patch`, `whatchanged`, `reflog`
 //!   and `blame`, `--upload-pack=git-upload-pack` to `fetch`, `pull`, `ls-remote` and `clone`, and

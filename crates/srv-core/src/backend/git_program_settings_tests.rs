@@ -533,6 +533,16 @@ fn the_function_keeps_a_remotes_upload_and_receive_programs_from_running() {
         }
         assert_eq!(folder.ran(), Vec::<String>::new(), "with it none of {remote_commands:?} runs them");
     }
+    folder.git(&["config", "fetch.all", "true"], &HashMap::new());
+    for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
+        folder.forget();
+        through_the_function(&folder, body, false, "git fetch");
+        assert_eq!(folder.ran(), vec!["uploadpack"], "a fetch of every remote, by the folder's own setting, runs the remote's program");
+        folder.forget();
+        through_the_function(&folder, body, true, "git fetch");
+        assert_eq!(folder.ran(), Vec::<String>::new(), "with the step it fetches the one remote and runs none");
+    }
+    folder.git(&["config", "--unset", "fetch.all"], &HashMap::new());
     let pushed = through_the_function(&folder, agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, true, "git push viaup HEAD:refs/heads/y && git ls-remote viaup");
     assert!(pushed.contains("refs/heads/y"), "a push still works through it: {pushed}");
 }
@@ -543,5 +553,31 @@ fn the_function_leaves_the_reflog_subcommands_working() {
     for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
         let out = through_the_function(&folder, body, true, "git reflog show -1 && git reflog exists HEAD && git reflog expire --all --dry-run && git reflog list && git reflog HEAD -1 && git reflog -1 && echo reflog-ok");
         assert!(out.contains("reflog-ok"), "{out}");
+    }
+}
+
+#[test]
+fn the_function_keeps_a_merge_driver_the_folder_names_from_running() {
+    let folder = Folder::new();
+    let repo = folder.repo();
+    std::fs::write(repo.join(".gitattributes"), "m.txt merge=mx\n").unwrap();
+    std::fs::write(repo.join("m.txt"), "base\n").unwrap();
+    folder.git(&["add", "."], &HashMap::new());
+    folder.git(&["commit", "-q", "-m", "m0"], &HashMap::new());
+    folder.git(&["switch", "-q", "-c", "other"], &HashMap::new());
+    std::fs::write(repo.join("m.txt"), "theirs\n").unwrap();
+    folder.git(&["commit", "-q", "-a", "-m", "m1"], &HashMap::new());
+    folder.git(&["switch", "-q", "-"], &HashMap::new());
+    std::fs::write(repo.join("m.txt"), "mine\n").unwrap();
+    folder.git(&["commit", "-q", "-a", "-m", "m2"], &HashMap::new());
+    let script = folder.dir.path().join("mark.sh");
+    folder.git(&["config", "merge.mx.driver", &format!("sh {} mergedriver %O %A %B", slashes(&script))], &HashMap::new());
+    for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
+        folder.forget();
+        through_the_function(&folder, body, false, "git merge other; git merge --abort");
+        assert_eq!(folder.ran(), vec!["mergedriver"], "without the step the folder's merge driver runs");
+        folder.forget();
+        through_the_function(&folder, body, true, "git merge other; git merge --abort");
+        assert_eq!(folder.ran(), Vec::<String>::new(), "with it none runs");
     }
 }

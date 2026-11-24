@@ -77,14 +77,14 @@ pub const GIT_NO_EXT_DIFF_ENV: &str = "AGENTMUX_GIT_NO_EXT_DIFF";
 
 /// The step of the `git` function that [`GIT_NO_EXT_DIFF_ENV`] turns on. A `diff.<driver>.textconv` and a
 /// `filter.<name>.clean`, `smudge` and `process` of the folder's own configuration are set to `cat` (the `process` to
-/// nothing, and the filter not required) on the command line (`-c`, which every command git starts inherits, so
+/// nothing, and the filter not required), and a `merge.<name>.driver` to `false`, on the command line (`-c`, which every command git starts inherits, so
 /// `range-diff` is covered). After any leading `-C <dir>`, `-c <name=value>` and other global options, every command
 /// gets `--no-pager` (so a pager the folder's own configuration names does not run); `diff`, `log`, `show`,
 /// `format-patch`, `whatchanged`, `blame` and `reflog` (after its `show`, or with no subcommand, and not for another
 /// one) also get `--no-ext-diff` and `--no-textconv` (so the external diff program, a diff driver's `command` and a
 /// `textconv` of the folder's own configuration do not run); `fetch`, `pull`, `ls-remote` and `clone` get
 /// `--upload-pack=git-upload-pack` and `push` gets `--receive-pack=git-receive-pack` (so a remote's `uploadpack` and
-/// `receivepack` of the folder's configuration do not run); `fetch` and `pull` of all remotes, several or a group, and
+/// `receivepack` of the folder's configuration do not run), and `fetch` and `pull` get `fetch.all` false; `fetch` and `pull` of all remotes, several or a group, and
 /// `remote update`, `show`, `prune`, `set-head` and `add -f`, are refused while the folder's configuration names such a
 /// program for a remote. Every other option is git's own, and
 /// the function goes on with the arguments so changed.
@@ -104,12 +104,13 @@ macro_rules! no_ext_diff_step {
       case "$_amx_k" in
         *=*) ;;
         *.textconv) _amx_g+=(-c "$_amx_k=cat");;
+        merge.*.driver) _amx_g+=(-c "$_amx_k=false");;
         filter.*.clean|filter.*.smudge) _amx_g+=(-c "$_amx_k=cat" -c "${_amx_k%.*}.required=false");;
         filter.*.process) _amx_g+=(-c "$_amx_k=" -c "${_amx_k%.*}.required=false");;
         remotes.*) _amx_r+=("${_amx_k#remotes.}");;
         *.uploadpack|*.receivepack) _amx_u=1;;
       esac;
-    done < <(command git ${_amx_g[@]+"${_amx_g[@]}"} config --show-scope --name-only --get-regexp '^(diff\..*\.textconv|filter\..*\.(clean|smudge|process)|remotes\..*|remote\..*\.(uploadpack|receivepack))$' 2>/dev/null);
+    done < <(command git ${_amx_g[@]+"${_amx_g[@]}"} config --show-scope --name-only --get-regexp '^(diff\..*\.textconv|merge\..*\.driver|filter\..*\.(clean|smudge|process)|remotes\..*|remote\..*\.(uploadpack|receivepack))$' 2>/dev/null);
     case "${1:-}" in
       remote)
         if [ -n "$_amx_u" ]; then
@@ -138,7 +139,7 @@ macro_rules! no_ext_diff_step {
             done;
           done;
         fi;
-        _amx_s=$1; shift; set -- "$_amx_s" --upload-pack=git-upload-pack "$@";;
+        _amx_s=$1; shift; _amx_g+=(-c fetch.all=false); set -- "$_amx_s" --upload-pack=git-upload-pack "$@";;
       ls-remote|clone) _amx_s=$1; shift; set -- "$_amx_s" --upload-pack=git-upload-pack "$@";;
       push) _amx_s=$1; shift; set -- "$_amx_s" --receive-pack=git-receive-pack "$@";;
     esac;
