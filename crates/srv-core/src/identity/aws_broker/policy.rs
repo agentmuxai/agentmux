@@ -23,7 +23,12 @@ const DEFAULT_MINTS_PER_HOUR: u32 = 12;
 const DEFAULT_READ_SECONDS: u64 = 3600;
 const DEFAULT_WRITE_SECONDS: u64 = 1800;
 /// What a recipe may be given, substituted whole into one argument each.
-const PLACEHOLDERS: [&str; 4] = ["reason", "seconds", "session", "agent"];
+const PLACEHOLDERS: [&str; 6] = ["reason", "seconds", "session", "agent", "tag", "tag_key"];
+/// The most characters a caller-supplied session tag value, and a tag key, may have.
+pub const TAG_VALUE_MAX: usize = 256;
+const TAG_KEY_MAX: usize = 128;
+/// The characters a caller-supplied tag may hold, besides letters and digits: no space, and none that is a wildcard.
+const TAG_CHARS: &str = "_.:/=+-@";
 /// The environment variable that points at another policy file (tests, an isolated instance).
 pub const FILE_ENV: &str = "AGENTMUX_AWS_GRANTS_FILE";
 
@@ -51,6 +56,44 @@ pub enum Hold {
     Refused,
 }
 
+/// One session tag the caller supplies on each mint, under a key the grant fixes. A grant for a role whose own policy builds
+/// what it may reach from a tag takes the tag's value from the caller, so the value is checked here: it starts with the
+/// prefix the grant fixes, and holds only letters, digits and `_.:/=+-@`, at most 256 characters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallerTag {
+    /// The tag's key as the recipe sets it (`{tag_key}`).
+    pub key: String,
+    /// What every value starts with. May be empty.
+    pub prefix: String,
+}
+
+fn tag_chars_ok(s: &str) -> bool {
+    s.chars().all(|c| c.is_ascii_alphanumeric() || TAG_CHARS.contains(c))
+}
+
+impl CallerTag {
+    /// The value the caller gave, or the sentence that says why it is not allowed. Nothing is cleaned: a value that is not
+    /// allowed is refused, not changed into one that is.
+    pub fn check(&self, grant: &str, given: Option<&str>) -> Result<String, String> {
+        let Some(value) = given.map(str::trim).filter(|v| !v.is_empty()) else {
+            return Err(format!(
+                "The grant '{grant}' needs the {} tag. Run the command with AGENTMUX_AWS_TAG='<value>' in front of it; the value starts with '{}'.",
+                self.key, self.prefix
+            ));
+        };
+        if value.chars().count() > TAG_VALUE_MAX || !tag_chars_ok(value) {
+            return Err(format!(
+                "The {} tag for the grant '{grant}' may hold only letters, digits and _.:/=+-@ (no spaces), at most {TAG_VALUE_MAX} characters.",
+                self.key
+            ));
+        }
+        if !value.starts_with(&self.prefix) {
+            return Err(format!("The {} tag for the grant '{grant}' has to start with '{}'.", self.key, self.prefix));
+        }
+        Ok(value.to_string())
+    }
+}
+
 /// How srv gets the credentials (spec §7).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Mint {
@@ -73,6 +116,8 @@ pub struct Grant {
     pub max_mints_per_hour: u32,
     pub disabled: bool,
     pub note: Option<String>,
+    /// One tag the caller names on each mint (`None`: the grant takes none).
+    pub caller_tag: Option<CallerTag>,
     /// Set when the file's version of this grant has not been allowed: it is refused. Always none from `parse`.
     pub hold: Option<Hold>,
 }
@@ -115,6 +160,15 @@ struct RawGrant {
     #[serde(default)]
     disabled: bool,
     note: Option<String>,
+    caller_tag: Option<RawCallerTag>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawCallerTag {
+    key: String,
+    #[serde(default)]
+    prefix: String,
 }
 
 #[derive(Deserialize)]
@@ -147,7 +201,7 @@ fn placeholders_of(arg: &str) -> Result<Vec<&str>, String> {
         let close = after.find('}').ok_or_else(|| format!("{arg:?} has an unclosed {{"))?;
         let name = &after[..close];
         if !PLACEHOLDERS.contains(&name) {
-            return Err(format!("{arg:?} uses {{{name}}}; the placeholders are {{reason}}, {{seconds}}, {{session}} and {{agent}}"));
+            return Err(format!("{arg:?} uses {{{name}}}; the placeholders are {{reason}}, {{seconds}}, {{session}}, {{agent}}, {{tag}} and {{tag_key}}"));
         }
         found.push(name);
         rest = &after[close + 1..];
@@ -192,10 +246,31 @@ impl Policy {
                     if program.is_empty() || program.contains('{') {
                         return Err(at("the program (argv[0]) must be a fixed path or name".to_string()));
                     }
+                    let mut used = Vec::new();
                     for arg in &argv {
-                        placeholders_of(arg).map_err(&at)?;
+                        used.extend(placeholders_of(arg).map_err(&at)?);
+                    }
+                    let takes_tag = g.caller_tag.is_some();
+                    if used.iter().any(|p| matches!(*p, "tag" | "tag_key")) && !takes_tag {
+                        return Err(at("the command uses {tag} or {tag_key}, and the grant has no caller_tag".to_string()));
+                    }
+                    if takes_tag && !used.contains(&"tag") {
+                        return Err(at("caller_tag is set and no argument of the command uses {tag}".to_string()));
                     }
                     Mint::Command { argv }
+                }
+            };
+            let caller_tag = match g.caller_tag {
+                None => None,
+                Some(_) if matches!(mint, Mint::HostProfile { .. }) => return Err(at("a caller_tag needs a command recipe".to_string())),
+                Some(t) => {
+                    if t.key.is_empty() || t.key.len() > TAG_KEY_MAX || !tag_chars_ok(&t.key) || t.key.to_ascii_lowercase().starts_with("aws:") {
+                        return Err(at(format!("caller_tag key {:?}: letters, digits and _.:/=+-@, at most {TAG_KEY_MAX} characters, and not starting with aws:", t.key)));
+                    }
+                    if t.prefix.len() > TAG_VALUE_MAX || !tag_chars_ok(&t.prefix) {
+                        return Err(at(format!("caller_tag prefix {:?}: letters, digits and _.:/=+-@, at most {TAG_VALUE_MAX} characters", t.prefix)));
+                    }
+                    Some(CallerTag { key: t.key, prefix: t.prefix })
                 }
             };
             let default_seconds = g.default_seconds.unwrap_or(if tier == Tier::Read { DEFAULT_READ_SECONDS } else { DEFAULT_WRITE_SECONDS });
@@ -229,6 +304,7 @@ impl Policy {
                     max_mints_per_hour,
                     disabled: g.disabled,
                     note: g.note.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()),
+                    caller_tag,
                     hold: None,
                 },
             );
