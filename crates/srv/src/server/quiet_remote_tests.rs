@@ -201,3 +201,12 @@ fn a_worker_with_a_display_name_is_found_by_its_route_name() {
     let note = Note::new("Loap #3", false, 35, &[48288], "").wire();
     assert!(matches!(judge(&note, &from, Some(true), true, &peers), Verdict::Accept { .. }));
 }
+
+/// A worker whose route name is 64 characters long is found among the agents its machine lists.
+#[test]
+fn a_worker_with_a_64_character_route_name_is_accepted() {
+    let long = "w".repeat(64);
+    let peers = vec![peer("starpower", "stable", &[long.as_str()])];
+    let note = Note::new(&long, false, 35, &[48288], "").wire();
+    assert!(matches!(judge(&note, &sent_by("starpower", "stable"), Some(true), true, &peers), Verdict::Accept { .. }));
+}

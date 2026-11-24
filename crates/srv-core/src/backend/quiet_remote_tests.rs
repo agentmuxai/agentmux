@@ -113,3 +113,12 @@ fn the_worker_is_named_as_the_lan_lists_it() {
     let parsed = parse(&Note::new("Loap #3", true, 4, &[2], "").wire()).expect("a note");
     assert_eq!(parsed.agent, "Loap-3");
 }
+
+/// A route name may be 64 characters long, and is kept whole: the other machine lists it whole.
+#[test]
+fn a_worker_with_the_longest_route_name_is_named_whole() {
+    let long = "w".repeat(64);
+    assert_eq!(Note::new(&long, false, 1, &[], "").agent, long);
+    assert_eq!(parse(&Note::new(&long, false, 1, &[], "").wire()).map(|n| n.agent), Some(long.clone()));
+    assert_eq!(Note::new(&"w".repeat(80), false, 1, &[], "").agent.len(), 64, "a longer one is cut at the route name's own limit");
+}
