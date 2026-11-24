@@ -389,7 +389,11 @@ fn the_function_keeps_the_folders_diff_programs_from_running_and_leaves_git_s_ow
         "git reflog -p",
         "git range-diff HEAD~2..HEAD~1 HEAD~1..HEAD",
         "git status",
+        "git d",
+        "git dd -p",
     ];
+    folder.git(&["config", "alias.d", "diff"], &HashMap::new());
+    folder.git(&["config", "alias.dd", "d"], &HashMap::new());
     for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
         for (key, name) in [("diff.external", "diffext"), ("diff.drvcmd.command", "drvcmd"), ("diff.drvtext.textconv", "drvtext"), ("filter.fx.clean", "filterclean"), ("filter.fx.process", "filterprocess"), ("diff.a=b.textconv", "eqtext"), ("filter.f=g.clean", "eqclean")] {
             folder.git(&["config", key, &format!("sh {} {name}", slashes(&script))], &HashMap::new());
@@ -583,5 +587,26 @@ fn the_function_keeps_a_merge_driver_the_folder_names_from_running() {
         folder.forget();
         through_the_function(&folder, body, true, "git merge other; git merge --abort");
         assert_eq!(folder.ran(), Vec::<String>::new(), "with it none runs");
+    }
+}
+
+#[test]
+fn the_function_does_not_run_an_alias_of_the_folder_that_names_a_program() {
+    let folder = Folder::new();
+    let script = folder.dir.path().join("mark.sh");
+    folder.git(&["config", "alias.rn", &format!("!sh {} aliasrun", slashes(&script))], &HashMap::new());
+    folder.git(&["config", "alias.opt", "--no-pager status"], &HashMap::new());
+    for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
+        folder.forget();
+        through_the_function(&folder, body, false, "git rn");
+        assert_eq!(folder.ran(), vec!["aliasrun"], "without the step the folder's alias runs its program");
+        folder.forget();
+        for command in ["git rn", "git opt"] {
+            let said = through_the_function(&folder, body, true, command);
+            assert!(said.contains("is not run"), "{command}: {said}");
+        }
+        assert_eq!(folder.ran(), Vec::<String>::new(), "with the step no alias of the folder runs a program");
+        let status = through_the_function(&folder, body, true, "git status --short && echo plain-ok");
+        assert!(status.contains("plain-ok"), "any other command is plain git: {status}");
     }
 }

@@ -92,7 +92,7 @@ pub const GIT_NO_EXT_DIFF_ENV: &str = "AGENTMUX_GIT_NO_EXT_DIFF";
 macro_rules! no_ext_diff_step {
     () => {
         r#"  if [ -n "${AGENTMUX_GIT_NO_EXT_DIFF:-}" ]; then
-    local _amx_g=() _amx_r=() _amx_e=() _amx_s _amx_t _amx_c _amx_k _amx_b _amx_n _amx_i _amx_u=;
+    local _amx_g=() _amx_r=() _amx_e=() _amx_s _amx_t _amx_c _amx_k _amx_b _amx_n _amx_i _amx_w _amx_u=;
     while [ $# -gt 0 ]; do
       case "$1" in
         -C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env|--attr-source) _amx_g+=("$1"); shift; if [ $# -gt 0 ]; then _amx_g+=("$1"); shift; fi;;
@@ -116,7 +116,17 @@ macro_rules! no_ext_diff_step {
       local -x "GIT_CONFIG_KEY_$_amx_n=${_amx_e[_amx_i]}" "GIT_CONFIG_VALUE_$_amx_n=${_amx_e[_amx_i+1]}"; _amx_n=$((_amx_n+1));
     done;
     local -x GIT_CONFIG_COUNT=$_amx_n;
-    case "${1:-}" in
+    _amx_w=${1:-};
+    for _amx_i in 1 2 3 4 5; do
+      case "$_amx_w" in diff|log|show|format-patch|whatchanged|blame|reflog|fetch|pull|ls-remote|clone|push|remote|"") break;; esac;
+      _amx_t=$(command git ${_amx_g[@]+"${_amx_g[@]}"} config --show-scope --get "alias.$_amx_w" 2>/dev/null) || break;
+      _amx_c=${_amx_t%%$'\t'*}; read -r _amx_w _amx_t <<< "${_amx_t#*$'\t'}";
+      case "$_amx_c:$_amx_w" in
+        global:*|system:*) break;;
+        *:'!'*|*:-*) echo "git: an alias of this folder's configuration that runs a program or starts with an option is not run" >&2; return 1;;
+      esac;
+    done;
+    case "$_amx_w" in
       remote)
         if [ -n "$_amx_u" ]; then
           _amx_s=$1; shift; _amx_t=;
