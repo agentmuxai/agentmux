@@ -11,28 +11,34 @@
 import { revealInFileManagerLabel } from "@/app/util/file-manager-label";
 import { formatBytes } from "@/util/format-bytes";
 import { Button } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import { createSignal, Show, type JSX } from "solid-js";
 import { ViewerBar, type ViewerBarProps } from "../viewer-bar";
 import { isProgramPath, type FileProbe } from "../viewer-choice";
 
-/** What the info card says a probe's kind is. */
-export const KIND_LABELS: Record<string, string> = {
-    image: "Image",
-    image_file: "Image the editor can't show yet",
-    svg: "SVG image",
-    pdf: "PDF document",
-    audio: "Audio",
-    video: "Video",
-    archive: "Archive",
-    word: "Word document",
-    excel: "Spreadsheet",
-    powerpoint: "Presentation",
-    sqlite: "SQLite database",
-    font: "Font",
-    text: "Text",
-    other: "Binary file",
-};
+const KIND_KEYS = new Set([
+    "image",
+    "imageFile",
+    "svg",
+    "pdf",
+    "audio",
+    "video",
+    "archive",
+    "word",
+    "excel",
+    "powerpoint",
+    "sqlite",
+    "font",
+    "text",
+    "other",
+]);
+
+/** What the info card says a probe's kind is; a kind it has no words for reads as "File". */
+function kindLabel(kind: string): string {
+    const key = kind === "image_file" ? "imageFile" : kind;
+    return KIND_KEYS.has(key) ? t(`infoCard.kind.${key}`) : t("infoCard.file");
+}
 
 export interface InfoCardProps {
     path: string;
@@ -53,7 +59,7 @@ export interface InfoCardProps {
 
 export function InfoCard(props: InfoCardProps): JSX.Element {
     const name = () => props.file?.name || props.path.split(/[\\/]/).pop() || props.path;
-    const kind = () => (props.probe ? (KIND_LABELS[props.probe.kind] ?? "File") : props.file?.type || "File");
+    const kind = () => (props.probe ? kindLabel(props.probe.kind) : props.file?.type || t("infoCard.file"));
     const size = () => props.probe?.size ?? props.file?.size;
     const modified = () => (props.probe?.mtime ? new Date(props.probe.mtime).toLocaleString() : "");
     // The open waiting on "Run this file?", for a program.
@@ -69,27 +75,27 @@ export function InfoCard(props: InfoCardProps): JSX.Element {
         <div class="editor-viewer info-card-viewer">
             {/* The toolbar's open button asks too: it runs a program as surely as this one. */}
             <ViewerBar {...props.bar} onOpenWithSystem={barOpen() && (() => askThenOpen(barOpen()))} />
-            <div class="info-card" role="region" aria-label="File info">
+            <div class="info-card" role="region" aria-label={t("infoCard.aria")}>
                 <div class="info-card-name">{name()}</div>
                 <dl class="info-card-facts">
-                    <dt>Kind</dt>
+                    <dt>{t("infoCard.kindLabel")}</dt>
                     <dd>{kind()}</dd>
                     <Show when={size() != null}>
-                        <dt>Size</dt>
+                        <dt>{t("infoCard.size")}</dt>
                         <dd>
-                            {formatBytes(size()!)} ({size()!.toLocaleString()} bytes)
+                            {t("infoCard.sizeValue", { size: formatBytes(size()!), bytes: size()!.toLocaleString() })}
                         </dd>
                     </Show>
                     <Show when={props.probe?.mime}>
-                        <dt>Type</dt>
+                        <dt>{t("infoCard.type")}</dt>
                         <dd>{props.probe!.mime}</dd>
                     </Show>
                     <Show when={modified()}>
-                        <dt>Modified</dt>
+                        <dt>{t("infoCard.modified")}</dt>
                         <dd>{modified()}</dd>
                     </Show>
                     <Show when={props.path && !props.file}>
-                        <dt>Path</dt>
+                        <dt>{t("infoCard.path")}</dt>
                         <dd class="info-card-path">{props.path}</dd>
                     </Show>
                 </dl>
@@ -99,17 +105,17 @@ export function InfoCard(props: InfoCardProps): JSX.Element {
                 <div class="info-card-actions">
                     <Show when={props.onOpenWithSystem}>
                         <Button tone="accent" icon="arrow-up-right-from-square" onClick={() => askThenOpen(props.onOpenWithSystem)}>
-                            Open with the system's app
+                            {t("infoCard.openSystem")}
                         </Button>
                     </Show>
                     <Show when={props.onOpenAsText}>
                         <Button icon="file-lines" onClick={() => props.onOpenAsText!()}>
-                            Open as text anyway
+                            {t("infoCard.openText")}
                         </Button>
                     </Show>
                     <Show when={props.onOpenAsHex}>
                         <Button icon="table-cells" onClick={() => props.onOpenAsHex!()}>
-                            Open as hex
+                            {t("infoCard.openHex")}
                         </Button>
                     </Show>
                     <Show when={props.onReveal}>
@@ -119,7 +125,7 @@ export function InfoCard(props: InfoCardProps): JSX.Element {
                     </Show>
                     <Show when={props.onCopyPath}>
                         <Button icon="copy" onClick={() => props.onCopyPath!()}>
-                            Copy path
+                            {t("infoCard.copyPath")}
                         </Button>
                     </Show>
                 </div>
@@ -128,10 +134,10 @@ export function InfoCard(props: InfoCardProps): JSX.Element {
                 <ConfirmModal
                     open={true}
                     scope="pane"
-                    title="Run this file?"
-                    description={`${name()} is a program or script. Opening it with the system runs it.`}
+                    title={t("infoCard.runTitle")}
+                    description={t("infoCard.runBody", { name: name() })}
                     destructive
-                    confirmLabel="Run"
+                    confirmLabel={t("infoCard.run")}
                     onConfirm={() => {
                         const open = confirmRun();
                         setConfirmRun(null);

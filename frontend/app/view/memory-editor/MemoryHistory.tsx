@@ -14,6 +14,8 @@ import { diffLineClass, diffLines } from "./line-diff";
 import { sourceLabel, sourceWarning, type MemoryHistoryModel, type MemoryVersionMeta } from "./memory-history-model";
 import "./memory-history.scss";
 import { Button, Tag } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
+import { Rich } from "@/app/i18n/rich";
 import { tokensLabel, tokensTitle } from "@/app/view/native-memory/memory-tokens";
 import { growthLabel, growthOver, sparklinePoints, versionDelta } from "./memory-history-tokens";
 import { tip } from "@/app/element/tip";
@@ -25,7 +27,7 @@ interface MemoryHistoryProps<V extends MemoryVersionMeta> {
 }
 
 function formatTimestamp(ms: number): string {
-    if (!ms) return "unknown time";
+    if (!ms) return t("memoryHistory.unknownTime");
     return new Date(ms).toLocaleString(undefined, {
         year: "numeric", month: "short", day: "numeric",
         hour: "2-digit", minute: "2-digit",
@@ -37,7 +39,7 @@ function formatTimestamp(ms: number): string {
  *  a "Human" source, so it isn't repeated. */
 function writerLabel(v: MemoryVersionMeta): string | null {
     if (!v.written_by || v.written_by === "armory-ui") return null;
-    return `by ${v.written_by}`;
+    return t("memoryHistory.by", { name: v.written_by });
 }
 
 /** The size over time above the list: now, growth over 7 and 30 days, and a
@@ -50,10 +52,10 @@ function HistorySize<V extends MemoryVersionMeta>(props: { versions: V[] }): JSX
         <Show when={latest() != null}>
             <div class="memory-history-size" data-testid="memory-history-size">
                 <span {...tip(tokensTitle(latest() ?? 0, props.versions[0]?.size_bytes))}>
-                    Now <strong>{tokensLabel(latest() ?? 0)}</strong>
+                    <Rich k="memoryHistory.now" params={{ tokens: tokensLabel(latest() ?? 0) }} />
                 </span>
-                <span>7 days: {growthLabel(growth(7) ?? 0)}</span>
-                <span>30 days: {growthLabel(growth(30) ?? 0)}</span>
+                <span>{t("memoryHistory.days7", { growth: growthLabel(growth(7) ?? 0) })}</span>
+                <span>{t("memoryHistory.days30", { growth: growthLabel(growth(30) ?? 0) })}</span>
                 <Show when={points()}>
                     <svg class="memory-history-sparkline" viewBox="0 0 120 18" width="120" height="18" aria-hidden="true">
                         <polyline points={points()} />
@@ -76,15 +78,15 @@ export function MemoryHistory<V extends MemoryVersionMeta>(props: MemoryHistoryP
 
             <Show
                 when={!model.loadingAtom() || model.versionsAtom().length > 0}
-                fallback={<div class="native-memory-history-loading">Loading history…</div>}
+                fallback={<div class="native-memory-history-loading">{t("memoryHistory.loading")}</div>}
             >
                 <Show
                     when={model.versionsAtom().length > 0}
-                    fallback={<div class="native-memory-history-empty">No recorded versions yet.</div>}
+                    fallback={<div class="native-memory-history-empty">{t("memoryHistory.empty")}</div>}
                 >
                     <HistorySize versions={model.versionsAtom()} />
                     <div class="native-memory-history-hint">
-                        Select two versions to compare, or revert directly to one.
+                        {t("memoryHistory.hint")}
                     </div>
                     <ul class="native-memory-history-list">
                         <For each={model.versionsAtom()}>
@@ -128,7 +130,7 @@ export function MemoryHistory<V extends MemoryVersionMeta>(props: MemoryHistoryP
                                                     </span>
                                                 </Show>
                                                 <Show when={i() === 0}>
-                                                    <Tag size="xs" tone="accent">current</Tag>
+                                                    <Tag size="xs" tone="accent">{t("memoryHistory.current")}</Tag>
                                                 </Show>
                                             </div>
                                             <Show when={warning}>
@@ -147,19 +149,19 @@ export function MemoryHistory<V extends MemoryVersionMeta>(props: MemoryHistoryP
                                                         disabled={model.revertingAtom() || props.revertDisabled}
                                                         onClick={() => setConfirmingRevert(v.id)}
                                                     >
-                                                        Revert to this
+                                                        {t("memoryHistory.revertTo")}
                                                     </Button>
                                                 }
                                             >
                                                 <div class="native-memory-history-revert-confirm">
-                                                    <span>Restore this content as a new version?</span>
+                                                    <span>{t("memoryHistory.restoreQuestion")}</span>
                                                     <Button
                                                         density="compact"
                                                         class="native-memory-history-btn"
                                                         disabled={model.revertingAtom()}
                                                         onClick={() => setConfirmingRevert(null)}
                                                     >
-                                                        Cancel
+                                                        {t("memoryHistory.cancel")}
                                                     </Button>
                                                     <Button
                                                         density="compact"
@@ -171,7 +173,7 @@ export function MemoryHistory<V extends MemoryVersionMeta>(props: MemoryHistoryP
                                                             void model.revertTo(v.id);
                                                         }}
                                                     >
-                                                        {model.revertingAtom() ? "Reverting…" : "Confirm revert"}
+                                                        {model.revertingAtom() ? t("memoryHistory.reverting") : t("memoryHistory.confirmRevert")}
                                                     </Button>
                                                 </div>
                                             </Show>
@@ -187,14 +189,14 @@ export function MemoryHistory<V extends MemoryVersionMeta>(props: MemoryHistoryP
             <Show when={model.diffSelectionAtom().length === 2}>
                 <div class="native-memory-history-diff">
                     <div class="native-memory-history-diff-header">
-                        <span>Diff</span>
+                        <span>{t("memoryHistory.diff")}</span>
                         <Button density="compact" class="native-memory-history-btn" onClick={() => model.clearDiffSelection()}>
-                            Clear selection
+                            {t("memoryHistory.clearSelection")}
                         </Button>
                     </div>
                     <Show
                         when={!model.diffLoadingAtom()}
-                        fallback={<div class="native-memory-history-loading">Loading diff…</div>}
+                        fallback={<div class="native-memory-history-loading">{t("memoryHistory.loadingDiff")}</div>}
                     >
                         <pre class="native-memory-history-diff-body">
                             <For each={diffLines(model.diffTextAtom() ?? "")}>
