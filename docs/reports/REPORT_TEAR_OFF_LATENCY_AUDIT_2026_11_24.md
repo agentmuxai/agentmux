@@ -1,5 +1,7 @@
 # Tear-off latency: the path from pointer down to the torn-off window, and what blocks the page
 
+**Status:** analysis. Read from the code and the app's own log lines; the fixes are built in #48665.
+
 Audit of the Windows tear-off of a pane (drag a pane's header out of the window). It follows the code from the press to the
 floating window painted and the source window settled, and ranks what blocks the page. Requirement behind it: a user-facing
 gesture answers as fast as it can, and nothing on its path blocks the page's frames.
