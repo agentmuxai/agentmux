@@ -48,12 +48,25 @@ fn shown(value: &str) -> String {
     withhold::text(&format!("TOKEN={value}")).into_owned()
 }
 
+/// Asserts `value` is no longer withheld. A release marks the matcher stale and the next read rebuilds it, but a
+/// read that arrives while another thread's rebuild is running (tests in one process share the registry) is
+/// served by the matcher in use, which still holds the value until that rebuild is swapped in. So a release is
+/// checked as taking effect within a few seconds, never in the same instant.
+fn no_longer_held(value: &str, why: &str) {
+    let want = format!("TOKEN={value}");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while shown(value) != want && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert_eq!(shown(value), want, "{why}");
+}
+
 #[test]
 fn a_container_token_is_withheld_until_its_block_is_revoked() {
     let token = crate::backend::container::credential::token_for_block("withhold-revoke-block", None);
     assert_eq!(shown(&token), format!("TOKEN={MARK}"));
     crate::backend::container::credential::revoke_block("withhold-revoke-block");
-    assert_eq!(shown(&token), format!("TOKEN={token}"), "a revoked token no longer works, so it is no longer held");
+    no_longer_held(&token, "a revoked token no longer works, so it is no longer held");
     let next = crate::backend::container::credential::token_for_block("withhold-revoke-block", None);
     assert_ne!(next, token);
     assert_eq!(shown(&next), format!("TOKEN={MARK}"));
@@ -67,9 +80,9 @@ fn a_gateway_token_is_withheld_until_it_is_replaced_or_ended() {
     let renewed = token::renew_for_account("withhold-gw-agent", "withhold-gw-def", "withhold-gw-route", "other", None);
     assert_ne!(first, renewed);
     assert_eq!(shown(&renewed), format!("TOKEN={MARK}"));
-    assert_eq!(shown(&first), format!("TOKEN={first}"), "the token it replaced is dropped");
+    no_longer_held(&first, "the token it replaced is dropped");
     token::revoke("withhold-gw-def", "withhold-gw-route");
-    assert_eq!(shown(&renewed), format!("TOKEN={renewed}"), "a route that was changed ends its token, and its hold");
+    no_longer_held(&renewed, "a route that was changed ends its token, and its hold");
 }
 
 #[test]
@@ -79,7 +92,7 @@ fn a_devices_token_is_withheld_until_the_device_is_unpaired() {
     store.viewer_device_insert("withhold-device", &crate::backend::viewer::pairing::token_hash(&token), "phone", "", 1).unwrap();
     assert_eq!(shown(&token), format!("TOKEN={MARK}"));
     store.viewer_device_delete("withhold-device").unwrap();
-    assert_eq!(shown(&token), format!("TOKEN={token}"));
+    no_longer_held(&token, "an unpaired device's token no longer works, so it is no longer held");
 }
 
 #[test]
