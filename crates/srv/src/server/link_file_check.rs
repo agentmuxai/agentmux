@@ -119,7 +119,13 @@ fn leaves_by_links(path: &Path, inside: &[&Path], hops: usize) -> bool {
             continue;
         }
         let Ok(target) = std::fs::read_link(&at) else { break };
-        let joined = if target.is_absolute() { target } else { at.parent().map_or(target.clone(), |parent| parent.join(&target)) };
+        // A relative target is read from the real folder that holds the link, which is not where the path says when a link led to it.
+        let joined = if target.is_absolute() {
+            target
+        } else {
+            let holder = at.parent().map(|parent| crate::server::browser_uploads::canonical(parent).unwrap_or_else(|_| parent.to_path_buf()));
+            holder.map_or(target.clone(), |holder| holder.join(&target))
+        };
         let Some(next) = collapse(&joined) else { return true };
         if !inside.iter().any(|root| next.starts_with(root)) {
             return true;
@@ -279,6 +285,11 @@ mod tests {
         // A link inside the folder whose own target runs through a link that leaves it, to something that is not there.
         link("through-up", &work.join("up").join("nothing.txt"));
         link("through-up-to-a-file", &work.join("up").join("secret.txt"));
+        // A relative link that does not resolve, reached through a link to the folder itself, is read from the real folder.
+        std::fs::create_dir_all(work.join("x").join("y")).unwrap();
+        link("x/y/dirlink", &work);
+        std::os::unix::fs::symlink("../probe", work.join("d")).unwrap();
+        assert_eq!(check(&dir, "x/y/dirlink/d"), (OUTSIDE.to_string(), OUTSIDE_WORDS.to_string()));
         for asked in ["through-up", "through-up-to-a-file"] {
             assert_eq!(check(&dir, asked), (OUTSIDE.to_string(), OUTSIDE_WORDS.to_string()), "{asked}");
         }

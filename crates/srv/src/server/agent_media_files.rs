@@ -252,6 +252,10 @@ mod tests {
         // A link inside the folder whose own target runs through that link answers alike, with or without a file at its end.
         std::os::unix::fs::symlink(f.ws.join("up").join("nothing.png"), f.ws.join("via-up.png")).unwrap();
         std::os::unix::fs::symlink(f.ws.join("up").join("photo.png"), f.ws.join("via-up-file.png")).unwrap();
+        std::fs::create_dir_all(f.ws.join("x").join("y")).unwrap();
+        std::os::unix::fs::symlink(&f.ws, f.ws.join("x").join("y").join("dirlink")).unwrap();
+        std::os::unix::fs::symlink("../probe.png", f.ws.join("d.png")).unwrap();
+        assert_eq!(resolve(&f.meta, "/workspace/x/y/dirlink/d.png").unwrap_err(), LEADS_OUT);
         assert_eq!(resolve(&f.meta, "/workspace/via-up.png").unwrap_err(), LEADS_OUT);
         assert_eq!(resolve(&f.meta, "/workspace/via-up-file.png").unwrap_err(), LEADS_OUT);
         let host = format!("{}/gone.png", f.ws.to_string_lossy());
