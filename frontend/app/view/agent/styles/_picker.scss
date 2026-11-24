@@ -237,6 +237,9 @@
 
     .agent-card {
         position: relative;                // anchor for absolutely-positioned actions
+        // The room a corner ribbon needs under the caption: its height (a line of xs text, its icon and 1px edges, 20px)
+        // and a gap of 8px, so the ribbon never reaches the text.
+        --agent-card-ribbon-room: calc(var(--space-4) + var(--space-2) + var(--space-1));
         // Tile layout: logo + title + caption stacked, uniform height so the
         // grid rows align. (Was a horizontal row.) Extra bottom padding
         // leaves room for the corner install ribbon / "+ New" affordance.
@@ -288,6 +291,13 @@
 
         .agent-card-tags {
             margin-top: auto;
+        }
+
+        // A card with the corner action and no chips has no tag row to hold it: the ribbon is on the corner alone, and is
+        // taller than the bottom padding, so it would sit over the caption's last line. It gets a line of its own at
+        // any card width. (A card with chips reserves its own: see below.)
+        &.agent-card--has-action:not(.agent-card--has-tags) {
+            padding-bottom: var(--agent-card-ribbon-room);
         }
 
         // A narrow card (AgentCard's ResizeObserver sets the class; a container query can't
