@@ -9,18 +9,13 @@ loadRuns j1 before=- limit=50
         <span class="ui-pill ui-pill--ok">
           "Active"
         <span class="warden-manager-dim">
-          "by"
-          "Builder"
+          "by Builder"
         <span class="warden-manager-dim">
           "→"
           "Builder"
         <button title="Its failures go to this task until the job succeeds again" type="button" class="ui-button ui-tone-quiet ui-density-compact">
           <i aria-hidden="true" class="fa-solid fa-table-columns">
-          "Failing: Kanban #"
-          "77"
-          "·"
-          "3"
-          "in a row"
+          "Failing: Kanban #77 · 3 in a row"
       <div class="warden-jobs-actions">
         <button title="Run it once now" type="button" class="ui-button ui-tone-neutral ui-density-compact">
           <i aria-hidden="true" class="fa-solid fa-play">
@@ -121,18 +116,13 @@ loadRuns j1 before=- limit=50
         <span class="ui-pill ui-pill--ok">
           "Active"
         <span class="warden-manager-dim">
-          "by"
-          "Builder"
+          "by Builder"
         <span class="warden-manager-dim">
           "→"
           "Builder"
         <button title="Its failures go to this task until the job succeeds again" type="button" class="ui-button ui-tone-quiet ui-density-compact">
           <i aria-hidden="true" class="fa-solid fa-table-columns">
-          "Failing: Kanban #"
-          "77"
-          "·"
-          "3"
-          "in a row"
+          "Failing: Kanban #77 · 3 in a row"
       <div class="warden-jobs-actions">
         <button title="Run it once now" type="button" class="ui-button ui-tone-neutral ui-density-compact">
           <i aria-hidden="true" class="fa-solid fa-play">
@@ -225,8 +215,7 @@ loadRuns j1 before=- limit=50
         <span class="ui-pill ui-pill--ok">
           "Active"
         <span class="warden-manager-dim">
-          "by"
-          "Builder"
+          "by Builder"
         <span class="warden-manager-dim">
           "→"
           "Builder"

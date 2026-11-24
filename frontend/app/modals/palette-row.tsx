@@ -46,7 +46,7 @@ export function PaletteRow(props: {
 }): JSX.Element {
     const cmd = () => props.row.cmd;
     // Looked up once per change of command, not once per use (the name, the caps and the test for them each need it).
-    const shortcut = createMemo(() => shortcutFor(cmd().id));
+    const shortcut = createMemo(() => shortcutFor(cmd().keyOf ?? cmd().id));
     return (
         <div
             id={props.id}

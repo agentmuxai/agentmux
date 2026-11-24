@@ -212,6 +212,21 @@ describe("the Large text viewer", () => {
         expect(document.querySelector('[data-line="3"] .large-text-text')?.textContent).toBe("after");
     });
 
+    it("shows the rest of a cut line when its note is clicked", async () => {
+        serve(`short
+${"x".repeat(LINE_SHOWN_MAX + 500)}
+after
+`);
+        await mount();
+        const note = () => document.querySelector('[data-line="2"] .large-text-hidden') as HTMLElement;
+        expect(document.querySelector('[data-line="2"] .large-text-text')?.textContent).toHaveLength(LINE_SHOWN_MAX + "…(+500 characters)".length);
+        fireEvent.click(note());
+        await settle();
+        expect(note()).toBeNull();
+        expect(document.querySelector('[data-line="2"] .large-text-text')?.textContent).toBe("x".repeat(LINE_SHOWN_MAX + 500));
+        expect(document.querySelector('[data-line="3"] .large-text-text')?.textContent).toBe("after");
+    });
+
     it("says an empty file is empty", async () => {
         serve("");
         await mount({ size: 0 });

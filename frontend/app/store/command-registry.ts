@@ -48,6 +48,9 @@ export interface CommandEntry {
     keywords?: string;
     /** Secondary text the palette shows after the label, and searches (an agent's seat and state). */
     detail?: string;
+    /** The id whose key the palette shows on this row, for a command that is the same action as a pane's own key command
+     *  (the agent view's "Find in conversation" shows the key of `pane:find`). Absent: the row's own id. */
+    keyOf?: string;
     /** Left out of the palette; still runs by id (a menu, a keybinding). */
     hidden?: boolean;
     /** A host capability the command needs. Without it the command is left
