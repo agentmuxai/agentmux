@@ -13,7 +13,9 @@ import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const FRONTEND = join(__dirname, "..", "..");
-const HINT = /(Ctrl|Cmd|Alt|Mod|Meta|Option)\+[A-Za-z0-9←→↑↓,./=-]|[⌘⌥⌃]/;
+// Also a bare key named in a hint's parentheses ("Close (Esc)", "Next match (Enter, F3)"), and Shift with a named key:
+// on macOS the table writes those as ⇧↵-style glyphs, so `keyLabel("shift+Enter")` is the one source.
+const HINT = /(Ctrl|Cmd|Alt|Mod|Meta|Option)\+[A-Za-z0-9←→↑↓,./=-]|[⌘⌥⌃]|\((?:Shift\+)?(?:Esc|Enter|F\d{1,2})[,)]|\bShift\+(?:Enter|F\d{1,2}|Tab)\b/;
 const SKIP = /(\.test\.tsx?$|[\\/]keybindings[\\/]|[\\/]util[\\/]keyutil\.ts$)/;
 
 function sources(dir: string, out: string[] = []): string[] {

@@ -140,6 +140,15 @@ impl Watch {
         None
     }
 
+    /// When the quiet that `step` is looking at began (unix ms), if the agent `key` is quiet at `now_ms`: it is between
+    /// turns and idle for the quiet time, or in a turn that has written nothing for the longer running time. Whether
+    /// it was nudged or its watchers told does not matter: this is what the Swarm and the Kanban show.
+    pub fn quiet_since(&self, key: &str, turn_active: bool, lim: &Limits, now_ms: u64) -> Option<u64> {
+        let at = self.episodes.get(key)?.activity_at;
+        let limit = if turn_active { lim.running_ms } else { lim.quiet_ms };
+        (now_ms.saturating_sub(at) >= limit).then_some(at)
+    }
+
     /// The watchers of `key` were told at `now_ms`: it is not told again for an hour. Called only once a note went
     /// out, so a note nobody could receive (no watcher open) or that the one-a-minute gap held is tried again at the
     /// next sweep.
@@ -158,6 +167,25 @@ impl Watch {
             self.last_nudge.retain(|_, at| *at >= cutoff);
         }
     }
+}
+
+/// An agent that is quiet now, as the Swarm and the Kanban show it (the `quiet` group of the live facts).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuietView {
+    /// When the quiet began (unix ms): the agent's last activity.
+    pub since_ms: u64,
+    /// The tasks it holds (numbers); empty for a spawned worker that owes its leader a report.
+    pub tasks: Vec<i64>,
+    /// The agents told when it has been quiet long enough (their names).
+    pub watchers: Vec<String>,
+}
+
+/// The agents quiet at the last sweep, by definition id. A sweep replaces it whole.
+static QUIET: std::sync::LazyLock<parking_lot::Mutex<HashMap<String, QuietView>>> = std::sync::LazyLock::new(Default::default);
+
+/// `def_id` as the last sweep found it, when it was quiet.
+pub fn quiet_view(def_id: &str) -> Option<QuietView> {
+    QUIET.lock().get(def_id).cloned()
 }
 
 /// Whether an agent in this state can be called quiet: it is working or idle. A question waiting for the user,
@@ -303,6 +331,7 @@ pub fn install(mstore: Arc<Store>, work: Arc<Store>, filestore: Arc<FileStore>, 
 pub fn sweep(watch: &mut Watch, mstore: &Store, work: &Store, filestore: &FileStore, config: &ConfigState, now_ms: u64) {
     let Some(lim) = limits_from(&config.get_settings().extra) else {
         watch.retain(&HashSet::new());
+        QUIET.lock().clear();
         return;
     };
     let defs = mstore.agent_def_list().unwrap_or_default();
@@ -310,6 +339,7 @@ pub fn sweep(watch: &mut Watch, mstore: &Store, work: &Store, filestore: &FileSt
     notes::absorb(&crate::backend::reactive::get_global_handler().get_audit_log(usize::MAX));
     let claimed = claimed_by_holder(&read_claimed(work, now_ms as i64));
     let mut keep = HashSet::new();
+    let mut quiet_now = HashMap::new();
     for def in &defs {
         let Some(block_id) = panes.get(&def.id) else { continue };
         let tasks = owed_by(&claimed, def);
@@ -319,7 +349,13 @@ pub fn sweep(watch: &mut Watch, mstore: &Store, work: &Store, filestore: &FileSt
         let state = crate::backend::agent_state::current_state(mstore, block_id);
         let Some(reading) = read(block_id, def, &tasks, state) else { continue };
         keep.insert(def.id.clone());
-        match watch.step(&def.id, reading, &lim, now_ms) {
+        let action = watch.step(&def.id, reading, &lim, now_ms);
+        if let Some(since_ms) = watch.quiet_since(&def.id, reading.turn_active, &lim, now_ms) {
+            let filers: Vec<String> = tasks.iter().map(|t| t.filer_uid.clone()).collect();
+            let watchers = watcher_panes(mstore, &def.id, &filers).iter().filter_map(|p| agent_name_of_pane(mstore, &defs, p)).collect();
+            quiet_now.insert(def.id.clone(), QuietView { since_ms, tasks: tasks.iter().map(|t| t.num).collect(), watchers });
+        }
+        match action {
             None => {}
             Some(Action::Nudge) => nudge(&def.id, block_id, &tasks, lim.quiet_ms / 60_000),
             Some(Action::Tell { running, idle_ms }) => {
@@ -330,6 +366,15 @@ pub fn sweep(watch: &mut Watch, mstore: &Store, work: &Store, filestore: &FileSt
         }
     }
     watch.retain(&keep);
+    *QUIET.lock() = quiet_now;
+}
+
+/// The name of the agent whose pane is `block_id`.
+fn agent_name_of_pane(mstore: &Store, defs: &[AgentDefinition], block_id: &str) -> Option<String> {
+    use crate::backend::obj::{self, Block};
+    let block = mstore.get::<Block>(block_id).ok().flatten()?;
+    let def_id = obj::meta_get_string(&block.meta, "agentId", "");
+    defs.iter().find(|d| d.id == def_id).map(|d| d.name.clone())
 }
 
 /// What the controller and the stores say about `def`'s pane, or `None` when it cannot be called quiet: it cannot
@@ -366,10 +411,15 @@ fn tell(mstore: &Store, filestore: &FileStore, config: &ConfigState, def: &Agent
     let is_worker = crate::backend::agent_seat::worker_of(mstore, &def.id).is_some();
     let body = quiet_body(&def.name, is_worker, tasks, idle_minutes, running, &words);
     let Some(body) = notes::admit(&def.id, body, now_ms) else { return false };
-    let text = format!("[AgentMux] {}", crate::backend::reactive::sanitize::quote_in_system_note(&body));
-    let key = format!("quiet:{}", def.id);
-    // Information that asks nothing: a cold leader hears it at its next turn. Told when any watcher took it.
-    watchers.iter().fold(false, |told, leader| notes::deliver(mstore, config, leader, &text, Some(&key)) || told)
+    // Information that asks nothing: a cold leader hears it at its next turn, and with the other notes about its agents
+    // when they fall in the same window (`note_outbox`).
+    let line = super::note_outbox::Line {
+        agent: def.id.clone(),
+        text: crate::backend::reactive::sanitize::quote_in_system_note(&body),
+        held_key: Some(format!("quiet:{}", def.id)),
+    };
+    super::note_outbox::queue(mstore, config, &watchers, &line, now_ms);
+    true
 }
 
 #[cfg(test)]
