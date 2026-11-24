@@ -206,7 +206,11 @@ function registerOpenViewCommands(): void {
         category: "Open",
         icon: "users",
         hidden: true,
-        execute: (opts) => openPane({ meta: { view: "audit", ...sectionMetaOf("audit", "conversations") } }, opts?.forceNew),
+        // An Audit pane already open is switched to Conversations (openAuditSection sets the section on it); Shift opens another.
+        execute: async (opts) => {
+            if (opts?.forceNew) return openPane({ meta: { view: "audit", ...sectionMetaOf("audit", "conversations") } }, true);
+            return (await import("@/app/view/audit/open-audit")).openAuditSection("conversations");
+        },
     });
     commandRegistry.register({
         id: "open:audit",
