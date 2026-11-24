@@ -17,7 +17,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { openInEditorPaneOnScreen } from "@/app/util/editor-open";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { getLayoutModelForStaticTab } from "@/layout/lib/layoutModelHooks";
-import { addWidgetAsPaneTab, closeBlockInStack, effectiveStack } from "@/layout/lib/layoutStack";
+import { addWidgetAsPaneTab } from "@/layout/lib/layoutStack";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { errorText, type FilesModel } from "./files-model";
 import { extensionOf } from "./files-sort";
@@ -127,13 +127,4 @@ export async function openFolderInNewTab(fromBlockId: string, dir: string, conne
     });
 }
 
-/** Close `blockId`'s pane tab, but never the pane itself: false when it is
- *  the pane's only tab (the pane's own × closes that). */
-export async function closeOwnTab(blockId: string): Promise<boolean> {
-    const pane = paneOf(blockId);
-    if (!pane) return false;
-    const node = pane.model.getNodeByBlockId(blockId);
-    if (!node?.data || effectiveStack(node.data).length <= 1) return false;
-    await closeBlockInStack(pane.model, pane.nodeId, blockId);
-    return true;
-}
+export { closeOwnTab } from "@/app/util/close-own-tab";
