@@ -11,13 +11,12 @@ use super::*;
 /// The built-in management views, as `BUILTIN_SINGLETON_VIEWS` in `frontend/app/store/widget-singleton.ts`
 /// has them (a test keeps the two equal). A view that a widget entry flags singleton is the window's to
 /// enforce: srv doesn't read `widgets.json`.
-pub(super) const SINGLETON_VIEWS: [&str; 13] = [
+pub(super) const SINGLETON_VIEWS: [&str; 12] = [
     "atlas",
     "audit",
     "connectors",
     "drone",
     "help",
-    "history",
     "kanban",
     "memory",
     "settings",

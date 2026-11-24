@@ -35,12 +35,18 @@ describe("the palette's open entries", () => {
         ["open:swarm", "swarm"],
         ["open:kanban", "kanban"],
         ["open:vault", "vault"],
-        ["open:history", "history"],
         ["open:audit", "audit"],
     ])("%s brings back the open %s pane", async (id, view) => {
         await commandRegistry.get(id)!.execute();
         expect(h.openOrFocusPaneByView).toHaveBeenCalledWith(view, { meta: { view } });
         expect(h.createBlock).not.toHaveBeenCalled();
+    });
+
+    it("open:history, kept for a saved key binding, opens the Audit pane on Conversations and is not in the palette", async () => {
+        const command = commandRegistry.get("open:history")!;
+        expect(command.hidden).toBe(true);
+        await command.execute();
+        expect(h.openOrFocusPaneByView).toHaveBeenCalledWith("audit", { meta: { view: "audit", "audit:section": "conversations" } });
     });
 
     it("opens a new pane on Shift", async () => {

@@ -30,6 +30,7 @@ import { openKeyboardSettings } from "@/app/store/keyboard-focus-request";
 import { toggleStatusBar } from "@/app/statusbar/status-bar-visibility";
 import { devModeOn, toggleDevMode } from "@/app/store/dev-mode";
 import { paneHistoryBack, paneHistoryForward } from "@/app/store/pane-history";
+import { sectionMetaOf } from "@/app/store/pane-sections";
 import { browserPauseAll, setAgentBrowsingPaused } from "@/app/store/browser-pause-all";
 
 // ---------------------------------------------------------------------------
@@ -206,7 +207,7 @@ function registerOpenCommands(): void {
     });
 }
 
-/** The "Open" commands for the other views: Vault, History, Audit, Jobs, Help, Swarm, Files and Remotes. */
+/** The "Open" commands for the other views: Vault, Audit, Jobs, Help, Swarm, Files and Remotes. */
 function registerOpenViewCommands(): void {
     commandRegistry.register({
         id: "open:vault",
@@ -215,12 +216,15 @@ function registerOpenViewCommands(): void {
         icon: "lock",
         execute: (opts) => openPane({ meta: { view: "vault" } }, opts?.forceNew),
     });
+    // The History pane is the Audit pane's Conversations section. The command stays for a key binding saved
+    // against it (Ctrl+Shift+O then H), and is not listed in the palette: "Open Audit" is.
     commandRegistry.register({
         id: "open:history",
-        label: "Open History",
+        label: "Open Conversations",
         category: "Open",
-        icon: "clock-rotate-left",
-        execute: (opts) => openPane({ meta: { view: "history" } }, opts?.forceNew),
+        icon: "users",
+        hidden: true,
+        execute: (opts) => openPane({ meta: { view: "audit", ...sectionMetaOf("audit", "conversations") } }, opts?.forceNew),
     });
     commandRegistry.register({
         id: "open:audit",

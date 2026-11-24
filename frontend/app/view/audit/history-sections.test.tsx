@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HistoryAgent } from "@/types/rpc/HistoryAgent";
 
@@ -38,7 +39,26 @@ vi.mock("@/app/view/agent/open-history-tab", () => ({
     openOrFocusHistoryTab: (...a: unknown[]) => openOrFocusHistoryTab(...a),
 }));
 
-import { HistoryManager } from "./history-manager";
+import ConversationsSection from "./conversations/conversations-section";
+import StorageSection from "./storage/storage-section";
+
+/** The two sections the way the Audit pane drives them: one shown at a time, both kept mounted. */
+const HistoryManager = (props: { paneBlockId: string; visible: boolean }) => {
+    const [section, setSection] = createSignal<"conversations" | "storage">("conversations");
+    return (
+        <>
+            <button type="button" role="radio" aria-checked={section() === "storage"} onClick={() => setSection("storage")}>
+                Storage
+            </button>
+            <div hidden={section() !== "conversations"}>
+                <ConversationsSection paneBlockId={props.paneBlockId} visible={props.visible && section() === "conversations"} meta={undefined} />
+            </div>
+            <div hidden={section() !== "storage"}>
+                <StorageSection paneBlockId={props.paneBlockId} visible={props.visible && section() === "storage"} meta={undefined} />
+            </div>
+        </>
+    );
+};
 
 const agent = (id: string, extra: Partial<HistoryAgent> = {}): HistoryAgent => ({
     definition_id: id,
@@ -54,7 +74,7 @@ const agent = (id: string, extra: Partial<HistoryAgent> = {}): HistoryAgent => (
     ...extra,
 });
 
-describe("History pane", () => {
+describe("the Conversations and Storage sections", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         HistoryAgentsCommand.mockResolvedValue({
@@ -164,7 +184,7 @@ describe("History pane", () => {
         });
     });
 
-    it("opens an agent's history in the History pane", async () => {
+    it("opens an agent's conversation as a tab beside Audit", async () => {
         render(() => <HistoryManager paneBlockId="warden-1" visible={true} />);
         await waitFor(() => expect(screen.getByText("Parent")).toBeInTheDocument());
         fireEvent.click(screen.getAllByRole("button", { name: "Open conversation" })[0]);

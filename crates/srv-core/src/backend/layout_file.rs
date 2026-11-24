@@ -512,6 +512,17 @@ fn view_from_block(store: &Store, meta: &MetaMapType, ctx: &ExportContext, warni
             view_type = pane.to_string();
         }
     }
+    // History became the Audit pane's Conversations section; a block saved before that (or a Warden one on
+    // History) is written as it, and an Audit pane keeps the section it shows.
+    if view_type == "history" {
+        view_type = "audit".to_string();
+        config.insert("section".into(), Value::String("conversations".to_string()));
+    }
+    if view_type == "audit" && !config.contains_key("section") {
+        if let Some(section) = meta_str(meta, "audit:section").filter(|s| AUDIT_SECTIONS.contains(s)) {
+            config.insert("section".into(), Value::String(section.to_string()));
+        }
+    }
     match view_type.as_str() {
         "agent" => {
             // The definition's portable identity, never its local row id.
@@ -690,8 +701,11 @@ const MAX_TREE_DEPTH: usize = 32;
 
 /// Views that need no config to open, beyond their type.
 const PLAIN_VIEWS: &[&str] = &[
-    "swarm", "kanban", "history", "audit", "help", "drone", "workflows", "toolchain", "launcher", "shortcuts", "identity", "tower", "atlas",
+    "swarm", "kanban", "help", "drone", "workflows", "toolchain", "launcher", "shortcuts", "identity", "tower", "atlas",
 ];
+
+/// The sections of the Audit pane, as `frontend/app/view/audit/audit-sections.ts` has them.
+const AUDIT_SECTIONS: &[&str] = &["events", "conversations", "typed", "storage"];
 
 /// The pane a Warden section opens now, or None when it is still Warden's own (Jobs). Host, no
 /// section and an unknown one open the Swarm, Warden's old default; sections with no pane of their
@@ -1170,6 +1184,7 @@ impl PlanBuilder<'_> {
                         match warden_section_pane(id) {
                             None => ("warden", id, None),
                             Some("vault") => ("vault", None, sub),
+                            Some("history") => ("audit", Some("conversations"), None),
                             Some(pane) => (pane, None, None),
                         }
                     }
@@ -1187,6 +1202,19 @@ impl PlanBuilder<'_> {
                 self.summary.push(pane.to_string());
             }
             "reviews" => fold_reviews_meta(view, &mut meta, &mut self.summary),
+            // The History pane is the Audit pane's Conversations section now; an Audit pane's file names its section.
+            "history" => {
+                meta.insert("view".into(), Value::String("audit".to_string()));
+                meta.insert("audit:section".into(), Value::String("conversations".to_string()));
+                self.summary.push("audit".to_string());
+            }
+            "audit" => {
+                meta.insert("view".into(), Value::String("audit".to_string()));
+                if let Some(section) = cfg_str(view, "section").filter(|s| AUDIT_SECTIONS.contains(s)) {
+                    meta.insert("audit:section".into(), Value::String(section.to_string()));
+                }
+                self.summary.push("audit".to_string());
+            }
             k if PLAIN_VIEWS.contains(&k) => {
                 meta.insert("view".into(), Value::String(k.to_string()));
                 self.summary.push(k.to_string());

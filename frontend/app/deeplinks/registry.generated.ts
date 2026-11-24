@@ -490,23 +490,36 @@ export const DEEPLINK_REGISTRY: DeepLinkRegistry = {
                             kind: "id"
                         }
                     ]
+                },
+                {
+                    id: "section",
+                    sections: true,
+                    segments: [
+                        {
+                            var: "section",
+                            kind: "enum",
+                            values: [
+                                {
+                                    id: "events",
+                                    labelKey: "deeplinks.places.audit.events"
+                                },
+                                {
+                                    id: "conversations",
+                                    labelKey: "deeplinks.places.audit.conversations"
+                                },
+                                {
+                                    id: "typed",
+                                    labelKey: "deeplinks.places.audit.typed"
+                                },
+                                {
+                                    id: "storage",
+                                    labelKey: "deeplinks.places.audit.storage"
+                                }
+                            ]
+                        }
+                    ]
                 }
             ]
-        },
-        {
-            id: "history",
-            labelKey: "deeplinks.views.history",
-            icon: "clock-rotate-left",
-            build: 1,
-            effect: "none",
-            sensitivity: "public",
-            agent: "yes",
-            surfaces: [
-                "desktop"
-            ],
-            command: "open:history",
-            group: "views",
-            places: []
         },
         {
             id: "atlas",
@@ -877,6 +890,15 @@ export const DEEPLINK_REGISTRY: DeepLinkRegistry = {
             to: [
                 "kanban",
                 "pulls"
+            ]
+        },
+        {
+            from: [
+                "history"
+            ],
+            to: [
+                "audit",
+                "conversations"
             ]
         }
     ],
