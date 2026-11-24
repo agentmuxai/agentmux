@@ -55,7 +55,16 @@ impl PersistentSubprocessController {
         }
         inner.restart_spawn_for = restart_generation;
         inner.spawning_in_progress = true;
+        inner.eager_resume_claim_epoch = Some(inner.stop_epoch);
         true
+    }
+
+    /// True when a Stop (or a replacement's stop of this controller, or a pane close) has landed since an eager
+    /// resume claimed its spawn, so the child it is about to start would outlive its pane: nothing could reach it
+    /// through the registry, and it would race the replacement on the same `--resume` session. Always false for
+    /// a spawn that is not an eager resume.
+    pub(super) fn eager_resume_stopped_locked(inner: &PersistentInner) -> bool {
+        inner.eager_resume_claim_epoch.is_some_and(|claimed| claimed != inner.stop_epoch)
     }
 
     /// `start()`'s eager-resume attempt for a pane with a captured
@@ -109,6 +118,8 @@ impl PersistentSubprocessController {
                  — nothing to eagerly resume",
             );
         }
+        // The claim's epoch outlives neither this call nor the spawn it guards.
+        let _claim_epoch = EagerClaimEpoch(&self.inner);
 
         let env_vars = match self.build_gate_env(stores, block_meta, base_env_vars) {
             Ok(env) => env,
@@ -180,7 +191,10 @@ impl PersistentSubprocessController {
         // prompts queued behind it too: the fallback respawn below would start
         // the agent the user just stopped (codex P1 on #3990).
         let restart_cancelled = err == RESTART_OVERRIDDEN;
-        let no_fallback = ownership_refusal || restart_cancelled;
+        // Likewise a Stop or a replacement that landed while an eager resume was starting: the prompts queued
+        // behind it must not start the agent again on a controller that was just stopped or replaced.
+        let stopped_while_starting = err == STOPPED_WHILE_STARTING;
+        let no_fallback = ownership_refusal || restart_cancelled || stopped_while_starting;
         let (stranded, discarded) = {
             let mut inner = self.inner.lock().unwrap();
             let n = inner.pending_send_messages.len();
@@ -205,6 +219,8 @@ impl PersistentSubprocessController {
         }
         let why = if restart_cancelled {
             "this agent was stopped before its config restart finished, so it was not restarted".to_string()
+        } else if stopped_while_starting {
+            "this agent was stopped or replaced while it was being resumed, so it was not resumed".to_string()
         } else {
             format!("this agent was not resumed. {err}")
         };
@@ -234,6 +250,10 @@ impl PersistentSubprocessController {
     /// spawn-failure path: the claim is released, and a message a human typed
     /// meanwhile still gets its own spawn.
     pub(super) fn restart_spawn_still_permitted_locked(inner: &mut PersistentInner) -> Result<(), String> {
+        if Self::eager_resume_stopped_locked(inner) {
+            inner.restart_spawn_for = None;
+            return Err(STOPPED_WHILE_STARTING.to_string());
+        }
         let Some(generation) = inner.restart_spawn_for else {
             return Ok(());
         };
@@ -251,6 +271,10 @@ impl PersistentSubprocessController {
     /// where it must win: on refusal the caller kills the child it just
     /// started and fails the spawn.
     pub(super) fn commit_restart_spawn_locked(inner: &mut PersistentInner) -> Result<(), String> {
+        if Self::eager_resume_stopped_locked(inner) {
+            inner.restart_spawn_for = None;
+            return Err(STOPPED_WHILE_STARTING.to_string());
+        }
         let Some(generation) = inner.restart_spawn_for.take() else {
             return Ok(());
         };
@@ -361,3 +385,19 @@ impl PersistentSubprocessController {
 
 /// Why a config restart's replacement was abandoned: a Stop landed first.
 pub(super) const RESTART_OVERRIDDEN: &str = "a stop overrode the config restart before its replacement started";
+
+/// Why an eager resume was abandoned after it claimed its spawn: a Stop, a replacement of this controller or a
+/// pane close landed during the credential gate or while the child was starting.
+pub(super) const STOPPED_WHILE_STARTING: &str = "a stop or a replacement landed before the eager resume's process started";
+
+/// Holds an eager resume's claim epoch (`eager_resume_claim_epoch`) for the length of the attempt and clears it
+/// on every way out, so a later spawn of another kind is never judged by a stale one.
+struct EagerClaimEpoch<'a>(&'a Mutex<PersistentInner>);
+
+impl Drop for EagerClaimEpoch<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut inner) = self.0.lock() {
+            inner.eager_resume_claim_epoch = None;
+        }
+    }
+}

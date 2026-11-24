@@ -33,6 +33,8 @@ fn inner_with_session_id(session_id: Option<&str>) -> PersistentInner {
         stop_pending: false,
         config_restart_generation: None,
         restart_spawn_for: None,
+        stop_epoch: 0,
+        eager_resume_claim_epoch: None,
         resume: persistent_resume::ResumeState::default(),
         spawning_in_progress: false,
         pending_send_messages: VecDeque::new(),

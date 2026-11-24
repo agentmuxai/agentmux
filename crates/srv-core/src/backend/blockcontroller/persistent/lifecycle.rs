@@ -184,6 +184,8 @@ impl PersistentSubprocessController {
         inner.stop_pending = true;
         if !config_restart {
             inner.config_restart_generation = None;
+            // An eager resume that claimed its spawn before this stop must not start a child after it.
+            inner.stop_epoch += 1;
         }
         let drained = if drain_deferred {
             inner.deferred_deliveries.drain(..).collect()
