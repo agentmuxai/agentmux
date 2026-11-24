@@ -9,6 +9,7 @@
 use agentmux_srv_core::backend::storage::drone_store::DroneStore;
 
 use crate::backend::jobs::definition::{Action, JobDefinition, Trigger};
+use crate::drone::types::DroneDefinition;
 use crate::drone::{payload_schema, rule_of_two};
 use crate::server::AppState;
 
@@ -25,4 +26,25 @@ pub(crate) fn allowed(state: &AppState, def: &JobDefinition) -> Result<(), Strin
         _ => (None, Default::default()),
     };
     rule_of_two::refuse(&drone.graph, &payload_schema::fields_of(source, &filter))
+}
+
+/// `Ok` when the graph of `drone`, about to be saved, still passes for every job that is on and runs it, or what stops it. A
+/// drone nobody runs, and a job that is paused, are not checked here: the job is checked when it is turned on.
+pub(crate) fn graph_allowed(state: &AppState, drone: &DroneDefinition) -> Result<(), String> {
+    let Some(store) = crate::server::cron::jobs_store(state) else { return Ok(()) };
+    let jobs = store.cron_list_enabled().map_err(|e| format!("the jobs could not be read: {e}"))?;
+    for job in &jobs {
+        let def = JobDefinition::from_job(job);
+        if !matches!(&def.action, Action::Drone { drone_id } if *drone_id == drone.id) {
+            continue;
+        }
+        let (source, filter) = match &def.trigger {
+            Trigger::Event(e) => (Some(e.source.as_str()), e.filter.clone()),
+            _ => (None, Default::default()),
+        };
+        if let Err(why) = rule_of_two::refuse(&drone.graph, &payload_schema::fields_of(source, &filter)) {
+            return Err(format!("the job {:?} runs this drone and is on, so this graph cannot be saved: {why}", def.name));
+        }
+    }
+    Ok(())
 }

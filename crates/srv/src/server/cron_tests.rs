@@ -697,5 +697,12 @@ async fn a_drone_job_that_breaks_the_rule_of_two_is_not_turned_on() {
     crate::server::drone_handlers::upsert_drone(&state, fixed).unwrap();
     let (status, v) = send(&state, Method::PATCH, Some(&owner), &uri, Some(json!({ "action": "resume" }))).await;
     assert_eq!(status, StatusCode::OK, "{v}");
+    // The job is on now: saving the risky graph again is refused, and the saved one stays.
+    let mut back = graph(vec![json!({ "id": "post", "kind": "api", "method": "POST", "url": "https://api.example.com/comments", "body": "{{trigger.title}}" })], vec![]);
+    back.id = drone.id.clone();
+    let why = crate::server::drone_handlers::upsert_drone(&state, back).unwrap_err();
+    assert!(why.contains("Comment") || why.contains("is on"), "{why}");
+    assert!(why.contains("post:") && why.contains("Approval"), "{why}");
+    assert_eq!(agentmux_srv_core::backend::storage::drone_store::DroneStore::drone_get(&*state.id_store, &drone.id).unwrap().unwrap().graph.nodes.len(), 2, "the graph that passes is still the saved one");
     state.cron_scheduler.cancel_job(uri.rsplit('/').next().unwrap());
 }
