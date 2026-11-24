@@ -240,6 +240,12 @@
     align-items: stretch;
 }
 
+// A tab with no icon (a document tab) has only its label to say which it is: it keeps a few letters of it, not a sliver
+// (RESTING_NO_ICON_FLOOR_PX in pane-tab-steps.ts); the strip's header scrolls past that.
+.pane-tab-tip:has(.doc-tab--no-icon):not(:has(.pane-tab--active)) {
+    min-width: 56px;
+}
+
 // The selected tab keeps a floor wide enough for its icon and its close button, so
 // the squeeze takes the label (and then the other tabs' labels) before it takes
 // the selected tab's controls. A lone tab may shrink below it, to the strip (#30300).
