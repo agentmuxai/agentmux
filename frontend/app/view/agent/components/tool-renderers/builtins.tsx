@@ -11,8 +11,10 @@
  */
 
 import { Markdown } from "@/app/element/markdown";
+import { pushNotification } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { withoutAskMarker } from "@/app/util/open-asks-first";
 import { formatBytes } from "@/util/format-bytes";
 import { Show, type JSX } from "solid-js";
 import { Button } from "@/app/element/ui/Button";
@@ -37,6 +39,21 @@ import { anyTool, byKind, type ToolRendererEntry } from "./registry";
 // a closed switch — these are the built-in (coarse-kind) entries. The bodies are
 // the former `switch` arms verbatim; behavior is unchanged. See
 // SPEC_TOOL_RESULT_RENDERER_REGISTRY_2026_06_17.md (Phase 1).
+
+/** Open a file with the system's default app, and say so when that fails: a file a container agent can write is not
+ *  opened from here (it asks first, in a Files pane), and the person is told instead of nothing happening. */
+function openWithTheSystemsApp(path: string): void {
+    void RpcApi.FsOpenCommand(TabRpcClient, { path }).catch((e) =>
+        pushNotification({
+            icon: "fa-triangle-exclamation",
+            title: "Couldn't open the file",
+            message: withoutAskMarker(e instanceof Error ? e.message : String(e)),
+            timestamp: new Date().toISOString(),
+            type: "error",
+            expiration: Date.now() + 8000,
+        })
+    );
+}
 
 function renderEdit(node: ToolNode): JSX.Element {
     const range = fileRangeOf(node);
@@ -188,7 +205,7 @@ function renderRead(node: ToolNode): JSX.Element {
                             density="compact"
                             class="agent-tool-read-open"
                             title="Open with the default app"
-                            onClick={() => void RpcApi.FsOpenCommand(TabRpcClient, { path: filePath }).catch(() => {})}
+                            onClick={() => openWithTheSystemsApp(filePath)}
                         >
                             Open
                         </Button>

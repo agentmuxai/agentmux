@@ -1,10 +1,11 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Where the process that sends a headless sign-in's confirm stands. The confirm is the person's own answer, so one sent by
-//! a process inside an agent's process tree is refused, and the refusal tells the agent to ask the person. A confirm from any
-//! other process goes through. When the process cannot be found (the lookup failed, or the peer is a proxy or a tunnel) the
-//! confirm goes through too, and is recorded as `peer unknown`. Every confirm is recorded by [`super::local_session`].
+//! Where the process that sends a headless sign-in's confirm stands. The confirm is the person's own answer, so it is taken
+//! only from a process that is found and is outside every agent's process tree. One from inside an agent's tree, one whose
+//! process cannot be found (the lookup failed, or the peer is not on IPv4 loopback) and one that came through a proxy or a
+//! tunnel (it carries forwarding headers) are refused, and the refusal says what works. Every confirm is recorded by
+//! [`super::local_session`].
 
 use std::net::SocketAddr;
 
@@ -44,8 +45,28 @@ async fn plain_peer(mut req: axum::extract::Request, next: axum::middleware::Nex
 /// What an agent that sent a confirm is told.
 pub(crate) const REFUSED_TEXT: &str = "this confirm is the person's own answer to their sign-in: ask the person to answer it in their terminal";
 
+/// What is told when the confirm's sender could not be found, or came through a proxy: it was not taken, and the person's own
+/// terminal on this machine, or their own browser on the printed address and code, still works.
+pub(crate) const UNKNOWN_TEXT: &str = "this confirm could not be tied to the person's own terminal on this machine, so it was not taken: the person runs `agentmux-srv open` in their own terminal here, or opens the printed address and code in their own browser";
+
+/// The text of a confirm that was not taken.
+pub(crate) fn refusal_text(how: &ConfirmHow) -> &'static str {
+    match how {
+        ConfirmHow::Refused(_) => REFUSED_TEXT,
+        _ => UNKNOWN_TEXT,
+    }
+}
+
+/// Whether the request came through a proxy or a tunnel, by the headers one adds. The real client sends none of them.
+pub(crate) fn is_forwarded(headers: &axum::http::HeaderMap) -> bool {
+    ["forwarded", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "x-real-ip", "via"].iter().any(|h| headers.contains_key(*h))
+}
+
 /// How the confirm that arrived on `conn` was sent. It reads the process table, so it runs off the async threads.
-pub(crate) async fn classify(state: &AppState, conn: Conn) -> ConfirmHow {
+pub(crate) async fn classify(state: &AppState, conn: Conn, forwarded: bool) -> ConfirmHow {
+    if forwarded {
+        return ConfirmHow::Forwarded;
+    }
     let state = state.clone();
     tokio::task::spawn_blocking(move || classify_now(&state, conn)).await.unwrap_or(ConfirmHow::Unknown)
 }

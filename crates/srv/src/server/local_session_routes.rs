@@ -299,9 +299,10 @@ async fn handle_pending(headers: HeaderMap, body: Bytes) -> Response {
     proved(&admitted, state)
 }
 
-/// `POST /auth/confirm {code, accept}`: the person's answer for the session that code made. An accept sent by a process inside
-/// an agent's process tree is not taken (the answer says whose it is); any other accept goes through. Every accept, taken or
-/// not, is recorded with how it arrived ([`super::confirm_peer`]).
+/// `POST /auth/confirm {code, accept}`: the person's answer for the session that code made. An accept is taken only from a
+/// process found outside every agent's process tree; one from an agent's tree, from a process that cannot be found, or through
+/// a proxy is not taken (the answer says what works). Every accept, taken or not, is recorded with how it arrived
+/// ([`super::confirm_peer`]).
 async fn handle_confirm(
     State(state): State<AppState>,
     conn: Option<ConnectInfo<super::confirm_peer::Conn>>,
@@ -315,14 +316,13 @@ async fn handle_confirm(
     let Ok(ConfirmBody { code, accept }) = serde_json::from_slice(&body) else { return refuse("/auth/confirm", Reason::Code).await };
     if accept {
         let how = match conn {
-            Some(ConnectInfo(conn)) => super::confirm_peer::classify(&state, conn).await,
+            Some(ConnectInfo(conn)) => super::confirm_peer::classify(&state, conn, super::confirm_peer::is_forwarded(&headers)).await,
             None => ConfirmHow::Unknown,
         };
-        let refused = matches!(how, ConfirmHow::Refused(_));
         let found = store().note_confirm(&code, how.clone(), Instant::now());
-        if refused {
-            tracing::warn!(found, how = %how.label(), "local sign-in confirm refused: it came from an agent's process tree");
-            return proved(&admitted, json!({ "found": false, "refused": super::confirm_peer::REFUSED_TEXT }));
+        if !how.is_taken() {
+            tracing::warn!(found, how = %how.label(), "local sign-in confirm not taken");
+            return proved(&admitted, json!({ "found": false, "refused": super::confirm_peer::refusal_text(&how) }));
         }
     }
     let found = store().decide(&code, accept, Instant::now());
