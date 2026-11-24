@@ -168,17 +168,26 @@ export function FileRow(props: {
                 </Show>
             </div>
             <Show when={!props.inColumn}>
-                <div class="files-cell files-col-modified" role="gridcell">
-                    {formatModified(props.entry.mtime)}
-                </div>
-                <div class="files-cell files-col-size" role="gridcell">
-                    {props.entry.is_dir || props.entry.size == null ? "" : formatBytes(props.entry.size)}
-                </div>
-                <div class="files-cell files-col-kind" role="gridcell">
-                    {kindOf(props.entry)}
-                </div>
+                <FileRowDetails entry={props.entry} />
             </Show>
         </div>
+    );
+}
+
+/** A details row's modified, size and kind cells. */
+function FileRowDetails(props: { entry: FsEntry }): JSX.Element {
+    return (
+        <>
+            <div class="files-cell files-col-modified" role="gridcell">
+                {formatModified(props.entry.mtime)}
+            </div>
+            <div class="files-cell files-col-size" role="gridcell">
+                {props.entry.is_dir || props.entry.size == null ? "" : formatBytes(props.entry.size)}
+            </div>
+            <div class="files-cell files-col-kind" role="gridcell">
+                {kindOf(props.entry)}
+            </div>
+        </>
     );
 }
 
