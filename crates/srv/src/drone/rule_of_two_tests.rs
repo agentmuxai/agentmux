@@ -161,6 +161,27 @@ fn item_and_index_outside_a_loop_are_block_ids() {
 }
 
 #[test]
+fn a_once_key_carries_what_it_reads() {
+    let once = |key: &str| json!({ "kind": "once", "key": key });
+    let tainted = graph(&[("once", once("{{trigger.body}}")), ("post", comment("{{once.key}}"))], &[("once", "post")]);
+    assert_eq!(broken(&tainted, &webhook()), ["post"]);
+    let clean = graph(&[("once", once("{{trigger.run_id}}")), ("post", comment("{{once.key}}"))], &[("once", "post")]);
+    assert!(check(&clean, &webhook()).is_empty(), "a key made of the run id is typed");
+}
+
+#[test]
+fn a_header_that_reads_a_variable_or_an_answer_may_be_a_secret() {
+    let vars = json!({ "kind": "variables", "values": { "token": "{{env.AGENTMUX_DR_TOKEN}}" } });
+    let read = |header: &str| {
+        let get = json!({ "kind": "api", "method": "GET", "url": "{{trigger.url}}", "headers": { "X-Credential": header } });
+        graph(&[("vars", vars.clone()), ("get", get)], &[("vars", "get")])
+    };
+    assert_eq!(broken(&read("{{var.token}}"), &webhook()), ["get"]);
+    assert_eq!(broken(&read("{{vars.token}}"), &webhook()), ["get"]);
+    assert!(check(&read("text/plain"), &webhook()).is_empty());
+}
+
+#[test]
 fn an_error_edge_out_of_an_approval_is_not_an_approval() {
     // A no and a silence fail the Approval, and only its `error` edge takes them: the write on it runs when nobody approved.
     let mut g = graph(&[("ok", approval()), ("post", comment("{{trigger.title}}"))], &[("ok", "post")]);

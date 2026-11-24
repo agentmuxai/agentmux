@@ -257,8 +257,9 @@ impl<'a> Flow<'a> {
         match kind {
             BlockKind::Agent | BlockKind::Api | BlockKind::Message | BlockKind::AppQuery | BlockKind::Run | BlockKind::Drone => true,
             BlockKind::Wait => node.data.get("on").is_some(),
-            BlockKind::Condition | BlockKind::Once | BlockKind::Approval | BlockKind::Task | BlockKind::Notify | BlockKind::Spawn => false,
-            BlockKind::Response | BlockKind::Variables | BlockKind::Transform => !self.outside_refs_of(node).is_empty(),
+            BlockKind::Condition | BlockKind::Approval | BlockKind::Task | BlockKind::Notify | BlockKind::Spawn => false,
+            // A Once answers with its key as well as true or false, so what its key reads is what it makes.
+            BlockKind::Response | BlockKind::Variables | BlockKind::Transform | BlockKind::Once => !self.outside_refs_of(node).is_empty(),
             BlockKind::ForEach => {
                 let body = node.data.get("body").and_then(Value::as_str).unwrap_or("").trim();
                 self.items_outside(node) || self.outside.contains(body)
@@ -292,14 +293,16 @@ fn join(refs: &[String]) -> String {
 fn sends_credential(node: &FlowNode) -> bool {
     const NAMES: [&str; 6] = ["auth", "token", "key", "secret", "cookie", "password"];
     // A reference to the environment or the Vault, however it is spaced: the references are parsed, not matched as text.
-    let reads_secret = |t: &str| refs_in(t).iter().any(|r| matches!(r.split('.').next().unwrap_or(""), "env" | "vault" | "secret" | "secrets"));
+    let reads_secret = |t: &str| refs_in(t).iter().any(|r| matches!(r.split('.').next().unwrap_or(""), "env" | "vault" | "secret" | "secrets" | "var" | "vars"));
+    // A header value that reads anything but the trigger (a variable, a block's answer) may be a secret kept there.
+    let from_elsewhere = |t: &str| refs_in(t).iter().any(|r| r.split('.').next().unwrap_or("") != "trigger");
     if node.data.get("auth").is_some() {
         return true;
     }
     let header = node.data.get("headers").and_then(Value::as_object).is_some_and(|m| {
         m.iter().any(|(name, value)| {
             let name = name.to_lowercase();
-            NAMES.iter().any(|n| name.contains(n)) || reads_secret(&value.to_string())
+            NAMES.iter().any(|n| name.contains(n)) || reads_secret(&value.to_string()) || from_elsewhere(&value.to_string())
         })
     });
     header || texts_of(node).iter().any(|(_, t)| reads_secret(t))
