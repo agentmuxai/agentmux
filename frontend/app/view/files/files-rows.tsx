@@ -143,7 +143,7 @@ export function FileRow(props: {
                         />
                     )}
                 </Show>
-                <Show when={props.renaming} fallback={<span class="files-name" classList={{ "files-name--found": props.where !== undefined }}>{props.tree?.label ?? labelOf(props.entry.name)}</span>}>
+                <Show when={props.renaming} fallback={<span class="files-name" classList={{ "files-name--found": !!props.where }}>{props.tree?.label ?? labelOf(props.entry.name)}</span>}>
                     <RenameInput model={props.model} entry={props.entry} onDone={props.onRenameDone} />
                 </Show>
                 <Show when={props.where}>
