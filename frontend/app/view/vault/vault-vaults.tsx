@@ -10,6 +10,7 @@ import { createSignal, Show, type JSX } from "solid-js";
 import { Modal } from "@/app/element/modal";
 import { ModalBody, ModalFooter, ModalHeader } from "@/app/element/modal-parts";
 import { Button, Field, Select, type SelectOption } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import type { VaultAgents } from "@/types/rpc/VaultAgents";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import { moveEntry, vaultList } from "./vault-store";
@@ -24,9 +25,9 @@ export function vaultNameOf(id: string): string {
 
 /** Which agents a Vault is for, in a few words. */
 export function agentsSummary(agents: VaultAgents): string {
-    if (agents.mode === "all") return "All agents";
-    if (agents.mode === "none") return "No agents: only you";
-    return agents.agents.length === 0 ? "No agents: only you" : `Only ${agents.agents.join(", ")}`;
+    if (agents.mode === "all") return t("vault.vaults.agentsAll");
+    if (agents.mode === "none") return t("vault.vaults.agentsNone");
+    return agents.agents.length === 0 ? t("vault.vaults.agentsNone") : t("vault.vaults.agentsOnly", { agents: agents.agents.join(", ") });
 }
 
 /** The Vaults as choices for a Select. */
@@ -40,8 +41,8 @@ export function vaultChoices(except?: string): SelectOption[] {
 export function VaultField(props: { value: string; onChange: (id: string) => void; label?: string; description?: string }): JSX.Element {
     return (
         <Show when={vaultList().length > 1}>
-            <Field label={props.label ?? "Vault"} layout="stacked" description={props.description}>
-                <Select value={props.value} onChange={props.onChange} options={vaultChoices()} ariaLabel={props.label ?? "Vault"} />
+            <Field label={props.label ?? t("vault.vaults.choose")} layout="stacked" description={props.description}>
+                <Select value={props.value} onChange={props.onChange} options={vaultChoices()} ariaLabel={props.label ?? t("vault.vaults.choose")} />
             </Field>
         </Show>
     );
@@ -70,12 +71,12 @@ export function VaultMoveDialog(props: { entry: VaultEntryInfo; onClose: () => v
     return (
         <Modal open={true} scope="pane" onClose={props.onClose} size="md" panelClass="vault-form">
             <ModalHeader
-                title={`Move ${props.entry.label}`}
-                description={`It is in ${vaultNameOf(props.entry.vault_id)} now. Its value, its earlier values and its permissions move with it.`}
+                title={t("vault.vaults.moveTitle", { label: props.entry.label })}
+                description={t("vault.vaults.moveAbout", { vault: vaultNameOf(props.entry.vault_id) })}
             />
             <ModalBody>
-                <Field label="Move to" layout="stacked" description={who() ? `Agents that may use it there: ${who()}.` : undefined}>
-                    <Select value={target()} onChange={setTarget} options={others()} ariaLabel="Move to" />
+                <Field label={t("vault.vaults.moveTo")} layout="stacked" description={who() ? t("vault.vaults.moveAgents", { who: who() }) : undefined}>
+                    <Select value={target()} onChange={setTarget} options={others()} ariaLabel={t("vault.vaults.moveTo")} />
                 </Field>
                 <Show when={error()}>
                     <div class="warden-manager-error" role="alert">
@@ -85,10 +86,10 @@ export function VaultMoveDialog(props: { entry: VaultEntryInfo; onClose: () => v
             </ModalBody>
             <ModalFooter>
                 <Button data-modal-dismiss onClick={props.onClose} disabled={busy()}>
-                    Cancel
+                    {t("vault.vaults.cancel")}
                 </Button>
                 <Button tone="accent" busy={busy()} disabled={!target()} onClick={() => void move()}>
-                    Move
+                    {t("vault.vaults.move")}
                 </Button>
             </ModalFooter>
         </Modal>

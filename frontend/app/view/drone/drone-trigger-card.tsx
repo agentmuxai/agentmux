@@ -13,6 +13,7 @@ import { tip } from "@/app/element/tip";
 import { openWarden } from "@/app/view/warden/open-warden";
 import type { JobPayload } from "@/types/rpc/JobPayload";
 import type { DroneViewModel } from "./drone-model";
+import { DroneFireAgents } from "./drone-fire-agents";
 
 /** What a job's trigger kind reads as; a kind this build does not know shows as it is named. */
 export function triggerKindLabel(kind: string): string {
@@ -60,6 +61,9 @@ export const TriggerCard = (p: { model: DroneViewModel }): JSX.Element => {
                     </div>
                 )}
             </For>
+            <Show when={m.draftAtom().id}>
+                <DroneFireAgents droneId={() => m.draftAtom().id} />
+            </Show>
             <Show when={m.draftAtom().id && jobs().length === 0}>
                 <p class="drone-trigger-note">{t("drone.trigger.noJobs")}</p>
             </Show>

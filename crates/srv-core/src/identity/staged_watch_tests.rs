@@ -38,6 +38,18 @@ fn hidden(value: &str) -> bool {
     withhold::text(value) == withhold::MARK
 }
 
+/// Asserts `value` stops being withheld. Dropping a value marks the matcher stale and the next read rebuilds it, but
+/// a read that arrives while another thread's rebuild is running (tests in one process share the registry) is served
+/// by the matcher in use, which still holds the value until that rebuild is swapped in. So a drop is checked as taking
+/// effect within a few seconds, never in the same instant.
+fn dropped_soon(value: &str, why: &str) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while hidden(value) && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(!hidden(value), "{why}");
+}
+
 #[test]
 fn a_staged_copys_values_are_withheld_without_trusting_its_expiry() {
     let tmp = tempfile::tempdir().unwrap();
@@ -67,7 +79,7 @@ fn a_container_that_floods_its_copy_cannot_push_out_what_the_accounts_own_file_h
         look(&file);
     }
     assert!(hidden("canary-real-access-0001") && hidden("canary-real-refresh-0001"), "the account's own values stay withheld");
-    assert!(!hidden("canary-junk-refresh-0000"), "the copy holds a bounded number of values: the oldest is dropped");
+    dropped_soon("canary-junk-refresh-0000", "the copy holds a bounded number of values: the oldest is dropped");
     assert!(hidden("canary-junk-refresh-0039"));
 }
 
@@ -92,7 +104,7 @@ fn a_copy_registered_by_another_reader_is_held_under_the_copys_own_owners() {
     withhold_copy(&folder, &json);
     assert!(hidden("canary-reader-access-0001") && hidden("canary-reader-refresh-0001"));
     crate::backend::transcript::withhold::release_prefix(&format!("sign-in:staged:{}:", folder.to_string_lossy()));
-    assert!(!hidden("canary-reader-refresh-0001"), "the copy's owners are named by its folder");
+    dropped_soon("canary-reader-refresh-0001", "the copy's owners are named by its folder");
 }
 
 #[test]
@@ -105,7 +117,7 @@ fn an_expiry_in_either_shape_a_copy_is_written_in_is_not_used() {
         std::fs::write(&file, top.to_string()).unwrap();
         look(&file);
     }
-    assert!(!hidden("canary-top-access-0000"), "the cap holds for the top-level shape too: the oldest is dropped");
+    dropped_soon("canary-top-access-0000", "the cap holds for the top-level shape too: the oldest is dropped");
     assert!(hidden("canary-top-access-0039") && hidden("canary-top-refresh-0039"));
 }
 

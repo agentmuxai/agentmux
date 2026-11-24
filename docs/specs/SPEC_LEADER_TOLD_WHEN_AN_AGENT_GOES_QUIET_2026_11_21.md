@@ -174,3 +174,11 @@ The grouped note and the `quiet` group are built; the Swarm and Kanban chips (th
 - **Callers.** The failed, exited and asked notes and the quiet note all queue through it (`worker_notes::note_line_for` is `note_for` before it is addressed). The one-a-minute gap per agent still applies before a note is queued.
 - **Not in this build.** Folding the 75% and 90% usage notes in (D3): they still go on their own, once per lead, as before. The spec allows shipping without it.
 - **`quiet` live-facts group** (`since_ms`, `quiet_ms`, `tasks`, `watchers`), asked for by name or in the `facts` and `full` details, read from the last sweep (at most 30 seconds old). An agent is shown as quiet from the quiet time (the running time for a turn that is running), whether or not it was nudged or its watchers told. `Agents status` adds `quiet 22m` after the state.
+
+## 15. Phase 2, the chips, as built (task #48288)
+
+- **One source.** srv's last quiet sweep (`quiet_watch::quiet_view`) feeds the `quiet` live-facts group (§14), the runtime row the Swarm reads (`quiet_since_ms`) and the holder the Kanban card carries (`holder.quiet_since_ms`), so the three show the same fact.
+- **Swarm row:** a muted "quiet 22 min" after the status chip, in the row's own note style, counting up with the row's tick; the row's state is unchanged. Hover says the agent holds work and has done nothing for that long.
+- **Kanban card:** the same "quiet 22 min" as a pill on a claimed card whose holder is quiet, counted from the card's own clock.
+- **Lag.** Both read the runtime store's refresh (every 20 seconds) after the sweep (every 30), so a chip can appear up to about a minute after the quiet time and clear about as late after the agent moves.
+- Text through `swarm.quiet.*` and `kanban.quiet.*`. No new pane, no modal, nothing asks anything.
