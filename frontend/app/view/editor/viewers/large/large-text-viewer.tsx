@@ -51,17 +51,28 @@ export function LargeTextViewer(props: LargeTextProps): JSX.Element {
 function LargeTextTools(props: { t: LargeTextState }): JSX.Element {
     const t = props.t;
     return (
-        <input
-            ref={t.bindLineBox}
-            class="large-text-line-input"
-            data-raw-text-field="the viewer bar's line box: a short number beside the other bar controls, with its own mod+g focus and Enter to go, not a form field"
-            placeholder="Line"
-            aria-label="Go to line"
-            aria-invalid={t.badLine()}
-            {...tip(`Go to a line (${keyLabel("mod+g")})`)}
-            onInput={t.clearBadLine}
-            onKeyDown={(e) => e.key === "Enter" && t.goToTyped(e.currentTarget.value)}
-        />
+        <>
+            <input
+                ref={t.bindLineBox}
+                class="large-text-line-input"
+                data-raw-text-field="the viewer bar's line box: a short number beside the other bar controls, with its own mod+g focus and Enter to go, not a form field"
+                placeholder="Line"
+                aria-label="Go to line"
+                aria-invalid={t.badLine()}
+                {...tip(`Go to a line (${keyLabel("mod+g")})`)}
+                onInput={t.clearBadLine}
+                onKeyDown={(e) => e.key === "Enter" && t.goToTyped(e.currentTarget.value)}
+            />
+            <Button
+                density="compact"
+                pressed={t.follow.following()}
+                aria-label={tr("editor.large.follow")}
+                {...tip(tr("editor.large.followTip"))}
+                onClick={t.follow.toggle}
+            >
+                {tr("editor.large.follow")}
+            </Button>
+        </>
     );
 }
 

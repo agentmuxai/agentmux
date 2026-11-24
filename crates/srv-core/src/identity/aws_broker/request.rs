@@ -40,6 +40,8 @@ pub struct Ask<'a> {
     pub in_container: bool,
     pub profile: &'a str,
     pub reason: Option<&'a str>,
+    /// The value of the tag the grant takes from the caller, if it takes one (`AGENTMUX_AWS_TAG`).
+    pub tag: Option<&'a str>,
     pub seconds: Option<u64>,
 }
 
@@ -49,6 +51,8 @@ pub struct Granted {
     pub source: Source,
     /// The reason as it was cleaned and used.
     pub reason: String,
+    /// The caller's tag as it was checked and used: its key and value. None when the grant takes none.
+    pub tag: Option<(String, String)>,
     /// The lifetime asked for, within the grant's bounds.
     pub seconds: u64,
 }
@@ -141,13 +145,24 @@ pub async fn credentials_for<R: Runner>(
             format!("The grant '{}' needs a reason. Run the command with AGENTMUX_AWS_REASON='what and why' in front of it.", grant.name),
         ));
     }
+    // A grant that takes a tag from the caller: the value is checked against what the grant fixes, and never changed.
+    let tag = match &grant.caller_tag {
+        Some(spec) => match spec.check(&grant.name, ask.tag) {
+            Ok(value) => Some((spec.key.clone(), value)),
+            Err(sentence) => return Err(Refusal::new(StatusCode::BAD_REQUEST, "TAG_REFUSED", sentence)),
+        },
+        None => None,
+    };
     let seconds = ask.seconds.unwrap_or(grant.default_seconds).clamp(super::policy::MIN_SECONDS, grant.max_seconds);
-    let ctx = MintCtx { agent_slug: ask.agent_slug, grant, reason: &reason, seconds, now_ms: now.timestamp_millis() };
+    let tag_value = tag.as_ref().map_or("", |(_, v)| v.as_str());
+    let ctx = MintCtx { agent_slug: ask.agent_slug, grant, reason: &reason, tag: tag_value, seconds, now_ms: now.timestamp_millis() };
+    // A session is for one reason and one tag value: the same grant with another value is another session.
+    let variant = if tag_value.is_empty() { reason.clone() } else { format!("{reason}\u{1f}{tag_value}") };
     let got = sessions
-        .get_or_mint(ask.agent_uid, &grant.name, &reason, grant.max_mints_per_hour, now, || mint::mint(runner, &ctx, now))
+        .get_or_mint(ask.agent_uid, &grant.name, &variant, grant.max_mints_per_hour, now, || mint::mint(runner, &ctx, now))
         .await;
     match got {
-        Ok((creds, source)) => Ok(Granted { creds, grant: grant.clone(), source, reason, seconds }),
+        Ok((creds, source)) => Ok(Granted { creds, grant: grant.clone(), source, reason, tag, seconds }),
         Err(SessionError::TooMany { cap }) => Err(Refusal::new(
             StatusCode::TOO_MANY_REQUESTS,
             "TOO_MANY_MINTS",

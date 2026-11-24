@@ -1,22 +1,32 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createSignal, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createSignal, on, onCleanup, Show } from "solid-js";
+import { themePolarity, type ThemePolarity } from "./theme-polarity";
 
 let mermaidInitialized = false;
 let mermaidInstance: any = null;
 let mermaidRenderCount = 0;
 
-const initializeMermaid = async () => {
+/** Mermaid's own theme for the app's: its "dark" has light labels and arrows that vanish on a light pane, its "default"
+ *  has dark ones that vanish on a dark pane. */
+export const MERMAID_THEMES: Record<ThemePolarity, string> = { dark: "dark", light: "default" };
+
+let initializedFor: ThemePolarity | null = null;
+const initializeMermaid = async (polarity: ThemePolarity) => {
     if (!mermaidInitialized) {
         const mermaid = await import("mermaid");
         mermaidInstance = mermaid.default;
+        mermaidInitialized = true;
+    }
+    // Set again whenever the polarity changed since the last diagram: mermaid keeps one global theme.
+    if (initializedFor !== polarity) {
         mermaidInstance.initialize({
             startOnLoad: false,
-            theme: "dark",
+            theme: MERMAID_THEMES[polarity],
             securityLevel: "strict",
         });
-        mermaidInitialized = true;
+        initializedFor = polarity;
     }
 };
 
@@ -38,14 +48,16 @@ const Mermaid = ({ chart }: { chart: string }) => {
     const [svgContent, setSvgContent] = createSignal<string | null>(null);
     const [error, setError] = createSignal<string | null>(null);
 
-    onMount(() => {
+    const polarity = themePolarity();
+    // Drawn again when the theme flips between light and dark: the SVG carries its colours.
+    createEffect(on(polarity, (current) => {
         let cancelled = false;
         const renderMermaid = async () => {
             try {
                 setError(null);
                 setSvgContent(null);
 
-                await initializeMermaid();
+                await initializeMermaid(current);
                 if (cancelled || !mermaidInstance) {
                     return;
                 }
@@ -77,7 +89,7 @@ const Mermaid = ({ chart }: { chart: string }) => {
         onCleanup(() => {
             cancelled = true;
         });
-    });
+    }));
 
     return (
         <Show

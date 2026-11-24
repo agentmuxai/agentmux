@@ -4,8 +4,9 @@
 // Shiki-highlighted runs (embedded-highlight.ts) carry both themes' colours as
 // CSS variables; this picks by the theme's polarity, so a theme switch needs no
 // re-highlight. Shared by shell commands (ShellCommand.tsx) and code blocks in
-// markdown (markdown-codeblock.tsx).
-.sh-shiki span {
+// markdown (markdown-codeblock.tsx); `.sh-tok` is one token of a Read or Edit preview (PreviewLines.tsx).
+.sh-shiki span,
+.sh-tok {
     color: var(--shiki-dark);
     font-style: var(--shiki-dark-font-style);
     font-weight: var(--shiki-dark-font-weight);

@@ -12,14 +12,18 @@
 const MAX_BYTES_FOR_NUL_SNIFF = 4096;
 const MAX_SINGLE_LINE_CHARS = 100_000;
 
-export function sniffUnopenable(content: string, allowBinary = false): string | null {
+export type SniffRefusal = { kind: "binary" | "wide"; message: string };
+
+/** Why `content` is unsafe to hand to CodeMirror, and which kind of unsafe: a "wide" first line is text that the Large
+ *  text viewer shows, where binary is not. */
+export function sniffRefusal(content: string, allowBinary = false): SniffRefusal | null {
     // NUL-byte sniff — any U+0000 in the first few KB means binary. Skipped
     // for "Open as text anyway" (the user asked to see the bytes); the
     // long-line guard below never is.
     const sniffLen = allowBinary ? 0 : Math.min(content.length, MAX_BYTES_FOR_NUL_SNIFF);
     for (let i = 0; i < sniffLen; i++) {
         if (content.charCodeAt(i) === 0) {
-            return "This file looks binary (contains NUL bytes) and can't be displayed in the editor.";
+            return { kind: "binary", message: "This file looks binary (contains NUL bytes) and can't be displayed in the editor." };
         }
     }
     // Single-line-too-long sniff — even a "text" file is unsafe to render if
@@ -28,7 +32,11 @@ export function sniffUnopenable(content: string, allowBinary = false): string | 
     const firstNewline = content.indexOf("\n");
     const lineLen = firstNewline === -1 ? content.length : firstNewline;
     if (lineLen > MAX_SINGLE_LINE_CHARS) {
-        return `This file's first line is ${lineLen.toLocaleString()} characters long — too wide to render. Open it in an external editor.`;
+        return { kind: "wide", message: `This file's first line is ${lineLen.toLocaleString()} characters long — too wide to render. Open it in an external editor.` };
     }
     return null;
+}
+
+export function sniffUnopenable(content: string, allowBinary = false): string | null {
+    return sniffRefusal(content, allowBinary)?.message ?? null;
 }
