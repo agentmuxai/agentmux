@@ -264,6 +264,55 @@ describe("a selection extended from the keyboard", () => {
         await settle();
         expect(sel.focusNode).toBe(el("tb").firstChild);
     });
+
+    it("holds the selection where the pointer last had it in the pane while the pointer is over anything else", async () => {
+        const sel = window.getSelection()!;
+        press(el("ta2"));
+        pointer("pointermove", 1, el("ta"), 10);
+        sel.setBaseAndExtent(el("ta2").firstChild!, 2, el("ta").firstChild!, 5);
+        await settle();
+        // The engine snapped the far end to the start of what comes before the pane (a field, a handle, the gap).
+        pointer("pointermove", 1, el("chrome"), 60);
+        sel.setBaseAndExtent(el("ta2").firstChild!, 2, el("chrome").firstChild!, 0);
+        await settle();
+        expect([sel.anchorNode, sel.anchorOffset, sel.focusNode, sel.focusOffset]).toEqual([el("ta2").firstChild, 2, el("ta").firstChild, 5]);
+        expect(sel.toString()).not.toContain("tab strip");
+        // Over the other pane: the same.
+        pointer("pointermove", 1, el("tb"), 80);
+        sel.setBaseAndExtent(el("ta2").firstChild!, 2, el("tb").firstChild!, 4);
+        await settle();
+        expect(sel.focusNode).toBe(el("ta").firstChild);
+        expect(sel.toString()).not.toContain("text in b");
+    });
+
+    it("lets the selection follow the pointer again once it is back over the pane", async () => {
+        const sel = window.getSelection()!;
+        press(el("ta"));
+        pointer("pointermove", 1, el("ta"), 10);
+        sel.setBaseAndExtent(el("ta").firstChild!, 1, el("ta").firstChild!, 6);
+        await settle();
+        pointer("pointermove", 1, el("chrome"), 60);
+        sel.setBaseAndExtent(el("ta").firstChild!, 1, el("chrome").firstChild!, 0);
+        await settle();
+        pointer("pointermove", 1, el("ta2"), 20);
+        sel.setBaseAndExtent(el("ta").firstChild!, 1, el("ta2").firstChild!, 7);
+        await settle();
+        expect(sel.focusNode).toBe(el("ta2").firstChild);
+        expect(sel.focusOffset).toBe(7);
+    });
+
+    it("patches nothing after the release, and nothing for a drag that never had the pointer in the pane's text", async () => {
+        const sel = window.getSelection()!;
+        press(el("ta"));
+        pointer("pointermove", 1, el("chrome"), 60);
+        sel.setBaseAndExtent(el("ta").firstChild!, 1, el("chrome").firstChild!, 2);
+        await settle();
+        expect(sel.focusNode).toBe(el("chrome").firstChild);
+        pointer("pointerup", 0, el("chrome"), 60);
+        sel.setBaseAndExtent(el("ta").firstChild!, 1, el("tb").firstChild!, 2);
+        await settle();
+        expect(el("a").contains(sel.focusNode)).toBe(true);
+    });
 });
 
 describe("Ctrl+A", () => {
