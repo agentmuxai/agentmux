@@ -140,7 +140,7 @@ describe("HistoryAgents", () => {
             const { container } = mountAgents();
             await screen.findByText("Parent");
             expect(container.querySelector(".warden-manager-footnote")!.textContent).toBe(
-                'Kept forever. "Open history" shows an agent\'s whole recorded conversation in this pane.'
+                'Kept forever. "Open conversation" shows an agent\'s whole recorded conversation in this pane.'
             );
         });
 

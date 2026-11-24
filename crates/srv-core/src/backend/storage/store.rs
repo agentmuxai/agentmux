@@ -29,7 +29,7 @@ pub struct Store {
     /// `pub(super)` so sibling subsystem modules (e.g. `bundles`)
     /// can take the lock. Each per-subsystem file adds methods to `Store`
     /// via `impl Store {}` and needs the connection.
-    pub(super) conn: Mutex<Connection>,
+    pub(super) conn: super::timed_mutex::TimedMutex<Connection>,
     /// Cross-version named-agent registry. `None` for in-memory test
     /// stores; `Some` for production srv. Mutations to
     /// `db_agent_instances` parallel-write to this registry when set.
@@ -141,7 +141,7 @@ impl Store {
         let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         conn.execute_batch("PRAGMA busy_timeout=5000;")?;
         Ok(Self {
-            conn: Mutex::new(conn),
+            conn: super::timed_mutex::TimedMutex::new(conn, "objects"),
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
             slug_home: Mutex::new(None),
@@ -229,7 +229,7 @@ impl Store {
         run_shared_store_schema(&conn)?;
         stamp_version(&conn, SHARED_STORE_SCHEMA_VERSION)?;
         Ok(Self {
-            conn: Mutex::new(conn),
+            conn: super::timed_mutex::TimedMutex::new(conn, "objects"),
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
             slug_home: Mutex::new(None),
@@ -283,7 +283,7 @@ impl Store {
         conn.execute_batch(super::google_grants::SCHEMA)?;
         stamp_version(&conn, IDENTITY_STORE_SCHEMA_VERSION)?;
         Ok(Self {
-            conn: Mutex::new(conn),
+            conn: super::timed_mutex::TimedMutex::new(conn, "objects"),
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
             slug_home: Mutex::new(None),
@@ -314,7 +314,7 @@ impl Store {
         )?;
         conn.busy_timeout(std::time::Duration::from_millis(500))?;
         Ok(Self {
-            conn: Mutex::new(conn),
+            conn: super::timed_mutex::TimedMutex::new(conn, "objects"),
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
             slug_home: Mutex::new(None),
@@ -333,7 +333,7 @@ impl Store {
     /// own per-table CRUD via the `DroneStore` extension trait
     /// pattern (see `crates/srv-core/src/backend/storage/drone_store.rs`). Outside
     /// callers must use the typed methods on this impl.
-    pub fn conn(&self) -> &Mutex<Connection> {
+    pub fn conn(&self) -> &super::timed_mutex::TimedMutex<Connection> {
         &self.conn
     }
 
@@ -389,7 +389,7 @@ impl Store {
         conn.execute_batch(super::user_workspaces::SCHEMA)?;
         stamp_version(&conn, OBJECT_SCHEMA_VERSION)?;
         Ok(Self {
-            conn: Mutex::new(conn),
+            conn: super::timed_mutex::TimedMutex::new(conn, "objects"),
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
             slug_home: Mutex::new(None),

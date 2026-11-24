@@ -15,11 +15,11 @@ import { openOrFocusHistoryTab } from "@/app/view/agent/open-history-tab";
 import { ageMs, formatAge } from "@/app/view/warden-shared/warden-shared";
 import type { HistoryAgent } from "@/types/rpc/HistoryAgent";
 import { formatBytes } from "@/util/format-bytes";
-import { agentRows, formatWhen, historyTotals, type AgentRow } from "./history-shared";
+import { agentRows, formatWhen, historyTotals, type AgentRow } from "../history-shared";
 import { useOpenSessions, type Sessions } from "./history-sessions";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
-import "./history.scss";
+import "../history-sections.scss";
 import { tip } from "@/app/element/tip";
 import { t } from "@/app/i18n/i18n";
 
@@ -147,7 +147,7 @@ const AgentRowItem = (props: { id: string; list: AgentsList }): JSX.Element => {
                 <td data-label={t("history.agents.colLastActive")}>{a().last_active_ms ? t("history.agents.ago", { age: formatAge(ageMs(a().last_active_ms, now())) }) : "—"}</td>
                 <td class="warden-history-actions warden-history-cell-wide">
                     <Button tone="quiet" density="compact" onClick={() => props.list.openHistory(a())}>
-                        {t("history.agents.openHistory")}
+                        {t("history.agents.openConversation")}
                     </Button>
                 </td>
             </tr>
