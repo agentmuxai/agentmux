@@ -87,7 +87,6 @@ describe("registerGlobalKeys", () => {
             "tab:moveRight",
             "tab:rename",
             "pane:new",
-            "pane:magnify",
             "pane:focus:up",
             "pane:focus:down",
             "pane:focus:left",

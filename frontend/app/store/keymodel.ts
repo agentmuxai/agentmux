@@ -88,14 +88,6 @@ function registerTabKeys() {
 /** Panes: create, close, move focus, swap and resize. */
 function registerPaneLayoutKeys() {
     on("pane:new", run(() => handleCmdN()));
-    on("pane:magnify", () => {
-        const layoutModel = getLayoutModelForStaticTab();
-        const focusedNode = layoutModel.focusedNode?.();
-        if (focusedNode != null) {
-            layoutModel.magnifyNodeToggle(focusedNode.id);
-        }
-        return true;
-    });
     on("pane:focus:up", run(() => switchBlockInDirection(NavigateDirection.Up)));
     on("pane:focus:down", run(() => switchBlockInDirection(NavigateDirection.Down)));
     on("pane:focus:left", run(() => switchBlockInDirection(NavigateDirection.Left)));
