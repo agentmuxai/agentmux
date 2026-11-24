@@ -39,6 +39,13 @@ const SCHEMA: &str = "
         vault    TEXT NOT NULL,
         record   TEXT NOT NULL,
         hash     TEXT NOT NULL
+    );
+    -- Records this machine no longer writes an entry under (it follows another machine's, see `sync_take`): ended with a
+    -- tombstone by the next capture.
+    CREATE TABLE IF NOT EXISTS db_sync_vault_ended (
+        vault  TEXT NOT NULL,
+        record TEXT NOT NULL,
+        PRIMARY KEY (vault, record)
     );";
 
 /// Creates the log's tables and this module's.
@@ -94,6 +101,33 @@ pub(super) fn mark_seen(store: &Store, row: &VaultRow, record: &str, key: &Key, 
     Ok(())
 }
 
+/// Every entry that has been written: the record it is written under.
+fn records_written(store: &Store) -> Result<std::collections::HashMap<String, String>, String> {
+    let conn = store.conn().lock().unwrap_or_else(|e| e.into_inner());
+    let mut stmt = conn.prepare("SELECT entry_id, record FROM db_sync_vault_seen").map_err(|e| e.to_string())?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))).map_err(|e| e.to_string())?;
+    rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
+}
+
+/// The Vault and record `entry_id` is written under, if it has been written; otherwise the record it will be written
+/// under, which is its own link id, with no Vault (nothing of it is in any log).
+pub(super) fn identity_of(store: &Store, entry_id: &str) -> Result<Option<(String, String)>, String> {
+    {
+        let conn = store.conn().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(s) = seen_of(&conn, entry_id).map_err(|e| e.to_string())? {
+            return Ok(Some((s.vault, s.record)));
+        }
+    }
+    Ok(store.vault_link_primary(entry_id).map_err(|e| e.to_string())?.map(|p| (String::new(), p)))
+}
+
+/// Notes that `record` in `vault` is no longer written: the next capture of that Vault ends it with a tombstone.
+pub(super) fn end_record(store: &Store, vault: &str, record: &str) -> Result<(), String> {
+    let conn = store.conn().lock().unwrap_or_else(|e| e.into_inner());
+    conn.execute("INSERT OR IGNORE INTO db_sync_vault_ended (vault, record) VALUES (?1, ?2)", params![vault, record]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Forgets an entry that was deleted here because a record said so: its tombstone is already in the log.
 pub(super) fn forget(store: &Store, entry_id: &str) -> Result<(), String> {
     let conn = store.conn().lock().unwrap_or_else(|e| e.into_inner());
@@ -141,9 +175,12 @@ pub fn capture(store: &Store, signer: &mut Signer, vault_id: &str, ring: &KeyRin
     let rows: Vec<_> = store.vault_list().map_err(|e| e.to_string())?.into_iter().filter(|r| r.vault_id == vault_id && !stays_here(r, profiles)).collect();
     let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
     let link_of = super::link_ids(store, &ids)?;
+    let written_as = records_written(store)?;
     let mut pending = Vec::new();
     for row in &rows {
-        let Some(record) = link_of.get(&row.id) else { continue };
+        // The record an entry is written under is the one it was first written (or taken) as, whatever link ids it has
+        // learned since: one entry is one record (`identity_of`). Until then, its own link id.
+        let Some(record) = written_as.get(&row.id).or_else(|| link_of.get(&row.id)) else { continue };
         if !sync_links::is_link_id(record) {
             continue;
         }
@@ -156,6 +193,15 @@ pub fn capture(store: &Store, signer: &mut Signer, vault_id: &str, ring: &KeyRin
     let conn = store.conn().lock().unwrap_or_else(|e| e.into_inner());
     let mut out = Captured::default();
     log::ensure_collection(&conn, vault_id, KIND, now_ms).map_err(|e| e.to_string())?;
+    // Records that an entry has left for another machine's: ended once.
+    let mut ended = conn.prepare("SELECT record FROM db_sync_vault_ended WHERE vault = ?1").map_err(|e| e.to_string())?;
+    let ended: Vec<String> = ended.query_map(params![vault_id], |r| r.get(0)).map_err(|e| e.to_string())?.collect::<Result<_, _>>().map_err(|e| e.to_string())?;
+    for record in ended {
+        if tombstone(&conn, signer, vault_id, &record, now_ms)? {
+            out.tombstoned += 1;
+        }
+        conn.execute("DELETE FROM db_sync_vault_ended WHERE vault = ?1 AND record = ?2", params![vault_id, record]).map_err(|e| e.to_string())?;
+    }
     for p in &pending {
         let seen = seen_of(&conn, &p.entry_id).map_err(|e| e.to_string())?;
         if seen.as_ref().is_some_and(|s| s.vault == vault_id && s.record == p.record && s.hash == p.hash) {
