@@ -633,4 +633,8 @@ fn an_approval_that_is_not_on_every_path_to_a_write_does_not_satisfy_the_templat
     assert!(!graph::approval_guards_every_write(&g(json!([{ "id": "1", "source": "a", "target": "ok" }, { "id": "2", "source": "a", "target": "w" }]))), "a second path to the write");
     assert!(!graph::approval_guards_every_write(&g(json!([{ "id": "1", "source": "a", "target": "w" }]))), "no approval at all");
     assert!(!graph::approval_guards_every_write(&g(json!([]))), "an unconnected write is reachable from its own start");
+    let error_edge = json!([{ "id": "1", "source": "a", "target": "ok" }, { "id": "2", "source": "ok", "target": "w", "sourceHandle": "error" }]);
+    assert!(!graph::approval_guards_every_write(&g(error_edge)), "the no and silence path of an Approval is not a yes");
+    let yes_edge = json!([{ "id": "1", "source": "a", "target": "ok" }, { "id": "2", "source": "ok", "target": "w", "sourceHandle": "approved" }]);
+    assert!(graph::approval_guards_every_write(&g(yes_edge)), "the yes path is guarded");
 }

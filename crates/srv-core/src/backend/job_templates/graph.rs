@@ -136,10 +136,18 @@ pub fn approval_guards_every_write(graph: &DroneGraph) -> bool {
     let mut seen: HashSet<&str> = HashSet::new();
     let mut stack: Vec<&str> = graph.nodes.iter().map(|n| n.id.as_str()).filter(|id| !targets.contains(id)).collect();
     while let Some(id) = stack.pop() {
-        if !seen.insert(id) || approvals.contains(id) {
+        if !seen.insert(id) {
             continue;
         }
-        stack.extend(graph.edges.iter().filter(|e| e.source == id).map(|e| e.target.as_str()));
+        // Past an Approval only by its `error` handle (no, or silence) runs without a yes: those targets stay reachable.
+        let guarded = approvals.contains(id);
+        stack.extend(
+            graph
+                .edges
+                .iter()
+                .filter(|e| e.source == id && (!guarded || e.source_handle.as_deref() == Some("error")))
+                .map(|e| e.target.as_str()),
+        );
     }
     !approvals.is_empty() && writes.iter().all(|w| !seen.contains(w))
 }
