@@ -95,6 +95,11 @@ const MAX_HOPS: usize = 16;
 /// whether what it points at is there or not, and whatever follows it. A path through such a link answers as one that
 /// leaves the folder does: what lies outside is not told by whether a file is there.
 pub(crate) fn dangling_link_leaves(path: &Path, inside: &[&Path]) -> bool {
+    leaves_by_links(path, inside, 0)
+}
+
+/// [`dangling_link_leaves`] after `hops` links have been followed by hand; where a link points is walked the same way.
+fn leaves_by_links(path: &Path, inside: &[&Path], hops: usize) -> bool {
     let mut at = PathBuf::new();
     for part in path.components() {
         at.push(part.as_os_str());
@@ -102,26 +107,26 @@ pub(crate) fn dangling_link_leaves(path: &Path, inside: &[&Path]) -> bool {
         if inside.iter().any(|root| root.starts_with(&at)) {
             continue;
         }
-        let mut here = at.clone();
-        for _ in 0..MAX_HOPS {
-            let Ok(meta) = std::fs::symlink_metadata(&here) else { break };
-            if !meta.file_type().is_symlink() {
-                break;
-            }
-            // A link that resolves leaves the folder when what it resolves to is not under it, whatever follows it.
-            if let Ok(resolved) = crate::server::browser_uploads::canonical(&here) {
-                if !inside.iter().any(|root| resolved.starts_with(root)) {
-                    return true;
-                }
-                break;
-            }
-            let Ok(target) = std::fs::read_link(&here) else { break };
-            let joined = if target.is_absolute() { target } else { here.parent().map_or(target.clone(), |parent| parent.join(&target)) };
-            let Some(next) = collapse(&joined) else { return true };
-            if !inside.iter().any(|root| next.starts_with(root)) {
+        let Ok(meta) = std::fs::symlink_metadata(&at) else { break };
+        if !meta.file_type().is_symlink() {
+            continue;
+        }
+        // A link that resolves leaves the folder when what it resolves to is not under it, whatever follows it.
+        if let Ok(resolved) = crate::server::browser_uploads::canonical(&at) {
+            if !inside.iter().any(|root| resolved.starts_with(root)) {
                 return true;
             }
-            here = next;
+            continue;
+        }
+        let Ok(target) = std::fs::read_link(&at) else { break };
+        let joined = if target.is_absolute() { target } else { at.parent().map_or(target.clone(), |parent| parent.join(&target)) };
+        let Some(next) = collapse(&joined) else { return true };
+        if !inside.iter().any(|root| next.starts_with(root)) {
+            return true;
+        }
+        // Where the link points may itself run through a link that leaves the folder.
+        if hops < MAX_HOPS && leaves_by_links(&next, inside, hops + 1) {
+            return true;
         }
     }
     false
@@ -271,6 +276,12 @@ mod tests {
         link("chain-b", &dir.path().join("not-there.txt"));
         link("chain-a", &work.join("chain-b"));
         link("up", dir.path());
+        // A link inside the folder whose own target runs through a link that leaves it, to something that is not there.
+        link("through-up", &work.join("up").join("nothing.txt"));
+        link("through-up-to-a-file", &work.join("up").join("secret.txt"));
+        for asked in ["through-up", "through-up-to-a-file"] {
+            assert_eq!(check(&dir, asked), (OUTSIDE.to_string(), OUTSIDE_WORDS.to_string()), "{asked}");
+        }
         for asked in ["gone.txt", "gone-dir/a.md", "gone-dir", "present.txt", "relative", "chain-a", "gone-dir/../plan.md", "up/nothing.txt", "up/secret.txt", "up/nothing/deeper.txt"] {
             assert_eq!(check(&dir, asked), (OUTSIDE.to_string(), OUTSIDE_WORDS.to_string()), "{asked}");
         }
