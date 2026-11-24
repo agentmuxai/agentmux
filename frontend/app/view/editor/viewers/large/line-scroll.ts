@@ -30,9 +30,26 @@ export function createLineScroll(lines: Accessor<number>, initial = 0) {
     // A view is rarely a whole number of rows tall, so the last first row asks for a little more scrolling than the
     // scroller has: the browser stops at its end and says so in a scroll event. That is where this viewer put it.
     const reachable = (to: number): number => (el && el.scrollHeight > 0 ? Math.max(0, Math.min(to, el.scrollHeight - el.clientHeight)) : to);
+    // A hidden pane puts a scroller's scrollTop back to 0 and says nothing: a resize is the word that it
+    // is shown again, so put the scroller where the lines are.
+    const measure = (): void => {
+        if (!el) return;
+        setViewPx(Math.max(0, el.clientHeight));
+        const at = top();
+        if (el.clientHeight > 0 && Math.abs(el.scrollTop - at) >= 1) {
+            own = reachable(at);
+            el.scrollTop = at;
+        }
+    };
     const onScroll = (): void => {
         // A pane that is hidden has no height, and its scroller reports 0: not where the user scrolled to.
         if (!el || el.clientHeight === 0) return;
+        // The scroller's own height changed (a horizontal scrollbar came or went as the content grew) and the
+        // browser clamped its scrollTop: that is not the user scrolling. Measure it and put the view right.
+        if (Math.round(el.clientHeight) !== viewPx()) {
+            measure();
+            return;
+        }
         const at = el.scrollTop;
         setTop(at);
         if (own != null && Math.abs(at - own) < 1) return;
@@ -54,16 +71,6 @@ export function createLineScroll(lines: Accessor<number>, initial = 0) {
     /** The scroller's `ref`. */
     const bind = (node: HTMLDivElement): void => {
         el = node;
-        // A hidden pane puts a scroller's scrollTop back to 0 and says nothing: a resize is the word that it
-        // is shown again, so put the scroller where the lines are.
-        const measure = () => {
-            setViewPx(Math.max(0, node.clientHeight));
-            const at = top();
-            if (node.clientHeight > 0 && Math.abs(node.scrollTop - at) >= 1) {
-                own = at;
-                node.scrollTop = at;
-            }
-        };
         measure();
         node.addEventListener("wheel", onWheel, { passive: false });
         const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);

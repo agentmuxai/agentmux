@@ -318,6 +318,54 @@ describe("the Large text viewer", () => {
         expect(facts()[0]).toBe("Line 992 of 1,001");
     });
 
+    it("keeps following when the scroller gets a few pixels taller and the browser clamps it: a horizontal scrollbar going away is not the reader scrolling", async () => {
+        let height = ROW_H * VIEW_LINES + 3;
+        Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get: () => height });
+        const [revision, setRevision] = createSignal(0);
+        render(() => (
+            <LargeTextViewer
+                path="C:/logs/big.log"
+                revision={revision()}
+                probe={{ size: FILE.length, mtime: 0, kind: "text", mime: "text/plain", read_only: false, text: { encoding: "utf-8", bom: "none" } }}
+                bar={{ viewer: "large", options: ["large", "info", "hex"], onReopenWith: () => {} }}
+            />
+        ));
+        await settle();
+        const el = grid();
+        let total = 1000;
+        let top = 0;
+        Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => total * ROW_H });
+        Object.defineProperty(el, "scrollTop", {
+            configurable: true,
+            get: () => top,
+            set: (v: number) => {
+                const next = Math.min(Math.max(0, el.scrollHeight - el.clientHeight), Math.max(0, v));
+                if (next === top) return;
+                top = next;
+                queueMicrotask(() => fireEvent.scroll(el));
+            },
+        });
+        const follow = screen.getByRole("button", { name: "Follow" });
+        fireEvent.click(follow);
+        await settle();
+        expect(follow.getAttribute("aria-pressed")).toBe("true");
+        const atEnd = facts()[0];
+        // The content grew by a line, the scroller got 7 px taller (its scrollbar went), and the browser put its scrollTop back.
+        height += 7;
+        top = Math.min(top, el.scrollHeight - el.clientHeight);
+        fireEvent.scroll(el);
+        await settle();
+        expect(follow.getAttribute("aria-pressed")).toBe("true");
+        expect(facts()[0]).toBe(atEnd);
+        serve(`${FILE}line 1001\n`);
+        total = 1001;
+        setRevision(1);
+        await settle();
+        expect(follow.getAttribute("aria-pressed")).toBe("true");
+        expect(facts()[0]).toMatch(/of 1,001$/);
+        expect(numbers()).toContain(1001);
+    });
+
     it("reads the file again when it changed on disk, and stays at the line it was at", async () => {
         const [revision, setRevision] = createSignal(0);
         render(() => (

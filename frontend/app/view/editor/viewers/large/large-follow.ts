@@ -26,6 +26,8 @@ export function createFollow(lines: Accessor<number>, scroll: LineScroll) {
             { defer: true }
         )
     );
+    // The view got taller or shorter (the find strip opened, the pane was resized): the end is somewhere else.
+    createEffect(on(scroll.viewPx, () => following() && scroll.viewPx() > 0 && toEnd(), { defer: true }));
     // The reader moved off the end: they are reading, not following.
     createEffect(
         on(
