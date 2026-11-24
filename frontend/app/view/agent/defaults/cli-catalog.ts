@@ -30,6 +30,13 @@ export interface CliCatalogEntry {
     icon: string;
     /** Capability-first one-liner used as the card title. */
     blurb: string;
+    /**
+     * How the harness is paid for, in a few words, for the card's caption (SPEC_AGENT_HARNESS_CURATION §7): "Your Claude plan"
+     * where the lab's own sign-in is the expected bill, how it signs in where its plan is not confirmed, "Your … key" where the
+     * key is the bill. Absent for a harness that makes no billing claim. Kept apart from `blurb`, which other text compares with
+     * (an agent's stored description equal to its harness's blurb is the default description).
+     */
+    billing?: string;
     /** Primary context file the CLI reads at startup — shown as a badge. */
     primaryContextFile: string;
     /** Short MCP-support summary; "none" hides the badge. */
@@ -50,7 +57,8 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         provider: "claude",
         displayName: "Claude Code",
         icon: "✖",
-        blurb: "Anthropic's coding agent, on your Claude plan",
+        blurb: "Anthropic's coding agent",
+        billing: "Your Claude plan",
         primaryContextFile: "CLAUDE.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
@@ -63,7 +71,8 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         provider: "codex",
         displayName: "Codex CLI",
         icon: "✦",
-        blurb: "OpenAI's coding agent, on your ChatGPT plan",
+        blurb: "OpenAI's coding agent",
+        billing: "Your ChatGPT plan",
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http+oauth",
         popoverMarkdown:
@@ -104,7 +113,8 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         provider: "qwen",
         displayName: "Qwen Code",
         icon: "❖",
-        blurb: "Alibaba's open-source coding agent, with your own key",
+        blurb: "Alibaba's open-source coding agent",
+        billing: "Your own key",
         primaryContextFile: "QWEN.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
@@ -118,7 +128,8 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         provider: "kimi",
         displayName: "Kimi Code",
         icon: "◈",
-        blurb: "Moonshot's 262k-context agent, with your Moonshot key",
+        blurb: "Moonshot's 262k-context agent",
+        billing: "Your Moonshot key",
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
@@ -156,7 +167,8 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         provider: "copilot",
         displayName: "GitHub Copilot CLI",
         icon: "⛶",
-        blurb: "Microsoft's coding agent, on your Copilot plan",
+        blurb: "Microsoft's coding agent",
+        billing: "Your Copilot plan",
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
@@ -222,7 +234,8 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         provider: "grok",
         displayName: "Grok Build",
         icon: "X",
-        blurb: "xAI's coding agent, signs in with your xAI account",
+        blurb: "xAI's coding agent",
+        billing: "xAI sign-in",
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
@@ -274,7 +287,8 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         provider: "muse",
         displayName: "Muse Code",
         icon: "M",
-        blurb: "Meta's coding agent, signs in with your Meta account",
+        blurb: "Meta's coding agent",
+        billing: "Meta sign-in",
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
@@ -294,4 +308,10 @@ const CLI_CATALOG: CliCatalogEntry[] = [
 export function getCliCatalogEntry(provider: string): CliCatalogEntry | null {
     const lower = (provider || "").toLowerCase();
     return CLI_CATALOG.find((c) => c.provider === lower) ?? null;
+}
+
+/** The caption under a harness card: how it is billed first (it is what a narrow card must not cut), then what it is. */
+export function cardCaption(entry: CliCatalogEntry | null | undefined): string {
+    if (!entry) return "";
+    return entry.billing ? `${entry.billing} · ${entry.blurb}` : entry.blurb;
 }
