@@ -8,8 +8,7 @@ watchAmbient 5000
       <span class="token-usage-breakdown-title">
         "Token Usage"
       <span class="token-usage-breakdown-subtitle">
-        "since"
-        "T"
+        "since T"
     <div class="token-usage-breakdown-rows">
       <div class="token-usage-breakdown-ambient">
         <div class="token-usage-breakdown-row">
@@ -39,8 +38,7 @@ watchAmbient 5000
       <span class="token-usage-breakdown-title">
         "Token Usage"
       <span class="token-usage-breakdown-subtitle">
-        "since"
-        "T"
+        "since T"
     <div class="token-usage-breakdown-empty">
       "No turns completed yet this session."
     <div class="token-usage-breakdown-footer">

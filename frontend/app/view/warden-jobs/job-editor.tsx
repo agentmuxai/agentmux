@@ -20,6 +20,7 @@ import {
     type SelectOption,
 } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
+import { Rich } from "@/app/i18n/rich";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -52,12 +53,19 @@ import "./job-editor.scss";
 
 export type EditorStart = { mode: "new" } | { mode: "edit" | "clone"; jobId: string };
 
-const STATE_PILL: Record<string, { label: string; tone: PillTone }> = {
-    approved: { label: "Approved", tone: "ok" },
-    needs_approval: { label: "Needs your approval", tone: "warn" },
-    changed: { label: "Changed since approved", tone: "warn" },
-    invalid: { label: "Can't be read", tone: "error" },
+const STATE_TONE: Record<string, PillTone> = {
+    approved: "ok",
+    needs_approval: "warn",
+    changed: "warn",
+    invalid: "error",
 };
+
+/** A template's state as a pill: its words follow the language. Anything unknown reads as invalid. */
+function statePill(state: string): { label: string; tone: PillTone } {
+    const known = state in STATE_TONE ? state : "invalid";
+    const key = known === "needs_approval" ? "needsApproval" : known;
+    return { label: t(`jobs.editor.state.${key}`), tone: STATE_TONE[known] };
+}
 
 interface JobEditorProps {
     start: EditorStart;
@@ -125,7 +133,7 @@ function createEditorState(props: JobEditorProps): EditorState {
     const [confirm, setConfirm] = createSignal<JobsSaveResult | null>(null);
     const [agents] = useAgentList();
 
-    const manifest = createMemo(() => templates().find((t) => t.id === draft.template?.id)?.manifest ?? null);
+    const manifest = createMemo(() => templates().find((tpl) => tpl.id === draft.template?.id)?.manifest ?? null);
     const agentOptions = createMemo<SelectOption[]>(() =>
         sortByLastUsed(
             (agents() ?? []).filter((a) => !a.is_seeded),
@@ -185,7 +193,7 @@ async function loadEditor(ed: EditorState): Promise<void> {
     try {
         const { definition } = await ed.props.model.get(start.jobId);
         const id = (definition.template as { id?: string } | undefined)?.id;
-        const info = ed.templates().find((t) => t.id === id);
+        const info = ed.templates().find((tpl) => tpl.id === id);
         ed.setDraft(reconcile(draftFromDefinition(definition, info?.manifest ?? null, start.mode)));
         ed.setChosen(true);
     } catch (e) {
@@ -273,15 +281,15 @@ async function dryRunJob(ed: EditorState): Promise<void> {
 
 const editorTitle = (ed: EditorState) =>
     ed.props.start.mode === "edit"
-        ? `Edit ${ed.draft.name || "job"}`
+        ? t("jobs.editor.edit", { name: ed.draft.name || t("jobs.editor.jobFallback") })
         : ed.props.start.mode === "clone"
-          ? "Clone job"
-          : "New job";
+          ? t("jobs.editor.clone")
+          : t("jobs.editor.new");
 const showForm = (ed: EditorState) =>
     !ed.loading() && (ed.props.start.mode !== "new" || ed.source() === "blank" || ed.chosen());
 
 function TemplateItem(p: { ed: EditorState; t: JobTemplateInfo }): JSX.Element {
-    const pill = STATE_PILL[p.t.state] ?? STATE_PILL.invalid;
+    const pill = statePill(p.t.state);
     const isDrone = p.t.manifest?.kind === "drone";
     // A Drone template makes a drone (its graph), not a job: its settings are asked for here.
     const [making, setMaking] = createSignal(false);
@@ -308,7 +316,7 @@ function TemplateItem(p: { ed: EditorState; t: JobTemplateInfo }): JSX.Element {
                         when={isDrone}
                         fallback={
                             <Button density="compact" icon="clone" onClick={() => useTemplate(p.ed, p.t)}>
-                                Clone to a job
+                                {t("jobs.editor.cloneToJob")}
                             </Button>
                         }
                     >
@@ -319,7 +327,7 @@ function TemplateItem(p: { ed: EditorState; t: JobTemplateInfo }): JSX.Element {
                 </Show>
                 <Show when={p.t.state === "needs_approval" || p.t.state === "changed"}>
                     <Button density="compact" icon="shield-halved" onClick={() => p.ed.setApproving(p.t)}>
-                        Review and approve
+                        {t("jobs.editor.reviewApprove")}
                     </Button>
                 </Show>
             </div>
@@ -330,11 +338,11 @@ function TemplateItem(p: { ed: EditorState; t: JobTemplateInfo }): JSX.Element {
 function StartFrom(p: { ed: EditorState }): JSX.Element {
     return (
         <>
-            <Field label="Start from" layout="stacked">
+            <Field label={t("jobs.editor.startFrom")} layout="stacked">
                 <SegmentedControl
                     options={[
-                        { value: "blank", label: "A blank job" },
-                        { value: "template", label: "A template" },
+                        { value: "blank", label: t("jobs.editor.blank") },
+                        { value: "template", label: t("jobs.editor.template") },
                     ]}
                     value={p.ed.source()}
                     onChange={(next) => chooseSource(p.ed, next)}
@@ -343,10 +351,10 @@ function StartFrom(p: { ed: EditorState }): JSX.Element {
             <Show when={p.ed.source() === "template" && !p.ed.chosen()}>
                 <Show
                     when={p.ed.templates().length > 0}
-                    fallback={<div class="warden-section-stub">No templates are installed.</div>}
+                    fallback={<div class="warden-section-stub">{t("jobs.editor.noTemplates")}</div>}
                 >
                     <ul class="warden-jobs-templates">
-                        <For each={p.ed.templates()}>{(t) => <TemplateItem ed={p.ed} t={t} />}</For>
+                        <For each={p.ed.templates()}>{(tpl) => <TemplateItem ed={p.ed} t={tpl} />}</For>
                     </ul>
                 </Show>
             </Show>
@@ -359,27 +367,32 @@ function JobForm(p: { ed: EditorState }): JSX.Element {
     return (
         <>
             <Show when={ed.draft.template}>
-                {(t) => (
+                {(tpl) => (
                     <div class="warden-manager-dim">
-                        Made from <strong>{ed.manifest()?.name ?? t().id}</strong>{" "}
-                        {t().version || ed.manifest()?.version}. The template writes the brief; its settings are below.
+                        <Rich
+                            k="jobs.editor.madeFrom"
+                            params={{
+                                name: ed.manifest()?.name ?? tpl().id,
+                                version: tpl().version || ed.manifest()?.version || "",
+                            }}
+                        />
                     </div>
                 )}
             </Show>
             <div class="warden-jobs-form">
                 <div class="warden-jobs-grid">
-                    <Field label="Name" layout="stacked">
+                    <Field label={t("jobs.editor.name")} layout="stacked">
                         <TextInput
                             value={ed.draft.name}
                             onInput={(e) => ed.setDraft("name", e.currentTarget.value)}
                             maxLength={200}
                         />
                     </Field>
-                    <Field label="Owner" layout="stacked" description="Its leader gets the failure alerts.">
+                    <Field label={t("jobs.editor.owner")} layout="stacked" description={t("jobs.editor.ownerHint")}>
                         <Select
                             value={ed.draft.owner}
                             onChange={(v) => ed.setDraft("owner", v)}
-                            options={withCurrent(ed.agentOptions(), ed.draft.owner, "You (no agent)")}
+                            options={withCurrent(ed.agentOptions(), ed.draft.owner, t("jobs.editor.noAgent"))}
                         />
                     </Field>
                 </div>
@@ -396,7 +409,7 @@ function JobForm(p: { ed: EditorState }): JSX.Element {
                 </Show>
                 <Show when={ed.draft.template && !ed.manifest() && !ed.loading()}>
                     <div class="warden-manager-error">
-                        This job's template isn't installed any more, so its settings stay as they are.
+                        {t("jobs.editor.templateGone")}
                     </div>
                 </Show>
                 <WhenSection draft={ed.draft} set={ed.setDraft} />
@@ -429,10 +442,10 @@ function ConfirmNote(p: { ed: EditorState; result: JobsSaveResult }): JSX.Elemen
                     busy={p.ed.busy() === "save"}
                     onClick={() => void saveJob(p.ed, p.result.needs_confirmation)}
                 >
-                    {p.result.needs_confirmation === "turn_on" ? t("jobs.turnOn.confirm") : "Confirm and save"}
+                    {p.result.needs_confirmation === "turn_on" ? t("jobs.turnOn.confirm") : t("jobs.editor.confirmSave")}
                 </Button>
                 <Button tone="quiet" onClick={() => p.ed.setConfirm(null)}>
-                    Not now
+                    {t("jobs.editor.notNow")}
                 </Button>
             </div>
         </div>
@@ -450,7 +463,7 @@ function EditorActions(p: { ed: EditorState }): JSX.Element {
                 disabled={!showForm(ed) || ed.busy() != null}
                 onClick={() => void saveJob(ed)}
             >
-                {ed.draft.id ? "Save changes" : "Create job"}
+                {ed.draft.id ? t("jobs.editor.saveChanges") : t("jobs.editor.create")}
             </Button>
             <Button
                 icon="vial"
@@ -458,10 +471,10 @@ function EditorActions(p: { ed: EditorState }): JSX.Element {
                 disabled={!showForm(ed) || ed.busy() != null}
                 onClick={() => void dryRunJob(ed)}
             >
-                Dry run
+                {t("jobs.editor.dryRun")}
             </Button>
             <Button tone="quiet" onClick={() => ed.props.onClose()}>
-                Cancel
+                {t("jobs.editor.cancel")}
             </Button>
         </div>
     );
@@ -490,7 +503,7 @@ export function JobEditor(props: JobEditorProps): JSX.Element {
                     <StartFrom ed={ed} />
                 </Show>
                 <Show when={ed.loading()}>
-                    <div class="warden-section-stub">Loading…</div>
+                    <div class="warden-section-stub">{t("jobs.editor.loading")}</div>
                 </Show>
                 <Show when={showForm(ed)}>
                     <JobForm ed={ed} />
