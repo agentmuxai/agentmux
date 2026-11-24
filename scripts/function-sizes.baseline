@@ -383,7 +383,6 @@
 112 frontend/app/view/native-memory/NativeMemoryCreate.tsx::NativeMemoryCreate
 132 frontend/app/view/settings/sections/animations-section.tsx::AnimationsSection
 124 frontend/app/view/settings/sections/browser-section.tsx::BrowserSection
-102 frontend/app/view/settings/sections/pinned-senders.tsx::PinnedSenders
 115 frontend/app/view/settings/sections/widget-bar-settings.tsx::WidgetBarSettings
 104 frontend/app/view/settings/sections/widget-catalog.tsx::WidgetCatalog
 137 frontend/app/view/shortcuts/shortcuts.tsx::ShortcutsView
