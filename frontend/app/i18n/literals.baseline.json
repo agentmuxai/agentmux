@@ -30,7 +30,7 @@
     "frontend/app/element/PaneTabRenameInput.tsx": 1,
     "frontend/app/element/PaneTabStrip.tsx": 4,
     "frontend/app/element/quicktips-parts.tsx": 19,
-    "frontend/app/element/search-parts.tsx": 3,
+    "frontend/app/element/search-parts.tsx": 2,
     "frontend/app/element/table-block.tsx": 2,
     "frontend/app/element/ui/FilterInput.tsx": 1,
     "frontend/app/element/ui/Notice.tsx": 1,
