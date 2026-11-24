@@ -65,3 +65,24 @@ describe("an agent's palette row", () => {
         expect(row.textContent).toContain("Camper");
     });
 });
+
+describe("an agent's icon", () => {
+    it("is the icon-font glyph for a font name, and the text itself for a provider glyph", () => {
+        const named = renderRow(STORED);
+        expect(named.querySelector("i.fa-robot")).not.toBeNull();
+        cleanup();
+        const { container } = render(() => (
+            <PaletteRow
+                row={{ cmd: { ...entry(STORED), icon: "✦" }, index: 0, divider: false }}
+                id="r1"
+                selected={false}
+                groupColumn={false}
+                onPick={() => {}}
+            />
+        ));
+        const icon = container.querySelector(".command-palette-item-icon")!;
+        expect(icon.tagName).toBe("SPAN");
+        expect(icon.textContent).toBe("✦");
+        expect(container.querySelector("i.fa-solid")).toBeNull();
+    });
+});

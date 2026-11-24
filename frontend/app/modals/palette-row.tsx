@@ -32,6 +32,9 @@ function ShortcutCaps(props: { label: string }): JSX.Element {
     );
 }
 
+/** An icon-font name ("robot", "arrow-right"), as against a glyph drawn as text. */
+const isIconName = (icon: string | undefined): boolean => !!icon && /^[a-z0-9-]+$/i.test(icon);
+
 /** What a screen reader says for a row: the label, the detail and the shortcut in words (R26). */
 function rowName(cmd: PaletteRowModel["cmd"], shortcut: string): string {
     return [cmd.label, cmd.detail, shortcut && keyCapsWords(shortcut)].filter(Boolean).join(", ");
@@ -67,10 +70,20 @@ export function PaletteRow(props: {
             onClick={(e) => props.onPick(e)}
         >
             <Show when={cmd().icon}>
-                <i
-                    class={`fa-solid fa-${cmd().icon} command-palette-item-icon`}
-                    style={cmd().iconColor ? { color: cmd().iconColor } : {}}
-                />
+                <Show
+                    when={isIconName(cmd().icon)}
+                    fallback={
+                        // An agent's provider glyph ("✦") is text, not an icon-font name.
+                        <span class="command-palette-item-icon" style={cmd().iconColor ? { color: cmd().iconColor } : {}}>
+                            {cmd().icon}
+                        </span>
+                    }
+                >
+                    <i
+                        class={`fa-solid fa-${cmd().icon} command-palette-item-icon`}
+                        style={cmd().iconColor ? { color: cmd().iconColor } : {}}
+                    />
+                </Show>
             </Show>
             <span class="command-palette-item-text">
                 <span class="command-palette-item-label">{cmd().label}</span>
