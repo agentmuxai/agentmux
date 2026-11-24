@@ -69,8 +69,8 @@ vi.mock("@/app/view/agent/agent-input-history", () => ({
     },
 }));
 // formatWhen formats in the machine's locale and zone; the snapshots must not.
-vi.mock("./history-shared", async (orig) => ({
-    ...(await orig<typeof import("./history-shared")>()),
+vi.mock("../history-shared", async (orig) => ({
+    ...(await orig<typeof import("../history-shared")>()),
     formatWhen: (ms: number) => `when:${ms}`,
 }));
 

@@ -35,7 +35,7 @@ fetchMediaBlob /docs/a.pdf signal=true
       <div class="ui-tooltip-anchor">
         <button aria-label="Invert the pages (for a dark theme)" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button" aria-pressed="false">
           <i aria-hidden="true" class="fa-solid fa-circle-half-stroke">
-      <input class="pdf-viewer-find" data-raw-text-field="the viewer bar's find box: it sits in the bar's row with its own mod+f focus and Enter for the next match, not a form field" type="search" placeholder="Find" aria-label="Find in the document" title="Find ([mod+f]); Enter for the next match, Shift+Enter for the previous" value="">
+      <input class="pdf-viewer-find" data-raw-text-field="the viewer bar's find box: it sits in the bar's row with its own mod+f focus and Enter for the next match, not a form field" type="search" placeholder="Find" aria-label="Find in the document" title="Find ([mod+f]); [Enter] for the next match, [shift+Enter] for the previous" value="">
     <div class="editor-viewer-bar-group">
     <div class="editor-viewer-bar-facts" role="status" aria-live="polite">
       <span>

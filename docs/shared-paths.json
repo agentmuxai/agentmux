@@ -292,6 +292,18 @@
       "users": [
         "crates/common/src/data_paths.rs"
       ]
+    },
+    {
+      "name": "custom harness manifests",
+      "paths": [
+        "harnesses/"
+      ],
+      "why": "A custom ACP harness a person registered is the same on every install and channel of the machine: one folder per harness, harnesses/<id>/harness.json with an optional icon (SPEC_BYO_HARNESS_CUSTOM_ACP_MANIFEST_2026_11_12). srv reads them only from here, never from a repository or an agent's working folder.",
+      "gate": "manifestVersion (harness_manifest.rs): a manifest of another version, or one that breaks a rule, is refused with the field named and the rest still load; a folder over 1 MB, an icon over 64 KB and a folder not named as its id are refused.",
+      "lock": "Read-only in this layer: srv reads the folders at first use and keeps them in an in-process lock. Writers (a later step) write a temp file and rename it, so a reader never sees half a manifest.",
+      "users": [
+        "crates/srv-core/src/backend/providers_custom.rs"
+      ]
     }
   ]
 }

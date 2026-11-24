@@ -44,12 +44,16 @@ fn main() {
     // What a bare `#[tokio::main]` expands to (tokio-macros 2.7: the multi-thread
     // flavor, `enable_all`, no worker count, thread name or other setting, and the
     // same panic message), built by hand so the call above runs first: the runtime
-    // starts its worker threads when it is built. This is on EVERY platform.
-    tokio::runtime::Builder::new_multi_thread()
+    // starts its worker threads when it is built. This is on EVERY platform. The one
+    // addition is a note of which threads are the workers (`thread_roles`), which
+    // changes nothing about the runtime.
+    let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
+        .on_thread_start(backend::thread_roles::thread_started)
         .build()
-        .expect("Failed building the Runtime")
-        .block_on(app_main());
+        .expect("Failed building the Runtime");
+    backend::thread_roles::settle(runtime.metrics().num_workers());
+    runtime.block_on(app_main());
 }
 
 /// Runs the document-reading or file-icon child srv was started as, and exits; returns when

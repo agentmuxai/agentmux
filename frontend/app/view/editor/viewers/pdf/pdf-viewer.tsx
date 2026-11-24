@@ -79,7 +79,7 @@ function PdfViewerControls(props: { s: PdfViewerState }): JSX.Element {
                 type="search"
                 placeholder="Find"
                 aria-label="Find in the document"
-                title={`Find (${keyLabel("mod+f")}); Enter for the next match, Shift+Enter for the previous`}
+                title={`Find (${keyLabel("mod+f")}); ${keyLabel("Enter")} for the next match, ${keyLabel("shift+Enter")} for the previous`}
                 value={s.query()}
                 onInput={(e) => {
                     s.setQuery(e.currentTarget.value);

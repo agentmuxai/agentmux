@@ -25,6 +25,9 @@ const write = (rel, text) => {
 };
 
 beforeEach(() => {
+    // CI sets the PR's base, which the fixture repo does not have: on a PR whose base is not main (one stacked on another),
+    // `changedRows({ root })` would answer null. The fixture's base is main.
+    vi.stubEnv("GITHUB_BASE_REF", "");
     root = mkdtempSync(join(tmpdir(), "branch-changes-"));
     git("init", "-q", "-b", "main");
     write("README.md", "base\n");
@@ -34,7 +37,10 @@ beforeEach(() => {
     git("checkout", "-q", "-b", "feature");
 });
 
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => {
+    vi.unstubAllEnvs();
+    rmSync(root, { recursive: true, force: true });
+});
 
 describe("branch-changes", () => {
     it("finds the base branch, and null when there is none", () => {

@@ -240,6 +240,28 @@
     }
 }
 
+// The tree view: each level indents by 16px, and a folder has a chevron to open it in place.
+.files-tree-indent {
+    flex-shrink: 0;
+}
+
+.files-twisty {
+    flex-shrink: 0;
+    width: 14px;
+    font-size: var(--text-2xs);
+    text-align: center;
+    color: var(--secondary-text-color);
+    cursor: pointer;
+
+    &:hover {
+        color: var(--main-text-color);
+    }
+}
+
+.files-twisty-none {
+    cursor: default;
+}
+
 .files-list {
     position: relative;
     flex: 1;
