@@ -381,7 +381,6 @@
     "frontend/app/view/vault/vault-secrets.tsx": 15,
     "frontend/app/view/vault/vault-signin-vaults.tsx": 4,
     "frontend/app/view/vault/vault-use-card.tsx": 11,
-    "frontend/app/view/vault/vault-use-question.tsx": 46,
     "frontend/app/view/vault/vault-vaults.tsx": 9,
     "frontend/app/view/vault/vault-versions.tsx": 7,
     "frontend/app/view/vault/vault-view.tsx": 4,
