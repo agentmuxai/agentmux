@@ -176,7 +176,7 @@ impl Store {
 
     /// TEST-ONLY: the connection's lock, held for as long as the guard lives: a store another thread has busy.
     #[cfg(any(test, feature = "test-support"))]
-    pub fn hold_for_tests(&self) -> std::sync::MutexGuard<'_, Connection> {
+    pub fn hold_for_tests(&self) -> super::timed_mutex::TimedGuard<'_, Connection> {
         self.conn.lock().unwrap_or_else(|e| e.into_inner())
     }
 
