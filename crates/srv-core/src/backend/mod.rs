@@ -303,6 +303,8 @@ pub mod worker_failure_note;
 /// A leader hears when its workers (and the agents that hold its tasks) fail, stop or wait on a question.
 pub mod worker_notes;
 pub mod quiet_watch;
+/// The quiet note sent to a lead on another machine, and what the lead's machine accepts of it.
+pub mod quiet_remote;
 pub mod urgent_asks;
 pub mod note_outbox;
 
