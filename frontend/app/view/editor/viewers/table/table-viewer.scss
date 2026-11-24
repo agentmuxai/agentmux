@@ -61,10 +61,10 @@
 .table-viewer-head {
     position: sticky;
     top: 0;
-    z-index: 1;
+    z-index: var(--z-over-content);
     margin-bottom: calc(var(--table-row-h) * -1);
     font-weight: 600;
-    background: var(--block-bg-color, var(--main-bg-color));
+    background: var(--main-bg-color);
 }
 
 .table-viewer-number {

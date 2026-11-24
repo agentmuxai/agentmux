@@ -162,7 +162,7 @@ function Row(props: { cells: string[]; widths: number[]; columns: number; number
             </span>
             <For each={props.widths.slice(0, props.columns)}>
                 {(w, c) => (
-                    <span class="table-viewer-cell" role={props.header ? "columnheader" : "gridcell"} style={{ width: `${w + 2}ch` }} title={props.cells[c()]}>
+                    <span class="table-viewer-cell" role={props.header ? "columnheader" : "gridcell"} style={{ width: `${w + 2}ch` }} {...tip(props.cells[c()] ?? "")}>
                         {props.cells[c()] ?? ""}
                     </span>
                 )}
