@@ -7,6 +7,7 @@
 
 import { blockRoleColor, isLightThemeActive } from "@/app/block/pane-identity";
 import { Button, EmptyState, IconButton, Select } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import * as MOS from "@/app/store/mos";
 import type { TowerProcess, TowerTask } from "@/app/store/rpc-api";
 import { revealBlock } from "@/app/util/reveal-block";
@@ -20,7 +21,6 @@ import { ProcessName } from "./tower-process-name";
 import { SortHeader } from "./tower-sort-header";
 import {
     buildProcessTree,
-    count,
     cpuPercent,
     formatAgo,
     formatCpuTime,
@@ -98,21 +98,21 @@ export function AgentsView(props: { model: TowerViewModel; cpu: Cpu }): JSX.Elem
                 <div class="tower-rail-bar">
                     <Select
                         density="compact"
-                        ariaLabel="Order agents by"
+                        ariaLabel={t("tower.agents.orderBy")}
                         value={m.railSort()}
                         onChange={(v) => m.setRailSort(v as RailSort)}
                         options={[
-                            { value: "pane", label: "Pane order" },
-                            { value: "cpu", label: "CPU" },
-                            { value: "mem", label: "Memory" },
-                            { value: "name", label: "Name" },
+                            { value: "pane", label: t("tower.agents.sort.pane") },
+                            { value: "cpu", label: t("tower.agents.sort.cpu") },
+                            { value: "mem", label: t("tower.agents.sort.mem") },
+                            { value: "name", label: t("tower.agents.sort.name") },
                         ]}
                     />
                 </div>
                 <div
                     class="tower-rail-list"
                     role="listbox"
-                    aria-label="Agents"
+                    aria-label={t("tower.agents.aria")}
                     tabIndex={0}
                     aria-activedescendant={selected() ? `tower-rail-${m.blockId}-${selected()}` : undefined}
                     onPointerEnter={() => setFrozen(orderIds())}
@@ -136,7 +136,7 @@ export function AgentsView(props: { model: TowerViewModel; cpu: Cpu }): JSX.Elem
                 </div>
             </div>
             <div class="tower-detail">
-                <Show when={byId().get(selected())} fallback={<EmptyState>No agents running.</EmptyState>}>
+                <Show when={byId().get(selected())} fallback={<EmptyState>{t("tower.agents.none")}</EmptyState>}>
                     {(entry) => <Detail model={m} entry={entry()} cpu={props.cpu} />}
                 </Show>
             </div>
@@ -179,7 +179,14 @@ function RailRow(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu; sel
                 `tower-rail-row--${props.entry.kind}`
             )}
             data-testid={`tower-rail-${props.entry.id}`}
-            {...tip(`${props.entry.label}: ${formatMem(props.entry.mem)} · CPU ${props.cpu(props.entry.cpu)} · ${count(props.entry.processes, "process")}`)}
+            {...tip(
+                t("tower.agents.rowTip", {
+                    label: props.entry.label,
+                    mem: formatMem(props.entry.mem),
+                    cpu: props.cpu(props.entry.cpu),
+                    processes: t("tower.view.processes", { count: props.entry.processes }),
+                })
+            )}
             onClick={() => m.select(props.entry.id)}
         >
             <Swatch entry={props.entry} remote={remote()} />
@@ -200,7 +207,7 @@ function RailRow(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu; sel
                         `tower-level--${loadLevel("cpu", "item", m.cpuShare(props.entry.cpu))}`
                 )}
             >
-                CPU <span class="tower-rail-cpu-value">{props.cpu(props.entry.cpu)}</span>
+                {t("tower.agents.cpuLabel")} <span class="tower-rail-cpu-value">{props.cpu(props.entry.cpu)}</span>
             </span>
             <Sparkline points={m.recentMem(props.entry.id)} color={entryColor(props.entry, remote())} />
         </div>
@@ -235,11 +242,11 @@ function OtherProcessesNote(props: { model: TowerViewModel; entry: RailEntry }) 
         <EmptyState
             actions={
                 <Button density="compact" onClick={() => props.model.setView("processes", props.entry.id)}>
-                    Show in Processes
+                    {t("tower.agents.showInProcesses")}
                 </Button>
             }
         >
-            {count(props.entry.processes, "process")} AgentMux didn't start: other apps, services and the system.
+            {t("tower.agents.otherNote", { processes: t("tower.view.processes", { count: props.entry.processes }) })}
         </EmptyState>
     );
 }
@@ -254,7 +261,7 @@ function Detail(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu }) {
             if (n.children.length) keys.push(foldKey(n.process));
             n.children.forEach(walk);
         };
-        for (const t of props.entry.tasks) buildProcessTree(withExited(t)).forEach(walk);
+        for (const task of props.entry.tasks) buildProcessTree(withExited(task)).forEach(walk);
         return keys;
     });
     return (
@@ -265,22 +272,22 @@ function Detail(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu }) {
                 <Show when={props.entry.kind === "agent" && !remote()}>
                     <IconButton
                         icon="arrow-up-right-from-square"
-                        label="Show this pane"
+                        label={t("tower.panes.show")}
                         density="compact"
                         onClick={() => void revealBlock(props.entry.id, { source: "tower" })}
                     />
                 </Show>
                 <span class="tower-toolbar-spacer" />
                 <span class="tower-detail-totals">
-                    Memory{" "}
+                    {t("tower.agents.memory")}{" "}
                     <span class={clsx("tower-total tower-total--mem", level("mem", m.memShare(props.entry.mem)))}>
                         {formatMem(props.entry.mem)}
                     </span>{" "}
-                    · CPU{" "}
+                    · {t("tower.agents.cpuLabel")}{" "}
                     <span class={clsx("tower-total tower-total--cpu", level("cpu", m.cpuShare(props.entry.cpu)))}>
                         {props.cpu(props.entry.cpu)}
                     </span>{" "}
-                    · {count(props.entry.processes, "process")}
+                    · {t("tower.view.processes", { count: props.entry.processes })}
                 </span>
             </div>
             <HistoryCharts
@@ -297,10 +304,10 @@ function Detail(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu }) {
             >
                 <div class="tower-detail-bar">
                     <Button density="compact" tone="quiet" icon="angles-down" onClick={() => m.unfold(parents())}>
-                        Expand all
+                        {t("tower.agents.expandAll")}
                     </Button>
                     <Button density="compact" tone="quiet" icon="angles-up" onClick={() => m.fold(parents())}>
-                        Collapse all
+                        {t("tower.agents.collapseAll")}
                     </Button>
                     <span class="tower-toolbar-spacer" />
                     <Button
@@ -309,27 +316,27 @@ function Detail(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu }) {
                         tone="quiet"
                         icon="table-columns"
                         pressed={m.moreColumns()}
-                        title="CPU time used (with everything a process started, exited ones included) and peak memory"
+                        title={t("tower.agents.moreColumnsTip")}
                         onClick={() => m.setMoreColumns(!m.moreColumns())}
                     >
-                        More columns
+                        {t("tower.agents.moreColumns")}
                     </Button>
                 </div>
-                <table class="tower-table" aria-label={`${props.entry.label}'s processes`}>
+                <table class="tower-table" aria-label={t("tower.agents.processesAria", { label: props.entry.label })}>
                     <thead>
                         <tr>
-                            <SortHeader model={m} key="name" label="Process" />
-                            <SortHeader model={m} key="mem" label="Memory" numeric />
-                            <SortHeader model={m} key="cpu" label="CPU" numeric />
+                            <SortHeader model={m} key="name" label={t("tower.agents.col.process")} />
+                            <SortHeader model={m} key="mem" label={t("tower.agents.memory")} numeric />
+                            <SortHeader model={m} key="cpu" label={t("tower.agents.cpuLabel")} numeric />
                             <Show when={m.moreColumns()}>
-                                <th class="tower-num" {...tip("CPU time used, with everything it started")}>
-                                    <span class="tower-th-label ui-density-compact">CPU time</span>
+                                <th class="tower-num" {...tip(t("tower.agents.cpuTimeTip"))}>
+                                    <span class="tower-th-label ui-density-compact">{t("tower.agents.cpuTime")}</span>
                                 </th>
-                                <th class="tower-num" {...tip("The most private memory seen")}>
-                                    <span class="tower-th-label ui-density-compact">Peak</span>
+                                <th class="tower-num" {...tip(t("tower.agents.peakTip"))}>
+                                    <span class="tower-th-label ui-density-compact">{t("tower.agents.peak")}</span>
                                 </th>
                             </Show>
-                            <SortHeader model={m} key="count" label="PID" numeric />
+                            <SortHeader model={m} key="count" label={t("tower.agents.col.pid")} numeric />
                         </tr>
                     </thead>
                     <tbody>
@@ -474,8 +481,8 @@ function ManyRows(props: { model: TowerViewModel; line: ManyLine; depth: number;
                             icon={open() ? "chevron-down" : "chevron-right"}
                             label={
                                 open()
-                                    ? `Hide the ${props.line.name} processes`
-                                    : `Show the ${props.line.name} processes`
+                                    ? t("tower.agents.hideMany", { name: props.line.name })
+                                    : t("tower.agents.showMany", { name: props.line.name })
                             }
                             density="compact"
                             tooltip={false}
@@ -486,7 +493,7 @@ function ManyRows(props: { model: TowerViewModel; line: ManyLine; depth: number;
                         <span class="tower-label">{props.line.name}</span>
                         <span class="tower-muted">×{props.line.nodes.length}</span>
                         <Show when={props.line.exited}>
-                            <span class="tower-muted">exited</span>
+                            <span class="tower-muted">{t("tower.agents.exited")}</span>
                         </Show>
                     </div>
                 </td>
@@ -517,7 +524,7 @@ function ProcessRows(props: { model: TowerViewModel; node: ProcessNode; depth: n
     const m = props.model;
     const hasChildren = () => props.node.children.length > 0;
     const folded = () => m.expanded().has(foldKey(props.node.process));
-    const subtree = () => (hasChildren() ? "With everything it started" : undefined);
+    const subtree = () => (hasChildren() ? t("tower.agents.withChildren") : undefined);
     const exitedMs = () => props.node.process.exited_ms;
     return (
         <>
@@ -535,7 +542,7 @@ function ProcessRows(props: { model: TowerViewModel; node: ProcessNode; depth: n
                         <Show when={hasChildren()} fallback={<span class="tower-chevron-space" />}>
                             <IconButton
                                 icon={folded() ? "chevron-right" : "chevron-down"}
-                                label={folded() ? "Show what it started" : "Hide what it started"}
+                                label={folded() ? t("tower.agents.showChildren") : t("tower.agents.hideChildren")}
                                 density="compact"
                                 tooltip={false}
                                 aria-expanded={!folded()}
@@ -547,7 +554,7 @@ function ProcessRows(props: { model: TowerViewModel; node: ProcessNode; depth: n
                                 {(ms) => (
                                     <span
                                         class="tower-muted tower-exited-ago"
-                                        {...tip(`Exited ${formatAgo(ms(), m.snapshot()?.ts_ms ?? ms())}`)}
+                                        {...tip(t("tower.agents.exitedAgo", { ago: formatAgo(ms(), m.snapshot()?.ts_ms ?? ms()) }))}
                                     >
                                         {formatAgo(ms(), m.snapshot()?.ts_ms ?? ms())}
                                     </span>
