@@ -17,6 +17,14 @@ import type { AtlasEdge, AtlasGraph } from "./atlas-graph";
 export const NODE_W = 140;
 /** A name and a line under it, with a few pixels over and under them: the box is no taller than its words need. */
 export const NODE_H = 36;
+/** One line of a node's tasks (atlas.scss `.atlas-node__task`), and the room between the node's two lines and the first. */
+export const TASK_LINE_H = 14;
+export const TASKS_GAP = 3;
+
+/** The height of a node with `lines` lines of tasks under its name and state: `NODE_H` with none. */
+export function nodeHeight(lines: number): number {
+    return lines > 0 ? NODE_H + TASKS_GAP + lines * TASK_LINE_H : NODE_H;
+}
 /** How far the dashed frame of a container agent reaches past its node (atlas.scss `.atlas-node--container`). */
 export const CONTAINER_FRAME_OUT = 7;
 /** The gap between two nodes of a row, and between one level and the next. */
@@ -85,7 +93,12 @@ export function gapsAt(spread = 1): Gaps {
 export interface Placed {
     x: number;
     y: number;
+    /** Its height when it is not `NODE_H`: a node that lists tasks is taller. */
+    h?: number;
 }
+
+/** The heights of the nodes that are not `NODE_H` tall, by key (`nodeHeight`). */
+export type NodeHeights = ReadonlyMap<string, number>;
 
 /** The room the nodes of one host take: not drawn, only kept together. */
 export interface RegionBox extends Placed {
@@ -107,6 +120,13 @@ export interface AtlasLayout {
     wrapped: ReadonlyMap<string, string>;
     /** The gaps it was made with: a wrapped report's line runs along the middle of two of them. */
     gaps: Gaps;
+}
+
+const NO_HEIGHTS: NodeHeights = new Map();
+
+/** A node's place: its height is kept only when it is not the usual one. */
+function placed(x: number, y: number, h: number): Placed {
+    return h === NODE_H ? { x, y } : { x, y, h };
 }
 
 /** The trees of one region: each root that has reports, with the subtree it heads, in the order given. */
@@ -154,18 +174,17 @@ function layoutRegion(
     edges: readonly AtlasEdge[],
     gridCols = GRID_COLS,
     reportCols = Number.POSITIVE_INFINITY,
-    gaps: Gaps = FULL_GAPS
+    gaps: Gaps = FULL_GAPS,
+    heights: NodeHeights = NO_HEIGHTS
 ): RegionLayout {
     const { roots, loners, children } = treesOf(keys, edges);
     const nodes = new Map<string, Placed>();
     const wrapped = new Map<string, string>();
+    const heightOf = (k: string) => heights.get(k) ?? NODE_H;
+    /** Where the trees put a node, before the rows' tops are known: its row is a depth and, within it, a wrapped row. */
+    const stood: { k: string; x: number; depth: number; row: number }[] = [];
     let slot = 0;
-    /** The lowest edge of a node the trees have placed. */
-    let bottom = 0;
-    const put = (k: string, x: number, y: number) => {
-        nodes.set(k, { x, y });
-        bottom = Math.max(bottom, y + NODE_H);
-    };
+    const put = (k: string, x: number, depth: number, row = 0) => stood.push({ k, x, depth, row });
     const place = (k: string, depth: number, seen: Set<string>): number => {
         seen.add(k);
         const kids = (children.get(k) ?? []).filter((c) => !seen.has(c));
@@ -178,7 +197,7 @@ function layoutRegion(
                 seen.add(c);
                 const row = Math.floor(i / reportCols);
                 if (row > 0) wrapped.set(c, k);
-                put(c, (first + (i % reportCols)) * (NODE_W + gaps.x), (depth + 1) * (NODE_H + gaps.level) + row * (NODE_H + gaps.reportRow));
+                put(c, (first + (i % reportCols)) * (NODE_W + gaps.x), depth + 1, row);
             });
             slot += reportCols;
             x = ((first + (first + reportCols - 1)) / 2) * (NODE_W + gaps.x);
@@ -186,22 +205,50 @@ function layoutRegion(
             const xs = kids.map((c) => place(c, depth + 1, seen));
             x = (xs[0] + xs[xs.length - 1]) / 2;
         }
-        put(k, x, depth * (NODE_H + gaps.level));
+        put(k, x, depth);
         return x;
     };
     const seen = new Set<string>();
     for (const r of roots) place(r, 0, seen);
+
+    // A row is as tall as its tallest node, and the next level starts a gap under the level's first row (a lead's wrapped
+    // rows lie beside whatever stands at the levels below, as they always have).
+    const rowHeight = new Map<string, number>();
+    for (const n of stood) rowHeight.set(`${n.depth}:${n.row}`, Math.max(rowHeight.get(`${n.depth}:${n.row}`) ?? 0, heightOf(n.k)));
+    const rowH = (depth: number, row: number) => rowHeight.get(`${depth}:${row}`) ?? NODE_H;
+    const levelTop: number[] = [];
+    let top = 0;
+    const deepest = Math.max(-1, ...stood.map((n) => n.depth));
+    for (let d = 0; d <= deepest; d++) {
+        levelTop[d] = top;
+        top += rowH(d, 0) + gaps.level;
+    }
+    const rowTop = (depth: number, row: number) => {
+        let y = levelTop[depth];
+        for (let r = 0; r < row; r++) y += rowH(depth, r) + gaps.reportRow;
+        return y;
+    };
+    /** The lowest edge of a node the trees have placed. */
+    let bottom = 0;
+    for (const n of stood) {
+        const y = rowTop(n.depth, n.row);
+        nodes.set(n.k, placed(n.x, y, heightOf(n.k)));
+        bottom = Math.max(bottom, y + heightOf(n.k));
+    }
     const treeW = slot === 0 ? 0 : slot * (NODE_W + gaps.x) - gaps.x;
     const treeH = bottom;
 
     // The agents with no lead and no reports, in a grid under the trees.
     const cols = Math.min(gridCols, Math.max(loners.length, 1));
     const gridTop = treeH > 0 ? treeH + gaps.level : 0;
-    loners.forEach((k, i) => {
-        nodes.set(k, { x: (i % cols) * (NODE_W + gaps.x), y: gridTop + Math.floor(i / cols) * (NODE_H + gaps.x) });
-    });
+    let gridY = gridTop;
+    for (let first = 0; first < loners.length; first += cols) {
+        const row = loners.slice(first, first + cols);
+        row.forEach((k, i) => nodes.set(k, placed(i * (NODE_W + gaps.x), gridY, heightOf(k))));
+        gridY += Math.max(...row.map(heightOf)) + gaps.x;
+    }
     const gridW = loners.length === 0 ? 0 : cols * (NODE_W + gaps.x) - gaps.x;
-    const gridH = loners.length === 0 ? 0 : Math.ceil(loners.length / cols) * (NODE_H + gaps.x) - gaps.x;
+    const gridH = loners.length === 0 ? 0 : gridY - gaps.x - gridTop;
     // Trees alone end at their lowest node: the gap under them is only for a grid.
     return { nodes, w: Math.max(treeW, gridW), h: loners.length === 0 ? treeH : gridTop + gridH, wrapped };
 }
@@ -253,9 +300,10 @@ function slotOf(
     edges: readonly AtlasEdge[],
     cols: number,
     reportCols = Number.POSITIVE_INFINITY,
-    gaps: Gaps = FULL_GAPS
+    gaps: Gaps = FULL_GAPS,
+    heights: NodeHeights = NO_HEIGHTS
 ): Slot {
-    const inner = layoutRegion(keys, edges, cols, reportCols, gaps);
+    const inner = layoutRegion(keys, edges, cols, reportCols, gaps, heights);
     return keys.length === 0 ? { key, inner, w: 0, h: 0 } : { key, inner, w: inner.w, h: inner.h };
 }
 
@@ -295,7 +343,7 @@ function shelfPack(
             newRow();
             rowStarts.add(i);
         }
-        for (const [node, p] of s.inner.nodes) nodes.set(node, { x: m + x + p.x, y: m + y + p.y });
+        for (const [node, p] of s.inner.nodes) nodes.set(node, { ...p, x: m + x + p.x, y: m + y + p.y });
         for (const [report, lead] of s.inner.wrapped) wrapped.set(report, lead);
         boxes.push({ key: s.key, x: m + x, y: m + y, w: s.w, h: s.h });
         x += s.w + gaps.region;
@@ -332,7 +380,9 @@ export function pickBest(candidates: readonly AtlasLayout[], pane: PaneShape, pr
         const raw = fitScale(l, pane);
         // Only the By seat picture (no region boxes) asks for it; the machine boxes have room of their own.
         const dense =
-            preferFull && l.width * l.height > 0 ? (l.nodes.size * NODE_W * NODE_H) / (l.width * l.height) : 0;
+            preferFull && l.width * l.height > 0
+                ? [...l.nodes.values()].reduce((area, p) => area + NODE_W * (p.h ?? NODE_H), 0) / (l.width * l.height)
+                : 0;
         return { k, raw, dense, cover: Math.min(l.width * k, pane.w) * Math.min(l.height * k, pane.h), rows: rowsOf(l) };
     };
     let best = candidates[0];
@@ -373,9 +423,15 @@ function wrapWidths(slots: readonly Slot[]): number[] {
  * order and their insides, and the width a row wraps at and the columns of the grid of agents with no lead are the
  * ones that fit the pane best (docs/specs/SPEC_ATLAS_AGENT_MAP_2026_11_13.md §6.5). Without it, the fixed ones.
  * `spread` under 1 closes the gaps (`gapsAt`): the picture is the one chosen at the full gaps, so a zoom moves no
- * card to another row or column and no machine to another row.
+ * card to another row or column and no machine to another row. `heights` are the nodes taller than `NODE_H` (they list
+ * tasks): a row is as tall as its tallest node.
  */
-export function layoutAtlas(graph: AtlasGraph, pane?: PaneShape, spread = 1): AtlasLayout {
+export function layoutAtlas(
+    graph: AtlasGraph,
+    pane?: PaneShape,
+    spread = 1,
+    heights: NodeHeights = NO_HEIGHTS
+): AtlasLayout {
     const gaps = gapsAt(spread);
     const build = (cols: number, reportCols: number, g: Gaps) => {
         const slots = graph.regions.map((r) =>
@@ -385,7 +441,8 @@ export function layoutAtlas(graph: AtlasGraph, pane?: PaneShape, spread = 1): At
                 graph.edges,
                 cols,
                 reportCols,
-                g
+                g,
+                heights
             )
         );
         return { slots };
@@ -421,32 +478,38 @@ export function layoutAtlas(graph: AtlasGraph, pane?: PaneShape, spread = 1): At
  * agents with no lead are the ones that fit it best. `spread` under 1 closes the gaps, as in `layoutAtlas`: the
  * columns are the ones chosen at the full gaps.
  */
-export function layoutBySeat(graph: AtlasGraph, pane?: PaneShape, spread = 1): AtlasLayout {
+export function layoutBySeat(
+    graph: AtlasGraph,
+    pane?: PaneShape,
+    spread = 1,
+    heights: NodeHeights = NO_HEIGHTS
+): AtlasLayout {
     const gaps = gapsAt(spread);
-    if (!pane || pane.w <= 0 || pane.h <= 0) return seatWithCols(graph, GRID_COLS, Number.POSITIVE_INFINITY, gaps);
+    if (!pane || pane.w <= 0 || pane.h <= 0) return seatWithCols(graph, GRID_COLS, Number.POSITIVE_INFINITY, gaps, heights);
     const choices = reportColsChoices(graph).flatMap((reportCols) =>
         SEAT_GRID_COLS_CHOICES.map((cols) => ({ cols, reportCols }))
     );
-    const candidates = choices.map((c) => seatWithCols(graph, c.cols, c.reportCols));
+    const candidates = choices.map((c) => seatWithCols(graph, c.cols, c.reportCols, FULL_GAPS, heights));
     const best = pickBest(candidates, pane, true);
     if (gaps === FULL_GAPS) return best;
     const chosen = choices[candidates.indexOf(best)];
-    return seatWithCols(graph, chosen.cols, chosen.reportCols, gaps);
+    return seatWithCols(graph, chosen.cols, chosen.reportCols, gaps, heights);
 }
 
 function seatWithCols(
     graph: AtlasGraph,
     cols: number,
     reportCols = Number.POSITIVE_INFINITY,
-    gaps: Gaps = FULL_GAPS
+    gaps: Gaps = FULL_GAPS,
+    heights: NodeHeights = NO_HEIGHTS
 ): AtlasLayout {
     const keys = [
         ...graph.regions.flatMap((r) => r.shown.map((a) => a.key)),
         ...graph.regions.flatMap((r) => r.orphans.map((o) => o.key)),
     ];
-    const inner = layoutRegion(keys, graph.edges, cols, reportCols, gaps);
+    const inner = layoutRegion(keys, graph.edges, cols, reportCols, gaps, heights);
     const nodes = new Map<string, Placed>();
-    for (const [key, p] of inner.nodes) nodes.set(key, { x: gaps.pad + p.x, y: gaps.pad + p.y });
+    for (const [key, p] of inner.nodes) nodes.set(key, { ...p, x: gaps.pad + p.x, y: gaps.pad + p.y });
     if (nodes.size === 0) return { regions: [], nodes, width: 0, height: 0, wrapped: new Map(), gaps };
     return {
         regions: [],

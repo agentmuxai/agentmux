@@ -32,15 +32,17 @@ import { AtlasFlowLayer } from "./atlas-flow-layer";
 import type { AtlasAgent, AtlasRegion, AtlasState } from "./atlas-graph";
 import { AtlasLegend, HostLabel, hostAttrs, machineDetail, onHost, ringVars } from "./atlas-host-mark";
 import { hostStyles, ringsDrawn, type HostStyle } from "./atlas-hosts";
-import { layoutAtlas, layoutBySeat, NODE_H, NODE_W, type AtlasLayout } from "./atlas-layout";
+import { fitScale, layoutAtlas, layoutBySeat, NODE_H, NODE_W, type AtlasLayout, type NodeHeights } from "./atlas-layout";
 import type { AtlasData } from "./atlas-model";
 import { ATLAS_LAYOUT_META, readAtlasLayout, type AtlasLayoutMode } from "./atlas-layout-mode";
 import { useAtlasLasso } from "./atlas-lasso";
 import { NOT_BACKGROUND, useAtlasPanZoom, type AtlasPanZoom } from "./atlas-pan-zoom";
 import { selectionKeyOf } from "./atlas-select";
 import { clampZoom, type Viewport } from "./atlas-viewport";
-import type { AtlasWork } from "./atlas-work";
-import { useAtlasWork } from "./atlas-work-store";
+import { nodeHeights, nodeTasksOf, showTaskLines } from "./atlas-node-tasks";
+import { NodeTasksList, TaskCount } from "./atlas-node-tasks-view";
+import type { AtlasWork, NodeTasks } from "./atlas-work";
+import { useAtlasTasks, useAtlasWork } from "./atlas-work-store";
 import { t } from "@/app/i18n/i18n";
 import "./atlas.scss";
 
@@ -70,6 +72,11 @@ function Node(props: {
     agent: AtlasAgent;
     x: number;
     y: number;
+    /** Its height: `NODE_H`, or taller with the lines of its tasks (atlas-layout.ts `nodeHeight`). */
+    h: number;
+    /** What it lists of its tasks, and whether the map is big enough to list them line by line. */
+    tasks?: NodeTasks;
+    lines: boolean;
     /** Its host's ring and name; undefined for a machine this view does not know. */
     host: HostStyle | undefined;
     /** Rings are drawn (more than one host). */
@@ -90,37 +97,44 @@ function Node(props: {
                 "atlas-node--picked": props.picked,
                 "atlas-node--stale": a().stale,
                 "atlas-node--container": inContainer(a()),
+                "atlas-node--tasks": props.lines && !!props.tasks,
             }}
             {...hostAttrs(props.host, props.ring)}
             data-container={a().container?.state}
             data-testid="atlas-node"
-            style={{ left: `${props.x}px`, top: `${props.y}px`, width: `${NODE_W}px`, height: `${NODE_H}px` }}
+            style={{ left: `${props.x}px`, top: `${props.y}px`, width: `${NODE_W}px`, height: `${props.h}px` }}
             aria-pressed={props.selected}
             aria-label={`${a().name}, ${stateLabel(a().state)}${onHost(props.host)}${inContainer(a()) ? `, ${t("atlas.node.inContainer")}` : ""}${props.picked ? `, ${t("atlas.node.selected")}` : ""}`}
             {...tip(`${a().line ?? stateLabel(a().state)}${onHost(props.host)}`)}
             onClick={(e) => props.onSelect(a().key, e)}
             onKeyDown={(e) => {
-                if (e.key !== "Enter" && e.key !== " ") return;
+                // A key on one of the task links is theirs.
+                if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
                 e.preventDefault();
                 props.onSelect(a().key, e);
             }}
         >
-            <span class="atlas-node__top">
-                <span class="atlas-node__dot" />
-                <span class="atlas-node__name">{a().name}</span>
-                <Show when={inContainer(a())}>
-                    <i class="fa-solid fa-box atlas-node__kind" aria-hidden="true" />
-                </Show>
-                <HostLabel style={props.host} />
-                <Show when={props.picked}>
-                    <i class="fa-solid fa-check atlas-node__check" aria-hidden="true" />
-                </Show>
+            <span class="atlas-node__head">
+                <span class="atlas-node__top">
+                    <span class="atlas-node__dot" />
+                    <span class="atlas-node__name">{a().name}</span>
+                    {/* Where the map is too small to list the tasks, how many there are. */}
+                    <Show when={props.lines ? undefined : props.tasks}>{(tasks) => <TaskCount total={tasks().total} />}</Show>
+                    <Show when={inContainer(a())}>
+                        <i class="fa-solid fa-box atlas-node__kind" aria-hidden="true" />
+                    </Show>
+                    <HostLabel style={props.host} />
+                    <Show when={props.picked}>
+                        <i class="fa-solid fa-check atlas-node__check" aria-hidden="true" />
+                    </Show>
+                </span>
+                <span class="atlas-node__sub">
+                    <Show when={a().seat} fallback={stateLabel(a().state)}>
+                        {(seat) => <SeatTag seat={seat()} size="xs" class="atlas-node__seat" />}
+                    </Show>
+                </span>
             </span>
-            <span class="atlas-node__sub">
-                <Show when={a().seat} fallback={stateLabel(a().state)}>
-                    {(seat) => <SeatTag seat={seat()} size="xs" class="atlas-node__seat" />}
-                </Show>
-            </span>
+            <Show when={props.lines && props.tasks}>{(tasks) => <NodeTasksList tasks={tasks()} />}</Show>
         </div>
     );
 }
@@ -236,6 +250,8 @@ function Card(props: {
     );
 }
 
+const NO_NODE_HEIGHTS: NodeHeights = new Map();
+
 /** The map itself: the lines and a node per running agent, in map pixels. */
 function AtlasMap(props: {
     data: AtlasData;
@@ -246,6 +262,9 @@ function AtlasMap(props: {
     ring: boolean;
     selected: string | null;
     picked: (agent: AtlasAgent) => boolean;
+    /** What each node lists of its agent's tasks, and whether the map lists them line by line. */
+    tasks: ReadonlyMap<string, NodeTasks>;
+    lines: boolean;
     onSelect: (key: string, e: MouseEvent | KeyboardEvent) => void;
 }): JSX.Element {
     const regions = () => props.data.graph().regions;
@@ -310,6 +329,9 @@ function AtlasMap(props: {
                                 agent={agent()}
                                 x={p().x}
                                 y={p().y}
+                                h={p().h ?? NODE_H}
+                                tasks={props.tasks.get(key)}
+                                lines={props.lines}
                                 host={props.hosts.get(agent().machine)}
                                 ring={props.ring}
                                 selected={props.selected === key}
@@ -465,11 +487,23 @@ export function AtlasView(props: { data: AtlasData; ctx: PaneTabHostContext }): 
     // already fitted (the view reads the layout lazily: it is made right below).
     const zoom = useAtlasPanZoom(() => layout(), mode, () => setSelected(null));
     // Zoomed in past the fitted view, the gaps close up (`zoom.spread`), so more of the cards are in the pane.
-    const layout = createMemo<AtlasLayout>(() =>
-        mode() === "seat"
-            ? layoutBySeat(data.graph(), zoom.shape(), zoom.spread())
-            : layoutAtlas(data.graph(), zoom.shape(), zoom.spread())
+    const tasks = useAtlasTasks();
+    const nodeTaskLists = createMemo(() =>
+        nodeTasksOf(
+            data.graph().regions.flatMap((r) => r.shown),
+            tasks()
+        )
     );
+    const lineHeights = createMemo(() => nodeHeights(nodeTaskLists()));
+    const layoutFor = (heights: NodeHeights, spread: number) =>
+        mode() === "seat"
+            ? layoutBySeat(data.graph(), zoom.shape(), spread, heights)
+            : layoutAtlas(data.graph(), zoom.shape(), spread, heights);
+    // Nodes list their tasks line by line when the fitted map with the lines is big enough to read them, or the person has
+    // zoomed in to a scale that is. Otherwise a node says how many it has, and keeps the height every node has.
+    const fitWithLines = createMemo(() => (lineHeights().size === 0 ? 0 : fitScale(layoutFor(lineHeights(), 1), zoom.shape())));
+    const lines = createMemo(() => lineHeights().size > 0 && showTaskLines(fitWithLines(), zoom.touched(), zoom.view().k));
+    const layout = createMemo<AtlasLayout>(() => layoutFor(lines() ? lineHeights() : NO_NODE_HEIGHTS, zoom.spread()));
     const sel = useAtlasSelection(data, zoom, layout);
     const { hosts, ring, stopped } = useAtlasHosts(data);
     const shownCount = createMemo(() => data.graph().regions.reduce((n, r) => n + r.shown.length + r.orphans.length, 0));
@@ -490,8 +524,8 @@ export function AtlasView(props: { data: AtlasData; ctx: PaneTabHostContext }): 
     // Branch and tasks are this instance's facts: an agent of another instance has no pane here to ask about.
     const work = useAtlasWork(() => {
         const agent = selectedAgent();
-        return agent && !agent.remote ? agent.blockId : null;
-    });
+        return agent && !agent.remote ? agent : null;
+    }, tasks);
     const onEscape = () => (sel.lasso.rect() ? sel.lasso.cancel() : setSelected(null));
     return (
         <div class="atlas" data-testid="atlas" onKeyDown={(e) => e.key === "Escape" && onEscape()}>
@@ -523,6 +557,8 @@ export function AtlasView(props: { data: AtlasData; ctx: PaneTabHostContext }): 
                         ring={ring()}
                         selected={selected()}
                         picked={sel.picked}
+                        tasks={nodeTaskLists()}
+                        lines={lines()}
                         onSelect={(key, e) => sel.toggleFor(key, e) || setSelected(key)}
                     />
                 </Show>

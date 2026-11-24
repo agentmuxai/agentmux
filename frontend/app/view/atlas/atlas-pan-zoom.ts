@@ -38,6 +38,8 @@ export interface AtlasPanZoom {
     shape: Accessor<PaneShape>;
     /** The share of its gaps the layout keeps: 1 in the fitted view, less once zoomed in past it. */
     spread: Accessor<number>;
+    /** The person has panned or zoomed: the view is no longer the fitted one. */
+    touched: Accessor<boolean>;
     /** The element the pointer events are on. */
     setViewport: (el: HTMLDivElement) => void;
     fit: () => void;
@@ -153,6 +155,7 @@ export function useAtlasPanZoom(
         view,
         shape,
         spread,
+        touched,
         setViewport: (el) => (viewport = el),
         fit,
         zoomBy: (factor) => {

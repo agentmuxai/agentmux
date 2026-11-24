@@ -13,6 +13,9 @@ import {
     MIN_SPREAD,
     NODE_H,
     NODE_W,
+    nodeHeight,
+    TASK_LINE_H,
+    TASKS_GAP,
     ROW_MAX_W,
     type AtlasLayout,
     type PaneShape,
@@ -495,5 +498,67 @@ describe("the gaps close as the map is zoomed in", () => {
         expect(layoutBySeat(graph, panes[0], 2)).toEqual(layoutBySeat(graph, panes[0]));
         expect(layoutAtlas(graph, undefined, 0.5).height).toBeLessThan(layoutAtlas(graph).height);
         expect(boxRows(layoutAtlas(graph, undefined, 0.5))).toEqual(boxRows(layoutAtlas(graph)));
+    });
+});
+
+describe("nodes that list tasks are taller", () => {
+    const agents = () => [agent("boss", "a"), agent("w1", "a", "boss"), agent("w2", "a", "boss"), agent("solo", "a"), agent("solo2", "a")];
+    const graph = () => buildAtlasGraph([machine("a")], agents());
+    const pane: PaneShape = { w: 900, h: 600 };
+
+    it("is a node's height with a gap and a line for each task, and the usual one with none", () => {
+        expect(nodeHeight(0)).toBe(NODE_H);
+        expect(nodeHeight(1)).toBe(NODE_H + TASKS_GAP + TASK_LINE_H);
+        expect(nodeHeight(4)).toBe(NODE_H + TASKS_GAP + 4 * TASK_LINE_H);
+    });
+
+    it("is the same picture, to the pixel, when no node is taller", () => {
+        for (const make of [layoutAtlas, layoutBySeat]) {
+            const plain = make(graph(), pane);
+            const same = make(graph(), pane, 1, new Map());
+            expect([...same.nodes]).toEqual([...plain.nodes]);
+            expect([same.width, same.height]).toEqual([plain.width, plain.height]);
+            for (const p of plain.nodes.values()) expect(p.h).toBeUndefined();
+        }
+    });
+
+    it("keeps a taller node's height on its place, and none on the others", () => {
+        const l = layoutAtlas(graph(), pane, 1, new Map([["a/w1", nodeHeight(3)]]));
+        expect(l.nodes.get("a/w1")!.h).toBe(nodeHeight(3));
+        expect(l.nodes.get("a/w2")!.h).toBeUndefined();
+    });
+
+    it("starts the level under a row where its tallest node ends, and keeps a lead's reports in one row at one height", () => {
+        const plain = layoutAtlas(graph(), pane);
+        const tall = layoutAtlas(graph(), pane, 1, new Map([["a/boss", nodeHeight(3)]]));
+        const gap = plain.nodes.get("a/w1")!.y - (plain.nodes.get("a/boss")!.y + NODE_H);
+        // The reports stand a gap under the lead's own bottom, however tall it is.
+        expect(tall.nodes.get("a/w1")!.y - (tall.nodes.get("a/boss")!.y + nodeHeight(3))).toBeCloseTo(gap);
+        expect(tall.nodes.get("a/w1")!.y).toBe(tall.nodes.get("a/w2")!.y);
+        expect(tall.height).toBeGreaterThan(plain.height);
+    });
+
+    it("takes a row of the grid as tall as its tallest node and leaves no two nodes overlapping", () => {
+        const heights = new Map([
+            ["a/solo", nodeHeight(2)],
+            ["a/w2", nodeHeight(4)],
+        ]);
+        for (const make of [layoutAtlas, layoutBySeat]) {
+            const l = make(graph(), pane, 1, heights);
+            const placed = [...l.nodes];
+            for (const [k, p] of placed) {
+                expect(p.y + (p.h ?? NODE_H), k).toBeLessThanOrEqual(l.height);
+                for (const [k2, q] of placed) {
+                    if (k === k2) continue;
+                    const apart = p.x + NODE_W <= q.x || q.x + NODE_W <= p.x || p.y + (p.h ?? NODE_H) <= q.y || q.y + (q.h ?? NODE_H) <= p.y;
+                    expect(apart, `${k} and ${k2}`).toBe(true);
+                }
+            }
+        }
+    });
+
+    it("keeps the height of a node when the gaps close as the map is zoomed in", () => {
+        const l = layoutAtlas(graph(), pane, 0.5, new Map([["a/w1", nodeHeight(2)]]));
+        expect(l.nodes.get("a/w1")!.h).toBe(nodeHeight(2));
     });
 });
