@@ -136,6 +136,17 @@ On 2026-11-10 main's `vitest (1/2)` went red for every PR. #6881 (Vite 8, merged
 - **Cost:** no added queue time. A full vitest leg takes about 280 to 305 s in a PR run (runs 42774863425 and 42882800554), and the queue's ubuntu Rust leg, which the group waits for anyway, takes about 410 s (run 42881131825). It is about 10 more runner minutes per group, not per PR, as the group of up to five PRs runs once.
 - **Still not in the queue:** the Windows and macOS legs, the rest of the Rust tests and the doc tests; each ran on its PR and runs again on the push to main.
 
+### Phase 9: an entry that changes no Rust input skips the Rust job (2026-11-24)
+
+On 2026-11-24 each queue entry took 13.5 to 18.5 minutes (the last twelve `merge_group` runs of "CI (PR) — compile tests + run"), and almost all of it was the Ubuntu Rust job, whose nextest step alone took 13 min 22 s in run 45447896545. An entry of four files under `frontend/` and a changeset paid all of it. A pull request like that already skips the Rust job (R8 of `SPEC_CI_PATH_CONDITIONAL_CHECKS_2026_09_21.md`); the queue did not, because its `merge_group` branch wrote `rust=true` before the classifier ran.
+
+- **What changes:** the `merge_group` branch of the `changes` job lists the files the entry changes (`git diff --name-only --no-renames base_sha head_sha`, the event's two shas) and runs `scripts/ci-classify-changes.mjs --queue`, which applies the pull-request rule to them. It takes one answer from it, `rust`. Everything else the queue sets stays: both frontend legs in full, the docs gates, `cef=false`, `deps=false`, `queue=true`, the Ubuntu-only matrix.
+- **Each entry is compared with the one ahead of it.** GitHub builds a group on the previous group's commit (the group's branch name ends in that base), so `base_sha` is the entry ahead, or main for the first. An entry is judged by what it adds, not by what the queue already holds.
+- **Why it is safe:** the Rust job's result depends only on the Rust inputs and the paths under `frontend/` the crates read (`RUST_READS_FRONTEND`, which a test checks against the crates). An entry that changes none of them leaves the tree's Rust inputs as its base had them, so its Rust result is the base's. The base's Rust job ran the last time an entry that did change those inputs went through the queue, or on the push to main. Both checks the job ends with, "RPC bindings are current" and "ts-rs parses every serde attribute", read only Rust types and the build's warnings and `frontend/types/rpc/`, which is in the list, so a frontend-only entry cannot change what they see and nothing is moved out of the job.
+- **What the queue no longer does:** it used to be a second chance for a path nobody listed (the R8 text said so). The test that lists every `frontend/` path the crates name is now the only guard for those, plus the push to main, which runs the whole suite and opens a `main-red` issue.
+- **Fail open (R2):** no sha, a failed fetch or diff, an empty list, an entry that is not a path, a classifier error: `rust=true`. The outputs are written once, after the decision. A workflow, a script, a manifest, a lock file, a Rust file or a path the classifier does not know runs the job. A release PR (R7) is not skipped in the queue: it changes manifests.
+- **`CI required`** reads a skipped `rust` job as passed, as for a pull request, and fails when it ran and failed or when `changes` failed.
+
 ## 6. Order and size
 
 1. Phase 0: #5118.
