@@ -473,8 +473,6 @@ mod tests {
         assert_eq!(find("fs.places")["responseName"], "FsPlacesResult");
     }
 
-    /// `fs.places` takes no argument; the stub sends `{}`, a client that
-    /// omits `data` sends `null`. Both must work.
     #[test]
     fn the_answer_that_asks_first_names_the_agent_and_carries_its_marker() {
         let said = super::asks_first_message("aria");
@@ -483,6 +481,8 @@ mod tests {
         assert!(super::asks_first_message("").starts_with("[asks-first:] "));
     }
 
+    /// `fs.places` takes no argument; the stub sends `{}`, a client that
+    /// omits `data` sends `null`. Both must work.
     #[tokio::test]
     async fn places_accepts_both_encodings_of_no_argument() {
         let state = crate::server::tests::test_state();
