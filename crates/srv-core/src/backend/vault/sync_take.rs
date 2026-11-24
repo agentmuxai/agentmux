@@ -52,9 +52,6 @@ use crate::backend::user_sync::log::{self, Outcome, Pins};
 use crate::backend::user_sync::record::{Header, Record};
 use crate::backend::user_sync::seal::KeyRing;
 
-/// How many times a take reads the entry again when a change made here lands between its read and its write.
-const TRIES: usize = 3;
-
 /// What taking a record did to the store.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
@@ -208,7 +205,8 @@ impl Taker<'_> {
     /// Takes again the records of `vault` that the log holds and the store did not take (an error, a key not here yet, a kind
     /// this version does not know), from the log's current state of each, as a plain change that follows on: the side of a
     /// conflict that lost stays in the log. A record taken, or no longer in the log, is not noted any more; one that fails again
-    /// stays. Run it at the start of a sync round and after an upgrade.
+    /// stays (so does one that finds the entry changed here since it was read, which is never written over). Run it after a
+    /// capture, at the start of a sync round, and after an upgrade: a change made here is in the log by then.
     pub fn retake(&self, vault: &str, now_ms: i64) -> Result<Vec<(String, Result<Effect, String>)>, String> {
         let mut out = Vec::new();
         for record in sync_capture::retake_pending(self.store, vault)? {
@@ -242,12 +240,13 @@ impl Taker<'_> {
         if let Some(why) = refused(&body) {
             return Ok(Effect::Deferred(why));
         }
-        for _ in 0..TRIES {
-            if let Some(effect) = self.write(rec, &body, lost, now_ms)? {
-                return Ok(effect);
-            }
+        // One try: what was decided was decided against the entry as it was read. An entry changed here since is not written
+        // over, and the decision is not run again against it: the change here is sent by the next capture, and `retake` takes
+        // the record's state then.
+        match self.write(rec, &body, lost, now_ms)? {
+            Some(effect) => Ok(effect),
+            None => Err("the entry was changed here while its record was taken, so nothing was overwritten".to_string()),
         }
-        Err("the entry kept changing while its record was taken".to_string())
     }
 
     /// One try at writing `body` as the entry's value. `None` if the entry changed here between the read and the write.
@@ -299,8 +298,9 @@ impl Taker<'_> {
         if !store.vault_take_write(&write).map_err(|e| e.to_string())? {
             return Ok(None);
         }
-        let stored = store.vault_get(&entry_id).map_err(|e| e.to_string())?.ok_or_else(|| "the entry taken is not in the store".to_string())?;
-        sync_capture::mark_seen(store, &stored, &h.record, self.key, self.profiles)?;
+        // What was written is what is marked as seen, not what the store holds by now: a change made here after the write is
+        // not in the log, and the next capture has to send it.
+        sync_capture::mark_seen(store, &row, &h.record, self.key, self.profiles)?;
         Ok(Some(Effect::Wrote { entry: entry_id }))
     }
 
@@ -339,22 +339,20 @@ impl Taker<'_> {
             }
             (seal::seal(self.key, &id, &Parts(body.parts.clone()))?, Some(body.tags.clone()))
         };
-        for _ in 0..TRIES {
-            let Some(row) = self.store.vault_get(&id).map_err(|e| e.to_string())? else { return Ok(Effect::KeptInLog(label)) };
-            let mut next = row.clone();
-            if let Some(theirs) = &theirs {
-                next.tags = tags_json(&sync_merge::union_tags(&tags_of(&row), theirs));
-            }
-            let links = links_of(self.store, &id)?;
-            let kept = [version(&id, row.created_at, sealed.clone(), state.clone(), machine, now_ms)];
-            let write = TakeWrite { row: &next, was: Some(&row), primary: links.primary.as_deref(), aliases: &links.aliases, revive: None, kept: &kept };
-            if self.store.vault_take_write(&write).map_err(|e| e.to_string())? {
-                let stored = self.store.vault_get(&id).map_err(|e| e.to_string())?.ok_or_else(|| "the entry is not in the store".to_string())?;
-                sync_capture::mark_seen(self.store, &stored, &h.record, self.key, self.profiles)?;
-                return Ok(Effect::Wrote { entry: id });
-            }
+        // One try, as in `current`: an entry changed here since it was read is not written over.
+        let Some(row) = self.store.vault_get(&id).map_err(|e| e.to_string())? else { return Ok(Effect::KeptInLog(label)) };
+        let mut next = row.clone();
+        if let Some(theirs) = &theirs {
+            next.tags = tags_json(&sync_merge::union_tags(&tags_of(&row), theirs));
         }
-        Err("the entry kept changing while its record was taken: it will be taken again when the record is next sent".to_string())
+        let links = links_of(self.store, &id)?;
+        let kept = [version(&id, row.created_at, sealed, state, machine, now_ms)];
+        let write = TakeWrite { row: &next, was: Some(&row), primary: links.primary.as_deref(), aliases: &links.aliases, revive: None, kept: &kept };
+        if !self.store.vault_take_write(&write).map_err(|e| e.to_string())? {
+            return Err("the entry was changed here while its record was taken, so nothing was overwritten".to_string());
+        }
+        sync_capture::mark_seen(self.store, &next, &h.record, self.key, self.profiles)?;
+        Ok(Effect::Wrote { entry: id })
     }
 }
 
