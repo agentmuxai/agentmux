@@ -572,6 +572,7 @@ const ENTER_HTML: &str = r#"<!doctype html>
 <p id="msg">Signing in&hellip;</p>
 <p id="phrase" hidden></p>
 <p id="hint" hidden>Compare this with the terminal where you ran <code>agentmux open</code>. Answer <code>y</code> there only if the two match.</p>
+<form id="paste" hidden><label>Code from the terminal <input id="code" autocomplete="off" autocapitalize="off" spellcheck="false"></label> <button type="submit">Sign in</button></form>
 </main>
 <script src="/auth/enter.js"></script>
 </body>
@@ -581,64 +582,92 @@ const ENTER_HTML: &str = r#"<!doctype html>
 const ENTER_CSS: &str = "body{font-family:system-ui,sans-serif;background:#111;color:#eee;display:flex;justify-content:center;padding-top:15vh}\
 main{max-width:34rem;padding:0 1rem;text-align:center}\
 #phrase{font-family:ui-monospace,monospace;font-size:3rem;letter-spacing:.05em;margin:1.5rem 0}\
-#hint{color:#bbb}code{background:#222;padding:.1rem .3rem;border-radius:.2rem}\n";
+#hint{color:#bbb}code{background:#222;padding:.1rem .3rem;border-radius:.2rem}\
+#paste{margin-top:1rem}#code{font-family:ui-monospace,monospace;background:#222;color:#eee;border:1px solid #444;border-radius:.2rem;padding:.3rem;width:20rem;max-width:100%}\n";
 
 /// The code is in the fragment. The history entry loses it before anything is sent; the page then
 /// waits for the person's answer in the terminal and keeps the token in `sessionStorage` only. A page
 /// opened with no code (a visitor with no session, or a browser that signed itself out) says how to
 /// sign in and is no refusal: it is the same words for everyone and tells nothing about the server.
-const ENTER_JS: &str = r#"(async () => {
+const ENTER_JS: &str = r#"(() => {
   const msg = document.getElementById("msg");
   const phrase = document.getElementById("phrase");
   const hint = document.getElementById("hint");
-  const fail = () => {
-    msg.textContent = "not accepted";
+  const paste = document.getElementById("paste");
+  const field = document.getElementById("code");
+  // Each sign-in attempt is a run; a new code in the fragment (a hash-only navigation in this tab) starts a new one and ends the last.
+  let run = 0;
+  const begin = async () => {
+    const mine = ++run;
+    const current = () => mine === run;
+    const fail = () => {
+      if (!current()) return;
+      msg.textContent = "not accepted";
+      phrase.hidden = true;
+      hint.hidden = true;
+    };
+    msg.textContent = "Signing in...";
     phrase.hidden = true;
     hint.hidden = true;
-  };
-  const code = location.hash.slice(1);
-  history.replaceState(null, "", location.pathname);
-  if (!code) {
-    // Nobody tried to sign in: a visitor with no session, or a browser that has just signed out.
-    msg.textContent = "This browser is not signed in.";
-    hint.textContent = "To sign in, run agentmux open (or agentmux-srv open) in a terminal on the machine where AgentMux runs, as the user that started it.";
-    hint.hidden = false;
-    return;
-  }
-  const post = (path, body) =>
-    fetch(path, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-      cache: "no-store",
-      credentials: "same-origin",
-    });
-  let entered;
-  try {
-    const r = await post("/auth/enter", { code });
-    if (!r.ok) return fail();
-    entered = await r.json();
-  } catch {
-    return fail();
-  }
-  msg.textContent = "Waiting for you to confirm in the terminal.";
-  phrase.textContent = entered.phrase;
-  phrase.hidden = false;
-  hint.hidden = false;
-  for (;;) {
-    let w;
+    paste.hidden = true;
+    const code = location.hash.slice(1);
+    history.replaceState(null, "", location.pathname);
+    if (!code) {
+      // Nobody tried to sign in: a visitor with no session, or a browser that has just signed out.
+      msg.textContent = "This browser is not signed in.";
+      hint.textContent = "To sign in, run agentmux open (or agentmux-srv open) in a terminal on the machine where AgentMux runs, as the user that started it, and paste the code it prints below if its link will not copy.";
+      hint.hidden = false;
+      paste.hidden = false;
+      return;
+    }
+    const post = (path, body) =>
+      fetch(path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+        cache: "no-store",
+        credentials: "same-origin",
+      });
+    let entered;
     try {
-      w = await post("/auth/wait", { handle: entered.handle });
+      const r = await post("/auth/enter", { code });
+      if (!current()) return;
+      if (!r.ok) return fail();
+      entered = await r.json();
     } catch {
       return fail();
     }
-    if (w.status === 202) continue;
-    if (!w.ok) return fail();
-    const { token } = await w.json();
-    sessionStorage.setItem("amx-session", token);
-    location.replace("/");
-    return;
-  }
+    if (!current()) return;
+    msg.textContent = "Waiting for you to confirm in the terminal.";
+    phrase.textContent = entered.phrase;
+    phrase.hidden = false;
+    hint.textContent = "Compare this with the terminal where you ran agentmux open. Answer y there only if the two match.";
+    hint.hidden = false;
+    for (;;) {
+      let w;
+      try {
+        w = await post("/auth/wait", { handle: entered.handle });
+      } catch {
+        return fail();
+      }
+      if (!current()) return;
+      if (w.status === 202) continue;
+      if (!w.ok) return fail();
+      const { token } = await w.json();
+      if (!current()) return;
+      sessionStorage.setItem("amx-session", token);
+      location.replace("/");
+      return;
+    }
+  };
+  paste.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const typed = field.value.trim();
+    field.value = "";
+    if (typed) location.hash = typed;
+  });
+  window.addEventListener("hashchange", begin);
+  begin();
 })();
 "#;
 
