@@ -45,6 +45,8 @@ const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS db_sync_vault_retake (
         vault  TEXT NOT NULL,
         record TEXT NOT NULL,
+        -- Why the other side of a conflict was kept, when the record won one: the retake keeps it the same way.
+        kept   TEXT,
         PRIMARY KEY (vault, record)
     );";
 
@@ -102,9 +104,10 @@ pub(super) fn mark_seen(store: &Store, row: &VaultRow, record: &str, key: &Key, 
 }
 
 /// Notes that the store did not take `record` of `vault`, which the log holds: `Taker::retake` takes it again.
-pub(super) fn retake_mark(store: &Store, vault: &str, record: &str) -> Result<(), String> {
+/// `kept` is why the side of a conflict this machine held is kept, if the record won one.
+pub(super) fn retake_mark(store: &Store, vault: &str, record: &str, kept: Option<&str>) -> Result<(), String> {
     let conn = store.conn().lock().unwrap_or_else(|e| e.into_inner());
-    conn.execute("INSERT OR IGNORE INTO db_sync_vault_retake (vault, record) VALUES (?1, ?2)", params![vault, record]).map_err(|e| e.to_string())?;
+    conn.execute("INSERT OR IGNORE INTO db_sync_vault_retake (vault, record, kept) VALUES (?1, ?2, ?3)", params![vault, record, kept]).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -116,10 +119,10 @@ pub(super) fn retake_clear(store: &Store, vault: &str, record: &str) -> Result<(
 }
 
 /// The records of `vault` to take again, in the order they were noted.
-pub(super) fn retake_pending(store: &Store, vault: &str) -> Result<Vec<String>, String> {
+pub(super) fn retake_pending(store: &Store, vault: &str) -> Result<Vec<(String, Option<String>)>, String> {
     let conn = store.conn().lock().unwrap_or_else(|e| e.into_inner());
-    let mut stmt = conn.prepare("SELECT record FROM db_sync_vault_retake WHERE vault = ?1 ORDER BY rowid").map_err(|e| e.to_string())?;
-    let rows = stmt.query_map(params![vault], |r| r.get::<_, String>(0)).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare("SELECT record, kept FROM db_sync_vault_retake WHERE vault = ?1 ORDER BY rowid").map_err(|e| e.to_string())?;
+    let rows = stmt.query_map(params![vault], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))).map_err(|e| e.to_string())?;
     rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
 }
 

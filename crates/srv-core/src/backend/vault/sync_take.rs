@@ -180,12 +180,17 @@ impl Taker<'_> {
         let none = |outcome| Taken { outcome, effect: Effect::None, kept: None };
         // The adapter is not asked about a record the layer already holds or voids.
         let Some(decision) = decision else { return Ok(none(outcome)) };
+        // Why the other side of a conflict is kept, when this record won one: a retake keeps it the same way.
+        let lost = match &decision {
+            Decision::Conflict { current: Chose::Incoming, kept, .. } => Some(kept.label()),
+            _ => None,
+        };
         let result = match decision {
             Decision::KeptLocal => return Ok(none(outcome)),
             Decision::Applied => self.current(rec, None, false, now_ms).map(|effect| Taken { outcome, effect, kept: None }),
             Decision::Conflict { current: Chose::Incoming, kept, .. } => {
                 let label = kept.label();
-                self.current(rec, Some(&kept), false, now_ms).map(|effect| Taken { outcome, effect, kept: Some(label) })
+                self.current(rec, Some(&label), false, now_ms).map(|effect| Taken { outcome, effect, kept: Some(label) })
             }
             Decision::Conflict { current: Chose::Local, kept, .. } => {
                 let label = kept.label();
@@ -197,7 +202,7 @@ impl Taker<'_> {
         let (vault, record) = (&h.collection, &h.record);
         match &result {
             Err(_) | Ok(Taken { effect: Effect::Deferred(_), .. }) => {
-                sync_capture::retake_mark(self.store, vault, record).map_err(|e| format!("the log holds the record, and it could not be noted for `retake`: {e}"))?;
+                sync_capture::retake_mark(self.store, vault, record, lost.as_deref()).map_err(|e| format!("the log holds the record, and it could not be noted for `retake`: {e}"))?;
             }
             // Clearing a mark that is not needed any more fails harmlessly: the record is taken again, and the take is the same.
             Ok(_) => drop(sync_capture::retake_clear(self.store, vault, record)),
@@ -208,17 +213,17 @@ impl Taker<'_> {
     /// Takes again the records of `vault` that the log holds and the store did not take (an error, a key not here yet, a kind
     /// this version does not know), from the log's current state of each, as a plain change that follows on: the side of a
     /// conflict that lost stays in the log. A record taken, or no longer in the log, is not noted any more; one that fails again
-    /// stays (so does one that finds the entry changed here since it was read, which is never written over). Run it after a
+    /// stays, with the conflict it won (so does one that finds the entry changed here since it was read, which is never written over). Run it after a
     /// capture, at the start of a sync round, and after an upgrade: a change made here is in the log by then.
     pub fn retake(&self, vault: &str, now_ms: i64) -> Result<Vec<(String, Result<Effect, String>)>, String> {
         let mut out = Vec::new();
-        for record in sync_capture::retake_pending(self.store, vault)? {
+        for (record, lost) in sync_capture::retake_pending(self.store, vault)? {
             let current = log::current(&self.store.conn().lock().unwrap_or_else(|e| e.into_inner()), vault, &record).map_err(|e| e.to_string())?;
             let Some(rec) = current else {
                 sync_capture::retake_clear(self.store, vault, &record)?;
                 continue;
             };
-            let effect = self.current(&rec, None, true, now_ms);
+            let effect = self.current(&rec, lost.as_deref(), true, now_ms);
             if !matches!(effect, Err(_) | Ok(Effect::Deferred(_))) {
                 sync_capture::retake_clear(self.store, vault, &record)?;
             }
@@ -235,7 +240,7 @@ impl Taker<'_> {
 
     /// `rec` is now the record's current state: the entry takes its value, or is deleted. `lost` is the other side of a
     /// conflict, which this machine held, and which is kept.
-    fn current(&self, rec: &Record, lost: Option<&Kept>, settled: bool, now_ms: i64) -> Result<Effect, String> {
+    fn current(&self, rec: &Record, lost: Option<&str>, settled: bool, now_ms: i64) -> Result<Effect, String> {
         if rec.header.tombstone {
             return self.delete(rec, lost, settled);
         }
@@ -253,7 +258,7 @@ impl Taker<'_> {
     }
 
     /// One try at writing `body` as the entry's value. `None` if the entry changed here between the read and the write.
-    fn write(&self, rec: &Record, body: &EntryBody, lost: Option<&Kept>, now_ms: i64) -> Result<Option<Effect>, String> {
+    fn write(&self, rec: &Record, body: &EntryBody, lost: Option<&str>, now_ms: i64) -> Result<Option<Effect>, String> {
         let h = &rec.header;
         let store = self.store;
         let existing = match store.vault_entry_of_link(&h.record).map_err(|e| e.to_string())? {
@@ -276,7 +281,7 @@ impl Taker<'_> {
         match (&existing, lost) {
             // A conflict: the value this machine held is kept as it was, and the tags are the two sides' together.
             (Some(old), Some(why)) => {
-                kept.push(version(&old.id, old.created_at, old.sealed.clone(), format!("{KEPT_PREFIX}{}", why.label()), machine, now_ms));
+                kept.push(version(&old.id, old.created_at, old.sealed.clone(), format!("{KEPT_PREFIX}{why}"), machine, now_ms));
                 row.tags = tags_json(&sync_merge::union_tags(&body.tags, &tags_of(old)));
             }
             // A change that follows on: the value it replaces is kept for 7 days, if it differs.
@@ -287,7 +292,7 @@ impl Taker<'_> {
                 }
             }
             // The entry was deleted here, and this change is later than the delete: it comes back, and the delete is kept.
-            (None, Some(why)) => kept.push(version(&entry_id, row.created_at, Vec::new(), format!("{KEPT_PREFIX}{}", why.label()), machine, now_ms)),
+            (None, Some(why)) => kept.push(version(&entry_id, row.created_at, Vec::new(), format!("{KEPT_PREFIX}{why}"), machine, now_ms)),
             (None, None) => {}
         }
         let write = TakeWrite {
@@ -315,7 +320,7 @@ impl Taker<'_> {
     /// already in the log, and not on first sight either, when it may still come in this round. The delete waits one round
     /// (`settled` is false then, true when [`Taker::retake`] takes it again), and by then the new Vault's record has moved the
     /// entry, which keeps its grants, versions and ids; if it has not, the entry is deleted.
-    fn delete(&self, rec: &Record, lost: Option<&Kept>, settled: bool) -> Result<Effect, String> {
+    fn delete(&self, rec: &Record, lost: Option<&str>, settled: bool) -> Result<Effect, String> {
         let h = &rec.header;
         let Some(id) = self.store.vault_entry_of_link(&h.record).map_err(|e| e.to_string())? else { return Ok(Effect::None) };
         let Some(row) = self.store.vault_get(&id).map_err(|e| e.to_string())? else { return Ok(Effect::None) };
@@ -333,7 +338,7 @@ impl Taker<'_> {
         self.store.vault_delete(&id).map_err(|e| e.to_string())?;
         sync_capture::forget(self.store, &id)?;
         Ok(match lost {
-            Some(why) => Effect::KeptInLog(why.label()),
+            Some(why) => Effect::KeptInLog(why.to_string()),
             None => Effect::Deleted { entry: id },
         })
     }

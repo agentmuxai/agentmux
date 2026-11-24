@@ -274,7 +274,8 @@ fn a_delete_made_after_a_change_ends_the_entry_and_the_change_stays_in_the_log()
     // a takes the delete: the entry ends there too, and its last value is still in a's log, sealed.
     let on_a_taken = ship(&b, &mut a, &p, NOW + 310);
     assert!(matches!(&on_a_taken[0].effect, Effect::Deferred(_)), "{on_a_taken:?}");
-    assert_eq!(settle(&a, NOW + 320).into_iter().map(|(_, e)| e).collect::<Vec<_>>(), [Ok(Effect::Deleted { entry: "entry-a".to_string() })]);
+    // The retake keeps the conflict the delete won: the change is in the log, and says so.
+    assert_eq!(settle(&a, NOW + 320).into_iter().map(|(_, e)| e).collect::<Vec<_>>(), [Ok(Effect::KeptInLog("changed on a while it was deleted elsewhere".to_string()))]);
     assert!(a.store.vault_get("entry-a").unwrap().is_none());
 }
 
@@ -386,6 +387,28 @@ fn a_record_the_store_could_not_take_is_taken_again_from_the_log_by_retake() {
     assert_eq!(b.value(&on_b).as_deref(), Some("sk_test_invented_0001"));
     // Taken once: nothing is left to retake.
     assert!(sighted.retake(VAULT, NOW + 20).unwrap().is_empty());
+}
+
+#[test]
+fn a_conflict_won_by_a_record_that_could_not_be_taken_is_kept_as_a_conflict_when_retaken() {
+    let (mut a, mut b, p, _, on_b) = both_hold_one();
+    // Changed apart: a's change is the later one, so it wins on b, and what b held is kept.
+    b.edit(&on_b, "sk_test_invented_from_b", "[\"prod\",\"b\"]", NOW + 100);
+    a.edit("entry-a", "sk_test_invented_from_a", "[\"prod\",\"a\"]", NOW + 200);
+    b.capture(VAULT, NOW + 100);
+    a.capture(VAULT, NOW + 200);
+    let vector: Vector = log::vector(&b.store.conn().lock().unwrap(), VAULT).unwrap();
+    let records = log::since(&a.store.conn().lock().unwrap(), VAULT, &vector, 100).unwrap();
+    let (own, none) = (key(), KeyRing::new());
+    let blind = Taker { store: &b.store, ring: &none, key: &own, profiles: &Known(&[]) };
+    assert!(records.iter().all(|r| blind.receive(r, &p, &mut b.clock, NOW + 300).is_err()));
+    // The retake takes it as the conflict it was: the value b held is kept for good, not for 7 days, and the tags are both sides'.
+    let again = settle(&b, NOW + 400);
+    assert!(matches!(&again[..], [(_, Ok(Effect::Wrote { .. }))]), "{again:?}");
+    assert_eq!(b.value(&on_b).as_deref(), Some("sk_test_invented_from_a"));
+    assert_eq!(b.versions(&on_b), [(format!("{KEPT_PREFIX}changed on b at the same time"), true)]);
+    let tags: Vec<String> = serde_json::from_str(&b.store.vault_get(&on_b).unwrap().unwrap().tags).unwrap();
+    assert!(["prod", "a", "b"].iter().all(|x| tags.iter().any(|t| t == x)), "{tags:?}");
 }
 
 #[test]
