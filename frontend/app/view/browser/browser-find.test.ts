@@ -116,6 +116,12 @@ describe("find in a browser pane's page", () => {
         expect([bar.resultsCount(), bar.resultsIndex()]).toEqual([12, 2]);
         h.result?.({ block_id: "other", count: 99, active: 9 });
         expect([bar.resultsCount(), bar.resultsIndex()]).toEqual([12, 2]);
+        // CEF's -1 is "unchanged": a count-only update keeps the current match, a match-only one keeps the count.
+        h.result?.({ block_id: "block-1", count: 20, active: -1 });
+        expect([bar.resultsCount(), bar.resultsIndex()]).toEqual([20, 2]);
+        h.result?.({ block_id: "block-1", count: -1, active: 5 });
+        expect([bar.resultsCount(), bar.resultsIndex()]).toEqual([20, 4]);
+        h.result?.({ block_id: "block-1", count: 12, active: 3 });
         // A result that arrives after the box emptied is the old search's.
         bar.onSearch?.("");
         h.result?.({ block_id: "block-1", count: 5, active: 1 });

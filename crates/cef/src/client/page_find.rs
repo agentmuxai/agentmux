@@ -8,10 +8,11 @@ use std::sync::Arc;
 
 use cef::*;
 
-/// The `browser-pane-find-result` event's payload. CEF's `active_match_ordinal` is -1 while the current
-/// match is unchanged, and `count` grows over several updates until `final_update` is set.
+/// The `browser-pane-find-result` event's payload, with CEF's numbers as they come: an update that changes only
+/// the count carries `active` -1 (the current match is unchanged), and one that changes only the current match
+/// carries `count` -1. The window keeps what it has for a -1; `count` grows over several updates until `final`.
 pub(crate) fn find_result_payload(block_id: &str, count: i32, active: i32, final_update: bool) -> serde_json::Value {
-    serde_json::json!({ "block_id": block_id, "count": count.max(0), "active": active.max(0), "final": final_update })
+    serde_json::json!({ "block_id": block_id, "count": count, "active": active, "final": final_update })
 }
 
 wrap_find_handler! {
@@ -43,11 +44,11 @@ mod tests {
     use super::find_result_payload;
 
     #[test]
-    fn a_result_names_the_pane_and_never_goes_negative() {
-        // CEF reports -1 for "the current match did not change" and for "none yet".
+    fn a_result_names_the_pane_and_passes_cefs_unchanged_markers_through() {
+        // CEF reports -1 for "this number did not change": the window must be told, not given a 0.
         let p = find_result_payload("b1", 12, 3, true);
         assert_eq!(p, serde_json::json!({ "block_id": "b1", "count": 12, "active": 3, "final": true }));
         let p = find_result_payload("b1", -1, -1, false);
-        assert_eq!(p, serde_json::json!({ "block_id": "b1", "count": 0, "active": 0, "final": false }));
+        assert_eq!(p, serde_json::json!({ "block_id": "b1", "count": -1, "active": -1, "final": false }));
     }
 }

@@ -13,7 +13,8 @@ import type { SearchProps } from "@/app/element/search-state";
 import { getApi } from "@/util/app-api";
 import type { BrowserViewModel } from "./browser-model";
 
-/** What the host's `browser-pane-find-result` carries (client/page_find.rs): `active` is 1-based, 0 for none. */
+/** What the host's `browser-pane-find-result` carries (client/page_find.rs): `active` is 1-based, 0 for none. Each is -1 when
+ *  that update does not change it (a count-only update has no current match, a match-only one has no count). */
 interface FindResult {
     block_id: string;
     count: number;
@@ -72,8 +73,8 @@ export function useBrowserFind(model: BrowserViewModel, anchor: () => HTMLElemen
         void getApi()
             .listen<FindResult>("browser-pane-find-result", (r) => {
                 if (r.block_id !== model.blockId || text === "") return;
-                search.resultsCount._set(r.count);
-                search.resultsIndex._set(Math.max(0, r.active - 1));
+                if (r.count >= 0) search.resultsCount._set(r.count);
+                if (r.active >= 0) search.resultsIndex._set(Math.max(0, r.active - 1));
             })
             .then((fn) => {
                 unsub = fn;
