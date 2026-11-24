@@ -11,7 +11,10 @@ use super::log::{self, Refused};
 use super::members::Change;
 use super::ops::{self, Held, KeysAns, KeysReq, MembersAns, MembersReq, OpError, PullAns, PullReq, PushAns, PushReq};
 use super::ops_tests::{ended, node, three, Node, C};
-use super::ops::Ctx;
+use super::ops::{Ctx, KeyDelivery};
+use super::members::Subject;
+use super::seal::KeyRing;
+use zeroize::Zeroizing;
 use super::round::{sync_collection, CallError, Ended, PeerCalls, Round, Session};
 
 /// The calls of `asker` to `host`, answered by the real ops of `host`.
@@ -62,9 +65,27 @@ impl PeerCalls for Link<'_> {
 /// A node as the asking side of a round: its state, lent for one closure.
 struct Mine<'a>(&'a mut Node);
 
+/// The keys every test node holds (epochs 0 and 1), and a sealed key for any member.
+struct RingKeys;
+
+impl KeyDelivery for RingKeys {
+    fn keys_for(&self, _: &str, _: &Subject) -> Vec<(u32, String)> {
+        vec![(0, "sealed-key".to_string())]
+    }
+    fn ring(&self, _: &str) -> KeyRing {
+        let mut ring = KeyRing::new();
+        ring.insert(0, Zeroizing::new([7u8; 32]));
+        ring.insert(1, Zeroizing::new([8u8; 32]));
+        ring
+    }
+}
+
 impl Session for Mine<'_> {
     fn with<R>(&mut self, f: impl FnOnce(&mut Ctx) -> R) -> Result<R, String> {
-        Ok(f(&mut self.0.ctx()))
+        let keys = RingKeys;
+        let mut ctx = self.0.ctx();
+        ctx.keys = &keys;
+        Ok(f(&mut ctx))
     }
 }
 
@@ -199,4 +220,24 @@ fn a_record_for_another_collection_is_refused_alone_and_the_one_beside_it_is_tak
     let ans = ops::push(&mut a.ctx(), &b.id, &PushReq { collection: C.into(), records: vec![rec, valid] }, &NewestWins).unwrap();
     assert_eq!(ans.results[0], Err(Refused::UnknownCollection));
     assert!(ans.results[1].is_ok());
+}
+
+#[test]
+fn a_write_cut_off_by_a_removal_is_written_again_in_the_round_that_learns_of_the_removal() {
+    let (mut a, mut b, c) = three("kanban");
+    a.write(C, "card", "first");
+    round(&mut b, &mut a);
+    // A writes again before it hears of the removal; B removes C having seen only A's first write.
+    a.write(C, "card", "second");
+    let gone = ended(&[(&a, 1), (&b, 0)]);
+    ops::change(&mut b.ctx(), C, Change::Remove { id: c.id.clone(), ended: gone }).unwrap();
+    let r = round(&mut a, &mut b);
+    assert_eq!(r.ended, Ended::Synced);
+    assert_eq!(r.reissued, 1, "{r:?}");
+    let held = log::current(&b.conn, C, "card").unwrap().unwrap();
+    let plain = super::seal::open(&b.ring, &held.header, &held.body).unwrap();
+    assert_eq!(&plain[..], b"second", "the others now hold the write the removal cut off");
+    assert_eq!(a.vector(C), b.vector(C));
+    let again = round(&mut a, &mut b);
+    assert_eq!(again.reissued, 0, "nothing is written twice");
 }

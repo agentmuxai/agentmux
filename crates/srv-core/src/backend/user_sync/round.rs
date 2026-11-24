@@ -16,7 +16,7 @@
 
 use super::adapter::Adapter;
 use super::chain_store;
-use super::log::{self, Outcome, Refused, SyncError};
+use super::log::{self, Outcome, Refused, Signer, SyncError};
 use super::members::{Change, Entry, Kind, MemberError, Taken};
 use super::ops::{self, Ctx, Held, KeysAns, KeysReq, MembersAns, MembersReq, OpError, PullAns, PullReq, PushAns, PushReq};
 
@@ -81,6 +81,8 @@ pub struct Round {
     pub entries_taken: usize,
     pub entries_given: usize,
     pub keys_taken: usize,
+    /// Records this machine wrote again at the new key epoch, because a removal cut them off.
+    pub reissued: usize,
     /// Records pulled and applied (not counting ones already held), kept as the older side, or in conflict.
     pub pulled: usize,
     pub kept_local: usize,
@@ -93,7 +95,7 @@ pub struct Round {
 
 impl Round {
     fn new() -> Round {
-        Round { ended: Ended::Synced, entries_taken: 0, entries_given: 0, keys_taken: 0, pulled: 0, kept_local: 0, conflicts: 0, pushed: 0, refused: Vec::new() }
+        Round { ended: Ended::Synced, entries_taken: 0, entries_given: 0, keys_taken: 0, reissued: 0, pulled: 0, kept_local: 0, conflicts: 0, pushed: 0, refused: Vec::new() }
     }
 
     fn end(mut self, ended: Ended) -> Round {
@@ -118,7 +120,7 @@ impl Round {
 
     /// Whether anything changed on either side.
     pub fn changed(&self) -> bool {
-        self.entries_taken + self.entries_given + self.keys_taken + self.pulled + self.kept_local + self.conflicts + self.pushed > 0
+        self.entries_taken + self.entries_given + self.keys_taken + self.reissued + self.pulled + self.kept_local + self.conflicts + self.pushed > 0
     }
 }
 
@@ -214,6 +216,26 @@ fn take_keys<S: Session, P: PeerCalls>(s: &mut S, peer: &mut P, collection: &str
         return Err(Ended::Distrusted("a key answer over the cap".into()));
     }
     out.keys_taken += lent(s, |ctx| ctx.keys.take(collection, &ans.keys))?;
+    Ok(())
+}
+
+/// Writes again, at the collection's current key epoch, what this machine wrote after the others had stopped at an
+/// older one (a removal cut it off): the peer would refuse it as it stands. Not while the removal is still contested, and
+/// not before the key of the new epoch has arrived: the next round does it.
+fn reissue<S: Session>(s: &mut S, collection: &str, out: &mut Round) -> Result<(), Ended> {
+    let done = lent(s, |ctx| {
+        if !ops::may_seal(ctx, collection) {
+            return Ok(0);
+        }
+        let ring = ctx.keys.ring(collection);
+        let mut signer = Signer { machine: ctx.me.id, private: ctx.me.private, clock: &mut *ctx.clock };
+        ops::reissue(ctx.conn, &mut signer, &ring, collection, ctx.now_ms)
+    })?;
+    match done {
+        Ok(n) => out.reissued += n,
+        Err(SyncError::Db(e)) => return Err(db(e)),
+        Err(_) => {}
+    }
     Ok(())
 }
 
@@ -317,6 +339,7 @@ pub fn sync_collection<S: Session, P: PeerCalls>(s: &mut S, peer: &mut P, collec
     let steps = (|| {
         exchange_members(s, peer, collection, held.n, &mut out)?;
         take_keys(s, peer, collection, &mut out)?;
+        reissue(s, collection, &mut out)?;
         pull_all(s, peer, collection, adapter, &mut out)?;
         push_all(s, peer, collection, held.vector.clone(), &mut out)
     })();

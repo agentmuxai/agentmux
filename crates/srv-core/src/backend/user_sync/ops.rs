@@ -112,6 +112,10 @@ pub trait KeyDelivery {
     fn held(&self, _collection: &str) -> Vec<u32> {
         Vec::new()
     }
+    /// The keys this machine holds for a collection, to open what it wrote at an older epoch and seal it again.
+    fn ring(&self, _collection: &str) -> KeyRing {
+        KeyRing::new()
+    }
 }
 
 /// A machine waiting for a person to confirm its join on this member.
