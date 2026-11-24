@@ -242,4 +242,15 @@ describe("WSControl input waits for the window's proof", () => {
         vi.advanceTimersByTime(1000);
         expect(tagsOf()).toEqual(["A", "B", "C", "D"]);
     });
+
+    it("sends none of the refused frames again, and tells the person, when more were refused than it kept", () => {
+        const ws = open();
+        for (let i = 0; i < 300; i++) ws.pushMessage(cmd({ wscommand: "blockinput", tag: i }));
+        for (let i = 0; i < 300; i++) ws.noteInputRefused();
+        settle(ws);
+        vi.advanceTimersByTime(1000);
+        // Frames 44 to 299 are a part of a paste: sent again they would be a truncated command.
+        expect(tagsOf()).toEqual([...Array(300).keys()]);
+        expect(notifications().filter((n) => n.title === "Input not sent")).toHaveLength(1);
+    });
 });

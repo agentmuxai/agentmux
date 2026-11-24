@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { AUTH_KEY_HEADER } from "@/util/sharedconst";
-import { InputHold, isInputFrame } from "./ws-input-hold";
+import { InputHold, isInputFrame, noteInputNotSent } from "./ws-input-hold";
 import { type WebSocket, newWebSocket } from "@/util/wsutil";
 import { debugLog } from "@/util/debuglog";
 import { createSlowHandlerWatch } from "./ws-slow-handler";
@@ -319,9 +319,15 @@ class WSControl {
     /// The refused frames, oldest first. srv refuses every frame from the moment the proof lapses, so they are the newest
     /// ones sent; the proof is made anew over the same ordered connection, so every refusal has arrived by then.
     private takeRefusedInput(now: number = Date.now()): any[] {
-        const n = Math.min(this.refusedInput, this.recentInput.length);
+        const n = this.refusedInput;
         this.refusedInput = 0;
         if (n === 0) return [];
+        // More refused than kept (a long paste): the refused frames are a run that ends at the newest, so a part of it would be a
+        // truncated command. None is sent again, and the person is told.
+        if (n > this.recentInput.length) {
+            noteInputNotSent("refused");
+            return [];
+        }
         const frames = this.recentInput.splice(this.recentInput.length - n, n);
         this.recentInputBytes = this.recentInput.reduce((sum, f) => sum + (f.inputdata64?.length ?? 0) + 64, 0);
         this.lastResendAt = now;
