@@ -963,10 +963,8 @@ describe("the Files pane: preview and filter (Phase 2a)", () => {
         v.model.toggleColumns();
         await waitFor(() => expect(v.model.columnsOn()).toBe(true));
         expect(v.container.querySelector(".files-notice p")?.textContent).toBe("Nothing here matches “zzz”.");
-        // The columns layer covers the whole list area: the notice must come after it, to be painted above it (a click on its
-        // button reaches it).
-        const columns = v.container.querySelector(".files-columns")!;
-        expect(columns.compareDocumentPosition(v.container.querySelector(".files-notice")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        // The columns layer covers the whole list area: it is not drawn under the notice, so the button is what a click reaches.
+        expect(v.container.querySelector(".files-columns")).toBeNull();
         fireEvent.click(v.getByText("Clear filter"));
         await waitFor(() => expect(v.model.filter()).toBe(""));
         await waitFor(() => expect(v.container.querySelector(".files-notice")).toBeNull());
@@ -2333,6 +2331,19 @@ describe("the Files pane: columns view", () => {
         await waitFor(() => expect(v.meta()["files:view"]).toBeUndefined());
         expect(columns(v)).toHaveLength(0);
         await waitFor(() => expect(v.names()).toHaveLength(4));
+    });
+
+    it("shows only the notice, over no column, when a filter matches nothing in the first one, and the chain is back with the filter gone", async () => {
+        const v = mount({ "files:view": "columns" });
+        await waitFor(() => expect(labels(v, 0)).toHaveLength(4));
+        fireEvent.click(rowIn(v, 0, "src"));
+        await waitFor(() => expect(labels(v, 1)).toEqual(["lib", "main.rs"]));
+        v.model.setFilter("zzz");
+        await waitFor(() => expect(columns(v)).toHaveLength(0));
+        expect(v.container.querySelector(".files-notice p")?.textContent).toBe("Nothing here matches “zzz”.");
+        fireEvent.click(v.getByText("Clear filter"));
+        await waitFor(() => expect(columns(v)).toHaveLength(2));
+        expect(labels(v, 1)).toEqual(["lib", "main.rs"]);
     });
 
     it("shows what is in a chosen folder as the next column, and drops it when a file is chosen instead", async () => {

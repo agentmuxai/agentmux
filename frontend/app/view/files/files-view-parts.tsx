@@ -222,7 +222,8 @@ function FilesList({ v }: { v: FilesViewParts }): JSX.Element {
             <Show when={!model.columnsOn()}>
                 <FilesColumnHeader model={model} fv={fv} />
             </Show>
-            <Show when={model.phase() === "ready" && model.columnsOn()}>
+            {/* A filter that matches nothing in the first column leaves the notice alone: no later column drawn under it. */}
+            <Show when={model.phase() === "ready" && model.columnsOn() && !(model.filter() && win.entries().length === 0)}>
                 <FilesColumns v={v} />
             </Show>
             <Show when={model.phase() === "ready" && win.grid()}>
