@@ -234,24 +234,24 @@ describe("the Vault pane", () => {
         expect(setMeta).not.toHaveBeenCalledWith(expect.objectContaining({ "vault:section": expect.anything() }));
     });
 
-    it("keeps Import, Export and the note in the pane when the pane is too narrow for them in its header", async () => {
+    it("has Import, Export and the note in the body, in words in a wide pane and as icons in a narrow one", async () => {
         renderVault();
         await screen.findByText("Alex");
-        // Wide: they are the header's (vault-instance.tsx), not the pane's.
         paneIsWide(900);
-        expect(screen.queryByRole("button", { name: "Export the Vault" })).toBeNull();
         expect(model.narrow()).toBe(false);
+        for (const name of ["Import into the Vault", "Export the Vault", "What the Vault may ask you"]) {
+            expect(screen.getByRole("button", { name })).toBeInTheDocument();
+        }
+        expect(screen.getByRole("button", { name: "Export the Vault" }).textContent).toContain("Export");
 
         paneIsWide(300);
         expect(model.narrow()).toBe(true);
         for (const name of ["Import into the Vault", "Export the Vault", "What the Vault may ask you"]) {
             expect(screen.getByRole("button", { name })).toBeInTheDocument();
         }
+        expect(screen.getByRole("button", { name: "Export the Vault" }).textContent?.trim()).toBe("");
         fireEvent.click(screen.getByRole("button", { name: "Export the Vault" }));
         expect(model.transfer()).toBe("export");
-
-        paneIsWide(900);
-        expect(screen.queryByRole("button", { name: "Import into the Vault" })).toBeNull();
     });
 
     it("saves a new entry through the host, and the typed value doesn't stay in the page", async () => {
