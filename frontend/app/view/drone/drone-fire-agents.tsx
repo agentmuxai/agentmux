@@ -4,7 +4,7 @@
 // Which agents may fire this drone at once (real-world jobs spec §6.5): the agent that made it, and the agents the
 // person gave it to. An agent that is neither asks the person first, with a countdown. The list is srv's; this edits it.
 
-import { createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js";
 
 import { Button, Select, type SelectOption } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
@@ -18,19 +18,29 @@ import type { DroneAccess } from "@/types/rpc/DroneAccess";
 /** The drone's owner and the agents it was given to, read again when drones change. None until it is read. */
 function useDroneAccess(droneId: () => string): [() => DroneAccess | null, (agents: string[]) => Promise<void>] {
     const [access, setAccess] = createSignal<DroneAccess | null>(null);
+    // An answer counts only while the pane still shows the drone it was asked for.
     const load = async () => {
         const id = droneId();
         if (!id) return setAccess(null);
         try {
-            setAccess(await RpcApi.GetDroneAccessCommand(TabRpcClient, { drone_id: id }));
+            const got = await RpcApi.GetDroneAccessCommand(TabRpcClient, { drone_id: id });
+            if (id === droneId()) setAccess(got);
         } catch {
-            setAccess(null);
+            if (id === droneId()) setAccess(null);
         }
     };
-    void load();
+    // Another drone opened in the same row: forget the last one's list before reading this one's.
+    createEffect(
+        on(droneId, () => {
+            setAccess(null);
+            void load();
+        })
+    );
     onCleanup(onMuxEvent(WpsEvent.DronesChanged, () => void load()));
     const save = async (agents: string[]) => {
-        setAccess(await RpcApi.SetDroneAgentsCommand(TabRpcClient, { drone_id: droneId(), agents }));
+        const id = droneId();
+        const saved = await RpcApi.SetDroneAgentsCommand(TabRpcClient, { drone_id: id, agents });
+        if (id === droneId()) setAccess(saved);
     };
     return [access, save];
 }
