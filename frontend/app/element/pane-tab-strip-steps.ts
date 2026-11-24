@@ -149,9 +149,10 @@ export function createStripSteps(opts: {
         watch();
         // At once, not a frame later: the limit is on the strip before anything else first measures it.
         measure();
-        const host = strip.closest<HTMLElement>(HEADER_CONTENT);
-        const mutations = host && typeof MutationObserver !== "undefined" ? new MutationObserver(watch) : undefined;
-        if (host) mutations?.observe(host, { childList: true });
+        // The row the strip shares with other items: an item that comes or goes (the Editor's tree toggle) changes its room.
+        const row = strip.closest<HTMLElement>(HEADER_CONTENT) ?? strip.parentElement;
+        const mutations = row && typeof MutationObserver !== "undefined" ? new MutationObserver(watch) : undefined;
+        if (row) mutations?.observe(row, { childList: true });
         onCleanup(() => {
             observer?.disconnect();
             mutations?.disconnect();
