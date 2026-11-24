@@ -524,7 +524,9 @@ jobs:
       - name: cargo nextest (CEF-free crates)
         if: matrix.os != 'windows-latest'
         env:
-          IN_QUEUE: ${{ needs.changes.outputs.queue }}
+          # TEMPORARY (#2736, reverted before merge): run the queue's builds on this PR to time them.
+          IN_QUEUE: "true"
+          CARGO_TERM_VERBOSE: "true"
           # The attempt limits: a PR run takes 13 to 21 minutes (about 11 in the queue); a stalled attempt is ended at
           # about twice that and tried once more, which reuses what it built. The step's limit is the two together
           # and the job's (below) is just over it, so a stall is ended by the script and not by the job.
