@@ -36,7 +36,8 @@ import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
 import { displayName, groupRemotes, remoteColor } from "@/app/view/remotes/remotes-sections";
 import { batch, createMemo, createSignal } from "solid-js";
 import { baseName, isWithin, joinPath, joinRel, normalizePath, parentOf, samePath } from "./files-path";
-import { flattenTree, isUnderRel, labelOf, MAX_EXPANDED, parentRel, type TreeRow } from "./files-tree";
+import { treeMove } from "@/app/fs/tree/tree-keys";
+import { flattenTree, isUnderRel, labelOf, parentRel, type TreeRow } from "@/app/fs/tree/tree-rows";
 import { EMPTY_SELECTION, pruneSelection, type Selection } from "./files-selection";
 import { clipboard, FilesOps, opFinishedText, sameVolume, setClipboard } from "./files-ops";
 import { systemIconsAvailable } from "./files-icons";
@@ -54,6 +55,8 @@ const META_PREVIEW = "files:preview";
 /** Set by srv when a container agent opens a folder of its workspace: the one folder this pane may show. */
 const META_ROOT = "files:root";
 const META_VIEW = "files:view";
+/** The most folders a pane keeps open in place at once: each one is watched, and srv allows 64 watches to a pane. */
+const MAX_EXPANDED = 40;
 /** The tree view: folders open in place (`true`), on the details view. */
 const META_TREE = "files:tree";
 /** The SSH connection the pane is browsing (the key terminals use too);
@@ -1088,23 +1091,24 @@ export class FilesModel {
         else void this.expand(rel);
     }
 
-    /** Right and Left in the tree: open the focused folder or step into it; close it or step out to its folder. */
+    /** Right and Left in the tree: open the focused folder or step into it; close it or step out to its folder (the keys of
+     *  app/fs/tree/tree-keys.ts, which the Editor's tree answers the same way). */
     treeArrow(dir: "right" | "left"): void {
         const focus = this.selection().focus;
-        const row = focus == null ? undefined : this.treeInfo().get(focus);
-        if (!focus || !row) return;
-        const go = (name: string): void => {
-            this.setSelection({ names: new Set([name]), focus: name, anchor: name });
-            this.setRevealRequest({ name });
-        };
-        if (dir === "right") {
-            if (row.expandable && !row.expanded) void this.expand(focus);
-            else if (row.expanded) {
-                const next = this.treeRows()[this.order().indexOf(focus) + 1];
-                if (next && next.depth === row.depth + 1) go(next.entry.name);
-            }
-        } else if (row.expanded) this.collapse(focus);
-        else if (row.depth > 0) go(parentRel(focus));
+        if (!focus || !this.treeInfo().has(focus)) return;
+        const rows = this.treeRows().map((r) => ({
+            id: r.entry.name,
+            expandable: r.expandable,
+            expanded: r.expanded,
+            parent: r.depth > 0 ? parentRel(r.entry.name) : null,
+        }));
+        const move = treeMove(rows, focus, dir === "right" ? "ArrowRight" : "ArrowLeft", 1);
+        if (move?.kind === "expand") void this.expand(move.id);
+        else if (move?.kind === "collapse") this.collapse(move.id);
+        else if (move?.kind === "select") {
+            this.setSelection({ names: new Set([move.id]), focus: move.id, anchor: move.id });
+            this.setRevealRequest({ name: move.id });
+        }
     }
 
     /** Closes an opened folder whose row is gone from the listing of the folder it was in (renamed, moved or deleted),

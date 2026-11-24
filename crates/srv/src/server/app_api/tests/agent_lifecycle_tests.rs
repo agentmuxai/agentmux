@@ -186,6 +186,7 @@ fn row_in(state: AgentRuntimeState, desired: agent_runtime::AgentDesiredState) -
         effort: None,
         pending_switch: None,
         definition_model_label: None,
+        quiet_since_ms: None,
     }
 }
 

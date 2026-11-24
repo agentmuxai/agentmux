@@ -71,9 +71,9 @@ function profileChoices(current: string | undefined) {
     const named = browserProfiles().map((p) => ({ value: `profile:${p.id}`, label: p.name }));
     const gone =
         current && current !== "personal" && !named.some((o) => o.value === current)
-            ? [{ value: current, label: "A deleted profile" }]
+            ? [{ value: current, label: t("vault.form.deletedProfile") }]
             : [];
-    return [{ value: "personal", label: "Personal" }, ...named, ...gone];
+    return [{ value: "personal", label: t("vault.form.personal") }, ...named, ...gone];
 }
 
 interface FormProps {
@@ -176,7 +176,7 @@ async function save(s: FormState) {
     const k = s.kind();
     if (!k) return;
     if (k.name === "card" && !!s.parts.exp_month !== !!s.parts.exp_year) {
-        s.setError("Choose the expiry month and the year.");
+        s.setError(t("vault.form.chooseExpiry"));
         return;
     }
     s.setBusy(true);
@@ -216,10 +216,10 @@ export function VaultEntryForm(props: FormProps): JSX.Element {
     const s = createFormState(props);
     const { editing, request } = s;
     const title = editing
-        ? `Change ${editing.label}`
+        ? t("vault.form.titleChange", { label: editing.label })
         : request
-          ? `${request.agent} asks for: ${request.label}`
-          : "Add to the Vault";
+          ? t("vault.form.titleAsks", { agent: request.agent, label: request.label })
+          : t("vault.form.titleAdd");
 
     return (
         <Modal
@@ -234,11 +234,11 @@ export function VaultEntryForm(props: FormProps): JSX.Element {
                 title={title}
                 description={
                     request?.why
-                        ? `Why: ${request.why}`
+                        ? t("vault.form.why", { why: request.why })
                         : editing && isLinked(editing.fields)
                           ? t(isBacked(editing.fields) ? "vault.backed.editDescription" : "vault.linked.editDescription")
                           : editing
-                            ? "Values aren't shown. Type one to replace it; leave it empty to keep it."
+                            ? t("vault.form.valuesHidden")
                             : undefined
                 }
             />
@@ -253,10 +253,10 @@ export function VaultEntryForm(props: FormProps): JSX.Element {
             </ModalBody>
             <ModalFooter>
                 <Button data-modal-dismiss onClick={() => props.onClose()} disabled={s.busy()}>
-                    Cancel
+                    {t("vault.form.cancel")}
                 </Button>
                 <Button tone="accent" busy={s.busy()} onClick={() => void save(s)}>
-                    {editing ? "Save changes" : "Save to Vault"}
+                    {editing ? t("vault.form.saveChanges") : t("vault.form.save")}
                 </Button>
             </ModalFooter>
         </Modal>
@@ -274,7 +274,7 @@ function FormFields({ s }: { s: FormState }) {
             }}
         >
             <Show when={!s.editing && s.kindOptions().length > 1}>
-                <Field label="Kind" layout="stacked">
+                <Field label={t("vault.form.kind")} layout="stacked">
                     <Select value={s.kindName()} onChange={s.setKindName} options={s.kindOptions()} />
                 </Field>
             </Show>
@@ -282,13 +282,13 @@ function FormFields({ s }: { s: FormState }) {
                 <VaultField
                     value={s.vault()}
                     onChange={s.setVault}
-                    description="Which agents may use it is the Vault's setting."
+                    description={t("vault.form.vaultHelp")}
                 />
             </Show>
             <Field
-                label="Label"
+                label={t("vault.form.label")}
                 layout="stacked"
-                description="How you and agents name it. Agents see labels, never values."
+                description={t("vault.form.labelHelp")}
             >
                 <TextInput
                     value={s.label()}
@@ -316,8 +316,8 @@ function FormFields({ s }: { s: FormState }) {
 }
 
 function partHint(s: FormState, p: VaultInput): string | undefined {
-    if (s.editing && s.isSet(p.name)) return s.clear[p.name] ? "Will be cleared." : "Set. Type to replace it.";
-    return p.name === s.main() ? "Required." : undefined;
+    if (s.editing && s.isSet(p.name)) return s.clear[p.name] ? t("vault.form.willClear") : t("vault.form.partSet");
+    return p.name === s.main() ? t("vault.form.required") : undefined;
 }
 
 /** The brand the number typed so far belongs to; before anything is typed, the saved card's. */
@@ -346,7 +346,7 @@ function CardNumberRow({ s, p }: { s: FormState; p: VaultInput }) {
             </div>
             <Show when={digits().length >= 12 && !cardLuhn(digits())}>
                 <div class="vault-card-warn" role="note">
-                    This number doesn't look right. You can still save it.
+                    {t("vault.form.cardWarn")}
                 </div>
             </Show>
         </Field>
@@ -357,7 +357,7 @@ function CardCodeRow({ s, p }: { s: FormState; p: VaultInput }) {
     const length = () => cardCvcLength(cardBrandOf(s));
     return (
         <Field
-            label={length() === 4 ? "Security code (CID, 4 digits)" : "Security code (CVC, 3 digits)"}
+            label={length() === 4 ? t("vault.form.cid") : t("vault.form.cvc")}
             layout="stacked"
             hint={partHint(s, p)}
         >
@@ -370,7 +370,7 @@ function CardCodeRow({ s, p }: { s: FormState; p: VaultInput }) {
                         pressed={!!s.clear[p.name]}
                         onClick={() => s.setClear(p.name, !s.clear[p.name])}
                     >
-                        Clear
+                        {t("vault.form.clear")}
                     </Button>
                 </Show>
             </div>
@@ -403,25 +403,25 @@ function CardExpiryRow({ s }: { s: FormState }) {
         if (on) choose("", "");
     };
     return (
-        <Field label="Expiry" layout="stacked" hint={cleared() ? "Will be cleared." : undefined}>
+        <Field label={t("vault.form.expiry")} layout="stacked" hint={cleared() ? t("vault.form.willClear") : undefined}>
             <div class="vault-part vault-card-expiry">
                 <Select
-                    ariaLabel="Expiry month"
+                    ariaLabel={t("vault.form.expiryMonth")}
                     value={cleared() ? "" : month()}
                     disabled={cleared()}
                     onChange={(m) => choose(m, year())}
-                    options={[{ value: "", label: "Month" }, ...MONTHS.map((m) => ({ value: m, label: m }))]}
+                    options={[{ value: "", label: t("vault.form.month") }, ...MONTHS.map((m) => ({ value: m, label: m }))]}
                 />
                 <Select
-                    ariaLabel="Expiry year"
+                    ariaLabel={t("vault.form.expiryYear")}
                     value={cleared() ? "" : year()}
                     disabled={cleared()}
                     onChange={(y) => choose(month(), y)}
-                    options={[{ value: "", label: "Year" }, ...years().map((y) => ({ value: y, label: y }))]}
+                    options={[{ value: "", label: t("vault.form.year") }, ...years().map((y) => ({ value: y, label: y }))]}
                 />
                 <Show when={s.editing && EXPIRY_PARTS.some((name) => s.isSet(name))}>
                     <Button density="compact" tone="quiet" pressed={cleared()} onClick={toggleClear}>
-                        Clear
+                        {t("vault.form.clear")}
                     </Button>
                 </Show>
             </div>
@@ -446,7 +446,7 @@ function PartRow({ s, p }: { s: FormState; p: VaultInput }) {
                         pressed={!!s.clear[p.name]}
                         onClick={() => s.setClear(p.name, !s.clear[p.name])}
                     >
-                        Clear
+                        {t("vault.form.clear")}
                     </Button>
                 </Show>
             </div>
@@ -480,7 +480,7 @@ function PartControl(props: { s: FormState; p: VaultInput; maxLength?: number; n
                 label={p.label}
                 value={s.parts[p.name] ?? ""}
                 onInput={(v) => s.setParts(p.name, v)}
-                placeholder={s.editing && s.isSet(p.name) ? "Set. Type to replace it." : p.placeholder}
+                placeholder={s.editing && s.isSet(p.name) ? t("vault.form.partSet") : p.placeholder}
             />
         </Show>
     );
@@ -493,9 +493,9 @@ function FieldRow({ s, f }: { s: FormState; f: VaultInput }) {
             layout="stacked"
             description={
                 f.profile
-                    ? "Only this profile's tabs are offered it."
+                    ? t("vault.form.profileHelp")
                     : f.toggle
-                      ? "The card an agent fills when it doesn't name one."
+                      ? t("vault.form.defaultCardHelp")
                       : undefined
             }
         >

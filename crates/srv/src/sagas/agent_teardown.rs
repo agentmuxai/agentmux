@@ -78,6 +78,10 @@ pub struct Policy {
     /// dev-proxy routes. Stopped, not removed: the next launch restarts it
     /// (`ContainerManager::ensure_running`), and its volume keeps its state.
     pub stop_container: bool,
+    /// Dock the floating panes the agent opened into its own tab (choice 4 of
+    /// `SPEC_AGENT_PANE_PLACEMENT_FLOATING_2026_11_22.md`). Only for a Stop: the agent's pane and tab stay, so the
+    /// panes have a tab to go back to; a closing pane or tab would take them with it.
+    pub dock_floaters: bool,
 }
 
 impl Policy {
@@ -85,33 +89,33 @@ impl Policy {
     /// it runs, `Shell()` sessions included; claims stay until their lease
     /// expires, as before (spec §5).
     pub const fn close() -> Self {
-        Self { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: true, stop_background: false, stop_container: true }
+        Self { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: true, stop_background: false, stop_container: true, dock_floaters: false }
     }
     /// `/quit`, `QuitSelf`, no-argument `ClosePane`: everything (spec §0).
     pub const fn quit() -> Self {
-        Self { cli: CliStop::Graceful, release_claims: true, stop_shell_sessions: true, stop_background: false, stop_container: true }
+        Self { cli: CliStop::Graceful, release_claims: true, stop_shell_sessions: true, stop_background: false, stop_container: true, dock_floaters: false }
     }
     /// Stop (`agent.stop`, `FleetBulkStop`): the CLI, and its background
     /// tasks only if asked; its claims go back to the pool (spec §5). The
     /// block, its `Shell()` sessions and drawers stay.
     pub const fn stop(graceful: bool, stop_background: bool) -> Self {
-        Self { cli: CliStop::StopOnly { graceful }, release_claims: true, stop_shell_sessions: false, stop_background, stop_container: false }
+        Self { cli: CliStop::StopOnly { graceful }, release_claims: true, stop_shell_sessions: false, stop_background, stop_container: false, dock_floaters: true }
     }
     /// The watchdog's max-runtime / idle stop: the CLI only, as it always
     /// has been. Its claims stay, since it may be restarted on the next
     /// message.
     pub const fn stop_cli_only(graceful: bool) -> Self {
-        Self { cli: CliStop::StopOnly { graceful }, release_claims: false, stop_shell_sessions: false, stop_background: false, stop_container: false }
+        Self { cli: CliStop::StopOnly { graceful }, release_claims: false, stop_shell_sessions: false, stop_background: false, stop_container: false, dock_floaters: false }
     }
     /// Restart / controller replace: the CLI only; background tasks survive.
     pub const fn replace() -> Self {
-        Self { cli: CliStop::Replace, release_claims: false, stop_shell_sessions: false, stop_background: false, stop_container: false }
+        Self { cli: CliStop::Replace, release_claims: false, stop_shell_sessions: false, stop_background: false, stop_container: false, dock_floaters: false }
     }
     /// App exit: every agent closes gracefully and its `Shell()` sessions
     /// stop. Claims stay: the agent comes back with the app and its lease
     /// covers the gap (spec §5).
     pub const fn app_exit() -> Self {
-        Self { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: true, stop_background: false, stop_container: true }
+        Self { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: true, stop_background: false, stop_container: true, dock_floaters: false }
     }
 }
 
@@ -408,6 +412,9 @@ async fn run_one(state: &AppState, block_id: &str, policy: Policy, deadline: std
         let (released, crons) = release_claims_and_list_crons(state, &who, reason).await;
         report.released_claims = released;
         report.crons_targeting = crons;
+    }
+    if let (true, Some(uid)) = (policy.dock_floaters, who.uid.as_deref()) {
+        crate::server::pane_dock::dock_all(state, uid, block_id).await;
     }
     if policy.stop_shell_sessions {
         report.stopped_shells = before
@@ -832,8 +839,8 @@ mod tests {
 
     #[test]
     fn policies_encode_todays_scopes() {
-        assert_eq!(Policy::close(), Policy { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: true, stop_background: false, stop_container: true });
-        assert_eq!(Policy::quit(), Policy { cli: CliStop::Graceful, release_claims: true, stop_shell_sessions: true, stop_background: false, stop_container: true });
+        assert_eq!(Policy::close(), Policy { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: true, stop_background: false, stop_container: true, dock_floaters: false });
+        assert_eq!(Policy::quit(), Policy { cli: CliStop::Graceful, release_claims: true, stop_shell_sessions: true, stop_background: false, stop_container: true, dock_floaters: false });
         assert_eq!(Policy::stop(false, false).cli, CliStop::StopOnly { graceful: false });
         // Stop releases claims and keeps shells; background tasks as asked.
         assert!(Policy::stop(true, false).release_claims && !Policy::stop(true, false).stop_shell_sessions);
@@ -844,8 +851,10 @@ mod tests {
         // The watchdog's stop is the CLI only.
         let w = Policy::stop_cli_only(true);
         assert!(!w.release_claims && !w.stop_shell_sessions && !w.stop_background);
-        assert_eq!(Policy::replace(), Policy { cli: CliStop::Replace, release_claims: false, stop_shell_sessions: false, stop_background: false, stop_container: false });
-        assert_eq!(Policy::app_exit(), Policy { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: true, stop_background: false, stop_container: true });
+        assert_eq!(Policy::replace(), Policy { cli: CliStop::Replace, release_claims: false, stop_shell_sessions: false, stop_background: false, stop_container: false, dock_floaters: false });
+        assert_eq!(Policy::app_exit(), Policy { cli: CliStop::Graceful, release_claims: false, stop_shell_sessions: true, stop_background: false, stop_container: true, dock_floaters: false });
+        // Only a Stop docks the floating panes its agent opened: its pane and tab stay for them to go back to.
+        assert!(Policy::stop(true, false).dock_floaters && !Policy::stop_cli_only(true).dock_floaters && !Policy::close().dock_floaters && !Policy::quit().dock_floaters);
         // App exit covers the CLI's own grace and the shell sweep.
         assert!(APP_EXIT_CAP.saturating_sub(SHELL_SWEEP_GRACE) > blockcontroller::SHUTDOWN_GRACE);
     }

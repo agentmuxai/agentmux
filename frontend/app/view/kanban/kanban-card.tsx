@@ -296,6 +296,24 @@ function WhoChip({ s }: { s: CardState }) {
     );
 }
 
+/** "quiet 22 min" on a card its holder has done nothing for the quiet time (the same fact the Swarm row shows). */
+function QuietPill({ s }: { s: CardState }) {
+    const { t, props } = s;
+    const since = () => (t().state === "claimed" ? t().holder?.quiet_since_ms : null);
+    return (
+        <Show when={since()}>
+            {(at) => {
+                const minutes = () => Math.max(1, Math.floor((props.now - at()) / 60_000));
+                return (
+                    <Pill icon="clock" title={tr("kanban.quiet.title", { minutes: minutes() })}>
+                        {tr("kanban.quiet.label", { minutes: minutes() })}
+                    </Pill>
+                );
+            }}
+        </Show>
+    );
+}
+
 /** On hold, the specs it comes from, what it starts after, and (for a spec) the builds that start after it. */
 function LinkPills({ s }: { s: CardState }) {
     const { t, column } = s;
@@ -304,6 +322,7 @@ function LinkPills({ s }: { s: CardState }) {
             <Show when={t().state === "held"}>
                 <Pill icon="pause">on hold</Pill>
             </Show>
+            <QuietPill s={s} />
             {/* Its spec: "spec #1103 · in review", then "· accepted" once it is Spec'd. */}
             <For each={(t().card.after ?? []).filter((a) => isResearchKind(a.kind))}>
                 {(a) => (

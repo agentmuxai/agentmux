@@ -1,13 +1,12 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-/** The tree view's rows: depth-first order, names by path from the shown folder, and the path helpers (files-tree.ts). */
+/** The tree rows: depth-first order, names by path from the shown folder, and the name helpers (tree-rows.ts). */
 
 import { describe, expect, it } from "vitest";
 import type { FsEntry } from "@/types/rpc/FsEntry";
-import { joinRel } from "./files-path";
-import { extensionOf, sortEntries } from "./files-sort";
-import { flattenTree, isUnderRel, labelOf, parentRel } from "./files-tree";
+import { sortEntries } from "@/app/view/files/files-sort";
+import { flattenTree, isUnderRel, labelOf, parentRel } from "./tree-rows";
 
 const f = (name: string, over: Partial<FsEntry> = {}): FsEntry => ({ name, is_dir: false, is_symlink: false, hidden: false, readonly: false, size: 1, mtime: 0, ...over });
 const d = (name: string, over: Partial<FsEntry> = {}): FsEntry => f(name, { is_dir: true, size: undefined, ...over });
@@ -70,18 +69,5 @@ describe("row names", () => {
         expect(isUnderRel("src/lib", "src")).toBe(true);
         expect(isUnderRel("src", "src")).toBe(true);
         expect(isUnderRel("src2/a", "src")).toBe(false);
-    });
-
-    it("turns a row's name into a path in the shown folder's own spelling", () => {
-        expect(joinRel("C:\\Users\\a", "src/lib/a.ts")).toBe("C:\\Users\\a\\src\\lib\\a.ts");
-        expect(joinRel("C:\\Users\\a", "b.txt")).toBe("C:\\Users\\a\\b.txt");
-        expect(joinRel("/home/a", "src/a.ts")).toBe("/home/a/src/a.ts");
-        expect(joinRel("/", "etc/hosts")).toBe("/etc/hosts");
-    });
-
-    it("takes the extension from the file's own name, not from a folder's dot", () => {
-        expect(extensionOf("src.d/Makefile")).toBe("");
-        expect(extensionOf("src.d/a.TS")).toBe("ts");
-        expect(extensionOf("a.md")).toBe("md");
     });
 });

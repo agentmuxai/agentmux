@@ -31,19 +31,19 @@ const writesOutside = (output: string): boolean => OUTSIDE.has(output) || OUTSID
 /** The publisher's key, in words and in a tone. */
 export function publisherNote(info: JobTemplateInfo): { text: string; tone: PillTone } {
     const sig = info.signature;
-    if (info.source === "builtin") return { text: "Published by AgentMux and part of this app.", tone: "ok" };
+    if (info.source === "builtin") return { text: t("jobs.approval.builtin"), tone: "ok" };
     switch (sig.state) {
         case "signed":
-            return { text: `Signed with the key pinned for ${sig.publisher} (${sig.fingerprint}).`, tone: "ok" };
+            return { text: t("jobs.approval.signed", { publisher: sig.publisher, fingerprint: sig.fingerprint }), tone: "ok" };
         case "signed_new":
-            return { text: `${sig.publisher} is new to you. Approving pins its key ${sig.fingerprint}.`, tone: "warn" };
+            return { text: t("jobs.approval.signedNew", { publisher: sig.publisher, fingerprint: sig.fingerprint }), tone: "warn" };
         case "key_changed":
             return {
-                text: `The key differs from the one pinned for ${sig.publisher}: pinned ${sig.pinned ?? "none"}, this one ${sig.fingerprint ?? "unsigned"}.`,
+                text: t("jobs.approval.keyChanged", { publisher: sig.publisher, pinned: sig.pinned ?? t("jobs.approval.pinnedNone"), fingerprint: sig.fingerprint ?? t("jobs.approval.unsigned") }),
                 tone: "error",
             };
         default:
-            return { text: `Unsigned. Nothing vouches that ${sig.publisher} wrote it.`, tone: "warn" };
+            return { text: t("jobs.approval.unsignedNote", { publisher: sig.publisher }), tone: "warn" };
     }
 }
 
@@ -52,21 +52,21 @@ export function reporterNote(note: ReporterNote): { text: string; tone: PillTone
     switch (note.state) {
         case "new":
             return {
-                text: `New to you. Approving pins its key ${note.fingerprint} and accepts the signed run reports it sends for this job at once.`,
+                text: t("jobs.approval.reporterNew", { fingerprint: note.fingerprint }),
                 tone: "warn",
                 block: false,
             };
         case "pinned":
-            return { text: `Already pinned (${note.fingerprint}).`, tone: "ok", block: false };
+            return { text: t("jobs.approval.reporterPinned", { fingerprint: note.fingerprint }), tone: "ok", block: false };
         case "name_taken":
             return {
-                text: `The name ${note.name} is pinned to a different key than this one (${note.fingerprint}). Forget that reporter first; approving is refused until then.`,
+                text: t("jobs.approval.reporterNameTaken", { name: note.name, fingerprint: note.fingerprint }),
                 tone: "error",
                 block: true,
             };
         default:
             return {
-                text: `This key (${note.fingerprint}) is already pinned under another name. Approving is refused.`,
+                text: t("jobs.approval.reporterKeyTaken", { fingerprint: note.fingerprint }),
                 tone: "error",
                 block: true,
             };
@@ -74,47 +74,47 @@ export function reporterNote(note: ReporterNote): { text: string; tone: PillTone
 }
 
 function expectWords(expect: CloudExpect | null | undefined): string {
-    if (!expect || expect === "none") return "no schedule: events start it";
-    return `${describeCron(expect.cron, expect.tz)}, a report is missed ${expect.graceMinutes} min after its slot`;
+    if (!expect || expect === "none") return t("jobs.approval.expectNone");
+    return t("jobs.approval.expectCron", { cron: describeCron(expect.cron, expect.tz), grace: expect.graceMinutes });
 }
 
 function triggerWords(trigger: Record<string, unknown> | null | undefined): string {
-    if (!trigger) return "none (run by hand)";
+    if (!trigger) return t("jobs.approval.triggerNone");
     switch (trigger.kind) {
         case "cron":
             return typeof trigger.cron === "string"
                 ? describeCron(trigger.cron, typeof trigger.tz === "string" ? trigger.tz : "UTC")
-                : "on a schedule";
+                : t("jobs.approval.triggerSchedule");
         case "every":
             return typeof trigger.seconds === "number"
-                ? `every ${Math.round(trigger.seconds / 60)} min`
-                : "on an interval";
+                ? t("jobs.approval.triggerEvery", { n: Math.round(trigger.seconds / 60) })
+                : t("jobs.approval.triggerInterval");
         case "once":
-            return "once";
+            return t("jobs.approval.triggerOnce");
         case "event":
-            return "on an event";
+            return t("jobs.approval.triggerEvent");
         default:
-            return "by hand";
+            return t("jobs.approval.triggerHand");
     }
 }
 
 function capsWords(policy: Record<string, unknown> | null | undefined): string {
     const caps = (policy?.caps ?? {}) as Record<string, unknown>;
     const parts: string[] = [];
-    if (typeof caps.run_usd === "number") parts.push(`$${caps.run_usd} per run`);
-    if (typeof caps.day_usd === "number") parts.push(`$${caps.day_usd} per day`);
-    if (typeof caps.messages_per_day === "number") parts.push(`${caps.messages_per_day} messages per day`);
-    return parts.length > 0 ? parts.join(", ") : "the defaults";
+    if (typeof caps.run_usd === "number") parts.push(t("jobs.approval.capRun", { usd: caps.run_usd }));
+    if (typeof caps.day_usd === "number") parts.push(t("jobs.approval.capDay", { usd: caps.day_usd }));
+    if (typeof caps.messages_per_day === "number") parts.push(t("jobs.approval.capMessages", { n: caps.messages_per_day }));
+    return parts.length > 0 ? parts.join(", ") : t("jobs.approval.capDefaults");
 }
 
 /** A cloud template's facts: who owns it, the reporter whose key approving pins, what it is expected to do. */
 const CloudFacts = (props: { manifest: JobTemplateManifest; reporter: ReporterNote | undefined }): JSX.Element => (
     <>
-        <dt>Owner</dt>
+        <dt>{t("jobs.approval.owner")}</dt>
         <dd>{props.manifest.owner}</dd>
-        <dt>Reporter</dt>
+        <dt>{t("jobs.approval.reporter")}</dt>
         <dd>
-            <Show when={props.reporter} fallback={<span class="warden-manager-dim">none named</span>}>
+            <Show when={props.reporter} fallback={<span class="warden-manager-dim">{t("jobs.approval.noneNamed")}</span>}>
                 {(reporter) => (
                     <>
                         <Pill tone={reporterNote(reporter()).tone}>{reporter().name}</Pill>{" "}
@@ -123,18 +123,18 @@ const CloudFacts = (props: { manifest: JobTemplateManifest; reporter: ReporterNo
                 )}
             </Show>
         </dd>
-        <dt>Expects</dt>
+        <dt>{t("jobs.approval.expects")}</dt>
         <dd>{expectWords(props.manifest.expect)}</dd>
-        <dt>Run limit</dt>
-        <dd>{props.manifest.maxDurationMinutes} min before a run counts as lost</dd>
+        <dt>{t("jobs.approval.runLimit")}</dt>
+        <dd>{t("jobs.approval.runLimitHelp", { n: props.manifest.maxDurationMinutes })}</dd>
         <Show when={props.manifest.runNow}>
             {(runNow) => (
                 <>
-                    <dt>Run now</dt>
+                    <dt>{t("jobs.approval.runNow")}</dt>
                     <dd>
                         {runNow().link
-                            ? `opens ${runNow().link}`
-                            : `asks ${props.manifest.owner}: ${runNow().askOwner}`}
+                            ? t("jobs.approval.runNowOpens", { link: runNow().link })
+                            : t("jobs.approval.runNowAsks", { owner: props.manifest.owner, ask: runNow().askOwner })}
                     </dd>
                 </>
             )}
@@ -145,14 +145,13 @@ const CloudFacts = (props: { manifest: JobTemplateManifest; reporter: ReporterNo
 /** A job template's facts: when it triggers and what it does. */
 const JobFacts = (props: { manifest: JobTemplateManifest }): JSX.Element => (
     <>
-        <dt>Triggers</dt>
+        <dt>{t("jobs.approval.triggers")}</dt>
         <dd>{triggerWords(props.manifest.trigger)}</dd>
-        <dt>Does</dt>
+        <dt>{t("jobs.approval.does")}</dt>
         <dd>
-            {String((props.manifest.action as Record<string, unknown> | null)?.kind ?? "message")} an agent with the
-            template's brief
+            {t("jobs.approval.doesJob", { kind: String((props.manifest.action as Record<string, unknown> | null)?.kind ?? "message") })}
             <Show when={props.manifest.readsUntrusted}>
-                <span class="warden-manager-dim"> · reads text nobody vouches for</span>
+                <span class="warden-manager-dim"> · {t("jobs.approval.untrusted")}</span>
             </Show>
         </dd>
     </>
@@ -161,21 +160,21 @@ const JobFacts = (props: { manifest: JobTemplateManifest }): JSX.Element => (
 /** A Drone template's facts: when it triggers, how big its graph is, and every call it makes outside AgentMux. */
 const DroneFacts = (props: { manifest: JobTemplateManifest; drone: DroneSummary | undefined }): JSX.Element => (
     <>
-        <dt>Triggers</dt>
+        <dt>{t("jobs.approval.triggers")}</dt>
         <dd>{triggerWords(props.manifest.trigger)}</dd>
-        <dt>Does</dt>
+        <dt>{t("jobs.approval.does")}</dt>
         <dd>
-            runs a drone of {props.drone?.nodes ?? 0} {props.drone?.nodes === 1 ? "node" : "nodes"}
-            <Show when={(props.drone?.agents ?? 0) > 0}>, {props.drone?.agents} of them start an agent</Show>
+            {t("jobs.approval.droneNodes", { count: props.drone?.nodes ?? 0 })}
+            <Show when={(props.drone?.agents ?? 0) > 0}>, {t("jobs.approval.droneAgents", { n: props.drone?.agents ?? 0 })}</Show>
             <Show when={props.manifest.readsUntrusted}>
-                <span class="warden-manager-dim"> · reads text nobody vouches for</span>
+                <span class="warden-manager-dim"> · {t("jobs.approval.untrusted")}</span>
             </Show>
         </dd>
-        <dt>Calls outside</dt>
+        <dt>{t("jobs.approval.callsOutside")}</dt>
         <dd>
             <Show
                 when={(props.drone?.writes_outside.length ?? 0) > 0}
-                fallback={<span class="warden-manager-dim">none</span>}
+                fallback={<span class="warden-manager-dim">{t("jobs.approval.none")}</span>}
             >
                 <For each={props.drone?.writes_outside}>{(call) => <Pill tone="warn">{call}</Pill>}</For>
             </Show>
@@ -198,14 +197,14 @@ const DroneFacts = (props: { manifest: JobTemplateManifest; drone: DroneSummary 
 /** Every output the template declares; the ones that write outside AgentMux are marked. */
 const OutputsFact = (props: { outputs: string[] }): JSX.Element => (
     <>
-        <dt>Outputs</dt>
+        <dt>{t("jobs.approval.outputs")}</dt>
         <dd>
-            <Show when={props.outputs.length > 0} fallback={<span class="warden-manager-dim">none</span>}>
+            <Show when={props.outputs.length > 0} fallback={<span class="warden-manager-dim">{t("jobs.approval.none")}</span>}>
                 <For each={props.outputs}>
                     {(o) => (
                         <Pill
                             tone={writesOutside(o) ? "warn" : "neutral"}
-                            title={writesOutside(o) ? "Writes outside AgentMux" : undefined}
+                            title={writesOutside(o) ? t("jobs.approval.writesOutside") : undefined}
                         >
                             {o}
                         </Pill>
@@ -219,13 +218,13 @@ const OutputsFact = (props: { outputs: string[] }): JSX.Element => (
 /** Every secret the template declares. */
 const SecretsFact = (props: { secrets: JobTemplateManifest["secrets"]; usesCredential?: boolean }): JSX.Element => (
     <>
-        <dt>Secrets</dt>
+        <dt>{t("jobs.approval.secrets")}</dt>
         <dd>
             <Show
                 when={props.secrets.length > 0}
                 fallback={
                     <span class="warden-manager-dim">
-                        {props.usesCredential ? t("templateApproval.secretsNoneDeclared") : "none"}
+                        {props.usesCredential ? t("templateApproval.secretsNoneDeclared") : t("jobs.approval.none")}
                     </span>
                 }
             >
@@ -241,11 +240,11 @@ const ApprovalFacts = (props: { info: JobTemplateInfo; manifest: JobTemplateMani
     return (
         <>
             <h3 class="warden-jobs-heading">
-                Approve {props.manifest.name} {props.manifest.version}?
+                {t("jobs.approval.heading", { name: props.manifest.name, version: props.manifest.version })}
             </h3>
             <p class="warden-manager-dim">{props.manifest.description}</p>
             <dl class="warden-jobs-facts">
-                <dt>Publisher</dt>
+                <dt>{t("jobs.approval.publisher")}</dt>
                 <dd>
                     <Pill tone={note().tone}>{props.info.signature.publisher}</Pill> <span>{note().text}</span>
                 </dd>
@@ -264,17 +263,16 @@ const ApprovalFacts = (props: { info: JobTemplateInfo; manifest: JobTemplateMani
                     usesCredential={(props.info.drone?.credentials?.length ?? 0) > 0}
                 />
                 <Show when={props.manifest.kind !== "cloud"}>
-                    <dt>Default caps</dt>
+                    <dt>{t("jobs.approval.defaultCaps")}</dt>
                     <dd>{capsWords(props.manifest.policy)}</dd>
                 </Show>
             </dl>
             <p class="warden-manager-dim">
                 <Show
                     when={props.manifest.kind === "cloud"}
-                    fallback="Approving runs nothing. It lets you make jobs from exactly this version; a changed version asks again."
+                    fallback={t("jobs.approval.approvingJob")}
                 >
-                    Approving starts nothing: AgentMux holds no cloud credentials. It pins the reporter's key and lets
-                    this job's signed run reports into the Jobs ledger; a changed version asks again.
+                    {t("jobs.approval.approvingCloud")}
                 </Show>
             </p>
         </>
@@ -294,10 +292,10 @@ export function TemplateApproval(props: {
         return reporter ? reporterNote(reporter).block : false;
     };
     return (
-        <section class="warden-jobs-approval" aria-label={`Approve ${props.info.id}`} data-operator-only="">
+        <section class="warden-jobs-approval" aria-label={t("jobs.approval.aria", { id: props.info.id })} data-operator-only="">
             <Show
                 when={m()}
-                fallback={<div class="warden-manager-error">{props.info.error ?? "This template can't be read."}</div>}
+                fallback={<div class="warden-manager-error">{props.info.error ?? t("jobs.approval.unreadable")}</div>}
             >
                 {(manifest) => <ApprovalFacts info={props.info} manifest={manifest()} />}
             </Show>
@@ -314,10 +312,10 @@ export function TemplateApproval(props: {
                     disabled={!m() || refused()}
                     onClick={() => props.onApprove()}
                 >
-                    Approve
+                    {t("jobs.approval.approve")}
                 </Button>
                 <Button tone="quiet" disabled={props.busy} onClick={() => props.onCancel()}>
-                    Cancel
+                    {t("jobs.approval.cancel")}
                 </Button>
             </div>
         </section>
