@@ -9,7 +9,7 @@ import { For, Show, type JSX } from "solid-js";
 import { Button, FilterInput, Select } from "@/app/element/ui";
 import { tip } from "@/app/element/tip";
 import type { InputHistoryItem } from "@/types/rpc/InputHistoryItem";
-import { formatWhen, typedTags } from "./history-shared";
+import { formatWhen, typedTags } from "../history-shared";
 import type { HistoryTypedState } from "./history-typed-state";
 
 type Part = { t: HistoryTypedState };

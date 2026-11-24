@@ -10,6 +10,7 @@ import { Show, type JSX } from "solid-js";
 import type { SetStoreFunction } from "solid-js/store";
 
 import { Field, SegmentedControl, Select, Switch, TextArea, TextInput, type SelectOption } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import type { CapDefaults } from "@/types/rpc/CapDefaults";
 
 import { CATCH_UPS, OVERLAPS, type ActionKind, type JobDraft, type TriggerKind } from "./job-draft";
@@ -26,25 +27,26 @@ interface SectionProps {
     set: SetStoreFunction<JobDraft>;
 }
 
-const TRIGGERS: { value: TriggerKind; label: string }[] = [
-    { value: "cron", label: "On a schedule" },
-    { value: "every", label: "Every" },
-    { value: "once", label: "Once" },
-    { value: "manual", label: "By hand" },
+// Built when drawn, not once at load, so a change of language shows.
+const triggers = (): { value: TriggerKind; label: string }[] => [
+    { value: "cron", label: t("jobs.fields.trigger.cron") },
+    { value: "every", label: t("jobs.fields.trigger.every") },
+    { value: "once", label: t("jobs.fields.trigger.once") },
+    { value: "manual", label: t("jobs.fields.trigger.manual") },
 ];
 
-const ACTIONS: { value: ActionKind; label: string }[] = [
-    { value: "message", label: "Message an agent" },
-    { value: "task", label: "File a task" },
-    { value: "spawn", label: "Start a worker" },
+const actions = (): { value: ActionKind; label: string }[] => [
+    { value: "message", label: t("jobs.fields.action.message") },
+    { value: "task", label: t("jobs.fields.action.task") },
+    { value: "spawn", label: t("jobs.fields.action.spawn") },
 ];
 
 export function WhenSection(props: SectionProps): JSX.Element {
     return (
         <>
-            <Field label="Runs" layout="stacked">
+            <Field label={t("jobs.fields.runs")} layout="stacked">
                 <SegmentedControl
-                    options={TRIGGERS}
+                    options={triggers()}
                     value={props.draft.triggerKind}
                     onChange={(v) => props.set("triggerKind", v)}
                 />
@@ -52,10 +54,10 @@ export function WhenSection(props: SectionProps): JSX.Element {
             <Show when={props.draft.triggerKind === "cron"}>
                 <div class="warden-jobs-grid">
                     <Field
-                        label="Cron expression"
+                        label={t("jobs.fields.cron")}
                         layout="stacked"
                         hint={describeCron(props.draft.cron, props.draft.tz || "UTC") || undefined}
-                        description="Minute, hour, day of month, month, weekday."
+                        description={t("jobs.fields.cronHelp")}
                     >
                         <TextInput
                             value={props.draft.cron}
@@ -63,7 +65,7 @@ export function WhenSection(props: SectionProps): JSX.Element {
                             spellcheck={false}
                         />
                     </Field>
-                    <Field label="Time zone" layout="stacked" description="An IANA name such as Europe/Berlin.">
+                    <Field label={t("jobs.fields.timeZone")} layout="stacked" description={t("jobs.fields.timeZoneHelp")}>
                         <TextInput
                             value={props.draft.tz}
                             onInput={(e) => props.set("tz", e.currentTarget.value)}
@@ -74,9 +76,9 @@ export function WhenSection(props: SectionProps): JSX.Element {
             </Show>
             <Show when={props.draft.triggerKind === "every"}>
                 <Field
-                    label="Every (minutes)"
+                    label={t("jobs.fields.everyMinutes")}
                     layout="stacked"
-                    description="An agent job runs at most every 15 minutes."
+                    description={t("jobs.fields.everyHelp")}
                 >
                     <TextInput
                         type="number"
@@ -87,7 +89,7 @@ export function WhenSection(props: SectionProps): JSX.Element {
                 </Field>
             </Show>
             <Show when={props.draft.triggerKind === "once"}>
-                <Field label="At" layout="stacked" description="In your time zone.">
+                <Field label={t("jobs.fields.at")} layout="stacked" description={t("jobs.fields.atHelp")}>
                     <TextInput
                         type="datetime-local"
                         value={props.draft.onceAt}
@@ -111,14 +113,14 @@ export function WhatSection(
             when={!props.templated}
             fallback={
                 <Field label={label} layout="stacked">
-                    <div class="warden-manager-dim">Written by the template from its settings. A dry run shows it.</div>
+                    <div class="warden-manager-dim">{t("jobs.fields.templated")}</div>
                 </Field>
             }
         >
             <Field
                 label={label}
                 layout="stacked"
-                description="Another agent's words to it: it is not your instruction."
+                description={t("jobs.fields.briefHelp")}
             >
                 <TextArea
                     variant="plain"
@@ -132,69 +134,69 @@ export function WhatSection(
     );
     return (
         <>
-            <Field label="Does" layout="stacked">
+            <Field label={t("jobs.fields.does")} layout="stacked">
                 <SegmentedControl
-                    options={ACTIONS}
+                    options={actions()}
                     value={props.draft.actionKind}
                     onChange={(v) => props.set("actionKind", v)}
                 />
             </Field>
             <Show when={props.draft.actionKind === "message"}>
-                <Field label="Message" layout="stacked">
+                <Field label={t("jobs.fields.message")} layout="stacked">
                     <Select
                         value={props.draft.to}
                         onChange={(v) => props.set("to", v)}
-                        options={withCurrent(props.agents, props.draft.to, "Choose an agent")}
+                        options={withCurrent(props.agents, props.draft.to, t("jobs.fields.chooseAgent"))}
                     />
                 </Field>
-                {brief("brief", "Brief")}
+                {brief("brief", t("jobs.fields.brief"))}
             </Show>
             <Show when={props.draft.actionKind === "task"}>
                 <div class="warden-jobs-grid">
-                    <Field label="Task title" layout="stacked">
+                    <Field label={t("jobs.fields.taskTitle")} layout="stacked">
                         <TextInput
                             value={props.draft.title}
                             onInput={(e) => props.set("title", e.currentTarget.value)}
                         />
                     </Field>
-                    <Field label="For" layout="stacked">
+                    <Field label={t("jobs.fields.for")} layout="stacked">
                         <Select
                             value={props.draft.taskTarget}
                             onChange={(v) => props.set("taskTarget", v)}
-                            options={withCurrent(props.agents, props.draft.taskTarget, "Anyone (the backlog)")}
+                            options={withCurrent(props.agents, props.draft.taskTarget, t("jobs.fields.anyone"))}
                         />
                     </Field>
                 </div>
-                {brief("payload", "Details")}
+                {brief("payload", t("jobs.fields.details"))}
             </Show>
             <Show when={props.draft.actionKind === "spawn"}>
                 <Field
-                    label="Leader"
+                    label={t("jobs.fields.leader")}
                     layout="stacked"
-                    description="The worker reports to this agent. A worker starts for each run and spends until it stops."
+                    description={t("jobs.fields.leaderHelp")}
                 >
                     <Select
                         value={props.draft.leader}
                         onChange={(v) => props.set("leader", v)}
-                        options={withCurrent(props.agents, props.draft.leader, "Choose an agent")}
+                        options={withCurrent(props.agents, props.draft.leader, t("jobs.fields.chooseAgent"))}
                     />
                 </Field>
-                {brief("brief", "Brief")}
+                {brief("brief", t("jobs.fields.brief"))}
                 <div class="warden-jobs-grid">
-                    <Field label="Model" layout="stacked" description="Optional.">
+                    <Field label={t("jobs.fields.model")} layout="stacked" description={t("jobs.fields.optional")}>
                         <TextInput
                             value={props.draft.model}
                             onInput={(e) => props.set("model", e.currentTarget.value)}
                         />
                     </Field>
-                    <Field label="Account" layout="stacked" description="Optional.">
+                    <Field label={t("jobs.fields.account")} layout="stacked" description={t("jobs.fields.optional")}>
                         <TextInput
                             value={props.draft.account}
                             onInput={(e) => props.set("account", e.currentTarget.value)}
                         />
                     </Field>
                 </div>
-                <Field label="Keep the worker after its first turn" layout="inline">
+                <Field label={t("jobs.fields.keepWorker")} layout="inline">
                     <Switch checked={props.draft.keepWorker} onChange={(on) => props.set("keepWorker", on)} />
                 </Field>
             </Show>
@@ -205,16 +207,16 @@ export function WhatSection(
 export function PolicySection(props: SectionProps & { defaults: CapDefaults | undefined }): JSX.Element {
     const raised = (text: string, base: number | undefined) =>
         base != null && text.trim() !== "" && Number(text) > base;
-    const capHint = (text: string, base: number | undefined, what: string) =>
+    const capHint = (text: string, base: number | undefined, per: "run" | "day") =>
         base == null
             ? undefined
             : raised(text, base)
-              ? `Above the default of $${base}: you raise it for this job.`
-              : `Default ${what}: $${base}.`;
+              ? t("jobs.fields.capRaised", { base })
+              : t(per === "run" ? "jobs.fields.capDefaultRun" : "jobs.fields.capDefaultDay", { base });
     return (
         <>
             <div class="warden-jobs-grid">
-                <Field label="If the last run is still going" layout="stacked">
+                <Field label={t("jobs.fields.overlap")} layout="stacked">
                     <Select
                         value={props.draft.overlap}
                         onChange={(v) => props.set("overlap", v)}
@@ -222,9 +224,9 @@ export function PolicySection(props: SectionProps & { defaults: CapDefaults | un
                     />
                 </Field>
                 <Field
-                    label="If a run was missed"
+                    label={t("jobs.fields.catchUp")}
                     layout="stacked"
-                    description="Skip it, or run the latest one when the agent is back."
+                    description={t("jobs.fields.catchUpHelp")}
                 >
                     <Select
                         value={props.draft.catchUp}
@@ -232,7 +234,7 @@ export function PolicySection(props: SectionProps & { defaults: CapDefaults | un
                         options={CATCH_UPS.map((o) => ({ value: o, label: o }))}
                     />
                 </Field>
-                <Field label="Timeout (minutes)" layout="stacked">
+                <Field label={t("jobs.fields.timeout")} layout="stacked">
                     <TextInput
                         type="number"
                         min="1"
@@ -240,7 +242,7 @@ export function PolicySection(props: SectionProps & { defaults: CapDefaults | un
                         onInput={(e) => props.set("timeoutMinutes", e.currentTarget.value)}
                     />
                 </Field>
-                <Field label="Retries" layout="stacked" description="Infrastructure failures only, at most 3.">
+                <Field label={t("jobs.fields.retries")} layout="stacked" description={t("jobs.fields.retriesHelp")}>
                     <TextInput
                         type="number"
                         min="0"
@@ -249,15 +251,15 @@ export function PolicySection(props: SectionProps & { defaults: CapDefaults | un
                         onInput={(e) => props.set("retries", e.currentTarget.value)}
                     />
                 </Field>
-                <Field label="Group" layout="stacked" description="Runs of one group go one at a time.">
+                <Field label={t("jobs.fields.group")} layout="stacked" description={t("jobs.fields.groupHelp")}>
                     <TextInput value={props.draft.group} onInput={(e) => props.set("group", e.currentTarget.value)} />
                 </Field>
             </div>
             <div class="warden-jobs-grid">
                 <Field
-                    label="Cap per run ($)"
+                    label={t("jobs.fields.capRun")}
                     layout="stacked"
-                    hint={capHint(props.draft.runCap, props.defaults?.run_usd, "per run")}
+                    hint={capHint(props.draft.runCap, props.defaults?.run_usd, "run")}
                 >
                     <TextInput
                         type="number"
@@ -269,9 +271,9 @@ export function PolicySection(props: SectionProps & { defaults: CapDefaults | un
                     />
                 </Field>
                 <Field
-                    label="Cap per day ($)"
+                    label={t("jobs.fields.capDay")}
                     layout="stacked"
-                    hint={capHint(props.draft.dayCap, props.defaults?.job_day_usd, "per day")}
+                    hint={capHint(props.draft.dayCap, props.defaults?.job_day_usd, "day")}
                 >
                     <TextInput
                         type="number"
@@ -283,10 +285,10 @@ export function PolicySection(props: SectionProps & { defaults: CapDefaults | un
                     />
                 </Field>
                 <Field
-                    label="Messages per day"
+                    label={t("jobs.fields.messagesPerDay")}
                     layout="stacked"
-                    description="Messages to another agent."
-                    hint={props.defaults ? `Default ${props.defaults.messages_per_day}.` : undefined}
+                    description={t("jobs.fields.messagesPerDayHelp")}
+                    hint={props.defaults ? t("jobs.fields.messagesDefault", { n: props.defaults.messages_per_day }) : undefined}
                 >
                     <TextInput
                         type="number"
@@ -297,7 +299,7 @@ export function PolicySection(props: SectionProps & { defaults: CapDefaults | un
                     />
                 </Field>
             </div>
-            <Field label="Enabled" layout="inline" description="A disabled job doesn't run on its trigger.">
+            <Field label={t("jobs.fields.enabled")} layout="inline" description={t("jobs.fields.enabledHelp")}>
                 <Switch checked={props.draft.enabled} onChange={(on) => props.set("enabled", on)} />
             </Field>
         </>

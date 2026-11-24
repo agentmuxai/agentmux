@@ -30,7 +30,7 @@ vi.mock("@/app/store/block-component-registry", () => ({
 const slotOf = (container: HTMLElement, i: number) =>
     container.querySelectorAll<HTMLElement>(".pane-leaf-keepalive-slot")[i];
 
-function mountSlots(ids: string[], initialActive: string) {
+function mountSlots(ids: string[], initialActive: string, splitterDragging: () => boolean = () => false) {
     const [active, setActive] = createSignal(initialActive);
     const view = render(() =>
         renderPaneMembers({
@@ -38,7 +38,7 @@ function mountSlots(ids: string[], initialActive: string) {
             scopedNodeModel: () => ({}) as NodeModel,
             mountedBlockIds: () => ids,
             activeBlockId: active,
-            keepAliveNodeModelFor: (id) => ({ blockId: id }) as unknown as NodeModel,
+            keepAliveNodeModelFor: (id) => ({ blockId: id, isSplitterDragging: splitterDragging }) as unknown as NodeModel,
         })
     );
     return { ...view, setActive };
@@ -96,6 +96,66 @@ describe("a dormant keep-alive slot during a window resize", () => {
     });
 });
 
+describe("a dormant keep-alive slot during a splitter drag", () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+        resetWindowResizeForTests();
+    });
+    afterEach(() => {
+        cleanup();
+        resetWindowResizeForTests();
+        vi.useRealTimers();
+    });
+
+    it("skips layout while a splitter is dragged, never for the active member, however many tabs there are", () => {
+        const [dragging, setDragging] = createSignal(false);
+        const ids = Array.from({ length: 30 }, (_, i) => `m${i}`);
+        const { container } = mountSlots(ids, "m0", dragging);
+        setDragging(true);
+        const slots = Array.from(container.querySelectorAll<HTMLElement>(".pane-leaf-keepalive-slot"));
+        expect(slots[0].style.contentVisibility).toBe("");
+        expect(slots.slice(1).every((s) => s.style.contentVisibility === "hidden")).toBe(true);
+        // still mounted, with the same box
+        expect(slots[1].style.visibility).toBe("hidden");
+        expect(slots[1].style.inset).toBe("0px");
+    });
+
+    it("catches up one slot per idle period once the drag ends", () => {
+        const [dragging, setDragging] = createSignal(false);
+        const { container } = mountSlots(["a", "b", "c"], "a", dragging);
+        setDragging(true);
+        setDragging(false);
+        expect(slotOf(container, 1).style.contentVisibility).toBe("hidden");
+        expect(slotOf(container, 2).style.contentVisibility).toBe("hidden");
+        vi.advanceTimersByTime(16);
+        expect(slotOf(container, 1).style.contentVisibility).toBe("");
+        expect(slotOf(container, 2).style.contentVisibility).toBe("hidden");
+        vi.advanceTimersByTime(16);
+        expect(slotOf(container, 2).style.contentVisibility).toBe("");
+    });
+
+    it("does not catch up while the window is resizing, but when that settles", () => {
+        const [dragging, setDragging] = createSignal(false);
+        const { container } = mountSlots(["a", "b"], "a", dragging);
+        setDragging(true);
+        noteWindowResize();
+        setDragging(false);
+        vi.advanceTimersByTime(16);
+        expect(slotOf(container, 1).style.contentVisibility).toBe("hidden");
+        vi.advanceTimersByTime(WINDOW_RESIZE_SETTLE_MS + 16);
+        expect(slotOf(container, 1).style.contentVisibility).toBe("");
+    });
+
+    it("lays a member out at once when it becomes the active one mid-drag", () => {
+        const [dragging, setDragging] = createSignal(false);
+        const { container, setActive } = mountSlots(["a", "b"], "a", dragging);
+        setDragging(true);
+        expect(slotOf(container, 1).style.contentVisibility).toBe("hidden");
+        setActive("b");
+        expect(slotOf(container, 1).style.contentVisibility).toBe("");
+        expect(slotOf(container, 0).style.contentVisibility).toBe("hidden");
+    });
+});
 describe("a member whose tab is dragged out of the pane", () => {
     afterEach(() => {
         cleanup();

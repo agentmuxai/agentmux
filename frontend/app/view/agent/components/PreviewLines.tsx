@@ -17,6 +17,7 @@
  */
 
 import { LinkifiedText } from "@/app/element/linkified-text";
+import "@/app/element/shiki-themed.scss";
 import clsx from "clsx";
 import { createEffect, createMemo, createSignal, For, Index, onCleanup, Show, type JSX } from "solid-js";
 import { highlightDoc, type CodeToken } from "../preview-text/highlight";
@@ -145,18 +146,7 @@ function LineText(props: { line: PreviewLine; tokens: CodeToken[] | null; linkif
                 </Show>
             }
         >
-            <For each={props.tokens}>{(t) => <span style={tokenStyle(t)}>{t.content}</span>}</For>
+            <For each={props.tokens}>{(t) => <span class="sh-tok" style={t.vars}>{t.content}</span>}</For>
         </Show>
     );
-}
-
-function tokenStyle(t: CodeToken): JSX.CSSProperties | undefined {
-    const fs = t.fontStyle ?? 0;
-    if (!t.color && !fs) return undefined;
-    return {
-        ...(t.color ? { color: t.color } : {}),
-        ...(fs & 1 ? { "font-style": "italic" } : {}),
-        ...(fs & 2 ? { "font-weight": "bold" } : {}),
-        ...(fs & 4 ? { "text-decoration": "underline" } : {}),
-    };
 }

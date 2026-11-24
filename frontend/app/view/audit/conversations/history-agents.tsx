@@ -15,11 +15,11 @@ import { openOrFocusHistoryTab } from "@/app/view/agent/open-history-tab";
 import { ageMs, formatAge } from "@/app/view/warden-shared/warden-shared";
 import type { HistoryAgent } from "@/types/rpc/HistoryAgent";
 import { formatBytes } from "@/util/format-bytes";
-import { agentRows, formatWhen, historyTotals, type AgentRow } from "./history-shared";
+import { agentRows, formatWhen, historyTotals, type AgentRow } from "../history-shared";
 import { useOpenSessions, type Sessions } from "./history-sessions";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
-import "./history.scss";
+import "../history-sections.scss";
 import { tip } from "@/app/element/tip";
 
 /** srv announces a change at most every two seconds while a transcript grows; a write by another AgentMux sharing the store is not announced, so the list also reads again this often. */
@@ -146,7 +146,7 @@ const AgentRowItem = (props: { id: string; list: AgentsList }): JSX.Element => {
                 <td data-label="Last active">{a().last_active_ms ? `${formatAge(ageMs(a().last_active_ms, now()))} ago` : "—"}</td>
                 <td class="warden-history-actions warden-history-cell-wide">
                     <Button tone="quiet" density="compact" onClick={() => props.list.openHistory(a())}>
-                        Open history
+                        Open conversation
                     </Button>
                 </td>
             </tr>
@@ -211,7 +211,7 @@ export const HistoryAgents = (props: HistoryAgentsProps): JSX.Element => {
                 <AgentsTable list={list} />
             </Show>
             <div class="warden-manager-footnote">
-                Kept forever. "Open history" shows an agent's whole recorded conversation in this pane.
+                Kept forever. "Open conversation" shows an agent's whole recorded conversation in this pane.
             </div>
         </div>
     );

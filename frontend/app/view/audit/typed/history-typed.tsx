@@ -12,7 +12,7 @@ import { createHistoryTyped } from "./history-typed-state";
 import { TypedBar, TypedEntries, TypedFootnote, TypedTrash } from "./history-typed-parts";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
-import "./history.scss";
+import "../history-sections.scss";
 
 export const HistoryTyped = (props: { visible: boolean }): JSX.Element => {
     const t = createHistoryTyped(props);
