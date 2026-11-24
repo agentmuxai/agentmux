@@ -4,7 +4,7 @@
 import { t } from "@/app/i18n/i18n";
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import { tip } from "@/app/element/tip";
-import { Button, CloseButton, openMenuAt, Tag } from "@/app/element/ui";
+import { Button, CloseButton, ConfirmPanel, openMenuAt, Tag } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { accountStatus } from "@/app/view/accounts/account-card";
@@ -521,7 +521,8 @@ function findScrollParent(el: HTMLElement | undefined): HTMLElement | null {
 
 // ── Delete confirmation (spec §3.3) ──────────────────────────────────────────
 
-export function DeleteAccountConfirm({ model, account }: { model: IdentityViewModel; account: Account }): JSX.Element {
+/** What the delete question says about `account`: its title and what the delete does and leaves, for the modal and the panel. */
+function useDeleteAccountCopy(model: IdentityViewModel, account: Account): { title: () => string; body: () => JSX.Element } {
     const usingAgents = useAccountAgents(account);
     const usedBy = () => usingAgents().map((a) => a.name);
     const backend = account.secret_ref?.backend;
@@ -533,16 +534,9 @@ export function DeleteAccountConfirm({ model, account }: { model: IdentityViewMo
     const grantStays = revokesOnDelete(account) && !signsOut;
     const providerName = PROVIDER_LABELS[brandForProvider(account.provider)] ?? account.provider;
     const editing = () => model.formOpenAtom() && model.editingAccountAtom()?.id === account.id;
-    return (
-        <ConfirmModal
-            open={true}
-            scope="pane"
-            title={t("accountsTab.delete.title", { account: accountLabel(account, model.accountsAtom()) })}
-            confirmLabel={t("accountsTab.delete.confirm")}
-            destructive
-            onConfirm={() => model.confirmDelete()}
-            onCancel={() => model.cancelDelete()}
-        >
+    return {
+        title: () => t("accountsTab.delete.title", { account: accountLabel(account, model.accountsAtom()) }),
+        body: () => (
             <div class="identity-delete-confirm">
                 <p>{t("accountsTab.delete.forgets")}</p>
                 <Show when={usedBy().length > 0}>
@@ -564,7 +558,42 @@ export function DeleteAccountConfirm({ model, account }: { model: IdentityViewMo
                     <p>{t("accountsTab.delete.unsaved")}</p>
                 </Show>
             </div>
+        ),
+    };
+}
+
+/** The delete question as a modal over the pane (the identity accounts tab). */
+export function DeleteAccountConfirm({ model, account }: { model: IdentityViewModel; account: Account }): JSX.Element {
+    const copy = useDeleteAccountCopy(model, account);
+    return (
+        <ConfirmModal
+            open={true}
+            scope="pane"
+            title={copy.title()}
+            confirmLabel={t("accountsTab.delete.confirm")}
+            destructive
+            onConfirm={() => model.confirmDelete()}
+            onCancel={() => model.cancelDelete()}
+        >
+            {copy.body()}
         </ConfirmModal>
+    );
+}
+
+/** The delete question as a panel under the account's row (Connectors): the same words and the same answers. */
+export function DeleteAccountPanel({ model, account }: { model: IdentityViewModel; account: Account }): JSX.Element {
+    const copy = useDeleteAccountCopy(model, account);
+    return (
+        <ConfirmPanel
+            title={copy.title()}
+            confirmLabel={t("accountsTab.delete.confirm")}
+            cancelLabel={t("accountForm.cancel")}
+            destructive
+            onConfirm={() => model.confirmDelete()}
+            onCancel={() => model.cancelDelete()}
+        >
+            {copy.body()}
+        </ConfirmPanel>
     );
 }
 
