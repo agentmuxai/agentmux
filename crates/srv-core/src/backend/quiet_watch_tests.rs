@@ -382,3 +382,62 @@ fn an_agent_shows_as_quiet_from_the_quiet_time_whether_or_not_it_was_told() {
     w.step("a", idle(T0 + 17 * MIN), &l, T0 + 17 * MIN);
     assert_eq!(w.quiet_since("a", false, &l, T0 + 17 * MIN), None, "it moved: not quiet");
 }
+
+
+fn status_meta(v: serde_json::Value) -> MetaMapType {
+    v.as_object().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+}
+
+#[test]
+fn a_new_status_line_is_something_the_agent_did() {
+    let line = status_meta(live_phrase::set_meta("Fixing the login race", Some("working"), live_phrase::SRC_AGENT, T0 as i64));
+    assert_eq!(paused_activity(&line, None, T0 + 20 * MIN), T0);
+    assert_eq!(paused_activity(&MetaMapType::new(), None, T0), 0, "no line, no activity");
+}
+
+#[test]
+fn a_waiting_line_with_a_time_stops_the_clock_and_it_runs_again_from_the_end() {
+    let line = status_meta(live_phrase::set_meta_waiting("Waiting for the build", live_phrase::SRC_AGENT, T0 as i64, 40));
+    let (mut w, l) = (Watch::default(), lim());
+    // While it waits the agent counts as active now, however long it has written nothing.
+    for at in [T0 + MIN, T0 + 20 * MIN, T0 + 39 * MIN] {
+        assert_eq!(w.step("wait", idle(paused_activity(&line, None, at)), &l, at), None, "waiting at {at}");
+    }
+    // The wait ends at 40 minutes: a whole quiet time from there, not from when it last wrote.
+    assert_eq!(w.step("wait", idle(paused_activity(&line, None, T0 + 54 * MIN)), &l, T0 + 54 * MIN), None);
+    assert_eq!(w.step("wait", idle(paused_activity(&line, None, T0 + 55 * MIN)), &l, T0 + 55 * MIN), Some(Action::Nudge));
+}
+
+#[test]
+fn a_waiting_line_with_no_time_stops_the_clock_for_half_an_hour_only() {
+    let line = status_meta(live_phrase::set_meta("Waiting for an answer", Some("waiting"), live_phrase::SRC_AGENT, T0 as i64));
+    let (mut w, l) = (Watch::default(), lim());
+    assert_eq!(w.step("bare", idle(paused_activity(&line, None, T0 + 29 * MIN)), &l, T0 + 29 * MIN), None);
+    assert_eq!(w.step("bare", idle(paused_activity(&line, None, T0 + 44 * MIN)), &l, T0 + 44 * MIN), None, "30 + 14 minutes");
+    assert_eq!(w.step("bare", idle(paused_activity(&line, None, T0 + 45 * MIN)), &l, T0 + 45 * MIN), Some(Action::Nudge), "30 + 15 minutes: a status line left up is what the watch catches");
+}
+
+#[test]
+fn a_leaders_mute_stops_the_clock_for_the_stated_time_and_no_longer() {
+    let m = mute("mute-a", 40, "  building\nthe release  ", "agentx", T0).unwrap();
+    assert_eq!((m.until_ms, m.reason.as_str(), m.by.as_str()), (T0 + 40 * MIN, "building the release", "agentx"));
+    assert_eq!(mute_of("mute-a", T0 + 39 * MIN), Some(m.clone()));
+    let (mut w, l) = (Watch::default(), lim());
+    let none = MetaMapType::new();
+    let at = |t: u64| idle(paused_activity(&none, mute_of("mute-a", t).as_ref(), t));
+    assert_eq!(w.step("mute-a", at(T0 + 20 * MIN), &l, T0 + 20 * MIN), None);
+    assert_eq!(mute_of("mute-a", T0 + 40 * MIN), None, "ended, and dropped");
+    // The mute's own end is the clock's start again.
+    assert_eq!(paused_activity(&none, Some(&m), T0 + 50 * MIN), T0 + 40 * MIN);
+}
+
+#[test]
+fn a_mute_asks_for_one_to_240_minutes_and_zero_lifts_it() {
+    assert!(mute("mute-b", 0, "x", "a", T0).is_err());
+    assert!(mute("mute-b", 241, "x", "a", T0).is_err());
+    assert!(mute("mute-b", 240, "x", "a", T0).is_ok());
+    assert!(unmute("mute-b", T0 + MIN), "one was in force");
+    assert!(!unmute("mute-b", T0 + MIN), "and now none");
+    let long = "w".repeat(500);
+    assert_eq!(mute("mute-c", 5, &long, "a", T0).unwrap().reason.chars().count(), 120);
+}

@@ -15,9 +15,11 @@
 //! and the controllers and delivers.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use crate::backend::agent_state::AgentState;
+use crate::backend::obj::MetaMapType;
+use crate::backend::work_facts::live_phrase;
 use crate::backend::storage::agents::AgentDefinition;
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
@@ -188,6 +190,75 @@ pub fn quiet_view(def_id: &str) -> Option<QuietView> {
     QUIET.lock().get(def_id).cloned()
 }
 
+/// The most minutes a leader may mute one agent for.
+pub const MAX_MUTE_MINUTES: u64 = 240;
+/// The longest reason kept, in characters.
+const MUTE_REASON_CHARS: usize = 120;
+
+/// A leader's mute of one agent: its quiet clock is stopped until `until_ms`, then runs again from there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Mute {
+    pub until_ms: u64,
+    /// Why, in the leader's words (cut, one line).
+    pub reason: String,
+    /// The agent that muted it (its slug): recorded as that agent, never as the operator.
+    pub by: String,
+}
+
+/// The mutes in force, by the muted agent's definition id. Kept in memory: a mute is for at most four hours, and a
+/// restart of srv gives the agent a whole quiet time anyway.
+static MUTES: LazyLock<parking_lot::Mutex<HashMap<String, Mute>>> = LazyLock::new(Default::default);
+
+/// Mute `def_id` for `minutes` (1 to [`MAX_MUTE_MINUTES`]) from `now_ms`, replacing an earlier mute of it.
+pub fn mute(def_id: &str, minutes: u64, reason: &str, by: &str, now_ms: u64) -> Result<Mute, String> {
+    if minutes == 0 || minutes > MAX_MUTE_MINUTES {
+        return Err(format!("minutes must be 1 to {MAX_MUTE_MINUTES} (0 lifts a mute); got {minutes}"));
+    }
+    let reason: String = reason.split_whitespace().collect::<Vec<_>>().join(" ").chars().filter(|c| !c.is_control()).take(MUTE_REASON_CHARS).collect();
+    let muted = Mute { until_ms: now_ms.saturating_add(minutes.saturating_mul(60_000)), reason, by: by.to_string() };
+    MUTES.lock().insert(def_id.to_string(), muted.clone());
+    Ok(muted)
+}
+
+/// Lift the mute of `def_id`; whether there was one in force.
+pub fn unmute(def_id: &str, now_ms: u64) -> bool {
+    MUTES.lock().remove(def_id).is_some_and(|m| m.until_ms > now_ms)
+}
+
+/// The mute of `def_id` in force at `now_ms`, if any (an ended one is dropped).
+pub fn mute_of(def_id: &str, now_ms: u64) -> Option<Mute> {
+    let mut mutes = MUTES.lock();
+    match mutes.get(def_id) {
+        Some(m) if m.until_ms > now_ms => Some(m.clone()),
+        Some(_) => {
+            mutes.remove(def_id);
+            None
+        }
+        None => None,
+    }
+}
+
+/// Whether `caller` leads `target` (both agent uids): it is the lead of the target's seat, which for a spawned worker is
+/// the agent that spawned it. Only a lead may mute.
+pub fn leads(mstore: &Store, caller: &str, target: &str) -> bool {
+    let seat_lead = crate::backend::agent_seat::effective_seat_by_id(mstore, target).and_then(|seat| seat.lead);
+    seat_lead.as_deref() == Some(caller) || crate::backend::agent_seat::worker_of(mstore, target).as_deref() == Some(caller)
+}
+
+/// What the agent's status line and a mute add to its clock (unix ms; 0 for nothing). A new status line is something
+/// the agent did, so it counts at the time it was set. A `waiting` line with its time, and a mute, stop the clock:
+/// while one is in force the agent counts as active now, and when it ends the clock runs again from its end.
+pub fn paused_activity(status: &MetaMapType, mute: Option<&Mute>, now_ms: u64) -> u64 {
+    let mut at = live_phrase::declared_of(status).map_or(0, |line| line.at_ms);
+    if let Some(until) = live_phrase::waiting_until(status) {
+        at = at.max(until.min(now_ms));
+    }
+    if let Some(m) = mute {
+        at = at.max(m.until_ms.min(now_ms));
+    }
+    at
+}
+
 /// Whether an agent in this state can be called quiet: it is working or idle. A question waiting for the user,
 /// an agent that cannot run (stopped, failed, limited, signed out) and one with no state are told another way.
 pub fn callable(state: Option<AgentState>) -> bool {
@@ -347,7 +418,7 @@ pub fn sweep(watch: &mut Watch, mstore: &Store, work: &Store, filestore: &FileSt
             continue;
         }
         let state = crate::backend::agent_state::current_state(mstore, block_id);
-        let Some(reading) = read(block_id, def, &tasks, state) else { continue };
+        let Some(reading) = read(mstore, block_id, def, &tasks, state, now_ms) else { continue };
         keep.insert(def.id.clone());
         let action = watch.step(&def.id, reading, &lim, now_ms);
         if let Some(since_ms) = watch.quiet_since(&def.id, reading.turn_active, &lim, now_ms) {
@@ -379,7 +450,7 @@ fn agent_name_of_pane(mstore: &Store, defs: &[AgentDefinition], block_id: &str) 
 
 /// What the controller and the stores say about `def`'s pane, or `None` when it cannot be called quiet: it cannot
 /// run, waits for the user, or its controller cannot say when it last wrote (a controller with no turn tracker).
-fn read(block_id: &str, def: &AgentDefinition, tasks: &[OwedTask], state: Option<AgentState>) -> Option<Reading> {
+fn read(mstore: &Store, block_id: &str, def: &AgentDefinition, tasks: &[OwedTask], state: Option<AgentState>, now_ms: u64) -> Option<Reading> {
     if !callable(state) {
         return None;
     }
@@ -388,7 +459,9 @@ fn read(block_id: &str, def: &AgentDefinition, tasks: &[OwedTask], state: Option
     let output = ctrl.last_output_ms().and_then(|v| u64::try_from(v).ok()).unwrap_or(0);
     let sent = notes::last_message_by(&def.slug).unwrap_or(0);
     let moved = tasks.iter().map(|t| t.updated_ms).max().unwrap_or(0);
-    Some(Reading { activity_ms: output.max(sent).max(moved), turn_active: tracker.pass_started_ms().is_some() })
+    let status = mstore.get::<crate::backend::obj::Block>(block_id).ok().flatten().map(|b| b.meta).unwrap_or_default();
+    let paused = paused_activity(&status, mute_of(&def.id, now_ms).as_ref(), now_ms);
+    Some(Reading { activity_ms: output.max(sent).max(moved).max(paused), turn_active: tracker.pass_started_ms().is_some() })
 }
 
 fn nudge(def_id: &str, block_id: &str, tasks: &[OwedTask], quiet_minutes: u64) {
