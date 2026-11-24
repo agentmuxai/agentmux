@@ -1463,6 +1463,9 @@ const HISTORY_SEARCH_DEFAULT_MAX_SESSIONS: usize = 20;
 const HISTORY_SEARCH_MAX_SESSIONS_CAP: usize = 100;
 const HISTORY_SEARCH_DEFAULT_LIMIT: usize = 50;
 const HISTORY_SEARCH_LIMIT_CAP: usize = 200;
+/// How long a history search may read sessions before it answers with what it has: the client that asks gives up
+/// after 10 seconds, and a partial answer with a hint to narrow is worth more than that timeout.
+const HISTORY_SEARCH_BUDGET: std::time::Duration = std::time::Duration::from_secs(6);
 
 /// SearchHistory's answer to a request that carries no per-agent token.
 const HISTORY_SEARCH_NEEDS_IDENTITY: &str = "history.search: this request carries no agent identity \
@@ -1541,6 +1544,7 @@ pub(super) async fn handle_reactive_history_search(
         }
     }
 
+    let started = std::time::Instant::now();
     let opts = crate::backend::history::index::HistorySearchOptions {
         query: params.query.clone(),
         role: params.role.clone(),
@@ -1550,6 +1554,7 @@ pub(super) async fn handle_reactive_history_search(
         until_ms: params.until.map(crate::backend::history::unix_time_to_ms),
         max_sessions: Some(params.max_sessions.clamp(1, HISTORY_SEARCH_MAX_SESSIONS_CAP)),
         include_inferred: params.include_inferred,
+        deadline: Some(started + HISTORY_SEARCH_BUDGET),
     };
 
     // Identity M4c-2c (spec §6.5.9): the owner is the caller's own row, from its per-agent token,

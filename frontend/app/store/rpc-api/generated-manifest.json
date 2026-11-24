@@ -571,6 +571,10 @@
             "method": "FsAgentFolderCommand"
         },
         {
+            "command": "fs.link_file_check",
+            "method": "FsLinkFileCheckCommand"
+        },
+        {
             "command": "fs.git_status",
             "method": "FsGitStatusCommand"
         },
@@ -933,6 +937,22 @@
             "command": "listmemories",
             "method": "ListBundlesCommand",
             "send": "data ?? {}"
+        },
+        {
+            "command": "getdroneaccess",
+            "method": "GetDroneAccessCommand"
+        },
+        {
+            "command": "setdroneagents",
+            "method": "SetDroneAgentsCommand"
+        },
+        {
+            "command": "listdroneapprovals",
+            "method": "ListDroneApprovalsCommand"
+        },
+        {
+            "command": "answerdroneapproval",
+            "method": "AnswerDroneApprovalCommand"
         },
         {
             "command": "getdronepayloadschema",

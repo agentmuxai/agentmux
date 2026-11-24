@@ -5,8 +5,7 @@ model.save {"job_id":"j1","definition":{"template":{"id":"nightly-build","versio
 <div>
   <section class="warden-jobs-update" aria-label="Update for Nightly build">
     <h3 class="warden-jobs-heading">
-      "Update for"
-      "Nightly build"
+      "Update for Nightly build"
     <p>
       "nightly-build"
       ":"
@@ -65,8 +64,7 @@ closed 1 time(s)
 <div>
   <section class="warden-jobs-update" aria-label="Update for Nightly build">
     <h3 class="warden-jobs-heading">
-      "Update for"
-      "Nightly build"
+      "Update for Nightly build"
     <p>
       "nightly-build"
       ":"
@@ -125,8 +123,7 @@ model.save {"job_id":"j1","definition":{"template":{"id":"nightly-build","versio
 <div>
   <section class="warden-jobs-update" aria-label="Update for Nightly build">
     <h3 class="warden-jobs-heading">
-      "Update for"
-      "Nightly build"
+      "Update for Nightly build"
     <p>
       "nightly-build"
       ":"
@@ -187,8 +184,7 @@ model.save {"job_id":"j1","definition":{"template":{"id":"nightly-build","versio
 <div>
   <section class="warden-jobs-update" aria-label="Update for Nightly build">
     <h3 class="warden-jobs-heading">
-      "Update for"
-      "Nightly build"
+      "Update for Nightly build"
     <p>
       "nightly-build"
       ":"
@@ -249,8 +245,7 @@ model.save {"job_id":"j1","definition":{"template":{"id":"nightly-build","versio
 <div>
   <section class="warden-jobs-update" aria-label="Update for Nightly build">
     <h3 class="warden-jobs-heading">
-      "Update for"
-      "Nightly build"
+      "Update for Nightly build"
     <p>
       "nightly-build"
       ":"

@@ -33,6 +33,27 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+describe("the files an agent's message names", () => {
+    it("are file links, also a bare name that reads as a web domain, and never a web address", () => {
+        const c = mount("See findings.md, setup.py, docs/specs/X.md and ./src/a.tsx:12 for it.");
+        const files = [...c.querySelectorAll("a.entity-link--file")].map((a) => a.textContent);
+        expect(files).toEqual(["findings.md", "setup.py", "docs/specs/X.md", "./src/a.tsx:12"]);
+        expect([...c.querySelectorAll("a")].filter((a) => /^https?:/.test(a.getAttribute("href") ?? ""))).toEqual([]);
+    });
+
+    it("leave a real web address and a domain alone, and a surface with no agent pane keeps the old linking", () => {
+        const c = mount("Docs at https://example.com/docs/a.md and example.com.");
+        expect([...c.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual(["https://example.com/docs/a.md", "https://example.com"]);
+        const plain = mount("See findings.md", { entities: undefined });
+        expect(plain.querySelector("a.entity-link--file")).toBeNull();
+    });
+
+    it("are not made links for text from another computer, which keeps the web linker's reading", () => {
+        const remote = { author: { kind: "agent" as const, id: "pane-1", confined: false, remote: true } };
+        expect(mount("See findings.md", { entities: remote as unknown as typeof surface }).querySelector("a.entity-link--file")).toBeNull();
+    });
+});
+
 describe("agent names and task numbers in a message", () => {
     it("are links with their class, address and accessible name, and the words are kept", () => {
         const c = mount("I asked Opaz about #48247 today.");

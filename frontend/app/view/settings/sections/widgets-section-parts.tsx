@@ -7,6 +7,7 @@
 import { createSignal, For, Show, type JSX } from "solid-js";
 
 import { Button } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { widgetLoadErrors } from "@/app/block/widget-loader";
 import { getApi } from "@/util/app-api";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -18,13 +19,7 @@ import { CATALOG_LINE, inCatalog } from "./widget-catalog";
 import { describePermission } from "./widget-permissions";
 import { errorText, type WidgetsSectionState } from "./widgets-section-state";
 
-const STATE_TEXT: Record<WidgetState, string> = {
-    approved: "On",
-    needs_approval: "Waiting for your approval",
-    changed: "Changed since you approved it",
-    invalid: "Can't be loaded",
-    disabled: "Off",
-};
+const stateText = (state: WidgetState): string => t(`settings.widgets.state.${state === "needs_approval" ? "needsApproval" : state}`);
 
 /** The install prompt for one package (spec §8.3). */
 function ApprovalPrompt(props: { pkg: WidgetPackageInfo; onDone: () => void }): JSX.Element {
@@ -44,9 +39,9 @@ function ApprovalPrompt(props: { pkg: WidgetPackageInfo; onDone: () => void }): 
     };
     const updated = () => props.pkg.state === "changed";
     return (
-        <div class="widget-approval" role="dialog" aria-label={`Install ${props.pkg.name}`}>
+        <div class="widget-approval" role="dialog" aria-label={t("settings.widgets.installAria", { name: props.pkg.name })}>
             <div class="widget-approval-title">
-                <i class={`fa-solid fa-${props.pkg.icon}`} /> {updated() ? `${props.pkg.name} changed` : `Install ${props.pkg.name}?`}
+                <i class={`fa-solid fa-${props.pkg.icon}`} /> {updated() ? t("settings.widgets.changedTitle", { name: props.pkg.name }) : t("settings.widgets.installTitle", { name: props.pkg.name })}
             </div>
             <WidgetApprovalDetails pkg={props.pkg} />
             <Show when={inCatalog(props.pkg)}>
@@ -65,10 +60,10 @@ function ApprovalPrompt(props: { pkg: WidgetPackageInfo; onDone: () => void }): 
                     disabled={busy()}
                     onClick={() => void decide(true)}
                 >
-                    {installLabel(props.pkg, updated() ? "Approve" : "Install")}
+                    {installLabel(props.pkg, updated() ? t("settings.widgets.approve") : t("settings.widgets.install"))}
                 </Button>
                 <Button disabled={busy()} onClick={() => void decide(false).then(props.onDone)}>
-                    Cancel
+                    {t("settings.widgets.cancel")}
                 </Button>
             </div>
         </div>
@@ -80,11 +75,13 @@ function signatureShort(pkg: WidgetPackageInfo): string {
     switch (s?.state) {
         case "signed":
         case "signed_new":
-            return `Signed by ${s.publisher} · ${s.fingerprint}`;
+            return t("settings.widgets.signedBy", { publisher: s.publisher, fingerprint: s.fingerprint });
         case "key_changed":
-            return s.fingerprint ? `Signed by another key than ${s.publisher}'s (${s.fingerprint})` : `Not signed, unlike ${s.publisher}'s other widgets`;
+            return s.fingerprint
+                ? t("settings.widgets.signedOtherKey", { publisher: s.publisher, fingerprint: s.fingerprint })
+                : t("settings.widgets.unsignedUnlike", { publisher: s.publisher });
         default:
-            return "Not signed";
+            return t("settings.widgets.notSigned");
     }
 }
 
@@ -93,19 +90,19 @@ export function WidgetsToolbar(part: { s: WidgetsSectionState }): JSX.Element {
     return (
         <div class="widgets-toolbar">
             <Button icon="plus" disabled={busy() === "install"} onClick={() => void install()}>
-                Install…
+                {t("settings.widgets.installEllipsis")}
             </Button>
             <Button
                 icon="rotate"
                 disabled={busy() === "rescan"}
                 onClick={() => void run("rescan", async () => (await RpcApi.WidgetsRescanCommand(TabRpcClient)).packages)}
             >
-                Rescan
+                {t("settings.widgets.rescan")}
             </Button>
             <Show when={widgetsDir()}>
                 {(dir) => (
                     <Button icon="folder-open" onClick={() => void reveal(dir())}>
-                        Open widgets folder
+                        {t("settings.widgets.openFolder")}
                     </Button>
                 )}
             </Show>
@@ -120,12 +117,12 @@ export function ReplacePrompt(part: { s: WidgetsSectionState }): JSX.Element {
         <Show when={replacePath()}>
             {(path) => (
                 <div class="widget-approval">
-                    That widget is already installed. Replace it with this one? It will ask for your approval again.
+                    {t("settings.widgets.replaceQuestion")}
                     <div class="widget-approval-actions">
                         <Button tone="accent" onClick={() => void installFrom(path(), true)}>
-                            Replace
+                            {t("settings.widgets.replace")}
                         </Button>
-                        <Button onClick={() => setReplacePath(null)}>Cancel</Button>
+                        <Button onClick={() => setReplacePath(null)}>{t("settings.widgets.cancel")}</Button>
                     </div>
                 </div>
             )}
@@ -140,7 +137,7 @@ function RowActions(part: { pkg: WidgetPackageInfo; s: WidgetsSectionState }): J
         <div class="widget-row-actions">
             <Show when={pkg.state === "needs_approval" || pkg.state === "changed"}>
                 <Button tone="accent" onClick={() => setAsking(pkg.id)}>
-                    {pkg.state === "changed" ? "Review and approve" : "Approve"}
+                    {pkg.state === "changed" ? t("settings.widgets.reviewApprove") : t("settings.widgets.approve")}
                 </Button>
             </Show>
             <Show when={pkg.state === "approved"}>
@@ -152,7 +149,7 @@ function RowActions(part: { pkg: WidgetPackageInfo; s: WidgetsSectionState }): J
                         )
                     }
                 >
-                    Turn off
+                    {t("settings.widgets.turnOff")}
                 </Button>
             </Show>
             <Show when={pkg.state === "disabled"}>
@@ -164,22 +161,22 @@ function RowActions(part: { pkg: WidgetPackageInfo; s: WidgetsSectionState }): J
                         )
                     }
                 >
-                    Turn on
+                    {t("settings.widgets.turnOn")}
                 </Button>
             </Show>
             <Button icon="folder-open" onClick={() => void reveal(pkg.folder)}>
-                Show folder
+                {t("settings.widgets.showFolder")}
             </Button>
             <Show when={!pkg.implied}>
                 <Show
                     when={confirmRemove() === pkg.id}
                     fallback={
                         <Button tone="danger" onClick={() => setConfirmRemove(pkg.id)}>
-                            Uninstall
+                            {t("settings.widgets.uninstall")}
                         </Button>
                     }
                 >
-                    <span class="widget-row-confirm">Delete {pkg.name} and its data?</span>
+                    <span class="widget-row-confirm">{t("settings.widgets.deleteQuestion", { name: pkg.name })}</span>
                     <Button
                         tone="danger"
                         disabled={busy() === pkg.id}
@@ -190,9 +187,9 @@ function RowActions(part: { pkg: WidgetPackageInfo; s: WidgetsSectionState }): J
                             })
                         }
                     >
-                        Delete
+                        {t("settings.widgets.delete")}
                     </Button>
-                    <Button onClick={() => setConfirmRemove(null)}>Keep</Button>
+                    <Button onClick={() => setConfirmRemove(null)}>{t("settings.widgets.keep")}</Button>
                 </Show>
             </Show>
         </div>
@@ -209,7 +206,7 @@ function WidgetRow(part: { pkg: WidgetPackageInfo; s: WidgetsSectionState }): JS
                 <span class="widget-row-name">{pkg.name}</span>
                 <span class="widget-row-version">{pkg.version}</span>
                 <span class="widget-row-kind">{pkg.kind}</span>
-                <span class={`widget-row-state state-${pkg.state}`}>{STATE_TEXT[pkg.state]}</span>
+                <span class={`widget-row-state state-${pkg.state}`}>{stateText(pkg.state)}</span>
             </div>
             <Show when={pkg.description}>
                 <div class="widget-row-description">{pkg.description}</div>
@@ -240,7 +237,7 @@ export function WidgetList(part: { s: WidgetsSectionState }): JSX.Element {
             when={list().length > 0}
             fallback={
                 <div class="setting-devices-empty">
-                    {widgetPackagesLoaded() ? "No widgets installed." : "Loading…"}
+                    {widgetPackagesLoaded() ? t("settings.widgets.none") : t("settings.widgets.loading")}
                 </div>
             }
         >
@@ -257,8 +254,7 @@ export function Publishers(part: { s: WidgetsSectionState }): JSX.Element {
         <Show when={publishers().length > 0}>
             <div class="widgets-publishers">
                 <div class="setting-devices-description">
-                    Publisher keys: the key each publisher's first signed widget was signed with. A later widget of theirs
-                    signed with another key gets a warning. Forget a key only if its author told you they changed it.
+                    {t("settings.widgets.publishersNote")}
                 </div>
                 <For each={publishers()}>
                     {(pin) => (
@@ -275,7 +271,7 @@ export function Publishers(part: { s: WidgetsSectionState }): JSX.Element {
                                         })
                                     }
                                 >
-                                    Forget key
+                                    {t("settings.widgets.forgetKey")}
                                 </Button>
                             </Show>
                         </div>

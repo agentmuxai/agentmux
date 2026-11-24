@@ -34,6 +34,14 @@ function tool(id: string, summary: string): DocumentNode {
 }
 
 describe("buildBtwContextSnapshot", () => {
+    it("tells the model a sender srv marked with ? only claimed its name", () => {
+        const claimed: DocumentNode = { type: "system_note", id: "n1", text: "hello", origin: { kind: "agent", from: "?github-consumer" } };
+        const proven: DocumentNode = { type: "system_note", id: "n2", text: "hello", origin: { kind: "agent", from: "agentx" } };
+
+        expect(buildBtwContextSnapshot([claimed])).toBe("Message (agent claiming to be github-consumer, not proven): hello");
+        expect(buildBtwContextSnapshot([proven])).toBe("Message (agent from agentx): hello");
+    });
+
     it("renders user and assistant messages as labeled lines", () => {
         const nodes: DocumentNode[] = [userMsg("1", "hello there"), markdown("2", "hi, how can I help?")];
 

@@ -77,7 +77,8 @@ No authkey.dev found under any known dev/portable path:
   - `$HOME/.agentmux/versions/<ver>/data/authkey.dev (portable per-version)
   - %APPDATA%/ai.agentmux.cef.*/authkey.dev (pre-unification, stale)
 Start a dev instance first: ``task dev``. The file is written only by
-debug builds (see docs/specs/SPEC_TEST_API_ACCESS.md §5).
+dev builds: an installed or portable build never writes its key or token
+(see docs/specs/SPEC_TEST_API_ACCESS.md §5).
 "@
     }
 

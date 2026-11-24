@@ -1,0 +1,9 @@
+diag sync urlAtom="https://example.com/" addressBar="https://example.com/" focused=false willUpdate=false
+listen browser-pane-shortcut
+openNewTab block-1 home=https://agentmux.ai
+closeBrowserTab block-1
+openNewTab block-1 home=https://agentmux.ai
+ctrl+t prevented=true
+closeBrowserTab block-1
+ctrl+w prevented=true
+plain t prevented=false

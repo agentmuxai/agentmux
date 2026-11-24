@@ -6,6 +6,8 @@
 
 import { createMemo, For, Show, type Accessor, type JSX } from "solid-js";
 import { Button } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
+import { Rich } from "@/app/i18n/rich";
 import { getCliCatalogEntry } from "@/app/view/agent/defaults/cli-catalog";
 import { formatCompactNumber } from "@/util/format-count";
 import { ambientSummary } from "@/app/store/ambient-health";
@@ -51,9 +53,9 @@ function serviceRowsOf(row: AgentUsage): ServiceRow[] {
 export function BreakdownHeader(): JSX.Element {
     return (
         <div class="token-usage-breakdown-header">
-            <span class="token-usage-breakdown-title">Token Usage</span>
+            <span class="token-usage-breakdown-title">{t("tokenBreakdown.title")}</span>
             <span class="token-usage-breakdown-subtitle">
-                since {formatSessionStartTime(getSessionStartAt())}
+                {t("tokenBreakdown.since", { time: formatSessionStartTime(getSessionStartAt()) })}
             </span>
         </div>
     );
@@ -71,21 +73,21 @@ function AgentRowButton(part: { id: string; s: TokenBreakdownState }): JSX.Eleme
             tone="quiet"
             class="token-usage-breakdown-row token-usage-breakdown-agent-row"
             onClick={() => handleAgentClick(row())}
-            title={`Click to focus ${row().agentName}'s pane`}
+            title={t("tokenBreakdown.focusPane", { name: row().agentName })}
         >
             <span class="token-usage-breakdown-row-name">
                 {row().agentName}
                 <Show when={agentCacheRate() != null}>
                     <span
                         class="token-usage-breakdown-row-cache"
-                        {...tip(`${Math.round((agentCacheRate() as number) * 100)}% of input served from cache`)}
+                        {...tip(t("tokenBreakdown.cacheShare", { pct: Math.round((agentCacheRate() as number) * 100) }))}
                     >
                         {Math.round((agentCacheRate() as number) * 100)}%
                     </span>
                 </Show>
             </span>
             <span class="token-usage-breakdown-row-meta">
-                {row().numTurns} {row().numTurns === 1 ? "turn" : "turns"}
+                {t("tokenBreakdown.turns", { count: row().numTurns })}
                 <Show when={row().costUsd > 0}>
                     {" "}·{" "}${row().costUsd.toFixed(3)}
                 </Show>
@@ -154,7 +156,7 @@ function InternalBucket(): JSX.Element {
     return (
         <div class="token-usage-breakdown-ambient">
             <div class="token-usage-breakdown-row">
-                <span class="token-usage-breakdown-row-name">AgentMux internal</span>
+                <span class="token-usage-breakdown-row-name">{t("tokenBreakdown.internal")}</span>
             </div>
             <div class="token-usage-breakdown-ambient-detail">
                 <AmbientPurposes />
@@ -171,7 +173,7 @@ export function BreakdownRows(part: { s: TokenBreakdownState }): JSX.Element {
             when={agentRows().length > 0 || ambientSummary() != null}
             fallback={
                 <div class="token-usage-breakdown-empty">
-                    No turns completed yet this session.
+                    {t("tokenBreakdown.empty")}
                 </div>
             }
         >
@@ -182,7 +184,7 @@ export function BreakdownRows(part: { s: TokenBreakdownState }): JSX.Element {
                     <InternalBucket />
                 </Show>
                 <div class="token-usage-breakdown-row token-usage-breakdown-total">
-                    <span class="token-usage-breakdown-row-name">Total</span>
+                    <span class="token-usage-breakdown-row-name">{t("tokenBreakdown.total")}</span>
                     <span class="token-usage-breakdown-row-counts">
                         <span class="token-usage-indicator-arrow">↑</span>
                         {formatCompactNumber(total().input)}
@@ -194,9 +196,9 @@ export function BreakdownRows(part: { s: TokenBreakdownState }): JSX.Element {
                 <Show when={cacheHitRate() != null}>
                     <div
                         class="token-usage-breakdown-cache-rate"
-                        {...tip("Share of input tokens served from Claude's prompt cache this session (~0.1x the cost of a fresh token). Only available for providers that report a cache breakdown.")}
+                        {...tip(t("tokenBreakdown.cacheTip"))}
                     >
-                        {Math.round((cacheHitRate() as number) * 100)}% of input served from cache
+                        {t("tokenBreakdown.cacheShare", { pct: Math.round((cacheHitRate() as number) * 100) })}
                     </div>
                 </Show>
             </div>
@@ -225,21 +227,20 @@ export function BreakdownFooter(part: { s: TokenBreakdownState }): JSX.Element {
                 when={confirmingReset()}
                 fallback={
                     <Button ref={resetRef} tone="danger" density="compact" onClick={ask} disabled={agentRows().length === 0}>
-                        Reset counter
+                        {t("tokenBreakdown.resetCounter")}
                     </Button>
                 }
             >
-                <div class="token-usage-breakdown-confirm" role="group" aria-label="Reset token counter?">
+                <div class="token-usage-breakdown-confirm" role="group" aria-label={t("tokenBreakdown.resetQuestion")}>
                     <div class="token-usage-breakdown-confirm-text">
-                        <strong>Reset token counter?</strong> This clears the running total for the current session.
-                        Per-pane Worked stats stay unchanged.
+                        <Rich k="tokenBreakdown.resetBody" />
                     </div>
                     <div class="token-usage-breakdown-confirm-actions">
                         <Button ref={cancelRef} tone="quiet" density="compact" onClick={cancel}>
-                            Cancel
+                            {t("tokenBreakdown.cancel")}
                         </Button>
                         <Button tone="danger" density="compact" onClick={handleConfirmReset}>
-                            Reset
+                            {t("tokenBreakdown.reset")}
                         </Button>
                     </div>
                 </div>

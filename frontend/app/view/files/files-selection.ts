@@ -89,9 +89,19 @@ export function toggleFocused(sel: Selection): Selection {
 export function folderAt(target: EventTarget | null, byName: ReadonlyMap<string, FsEntry>): FsEntry | undefined {
     if (!(target instanceof Element)) return undefined;
     const el = target.closest<HTMLElement>(".files-rows .files-row, .files-tile");
-    const name = el?.querySelector(".files-name, .files-tile-name")?.textContent;
+    // The row's own name, not the label it shows: a row in the tree shows `lib` for `src/lib`.
+    const name = el?.dataset.name;
     const entry = name ? byName.get(name) : undefined;
     return entry?.is_dir ? entry : undefined;
+}
+
+/**
+ * The entries not inside another listed folder. With a folder opened in place, Select All selects it and its rows, and a copy
+ * of both would put the rows in the destination twice (`dest/src/main.rs` and `dest/main.rs`): each source goes under its own name.
+ */
+export function topmost(list: readonly FsEntry[]): FsEntry[] {
+    const folders = list.filter((e) => e.is_dir).map((e) => e.name);
+    return list.filter((e) => !folders.some((dir) => dir !== e.name && e.name.startsWith(`${dir}/`)));
 }
 
 export function selectAll(sel: Selection, order: readonly string[]): Selection {

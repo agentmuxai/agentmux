@@ -107,17 +107,25 @@ struct Pending {
 pub(crate) enum ConfirmHow {
     /// The sending process is in no agent's process tree.
     Outside,
-    /// The sending process could not be found (the lookup failed, or the peer is a proxy or a tunnel); the confirm went through.
+    /// The sending process could not be found (the lookup failed, or the peer is not on IPv4 loopback); the confirm was not taken.
     Unknown,
+    /// The request carried forwarding headers, so it came through a proxy or a tunnel; the confirm was not taken.
+    Forwarded,
     /// The sending process is in this agent's tree (`agent:<id>`); the confirm was not taken.
     Refused(String),
 }
 
 impl ConfirmHow {
+    /// Whether the confirm is the person's answer: only a process found outside every agent's tree is.
+    pub(crate) fn is_taken(&self) -> bool {
+        matches!(self, ConfirmHow::Outside)
+    }
+
     pub(crate) fn label(&self) -> String {
         match self {
             ConfirmHow::Outside => "peer outside agent trees".to_string(),
             ConfirmHow::Unknown => "peer unknown".to_string(),
+            ConfirmHow::Forwarded => "peer forwarded".to_string(),
             ConfirmHow::Refused(who) => format!("refused: {who}"),
         }
     }

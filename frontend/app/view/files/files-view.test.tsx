@@ -136,8 +136,10 @@ import { getPaneTab } from "@/app/store/pane-tab-registry";
 import { runCommand } from "@/app/keybindings/app-api";
 import { setPlatform } from "@/util/platformutil";
 import { FilesModel } from "./files-model";
-import { openTargetOf } from "./files-open";
+import { openTargetOf, runsWhenOpenedByOs } from "./files-open";
 import { clipboard, setClipboard } from "./files-ops";
+import { buildRowMenu } from "./files-menus";
+import { recentPlaces, resetPlacesForTests } from "./files-pins";
 import { resetThumbnailsForTests } from "./files-thumbs";
 import { noteToolCall, noteToolResult, resetTouchedForTests } from "@/app/store/touched-files";
 import { beginPathDrag, endPathDrag, installFileDropController, PATHS_MIME } from "@/app/drag/file-drop";
@@ -198,6 +200,7 @@ beforeEach(() => {
     h.state.handlers = [];
     h.state.byType = new Map();
     setClipboard(null);
+    resetPlacesForTests();
     icons.url = null;
     icons.asked = [];
     icons.settings = {};
@@ -468,6 +471,66 @@ describe("the Files pane: navigation", () => {
         expect(h.rpc.FsOpenCommand).not.toHaveBeenCalled();
         fireEvent.click(screen.getByText("Run"));
         expect(h.rpc.FsOpenCommand).toHaveBeenCalledWith(expect.anything(), { path: `${HOME}\\setup.exe`, block_id: "b1" });
+    });
+
+    it("knows what each system runs when it opens a file with its default app, and still opens scripts in the Editor", async () => {
+        expect(runsWhenOpenedByOs("setup.exe")).toBe(true);
+        expect(runsWhenOpenedByOs("notes.docx")).toBe(false);
+        // The tests run as Windows.
+        for (const name of ["a.bat", "a.CMD", "a.vbs", "a.js", "a.hta", "a.jar", "a.wsf", "a.msc"]) expect(runsWhenOpenedByOs(name), name).toBe(true);
+        expect(runsWhenOpenedByOs("a.command")).toBe(false);
+        setPlatform("darwin");
+        for (const name of ["a.command", "a.tool", "a.terminal", "a.jar", "a.app"]) expect(runsWhenOpenedByOs(name), name).toBe(true);
+        for (const name of ["a.js", "a.bat", "a.desktop"]) expect(runsWhenOpenedByOs(name), name).toBe(false);
+        setPlatform("linux");
+        for (const name of ["a.desktop", "a.AppImage", "a.jar"]) expect(runsWhenOpenedByOs(name), name).toBe(true);
+        for (const name of ["a.js", "a.command", "a.bat"]) expect(runsWhenOpenedByOs(name), name).toBe(false);
+        setPlatform("win32");
+        // A double-click on source still opens it in the Editor.
+        expect(openTargetOf("build.bat")).toBe("editor");
+        expect(openTargetOf("app.js")).toBe("editor");
+    });
+
+    const chooseFromMenu = async (v: ReturnType<typeof mount>, name: string, label: string) => {
+        fireEvent.contextMenu(v.row(name));
+        const item = [...document.body.querySelectorAll(".ctx-menu .ctx-menu-item")].find((row) => row.querySelector(".ctx-menu-label")?.textContent === label);
+        fireEvent.pointerDown(item!);
+    };
+
+    it("asks before the menu's Open with default app runs a script, and not for a document", async () => {
+        h.state.dirs.set(HOME, [f("build.bat"), f("notes.docx")]);
+        const v = mount();
+        await waitFor(() => expect(v.names()).toEqual(["build.bat", "notes.docx"]));
+        await chooseFromMenu(v, "build.bat", "Open with default app");
+        expect(h.rpc.FsOpenCommand).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByText("Run"));
+        expect(h.rpc.FsOpenCommand).toHaveBeenCalledWith(expect.anything(), { path: `${HOME}\\build.bat`, block_id: "b1" });
+        h.rpc.FsOpenCommand.mockClear();
+        fireEvent.keyDown(document.body, { key: "Escape" });
+        await chooseFromMenu(v, "notes.docx", "Open with default app");
+        expect(h.rpc.FsOpenCommand).toHaveBeenCalledWith(expect.anything(), { path: `${HOME}\\notes.docx`, block_id: "b1" });
+    });
+
+    it("asks first, naming the agent, for a file srv says a container agent can write, and opens it once confirmed", async () => {
+        h.state.dirs.set(HOME, [f("notes.docx")]);
+        h.rpc.FsOpenCommand.mockRejectedValueOnce(new Error("[asks-first:aria] This file is in the folder of aria, a container agent that can change it."));
+        const v = mount();
+        await waitFor(() => expect(v.names()).toEqual(["notes.docx"]));
+        await chooseFromMenu(v, "notes.docx", "Open with default app");
+        await waitFor(() => expect(screen.getByText("Open notes.docx?")).toBeTruthy());
+        expect(document.body.textContent).toContain("the folder of aria, a container agent that can change it");
+        fireEvent.click(screen.getByText("Open"));
+        expect(h.rpc.FsOpenCommand).toHaveBeenLastCalledWith(expect.anything(), { path: `${HOME}\\notes.docx`, block_id: "b1", confirmed: true });
+    });
+
+    it("shows any other failure to open as a status, not a question", async () => {
+        h.state.dirs.set(HOME, [f("notes.docx")]);
+        h.rpc.FsOpenCommand.mockRejectedValueOnce(new Error("no app for this file"));
+        const v = mount();
+        await waitFor(() => expect(v.names()).toEqual(["notes.docx"]));
+        await chooseFromMenu(v, "notes.docx", "Open with default app");
+        await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toContain("no app for this file"));
+        expect(screen.queryByText("Open notes.docx?")).toBeNull();
     });
 
     it("shows each agent's name in its pane colour, at the theme's text lightness", async () => {
@@ -886,12 +949,33 @@ describe("the Files pane: preview and filter (Phase 2a)", () => {
         await waitFor(() => expect(v.names()).toHaveLength(4));
     });
 
+    it("offers to clear a filter that matches nothing, also when its box is hidden, in the list and in columns", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.keyDown(v.list(), { key: "/" });
+        const input = v.container.querySelector<HTMLInputElement>(".files-filter-input")!;
+        fireEvent.input(input, { target: { value: "zzz" } });
+        await waitFor(() => expect(v.names()).toHaveLength(0));
+        // A press elsewhere hides the box and keeps the filter applied.
+        fireEvent.pointerDown(document.body);
+        await waitFor(() => expect(v.container.querySelector(".files-filter-input")).toBeNull());
+        expect(v.model.filter()).toBe("zzz");
+        v.model.toggleColumns();
+        await waitFor(() => expect(v.model.columnsOn()).toBe(true));
+        expect(v.container.querySelector(".files-notice p")?.textContent).toBe("Nothing here matches “zzz”.");
+        // The columns layer covers the whole list area: it is not drawn under the notice, so the button is what a click reaches.
+        expect(v.container.querySelector(".files-columns")).toBeNull();
+        fireEvent.click(v.getByText("Clear filter"));
+        await waitFor(() => expect(v.model.filter()).toBe(""));
+        await waitFor(() => expect(v.container.querySelector(".files-notice")).toBeNull());
+    });
+
     it("a new folder clears the filter", async () => {
         const v = mount();
         await waitFor(() => expect(v.names()).toHaveLength(4));
         v.model.setFilter("zzz");
         await waitFor(() => expect(v.names()).toHaveLength(0));
-        expect(v.container.querySelector(".files-notice")?.textContent).toBe("Nothing here matches “zzz”.");
+        expect(v.container.querySelector(".files-notice p")?.textContent).toBe("Nothing here matches “zzz”.");
         v.model.setFilter("sr");
         await waitFor(() => expect(v.names()).toEqual(["src"]));
         fireEvent.dblClick(v.row("src"));
@@ -1102,6 +1186,140 @@ describe("the Files pane: dragging files (§8.2)", () => {
             expect(h.rpc.FsOpStartCommand.mock.lastCall?.[1]).toEqual({ kind: "move", sources: ["C:\\other\\x.txt"], dest_dir: HOME, block_id: "b1" })
         );
         pane.remove();
+    });
+
+    describe("undo for a move", () => {
+        const opEvent = (data: Record<string, unknown>) =>
+            h.state.byType.get("files:op")?.forEach((fn) => fn({ data: { op_id: "op1", kind: "copy", done_items: 0, total_items: 1, done_bytes: 0, total_bytes: 0, ...data } }));
+        const SRC = `${HOME}\\src`;
+        const moved = async (v: ReturnType<typeof mount>, extra: FsEntry[] = []) => {
+            await waitFor(() => expect(v.names()).toHaveLength(4));
+            await v.model.transfer("move", [`${HOME}\\b.txt`], SRC);
+            // What srv did: the item landed in the destination.
+            h.state.dirs.set(SRC, [f("main.rs"), f("b.txt"), ...extra]);
+            opEvent({ kind: "move", state: "done", done_items: 1 });
+        };
+        const undoButton = (v: ReturnType<typeof mount>) => v.container.querySelector(".files-status-undo") as HTMLElement | null;
+
+        it("offers Undo for a move that went to plan, and moves the item back where it was", async () => {
+            const v = mount();
+            await moved(v);
+            await waitFor(() => expect(undoButton(v)).not.toBeNull());
+            // What srv did: b.txt left Home and is in src.
+            h.state.dirs.set(HOME, [d("src")]);
+            h.state.dirs.set(SRC, [f("main.rs"), f("b.txt")]);
+            h.rpc.FsOpStartCommand.mockClear();
+            fireEvent.click(undoButton(v)!);
+            await waitFor(() =>
+                expect(h.rpc.FsOpStartCommand.mock.lastCall?.[1]).toEqual({ kind: "move", sources: [`${SRC}\\b.txt`], dest_dir: HOME, block_id: "b1" })
+            );
+        });
+
+        it("offers no Undo when the destination already had that name: a Replace or Keep both could have happened", async () => {
+            h.state.dirs.set(SRC, [f("main.rs"), f("B.TXT")]);
+            const v = mount();
+            await moved(v);
+            expect(v.container.querySelector(".files-status")?.textContent).toContain("Moved");
+            expect(undoButton(v)).toBeNull();
+            await v.model.undo();
+            expect(v.container.querySelector(".files-status")?.textContent).toContain("Nothing to undo");
+        });
+
+        it("offers no Undo when a conflict answered while the move ran left the item under another name", async () => {
+            const v = mount();
+            // Something created b.txt in src after the check, so the moved one was kept as "b (2).txt".
+            await moved(v, [f("b (2).txt")]);
+            await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toContain("Moved"));
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            expect(undoButton(v)).toBeNull();
+            await v.model.undo();
+            expect(v.container.querySelector(".files-status")?.textContent).toContain("Nothing to undo");
+        });
+
+        describe("a folder moved", () => {
+            const DOCS = `${HOME}\\docs`;
+            const movedFolder = async (v: ReturnType<typeof mount>, landed: FsEntry[]) => {
+                await waitFor(() => expect(v.names()).toHaveLength(5));
+                await v.model.transfer("move", [DOCS], SRC);
+                // What srv did: the folder is in src, with what it holds there.
+                h.state.dirs.set(SRC, [f("main.rs"), d("docs")]);
+                h.state.dirs.set(`${SRC}\\docs`, landed);
+                opEvent({ kind: "move", state: "done", done_items: 1 });
+            };
+            beforeEach(() => {
+                h.state.dirs.set(HOME, [f("b.txt"), d("src"), d("docs"), f("a10.md"), f("a2.md")]);
+                h.state.dirs.set(DOCS, [f("a.md")]);
+            });
+
+            it("is offered Undo when it holds what it held", async () => {
+                const v = mount();
+                await movedFolder(v, [f("a.md")]);
+                await waitFor(() => expect(undoButton(v)).not.toBeNull());
+            });
+
+            it("is offered no Undo when it was merged into a folder of that name that held other files", async () => {
+                const v = mount();
+                await movedFolder(v, [f("a.md"), f("other.txt")]);
+                await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toContain("Moved"));
+                await new Promise((resolve) => setTimeout(resolve, 50));
+                expect(undoButton(v)).toBeNull();
+            });
+        });
+
+        it("does not start a move whose pane changed host while the destination was being read", async () => {
+            const v = mount();
+            await waitFor(() => expect(v.names()).toHaveLength(4));
+            const real = h.rpc.FsListCommand.getMockImplementation()!;
+            let release!: () => void;
+            const gate = new Promise<void>((resolve) => (release = resolve));
+            h.rpc.FsListCommand.mockImplementationOnce(async (c: unknown, req: { path: string; cursor?: string }) => {
+                const out = await real(c, req);
+                await gate;
+                return out;
+            });
+            h.rpc.FsOpStartCommand.mockClear();
+            const started = v.model.transfer("move", [`${HOME}\\b.txt`], SRC);
+            void v.model.openOn("user@box", "~");
+            release();
+            expect(await started).toBe(false);
+            expect(h.rpc.FsOpStartCommand).not.toHaveBeenCalled();
+        });
+
+        it("offers no Undo for a copy, nor for a move that was canceled", async () => {
+            const v = mount();
+            await waitFor(() => expect(v.names()).toHaveLength(4));
+            await v.model.transfer("copy", [`${HOME}\\b.txt`], SRC);
+            opEvent({ state: "done", done_items: 1 });
+            await v.model.transfer("move", [`${HOME}\\a2.md`], SRC);
+            opEvent({ kind: "move", state: "canceled", done_items: 0 });
+            await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toContain("canceled"));
+            expect(undoButton(v)).toBeNull();
+        });
+
+        it("leaves out an item srv reports as failed", async () => {
+            const v = mount();
+            await waitFor(() => expect(v.names()).toHaveLength(4));
+            await v.model.transfer("move", [`${HOME}\\b.txt`, `${HOME}\\a2.md`], SRC);
+            h.state.dirs.set(SRC, [f("main.rs"), f("b.txt")]);
+            opEvent({ kind: "move", state: "done", done_items: 2, total_items: 2, failures: [{ path: `${HOME}\\a2.md`, ok: false, error: "in use" }] });
+            await waitFor(() => expect(undoButton(v)).not.toBeNull());
+            h.state.dirs.set(HOME, [d("src"), f("a2.md")]);
+            h.state.dirs.set(SRC, [f("main.rs"), f("b.txt")]);
+            h.rpc.FsOpStartCommand.mockClear();
+            await v.model.undo();
+            expect(h.rpc.FsOpStartCommand.mock.calls.map((c) => (c[1] as { sources: string[] }).sources)).toEqual([[`${SRC}\\b.txt`]]);
+        });
+
+        it("says so, and moves nothing, when the items are no longer where the move left them", async () => {
+            const v = mount();
+            await moved(v);
+            await waitFor(() => expect(undoButton(v)).not.toBeNull());
+            // Nothing changed on disk since: b.txt is still in Home and not in src.
+            h.rpc.FsOpStartCommand.mockClear();
+            await v.model.undo();
+            expect(h.rpc.FsOpStartCommand).not.toHaveBeenCalled();
+            expect(v.container.querySelector(".files-status")?.textContent).toContain("Can't undo that move");
+        });
     });
 });
 
@@ -1640,5 +1858,579 @@ describe("the Files pane: a narrow pane (#47504)", () => {
         await waitFor(() => expect(v.container.querySelector(".files-grid")).toBeTruthy());
         openMore(v, "less");
         expect(menuLabels()).toEqual(["Hide hidden files", "Show as a list"]);
+    });
+});
+
+describe("the Files pane: tree view", () => {
+    const SRC = `${HOME}\\src`;
+    const LIB = `${SRC}\\lib`;
+    const changed = (dir: string) => h.state.byType.get("files:changed")?.forEach((fn) => fn({ data: { dir } }));
+    const twisty = (v: ReturnType<typeof mount>, label: string) => v.container.querySelector(`[aria-label="${label}"]`) as HTMLElement;
+    const indentOf = (v: ReturnType<typeof mount>, name: string) =>
+        (v.row(name).querySelector(".files-tree-indent") as HTMLElement | null)?.style.width;
+    const key = (v: ReturnType<typeof mount>, k: string) => fireEvent.keyDown(v.list(), { key: k });
+    const focused = (v: ReturnType<typeof mount>) => v.model.selection().focus;
+
+    beforeEach(() => {
+        h.state.dirs.set(SRC, [f("main.rs"), d("lib")]);
+        h.state.dirs.set(LIB, [f("util.ts")]);
+    });
+
+    it("is off until chosen, and the folder menu turns it on and off", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        expect(v.container.querySelector(".files-twisty")).toBeNull();
+        v.model.toggleTree();
+        await waitFor(() => expect(v.meta()["files:tree"]).toBe(true));
+        await waitFor(() => expect(twisty(v, "Open src")).not.toBeNull());
+        v.model.toggleTree();
+        await waitFor(() => expect(v.meta()["files:tree"]).toBeUndefined());
+        expect(v.container.querySelector(".files-twisty")).toBeNull();
+    });
+
+    it("opens a folder in place under its row, indented, and closes it again", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toEqual(["src", "a2.md", "a10.md", "b.txt"]));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toEqual(["src", "lib", "main.rs", "a2.md", "a10.md", "b.txt"]));
+        expect(indentOf(v, "src")).toBe("0px");
+        expect(indentOf(v, "lib")).toBe("16px");
+        // The folder is watched while it is open, and only then.
+        expect(h.rpc.FsWatchCommand).toHaveBeenCalledWith(expect.anything(), { path: SRC, block_id: "b1" });
+        fireEvent.click(twisty(v, "Close src"));
+        await waitFor(() => expect(v.names()).toEqual(["src", "a2.md", "a10.md", "b.txt"]));
+        expect(h.rpc.FsUnwatchCommand).toHaveBeenCalled();
+    });
+
+    it("opens folders inside folders, and closing the outer one closes the inner", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(twisty(v, "Open lib")).not.toBeNull());
+        fireEvent.click(twisty(v, "Open lib"));
+        await waitFor(() => expect(v.names()).toContain("util.ts"));
+        expect(indentOf(v, "util.ts")).toBe("32px");
+        fireEvent.click(twisty(v, "Close src"));
+        await waitFor(() => expect(v.names()).toEqual(["src", "a2.md", "a10.md", "b.txt"]));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toContain("lib"));
+        expect(v.names()).not.toContain("util.ts");
+    });
+
+    it("moves with Right and Left: open, step in, open, close, step out, close", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(v.row("src"));
+        key(v, "ArrowRight");
+        await waitFor(() => expect(v.names()).toContain("lib"));
+        key(v, "ArrowRight");
+        expect(focused(v)).toBe("src/lib");
+        key(v, "ArrowRight");
+        await waitFor(() => expect(v.names()).toContain("util.ts"));
+        key(v, "ArrowLeft");
+        await waitFor(() => expect(v.names()).not.toContain("util.ts"));
+        expect(focused(v)).toBe("src/lib");
+        key(v, "ArrowLeft");
+        expect(focused(v)).toBe("src");
+        key(v, "ArrowLeft");
+        await waitFor(() => expect(v.names()).toEqual(["src", "a2.md", "a10.md", "b.txt"]));
+    });
+
+    it("keeps the selection on the folder when what was selected inside it closes with it", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toContain("main.rs"));
+        fireEvent.click(v.row("main.rs"));
+        expect(focused(v)).toBe("src/main.rs");
+        fireEvent.click(twisty(v, "Close src"));
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        expect([...v.model.selection().names]).toEqual(["src"]);
+        expect(focused(v)).toBe("src");
+    });
+
+    it("acts on a row inside a folder by its real path", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toContain("main.rs"));
+        expect(v.model.pathOf("src/main.rs")).toBe(`${SRC}\\main.rs`);
+        // srv has renamed it by the time the folder is listed again.
+        h.state.dirs.set(SRC, [f("app.rs"), d("lib")]);
+        await v.model.rename("src/main.rs", "app.rs");
+        expect(h.rpc.FsRenameCommand).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ path: `${SRC}\\main.rs`, new_name: "app.rs" }));
+        expect(focused(v)).toBe("src/app.rs");
+    });
+
+    it("re-lists an open folder when it changes on disk", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toContain("main.rs"));
+        h.state.dirs.set(SRC, [f("main.rs"), f("new.rs"), d("lib")]);
+        changed(SRC);
+        await waitFor(() => expect(v.names()).toContain("new.rs"));
+    });
+
+    it("shows the matches of the shown folder alone while a filter is typed, and the open folders after", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toContain("main.rs"));
+        v.model.setFilter("txt");
+        await waitFor(() => expect(v.names()).toEqual(["b.txt"]));
+        v.model.setFilter("");
+        await waitFor(() => expect(v.names()).toContain("main.rs"));
+    });
+
+    it("closes the open folders when another folder is shown", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toContain("main.rs"));
+        fireEvent.dblClick(v.row("src"));
+        await waitFor(() => expect(v.names()).toEqual(["lib", "main.rs"]));
+        h.rpc.FsUnwatchCommand.mockClear();
+        await v.model.navigate(HOME);
+        await waitFor(() => expect(v.names()).toEqual(["src", "a2.md", "a10.md", "b.txt"]));
+    });
+
+    it("says why a folder can't be opened, and leaves it closed", async () => {
+        h.state.errors.set(SRC, { kind: "permission_denied", message: "Access is denied." });
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toContain("Couldn't open src"));
+        expect(v.names()).toEqual(["src", "a2.md", "a10.md", "b.txt"]);
+        expect(twisty(v, "Open src")).not.toBeNull();
+    });
+
+    it("has no tree on the grid: choosing the tree leaves the grid for the list", async () => {
+        const v = mount({ "files:view": "grid" });
+        await waitFor(() => expect(v.container.querySelector(".files-grid")).not.toBeNull());
+        v.model.toggleTree();
+        await waitFor(() => expect(v.meta()["files:tree"]).toBe(true));
+        expect(v.meta()["files:view"]).toBeUndefined();
+    });
+});
+
+describe("the Files pane: tree view, folders that change under it", () => {
+    const SRC = `${HOME}\\src`;
+    const LIB = `${SRC}\\lib`;
+    const changed = (dir: string) => h.state.byType.get("files:changed")?.forEach((fn) => fn({ data: { dir } }));
+    const twisty = (v: ReturnType<typeof mount>, label: string) => v.container.querySelector(`[aria-label="${label}"]`) as HTMLElement;
+
+    beforeEach(() => {
+        h.state.dirs.set(SRC, [f("main.rs"), d("lib")]);
+        h.state.dirs.set(LIB, [f("util.ts")]);
+    });
+
+    it("closes an open folder that was renamed or deleted, with no error, and stops watching it", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toContain("main.rs"));
+        // The folder is renamed on disk, and the pane is refreshed (as it is after the person's own rename).
+        h.state.dirs.set(HOME, [f("b.txt"), d("source"), f("a10.md"), f("a2.md")]);
+        h.state.dirs.delete(SRC);
+        h.state.errors.set(SRC, { kind: "not_found", message: "gone" });
+        v.model.refresh();
+        await waitFor(() => expect(v.names()).toEqual(["source", "a2.md", "a10.md", "b.txt"]));
+        await waitFor(() => expect(h.rpc.FsUnwatchCommand).toHaveBeenCalled());
+        expect(v.container.querySelector(".files-status")?.textContent ?? "").not.toContain("Couldn't open");
+        // A folder of the old name coming back is a closed folder, not one that silently reopens.
+        h.state.errors.delete(SRC);
+        h.state.dirs.set(HOME, [f("b.txt"), d("src"), f("a10.md"), f("a2.md")]);
+        h.state.dirs.set(SRC, [f("main.rs")]);
+        v.model.refresh();
+        await waitFor(() => expect(v.names()).toEqual(["src", "a2.md", "a10.md", "b.txt"]));
+        expect(twisty(v, "Open src")).not.toBeNull();
+    });
+
+    it("keeps the newest listing of an open folder when an older one ends last", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        const real = h.rpc.FsListCommand.getMockImplementation()!;
+        let release!: () => void;
+        const slow = new Promise<void>((resolve) => (release = resolve));
+        // The first listing of src is held back after it has read the folder as it was.
+        h.rpc.FsListCommand.mockImplementationOnce(async (c: unknown, req: { path: string; cursor?: string }) => {
+            const old = await real(c, req);
+            await slow;
+            return old;
+        });
+        fireEvent.click(twisty(v, "Open src"));
+        h.state.dirs.set(SRC, [f("main.rs"), d("lib"), f("new.txt")]);
+        changed(SRC);
+        await waitFor(() => expect(v.names()).toContain("new.txt"));
+        release();
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(v.names()).toContain("new.txt");
+    });
+
+    it("lets go of a second watch of a folder that was closed and opened again while the first was pending", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        const resolvers: Array<(id: string) => void> = [];
+        const pending = () => new Promise<{ watch_id: string }>((resolve) => resolvers.push((id) => resolve({ watch_id: id })));
+        h.rpc.FsWatchCommand.mockImplementationOnce(pending).mockImplementationOnce(pending);
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(resolvers).toHaveLength(1));
+        fireEvent.click(twisty(v, "Close src"));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(resolvers).toHaveLength(2));
+        resolvers[0]("w-first");
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        resolvers[1]("w-second");
+        await waitFor(() => expect(h.rpc.FsUnwatchCommand).toHaveBeenCalledWith(expect.anything(), { watch_id: "w-second" }));
+        expect(h.rpc.FsUnwatchCommand).not.toHaveBeenCalledWith(expect.anything(), { watch_id: "w-first" });
+    });
+});
+
+describe("the Files pane: tree view, rows that share a label or a name with another folder's", () => {
+    const SRC = `${HOME}\\src`;
+    const LIB = `${SRC}\\lib`;
+    const twisty = (v: ReturnType<typeof mount>, label: string) => v.container.querySelector(`[aria-label="${label}"]`) as HTMLElement;
+    const rowOf = (v: ReturnType<typeof mount>, name: string) => v.container.querySelector(`.files-row[data-name="${name}"]`) as HTMLElement;
+
+    beforeEach(() => {
+        tabs.opened = [];
+        h.state.dirs.set(HOME, [f("b.txt"), d("src"), d("lib"), f("a2.md")]);
+        h.state.dirs.set(SRC, [f("main.rs"), d("lib")]);
+        h.state.dirs.set(LIB, [f("util.ts")]);
+        h.state.dirs.set(`${HOME}\\lib`, [f("top.ts")]);
+    });
+
+    it("copies a folder and the rows opened inside it as the folder alone", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toContain("main.rs"));
+        fireEvent.keyDown(v.list(), { key: "a", ctrlKey: true });
+        fireEvent.keyDown(v.list(), { key: "c", ctrlKey: true });
+        // Not `src\\main.rs` besides `src`: pasted, each would land under its own name, and main.rs would be twice in the destination.
+        expect(clipboard()).toEqual({ kind: "copy", paths: [`${HOME}\\lib`, SRC, `${HOME}\\a2.md`, `${HOME}\\b.txt`] });
+        fireEvent.keyDown(v.list(), { key: "x", ctrlKey: true });
+        expect(clipboard()?.paths).toEqual([`${HOME}\\lib`, SRC, `${HOME}\\a2.md`, `${HOME}\\b.txt`]);
+    });
+
+    it("acts on the folder from the menu of a row opened in it, when both are selected", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toContain("main.rs"));
+        // Both rows selected: the menu of the inner one acts on the selection, which is the folder.
+        v.model.setSelection({ names: new Set(["src", "src/main.rs"]), focus: "src/main.rs", anchor: "src" });
+        const entry = v.model.entries().find((e) => e.name === "src/main.rs")!;
+        const menu = buildRowMenu(v.model, entry, { openEntry: () => {}, openWithDefaultApp: () => {}, openInNewTab: () => {}, copyPaths: () => {}, askDeletePermanently: () => {} });
+        (menu.find((i) => i.type === "action" && i.label === "Copy") as { onSelect: () => void }).onSelect();
+        expect(clipboard()).toEqual({ kind: "copy", paths: [SRC] });
+    });
+
+    it("keeps a row opened in a selected folder when the folder itself is not selected", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toContain("main.rs"));
+        fireEvent.click(rowOf(v, "src/main.rs"));
+        fireEvent.keyDown(v.list(), { key: "c", ctrlKey: true });
+        expect(clipboard()).toEqual({ kind: "copy", paths: [`${SRC}\\main.rs`] });
+    });
+
+    it("drags a folder and the rows opened inside it as the folder alone", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toContain("main.rs"));
+        fireEvent.keyDown(v.list(), { key: "a", ctrlKey: true });
+        const data = new Map<string, string>();
+        const dt = { setData: (k: string, val: string) => data.set(k, val), effectAllowed: "" };
+        fireEvent.dragStart(rowOf(v, "src"), { dataTransfer: dt });
+        expect(JSON.parse(data.get(PATHS_MIME)!)).toEqual([`${HOME}\\lib`, SRC, `${HOME}\\a2.md`, `${HOME}\\b.txt`]);
+    });
+
+    it("opens the folder a middle-click is on in a new tab, not another of the same label", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toContain("main.rs"));
+        // src\lib shows as `lib`, as the folder `lib` of the shown folder does.
+        fireEvent(rowOf(v, "src/lib"), new MouseEvent("auxclick", { bubbles: true, button: 1 }));
+        await waitFor(() => expect(tabs.opened).toEqual([["b1", LIB]]));
+        fireEvent(rowOf(v, "lib"), new MouseEvent("auxclick", { bubbles: true, button: 1 }));
+        await waitFor(() => expect(tabs.opened).toEqual([["b1", LIB], ["b1", `${HOME}\\lib`]]));
+    });
+});
+
+describe("the Files pane: tree view, a watch asked before the pane went elsewhere", () => {
+    const OTHER = "C:\\Users\\b";
+    const twisty = (v: ReturnType<typeof mount>, label: string) => v.container.querySelector(`[aria-label="${label}"]`) as HTMLElement;
+
+    it("lets go of the old folder's watch when a folder of the same name was opened in the new one", async () => {
+        h.state.dirs.set(OTHER, [d("src")]);
+        h.state.dirs.set(`${OTHER}\\src`, [f("x.rs")]);
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        const resolvers: Array<(id: string) => void> = [];
+        const pending = () => new Promise<{ watch_id: string }>((resolve) => resolvers.push((id) => resolve({ watch_id: id })));
+        // The watches asked for, in order: src here (held back), the other folder itself, then its src (held back).
+        h.rpc.FsWatchCommand.mockImplementationOnce(pending)
+            .mockImplementationOnce(async () => ({ watch_id: "w-pane" }))
+            .mockImplementationOnce(pending);
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(resolvers).toHaveLength(1));
+        await v.model.navigate(OTHER);
+        await waitFor(() => expect(v.names()).toEqual(["src"]));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(resolvers).toHaveLength(2));
+        // The first answer is for C:\\Users\\a\\src: it must not take the place of the watch of C:\\Users\\b\\src.
+        resolvers[0]("w-old");
+        await waitFor(() => expect(h.rpc.FsUnwatchCommand).toHaveBeenCalledWith(expect.anything(), { watch_id: "w-old" }));
+        resolvers[1]("w-new");
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        expect(h.rpc.FsUnwatchCommand).not.toHaveBeenCalledWith(expect.anything(), { watch_id: "w-new" });
+        // And it is the one kept: a change in the folder reaches it, and closing the folder lets it go.
+        fireEvent.click(twisty(v, "Close src"));
+        await waitFor(() => expect(h.rpc.FsUnwatchCommand).toHaveBeenCalledWith(expect.anything(), { watch_id: "w-new" }));
+    });
+});
+
+describe("the Files pane: find in subfolders", () => {
+    const SRC = `${HOME}\\src`;
+    const LIB = `${SRC}\\lib`;
+    const where = (v: ReturnType<typeof mount>) => [...v.container.querySelectorAll(".files-rows .files-where")].map((n) => n.textContent);
+    const status = (v: ReturnType<typeof mount>) => v.container.querySelector(".files-status")?.textContent ?? "";
+
+    beforeEach(() => {
+        h.state.dirs.set(SRC, [f("main.rs"), d("lib")]);
+        h.state.dirs.set(LIB, [f("util.ts")]);
+    });
+
+    it("shows what matches in the folders under the shown one, with the folder after each name", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        v.model.toggleDeep();
+        v.model.setFilter("util");
+        await waitFor(() => expect(v.names()).toEqual(["util.ts"]));
+        expect(where(v)).toEqual(["src/lib"]);
+        expect(v.model.pathOf("src/lib/util.ts")).toBe(`${LIB}\\util.ts`);
+        // Folders and files both match, best first.
+        v.model.setFilter("lib");
+        await waitFor(() => expect(v.names()).toContain("lib"));
+        // Clearing what was typed brings the folder back.
+        v.model.setFilter("");
+        await waitFor(() => expect(v.names()).toEqual(["src", "a2.md", "a10.md", "b.txt"]));
+    });
+
+    it("is the plain filter of the shown folder while it is off", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        v.model.setFilter("util");
+        await waitFor(() => expect(v.names()).toEqual([]));
+        v.model.setFilter("b.");
+        await waitFor(() => expect(v.names()).toEqual(["b.txt"]));
+        expect(where(v)).toEqual([]);
+    });
+
+    it("works on a found row by its real path", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        v.model.toggleDeep();
+        v.model.setFilter("util");
+        await waitFor(() => expect(v.names()).toEqual(["util.ts"]));
+        await v.model.rename("src/lib/util.ts", "tools.ts");
+        expect(h.rpc.FsRenameCommand).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ path: `${LIB}\\util.ts`, new_name: "tools.ts" }));
+    });
+
+    it("is turned on from the filter box, and turns off when another folder is shown", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.keyDown(v.list(), { key: "/" });
+        const button = await waitFor(() => {
+            const b = v.container.querySelector('[aria-label="Search subfolders too"]') as HTMLElement | null;
+            expect(b).not.toBeNull();
+            return b!;
+        });
+        // A real press goes pointerdown first: it must not count as a press outside the box and hide it.
+        fireEvent.pointerDown(button);
+        expect(v.container.querySelector(".files-filter-input")).not.toBeNull();
+        fireEvent.click(button);
+        await waitFor(() => expect(v.container.querySelector(".files-filter-input")?.getAttribute("placeholder")).toBe("Find in this folder and its subfolders"));
+        await v.model.navigate(SRC);
+        await waitFor(() => expect(v.names()).toEqual(["lib", "main.rs"]));
+        expect(v.model.deepMode()).toBe(false);
+    });
+
+    it("says it isn't available on a host", async () => {
+        const v = mount({ connection: "user@box" });
+        await waitFor(() => expect(v.container.querySelector(".files-status")).not.toBeNull());
+        v.model.toggleDeep();
+        expect(status(v)).toContain("isn't available");
+        expect(v.model.deepMode()).toBe(false);
+    });
+
+    it("indexes hidden folders once hidden files are turned on, though the setting is saved a moment later", async () => {
+        h.state.dirs.set(HOME, [d(".cache", { hidden: true }), d("src")]);
+        h.state.dirs.set(`${HOME}\\.cache`, [f("secret.ts")]);
+        const v = mount();
+        await waitFor(() => expect(v.names()).toEqual(["src"]));
+        v.model.toggleDeep();
+        v.model.setFilter("secret");
+        await new Promise((r) => setTimeout(r, 300));
+        expect(v.names()).toEqual([]);
+        // Saving the setting takes a round trip: the find must not read the old one in the meantime.
+        const save = v.ctx.setMeta;
+        (v.ctx as { setMeta: typeof save }).setMeta = async (patch) => {
+            await new Promise((r) => setTimeout(r, 40));
+            await save(patch);
+        };
+        v.model.toggleHidden();
+        await waitFor(() => expect(v.names()).toEqual(["secret.ts"]));
+    });
+
+    it("leaves out a hidden folder's files unless hidden files are shown", async () => {
+        h.state.dirs.set(HOME, [d(".cache", { hidden: true }), d("src")]);
+        h.state.dirs.set(`${HOME}\\.cache`, [f("secret.ts")]);
+        const v = mount();
+        await waitFor(() => expect(v.names()).toEqual(["src"]));
+        v.model.toggleDeep();
+        v.model.setFilter("secret");
+        await waitFor(() => expect(h.rpc.FsListCommand.mock.calls.some((c) => (c[1] as { path: string }).path === SRC)).toBe(true));
+        await new Promise((r) => setTimeout(r, 300));
+        expect(v.names()).toEqual([]);
+        expect(h.rpc.FsListCommand.mock.calls.some((c) => (c[1] as { path: string }).path === `${HOME}\\.cache`)).toBe(false);
+    });
+});
+
+describe("the Files pane: columns view", () => {
+    const SRC = `${HOME}\\src`;
+    const LIB = `${SRC}\\lib`;
+    const columns = (v: ReturnType<typeof mount>) => [...v.container.querySelectorAll(".files-column")] as HTMLElement[];
+    const labels = (v: ReturnType<typeof mount>, i: number) => [...(columns(v)[i]?.querySelectorAll(".files-name") ?? [])].map((n) => n.textContent);
+    const rowIn = (v: ReturnType<typeof mount>, i: number, label: string) =>
+        [...columns(v)[i].querySelectorAll(".files-row")].find((r) => r.querySelector(".files-name")?.textContent === label) as HTMLElement;
+    const key = (v: ReturnType<typeof mount>, k: string) => fireEvent.keyDown(v.list(), { key: k });
+
+    beforeEach(() => {
+        h.state.dirs.set(SRC, [f("main.rs"), d("lib")]);
+        h.state.dirs.set(LIB, [f("util.ts")]);
+    });
+
+    it("is chosen from the folder menu, shows the folder as one column, and goes back to the list", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        expect(columns(v)).toHaveLength(0);
+        v.model.toggleColumns();
+        await waitFor(() => expect(v.meta()["files:view"]).toBe("columns"));
+        await waitFor(() => expect(labels(v, 0)).toEqual(["src", "a2.md", "a10.md", "b.txt"]));
+        expect(columns(v)).toHaveLength(1);
+        // The arrow on a folder; none on a file.
+        expect(rowIn(v, 0, "src").querySelector(".files-column-arrow")).not.toBeNull();
+        expect(rowIn(v, 0, "b.txt").querySelector(".files-column-arrow")).toBeNull();
+        v.model.toggleColumns();
+        await waitFor(() => expect(v.meta()["files:view"]).toBeUndefined());
+        expect(columns(v)).toHaveLength(0);
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+    });
+
+    it("shows only the notice, over no column, when a filter matches nothing in the first one, and the chain is back with the filter gone", async () => {
+        const v = mount({ "files:view": "columns" });
+        await waitFor(() => expect(labels(v, 0)).toHaveLength(4));
+        fireEvent.click(rowIn(v, 0, "src"));
+        await waitFor(() => expect(labels(v, 1)).toEqual(["lib", "main.rs"]));
+        v.model.setFilter("zzz");
+        await waitFor(() => expect(columns(v)).toHaveLength(0));
+        expect(v.container.querySelector(".files-notice p")?.textContent).toBe("Nothing here matches “zzz”.");
+        fireEvent.click(v.getByText("Clear filter"));
+        await waitFor(() => expect(columns(v)).toHaveLength(2));
+        expect(labels(v, 1)).toEqual(["lib", "main.rs"]);
+    });
+
+    it("shows what is in a chosen folder as the next column, and drops it when a file is chosen instead", async () => {
+        const v = mount({ "files:view": "columns" });
+        await waitFor(() => expect(labels(v, 0)).toHaveLength(4));
+        fireEvent.click(rowIn(v, 0, "src"));
+        await waitFor(() => expect(labels(v, 1)).toEqual(["lib", "main.rs"]));
+        expect(h.rpc.FsWatchCommand).toHaveBeenCalledWith(expect.anything(), { path: SRC, block_id: "b1" });
+        fireEvent.click(rowIn(v, 1, "lib"));
+        await waitFor(() => expect(labels(v, 2)).toEqual(["util.ts"]));
+        expect(columns(v)).toHaveLength(3);
+        // A file in the first column ends the chain after it.
+        fireEvent.click(rowIn(v, 0, "b.txt"));
+        await waitFor(() => expect(columns(v)).toHaveLength(1));
+        expect(h.rpc.FsUnwatchCommand).toHaveBeenCalled();
+    });
+
+    it("moves with Up and Down inside the column, Right into the next one and Left back out", async () => {
+        const v = mount({ "files:view": "columns" });
+        await waitFor(() => expect(labels(v, 0)).toHaveLength(4));
+        fireEvent.click(rowIn(v, 0, "src"));
+        await waitFor(() => expect(labels(v, 1)).toHaveLength(2));
+        key(v, "ArrowRight");
+        await waitFor(() => expect(v.model.selection().focus).toBe("src/lib"));
+        expect(v.model.cols.activeColumn()).toBe(1);
+        key(v, "ArrowDown");
+        expect(v.model.selection().focus).toBe("src/main.rs");
+        key(v, "ArrowUp");
+        await waitFor(() => expect(labels(v, 2)).toEqual(["util.ts"]));
+        key(v, "ArrowRight");
+        await waitFor(() => expect(v.model.selection().focus).toBe("src/lib/util.ts"));
+        expect(v.model.cols.activeColumn()).toBe(2);
+        key(v, "ArrowLeft");
+        expect(v.model.selection().focus).toBe("src/lib");
+        key(v, "ArrowLeft");
+        expect(v.model.selection().focus).toBe("src");
+        await waitFor(() => expect(columns(v)).toHaveLength(2));
+        expect(v.model.cols.activeColumn()).toBe(0);
+    });
+
+    it("works on a row of a later column by its real path", async () => {
+        const v = mount({ "files:view": "columns" });
+        await waitFor(() => expect(labels(v, 0)).toHaveLength(4));
+        fireEvent.click(rowIn(v, 0, "src"));
+        await waitFor(() => expect(labels(v, 1)).toHaveLength(2));
+        fireEvent.click(rowIn(v, 1, "main.rs"));
+        expect(v.model.selection().names).toEqual(new Set(["src/main.rs"]));
+        expect(v.model.pathOf("src/main.rs")).toBe(`${SRC}\\main.rs`);
+        await v.model.rename("src/main.rs", "app.rs");
+        expect(h.rpc.FsRenameCommand).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ path: `${SRC}\\main.rs`, new_name: "app.rs" }));
+    });
+
+    it("starts again from one column when another folder is shown", async () => {
+        const v = mount({ "files:view": "columns" });
+        await waitFor(() => expect(labels(v, 0)).toHaveLength(4));
+        fireEvent.click(rowIn(v, 0, "src"));
+        await waitFor(() => expect(columns(v)).toHaveLength(2));
+        await v.model.navigate(SRC);
+        await waitFor(() => expect(labels(v, 0)).toEqual(["lib", "main.rs"]));
+        expect(columns(v)).toHaveLength(1);
+        expect(v.model.cols.activeColumn()).toBe(0);
+    });
+
+    it("keeps the grid and the tree out of it: choosing either leaves the columns", async () => {
+        const v = mount({ "files:view": "columns" });
+        await waitFor(() => expect(labels(v, 0)).toHaveLength(4));
+        fireEvent.click(rowIn(v, 0, "src"));
+        await waitFor(() => expect(columns(v)).toHaveLength(2));
+        v.model.toggleTree();
+        await waitFor(() => expect(v.meta()["files:tree"]).toBe(true));
+        expect(v.meta()["files:view"]).toBeUndefined();
+        expect(columns(v)).toHaveLength(0);
+        await waitFor(() => expect(v.names()).toEqual(["src", "a2.md", "a10.md", "b.txt"]));
+    });
+});
+
+describe("the Files pane: Places recents", () => {
+    it("records a folder the person opened, not the one the pane came back to, nor one reached by Back", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        // The folder the pane started in is not a recent.
+        expect(recentPlaces()).toEqual([]);
+        fireEvent.dblClick(v.row("src"));
+        await waitFor(() => expect(v.names()).toEqual(["main.rs"]));
+        await waitFor(() => expect(recentPlaces().map((p) => p.path)).toEqual([`${HOME}\\src`]));
+        v.model.goBack();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        expect(recentPlaces().map((p) => p.path)).toEqual([`${HOME}\\src`]);
     });
 });

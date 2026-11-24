@@ -169,7 +169,7 @@ impl PersistentSubprocessController {
     }
 
     /// The attempt after the gate refused: release the claim, and say so when prompts were queued behind it.
-    pub(super) fn refuse_after_gate(&self, gate_err: &crate::identity::resolver::SpawnGateError) -> EagerResumeOutcome {
+    pub(in super::super) fn refuse_after_gate(&self, gate_err: &crate::identity::resolver::SpawnGateError) -> EagerResumeOutcome {
         tracing::warn!(
             block_id = %self.block_id,
             error = %gate_err,
@@ -221,6 +221,8 @@ impl PersistentSubprocessController {
         let stranded = {
             let mut inner = self.inner.lock().unwrap();
             inner.spawning_in_progress = false;
+            // In the same acquisition, so a message that spawns next is not judged by this attempt's stop.
+            inner.stop_watch.release();
             inner.pending_send_messages.len()
         };
         if stranded > 0 {

@@ -58,8 +58,32 @@ export function layoutBehind(id: string): boolean {
     return behind().has(id);
 }
 
+/** Something other than the window (a splitter drag) ended: let the panes that waited for it catch up, unless the window is resizing again. */
+export function settleLayoutBehind(): void {
+    if (!untrack(resizing)) drainBehind();
+}
+
+// Splitter drags in progress. A drag resizes slots on every frame as a window resize does, so the catch-up waits for
+// it: a drain that ran under a new drag would empty the queue while those panes stay hidden, and they would all
+// lay out together when it ended.
+let splitterDrags = 0;
+
+/** A splitter drag began (`true`) or ended (`false`). The catch-up pauses with the first drag and resumes after the last. */
+export function noteSplitterDrag(active: boolean): void {
+    if (active) {
+        splitterDrags++;
+        cancelDrain?.();
+        cancelDrain = null;
+        return;
+    }
+    if (splitterDrags === 0) return;
+    if (--splitterDrags === 0) settleLayoutBehind();
+}
+
 function drainBehind(): void {
     cancelDrain?.();
+    cancelDrain = null;
+    if (splitterDrags > 0) return;
     cancelDrain = drainWhenIdle(() => {
         const [next] = untrack(behind);
         if (next == null) return false;
@@ -87,6 +111,7 @@ export function resetWindowResizeForTests(): void {
     setResizing(false);
     cancelDrain?.();
     cancelDrain = null;
+    splitterDrags = 0;
     setBehind(new Set<string>());
     installedOn?.removeEventListener("resize", noteWindowResize);
     installedOn = null;

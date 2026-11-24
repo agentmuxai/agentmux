@@ -11,9 +11,12 @@
  *
  *  - a drag, also a double- or triple-click drag: while the primary button is held after a press in pane P,
  *    the root carries `data-pane-select` and P carries `data-pane-select-owner`, and the stylesheet makes
- *    everything outside P `user-select: none`. The engine never has anything outside P to extend to, so
- *    nothing patches the selection afterwards. The attributes go on at the first move past `DRAG_SLOP_PX`
- *    (a click sets nothing, so a click never restyles the document), and off at the release, a cancel, a
+ *    everything outside P `user-select: none`. The engine never has anything outside P to extend to. While
+ *    the pointer is over something that is not P (a field or a handle there makes the engine snap the end
+ *    to the nearest position it can select, which can be before P in document order) the selection is held
+ *    where the pointer last had it inside P. The attributes go on at the first move past `DRAG_SLOP_PX` that is over
+ *    something other than the pane (a click, or a drag that stays inside the pane, sets nothing, so it never restyles
+ *    the document), and off at the release, a cancel, a
  *    drag of the text out, the window losing focus or P leaving the page;
  *  - Shift+click: a press that would extend a selection from one pane into another drops the selection
  *    first, so the click starts a new one where it landed;
@@ -71,6 +74,33 @@ interface Drag {
     y: number;
     /** The attributes are on: the pointer has moved since the press. */
     marked: boolean;
+    /** The pointer is over the pane (not over another pane, the chrome or the gap between). */
+    inside: boolean;
+    /** The selection as it stood the last time it changed with the pointer over the pane. */
+    last: SelectionEnds | null;
+}
+
+type SelectionEnds = [Node, number, Node, number];
+
+/**
+ * A held drag whose pointer is over something that is not the pane: over a field or a handle (`user-select: none`)
+ * the engine snaps the far end to the nearest position it can select, which can be the start of the document's
+ * order before the pane, so the selection leaps backwards over other panes. It stays where it last was in the pane.
+ */
+function holdSelection(doc: Document, d: Drag): void {
+    const sel = doc.getSelection();
+    if (!sel || !sel.anchorNode || !sel.focusNode) return;
+    const now: SelectionEnds = [sel.anchorNode, sel.anchorOffset, sel.focusNode, sel.focusOffset];
+    if (d.inside || !d.last) {
+        if (d.inside) d.last = now;
+        return;
+    }
+    if (now.some((v, i) => v !== d.last![i])) sel.setBaseAndExtent(...d.last);
+}
+
+/** Whether a press on `el` can start no selection: the element, or what it inherits from, is `user-select: none`. */
+export function cannotSelect(win: Window, el: Element | null): boolean {
+    return !!el && win.getComputedStyle(el).userSelect === "none";
 }
 
 export function installPaneSelectGuard(win: Window = window): () => void {
@@ -108,7 +138,10 @@ export function installPaneSelectGuard(win: Window = window): () => void {
         if (p.shiftKey) dropCrossingSelection(p.target);
         const pane = paneOf(p.target);
         if (!pane) return;
-        drag = { pane, x: p.clientX, y: p.clientY, marked: false };
+        // A press on something that says `user-select: none` (the Atlas map, a button, a header) cannot start a
+        // selection, so there is nothing to confine, and marking it restyles every element of the window.
+        if (cannotSelect(win, elementOf(p.target))) return;
+        drag = { pane, x: p.clientX, y: p.clientY, marked: false, inside: true, last: null };
     };
 
     const onMove = (e: Event): void => {
@@ -119,13 +152,14 @@ export function installPaneSelectGuard(win: Window = window): () => void {
             end();
             return;
         }
-        if (!drag.marked && Math.hypot(p.clientX - drag.x, p.clientY - drag.y) >= DRAG_SLOP_PX) mark(drag);
+        drag.inside = paneOf(p.target) === drag.pane;
+        // Only a pointer outside the pane can reach another pane; marking restyles the whole window.
+        if (!drag.marked && !drag.inside && Math.hypot(p.clientX - drag.x, p.clientY - drag.y) >= DRAG_SLOP_PX) mark(drag);
     };
 
     /** A selection that began in a pane and whose far end has left it: the end goes back to the pane's edge. */
     const keepInPane = (): void => {
-        // A held press is the pointer's business (the stylesheet confines it).
-        if (drag) return;
+        if (drag) return holdSelection(doc, drag); // a held press: the stylesheet confines it, the pointer moves the end
         const sel = doc.getSelection();
         if (!sel || sel.rangeCount === 0 || !sel.anchorNode || !sel.focusNode) return;
         const pane = paneOf(sel.anchorNode);

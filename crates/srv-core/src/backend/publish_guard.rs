@@ -28,7 +28,10 @@ use std::sync::Once;
 const COUNT: &str = "GIT_CONFIG_COUNT";
 pub(crate) const HOOKS_PATH_KEY: &str = "core.hooksPath";
 /// Larger counts already in the env are not trusted (and not looped over).
-const MAX_ENTRIES: usize = 256;
+pub(crate) const MAX_ENTRIES: usize = 1024;
+/// How many entries of its own an environment can hold: the room an addition to a count of
+/// this size (`git_program_settings::entries_over`) is sure to fit in below `MAX_ENTRIES`.
+pub(crate) const MAX_CARRIED: usize = MAX_ENTRIES - 256;
 /// The line `gh-agent` writes into every hook it generates.
 const MARKER: &str = "gh-agent publish guard";
 
@@ -66,6 +69,22 @@ fn parse_count(get: &impl Fn(&str) -> Option<String>) -> usize {
         .unwrap_or(0)
 }
 
+/// The count `GIT_CONFIG_COUNT` names, as written (0 when it is absent or not a number).
+pub(crate) fn declared_count(get: &impl Fn(&str) -> Option<String>) -> usize {
+    get(COUNT).and_then(|c| c.trim().parse().ok()).unwrap_or(0)
+}
+
+/// The variables that make `entries` the whole `GIT_CONFIG_*` list: the slots numbered from 0, and the count.
+pub(crate) fn git_config_slots(entries: &[(String, String)]) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::with_capacity(entries.len() * 2 + 1);
+    for (i, (k, v)) in entries.iter().enumerate() {
+        out.push((format!("GIT_CONFIG_KEY_{i}"), k.clone()));
+        out.push((format!("GIT_CONFIG_VALUE_{i}"), v.clone()));
+    }
+    out.push((COUNT.to_string(), entries.len().to_string()));
+    out
+}
+
 /// The variables that set `key = value` on top of the `GIT_CONFIG_*` entries
 /// `get` already sees. Every slot that names `key` (case-insensitively, as git
 /// does for the section and name) gets the value, since git uses the last one
@@ -85,6 +104,31 @@ pub fn git_config_entries(get: impl Fn(&str) -> Option<String>, key: &str, value
         (format!("GIT_CONFIG_VALUE_{count}"), value.to_string()),
         (COUNT.to_string(), (count + 1).to_string()),
     ]
+}
+
+/// Whether the `GIT_CONFIG_*` entries `get` sees name `key` (matched without case).
+pub fn git_config_has(get: &impl Fn(&str) -> Option<String>, key: &str) -> bool {
+    (0..parse_count(get)).any(|i| get(&format!("GIT_CONFIG_KEY_{i}")).is_some_and(|k| k.eq_ignore_ascii_case(key)))
+}
+
+/// Whether the `GIT_CONFIG_*` entries `get` sees give `key` exactly `value` somewhere (the name matched without case).
+pub fn git_config_has_value(get: &impl Fn(&str) -> Option<String>, key: &str, value: &str) -> bool {
+    (0..parse_count(get)).any(|i| {
+        get(&format!("GIT_CONFIG_KEY_{i}")).is_some_and(|k| k.eq_ignore_ascii_case(key)) && get(&format!("GIT_CONFIG_VALUE_{i}")).is_some_and(|v| v == value)
+    })
+}
+
+/// The variables that put `key = value` before every `GIT_CONFIG_*` entry `get` sees, the others renumbered after
+/// it: for a setting git reads in order, where an empty value clears the list built before it.
+pub fn git_config_prepend(get: &impl Fn(&str) -> Option<String>, key: &str, value: &str) -> Vec<(String, String)> {
+    let count = parse_count(get);
+    let mut out = vec![("GIT_CONFIG_KEY_0".to_string(), key.to_string()), ("GIT_CONFIG_VALUE_0".to_string(), value.to_string())];
+    for i in 0..count {
+        out.push((format!("GIT_CONFIG_KEY_{}", i + 1), get(&format!("GIT_CONFIG_KEY_{i}")).unwrap_or_default()));
+        out.push((format!("GIT_CONFIG_VALUE_{}", i + 1), get(&format!("GIT_CONFIG_VALUE_{i}")).unwrap_or_default()));
+    }
+    out.push((COUNT.to_string(), (count + 1).to_string()));
+    out
 }
 
 /// `env` without its `core.hooksPath` entries, the others renumbered: for a

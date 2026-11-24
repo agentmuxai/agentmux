@@ -8,8 +8,7 @@ watchAmbient 5000
       <span class="token-usage-breakdown-title">
         "Token Usage"
       <span class="token-usage-breakdown-subtitle">
-        "since"
-        "T"
+        "since T"
     <div class="token-usage-breakdown-rows">
       <button title="Click to focus Manoz's pane" type="button" class="ui-button ui-tone-quiet token-usage-breakdown-row token-usage-breakdown-agent-row">
         <span class="token-usage-breakdown-row-name">
@@ -18,8 +17,7 @@ watchAmbient 5000
             "80"
             "%"
         <span class="token-usage-breakdown-row-meta">
-          "1"
-          "turn"
+          "1 turn"
         <span class="token-usage-breakdown-row-counts">
           <span class="token-usage-indicator-arrow">
             "↑"
@@ -50,8 +48,7 @@ watchAmbient 5000
             "↓"
           "65"
       <div class="token-usage-breakdown-cache-rate" data-hover-tip="Share of input tokens served from Claude's prompt cache this session (~0.1x the cost of a fresh token). Only available for providers that report a cache breakdown." aria-description="Share of input tokens served from Claude's prompt cache this session (~0.1x the cost of a fresh token). Only available for providers that report a cache breakdown.">
-        "80"
-        "% of input served from cache"
+        "80% of input served from cache"
     <div class="token-usage-breakdown-footer">
       <button type="button" class="ui-button ui-tone-danger ui-density-compact">
         "Reset counter"
@@ -64,8 +61,7 @@ watchAmbient 5000
       <span class="token-usage-breakdown-title">
         "Token Usage"
       <span class="token-usage-breakdown-subtitle">
-        "since"
-        "T"
+        "since T"
     <div class="token-usage-breakdown-rows">
       <button title="Click to focus Manoz's pane" type="button" class="ui-button ui-tone-quiet token-usage-breakdown-row token-usage-breakdown-agent-row">
         <span class="token-usage-breakdown-row-name">
@@ -74,8 +70,7 @@ watchAmbient 5000
             "80"
             "%"
         <span class="token-usage-breakdown-row-meta">
-          "1"
-          "turn"
+          "1 turn"
         <span class="token-usage-breakdown-row-counts">
           <span class="token-usage-indicator-arrow">
             "↑"
@@ -138,8 +133,7 @@ watchAmbient 5000
             "↓"
           "65"
       <div class="token-usage-breakdown-cache-rate" data-hover-tip="Share of input tokens served from Claude's prompt cache this session (~0.1x the cost of a fresh token). Only available for providers that report a cache breakdown." aria-description="Share of input tokens served from Claude's prompt cache this session (~0.1x the cost of a fresh token). Only available for providers that report a cache breakdown.">
-        "80"
-        "% of input served from cache"
+        "80% of input served from cache"
     <div class="token-usage-breakdown-footer">
       <button type="button" class="ui-button ui-tone-danger ui-density-compact">
         "Reset counter"
@@ -152,8 +146,7 @@ watchAmbient 5000
       <span class="token-usage-breakdown-title">
         "Token Usage"
       <span class="token-usage-breakdown-subtitle">
-        "since"
-        "T"
+        "since T"
     <div class="token-usage-breakdown-rows">
       <button title="Click to focus Manoz's pane" type="button" class="ui-button ui-tone-quiet token-usage-breakdown-row token-usage-breakdown-agent-row">
         <span class="token-usage-breakdown-row-name">
@@ -162,8 +155,7 @@ watchAmbient 5000
             "80"
             "%"
         <span class="token-usage-breakdown-row-meta">
-          "1"
-          "turn"
+          "1 turn"
         <span class="token-usage-breakdown-row-counts">
           <span class="token-usage-indicator-arrow">
             "↑"
@@ -194,8 +186,7 @@ watchAmbient 5000
             "↓"
           "65"
       <div class="token-usage-breakdown-cache-rate" data-hover-tip="Share of input tokens served from Claude's prompt cache this session (~0.1x the cost of a fresh token). Only available for providers that report a cache breakdown." aria-description="Share of input tokens served from Claude's prompt cache this session (~0.1x the cost of a fresh token). Only available for providers that report a cache breakdown.">
-        "80"
-        "% of input served from cache"
+        "80% of input served from cache"
     <div class="token-usage-breakdown-footer">
       <button type="button" class="ui-button ui-tone-danger ui-density-compact">
         "Reset counter"

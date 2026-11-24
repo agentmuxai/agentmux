@@ -5,6 +5,8 @@
 
 import { For, Show, type Accessor, type JSX } from "solid-js";
 import { Tooltip } from "@/app/element/tooltip";
+import { t } from "@/app/i18n/i18n";
+import { Rich } from "@/app/i18n/rich";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { Button, TextArea, TextInput } from "@/app/element/ui";
 import { PROVIDERS } from "@/app/view/agent/providers/catalog";
@@ -35,15 +37,15 @@ function BundleIdentityFields(props: { draft: Accessor<BundleDraft>; act: Bundle
         <>
             <label class="bundle-view-field">
                 <span class="bundle-view-field-label">
-                    Name *
-                    <FieldHelp text="The bundle's display name — shown in Memory → Bundles and in the agent launch picker. Required." />
+                    {t("bundle.form.name")}
+                    <FieldHelp text={t("bundle.form.nameHelp")} />
                 </span>
                 <TextInput variant="plain"
                     class="bundle-view-input"
                     value={draft().name}
                     onInput={(e) => act.updateDraft("name", e.currentTarget.value)}
                     onContextMenu={showTextInputContextMenu}
-                    placeholder="e.g. Claude-coder"
+                    placeholder={t("bundle.form.namePlaceholder")}
                     required
                     ref={(el) => focusOnOpen(el, { select: true })}
                 />
@@ -51,8 +53,8 @@ function BundleIdentityFields(props: { draft: Accessor<BundleDraft>; act: Bundle
 
             <label class="bundle-view-field">
                 <span class="bundle-view-field-label">
-                    Description
-                    <FieldHelp text="Optional short label shown under the bundle's name in the launch picker. Purely cosmetic — has no effect on what gets injected into the agent." />
+                    {t("bundle.form.description")}
+                    <FieldHelp text={t("bundle.form.descriptionHelp")} />
                 </span>
                 <TextInput variant="plain"
                     class="bundle-view-input"
@@ -61,7 +63,7 @@ function BundleIdentityFields(props: { draft: Accessor<BundleDraft>; act: Bundle
                         act.updateDraft("description", e.currentTarget.value)
                     }
                     onContextMenu={showTextInputContextMenu}
-                    placeholder="Short label shown in the launch picker"
+                    placeholder={t("bundle.form.descriptionPlaceholder")}
                 />
             </label>
 
@@ -71,8 +73,8 @@ function BundleIdentityFields(props: { draft: Accessor<BundleDraft>; act: Bundle
                 (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.2). */}
             <label class="bundle-view-field">
                 <span class="bundle-view-field-label">
-                    Suggested for
-                    <FieldHelp text="The provider this bundle was made with in mind. A hint only: a bundle can be bound to any agent, and the agent's own provider decides which CLI runs." />
+                    {t("bundle.form.suggestedFor")}
+                    <FieldHelp text={t("bundle.form.suggestedForHelp")} />
                 </span>
                 <select
                     class="bundle-view-input"
@@ -83,7 +85,7 @@ function BundleIdentityFields(props: { draft: Accessor<BundleDraft>; act: Bundle
                         act.updateDraft("model", PROVIDERS[provider]?.supportedVendors?.[0] ?? "");
                     }}
                 >
-                    <option value="">Any provider</option>
+                    <option value="">{t("bundle.form.anyProvider")}</option>
                     <For each={Object.values(PROVIDERS)}>
                         {(p) => <option value={p.id}>{p.displayName}</option>}
                     </For>
@@ -92,8 +94,8 @@ function BundleIdentityFields(props: { draft: Accessor<BundleDraft>; act: Bundle
             <Show when={(PROVIDERS[draft().provider]?.supportedVendors?.length ?? 0) > 1}>
                 <label class="bundle-view-field">
                     <span class="bundle-view-field-label">
-                        Suggested vendor
-                        <FieldHelp text="The backend that provider was meant to talk to. A hint, like the provider." />
+                        {t("bundle.form.suggestedVendor")}
+                        <FieldHelp text={t("bundle.form.suggestedVendorHelp")} />
                     </span>
                     <select
                         class="bundle-view-input"
@@ -117,8 +119,8 @@ function BundleInstructionFields(props: { draft: Accessor<BundleDraft>; act: Bun
         <>
             <label class="bundle-view-field">
                 <span class="bundle-view-field-label">
-                    Instructions
-                    <FieldHelp text="The default system prompt injected into the agent's context at launch — provider-agnostic, applies regardless of which CLI/harness the agent uses. To override it for one specific harness, add a per-provider variant below; the default still applies to every provider without one." />
+                    {t("bundle.form.instructions")}
+                    <FieldHelp text={t("bundle.form.instructionsHelp")} />
                 </span>
                 <TextArea variant="plain"
                     class="bundle-view-textarea"
@@ -128,14 +130,14 @@ function BundleInstructionFields(props: { draft: Accessor<BundleDraft>; act: Bun
                         act.updateDraft("instructions", e.currentTarget.value)
                     }
                     onContextMenu={showTextInputContextMenu}
-                    placeholder="System prompt. The agent's soul."
+                    placeholder={t("bundle.form.instructionsPlaceholder")}
                 />
             </label>
 
             <label class="bundle-view-field">
                 <span class="bundle-view-field-label">
-                    Per-provider instruction overrides
-                    <FieldHelp text="ABF v0.2 §2.2. Each entry replaces the Instructions above when this bundle runs on that provider — it is an override, not an addition, and providers without an entry use the default unchanged. On export each becomes instructions/<provider>/AGENTS.md, so a key that is not a usable directory name is skipped; this form flags those before you save." />
+                    {t("bundle.form.overrides")}
+                    <FieldHelp text={t("bundle.form.overridesHelp")} />
                 </span>
                 <BundleProviderInstructionsSection
                     value={draft().instructions_by_provider}
@@ -153,7 +155,7 @@ function BundleFormActions(props: DetailProps & { draft: Accessor<BundleDraft> }
     return (
         <div class="bundle-view-form-actions">
             <Tooltip
-                content="Structurally checks this draft: unknown provider keys, unsafe or colliding context-file paths, and malformed JSON in the fields not yet editable here. Advisory only — never blocks Save."
+                content={t("bundle.form.validateTip")}
                 placement="top"
             >
                 <Button
@@ -161,7 +163,7 @@ function BundleFormActions(props: DetailProps & { draft: Accessor<BundleDraft> }
                     onClick={act.handleValidate}
                     disabled={model.validatingAtom() || model.savingAtom() || !draft().name.trim()}
                 >
-                    {model.validatingAtom() ? "Validating…" : "Validate"}
+                    {model.validatingAtom() ? t("bundle.form.validating") : t("bundle.form.validate")}
                 </Button>
             </Tooltip>
             <Button
@@ -169,7 +171,7 @@ function BundleFormActions(props: DetailProps & { draft: Accessor<BundleDraft> }
                 onClick={act.handleCancel}
                 disabled={model.savingAtom()}
             >
-                Cancel
+                {t("bundle.form.cancel")}
             </Button>
             <Button
                 type="submit"
@@ -177,7 +179,7 @@ function BundleFormActions(props: DetailProps & { draft: Accessor<BundleDraft> }
                 class="bundle-view-save-btn"
                 disabled={model.savingAtom() || !draft().name.trim()}
             >
-                {model.savingAtom() ? "Saving…" : "Save"}
+                {model.savingAtom() ? t("bundle.form.saving") : t("bundle.form.save")}
             </Button>
         </div>
     );
@@ -195,7 +197,7 @@ function BundleValidationReport(props: { model: BundleViewModel }): JSX.Element 
                 >
                     <Show
                         when={report().issues.length > 0}
-                        fallback={<p class="bundle-view-validation-ok">No structural issues found.</p>}
+                        fallback={<p class="bundle-view-validation-ok">{t("bundle.form.noIssues")}</p>}
                     >
                         <ul class="bundle-view-validation-list">
                             <For each={report().issues}>
@@ -232,7 +234,7 @@ function BundleForm(props: DetailProps & { draft: Accessor<BundleDraft> }): JSX.
             }}
         >
             <h2 class="bundle-view-form-title">
-                {draft().id ? "Edit Bundle" : "New Bundle"}
+                {draft().id ? t("bundle.form.titleEdit") : t("bundle.form.titleNew")}
             </h2>
 
             <BundleIdentityFields draft={draft} act={act} />
@@ -241,14 +243,7 @@ function BundleForm(props: DetailProps & { draft: Accessor<BundleDraft> }): JSX.
             <BundleValidationReport model={model} />
 
             <p class="bundle-view-form-hint">
-                Skills are managed on the bundle's own detail view (Cancel to
-                get back there), not in this edit form — they take effect live
-                and don't need a Save. MCP servers aren't part of a bundle: bind
-                them to agents in Connectors. Context files are still
-                persisted as JSON and round-trip cleanly through this form; use{" "}
-                <strong>Validate</strong> above to catch unsafe paths or malformed JSON in
-                them. To bring in an existing <code>.abf</code> archive's components directly,
-                use <strong>Import Bundle</strong> from the bundle list.
+                <Rich k="bundle.form.hint" />
             </p>
         </form>
     );

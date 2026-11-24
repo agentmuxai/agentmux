@@ -1413,6 +1413,25 @@
     }
   },
   {
+    "command": "answerdroneapproval",
+    "request": "agentmux_srv::server::drone_approval_handlers::AnswerDroneApprovalReq",
+    "requestName": "AnswerDroneApprovalReq",
+    "requestTs": {
+      "imports": [
+        "AnswerDroneApprovalReq"
+      ],
+      "name": "AnswerDroneApprovalReq"
+    },
+    "response": "agentmux_srv::server::drone_approval_handlers::AnswerDroneApprovalResp",
+    "responseName": "AnswerDroneApprovalResp",
+    "responseTs": {
+      "imports": [
+        "AnswerDroneApprovalResp"
+      ],
+      "name": "AnswerDroneApprovalResp"
+    }
+  },
+  {
     "command": "app.desktop",
     "request": "core::option::Option<agentmux_srv_core::backend::rpc_types::websocket::NoArgsReq>",
     "requestName": "core::option::Option<agentmux_srv_core::backend::rpc_types::websocket::NoArgsReq>",
@@ -3664,6 +3683,25 @@
     }
   },
   {
+    "command": "fs.link_file_check",
+    "request": "agentmux_srv_core::backend::rpc_types::fs::FsLinkFileReq",
+    "requestName": "FsLinkFileReq",
+    "requestTs": {
+      "imports": [
+        "FsLinkFileReq"
+      ],
+      "name": "FsLinkFileReq"
+    },
+    "response": "agentmux_srv_core::backend::rpc_types::fs::FsLinkFileCheck",
+    "responseName": "FsLinkFileCheck",
+    "responseTs": {
+      "imports": [
+        "FsLinkFileCheck"
+      ],
+      "name": "FsLinkFileCheck"
+    }
+  },
+  {
     "command": "fs.list",
     "request": "agentmux_srv_core::backend::rpc_types::fs::FsListReq",
     "requestName": "FsListReq",
@@ -4060,6 +4098,25 @@
         "DroneDefinition"
       ],
       "name": "DroneDefinition | null"
+    }
+  },
+  {
+    "command": "getdroneaccess",
+    "request": "agentmux_srv::server::drone_access_handlers::GetDroneAccessReq",
+    "requestName": "GetDroneAccessReq",
+    "requestTs": {
+      "imports": [
+        "GetDroneAccessReq"
+      ],
+      "name": "GetDroneAccessReq"
+    },
+    "response": "agentmux_srv::drone::access::DroneAccess",
+    "responseName": "DroneAccess",
+    "responseTs": {
+      "imports": [
+        "DroneAccess"
+      ],
+      "name": "DroneAccess"
     }
   },
   {
@@ -5578,6 +5635,25 @@
         "BackgroundTaskView"
       ],
       "name": "Array<BackgroundTaskView>"
+    }
+  },
+  {
+    "command": "listdroneapprovals",
+    "request": "core::option::Option<agentmux_srv::server::drone_approval_handlers::ListDroneApprovalsReq>",
+    "requestName": "core::option::Option<agentmux_srv::server::drone_approval_handlers::ListDroneApprovalsReq>",
+    "requestTs": {
+      "imports": [
+        "ListDroneApprovalsReq"
+      ],
+      "name": "ListDroneApprovalsReq | null"
+    },
+    "response": "alloc::vec::Vec<agentmux_srv_core::backend::drone_approval::DroneApproval>",
+    "responseName": "alloc::vec::Vec<agentmux_srv_core::backend::drone_approval::DroneApproval>",
+    "responseTs": {
+      "imports": [
+        "DroneApproval"
+      ],
+      "name": "Array<DroneApproval>"
     }
   },
   {
@@ -7376,6 +7452,25 @@
         "AgentContainerLimitsResult"
       ],
       "name": "AgentContainerLimitsResult"
+    }
+  },
+  {
+    "command": "setdroneagents",
+    "request": "agentmux_srv::server::drone_access_handlers::SetDroneAgentsReq",
+    "requestName": "SetDroneAgentsReq",
+    "requestTs": {
+      "imports": [
+        "SetDroneAgentsReq"
+      ],
+      "name": "SetDroneAgentsReq"
+    },
+    "response": "agentmux_srv::drone::access::DroneAccess",
+    "responseName": "DroneAccess",
+    "responseTs": {
+      "imports": [
+        "DroneAccess"
+      ],
+      "name": "DroneAccess"
     }
   },
   {

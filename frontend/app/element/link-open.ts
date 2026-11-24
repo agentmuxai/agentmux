@@ -31,6 +31,16 @@ function openInApp(href: string, floating: boolean, owner?: MediaOwner): boolean
                 if ("reason" in r) failed(r.reason);
             });
             return true;
+        case "entityfile":
+            // Only from the pane the message is in: with no pane to name, srv has no folders to check it against.
+            if (owner?.blockId) {
+                void import("@/app/links/entities/openers")
+                    .then((o) => o.openFileEntity({ kind: "file", path: target.path, blockId: owner.blockId as string, confined: Boolean(owner.confined) }, { floating }))
+                    .then((r) => {
+                        if ("reason" in r) failed(r.reason);
+                    });
+            }
+            return true;
         case "blocked":
             // An `agentmux:` URL that isn't a task or agent link: a link only navigates, so the OS never gets it.
             return true;

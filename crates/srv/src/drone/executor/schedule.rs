@@ -269,6 +269,8 @@ fn check_foreach(sorted: &[&FlowNode], edges: &[(usize, usize, &FlowEdge)], plan
             issues.push(Issue::at(&node.id, format!("the body {:?} is itself a for-each: nest loops with a sub-drone", body.id)));
         } else if kind_of(body) == "wait" {
             issues.push(Issue::at(&node.id, format!("the body {:?} is a Wait block: a wait is kept in the run as a whole, so put it before or after the for-each", body.id)));
+        } else if kind_of(body) == "approval" {
+            issues.push(Issue::at(&node.id, format!("the body {:?} is an Approval block: it waits as a Wait does, kept in the run as a whole, so put it before or after the for-each", body.id)));
         } else if wired {
             issues.push(Issue::at(&body.id, format!("{:?} is the body of the for-each {:?} and runs once per item: take its edges off", body.id, node.id)));
         } else if !plan.owned.insert(body.id.clone()) {
@@ -592,5 +594,14 @@ mod tests {
         g.nodes.push(node("work", "wait", json!({ "for": "1m" })));
         let issues = analyze(&g).unwrap_err();
         assert!(issues.iter().any(|i| i.message.contains("is a Wait block")), "{issues:?}");
+    }
+
+    #[test]
+    fn an_approval_cannot_be_a_for_each_body() {
+        let mut g = foreach_graph(json!({}), false);
+        g.nodes.retain(|n| n.id != "work");
+        g.nodes.push(node("work", "approval", json!({ "title": "ok?" })));
+        let issues = analyze(&g).unwrap_err();
+        assert!(issues.iter().any(|i| i.message.contains("is an Approval block")), "{issues:?}");
     }
 }

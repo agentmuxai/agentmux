@@ -12,7 +12,9 @@
 //!   number looked at, per Vault, so a capture reads only the lines made since.
 //! - A grant is written as the record named for its entry and its site, and written again only when the grant or the entry
 //!   it was made for is not what was written. A grant that is revoked, or whose entry is deleted or moved to another Vault,
-//!   ends with a tombstone. Grants to an agent never come here: the store holds only site grants in the table this reads.
+//!   ends with a tombstone. The table this reads holds other kinds of grant too (an agent's "always", a command's first use,
+//!   a setting), which name an agent or a setting of one machine: only a grant whose key is a site (`https://` or `http://`) is
+//!   written, and no other ever leaves the machine.
 
 use std::collections::{HashMap, HashSet};
 
@@ -130,10 +132,13 @@ pub(super) fn write(conn: &Connection, signer: &mut Signer, vault_id: &str, ring
 }
 
 /// The entries whose lines go to `vault_id`, each with its record: the ones captured now, and the ones it has written that are
-/// gone since (their last lines, the delete's included, are still to go).
+/// gone since (their last lines, the delete's included, are still to go). An entry that still exists is not one of the second
+/// kind: one that moved to another Vault, or stays on this machine, has its lines go where it is, not here.
 fn entries_of(conn: &Connection, vault_id: &str, records: &HashMap<String, String>) -> Result<HashMap<String, String>, String> {
     let mut ids = records.clone();
-    let mut stmt = conn.prepare("SELECT entry_id, record FROM db_sync_vault_seen WHERE vault = ?1").map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT entry_id, record FROM db_sync_vault_seen s WHERE vault = ?1 AND NOT EXISTS (SELECT 1 FROM db_vault_entries e WHERE e.id = s.entry_id)")
+        .map_err(|e| e.to_string())?;
     let seen = stmt.query_map(params![vault_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))).map_err(|e| e.to_string())?;
     for pair in seen {
         let (entry, record) = pair.map_err(|e| e.to_string())?;
@@ -175,6 +180,12 @@ fn seen_grants(conn: &Connection, vault_id: &str) -> Result<Vec<Seen>, String> {
     rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
 }
 
+/// Whether a grant's key is a site. The same table holds an agent's grants and a setting's, whose keys name an agent, a
+/// profile or a setting of this machine: those are not written.
+fn is_site(key: &str) -> bool {
+    key.starts_with("https://") || key.starts_with("http://")
+}
+
 #[allow(clippy::too_many_arguments)]
 fn write_grants(conn: &Connection, signer: &mut Signer, vault_id: &str, ring: &KeyRing, reads: &Reads, captured: &HashMap<&str, i64>, records: &HashMap<String, String>, here: &HashSet<&str>, now_ms: i64) -> Result<(usize, usize), String> {
     let seen = seen_grants(conn, vault_id)?;
@@ -182,7 +193,7 @@ fn write_grants(conn: &Connection, signer: &mut Signer, vault_id: &str, ring: &K
     let mut current = HashSet::new();
     for (entry_id, origin, granted_at) in &reads.grants {
         let (Some(&created_at), Some(entry_record)) = (captured.get(entry_id.as_str()), records.get(entry_id)) else { continue };
-        if origin.is_empty() {
+        if !is_site(origin) {
             continue;
         }
         let body = GrantBody::new(entry_record, origin, *granted_at, created_at);

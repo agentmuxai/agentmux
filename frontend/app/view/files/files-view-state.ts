@@ -67,6 +67,8 @@ export function useFilesLocal(model: FilesModel, ctx: PaneTabHostContext) {
         const onPress = (e: Event): void => {
             const target = e.target;
             if (target instanceof Node && (refs.filterInput?.contains(target) || refs.filterButton?.contains(target))) return;
+            // The find button sits beside the box: pressing it must not hide the box before the click lands.
+            if (target instanceof Element && target.closest(".files-find-deep")) return;
             hideFilter();
         };
         document.addEventListener("pointerdown", onPress, true);

@@ -5,7 +5,8 @@
 // Keys and paste are taken only while the stage has focus (it is focusable and takes focus when pressed), so typing
 // elsewhere in the window is never sent. docs/specs/SPEC_STREAMED_BROWSER_PANE_DEMO_2026_11_15.md §4, §7.
 
-import { isCopyChord, isPasteChord, keyMessage, mouseMessage, wheelMessage } from "./streamed-protocol";
+import { isMacOS } from "@/util/platformutil";
+import { isCopyChord, isPasteChord, keyMessage, mouseMessage, remoteModifiers, wheelMessage } from "./streamed-protocol";
 
 /** How long after a copy chord the pane asks for what was copied: the browser has put it on its clipboard by then. */
 export const COPY_DELAY_MS = 150;
@@ -13,7 +14,7 @@ export const COPY_DELAY_MS = 150;
 type Send = (message: object) => void;
 
 /** Wire input from `stage` (focusable) to `send`, measuring positions on `canvas`. Returns the way to unwire it. */
-export function attachStageInput(stage: HTMLElement, canvas: () => HTMLElement | undefined, send: Send): () => void {
+export function attachStageInput(stage: HTMLElement, canvas: () => HTMLElement | undefined, send: Send, mac: boolean = isMacOS()): () => void {
     const box = () => (canvas() ?? stage).getBoundingClientRect();
     // Only the page itself (the stage or its canvas) is the page's: a control drawn over it (Reconnect) keeps its own keys and clicks.
     const onPage = (e: Event) => e.target === stage || e.target === canvas();
@@ -21,6 +22,9 @@ export function attachStageInput(stage: HTMLElement, canvas: () => HTMLElement |
     let moveFrame = 0;
     let lastMove: MouseEvent | null = null;
     let copyTimer: ReturnType<typeof setTimeout> | undefined;
+    // The keys sent down and not yet up. If the stage loses focus while one is held (Control pressed here, the click on another control, the
+    // release over there), its release never arrives, and the remote screen would keep it held: every later key a shortcut.
+    const held = new Map<string, Parameters<typeof keyMessage>[1]>();
 
     const onDown = (e: MouseEvent) => {
         if (!onPage(e)) return;
@@ -53,9 +57,11 @@ export function attachStageInput(stage: HTMLElement, canvas: () => HTMLElement |
     const onKey = (type: "down" | "up") => (e: KeyboardEvent) => {
         if (!onPage(e) || isPasteChord(e)) return;
         e.preventDefault();
-        send(keyMessage(type, e));
-        // The person copied or cut in the remote browser: ask for the text, to put it on their own clipboard (only on their say-so).
-        if (type === "down" && isCopyChord(e)) {
+        send(keyMessage(type, e, mac));
+        if (type === "down") held.set(e.code, { key: e.key, code: e.code, keyCode: e.keyCode, altKey: e.altKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, shiftKey: e.shiftKey });
+        else held.delete(e.code);
+        // The person copied or cut in the remote browser (Cmd+C and Cmd+X on a Mac are its Ctrl chords): ask for the text, to put it on their own clipboard (only on their say-so).
+        if (type === "down" && isCopyChord({ key: e.key, ...remoteModifiers(e, mac) })) {
             clearTimeout(copyTimer);
             copyTimer = setTimeout(() => send({ t: "copy" }), COPY_DELAY_MS);
         }
@@ -68,6 +74,10 @@ export function attachStageInput(stage: HTMLElement, canvas: () => HTMLElement |
         e.preventDefault();
         if (text) send({ t: "paste", text });
     };
+    const onBlur = () => {
+        for (const e of held.values()) send(keyMessage("up", e, mac));
+        held.clear();
+    };
     const noMenu = (e: Event) => e.preventDefault();
 
     stage.addEventListener("mousedown", onDown);
@@ -75,6 +85,7 @@ export function attachStageInput(stage: HTMLElement, canvas: () => HTMLElement |
     stage.addEventListener("wheel", onWheel, { passive: false });
     stage.addEventListener("keydown", onKeyDown);
     stage.addEventListener("keyup", onKeyUp);
+    stage.addEventListener("blur", onBlur);
     stage.addEventListener("paste", onPaste);
     stage.addEventListener("contextmenu", noMenu);
     return () => {
@@ -83,6 +94,7 @@ export function attachStageInput(stage: HTMLElement, canvas: () => HTMLElement |
         stage.removeEventListener("wheel", onWheel);
         stage.removeEventListener("keydown", onKeyDown);
         stage.removeEventListener("keyup", onKeyUp);
+        stage.removeEventListener("blur", onBlur);
         stage.removeEventListener("paste", onPaste);
         stage.removeEventListener("contextmenu", noMenu);
         window.removeEventListener("mouseup", onUp);

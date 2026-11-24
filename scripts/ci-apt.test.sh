@@ -55,6 +55,11 @@ case "$outcome" in
     fail) echo "E: Failed to fetch https://security.ubuntu.com/ubuntu/pool/main/x.deb"; exit 100 ;;
 esac
 EOF
+# dpkg is only asked to finish an interrupted install; the stub records that it was.
+cat > "$BIN/dpkg" <<'EOF'
+#!/usr/bin/env bash
+echo "$*" >> "$STUB_DIR/dpkg-calls"
+EOF
 # getent fails for the first STUB_DNS_DOWN calls.
 cat > "$BIN/getent" <<'EOF'
 #!/usr/bin/env bash
@@ -122,6 +127,12 @@ echo "ci-apt.sh install"
 run APT_INSTALL_SEQ="fail fail ok" -- install -y libfoo-dev
 check "two failures then success: three installs, two list refreshes between, exit 0" "$([ $got = 0 ] && [ "$(calls install)" = 3 ] && [ "$(calls update)" = 2 ]; echo $?)" "exit $got, installs $(calls install), updates $(calls update): $out"
 
+run APT_INSTALL_SEQ="fail fail ok" -- install -y libfoo-dev
+check "each retry first finishes an interrupted dpkg (twice here)" "$([ "$(grep -c -x -- '--configure -a' "$dir/dpkg-calls" 2>/dev/null)" = 2 ]; echo $?)" "dpkg calls: $(cat "$dir/dpkg-calls" 2>&1)"
+
+run APT_INSTALL_SEQ="ok" -- install -y libfoo-dev
+check "clean first try asks dpkg for nothing" "$([ ! -e "$dir/dpkg-calls" ]; echo $?)" "dpkg calls: $(cat "$dir/dpkg-calls" 2>&1)"
+
 run APT_INSTALL_SEQ="ok" -- install -y libfoo-dev
 check "clean first try: one install, no refresh" "$([ $got = 0 ] && [ "$(calls install)" = 1 ] && [ "$(calls update)" = 0 ]; echo $?)" "exit $got: $out"
 
@@ -135,7 +146,11 @@ run -- install
 check "install with nothing to install is a usage error (2)" "$([ $got = 2 ]; echo $?)" "exit $got: $out"
 
 echo "budget"
-# The merge queue's settings (ci-pr.yml): a 90 s limit plus the 45 s pause fits the 150 s budget, so a hung install is retried.
+# The merge queue's settings (ci-pr.yml): a slow mirror that costs the first two attempts their 90 s (the list refresh between
+# them hangs too) still leaves room, in the 360 s budget, for a third. Each hung call is 50 s on the stub clock.
+run CI_APT_BUDGET=360 CI_APT_PAUSE=45 CI_APT_INSTALL_LIMIT=90 STUB_TIMEOUTS=3 STUB_TIMEOUT_COST=50 APT_INSTALL_SEQ="ok" -- install -y libfoo-dev
+check "queue limits: a slow mirror that costs two attempts still gets a third, and it succeeds" "$([ $got = 0 ] && echo "$out" | grep -q 'attempt 2 failed; waiting 90s before attempt 3'; echo $?)" "exit $got: $out"
+
 run CI_APT_BUDGET=150 CI_APT_PAUSE=45 CI_APT_INSTALL_LIMIT=90 STUB_TIMEOUTS=1 STUB_TIMEOUT_COST=100 APT_INSTALL_SEQ="ok" -- install -y libfoo-dev
 check "queue limits: an install that hung for its 90 s is retried and succeeds" "$([ $got = 0 ] && echo "$out" | grep -q 'attempt 1 failed; waiting 45s before attempt 2'; echo $?)" "exit $got: $out"
 

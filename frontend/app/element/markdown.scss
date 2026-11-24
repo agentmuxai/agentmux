@@ -110,6 +110,11 @@
 
         a {
             color: var(--term-bright-blue);
+
+            // A file the agent named that is missing, or outside its folders, is text with a reason, not a link.
+            &.entity-link--dead {
+                color: var(--secondary-text-color);
+            }
         }
 
         ul {

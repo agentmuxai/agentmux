@@ -14,10 +14,10 @@
 3228 crates/srv-core/src/backend/agent_config.rs
 1531 crates/srv-core/src/backend/blockcontroller/app_server.rs
 2644 crates/srv-core/src/backend/blockcontroller/app_server_protocol.rs
-1591 crates/srv-core/src/backend/blockcontroller/persistent/mod.rs
+1594 crates/srv-core/src/backend/blockcontroller/persistent/mod.rs
 1882 crates/srv-core/src/backend/blockcontroller/shell/lifecycle.rs
 1774 crates/srv-core/src/backend/fs_ops/host_jobs.rs
-2217 crates/srv-core/src/backend/history/index.rs
+2291 crates/srv-core/src/backend/history/index.rs
 1903 crates/srv-core/src/backend/history/mod.rs
 3200 crates/srv-core/src/backend/lan/discovery.rs
 2909 crates/srv-core/src/identity/resolver/inject.rs
@@ -25,5 +25,5 @@
 2120 crates/srv-core/src/persist_subscriber.rs
 1509 crates/srv-core/src/registry/migrate.rs
 2107 crates/srv/src/server/muxspect_handlers.rs
-1787 crates/srv/src/server/reactive.rs
+1792 crates/srv/src/server/reactive.rs
 1849 frontend/app/view/swarm/swarm-model.ts

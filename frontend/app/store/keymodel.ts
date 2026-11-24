@@ -3,10 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { toggleVoiceFor } from "@/app/hook/useVoiceInput";
-import { hostHas } from "@/util/host-caps";
 import { countBasicTerms } from "@/app/store/view-actions";
 import { atoms, settingsAtom, setIsTermMultiInput } from "@/app/store/global";
-import { createTab } from "@/app/store/tab-actions";
 import { getBlockComponentModel, getFocusedBlockId, openOrFocusPaneByView } from "@/app/store/block-component-registry";
 import { replaceBlock } from "@/app/store/block-layout-actions";
 import { zoomAllPanesReset, zoomIn, zoomOut, zoomReset } from "@/app/store/zoom";
@@ -18,18 +16,15 @@ import { modalsModel } from "./modalmodel";
 import { openCommandPalette, preloadCommandPaletteWhenIdle } from "@/app/store/open-command-palette";
 import { ReplacePaneConfirm } from "@/app/modals/replace-pane-confirm";
 import { openPaneModal, paneRequests } from "@/app/store/pane-requests";
-import { handleCmdN, handleSplitHorizontal, handleSplitVertical } from "./keymodel-blockcreate";
+import { handleCmdN } from "./keymodel-blockcreate";
 import { type KeyHandler, keyCommands } from "./keymodel-dispatch";
 import { clearPaneTabSelection } from "@/app/element/pane-tab-selection";
 import {
     cyclePaneFocus,
-    genericClose,
     getFocusedBlockInStaticTab,
     handleCmdI,
-    simpleCloseStaticTab,
     switchBlockByBlockNum,
     switchBlockInDirection,
-    switchTab,
     switchTabAbs,
     switchTabLast,
     moveActiveTab,
@@ -39,7 +34,6 @@ import { registerHostKeysPush } from "./host-keys-push";
 import { registerMenuKeysPush } from "./menu-keys-push";
 import { createEffect, createRoot } from "solid-js";
 import { commandRegistry } from "./command-registry";
-import { openNewWindowFromHere } from "./window-appearance";
 
 function countTermBlocks(): number {
     return countBasicTerms();
@@ -72,16 +66,8 @@ function registerGeneralKeys() {
 
 /** Tabs and windows. */
 function registerTabKeys() {
-    // Declined (false) on a host without multiWindow, so the key goes on to the terminal.
-    on("window:new", () => {
-        if (!hostHas("multiWindow")) return false;
-        openNewWindowFromHere().catch((e: unknown) => console.error("[keymodel] Failed to open new window:", e));
-        return true;
-    });
-    on("tab:new", run(() => createTab()));
-    on("tab:close", run(() => simpleCloseStaticTab()));
-    on("tab:next", run(() => switchTab(1)));
-    on("tab:prev", run(() => switchTab(-1)));
+    // New Tab and New Window have no handler here: their keys run the registry's commands (a host without multiWindow
+    // declines the window one, so its key goes on to the terminal).
     for (let idx = 1; idx <= 8; idx++) {
         on(`tab:goto:${idx}`, run(() => switchTabAbs(idx)));
     }
@@ -94,17 +80,6 @@ function registerTabKeys() {
 /** Panes: create, close, move focus, swap and resize. */
 function registerPaneLayoutKeys() {
     on("pane:new", run(() => handleCmdN()));
-    on("split:right", run(() => handleSplitHorizontal("after")));
-    on("split:down", run(() => handleSplitVertical("after")));
-    on("pane:close", run(() => genericClose()));
-    on("pane:magnify", () => {
-        const layoutModel = getLayoutModelForStaticTab();
-        const focusedNode = layoutModel.focusedNode?.();
-        if (focusedNode != null) {
-            layoutModel.magnifyNodeToggle(focusedNode.id);
-        }
-        return true;
-    });
     on("pane:focus:up", run(() => switchBlockInDirection(NavigateDirection.Up)));
     on("pane:focus:down", run(() => switchBlockInDirection(NavigateDirection.Down)));
     on("pane:focus:left", run(() => switchBlockInDirection(NavigateDirection.Left)));

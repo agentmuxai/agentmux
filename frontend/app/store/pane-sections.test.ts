@@ -10,11 +10,13 @@ import { SETTINGS_SECTIONS } from "@/app/view/settings/settings-model";
 import { CONNECTORS_SECTIONS, MEMORY_SECTIONS } from "@/app/store/section-panes";
 import { WARDEN_SECTIONS } from "@/app/view/warden/warden-model";
 import { VAULT_SECTIONS } from "@/app/view/vault/vault-kinds";
+import { AUDIT_SECTIONS } from "@/app/view/audit/audit-sections";
 import { SWARM_SECTIONS } from "@/app/view/swarm/swarm-section";
 import {
     isSectionMeta,
     movedMeta,
     movedSection,
+    movedView,
     retiredSection,
     sectionKeyOf,
     sectionKeysIn,
@@ -43,7 +45,7 @@ let unregister: () => void = () => {};
 const unregisterReal: (() => void)[] = [];
 beforeAll(() => {
     // Warden, the Vault and the Swarm, as their manifests declare their sections.
-    for (const [view, sections] of [["warden", WARDEN_SECTIONS], ["vault", VAULT_SECTIONS], ["swarm", SWARM_SECTIONS]] as const) {
+    for (const [view, sections] of [["warden", WARDEN_SECTIONS], ["vault", VAULT_SECTIONS], ["swarm", SWARM_SECTIONS], ["audit", AUDIT_SECTIONS]] as const) {
         unregisterReal.push(registerPaneTab({ apiVersion: 1, view, label: view, icon: "x", sections, create: () => ({ component: () => null }) }));
     }
     unregister = registerPaneTab({
@@ -103,7 +105,7 @@ describe("pane sections", () => {
         expect(movedSection("swarm", "kanban")).toEqual({ view: "kanban" });
         // Warden's Vault, History, Audit and Host are panes of their own.
         expect(movedSection("warden", "vault")).toEqual({ view: "vault" });
-        expect(movedSection("warden", "history")).toEqual({ view: "history" });
+        expect(movedSection("warden", "history")).toEqual({ view: "audit", section: "conversations" });
         expect(movedSection("warden", "audit")).toEqual({ view: "audit" });
         expect(movedSection("warden", "host")).toEqual({ view: "swarm" });
         expect(movedSection("warden", "jobs")).toBeNull();
@@ -160,6 +162,32 @@ describe("pane sections", () => {
             connectors: ids(CONNECTORS_SECTIONS),
             memory: ids(MEMORY_SECTIONS),
             settings: ids(SETTINGS_SECTIONS),
+            audit: ids(AUDIT_SECTIONS),
         });
+    });
+});
+
+describe("the History pane, which became Audit's Conversations section", () => {
+    it("names where it went", () => {
+        expect(movedView("history")).toEqual({ view: "audit", section: "conversations" });
+        expect(movedView("audit")).toBeNull();
+        expect(movedView(undefined)).toBeNull();
+    });
+
+    it("opens as Audit on Conversations, keeping the meta's other keys", () => {
+        expect(movedMeta({ view: "history" })).toEqual({ view: "audit", "audit:section": "conversations" });
+        expect(movedMeta({ view: "history", "term:zoom": 1.2 })).toEqual({ view: "audit", "audit:section": "conversations", "term:zoom": 1.2 });
+    });
+
+    it("keeps a section the meta already names", () => {
+        expect(movedMeta({ view: "history", "audit:section": "typed" })).toEqual({ view: "audit", "audit:section": "typed" });
+    });
+
+    it("leaves an Audit pane alone and says where History went", () => {
+        const audit = { view: "audit", "audit:section": "storage" };
+        expect(movedMeta(audit)).toBe(audit);
+        expect(sectionProblem("history", "x")).toBe(`"history" is now the audit pane's conversations section: use "view": "audit"`);
+        expect(sectionProblem("audit", "conversations")).toBeNull();
+        expect(sectionProblem("audit", "nope")).toMatch(/has no "nope" section/);
     });
 });

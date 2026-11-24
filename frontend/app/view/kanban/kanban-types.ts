@@ -198,6 +198,8 @@ export interface KanbanAgent {
     state: KanbanAgentState;
     /** The colour its definition keeps (`#rrggbb`), absent from an older srv. */
     color?: string | null;
+    /** When it went quiet (unix ms): it holds work and has done nothing for the quiet time. Absent when it is not. */
+    quiet_since_ms?: number | null;
 }
 
 export interface KanbanTask {

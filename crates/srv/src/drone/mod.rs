@@ -20,12 +20,14 @@
 //!   * `executor/blocks` — one file per block type.
 //!   * `data_flow.rs`    — `{{var}}` interpolation (Mustache-style; see RFC §2 Q5).
 
+pub mod access;
 pub mod checkpoint;
 pub mod data_flow;
 pub mod executor;
 pub mod payload_schema;
 pub(crate) mod host;
 pub mod recorder;
+pub mod rule_of_two;
 pub mod replay;
 pub mod state;
 pub use crate::backend::storage::drone_store as storage;

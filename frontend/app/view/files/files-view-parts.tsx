@@ -10,6 +10,7 @@
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import { ContextMenu } from "@/app/components/context-menu";
 import { endPathDrag } from "@/app/drag/file-drop";
+import { t } from "@/app/i18n/i18n";
 import { Button } from "@/app/element/ui";
 import { useWidthFit } from "@/app/element/width-fit";
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
@@ -18,11 +19,11 @@ import { MAIN_PART, zoomPartAttrs } from "@/app/store/zoom-parts";
 import { For, Match, Show, Switch, type Accessor, type JSX } from "solid-js";
 import { ColumnResizer } from "./files-column-resizer";
 import { META_COLWIDTHS } from "./files-columns";
+import { FilesColumns } from "./files-columns-view";
 import { FilesFooter } from "./FilesFooter";
 import { FilesPlaces } from "./FilesPlaces";
 import { FilesToolbar } from "./FilesToolbar";
 import type { FilesModel } from "./files-model";
-import { openEntryWithOs } from "./files-open";
 import { useNarrowTiers, type NarrowTiers } from "./files-narrow";
 import { FilesPreview } from "./files-preview";
 import { FileRow, GridTile, ROW_HEIGHT, TILE_H, TILE_W } from "./files-rows";
@@ -170,7 +171,7 @@ function FilesBody(props: {
                         pathOf={(name) => model.pathOf(name)}
                         blockId={model.blockId}
                         onOpen={opening.openEntry}
-                        onOpenWithOs={(entry) => openEntryWithOs(model, entry.name)}
+                        onOpenWithOs={(entry) => opening.openWithDefaultApp(entry)}
                     />
                 </Show>
             </div>
@@ -218,14 +219,21 @@ function FilesList({ v }: { v: FilesViewParts }): JSX.Element {
                 if (e.target === e.currentTarget) model.setSelection({ ...model.selection(), names: new Set() });
             }}
         >
-            <FilesColumnHeader model={model} fv={fv} />
-            <FilesNotices v={v} />
+            <Show when={!model.columnsOn()}>
+                <FilesColumnHeader model={model} fv={fv} />
+            </Show>
+            {/* A filter that matches nothing in the first column leaves the notice alone: no later column drawn under it. */}
+            <Show when={model.phase() === "ready" && model.columnsOn() && !(model.filter() && win.entries().length === 0)}>
+                <FilesColumns v={v} />
+            </Show>
             <Show when={model.phase() === "ready" && win.grid()}>
                 <FilesGridTiles v={v} />
             </Show>
-            <Show when={model.phase() === "ready" && !win.grid()}>
+            <Show when={model.phase() === "ready" && !win.grid() && !model.columnsOn()}>
                 <FilesDetailRows v={v} />
             </Show>
+            {/* Last: its buttons must not sit under the columns view's layer, which covers the whole list area. */}
+            <FilesNotices v={v} />
         </div>
     );
 }
@@ -266,7 +274,7 @@ function FilesColumnHeader(props: { model: FilesModel; fv: FilesLocal }): JSX.El
 
 /** Why there are no rows: a macOS prompt to answer, a slow load, an error, or an empty folder. */
 function FilesNotices({ v }: { v: FilesViewParts }): JSX.Element {
-    const { model, win, pointer } = v;
+    const { model, win, pointer, fv } = v;
     const { placeLabel } = pointer;
     return (
         <Switch>
@@ -300,11 +308,16 @@ function FilesNotices({ v }: { v: FilesViewParts }): JSX.Element {
             </Match>
             <Match when={model.phase() === "ready" && win.entries().length === 0 && !model.partial()}>
                 <div class="files-notice">
-                    {model.filter()
-                        ? `Nothing here matches “${model.filter()}”.`
-                        : model.rawEntries().length > 0
-                          ? "Only hidden files here."
-                          : "This folder is empty."}
+                    <Show
+                        when={model.filter()}
+                        fallback={model.rawEntries().length > 0 ? t("files.empty.hidden") : t("files.empty.folder")}
+                    >
+                        {/* The filter box may be hidden while its filter is still applied: the way out is here. */}
+                        <p>{t("files.filter.nomatch", { filter: model.filter() })}</p>
+                        <Button class="files-button" onClick={fv.closeFilter}>
+                            {t("files.filter.clear")}
+                        </Button>
+                    </Show>
                 </div>
             </Match>
         </Switch>
@@ -354,6 +367,7 @@ function FilesGridTiles({ v }: { v: FilesViewParts }): JSX.Element {
                                 onClick={(e) => pointer.onRowClick(e, entry())}
                                 onOpen={() => opening.openEntry(entry())}
                                 onContextMenu={(e) => pointer.onRowContextMenu(e, entry())}
+                                onPointerDown={(e) => drag.onRowPointerDown(e, entry())}
                                 onDragStart={(e) => drag.onRowDragStart(e, entry())}
                                 onDragOver={() => drag.onRowDragOver(entry())}
                                 onDragEnd={() => endPathDrag()}
@@ -389,11 +403,15 @@ function FilesDetailRows({ v }: { v: FilesViewParts }): JSX.Element {
                                 onClick={(e) => pointer.onRowClick(e, entry())}
                                 onOpen={() => opening.openEntry(entry())}
                                 onContextMenu={(e) => pointer.onRowContextMenu(e, entry())}
+                                onPointerDown={(e) => drag.onRowPointerDown(e, entry())}
                                 onDragStart={(e) => drag.onRowDragStart(e, entry())}
                                 onDragOver={() => drag.onRowDragOver(entry())}
                                 dropTarget={fv.dropRow() === name}
                                 onDragEnd={() => endPathDrag()}
                                 onRenameDone={() => fv.refs.list?.focus()}
+                                tree={model.treeInfo().get(name)}
+                                onToggle={() => model.toggleExpanded(name)}
+                                where={model.findWhere(name)}
                             />
                         </Show>
                     );

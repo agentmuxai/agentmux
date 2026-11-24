@@ -22,15 +22,13 @@ pub(super) fn pick_openable_agent(state: &AppState, agent_ref: &str) -> Result<A
     Ok(agent)
 }
 
-/// Takes the start's markers off `extra_meta` (they are not block meta): whether it is a start with no pane, and whether it
-/// is restart resume's.
-pub(super) fn take_start_markers(extra_meta: &mut MetaMapType) -> (bool, bool) {
-    (extra_meta.remove(super::agent_attach::START_PARKED).is_some(), extra_meta.remove(super::agent_attach::RESUME_START).is_some())
+/// Takes the start's marker off `extra_meta` (it is not block meta): whether it is a start with no pane.
+pub(super) fn take_start_marker(extra_meta: &mut MetaMapType) -> bool {
+    extra_meta.remove(super::agent_attach::START_PARKED).is_some()
 }
 
 /// The checks before anything is written for the agent: no live instance elsewhere on this host, and a local row.
-/// `resumed`: restart resume's start of an agent that was running when AgentMux stopped.
-pub(super) async fn admit_open(state: &AppState, agent: &AgentDefinition, resumed: bool) -> Result<(), String> {
+pub(super) async fn admit_open(state: &AppState, agent: &AgentDefinition) -> Result<(), String> {
     let mstore = &state.mstore;
     // One live instance per agent across every AgentMux instance
     // on this host (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24
@@ -53,12 +51,8 @@ pub(super) async fn admit_open(state: &AppState, agent: &AgentDefinition, resume
     require_local_agent_row(&mstore, &agent.id)?;
 
     // A host agent in a folder a container agent can write opens once the person has gone ahead with that pair
-    // (the window asks them, then opens it again). One that was running when AgentMux stopped resumes as it did: the
-    // question comes the next time its pane is opened, and the person's no stops it.
-    if !resumed {
-        crate::backend::folder_overlap::check_open(mstore, agent)?;
-    }
-    Ok(())
+    // (the window asks them, then opens it again), whoever starts it: a message, a start, restart resume.
+    crate::backend::folder_overlap::check_open(mstore, agent)
 }
 
 /// Step 5: the provider's CLI on disk, installing the pinned version when it is missing.
@@ -223,6 +217,8 @@ pub(super) fn launch_env(
         // and lines without a valid `NAME=` are skipped, and a repeated name takes its last value.
         for (k, v) in crate::backend::agent_env::effective(&env_blob.content) {
             if !env_vars.contains_key(&k) {
+                // A key written in the clear goes into the process as written; it is never written into a transcript.
+                crate::backend::transcript::withhold_sources::env_credential(&agent.id, &k, &v);
                 env_vars.insert(k, json!(v));
             }
         }

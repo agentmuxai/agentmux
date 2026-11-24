@@ -111,6 +111,8 @@ function desktopOnlyApi() {
                 "goForward",
                 "reload",
                 "stop",
+                "find",
+                "stopFind",
                 "cancelDownload",
                 "startDownload",
                 "focus",

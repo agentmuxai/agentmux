@@ -42,7 +42,7 @@ describe("agents", () => {
     });
     it("never links an email address, a file name or a path segment", () => {
         expect(links("opaz@example.com")).toEqual([]);
-        expect(links("Opaz.json and src/Opaz and a/Opaz")).toEqual([]);
+        expect(links("Opaz.json and src/Opaz and a/Opaz")).toEqual(["file:Opaz.json"]);
     });
     it("builds the destination from the roster, not from the text", () => {
         const [seg] = linkify("Opaz", testContext());
@@ -106,7 +106,7 @@ describe("addresses", () => {
         expect(links("mailto:a@b.co ftp://x.test/y javascript:alert(1) file:///C:/x")).toEqual([]);
     });
     it("keeps README-style names out", () => {
-        expect(links("open README.md or main.rs")).toEqual([]);
+        expect(links("open README.md or main.rs").filter((l) => l.startsWith("address:"))).toEqual([]);
     });
     it("wins over a task or a name inside it", () => {
         expect(links("https://example.com/Opaz/#48247")).toEqual(["address:https://example.com/Opaz/#48247"]);

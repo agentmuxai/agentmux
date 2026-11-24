@@ -14,6 +14,7 @@
 import { createEffect, createMemo, on, onCleanup, Show, untrack, type JSX } from "solid-js";
 import { createConfirm, type PaneConfirm } from "@/app/element/create-confirm";
 import { Markdown } from "@/app/element/markdown";
+import { t } from "@/app/i18n/i18n";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import type { Bundle, GlobalMemoryVersionMeta } from "@/app/store/rpc-api";
 import { askDiscard, handleMemoryEditorKeyDown, requestCancel } from "@/app/view/memory-editor/editor-keys";
@@ -35,9 +36,9 @@ import { tip } from "@/app/element/tip";
 
 const SURFACE = "armory-global";
 
-const REACH_OPTIONS: { value: GlobalMemoryReach; label: string; title: string }[] = [
-    { value: "fleet", label: "Every machine", title: "Sent to every proven machine on the LAN, and kept in step: the newest write wins" },
-    { value: "machine", label: "This machine only", title: "Stays on this machine; a copy another machine sends is skipped" },
+const reachOptions = (): { value: GlobalMemoryReach; label: string; title: string }[] => [
+    { value: "fleet", label: t("globalMemory.full.reach.fleet"), title: t("globalMemory.full.reach.fleetTip") },
+    { value: "machine", label: t("globalMemory.full.reach.machine"), title: t("globalMemory.full.reach.machineTip") },
 ];
 
 const draftText = (v: GlobalMemoryDraft) => `# ${v.name}\n\n${v.instructions}`;
@@ -55,9 +56,9 @@ function EditorBar(props: { model: GlobalBundleViewModel; isNew: boolean; confir
                     class="memory-editor-btn is-primary"
                     disabled={draft.savingAtom() || !value().name.trim()}
                     onClick={() => void props.model.save()}
-                    title={`Save (${keyLabel("mod+s")})`}
+                    title={t("globalMemory.full.saveTip", { key: keyLabel("mod+s") })}
                 >
-                    {draft.savingAtom() ? "Saving…" : props.isNew ? "Add memory" : "Save"}
+                    {draft.savingAtom() ? t("globalMemory.full.saving") : props.isNew ? t("globalMemory.full.add") : t("globalMemory.full.save")}
                 </Button>
                 <Button
                     density="compact"
@@ -71,20 +72,20 @@ function EditorBar(props: { model: GlobalBundleViewModel; isNew: boolean; confir
                             confirm: askDiscard(props.confirm),
                         })
                     }
-                    title="Cancel (Esc)"
+                    title={t("globalMemory.full.cancelTip", { key: keyLabel("Escape") })}
                 >
-                    Cancel
+                    {t("globalMemory.full.cancel")}
                 </Button>
-                <span class="memory-editor-status">{draft.dirtyAtom() ? "Unsaved changes" : "No changes"}</span>
+                <span class="memory-editor-status">{draft.dirtyAtom() ? t("globalMemory.full.unsaved") : t("globalMemory.full.noChanges")}</span>
             </div>
             <label class="memory-editor-field">
-                <span class="memory-editor-field-label">Name</span>
+                <span class="memory-editor-field-label">{t("globalMemory.full.name")}</span>
                 <TextInput variant="plain"
                     class="memory-editor-input"
                     value={value().name}
                     onInput={(e) => draft.setDraft({ ...value(), name: e.currentTarget.value })}
                     onContextMenu={showTextInputContextMenu}
-                    placeholder="e.g. Coding Standards"
+                    placeholder={t("globalMemory.full.namePlaceholder")}
                     ref={(el) => {
                         if (props.isNew) focusOnOpen(el);
                     }}
@@ -97,7 +98,7 @@ function EditorBar(props: { model: GlobalBundleViewModel; isNew: boolean; confir
 /** Asks in the pane whether to remove the entry, and removes it on a yes. The button that calls it waits for a person's
  *  answer, so it is `pending={false}`. */
 async function removeAfterConfirm(confirm: PaneConfirm, name: string, remove: () => void): Promise<void> {
-    if (!(await confirm.ask({ title: `Remove "${name}" from Global Memory?`, confirmLabel: "Remove" }))) return;
+    if (!(await confirm.ask({ title: t("globalMemory.full.removeTitle", { name }), confirmLabel: t("globalMemory.full.remove") }))) return;
     remove();
 }
 
@@ -136,7 +137,7 @@ function EntryView(props: { model: GlobalBundleViewModel; id: string; confirm: P
                 fallback={
                     <div class="memory-editor-actions">
                         <Button density="compact" class="memory-editor-btn" onClick={() => model.startEdit()}>
-                            Edit
+                            {t("globalMemory.full.edit")}
                         </Button>
                         {/* ↑/↓ stay here as the keyboard-reachable fallback for the
                             grid's drag-to-reorder. System entries never reorder. */}
@@ -144,7 +145,7 @@ function EntryView(props: { model: GlobalBundleViewModel; id: string; confirm: P
                             <Button
                                 density="compact"
                                 class="memory-editor-btn"
-                                title="Move earlier in the injection order"
+                                title={t("globalMemory.full.moveEarlier")}
                                 disabled={ordIndex() <= 0}
                                 onClick={() => void model.move(id, -1)}
                             >
@@ -153,7 +154,7 @@ function EntryView(props: { model: GlobalBundleViewModel; id: string; confirm: P
                             <Button
                                 density="compact"
                                 class="memory-editor-btn"
-                                title="Move later in the injection order"
+                                title={t("globalMemory.full.moveLater")}
                                 disabled={ordIndex() === -1 || ordIndex() === model.ordinarySectionsAtom().length - 1}
                                 onClick={() => void model.move(id, 1)}
                             >
@@ -164,8 +165,8 @@ function EntryView(props: { model: GlobalBundleViewModel; id: string; confirm: P
                             {(current) => (
                                 <SegmentedControl
                                     density="compact"
-                                    ariaLabel="Where this memory goes"
-                                    options={REACH_OPTIONS}
+                                    ariaLabel={t("globalMemory.full.reachAria")}
+                                    options={reachOptions()}
                                     value={current()}
                                     onChange={(next) => void model.setReach(id, next)}
                                 />
@@ -176,13 +177,13 @@ function EntryView(props: { model: GlobalBundleViewModel; id: string; confirm: P
                             density="compact"
                             tone="danger"
                             class="memory-editor-btn is-danger"
-                            title="Remove this memory from Global Memory"
+                            title={t("globalMemory.full.removeThis")}
                             pending={false}
                             onClick={() =>
                                 removeAfterConfirm(props.confirm, entry().name, () => void (isSystem() ? model.removeSystem(id) : model.remove(id)))
                             }
                         >
-                            Remove
+                            {t("globalMemory.full.remove")}
                         </Button>
                     </div>
                 }
@@ -192,13 +193,13 @@ function EntryView(props: { model: GlobalBundleViewModel; id: string; confirm: P
             <Show when={draft.errorAtom()}>
                 <div class="memory-editor-error">{draft.errorAtom()}</div>
             </Show>
-            <MemoryConflictBanner model={draft} toText={draftText} noun="this memory" canRecreate={false} />
+            <MemoryConflictBanner model={draft} toText={draftText} noun={t("globalMemory.full.noun")} canRecreate={false} />
             <Show when={!liveEntry() && !draft.editingAtom()}>
-                <div class="memory-editor-error">This memory no longer exists.</div>
+                <div class="memory-editor-error">{t("globalMemory.full.gone")}</div>
             </Show>
             <Show when={isSystem()}>
                 <p class="global-bundle-intro">
-                    AgentMux-controlled: injected first, with override wording, into every agent's startup file.
+                    {t("globalMemory.full.systemNote")}
                 </p>
             </Show>
             <MemoryHistory model={history} revertDisabled={draft.dirtyAtom()} />
@@ -212,12 +213,12 @@ function EntryView(props: { model: GlobalBundleViewModel; id: string; confirm: P
             autoFocus
             draft={draft.draftAtom()?.instructions ?? ""}
             onDraftInput={(v) => draft.setDraft({ ...(draft.draftAtom() ?? { name: "", instructions: "" }), instructions: v })}
-            emptyText="(empty)"
-            textareaLabel={`Edit ${entry().name}`}
+            emptyText={t("globalMemory.full.empty")}
+            textareaLabel={t("globalMemory.full.editName", { name: entry().name })}
             placeholder={
                 isSystem()
-                    ? "Markdown injected FIRST into every agent's startup instructions file, wrapped in explicit override wording."
-                    : "Markdown injected into every agent's startup instructions file under a # [Workspace] heading."
+                    ? t("globalMemory.full.systemPlaceholder")
+                    : t("globalMemory.full.placeholder")
             }
         />
     );
@@ -244,7 +245,7 @@ function NewEntryView(props: { model: GlobalBundleViewModel; confirm: PaneConfir
             <Show when={draft.errorAtom()}>
                 <div class="memory-editor-error">{draft.errorAtom()}</div>
             </Show>
-            <p class="global-bundle-intro">Added to the end of the injection order.</p>
+            <p class="global-bundle-intro">{t("globalMemory.full.addedAtEnd")}</p>
         </>
     );
     const bottom = (
@@ -253,8 +254,8 @@ function NewEntryView(props: { model: GlobalBundleViewModel; confirm: PaneConfir
             editing={true}
             draft={draft.draftAtom()?.instructions ?? ""}
             onDraftInput={(v) => draft.setDraft({ ...(draft.draftAtom() ?? { name: "", instructions: "" }), instructions: v })}
-            textareaLabel="New memory content"
-            placeholder="Markdown injected into every agent's startup instructions file under a # [Workspace] heading."
+            textareaLabel={t("globalMemory.full.newContent")}
+            placeholder={t("globalMemory.full.placeholder")}
         />
     );
     return <PinnedEditorLayout surface={SURFACE} top={top} bottom={bottom} onKeyDown={(e) => keys(e, props.model, props.confirm)} />;
@@ -270,20 +271,19 @@ function ClaudeConfigView(props: { model: GlobalBundleViewModel }): JSX.Element 
         <>
             <code
                 class="global-bundle-file-label"
-                {...tip("Claude Code — shared provider config. Used by default spawned agents; identity-bound agents use a separate dir, not shown here.")}
+                {...tip(t("globalMemory.full.claudeTip"))}
             >
                 {cfg()?.path}
             </code>
             <p class="global-bundle-intro">
-                Read-only. Claude Code's own config file for default spawned agents — not composed from Global
-                Memory.
+                {t("globalMemory.full.claudeNote")}
             </p>
         </>
     );
     const bottom = (
         <Show
             when={cfg()?.exists}
-            fallback={<p class="memory-content-status global-bundle-file-empty">No file at this path yet.</p>}
+            fallback={<p class="memory-content-status global-bundle-file-empty">{t("globalMemory.full.noFile")}</p>}
         >
             <MemoryContent content={cfg()?.content ?? ""} editing={false} />
         </Show>
@@ -295,15 +295,14 @@ function ClaudeConfigView(props: { model: GlobalBundleViewModel }): JSX.Element 
 function PreviewView(props: { model: GlobalBundleViewModel }): JSX.Element {
     const top = (
         <p class="global-bundle-intro">
-            Exactly what every agent's startup instructions file (CLAUDE.md, GEMINI.md, …) receives at launch, in
-            injection order.
+            {t("globalMemory.full.previewNote")}
         </p>
     );
     const bottom = (
         <div class="memory-content">
             <div class="memory-content-markdown">
                 <Markdown
-                    text={props.model.previewAtom() || "(empty)"}
+                    text={props.model.previewAtom() || t("globalMemory.full.empty")}
                     scrollable={true}
                     contentClass="memory-content-markdown-content"
                 />
@@ -338,7 +337,7 @@ export function GlobalMemoryFullView(props: { model: GlobalBundleViewModel }): J
                             return (
                                 <Show
                                     when={untrack(props.model.openEntryAtom)}
-                                    fallback={<p class="memory-content-status">This memory no longer exists.</p>}
+                                    fallback={<p class="memory-content-status">{t("globalMemory.full.gone")}</p>}
                                 >
                                     <EntryView model={props.model} id={key.slice("entry:".length)} confirm={confirm} />
                                 </Show>

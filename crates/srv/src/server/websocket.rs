@@ -728,8 +728,7 @@ async fn input_command(wscommand: &str, incoming: &WSIncoming, engine: &Arc<WshR
     } else {
         let Some(ts_val) = incoming.termsize.as_ref() else { return Ok(()) };
         match serde_json::from_value::<TermSize>(ts_val.clone()) {
-            Ok(ts) => refuse_agent_input(&ctx)
-                .and_then(|()| blockcontroller::send_input(block_id, blockcontroller::BlockInputUnion::resize(ts), None)),
+            Ok(ts) => dispatch_termsize(&ctx, block_id, ts),
             Err(e) => {
                 tracing::warn!("ws: setblocktermsize parse error: {}", e);
                 return Ok(());
@@ -744,6 +743,12 @@ async fn input_command(wscommand: &str, incoming: &WSIncoming, engine: &Arc<WshR
         }
     }
     Ok(())
+}
+
+/// `setblocktermsize`: a resize for a block's controller. The window's alone: an agent connection is refused.
+pub(super) fn dispatch_termsize(ctx: &RpcContext, block_id: &str, size: TermSize) -> Result<(), String> {
+    refuse_agent_input(ctx)?;
+    blockcontroller::send_input(block_id, blockcontroller::BlockInputUnion::resize(size), None)
 }
 
 /// Route a decoded `blockinput` payload — the actual human-keystroke path
@@ -1034,6 +1039,20 @@ mod tests {
             Err(format!("no controller for block {unlocked_id}")),
             "an unlocked blockinput call must still reach send_input for real"
         );
+    }
+
+    /// `setblocktermsize` is the window's: an agent connection is refused whichever block it names, the window and a
+    /// connection that is not registered as an agent reach the controller as before.
+    #[test]
+    fn setblocktermsize_is_refused_for_a_connection_registered_as_an_agent() {
+        let agent = RpcContext { agent_id: "agent9".to_string(), ..Default::default() };
+        let pane = "ws-termsize-agent-test-pane";
+        let size = || crate::backend::obj::TermSize { rows: 24, cols: 80 };
+        let refused = dispatch_termsize(&agent, pane, size());
+        assert!(refused.as_ref().is_err_and(|e| e.starts_with("FORBIDDEN") && e.contains("Terminal tool")), "{refused:?}");
+        for person in [RpcContext::operator_for_tests(), RpcContext::default()] {
+            assert_eq!(dispatch_termsize(&person, pane, size()), Err(format!("no controller for block {pane}")));
+        }
     }
 
     /// An agent's connection writes into no block through the window's input commands, whatever block it names (another

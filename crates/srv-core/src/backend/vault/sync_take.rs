@@ -53,9 +53,6 @@ use crate::backend::user_sync::log::{self, Outcome, Pins};
 use crate::backend::user_sync::record::{Header, Record};
 use crate::backend::user_sync::seal::KeyRing;
 
-/// How many times a take reads the entry again when a change made here lands between its read and its write.
-const TRIES: usize = 3;
-
 /// What taking a record did to the store.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
@@ -72,8 +69,11 @@ pub enum Effect {
     Granted { entry: String },
     /// A site grant another machine revoked was ended here, for the entry.
     Revoked { entry: String },
-    /// The record was not taken into the store, and why (no value in it).
+    /// The record was not taken into the store, and why (no value in it), and it is not going to be.
     Skipped(String),
+    /// The record was not taken into the store yet, and why: a kind this version does not know, or an id another entry holds.
+    /// The log holds it and does not send it again, so [`Taker::retake`] takes it again from the log.
+    Deferred(String),
     /// The side of a conflict that lost has nowhere in the store to be kept: it stays in the log, sealed.
     KeptInLog(String),
 }
@@ -176,8 +176,10 @@ fn version(entry_id: &str, created_at: i64, sealed: Vec<u8>, state: String, mach
 }
 
 impl Taker<'_> {
-    /// Hands `rec` to the layer, and takes its result into the store. Errors from the layer (a record that is refused, out of
-    /// sequence or at another epoch) and from the store come back as text, and change nothing in the store.
+    /// Hands `rec` to the layer, and takes its result into the store. An error from the layer (a record that is refused, out of
+    /// sequence or at another epoch) comes back as text and the log does not hold the record. An error from the store, or a
+    /// record the store cannot take yet ([`Effect::Deferred`]), comes back after the log holds the record, which the layer does
+    /// not hand over again: so it is noted, and [`Taker::retake`] takes it again from the log.
     pub fn receive(&self, rec: &Record, pins: &Pins, clock: &mut Clock, now_ms: i64) -> Result<Taken, String> {
         let h = &rec.header;
         // Everything that reads the store comes before the log is locked: the log is the store's own connection.
@@ -201,23 +203,56 @@ impl Taker<'_> {
         let none = |outcome| Taken { outcome, effect: Effect::None, kept: None };
         // The adapter is not asked about a record the layer already holds or voids.
         let Some(decision) = decision else { return Ok(none(outcome)) };
-        match decision {
-            Decision::KeptLocal => Ok(none(outcome)),
-            Decision::Applied => {
-                let effect = self.current(rec, None, now_ms)?;
-                Ok(Taken { outcome, effect, kept: None })
-            }
+        // Why the other side of a conflict is kept, when this record won one: a retake keeps it the same way.
+        let lost = match &decision {
+            Decision::Conflict { current: Chose::Incoming, kept, .. } => Some(kept.label()),
+            _ => None,
+        };
+        let result = match decision {
+            Decision::KeptLocal => return Ok(none(outcome)),
+            Decision::Applied => self.current(rec, None, false, now_ms).map(|effect| Taken { outcome, effect, kept: None }),
             Decision::Conflict { current: Chose::Incoming, kept, .. } => {
                 let label = kept.label();
-                let effect = self.current(rec, Some(&kept), now_ms)?;
-                Ok(Taken { outcome, effect, kept: Some(label) })
+                self.current(rec, Some(&label), false, now_ms).map(|effect| Taken { outcome, effect, kept: Some(label) })
             }
             Decision::Conflict { current: Chose::Local, kept, .. } => {
                 let label = kept.label();
-                let effect = self.keep_incoming(rec, &kept, now_ms)?;
-                Ok(Taken { outcome, effect, kept: Some(label) })
+                self.keep_incoming(rec, &label, now_ms).map(|effect| Taken { outcome, effect, kept: Some(label) })
             }
+        };
+        // The log holds the record now. What the store could not take of it is noted, so a record that is never sent again is
+        // still taken; what it took, or is not going to, is not.
+        let (vault, record) = (&h.collection, &h.record);
+        match &result {
+            Err(_) | Ok(Taken { effect: Effect::Deferred(_), .. }) => {
+                sync_capture::retake_mark(self.store, vault, record, lost.as_deref()).map_err(|e| format!("the log holds the record, and it could not be noted for `retake`: {e}"))?;
+            }
+            // Clearing a mark that is not needed any more fails harmlessly: the record is taken again, and the take is the same.
+            Ok(_) => drop(sync_capture::retake_clear(self.store, vault, record)),
         }
+        result.map_err(|e| format!("{e}: the log holds the record, and `retake` takes it again"))
+    }
+
+    /// Takes again the records of `vault` that the log holds and the store did not take (an error, a key not here yet, a kind
+    /// this version does not know), from the log's current state of each, as a plain change that follows on: the side of a
+    /// conflict that lost stays in the log. A record taken, or no longer in the log, is not noted any more; one that fails again
+    /// stays, with the conflict it won (so does one that finds the entry changed here since it was read, which is never written over). Run it after a
+    /// capture, at the start of a sync round, and after an upgrade: a change made here is in the log by then.
+    pub fn retake(&self, vault: &str, now_ms: i64) -> Result<Vec<(String, Result<Effect, String>)>, String> {
+        let mut out = Vec::new();
+        for (record, lost) in sync_capture::retake_pending(self.store, vault)? {
+            let current = log::current(&self.store.conn().lock().unwrap_or_else(|e| e.into_inner()), vault, &record).map_err(|e| e.to_string())?;
+            let Some(rec) = current else {
+                sync_capture::retake_clear(self.store, vault, &record)?;
+                continue;
+            };
+            let effect = self.current(&rec, lost.as_deref(), true, now_ms);
+            if !matches!(effect, Err(_) | Ok(Effect::Deferred(_))) {
+                sync_capture::retake_clear(self.store, vault, &record)?;
+            }
+            out.push((record, effect));
+        }
+        Ok(out)
     }
 
     /// The ids a record names its entry by: its own, then the ones its body says the entry has (a body that does not open, or
@@ -258,7 +293,7 @@ impl Taker<'_> {
 
     /// `rec` is now the record's current state: the entry takes its value, or is deleted. `lost` is the other side of a
     /// conflict, which this machine held, and which is kept.
-    fn current(&self, rec: &Record, lost: Option<&Kept>, now_ms: i64) -> Result<Effect, String> {
+    fn current(&self, rec: &Record, lost: Option<&str>, settled: bool, now_ms: i64) -> Result<Effect, String> {
         match Kind::of(&rec.header.record) {
             Kind::Activity => return self.line(rec),
             Kind::Grant => return self.grant(rec),
@@ -268,26 +303,29 @@ impl Taker<'_> {
             return Ok(Effect::Skipped("a record whose id is not an entry's".to_string()));
         }
         if rec.header.tombstone {
-            return self.delete(rec, lost);
+            return self.delete(rec, lost, settled, now_ms);
         }
         let body: EntryBody = open_body(self.ring, rec)?;
         if let Some(why) = refused(&body) {
-            return Ok(Effect::Skipped(why));
+            return Ok(Effect::Deferred(why));
         }
-        for _ in 0..TRIES {
-            if let Some(effect) = self.write(rec, &body, lost, now_ms)? {
+        // One try: what was decided was decided against the entry as it was read. An entry changed here since is not written
+        // over, and the decision is not run again against it: the change here is sent by the next capture, and `retake` takes
+        // the record's state then.
+        match self.write(rec, &body, lost, now_ms)? {
+            Some(effect) => {
                 // Grants that came before the entry did are made now.
                 if let Effect::Wrote { entry } = &effect {
                     self.apply_waiting(entry, &rec.header.collection)?;
                 }
-                return Ok(effect);
+                Ok(effect)
             }
+            None => Err("the entry was changed here while its record was taken, so nothing was overwritten".to_string()),
         }
-        Err("the entry kept changing while its record was taken: it will be taken again when the record is next sent".to_string())
     }
 
     /// One try at writing `body` as the entry's value. `None` if the entry changed here between the read and the write.
-    fn write(&self, rec: &Record, body: &EntryBody, lost: Option<&Kept>, now_ms: i64) -> Result<Option<Effect>, String> {
+    fn write(&self, rec: &Record, body: &EntryBody, lost: Option<&str>, now_ms: i64) -> Result<Option<Effect>, String> {
         let h = &rec.header;
         let store = self.store;
         let mut ids = vec![h.record.clone()];
@@ -295,8 +333,16 @@ impl Taker<'_> {
         let existing = match self.find(&ids)? {
             Found::None => None,
             Found::One(id) => store.vault_get(&id).map_err(|e| e.to_string())?,
-            Found::Two => return Ok(Some(Effect::Skipped("its ids belong to two entries here".to_string()))),
+            Found::Two => return Ok(Some(Effect::Deferred("its ids belong to two entries here".to_string()))),
         };
+        // The entry is in another Vault here, and that Vault's record of it is live and later than this one: this record is the
+        // entry's past (the source Vault's, taken after the destination's), and does not move it back.
+        if let Some(old) = existing.as_ref().filter(|r| r.vault_id != h.collection) {
+            let there = log::current(&store.conn().lock().unwrap_or_else(|e| e.into_inner()), &old.vault_id, &h.record).map_err(|e| e.to_string())?;
+            if there.is_some_and(|t| !t.header.tombstone && t.header.version > h.version) {
+                return Ok(Some(Effect::None));
+            }
+        }
         // One entry is one record. An entry that is written under another record than this one has two: the smaller id's is
         // the one every machine follows, so the larger's is not taken (it names the entry's ids, so a link made from it
         // opens it), and this machine's own larger one is left for the smaller (below).
@@ -321,23 +367,23 @@ impl Taker<'_> {
         let local = if existing.is_some() { links_of(store, &entry_id)? } else { Links::default() };
         let links = sync_links::settle(&Reviving { store, record: &h.record }, &entry_id, &local, &ids);
         if existing.is_none() && links.primary.as_deref() != Some(h.record.as_str()) {
-            return Ok(Some(Effect::Skipped("its id is held by another entry here".to_string())));
+            return Ok(Some(Effect::Deferred("its id is held by another entry here".to_string())));
         }
         let sealed = seal::seal(self.key, &entry_id, &Parts(body.parts.clone()))?;
         let mut row = body.into_row(&entry_id, &h.collection, sealed, existing.as_ref(), self.profiles);
         let machine = h.version.machine.as_str();
         // This machine's own larger record is left for the smaller: if what the entry holds here is not what that record
         // says, this machine's value is kept beside it as a version of its own, as for a change made at the same time.
-        let adopt_kept = Kept::SameTime { machine: self.machine.to_string() };
+        let adopt_label = Kept::SameTime { machine: self.machine.to_string() }.label();
         let lost = match (&adopting, &existing) {
-            (Some(_), Some(old)) if lost.is_none() && self.differs(old, &row, body) => Some(&adopt_kept),
+            (Some(_), Some(old)) if lost.is_none() && self.differs(old, &row, body) => Some(adopt_label.as_str()),
             _ => lost,
         };
         let mut kept = Vec::new();
         match (&existing, lost) {
             // A conflict: the value this machine held is kept as it was, and the tags are the two sides' together.
             (Some(old), Some(why)) => {
-                kept.push(version(&old.id, old.created_at, old.sealed.clone(), format!("{KEPT_PREFIX}{}", why.label()), machine, now_ms));
+                kept.push(version(&old.id, old.created_at, old.sealed.clone(), format!("{KEPT_PREFIX}{why}"), machine, now_ms));
                 row.tags = tags_json(&sync_merge::union_tags(&body.tags, &tags_of(old)));
             }
             // A change that follows on: the value it replaces is kept for 7 days, if it differs.
@@ -348,12 +394,12 @@ impl Taker<'_> {
                 }
             }
             // The entry was deleted here, and this change is later than the delete: it comes back, and the delete is kept.
-            (None, Some(why)) => kept.push(version(&entry_id, row.created_at, Vec::new(), format!("{KEPT_PREFIX}{}", why.label()), machine, now_ms)),
+            (None, Some(why)) => kept.push(version(&entry_id, row.created_at, Vec::new(), format!("{KEPT_PREFIX}{why}"), machine, now_ms)),
             (None, None) => {}
         }
         let write = TakeWrite {
             row: &row,
-            was: existing.as_ref().map(|r| r.sealed.as_slice()),
+            was: existing.as_ref(),
             primary: links.primary.as_deref(),
             aliases: &links.aliases,
             revive: existing.is_none().then_some(h.record.as_str()),
@@ -362,8 +408,9 @@ impl Taker<'_> {
         if !store.vault_take_write(&write).map_err(|e| e.to_string())? {
             return Ok(None);
         }
-        let stored = store.vault_get(&entry_id).map_err(|e| e.to_string())?.ok_or_else(|| "the entry taken is not in the store".to_string())?;
-        sync_capture::mark_seen(store, &stored, &h.record, self.key, self.profiles)?;
+        // What was written is what is marked as seen, not what the store holds by now: a change made here after the write is
+        // not in the log, and the next capture has to send it.
+        sync_capture::mark_seen(store, &row, &h.record, self.key, self.profiles)?;
         // The record this machine wrote it under is ended by its next capture, so a machine that has only that one (a
         // new member) does not make a second entry of it.
         if let Some((vault, mine)) = adopting.filter(|(vault, _)| !vault.is_empty()) {
@@ -396,7 +443,13 @@ impl Taker<'_> {
 
     /// `rec`, a tombstone, is now the record's current state. A conflict's other side is the entry's last value, which the
     /// delete takes with it: it stays in the log.
-    fn delete(&self, rec: &Record, lost: Option<&Kept>) -> Result<Effect, String> {
+    ///
+    /// A tombstone in a Vault is also what a move to another Vault leaves behind, and the two Vaults' records come separately,
+    /// in either order. An entry that moved is not deleted by its old Vault's tombstone: not when the new Vault's record is
+    /// already in the log, and not on first sight either, when it may still come in this round. The delete waits one round
+    /// (`settled` is false then, true when [`Taker::retake`] takes it again), and by then the new Vault's record has moved the
+    /// entry, which keeps its grants, versions and ids; if it has not, the entry is deleted.
+    fn delete(&self, rec: &Record, lost: Option<&str>, settled: bool, now_ms: i64) -> Result<Effect, String> {
         let h = &rec.header;
         let Some(id) = self.store.vault_entry_of_link(&h.record).map_err(|e| e.to_string())? else { return Ok(Effect::None) };
         let Some(row) = self.store.vault_get(&id).map_err(|e| e.to_string())? else { return Ok(Effect::None) };
@@ -408,10 +461,23 @@ impl Taker<'_> {
         if sync_capture::identity_of(self.store, &id)?.is_some_and(|(_, mine)| mine != h.record) {
             return Ok(Effect::None);
         }
+        let moved = log::live_elsewhere(&self.store.conn().lock().unwrap_or_else(|e| e.into_inner()), &h.collection, &h.record).map_err(|e| e.to_string())?;
+        if moved {
+            return Ok(Effect::None);
+        }
+        // A rotation may have started since the tombstone came (a rotation holds a pending value beside the entry, and is not a
+        // change to it): the delete does not take the pending value with it, and is kept beside the entry, as a delete that
+        // came while the entry was being rotated is.
+        if self.rotation_waits(&id)? {
+            return self.keep_incoming(rec, &format!("deleted on {} while this was being rotated", h.version.machine), now_ms);
+        }
+        if !settled {
+            return Ok(Effect::Deferred("deleted in this Vault: it waits one round, in case the entry moved to another Vault whose record has not come yet".to_string()));
+        }
         self.store.vault_delete(&id).map_err(|e| e.to_string())?;
         sync_capture::forget(self.store, &id)?;
         Ok(match lost {
-            Some(why) => Effect::KeptInLog(why.label()),
+            Some(why) => Effect::KeptInLog(why.to_string()),
             None => Effect::Deleted { entry: id },
         })
     }
@@ -423,9 +489,9 @@ impl Taker<'_> {
     }
 
     /// `rec` lost a conflict: this machine's value stays, and `rec` is kept beside it as a version, with its tags.
-    fn keep_incoming(&self, rec: &Record, why: &Kept, now_ms: i64) -> Result<Effect, String> {
+    fn keep_incoming(&self, rec: &Record, label: &str, now_ms: i64) -> Result<Effect, String> {
         let h = &rec.header;
-        let label = why.label();
+        let label = label.to_string();
         let Some(id) = self.store.vault_entry_of_link(&h.record).map_err(|e| e.to_string())? else { return Ok(Effect::KeptInLog(label)) };
         let machine = h.version.machine.as_str();
         let state = format!("{KEPT_PREFIX}{label}");
@@ -439,22 +505,20 @@ impl Taker<'_> {
             }
             (seal::seal(self.key, &id, &Parts(body.parts.clone()))?, Some(body.tags.clone()))
         };
-        for _ in 0..TRIES {
-            let Some(row) = self.store.vault_get(&id).map_err(|e| e.to_string())? else { return Ok(Effect::KeptInLog(label)) };
-            let mut next = row.clone();
-            if let Some(theirs) = &theirs {
-                next.tags = tags_json(&sync_merge::union_tags(&tags_of(&row), theirs));
-            }
-            let links = links_of(self.store, &id)?;
-            let kept = [version(&id, row.created_at, sealed.clone(), state.clone(), machine, now_ms)];
-            let write = TakeWrite { row: &next, was: Some(row.sealed.as_slice()), primary: links.primary.as_deref(), aliases: &links.aliases, revive: None, kept: &kept };
-            if self.store.vault_take_write(&write).map_err(|e| e.to_string())? {
-                let stored = self.store.vault_get(&id).map_err(|e| e.to_string())?.ok_or_else(|| "the entry is not in the store".to_string())?;
-                sync_capture::mark_seen(self.store, &stored, &h.record, self.key, self.profiles)?;
-                return Ok(Effect::Wrote { entry: id });
-            }
+        // One try, as in `current`: an entry changed here since it was read is not written over.
+        let Some(row) = self.store.vault_get(&id).map_err(|e| e.to_string())? else { return Ok(Effect::KeptInLog(label)) };
+        let mut next = row.clone();
+        if let Some(theirs) = &theirs {
+            next.tags = tags_json(&sync_merge::union_tags(&tags_of(&row), theirs));
         }
-        Err("the entry kept changing while its record was taken: it will be taken again when the record is next sent".to_string())
+        let links = links_of(self.store, &id)?;
+        let kept = [version(&id, row.created_at, sealed, state, machine, now_ms)];
+        let write = TakeWrite { row: &next, was: Some(&row), primary: links.primary.as_deref(), aliases: &links.aliases, revive: None, kept: &kept };
+        if !self.store.vault_take_write(&write).map_err(|e| e.to_string())? {
+            return Err("the entry was changed here while its record was taken, so nothing was overwritten".to_string());
+        }
+        sync_capture::mark_seen(self.store, &next, &h.record, self.key, self.profiles)?;
+        Ok(Effect::Wrote { entry: id })
     }
 }
 

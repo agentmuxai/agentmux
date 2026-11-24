@@ -55,6 +55,9 @@ pub trait DroneStore {
     fn drone_get(&self, id: &str) -> Result<Option<DroneDefinition>, StoreError>;
     fn drone_upsert(&self, wf: &DroneDefinition) -> Result<(), StoreError>;
     fn drone_delete(&self, id: &str) -> Result<bool, StoreError>;
+    /// A Once block's claim of `key` for `drone_id`: true for the first caller, false for every later one. The keys
+    /// of a drone are forgotten when the drone is deleted.
+    fn drone_once_claim(&self, drone_id: &str, key: &str, now_ms: i64) -> Result<bool, StoreError>;
     fn drone_run_insert(&self, run: &DroneRun) -> Result<(), StoreError>;
     /// Update an existing run row in place. Returns rows affected
     /// (0 if no row matched `run.id`). Used to flip a placeholder
@@ -154,7 +157,31 @@ impl DroneStore for Store {
         let conn = self.conn().lock().unwrap();
         let rows =
             conn.execute("DELETE FROM db_drone_definitions WHERE id = ?1", params![id])?;
+        // A table made the first time a Once block runs, so there may be none; any other failure is not hidden: the keys
+        // would stay behind and a drone made later with this id would find them already seen.
+        match conn.execute("DELETE FROM db_drone_once WHERE drone_id = ?1", params![id]) {
+            Ok(_) => {}
+            Err(e) if e.to_string().contains("no such table") => {}
+            Err(e) => return Err(e.into()),
+        }
         Ok(rows > 0)
+    }
+
+    fn drone_once_claim(&self, drone_id: &str, key: &str, now_ms: i64) -> Result<bool, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS db_drone_once (
+                drone_id TEXT NOT NULL,
+                key      TEXT NOT NULL,
+                claimed_at INTEGER NOT NULL,
+                PRIMARY KEY (drone_id, key)
+            );",
+        )?;
+        let added = conn.execute(
+            "INSERT OR IGNORE INTO db_drone_once (drone_id, key, claimed_at) VALUES (?1, ?2, ?3)",
+            params![drone_id, key, now_ms],
+        )?;
+        Ok(added == 1)
     }
 
     fn drone_run_insert(&self, run: &DroneRun) -> Result<(), StoreError> {

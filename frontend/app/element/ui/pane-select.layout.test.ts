@@ -48,6 +48,17 @@ function fixture(guarded: boolean): string {
 <script>${guarded ? `${GUARD};PS.installPaneSelectGuard(window);` : ""}</script>`;
 }
 
+/** The first pane `a` after a pane `s` in the document, `s` to its right on screen, with a field that is `user-select: none`. */
+function fixtureBehind(): string {
+    const text = (id: string) => `<p id="${id}" style="margin:0 0 10px;font:14px sans-serif">${PARAGRAPH.repeat(3)}</p>`;
+    return `<!doctype html><meta charset="utf-8"><style>html,body{margin:0;overflow:hidden;font:14px sans-serif}${RULES}</style>
+<div class="block" data-blockid="s" id="s" style="position:absolute;left:320px;top:40px;width:300px;height:400px;overflow:hidden">
+  <div class="block-content"><textarea id="sf" placeholder="Broadcast to agents" style="user-select:none;width:280px;height:60px"></textarea><p id="s1" style="margin:0;font:14px sans-serif">swarm text ${PARAGRAPH}</p></div></div>
+<div class="block block-focused" data-blockid="a" id="a" style="position:absolute;left:0;top:40px;width:300px;height:400px;overflow:hidden">
+  <div class="block-content">${text("a1")}${text("a2")}${text("a3")}</div></div>
+<script>${GUARD};PS.installPaneSelectGuard(window);</script>`;
+}
+
 interface Probe {
     ranges: number;
     len: number;
@@ -146,6 +157,51 @@ describe.skipIf(!BROWSER)("a selection that starts in a pane", () => {
             expect(seen.some(([, s]) => !s.inA || s.crossing), `${what} never left the pane: ${JSON.stringify(seen)}`).toBe(true);
         }, 60_000);
     }
+
+    /**
+     * The pane the drag began in comes AFTER another pane in the document (the Swarm and CPU panes sit before an agent
+     * pane in DOM order, to its right on screen), and that pane holds a field and a handle that are `user-select: none`.
+     * Held over such a thing the engine snaps the end of the selection to the nearest position it can select, which
+     * can be before the pane in document order: the selection leaps backwards, over the other pane.
+     */
+    const behind = (p: DrivenPage) =>
+        p.eval<{ sf: { x: number; y: number }; s1: { x: number; y: number } }>(
+            `(() => { const c = (id) => { const b = document.getElementById(id).getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; }; return { sf: c("sf"), s1: c("s1") }; })()`,
+        );
+    const dragOverFieldBefore = async (p: DrivenPage): Promise<Array<[string, Probe]>> => {
+        const start = await textPoint(p, "a1");
+        const over = await behind(p);
+        const edge = { x: 296, y: over.sf.y };
+        await p.mouse("mouseMoved", start.x, start.y);
+        await p.mouse("mousePressed", start.x, start.y, { clickCount: 1 });
+        const seen: Array<[string, Probe]> = [];
+        let at = start;
+        for (const [name, to] of [["at the pane's right edge", edge], ["over a field before the pane", over.sf], ["over text before the pane", over.s1]] as const) {
+            for (let i = 1; i <= 8; i++) {
+                await p.mouse("mouseMoved", at.x + ((to.x - at.x) * i) / 8, at.y + ((to.y - at.y) * i) / 8, { clickCount: 1 });
+                await wait(15);
+            }
+            at = to;
+            await wait(80);
+            seen.push([name, await probe(p)]);
+        }
+        await p.mouse("mouseReleased", at.x, at.y, { clickCount: 1 });
+        return seen;
+    };
+
+    it("holds the selection where it was in the pane while the pointer is over a field or text of a pane that comes before it in the document", async () => {
+        const seen = await driveInBrowser(BROWSER!, fixtureBehind(), SIZE, async (p) => {
+            for (let i = 0; i < 50 && !(await p.eval<boolean>(`!!document.getElementById("s1")`)); i++) await wait(100);
+            return dragOverFieldBefore(p);
+        });
+        // Where the pointer last was over the pane is where the selection stays.
+        const held = seen[0][1].len;
+        expect(held).toBeGreaterThan(0);
+        for (const [name, s] of seen) {
+            expect(s.inA, `${name}: ${JSON.stringify(s)}`).toBe(true);
+            expect(s.len, `${name}: ${JSON.stringify(s)}`).toBe(held);
+        }
+    }, 60_000);
 
     /** Click in the first pane's text, then Shift+click in the second pane's. */
     const shiftClick = async (p: DrivenPage): Promise<Probe> => {

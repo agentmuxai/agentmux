@@ -314,6 +314,20 @@ pub fn check_open(store: &Store, def: &AgentDefinition) -> Result<(), String> {
     check(store, def, Some(&open_folder(def))).map_err(|refusal| format!("{OPEN_REFUSAL_CODE}: {refusal}"))
 }
 
+/// Why the start of host agent `def` waits, for an agent that asks what its state is: the pairs it shares a folder with
+/// that the person has not gone ahead with. `None` when nothing waits.
+pub fn waiting_reason(store: &Store, def: &AgentDefinition) -> Option<String> {
+    if is_container(def) {
+        return None;
+    }
+    let pending = unchosen(of(store, def, Some(&open_folder(def))));
+    if pending.is_empty() {
+        return None;
+    }
+    let pairs = pending.iter().map(|o| format!("{} (host) and {} (container)", o.host_name, o.container_name)).collect::<Vec<_>>().join("; ");
+    Some(format!("{OPEN_REFUSAL_CODE}: waits for the person's go-ahead for a shared folder: {pairs}"))
+}
+
 /// Whether a save of `new` over `old` changes a folder an agent works in or can write.
 pub fn folders_changed(old: &AgentDefinition, new: &AgentDefinition) -> bool {
     old.working_directory != new.working_directory || old.agent_type != new.agent_type || old.container_volumes != new.container_volumes

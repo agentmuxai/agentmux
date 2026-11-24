@@ -19,6 +19,7 @@
  */
 
 import { Show, createEffect, createMemo, type JSX } from "solid-js";
+import { getPaneScope } from "@/app/backdrop/scope";
 import { UnseenTurnsDot } from "@/app/block/UnseenTurnsDot";
 import { computeFocusRingBorderColor } from "@/app/block/blockframe";
 import { isLightThemeActive } from "@/app/block/pane-identity";
@@ -102,7 +103,7 @@ function createShellTabs(nodeModel: NodeModel, s: ShellState) {
     const extraTabs = createMemo(() => model()?.extraTabs?.() ?? []);
     const tabIds = createTabIds(s.stackIds, extraTabs);
     const tabInfos = createTabInfos(nodeModel, s.stackIds, tabIds, extraTabs, s.activeBlockId);
-    const tabColors = createTabColors(tabIds);
+    const tabColors = createTabColors(tabIds, s.activeBlockId);
     const headerTailBg = createHeaderTailBg(tabIds);
     const { renamingId, setRenamingId, labelOf, confirmRename } = createTabRename(tabInfos);
     const summaryOf = (id: string) => tabSummaryOf(id, tabInfos);
@@ -187,6 +188,8 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
 
     const activeViewModelOrUndefined = () => nodeModel.activeViewModel?.() ?? undefined;
     const setProgressSlotEl = useProgressBarSlot(nodeModel);
+    // Looked up as it is read: the chrome follows the tab in front.
+    const scope = () => getPaneScope(s.activeBlockId())() ?? undefined;
 
     createEffect(() => {
         const closing = nodeModel.isClosing?.() ?? false;
@@ -222,7 +225,10 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
                 "pane-stack-closing": nodeModel.isClosing?.() ?? false,
                 ...(t.model()?.rootClass ? { [t.model()!.rootClass]: true } : {}),
             }}
-            style={{ "--pane-ring-color": look.ringBorderColor(), "--pane-remote-color": look.remoteColor() }}
+            // The pane's backdrop, when its tab in front has one: the header, the tab strip and the progress slot sit
+            // outside the block's own frame, so they take its colours here (spec §6, the header and tab pills).
+            style={{ "--pane-ring-color": look.ringBorderColor(), "--pane-remote-color": look.remoteColor(), ...scope() }}
+            data-backdrop={scope() ? "" : undefined}
             data-blockid={s.activeBlockId()}
             data-file-drop={dropState()?.state}
             onClick={() => nodeModel.focusNode()}

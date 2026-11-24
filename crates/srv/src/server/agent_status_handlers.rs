@@ -25,6 +25,8 @@ use super::AppState;
 pub struct StatusParams {
     pub line: Option<String>,
     pub state: Option<String>,
+    /// With state `waiting`: how long the quiet watch leaves the agent alone, 1 to 240 minutes (30 when absent).
+    pub until_minutes: Option<u64>,
     pub agent: Option<String>,
     pub block: Option<String>,
 }
@@ -66,6 +68,16 @@ pub(crate) async fn handle_agent_status(
         Ok(v) => v,
         Err(e) => return bad_request(e),
     };
+    let waiting_minutes = match p.until_minutes {
+        None => None,
+        Some(m) if status != Some("waiting") => {
+            return bad_request(format!("until_minutes ({m}) goes with state \"waiting\": say how long you will be quiet, or leave it out"))
+        }
+        Some(m) if m == 0 || m > live_phrase::WAITING_MAX_MINUTES => {
+            return bad_request(format!("until_minutes is 1 to {} minutes; got {m}", live_phrase::WAITING_MAX_MINUTES))
+        }
+        Some(m) => Some(m),
+    };
     let Some((agent, _uid, block)) = claimer(&state, caller.as_ref().map(|c| &c.0), p.agent.as_deref(), p.block.as_deref())
     else {
         return bad_request("who is setting the status is unknown: this needs an agent started by AgentMux");
@@ -75,7 +87,10 @@ pub(crate) async fn handle_agent_status(
     };
     let _writing = LINE_WRITES.lock().await;
     let now = agentmux_common::time::now_ms();
-    let meta = live_phrase::set_meta(&line, status, live_phrase::SRC_AGENT, now);
+    let meta = match waiting_minutes {
+        Some(minutes) => live_phrase::set_meta_waiting(&line, live_phrase::SRC_AGENT, now, minutes),
+        None => live_phrase::set_meta(&line, status, live_phrase::SRC_AGENT, now),
+    };
     if let Err(e) = write_block_meta(&state, &block_id, meta).await {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": format!("status not saved: {e}") }))).into_response();
     }
@@ -86,6 +101,7 @@ pub(crate) async fn handle_agent_status(
         "state": status,
         "set_at": now,
         "cut_to_fit": cut,
+        "quiet_watch_paused_until": (status == Some("waiting")).then(|| now + waiting_minutes.unwrap_or(live_phrase::WAITING_DEFAULT_MINUTES) as i64 * 60_000),
         "note": "Shown in the Swarm and in Agents conversations until you set another line or claim a task. Set it again when \
                  your plan changes, when you are blocked or waiting, and when you are done.",
     }))

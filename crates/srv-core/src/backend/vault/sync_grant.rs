@@ -3,7 +3,7 @@
 
 //! A site grant ("Always on this site" for an entry) as a sync record (docs/specs/SPEC_VAULT_SHARED_ACROSS_MACHINES_LAN_AND_CLOUD_2026_11_01.md
 //! section 6.6). Grants to an agent (`signin:<agent>`, a command's first-use grant) name an agent of one machine and
-//! never sync: this module has no way to build a record from one.
+//! never sync: this module has no way to build a record from one, and the capture writes only a grant whose key is a site.
 //!
 //! A grant holds no value, and two machines that make the same grant make the same record, so a grant has no keep-both:
 //! the later version, a grant or its revoking, is the one every machine follows.
