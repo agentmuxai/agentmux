@@ -213,6 +213,7 @@ mod tests {
             let cmd = crate::backend::rpc_types::FsPathReq {
                 path: file.to_string_lossy().into_owned(),
                 block_id: Some("confined".into()),
+                confirmed: None,
             };
             let err = crate::server::fs_handlers::open_or_reveal_bound(&state, cmd, reveal).await.unwrap_err();
             assert_eq!(err, NO_PROGRAMS);

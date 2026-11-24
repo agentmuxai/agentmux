@@ -3,7 +3,7 @@ click pic.png {"ctrlKey":true}: selection={"names":["b.txt","pic.png"],"focus":"
 click src {"shiftKey":true}: selection={"names":["src","a.md","b.txt","pic.png"],"focus":"src","anchor":"pic.png"} focusOnList=true
 blank space: selection={"names":[],"focus":"src","anchor":"pic.png"}
 > the row menu
-buildRowMenu(run.exe, openEntry,openInNewTab,copyPaths,askDeletePermanently)
+buildRowMenu(run.exe, openEntry,openWithDefaultApp,openInNewTab,copyPaths,askDeletePermanently)
 contextmenu notPrevented=false selection={"names":["run.exe"],"focus":"run.exe","anchor":"run.exe"}
 menu: ["Open","Open in Editor","Open with default app","Open Containing Folder","Cut","Copy","Copy path","Rename","Move to Trash","Delete permanently…"]
 openFolderInNewTab(["b1","/home/a/src",null])
