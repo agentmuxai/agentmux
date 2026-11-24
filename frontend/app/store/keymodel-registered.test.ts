@@ -72,8 +72,6 @@ describe("registerGlobalKeys", () => {
             "app:settings",
             "help:shortcuts",
             "app:escape",
-            "window:new",
-            "tab:new",
             "tab:goto:1",
             "tab:goto:2",
             "tab:goto:3",
