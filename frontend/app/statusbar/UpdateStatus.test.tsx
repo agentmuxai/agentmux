@@ -5,7 +5,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { agentReach } from "./person-only-reach.testutil";
+import { agentReach } from "./person-only-reach.test.util";
 import { operatorPromptOpen } from "@/app/store/keymodel-dispatch";
 
 const updateStatus = vi.fn();

@@ -7,7 +7,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { agentReach } from "./person-only-reach.testutil";
+import { agentReach } from "./person-only-reach.test.util";
 
 type Stop = { stopAtMs: number; reasonId: string; reason: string } | null;
 const h = vi.hoisted(() => ({
