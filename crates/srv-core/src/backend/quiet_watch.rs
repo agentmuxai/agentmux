@@ -25,6 +25,7 @@ use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
 use crate::backend::storage::work_queue::work_state;
 use crate::backend::wconfig::ConfigState;
+use super::urgent_asks::{self, Ask};
 use super::worker_notes as notes;
 
 /// The quiet time of an agent between turns, in minutes; 0 turns the whole feature off.
@@ -277,6 +278,8 @@ pub struct OwedTask {
     pub filer_uid: String,
     /// When the task last moved (unix ms).
     pub updated_ms: u64,
+    /// Not held: an urgent message from a proven sender named it and the agent has not answered (`urgent_asks`).
+    pub asked: bool,
 }
 
 /// The claimed tasks of every holder, keyed by the holder's uid, or `name:<lowercased claimed_by>` when the
@@ -287,7 +290,7 @@ pub fn claimed_by_holder(items: &[crate::backend::storage::work_board::BoardTask
     for t in items.iter().filter(|t| t.item.state == work_state::CLAIMED) {
         let key = if t.item.claimed_by_uid.is_empty() { format!("name:{}", t.item.claimed_by.to_lowercase()) } else { t.item.claimed_by_uid.clone() };
         let moved = t.item.updated_at.max(t.card.updated_at).max(0) as u64;
-        out.entry(key).or_default().push(OwedTask { num: t.card.num, filer_uid: t.item.created_by_uid.clone(), updated_ms: moved });
+        out.entry(key).or_default().push(OwedTask { num: t.card.num, filer_uid: t.item.created_by_uid.clone(), updated_ms: moved, asked: false });
     }
     out.values_mut().for_each(|v| v.sort_by_key(|t| t.num));
     out
@@ -346,6 +349,46 @@ pub fn watcher_panes(mstore: &Store, def_id: &str, filers: &[String]) -> Vec<Str
     panes
 }
 
+/// Whether an urgent ask is answered: the recipient messaged the sender since (`replied_ms`), updated or completed a
+/// task it named (a held task that moved since), or none of the tasks named is waiting on it any more (done, handed
+/// elsewhere or cancelled). Pure.
+pub fn ask_answered(ask: &Ask, replied_ms: Option<u64>, held: &[OwedTask], still_waiting: bool) -> bool {
+    replied_ms.is_some_and(|at| at >= ask.at_ms) || held.iter().any(|t| ask.tasks.contains(&t.num) && t.updated_ms > ask.at_ms) || !still_waiting
+}
+
+/// The tasks each agent was asked about by an urgent message and has not answered, by the agent's definition id, as
+/// `asked` entries whose filer is the sender (so the sender is told, as a filer is). The answered asks are forgotten.
+fn open_asks_by_def(mstore: &Store, work: &Store, defs: &[AgentDefinition], claimed: &HashMap<String, Vec<OwedTask>>, now_ms: u64) -> HashMap<String, Vec<OwedTask>> {
+    use crate::backend::obj::{self, Block};
+    let mut open: HashMap<String, Vec<OwedTask>> = HashMap::new();
+    let mut done: Vec<Ask> = Vec::new();
+    for ask in urgent_asks::open_asks(now_ms) {
+        let def_id = mstore.get::<Block>(&ask.block_id).ok().flatten().map(|b| obj::meta_get_string(&b.meta, "agentId", "")).unwrap_or_default();
+        let Some(def) = defs.iter().find(|d| d.id == def_id) else {
+            done.push(ask);
+            continue;
+        };
+        let Some(sender) = defs.iter().find(|d| d.slug.eq_ignore_ascii_case(&ask.sender) || d.name.eq_ignore_ascii_case(&ask.sender) || d.id == ask.sender) else { continue };
+        let held = owed_by(claimed, def);
+        let replied = notes::last_report(&def.slug, &notes::live_panes_of(mstore, &sender.id));
+        let waiting = work.work_numbers_waiting_on(&ask.tasks, &def.id, &def.slug).unwrap_or(true);
+        if ask_answered(&ask, replied, &held, waiting) {
+            done.push(ask);
+            continue;
+        }
+        let entry = open.entry(def.id.clone()).or_default();
+        for num in &ask.tasks {
+            if !entry.iter().any(|t| t.num == *num) {
+                entry.push(OwedTask { num: *num, filer_uid: sender.id.clone(), updated_ms: ask.at_ms, asked: true });
+            }
+        }
+    }
+    if !done.is_empty() {
+        urgent_asks::settle(|a| done.contains(a));
+    }
+    open
+}
+
 /// Whether the spawned worker `def` owes its leader a report: its leader has messaged it since it last messaged
 /// the leader (or it never has).
 fn owes_report(mstore: &Store, defs: &[AgentDefinition], def: &AgentDefinition, worker_pane: &str) -> bool {
@@ -362,8 +405,22 @@ fn owes_report(mstore: &Store, defs: &[AgentDefinition], def: &AgentDefinition, 
 
 /// The nudge's text.
 fn nudge_text(tasks: &[OwedTask], quiet_minutes: u64) -> String {
-    let owes = if tasks.is_empty() { "You have not reported to your leader".to_string() } else { format!("You hold {}", task_list(tasks)) };
+    let (held, asked) = split_asked(tasks);
+    let mut owes: Vec<String> = Vec::new();
+    if !held.is_empty() {
+        owes.push(format!("You hold {}", task_list(&held)));
+    }
+    if !asked.is_empty() {
+        let lead = if held.is_empty() { "You have" } else { "have" };
+        owes.push(format!("{lead} an unanswered urgent message about {}", task_list(&asked)));
+    }
+    let owes = if owes.is_empty() { "You have not reported to your leader".to_string() } else { owes.join(", ") };
     format!("{owes} and nothing has run for {quiet_minutes} minutes. Carry on, or say what you are waiting on.")
+}
+
+/// The tasks an agent holds, and the ones an urgent message asked it about.
+fn split_asked(tasks: &[OwedTask]) -> (Vec<OwedTask>, Vec<OwedTask>) {
+    tasks.iter().cloned().partition(|t| !t.asked)
 }
 
 fn task_list(tasks: &[OwedTask]) -> String {
@@ -373,7 +430,13 @@ fn task_list(tasks: &[OwedTask]) -> String {
 /// The note to a watcher about the quiet agent `name`.
 pub fn quiet_body(name: &str, is_worker: bool, tasks: &[OwedTask], idle_minutes: u64, running: bool, last_words: &str) -> String {
     let who = if is_worker { "worker" } else { "agent" };
-    let on = if tasks.is_empty() { " without reporting to you".to_string() } else { format!(" on {}", task_list(tasks)) };
+    let (held, asked) = split_asked(tasks);
+    let on = match (held.is_empty(), asked.is_empty()) {
+        (true, true) => " without reporting to you".to_string(),
+        (false, true) => format!(" on {}", task_list(&held)),
+        (true, false) => format!(" without answering your urgent message about {}", task_list(&asked)),
+        (false, false) => format!(" on {}, and has not answered your urgent message about {}", task_list(&held), task_list(&asked)),
+    };
     let state = if running {
         "Its turn is still running but has written nothing.".to_string()
     } else if last_words.is_empty() {
@@ -402,6 +465,19 @@ pub fn install(mstore: Arc<Store>, work: Arc<Store>, filestore: Arc<FileStore>, 
     });
 }
 
+/// The tasks an agent owes: the ones it holds, and the ones an urgent message asked it about, each ask kept once. A
+/// task that is both held and asked stays in both lists, so the sender of the message is a watcher (its filer) and
+/// the words name the message as well as the task.
+fn with_asked(mut held: Vec<OwedTask>, asked: Vec<OwedTask>) -> Vec<OwedTask> {
+    for more in asked {
+        if !held.iter().any(|t| t.asked && t.num == more.num) {
+            held.push(more);
+        }
+    }
+    held.sort_by_key(|t| (t.num, t.asked));
+    held
+}
+
 /// One look at every agent that owes work.
 pub fn sweep(watch: &mut Watch, mstore: &Store, work: &Store, filestore: &FileStore, config: &ConfigState, now_ms: u64) {
     let Some(lim) = limits_from(&config.get_settings().extra) else {
@@ -413,11 +489,12 @@ pub fn sweep(watch: &mut Watch, mstore: &Store, work: &Store, filestore: &FileSt
     let panes = first_pane_by_def(mstore);
     notes::absorb(&crate::backend::reactive::get_global_handler().get_audit_log(usize::MAX));
     let claimed = claimed_by_holder(&read_claimed(work, now_ms as i64));
+    let mut asked = open_asks_by_def(mstore, work, &defs, &claimed, now_ms);
     let mut keep = HashSet::new();
     let mut quiet_now = HashMap::new();
     for def in &defs {
         let Some(block_id) = panes.get(&def.id) else { continue };
-        let tasks = owed_by(&claimed, def);
+        let tasks = with_asked(owed_by(&claimed, def), asked.remove(&def.id).unwrap_or_default());
         if tasks.is_empty() && !owes_report(mstore, &defs, def, block_id) {
             continue;
         }
@@ -428,7 +505,9 @@ pub fn sweep(watch: &mut Watch, mstore: &Store, work: &Store, filestore: &FileSt
         if let Some(since_ms) = watch.quiet_since(&def.id, reading.turn_active, &lim, now_ms) {
             let filers: Vec<String> = tasks.iter().map(|t| t.filer_uid.clone()).collect();
             let watchers = watcher_panes(mstore, &def.id, &filers).iter().filter_map(|p| agent_name_of_pane(mstore, &defs, p)).collect();
-            quiet_now.insert(def.id.clone(), QuietView { since_ms, tasks: tasks.iter().map(|t| t.num).collect(), watchers });
+            let mut nums: Vec<i64> = tasks.iter().map(|t| t.num).collect();
+            nums.dedup();
+            quiet_now.insert(def.id.clone(), QuietView { since_ms, tasks: nums, watchers });
         }
         match action {
             None => {}
