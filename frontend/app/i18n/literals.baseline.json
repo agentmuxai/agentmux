@@ -270,7 +270,6 @@
     "frontend/app/view/kanban/kanban-board.tsx": 13,
     "frontend/app/view/kanban/kanban-boards-panel.tsx": 18,
     "frontend/app/view/kanban/kanban-card.tsx": 18,
-    "frontend/app/view/kanban/kanban-drawer.tsx": 49,
     "frontend/app/view/kanban/kanban-held.tsx": 3,
     "frontend/app/view/kanban/kanban-media.tsx": 15,
     "frontend/app/view/kanban/kanban-needs-badge.tsx": 2,
