@@ -25,6 +25,11 @@ pub struct GrantBody {
     pub entry_created_at: i64,
 }
 
+/// Whether `id` has the shape of a grant's record id (`record_id`): `g-` and 32 lowercase hex characters.
+pub fn is_record_id(id: &str) -> bool {
+    id.strip_prefix("g-").is_some_and(|h| h.len() == 32 && h.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+}
+
 /// A grant's record id: `g-` and 32 hex characters of a hash over the entry and the site, so the id says neither and is
 /// the same on every machine for the same grant. Revoking is a tombstone of this id.
 pub fn record_id(entry_id: &str, origin: &str) -> String {

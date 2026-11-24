@@ -141,7 +141,7 @@ describe("BundleImportPreviewModalPanel — skill text", () => {
         const onNext = vi.fn();
         render(() => <BundleImportPreviewModalPanel preview={preview} onNext={onNext} onCancel={() => {}} />);
 
-        expect(screen.getByText(/Not fully shown — 10 of 60000/)).toBeInTheDocument();
+        expect(screen.getByText(/Not fully shown — 10 of 60,000/)).toBeInTheDocument();
         const checked = () => {
             onNext.mockClear();
             return userEvent.click(screen.getByText("Next")).then(() =>

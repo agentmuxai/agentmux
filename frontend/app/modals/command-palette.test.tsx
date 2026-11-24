@@ -279,6 +279,19 @@ describe("CommandPaletteModal rows", () => {
         expect(caps).toEqual(["Ctrl", "Shift", "T"]);
     });
 
+    it("shows the key of another command id on a row that names it (the same action under a pane's own id)", () => {
+        const alias = { ...h.commands[0], id: "agent:search:open", label: "Find in conversation", keyOf: "pane:find" } as (typeof h.commands)[number];
+        h.commands.push(alias);
+        try {
+            h.keys["pane:find"] = "Ctrl+F";
+            open();
+            const caps = Array.from(rowOf("Find in conversation").querySelectorAll("kbd")).map((k) => k.textContent);
+            expect(caps).toEqual(["Ctrl", "F"]);
+        } finally {
+            h.commands.splice(h.commands.indexOf(alias), 1);
+        }
+    });
+
     it("draws the two steps of a chord as two groups of caps", () => {
         h.keys["split:right"] = "Ctrl+Shift+S then Right";
         open();

@@ -249,6 +249,14 @@ fn limiter() -> &'static Limiter {
     LIMITER.get_or_init(|| Limiter { seen: Mutex::new(HashMap::new()) })
 }
 
+/// The same limit for an agent's floating opens and its `resize`, `move` and `place`: they and deep-link opens share
+/// the ten a minute, so a loop of any of them is stopped. The text says when the next is allowed.
+pub(crate) fn check_place_rate(agent_id: &str) -> Result<(), String> {
+    limiter().allow(agent_id, Instant::now()).map_err(|wait| {
+        format!("RATE_LIMITED: an agent opens and places at most {RATE_LIMIT} panes a minute; the next one is allowed in {} s", wait.as_secs().max(1))
+    })
+}
+
 fn check_rate(agent_id: &str) -> Result<(), Refusal> {
     limiter().allow(agent_id, Instant::now()).map_err(|wait| {
         refusal(

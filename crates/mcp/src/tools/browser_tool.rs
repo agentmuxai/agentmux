@@ -95,7 +95,9 @@ async fn run(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let follow_wait =
         !is_wait && ["until_text", "until_url", "until_gone", "until_state"].iter().any(|k| arguments.get(*k).is_some());
     let follow_snapshot = arguments.get("snapshot").and_then(|v| v.as_bool()).unwrap_or(false);
-    if (follow_wait || follow_snapshot) && !CHANGES_THE_PAGE.contains(&act.action) {
+    // `wait` is itself the wait, so a snapshot after it is the one follow-up it can take (wait, then read).
+    let reads_after_wait = act.action == "wait";
+    if (follow_wait || (follow_snapshot && !reads_after_wait)) && !CHANGES_THE_PAGE.contains(&act.action) {
         anyhow::bail!(
             "until_text/until_url/until_gone/until_state and snapshot follow an action that changes the page ({}); \
              for action {:?}, call wait or snapshot on its own",
@@ -129,7 +131,7 @@ async fn run(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         // An action that navigates leaves the page loading: read it once it has
         // settled, not the empty page of a moment ago. A page that never settles (3 seconds at most)
         // is read as it is.
-        if !follow_wait {
+        if !follow_wait && !reads_after_wait {
             let settle = json!({ "state": "idle", "timeout_seconds": 3, "pane": arguments.get("pane") });
             let _ = tokio::time::timeout(std::time::Duration::from_secs(4), browser::call("BrowserWaitFor", &settle, cx)).await;
         }
@@ -391,6 +393,9 @@ mod tests {
             json!({ "action": "wait", "until_text": "Done" }),
             json!({ "action": "wait", "until_url": "/next", "pane": "p" }),
             json!({ "action": "wait", "until_gone": "e4" }),
+            // wait, then read the page: the one follow-up a wait takes.
+            json!({ "action": "wait", "until_state": "load", "snapshot": true }),
+            json!({ "action": "wait", "until_text": "Done", "snapshot": true, "pane": "p" }),
         ] {
             let e = call("Browser", &args, &cx).await.unwrap_err().to_string();
             assert!(!e.contains("follow an action that changes the page"), "{args}: {e}");

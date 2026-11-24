@@ -53,7 +53,7 @@ export function create(ctx: PaneTabHostContext): PaneTabInstance {
         on(
             () => eventRefs(ctx.meta()),
             (refs, prev) => {
-                if (prev !== undefined && refs !== "||" && model.sectionAtom() !== "events") model.selectSection("events");
+                if (prev !== undefined && refs !== prev && refs !== "||" && model.sectionAtom() !== "events") model.selectSection("events");
             }
         )
     );

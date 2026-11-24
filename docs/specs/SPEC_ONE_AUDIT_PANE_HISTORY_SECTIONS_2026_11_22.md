@@ -20,7 +20,6 @@ It is a move, not a redesign: no section changes what it shows, and the reader t
 - **Both are singletons**: `widget-singleton.ts:22,26` and the mirror in srv `pane_singleton.rs:14-21` (a test keeps the two lists equal).
 - **Where History is named**: the widget (`crates/srv-core/src/config/widgets.json:184-196`), `open:history` in the command registry (`command-registry.ts:219-224`), the palette map (`palette-open-commands.ts:21-26`), the default key `h` after Ctrl+Shift+O (`keybindings/defaults.ts:118`), the status bar (`LowDiskNotice.tsx:61`, `HistoryUsagePopover.tsx:114`), the deep-link registry (`crates/common/deeplinks/destinations.json:264`, generated `registry.generated.ts:489-503`, `registry.rs:239`), the Pane tool's `view` list (`crates/mcp/src/tool_schemas.rs:327`), the widget SDK doc (`sdk/widget-sdk/v1.d.ts:38-43`, `README.md:43`), `README.md:167`, `docs/deep-links.md:78-95`, `docs/keybindings.md:22`.
 - **Redirects today** cover a (view, section) pair only: `MOVED_SECTIONS` (`pane-sections.ts:73-80`, with the same table in srv `wconfig/types.rs:799-811`), the one-time migration `m0044_warden_split.rs`, and `layout_file.rs:693-708`. A section is refused through an alias (`pane-sections.ts:131-133`). History never had a section key, so a saved History pane is just `view: "history"`: the existing table cannot express it, and **this spec needs a whole-view rule** (§5).
-- **Blackout in screen capture**: `capture-mask.ts:45` blacks out `vault`, `audit` and `memory`; History is not blacked out.
 
 ## 2. Requirements
 
@@ -44,7 +43,7 @@ It is a move, not a redesign: no section changes what it shows, and the reader t
 
 **C6. Where Storage lives.** Recommended: **here**, as the fourth section, and Settings gets one row that opens it ("Where history is kept and for how long"). The status bar's disk notice and usage popover open Audit on Storage.
 
-**C7. Screen capture blackout.** Today Audit is blacked out and History is not. A merged pane is one view, so one rule. Recommended: **black out the whole pane**: Conversations and Typed are the person's own words and the agents' conversations, which is at least as private as the audit log. The cost: an agent can no longer take a screenshot of Storage (usage numbers only). This is the operator's call: say if Storage should stay visible, in which case the rule has to be per section.
+**C7. Screen capture.** A merged pane is one view, so one rule. Recommended: **black out the whole pane**: Conversations and Typed are the person's own words and the agents' conversations, which is at least as private as the audit log. The cost: an agent can no longer take a screenshot of Storage (usage numbers only). This is the operator's call: say if Storage should stay visible, in which case the rule has to be per section.
 
 **C8. Deep-link sensitivity.** The registry gives each destination one sensitivity: `audit` is private and own-agent only, `history` is public (`destinations.json:237-264`). Opening an old `history` link now opens Audit. Recommended: **the old `history` link becomes an alias of `audit` with `section=conversations` and takes Audit's sensitivity** (so a link someone shared opens only for the person, which is what Conversations should have meant); `audit` gains a `section` place with the four ids. The registry's owner (#48140) should confirm.
 

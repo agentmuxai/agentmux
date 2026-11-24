@@ -6,6 +6,7 @@
 import { For, Show, type JSX } from "solid-js";
 
 import { Button as UiButton, CloseButton, TextInput } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { formatBytes } from "@/util/format-bytes";
 import type { BundleImportPreviewActions, BundleImportPreviewState } from "./bundle-import-preview-state";
 
@@ -18,7 +19,7 @@ export function NameField(props: SectionProps): JSX.Element {
     const { s, act } = props;
     return (
         <label class="bundle-import-field">
-            <span class="bundle-import-field-label">Bundle name</span>
+            <span class="bundle-import-field-label">{t("bundle.import.bundleName")}</span>
             <TextInput variant="plain"
                 class="bundle-import-input"
                 value={s.bundleName()}
@@ -26,13 +27,13 @@ export function NameField(props: SectionProps): JSX.Element {
             />
             <Show when={s.preview.name_collision}>
                 <div class="bundle-import-hint">
-                    A bundle named this already exists.{" "}
+                    {t("bundle.import.bundleExists")}{" "}
                     <UiButton
                         variant="link"
                         tone="accent"
                         onClick={() => s.setBundleName(act.suggestedAltName())}
                     >
-                        Use "{act.suggestedAltName()}" instead
+                        {t("bundle.import.useInstead", { name: act.suggestedAltName() })}
                     </UiButton>
                 </div>
             </Show>
@@ -51,7 +52,7 @@ export function InstructionsSection(props: SectionProps): JSX.Element {
                     checked={s.includeInstructions()}
                     onChange={(e) => s.setIncludeInstructions(e.currentTarget.checked)}
                 />
-                <span>Include instructions</span>
+                <span>{t("bundle.import.includeInstructions")}</span>
             </label>
             <Show when={s.includeInstructions() && preview.instructions_preview}>
                 <div class="bundle-import-instructions-preview">
@@ -60,14 +61,13 @@ export function InstructionsSection(props: SectionProps): JSX.Element {
                         tone="accent"
                         onClick={() => s.setInstructionsExpanded((v) => !v)}
                     >
-                        {s.instructionsExpanded() ? "Hide" : "Show"} preview
+                        {s.instructionsExpanded() ? t("bundle.import.hidePreview") : t("bundle.import.showPreview")}
                     </UiButton>
                     <Show when={s.instructionsExpanded()}>
                         <pre class="bundle-import-instructions-text">{preview.instructions_preview}</pre>
                         <Show when={preview.instructions_truncated}>
                             <div class="bundle-import-hint">
-                                Preview truncated — {preview.instructions_total_chars} characters total,
-                                the full instructions are still imported.
+                                {t("bundle.import.truncated", { total: preview.instructions_total_chars })}
                             </div>
                         </Show>
                     </Show>
@@ -82,7 +82,7 @@ export function ContextSection(props: SectionProps): JSX.Element {
     return (
         <Show when={s.preview.context_files.length > 0}>
             <section class="bundle-import-section">
-                <h3 class="bundle-import-section-title">Context files</h3>
+                <h3 class="bundle-import-section-title">{t("bundle.import.contextFiles")}</h3>
                 <For each={s.preview.context_files}>
                     {(cf) => (
                         <label class="bundle-import-checkbox-row">
@@ -108,10 +108,9 @@ export function McpSection(props: SectionProps): JSX.Element {
     return (
         <Show when={preview.mcp_servers.length > 0}>
             <section class="bundle-import-section">
-                <h3 class="bundle-import-section-title">Not imported: MCP servers</h3>
+                <h3 class="bundle-import-section-title">{t("bundle.import.mcpTitle")}</h3>
                 <div class="bundle-import-hint">
-                    Bundles don't carry MCP servers. Add these in Connectors and bind them to
-                    the agents that need them.
+                    {t("bundle.import.mcpNote")}
                 </div>
                 <For each={preview.mcp_servers}>
                     {(m) => (
@@ -135,12 +134,14 @@ export function RequirementsSection(props: SectionProps): JSX.Element {
     return (
         <Show when={preview.requirements.length > 0}>
             <section class="bundle-import-section">
-                <h3 class="bundle-import-section-title">Account requirements</h3>
+                <h3 class="bundle-import-section-title">{t("bundle.import.requirements")}</h3>
                 <p class="bundle-import-requirements-summary">
-                    Depends on {preview.requirements.length} account(s):{" "}
-                    {preview.requirements
-                        .map((r) => `${r.provider} (${r.resolved ? "resolved" : "not connected"})`)
-                        .join(", ")}
+                    {t("bundle.import.dependsOn", {
+                        n: preview.requirements.length,
+                        list: preview.requirements
+                            .map((r) => `${r.provider} (${r.resolved ? t("bundle.import.resolved") : t("bundle.import.notConnected")})`)
+                            .join(", "),
+                    })}
                 </p>
             </section>
         </Show>
@@ -154,14 +155,14 @@ export function WarningsBanner(props: SectionProps): JSX.Element {
             <div class="bundle-import-warnings-banner">
                 <CloseButton
                     size="sm"
-                    label="Dismiss warnings"
+                    label={t("bundle.import.dismissWarnings")}
                     tooltip={false}
                     class="bundle-import-warnings-dismiss"
                     onClick={() => s.setWarningsDismissed(true)}
                 />
                 <For each={s.preview.warnings}>{(w) => <div class="bundle-import-warning-line">{w}</div>}</For>
                 <Show when={s.preview.warnings_truncated}>
-                    <div class="bundle-import-warning-line">…more warnings not shown</div>
+                    <div class="bundle-import-warning-line">{t("bundle.import.moreWarnings")}</div>
                 </Show>
             </div>
         </Show>

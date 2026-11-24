@@ -41,21 +41,24 @@ import { selectionKeyOf } from "./atlas-select";
 import { clampZoom, type Viewport } from "./atlas-viewport";
 import type { AtlasWork } from "./atlas-work";
 import { useAtlasWork } from "./atlas-work-store";
+import { t } from "@/app/i18n/i18n";
 import "./atlas.scss";
 
-const STATE_LABELS: Record<AtlasState, string> = {
-    working: "Working",
-    waiting: "Waiting for an answer",
-    idle: "Idle",
-    error: "Exited with an error",
-    limited: "Out of quota",
-    signed_out: "Signed out",
-    stopped: "Stopped",
-};
+// Built when drawn, so a change of language shows.
+const stateLabel = (state: AtlasState): string =>
+    ({
+        working: t("atlas.state.working"),
+        waiting: t("atlas.state.waiting"),
+        idle: t("atlas.state.idle"),
+        error: t("atlas.state.error"),
+        limited: t("atlas.state.limited"),
+        signed_out: t("atlas.state.signedOut"),
+        stopped: t("atlas.state.stopped"),
+    })[state];
 
-const LAYOUT_OPTIONS: { value: AtlasLayoutMode; label: string; title: string }[] = [
-    { value: "machine", label: "By machine", title: "Each computer is a region, its agents inside it" },
-    { value: "seat", label: "By seat", title: "Every agent in one picture, under whom it reports to" },
+const layoutOptions = (): { value: AtlasLayoutMode; label: string; title: string }[] => [
+    { value: "machine", label: t("atlas.layout.machine"), title: t("atlas.layout.machineTip") },
+    { value: "seat", label: t("atlas.layout.seat"), title: t("atlas.layout.seatTip") },
 ];
 
 /** "12k" for a context size. */
@@ -93,8 +96,8 @@ function Node(props: {
             data-testid="atlas-node"
             style={{ left: `${props.x}px`, top: `${props.y}px`, width: `${NODE_W}px`, height: `${NODE_H}px` }}
             aria-pressed={props.selected}
-            aria-label={`${a().name}, ${STATE_LABELS[a().state]}${onHost(props.host)}${inContainer(a()) ? ", in a container" : ""}${props.picked ? ", selected" : ""}`}
-            {...tip(`${a().line ?? STATE_LABELS[a().state]}${onHost(props.host)}`)}
+            aria-label={`${a().name}, ${stateLabel(a().state)}${onHost(props.host)}${inContainer(a()) ? `, ${t("atlas.node.inContainer")}` : ""}${props.picked ? `, ${t("atlas.node.selected")}` : ""}`}
+            {...tip(`${a().line ?? stateLabel(a().state)}${onHost(props.host)}`)}
             onClick={(e) => props.onSelect(a().key, e)}
             onKeyDown={(e) => {
                 if (e.key !== "Enter" && e.key !== " ") return;
@@ -114,7 +117,7 @@ function Node(props: {
                 </Show>
             </span>
             <span class="atlas-node__sub">
-                <Show when={a().seat} fallback={STATE_LABELS[a().state]}>
+                <Show when={a().seat} fallback={stateLabel(a().state)}>
                     {(seat) => <SeatTag seat={seat()} size="xs" class="atlas-node__seat" />}
                 </Show>
             </span>
@@ -128,7 +131,7 @@ function StoppedChip(props: { agents: { agent: AtlasAgent; host: string }[] }): 
     return (
         <div class="atlas-fold" data-testid="atlas-stopped">
             <Button density="compact" aria-expanded={open()} onClick={() => setOpen(!open())}>
-                {props.agents.length} stopped {open() ? "▾" : "▴"}
+                {t("atlas.stopped", { n: props.agents.length })} {open() ? "▾" : "▴"}
             </Button>
             <Show when={open()}>
                 <ul class="atlas-fold__list">
@@ -142,13 +145,13 @@ function StoppedChip(props: { agents: { agent: AtlasAgent; host: string }[] }): 
                                         density="compact"
                                         onClick={() => void openAgentInActiveTab({ agent_id: agent.runtimeId!, name: agent.name })}
                                     >
-                                        Open
+                                        {t("atlas.open")}
                                     </Button>
                                     <Button
                                         density="compact"
                                         onClick={() => void startAgent({ agent_id: agent.runtimeId!, name: agent.name })}
                                     >
-                                        Start
+                                        {t("atlas.start")}
                                     </Button>
                                 </Show>
                             </li>
@@ -171,48 +174,48 @@ function Card(props: {
 }): JSX.Element {
     const a = () => props.agent;
     return (
-        <aside class="atlas-card" data-testid="atlas-card" aria-label={`${a().name} details`}>
+        <aside class="atlas-card" data-testid="atlas-card" aria-label={t("atlas.card.aria", { name: a().name })}>
             <header class="atlas-card__head">
                 <span class={`atlas-node__dot atlas-node--${a().state}`} />
                 <strong class="atlas-card__name">{a().name}</strong>
                 <CloseButton size="sm" onClick={props.onClose} />
             </header>
             <dl class="atlas-card__rows">
-                <dt>State</dt>
+                <dt>{t("atlas.card.state")}</dt>
                 <dd>
-                    {STATE_LABELS[a().state]}
-                    <Show when={a().stale}> (last report is old)</Show>
+                    {stateLabel(a().state)}
+                    <Show when={a().stale}> {t("atlas.card.stale")}</Show>
                 </dd>
                 <Show when={a().line}>
-                    <dt>Doing</dt>
+                    <dt>{t("atlas.card.doing")}</dt>
                     <dd>{a().line}</dd>
                 </Show>
                 <Show when={a().currentTool}>
-                    <dt>Tool</dt>
+                    <dt>{t("atlas.card.tool")}</dt>
                     <dd>{a().currentTool}</dd>
                 </Show>
                 <Show when={a().seat}>
-                    <dt>Seat</dt>
+                    <dt>{t("atlas.card.seat")}</dt>
                     <dd>{seatTooltipLine(a().seat!)}</dd>
                 </Show>
-                <dt>Host</dt>
+                <dt>{t("atlas.card.host")}</dt>
                 <dd>
                     {props.machineTitle}
                     <Show when={props.machineDetail}>{(text) => <span class="atlas-card__detail"> · {text()}</span>}</Show>
                 </dd>
                 <Show when={a().provider}>
-                    <dt>Provider</dt>
+                    <dt>{t("atlas.card.provider")}</dt>
                     <dd>{a().provider}</dd>
                 </Show>
                 <CardFacts agent={a()} agents={props.agents} work={props.work} />
                 <Show when={a().contextTokens}>
-                    <dt>Context</dt>
-                    <dd>{tokensText(a().contextTokens!)} tokens</dd>
+                    <dt>{t("atlas.card.context")}</dt>
+                    <dd>{t("atlas.card.tokens", { size: tokensText(a().contextTokens!) })}</dd>
                 </Show>
                 <Show when={a().spend}>
-                    <dt>Spend today</dt>
+                    <dt>{t("atlas.card.spend")}</dt>
                     <dd>
-                        {Math.round((a().spend!.spent / a().spend!.cap) * 100)}% of its cap
+                        {t("atlas.card.ofCap", { pct: Math.round((a().spend!.spent / a().spend!.cap) * 100) })}
                     </dd>
                 </Show>
             </dl>
@@ -225,7 +228,7 @@ function Card(props: {
                             else void openAgentInActiveTab({ agent_id: a().runtimeId!, name: a().name });
                         }}
                     >
-                        Open
+                        {t("atlas.open")}
                     </Button>
                 </div>
             </Show>
@@ -343,21 +346,21 @@ function AtlasBar(props: {
             <SwarmFilterBar filter={props.data.swarm.filter} />
             <SegmentedControl<AtlasLayoutMode>
                 density="compact"
-                ariaLabel="Layout"
-                options={LAYOUT_OPTIONS}
+                ariaLabel={t("atlas.layout.aria")}
+                options={layoutOptions()}
                 value={props.mode}
                 onChange={(v) => void props.ctx.setMeta({ [ATLAS_LAYOUT_META]: v === "seat" ? "seat" : null })}
             />
             <IconButton
                 icon="object-group"
-                label={props.selecting ? "Selecting: a drag selects agents, Shift and drag moves the map" : "Select agents (or hold Shift and drag)"}
+                label={props.selecting ? t("atlas.select.on") : t("atlas.select.off")}
                 density="compact"
                 pressed={props.selecting}
                 onClick={() => props.onSelecting(!props.selecting)}
             />
-            <IconButton icon="magnifying-glass-minus" label="Zoom out" density="compact" onClick={() => props.zoom.zoomBy(1 / 1.25)} />
-            <IconButton icon="magnifying-glass-plus" label="Zoom in" density="compact" onClick={() => props.zoom.zoomBy(1.25)} />
-            <IconButton icon="expand" label="Fit all" density="compact" onClick={props.zoom.fit} />
+            <IconButton icon="magnifying-glass-minus" label={t("atlas.zoom.out")} density="compact" onClick={() => props.zoom.zoomBy(1 / 1.25)} />
+            <IconButton icon="magnifying-glass-plus" label={t("atlas.zoom.in")} density="compact" onClick={() => props.zoom.zoomBy(1.25)} />
+            <IconButton icon="expand" label={t("atlas.zoom.fit")} density="compact" onClick={props.zoom.fit} />
         </div>
     );
 }
@@ -436,7 +439,7 @@ function AtlasNotes(props: {
     return (
         <div class="atlas-notes">
             <Show when={props.data.cloudUnavailable()}>
-                <div data-testid="atlas-cloud-note">The account's other machines could not be read just now.</div>
+                <div data-testid="atlas-cloud-note">{t("atlas.cloudNote")}</div>
             </Show>
             {/* What is wrong with a machine itself (its report is old, its container runtime is not running): said by its
                 host's name here with one host, and in the legend beside the host with more. */}
@@ -511,7 +514,7 @@ export function AtlasView(props: { data: AtlasData; ctx: PaneTabHostContext }): 
                 onPointerUp={onPointerUp}
                 onPointerCancel={onPointerUp}
             >
-                <Show when={shownCount() > 0 || stoppedCount() > 0} fallback={<div class="atlas-empty">No agents to show yet.</div>}>
+                <Show when={shownCount() > 0 || stoppedCount() > 0} fallback={<div class="atlas-empty">{t("atlas.empty")}</div>}>
                     <AtlasMap
                         data={data}
                         layout={layout()}

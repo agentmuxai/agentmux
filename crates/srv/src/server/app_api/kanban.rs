@@ -73,6 +73,8 @@ fn agent_json(reg: &AgentRegistration, state: Option<AgentState>, color: Option<
         "block_id": reg.block_id,
         "state": state.map(AgentState::as_str).unwrap_or("gone"),
         "color": color,
+        // When it went quiet, while it owes work and has done nothing for the quiet time (the Swarm's "quiet 22 min").
+        "quiet_since_ms": reg.uid.as_deref().and_then(crate::backend::quiet_watch::quiet_view).map(|q| q.since_ms),
     })
 }
 

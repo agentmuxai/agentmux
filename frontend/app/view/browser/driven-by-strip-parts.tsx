@@ -8,6 +8,8 @@
  */
 
 import { Button } from "@/app/element/ui";
+import { t as tr } from "@/app/i18n/i18n";
+import { Rich } from "@/app/i18n/rich";
 import { pausedLabel, browserPauseAll } from "@/app/store/browser-pause-all";
 import { tip } from "@/app/element/tip";
 import { agentDisplayName } from "@/app/store/agent-names";
@@ -29,10 +31,10 @@ function StripControls(props: Part): JSX.Element {
                 density="compact"
                 class="browser-actions-log-button"
                 pressed={t.showLog()}
-                title={`What ${p.agent} did in this pane`}
+                title={tr("browser.driven.logTitle", { agent: p.agent })}
                 onClick={() => t.setShowLog(!t.showLog())}
             >
-                Log ({model.actionsAtom().count})
+                {tr("browser.driven.log", { n: model.actionsAtom().count })}
             </Button>
             <Button
                 density="compact"
@@ -41,13 +43,13 @@ function StripControls(props: Part): JSX.Element {
                 title={
                     model.pausedAtom()
                         ? t.everyPane()
-                            ? `${pausedLabel(browserPauseAll())}. Let agents act in every pane again.`
-                            : `Let ${p.agent} act in this pane again.`
-                        : `Hold ${p.agent}'s actions in this pane until you resume; auto-approve's time stops too.`
+                            ? tr("browser.driven.resumeEveryPane", { label: pausedLabel(browserPauseAll()) })
+                            : tr("browser.driven.resumeHere", { agent: p.agent })
+                        : tr("browser.driven.pauseTitle", { agent: p.agent })
                 }
                 onClick={t.togglePause}
             >
-                {model.pausedAtom() ? "Resume" : "Pause"}
+                {model.pausedAtom() ? tr("browser.driven.resume") : tr("browser.driven.pause")}
             </Button>
         </>
     );
@@ -77,26 +79,28 @@ export function PlainStrip(props: Part): JSX.Element {
                     when={!model.pausedAtom()}
                     fallback={
                         <span>
-                            <b>Paused{t.everyPane() ? " for every pane" : ""}:</b> <b>{p.agent}</b>'s actions here wait until you resume
+                            <Rich k={t.everyPane() ? "browser.driven.pausedEvery" : "browser.driven.pausedHere"} params={{ agent: p.agent }} />
                         </span>
                     }
                 >
                     <span>
-                        Driven by <b>{p.agent}</b>
+                        <Rich k="browser.driven.drivenBy" params={{ agent: p.agent }} />
                         <Show when={model.tookControlAtom()}>
                             {" "}
-                            <span class="browser-took-control">(took control)</span>
+                            <span class="browser-took-control">{tr("browser.driven.tookControl")}</span>
                         </Show>
                     </span>
                 </Show>
                 <Show when={model.allowedOriginsAtom().length > 0}>
-                    <span class="browser-limited-to" {...tip(`Limited to: ${model.allowedOriginsAtom().join(", ")}`)}>
-                        Limited to {model.allowedOriginsAtom().length}{" "}
-                        {model.allowedOriginsAtom().length === 1 ? "site" : "sites"}
+                    <span
+                        class="browser-limited-to"
+                        {...tip(tr("browser.driven.limitedTip", { sites: model.allowedOriginsAtom().join(", ") }))}
+                    >
+                        {tr("browser.driven.limitedTo", { count: model.allowedOriginsAtom().length })}
                     </span>
                 </Show>
                 <Show when={model.bypassEndedAtom()}>
-                    {(why) => <span class="browser-bypass-ended">Auto-approve ended: {why()}</span>}
+                    {(why) => <span class="browser-bypass-ended">{tr("browser.driven.bypassEnded", { why: why() })}</span>}
                 </Show>
                 <PauseErrorLine {...props} />
             </div>
@@ -107,21 +111,21 @@ export function PlainStrip(props: Part): JSX.Element {
                     tone="danger"
                     class="browser-bypass-button"
                     pressed={t.confirming()}
-                    title={`Let ${p.agent}'s clicks in this pane go through without asking you first.`}
+                    title={tr("browser.driven.autoApproveTitle", { agent: p.agent })}
                     onClick={() => {
                         t.setError(undefined);
                         t.setConfirming(!t.confirming());
                     }}
                 >
-                    Auto-approve
+                    {tr("browser.driven.autoApprove")}
                 </Button>
                 <Button
                     density="compact"
                     class="browser-take-over"
-                    title="End the agent's control of this pane; its next action here will fail."
+                    title={tr("browser.driven.takeOverTitle")}
                     onClick={() => model.takeOver().catch(() => {})}
                 >
-                    Take over
+                    {tr("browser.driven.takeOver")}
                 </Button>
             </div>
         </div>
@@ -146,10 +150,15 @@ export function BypassStrip(props: Part & { grant: () => BrowserBypass }): JSX.E
                     when={!model.pausedAtom()}
                     fallback={
                         <span>
-                            <b>Paused{t.everyPane() ? " for every pane" : ""}:</b> <b>{agentDisplayName(b().agent)}</b>'s actions here wait until you resume ·{" "}
-                            {b().always
-                                ? "auto-approve is held"
-                                : `auto-approve's clock is stopped at ${model.bypassMinutesLeft()} min left`}
+                            <Rich
+                                k={t.everyPane() ? "browser.driven.bypassPausedEvery" : "browser.driven.bypassPausedHere"}
+                                params={{
+                                    agent: agentDisplayName(b().agent),
+                                    note: b().always
+                                        ? tr("browser.driven.heldAlways")
+                                        : tr("browser.driven.clockStopped", { minutes: model.bypassMinutesLeft() }),
+                                }}
+                            />
                         </span>
                     }
                 >
@@ -157,17 +166,23 @@ export function BypassStrip(props: Part & { grant: () => BrowserBypass }): JSX.E
                         when={!model.bypassPaused()}
                         fallback={
                             <span>
-                                <b>Auto-approve paused:</b> the page left{" "}
-                                {b().origins.map(siteLabel).join(", ")}, so <b>{agentDisplayName(b().agent)}</b> asks again
-                                here
+                                <Rich
+                                    k="browser.driven.pageLeft"
+                                    params={{ sites: b().origins.map(siteLabel).join(", "), agent: agentDisplayName(b().agent) }}
+                                />
                             </span>
                         }
                     >
                         <span>
-                            <b>Auto-approve on:</b> <b>{agentDisplayName(b().agent)}</b>'s clicks go through without asking on{" "}
-                            {b().origins.map(siteLabel).join(", ")}
-                            {powersNote(b().powers)} ·{" "}
-                            {leftLabel(b().always, model.bypassMinutesLeft())}
+                            <Rich
+                                k="browser.driven.bypassOn"
+                                params={{
+                                    agent: agentDisplayName(b().agent),
+                                    sites: b().origins.map(siteLabel).join(", "),
+                                    powers: powersNote(b().powers),
+                                    left: leftLabel(b().always, model.bypassMinutesLeft()),
+                                }}
+                            />
                         </span>
                     </Show>
                 </Show>
@@ -181,15 +196,15 @@ export function BypassStrip(props: Part & { grant: () => BrowserBypass }): JSX.E
             <div class="browser-driven-by-actions">
                 <StripControls {...props} />
                 <Button density="compact" tone="danger" class="browser-bypass-end" onClick={t.end}>
-                    Stop auto-approve
+                    {tr("browser.driven.stopAutoApprove")}
                 </Button>
                 <Button
                     density="compact"
                     class="browser-take-over-inline"
-                    title="End the agent's control of this pane; its next action here will fail."
+                    title={tr("browser.driven.takeOverTitle")}
                     onClick={() => model.takeOver().catch(() => {})}
                 >
-                    Take over
+                    {tr("browser.driven.takeOver")}
                 </Button>
             </div>
         </div>
@@ -200,24 +215,21 @@ export function BypassStrip(props: Part & { grant: () => BrowserBypass }): JSX.E
 export function BypassConfirm(props: Part): JSX.Element {
     const { t, p } = props;
     return (
-        <div class="browser-bypass-confirm" role="dialog" aria-label="Turn on auto-approve">
+        <div class="browser-bypass-confirm" role="dialog" aria-label={tr("browser.driven.confirmLabel")}>
             <div class="browser-bypass-confirm-head">
                 <i class="fa-solid fa-bolt" aria-hidden="true" />
                 <span>
-                    Auto-approve <b>{p.agent}</b>'s clicks?
+                    <Rich k="browser.driven.confirmHead" params={{ agent: p.agent }} />
                 </span>
             </div>
             <Show
                 when={t.sites().length > 0}
-                fallback={<div class="browser-bypass-confirm-text">Open a web page in this pane first.</div>}
+                fallback={<div class="browser-bypass-confirm-text">{tr("browser.driven.openPageFirst")}</div>}
             >
                 <div class="browser-bypass-confirm-text">
-                    In this pane, on <b>{t.sites().map(siteLabel).join(", ")}</b>, {p.agent}'s clicks that
-                    submit forms, delete or send go through <b>without asking you first</b>, and so does the
-                    page's own "Are you sure?" that follows one. It still can't type passwords or codes or run
-                    scripts, and payments still ask.
+                    <Rich k="browser.driven.confirmText" params={{ sites: t.sites().map(siteLabel).join(", "), agent: p.agent }} />
                 </div>
-                <div class="browser-bypass-confirm-minutes" role="radiogroup" aria-label="For how long">
+                <div class="browser-bypass-confirm-minutes" role="radiogroup" aria-label={tr("browser.driven.forHowLong")}>
                     <For each={BYPASS_MINUTES}>
                         {(m) => (
                             <Button
@@ -246,10 +258,10 @@ export function BypassConfirm(props: Part): JSX.Element {
                     disabled={t.sites().length === 0}
                     onClick={t.turnOn}
                 >
-                    Turn on auto-approve
+                    {tr("browser.driven.turnOn")}
                 </Button>
                 <Button density="compact" onClick={() => t.setConfirming(false)}>
-                    Cancel
+                    {tr("browser.driven.cancel")}
                 </Button>
             </div>
         </div>
@@ -260,20 +272,23 @@ export function BypassConfirm(props: Part): JSX.Element {
 export function ActionLogPanel(props: { model: BrowserViewModel; agent: string; onClose: () => void }): JSX.Element {
     const newestFirst = () => [...props.model.actionsAtom().entries].reverse();
     return (
-        <div class="browser-action-log" role="log" aria-label={`What ${props.agent} did in this pane`}>
+        <div class="browser-action-log" role="log" aria-label={tr("browser.driven.logTitle", { agent: props.agent })}>
             <div class="browser-action-log-head">
                 <span>
-                    What <b>{props.agent}</b> did here, newest first
+                    <Rich k="browser.driven.logHead" params={{ agent: props.agent }} />
                     <Show when={props.model.actionsAtom().count > props.model.actionsAtom().entries.length}>
                         {" "}
-                        (the latest {props.model.actionsAtom().entries.length} of {props.model.actionsAtom().count})
+                        {tr("browser.driven.logLatest", {
+                            shown: props.model.actionsAtom().entries.length,
+                            total: props.model.actionsAtom().count,
+                        })}
                     </Show>
                 </span>
                 <Button density="compact" onClick={props.onClose}>
-                    Close
+                    {tr("browser.driven.close")}
                 </Button>
             </div>
-            <Show when={newestFirst().length > 0} fallback={<div class="browser-action-log-empty">Nothing yet.</div>}>
+            <Show when={newestFirst().length > 0} fallback={<div class="browser-action-log-empty">{tr("browser.driven.nothingYet")}</div>}>
                 <ol class="browser-action-log-list">
                     <For each={newestFirst()}>
                         {(e) => (

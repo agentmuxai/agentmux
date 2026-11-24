@@ -16,6 +16,7 @@ pub mod log;
 pub mod members;
 pub mod ops;
 pub mod record;
+pub mod round;
 pub mod seal;
 
 #[cfg(test)]
@@ -28,6 +29,8 @@ mod lock_tests;
 mod members_tests;
 #[cfg(test)]
 mod ops_tests;
+#[cfg(test)]
+mod round_tests;
 #[cfg(test)]
 mod seal_tests;
 #[cfg(test)]

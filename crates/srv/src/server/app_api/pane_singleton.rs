@@ -40,6 +40,15 @@ pub(super) fn wants_existing(cmd: &CommandPaneOpenData) -> bool {
         && SINGLETON_VIEWS.contains(&cmd.view.as_str())
 }
 
+/// The view a stored `meta.view` stands for. A Reviews pane saved before it was folded into the Kanban keeps
+/// `reviews` in its meta while it renders as the Kanban, so it is the window's Kanban (`pane_open_steps`).
+fn stands_for(stored: &str) -> &str {
+    match stored {
+        "reviews" => "kanban",
+        other => other,
+    }
+}
+
 /// The pane of `view` in the window that shows `tab_id`, as `(block id, its tab id)`.
 pub(super) fn in_window(mstore: &Store, tab_id: &str, view: &str) -> Option<(String, String)> {
     let workspaces: Vec<Workspace> = mstore.get_all::<Workspace>().ok()?;
@@ -48,7 +57,7 @@ pub(super) fn in_window(mstore: &Store, tab_id: &str, view: &str) -> Option<(Str
         let Ok(Some(tab)) = mstore.get::<Tab>(tab_id) else { continue };
         for block_id in &tab.blockids {
             let Ok(Some(block)) = mstore.get::<Block>(block_id) else { continue };
-            if block.meta.get("view").and_then(|v| v.as_str()) == Some(view) {
+            if block.meta.get("view").and_then(|v| v.as_str()).map(stands_for) == Some(view) {
                 return Some((block_id.clone(), tab_id.clone()));
             }
         }
@@ -193,6 +202,27 @@ mod tests {
         let plain = open_pane(&state, open("kanban", &tab)).await.unwrap();
         assert!(!again.created && !plain.created);
         assert_eq!((again.block_id.as_str(), plain.block_id.as_str()), (first.block_id.as_str(), first.block_id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn a_reviews_pane_saved_before_the_fold_is_the_windows_kanban() {
+        let state = test_state();
+        let tab = window(&state, "one").await;
+        // What a restored layout holds: a pane whose stored view is still `reviews`.
+        let mut block = Block {
+            oid: uuid::Uuid::new_v4().to_string(),
+            meta: MetaMapType::from([("view".to_string(), serde_json::json!("reviews"))]),
+            ..Default::default()
+        };
+        state.mstore.insert(&mut block).unwrap();
+        let mut t = state.mstore.must_get::<Tab>(&tab).unwrap();
+        t.blockids.push(block.oid.clone());
+        state.mstore.update(&mut t).unwrap();
+        for view in ["kanban", "reviews"] {
+            let found = open_pane(&state, open(view, &tab)).await.unwrap();
+            assert_eq!((found.block_id.as_str(), found.created), (block.oid.as_str(), false), "an open of {view}");
+        }
+        assert_eq!(panes(&state, &tab), 1, "no second Kanban");
     }
 
     /// srv can't read the frontend's list at run time, so a test keeps its copy equal.

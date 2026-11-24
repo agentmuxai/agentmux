@@ -232,12 +232,13 @@ fn usage_short(u: &crate::backend::account_usage::AccountUsage) -> String {
     windows.iter().map(|(k, w)| format!("{} {}%", name(k), w.used_percent.round())).collect::<Vec<_>>().join(" ")
 }
 
-/// `name | state (turn 4m) | Sonnet 5.5 high | ctx 62% | account | 5h 60% 7d 44% | #1234`: what a leader reads to see the
+/// `name | state (turn 4m), quiet 22m | Sonnet 5.5 high | ctx 62% | account | 5h 60% 7d 44% | #1234`: what a leader reads to see the
 /// fleet. A fact that is not known is left out, not guessed.
 pub fn status_line(name: &str, state: &str, facts: &LiveFacts, model: &ModelFacts) -> String {
     let mut parts: Vec<String> = vec![name.to_string()];
     let turn = facts.turn.as_ref().filter(|t| t.active).and_then(|t| t.duration_ms).map(|d| format!(" (turn {})", short_duration(d))).unwrap_or_default();
-    parts.push(format!("{state}{turn}"));
+    let quiet = facts.quiet.as_ref().map(|q| format!(", quiet {}", short_duration(q.quiet_ms))).unwrap_or_default();
+    parts.push(format!("{state}{turn}{quiet}"));
     let mut m = model.label.clone().or_else(|| model.id.clone()).unwrap_or_else(|| "model unknown".to_string());
     if let Some(e) = &model.effort {
         m = format!("{m} {e}");
@@ -276,7 +277,7 @@ fn key_of(group: &str, name_state: &str, model: &ModelFacts, a: &Agent, facts: &
 /// `Agents status`: one line per agent, the counts by state, model and host, and, with `group_by`, the agents grouped.
 pub fn status(state: &AppState, rows: Vec<Value>, p: &Params, now_ms: u64) -> Value {
     let mut sel = p.select;
-    for group in ["model", "turn", "context", "account", "usage", "task"] {
+    for group in ["model", "turn", "context", "account", "usage", "task", "quiet"] {
         let _ = sel.set(group);
     }
     let p = Params { select: sel, ..p.clone() };

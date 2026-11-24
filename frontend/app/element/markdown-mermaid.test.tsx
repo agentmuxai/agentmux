@@ -21,7 +21,8 @@ vi.mock("mermaid", () => ({
     },
 }));
 
-import { Mermaid, removeMermaidScratch } from "./markdown-mermaid";
+import mermaid from "mermaid";
+import { Mermaid, MERMAID_THEMES, removeMermaidScratch } from "./markdown-mermaid";
 
 const scratchIds = () => [...document.body.children].filter((e) => /^dmermaid-/.test(e.id)).map((e) => e.id);
 
@@ -68,5 +69,37 @@ describe("removeMermaidScratch", () => {
         expect(document.getElementById("dmermaid-9")).toBeNull();
         expect(document.getElementById("mermaid-9")).toBeNull();
         expect(document.getElementById("mermaid-4")).toBe(shown);
+    });
+});
+
+
+describe("the diagram follows the app's light or dark theme", () => {
+    const setPolarity = (p: "light" | "dark") => {
+        if (p === "light") document.documentElement.setAttribute("data-theme-polarity", "light");
+        else document.documentElement.removeAttribute("data-theme-polarity");
+    };
+    afterEach(() => {
+        cleanup();
+        document.body.innerHTML = "";
+        document.documentElement.removeAttribute("data-theme-polarity");
+    });
+
+    it("maps the app's light theme to mermaid's default and its dark theme to mermaid's dark", () => {
+        expect(MERMAID_THEMES).toEqual({ dark: "dark", light: "default" });
+    });
+
+    it("draws on a light pane in the light mermaid theme, and again in the dark one when the theme flips", async () => {
+        vi.mocked(mermaid.initialize).mockClear();
+        vi.mocked(mermaid.render).mockClear();
+        setPolarity("light");
+        const { container } = render(() => <Mermaid chart="graph TD; A-->B" />);
+        await waitFor(() => expect(container.querySelector(".mermaid svg")).not.toBeNull());
+        expect(vi.mocked(mermaid.initialize).mock.calls.at(-1)![0]).toMatchObject({ theme: "default" });
+        const rendered = vi.mocked(mermaid.render).mock.calls.length;
+
+        setPolarity("dark");
+        await waitFor(() => expect(vi.mocked(mermaid.render).mock.calls.length).toBe(rendered + 1));
+        expect(vi.mocked(mermaid.initialize).mock.calls.at(-1)![0]).toMatchObject({ theme: "dark" });
+        await waitFor(() => expect(container.querySelector(".mermaid svg")).not.toBeNull());
     });
 });
