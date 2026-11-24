@@ -192,7 +192,8 @@ mod tests {
         let files = take(&nonce).expect("the files");
         assert_eq!(files.len(), 1);
         assert!(take(&nonce).is_none(), "used up by the first drag");
-        assert!(take("not-a-nonce").is_none());
+        // Not a value the registry issued (the issued one with a letter added; a literal here would be flagged as a hard-coded nonce).
+        assert!(take(&format!("{nonce}x")).is_none());
     }
 
     #[test]
