@@ -1402,5 +1402,7 @@
     "drone.templates.review": "Review and approve",
     "pane.tab.actions": "Tab actions",
     "jobs.droneTemplate.pill": "Drone",
-    "jobs.droneTemplate.make": "Make a drone"
+    "jobs.droneTemplate.make": "Make a drone",
+    "workspaceStop.chip": "Stops in {{left}}",
+    "workspaceStop.tip": "This workspace stops at {{time}} because {{reason}}. Your data is saved, and you can start it again from the Console."
 }
