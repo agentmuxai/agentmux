@@ -138,7 +138,7 @@ import { setPlatform } from "@/util/platformutil";
 import { FilesModel } from "./files-model";
 import { openTargetOf } from "./files-open";
 import { clipboard, setClipboard } from "./files-ops";
-import { resetPlacesForTests } from "./files-pins";
+import { recentPlaces, resetPlacesForTests } from "./files-pins";
 import { resetThumbnailsForTests } from "./files-thumbs";
 import { noteToolCall, noteToolResult, resetTouchedForTests } from "@/app/store/touched-files";
 import { beginPathDrag, endPathDrag, installFileDropController, PATHS_MIME } from "@/app/drag/file-drop";
@@ -1642,5 +1642,20 @@ describe("the Files pane: a narrow pane (#47504)", () => {
         await waitFor(() => expect(v.container.querySelector(".files-grid")).toBeTruthy());
         openMore(v, "less");
         expect(menuLabels()).toEqual(["Hide hidden files", "Show as a list"]);
+    });
+});
+
+describe("the Files pane: Places recents", () => {
+    it("records a folder the person opened, not the one the pane came back to, nor one reached by Back", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        // The folder the pane started in is not a recent.
+        expect(recentPlaces()).toEqual([]);
+        fireEvent.dblClick(v.row("src"));
+        await waitFor(() => expect(v.names()).toEqual(["main.rs"]));
+        await waitFor(() => expect(recentPlaces().map((p) => p.path)).toEqual([`${HOME}\\src`]));
+        v.model.goBack();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        expect(recentPlaces().map((p) => p.path)).toEqual([`${HOME}\\src`]);
     });
 });

@@ -558,7 +558,7 @@ export class FilesModel {
             return;
         }
         await this.list(target, { silent: false, consented: true });
-        // A folder the person opened (not the one a restored pane came back to) goes into Places' recents, once
+        // A folder the person opened (not the one a restored pane came back to, nor one reached by Back or Forward) goes into Places' recents, once
         // its rows are on screen: a folder that couldn't be listed, or is waiting on macOS, is not one.
         if (!opts.restore && !this.root() && this.phase() === "ready") addRecent({ path: this.path(), connection: this.connection() || undefined });
     }
@@ -568,7 +568,7 @@ export class FilesModel {
         if (prev == null) return;
         this.forward.push(this.path());
         this.setHistoryVersion((n) => n + 1);
-        void this.navigate(prev, { push: false });
+        void this.navigate(prev, { push: false, restore: true });
     }
 
     goForward(): void {
@@ -576,7 +576,7 @@ export class FilesModel {
         if (next == null) return;
         this.back.push(this.path());
         this.setHistoryVersion((n) => n + 1);
-        void this.navigate(next, { push: false });
+        void this.navigate(next, { push: false, restore: true });
     }
 
     goUp(): void {
