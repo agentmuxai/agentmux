@@ -73,6 +73,11 @@ interface Drag {
     marked: boolean;
 }
 
+/** Whether a press on `el` can start no selection: the element, or what it inherits from, is `user-select: none`. */
+export function cannotSelect(win: Window, el: Element | null): boolean {
+    return !!el && win.getComputedStyle(el).userSelect === "none";
+}
+
 export function installPaneSelectGuard(win: Window = window): () => void {
     const doc = win.document;
     const mac = isMacPlatform(win);
@@ -108,6 +113,9 @@ export function installPaneSelectGuard(win: Window = window): () => void {
         if (p.shiftKey) dropCrossingSelection(p.target);
         const pane = paneOf(p.target);
         if (!pane) return;
+        // A press on something that says `user-select: none` (the Atlas map, a button, a header) cannot start a
+        // selection, so there is nothing to confine, and marking it restyles every element of the window.
+        if (cannotSelect(win, elementOf(p.target))) return;
         drag = { pane, x: p.clientX, y: p.clientY, marked: false };
     };
 
