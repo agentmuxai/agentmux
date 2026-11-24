@@ -257,7 +257,7 @@ pub(super) fn with_overrides(argv: &[String], overrides: &[String]) -> Vec<Strin
 /// srv's endpoint, which is inherited, not in the turn's own variables; and a
 /// server's literal env value must not replace a variable Codex already has.
 pub(super) fn launch_env(inherited: impl Iterator<Item = (String, String)>, own: &HashMap<String, String>) -> HashMap<String, String> {
-    let mut env: HashMap<String, String> = inherited.filter(|(k, _)| !k.starts_with("AGENTMUX") || !crate::backend::pane_env::should_strip(k)).collect();
+    let mut env: HashMap<String, String> = inherited.filter(|(k, _)| !crate::backend::pane_env::should_strip(k)).collect();
     env.extend(own.iter().map(|(k, v)| (k.clone(), v.clone())));
     env
 }
