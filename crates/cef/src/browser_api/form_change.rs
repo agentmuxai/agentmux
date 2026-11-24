@@ -18,6 +18,9 @@ pub(super) fn what_changed(approved: &Value, now: &Value) -> String {
     if text(approved, "what") != text(now, "what") {
         return "the button's name changed".to_string();
     }
+    if ["page", "description", "why"].iter().any(|k| text(approved, k) != text(now, k)) {
+        return "the page or what the click is said to do changed".to_string();
+    }
     let fields = |v: &Value| v.get("fields").and_then(|f| f.as_array()).cloned().unwrap_or_default();
     let (old, new) = (fields(approved), fields(now));
     if old.len() != new.len() {
@@ -31,7 +34,10 @@ pub(super) fn what_changed(approved: &Value, now: &Value) -> String {
             }
             let masked = agentmux_common::shown_once::mask(&label(b));
             let shown: String = masked.chars().take(60).collect();
-            return format!("the value of \"{shown}\" changed");
+            if a.get(1) != b.get(1) {
+                return format!("the value of \"{shown}\" changed");
+            }
+            return format!("the state of \"{shown}\" changed");
         }
     }
     "something it sends that the page does not show, a hidden or a secret value, changed".to_string()
@@ -55,6 +61,15 @@ mod tests {
         assert_eq!(what_changed(&base, &value), "the value of \"Message\" changed");
         let fewer = ask("Click \"Send\"", "https://x.test/a", json!([["Name", "Ann", false]]));
         assert_eq!(what_changed(&base, &fewer), "the fields it sends changed");
+        // What the person read about the click, and a field that only changed state, are not called a hidden value.
+        let mut moved = base.clone();
+        moved["page"] = json!("https://x.test/other");
+        assert_eq!(what_changed(&base, &moved), "the page or what the click is said to do changed");
+        let mut said = base.clone();
+        said["why"] = json!("to pay");
+        assert_eq!(what_changed(&base, &said), "the page or what the click is said to do changed");
+        let flag = ask("Click \"Send\"", "https://x.test/a", json!([["Name", "Ann", true], ["Message", "hi", true]]));
+        assert_eq!(what_changed(&base, &flag), "the state of \"Name\" changed");
         // Nothing the person saw differs: a hidden or secret value, said without it.
         assert!(what_changed(&base, &base).contains("hidden or a secret value"));
     }
