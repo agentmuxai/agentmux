@@ -1612,6 +1612,52 @@ fn bind_window_hwnd_replaces_unless_asked_to_keep() {
 }
 
 #[test]
+fn claim_free_window_hwnd_skips_bound_ones_and_keeps_an_existing_bind() {
+    let mut state = HostState::default();
+    let claim = |label: &str, candidates: &[isize]| HostCommand::ClaimFreeWindowHwnd {
+        label: label.to_string(),
+        candidates: candidates.to_vec(),
+    };
+    update(&mut state, HostCommand::BindWindowHwnd { label: "main".into(), hwnd: 0x10, replace: true });
+    let out = update(&mut state, claim("window-1", &[0x10, 0x20, 0x30]));
+    assert_eq!(out.claimed_window_hwnd, Some(0x20), "the one `main` holds is not free");
+    let out = update(&mut state, claim("window-2", &[0x10, 0x20, 0x30]));
+    assert_eq!(out.claimed_window_hwnd, Some(0x30));
+    let out = update(&mut state, claim("window-3", &[0x10, 0x20, 0x30]));
+    assert_eq!(out.claimed_window_hwnd, None, "none left");
+    assert!(!state.window_hwnds.contains_key("window-3"));
+    let out = update(&mut state, claim("window-1", &[0x40]));
+    assert_eq!(out.claimed_window_hwnd, None, "a bound label keeps its HWND");
+    assert_eq!(state.window_hwnds.get("window-1"), Some(&0x20));
+}
+
+/// Two "ready" events at once, both seeing the same unbound windows: each
+/// label must end on its own HWND. Looking and binding as separate steps
+/// (what `capture_hwnd_for_label` once did) lets both take the first.
+#[test]
+fn concurrent_claims_never_share_an_hwnd() {
+    use std::sync::{Arc, Barrier};
+    for round in 0..200 {
+        let app = Arc::new(crate::state::AppState::default());
+        let gate = Arc::new(Barrier::new(2));
+        let handles: Vec<_> = ["window-a", "window-b"]
+            .into_iter()
+            .map(|label| {
+                let (app, gate) = (app.clone(), gate.clone());
+                std::thread::spawn(move || {
+                    gate.wait();
+                    app.claim_free_window_hwnd(label, vec![0x10, 0x20])
+                })
+            })
+            .collect();
+        let got: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        let (a, b) = (app.window_hwnd("window-a"), app.window_hwnd("window-b"));
+        assert!(a.is_some() && b.is_some() && a != b, "round {round}: {a:?} vs {b:?}");
+        assert_eq!(got, vec![a, b]);
+    }
+}
+
+#[test]
 fn evict_window_hwnd_returns_the_binding_once() {
     let mut state = HostState::default();
     update(&mut state, HostCommand::BindWindowHwnd { label: "main".into(), hwnd: 0x30, replace: true });
@@ -1629,6 +1675,7 @@ fn window_hwnd_commands_are_not_quit_relevant() {
     use super::is_quit_relevant;
     assert!(!is_quit_relevant(&HostCommand::BindWindowHwnd { label: "main".into(), hwnd: 1, replace: true }));
     assert!(!is_quit_relevant(&HostCommand::EvictWindowHwnd { label: "main".into() }));
+    assert!(!is_quit_relevant(&HostCommand::ClaimFreeWindowHwnd { label: "main".into(), candidates: vec![1] }));
 }
 
 #[cfg(target_os = "windows")]
