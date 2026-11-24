@@ -1041,6 +1041,7 @@ mod tests {
         let some = argv_of(ToolLimit::Limited { commands: vec!["git status".to_string()] }).await;
         assert_eq!(value_after(&some, "--tools").as_deref(), Some("Read,Grep,Glob,Bash"), "{some:?}");
         assert_eq!(value_after(&some, "--allowedTools").as_deref(), Some("Bash(git status)"), "{some:?}");
+        assert_eq!(value_after(&some, "--setting-sources").as_deref(), Some(""), "no settings file adds to the list: {some:?}");
 
         // A tool flag takes a list: the prompt is the last argument and never one of its values.
         for argv in [&reading, &some] {

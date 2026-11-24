@@ -5,7 +5,8 @@
 //!
 //! The block's `allow_commands` is the whole answer, and the runner passes it to the CLI as flags:
 //!   - nothing, `false` or an empty list: the tools that read (`Read`, `Grep`, `Glob`) and no MCP server;
-//!   - a command line, or a list of them: those and `Bash` for exactly those command lines, and no MCP server;
+//!   - a command line, or a list of them: those and `Bash` for exactly those command lines, no MCP server, and none of the
+//!     user's, project's or local settings (their `permissions.allow` rules would add to the list);
 //!   - `true`: no limit from AgentMux (the check that turns a job on asks the person about it).
 //!
 //! A tool the CLI is not given is not there for the model to call, and a command line that is not listed is not run
@@ -48,12 +49,14 @@ impl ToolLimit {
     /// The flags that carry the limit to the CLI.
     pub fn args(&self) -> Vec<String> {
         let ToolLimit::Limited { commands } = self else { return Vec::new() };
-        let mut args = vec!["--strict-mcp-config".to_string(), "--permission-mode".to_string(), "dontAsk".to_string(), "--tools".to_string()];
+        let mut args = vec!["--strict-mcp-config".to_string(), "--permission-mode".to_string(), "dontAsk".to_string()];
         if commands.is_empty() {
-            args.push(READING.to_string());
+            args.extend(["--tools".to_string(), READING.to_string()]);
             return args;
         }
-        args.push(format!("{READING},Bash"));
+        // A settings file may allow more than the list, and an allow rule adds to the list instead of replacing it.
+        args.extend(["--setting-sources".to_string(), String::new()]);
+        args.extend(["--tools".to_string(), format!("{READING},Bash")]);
         args.push("--allowedTools".to_string());
         args.extend(commands.iter().map(|c| format!("Bash({})", escaped(c))));
         args
@@ -86,12 +89,15 @@ mod tests {
         for v in [None, Some(json!(false)), Some(json!([])), Some(json!("  ")), Some(Value::Null)] {
             let args = ToolLimit::from_allow_commands(v.as_ref()).args();
             assert_eq!(args, ["--strict-mcp-config", "--permission-mode", "dontAsk", "--tools", "Read,Grep,Glob"], "{v:?}");
+            assert!(!args.iter().any(|a| a == "--setting-sources"), "Bash is not there to be allowed by a settings file: {args:?}");
         }
     }
 
     #[test]
     fn listed_command_lines_are_the_only_commands() {
         let args = of(json!(["git status", "cargo test (fast)", 7])).args();
+        let sources = args.iter().position(|a| a == "--setting-sources").unwrap();
+        assert_eq!(args[sources + 1], "", "no settings file adds to the list");
         let tools = args.iter().position(|a| a == "--tools").unwrap();
         assert_eq!(args[tools + 1], "Read,Grep,Glob,Bash");
         let allowed = args.iter().position(|a| a == "--allowedTools").unwrap();
