@@ -31,6 +31,8 @@ const SETTLE_MS = 200;
 interface Fit {
     el: HTMLElement;
     tiers: readonly string[];
+    /** How many more px the element needs than its own content shows (see `Overrun`), or 0. */
+    overrun: Overrun | undefined;
     /** The tier it was left at: 0 is none, n is `tiers[n - 1]`. */
     at: number;
     /** The width its content needed at the tier below `at`, where it did not fit. */
@@ -39,10 +41,17 @@ interface Fit {
 
 const fits = new WeakMap<HTMLElement, Fit>();
 
-function fitOf(el: HTMLElement, tiers: readonly string[]): Fit {
+/**
+ * How many px wider the element must be for a part of it that its own overflow does not show to be visible: a part
+ * a child clips without growing the element (the pane header's tab strip, which shrinks and clips the selected tab's
+ * buttons rather than overflow). 0 when nothing is cut off; read after each tier is written, so it sees that tier's layout.
+ */
+export type Overrun = (el: HTMLElement) => number;
+
+function fitOf(el: HTMLElement, tiers: readonly string[], overrun?: Overrun): Fit {
     let fit = fits.get(el);
-    if (!fit || fit.tiers !== tiers) {
-        fit = { el, tiers, at: 0, neededBelow: undefined };
+    if (!fit || fit.tiers !== tiers || fit.overrun !== overrun) {
+        fit = { el, tiers, overrun, at: 0, neededBelow: undefined };
         fits.set(el, fit);
     }
     return fit;
@@ -55,15 +64,17 @@ const tierName = (fit: Fit, at: number): string | null => (at === 0 ? null : fit
  * pushed to the right edge (`justify-content: flex-end`) overruns on the left, so its children are
  * compared with the element's left edge too. (A `display: contents` child has no box.)
  */
-function contentWidth(el: HTMLElement): number {
-    if (el.scrollWidth - el.clientWidth > SLACK_PX) return el.scrollWidth;
+function contentWidth(fit: Fit): number {
+    const el = fit.el;
+    const clipped = Math.max(0, fit.overrun?.(el) ?? 0);
+    if (el.scrollWidth - el.clientWidth > SLACK_PX) return Math.max(el.scrollWidth, el.clientWidth + clipped);
     const left = el.getBoundingClientRect().left;
     let overrun = 0;
     for (const child of el.children) {
         const box = child.getBoundingClientRect();
         if (box.width > 0) overrun = Math.max(overrun, left - box.left);
     }
-    return el.clientWidth + overrun;
+    return el.clientWidth + Math.max(overrun, clipped);
 }
 
 /** Whether a fitting may start at the element's own tier: the tier below still needs more than it has. */
@@ -111,7 +122,7 @@ function fitAll(work: Map<Fit, boolean>): void {
         const next: typeof open = [];
         for (const step of open) {
             const { fit, at } = step;
-            const needed = contentWidth(fit.el);
+            const needed = contentWidth(fit);
             if (needed - fit.el.clientWidth > SLACK_PX && at < fit.tiers.length) {
                 fit.neededBelow = needed;
                 next.push({ fit, at: at + 1 });
@@ -125,8 +136,8 @@ function fitAll(work: Map<Fit, boolean>): void {
 }
 
 /** Sets `el`'s `data-fit` to the first of `tiers` at which it no longer overflows (the last one if none does). */
-export function fitToWidth(el: HTMLElement, tiers: readonly string[]): void {
-    fitAll(new Map([[fitOf(el, tiers), true]]));
+export function fitToWidth(el: HTMLElement, tiers: readonly string[], overrun?: Overrun): void {
+    fitAll(new Map([[fitOf(el, tiers, overrun), true]]));
 }
 
 /** What the window's observer watches: a fitted element itself, or a part whose size says its content changed. */
@@ -168,11 +179,12 @@ export function useWidthFit(
     tiers: readonly string[],
     watch: (el: HTMLElement) => Element[] = () => [],
     trigger?: () => unknown,
+    overrun?: Overrun,
 ): void {
     onMount(() => {
         const el = getEl();
         if (!el) return;
-        const fit = fitOf(el, tiers);
+        const fit = fitOf(el, tiers, overrun);
         if (typeof ResizeObserver !== "undefined") {
             const parts = watch(el);
             observe(el, fit, false);
@@ -186,7 +198,7 @@ export function useWidthFit(
         createEffect(() => {
             trigger();
             // The new zoom is written to the page after the signal changes: measure once it is.
-            const frame = requestAnimationFrame(() => fitToWidth(el, tiers));
+            const frame = requestAnimationFrame(() => fitToWidth(el, tiers, overrun));
             onCleanup(() => cancelAnimationFrame(frame));
         });
     });

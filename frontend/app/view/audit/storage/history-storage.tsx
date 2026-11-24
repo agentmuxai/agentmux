@@ -18,7 +18,7 @@ import type { HistoryUsage } from "@/types/rpc/HistoryUsage";
 import { formatBytes } from "@/util/format-bytes";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
-import "./history.scss";
+import "../history-sections.scss";
 
 /** How compressed the shared pane history is (`agent:transcriptframes`). */
 const CompressionLine = (props: { c: HistoryCompression }): JSX.Element => {

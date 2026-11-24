@@ -421,8 +421,11 @@
     }
 
     // A container agent's frame is in the way: the ring is outside it.
+    // Its width is the layout's (atlas-host-mark.tsx `containerRing`): the full width would reach half the gap between
+    // two nodes, and two container neighbours' rings would touch.
     &--container[data-host-colour]::before {
-        --ring-in: max(var(--atlas-ring-gap, 2px), calc(var(--atlas-frame-out, 7px) - 2px));
+        --atlas-ring-w: var(--atlas-ring-w-container, 1px);
+        --ring-in: var(--atlas-ring-gap-container, max(var(--atlas-ring-gap, 2px), calc(var(--atlas-frame-out, 7px) - 2px)));
     }
 
     // A container no agent uses has a 1 px border all round.

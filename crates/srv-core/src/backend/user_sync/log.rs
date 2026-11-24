@@ -170,20 +170,20 @@ pub fn set_epoch(conn: &Connection, id: &str, epoch: u32, ended: &Vector) -> rus
 
 /// Sets the collection's key epoch and the ends of the epochs before it to exactly what the membership chain says now,
 /// in either direction: a removal that lost a fork to another entry leaves no epoch and no ends behind. `cuts` holds,
-/// for each epoch left, what each remaining member had written at it.
+/// for each epoch left, what each remaining member had written at it. Several statements: the caller makes them one
+/// (`ops::sync_epoch` and `ops::store_chain` do), so a failure part-way leaves nothing changed.
 pub fn reset_epochs(conn: &Connection, id: &str, epoch: u32, cuts: &[(u32, &Vector)]) -> rusqlite::Result<()> {
-    let tx = conn.unchecked_transaction()?;
-    tx.execute("DELETE FROM db_sync_epoch_cut WHERE collection = ?1", params![id])?;
+    conn.execute("DELETE FROM db_sync_epoch_cut WHERE collection = ?1", params![id])?;
     for (left, ended) in cuts {
         for (origin, last) in ended.iter() {
-            tx.execute(
+            conn.execute(
                 "INSERT INTO db_sync_epoch_cut (collection, epoch, origin, last_seq) VALUES (?1, ?2, ?3, ?4)",
                 params![id, left, origin, *last as i64],
             )?;
         }
     }
-    tx.execute("UPDATE db_sync_collections SET epoch = ?2 WHERE id = ?1", params![id, epoch])?;
-    tx.commit()
+    conn.execute("UPDATE db_sync_collections SET epoch = ?2 WHERE id = ?1", params![id, epoch])?;
+    Ok(())
 }
 
 /// The last sequence its origin had written at the epoch `h` is at, as the membership change that ended the epoch

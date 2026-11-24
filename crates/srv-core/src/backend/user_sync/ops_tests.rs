@@ -589,6 +589,41 @@ fn a_stored_chain_that_was_altered_is_an_error_not_a_shorter_collection() {
 }
 
 #[test]
+fn a_chain_that_cannot_be_stored_leaves_the_key_epoch_and_the_chain_where_they_were() {
+    // A removal signed here, and one offered by another member: when the store refuses the chain, the epoch the log
+    // keeps is not moved ahead of it, and neither is the chain held in memory.
+    let (mut a, mut b, c) = three("kanban");
+    ops::change(&mut a.ctx(), C, Change::SetPolicy { policy: Policy::Approve }).unwrap();
+    let gone = ended(&[(&a, 0), (&b, 0)]);
+    let remove = ops::change(&mut b.ctx(), C, Change::Remove { id: c.id.clone(), ended: gone.clone() }).unwrap();
+    let (before, epoch) = (a.chains[C].clone(), log::collection_epoch(&a.conn, C).unwrap());
+    a.conn.execute("DROP TABLE db_sync_chain", []).unwrap();
+
+    let offered = MembersReq { collection: C.into(), have_n: 3, offered: vec![remove] };
+    assert!(ops::members(&mut a.ctx(), &b.id, &offered).is_err());
+    assert_eq!(log::collection_epoch(&a.conn, C).unwrap(), epoch, "taken from another member");
+    assert_eq!(a.chains[C], before);
+
+    assert!(ops::change(&mut a.ctx(), C, Change::Remove { id: c.id.clone(), ended: gone }).is_err());
+    assert_eq!(log::collection_epoch(&a.conn, C).unwrap(), epoch, "signed here");
+    assert_eq!(a.chains[C], before);
+}
+
+#[test]
+fn reading_every_stored_chain_reports_a_collection_whose_entries_are_all_gone() {
+    let (a, _, _) = three("kanban");
+    assert_eq!(chain_store::load_all(&a.conn).unwrap().len(), 1);
+    // Every entry row deleted, the head row left: `load` calls that altered, and so must the read of every chain, not
+    // leave the collection out as if it had never been there.
+    a.conn.execute("DELETE FROM db_sync_chain", []).unwrap();
+    assert!(matches!(chain_store::load(&a.conn, C), Err(LoadError::Altered)));
+    assert!(matches!(chain_store::load_all(&a.conn), Err(LoadError::Altered)));
+    // Nothing stored at all is simply no collections.
+    a.conn.execute("DELETE FROM db_sync_chain_head", []).unwrap();
+    assert!(chain_store::load_all(&a.conn).unwrap().is_empty());
+}
+
+#[test]
 fn a_stored_fork_must_be_one_that_was_valid_beside_the_head_and_held_once() {
     let (mut a, mut b, c) = three("kanban");
     ops::change(&mut a.ctx(), C, Change::SetPolicy { policy: Policy::Approve }).unwrap();

@@ -56,7 +56,7 @@ const fn op(
 
 /// The operations. 30 s by default; a restart of AgentMux is critical and
 /// gets the longest window.
-pub const OPS: [OpSpec; 15] = [
+pub const OPS: [OpSpec; 16] = [
     op("stop_agents", "stop agents", ("Keep running", "Close now"), 15, false, &["target"]),
     op("close_pane", "close a pane", ("Keep running", "Close now"), 15, false, &["target"]),
     op("quit_agentmux", "close this AgentMux", ("Keep open", "Close now"), MAX_WINDOW_SECS, true, &[]),
@@ -83,6 +83,10 @@ pub const OPS: [OpSpec; 15] = [
     ),
     // Removes only what a build recreates (cargo `target` folders of idle clones, old incremental caches).
     op("disk_cleanup", "clear idle agents' build folders on this computer", ("Keep them", "Clear now"), 30, true, &[]),
+    // An agent fires a drone it did not make and was not given (docs/specs/SPEC_DRONE_REAL_WORLD_JOBS_2026_11_11.md
+    // §6.5). The facts say which drone, what its graph can do and what payload goes in; the run starts when the
+    // countdown ends unvetoed, on the graph the person was shown.
+    op("drone_fire", "run a drone for an agent", ("Don't run", "Run now"), 30, true, &["drone", "can_do", "payload"]),
 ];
 
 /// The operation named `name`.

@@ -35,6 +35,7 @@
 | `desktop_control_grant`, `vault_use`, `vault_always_allow` | Don't allow | Allow now |
 | `sender_key_repin` | Don't trust | Trust now |
 | `tower_pair` | Don't pair | Pair now |
+| `drone_fire` | Don't run | Run now |
 
 The sensitive pairs are two new fields on `OpSpec` (`cancel_label`, `now_label`), so a new operation cannot be added without its words. The in-app banner stops saying "Veto" and "Approve now" and uses them.
 

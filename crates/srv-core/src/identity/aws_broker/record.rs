@@ -69,6 +69,14 @@ impl Summary {
                 }
             }
         }
+        // A grant that takes a caller's tag is another recipe when its key or prefix changes. One that takes none hashes as it
+        // always did, so a record made before this stays valid.
+        if let Some(t) = &g.caller_tag {
+            hash.update(b"caller_tag\0");
+            hash.update(t.key.as_bytes());
+            hash.update([0u8]);
+            hash.update(t.prefix.as_bytes());
+        }
         Summary {
             tier: g.tier.as_str().to_string(),
             agents,
