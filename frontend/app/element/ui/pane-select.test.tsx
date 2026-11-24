@@ -72,6 +72,37 @@ describe("a selection that starts in a pane (drag)", () => {
         expect(el("b").hasAttribute(OWNER_ATTR)).toBe(false);
     });
 
+    it("sets nothing while the drag stays inside its pane (a pane dragged by its header, text selected within it), so a busy window is not restyled", () => {
+        const seen: string[] = [];
+        const watch = new MutationObserver((rs) => rs.forEach((r) => seen.push(String(r.attributeName))));
+        watch.observe(document.documentElement, { attributes: true });
+        watch.observe(el("a"), { attributes: true });
+        press(el("ta"));
+        pointer("pointermove", 1, el("ta2"), 40);
+        pointer("pointermove", 1, el("fa"), 90);
+        pointer("pointermove", 1, el("a"), 140);
+        expect(locked()).toBe(false);
+        expect(el("a").hasAttribute(OWNER_ATTR)).toBe(false);
+        expect(watch.takeRecords()).toEqual([]);
+        expect(seen).toEqual([]);
+        pointer("pointerup", 0, el("ta"));
+        expect(watch.takeRecords()).toEqual([]);
+        watch.disconnect();
+    });
+
+    it("locks as soon as the pointer is over anything but the pane: another pane, the chrome, the gap", () => {
+        for (const outside of ["tb", "chrome", "status"]) {
+            press(el("ta"));
+            pointer("pointermove", 1, el("ta2"), 40);
+            expect(locked()).toBe(false);
+            pointer("pointermove", 1, el(outside), 80);
+            expect(locked()).toBe(true);
+            expect(el("a").hasAttribute(OWNER_ATTR)).toBe(true);
+            pointer("pointerup", 0, el(outside));
+            expect(locked()).toBe(false);
+        }
+    });
+
     it("sets nothing for a click, so a click never restyles the document", () => {
         const seen: string[] = [];
         const mo = new MutationObserver((rs) => rs.forEach((r) => seen.push(String(r.attributeName))));
