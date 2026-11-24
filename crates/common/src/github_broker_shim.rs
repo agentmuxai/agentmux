@@ -91,10 +91,10 @@ pub const GIT_NO_EXT_DIFF_ENV: &str = "AGENTMUX_GIT_NO_EXT_DIFF";
 macro_rules! no_ext_diff_step {
     () => {
         r#"  if [ -n "${AGENTMUX_GIT_NO_EXT_DIFF:-}" ]; then
-    local _amx_g=() _amx_r=() _amx_s _amx_t _amx_c _amx_k _amx_u=;
+    local _amx_g=() _amx_r=() _amx_s _amx_t _amx_c _amx_k _amx_b _amx_u=;
     while [ $# -gt 0 ]; do
       case "$1" in
-        -C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env) _amx_g+=("$1"); shift; if [ $# -gt 0 ]; then _amx_g+=("$1"); shift; fi;;
+        -C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env|--attr-source) _amx_g+=("$1"); shift; if [ $# -gt 0 ]; then _amx_g+=("$1"); shift; fi;;
         -*) _amx_g+=("$1"); shift;;
         *) break;;
       esac;
@@ -118,7 +118,15 @@ macro_rules! no_ext_diff_step {
           for _amx_k in "$@"; do case "$_amx_k" in -*) ;; *) _amx_t=$_amx_k; break;; esac; done;
           case "$_amx_t" in
             update|show|prune|set-head) echo "git remote $_amx_t is not run while this folder's configuration names an upload or receive program for a remote; use git fetch or git ls-remote" >&2; return 1;;
-            add) case " $* " in *" -f "*|*" --fetch "*) echo "git remote add with a fetch is not run while this folder's configuration names an upload or receive program for a remote" >&2; return 1;; esac;;
+            add)
+              _amx_b=;
+              for _amx_k in "$@"; do
+                case "$_amx_k" in
+                  --?*) _amx_c=${_amx_k#--}; _amx_c=${_amx_c%%=*}; case "fetch" in "$_amx_c"*) _amx_b=1;; esac;;
+                  -*f*) _amx_b=1;;
+                esac;
+              done;
+              if [ -n "$_amx_b" ]; then echo "git remote add with a fetch is not run while this folder's configuration names an upload or receive program for a remote" >&2; return 1; fi;;
           esac;
           set -- "$_amx_s" "$@";
         fi;;
@@ -133,7 +141,11 @@ macro_rules! no_ext_diff_step {
       fetch|pull)
         if [ -n "$_amx_u" ]; then
           for _amx_k in "$@"; do
-            case "$_amx_k" in --all|--multiple) echo "git $1 $_amx_k is not run while this folder's configuration names an upload or receive program for a remote; name one remote" >&2; return 1;; esac;
+            _amx_b=;
+            case "$_amx_k" in
+              --?*) _amx_c=${_amx_k#--}; _amx_c=${_amx_c%%=*}; case "all" in "$_amx_c"*) _amx_b=1;; esac; case "multiple" in "$_amx_c"*) _amx_b=1;; esac;;
+            esac;
+            if [ -n "$_amx_b" ]; then echo "git $1 $_amx_k is not run while this folder's configuration names an upload or receive program for a remote; name one remote" >&2; return 1; fi;
             for _amx_t in ${_amx_r[@]+"${_amx_r[@]}"}; do
               if [ "$_amx_k" = "$_amx_t" ]; then echo "git $1 of the group $_amx_k is not run while this folder's configuration names an upload or receive program for a remote; name one remote" >&2; return 1; fi;
             done;

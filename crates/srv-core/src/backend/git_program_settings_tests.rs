@@ -512,7 +512,7 @@ fn the_function_keeps_a_pager_the_folder_names_from_running_on_a_terminal() {
 fn the_function_keeps_a_remotes_upload_and_receive_programs_from_running() {
     let folder = Folder::new();
     let commands = ["git fetch viaup", "git ls-remote viaup", "git pull viaup HEAD", "git push viaup HEAD:refs/heads/x"];
-    let remote_commands = ["git remote update viaup", "git remote show viaup", "git remote prune viaup", "git remote -v update", "git remote set-head viaup -a", "git remote add -f other ../remote.git", "git fetch --all", "git fetch --multiple viaup", "git pull --all", "git fetch grp"];
+    let remote_commands = ["git remote update viaup", "git remote show viaup", "git remote prune viaup", "git remote -v update", "git remote set-head viaup -a", "git remote add -f other ../remote.git", "git remote add --fe other ../remote.git", "git remote add -ft main other ../remote.git", "git fetch --al", "git fetch --mu viaup", "git pull --al", "git --attr-source HEAD fetch --all", "git fetch --all", "git fetch --multiple viaup", "git pull --all", "git fetch grp"];
     for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
         folder.forget();
         for command in commands {
