@@ -105,6 +105,7 @@ pub mod agent_api_retry;
 pub mod providers;
 pub mod providers_custom;
 pub mod harness_manifest;
+pub mod harness_approval;
 pub mod cli_download;
 pub mod cli_install;
 pub mod cli_prune;
