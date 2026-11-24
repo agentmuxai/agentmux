@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# agentmux-build-slot-shim v4: written by AgentMux; edits here are overwritten.
+# agentmux-build-slot-shim v5: written by AgentMux; edits here are overwritten.
 #
 # The same file is installed as `cargo`, `task`, `npm`, `npx` and `docker`; it acts for the
 # tool whose name it carries. A heavy subcommand (`cargo test`, `task package`, `npm run build`,
@@ -189,6 +189,22 @@ case "$tool" in
     esac
     ;;
 esac
+
+# A call that only asks the tool to describe itself builds nothing, so it never waits for the slot:
+# `cargo nextest --version`, `cargo test --help`, `npx vitest -h`, `cargo help build`. Only the words
+# before a `--` count: after it they belong to the program the tool starts (`cargo test -- --help`
+# still builds the test binary first). `cargo install <crate> --version 1.2.3` is the exception: there
+# `--version` names the release to build, so only `--help` makes an install light.
+if [ "$heavy" = 1 ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      --) break ;;
+      --help|-h) heavy=0; break ;;
+      --version|-V) [ "$tool" = cargo ] && [ "${sub:-}" = install ] || { heavy=0; break; } ;;
+    esac
+  done
+  [ "$tool" = cargo ] && [ "$(first_word "$@")" = help ] && heavy=0
+fi
 
 # A site-style repo's build (a package.json with no Cargo.toml above it: asafebgi, agentmux-docs,
 # a widget folder) is not what the slot protects the machine from, so npm and npx skip the queue
