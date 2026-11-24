@@ -6,6 +6,7 @@
 import { createEffect, on, Match, Show, Switch, type Accessor, type JSX } from "solid-js";
 
 import { Button } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { InstallProgress } from "@/element/install/InstallProgress";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { open } from "./create-panel-model";
@@ -17,14 +18,13 @@ export function VendorInstall(props: { p: PanelParts }): JSX.Element {
     return (
         <div class="agent-create-install" data-testid="agent-create-vendor-install">
             <p class="agent-create-panel-text">
-                AgentMux doesn't install {name()}: install it with its own installer, which puts it on your
-                PATH, outside AgentMux's isolation. Then check again.
+                {t("createPanel.install.vendor", { name: name() })}
             </p>
             <Show when={install.vendorCommand()}>
                 <div class="agent-create-command">
                     <code data-testid="agent-create-vendor-command">{install.vendorCommand()}</code>
-                    <Button tone="quiet" onClick={() => void clipboardWriteText(install.vendorCommand())} title="Copy">
-                        <i class="fa-solid fa-copy" aria-hidden="true" /> Copy
+                    <Button tone="quiet" onClick={() => void clipboardWriteText(install.vendorCommand())} title={t("createPanel.install.copy")}>
+                        <i class="fa-solid fa-copy" aria-hidden="true" /> {t("createPanel.install.copy")}
                     </Button>
                 </div>
             </Show>
@@ -38,16 +38,17 @@ export function VendorInstall(props: { p: PanelParts }): JSX.Element {
                             open(url());
                         }}
                     >
-                        {name()}'s install instructions<span aria-hidden="true"> ↗</span>
+                        {t("createPanel.install.instructions", { name: name() })}
+                        <span aria-hidden="true"> ↗</span>
                     </a>
                 )}
             </Show>
             <div class="agent-create-actions">
                 <Button tone="neutral" onClick={() => s.props.onClose()}>
-                    Cancel
+                    {t("createPanel.install.cancel")}
                 </Button>
                 <Button tone="accent" busy={install.checkingAgain()} onClick={() => void install.checkAgain()} data-testid="agent-create-check-again">
-                    Check again
+                    {t("createPanel.install.checkAgain")}
                 </Button>
             </div>
         </div>
@@ -121,36 +122,35 @@ export function NpmInstall(props: { p: PanelParts; session: Accessor<Session> })
     return (
         <div ref={root} class="agent-create-install" data-testid="agent-create-npm-install">
             <p class="agent-create-panel-text">
-                {s.name()} isn't installed yet. AgentMux installs its own copy, kept apart from any you
-                installed yourself. It needs an internet connection, and keeps going if you close this.
+                {t("createPanel.install.npm", { name: s.name() })}
             </p>
             <InstallProgress session={sess()} kind="provider-cli" />
             <div class="agent-create-actions">
                 <Switch>
                     <Match when={sess().state() === "idle"}>
                         <Button tone="neutral" onClick={() => s.props.onClose()}>
-                            Cancel
+                            {t("createPanel.install.cancel")}
                         </Button>
                         <Button tone="accent" onClick={() => void sess().start()} data-testid="agent-create-install-start">
-                            Install now
+                            {t("createPanel.install.now")}
                         </Button>
                     </Match>
                     <Match when={sess().state() === "running"}>
                         <Button tone="neutral" onClick={() => void sess().cancel()} data-testid="agent-create-install-cancel">
-                            Cancel install
+                            {t("createPanel.install.cancelInstall")}
                         </Button>
                     </Match>
                     <Match when={sess().state() === "failed"}>
                         <Button tone="neutral" onClick={() => s.props.onClose()}>
-                            Close
+                            {t("createPanel.install.close")}
                         </Button>
                         <Button tone="accent" onClick={() => void sess().start()}>
-                            Retry
+                            {t("createPanel.install.retry")}
                         </Button>
                     </Match>
                     <Match when={sess().state() === "done"}>
                         <Button tone="neutral" onClick={() => s.props.onClose()}>
-                            Close
+                            {t("createPanel.install.close")}
                         </Button>
                         <Button
                             tone="accent"
@@ -160,7 +160,7 @@ export function NpmInstall(props: { p: PanelParts; session: Accessor<Session> })
                             }}
                             data-testid="agent-create-install-continue"
                         >
-                            Continue
+                            {t("createPanel.install.continue")}
                         </Button>
                     </Match>
                 </Switch>

@@ -10,6 +10,7 @@
 
 import { createResource, createSignal, For, Show, type JSX } from "solid-js";
 import { Button, Pill } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { ScriptInfo } from "@/types/rpc/ScriptInfo";
@@ -51,26 +52,28 @@ export function ScriptReview(p: {
 
     return (
         <>
-            <Pill tone={p.file.approved ? "ok" : "warn"} title={p.file.approved ? undefined : "Never given to an agent until you approve it"}>
+            <Pill tone={p.file.approved ? "ok" : "warn"} title={p.file.approved ? undefined : t("skill.script.neverGiven")}>
                 {scriptState(p.file)}
             </Pill>
             <Button variant="link" aria-expanded={open()} onClick={p.onToggle}>
-                {open() ? "Hide" : "Review"}
+                {open() ? t("skill.script.hide") : t("skill.script.review")}
             </Button>
             <Show when={open()}>
-                <div class="skill-app-script" role="group" aria-label={`Script ${p.file.path}`}>
+                <div class="skill-app-script" role="group" aria-label={t("skill.script.aria", { path: p.file.path })}>
                     <Show when={p.info?.purpose}>
                         <p class="skill-app-line">{p.info?.purpose}</p>
                     </Show>
                     <p class="skill-app-line skill-app-muted">
-                        Needs: {p.info && p.info.needs.length > 0 ? p.info.needs.join(", ") : "nothing listed"}
+                        {t("skill.script.needs", {
+                            needs: p.info && p.info.needs.length > 0 ? p.info.needs.join(", ") : t("skill.script.nothingListed"),
+                        })}
                     </p>
                     <Show when={p.fromCatalog}>
                         <p class="skill-app-line skill-app-muted">{FROM_CATALOG_LINE}</p>
                     </Show>
-                    <p class="skill-app-line skill-app-muted">SHA-256 {p.file.sha256}</p>
+                    <p class="skill-app-line skill-app-muted">{t("skill.script.hash", { hash: p.file.sha256 })}</p>
                     <pre class="skill-app-source" tabIndex={0}>
-                        {source.loading ? "Loading…" : source.error ? "Could not read the script." : source()}
+                        {source.loading ? t("skill.script.loading") : source.error ? t("skill.script.unreadable") : source()}
                     </pre>
                     <Show when={error()}>
                         <p class="skill-app-line skill-app-warn" role="alert">
@@ -82,16 +85,16 @@ export function ScriptReview(p: {
                         fallback={
                             <>
                                 <p class="skill-app-line skill-app-muted">
-                                    Approving lets agents that use this skill receive and run this exact script.
+                                    {t("skill.script.approveNote")}
                                 </p>
                                 <Button tone="accent" busy={busy()} onClick={() => void setApproved(true)}>
-                                    Approve script
+                                    {t("skill.script.approve")}
                                 </Button>
                             </>
                         }
                     >
                         <Button tone="danger" busy={busy()} onClick={() => void setApproved(false)}>
-                            Revoke approval
+                            {t("skill.script.revoke")}
                         </Button>
                     </Show>
                 </div>
@@ -108,13 +111,13 @@ export function ImportAppFacts(p: { app: SkillApp }): JSX.Element {
             <p class={`skill-app-line${signature().tone === "warn" ? " skill-app-warn" : ""}`}>{signature().text}</p>
             <Show when={p.app.scripts.length > 0}>
                 <p class="skill-app-line skill-app-muted">
-                    Scripts are stored, not run: no agent gets one until you approve it in the skill's detail.
+                    {t("skill.script.stored")}
                 </p>
-                <ul class="skill-app-list" aria-label="Scripts">
+                <ul class="skill-app-list" aria-label={t("skill.script.list")}>
                     <For each={p.app.scripts}>
                         {(s) => (
                             <li>
-                                {s.path} <span class="skill-app-muted">{s.purpose}{s.needs.length > 0 ? ` · needs ${s.needs.join(", ")}` : ""}</span>
+                                {s.path} <span class="skill-app-muted">{s.purpose}{s.needs.length > 0 ? ` · ${t("skill.script.needsInline", { needs: s.needs.join(", ") })}` : ""}</span>
                             </li>
                         )}
                     </For>
