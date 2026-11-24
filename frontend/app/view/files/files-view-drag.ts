@@ -65,7 +65,7 @@ export function useFilesDrag(fv: FilesLocal) {
     // computer's panes and apps, and a confined folder's are not handed out.
     const draggedPaths = (entry: FsEntry): string[] | null => {
         if (model.connection() || model.root()) return null;
-        const names = model.selection().names.has(entry.name) ? model.selectedEntries().map((x) => x.name) : [entry.name];
+        const names = model.selection().names.has(entry.name) ? model.topmostSelected().map((x) => x.name) : [entry.name];
         return names.map((n) => model.pathOf(n));
     };
 
@@ -86,7 +86,7 @@ export function useFilesDrag(fv: FilesLocal) {
         if (!model.selection().names.has(entry.name)) {
             model.setSelection({ names: new Set([entry.name]), focus: entry.name, anchor: entry.name });
         }
-        const paths = model.selectedEntries().map((x) => model.pathOf(x.name));
+        const paths = model.topmostSelected().map((x) => model.pathOf(x.name));
         beginPathDrag(e.dataTransfer, paths, model.blockId);
         markFileDragOut(e.dataTransfer, paths);
     };

@@ -89,7 +89,8 @@ export function toggleFocused(sel: Selection): Selection {
 export function folderAt(target: EventTarget | null, byName: ReadonlyMap<string, FsEntry>): FsEntry | undefined {
     if (!(target instanceof Element)) return undefined;
     const el = target.closest<HTMLElement>(".files-rows .files-row, .files-tile");
-    const name = el?.querySelector(".files-name, .files-tile-name")?.textContent;
+    // The row's own name, not the label it shows: a row in the tree shows `lib` for `src/lib`.
+    const name = el?.dataset.name;
     const entry = name ? byName.get(name) : undefined;
     return entry?.is_dir ? entry : undefined;
 }

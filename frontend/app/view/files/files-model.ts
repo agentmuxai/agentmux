@@ -988,6 +988,17 @@ export class FilesModel {
         return this.entries().filter((e) => names.has(e.name));
     }
 
+    /**
+     * The selected entries an operation (copy, cut, trash, drag) takes: those not inside another selected folder. With a folder
+     * opened in place, Select All selects it and its rows, and a copy of both would put the rows in the destination twice
+     * (`dest/src/main.rs` and `dest/main.rs`), since each source goes under its own name.
+     */
+    topmostSelected(): FsEntry[] {
+        const list = this.selectedEntries();
+        const folders = list.filter((e) => e.is_dir).map((e) => e.name);
+        return list.filter((e) => !folders.some((dir) => dir !== e.name && isUnderRel(e.name, dir)));
+    }
+
     /** The path of a row: its name is a path from the shown folder in the tree view (`src/a.ts`). */
     pathOf(name: string): string {
         return joinRel(this.path(), name);
@@ -1325,7 +1336,9 @@ export class FilesModel {
         const path = this.pathOf(rel);
         try {
             const res = await RpcApi.FsWatchCommand(TabRpcClient, { path, block_id: this.blockId });
-            if (this.disposed || !this.treeWatching.has(rel) || !this.expanded().has(rel) || this.treeWatches.has(rel)) {
+            // The name may mean another folder now: the pane went elsewhere while this was asked, and `src` was opened there.
+            const same = this.pathOf(rel) === path;
+            if (this.disposed || !same || !this.treeWatching.has(rel) || !this.expanded().has(rel) || this.treeWatches.has(rel)) {
                 void RpcApi.FsUnwatchCommand(TabRpcClient, { watch_id: res.watch_id }).catch(() => {});
             } else {
                 this.treeWatches.set(rel, res.watch_id);

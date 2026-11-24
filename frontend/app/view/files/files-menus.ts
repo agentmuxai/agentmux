@@ -41,7 +41,7 @@ export type RowMenuActions = {
 
 export const buildRowMenu = (model: FilesModel, entry: FsEntry, actions: RowMenuActions): ContextMenuItem[] => {
     const { openEntry, openInNewTab, copyPaths, askDeletePermanently } = actions;
-    const list = model.selectedEntries();
+    const list = model.topmostSelected();
     const many = list.length > 1;
     const path = model.pathOf(entry.name);
     const fail = (err: unknown) => model.setStatus({ text: errorText(err), tone: "error" });
