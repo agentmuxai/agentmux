@@ -165,6 +165,8 @@ fn apply_cli_switches(env_vars: &mut std::collections::HashMap<String, String>, 
     // A host agent in a folder a container agent can write: its CLI's scheduler is off, and it reads the
     // startup instructions AgentMux keeps for it outside the folder.
     crate::backend::host_agent_files::apply_for_spawn(env_vars, block_meta);
+    // Its git runs nothing the folder's own configuration names.
+    crate::backend::git_program_settings::apply_for_spawn(env_vars, block_meta);
 }
 
 /// The models an agent runs on: an agent on a model route is pointed at the gateway, then the sub-agent model

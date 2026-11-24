@@ -521,6 +521,7 @@ pub(super) fn session_agent_env(
     // live there, and an ACP agent's `cargo test` must reach them.
     crate::backend::tool_store::prepend_agent_tools_path(&mut env_vars);
     crate::backend::gh_guard::apply_gh_guard(&mut env_vars);
+    crate::backend::git_program_settings::apply_for_spawn(&mut env_vars, block_meta);
     crate::backend::account_login_guard::strip_account_login(&mut env_vars);
     env_vars
 }

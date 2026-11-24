@@ -87,6 +87,31 @@ pub fn git_config_entries(get: impl Fn(&str) -> Option<String>, key: &str, value
     ]
 }
 
+/// Whether the `GIT_CONFIG_*` entries `get` sees name `key` (matched without case).
+pub fn git_config_has(get: &impl Fn(&str) -> Option<String>, key: &str) -> bool {
+    (0..parse_count(get)).any(|i| get(&format!("GIT_CONFIG_KEY_{i}")).is_some_and(|k| k.eq_ignore_ascii_case(key)))
+}
+
+/// Whether the `GIT_CONFIG_*` entries `get` sees give `key` exactly `value` somewhere (the name matched without case).
+pub fn git_config_has_value(get: &impl Fn(&str) -> Option<String>, key: &str, value: &str) -> bool {
+    (0..parse_count(get)).any(|i| {
+        get(&format!("GIT_CONFIG_KEY_{i}")).is_some_and(|k| k.eq_ignore_ascii_case(key)) && get(&format!("GIT_CONFIG_VALUE_{i}")).is_some_and(|v| v == value)
+    })
+}
+
+/// The variables that put `key = value` before every `GIT_CONFIG_*` entry `get` sees, the others renumbered after
+/// it: for a setting git reads in order, where an empty value clears the list built before it.
+pub fn git_config_prepend(get: &impl Fn(&str) -> Option<String>, key: &str, value: &str) -> Vec<(String, String)> {
+    let count = parse_count(get);
+    let mut out = vec![("GIT_CONFIG_KEY_0".to_string(), key.to_string()), ("GIT_CONFIG_VALUE_0".to_string(), value.to_string())];
+    for i in 0..count {
+        out.push((format!("GIT_CONFIG_KEY_{}", i + 1), get(&format!("GIT_CONFIG_KEY_{i}")).unwrap_or_default()));
+        out.push((format!("GIT_CONFIG_VALUE_{}", i + 1), get(&format!("GIT_CONFIG_VALUE_{i}")).unwrap_or_default()));
+    }
+    out.push((COUNT.to_string(), (count + 1).to_string()));
+    out
+}
+
 /// `env` without its `core.hooksPath` entries, the others renumbered: for a
 /// container, where the host's hooks directory means nothing, but any other
 /// `GIT_CONFIG_*` setting the agent's env carries must still work.
