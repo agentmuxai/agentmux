@@ -589,6 +589,20 @@ fn a_stored_chain_that_was_altered_is_an_error_not_a_shorter_collection() {
 }
 
 #[test]
+fn reading_every_stored_chain_reports_a_collection_whose_entries_are_all_gone() {
+    let (a, _, _) = three("kanban");
+    assert_eq!(chain_store::load_all(&a.conn).unwrap().len(), 1);
+    // Every entry row deleted, the head row left: `load` calls that altered, and so must the read of every chain, not
+    // leave the collection out as if it had never been there.
+    a.conn.execute("DELETE FROM db_sync_chain", []).unwrap();
+    assert!(matches!(chain_store::load(&a.conn, C), Err(LoadError::Altered)));
+    assert!(matches!(chain_store::load_all(&a.conn), Err(LoadError::Altered)));
+    // Nothing stored at all is simply no collections.
+    a.conn.execute("DELETE FROM db_sync_chain_head", []).unwrap();
+    assert!(chain_store::load_all(&a.conn).unwrap().is_empty());
+}
+
+#[test]
 fn a_stored_fork_must_be_one_that_was_valid_beside_the_head_and_held_once() {
     let (mut a, mut b, c) = three("kanban");
     ops::change(&mut a.ctx(), C, Change::SetPolicy { policy: Policy::Approve }).unwrap();

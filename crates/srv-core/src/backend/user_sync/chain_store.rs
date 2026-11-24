@@ -93,9 +93,11 @@ pub fn load(conn: &Connection, collection: &str) -> Result<Option<Chain>, LoadEr
     }
 }
 
-/// Every stored chain, by collection. One that fails its check is an error for the whole read: it is not skipped.
+/// Every stored chain, by collection. One that fails its check is an error for the whole read: it is not skipped. A
+/// collection is named by its entry rows or by its head row, so one whose entries are all gone but whose head row is
+/// left is read, and reported as altered, not dropped as if it had never been stored.
 pub fn load_all(conn: &Connection) -> Result<BTreeMap<String, Chain>, LoadError> {
-    let mut stmt = conn.prepare("SELECT DISTINCT collection FROM db_sync_chain ORDER BY collection")?;
+    let mut stmt = conn.prepare("SELECT collection FROM db_sync_chain UNION SELECT collection FROM db_sync_chain_head ORDER BY collection")?;
     let names: Vec<String> = stmt.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
     let mut out = BTreeMap::new();
     for name in names {
