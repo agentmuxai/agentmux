@@ -43,7 +43,25 @@ export function HostLabel(props: { style: HostStyle | undefined }): JSX.Element 
 export function ringVars(gaps: Gaps): Record<string, string> {
     const gap = Math.max(1, Math.round((gaps.x / 7) * 10) / 10);
     const width = gaps.x >= 10 ? 2 : 1;
-    return { "--atlas-ring-gap": `${gap}px`, "--atlas-ring-w": `${width}px` };
+    const box = containerRing(gaps, gap, width);
+    return {
+        "--atlas-ring-gap": `${gap}px`,
+        "--atlas-ring-w": `${width}px`,
+        "--atlas-ring-gap-container": `${box.gap}px`,
+        "--atlas-ring-w-container": `${box.width}px`,
+    };
+}
+
+/**
+ * The ring of a container agent: outside the container's dashed frame (`gaps.frame` past the node, less the 2 px the
+ * node's border and its frame's own line take), and no wider than leaves 1 px between it and the ring of the node beside
+ * it. A ring's outer edge reaches `gap + width` past its node, so two neighbours' rings are `gaps.x - 2 * reach` apart;
+ * with the frame between, the ring's full width would reach exactly half the gap and the two would touch.
+ */
+export function containerRing(gaps: Gaps, gap: number, width: number): { gap: number; width: number } {
+    const inner = Math.max(gap, gaps.frame - 2);
+    const room = Math.floor(gaps.x / 2 - 0.5 - inner);
+    return { gap: inner, width: Math.max(1, Math.min(width, room)) };
 }
 
 /** What a machine says about itself, after its host's name: how it was found, its platform, and what is wrong with it. */

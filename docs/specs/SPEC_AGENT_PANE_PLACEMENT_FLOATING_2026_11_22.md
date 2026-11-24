@@ -3,7 +3,7 @@
 **Date:** 2026-11-22
 **Author:** Loap@narko
 **Type:** Spec (task #48507; the build is #48508 and starts after the operator approves this)
-**Status:** active — approved 2026-11-22 with the recommendations of section 4; built in three phases. Phase 1 (options on opens, answers) is in PR #8144; phases 2 (actions, layout reporting) and 3 (screenshot helper, docs) not started.
+**Status:** active — approved 2026-11-22 with the recommendations of section 4; built in three phases. Phase 1 (options on opens, answers) is merged (PR #8144). Phase 2 is built in two PRs: 2a (`resize`, `move` and `place`, and `floating` and `rect` in `Pane layout`) and 2b (`dock`, `float`, the handoff default and its setting, the stop behavior of choice 4, docked `size` and `share`). Phase 3 (screenshot helper, docs) not started.
 **Requested by:** the operator (2026-11-22): agents should open panes, a browser above all, as floating panes, with a size and a position they can set, and be able to resize and move them afterwards. It should also make "the layout holds at this size" checks repeatable.
 **Related:** `SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27.md`, `SPEC_FLOATING_PANE_REDOCK_TO_ORIGIN_2026_11_03.md`, `SPEC_FLOATING_PANE_SOURCE_WINDOW_2026_10_13.md`, `SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md`.
 
@@ -96,6 +96,7 @@ Per section 4 choice 4. In every variant: the person's own panes never move, and
 - **Phase 2 (act and report), added to it:** the choice 1 default itself (a browser handed to the person floats, and the setting that floats every agent browser), because a handoff happens on a pane that is already open and so needs the `float` action; the inactive show on macOS and Linux if the platform look check shows the window takes the foreground.
 - **Phase 2 (act and report):** `resize`, `move`, `place`, `dock`, `float`; `Pane layout` rects, sizes and floating state; the stop behavior of choice 4.
 - **Phase 3:** the screenshot-at-sizes helper and its notes; agentmux-docs (MuxAPI pages, a "floating panes for agents" page) in the release that carries it.
+- **Phase 2a, as built:** `Pane` `resize` (width and/or height; keeps the position), `move` (`spot`, or `x` and `y`; keeps the size) and `place` (any of them) act on a floating pane the caller opened, through `POST /api/v1/pane/place`. srv checks the opener record (`pane_openers`), then sends `placefloatingpane` to the floating window itself, which resolves the request against its own monitor's work area (`floater-placement.ts`), sets its rect through the host's `set_window_rect` (no activate) and answers with `pane.floatplaced`. The window's answer is the call's answer (`placed`, with `clamped`); a window that does not answer in 5 s gives `NO_ANSWER`. `Pane layout` marks each floating pane an agent opened with `floating: true` and `rect` (asked of its window, 2 s; `rect: null` with `rect_unavailable` when it cannot say). Floating opens and the new actions share the ten a minute of deep-link opens. Left to 2b: `always_on_top` in the rect (srv does not hold the tack), `floating` for panes the person tore off, and a docked pane's `size` and `share`.
 - One PR per phase. Visible changes (a floater appearing, its default place) get the macOS and Linux look checks, and the Windows one on narko's behalf from a testbed.
 
 ## 7. Tests the build adds
