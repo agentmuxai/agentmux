@@ -329,14 +329,11 @@ const COMMIT_INFO: &str = concat!(
   const sent = [];
   const secrets = [];
   if (form) {
-    const secretNames = new Set();
-    // Hidden fields a page rewrites by itself (scripts/rotating_name.js): their names count, and so do the kind and length of a value that looks like a token; the value itself doesn't.
-    const hiddenNames = new Set();
-    // A name another control shares (a visible one, or a disabled hidden one) is never exempt: its value is what the person chose.
-    const sharedNames = new Set();
+    // Hidden fields a page rewrites by itself (scripts/rotating_name.js): their names count, and so do the kind and length of a value that looks like a token; the value itself doesn't. A name another control shares (a visible one, a disabled hidden one) is never exempt: its value is what the person chose.
+    const secretNames = new Set(), hiddenNames = new Set(), sharedNames = new Set();
     for (const el of Array.from(formGet("elements"))) {
-      if (secret(el) && el.getAttribute("name")) secretNames.add(el.getAttribute("name"));
       const nm = el.getAttribute("name");
+      if (secret(el) && nm) secretNames.add(nm);
       if (nm) { if ((el.type || "").toLowerCase() === "hidden" && !el.disabled) hiddenNames.add(nm); else sharedNames.add(nm); }
     }
     let entries;
