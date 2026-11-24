@@ -97,14 +97,6 @@ function registerPaneLayoutKeys() {
     on("split:right", run(() => handleSplitHorizontal("after")));
     on("split:down", run(() => handleSplitVertical("after")));
     on("pane:close", run(() => genericClose()));
-    on("pane:magnify", () => {
-        const layoutModel = getLayoutModelForStaticTab();
-        const focusedNode = layoutModel.focusedNode?.();
-        if (focusedNode != null) {
-            layoutModel.magnifyNodeToggle(focusedNode.id);
-        }
-        return true;
-    });
     on("pane:focus:up", run(() => switchBlockInDirection(NavigateDirection.Up)));
     on("pane:focus:down", run(() => switchBlockInDirection(NavigateDirection.Down)));
     on("pane:focus:left", run(() => switchBlockInDirection(NavigateDirection.Left)));

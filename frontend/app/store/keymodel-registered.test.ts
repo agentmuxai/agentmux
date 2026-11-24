@@ -93,7 +93,6 @@ describe("registerGlobalKeys", () => {
             "split:right",
             "split:down",
             "pane:close",
-            "pane:magnify",
             "pane:focus:up",
             "pane:focus:down",
             "pane:focus:left",
