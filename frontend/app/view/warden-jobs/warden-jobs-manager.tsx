@@ -21,12 +21,13 @@ import { JobsModel } from "./jobs-model";
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./warden-jobs.scss";
 import { tip } from "@/app/element/tip";
+import { t } from "@/app/i18n/i18n";
 
 function Strip(props: { job: JobView }): JSX.Element {
     // Oldest on the left, as time reads.
     const marks = () => [...props.job.recent].reverse();
     return (
-        <span class="warden-jobs-strip" aria-label={`Last ${props.job.recent.length} runs`}>
+        <span class="warden-jobs-strip" aria-label={t("jobs.manager.lastRuns", { count: props.job.recent.length })}>
             <For each={marks()}>
                 {(run) => {
                     const b = runBadge(run);
@@ -59,15 +60,15 @@ function JobRow(props: { job: JobView; now: number; selected: boolean; onOpen: (
                 <div class="warden-jobs-name">
                     {props.job.name}
                     <Show when={props.job.source === "drone"}>
-                        <Pill>Drone</Pill>
+                        <Pill>{t("jobs.manager.drone")}</Pill>
                     </Show>
                     <Show when={props.job.cloud}>
                         {(c) => (
                             <>
-                                <Pill icon="cloud">Cloud</Pill>
+                                <Pill icon="cloud">{t("jobs.manager.cloud")}</Pill>
                                 <Show when={!c().reporter_pinned}>
-                                    <Pill tone="warn" title={`Its reporter ${c().reporter} is not pinned here, so its events are dropped`}>
-                                        Reporter not pinned
+                                    <Pill tone="warn" title={t("jobs.manager.notPinnedTip", { reporter: c().reporter })}>
+                                        {t("jobs.manager.notPinned")}
                                     </Pill>
                                 </Show>
                             </>
@@ -78,16 +79,16 @@ function JobRow(props: { job: JobView; now: number; selected: boolean; onOpen: (
                             <Pill
                                 tone="accent"
                                 icon="circle-up"
-                                title={`${props.job.template?.id} ${u().version} is installed${u().approved ? "" : ", waiting for your approval"}`}
+                                title={t(u().approved ? "jobs.manager.installed" : "jobs.manager.installedWaiting", { id: props.job.template?.id, version: u().version })}
                             >
-                                {u().approved ? "Update available" : "Update to approve"}
+                                {u().approved ? t("jobs.manager.updateAvailable") : t("jobs.manager.updateToApprove")}
                             </Pill>
                         )}
                     </Show>
                 </div>
                 <div class="warden-manager-dim">
-                    {props.job.owner ? `by ${props.job.owner}` : "yours"}
-                    <Show when={props.job.cloud}>{(c) => ` · reports as ${c().reporter}`}</Show>
+                    {props.job.owner ? t("jobs.manager.by", { owner: props.job.owner }) : t("jobs.manager.yours")}
+                    <Show when={props.job.cloud}>{(c) => ` · ${t("jobs.manager.reportsAs", { reporter: c().reporter })}`}</Show>
                 </div>
             </td>
             <td {...tip(props.job.expression || undefined)}>
@@ -95,7 +96,7 @@ function JobRow(props: { job: JobView; now: number; selected: boolean; onOpen: (
                 <Show when={props.job.next_run_ms}>{(next) => <div class="warden-manager-dim">{inWords(next(), props.now)}</div>}</Show>
             </td>
             <td>
-                <Show when={last()} fallback={<span class="warden-manager-dim">never run</span>}>
+                <Show when={last()} fallback={<span class="warden-manager-dim">{t("jobs.manager.neverRun")}</span>}>
                     {(run) => {
                         const b = () => runBadge(run());
                         return (
@@ -133,15 +134,14 @@ function Toolbar(props: {
     return (
         <div class="warden-jobs-toolbar">
             <p class="warden-manager-summary">
-                Everything that runs by itself: scheduled jobs, Drone graphs that have run, and approved cloud jobs that report in. A
-                schedule is read in its own time zone.
+                {t("jobs.manager.about")}
             </p>
             <div class="warden-jobs-actions">
                 <Button density="compact" tone="accent" icon="plus" onClick={() => props.onNew()}>
-                    New job
+                    {t("jobs.manager.newJob")}
                 </Button>
                 <Button density="compact" icon="cloud" onClick={() => props.onReporters()}>
-                    Cloud reporters
+                    {t("jobs.manager.reporters")}
                 </Button>
                 <Button
                     density="compact"
@@ -150,7 +150,7 @@ function Toolbar(props: {
                     busy={props.busy}
                     onClick={() => props.onTogglePause()}
                 >
-                    {props.paused ? "Resume all jobs" : "Pause all jobs"}
+                    {props.paused ? t("jobs.manager.resumeAll") : t("jobs.manager.pauseAll")}
                 </Button>
             </div>
         </div>
@@ -219,8 +219,7 @@ export const WardenJobsManager = (props: {
             <Show when={pausedAll()}>
                 {(p) => (
                     <Notice tone="warning">
-                        Every job is paused (Pause all, {formatTimeAgo(p().set_at_ms, now())}). Scheduled fires are skipped and Run now
-                        is off until you resume them.
+                        {t("jobs.manager.allPaused", { when: formatTimeAgo(p().set_at_ms, now()) })}
                     </Notice>
                 )}
             </Show>
@@ -240,7 +239,7 @@ export const WardenJobsManager = (props: {
                 fallback={
                     <Show when={list() || !model.error()}>
                         <div class="warden-section-stub">
-                            {list() ? "No jobs yet. Create one with New job, or an agent creates one with Schedule; a Drone graph shows here once it has run, and a cloud job once you approve its template." : "Loading…"}
+                            {list() ? t("jobs.manager.none") : t("jobs.manager.loading")}
                         </div>
                     </Show>
                 }
@@ -248,12 +247,12 @@ export const WardenJobsManager = (props: {
                 <table class="warden-manager-table warden-jobs-table">
                     <thead>
                         <tr>
-                            <th>Job</th>
-                            <th>Trigger</th>
-                            <th>Last run</th>
-                            <th>Recent</th>
-                            <th>Cost</th>
-                            <th>State</th>
+                            <th>{t("jobs.manager.colJob")}</th>
+                            <th>{t("jobs.manager.colTrigger")}</th>
+                            <th>{t("jobs.manager.colLastRun")}</th>
+                            <th>{t("jobs.manager.colRecent")}</th>
+                            <th>{t("jobs.manager.colCost")}</th>
+                            <th>{t("jobs.manager.colState")}</th>
                         </tr>
                     </thead>
                     <tbody>
