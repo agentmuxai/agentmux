@@ -39,6 +39,8 @@ export function useFilesKeys(fv: FilesLocal, win: FilesWindow, opening: FilesOpe
 
     const onKeyDown = (e: KeyboardEvent): void => {
         if (model.renaming() || editingPath()) return;
+        // A button in a notice (Clear filter, Try again) is pressed with Enter or Space, not taken as "open" or "preview".
+        if ((e.key === "Enter" || e.key === " ") && e.target instanceof Element && e.target.closest(".files-notice button")) return;
         const sel = model.selection();
         // In the grid, up and down move a row of tiles, left and right one.
         const step = grid() ? gridCols() : 1;

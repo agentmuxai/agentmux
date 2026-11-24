@@ -47,6 +47,7 @@
 use serde_json::{json, Value};
 
 use crate::agents::runner::{run_agent, AgentError};
+use crate::agents::tool_limit::ToolLimit;
 use crate::agents::types::{AgentRef, AgentRunResult, AgentTask};
 use crate::drone::data_flow::ExecutionScope;
 use crate::drone::executor::blocks::agent_output::Schema;
@@ -74,6 +75,16 @@ fn agent_ref_of(node: &FlowNode) -> Result<AgentRef, String> {
             Ok(AgentRef::default())
         }
     }
+}
+
+/// The block's `allow_commands` with each command line's `{{references}}` resolved, as the task is: the line the agent runs
+/// is the one that was allowed.
+fn resolved_allowance(allow: Option<&Value>, scope: &ExecutionScope) -> Option<Value> {
+    Some(match allow? {
+        Value::String(s) => Value::String(scope.resolve(s)),
+        Value::Array(list) => Value::Array(list.iter().map(|v| v.as_str().map_or_else(|| v.clone(), |s| Value::String(scope.resolve(s)))).collect()),
+        other => other.clone(),
+    })
 }
 
 pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, String> {
@@ -110,6 +121,7 @@ pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, Strin
         // surface scope vars as a `system` message section.
         context: serde_json::Map::new(),
         max_turns,
+        tools: ToolLimit::from_allow_commands(resolved_allowance(node.data.get("allow_commands"), scope).as_ref()),
     };
 
     // Forward AgentEvents into a local channel and discard for now.
@@ -183,6 +195,17 @@ mod tests {
             data,
             node_type: None,
         }
+    }
+
+    #[test]
+    fn an_allowed_command_line_is_the_one_that_will_run() {
+        let scope = ExecutionScope { trigger: json!({ "tag": "v1" }), ..ExecutionScope::new() };
+        let limit = |v: Value| ToolLimit::from_allow_commands(resolved_allowance(Some(&v), &scope).as_ref());
+        let one = |c: &str| ToolLimit::Limited { commands: vec![c.to_string()] };
+        assert_eq!(limit(json!(["./release-check {{trigger.tag}}"])), one("./release-check v1"));
+        assert_eq!(limit(json!("./release-check {{trigger.tag}}")), one("./release-check v1"));
+        assert_eq!(limit(json!(true)), ToolLimit::Unlimited);
+        assert_eq!(ToolLimit::from_allow_commands(resolved_allowance(None, &scope).as_ref()), ToolLimit::default());
     }
 
     #[tokio::test]

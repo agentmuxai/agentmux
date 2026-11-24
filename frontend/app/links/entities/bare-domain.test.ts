@@ -52,13 +52,14 @@ const PLAIN: [string, boolean][] = [
     ["analyze.py", true],
     ["tool.pl", true],
     ["parse.ml", true],
-    // A site, a file by its stem or its case or its characters, another ending, or a path: not plain.
+    // A hyphen or an underscore is no different: it is a word that may or may not be a file.
+    // A site, a file by its stem or its case, another ending, or a path: not plain.
     ["docs.rs", false],
     ["main.rs", false],
     ["setup.py", false],
     ["README.rs", false],
-    ["lib_utils.rs", false],
-    ["my-script.sh", false],
+    ["lib_utils.rs", true],
+    ["my-script.sh", true],
     ["gone.md", false],
     ["gone.ts", false],
     ["www.example.rs", false],
