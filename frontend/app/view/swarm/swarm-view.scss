@@ -1024,6 +1024,12 @@
     white-space: nowrap;
 }
 
+// "quiet 22 min" gives up its width long before the status chip does: in a narrow row the state matters more, and the
+// note goes to an ellipsis (then to nothing) while "idle" stays whole.
+.swarm-quiet {
+    flex-shrink: 100;
+}
+
 // The tools down is a fault; being repaired is not yet.
 .swarm-mcp-health--down {
     color: var(--error-text-color);
