@@ -51,6 +51,8 @@ export function sameVolume(sources: readonly string[], dest: string): boolean {
 export type OpView = FsOpEvent & {
     /** A short name for the status line: the one source, or "3 items". */
     label: string;
+    /** What the caller handed to `start` for this op, kept until it ends (the model's undo for a move). */
+    tag?: unknown;
 };
 
 /** Follows the jobs started from one pane (the events are scoped to it). */
@@ -58,6 +60,7 @@ export class FilesOps {
     readonly ops: () => OpView[];
     private readonly setOps: (fn: (o: OpView[]) => OpView[]) => void;
     private readonly labels = new Map<string, string>();
+    private readonly tags = new Map<string, unknown>();
     /** `fs.op.start` calls awaiting their reply. srv starts the op before it
      *  answers, so its events, even the last, can arrive first (muxreview on
      *  #4221): they wait here until the reply names the op. */
@@ -86,7 +89,7 @@ export class FilesOps {
     }
 
     private apply(data: FsOpEvent): void {
-        const view: OpView = { ...data, label: this.labels.get(data.op_id) ?? "items" };
+        const view: OpView = { ...data, label: this.labels.get(data.op_id) ?? "items", tag: this.tags.get(data.op_id) };
         const finished = isFinal(data.state);
         this.setOps((list) => {
             const rest = list.filter((o) => o.op_id !== data.op_id);
@@ -94,6 +97,7 @@ export class FilesOps {
         });
         if (finished) {
             this.labels.delete(data.op_id);
+            this.tags.delete(data.op_id);
             this.onFinished?.(view);
         }
     }
@@ -105,7 +109,8 @@ export class FilesOps {
         kind: "copy" | "move",
         sources: string[],
         destDir: string,
-        where: { sourceConnection?: string; connection?: string } = {}
+        where: { sourceConnection?: string; connection?: string } = {},
+        tag?: unknown
     ): Promise<string> {
         this.pendingStarts++;
         let res: { op_id: string };
@@ -125,6 +130,7 @@ export class FilesOps {
         }
         const label = sources.length === 1 ? baseName(sources[0]) : `${sources.length} items`;
         this.labels.set(res.op_id, label);
+        if (tag !== undefined) this.tags.set(res.op_id, tag);
         const held = this.early.get(res.op_id);
         this.early.delete(res.op_id);
         if (held) {

@@ -943,6 +943,14 @@
             "method": "SetDroneAgentsCommand"
         },
         {
+            "command": "listdroneapprovals",
+            "method": "ListDroneApprovalsCommand"
+        },
+        {
+            "command": "answerdroneapproval",
+            "method": "AnswerDroneApprovalCommand"
+        },
+        {
             "command": "getdronepayloadschema",
             "method": "GetDronePayloadSchemaCommand"
         },
