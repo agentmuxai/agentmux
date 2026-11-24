@@ -50,6 +50,8 @@ function noteLabel(node: SystemNoteNode): string {
     if (node.source === "earlier") return "Earlier message (sender not recorded)";
     const origin = node.origin;
     if (!origin || origin.kind === "system") return "AgentMux note";
+    // A name srv marks with `?` is only what the sender claimed: the prompt says so.
+    if (origin.from?.startsWith("?")) return `Message (${origin.kind} claiming to be ${origin.from.slice(1)}, not proven)`;
     return `Message (${origin.kind}${origin.from ? ` from ${origin.from}` : ""})`;
 }
 

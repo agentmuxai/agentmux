@@ -15,13 +15,23 @@
 import { ByteLru } from "@/util/byte-lru";
 import type { PreviewDoc } from "./types";
 
-export const SHIKI_THEME = "github-dark-high-contrast";
+/** Both themes are tokenized at once: each token carries both colours as CSS variables and the stylesheet picks by
+ *  the window's polarity (shiki-themed.scss), so a flip between a light and a dark theme needs no re-highlight and a
+ *  light pane does not show the dark theme's near-white punctuation and names. */
+export const SHIKI_THEMES = { dark: "github-dark-high-contrast", light: "github-light-high-contrast" } as const;
 
 /** One highlighted run. `fontStyle` is Shiki's bit set: 1 italic, 2 bold, 4 underline. */
 export interface CodeToken {
     content: string;
-    color?: string;
-    fontStyle?: number;
+    /** Shiki's `--shiki-dark` / `--shiki-light` colour and font variables for this run (never anything else). */
+    vars?: Record<string, string>;
+}
+
+/** Only Shiki's own variables reach the DOM. */
+function shikiVars(style: Record<string, string> | undefined): Record<string, string> | undefined {
+    if (!style) return undefined;
+    const out = Object.fromEntries(Object.entries(style).filter(([k]) => k.startsWith("--shiki-")));
+    return Object.keys(out).length ? out : undefined;
 }
 
 /** Don't highlight more than this much text at once: it blocks the main thread. */
@@ -51,9 +61,12 @@ async function tokenize(code: string, lang: string | undefined): Promise<CodeTok
     if (hit) return hit;
     try {
         const { codeToTokens } = await loadShiki();
-        const { tokens } = await codeToTokens(code, { lang: lang as never, theme: SHIKI_THEME });
+        const { tokens } = await codeToTokens(code, { lang: lang as never, themes: SHIKI_THEMES, defaultColor: false });
         const lines = tokens.map((line) =>
-            line.map((t) => ({ content: t.content, color: t.color, fontStyle: t.fontStyle }))
+            line.map((t) => {
+                const vars = shikiVars(t.htmlStyle as Record<string, string> | undefined);
+                return vars ? { content: t.content, vars } : { content: t.content };
+            })
         );
         cache.set(key, lines);
         return lines;

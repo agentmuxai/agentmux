@@ -292,6 +292,14 @@ pub(super) struct MuxBusTokens {
     pub(super) id_token: String,
 }
 
+impl MuxBusTokens {
+    /// The tokens `creds` holds, which are never written into a transcript from here on.
+    fn withheld_of(creds: &MuxBusCredentials) -> Self {
+        crate::backend::transcript::withhold_sources::cloud_sign_in(&creds.access_token, &creds.refresh_token, &creds.id_token, creds.expires_at);
+        Self { access_token: creds.access_token.clone(), refresh_token: creds.refresh_token.clone(), id_token: creds.id_token.clone() }
+    }
+}
+
 /// On-disk JSON shape for the single-blob format (macOS/Linux's preferred
 /// layout, `write_single_blob`/`blob_key`). Wraps
 /// `MuxBusTokens` with a generation stamp — the SAME `new_generation()`
@@ -875,6 +883,7 @@ impl Store {
         let (cognito_domain, client_id, legacy_access, legacy_refresh, legacy_id, expires_at, user_email, user_sub) = row;
 
         let tokens = self.muxbus_load_tokens(allow_migration, &legacy_access, &legacy_refresh, &legacy_id, &user_sub)?;
+        crate::backend::transcript::withhold_sources::cloud_sign_in(&tokens.access_token, &tokens.refresh_token, &tokens.id_token, expires_at);
 
         Ok(Some(MuxBusCredentials {
             cognito_domain,
@@ -922,11 +931,7 @@ impl Store {
             .ok()
         };
 
-        let tokens = MuxBusTokens {
-            access_token: creds.access_token.clone(),
-            refresh_token: creds.refresh_token.clone(),
-            id_token: creds.id_token.clone(),
-        };
+        let tokens = MuxBusTokens::withheld_of(creds);
 
         // Windows needs the chunked per-field layout (its 1280-char keychain
         // entry cap — see `blob_key`'s doc comment); macOS/Linux

@@ -767,6 +767,7 @@ pub(crate) async fn handle_ui_browser_open(
         Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
     };
     cmd.meta = Some(meta);
+    let already = crate::server::browser_same_site::owned_on_site(&state, &req.auth.agent_id, url).await;
     let (floating, opener) = (cmd.floating == Some(true), cmd.opener.clone());
     let result = match crate::server::app_api::open_pane(&state, cmd).await {
         Ok(r) => r,
@@ -779,7 +780,10 @@ pub(crate) async fn handle_ui_browser_open(
         agent_id = %req.auth.agent_id, own_block = %own, pane = %result.block_id, url = %url, browsing_as = %browsing_as, from_container = grant.is_some(),
         "[ui-automation] browser open (agent-owned)"
     );
-    let data = crate::server::app_api::floater_place::open_answer(&result, &browsing_as);
+    let mut data = crate::server::app_api::floater_place::open_answer(&result, &browsing_as);
+    if let (false, Some(o)) = (already.is_empty(), data.as_object_mut()) {
+        o.insert("already_on_site".to_string(), json!(already));
+    }
     (StatusCode::OK, Json(json!({ "ok": true, "data": data }))).into_response()
 }
 

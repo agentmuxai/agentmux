@@ -310,6 +310,8 @@ pub const ROUTES: &[(Match, Audience)] = &[
     (Match::Route("/api/v1/pane/open"), Audience::Everyone),
     // A deep link: srv's guard refuses a path a container agent's snapshot rule would not open.
     (Match::Route("/api/v1/pane/open_link"), Audience::Everyone),
+    // A floating pane the caller opened, resized or moved: a window call, with no host execution by the agent.
+    (Match::Route("/api/v1/pane/place"), Audience::Everyone),
     (Match::Route("/api/v1/pane/title"), Audience::Everyone),
     (Match::Route("/api/v1/quota-mode"), Audience::Everyone),
     (Match::Route("/api/v1/self"), Audience::Everyone),

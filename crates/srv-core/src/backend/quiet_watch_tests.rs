@@ -364,3 +364,21 @@ fn the_note_to_a_watcher_says_who_what_and_how_long() {
     assert_eq!(nudge_text(&tasks[..1], 15), "You hold #1234 and nothing has run for 15 minutes. Carry on, or say what you are waiting on.");
     assert_eq!(nudge_text(&[], 15), "You have not reported to your leader and nothing has run for 15 minutes. Carry on, or say what you are waiting on.");
 }
+
+/// What the Swarm and the Kanban show (`quiet_since`): quiet from the quiet time, whether or not it was nudged or told, a
+/// running turn only from the longer running time, and never while the agent moves.
+#[test]
+fn an_agent_shows_as_quiet_from_the_quiet_time_whether_or_not_it_was_told() {
+    let mut w = Watch::default();
+    let l = lim();
+    assert_eq!(w.quiet_since("a", false, &l, T0), None, "never seen");
+    w.step("a", idle(T0), &l, T0);
+    assert_eq!(w.quiet_since("a", false, &l, T0 + 14 * MIN), None);
+    assert_eq!(w.quiet_since("a", false, &l, T0 + 15 * MIN), Some(T0), "quiet since its last activity, before any nudge");
+    w.step("a", idle(T0), &l, T0 + 15 * MIN);
+    assert_eq!(w.quiet_since("a", false, &l, T0 + 16 * MIN), Some(T0), "still quiet after the nudge");
+    assert_eq!(w.quiet_since("a", true, &l, T0 + 16 * MIN), None, "a running turn is quiet only after the running time");
+    assert_eq!(w.quiet_since("a", true, &l, T0 + 30 * MIN), Some(T0));
+    w.step("a", idle(T0 + 17 * MIN), &l, T0 + 17 * MIN);
+    assert_eq!(w.quiet_since("a", false, &l, T0 + 17 * MIN), None, "it moved: not quiet");
+}

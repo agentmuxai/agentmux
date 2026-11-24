@@ -48,7 +48,7 @@ vi.mock("@/app/store/focusManager", () => ({
     focusManager: { claimFocusOnMount },
 }));
 
-import { AgentCard } from "./AgentCard";
+import { AgentCard, chipSlots } from "./AgentCard";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 
 afterEach(() => {
@@ -134,7 +134,7 @@ describe("AgentCard other rendering", () => {
             <AgentCard agent={makeAgent()} launching={false} disabled={false} installed={true} onLaunch={() => {}} />
         ));
         expect(container.querySelector(".agent-card-title")?.textContent).toBe("Claude Code");
-        expect(container.querySelector(".agent-card-caption")?.textContent).toBe("Anthropic's coding agent");
+        expect(container.querySelector(".agent-card-caption")?.textContent).toBe("Your Claude plan · Anthropic's coding agent");
     });
 
     it("names the launch action after the CLI, not the blurb", () => {
@@ -349,15 +349,19 @@ describe("AgentCard tags", () => {
         expect(screen.getByText("Installing…")).toBeTruthy();
     });
 
-    it("shows the update note after Free and Local, ahead of the Preview label", () => {
+    it("shows the update note after Free and Local, and the Preview label last", () => {
         const { container } = renderTags("opencode", { drift: "behind-pin" });
-        expect(chipLabels(container)).toEqual(["Free", "Local", "Update available", "+1"]);
+        expect(chipLabels(container)).toEqual(["Free", "Local", "Update available", "Preview"]);
     });
 
     it("labels a Preview harness's card Preview, and no first-class card", () => {
         expect(chipLabels(renderTags("opencode", {}).container)).toEqual(["Free", "Local", "Preview"]);
         cleanup();
         expect(chipLabels(renderTags("claude", {}).container)).not.toContain("Preview");
+    });
+
+    it("gives a Preview card one more chip than a first-class card, narrow or not", () => {
+        expect([chipSlots(false, false), chipSlots(true, false), chipSlots(false, true), chipSlots(true, true)]).toEqual([3, 2, 4, 3]);
     });
 
     it("marks a card with a session as having an action, so a narrow card makes room for it", () => {
@@ -383,7 +387,7 @@ describe("AgentCard tags", () => {
             expect(chipLabels(container).length).toBe(4);
             fire!(250);
             expect(container.querySelector(".agent-card--narrow")).not.toBeNull();
-            expect(chipLabels(container).length).toBeLessThanOrEqual(3);
+            expect(chipLabels(container)).toEqual(["Free", "Local", "Update available", "+1"]);
             fire!(400);
             expect(container.querySelector(".agent-card--narrow")).toBeNull();
         } finally {

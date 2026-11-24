@@ -73,6 +73,8 @@ pub(super) struct Pane {
     events: WeakUnboundedSender<(WindowId, Event)>,
     /// Where the browser's news of this pane's windows is told (`popups`).
     targets: UnboundedSender<TargetEvent>,
+    /// The pages this pane has claimed: released with the pane, however it ends.
+    claims: popups::Claims,
     limiter: NoticeLimiter,
     /// Keys are dropped until then: the shown window just changed and the person did not choose it (`windows::KEY_GAP`).
     keys_held_until: Option<Instant>,
@@ -93,8 +95,9 @@ impl Pane {
         let making = popups::making_a_page();
         let made = cdp.call("Target.createTarget", json!({ "url": "about:blank" }), None).await;
         let made_id = made.as_ref().ok().and_then(|m| m.get("targetId").and_then(Value::as_str)).map(str::to_string);
+        let mut claims = popups::Claims::default();
         if let Some(id) = &made_id {
-            popups::claim(id, targets.clone());
+            claims.claim(id, targets.clone());
         }
         for stray in making.done() {
             let _ = cdp.call("Target.closeTarget", json!({ "targetId": stray }), None).await;
@@ -112,7 +115,7 @@ impl Pane {
         let session = match session {
             Ok(s) => s,
             Err(e) => {
-                popups::release(&target);
+                claims.release(&target);
                 let _ = cdp.call("Target.closeTarget", json!({ "targetId": target }), None).await;
                 return Err(e);
             }
@@ -122,7 +125,7 @@ impl Pane {
         listen(cdp, &session, FIRST, tx);
         let mut state = HashMap::new();
         state.insert(FIRST, PageState { loading: false, resized_at: None });
-        let pane = Pane { cdp: cdp.clone(), windows: Windows::starting(target, session), state, size: (start.w, start.h), events: weak, targets, limiter: NoticeLimiter::default(), keys_held_until: None };
+        let pane = Pane { cdp: cdp.clone(), windows: Windows::starting(target, session), state, size: (start.w, start.h), events: weak, targets, claims, limiter: NoticeLimiter::default(), keys_held_until: None };
         match pane.prepare(FIRST, Some(&start.url)).await {
             Ok(()) => Ok((pane, events, told)),
             Err(e) => {
@@ -163,10 +166,10 @@ impl Pane {
     }
 
     /// The pane has ended: every window is let go and closed.
-    pub(super) async fn finish(self) {
+    pub(super) async fn finish(mut self) {
         for w in self.windows.entries() {
             self.cdp.unsubscribe(&w.session);
-            popups::release(&w.target);
+            self.claims.release(&w.target);
         }
         for w in self.windows.entries() {
             let _ = self.cdp.call("Target.closeTarget", json!({ "targetId": w.target }), None).await;
@@ -248,7 +251,7 @@ impl Pane {
         let Some(gone) = self.windows.get(id).cloned() else { return true };
         let Some(removed) = self.windows.remove(id) else { return true };
         self.cdp.unsubscribe(&gone.session);
-        popups::release(&gone.target);
+        self.claims.release(&gone.target);
         self.state.remove(&id);
         if removed.was_active {
             if let Some(next) = self.session_of(removed.now_active) {
@@ -306,13 +309,13 @@ impl Pane {
             return;
         };
         listen(&self.cdp, &session, id, tx);
-        popups::claim(target, self.targets.clone());
+        self.claims.claim(target, self.targets.clone());
         self.state.insert(id, PageState { loading: false, resized_at: None });
         if let Err(e) = self.prepare(id, None).await {
             tracing::warn!(error = %e, "streamed browser: a window a page opened could not be shown");
             self.windows.remove(id);
             self.cdp.unsubscribe(&session);
-            popups::release(target);
+            self.claims.release(target);
             self.state.remove(&id);
             self.close_target(target).await;
             // The shown window was never changed by the one that failed: say so, and carry on with it.
@@ -765,6 +768,15 @@ mod tests {
         assert!(closed.contains(&"T1".to_string()) && closed.contains(&"T2".to_string()), "{closed:?}");
         // Nothing of this pane is claimed any more: a window opened by one of its pages is nobody's and is closed.
         assert_eq!(browser_says("Target.targetCreated", created("T77", "T2")), vec!["T77".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_pane_dropped_without_finishing_claims_nothing_any_more() {
+        let _serial = serial().await;
+        let (pane, _events, _told, _fake) = pane().await;
+        // The pane ends by a panic or its task is dropped: `finish` never runs.
+        drop(pane);
+        assert_eq!(browser_says("Target.targetCreated", created("T78", "T1")), vec!["T78".to_string()], "its first page is still claimed");
     }
 
     #[tokio::test]
