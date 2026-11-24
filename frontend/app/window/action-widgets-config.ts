@@ -208,6 +208,24 @@ const RETIRED_PINS = new Map<string, string>([
     ["reviews", "kanban"],
 ]);
 
+/** What a retired pin opens its replacement on: a saved Reviews pin opens the Kanban on the cards
+ *  with open pull requests, which is what the Reviews pane showed (the spec's choice B). */
+const RETIRED_PIN_META: Record<string, Record<string, unknown>> = {
+    reviews: { "kanban:waits": "open" },
+};
+
+/** The pins that stand in for a retired one in `settings` (and are not also pinned as themselves),
+ *  with the meta that retired pin opens its replacement on, by the replacement's short name. */
+function migratedPinMeta(settings: Record<string, any>): Map<string, Record<string, unknown>> {
+    const saved: string[] = settings["widget:pinned"] ?? [];
+    const out = new Map<string, Record<string, unknown>>();
+    for (const id of saved) {
+        const to = RETIRED_PINS.get(id);
+        if (to != null && RETIRED_PIN_META[id] != null && !saved.includes(to) && !out.has(to)) out.set(to, RETIRED_PIN_META[id]);
+    }
+    return out;
+}
+
 /**
  * The pins as saved, hidden or not: `widget:pinned` (or the fresh-install
  * default). Every write of `widget:pinned` starts from this, not from getPinnedKeys, so a pinned
@@ -238,15 +256,23 @@ export function withVisibleOrder(saved: string[], visibleOrder: string[]): strin
     return next;
 }
 
+function withBlockMeta(widget: WidgetConfigType, meta: Record<string, unknown>): WidgetConfigType {
+    return { ...widget, blockdef: { ...widget.blockdef, meta: { ...widget.blockdef?.meta, ...meta } } };
+}
+
 export function getPinnedWidgets(
     settings: Record<string, any>,
     wmap: Record<string, WidgetConfigType>
 ): { key: string; widget: WidgetConfigType }[] {
     if (!wmap) return [];
+    const migrated = migratedPinMeta(settings);
     return getPinnedKeys(settings, wmap)
         .map((id) => {
             const key = keyOfPinId(id);
-            return { key, widget: wmap[key] };
+            const widget = wmap[key];
+            const meta = migrated.get(id);
+            // A pin that stood for a retired pane opens its replacement where the retired one showed.
+            return { key, widget: meta && widget ? withBlockMeta(widget, meta) : widget };
         })
         .filter((e) => e.widget != null);
 }
@@ -353,13 +379,20 @@ export function preloadWidget(widget: WidgetConfigType) {
     if (typeof view === "string") getPaneTab(view)?.preload?.();
 }
 
+/** The meta an entry asks a pane that is already open to take: its section, and a filter the entry names. */
+function focusKeysIn(meta: Record<string, unknown> | undefined): MetaType | undefined {
+    const waits = meta?.["kanban:waits"];
+    const keys = { ...sectionKeysIn(meta), ...(typeof waits === "string" ? { "kanban:waits": waits } : {}) };
+    return Object.keys(keys).length > 0 ? (keys as MetaType) : undefined;
+}
+
 export async function openWidget(widget: WidgetConfigType, opts: { forceNew?: boolean } = {}) {
     // An entry that still names a section that moved (the Kanban, of Warden or the Swarm) opens where it lives now.
     const meta = movedMeta(widget.blockdef?.meta as Record<string, unknown> | undefined);
     const blockdef = meta === widget.blockdef?.meta ? widget.blockdef : { ...widget.blockdef, meta: meta as MetaType };
     const view = meta?.["view"] as string | undefined;
     if (view && (widget.singleton ?? isSingletonView(view)) && !opts.forceNew && !widget.magnified) {
-        await openOrFocusPaneByView(view, blockdef, sectionKeysIn(meta) as MetaType | undefined);
+        await openOrFocusPaneByView(view, blockdef, focusKeysIn(meta));
         return;
     }
     createBlock(blockdef, widget.magnified);

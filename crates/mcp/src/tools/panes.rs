@@ -21,6 +21,11 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         "NewTab" => run_new_tab(arguments, cx).await,
         "FocusWindow" => run_focus_window(arguments, cx).await,
         "ClosePane" => run_close_pane(arguments, cx).await,
+        "ResizePane" => run_place_pane("resize", arguments, cx).await,
+        "MovePane" => run_place_pane("move", arguments, cx).await,
+        "PlacePane" => run_place_pane("place", arguments, cx).await,
+        "DockPane" => run_place_pane("dock", arguments, cx).await,
+        "FloatPane" => run_place_pane("float", arguments, cx).await,
         "QuitSelf" => run_quit_self(arguments, cx).await,
         "RegisterDevServer" => run_register_dev_server(arguments, cx).await,
         _ => Err(not_in_family()),
@@ -687,6 +692,54 @@ async fn run_focus_window(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String>
         anyhow::bail!("focus window failed: HTTP {status} — {text}");
     }
     Ok("Focused window".to_string())
+}
+
+/// `Pane` resize, move and place: a floating pane this agent opened, set to a size, a place or both. srv checks
+/// that it is the agent's own and asks the pane's window, which answers with where it went.
+async fn run_place_pane(op: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let target_id = arguments
+        .get("target_id")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("Pane {op}: missing required parameter: target_id (a floating pane you opened, from Pane layout)"))?;
+    let place = PlaceArgs::of(arguments).map_err(|e| anyhow::anyhow!("INVALID_ARG: {e}"))?;
+    let url = format!("{}/api/v1/pane/place", local_url.trim_end_matches('/'));
+    let resp = client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, auth_key)
+        .json(&PanePlaceRequest {
+            op: op.to_string(),
+            target_id: target_id.to_string(),
+            place,
+            split: arguments.get("split").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(str::to_string),
+            // The caller's own pane: `dock` goes into its tab, `float` is shown from its window.
+            block_id: Some(block_id.to_string()).filter(|b| !b.is_empty()),
+        })
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        // srv's own words (the refusal and what would work), not the HTTP envelope.
+        let said = serde_json::from_str::<Value>(&text).ok().and_then(|b| b.get("error").and_then(Value::as_str).map(str::to_string));
+        anyhow::bail!("Pane {op} failed ({status}): {}", said.unwrap_or(text));
+    }
+    let body: Value = resp.json().await.map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+    if op == "dock" {
+        let tab = body.get("tab_id").and_then(Value::as_str).unwrap_or("your tab");
+        return Ok(format!("Docked pane {target_id} into tab {tab}; its window closes."));
+    }
+    let done = match op {
+        "resize" => "Resized",
+        "move" => "Moved",
+        "float" => "Floated",
+        _ => "Placed",
+    };
+    Ok(format!("{done} pane {target_id}.{}", floating_note(Some(&body))))
 }
 
 async fn run_close_pane(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {

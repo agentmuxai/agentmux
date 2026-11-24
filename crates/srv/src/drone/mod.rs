@@ -20,6 +20,7 @@
 //!   * `executor/blocks` — one file per block type.
 //!   * `data_flow.rs`    — `{{var}}` interpolation (Mustache-style; see RFC §2 Q5).
 
+pub mod access;
 pub mod checkpoint;
 pub mod data_flow;
 pub mod executor;

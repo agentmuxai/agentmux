@@ -115,6 +115,25 @@ pub struct TaskFacts {
     pub all: Vec<i64>,
 }
 
+/// An agent that owes work and has done nothing for the quiet time
+/// (SPEC_LEADER_TOLD_WHEN_AN_AGENT_GOES_QUIET_2026_11_21.md §6): the Swarm's and the Kanban's "quiet 22 min". Read from
+/// the last sweep, so it can be up to half a minute behind; absent while the agent is not quiet.
+#[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct QuietFacts {
+    /// When the quiet began: the agent's last activity.
+    #[ts(type = "number")]
+    pub since_ms: u64,
+    /// How long it has been quiet.
+    #[ts(type = "number")]
+    pub quiet_ms: u64,
+    /// The Kanban tasks it holds; empty for a spawned worker that owes its leader a report.
+    #[ts(type = "Array<number>")]
+    pub tasks: Vec<i64>,
+    /// The agents told about it (names).
+    pub watchers: Vec<String>,
+}
+
 /// When the agent's process started.
 #[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -167,6 +186,9 @@ pub struct LiveFacts {
     pub task: Option<TaskFacts>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub quiet: Option<QuietFacts>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub session: Option<SessionFacts>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -184,16 +206,17 @@ pub struct Select {
     pub usage: bool,
     pub spend: bool,
     pub task: bool,
+    pub quiet: bool,
     pub session: bool,
     pub host: bool,
 }
 
 impl Select {
-    pub const GROUPS: [&'static str; 10] = ["model", "runtime", "turn", "context", "account", "usage", "spend", "task", "session", "host"];
+    pub const GROUPS: [&'static str; 11] = ["model", "runtime", "turn", "context", "account", "usage", "spend", "task", "quiet", "session", "host"];
 
     /// Every group (`host` only when `with_host`).
     pub fn all(with_host: bool) -> Self {
-        Self { model: true, runtime: true, turn: true, context: true, account: true, usage: true, spend: true, task: true, session: true, host: with_host }
+        Self { model: true, runtime: true, turn: true, context: true, account: true, usage: true, spend: true, task: true, quiet: true, session: true, host: with_host }
     }
 
     fn set(&mut self, group: &str) -> bool {
@@ -206,6 +229,7 @@ impl Select {
             "usage" => self.usage = true,
             "spend" => self.spend = true,
             "task" => self.task = true,
+            "quiet" => self.quiet = true,
             "session" => self.session = true,
             "host" => self.host = true,
             _ => return false,
@@ -400,6 +424,11 @@ fn task_of(ctx: &Ctx, a: &Agent) -> Option<TaskFacts> {
     Some(TaskFacts { number: *all.first()?, all: all.clone() })
 }
 
+fn quiet_of(ctx: &Ctx, a: &Agent) -> Option<QuietFacts> {
+    let q = crate::backend::quiet_watch::quiet_view(a.uid)?;
+    Some(QuietFacts { since_ms: q.since_ms, quiet_ms: ctx.now_ms.saturating_sub(q.since_ms), tasks: q.tasks, watchers: q.watchers })
+}
+
 fn session_of(ctx: &Ctx, a: &Agent) -> Option<SessionFacts> {
     let tracker = crate::backend::blockcontroller::get_controller(a.block_id?)?.turn_tracker()?;
     let started = u64::try_from(tracker.spawned_at_ms()?).ok()?;
@@ -429,6 +458,7 @@ pub fn facts_of(ctx: &Ctx, sel: &Select, a: &Agent, model: ModelFacts) -> LiveFa
         usage: if sel.usage { usage.flatten() } else { None },
         spend: sel.spend.then(|| super::spend_watch::view(&ctx.state.mstore, &ctx.state.identity_store, &ctx.settings, &ctx.defs, a.uid)).flatten(),
         task: sel.task.then(|| task_of(ctx, a)).flatten(),
+        quiet: sel.quiet.then(|| quiet_of(ctx, a)).flatten(),
         session: sel.session.then(|| session_of(ctx, a)).flatten(),
         host: sel.host.then(|| host_of(ctx)),
     }

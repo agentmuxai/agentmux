@@ -10,8 +10,8 @@
 //! * **Writes outside.** An API call that is not a read, a command, an Agent block that may run commands, and a call to
 //!   another drone are nodes that change things outside AgentMux. One of them may not read a value that is outside
 //!   text unless an Approval block stands on every path from where that text came in to the node.
-//! * **Where outside text may not go.** Never into a header name, the address (scheme and host) of a request, a
-//!   Vault credential, the target of a Message or a Task, or the place a command runs, however it got there. It may go
+//! * **Where outside text may not go.** Never into a header name, the address (scheme and host) of a request that
+//!   carries a credential or changes something, a Vault credential, the target of a Message or a Task, or the place a command runs, however it got there. It may go
 //!   into the text of a Message, a Task or a Notify: those say it is data.
 //!
 //! What counts as outside text is the engine's own rule (`scheduler::mark_bits`), read from the graph instead of a
@@ -242,11 +242,16 @@ fn forbidden_places<'a>(node: &'a FlowNode, kind: BlockKind) -> Vec<(&'static st
     let text = |key: &str| node.data.get(key).and_then(Value::as_str).unwrap_or("").to_string();
     let keys = |key: &str| node.data.get(key).and_then(Value::as_object).map(|m| m.keys().cloned().collect::<Vec<_>>().join(" ")).unwrap_or_default();
     match kind {
-        BlockKind::Api => vec![
-            ("the name of a header", keys("headers")),
-            ("the address a request goes to", address_of(&text("url")).to_string()),
-            ("a credential", node.data.get("auth").map(Value::to_string).unwrap_or_default()),
-        ],
+        BlockKind::Api => {
+            let mut places = vec![("the name of a header", keys("headers")), ("a credential", node.data.get("auth").map(Value::to_string).unwrap_or_default())];
+            // Where a request goes matters when it carries a credential or changes something. A plain read with no
+            // credential may follow an address an earlier answer gave (a redirect to a log, a next page): what it can
+            // reach is limited by the engine's own refusal of private addresses, and it sends nothing secret.
+            if writes_outside(node, kind) || node.data.get("auth").is_some() {
+                places.push(("the address a request goes to", address_of(&text("url")).to_string()));
+            }
+            places
+        }
         BlockKind::Message => vec![("who a message goes to", text("to"))],
         BlockKind::Task => vec![("who a task is for", text("target"))],
         BlockKind::Run => vec![

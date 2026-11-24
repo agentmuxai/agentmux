@@ -23,7 +23,8 @@
 
 import { createEffect, createSignal, onCleanup, type JSX } from "solid-js";
 import { ByteLru } from "@/util/byte-lru";
-import { loadShiki, SHIKI_THEME } from "../preview-text/highlight";
+import "@/app/element/shiki-themed.scss";
+import { loadShiki, SHIKI_THEMES } from "../preview-text/highlight";
 
 // Size caps — skip highlighting for very large content to avoid blocking
 // the main thread.
@@ -85,7 +86,7 @@ export const HighlightedCode = (props: HighlightedCodeProps): JSX.Element => {
             try {
                 const { codeToHtml } = await loadShiki();
                 if (cancelled || mySeq !== seq) return;
-                const full = await codeToHtml(code, { lang, theme: SHIKI_THEME });
+                const full = await codeToHtml(code, { lang, themes: SHIKI_THEMES, defaultColor: false });
                 if (cancelled || mySeq !== seq) return;
                 // Shiki wraps output in <pre><code>...</code></pre>; we only
                 // want the inner HTML of the <pre> so our own <pre> wrapper
@@ -122,7 +123,7 @@ export const HighlightedCode = (props: HighlightedCodeProps): JSX.Element => {
     return (
         <pre
             ref={preEl}
-            class={`agent-highlighted-code${props.class ? ` ${props.class}` : ""}`}
+            class={`agent-highlighted-code sh-shiki${props.class ? ` ${props.class}` : ""}`}
         >
             {props.code}
         </pre>

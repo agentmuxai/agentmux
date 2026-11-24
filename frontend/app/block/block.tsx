@@ -296,7 +296,7 @@ function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Eleme
     // Track previous focus state to handle blockClicked
     const [blockContentOffset, setBlockContentOffset] = createSignal<Dimensions>(null);
 
-    const bodyHold = usePaneBodyHold(() => nodeModel.isSplitterDragging?.() ?? false, () => contentRef.current, () => blockData()?.meta?.view);
+    const bodyHold = usePaneBodyHold(() => (nodeModel.isSplitterDragging?.() ?? false) && (nodeModel.isSplitterHeld?.() ?? true), () => contentRef.current, () => blockData()?.meta?.view);
     const paneZoomLevel = createMemo(() => paneZoomLevelOf(blockData()?.meta));
     const blockContentStyle = createMemo<JSX.CSSProperties>(() => {
         const retVal: JSX.CSSProperties = {

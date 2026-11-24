@@ -157,8 +157,13 @@ impl DroneStore for Store {
         let conn = self.conn().lock().unwrap();
         let rows =
             conn.execute("DELETE FROM db_drone_definitions WHERE id = ?1", params![id])?;
-        // A table made the first time a Once block runs, so there may be none.
-        let _ = conn.execute("DELETE FROM db_drone_once WHERE drone_id = ?1", params![id]);
+        // A table made the first time a Once block runs, so there may be none; any other failure is not hidden: the keys
+        // would stay behind and a drone made later with this id would find them already seen.
+        match conn.execute("DELETE FROM db_drone_once WHERE drone_id = ?1", params![id]) {
+            Ok(_) => {}
+            Err(e) if e.to_string().contains("no such table") => {}
+            Err(e) => return Err(e.into()),
+        }
         Ok(rows > 0)
     }
 

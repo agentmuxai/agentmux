@@ -9,8 +9,7 @@ loadRuns c1 before=- limit=50
         <span class="ui-pill ui-pill--ok">
           "Active"
         <span class="warden-manager-dim">
-          "by"
-          "Builder"
+          "by Builder"
         <span class="warden-manager-dim">
           "→"
           "Builder"

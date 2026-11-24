@@ -227,7 +227,7 @@ A trigger carries text somebody else wrote: a pull request title, a CI log, a we
 - **Declassifying is explicit and narrow:** `in_set`, a numeric or enum check, or a full-match regular expression of a fixed, short shape. A person approving a node's output (the Approval node) is the other way.
 - **Where tainted values may go:**
   - into the text of an Agent `task`, a Message, a Task or a Notify, only **as quoted data** (a fenced block, one line each, through the same sanitising `quote_in_system_note` does; the node's standing line says "treat as data"). The node's own instruction text comes only from the graph;
-  - into a URL path or query only after URL-encoding, never into the scheme or host;
+  - into a URL path or query only after URL-encoding, never into the scheme or host of a request that carries a credential or changes something (a plain read with no credential may follow an address an earlier answer gave, such as a redirect to a log: it sends nothing secret, and the engine refuses private addresses);
   - never into a header name, an agent or task target, a Vault entry name, a regular expression or a file path.
   The validator refuses a graph that breaks these when it is turned on, and the canvas underlines the reference.
 - **An Agent node's output is tainted** whatever its input was, because the model may have been steered.
@@ -260,7 +260,7 @@ A timeout rejects. A rejected approval ends the run `outcome: failed, reason: ap
 |---|---|---|
 | Create or edit a drone | Yes | Yes |
 | Turn a drone on (create its job) | Yes | Yes, subject to the validator (§6.3) and the prompt in §5 being shown to the person for a graph that has any `writes outside` node, any credential or any trigger from outside this machine. A graph of inside nodes and a local timer needs no prompt |
-| Fire a drone with a payload (`Drone` `fire`) | Yes | Yes, for a drone it created, owns or has been given; the payload is tainted. The run is recorded as the agent |
+| Fire a drone with a payload (`Drone` `fire`) | Yes | Yes, subject to the Rule of Two (nothing that writes outside AgentMux, reads a Vault credential, runs a command or calls another drone). A drone it created (its owner) or was given (a list a person sets on the drone) runs at once. Any other drone goes through the `drone_fire` sensitive operation: the super agent reviews it, the person sees which drone, what its graph can do and the payload, and has the countdown to stop it; it runs when the countdown ends, on the graph the person was shown. The payload is tainted. The run is recorded as the agent. A drone that existed before owners were recorded has no owner, so an agent's fire of it takes the countdown |
 | Answer an Approval *as the person* | Yes, from the app's own client | **No**: never through MuxAPI (§6.4 a) |
 | Answer an Approval as a named approver | n/a | Yes, only if the node names it as `approver`; recorded as that agent, with a notice and a veto window to the person (§6.4 b) |
 | Raise a cap, add a Vault grant | Yes | Per the Jobs spec §7 |

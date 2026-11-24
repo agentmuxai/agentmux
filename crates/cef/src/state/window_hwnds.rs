@@ -31,15 +31,18 @@ impl AppState {
         self.host_dispatch(HostCommand::BindWindowHwnd { label: label.to_string(), hwnd, replace: false });
     }
 
+    /// Bind `label` to the first of `candidates` no label is bound to, unless
+    /// it already has one; returns the HWND it took. One lock for the look and
+    /// the write, so concurrent callers never share an HWND.
+    pub fn claim_free_window_hwnd(&self, label: &str, candidates: Vec<isize>) -> Option<isize> {
+        self.host_dispatch(HostCommand::ClaimFreeWindowHwnd { label: label.to_string(), candidates })
+            .claimed_window_hwnd
+    }
+
     /// Forget `label`'s HWND; returns what it was bound to.
     pub fn evict_window_hwnd(&self, label: &str) -> Option<isize> {
         self.host_dispatch(HostCommand::EvictWindowHwnd { label: label.to_string() })
             .evicted_window_hwnd
-    }
-
-    /// Every HWND some label is bound to.
-    pub fn bound_window_hwnds(&self) -> HashSet<isize> {
-        self.host_state.lock().window_hwnds.values().copied().collect()
     }
 
     /// The label bound to `hwnd` (the first in sort order if a stale entry

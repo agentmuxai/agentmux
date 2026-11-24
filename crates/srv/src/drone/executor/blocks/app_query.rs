@@ -783,6 +783,7 @@ mod tests {
             effort: None,
             pending_switch: None,
             definition_model_label: None,
+            quiet_since_ms: None,
         };
         let healthy = agents_answer(&[row("a", S::Idle, D::Running, None), row("b", S::Working, D::Running, None), row("c", S::WaitingOnUser, D::Running, None), row("off", S::Stopped, D::Stopped, None)]);
         assert_eq!((healthy["count"].clone(), healthy["wanted_running"].clone(), healthy["up"].clone(), healthy["all_up"].clone()), (json!(4), json!(3), json!(3), json!(true)), "an agent wanted stopped is no problem");

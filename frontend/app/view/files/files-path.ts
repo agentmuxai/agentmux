@@ -76,6 +76,11 @@ export function joinPath(dir: string, name: string): string {
     return dir.endsWith("/") || dir.endsWith("\\") ? `${dir}${name}` : `${dir}${sep}${name}`;
 }
 
+/** A row of the tree view, named by its path from `dir` with `/` (`src/a.ts`), as a path in `dir`'s own spelling. */
+export function joinRel(dir: string, rel: string): string {
+    return rel.split("/").reduce((acc, part) => joinPath(acc, part), dir);
+}
+
 /** The last segment of a path. */
 export function baseName(path: string): string {
     const parts = path.split(/[\\/]+/).filter((p) => p !== "");

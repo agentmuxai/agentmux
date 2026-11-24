@@ -16,5 +16,6 @@ pub mod source;
 pub mod tail;
 pub mod turns;
 pub mod withhold;
+pub mod withhold_sources;
 #[cfg(test)]
 mod withhold_sources_tests;

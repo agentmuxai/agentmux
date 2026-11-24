@@ -164,4 +164,13 @@ describe("TypeAhead", () => {
         expect(t.active(1100)).toBe(true);
         expect(t.active(2000)).toBe(false);
     });
+
+    it("matches the last part of a row named by its path, not the folders before it", () => {
+        const rows = ["src/lib", "src/main.rs", "src/util.ts"];
+        const t = new TypeAhead();
+        expect(t.next("m", rows, null, 0)).toBe("src/main.rs");
+        // "s" starts every path, but no row's own name.
+        expect(t.next("s", rows, null, 1000)).toBeNull();
+        expect(t.next("u", rows, "src/lib", 2000)).toBe("src/util.ts");
+    });
 });

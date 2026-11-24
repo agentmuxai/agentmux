@@ -806,16 +806,39 @@ const MOVED_SECTIONS: &[(&str, &str, &str)] = &[
     ("warden", "host", "swarm"),
 ];
 
+/// Panes that became a section of another pane, as `(old view, new view, section)`. An entry that names
+/// the old view opens the new one on that section. The frontend has the same table (`MOVED_VIEWS` in
+/// `frontend/app/store/pane-sections.ts`).
+const MOVED_VIEWS: &[(&str, &str, &str)] = &[("history", "audit", "conversations")];
+
 /// Sections that have no pane now, as `(view, section)`. An entry that names one keeps its view and
 /// loses the section, so the pane opens on its default.
 const RETIRED_SECTIONS: &[(&str, &str)] = &[("warden", "lan"), ("warden", "internet"), ("warden", "ambient")];
 
 impl WidgetConfigType {
+    /// A blockdef that names a view that is a section of another pane now (`MOVED_VIEWS`) names that
+    /// pane and its section instead; a section already in the meta is kept.
+    fn follow_moved_view(&mut self) {
+        let Some(view) = self.block_def.meta.get("view").and_then(|v| v.as_str()) else {
+            return;
+        };
+        let Some((from, to, section)) = MOVED_VIEWS.iter().find(|(from, _, _)| *from == view) else {
+            return;
+        };
+        self.block_def.meta.remove(&format!("{from}:section"));
+        self.block_def.meta.insert("view".to_owned(), Value::String((*to).to_owned()));
+        self.block_def
+            .meta
+            .entry(format!("{to}:section"))
+            .or_insert_with(|| Value::String((*section).to_owned()));
+    }
+
     /// Writes `section` into the blockdef's meta under `<view>:section`, and a
     /// sub-section under `<section>:section`. Nothing without a section or a view.
     /// A section that moved panes (`MOVED_SECTIONS`) is written for the pane it lives in now,
     /// and the blockdef's `view` follows it. A retired one (`RETIRED_SECTIONS`) leaves no section.
     pub fn resolve_section(&mut self) {
+        self.follow_moved_view();
         if self.section.is_empty() {
             return;
         }
@@ -840,6 +863,7 @@ impl WidgetConfigType {
                     self.block_def.meta.insert("vault:section".to_owned(), Value::String(sub));
                 }
             }
+            self.follow_moved_view();
             return;
         }
         if let Some(sub) = sub {
@@ -1158,5 +1182,51 @@ mod statusbar_muxbus_cloud_tests {
     fn explicit_true_round_trips() {
         let s: SettingsType = serde_json::from_str(r#"{"statusbar:showmuxbuscloud": true}"#).unwrap();
         assert_eq!(s.statusbar_show_muxbus_cloud, Some(true));
+    }
+}
+
+#[cfg(test)]
+mod moved_view_tests {
+    use super::WidgetConfigType;
+
+    fn resolved(json: &str) -> WidgetConfigType {
+        let mut w: WidgetConfigType = serde_json::from_str(json).unwrap();
+        w.resolve_section();
+        w
+    }
+
+    fn view_and_section(w: &WidgetConfigType) -> (Option<&str>, Option<&str>) {
+        (
+            w.block_def.meta.get("view").and_then(|v| v.as_str()),
+            w.block_def.meta.get("audit:section").and_then(|v| v.as_str()),
+        )
+    }
+
+    #[test]
+    fn an_entry_naming_the_history_view_opens_audit_on_conversations() {
+        let w = resolved(r#"{ "blockdef": { "meta": { "view": "history" } } }"#);
+        assert_eq!(view_and_section(&w), (Some("audit"), Some("conversations")));
+        assert!(!w.block_def.meta.contains_key("history:section"));
+    }
+
+    #[test]
+    fn a_section_already_in_the_meta_is_kept() {
+        let w = resolved(r#"{ "blockdef": { "meta": { "view": "history", "audit:section": "typed" } } }"#);
+        assert_eq!(view_and_section(&w), (Some("audit"), Some("typed")));
+    }
+
+    #[test]
+    fn wardens_old_history_section_lands_on_conversations_too() {
+        let w = resolved(r#"{ "section": "history", "blockdef": { "meta": { "view": "warden" } } }"#);
+        assert_eq!(view_and_section(&w), (Some("audit"), Some("conversations")));
+        assert!(w.section.is_empty());
+    }
+
+    #[test]
+    fn audit_and_other_entries_are_left_alone() {
+        let w = resolved(r#"{ "blockdef": { "meta": { "view": "audit" } } }"#);
+        assert_eq!(view_and_section(&w), (Some("audit"), None));
+        let w = resolved(r#"{ "section": "cards", "blockdef": { "meta": { "view": "vault" } } }"#);
+        assert_eq!(w.block_def.meta.get("view").and_then(|v| v.as_str()), Some("vault"));
     }
 }

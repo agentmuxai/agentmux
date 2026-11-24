@@ -106,4 +106,9 @@ pub struct AgentRuntime {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub definition_model_label: Option<String>,
+    /// When it went quiet (unix ms), while it owes work and has done nothing for the quiet time: the Swarm shows
+    /// "quiet 22 min" from it (SPEC_LEADER_TOLD_WHEN_AN_AGENT_GOES_QUIET_2026_11_21.md §6). From the last quiet sweep.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub quiet_since_ms: Option<u64>,
 }

@@ -91,9 +91,13 @@ fn outside_text_may_go_into_a_message_as_data_but_never_choose_where_it_goes() {
 #[test]
 fn outside_text_cannot_be_the_host_or_a_header_name_but_can_be_in_the_path() {
     let get = |url: &str| graph(&[("g", json!({ "kind": "api", "method": "GET", "url": url }))], &[]);
+    let keyed = |url: &str| graph(&[("g", json!({ "kind": "api", "method": "GET", "url": url, "auth": { "vault": "token", "as": "bearer" } }))], &[]);
     assert!(check(&get("https://api.example.com/items/{{trigger.id}}?q={{trigger.q}}"), &webhook()).is_empty());
-    assert_eq!(broken(&get("https://{{trigger.host}}/x"), &webhook()), ["g"]);
-    assert_eq!(broken(&get("{{trigger.url}}"), &webhook()), ["g"]);
+    assert!(check(&get("{{trigger.url}}"), &webhook()).is_empty(), "a plain read with no credential may follow an address it was given");
+    assert_eq!(broken(&keyed("https://{{trigger.host}}/x"), &webhook()), ["g"], "a credential goes only where the graph says");
+    assert_eq!(broken(&keyed("{{trigger.url}}"), &webhook()), ["g"]);
+    let post = graph(&[("g", json!({ "kind": "api", "method": "POST", "url": "https://{{trigger.host}}/x" }))], &[]);
+    assert!(broken(&post, &webhook()).contains(&"g".to_string()), "a write goes only where the graph says");
     let header = graph(&[("g", json!({ "kind": "api", "url": "https://a.example.com", "headers": { "{{trigger.name}}": "x" } }))], &[]);
     assert_eq!(broken(&header, &webhook()), ["g"]);
     let cleared = graph(&[("ok", approval()), ("g", json!({ "kind": "api", "url": "{{trigger.url}}" }))], &[("ok", "g")]);
@@ -156,4 +160,37 @@ fn a_graph_of_inside_nodes_and_a_timer_passes_and_the_refusal_says_every_node() 
     let two = graph(&[("a", comment("{{trigger.x}}")), ("b", comment("{{trigger.y}}"))], &[]);
     let said = refuse(&two, &webhook()).unwrap_err();
     assert!(said.starts_with("this drone cannot be turned on") && said.contains("a:") && said.contains("b:"), "{said}");
+}
+
+/// Every drone AgentMux ships, filled in with example values, is turned on without a refusal: the rule that guards a
+/// person's drone does not refuse the templates (the merge of `verify-release` has an Approval on its only path).
+#[test]
+fn every_shipped_drone_template_passes_the_check_it_is_turned_on_under() {
+    use crate::backend::job_templates::{graph as tgraph, manifest, package, DRONE_BUILTINS};
+    let example = |id: &str| -> Map<String, Value> {
+        let v = match id {
+            "agentmux.scheduled-report" => json!({ "question": "What changed?", "owner": "loap" }),
+            "agentmux.check-and-file-task" => json!({ "check": "Is the build green?" }),
+            "agentmux.two-agent-handoff" => json!({ "first": "a", "second": "b", "owner": "loap" }),
+            "agentmux.after-upgrade-check" => json!({ "leader": "agenty", "steward": "masty" }),
+            "agentmux.triage-failed-nightly" => json!({ "repo": "acme/site", "leader": "agenty", "triager": "masty" }),
+            "agentmux.rerun-flaky-job" => json!({ "repo": "acme/site", "workflow": "CI", "leader": "agenty" }),
+            "agentmux.merged-pr-still-claimed" => json!({ "repo": "acme/site", "steward": "masty" }),
+            "agentmux.verify-release" => json!({ "repo": "acme/site", "held_pr": 42, "leader": "agenty" }),
+            other => panic!("no example for {other}"),
+        };
+        v.as_object().cloned().unwrap()
+    };
+    for b in DRONE_BUILTINS {
+        let pkg = package::load_embedded(b.id, b.files).unwrap();
+        let given = example(b.id);
+        let g = tgraph::render(pkg.graph.as_ref().unwrap(), &pkg.manifest, &given).unwrap();
+        let params = manifest::resolve_params(&pkg.manifest, &given).unwrap();
+        let mut trigger = pkg.manifest.trigger.clone().unwrap_or(Value::Null);
+        tgraph::render_value(&mut trigger, &params).unwrap();
+        let source = trigger.get("source").and_then(Value::as_str);
+        let filter = trigger.get("filter").and_then(Value::as_object).cloned().unwrap_or_default();
+        let found = check(&g, &fields_of(source, &filter));
+        assert!(found.is_empty(), "{}: {found:?}", b.id);
+    }
 }
