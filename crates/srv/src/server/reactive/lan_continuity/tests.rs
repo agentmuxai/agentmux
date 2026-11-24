@@ -671,9 +671,9 @@ async fn the_machines_sender_key_is_certified_by_this_install_and_no_other_name_
     assert_eq!((cert.agent_id.as_str(), cert.channel.as_str()), (own.as_str(), CERT_CHANNEL));
     assert!(answered["lan_install_sig"].is_string());
     let other = with_sender_cert(&state, serde_json::json!({ "agent_id": "swarm-elsewhere-00000001", "lan_public_key": other_pair.public_key }));
-    assert!(other.get("lan_cert").is_none() && other.get("lan_install_sig").is_none(), "another name: {other}");
+    assert!(other.get("lan_cert").is_none() && other.get("lan_install_sig").is_none(), "another name");
     let wrong_key = with_sender_cert(&state, serde_json::json!({ "agent_id": own, "lan_public_key": other_pair.public_key }));
-    assert!(wrong_key.get("lan_cert").is_none(), "the own name with a key that is not its stored one: {wrong_key}");
+    assert!(wrong_key.get("lan_cert").is_none(), "the own name with a key that is not its stored one");
     let plain = with_sender_cert(&state, serde_json::json!({ "something": "else" }));
     assert_eq!(plain, serde_json::json!({ "something": "else" }));
 }
