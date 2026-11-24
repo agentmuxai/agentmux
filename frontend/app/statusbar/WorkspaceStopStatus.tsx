@@ -74,6 +74,7 @@ const WorkspaceStopStatus = (): JSX.Element => {
                                 anchor={chip}
                                 placement="top-end"
                                 fitHeight
+                                operatorOnly
                                 onDismiss={(reason) => {
                                     setOpen(false);
                                     // Esc gives the keyboard back to the chip it came from; an outside click leaves focus where the person put it.
