@@ -35,6 +35,7 @@ import { CloseButton } from "./ui/CloseButton";
 import { tip } from "./tip";
 import "./PaneTabStrip.scss";
 import { createScrollEdges } from "./scroll-edges";
+import { createStripSteps } from "./pane-tab-strip-steps";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
 import type { PaneTabSelectionApi } from "./pane-tab-selection";
@@ -417,6 +418,14 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
 
     useStripScrollInput(() => s.refs.strip, s.reveal);
 
+    // As the tabs run out of room they shrink in steps (pane-tab-steps.ts): the width limit and the step are set here, the rest is CSS.
+    const steps = createStripSteps({
+        strip: () => s.refs.strip,
+        tabCount: () => props.tabs.length,
+        zoom: () => props.zoomFactor?.() ?? 1,
+        revision: () => props.tabs.map(props.getLabel).join(" "),
+    });
+
     return (
         <div
             class="pane-tab-strip"
@@ -429,6 +438,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                 "pane-tab-strip--flush-left": s.edges.flushLeft(),
             }}
             ref={(el) => { s.refs.strip = el; }}
+            data-step={steps.step()}
             // Double-click inside the strip should never bubble up and
             // maximize the pane — matches the icon-toggle pattern from
             // blockframe.tsx. True for every consumer, not just the editor.
@@ -438,7 +448,10 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
             // inner layer's `zoom` — a custom property set here is visible
             // to any descendant, which is all that's needed; the outer box
             // itself is deliberately never zoomed (§A.2 in the spec above).
-            style={{ "--pane-tab-strip-zoom": String(props.zoomFactor?.() ?? 1) }}
+            style={{
+                "--pane-tab-strip-zoom": String(props.zoomFactor?.() ?? 1),
+                "--pane-tab-room": steps.room() === undefined ? undefined : `${steps.room()}px`,
+            }}
         >
             {/* Zoom lives here, not on .pane-tab-strip itself — see
                 docs/specs/SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12.md

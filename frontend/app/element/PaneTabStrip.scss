@@ -233,8 +233,10 @@
 // instead of overflowing it — required for the tab's ellipsis (below) to
 // ever engage.
 .pane-tab-tip {
-    flex: 0 0 auto;
-    min-width: 0;
+    // Shrinks with its neighbours when the strip has less room than the tabs' own widths, down to a floor
+    // (pane-tab-steps.ts): the label is cut with an ellipsis first. The selected tab's floor keeps its icon and its close.
+    flex: 0 1 auto;
+    min-width: 27px;
     max-width: 240px;
     display: flex;
     align-items: stretch;
@@ -245,8 +247,13 @@
 // the strip scrolled ("u, memory and network", #30300). Several tabs are left
 // exactly as before: each at its own width, the strip scrolling once they no
 // longer fit — no short tab is widened by a floor.
+.pane-tab-tip:has(.pane-tab--active) {
+    min-width: 47px;
+}
+
+// A lone tab may shrink to the strip and ellipsize, with no floor but the strip's.
 .pane-tab-strip-inner:not(:has(.pane-tab-tip ~ .pane-tab-tip)) .pane-tab-tip {
-    flex: 0 1 auto;
+    min-width: 0;
 }
 
 .pane-tab {
@@ -766,4 +773,82 @@
     background:
         linear-gradient(currentColor, currentColor) center / 100% 2px no-repeat,
         linear-gradient(currentColor, currentColor) center / 2px 100% no-repeat;
+}
+
+// The steps of a strip that has run out of room (pane-tab-steps.ts; PaneTabStrip.tsx sets `data-step`). The tabs that are
+// not selected lose their label first, then their close button's place; the selected tab keeps its label, its close and its
+// underline. Hidden, not removed: a tab's accessible name is still its label, and its tooltip still names it.
+.pane-tab-strip[data-step="icon-close"] .pane-tab:not(.pane-tab--active) .pane-tab-label,
+.pane-tab-strip[data-step="icon"] .pane-tab:not(.pane-tab--active) .pane-tab-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+// The strip takes all the room it was given, and the tabs that are not selected share what the selected one leaves,
+// equally, as a browser's tabs do; the selected tab keeps its own width and its close button.
+.pane-tab-strip[data-step="icon-close"],
+.pane-tab-strip[data-step="icon"] {
+    width: var(--pane-tab-room);
+
+    .pane-tab-strip-inner {
+        flex: 1 1 auto;
+    }
+
+    .pane-tab-tip:not(:has(.pane-tab--active)) {
+        flex: 1 1 27px;
+        max-width: none;
+    }
+
+    .pane-tab--active .pane-tab-close {
+        opacity: 1;
+    }
+}
+
+// With no label to carry it, a resting tab shows its icon; its close button takes the icon's place while the pointer is
+// on it (or the keyboard focus), so the tab can still be closed.
+.pane-tab-strip[data-step="icon-close"] .pane-tab:not(.pane-tab--active),
+.pane-tab-strip[data-step="icon"] .pane-tab:not(.pane-tab--active) {
+    justify-content: center;
+    padding: 0;
+    gap: 0;
+
+    .pane-tab-close {
+        position: absolute;
+        inset: 0;
+        margin: auto;
+        opacity: 0;
+    }
+
+    &:hover,
+    &:focus-within {
+        .pane-tab-icon {
+            opacity: 0;
+        }
+
+        .pane-tab-close {
+            opacity: 1;
+        }
+    }
+
+    // The unsaved mark was the close button, always shown: with the icon alone it becomes a dot on the icon.
+    &.pane-tab--attention:not(:hover):not(:focus-within) {
+        .pane-tab-close {
+            opacity: 0;
+        }
+
+        .pane-tab-icon::after {
+            content: "";
+            position: absolute;
+            right: -2px;
+            top: -2px;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--warning-color);
+        }
+    }
 }
