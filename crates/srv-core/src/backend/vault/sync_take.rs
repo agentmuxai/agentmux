@@ -182,10 +182,10 @@ impl Taker<'_> {
         let Some(decision) = decision else { return Ok(none(outcome)) };
         let result = match decision {
             Decision::KeptLocal => return Ok(none(outcome)),
-            Decision::Applied => self.current(rec, None, now_ms).map(|effect| Taken { outcome, effect, kept: None }),
+            Decision::Applied => self.current(rec, None, false, now_ms).map(|effect| Taken { outcome, effect, kept: None }),
             Decision::Conflict { current: Chose::Incoming, kept, .. } => {
                 let label = kept.label();
-                self.current(rec, Some(&kept), now_ms).map(|effect| Taken { outcome, effect, kept: Some(label) })
+                self.current(rec, Some(&kept), false, now_ms).map(|effect| Taken { outcome, effect, kept: Some(label) })
             }
             Decision::Conflict { current: Chose::Local, kept, .. } => {
                 let label = kept.label();
@@ -195,10 +195,13 @@ impl Taker<'_> {
         // The log holds the record now. What the store could not take of it is noted, so a record that is never sent again is
         // still taken; what it took, or is not going to, is not.
         let (vault, record) = (&h.collection, &h.record);
-        let _ = match &result {
-            Err(_) | Ok(Taken { effect: Effect::Deferred(_), .. }) => sync_capture::retake_mark(self.store, vault, record),
-            Ok(_) => sync_capture::retake_clear(self.store, vault, record),
-        };
+        match &result {
+            Err(_) | Ok(Taken { effect: Effect::Deferred(_), .. }) => {
+                sync_capture::retake_mark(self.store, vault, record).map_err(|e| format!("the log holds the record, and it could not be noted for `retake`: {e}"))?;
+            }
+            // Clearing a mark that is not needed any more fails harmlessly: the record is taken again, and the take is the same.
+            Ok(_) => drop(sync_capture::retake_clear(self.store, vault, record)),
+        }
         result.map_err(|e| format!("{e}: the log holds the record, and `retake` takes it again"))
     }
 
@@ -215,7 +218,7 @@ impl Taker<'_> {
                 sync_capture::retake_clear(self.store, vault, &record)?;
                 continue;
             };
-            let effect = self.current(&rec, None, now_ms);
+            let effect = self.current(&rec, None, true, now_ms);
             if !matches!(effect, Err(_) | Ok(Effect::Deferred(_))) {
                 sync_capture::retake_clear(self.store, vault, &record)?;
             }
@@ -232,9 +235,9 @@ impl Taker<'_> {
 
     /// `rec` is now the record's current state: the entry takes its value, or is deleted. `lost` is the other side of a
     /// conflict, which this machine held, and which is kept.
-    fn current(&self, rec: &Record, lost: Option<&Kept>, now_ms: i64) -> Result<Effect, String> {
+    fn current(&self, rec: &Record, lost: Option<&Kept>, settled: bool, now_ms: i64) -> Result<Effect, String> {
         if rec.header.tombstone {
-            return self.delete(rec, lost);
+            return self.delete(rec, lost, settled);
         }
         let body = open_body(self.ring, rec)?;
         if let Some(why) = refused(&body) {
@@ -306,13 +309,26 @@ impl Taker<'_> {
 
     /// `rec`, a tombstone, is now the record's current state. A conflict's other side is the entry's last value, which the
     /// delete takes with it: it stays in the log.
-    fn delete(&self, rec: &Record, lost: Option<&Kept>) -> Result<Effect, String> {
+    ///
+    /// A tombstone in a Vault is also what a move to another Vault leaves behind, and the two Vaults' records come separately,
+    /// in either order. An entry that moved is not deleted by its old Vault's tombstone: not when the new Vault's record is
+    /// already in the log, and not on first sight either, when it may still come in this round. The delete waits one round
+    /// (`settled` is false then, true when [`Taker::retake`] takes it again), and by then the new Vault's record has moved the
+    /// entry, which keeps its grants, versions and ids; if it has not, the entry is deleted.
+    fn delete(&self, rec: &Record, lost: Option<&Kept>, settled: bool) -> Result<Effect, String> {
         let h = &rec.header;
         let Some(id) = self.store.vault_entry_of_link(&h.record).map_err(|e| e.to_string())? else { return Ok(Effect::None) };
         let Some(row) = self.store.vault_get(&id).map_err(|e| e.to_string())? else { return Ok(Effect::None) };
         // An entry that moved to another Vault is not deleted by its old Vault's tombstone.
         if row.vault_id != h.collection {
             return Ok(Effect::None);
+        }
+        let moved = log::live_elsewhere(&self.store.conn().lock().unwrap_or_else(|e| e.into_inner()), &h.collection, &h.record).map_err(|e| e.to_string())?;
+        if moved {
+            return Ok(Effect::None);
+        }
+        if !settled {
+            return Ok(Effect::Deferred("deleted in this Vault: it waits one round, in case the entry moved to another Vault whose record has not come yet".to_string()));
         }
         self.store.vault_delete(&id).map_err(|e| e.to_string())?;
         sync_capture::forget(self.store, &id)?;

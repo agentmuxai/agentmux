@@ -127,6 +127,12 @@ fn ship(from: &Machine, to: &mut Machine, pins: &Pins, at: i64) -> Vec<Taken> {
     records.iter().map(|r| taker.receive(r, pins, &mut to.clock, at).unwrap()).collect()
 }
 
+/// What a sync round does first: takes again what was deferred in the last one, which settles the deletes that waited.
+fn settle(to: &Machine, at: i64) -> Vec<(String, Result<Effect, String>)> {
+    let own = key();
+    Taker { store: &to.store, ring: &to.ring, key: &own, profiles: &Known(&[]) }.retake(VAULT, at).unwrap()
+}
+
 /// Two machines that both hold one entry, written on `a` and taken by `b`.
 fn both_hold_one() -> (Machine, Machine, Pins, String, String) {
     let mut a = machine("a", 1);
@@ -218,7 +224,10 @@ fn a_delete_removes_the_entry_with_its_versions_and_a_second_delete_changes_noth
     a.store.vault_delete("entry-a").unwrap();
     a.capture(VAULT, NOW + 200);
     let taken = ship(&a, &mut b, &p, NOW + 210);
-    assert_eq!(taken[0].effect, Effect::Deleted { entry: on_b.clone() });
+    // The delete waits one round, in case the entry moved to another Vault: the next round's start takes it.
+    assert!(matches!(&taken[0].effect, Effect::Deferred(why) if why.contains("moved")), "{taken:?}");
+    assert!(b.store.vault_get(&on_b).unwrap().is_some());
+    assert!(matches!(&settle(&b, NOW + 220)[..], [(_, Ok(Effect::Deleted { entry }))] if *entry == on_b));
     assert!(b.store.vault_get(&on_b).unwrap().is_none());
     assert!(b.store.vault_versions(&on_b, 1).unwrap().is_empty());
     assert_eq!(b.entry_of(&link), None);
@@ -264,7 +273,8 @@ fn a_delete_made_after_a_change_ends_the_entry_and_the_change_stays_in_the_log()
     assert_eq!(b.entry_of(&link), None);
     // a takes the delete: the entry ends there too, and its last value is still in a's log, sealed.
     let on_a_taken = ship(&b, &mut a, &p, NOW + 310);
-    assert_eq!(on_a_taken[0].effect, Effect::KeptInLog("changed on a while it was deleted elsewhere".to_string()));
+    assert!(matches!(&on_a_taken[0].effect, Effect::Deferred(_)), "{on_a_taken:?}");
+    assert_eq!(settle(&a, NOW + 320).into_iter().map(|(_, e)| e).collect::<Vec<_>>(), [Ok(Effect::Deleted { entry: "entry-a".to_string() })]);
     assert!(a.store.vault_get("entry-a").unwrap().is_none());
 }
 
@@ -279,6 +289,38 @@ fn a_delete_does_not_take_an_entry_that_moved_to_another_vault() {
     let row = b.store.vault_get(&on_b).unwrap().expect("the entry is still on b");
     assert_eq!(row.vault_id, "vault-b");
     assert_eq!(b.value(&on_b).as_deref(), Some("sk_test_invented_0001"));
+}
+
+#[test]
+fn the_old_vaults_tombstone_taken_before_the_new_vaults_record_does_not_delete_the_entry() {
+    let (mut a, mut b, p, _, on_b) = both_hold_one();
+    // A kept earlier value the entry has on b: a delete and a re-make would lose it.
+    let held = b.store.vault_get(&on_b).unwrap().unwrap();
+    let earlier = VaultVersionRow { seq: 0, entry_id: on_b.clone(), entry_created_at: held.created_at, sealed: held.sealed.clone(), replaced_at: NOW + 90, replaced_by: "you".into(), how: "edit".into(), state: "kept".into() };
+    b.store.vault_version_add(&earlier).unwrap();
+    a.store.vault_move_entry("entry-a", "vault-b").unwrap();
+    a.capture(VAULT, NOW + 100);
+    a.capture("vault-b", NOW + 100);
+    let own = key();
+    let taker = Taker { store: &b.store, ring: &b.ring, key: &own, profiles: &Known(&[]) };
+    let first = |vault: &str| log::since(&a.store.conn().lock().unwrap(), vault, &Vector::default(), 100).unwrap();
+    // The old Vault's tombstone comes first, on its own.
+    let old = first(VAULT);
+    let tomb = old.iter().find(|r| r.header.tombstone).expect("the old Vault ends the record");
+    let taken = taker.receive(tomb, &p, &mut b.clock, NOW + 200).unwrap();
+    assert!(matches!(taken.effect, Effect::Deferred(_)), "{taken:?}");
+    assert_eq!(b.store.vault_get(&on_b).unwrap().unwrap().vault_id, VAULT, "still there");
+    // Then the new Vault's record: it moves the same entry.
+    for rec in first("vault-b") {
+        taker.receive(&rec, &p, &mut b.clock, NOW + 210).unwrap();
+    }
+    let row = b.store.vault_get(&on_b).unwrap().expect("the entry is the same one, not made again");
+    assert_eq!(row.vault_id, "vault-b");
+    assert_eq!(b.versions(&on_b).len(), 1, "its kept value is still there");
+    // The next round takes the delete again, and finds the entry in another Vault: nothing is deleted.
+    let again = taker.retake(VAULT, NOW + 300).unwrap();
+    assert!(matches!(&again[..], [(_, Ok(Effect::None))]), "{again:?}");
+    assert!(b.store.vault_get(&on_b).unwrap().is_some());
 }
 
 #[test]

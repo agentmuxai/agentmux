@@ -279,6 +279,18 @@ pub fn current(conn: &Connection, collection: &str, record: &str) -> rusqlite::R
     .optional()
 }
 
+/// Whether a collection other than `collection` holds `record` as a live record (not a tombstone): a record the log has
+/// moved to another collection is live in the new one while the old one ends it.
+pub fn live_elsewhere(conn: &Connection, collection: &str, record: &str) -> rusqlite::Result<bool> {
+    let n: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM db_sync_state s JOIN db_sync_log l ON l.collection = s.collection AND l.origin = s.origin AND l.seq = s.seq
+         WHERE s.collection != ?1 AND s.record = ?2 AND l.tombstone = 0",
+        params![collection, record],
+        |r| r.get(0),
+    )?;
+    Ok(n > 0)
+}
+
 /// The highest version this store holds in a collection, from any origin.
 fn max_version(conn: &Connection, collection: &str) -> rusqlite::Result<Option<Version>> {
     conn.query_row(
