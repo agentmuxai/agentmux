@@ -98,6 +98,10 @@ pub(crate) fn dangling_link_leaves(path: &Path, inside: &[&Path]) -> bool {
     let mut at = PathBuf::new();
     for part in path.components() {
         at.push(part.as_os_str());
+        // The folder's own place (a link above it, such as a short name of a data disk) is where the agent lives, not a way out of it.
+        if inside.iter().any(|root| root.starts_with(&at)) {
+            continue;
+        }
         let mut here = at.clone();
         for _ in 0..MAX_HOPS {
             let Ok(meta) = std::fs::symlink_metadata(&here) else { break };
@@ -285,6 +289,22 @@ mod tests {
         std::os::unix::fs::symlink(work.join("notes"), work.join("inside-dir")).unwrap();
         assert_eq!(check(&dir, "inside-dir/later.md"), (MISSING.to_string(), NOT_FOUND_WORDS.to_string()));
         assert_eq!(check(&dir, "inside-dir/plan.md").0, FOUND);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_reached_through_a_link_above_it_answers_missing_for_a_file_that_is_not_there() {
+        let dir = folder();
+        let door = dir.path().join("door");
+        std::os::unix::fs::symlink(dir.path(), &door).unwrap();
+        let cwd = door.join("work").to_string_lossy().into_owned();
+        let state = |asked: &str| check_in_folder(&cwd, asked).state;
+        assert_eq!(state("notes/none.md"), MISSING);
+        assert_eq!(state("notes/plan.md"), FOUND);
+        assert_eq!(state("../secret.txt"), OUTSIDE);
+        // A link beneath the folder that leaves it is still outside.
+        std::os::unix::fs::symlink(dir.path(), dir.path().join("work").join("up")).unwrap();
+        assert_eq!(state("up/nothing.txt"), OUTSIDE);
     }
 
     #[test]

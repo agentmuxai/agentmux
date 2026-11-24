@@ -255,6 +255,19 @@ mod tests {
         assert_eq!(resolve(&f.meta, "/workspace/soon.png").unwrap_err(), "That file doesn't exist.");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_reached_through_a_link_above_it_says_a_missing_file_is_not_there() {
+        let mut f = fixture();
+        let door = f._tmp.path().join("door");
+        std::os::unix::fs::symlink(f._tmp.path(), &door).unwrap();
+        f.meta.insert(crate::backend::blockcontroller::META_KEY_CMD_CWD.to_string(), serde_json::json!(door.join("ws").to_string_lossy()));
+        assert_eq!(resolve(&f.meta, "/workspace/img/none.png").unwrap_err(), "That file doesn't exist.");
+        assert_eq!(read(open(&f.meta, "/workspace/img/a.png")), "the agent's picture");
+        std::os::unix::fs::symlink(&f.private, f.ws.join("up")).unwrap();
+        assert_eq!(resolve(&f.meta, "/workspace/up/nothing.png").unwrap_err(), LEADS_OUT);
+    }
+
     #[test]
     fn a_link_swapped_in_after_the_path_was_found_is_not_followed() {
         let f = fixture();
