@@ -14,6 +14,7 @@ pub(crate) mod prep;
 pub mod agent_resources;
 pub mod agent_handlers;
 mod agent_only;
+pub(crate) mod dispatch_guard;
 mod http_action;
 mod http_action_routes;
 pub(crate) mod agent_move_here;

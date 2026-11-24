@@ -4,57 +4,10 @@
 // Operator-only RPCs need the host's proof that this window's connection is the
 // operator's (crates/srv/src/server/operator_proof.rs): on each (re)connect the
 // window gets a challenge from srv and the host vouches for it with its own token.
-// Kept free of store imports: rpc-client.ts imports it.
+// Kept free of store imports: rpc-client.ts imports it. Which commands wait for the proof is srv's own decision
+// (`OPERATOR_COMMANDS`, generated from crates/srv-core/src/backend/rpc/action_access.rs): every command that is not open.
 
-/** srv commands that refuse a connection the host hasn't proven
- *  (`RpcContext::operator_only` and the guards built on it). */
-export const OPERATOR_COMMANDS: ReadonlySet<string> = new Set([
-    "agentanswer",
-    "agentcancel",
-    "agentinput",
-    "agent.pane.unregister",
-    "agent.setSeat",
-    "agent.takeover",
-    "agent.move-here",
-    "audit.query",
-    "blockstats.detail",
-    "browser.signin_fill",
-    "browser.signin_offer_answer",
-    "browser.signin_stop",
-    "browser.signup_password",
-    "browser_profiles.create",
-    "browser_profiles.delete",
-    "browser_profiles.update",
-    "fleet.broadcast",
-    "gpu.sample",
-    "history.agent_sessions",
-    "history.agents",
-    "history.locate",
-    "history.reclaim",
-    "history.usage",
-    "identity.account.availability",
-    "identity.account.move_agents",
-    "identity.account.signed_in",
-    "identity.account.usage",
-    "jobs.act",
-    "jobs.save",
-    "jobs.templates.approve",
-    "jobs.templates.catalog",
-    "jobs.templates.catalog.install",
-    "jobs.templates.install",
-    "jobs.templates.uninstall",
-    "kanban.act",
-    "pins.adopt",
-    "pins.forget",
-    "pins.list",
-    "tooldecision",
-    "tower.forget",
-    "tower.pair",
-    "tower.peers",
-    "tower.sample",
-    "widgets.session",
-    "writeagentconfig",
-]);
+import { OPERATOR_COMMANDS } from "./operator-commands.generated";
 
 /** How srv words a refusal for a connection it hasn't seen proven. */
 const UNPROVEN = "isn't the AgentMux window";
@@ -70,6 +23,8 @@ type OperatorProofDeps = {
 
 let generation = 0;
 let current: Promise<boolean> = Promise.resolve(false);
+/** The current connection's proof has settled (given or refused); false while it is awaited. */
+let proofSettled = true;
 let settleExpected: ((proven: boolean) => void) | null = null;
 /** The last connection's proof deps, to prove it again when its proof lapses (a host that vouches for a lease). */
 let lastDeps: OperatorProofDeps | null = null;
@@ -98,6 +53,7 @@ function refuse(e: unknown): void {
  *  made before then wait for that first proof. */
 export function expectOperatorProof(): void {
     generation++;
+    proofSettled = false;
     current = new Promise<boolean>((resolve) => (settleExpected = resolve));
 }
 
@@ -120,6 +76,10 @@ export function proveOperatorConnection(deps: OperatorProofDeps): Promise<boolea
           })()
         : Promise.resolve(false);
     current = attempt;
+    proofSettled = false;
+    void attempt.then(() => {
+        if (current === attempt) proofSettled = true;
+    });
     const settle = settleExpected;
     settleExpected = null;
     if (settle) void attempt.then(settle);
@@ -129,6 +89,7 @@ export function proveOperatorConnection(deps: OperatorProofDeps): Promise<boolea
 /** Resolves when the current connection's proof has settled (true if it was
  *  proven), or after `PROOF_WAIT_MS`. */
 export function operatorProofReady(): Promise<boolean> {
+    if (proofSettled) return current;
     let timer: ReturnType<typeof setTimeout>;
     const timeout = new Promise<boolean>((resolve) => (timer = setTimeout(() => resolve(false), PROOF_WAIT_MS)));
     return Promise.race([current, timeout]).finally(() => clearTimeout(timer));
@@ -143,6 +104,12 @@ function reprove(): Promise<boolean> {
     if (!deps?.attest || settleExpected) return Promise.resolve(false);
     reproving ??= proveOperatorConnection(deps).finally(() => (reproving = null));
     return reproving;
+}
+
+/** Whether the current connection's proof has settled: what the window's own keystrokes and resizes
+ *  (`blockinput`, `setblocktermsize`, not RPCs) wait for, since srv refuses them to a connection it has not seen proven. */
+export function isOperatorProofSettled(): boolean {
+    return proofSettled;
 }
 
 export function isOperatorCommand(command: string): boolean {
@@ -203,6 +170,7 @@ export async function sendRetryingUnproven<T>(send: () => Promise<T>): Promise<T
 /** Forget every proof: for tests. */
 export function resetOperatorProofForTests(): void {
     generation = 0;
+    proofSettled = true;
     current = Promise.resolve(false);
     settleExpected = null;
     lastDeps = null;

@@ -242,7 +242,7 @@ describe("operator proof", () => {
         expect(attest).toHaveBeenCalledTimes(1);
     });
 
-    it("names the commands srv keeps for the operator, and only those", () => {
+    it("names the commands srv keeps for the window: every one that is not open", () => {
         for (const c of [
             "kanban.act",
             "jobs.act",
@@ -263,10 +263,18 @@ describe("operator proof", () => {
             "agentanswer",
             "agentcancel",
             "tooldecision",
+            // Reads of another agent's words and the person's own state are the window's too.
+            "agent.output",
+            "getmemory",
+            "getmeta",
+            "jobs.get",
+            "controllerinput",
+            "setmeta",
         ]) {
             expect(isOperatorCommand(c)).toBe(true);
         }
-        for (const c of ["kanban.list", "kanban.task", "operator.challenge", "jobs.list", "jobs.dryrun", "jobs.get"]) {
+        // What any connection may call, and so what the window sends before its proof lands.
+        for (const c of ["kanban.list", "operator.challenge", "jobs.list", "getfullconfig", "eventsub", "notify.ack", "setconfig"]) {
             expect(isOperatorCommand(c)).toBe(false);
         }
     });

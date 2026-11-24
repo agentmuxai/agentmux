@@ -182,7 +182,7 @@
 101 crates/srv-core/src/backend/reactive/activity_watcher.rs::run_agent_summary_loop
 150 crates/srv-core/src/backend/reactive/handler.rs::Handler::register_agent_full
 110 crates/srv-core/src/backend/resume_preflight.rs::preflight
-157 crates/srv-core/src/backend/rpc/engine.rs::WshRpcEngine::handle_request
+155 crates/srv-core/src/backend/rpc/engine.rs::WshRpcEngine::handle_request
 270 crates/srv-core/src/backend/service.rs::get_method_meta
 238 crates/srv-core/src/backend/shell_node.rs::ShellNodeRunner::run
 111 crates/srv-core/src/backend/slug_migration/plan.rs::holder_of

@@ -29,6 +29,10 @@ const RESP_CH_SIZE: usize = 32;
 /// Result type for RPC handler responses.
 pub type HandlerResult = Result<Option<serde_json::Value>, String>;
 
+/// Decides, before a command's handler runs, whether this connection may call it: `Err` is the refusal the
+/// caller is sent. Set per connection by srv (`server::dispatch_guard`).
+pub type DispatchGuard = Arc<dyn Fn(&str, &RpcContext) -> Result<(), String> + Send + Sync>;
+
 /// A boxed async handler function.
 /// Takes the command data and returns either:
 /// - Ok(Some(value)) for a single response
@@ -185,6 +189,8 @@ struct EngineInner {
     /// The id a registered external host gave this connection when it proxied it (verified by srv),
     /// kept beside the context because registering as an agent replaces the whole context.
     gateway_conn: Option<String>,
+    /// Who may call which command; absent for an engine nothing guards (tests, in-process callers).
+    guard: Option<DispatchGuard>,
     /// Request/response types of every command registered through
     /// [`WshRpcEngine::register_typed`]. Lives beside `handlers` so the
     /// mapping is a side effect of registration and cannot drift from it.
@@ -221,6 +227,7 @@ impl WshRpcEngine {
                 auth_token: String::new(),
                 rpc_context: None,
                 gateway_conn: None,
+                guard: None,
                 schema: RpcSchema::new(),
             }),
             output_tx,
@@ -366,6 +373,33 @@ impl WshRpcEngine {
     pub fn set_rpc_context(&self, ctx: RpcContext) {
         let mut inner = self.lock_inner();
         inner.rpc_context = Some(ctx);
+    }
+
+    /// Guard every command this connection calls: `guard` runs before the handler and a refusal is the answer.
+    pub fn set_dispatch_guard(&self, guard: DispatchGuard) {
+        self.lock_inner().guard = Some(guard);
+    }
+
+    /// Whether this connection may call `command` (also asked for the websocket's own input commands, which
+    /// do not go through [`Self::handle_message`]).
+    pub fn check_dispatch(&self, command: &str) -> Result<(), String> {
+        let (guard, ctx) = {
+            let inner = self.lock_inner();
+            (inner.guard.clone(), inner.rpc_context.clone().unwrap_or_default())
+        };
+        guard.map_or(Ok(()), |g| g(command, &ctx))
+    }
+
+    /// Answers a call that must not run (no such command, or the guard refuses this connection it), recording a refusal; true when it did.
+    fn refuse_before_running(&self, command: &str, data: &serde_json::Value, ctx: &RpcContext, reqid: &str, handler: &RpcResponseHandler, known: bool) -> bool {
+        let refusal = if known { self.check_dispatch(command).err() } else { Some(format!("unknown command: {command}")) };
+        let Some(refusal) = refusal else { return false };
+        if known {
+            super::action_record::after_call(command, data, ctx, reqid, &Err(refusal.clone()));
+        }
+        handler.send_error(&refusal);
+        self.cleanup_handler(reqid);
+        true
     }
 
     /// The context handlers get for this connection's next call.
@@ -597,9 +631,7 @@ impl WshRpcEngine {
 
         let dispatch_elapsed = request_start.elapsed();
 
-        if !has_call && !has_stream {
-            handler.send_error(&format!("unknown command: {}", command));
-            self.cleanup_handler(&msg.reqid);
+        if self.refuse_before_running(&command, &data, &rpc_context, &msg.reqid, &handler, has_call || has_stream) {
             return;
         }
 

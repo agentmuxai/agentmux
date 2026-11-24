@@ -80,6 +80,12 @@ fn store() -> &'static SessionStore {
     STORE.get_or_init(SessionStore::default)
 }
 
+/// Whether something here can vouch for a browser's connection as the person's: this srv serves its own
+/// sign-in, or a browser has signed in.
+pub(crate) fn sign_in_exists() -> bool {
+    crate::headless::local_sign_in() || store().session_count(std::time::Instant::now()) > 0
+}
+
 fn channels() -> &'static Channels {
     CHANNELS.get_or_init(Channels::default)
 }

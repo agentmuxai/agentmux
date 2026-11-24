@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { expectOperatorProof, proveOperatorConnection, resetOperatorProofForTests } from "./operator-proof";
 import { WSControl, addWSReconnectHandler } from "./ws";
 
 class FakeSocket {
@@ -102,5 +103,59 @@ describe("WSControl message queue", () => {
         lastSocket.onopen(new Event("open"));
         ws.pushMessage(cmd({ wscommand: "rpc", command: "x" }));
         expect(lastSocket.sent.map((m) => JSON.parse(m).command)).toEqual(["x"]);
+    });
+});
+
+describe("WSControl holds the window's keystrokes until its proof settles", () => {
+    afterEach(() => {
+        vi.useRealTimers();
+        resetOperatorProofForTests();
+    });
+
+    it("sends a keystroke and a resize after the proof, in order, and everything else at once", async () => {
+        vi.useFakeTimers();
+        resetOperatorProofForTests();
+        expectOperatorProof();
+        const ws = new WSControl("ws://127.0.0.1:1", "tab", () => {});
+        ws.connectNow("test");
+        lastSocket.onopen(new Event("open"));
+        ws.pushMessage(cmd({ wscommand: "blockinput", tag: "key" }));
+        ws.pushMessage(cmd({ wscommand: "setblocktermsize", tag: "size" }));
+        ws.pushMessage(cmd({ wscommand: "rpc", tag: "other" }));
+        // The call that is not input goes after the held ones, as before: order is kept.
+        expect(lastSocket.sent).toHaveLength(0);
+        let finish: () => void;
+        const proving = proveOperatorConnection({
+            challenge: async () => ({ nonce: "n" }),
+            attest: () => new Promise<void>((resolve) => (finish = resolve)),
+        });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(lastSocket.sent).toHaveLength(0);
+        finish();
+        await proving;
+        await vi.advanceTimersByTimeAsync(20);
+        expect(lastSocket.sent.map((m) => JSON.parse(m).tag).filter((t) => t !== undefined)).toEqual(["key", "size", "other"]);
+    });
+
+    it("sends them anyway when no proof comes, so srv's answer is the refusal", async () => {
+        vi.useFakeTimers();
+        resetOperatorProofForTests();
+        expectOperatorProof();
+        const ws = new WSControl("ws://127.0.0.1:1", "tab", () => {});
+        ws.connectNow("test");
+        lastSocket.onopen(new Event("open"));
+        ws.pushMessage(cmd({ wscommand: "blockinput", tag: "key" }));
+        expect(lastSocket.sent).toHaveLength(0);
+        await vi.advanceTimersByTimeAsync(10_100);
+        expect(lastSocket.sent.map((m) => JSON.parse(m).tag).filter((t) => t !== undefined)).toEqual(["key"]);
+    });
+
+    it("does not hold anything when there is no host to prove the connection", () => {
+        resetOperatorProofForTests();
+        const ws = new WSControl("ws://127.0.0.1:1", "tab", () => {});
+        ws.connectNow("test");
+        lastSocket.onopen(new Event("open"));
+        ws.pushMessage(cmd({ wscommand: "blockinput", tag: "key" }));
+        expect(lastSocket.sent).toHaveLength(1);
     });
 });

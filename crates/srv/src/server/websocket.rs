@@ -275,6 +275,7 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState, session: O
 
     // Register handlers
     register_handlers(&engine, state.clone(), conn_id.clone());
+    super::dispatch_guard::install(&engine);
     tracing::info!("[ws-perf] create_engine+register_handlers: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0);
     tracing::info!("[ws-perf] TOTAL ws_setup: {:.2}ms", ws_start.elapsed().as_secs_f64() * 1000.0);
 
@@ -715,6 +716,10 @@ pub(super) fn refuse_agent_input(ctx: &RpcContext) -> Result<(), String> {
 /// as a `bus:error` frame (the one agent clients already read); a closed socket is the only `Err`.
 async fn input_command(wscommand: &str, incoming: &WSIncoming, engine: &Arc<WshRpcEngine>, socket: &mut WebSocket) -> Result<(), ()> {
     let Some(block_id) = incoming.blockid.as_deref() else { return Ok(()) };
+    if let Err(refusal) = engine.check_dispatch(wscommand) {
+        let frame = serde_json::to_string(&json!({ "type": "bus:error", "error": refusal })).unwrap_or_default();
+        return socket.send(Message::Text(frame.into())).await.map_err(|_| ());
+    }
     let ctx = engine.rpc_context();
     let result = if wscommand == "blockinput" {
         let Some(data64) = incoming.inputdata64.as_deref().filter(|d| !d.is_empty()) else { return Ok(()) };

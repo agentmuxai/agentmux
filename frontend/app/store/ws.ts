@@ -7,6 +7,7 @@ import { type WebSocket, newWebSocket } from "@/util/wsutil";
 import { debugLog } from "@/util/debuglog";
 import { createSlowHandlerWatch } from "./ws-slow-handler";
 import { createHandlerCostTally } from "./ws-handler-cost";
+import { isOperatorProofSettled, operatorProofReady } from "./operator-proof";
 
 const dlog = debugLog("wave:ws");
 
@@ -20,6 +21,10 @@ const StableConnTime = 2000;
 // reconnect. Mirrors PASTE_CHUNK_DELAY_MS in block-input-sender.ts (not
 // imported: that module imports this one).
 const QueuedInputPaceMs = 5;
+// The window's keystrokes and resizes are not RPCs, and srv refuses them to a connection the host has not proven the
+// window's: they wait in the queue, in order, until this connection's proof has settled.
+const windowOnlyWsCommands = new Set(["blockinput", "setblocktermsize"]);
+const isWindowOnlyWsCommand = (msg: any) => windowOnlyWsCommands.has(msg?.wscommand);
 
 function addWSReconnectHandler(handler: () => void) {
     reconnectHandlers.push(handler);
@@ -38,6 +43,13 @@ class WSControl {
     reconnectTimes: number = 0;
     msgQueue: any[] = [];
     msgQueueTimer: ReturnType<typeof setTimeout> = null;
+    waitingForProof: boolean = false;
+    /** The proof did not come in time: the window's own input goes out anyway (srv's answer is the refusal). */
+    proofGaveUp: boolean = false;
+
+    holdsForProof(msg: any): boolean {
+        return isWindowOnlyWsCommand(msg) && !this.proofGaveUp && !isOperatorProofSettled();
+    }
     inReconnectHandlers: boolean = false;
     tabId: string;
     messageCallback: WSEventCallback;
@@ -168,6 +180,7 @@ class WSControl {
     onopen(e: Event) {
         dlog("connection open");
         this.open = true;
+        this.proofGaveUp = false;
         this.opening = false;
         this.onOpenTimeoutId = setTimeout(() => {
             this.reconnectTimes = 0;
@@ -195,10 +208,19 @@ class WSControl {
     /// so an RPC behind them, `GetFullConfig` in `initMux`, waited 1.3-1.8 s on
     /// launches where the socket wasn't open yet.
     runMsgQueue() {
-        if (this.msgQueueTimer != null) {
+        if (this.msgQueueTimer != null || this.waitingForProof) {
             return;
         }
         while (this.open && this.msgQueue.length > 0) {
+            if (this.holdsForProof(this.msgQueue[0])) {
+                this.waitingForProof = true;
+                void operatorProofReady().then(() => {
+                    this.waitingForProof = false;
+                    this.proofGaveUp = !isOperatorProofSettled();
+                    this.runMsgQueue();
+                });
+                return;
+            }
             const msg = this.msgQueue.shift();
             this.sendMessage(msg);
             if (msg.wscommand == "blockinput" && this.msgQueue.length > 0) {
@@ -267,8 +289,9 @@ class WSControl {
     pushMessage(data: WSCommandType) {
         // Behind a queue that is still draining, so order is kept; except
         // from the reconnect handlers, which go first (see onopen).
-        if (!this.open || (this.msgQueue.length > 0 && !this.inReconnectHandlers)) {
+        if (!this.open || (this.msgQueue.length > 0 && !this.inReconnectHandlers) || this.holdsForProof(data)) {
             this.msgQueue.push(data);
+            if (this.open && !this.inReconnectHandlers) this.runMsgQueue();
             return;
         }
         this.sendMessage(data);

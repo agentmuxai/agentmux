@@ -9,6 +9,13 @@ their data dir at startup. See
 §5–§6 for the file format and security model. Release builds do not
 write the file, so these scripts only work against `task dev`.
 
+**The dev build refuses the window's commands to a connection that is not the window**, like every other build: the
+key in `authkey.dev` opens `/ws`, and a command that is not open to every connection is the window's alone. A harness
+that drives one over `/ws` with the key (`bench-term-echo.mjs`, `bench-term-cross-pane.mjs`, `scripts/test-app-api.mjs`)
+needs the instance started with `AGENTMUX_DEV_OPEN_RPC=1` (for example `AGENTMUX_DEV_OPEN_RPC=1 task dev`); only a dev
+build honours it, and every other build ignores it. Harnesses that drive the window over the debugging port
+(CDP) are the window and need nothing.
+
 ## `authfile.ps1`
 
 Helper module sourced by the other scripts. Exports:
