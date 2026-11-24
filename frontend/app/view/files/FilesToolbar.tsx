@@ -11,6 +11,7 @@ import { Button, IconButton } from "@/app/element/ui";
 import { useWidthFit } from "@/app/element/width-fit";
 import { shortcutFor } from "@/app/keybindings";
 import { tip } from "@/app/element/tip";
+import { t } from "@/app/i18n/i18n";
 import { For, Show, type JSX } from "solid-js";
 import { buildToolbarMenu, TOOLBAR_TIERS } from "./files-menus";
 import type { FilesModel } from "./files-model";
@@ -94,6 +95,14 @@ export function FilesToolbar(props: {
             </Show>
             <Show when={props.filterOpen()}>
                 <FilterBox model={model} closeFilter={props.closeFilter} focusList={props.focusList} filterRef={props.filterRef} />
+                <IconButton
+                    icon="magnifying-glass"
+                    label={t("files.find.deep")}
+                    class="files-tool files-find-deep"
+                    pressed={model.deepMode()}
+                    tone={model.deepMode() ? "accent" : undefined}
+                    onClick={() => model.toggleDeep()}
+                />
             </Show>
             <FilterButton model={model} open={props.filterOpen} toggle={props.toggleFilter} buttonRef={props.filterButtonRef} />
             <IconButton icon="folder-plus" label="New folder" class="files-tool files-tool--action" onClick={() => void model.createNew("dir")} />
@@ -119,8 +128,8 @@ function FilterBox(props: {
         <input
             ref={props.filterRef}
             class="files-filter-input" data-raw-text-field="the folder filter in the pane's toolbar row: it owns Escape, Enter and ArrowDown to hand the focus to the list, not a form field"
-            placeholder="Filter"
-            aria-label="Filter this folder"
+            placeholder={model.deepMode() ? t("files.find.placeholder") : "Filter"}
+            aria-label={model.deepMode() ? t("files.find.aria") : "Filter this folder"}
             value={model.filter()}
             spellcheck={false}
             onInput={(e) => model.setFilter(e.currentTarget.value)}

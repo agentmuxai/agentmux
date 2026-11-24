@@ -100,6 +100,8 @@ export function FileRow(props: {
     /** In the tree view: the row's depth and whether it is open; `onToggle` opens or closes it. */
     tree?: TreeRow;
     onToggle?: () => void;
+    /** A found row: the folder it is in, from the shown folder, shown after its name ("" at the first level). */
+    where?: string;
 }): JSX.Element {
     return (
         <div
@@ -141,8 +143,11 @@ export function FileRow(props: {
                         />
                     )}
                 </Show>
-                <Show when={props.renaming} fallback={<span class="files-name">{props.tree?.label ?? props.entry.name}</span>}>
+                <Show when={props.renaming} fallback={<span class="files-name">{props.tree?.label ?? labelOf(props.entry.name)}</span>}>
                     <RenameInput model={props.model} entry={props.entry} onDone={props.onRenameDone} />
+                </Show>
+                <Show when={props.where}>
+                    <span class="files-where">{props.where}</span>
                 </Show>
                 <Show when={props.entry.error}>
                     <i class="fa fa-triangle-exclamation files-entry-error" aria-label={props.entry.error} />

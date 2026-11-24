@@ -1795,3 +1795,88 @@ describe("the Files pane: tree view", () => {
         expect(v.meta()["files:view"]).toBeUndefined();
     });
 });
+
+describe("the Files pane: find in subfolders", () => {
+    const SRC = `${HOME}\\src`;
+    const LIB = `${SRC}\\lib`;
+    const where = (v: ReturnType<typeof mount>) => [...v.container.querySelectorAll(".files-rows .files-where")].map((n) => n.textContent);
+    const status = (v: ReturnType<typeof mount>) => v.container.querySelector(".files-status")?.textContent ?? "";
+
+    beforeEach(() => {
+        h.state.dirs.set(SRC, [f("main.rs"), d("lib")]);
+        h.state.dirs.set(LIB, [f("util.ts")]);
+    });
+
+    it("shows what matches in the folders under the shown one, with the folder after each name", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        v.model.toggleDeep();
+        v.model.setFilter("util");
+        await waitFor(() => expect(v.names()).toEqual(["util.ts"]));
+        expect(where(v)).toEqual(["src/lib"]);
+        expect(v.model.pathOf("src/lib/util.ts")).toBe(`${LIB}\\util.ts`);
+        // Folders and files both match, best first.
+        v.model.setFilter("lib");
+        await waitFor(() => expect(v.names()).toContain("lib"));
+        // Clearing what was typed brings the folder back.
+        v.model.setFilter("");
+        await waitFor(() => expect(v.names()).toEqual(["src", "a2.md", "a10.md", "b.txt"]));
+    });
+
+    it("is the plain filter of the shown folder while it is off", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        v.model.setFilter("util");
+        await waitFor(() => expect(v.names()).toEqual([]));
+        v.model.setFilter("b.");
+        await waitFor(() => expect(v.names()).toEqual(["b.txt"]));
+        expect(where(v)).toEqual([]);
+    });
+
+    it("works on a found row by its real path", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        v.model.toggleDeep();
+        v.model.setFilter("util");
+        await waitFor(() => expect(v.names()).toEqual(["util.ts"]));
+        await v.model.rename("src/lib/util.ts", "tools.ts");
+        expect(h.rpc.FsRenameCommand).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ path: `${LIB}\\util.ts`, new_name: "tools.ts" }));
+    });
+
+    it("is turned on from the filter box, and turns off when another folder is shown", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.keyDown(v.list(), { key: "/" });
+        const button = await waitFor(() => {
+            const b = v.container.querySelector('[aria-label="Search subfolders too"]') as HTMLElement | null;
+            expect(b).not.toBeNull();
+            return b!;
+        });
+        fireEvent.click(button);
+        await waitFor(() => expect(v.container.querySelector(".files-filter-input")?.getAttribute("placeholder")).toBe("Find in this folder and its subfolders"));
+        await v.model.navigate(SRC);
+        await waitFor(() => expect(v.names()).toEqual(["lib", "main.rs"]));
+        expect(v.model.deepMode()).toBe(false);
+    });
+
+    it("says it isn't available on a host", async () => {
+        const v = mount({ connection: "user@box" });
+        await waitFor(() => expect(v.container.querySelector(".files-status")).not.toBeNull());
+        v.model.toggleDeep();
+        expect(status(v)).toContain("isn't available");
+        expect(v.model.deepMode()).toBe(false);
+    });
+
+    it("leaves out a hidden folder's files unless hidden files are shown", async () => {
+        h.state.dirs.set(HOME, [d(".cache", { hidden: true }), d("src")]);
+        h.state.dirs.set(`${HOME}\\.cache`, [f("secret.ts")]);
+        const v = mount();
+        await waitFor(() => expect(v.names()).toEqual(["src"]));
+        v.model.toggleDeep();
+        v.model.setFilter("secret");
+        await waitFor(() => expect(h.rpc.FsListCommand.mock.calls.some((c) => (c[1] as { path: string }).path === SRC)).toBe(true));
+        await new Promise((r) => setTimeout(r, 300));
+        expect(v.names()).toEqual([]);
+        expect(h.rpc.FsListCommand.mock.calls.some((c) => (c[1] as { path: string }).path === `${HOME}\\.cache`)).toBe(false);
+    });
+});
