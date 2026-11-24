@@ -9,7 +9,7 @@
  *
  * This is the check that keeps it so, next to the link renderer: it fails when a link element is left without the
  * hand, whether by a missing global rule or by a component's own rule that sets another cursor on it. A name that
- * does not resolve (`--dead`) and a disabled link are the two places the arrow is right.
+ * does not resolve (`--dead`), a bare name with no such file (`--plain`) and a disabled link are the places the arrow is right.
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -120,7 +120,7 @@ function subject(selector: string): string {
 
 const isLinkHand = (value: string) => value === "var(--cursor-link)" || value === "pointer";
 /** Selectors where the arrow is right on a link: a name that does not resolve, and a disabled one. */
-const isOff = (selector: string) => /--dead|:disabled|\[disabled|aria-disabled/.test(selector);
+const isOff = (selector: string) => /--dead|--plain|:disabled|\[disabled|aria-disabled/.test(selector);
 
 // ─── Markup: the classes carried by link elements ───────────────────────────────────────────────────────────────
 
@@ -201,6 +201,7 @@ describe("the link hand", () => {
         expect(links.find((r) => r.selector === ".entity-link")?.value).toBe("var(--cursor-link)");
         // Two classes, because the `a[href]` rule is more specific than one: with one the dead link would show the hand.
         expect(links.find((r) => r.selector === ".entity-link.entity-link--dead")?.value).toBe("var(--cursor-default)");
+        expect(links.find((r) => r.selector === ".entity-link.entity-link--plain")?.value).toBe("var(--cursor-default)");
     });
 
     it("gives a button that opens something the hand", () => {

@@ -14,6 +14,15 @@ describe("files", () => {
         expect(links("see C:/work/notes/plan.md, C:\\work\\a.ts and /home/u/src/main.rs")).toEqual(["file:C:/work/notes/plan.md", "file:C:\\work\\a.ts", "file:/home/u/src/main.rs"]);
         expect(links("in ./src/a.tsx and ../x/y.json")).toEqual(["file:./src/a.tsx", "file:../x/y.json"]);
     });
+    it("reads a bare name of every ending the web linker would also take for a country as a file", () => {
+        expect(links("run tool.pl then parse.ml, parser.rs, pkg.sh and analyze.py", { author: { kind: "agent", id: "pane-1", confined: false } })).toEqual([
+            "file:tool.pl",
+            "file:parse.ml",
+            "file:parser.rs",
+            "file:pkg.sh",
+            "file:analyze.py",
+        ]);
+    });
     it("takes an optional line and column into the words, and not into the path", () => {
         const link = linkify("fails at src/a.rs:120:4.", testContext()).find((s) => s.type === "link");
         expect(link).toMatchObject({ label: "src/a.rs:120:4", destination: { kind: "file", path: "src/a.rs" } });
