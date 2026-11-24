@@ -1,5 +1,7 @@
 # Where the merge queue's minutes and the release run's two hours go
 
+**Status:** analysis. Read from recorded runs only; the apt and image-pull retries it proposes are built in the same change.
+
 **Date:** 2026-11-24. **Source:** recorded GitHub Actions runs only (job and step timings, job logs, run lists). No run was started, nothing was benchmarked. Every number is tagged **[M]** measured from a recorded run, **[I]** inferred from what the logs and workflow files show, or **[E]** estimated (needs one measurement before anyone relies on it).
 
 **Decisions this informs:** (1) which cheap CI changes to make next, in order; (2) whether a paid larger runner is worth asking for.
