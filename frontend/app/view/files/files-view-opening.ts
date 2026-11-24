@@ -8,13 +8,44 @@
 
 import type { FsEntry } from "@/types/rpc/FsEntry";
 import { errorText } from "./files-model";
-import { openFolderInNewTab, openInEditor, openInPane, openTargetOf, openWithOs } from "./files-open";
+import { askedFirstAgent } from "@/app/util/open-asks-first";
+import { openFolderInNewTab, openInEditor, openInPane, openTargetOf, openWithOs, runsWhenOpenedByOs } from "./files-open";
 import type { FilesLocal } from "./files-view-state";
 
 export type FilesOpening = ReturnType<typeof useFilesOpening>;
 
 export function useFilesOpening(fv: FilesLocal) {
     const { model, setConfirm } = fv;
+
+    /** A file with the system's default app. A program, a shortcut or a script asks first (`mustAsk`); and a file a
+     *  container agent can write asks first too, naming the agent (srv says so, and the answer is sent again as
+     *  confirmed). Both are panels in this pane. */
+    const openWithDefaultApp = (entry: FsEntry, mustAsk: boolean = runsWhenOpenedByOs(entry.name)): void => {
+        if (model.refuseInRoot("Opening with another program")) return;
+        const path = model.pathOf(entry.name);
+        const fail = (err: unknown) => model.setStatus({ text: `Couldn't open ${entry.name}: ${errorText(err)}`, tone: "error" });
+        const go = (confirmed: boolean): void => {
+            void openWithOs(path, model.blockId, confirmed).catch((err) => {
+                const agent = askedFirstAgent(err);
+                if (agent === null) return fail(err);
+                setConfirm({
+                    title: `Open ${entry.name}?`,
+                    message: agent
+                        ? `${entry.name} is in the folder of ${agent}, a container agent that can change it. Opening it runs your computer's app on what ${agent} wrote.`
+                        : `${entry.name} is in a folder a container agent can change. Opening it runs your computer's app on what the agent wrote.`,
+                    confirmLabel: "Open",
+                    onConfirm: () => go(true),
+                });
+            });
+        };
+        if (!mustAsk) return go(false);
+        setConfirm({
+            title: `Run ${entry.name}?`,
+            message: `${entry.name} is a program or shortcut. Opening it runs it.`,
+            confirmLabel: "Run",
+            onConfirm: () => go(false),
+        });
+    };
 
     const openEntry = (entry: FsEntry): void => {
         const path = model.pathOf(entry.name);
@@ -32,14 +63,7 @@ export function useFilesOpening(fv: FilesLocal) {
             return;
         }
         if (target === "editor") void openInEditor(model, path).catch(fail);
-        else if (target === "os") void openWithOs(path, model.blockId).catch(fail);
-        else
-            setConfirm({
-                title: `Run ${entry.name}?`,
-                message: `${entry.name} is a program or shortcut. Opening it runs it.`,
-                confirmLabel: "Run",
-                onConfirm: () => void openWithOs(path, model.blockId).catch(fail),
-            });
+        else openWithDefaultApp(entry, target === "program");
     };
 
     /** A folder in a new Files tab of this pane (Ctrl+Enter, middle-click,
@@ -73,5 +97,5 @@ export function useFilesOpening(fv: FilesLocal) {
         );
     };
 
-    return { openEntry, openInNewTab, askDeletePermanently, copyPaths };
+    return { openEntry, openWithDefaultApp, openInNewTab, askDeletePermanently, copyPaths };
 }

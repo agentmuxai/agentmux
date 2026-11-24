@@ -23,7 +23,6 @@ import { FilesFooter } from "./FilesFooter";
 import { FilesPlaces } from "./FilesPlaces";
 import { FilesToolbar } from "./FilesToolbar";
 import type { FilesModel } from "./files-model";
-import { openEntryWithOs } from "./files-open";
 import { useNarrowTiers, type NarrowTiers } from "./files-narrow";
 import { FilesPreview } from "./files-preview";
 import { FileRow, GridTile, ROW_HEIGHT, TILE_H, TILE_W } from "./files-rows";
@@ -171,7 +170,7 @@ function FilesBody(props: {
                         pathOf={(name) => model.pathOf(name)}
                         blockId={model.blockId}
                         onOpen={opening.openEntry}
-                        onOpenWithOs={(entry) => openEntryWithOs(model, entry.name)}
+                        onOpenWithOs={(entry) => opening.openWithDefaultApp(entry)}
                     />
                 </Show>
             </div>

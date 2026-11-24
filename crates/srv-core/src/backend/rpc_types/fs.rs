@@ -372,6 +372,10 @@ pub struct FsPathReq {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub block_id: Option<String>,
+    /// For `fs.open`: the person has been asked and said yes to opening a file a container agent can write.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub confirmed: Option<bool>,
 }
 
 // ── Copy/move jobs (spec §7.1, §7.2) ─────────────────────────────────────
