@@ -19,6 +19,7 @@ import { tip } from "@/app/element/tip";
 import { resolveFloatingName } from "./instance-floating-name";
 import type { OpacityControlComponent } from "./InstancePanelRows";
 import type { AboutDetails, WorkspaceRename } from "./instance-panel-state";
+import { keyLabel } from "@/app/keybindings";
 
 /** "About" metadata: version, the channel its data is in, commit, CEF, runtime and build time, each only when the host reports it. */
 export const AboutSection = (props: { about: Accessor<AboutDetails> }): JSX.Element => {
@@ -105,7 +106,7 @@ export const WorkspaceTitle = (props: { rename: WorkspaceRename; windowCount: ()
         <div
             class="instance-panel-section-title instance-panel-workspace-title"
             classList={{ "instance-panel-workspace-title-editing": r.editing() }}
-            {...tip("The open workspace — double-click to rename (F2)")}
+            {...tip(`The open workspace — double-click to rename (${keyLabel("F2")})`)}
             role="button"
             tabIndex={0}
             onDblClick={(e) => {

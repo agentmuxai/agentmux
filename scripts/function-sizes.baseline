@@ -392,7 +392,7 @@
 128 frontend/app/view/swarm/swarm-view.tsx::SubagentRow
 127 frontend/app/view/sysinfo/sysinfo-model.ts::sampleReducer
 290 frontend/app/view/term/term.tsx::TerminalView
-224 frontend/app/view/term/termViewModel.ts::TermViewModel::constructor
+218 frontend/app/view/term/termViewModel.ts::TermViewModel::constructor
 127 frontend/app/view/term/termwrap.ts::TermWrap::constructor
 268 frontend/app/view/term/termwrap.ts::TermWrap::init
 128 frontend/app/view/toolchain/CliDiskSpace.tsx::CliDiskSpace
@@ -411,9 +411,9 @@
 467 frontend/app/workspace/workspace.tsx::WorkspaceElem
 119 frontend/layout/lib/layoutInvariants.ts::validateLayoutInvariants
 170 frontend/layout/lib/layoutModel.ts::LayoutModel::constructor
-158 frontend/layout/lib/layoutNodeModels.ts::getNodeModel
+156 frontend/layout/lib/layoutNodeModels.ts::getNodeModel
 232 frontend/layout/lib/layoutPersistence.ts::handleBackendAction
-138 frontend/layout/lib/layoutResize.ts::onResizeMove
+136 frontend/layout/lib/layoutResize.ts::onResizeMove
 200 frontend/layout/lib/layoutTree.ts::computeMoveNode
 123 frontend/layout/lib/tilelayout-shared.tsx::OverlayNodeWrapper
 105 frontend/perf/hud.tsx::PerfHud
