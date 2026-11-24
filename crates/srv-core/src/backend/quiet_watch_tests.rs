@@ -354,7 +354,7 @@ fn a_message_the_agent_sends_is_activity_and_one_sent_to_it_is_not() {
 
 #[test]
 fn the_note_to_a_watcher_says_who_what_and_how_long() {
-    let tasks = vec![OwedTask { num: 1234, filer_uid: String::new(), updated_ms: 0 }, OwedTask { num: 1240, filer_uid: String::new(), updated_ms: 0 }];
+    let tasks = vec![OwedTask { num: 1234, filer_uid: String::new(), updated_ms: 0, asked: false }, OwedTask { num: 1240, filer_uid: String::new(), updated_ms: 0, asked: false }];
     assert_eq!(quiet_body("Pulp", false, &tasks, 22, false, ""), "Your agent Pulp has been quiet for 22 min on #1234, #1240. It is idle.");
     assert_eq!(
         quiet_body("Pulp", true, &[], 20, false, "next I run the check"),
@@ -447,4 +447,97 @@ fn a_mute_asks_for_one_to_240_minutes_and_zero_lifts_it() {
     assert!(!unmute("mute-b", T0 + MIN), "and now none");
     let long = "w".repeat(500);
     assert_eq!(mute("mute-c", 5, &long, "a", T0).unwrap().reason.chars().count(), 120);
+}
+
+fn ask_at(tasks: &[i64], at_ms: u64) -> Ask {
+    Ask { sender: "agenty".into(), block_id: "b".into(), tasks: tasks.to_vec(), at_ms }
+}
+
+fn held_task(num: i64, updated_ms: u64) -> OwedTask {
+    OwedTask { num, filer_uid: String::new(), updated_ms, asked: false }
+}
+
+#[test]
+fn an_urgent_ask_is_answered_by_a_message_to_its_sender_by_a_move_on_a_task_it_named_or_by_the_task_leaving() {
+    let ask = ask_at(&[48288], 1_000);
+    // Nothing since: open.
+    assert!(!ask_answered(&ask, None, &[], true));
+    // A message to the sender before the ask does not answer it; one at or after does.
+    assert!(!ask_answered(&ask, Some(999), &[], true));
+    assert!(ask_answered(&ask, Some(1_000), &[], true));
+    // A task it named that moved after the ask; one that moved before, or another task, does not.
+    assert!(ask_answered(&ask, None, &[held_task(48288, 1_001)], true));
+    assert!(!ask_answered(&ask, None, &[held_task(48288, 1_000)], true));
+    assert!(!ask_answered(&ask, None, &[held_task(1, 9_999)], true));
+    // None of the tasks it named is waiting on the agent any more.
+    assert!(ask_answered(&ask, None, &[], false));
+}
+
+#[test]
+fn the_nudge_and_the_note_name_the_urgent_message_and_the_tasks_it_was_about() {
+    let asked = |num| OwedTask { num, filer_uid: "y".into(), updated_ms: 0, asked: true };
+    assert_eq!(nudge_text(&[asked(48288)], 15), "You have an unanswered urgent message about #48288 and nothing has run for 15 minutes. Carry on, or say what you are waiting on.");
+    assert_eq!(
+        nudge_text(&[held_task(7, 0), asked(48288)], 15),
+        "You hold #7, have an unanswered urgent message about #48288 and nothing has run for 15 minutes. Carry on, or say what you are waiting on."
+    );
+    assert_eq!(quiet_body("Pulp", false, &[asked(48288)], 22, false, ""), "Your agent Pulp has been quiet for 22 min without answering your urgent message about #48288. It is idle.");
+    assert_eq!(
+        quiet_body("Pulp", false, &[held_task(7, 0), asked(48288)], 22, false, ""),
+        "Your agent Pulp has been quiet for 22 min on #7, and has not answered your urgent message about #48288. It is idle."
+    );
+}
+
+/// From the record to the watch: an urgent message from a proven sender that names a task waiting on the recipient
+/// makes the recipient owe an answer to the sender, until the task is no longer waiting on it.
+#[tokio::test]
+async fn an_urgent_message_makes_the_recipient_owe_its_sender_an_answer_until_the_task_leaves() {
+    use crate::backend::reactive::{InjectionRequest, InjectionResponse};
+    let state = crate::test_support::core_parts();
+    let tab = tab(&state).await;
+    let id = uuid::Uuid::new_v4().to_string();
+    let (sender_id, recipient_id) = (format!("asker-{id}"), format!("owner-{id}"));
+    let mut sender = test_agent_def(&sender_id, &format!("Asker {}", &id[..8]), "claude", "host", 1, "");
+    let mut recipient = test_agent_def(&recipient_id, &format!("Owner {}", &id[..8]), "claude", "host", 1, "");
+    for d in [&mut sender, &mut recipient] {
+        state.mstore.agent_def_insert(d).unwrap();
+    }
+    let _sender_pane = pane(&state, &tab, &sender_id).await;
+    let recipient_pane = pane(&state, &tab, &recipient_id).await;
+    let (work, _dir) = work_store();
+    // A task the recipient holds (claimed, so its card has a number); the empty `claimed` map below keeps the watch
+    // from counting it as held work, so only the ask is under test.
+    work.work_queue_enqueue(&item("waiting", "uid-filer")).unwrap();
+    let holder = ClaimFilter { agent_id: recipient.slug.clone(), agent_uid: recipient_id.clone(), ..ClaimFilter::default() };
+    let claim_ms = 1_000_000_000_000i64;
+    work.work_queue_claim(&holder, claim_ms, 120_000).unwrap().expect("claimed");
+    let num = read_claimed(&work, claim_ms).first().expect("a claimed task").card.num;
+    let delivered = |block: &str| -> InjectionResponse { serde_json::from_value(json!({ "success": true, "request_id": "r", "block_id": block, "timestamp": 1 })).unwrap() };
+    let urgent = |message: String| InjectionRequest {
+        source_agent: Some(sender.slug.clone()),
+        priority: Some("urgent".into()),
+        message,
+        delivery_tier: Some("host".into()),
+        sig_verified: Some(true),
+        ..Default::default()
+    };
+    let defs = vec![sender.clone(), recipient.clone()];
+    let now = agentmux_common::time::now_ms_u64() + 1_000;
+
+    let _turn = urgent_asks::TEST_TURN.lock();
+    urgent_asks::note_delivery(&urgent(format!("please do #{num} now")), &delivered(&recipient_pane));
+    let open = open_asks_by_def(&state.mstore, &work, &defs, &HashMap::new(), now);
+    let owed = open.get(&recipient_id).expect("the recipient owes an answer");
+    assert_eq!(owed.len(), 1);
+    assert_eq!((owed[0].num, owed[0].filer_uid.as_str(), owed[0].asked), (num, sender_id.as_str(), true), "owed to the sender, as a filer is");
+    assert!(open.get(&sender_id).is_none(), "the sender owes nothing");
+
+    // Still open at the next sweep: a read does not settle it.
+    assert!(open_asks_by_def(&state.mstore, &work, &defs, &HashMap::new(), now).contains_key(&recipient_id));
+
+    // An urgent message that names a task not waiting on the recipient is settled at once.
+    urgent_asks::note_delivery(&urgent("about #999999".into()), &delivered(&recipient_pane));
+    let open = open_asks_by_def(&state.mstore, &work, &defs, &HashMap::new(), now);
+    assert_eq!(open.get(&recipient_id).map(|v| v.iter().map(|t| t.num).collect::<Vec<_>>()), Some(vec![num]), "only the task that waits on it");
+    assert!(urgent_asks::open_asks(now).iter().all(|a| !a.tasks.contains(&999_999)), "forgotten");
 }

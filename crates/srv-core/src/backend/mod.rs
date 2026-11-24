@@ -302,6 +302,7 @@ pub mod worker_failure_note;
 /// A leader hears when its workers (and the agents that hold its tasks) fail, stop or wait on a question.
 pub mod worker_notes;
 pub mod quiet_watch;
+pub mod urgent_asks;
 pub mod note_outbox;
 
 pub use oref::ORef;
