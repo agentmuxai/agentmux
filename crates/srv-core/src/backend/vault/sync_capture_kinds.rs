@@ -4,6 +4,9 @@
 //! The other two kinds of record in a Vault's collection, written by [`super::sync_capture::capture`] beside its entries:
 //! this machine's activity lines (`sync_activity`) and the site grants of its entries (`sync_grant`).
 //!
+//! Both name their entry by the record it is written under (its link id), never by the id it has here: an entry taken from
+//! another machine has an id of its own there, and the record's id is the one every machine has.
+//!
 //! - A line is written once, as `a.<machine>.<seq>`, sealed. It goes to the Vault its entry is in, and a line with no entry,
 //!   or of an entry that stays on this machine, stays here too. What was written is remembered as the highest sequence
 //!   number looked at, per Vault, so a capture reads only the lines made since.
@@ -63,41 +66,44 @@ pub(super) fn read(store: &Store, vault_id: &str) -> Result<Reads, String> {
     Ok(Reads { lines: store.vault_activity_after(sent).map_err(|e| e.to_string())?, grants: store.vault_grant_rows().map_err(|e| e.to_string())? })
 }
 
-/// Writes the lines and grants of `vault_id`. `rows` are its entries that are captured; `here` are all of its entries,
-/// including the ones that stay on this machine.
-pub(super) fn write(conn: &Connection, signer: &mut Signer, vault_id: &str, ring: &KeyRing, reads: &Reads, rows: &[VaultRow], here: &HashSet<&str>, now_ms: i64) -> Result<Wrote, String> {
+/// Writes the lines and grants of `vault_id`. `rows` are its entries that are captured, and `records` the record each is
+/// written under; `here` are all of its entries, including the ones that stay on this machine.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn write(conn: &Connection, signer: &mut Signer, vault_id: &str, ring: &KeyRing, reads: &Reads, rows: &[VaultRow], records: &HashMap<String, String>, here: &HashSet<&str>, now_ms: i64) -> Result<Wrote, String> {
     let mut out = Wrote::default();
     let captured: HashMap<&str, i64> = rows.iter().map(|r| (r.id.as_str(), r.created_at)).collect();
-    out.lines = write_lines(conn, signer, vault_id, ring, reads, &captured, now_ms)?;
-    let (grants, tombstoned) = write_grants(conn, signer, vault_id, ring, reads, &captured, here, now_ms)?;
+    out.lines = write_lines(conn, signer, vault_id, ring, reads, &entries_of(conn, vault_id, records)?, now_ms)?;
+    let (grants, tombstoned) = write_grants(conn, signer, vault_id, ring, reads, &captured, records, here, now_ms)?;
     out.grants = grants;
     out.tombstoned = tombstoned;
     Ok(out)
 }
 
-/// The entries whose lines go to `vault_id`: the ones captured now, and the ones it has written that are gone since (their
-/// last lines, the delete's included, are still to go).
-fn entries_of(conn: &Connection, vault_id: &str, captured: &HashMap<&str, i64>) -> Result<HashSet<String>, String> {
-    let mut ids: HashSet<String> = captured.keys().map(|k| k.to_string()).collect();
-    let mut stmt = conn.prepare("SELECT entry_id FROM db_sync_vault_seen WHERE vault = ?1").map_err(|e| e.to_string())?;
-    let seen = stmt.query_map(params![vault_id], |r| r.get::<_, String>(0)).map_err(|e| e.to_string())?;
-    for id in seen {
-        ids.insert(id.map_err(|e| e.to_string())?);
+/// The entries whose lines go to `vault_id`, each with its record: the ones captured now, and the ones it has written that are
+/// gone since (their last lines, the delete's included, are still to go).
+fn entries_of(conn: &Connection, vault_id: &str, records: &HashMap<String, String>) -> Result<HashMap<String, String>, String> {
+    let mut ids = records.clone();
+    let mut stmt = conn.prepare("SELECT entry_id, record FROM db_sync_vault_seen WHERE vault = ?1").map_err(|e| e.to_string())?;
+    let seen = stmt.query_map(params![vault_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))).map_err(|e| e.to_string())?;
+    for pair in seen {
+        let (entry, record) = pair.map_err(|e| e.to_string())?;
+        ids.entry(entry).or_insert(record);
     }
     Ok(ids)
 }
 
-fn write_lines(conn: &Connection, signer: &mut Signer, vault_id: &str, ring: &KeyRing, reads: &Reads, captured: &HashMap<&str, i64>, now_ms: i64) -> Result<usize, String> {
+fn write_lines(conn: &Connection, signer: &mut Signer, vault_id: &str, ring: &KeyRing, reads: &Reads, entries: &HashMap<String, String>, now_ms: i64) -> Result<usize, String> {
     let Some(last) = reads.lines.last().map(|l| l.seq) else { return Ok(0) };
-    let entries = entries_of(conn, vault_id, captured)?;
     let mut written = 0;
-    for line in reads.lines.iter().filter(|l| !l.entry_id.is_empty() && entries.contains(&l.entry_id)) {
+    for (line, entry_record) in reads.lines.iter().filter_map(|l| entries.get(&l.entry_id).map(|r| (l, r))) {
         let record = sync_activity::record_id(signer.machine, line.seq);
         // A line is never written twice: its record is the same every time.
         if log::current(conn, vault_id, &record).map_err(|e| e.to_string())?.is_some() {
             continue;
         }
-        let body = Zeroizing::new(serde_json::to_vec(&ActivityBody::of_row(line)).map_err(|e| e.to_string())?);
+        let mut body = ActivityBody::of_row(line);
+        body.entry_id = entry_record.clone();
+        let body = Zeroizing::new(serde_json::to_vec(&body).map_err(|e| e.to_string())?);
         log::append_local_with(conn, signer, vault_id, &record, false, now_ms, sealer(ring, &body)).map_err(|e| format!("{e:?}"))?;
         written += 1;
     }
@@ -120,16 +126,16 @@ fn seen_grants(conn: &Connection, vault_id: &str) -> Result<Vec<Seen>, String> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn write_grants(conn: &Connection, signer: &mut Signer, vault_id: &str, ring: &KeyRing, reads: &Reads, captured: &HashMap<&str, i64>, here: &HashSet<&str>, now_ms: i64) -> Result<(usize, usize), String> {
+fn write_grants(conn: &Connection, signer: &mut Signer, vault_id: &str, ring: &KeyRing, reads: &Reads, captured: &HashMap<&str, i64>, records: &HashMap<String, String>, here: &HashSet<&str>, now_ms: i64) -> Result<(usize, usize), String> {
     let seen = seen_grants(conn, vault_id)?;
     let (mut written, mut ended) = (0, 0);
     let mut current = HashSet::new();
     for (entry_id, origin, granted_at) in &reads.grants {
-        let Some(&created_at) = captured.get(entry_id.as_str()) else { continue };
+        let (Some(&created_at), Some(entry_record)) = (captured.get(entry_id.as_str()), records.get(entry_id)) else { continue };
         if origin.is_empty() {
             continue;
         }
-        let body = GrantBody::new(entry_id, origin, *granted_at, created_at);
+        let body = GrantBody::new(entry_record, origin, *granted_at, created_at);
         let record = body.record_id();
         current.insert(record.clone());
         if seen.iter().any(|s| s.record == record && s.granted_at == *granted_at && s.entry_created_at == created_at) {

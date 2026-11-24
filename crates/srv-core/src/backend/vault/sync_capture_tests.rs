@@ -207,6 +207,8 @@ fn an_activity_line_of_an_entry_is_written_once_sealed_and_a_line_with_no_entry_
     assert_eq!(a.capture(VAULT, NOW), Captured { written: 1, lines: 1, ..Captured::default() });
     let record = a.line_record(VAULT, first.seq).expect("the line is a record named for the machine and its number");
     assert!(!String::from_utf8_lossy(&record.body).contains("Invoice provider key"), "the label is sealed");
+    let link = a.store.vault_link_primary("entry-1").unwrap().unwrap();
+    assert_eq!(opened_body::<sync_activity::ActivityBody>(&a.ring, &record).entry_id, link, "the line names its entry by its link id");
     assert!(a.line_record(VAULT, first.seq + 1).is_none(), "a line of no entry is not written");
     // Nothing new, nothing written; a later line is.
     assert_eq!(a.capture(VAULT, NOW + 10), Captured::default());
@@ -231,8 +233,16 @@ fn the_last_lines_of_an_entry_that_was_deleted_are_written_and_a_line_of_another
     assert!(a.line_record("vault-b", other.seq).is_some());
 }
 
+/// The grant's record: named for the entry's link id and the site, not for the id the entry has here.
 fn grant_record(m: &Machine, vault: &str, entry: &str, origin: &str) -> Option<Record> {
-    log::current(&m.store.conn().lock().unwrap(), vault, &sync_grant::record_id(entry, origin)).unwrap()
+    let link = m.store.vault_link_primary(entry).unwrap().expect("the entry has a link id");
+    log::current(&m.store.conn().lock().unwrap(), vault, &sync_grant::record_id(&link, origin)).unwrap()
+}
+
+fn opened_body<T: serde::de::DeserializeOwned>(ring: &KeyRing, r: &Record) -> T {
+    let h = &r.header;
+    let place = Place { vault: &h.collection, record: &h.record, version: &h.version, base: h.base.as_ref(), epoch: h.epoch };
+    sync_seal::open_record(ring.get(h.epoch).unwrap(), &place, &r.body).unwrap()
 }
 
 #[test]
@@ -243,6 +253,8 @@ fn a_site_grant_is_written_once_sealed_and_ended_when_it_is_revoked() {
     assert_eq!(a.capture(VAULT, NOW), Captured { written: 1, grants: 1, ..Captured::default() });
     let record = grant_record(&a, VAULT, "entry-1", "https://billing.example.com").expect("a record named for the entry and the site");
     assert!(!String::from_utf8_lossy(&record.body).contains("billing.example.com"), "the site is sealed, the id says neither");
+    let link = a.store.vault_link_primary("entry-1").unwrap().unwrap();
+    assert_eq!(opened_body::<sync_grant::GrantBody>(&a.ring, &record).entry_id, link, "the grant names its entry by its link id");
     assert_eq!(a.capture(VAULT, NOW + 10), Captured::default(), "an unchanged grant is not written again");
     a.store.vault_grant_revoke("entry-1", "https://billing.example.com").unwrap();
     assert_eq!(a.capture(VAULT, NOW + 20), Captured { tombstoned: 1, ..Captured::default() });
@@ -262,8 +274,8 @@ fn a_grant_follows_its_entry_out_of_a_vault_and_one_of_an_entry_that_stays_here_
     a.store.vault_insert(&row("signin", "A sign-in", VAULT, &own)).unwrap();
     a.store.vault_grant_add("entry-1", "https://billing.example.com", NOW, 1).unwrap();
     a.store.vault_grant_add("signin", "https://billing.example.com", NOW, 1).unwrap();
-    a.capture(VAULT, NOW);
-    assert!(grant_record(&a, VAULT, "signin", "https://billing.example.com").is_none(), "the grant of an entry that stays here does not go");
+    assert_eq!(a.capture(VAULT, NOW).grants, 1, "the grant of an entry that stays here does not go");
+    assert!(a.store.vault_link_primary("signin").unwrap().is_none());
     // The entry moves to another Vault: its grant ends here and is written there.
     a.store.vault_move_entry("entry-1", "vault-b").unwrap();
     assert_eq!(a.capture(VAULT, NOW + 10).tombstoned, 1);

@@ -231,7 +231,8 @@ pub fn capture(store: &Store, signer: &mut Signer, vault_id: &str, ring: &KeyRin
         )
         .map_err(|e| e.to_string())?;
     }
-    let wrote = kinds::write(&conn, signer, vault_id, ring, &more, &rows, &here, now_ms)?;
+    let records: std::collections::HashMap<String, String> = pending.iter().map(|p| (p.entry_id.clone(), p.record.clone())).collect();
+    let wrote = kinds::write(&conn, signer, vault_id, ring, &more, &rows, &records, &here, now_ms)?;
     out.lines = wrote.lines;
     out.grants = wrote.grants;
     out.tombstoned += wrote.tombstoned;

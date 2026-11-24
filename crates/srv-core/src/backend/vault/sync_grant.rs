@@ -17,6 +17,7 @@ use super::sync_seal::Version;
 /// A site grant as a sync record carries it, sealed: which entry and which site stay out of the clear header.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GrantBody {
+    /// The record the entry is written under (its link id), the same on every machine; not the id it has on one.
     pub entry_id: String,
     pub origin: String,
     pub granted_at: i64,
