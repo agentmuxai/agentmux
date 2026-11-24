@@ -479,6 +479,12 @@
 .files-name {
     overflow: hidden;
     text-overflow: ellipsis;
+
+    // A found row: the name stays whole while the folder after it takes the ellipsis.
+    &.files-name--found {
+        flex-shrink: 0;
+        max-width: 100%;
+    }
 }
 
 .files-entry-error {
