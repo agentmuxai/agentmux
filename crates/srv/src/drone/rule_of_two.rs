@@ -111,14 +111,14 @@ fn writes_outside(node: &FlowNode, kind: BlockKind) -> bool {
     }
 }
 
-/// The first `://` that is not inside a `{{reference}}`.
+/// Where the scheme ends: just after the first `:` that is not inside a `{{reference}}`.
 fn scheme_end(url: &str) -> Option<usize> {
     let mut i = 0;
     while i < url.len() {
         if url[i..].starts_with("{{") {
             i = url[i + 2..].find("}}").map_or(url.len(), |close| i + 2 + close + 2);
-        } else if url[i..].starts_with("://") {
-            return Some(i + 3);
+        } else if url[i..].starts_with(':') {
+            return Some(i + 1);
         } else {
             i += url[i..].chars().next().map_or(1, char::len_utf8);
         }
@@ -126,19 +126,22 @@ fn scheme_end(url: &str) -> Option<usize> {
     None
 }
 
-/// The part of a request address that names where it goes: the scheme and the host. A `/`, `?` or `#` inside a
-/// `{{reference | filter:arg}}` does not end it, and nor does a `://` inside one.
+/// The part of a request address that names where it goes: the scheme and the host. The request is made the way a browser
+/// reads a URL, so any run of slashes or backslashes after the scheme (`https:/x`, `https:///x`) is one `//`, and a backslash
+/// ends the host as a slash does. A delimiter inside a `{{reference | filter:arg}}`, or a `:` inside one, does not count.
 fn address_of(url: &str) -> &str {
-    let after_scheme = scheme_end(url).unwrap_or(0);
     let bytes = url.as_bytes();
-    let mut i = after_scheme;
+    let mut i = scheme_end(url).unwrap_or(0);
+    while i < bytes.len() && matches!(bytes[i], b'/' | b'\\') {
+        i += 1;
+    }
     while i < bytes.len() {
         if bytes[i..].starts_with(b"{{") {
             // Skip the whole reference; one that never closes runs to the end of the address.
             i = url[i + 2..].find("}}").map_or(bytes.len(), |close| i + 2 + close + 2);
             continue;
         }
-        if matches!(bytes[i], b'/' | b'?' | b'#') {
+        if matches!(bytes[i], b'/' | b'\\' | b'?' | b'#') {
             break;
         }
         i += 1;
@@ -220,7 +223,8 @@ impl<'a> Flow<'a> {
         match head {
             "trigger" => is_tainted(self.fields, rest) && self.reaches_unapproved(None, at),
             "env" => false,
-            "item" | "index" => self.foreach_of.get(at).is_some_and(|fe| self.items_outside(fe)),
+            // Outside a loop body there is no local: the runtime reads `item` and `index` as block ids then.
+            "item" | "index" if self.foreach_of.contains_key(at) => self.foreach_of.get(at).is_some_and(|fe| self.items_outside(fe)),
             "var" | "vars" => self
                 .nodes
                 .iter()

@@ -141,6 +141,26 @@ fn a_pinned_call_is_followed_as_pinned() {
 }
 
 #[test]
+fn the_host_is_found_the_way_a_url_is_read() {
+    assert_eq!(address_of("https:///{{trigger.host}}/path"), "https:///{{trigger.host}}");
+    assert_eq!(address_of("https:/{{trigger.host}}/p"), "https:/{{trigger.host}}");
+    assert_eq!(address_of("https:\\\\{{trigger.host}}\\p"), "https:\\\\{{trigger.host}}");
+    assert_eq!(address_of("{{trigger.host}}:8080/x"), "{{trigger.host}}:8080");
+    assert_eq!(address_of("https://a.example.com\\x"), "https://a.example.com");
+    let get = graph(&[("get", json!({ "kind": "api", "method": "GET", "url": "https:///{{trigger.host}}/path", "headers": { "Authorization": "Bearer abc" } }))], &[]);
+    assert_eq!(broken(&get, &webhook()), ["get"]);
+}
+
+#[test]
+fn item_and_index_outside_a_loop_are_block_ids() {
+    let nodes = [
+        ("item", json!({ "kind": "api", "method": "GET", "url": "https://ci.example.com/x" })),
+        ("post", comment("{{item.body}}")),
+    ];
+    assert_eq!(broken(&graph(&nodes, &[("item", "post")]), &webhook()), ["post"]);
+}
+
+#[test]
 fn an_error_edge_out_of_an_approval_is_not_an_approval() {
     // A no and a silence fail the Approval, and only its `error` edge takes them: the write on it runs when nobody approved.
     let mut g = graph(&[("ok", approval()), ("post", comment("{{trigger.title}}"))], &[("ok", "post")]);
