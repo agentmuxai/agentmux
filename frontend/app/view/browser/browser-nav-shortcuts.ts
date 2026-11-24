@@ -3,11 +3,12 @@
 
 import { onCleanup, onMount } from "solid-js";
 import { getApi } from "@/util/app-api";
-import { openIncognitoTab } from "./browser-profile-menu";
+import { closeBrowserTab } from "./browser-close-tab";
+import { openIncognitoTab, openNewTab } from "./browser-profile-menu";
 import type { AddressBarState, BrowserNavBarProps } from "./browser-nav-address";
 
 /**
- * The host's pane shortcuts for this bar: focus the address, go Home, open an Incognito tab.
+ * The host's pane shortcuts for this bar: focus the address, go Home, open a tab or an Incognito tab, close this tab.
  * Ctrl+L (Cmd+L on macOS) is dead by default in a browser pane — CEF
  * intercepts it at the pre-key stage (crates/cef/src/client/handlers.rs)
  * since a pane's keystrokes go to the CEF child browser, not this webview,
@@ -35,6 +36,14 @@ export function useBrowserPaneShortcuts(
                 }
                 if (payload.action === "new-incognito") {
                     openIncognitoTab(model, home());
+                    return;
+                }
+                if (payload.action === "new-tab") {
+                    openNewTab(model, home());
+                    return;
+                }
+                if (payload.action === "close-tab") {
+                    void closeBrowserTab(model);
                     return;
                 }
                 if (payload.action !== "focus-address") return;
