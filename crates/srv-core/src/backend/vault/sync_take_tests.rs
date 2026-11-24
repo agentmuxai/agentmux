@@ -393,10 +393,11 @@ fn an_activity_line_named_for_another_machine_or_ended_is_not_taken() {
 }
 
 #[test]
-fn a_grant_or_a_record_that_is_not_an_entry_s_is_kept_in_the_log_and_not_taken_into_the_store() {
+fn a_grant_that_is_not_its_entry_s_and_site_s_or_a_record_that_is_not_an_entry_s_is_kept_in_the_log_and_not_taken_into_the_store() {
     let mut a = machine("a", 1);
     let mut b = machine("b", 2);
     let p = pins(&a, &b);
+    // A grant record whose id is not the one its entry and site make.
     let grant = format!("g-{}", "0123456789abcdef0123456789abcdef");
     write_sealed(&mut a, &grant, &sync_grant::GrantBody::new("entry-a", "https://example.com", NOW, 1), NOW);
     write_sealed(&mut a, "plain-name", &serde_json::json!({ "label": "Not an entry" }), NOW + 1);
@@ -479,4 +480,68 @@ fn what_this_machine_held_under_its_larger_record_is_kept_beside_the_smaller_one
     let kept = b.versions("entry-b");
     assert_eq!(kept, [(format!("{KEPT_PREFIX}changed on b at the same time"), true)], "b's own value is still there");
     assert_eq!(b.capture(VAULT, NOW + 30).written, 0, "and taking it is not a change to write back");
+}
+
+const SITE: &str = "https://billing.example.com";
+
+/// Sends what `from` holds and `to` lacks, the records `first` made before all the others (each machine's own in order, as
+/// the layer requires).
+fn ship_first_from(from: &Machine, to: &mut Machine, pins: &Pins, first: &str, at: i64) -> Vec<Taken> {
+    let vector: Vector = log::vector(&to.store.conn().lock().unwrap(), VAULT).unwrap();
+    let mut records = log::since(&from.store.conn().lock().unwrap(), VAULT, &vector, 100).unwrap();
+    records.sort_by(|x, y| (x.header.origin != first, &x.header.version).cmp(&(y.header.origin != first, &y.header.version)));
+    let own = key();
+    let taker = Taker { machine: &to.id, store: &to.store, ring: &to.ring, key: &own, profiles: &Known(&[]) };
+    records.iter().map(|r| taker.receive(r, pins, &mut to.clock, at).unwrap()).collect()
+}
+
+#[test]
+fn a_grant_that_comes_before_its_entry_waits_and_is_made_when_the_entry_is_taken() {
+    // a makes the entry; c takes it and grants a site; b gets c's records, the grant among them, before a's entry.
+    let mut a = machine("a", 1);
+    let mut b = machine("b", 2);
+    let mut c = machine("c", 3);
+    let p: Pins = [(a.id.clone(), a.public), (b.id.clone(), b.public), (c.id.clone(), c.public)].into_iter().collect();
+    a.store.vault_insert(&entry("entry-a", "Invoice provider key", "api-key", "sk_test_invented_0001", "[]")).unwrap();
+    a.capture(VAULT, NOW);
+    ship(&a, &mut c, &p, NOW + 5);
+    let on_c = c.entry_of(&a.link("entry-a")).unwrap();
+    c.store.vault_grant_add(&on_c, SITE, NOW + 6, 1).unwrap();
+    c.capture(VAULT, NOW + 7);
+    let taken = ship_first_from(&c, &mut b, &p, "c", NOW + 10);
+    assert!(taken.iter().any(|t| matches!(&t.effect, Effect::Skipped(why) if why.contains("waits"))), "{taken:?}");
+    let on_b = b.entry_of(&a.link("entry-a")).expect("the entry came after the grant");
+    assert!(b.store.vault_grant_check(&on_b, SITE).unwrap(), "the grant is made once the entry is here");
+}
+
+#[test]
+fn a_grant_made_for_another_entry_of_the_same_name_is_not_made_here() {
+    let mut a = machine("a", 1);
+    let mut b = machine("b", 2);
+    let p = pins(&a, &b);
+    a.store.vault_insert(&entry("entry-a", "Invoice provider key", "api-key", "sk_test_invented_0001", "[]")).unwrap();
+    a.capture(VAULT, NOW);
+    ship(&a, &mut b, &p, NOW + 10);
+    let on_b = b.entry_of(&a.link("entry-a")).unwrap();
+    // A grant for the entry as it was made at another time.
+    let body = sync_grant::GrantBody::new(&a.link("entry-a"), SITE, NOW, 2);
+    write_sealed(&mut a, &body.record_id(), &body, NOW + 20);
+    let taken = ship(&a, &mut b, &p, NOW + 30);
+    assert!(matches!(&taken[0].effect, Effect::Skipped(why) if why.contains("another entry")), "{taken:?}");
+    assert!(!b.store.vault_grant_check(&on_b, SITE).unwrap());
+}
+
+#[test]
+fn an_activity_line_names_its_entry_by_the_id_it_has_on_the_machine_that_takes_it() {
+    let mut a = machine("a", 1);
+    let mut b = machine("b", 2);
+    let p = pins(&a, &b);
+    a.store.vault_insert(&entry("entry-a", "Invoice provider key", "api-key", "sk_test_invented_0001", "[]")).unwrap();
+    a.store.vault_activity_add(&crate::backend::storage::vault::VaultActivityRow { at: NOW, entry_id: "entry-a".into(), entry_label: "Invoice provider key".into(), action: "revealed".into(), actor: "you".into(), ..Default::default() }).unwrap();
+    a.capture(VAULT, NOW);
+    ship(&a, &mut b, &p, NOW + 10);
+    let on_b = b.entry_of(&a.link("entry-a")).unwrap();
+    let lines = b.store.vault_activity_remote_list(10).unwrap();
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].1.entry_id, on_b, "b's own id for the entry, not a's");
 }

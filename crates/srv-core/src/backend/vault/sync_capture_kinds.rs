@@ -41,7 +41,57 @@ pub(super) const SCHEMA: &str = "
         granted_at       INTEGER NOT NULL,
         entry_created_at INTEGER NOT NULL,
         PRIMARY KEY (vault, record)
+    );
+    -- Grants taken from another machine whose entry is not here yet: the entry's link id, to apply them when it arrives.
+    CREATE TABLE IF NOT EXISTS db_sync_vault_grants_waiting (
+        vault      TEXT NOT NULL,
+        record     TEXT NOT NULL,
+        entry_link TEXT NOT NULL,
+        PRIMARY KEY (vault, record)
     );";
+
+/// Notes that the grant taken into the store as `entry_id` is what the log holds for `record`: a capture then finds nothing
+/// changed, and writes no version of its own. It is not waiting any more.
+pub(super) fn mark_grant(store: &Store, vault: &str, record: &str, entry_id: &str, granted_at: i64, entry_created_at: i64) -> Result<(), String> {
+    let conn = store.conn().lock().unwrap_or_else(|e| e.into_inner());
+    conn.execute(
+        "INSERT OR REPLACE INTO db_sync_vault_grants_seen (vault, record, entry_id, granted_at, entry_created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![vault, record, entry_id, granted_at, entry_created_at],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM db_sync_vault_grants_waiting WHERE vault = ?1 AND record = ?2", params![vault, record]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Forgets a grant taken or ended here: it is not written again, and not waiting.
+pub(super) fn forget_grant(store: &Store, vault: &str, record: &str) -> Result<(), String> {
+    let conn = store.conn().lock().unwrap_or_else(|e| e.into_inner());
+    conn.execute("DELETE FROM db_sync_vault_grants_seen WHERE vault = ?1 AND record = ?2", params![vault, record]).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM db_sync_vault_grants_waiting WHERE vault = ?1 AND record = ?2", params![vault, record]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// A grant record whose entry (named by `entry_link`) is not here yet.
+pub(super) fn wait_grant(store: &Store, vault: &str, record: &str, entry_link: &str) -> Result<(), String> {
+    let conn = store.conn().lock().unwrap_or_else(|e| e.into_inner());
+    conn.execute("INSERT OR REPLACE INTO db_sync_vault_grants_waiting (vault, record, entry_link) VALUES (?1, ?2, ?3)", params![vault, record, entry_link]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// The grant records waiting for an entry that has any of `links`.
+pub(super) fn waiting_for(store: &Store, vault: &str, links: &[String]) -> Result<Vec<String>, String> {
+    let conn = store.conn().lock().unwrap_or_else(|e| e.into_inner());
+    let mut stmt = conn.prepare("SELECT record, entry_link FROM db_sync_vault_grants_waiting WHERE vault = ?1").map_err(|e| e.to_string())?;
+    let rows = stmt.query_map(params![vault], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (record, link) = row.map_err(|e| e.to_string())?;
+        if links.contains(&link) {
+            out.push(record);
+        }
+    }
+    Ok(out)
+}
 
 /// What a capture reads from the store before it takes the connection.
 pub(super) struct Reads {
