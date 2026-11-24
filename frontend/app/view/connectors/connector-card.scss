@@ -148,6 +148,11 @@
     justify-self: end;
 }
 
+// The button whose section is open is held down, so a press that opened something below it reads as done.
+.connector-card-control .ui-button[aria-expanded="true"] {
+    --ui-bg: color-mix(in srgb, var(--accent-color) var(--ui-tint-hover), transparent);
+}
+
 .connector-card-chevron {
     display: inline-block;
     padding: 0 var(--space-1);

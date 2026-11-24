@@ -50,6 +50,10 @@ export type AgentIndex = {
      * another plain word than the display name counts only with its computer (`withComputer`).
      */
     find(written: string, withComputer?: boolean): AgentEntry | undefined;
+    /** The longest display name with a space (`Loap #3`) that `text` holds at `start`, whole, if any. */
+    longestName(text: string, start: number): string | undefined;
+    /** Whether some agent is named `base` and a number (`Loap` for `Loap #3`): then `base #N` is a numbered agent's name. */
+    isNumberedFamily(base: string): boolean;
     /** Whether `written` is one of the names that link only with their computer (D3). */
     neverAlone(written: string): boolean;
     /** First characters any name starts with, to skip most words without a lookup. */

@@ -340,7 +340,8 @@ describe("CommandPaletteModal rows", () => {
             open();
             // Which labels are cut is read for the whole list after the frame that drew it (palette-cut-labels.ts).
             await new Promise((r) => requestAnimationFrame(r));
-            expect(rowOf("Close Tab").getAttribute("data-hover-tip")).toBe("Close Tab");
+            expect(rowOf("Close Tab").hasAttribute("data-hover-tip")).toBe(false); // not before the frame is drawn
+            await vi.waitFor(() => expect(rowOf("Close Tab").getAttribute("data-hover-tip")).toBe("Close Tab"));
             expect(rowOf("New Tab").hasAttribute("data-hover-tip")).toBe(false);
             expect(rowOf("Close Tab").hasAttribute("title")).toBe(false);
         } finally {

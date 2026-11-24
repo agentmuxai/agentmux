@@ -44,7 +44,7 @@ vi.mock("@/app/platform/pane-overlay", () => ({
     usePaneOverlay: () => {},
 }));
 
-import { CommandPaletteModal, ROW_CHUNK } from "./command-palette";
+import { CommandPaletteModal, FIRST_ROWS, ROW_CHUNK } from "./command-palette";
 
 afterEach(() => {
     cleanup();
@@ -161,36 +161,58 @@ describe("the palette's keystroke budget", () => {
     const builtRows = () => document.querySelectorAll(".command-palette-item").length;
     const frame = () => new Promise((r) => requestAnimationFrame(r));
 
-    it("builds one chunk of rows when the palette opens and when a character matches thousands, not all of them", () => {
+    it("builds only the first rows when the palette opens and when a character matches thousands, not all of them", () => {
         h.commands = all;
         const input = open();
-        expect(builtRows()).toBe(ROW_CHUNK);
+        expect(builtRows()).toBe(FIRST_ROWS);
         type(input, "c");
-        expect(builtRows()).toBe(ROW_CHUNK);
+        expect(builtRows()).toBe(FIRST_ROWS);
     });
 
-    it("builds the rest a frame at a time until every row is there, and starts over with the next character", async () => {
+    it("builds the rows after the first ones once the first frame is drawn, not in the rendering step that draws it", async () => {
+        h.commands = all;
+        open();
+        // The rendering step that draws the palette: its callbacks run before the draw, so a chunk built there is in the first frame.
+        await frame();
+        expect(builtRows()).toBe(FIRST_ROWS);
+        await vi.waitFor(() => expect(builtRows()).toBeGreaterThan(FIRST_ROWS)); // a chunk a frame follows, as many as there are
+    });
+
+    it("builds the rest a chunk after each frame until every row is there, and starts over with the next character", async () => {
         h.commands = all.slice(0, ROW_CHUNK * 3 + 7);
         const input = open();
-        expect(builtRows()).toBe(ROW_CHUNK);
-        await frame();
-        await frame();
-        await frame();
-        await frame();
-        expect(builtRows()).toBe(ROW_CHUNK * 3 + 7);
+        expect(builtRows()).toBe(FIRST_ROWS);
+        await vi.waitFor(() => expect(builtRows()).toBe(ROW_CHUNK * 3 + 7));
         type(input, "command");
-        expect(builtRows()).toBe(ROW_CHUNK);
+        expect(builtRows()).toBe(FIRST_ROWS);
     });
 
     it("builds rows that join the list while the palette is open, without a character typed", async () => {
         h.commands = all.slice(0, ROW_CHUNK * 3 + 20);
         open();
-        for (let i = 0; i < 6; i++) await frame(); // everything there is has been built, and the building has stopped
-        expect(builtRows()).toBe(ROW_CHUNK * 3 + 20);
+        await vi.waitFor(() => expect(builtRows()).toBe(ROW_CHUNK * 3 + 20)); // everything there is has been built, and the building has stopped
         // An agent starts: more rows than were built come into the list.
         h.setAgents(entries(ROW_CHUNK * 2, "Agent", "Agent"));
-        for (let i = 0; i < 6; i++) await frame();
-        expect(builtRows()).toBe(ROW_CHUNK * 3 + 20 + ROW_CHUNK * 2);
+        await vi.waitFor(() => expect(builtRows()).toBe(ROW_CHUNK * 3 + 20 + ROW_CHUNK * 2));
+    });
+
+    it("searches the whole list when a character is typed, before the later chunks are built", () => {
+        h.commands = all.slice(0, 500);
+        const input = open();
+        expect(builtRows()).toBe(FIRST_ROWS);
+        // A row far past the first ones (Command 400): still found by the first character typed after the open.
+        type(input, "Command 400 alpha");
+        expect(rowLabels()).toContain("Command 400 alpha");
+    });
+
+    it("moves the selection past the built rows while the later chunks are still to come", () => {
+        h.commands = all.slice(0, 500);
+        const input = open();
+        expect(builtRows()).toBe(FIRST_ROWS);
+        for (let i = 0; i < 30; i++) fireEvent.keyDown(input, { key: "ArrowDown" });
+        const items = Array.from(document.querySelectorAll(".command-palette-item"));
+        expect(items.length).toBeGreaterThan(30);
+        expect(items[30].classList.contains("selected")).toBe(true);
     });
 
     it("builds through the row a key moves the selection to, so End shows the last row", () => {
