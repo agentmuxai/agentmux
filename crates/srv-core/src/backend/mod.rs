@@ -103,6 +103,8 @@ pub mod model_label;
 pub mod agent_context_usage;
 pub mod agent_api_retry;
 pub mod providers;
+pub mod providers_custom;
+pub mod harness_manifest;
 pub mod cli_download;
 pub mod cli_install;
 pub mod cli_prune;
@@ -297,5 +299,6 @@ pub mod worker_failure_note;
 /// A leader hears when its workers (and the agents that hold its tasks) fail, stop or wait on a question.
 pub mod worker_notes;
 pub mod quiet_watch;
+pub mod note_outbox;
 
 pub use oref::ORef;

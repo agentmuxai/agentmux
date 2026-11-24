@@ -50,6 +50,7 @@ import { notifyDrop } from "@/app/drag/file-drop-actions";
 import { createEditorDropHook, openEmptyScratch } from "./editor-drop";
 import { openPendingFiles, pendingEntryKey } from "./pending-open-files";
 import { detectLanguage } from "./editor-language";
+import { refuseContent } from "./editor-refusal";
 import { sniffUnopenable } from "./editor-sniff";
 import { errorSentence } from "./editor-rename-names";
 import { followRename, renameOnDisk } from "./editor-tab-rename";
@@ -759,7 +760,7 @@ export class EditorViewModel {
                 const probe = await RpcApi.FileProbeCommand(TabRpcClient, { path: filePath });
                 const tabNow = snapshot(this.blockId)?.tabs.find((t) => t.id === tabId);
                 if (!tabNow || tabNow.filePath !== canonical) return null;
-                this.viewerTabs.setProbe(tabId, probe as FileProbe);
+                this.viewerTabs.reprobe(tabId, probe as FileProbe, canonical);
                 const viewer = chooseViewer(probe, tabNow.viewerOverride);
                 if (tabNow.viewer !== viewer) dispatch(this.blockId, { type: "SetTabViewer", tabId, viewer, source: "system" });
                 if (viewer !== "text") return this._markViewerLoaded(tabId, `probe:${probe.size}:${probe.mtime}`, opts);
@@ -785,34 +786,8 @@ export class EditorViewModel {
                 return null;
             }
 
-            // Refuse content that looks binary or that would freeze the
-            // renderer in CodeMirror. Specifically:
-            //   1. Any NUL byte → binary (text files don't contain U+0000).
-            //   2. Single line over 100K chars → would block the layout
-            //      thread laying out a half-megabyte-wide line (real-world
-            //      hit: Windows NTUSER.DAT regtrans-ms files come through
-            //      as 512KB of one line).
-            // Both fast checks; bail before stashing content or hashing.
-            const refusal = sniffUnopenable(content, allowBinaryText);
-            // "Open as text anyway" that CodeMirror can't take after all: back
-            // to the file's own viewer, the choice dropped, and say why.
-            const probe = refusal && allowBinaryText ? this.viewerTabs.probe(tabId) : null;
-            if (refusal && probe) {
-                dispatch(this.blockId, { type: "SetTabViewer", tabId, viewer: chooseViewer(probe), clearOverride: true, source: "system" });
-                this.reportFileOpError("Opening as text", new Error(refusal));
-                this._markViewerLoaded(tabId, `probe:${probe.size}:${probe.mtime}`);
-                return null;
-            }
-            if (refusal) {
-                dispatch(this.blockId, {
-                    type: "TabContentLoadFailed",
-                    tabId,
-                    error: refusal,
-                    source: "system",
-                });
-                return null;
-            }
-
+            const refused = refuseContent(this._refusalHost(), tabId, canonical, content, allowBinaryText, opts);
+            if (refused !== undefined) return refused;
             const hash = await sha256Hex(content);
             if (opts?.skipIfHashMatches !== undefined && opts.skipIfHashMatches === hash) {
                 return hash;
@@ -1458,6 +1433,15 @@ export class EditorViewModel {
         const viewer = viewerForDropped(file.name, file.type, tab?.viewerOverride);
         if (tab?.viewer !== viewer) dispatch(this.blockId, { type: "SetTabViewer", tabId, viewer, source: "system" });
         return this._markViewerLoaded(tabId, `dropped:${file.size}:${file.lastModified}`, opts);
+    }
+
+    private _refusalHost() {
+        return {
+            blockId: this.blockId,
+            viewerTabs: this.viewerTabs,
+            report: (action: string, e: Error) => this.reportFileOpError(action, e),
+            markViewerLoaded: (tabId: string, hash: string, opts?: { skipIfHashMatches?: string }) => this._markViewerLoaded(tabId, hash, opts),
+        };
     }
 
     /** A non-text viewer's tab is loaded once its viewer is chosen: the

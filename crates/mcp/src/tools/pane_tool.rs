@@ -10,7 +10,7 @@
 use super::family::{pick, relabeled, Act};
 use super::*;
 
-pub(super) const ACTIONS: &[&str] = &["whoami", "layout", "open", "new_tab", "activate_tab", "focus_window", "rename"];
+pub(super) const ACTIONS: &[&str] = &["whoami", "layout", "open", "new_tab", "activate_tab", "focus_window", "rename", "resize", "move", "place"];
 
 const ACTS: &[Act] = &[
     Act { action: "whoami", tool: "WhoAmI", rename: &[] },
@@ -19,6 +19,9 @@ const ACTS: &[Act] = &[
     Act { action: "activate_tab", tool: "SetActiveTab", rename: &[] },
     Act { action: "focus_window", tool: "FocusWindow", rename: &[] },
     Act { action: "rename", tool: "SetName", rename: &[] },
+    Act { action: "resize", tool: "ResizePane", rename: &[] },
+    Act { action: "move", tool: "MovePane", rename: &[] },
+    Act { action: "place", tool: "PlacePane", rename: &[] },
 ];
 
 /// `open`'s handler for each view; the editor and media handlers take the
@@ -184,6 +187,12 @@ mod tests {
         assert_eq!(acts[0].tool, "SetName");
         assert_eq!(args, json!({ "target": "file", "path": "/w/a.rs", "name": "b.rs" }));
         assert_eq!(route(&json!({ "action": "whoami" })).unwrap().0[0].tool, "WhoAmI");
+        // A floating pane's size and place: each action has its own handler, since the handler is told which by its name.
+        for (action, tool) in [("resize", "ResizePane"), ("move", "MovePane"), ("place", "PlacePane")] {
+            let (acts, args) = route(&json!({ "action": action, "target_id": "b1", "width": 700 })).unwrap();
+            assert_eq!(acts[0].tool, tool);
+            assert_eq!(args, json!({ "target_id": "b1", "width": 700 }));
+        }
         let e = route(&json!({ "action": "close" })).unwrap_err().to_string();
         assert_eq!(e, format!("Pane: unknown action \"close\": use one of {}", ACTIONS.join(", ")));
     }
