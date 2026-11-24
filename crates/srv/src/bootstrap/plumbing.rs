@@ -66,6 +66,8 @@ pub async fn spawn_reducer_plumbing(
     // loudly. Without this, a silent bridge death would manifest as
     // "renaming a workspace stopped propagating" with no log evidence.
     // (Per ReAgent P2 follow-up on PR #852.)
+    // Says once at start when this debug build accepts input into panes without the window's proof (a dev harness).
+    server::window_input::log_dev_switch_at_start();
     let bridge_rx = srv_events_tx.subscribe();
     let bridge_handle = server::mux_obj_bridge::spawn_mux_obj_bridge(
         bridge_rx,

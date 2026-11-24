@@ -16,6 +16,11 @@
 //
 // Spec: docs/specs/SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19.md
 // Auth: docs/specs/SPEC_TEST_API_ACCESS.md §5
+//
+// Needs a dev srv started with AGENTMUX_DEV_INPUT_WITHOUT_PROOF=1 (a debug build on an isolated
+// AGENTMUX_HOME_OVERRIDE home): input into a pane is accepted only from the AgentMux window's
+// proven connection, and this script is not that. An installed instance, or a dev srv started
+// without the switch, refuses its keystrokes ("FORBIDDEN: only the person's window writes input").
 
 import { WebSocket } from "ws";
 import { readFileSync, writeFileSync, readdirSync, statSync } from "fs";

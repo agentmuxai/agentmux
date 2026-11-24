@@ -57,6 +57,7 @@ const CONTROLS: Record<string, string> = {
     "app/view/agent/history/HistoryNavigator.tsx": READ,
     "app/view/agent/history/history-navigation.ts": READ,
     "app/view/agent/hooks/useAgentCommands.ts": SEND,
+    "app/view/agent/hooks/usePtyWidth.ts": "resizes the person's own pane; no prompt",
     "app/view/agent/launch-agent-steps.ts": "writes the agent's own config on launch",
     "app/view/agent/memory-reinjection-controller.ts": SEND,
     "app/view/agent/offline/offline-input.ts": SEND,

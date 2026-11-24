@@ -699,16 +699,12 @@ async fn handle_incoming_text(
 }
 
 /// The window's input commands (`blockinput` keystrokes, `setblocktermsize`, and `controllerinput`'s Stop and resize)
-/// are the person's hands: typed into a block they read as the person's own words. A connection registered as an
-/// agent (the agent's own token, proven at `bus:register`) writes into no block through them. An agent writes into
-/// its own terminal with the Terminal tool (the PtyShell API checks that the shell is its own) and reaches another
-/// agent with Message send. Everything else is as before.
-pub(super) fn refuse_agent_input(ctx: &RpcContext) -> Result<(), String> {
-    if ctx.agent_id.is_empty() {
-        Ok(())
-    } else {
-        Err("FORBIDDEN: an agent writes into its own terminal with the Terminal tool and talks to another agent with Message send".to_string())
-    }
+/// are the person's hands: typed into a block they read as the person's own words. They are accepted only from a
+/// connection that has proved what it is (`window_input::require_window_input`), so an agent, or a connection that
+/// holds only the instance key, writes into no block through them. An agent writes into its own terminal with the
+/// Terminal tool (the PtyShell API checks that the shell is its own) and reaches another agent with Message send.
+pub(super) fn require_window_input(ctx: &RpcContext, command: &str) -> Result<(), String> {
+    super::window_input::require_window_input(ctx, command)
 }
 
 /// `blockinput` and `setblocktermsize`: a payload for a block's controller from this connection. A refusal is sent back
@@ -728,7 +724,7 @@ async fn input_command(wscommand: &str, incoming: &WSIncoming, engine: &Arc<WshR
     } else {
         let Some(ts_val) = incoming.termsize.as_ref() else { return Ok(()) };
         match serde_json::from_value::<TermSize>(ts_val.clone()) {
-            Ok(ts) => refuse_agent_input(&ctx)
+            Ok(ts) => require_window_input(&ctx, "setblocktermsize")
                 .and_then(|()| blockcontroller::send_input(block_id, blockcontroller::BlockInputUnion::resize(ts), None)),
             Err(e) => {
                 tracing::warn!("ws: setblocktermsize parse error: {}", e);
@@ -761,7 +757,7 @@ async fn input_command(wscommand: &str, incoming: &WSIncoming, engine: &Arc<WshR
 /// layer (stops it before it's even sent), but it is eventually consistent;
 /// this is the synchronous backstop against this handler's own state.
 fn dispatch_blockinput(ctx: &RpcContext, block_id: &str, data: Vec<u8>) -> Result<(), String> {
-    refuse_agent_input(ctx)?;
+    require_window_input(ctx, "blockinput")?;
     if blockcontroller::agent_lock::is_locked(block_id) {
         tracing::debug!(block_id = %block_id, "blockinput: dropped — agent lock active");
         return Ok(());
@@ -919,6 +915,7 @@ mod tests {
         let state = test_state();
         let (engine, mut output_rx) = WshRpcEngine::new();
         register_handlers(&engine, state.clone(), "test-conn".to_string());
+        engine.set_rpc_context(RpcContext::operator_for_tests());
 
         async fn send_input(
             engine: &std::sync::Arc<WshRpcEngine>,
@@ -1020,7 +1017,7 @@ mod tests {
     fn blockinput_is_dropped_while_an_agent_lock_is_active() {
         let locked_id = "ws-blockinput-lock-test-locked";
         blockcontroller::agent_lock::lock_until(locked_id, agentmux_common::time::now_ms() + 60_000);
-        let result = dispatch_blockinput(&RpcContext::default(), locked_id, b"y".to_vec());
+        let result = dispatch_blockinput(&RpcContext::operator_for_tests(), locked_id, b"y".to_vec());
         assert!(
             result.is_ok(),
             "a locked blockinput call must be dropped cleanly, not forwarded to send_input: {result:?}"
@@ -1028,7 +1025,7 @@ mod tests {
         blockcontroller::agent_lock::release(locked_id);
 
         let unlocked_id = "ws-blockinput-lock-test-unlocked";
-        let result = dispatch_blockinput(&RpcContext::default(), unlocked_id, b"y".to_vec());
+        let result = dispatch_blockinput(&RpcContext::operator_for_tests(), unlocked_id, b"y".to_vec());
         assert_eq!(
             result,
             Err(format!("no controller for block {unlocked_id}")),
@@ -1045,14 +1042,14 @@ mod tests {
         let someone_elses_pane = "ws-blockinput-agent-test-other-agents-pane";
         let refused = dispatch_blockinput(&agent, someone_elses_pane, b"rm -rf\n".to_vec());
         assert!(refused.as_ref().is_err_and(|e| e.starts_with("FORBIDDEN") && e.contains("Message send")), "{refused:?}");
-        assert!(refuse_agent_input(&agent).is_err());
-        // The window (proven) and a connection with no agent registration are not refused: they reach send_input.
-        for person in [RpcContext::operator_for_tests(), RpcContext::default()] {
-            assert_eq!(
-                dispatch_blockinput(&person, someone_elses_pane, b"y".to_vec()),
-                Err(format!("no controller for block {someone_elses_pane}"))
-            );
-        }
+        assert!(require_window_input(&agent, "blockinput").is_err());
+        // The window (proven) reaches send_input; a connection with no proof, holding only the instance key, does not.
+        assert_eq!(
+            dispatch_blockinput(&RpcContext::operator_for_tests(), someone_elses_pane, b"y".to_vec()),
+            Err(format!("no controller for block {someone_elses_pane}"))
+        );
+        let unproven = dispatch_blockinput(&RpcContext::default(), someone_elses_pane, b"y".to_vec());
+        assert!(unproven.as_ref().is_err_and(|e| e.starts_with("FORBIDDEN: only the person") && e.contains("isn't the AgentMux window")), "{unproven:?}");
     }
 
     /// `controllerinput` (Stop, resize) and its refusal for an agent's connection, through a real engine: the agent is
@@ -1081,10 +1078,10 @@ mod tests {
         let agent = RpcContext { agent_id: "agent9".to_string(), ..Default::default() };
         let resp = call(agent, "ci-other-agents-controller").await;
         assert!(resp.error.starts_with("FORBIDDEN") && resp.error.contains("Terminal tool"), "{}", resp.error);
-        for person in [RpcContext::operator_for_tests(), RpcContext::default()] {
-            let resp = call(person, "ci-other-agents-controller").await;
-            assert!(resp.error.contains("no controller"), "the window still reaches the controller: {}", resp.error);
-        }
+        let resp = call(RpcContext::operator_for_tests(), "ci-other-agents-controller").await;
+        assert!(resp.error.contains("no controller"), "the window still reaches the controller: {}", resp.error);
+        let resp = call(RpcContext::default(), "ci-other-agents-controller").await;
+        assert!(resp.error.starts_with("FORBIDDEN: only the person") && resp.error.contains("isn't the AgentMux window"), "a connection with no proof is refused: {}", resp.error);
     }
 
     /// The lease must stop dropping input the moment it lapses, with nobody
@@ -1101,6 +1098,7 @@ mod tests {
         let state = test_state();
         let (engine, mut output_rx) = WshRpcEngine::new();
         register_handlers(&engine, state, "test-conn-lapse".to_string());
+        engine.set_rpc_context(RpcContext::operator_for_tests());
 
         let block_id = "ci-lapsing-shell";
         blockcontroller::agent_lock::lock_until(block_id, agentmux_common::time::now_ms() + 40);

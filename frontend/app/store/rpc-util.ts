@@ -6,12 +6,13 @@ import { mpsReconnectHandler } from "@/app/store/mps";
 import { TabClient } from "@/app/store/tabrpcclient";
 import { makeTabRouteId, RpcRouter } from "@/app/store/rpc-router";
 import { getWSServerEndpoint } from "@/util/endpoints";
-import { addWSReconnectHandler, globalWS, initGlobalWS, WSControl } from "./ws";
+import { addWSReconnectHandler, globalWS, initGlobalWS, setInputProofGate, WSControl } from "./ws";
 import { DefaultRouter, setDefaultRouter } from "./rpc-util-base";
 import { getApi } from "./global";
 import { noteSrvConnectionOpened, noteSrvInfoMessage } from "./srv-info";
 import { noteEventsDroppedMessage } from "./resync";
-import { expectOperatorProof, proveOperatorConnection } from "./operator-proof";
+import { expectOperatorProof, onOperatorProofSettled, operatorProofPending, proveOperatorConnection } from "./operator-proof";
+import { noteInputNotSent } from "./ws-input-hold";
 import { RpcApi } from "./rpc-api";
 
 let TabRpcClient: TabClient;
@@ -19,7 +20,15 @@ let TabRpcClient: TabClient;
 function initWshrpc(tabId: string): WSControl {
     const router = new RpcRouter(new UpstreamRpcProxy());
     setDefaultRouter(router);
+    // The window's keystrokes wait for its proof (ws-input-hold.ts); what srv still refuses as not the window's is told to the person.
+    setInputProofGate(operatorProofPending);
+    onOperatorProofSettled(() => globalWS?.releaseHeldInput());
     const handleFn = (event: WSEventType) => {
+        const frame = event as { type?: string; error?: unknown };
+        if (frame.type === "bus:error" && typeof frame.error === "string" && frame.error.startsWith("FORBIDDEN")) {
+            noteInputNotSent("refused");
+            return;
+        }
         if (event.data == null) return;
         noteSrvInfoMessage(event.data);
         noteEventsDroppedMessage(event.data);

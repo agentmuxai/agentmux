@@ -2600,5 +2600,8 @@
     "workspaceStop.open": "This workspace is going to stop. Open for choices.",
     "workspaceStop.unreachable": "The workspace could not be reached. Try again.",
     "workspaceStop.signedOut": "You are signed out. Sign in again to change this.",
-    "workspaceStop.failed": "That could not be done. Try again."
+    "workspaceStop.failed": "That could not be done. Try again.",
+    "windowInput.title": "Input not sent",
+    "windowInput.full": "AgentMux is reconnecting and could not keep everything you typed. Wait a moment, then type it again.",
+    "windowInput.refused": "AgentMux did not accept that input because this window is not confirmed as yours. Reconnect the window, then try again."
 }

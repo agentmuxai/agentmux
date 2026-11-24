@@ -108,6 +108,7 @@ mod ui_cache;
 pub(crate) mod mux_obj_bridge;
 mod websocket;
 mod pane_caller;
+pub(crate) mod window_input;
 mod ws_register;
 mod cli_version;
 mod ws_resync;

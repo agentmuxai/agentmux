@@ -671,9 +671,13 @@ pub(crate) async fn agent_send(state: &AppState, cmd: CommandAgentSendData) -> R
 
 fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let s = state.clone();
-    engine.register_typed(COMMAND_AGENT_SEND, move |cmd: CommandAgentSendData, _ctx| {
+    // A message written into an agent's pane reads as the person's own: only the window, proven, may send it.
+    engine.register_typed(COMMAND_AGENT_SEND, move |cmd: CommandAgentSendData, ctx: RpcContext| {
         let s = s.clone();
-        async move { agent_send(&s, cmd).await }
+        async move {
+            crate::server::window_input::require_window_input(&ctx, "agent.send")?;
+            agent_send(&s, cmd).await
+        }
     });
 }
 

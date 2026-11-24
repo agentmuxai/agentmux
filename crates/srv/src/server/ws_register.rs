@@ -26,7 +26,7 @@ use crate::backend::rpc_types::{
     COMMAND_ROUTE_ANNOUNCE, COMMAND_ROUTE_UNANNOUNCE, COMMAND_SET_CONFIG, COMMAND_SET_META, COMMAND_TOOL_DECISION,
 };
 use super::service::{schedule_agent_zoom_mirror, update_object_meta};
-use super::websocket::{parse_block_input, refuse_agent_input, with_question_controller};
+use super::websocket::{parse_block_input, require_window_input, with_question_controller};
 use super::AppState;
 
 /// How far back the fleet list (`COMMAND_LIST_BACKGROUND_TASKS` with an empty
@@ -334,7 +334,7 @@ fn register_block_controller(engine: &Arc<WshRpcEngine>, state: &AppState) {
         COMMAND_CONTROLLER_INPUT,
         move |cmd: CommandBlockInputData, ctx| {
             async move {
-                refuse_agent_input(&ctx)?;
+                require_window_input(&ctx, "controllerinput")?;
                 if blockcontroller::agent_lock::is_locked(&cmd.blockid) {
                     tracing::debug!(block_id = %cmd.blockid, "controllerinput: dropped — agent lock active");
                     return Ok(());

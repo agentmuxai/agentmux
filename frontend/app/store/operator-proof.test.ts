@@ -24,6 +24,8 @@ vi.mock("@/app/store/rpc-util-base", () => ({
 import {
     expectOperatorProof,
     isOperatorCommand,
+    onOperatorProofSettled,
+    operatorProofPending,
     operatorProofReady,
     proveOperatorConnection,
     resetOperatorProofForTests,
@@ -285,5 +287,52 @@ describe("RpcClient and the proof", () => {
         await proveOperatorConnection({ challenge: async () => ({ nonce: "n" }), attest: async () => {} });
         await act;
         expect(sent).toEqual(["kanban.list", "kanban.act"]);
+    });
+});
+
+
+describe("the window's input waits for the proof", () => {
+    it("is pending from the first expectation until the connection's proof settles, proven or not, and says so to listeners", async () => {
+        const settled: boolean[] = [];
+        onOperatorProofSettled((proven) => settled.push(proven));
+        expect(operatorProofPending()).toBe(false);
+        expectOperatorProof();
+        expect(operatorProofPending()).toBe(true);
+        const host = deferred();
+        const proof = proveOperatorConnection({ challenge: async () => ({ nonce: "n" }), attest: () => host.promise });
+        expect(operatorProofPending()).toBe(true);
+        host.resolve();
+        await proof;
+        await Promise.resolve();
+        expect(operatorProofPending()).toBe(false);
+        expect(settled).toEqual([true]);
+        // A reconnect makes it pending again, and a proof the host refuses settles it as not proven.
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const again = proveOperatorConnection({ challenge: async () => ({ nonce: "n2" }), attest: async () => { throw new Error("no"); } });
+        expect(operatorProofPending()).toBe(true);
+        await again;
+        await Promise.resolve();
+        expect(operatorProofPending()).toBe(false);
+        expect(settled).toEqual([true, false]);
+        warn.mockRestore();
+    });
+
+    it("does not wait for an older connection's proof once a newer one is being made", async () => {
+        const first = deferred();
+        void proveOperatorConnection({ challenge: async () => ({ nonce: "1" }), attest: () => first.promise });
+        const second = deferred();
+        const secondProof = proveOperatorConnection({ challenge: async () => ({ nonce: "2" }), attest: () => second.promise });
+        first.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(operatorProofPending()).toBe(true);
+        second.resolve();
+        await secondProof;
+        await Promise.resolve();
+        expect(operatorProofPending()).toBe(false);
+    });
+
+    it("lists the input commands srv now accepts only from a proven connection", () => {
+        for (const command of ["controllerinput", "agentinput"]) expect(isOperatorCommand(command)).toBe(true);
     });
 });

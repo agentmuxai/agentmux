@@ -1,8 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { WSControl, addWSReconnectHandler } from "./ws";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { WSControl, addWSReconnectHandler, setInputProofGate } from "./ws";
+import { notifications, setNotifications } from "./flash-notifications";
+import { HOLD_MAX_FRAMES, HOLD_MAX_MS, resetInputNoticeForTests } from "./ws-input-hold";
 
 class FakeSocket {
     sent: string[] = [];
@@ -102,5 +104,100 @@ describe("WSControl message queue", () => {
         lastSocket.onopen(new Event("open"));
         ws.pushMessage(cmd({ wscommand: "rpc", command: "x" }));
         expect(lastSocket.sent.map((m) => JSON.parse(m).command)).toEqual(["x"]);
+    });
+});
+
+
+describe("WSControl input waits for the window's proof", () => {
+    let pending = false;
+    const tagsOf = () => lastSocket.sent.map((m) => JSON.parse(m).tag).filter((t) => t !== undefined); // keepalive frames carry no tag
+    const open = () => {
+        const ws = new WSControl("ws://127.0.0.1:1", "tab", () => {});
+        ws.connectNow("test");
+        lastSocket.onopen(new Event("open"));
+        return ws;
+    };
+    const settle = (ws: WSControl) => {
+        pending = false;
+        ws.releaseHeldInput();
+    };
+
+    beforeEach(() => {
+        vi.useFakeTimers();
+        pending = false;
+        setInputProofGate(() => pending);
+        setNotifications([]);
+        resetInputNoticeForTests();
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+        setInputProofGate(() => false);
+    });
+
+    it("holds typed frames while the proof is pending and sends them in order once it settles, rpc calls not waiting", () => {
+        const ws = open();
+        pending = true;
+        ws.pushMessage(cmd({ wscommand: "blockinput", tag: "k1" }));
+        ws.pushMessage(cmd({ wscommand: "rpc", tag: "rpc" }));
+        ws.pushMessage(cmd({ wscommand: "blockinput", tag: "k2" }));
+        ws.pushMessage(cmd({ wscommand: "setblocktermsize", tag: "size" }));
+        expect(tagsOf()).toEqual(["rpc"]);
+        settle(ws);
+        vi.advanceTimersByTime(1000);
+        expect(tagsOf()).toEqual(["rpc", "k1", "k2", "size"]);
+    });
+
+    it("sends a frame typed after the proof at once, and one typed behind a held backlog goes behind it", () => {
+        const ws = open();
+        ws.pushMessage(cmd({ wscommand: "blockinput", tag: "now" }));
+        expect(tagsOf()).toEqual(["now"]);
+        pending = true;
+        ws.pushMessage(cmd({ wscommand: "blockinput", tag: "held" }));
+        pending = false; // the proof settled but the release has not run yet: a new frame still goes behind the held one
+        ws.pushMessage(cmd({ wscommand: "blockinput", tag: "after" }));
+        expect(tagsOf()).toEqual(["now"]);
+        ws.releaseHeldInput();
+        vi.advanceTimersByTime(1000);
+        expect(tagsOf()).toEqual(["now", "held", "after"]);
+    });
+
+    it("keeps what was typed while disconnected, holds it on reconnect until the proof settles, and sends each frame once, in order", () => {
+        pending = true;
+        const ws = new WSControl("ws://127.0.0.1:1", "tab", () => {});
+        ws.connectNow("test");
+        ws.pushMessage(cmd({ wscommand: "blockinput", tag: "a" }));
+        ws.pushMessage(cmd({ wscommand: "blockinput", tag: "b" }));
+        ws.pushMessage(cmd({ wscommand: "rpc", tag: "rpc" }));
+        lastSocket.onopen(new Event("open"));
+        expect(tagsOf()).toEqual(["rpc"]);
+        ws.pushMessage(cmd({ wscommand: "blockinput", tag: "c" }));
+        settle(ws);
+        vi.advanceTimersByTime(1000);
+        expect(tagsOf()).toEqual(["rpc", "a", "b", "c"]);
+        expect(ws.msgQueue).toHaveLength(0);
+        expect(ws.heldInput.size).toBe(0);
+    });
+
+    it("at the bound keeps what it holds, drops the newest, and tells the person", () => {
+        const ws = open();
+        pending = true;
+        for (let i = 0; i < HOLD_MAX_FRAMES + 5; i++) ws.pushMessage(cmd({ wscommand: "blockinput", tag: i }));
+        expect(ws.heldInput.size).toBe(HOLD_MAX_FRAMES);
+        expect(notifications().filter((n) => n.title === "Input not sent")).toHaveLength(1);
+        settle(ws);
+        vi.advanceTimersByTime(60 * 60 * 1000);
+        const sent = tagsOf();
+        expect(sent).toEqual([...Array(HOLD_MAX_FRAMES).keys()]);
+    });
+
+    it("sends what it holds when the proof does not come in time, so srv answers it and the person is told", () => {
+        const ws = open();
+        pending = true;
+        ws.pushMessage(cmd({ wscommand: "blockinput", tag: "k" }));
+        vi.advanceTimersByTime(HOLD_MAX_MS + 10);
+        expect(tagsOf()).toEqual(["k"]);
+        // The gate stays open for the rest of this connection, so later frames are not held for a proof that is not coming.
+        ws.pushMessage(cmd({ wscommand: "blockinput", tag: "k2" }));
+        expect(tagsOf()).toEqual(["k", "k2"]);
     });
 });

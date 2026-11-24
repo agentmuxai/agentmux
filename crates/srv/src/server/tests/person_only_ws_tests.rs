@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! What only the person does, through the handlers a real connection registers: a settings write that waives or
-//! widens consent, "Keep running" on a stopping agent, and what is kept as typed by the person. An agent's connection
+//! widens consent, "Keep running" on a stopping agent, what is kept as typed by the person, and input into a pane. An agent's connection
 //! and one that proved nothing are refused each; the proven window reaches the handler.
 
 use std::sync::Arc;
@@ -22,6 +22,8 @@ fn calls() -> Vec<(&'static str, serde_json::Value)> {
         ("agentshutdownkeep", json!({"blockid": "no-such-block", "request_id": "r-1"})),
         ("agent.input-history-append", json!({"agent_id": "no-such-agent", "text": "hello", "kind": "message"})),
         ("agent.input-draft", json!({"agent_id": "no-such-agent", "text": "half a thought"})),
+        ("controllerinput", json!({"blockid": "no-such-block", "signame": "SIGINT"})),
+        ("agent.send", json!({"block_id": "no-such-block", "message": "hello"})),
     ]
 }
 

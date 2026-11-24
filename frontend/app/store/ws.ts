@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { AUTH_KEY_HEADER } from "@/util/sharedconst";
+import { InputHold, isInputFrame } from "./ws-input-hold";
 import { type WebSocket, newWebSocket } from "@/util/wsutil";
 import { debugLog } from "@/util/debuglog";
 import { createSlowHandlerWatch } from "./ws-slow-handler";
@@ -15,6 +16,15 @@ const MaxWebSocketSendSize = 5 * 1024 * 1024; // 5MB
 const watchSlowHandler = createSlowHandlerWatch();
 const noteHandlerCost = createHandlerCostTally();
 const reconnectHandlers: (() => void)[] = [];
+
+/** True while the window's proof for the current connection is expected or in the making; its input frames wait (ws-input-hold.ts). */
+let inputProofPending: () => boolean = () => false;
+/** The gate lapsed on its own (the proof did not come in time): input goes to srv, which answers it. Reset on each new connection. */
+let inputGateForcedOpen = false;
+function setInputProofGate(pending: () => boolean): void {
+    inputProofPending = pending;
+}
+const gateClosed = () => !inputGateForcedOpen && inputProofPending();
 const StableConnTime = 2000;
 // Gap between queued `blockinput` chunks when the queue drains after a
 // reconnect. Mirrors PASTE_CHUNK_DELAY_MS in block-input-sender.ts (not
@@ -37,6 +47,10 @@ class WSControl {
     opening: boolean = false;
     reconnectTimes: number = 0;
     msgQueue: any[] = [];
+    heldInput = new InputHold<any>(() => {
+        inputGateForcedOpen = true;
+        this.releaseHeldInput();
+    });
     msgQueueTimer: ReturnType<typeof setTimeout> = null;
     inReconnectHandlers: boolean = false;
     tabId: string;
@@ -168,6 +182,7 @@ class WSControl {
     onopen(e: Event) {
         dlog("connection open");
         this.open = true;
+        inputGateForcedOpen = false;
         this.opening = false;
         this.onOpenTimeoutId = setTimeout(() => {
             this.reconnectTimes = 0;
@@ -200,6 +215,10 @@ class WSControl {
         }
         while (this.open && this.msgQueue.length > 0) {
             const msg = this.msgQueue.shift();
+            if (isInputFrame(msg) && gateClosed()) {
+                this.heldInput.hold(msg);
+                continue;
+            }
             this.sendMessage(msg);
             if (msg.wscommand == "blockinput" && this.msgQueue.length > 0) {
                 this.msgQueueTimer = setTimeout(() => {
@@ -264,7 +283,20 @@ class WSControl {
         this.wsConn.send(msg);
     }
 
+    /// The window's proof has settled (or the wait ran out): send what was held, in order, ahead of what queued since.
+    releaseHeldInput() {
+        const frames = this.heldInput.take();
+        if (frames.length === 0) return;
+        this.msgQueue.unshift(...frames);
+        this.runMsgQueue();
+    }
+
     pushMessage(data: WSCommandType) {
+        // Input waits for the connection's proof, behind what is already held so order is kept.
+        if (isInputFrame(data) && (this.heldInput.size > 0 || (this.open && gateClosed()))) {
+            this.heldInput.hold(data);
+            return;
+        }
         // Behind a queue that is still draining, so order is kept; except
         // from the reconnect handlers, which go first (see onopen).
         if (!this.open || (this.msgQueue.length > 0 && !this.inReconnectHandlers)) {
@@ -309,4 +341,5 @@ export {
     reconnectWS,
     sendRawRpcMessage,
     sendWSCommand,
+    setInputProofGate,
 };

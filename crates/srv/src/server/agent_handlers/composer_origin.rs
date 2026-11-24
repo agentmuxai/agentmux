@@ -13,10 +13,10 @@
 //! - the AgentMux window, proven by the CEF host (`RpcContext::operator_only`),
 //!   is the human (`System` for a hidden memory reinjection, or a message the pane sends on
 //!   AgentMux's behalf, such as its start-up document: the request says so with `system`);
-//! - any other connection is refused when srv runs with a CEF host (every
-//!   desktop build); a headless srv (the cloud web host) has no CEF host and logs
-//!   the call. The mode comes from how srv was started, never from anything
-//!   the connection says.
+//! - any other connection is refused, in every mode. A headless srv (the cloud web
+//!   host) has no CEF host: there the person is proven by the browser they signed
+//!   in with (a confirmed session marks the connection, `operator_only` passes).
+//!   A connection that holds only the instance key is not the person.
 
 use crate::backend::blockcontroller::health::TurnOrigin;
 use crate::backend::rpc_types::RpcContext;
@@ -26,24 +26,15 @@ const WHY: &str = "only the AgentMux window types into an agent's composer; an a
 /// The origin of an `agentinput` turn from the caller, or why it is refused. `lowered` (a hidden
 /// reinjection, a message the pane sends on AgentMux's behalf) can only turn the window's `User` into `System`.
 pub(super) fn composer_origin(ctx: &RpcContext, lowered: bool) -> Result<TurnOrigin, String> {
-    composer_origin_in(ctx, lowered, crate::headless::active())
+    composer_origin_in(ctx, lowered)
 }
 
-fn composer_origin_in(ctx: &RpcContext, lowered: bool, headless: bool) -> Result<TurnOrigin, String> {
+fn composer_origin_in(ctx: &RpcContext, lowered: bool) -> Result<TurnOrigin, String> {
     // A registered agent is refused in every mode, whatever else it claims.
     if !ctx.agent_id.is_empty() {
         return Err(format!("FORBIDDEN: {WHY}"));
     }
-    if let Err(refusal) = ctx.operator_only(WHY) {
-        if !headless {
-            return Err(refusal);
-        }
-        // A headless srv has no CEF host: the cloud web host's own turns.
-        tracing::warn!(
-            client_type = %ctx.client_type,
-            "agentinput from a connection no host proved, in a headless srv"
-        );
-    }
+    ctx.operator_only(WHY)?;
     Ok(if lowered { TurnOrigin::System } else { TurnOrigin::User })
 }
 
@@ -58,39 +49,34 @@ mod tests {
     #[test]
     fn the_proven_window_is_the_user_or_the_system_for_a_hidden_reinjection() {
         let window = RpcContext::operator_for_tests();
-        assert_eq!(composer_origin_in(&window, false, false), Ok(TurnOrigin::User));
-        assert_eq!(composer_origin_in(&window, true, false), Ok(TurnOrigin::System));
+        assert_eq!(composer_origin_in(&window, false), Ok(TurnOrigin::User));
+        assert_eq!(composer_origin_in(&window, true), Ok(TurnOrigin::System));
     }
 
     #[test]
-    fn an_agent_connection_is_never_the_user_in_any_mode() {
-        for headless in [false, true] {
-            for proven in [false, true] {
-                for hidden in [false, true] {
-                    let err = composer_origin_in(&agent(proven), hidden, headless).unwrap_err();
-                    assert!(err.starts_with("FORBIDDEN: only the AgentMux window"), "{err}");
-                }
+    fn an_agent_connection_is_never_the_user() {
+        for proven in [false, true] {
+            for hidden in [false, true] {
+                let err = composer_origin_in(&agent(proven), hidden).unwrap_err();
+                assert!(err.starts_with("FORBIDDEN: only the AgentMux window"), "{err}");
             }
         }
     }
 
     #[test]
-    fn an_unproven_connection_is_refused_when_srv_has_a_host() {
-        let err = composer_origin_in(&RpcContext::default(), false, false).unwrap_err();
-        assert!(err.contains("isn't the AgentMux window"), "{err}");
-    }
-
-    #[test]
-    fn a_headless_srv_keeps_the_old_behaviour_for_an_unproven_connection() {
-        let ctx = RpcContext::default();
-        assert_eq!(composer_origin_in(&ctx, false, true), Ok(TurnOrigin::User));
-        assert_eq!(composer_origin_in(&ctx, true, true), Ok(TurnOrigin::System));
+    fn a_connection_with_no_proof_is_refused_in_a_headless_srv_as_on_the_desktop() {
+        // The signed-in browser of a headless srv is proven by its session (`operator_for_tests` stands for it above);
+        // a connection that holds only the instance key is not.
+        for hidden in [false, true] {
+            let err = composer_origin_in(&RpcContext::default(), hidden).unwrap_err();
+            assert!(err.contains("isn't the AgentMux window"), "{err}");
+        }
     }
 
     #[test]
     fn nothing_the_request_carries_can_raise_the_origin() {
         // `hidden` only ever lowers User to System; it never turns a refusal into an origin.
-        assert!(composer_origin_in(&RpcContext::default(), true, false).is_err());
-        assert!(composer_origin_in(&agent(false), true, true).is_err());
+        assert!(composer_origin_in(&RpcContext::default(), true).is_err());
+        assert!(composer_origin_in(&agent(false), true).is_err());
     }
 }

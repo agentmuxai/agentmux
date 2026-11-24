@@ -25,6 +25,7 @@ export const OPERATOR_COMMANDS: ReadonlySet<string> = new Set([
     "browser_profiles.create",
     "browser_profiles.delete",
     "browser_profiles.update",
+    "controllerinput",
     "fleet.broadcast",
     "gpu.sample",
     "history.agent_sessions",
@@ -74,6 +75,10 @@ let settleExpected: ((proven: boolean) => void) | null = null;
 /** The last connection's proof deps, to prove it again when its proof lapses (a host that vouches for a lease). */
 let lastDeps: OperatorProofDeps | null = null;
 let reproving: Promise<boolean> | null = null;
+/** A proof is expected or being made for the current connection: input that needs it waits. */
+let pending = false;
+let pendingSince = 0;
+const settledListeners = new Set<(proven: boolean) => void>();
 let refusalHandler: ((refusal: OperatorRefusal) => void) | null = null;
 
 /** An operator-only action srv refused that the app could not put right: the person must be told. */
@@ -98,6 +103,7 @@ function refuse(e: unknown): void {
  *  made before then wait for that first proof. */
 export function expectOperatorProof(): void {
     generation++;
+    markPending();
     current = new Promise<boolean>((resolve) => (settleExpected = resolve));
 }
 
@@ -105,6 +111,8 @@ export function expectOperatorProof(): void {
  *  connection starts unproven. Without a host it does nothing. */
 export function proveOperatorConnection(deps: OperatorProofDeps): Promise<boolean> {
     generation++;
+    const mine = generation;
+    markPending();
     lastDeps = deps;
     const attest = deps.attest;
     const attempt = attest
@@ -120,6 +128,9 @@ export function proveOperatorConnection(deps: OperatorProofDeps): Promise<boolea
           })()
         : Promise.resolve(false);
     current = attempt;
+    void attempt.then((proven) => {
+        if (generation === mine) settlePending(proven);
+    });
     const settle = settleExpected;
     settleExpected = null;
     if (settle) void attempt.then(settle);
@@ -161,7 +172,8 @@ function isUnproven(e: unknown): boolean {
  *  acting, so the second send can't repeat an action. A refusal that stands is
  *  handed to the refusal handler so the person sees it. */
 export async function sendAsOperator<T>(send: () => Promise<T>): Promise<T> {
-    await operatorProofReady();
+    // Nothing to wait for once the proof has settled (the resize of a pane being dragged calls this many times a second).
+    if (pending) await operatorProofReady();
     const sentAt = generation;
     try {
         return await send();
@@ -200,8 +212,34 @@ export async function sendRetryingUnproven<T>(send: () => Promise<T>): Promise<T
     }
 }
 
+function markPending(): void {
+    if (!pending) pendingSince = performance.now();
+    pending = true;
+}
+
+function settlePending(proven: boolean): void {
+    pending = false;
+    // The time from the connection opening to its proof, for the record of what the wait costs a keystroke.
+    console.log(`[operator-proof] connection ${proven ? "proven" : "not proven"} after ${Math.round(performance.now() - pendingSince)} ms`);
+    for (const listener of [...settledListeners]) listener(proven);
+}
+
+/** A proof is expected or in the making for the current connection (srv refuses the window's input until it lands). */
+export function operatorProofPending(): boolean {
+    return pending;
+}
+
+/** Called each time a proof settles, proven or not; returns the way to stop listening. */
+export function onOperatorProofSettled(listener: (proven: boolean) => void): () => void {
+    settledListeners.add(listener);
+    return () => settledListeners.delete(listener);
+}
+
 /** Forget every proof: for tests. */
 export function resetOperatorProofForTests(): void {
+    pending = false;
+    pendingSince = 0;
+    settledListeners.clear();
     generation = 0;
     current = Promise.resolve(false);
     settleExpected = null;
