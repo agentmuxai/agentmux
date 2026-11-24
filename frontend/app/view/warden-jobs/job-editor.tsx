@@ -236,7 +236,7 @@ function builtDefinition(ed: EditorState) {
     return b.errors.length > 0 ? null : b.definition;
 }
 
-async function saveJob(ed: EditorState, confirmNoCost = false): Promise<void> {
+async function saveJob(ed: EditorState, confirm: string | null = null): Promise<void> {
     ed.setFailure(null);
     const definition = builtDefinition(ed);
     if (!definition) return;
@@ -245,7 +245,8 @@ async function saveJob(ed: EditorState, confirmNoCost = false): Promise<void> {
         const res = await ed.props.model.save({
             ...(ed.draft.id ? { job_id: ed.draft.id } : {}),
             definition,
-            ...(confirmNoCost ? { confirm_no_cost: true } : {}),
+            ...(confirm === "no_cost" ? { confirm_no_cost: true } : {}),
+            ...(confirm === "turn_on" ? { confirm_turn_on: true } : {}),
         });
         if (res.needs_confirmation) ed.setConfirm(res);
         else ed.props.onClose();
@@ -416,14 +417,19 @@ function ConfirmNote(p: { ed: EditorState; result: JobsSaveResult }): JSX.Elemen
     return (
         <div class="warden-jobs-note" role="alert">
             {p.result.error}
+            <Show when={p.result.lines.length > 0}>
+                <ul class="warden-jobs-turn-on">
+                    <For each={p.result.lines}>{(line) => <li>{line}</li>}</For>
+                </ul>
+            </Show>
             <div class="warden-jobs-actions">
                 <Button
                     tone="danger"
                     icon="check"
                     busy={p.ed.busy() === "save"}
-                    onClick={() => void saveJob(p.ed, true)}
+                    onClick={() => void saveJob(p.ed, p.result.needs_confirmation)}
                 >
-                    Confirm and save
+                    {p.result.needs_confirmation === "turn_on" ? t("jobs.turnOn.confirm") : "Confirm and save"}
                 </Button>
                 <Button tone="quiet" onClick={() => p.ed.setConfirm(null)}>
                     Not now

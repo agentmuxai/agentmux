@@ -52,7 +52,7 @@ fn definition(extra: Value) -> Value {
 }
 
 fn req(job_id: Option<&str>, definition: Value) -> JobsSaveRequest {
-    JobsSaveRequest { job_id: job_id.map(str::to_string), definition, confirm_no_cost: None }
+    JobsSaveRequest { job_id: job_id.map(str::to_string), definition, confirm_no_cost: None, confirm_turn_on: None }
 }
 
 fn created(state: &AppState, def: Value) -> String {
