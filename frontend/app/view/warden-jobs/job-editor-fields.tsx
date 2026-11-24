@@ -103,7 +103,6 @@ export function WhenSection(props: SectionProps): JSX.Element {
 
 /** The drone a job runs, chosen from the drones this workspace has. */
 function DroneField(props: SectionProps & { drones: readonly SelectOption[] }): JSX.Element {
-    if (props.draft.actionKind !== "drone") return null;
     return (
         <Field
             label={t("jobs.fields.drone")}
@@ -190,7 +189,11 @@ export function WhatSection(props: WhatProps): JSX.Element {
                 <SegmentedControl
                     options={ACTIONS}
                     value={props.draft.actionKind}
-                    onChange={(v) => props.set("actionKind", v)}
+                    onChange={(v) => {
+                        props.set("actionKind", v);
+                        // A drone has no run to cancel from outside: leave that choice behind with the action that had it.
+                        if (v === "drone" && props.draft.overlap === "cancel_other") props.set("overlap", "skip");
+                    }}
                 />
             </Field>
             <Show when={props.draft.actionKind === "message"}>
@@ -221,7 +224,9 @@ export function WhatSection(props: WhatProps): JSX.Element {
                 </div>
                 {brief("payload", "Details")}
             </Show>
-            <DroneField {...props} />
+            <Show when={props.draft.actionKind === "drone"}>
+                <DroneField {...props} />
+            </Show>
             <Show when={props.draft.actionKind === "spawn"}>
                 <Field
                     label="Leader"
