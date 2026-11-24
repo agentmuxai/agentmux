@@ -120,11 +120,12 @@ macro_rules! no_ext_diff_step {
     for _amx_i in 1 2 3 4 5; do
       case "$_amx_w" in diff|log|show|format-patch|whatchanged|blame|reflog|fetch|pull|ls-remote|clone|push|remote|"") break;; esac;
       _amx_t=$(command git ${_amx_g[@]+"${_amx_g[@]}"} config --show-scope --get "alias.$_amx_w" 2>/dev/null) || break;
-      _amx_c=${_amx_t%%$'\t'*}; read -r _amx_w _amx_t <<< "${_amx_t#*$'\t'}";
+      _amx_c=${_amx_t%%$'\t'*}; _amx_b=${_amx_t#*$'\t'}; read -r _amx_w _amx_t <<< "$_amx_b";
       read -ra _amx_y <<< "$_amx_t"; _amx_x=(${_amx_y[@]+"${_amx_y[@]}"} ${_amx_x[@]+"${_amx_x[@]}"});
       case "$_amx_c:$_amx_w" in
         global:*|system:*) ;;
         *:'!'*|*:-*) echo "git: an alias of this folder's configuration that runs a program or starts with an option is not run" >&2; return 1;;
+        *) case "$_amx_b" in *'"'*|*"'"*|*'\'*) echo "git: an alias of this folder's configuration that quotes a word is not run" >&2; return 1;; esac;;
       esac;
     done;
     case "$_amx_w" in

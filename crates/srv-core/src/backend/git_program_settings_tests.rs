@@ -600,12 +600,16 @@ fn the_function_does_not_run_an_alias_of_the_folder_that_names_a_program() {
     let script = folder.dir.path().join("mark.sh");
     folder.git(&["config", "alias.rn", &format!("!sh {} aliasrun", slashes(&script))], &HashMap::new());
     folder.git(&["config", "alias.opt", "--no-pager status"], &HashMap::new());
+    folder.git(&["config", "alias.ruq", "remote \"update\""], &HashMap::new());
+    folder.git(&["config", "alias.faq", "fetch \"--all\""], &HashMap::new());
+    folder.git(&["config", "alias.rus", "remote 'update'"], &HashMap::new());
+    folder.git(&["config", "alias.rub", "remote \\update"], &HashMap::new());
     for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
         folder.forget();
         through_the_function(&folder, body, false, "git rn");
         assert_eq!(folder.ran(), vec!["aliasrun"], "without the step the folder's alias runs its program");
         folder.forget();
-        for command in ["git rn", "git opt"] {
+        for command in ["git rn", "git opt", "git ruq", "git faq", "git rus", "git rub"] {
             let said = through_the_function(&folder, body, true, command);
             assert!(said.contains("is not run"), "{command}: {said}");
         }
