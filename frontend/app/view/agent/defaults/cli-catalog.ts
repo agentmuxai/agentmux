@@ -92,7 +92,7 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         primaryContextFile: "GEMINI.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
-            "Google's coding agent. Very large context window — it can look at a lot of code at once. Defaults to reading + planning before it writes anything, so it's a safer pick when you're still deciding what to change. Needs a paid Gemini API key or a company Gemini Code Assist licence: since June 2026 it no longer works with a personal Google account. For that, pick Antigravity.",
+            "Google's coding agent. Very large context window — it can look at a lot of code at once. Defaults to reading + planning before it writes anything, so it's a safer pick when you're still deciding what to change. Needs a Gemini API key (Google AI Studio gives a free one, with daily limits) or a company Gemini Code Assist licence: since June 2026 it no longer works with a personal Google account. For that, pick Antigravity.",
         hostSupported: true,
         // No container image built yet — host-only until agentmux/gemini ships.
         containerSupported: false,
@@ -240,7 +240,7 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
-            "xAI's coding agent, running Grok 4.6 by default. AgentMux installs it for you; then sign in with `grok login` (a SuperGrok or X Premium+ account) or set XAI_API_KEY.",
+            "xAI's coding agent, running Grok 4.6 by default. AgentMux installs it for you; then sign in with `grok login` (a Grok or X account: free to try, with limits that aren't published) or set XAI_API_KEY.",
         hostSupported: true,
         // ACP runs on the host only (no container ACP path yet).
         containerSupported: false,
