@@ -161,6 +161,12 @@ function cardTags(props: AgentCardProps): TagSpec[] {
     return out;
 }
 
+/** How many chips a card shows before folding the rest into "+N": three, two when narrow, and one more for a Preview card, so
+ *  its Preview tag is never what a Free or Local chip pushes behind the "+N". */
+export function chipSlots(narrow: boolean, preview: boolean): number {
+    return (narrow ? 2 : 3) + (preview ? 1 : 0);
+}
+
 // A narrow card shows two chips, the rest folding into "+N", and its corner action
 // moves to its own line under them (`agent-card--narrow` in _picker.scss).
 function watchWidth(el: CardState["el"], setNarrow: (narrow: boolean) => void): void {
@@ -301,7 +307,7 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
             {/* The ribbon (what a click will do) and the chips (Free, Local, an update
                 note), as the kit's Tag. The old install ribbon and upgrade badge were
                 hand-rolled copies of it. */}
-            <TagList tags={tags()} max={narrow() ? 2 : 3} size="xs" class="agent-card-tags" />
+            <TagList tags={tags()} max={chipSlots(narrow(), isPreviewAgent(props.agent))} size="xs" class="agent-card-tags" />
             <NewSessionButton s={s} />
             <Show when={props.launching}>
                 <span class="agent-card-spinner" />
