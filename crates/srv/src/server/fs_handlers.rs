@@ -62,10 +62,27 @@ fn remote_of<'a>(conn: &'a str, block_id: Option<&'a str>, auth_key: &'a str) ->
     }
 }
 
-/// `fs.open` / `fs.reveal`: a confined pane hands nothing to another program.
+/// The answer of `fs.open` for a file a container agent can write, until the person has said yes: `[asks-first:<agent id>]`
+/// and then the sentence the person reads. A window turns it into the confirm that names the agent.
+pub(crate) fn asks_first_message(agent: &str) -> String {
+    if agent.is_empty() {
+        return "[asks-first:] This file is in a folder a container agent can change. Opening it runs your computer's app on what the agent wrote, so it asks first.".to_string();
+    }
+    format!("[asks-first:{agent}] This file is in the folder of {agent}, a container agent that can change it. Opening it runs your computer's app on what {agent} wrote, so it asks first.")
+}
+
+/// `fs.open` / `fs.reveal`: a confined pane hands nothing to another program, and a file a container agent can
+/// write is opened only once the person has said yes (`confirmed`). Showing a file in the file manager asks nothing.
 pub(super) async fn open_or_reveal_bound(state: &AppState, cmd: FsPathReq, reveal: bool) -> Result<FsEmptyResult, String> {
     if super::files_root::is_confined(state, cmd.block_id.as_deref()) {
         return Err(super::files_root::NO_PROGRAMS.to_string());
+    }
+    if !reveal && cmd.confirmed != Some(true) {
+        let asked = cmd.path.clone();
+        let place = blocking(move || fs_ops::container_folders::place(&asked)).await?;
+        if let Some(agent) = fs_ops::container_folders::open_asks_first(&place) {
+            return Err(asks_first_message(&agent));
+        }
     }
     let path = cmd.path;
     blocking(move || fs_ops::open_or_reveal(&path, reveal)).await??;
@@ -458,6 +475,14 @@ mod tests {
 
     /// `fs.places` takes no argument; the stub sends `{}`, a client that
     /// omits `data` sends `null`. Both must work.
+    #[test]
+    fn the_answer_that_asks_first_names_the_agent_and_carries_its_marker() {
+        let said = super::asks_first_message("aria");
+        assert!(said.starts_with("[asks-first:aria] "), "{said}");
+        assert!(said.contains("the folder of aria") && said.contains("what aria wrote"), "{said}");
+        assert!(super::asks_first_message("").starts_with("[asks-first:] "));
+    }
+
     #[tokio::test]
     async fn places_accepts_both_encodings_of_no_argument() {
         let state = crate::server::tests::test_state();
