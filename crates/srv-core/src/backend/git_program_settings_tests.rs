@@ -160,6 +160,7 @@ impl Folder {
             ("core.askPass", mark("askpass")),
             ("gpg.program", mark("gpg")),
             ("gpg.ssh.program", mark("gpgssh")),
+            ("gpg.ssh.defaultKeyCommand", mark("gpgsshkey")),
             ("credential.helper", format!("!{}", mark("credential"))),
             ("sequence.editor", mark("sequence")),
             ("protocol.ext.allow", "always".to_string()),
@@ -520,7 +521,10 @@ fn the_function_keeps_a_pager_the_folder_names_from_running_on_a_terminal() {
 fn the_function_keeps_a_remotes_upload_and_receive_programs_from_running() {
     let folder = Folder::new();
     let commands = ["git fetch viaup", "git ls-remote viaup", "git pull viaup HEAD", "git push viaup HEAD:refs/heads/x"];
-    let remote_commands = ["git remote update viaup", "git remote show viaup", "git remote prune viaup", "git remote -v update", "git remote set-head viaup -a", "git remote add -f other ../remote.git", "git remote add --fe other ../remote.git", "git remote add -ft main other ../remote.git", "git fetch --al", "git fetch --mu viaup", "git pull --al", "git --attr-source HEAD fetch --all", "git fetch --all", "git fetch --multiple viaup", "git pull --all", "git fetch grp"];
+    folder.git(&["config", "alias.fa", "fetch --all"], &HashMap::new());
+    folder.git(&["config", "alias.fm", "fetch --multiple viaup"], &HashMap::new());
+    folder.git(&["config", "alias.ru", "remote update"], &HashMap::new());
+    let remote_commands = ["git remote update viaup", "git remote show viaup", "git remote prune viaup", "git remote -v update", "git remote set-head viaup -a", "git remote add -f other ../remote.git", "git remote add --fe other ../remote.git", "git remote add -ft main other ../remote.git", "git fetch --al", "git fetch --mu viaup", "git pull --al", "git --attr-source HEAD fetch --all", "git fa", "git fm", "git ru", "git fetch --all", "git fetch --multiple viaup", "git pull --all", "git fetch grp"];
     for body in [agentmux_common::github_broker_shim::GIT_FLAGS_FUNCTION_BODY, agentmux_common::github_broker_shim::GIT_FUNCTION_BODY] {
         folder.forget();
         for command in commands {
@@ -609,4 +613,19 @@ fn the_function_does_not_run_an_alias_of_the_folder_that_names_a_program() {
         let status = through_the_function(&folder, body, true, "git status --short && echo plain-ok");
         assert!(status.contains("plain-ok"), "any other command is plain git: {status}");
     }
+}
+
+#[test]
+fn git_in_the_folder_does_not_run_the_ssh_signing_key_command_its_config_names() {
+    let folder = Folder::new();
+    for (key, value) in [("gpg.format", "ssh"), ("commit.gpgsign", "true")] {
+        folder.git(&["config", key, value], &HashMap::new());
+    }
+    folder.forget();
+    folder.git(&["commit", "--allow-empty", "-q", "-m", "signed"], &HashMap::new());
+    assert!(folder.ran().contains(&"gpgsshkey".to_string()), "without the settings the folder's key command runs: {:?}", folder.ran());
+    folder.forget();
+    let given = as_env(entries_over(none, &HashMap::new()));
+    folder.git(&["commit", "--allow-empty", "-q", "-m", "signed"], &given);
+    assert_eq!(folder.ran(), Vec::<String>::new(), "with them it does not");
 }

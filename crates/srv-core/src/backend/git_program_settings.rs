@@ -17,7 +17,7 @@
 //! first wins, so that one is set by its own variable):
 //!
 //! - `core.sshCommand` (`ssh`), `core.editor` and `sequence.editor` (`true`), `gpg.program` and
-//!   `gpg.openpgp.program` (`gpg`), `gpg.ssh.program` (`ssh-keygen`), `gpg.x509.program` (`gpgsm`): the person's
+//!   `gpg.openpgp.program` (`gpg`), `gpg.ssh.program` (`ssh-keygen`), `gpg.x509.program` (`gpgsm`), `gpg.ssh.defaultKeyCommand` (`true`): the person's
 //!   own value, else the one in brackets;
 //! - `core.fsmonitor` `false`, `core.pager` `cat`, `pager.<command>` `false` for every git command (a pager the
 //!   folder names for one command, such as `pager.log`, takes precedence over `core.pager`), `core.askPass` empty (no program asked, no fallback to
@@ -57,6 +57,7 @@ const SETTINGS: &[(&str, &str)] = &[
     ("gpg.openpgp.program", "gpg"),
     ("gpg.ssh.program", "ssh-keygen"),
     ("gpg.x509.program", "gpgsm"),
+    ("gpg.ssh.defaultKeyCommand", "true"),
     ("protocol.ext.allow", "never"),
 ];
 /// The commands of git 2.52 (`git --list-cmds=builtins`): `pager.<command>` is `false` for each, since a folder's own
@@ -84,9 +85,9 @@ const PAGED_COMMANDS: &[&str] = &[
 ];
 /// The settings of [`SETTINGS`] a person chooses for themselves: their own value, from the system and global
 /// configuration, is kept.
-const PERSONS: &[&str] = &["core.sshCommand", "core.editor", "sequence.editor", "gpg.program", "gpg.openpgp.program", "gpg.ssh.program", "gpg.x509.program"];
+const PERSONS: &[&str] = &["core.sshCommand", "core.editor", "sequence.editor", "gpg.program", "gpg.openpgp.program", "gpg.ssh.program", "gpg.x509.program", "gpg.ssh.defaultKeyCommand"];
 /// The names of [`PERSONS`] as git matches them (section and name in lower case).
-const PERSONS_PATTERN: &str = r"^(core\.sshcommand|core\.editor|sequence\.editor|gpg\.program|gpg\.(openpgp|ssh|x509)\.program)$";
+const PERSONS_PATTERN: &str = r"^(core\.sshcommand|core\.editor|sequence\.editor|gpg\.program|gpg\.(openpgp|ssh|x509)\.program|gpg\.ssh\.defaultkeycommand)$";
 /// How long what was read from the person's configuration is kept.
 const PERSONS_KEPT: Duration = Duration::from_secs(30);
 const CREDENTIAL_HELPER: &str = "credential.helper";

@@ -92,7 +92,7 @@ pub const GIT_NO_EXT_DIFF_ENV: &str = "AGENTMUX_GIT_NO_EXT_DIFF";
 macro_rules! no_ext_diff_step {
     () => {
         r#"  if [ -n "${AGENTMUX_GIT_NO_EXT_DIFF:-}" ]; then
-    local _amx_g=() _amx_r=() _amx_e=() _amx_s _amx_t _amx_c _amx_k _amx_b _amx_n _amx_i _amx_w _amx_u=;
+    local _amx_g=() _amx_r=() _amx_e=() _amx_s _amx_t _amx_c _amx_k _amx_b _amx_n _amx_i _amx_w _amx_x=() _amx_y=() _amx_u=;
     while [ $# -gt 0 ]; do
       case "$1" in
         -C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env|--attr-source) _amx_g+=("$1"); shift; if [ $# -gt 0 ]; then _amx_g+=("$1"); shift; fi;;
@@ -121,8 +121,9 @@ macro_rules! no_ext_diff_step {
       case "$_amx_w" in diff|log|show|format-patch|whatchanged|blame|reflog|fetch|pull|ls-remote|clone|push|remote|"") break;; esac;
       _amx_t=$(command git ${_amx_g[@]+"${_amx_g[@]}"} config --show-scope --get "alias.$_amx_w" 2>/dev/null) || break;
       _amx_c=${_amx_t%%$'\t'*}; read -r _amx_w _amx_t <<< "${_amx_t#*$'\t'}";
+      read -ra _amx_y <<< "$_amx_t"; _amx_x=(${_amx_y[@]+"${_amx_y[@]}"} ${_amx_x[@]+"${_amx_x[@]}"});
       case "$_amx_c:$_amx_w" in
-        global:*|system:*) break;;
+        global:*|system:*) ;;
         *:'!'*|*:-*) echo "git: an alias of this folder's configuration that runs a program or starts with an option is not run" >&2; return 1;;
       esac;
     done;
@@ -130,12 +131,12 @@ macro_rules! no_ext_diff_step {
       remote)
         if [ -n "$_amx_u" ]; then
           _amx_s=$1; shift; _amx_t=;
-          for _amx_k in "$@"; do case "$_amx_k" in -*) ;; *) _amx_t=$_amx_k; break;; esac; done;
+          for _amx_k in ${_amx_x[@]+"${_amx_x[@]}"} "$@"; do case "$_amx_k" in -*) ;; *) _amx_t=$_amx_k; break;; esac; done;
           case "$_amx_t" in
             update|show|prune|set-head) echo "git remote $_amx_t is not run while this folder's configuration names an upload or receive program for a remote; use git fetch or git ls-remote" >&2; return 1;;
             add)
               _amx_b=;
-              for _amx_k in "$@"; do
+              for _amx_k in ${_amx_x[@]+"${_amx_x[@]}"} "$@"; do
                 case "$_amx_k" in
                   --?*) _amx_c=${_amx_k#--}; _amx_c=${_amx_c%%=*}; case "fetch" in "$_amx_c"*) _amx_b=1;; esac;;
                   -*f*) _amx_b=1;;
@@ -155,7 +156,7 @@ macro_rules! no_ext_diff_step {
         esac;;
       fetch|pull)
         if [ -n "$_amx_u" ]; then
-          for _amx_k in "$@"; do
+          for _amx_k in ${_amx_x[@]+"${_amx_x[@]}"} "$@"; do
             _amx_b=;
             case "$_amx_k" in
               --?*) _amx_c=${_amx_k#--}; _amx_c=${_amx_c%%=*}; case "all" in "$_amx_c"*) _amx_b=1;; esac; case "multiple" in "$_amx_c"*) _amx_b=1;; esac;;
