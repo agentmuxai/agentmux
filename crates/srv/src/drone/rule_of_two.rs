@@ -100,7 +100,13 @@ fn writes_outside(node: &FlowNode, kind: BlockKind) -> bool {
             !matches!(method.as_str(), "GET" | "HEAD" | "OPTIONS")
         }
         BlockKind::Run | BlockKind::Drone => true,
-        BlockKind::Agent => node.data.get("allow_commands").and_then(Value::as_bool).unwrap_or(false),
+        // `allow_commands` is `true`, or the list of command lines the agent may run: either one lets it run commands.
+        BlockKind::Agent => match node.data.get("allow_commands") {
+            Some(Value::Bool(b)) => *b,
+            Some(Value::Array(list)) => !list.is_empty(),
+            Some(Value::String(s)) => !s.trim().is_empty(),
+            _ => false,
+        },
         _ => false,
     }
 }

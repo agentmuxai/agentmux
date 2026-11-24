@@ -161,6 +161,10 @@ fn a_command_and_a_callee_count_as_writes_and_a_read_only_agent_does_not() {
     };
     assert!(check(&agent(json!({})), &webhook()).is_empty(), "a native agent with read-only tools reads outside; it does not write");
     assert_eq!(broken(&agent(json!({ "allow_commands": true })), &webhook()), ["a"]);
+    assert_eq!(broken(&agent(json!({ "allow_commands": ["./release-check {{trigger.tag}}"] })), &webhook()), ["a"], "a list of command lines lets it run them");
+    assert_eq!(broken(&agent(json!({ "allow_commands": "./release-check" })), &webhook()), ["a"]);
+    assert!(check(&agent(json!({ "allow_commands": [] })), &webhook()).is_empty(), "an empty list lets it run nothing");
+    assert!(check(&agent(json!({ "allow_commands": false })), &webhook()).is_empty());
 }
 
 #[test]
