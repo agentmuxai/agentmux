@@ -14,8 +14,9 @@ const read = (rel: string) => readFileSync(new URL(`../${rel}`, import.meta.url)
 
 /** The declarations of the first top-level rule (selector at the start of a line) named exactly `selector`. */
 function rule(css: string, selector: string): string {
-    const open = css.search(new RegExp(`^${selector.replace(/[.]/g, "\.")} \{`, "m"));
-    expect(open, selector).toBeGreaterThanOrEqual(0);
+    const line = `${selector} {`;
+    const open = css.indexOf(`\n${line}`) + 1; // 0 when there is none: every stylesheet here starts with its header comment
+    expect(open, selector).toBeGreaterThan(0);
     return css.slice(open, css.indexOf("\n}", open));
 }
 
