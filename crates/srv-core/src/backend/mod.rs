@@ -103,6 +103,8 @@ pub mod model_label;
 pub mod agent_context_usage;
 pub mod agent_api_retry;
 pub mod providers;
+pub mod providers_custom;
+pub mod harness_manifest;
 pub mod cli_download;
 pub mod cli_install;
 pub mod cli_prune;
