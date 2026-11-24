@@ -17,7 +17,7 @@ fn seen(install_id: &str, host: &str) -> Seen {
 }
 
 fn round(ended: Ended, pulled: usize) -> Round {
-    Round { ended, entries_taken: 0, entries_given: 0, keys_taken: 0, pulled, kept_local: 0, conflicts: 0, pushed: 0, refused: Vec::new() }
+    Round { ended, entries_taken: 0, entries_given: 0, keys_taken: 0, reissued: 0, pulled, kept_local: 0, conflicts: 0, pushed: 0, refused: Vec::new() }
 }
 
 #[test]
