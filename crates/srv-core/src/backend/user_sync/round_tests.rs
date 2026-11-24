@@ -8,10 +8,12 @@
 
 use super::adapter::NewestWins;
 use super::log::{self, Refused};
-use super::members::Change;
+use super::chain_store;
+use super::members::{Change, Entry, Policy};
 use super::ops::{self, Held, KeysAns, KeysReq, MembersAns, MembersReq, OpError, PullAns, PullReq, PushAns, PushReq};
 use super::ops_tests::{ended, node, three, Node, C};
 use super::ops::{Ctx, KeyDelivery};
+use super::record::Record;
 use super::members::Subject;
 use super::seal::KeyRing;
 use zeroize::Zeroizing;
@@ -220,6 +222,142 @@ fn a_record_for_another_collection_is_refused_alone_and_the_one_beside_it_is_tak
     let ans = ops::push(&mut a.ctx(), &b.id, &PushReq { collection: C.into(), records: vec![rec, valid] }, &NewestWins).unwrap();
     assert_eq!(ans.results[0], Err(Refused::UnknownCollection));
     assert!(ans.results[1].is_ok());
+}
+
+/// A peer whose answer to a membership ask is the given entries, as when its chain moved between this machine's ask and
+/// the answer; every other call goes to the real ops.
+struct Answering<'a> {
+    inner: Link<'a>,
+    entries: Vec<Entry>,
+    /// What it answers a pull with, in place of the real answer.
+    pulled: Option<Vec<Record>>,
+}
+
+impl PeerCalls for Answering<'_> {
+    fn hello(&mut self, collections: &[String]) -> Result<Vec<Held>, CallError> {
+        self.inner.hello(collections)
+    }
+    fn members(&mut self, _: &MembersReq) -> Result<MembersAns, CallError> {
+        Ok(MembersAns { entries: self.entries.clone(), n: 4, taken: vec![] })
+    }
+    fn keys(&mut self, req: &KeysReq) -> Result<KeysAns, CallError> {
+        self.inner.keys(req)
+    }
+    fn pull(&mut self, req: &PullReq) -> Result<PullAns, CallError> {
+        match &self.pulled {
+            Some(records) => Ok(PullAns { records: records.clone(), more: false, epoch: 0, n: 3 }),
+            None => self.inner.pull(req),
+        }
+    }
+    fn push(&mut self, req: &PushReq) -> Result<PushAns, CallError> {
+        self.inner.push(req)
+    }
+}
+
+#[test]
+fn an_entry_that_loses_a_fork_is_a_result_of_the_round_not_a_reason_to_distrust_the_peer() {
+    let (mut a, mut b, c) = three("kanban");
+    ops::change(&mut a.ctx(), C, Change::SetPolicy { policy: Policy::Approve }).unwrap();
+    let gone = ended(&[(&a, 0), (&b, 0)]);
+    let remove = ops::change(&mut b.ctx(), C, Change::Remove { id: c.id.clone(), ended: gone }).unwrap();
+    // The peer's answer holds an entry beside this machine's head that loses to it.
+    let mut peer = Answering { inner: link(&a, &mut b), entries: vec![remove.clone()], pulled: None };
+    let r = sync_collection(&mut Mine(&mut a), &mut peer, C, &NewestWins);
+    assert_eq!(r.ended, Ended::Synced, "{:?}", r.ended);
+    assert_eq!(a.chains[C].forks(), &[remove], "the fork is kept, unsettled");
+    assert_eq!(chain_store::load_all(&a.conn).unwrap(), a.chains, "and stored");
+}
+
+#[test]
+fn entries_taken_before_one_that_does_not_verify_are_stored() {
+    let (mut a, mut b, _) = three("kanban");
+    let good = ops::change(&mut b.ctx(), C, Change::SetPolicy { policy: Policy::Approve }).unwrap();
+    let mut bad = good.clone();
+    bad.n = 5;
+    let mut peer = Answering { inner: link(&a, &mut b), entries: vec![good, bad], pulled: None };
+    let r = sync_collection(&mut Mine(&mut a), &mut peer, C, &NewestWins);
+    assert!(matches!(r.ended, Ended::Distrusted(_)), "{:?}", r.ended);
+    assert_eq!(a.chains[C].entries.len(), 4, "the entry before it was taken");
+    assert_eq!(chain_store::load_all(&a.conn).unwrap(), a.chains, "and stored, with its epoch");
+    assert_eq!(r.entries_taken, 1);
+}
+
+#[test]
+fn machines_that_appended_different_entries_at_the_same_position_settle_on_one_chain() {
+    let (mut a, mut b, c) = three("kanban");
+    ops::change(&mut a.ctx(), C, Change::SetPolicy { policy: Policy::Approve }).unwrap();
+    let gone = ended(&[(&a, 0), (&b, 0)]);
+    ops::change(&mut b.ctx(), C, Change::Remove { id: c.id.clone(), ended: gone }).unwrap();
+    assert_eq!(a.chains[C].entries.len(), b.chains[C].entries.len());
+    assert_ne!(a.chains[C].entries, b.chains[C].entries, "each holds its own entry at the fourth place");
+    // The chains are as long as each other, so what separates them is the head: it is what the round compares.
+    let r = round(&mut b, &mut a);
+    assert_eq!(r.ended, Ended::Synced, "{:?}", r.ended);
+    assert_eq!(a.chains[C].entries, b.chains[C].entries, "one of the two entries won on both machines");
+    assert_eq!(chain_store::load_all(&b.conn).unwrap(), b.chains);
+    let again = round(&mut b, &mut a);
+    assert!(!again.changed(), "{again:?}");
+}
+
+#[test]
+fn a_machine_whose_chain_is_shorter_settles_a_fork_with_the_longer_chain_that_won_it() {
+    let (mut a, mut b, c) = three("kanban");
+    ops::change(&mut a.ctx(), C, Change::SetPolicy { policy: Policy::Approve }).unwrap();
+    let gone = ended(&[(&a, 0), (&b, 0)]);
+    let remove = ops::change(&mut b.ctx(), C, Change::Remove { id: c.id.clone(), ended: gone }).unwrap();
+    // Which of the two entries at the fourth place wins is the same everywhere: the machine that wrote it goes on from
+    // there, and the other is left holding a chain one entry shorter than the winner's.
+    let mut probe = a.chains[C].clone();
+    let b_wins = matches!(probe.take(C, remove), Ok(super::members::Taken::Replaced(_)));
+    let (mut winner, mut loser, next) = if b_wins { (b, a, Policy::Approve) } else { (a, b, Policy::AutoProven) };
+    ops::change(&mut winner.ctx(), C, Change::SetPolicy { policy: next }).unwrap();
+    assert_eq!(winner.chains[C].entries.len(), loser.chains[C].entries.len() + 1);
+    let r = round(&mut loser, &mut winner);
+    assert_eq!(r.ended, Ended::Synced, "{:?}", r.ended);
+    assert_eq!(winner.chains[C].entries, loser.chains[C].entries);
+    assert_eq!(chain_store::load_all(&loser.conn).unwrap(), loser.chains);
+}
+
+#[test]
+fn a_peer_that_cannot_be_asked_for_membership_is_not_reported_as_one_that_does_not_list_this_machine() {
+    let (mut a, _, _) = three("kanban");
+    let mut stranger = node(9);
+    stranger.found(C, "kanban", Policy::Approve);
+    // The peer leaves the stranger out of its hello and then goes silent: the round says what happened.
+    struct Silent<'a>(Link<'a>);
+    impl PeerCalls for Silent<'_> {
+        fn hello(&mut self, c: &[String]) -> Result<Vec<Held>, CallError> {
+            self.0.hello(c)
+        }
+        fn members(&mut self, _: &MembersReq) -> Result<MembersAns, CallError> {
+            Err(CallError::Unreachable("gone quiet".into()))
+        }
+        fn keys(&mut self, r: &KeysReq) -> Result<KeysAns, CallError> {
+            self.0.keys(r)
+        }
+        fn pull(&mut self, r: &PullReq) -> Result<PullAns, CallError> {
+            self.0.pull(r)
+        }
+        fn push(&mut self, r: &PushReq) -> Result<PushAns, CallError> {
+            self.0.push(r)
+        }
+    }
+    let mut peer = Silent(link(&stranger, &mut a));
+    let r = sync_collection(&mut Mine(&mut stranger), &mut peer, C, &NewestWins);
+    assert_eq!(r.ended, Ended::Unreachable("gone quiet".into()));
+}
+
+#[test]
+fn a_record_for_another_collection_in_a_pull_is_refused_even_when_this_machine_holds_that_collection() {
+    let (mut a, mut b, _) = three("kanban");
+    // Both machines hold a second collection; b is in the first (the one being synced) and writes into the second.
+    a.found("board.other", "kanban", Policy::Approve);
+    b.found("board.other", "kanban", Policy::Approve);
+    let rec = b.write("board.other", "task.9", "y");
+    let mut peer = Answering { inner: link(&a, &mut b), entries: vec![], pulled: Some(vec![rec]) };
+    let r = sync_collection(&mut Mine(&mut a), &mut peer, C, &NewestWins);
+    assert!(log::current(&a.conn, "board.other", "task.9").unwrap().is_none(), "not applied to a collection the peer was not asked about");
+    assert!(r.refused.iter().any(|x| x == "unknown_collection"), "{:?}", r.refused);
 }
 
 #[test]

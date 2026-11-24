@@ -150,6 +150,11 @@
             &:hover {
                 background: var(--hover-bg-color);
             }
+
+            // An item the keyboard can reach (the stop chip) shows the one accent ring, drawn inside so the bar's edge does not cut it.
+            &:focus-visible {
+                @include mixins.focus-ring-inset(2px);
+            }
         }
 
         .status-icon {

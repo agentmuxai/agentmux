@@ -4063,6 +4063,25 @@
     }
   },
   {
+    "command": "getdroneaccess",
+    "request": "agentmux_srv::server::drone_access_handlers::GetDroneAccessReq",
+    "requestName": "GetDroneAccessReq",
+    "requestTs": {
+      "imports": [
+        "GetDroneAccessReq"
+      ],
+      "name": "GetDroneAccessReq"
+    },
+    "response": "agentmux_srv::drone::access::DroneAccess",
+    "responseName": "DroneAccess",
+    "responseTs": {
+      "imports": [
+        "DroneAccess"
+      ],
+      "name": "DroneAccess"
+    }
+  },
+  {
     "command": "getdronepayloadschema",
     "request": "agentmux_srv::server::drone_payload::PayloadSchemaReq",
     "requestName": "PayloadSchemaReq",
@@ -7376,6 +7395,25 @@
         "AgentContainerLimitsResult"
       ],
       "name": "AgentContainerLimitsResult"
+    }
+  },
+  {
+    "command": "setdroneagents",
+    "request": "agentmux_srv::server::drone_access_handlers::SetDroneAgentsReq",
+    "requestName": "SetDroneAgentsReq",
+    "requestTs": {
+      "imports": [
+        "SetDroneAgentsReq"
+      ],
+      "name": "SetDroneAgentsReq"
+    },
+    "response": "agentmux_srv::drone::access::DroneAccess",
+    "responseName": "DroneAccess",
+    "responseTs": {
+      "imports": [
+        "DroneAccess"
+      ],
+      "name": "DroneAccess"
     }
   },
   {

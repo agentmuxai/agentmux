@@ -162,31 +162,52 @@ struct Ask {
 }
 
 /// Learns the membership entries each side lacks. A removal of this machine ends the round.
-fn exchange_members<S: Session, P: PeerCalls>(s: &mut S, peer: &mut P, collection: &str, mut peer_n: u64, out: &mut Round) -> Result<(), Ended> {
+fn exchange_members<S: Session, P: PeerCalls>(s: &mut S, peer: &mut P, collection: &str, mut peer_n: u64, mut peer_head: Option<String>, out: &mut Round) -> Result<(), Ended> {
     for _ in 0..MAX_MEMBER_ASKS {
         let ask = lent(s, |ctx| {
             let chain = ctx.chains.get(collection).ok_or(Ended::NotHere)?;
-            let offered = chain.entries.iter().skip(peer_n as usize).take(ops::MAX_ENTRIES).cloned().collect();
-            Ok::<_, Ended>(Ask { have: chain.entries.len() as u64, offered })
+            let len = chain.entries.len();
+            // The chains are the same up to the shorter one's head only when they are as long as each other with the same
+            // head, or the peer says nothing of its head. Otherwise each may hold its own entry at the last place, or at
+            // any place the longer one has gone on from: one place back, each side is offered the other's entry beside
+            // its own and settles it. An entry both hold is only a duplicate.
+            let same = peer_n as usize == len && chain.entries.last().map(Entry::hash) == peer_head;
+            let back = usize::from(len > 1 && peer_head.is_some() && !same);
+            let offered = chain.entries.iter().skip((peer_n as usize).saturating_sub(back)).take(ops::MAX_ENTRIES).cloned().collect();
+            Ok::<_, Ended>(Ask { have: (len - back) as u64, offered })
         })??;
+        peer_head = None;
         let ans = peer.members(&MembersReq { collection: collection.to_string(), have_n: ask.have, offered: ask.offered }).map_err(stop)?;
         if ans.entries.len() > ops::MAX_ENTRIES {
             return Err(Ended::Distrusted("a membership answer over the cap".into()));
         }
         out.entries_given += taken_count(&ans.taken);
-        let (took, now, removed) = lent(s, |ctx| {
+        let (took, now, removed, unsound) = lent(s, |ctx| {
             let chain = ctx.chains.get_mut(collection).ok_or(Ended::NotHere)?;
             let mut taken: Vec<Result<Taken, MemberError>> = Vec::new();
+            let mut unsound = None;
             for entry in ans.entries.iter().cloned() {
-                taken.push(Ok(chain.take(collection, entry).map_err(|e| Ended::Distrusted(format!("a membership entry that does not verify: {e:?}")))?));
+                match chain.take(collection, entry) {
+                    Ok(t) => taken.push(Ok(t)),
+                    // An entry beside this machine's head that loses to it is a result, as `ops::members` records it.
+                    Err(MemberError::ForkLost) => taken.push(Err(MemberError::ForkLost)),
+                    Err(e) => {
+                        unsound = Some(e);
+                        break;
+                    }
+                }
             }
+            // What was taken before an entry that does not verify is stored as it is for any other.
             ops::discard_lost_keys(ctx.keys, collection, chain, &taken);
             ops::sync_epoch(ctx.conn, collection, chain).map_err(|e| Ended::Failed(format!("{e:?}")))?;
             chain_store::save(ctx.conn, collection, chain).map_err(db)?;
             let removed = if is_member(ctx, collection) { None } else { Some(removed_by(&ctx.chains[collection].entries, ctx.me.id).unwrap_or_default()) };
-            Ok((taken_count(&taken), ctx.chains[collection].entries.len() as u64, removed))
+            Ok((taken_count(&taken), ctx.chains[collection].entries.len() as u64, removed, unsound))
         })??;
         out.entries_taken += took;
+        if let Some(e) = unsound {
+            return Err(Ended::Distrusted(format!("a membership entry that does not verify: {e:?}")));
+        }
         if let Some(by) = removed {
             return Err(Ended::Removed { by });
         }
@@ -251,6 +272,11 @@ fn pull_all<S: Session, P: PeerCalls>(s: &mut S, peer: &mut P, collection: &str,
             let pins = state.pins();
             let mut stalled = false;
             for rec in &ans.records {
+                // Only the collection asked about: its members' pins say nothing of another collection's.
+                if rec.header.collection != collection {
+                    out.refuse(&Refused::UnknownCollection);
+                    continue;
+                }
                 match log::apply_remote(ctx.conn, rec, &pins, ctx.clock, ctx.now_ms, adapter) {
                     Ok(Outcome::Applied) => out.pulled += 1,
                     Ok(Outcome::KeptLocal) => out.kept_local += 1,
@@ -331,13 +357,14 @@ pub fn sync_collection<S: Session, P: PeerCalls>(s: &mut S, peer: &mut P, collec
         // The peer leaves this machine out of what it answers, which is also how it answers a machine it removed. A
         // former member may still ask for the membership entries up to its own removal, so ask: that is how a removed
         // machine learns it was, and by whom.
-        return match exchange_members(s, peer, collection, mine, &mut out) {
-            Err(Ended::Removed { by }) => out.end(Ended::Removed { by }),
-            _ => out.end(Ended::NotAMemberThere),
+        return match exchange_members(s, peer, collection, mine, None, &mut out) {
+            // Only what the peer's refusal says is "not a member there"; any other end is what happened.
+            Ok(()) | Err(Ended::NotAMemberThere) => out.end(Ended::NotAMemberThere),
+            Err(ended) => out.end(ended),
         };
     };
     let steps = (|| {
-        exchange_members(s, peer, collection, held.n, &mut out)?;
+        exchange_members(s, peer, collection, held.n, held.head.clone(), &mut out)?;
         take_keys(s, peer, collection, &mut out)?;
         reissue(s, collection, &mut out)?;
         pull_all(s, peer, collection, adapter, &mut out)?;

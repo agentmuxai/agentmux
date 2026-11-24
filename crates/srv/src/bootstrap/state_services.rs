@@ -368,9 +368,6 @@ pub fn spawn_state_services(state: &AppState) {
     install_turn_outcome_notes(state);
 }
 
-/// Tells whoever needs to know when a turn's outcome wasn't otherwise reported: a worker's leader
-/// (`worker_notes`, SPEC_AGENT_WORKERS_2026_10_15.md §3.3), and, since #2627, whoever sent the message that
-/// started a turn which then died of a retryable failure (`sender_failure_note`).
 /// What this machine sends the machines on the LAN that are behind: fleet Global Memory entries, and the collections
 /// (Kanban boards) it shares with them (SPEC_USER_DATA_SYNC_LAYER §4.2).
 fn install_lan_sync(state: &AppState) {
@@ -378,6 +375,9 @@ fn install_lan_sync(state: &AppState) {
     crate::server::remote_ops::sync_loop::install(state.clone());
 }
 
+/// Tells whoever needs to know when a turn's outcome wasn't otherwise reported: a worker's leader
+/// (`worker_notes`, SPEC_AGENT_WORKERS_2026_10_15.md §3.3), and, since #2627, whoever sent the message that
+/// started a turn which then died of a retryable failure (`sender_failure_note`).
 fn install_turn_outcome_notes(state: &AppState) {
     backend::worker_notes::install(
         Arc::clone(&state.broker),

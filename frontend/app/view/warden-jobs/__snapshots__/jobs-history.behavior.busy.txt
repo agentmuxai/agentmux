@@ -10,8 +10,7 @@ act {"action":"run_now","job_id":"j1"}
         <span class="ui-pill ui-pill--ok">
           "Active"
         <span class="warden-manager-dim">
-          "by"
-          "Builder"
+          "by Builder"
         <span class="warden-manager-dim">
           "→"
           "Builder"
@@ -102,8 +101,7 @@ act {"action":"run_now","job_id":"j1"}
         <span class="ui-pill ui-pill--ok">
           "Active"
         <span class="warden-manager-dim">
-          "by"
-          "Builder"
+          "by Builder"
         <span class="warden-manager-dim">
           "→"
           "Builder"
@@ -196,8 +194,7 @@ act {"action":"run_now","job_id":"j1"}
         <span class="ui-pill ui-pill--ok">
           "Active"
         <span class="warden-manager-dim">
-          "by"
-          "Builder"
+          "by Builder"
         <span class="warden-manager-dim">
           "→"
           "Builder"

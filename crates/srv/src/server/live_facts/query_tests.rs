@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use super::super::model::{ModelFacts, ModelSource};
-use super::super::{AccountFacts, ContextFacts, LiveFacts, TaskFacts, TurnFacts};
+use super::super::{AccountFacts, ContextFacts, LiveFacts, QuietFacts, Select, TaskFacts, TurnFacts};
 use super::*;
 
 fn model(id: Option<&str>, label: Option<&str>, source: ModelSource) -> ModelFacts {
@@ -116,6 +116,17 @@ fn a_status_line_names_what_is_known_and_leaves_out_what_is_not() {
     assert_eq!(bare, "Idle | idle | model unknown");
     let requested = ModelFacts { pending_switch: true, ..sonnet() };
     assert!(status_line("A", "idle", &LiveFacts::default(), &requested).contains("Sonnet 5.5 high?"), "a model that is not yet confirmed is marked");
+}
+
+#[test]
+fn a_quiet_agent_shows_its_quiet_time_in_its_status_line_and_the_group_is_asked_for_by_name() {
+    let m = sonnet();
+    let quiet = QuietFacts { since_ms: 1, quiet_ms: 22 * 60_000, tasks: vec![1234], watchers: vec!["AgentY".to_string()] };
+    let facts = LiveFacts { quiet: Some(quiet), task: Some(TaskFacts { number: 1234, all: vec![1234] }), ..Default::default() };
+    assert_eq!(status_line("Loap", "idle", &facts, &m), "Loap | idle, quiet 22m | Sonnet 5.5 high | #1234");
+    assert!(Select::parse(Some("quiet"), None).expect("a group").quiet, "asked for by name");
+    assert!(!Select::parse(None, Some("basic")).expect("basic").quiet, "not in a default row");
+    assert!(Select::parse(None, Some("facts")).expect("facts").quiet, "in the facts detail");
 }
 
 #[test]

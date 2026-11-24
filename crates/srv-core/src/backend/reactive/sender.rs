@@ -45,4 +45,33 @@ mod tests {
         }
         assert!(!is_shown_as_agent("not an id", "host", None));
     }
+
+    fn origin_of(from: &str, tier: &str, relay_signed: Option<bool>) -> crate::backend::message_origin::MessageOrigin {
+        use super::super::types::InjectionRequest;
+        let req = InjectionRequest { source_agent: Some(from.to_string()), reagent_verified: relay_signed, ..Default::default() };
+        super::super::sanitize::jekt_origin(&req, "coord", tier, "msg-1", 1_000)
+    }
+
+    #[test]
+    fn the_stored_origin_keeps_the_claimed_sender_marked_as_unproven() {
+        use crate::backend::blockcontroller::health::TriggerKind;
+        for tier in ["lan", "wan"] {
+            for name in ["github-consumer", "cron", "Muxreview"] {
+                let origin = origin_of(name, tier, None);
+                assert_eq!(origin.from.as_deref(), Some(format!("?{name}").as_str()), "{name} over {tier}");
+                assert_eq!(origin.kind, TriggerKind::Agent, "an unproven {name} is never the kind its name implies");
+            }
+        }
+        let odd = origin_of("not an id", "host", None);
+        assert_eq!(odd.from.as_deref(), Some("?not_an_id"));
+    }
+
+    #[test]
+    fn a_proven_or_ordinary_sender_is_stored_under_its_own_name() {
+        use crate::backend::blockcontroller::health::TriggerKind;
+        assert_eq!(origin_of("github-consumer", "wan", Some(true)).from.as_deref(), Some("github-consumer"));
+        assert_eq!(origin_of("github-consumer", "wan", Some(true)).kind, TriggerKind::Service);
+        assert_eq!(origin_of("cron", "host", None).kind, TriggerKind::Schedule);
+        assert_eq!(origin_of("agentx", "wan", None).from.as_deref(), Some("agentx"));
+    }
 }

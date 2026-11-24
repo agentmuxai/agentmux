@@ -18,18 +18,15 @@ import { modalsModel } from "./modalmodel";
 import { openCommandPalette, preloadCommandPaletteWhenIdle } from "@/app/store/open-command-palette";
 import { ReplacePaneConfirm } from "@/app/modals/replace-pane-confirm";
 import { openPaneModal, paneRequests } from "@/app/store/pane-requests";
-import { handleCmdN, handleSplitHorizontal, handleSplitVertical } from "./keymodel-blockcreate";
+import { handleCmdN } from "./keymodel-blockcreate";
 import { type KeyHandler, keyCommands } from "./keymodel-dispatch";
 import { clearPaneTabSelection } from "@/app/element/pane-tab-selection";
 import {
     cyclePaneFocus,
-    genericClose,
     getFocusedBlockInStaticTab,
     handleCmdI,
-    simpleCloseStaticTab,
     switchBlockByBlockNum,
     switchBlockInDirection,
-    switchTab,
     switchTabAbs,
     switchTabLast,
     moveActiveTab,
@@ -79,9 +76,6 @@ function registerTabKeys() {
         return true;
     });
     on("tab:new", run(() => createTab()));
-    on("tab:close", run(() => simpleCloseStaticTab()));
-    on("tab:next", run(() => switchTab(1)));
-    on("tab:prev", run(() => switchTab(-1)));
     for (let idx = 1; idx <= 8; idx++) {
         on(`tab:goto:${idx}`, run(() => switchTabAbs(idx)));
     }
@@ -94,17 +88,6 @@ function registerTabKeys() {
 /** Panes: create, close, move focus, swap and resize. */
 function registerPaneLayoutKeys() {
     on("pane:new", run(() => handleCmdN()));
-    on("split:right", run(() => handleSplitHorizontal("after")));
-    on("split:down", run(() => handleSplitVertical("after")));
-    on("pane:close", run(() => genericClose()));
-    on("pane:magnify", () => {
-        const layoutModel = getLayoutModelForStaticTab();
-        const focusedNode = layoutModel.focusedNode?.();
-        if (focusedNode != null) {
-            layoutModel.magnifyNodeToggle(focusedNode.id);
-        }
-        return true;
-    });
     on("pane:focus:up", run(() => switchBlockInDirection(NavigateDirection.Up)));
     on("pane:focus:down", run(() => switchBlockInDirection(NavigateDirection.Down)));
     on("pane:focus:left", run(() => switchBlockInDirection(NavigateDirection.Left)));

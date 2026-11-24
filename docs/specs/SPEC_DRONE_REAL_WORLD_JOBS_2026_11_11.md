@@ -260,7 +260,7 @@ A timeout rejects. A rejected approval ends the run `outcome: failed, reason: ap
 |---|---|---|
 | Create or edit a drone | Yes | Yes |
 | Turn a drone on (create its job) | Yes | Yes, subject to the validator (§6.3) and the prompt in §5 being shown to the person for a graph that has any `writes outside` node, any credential or any trigger from outside this machine. A graph of inside nodes and a local timer needs no prompt |
-| Fire a drone with a payload (`Drone` `fire`) | Yes | Yes, for a drone it created, owns or has been given; the payload is tainted. The run is recorded as the agent |
+| Fire a drone with a payload (`Drone` `fire`) | Yes | Yes, subject to the Rule of Two (nothing that writes outside AgentMux, reads a Vault credential, runs a command or calls another drone). A drone it created (its owner) or was given (a list a person sets on the drone) runs at once. Any other drone goes through the `drone_fire` sensitive operation: the super agent reviews it, the person sees which drone, what its graph can do and the payload, and has the countdown to stop it; it runs when the countdown ends, on the graph the person was shown. The payload is tainted. The run is recorded as the agent. A drone that existed before owners were recorded has no owner, so an agent's fire of it takes the countdown |
 | Answer an Approval *as the person* | Yes, from the app's own client | **No**: never through MuxAPI (§6.4 a) |
 | Answer an Approval as a named approver | n/a | Yes, only if the node names it as `approver`; recorded as that agent, with a notice and a veto window to the person (§6.4 b) |
 | Raise a cap, add a Vault grant | Yes | Per the Jobs spec §7 |

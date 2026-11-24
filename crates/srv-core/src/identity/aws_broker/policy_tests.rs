@@ -225,3 +225,52 @@ fn a_record_that_cannot_be_read_holds_every_grant_and_a_new_file_is_never_held_o
     let p = load(&path).unwrap().unwrap();
     assert!(p.grants.values().all(|g| g.hold == Some(Hold::Awaiting)), "{:?}", p.grants.values().map(|g| g.hold).collect::<Vec<_>>());
 }
+
+#[test]
+fn a_grant_may_take_one_tag_from_the_caller_and_the_file_says_how() {
+    let file = |mint: &str, tag: &str| {
+        format!(r#"{{ "version": 1, "grants": {{ "g": {{ "tier": "read", "agents": ["*"], "mint": {mint}{tag} }} }} }}"#)
+    };
+    let command = |arg: &str| format!(r#"{{ "kind": "command", "argv": ["/opt/mint", "{arg}"] }}"#);
+    let tag = |key: &str, prefix: &str| format!(r#", "caller_tag": {{ "key": "{key}", "prefix": "{prefix}" }}"#);
+    let p = Policy::parse(&file(&command("{tag_key}={tag}"), &tag("Scope", "team-a/"))).unwrap();
+    let spec = p.grants["g"].caller_tag.clone().unwrap();
+    assert_eq!(spec, CallerTag { key: "Scope".into(), prefix: "team-a/".into() });
+    assert_eq!(spec.check("g", Some("team-a/x")).unwrap(), "team-a/x");
+    // A tag with no place in the command, a place with no tag, a host profile, and keys and prefixes that are not allowed.
+    assert!(Policy::parse(&file(&command("--x"), &tag("Scope", "a/"))).unwrap_err().contains("no argument of the command uses {tag}"));
+    assert!(Policy::parse(&file(&command("{tag}"), "")).unwrap_err().contains("has no caller_tag"));
+    let host = file(r#"{ "kind": "host_profile", "profile": "work" }"#, &tag("K", ""));
+    assert!(Policy::parse(&host).unwrap_err().contains("needs a command recipe"));
+    for (key, prefix) in [("", "a/"), ("aws:x", "a/"), ("a b", "a/"), ("K", "a b/"), ("K", "a*")] {
+        assert!(Policy::parse(&file(&command("{tag}"), &tag(key, prefix))).is_err(), "{key:?} {prefix:?}");
+    }
+    // No prefix is allowed: only the characters are checked.
+    assert!(Policy::parse(&file(&command("{tag}"), &tag("K", ""))).is_ok());
+    // A key or prefix that starts with '-' would be read as an option by the program that gets it.
+    for (key, prefix) in [("-K", "a/"), ("K", "-a/")] {
+        assert!(Policy::parse(&file(&command("{tag}"), &tag(key, prefix))).unwrap_err().contains("may not start with '-'"), "{key:?} {prefix:?}");
+    }
+}
+
+#[test]
+fn a_tag_value_that_starts_with_a_dash_is_refused_even_when_the_grant_has_no_prefix() {
+    let open = CallerTag { key: "K".into(), prefix: String::new() };
+    for value in ["--profile", "-x", " -x"] {
+        let sentence = open.check("g", Some(value)).unwrap_err();
+        assert!(sentence.contains("may not start with '-'"), "{value:?}: {sentence}");
+    }
+    // A dash inside is allowed.
+    assert_eq!(open.check("g", Some("a-b")).unwrap(), "a-b");
+}
+
+#[test]
+fn a_changed_tag_requirement_is_a_wider_recipe_and_a_grant_without_one_fingerprints_as_before() {
+    let text = |prefix: &str| {
+        format!(r#"{{ "version": 1, "grants": {{ "g": {{ "tier": "read", "agents": ["*"], "mint": {{ "kind": "command", "argv": ["/opt/mint", "{{tag}}"] }}, "caller_tag": {{ "key": "K", "prefix": "{prefix}" }} }} }} }}"#)
+    };
+    let a = record::Summary::of(&Policy::parse(&text("a/")).unwrap().grants["g"]);
+    let b = record::Summary::of(&Policy::parse(&text("")).unwrap().grants["g"]);
+    assert_ne!(a.recipe, b.recipe);
+    assert_eq!(record::compare(&a, &b), record::Delta::Wider(vec!["recipe"]));
+}

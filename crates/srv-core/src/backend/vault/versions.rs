@@ -34,6 +34,10 @@ pub const PENDING: &str = "pending";
 pub const INTERRUPTED: &str = "rotation interrupted";
 /// A pending value that wasn't made current because the entry changed meanwhile.
 pub const OVERTAKEN: &str = "rotation failed: the entry changed meanwhile";
+/// What the state of a version that a sync conflict kept starts with, then why it was kept ("changed on <machine> at the
+/// same time", `sync_merge::Kept::label`). Unlike the others it is not pruned after 7 days: the person settles it. A
+/// version kept for a delete holds no value (an empty blob): it is only shown.
+pub const KEPT_PREFIX: &str = "kept: ";
 /// How long a rotation may run before its pending value counts as interrupted.
 const ROTATION_MS: i64 = 30 * 60 * 1000;
 
@@ -44,8 +48,14 @@ pub fn failed_at(step: u8) -> String {
 
 /// A version the person may put back: an earlier value, or a rotation's value
 /// that didn't become current (the service may hold it).
-fn restorable(state: &str) -> bool {
-    state == PREVIOUS || state == INTERRUPTED || state.starts_with("rotation failed")
+fn restorable(v: &VaultVersionRow) -> bool {
+    let state = v.state.as_str();
+    state == PREVIOUS || state == INTERRUPTED || state.starts_with("rotation failed") || (state.starts_with(KEPT_PREFIX) && !v.sealed.is_empty())
+}
+
+/// A version that a sync conflict kept, which is not past any 7 days.
+fn is_kept(state: &str) -> bool {
+    state.starts_with(KEPT_PREFIX)
 }
 
 /// An earlier value as the pane shows it: when it was replaced and by whom, and
@@ -87,7 +97,7 @@ pub fn prune(store: &Store) {
     if let Err(e) = store.vault_versions_restate_before(PENDING, now_ms() - ROTATION_MS, INTERRUPTED) {
         tracing::warn!(error = %e, "vault: couldn't mark interrupted rotations");
     }
-    if let Err(e) = store.vault_versions_prune(now_ms() - KEEP_MS) {
+    if let Err(e) = store.vault_versions_prune(now_ms() - KEEP_MS, KEPT_PREFIX) {
         tracing::warn!(error = %e, "vault: couldn't delete old versions");
     }
 }
@@ -118,7 +128,7 @@ pub fn restore(store: &Store, id: &str, seq: i64) -> Result<(), String> {
     let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {id}"))?;
     let chosen = store.vault_version_get(seq).map_err(|e| e.to_string())?;
     let kept_since = now_ms() - KEEP_MS;
-    let Some(chosen) = chosen.filter(|v| v.entry_id == row.id && v.entry_created_at == row.created_at && restorable(&v.state) && v.replaced_at >= kept_since) else {
+    let Some(chosen) = chosen.filter(|v| v.entry_id == row.id && v.entry_created_at == row.created_at && restorable(v) && (v.replaced_at >= kept_since || is_kept(&v.state))) else {
         return Err(format!("{} has no earlier value {seq}: it may be past its 7 days", row.label));
     };
     let now = now_ms();
@@ -132,7 +142,9 @@ pub fn restore(store: &Store, id: &str, seq: i64) -> Result<(), String> {
         how: "restored".to_string(),
         state: PREVIOUS.to_string(),
     };
-    if !store.vault_version_swap(&row.id, chosen.seq, &current, now, kept_since).map_err(|e| e.to_string())? {
+    // A kept version is not past its time whenever it was kept.
+    let since = if is_kept(&chosen.state) { 0 } else { kept_since };
+    if !store.vault_version_swap(&row.id, chosen.seq, &current, now, since).map_err(|e| e.to_string())? {
         return Err(format!("{} changed while restoring: nothing was changed", row.label));
     }
     if let Err(e) = super::resettle_card(store, &row.id) {

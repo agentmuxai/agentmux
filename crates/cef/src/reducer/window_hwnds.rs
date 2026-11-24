@@ -34,6 +34,31 @@ pub(super) fn handle_bind_window_hwnd(
     DispatchOutput::default()
 }
 
+/// Bind `label` to the first of `candidates` that no label is bound to, and
+/// return it. A label that already has an HWND keeps it and claims nothing.
+/// The scan and the bind are this one call, so two concurrent "ready" events
+/// can't both see the same HWND free.
+pub(super) fn handle_claim_free_window_hwnd(
+    state: &mut HostState,
+    label: String,
+    candidates: &[isize],
+) -> DispatchOutput {
+    if state.window_hwnds.contains_key(&label) {
+        return DispatchOutput::default();
+    }
+    let free = candidates
+        .iter()
+        .copied()
+        .find(|c| !state.window_hwnds.values().any(|bound| bound == c));
+    if let Some(hwnd) = free {
+        state.window_hwnds.insert(label, hwnd);
+    }
+    DispatchOutput {
+        claimed_window_hwnd: free,
+        ..Default::default()
+    }
+}
+
 /// Forget `label`'s HWND. Returns the evicted value; idempotent.
 pub(super) fn handle_evict_window_hwnd(state: &mut HostState, label: String) -> DispatchOutput {
     DispatchOutput {

@@ -4,6 +4,7 @@ import type { AccountUsage } from "./AccountUsage";
 import type { ContextFacts } from "./ContextFacts";
 import type { HostFacts } from "./HostFacts";
 import type { ModelFacts } from "./ModelFacts";
+import type { QuietFacts } from "./QuietFacts";
 import type { RuntimeFacts } from "./RuntimeFacts";
 import type { SessionFacts } from "./SessionFacts";
 import type { TaskFacts } from "./TaskFacts";
@@ -20,4 +21,4 @@ usage?: AccountUsage,
 /**
  * What a route agent has spent today and its cap, as the list row's `spend` says.
  */
-spend?: unknown, task?: TaskFacts, session?: SessionFacts, host?: HostFacts, };
+spend?: unknown, task?: TaskFacts, quiet?: QuietFacts, session?: SessionFacts, host?: HostFacts, };

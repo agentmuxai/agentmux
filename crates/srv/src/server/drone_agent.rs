@@ -23,6 +23,7 @@ use axum::Json;
 use serde_json::{json, Value};
 
 use super::caller::Caller;
+use crate::drone::access::DroneAccessStore;
 use super::drone_handlers::{list_drone_runs, list_drones, start_agent_drone_run, ListRunsReq, MAX_INPUT_BYTES};
 use super::AppState;
 use crate::backend::job_templates::graph;
@@ -50,10 +51,10 @@ pub(crate) async fn handle_drone(
         let uid = uid.clone();
         tokio::task::spawn_blocking(move || super::actor::proven_slug(&mstore, &uid, &claimed)).await.ok().flatten()
     };
-    if proven.is_none() {
+    let Some(slug) = proven else {
         return forbid("FORBIDDEN: the token's agent doesn't answer to that agent_id");
-    }
-    match act(&state, &uid, &action, &body).await {
+    };
+    match act(&state, (&uid, &slug), &action, &body).await {
         Ok(v) => Json(v).into_response(),
         Err(e) => {
             let code = match e.split(':').next().unwrap_or("") {
@@ -71,15 +72,18 @@ fn text(body: &Value, key: &str) -> String {
     body.get(key).and_then(Value::as_str).unwrap_or_default().trim().to_string()
 }
 
-async fn act(state: &AppState, uid: &str, action: &str, body: &Value) -> Result<Value, String> {
+async fn act(state: &AppState, who: (&str, &str), action: &str, body: &Value) -> Result<Value, String> {
     match action {
         "list" => {
             let drones = list_drones(state).map_err(|e| format!("drone list: {e}"))?;
-            Ok(json!({ "drones": drones.iter().map(brief).collect::<Vec<_>>() }))
+            let yours = |d: &DroneDefinition| state.id_store.access_get(&d.id).map(|a| a.allows(who.1)).unwrap_or(false);
+            Ok(json!({ "drones": drones.iter().map(|d| with_yours(brief(d), yours(d))).collect::<Vec<_>>() }))
         }
         "get" => {
             let drone = find(state, body)?;
-            let mut v = brief(&drone);
+            let access = state.id_store.access_get(&drone.id).map_err(|e| format!("drone: {e}"))?;
+            let mut v = with_yours(brief(&drone), access.allows(who.1));
+            v["owner"] = json!(access.owner);
             let summary = graph::summarize(&drone.graph);
             v["agents"] = json!(summary.agents);
             v["writes_outside"] = json!(summary.writes_outside);
@@ -94,7 +98,11 @@ async fn act(state: &AppState, uid: &str, action: &str, body: &Value) -> Result<
                 return Err(format!("FORBIDDEN: an agent can't fire {:?}: {why}. A person runs it from the Drone pane", drone.name));
             }
             let input = input_of(body)?;
-            let run_id = start_agent_drone_run(state, &drone.id, input, uid).await.map_err(|e| format!("drone fire: {e}"))?;
+            // A drone the agent made or was given runs now. Any other asks the person first (drone_fire).
+            if !state.id_store.access_get(&drone.id).map_err(|e| format!("drone: {e}"))?.allows(who.1) {
+                return crate::server::drone_fire::ask(state, who, &drone, input).await;
+            }
+            let run_id = start_agent_drone_run(state, &drone, input, who.0).await.map_err(|e| format!("drone fire: {e}"))?;
             Ok(json!({
                 "run_id": run_id,
                 "drone_id": drone.id,
@@ -155,7 +163,7 @@ fn input_of(body: &Value) -> Result<Value, String> {
 }
 
 /// The node kinds of a drone, each once, as the graph names them.
-fn kinds(drone: &DroneDefinition) -> Vec<String> {
+pub(crate) fn kinds(drone: &DroneDefinition) -> Vec<String> {
     let mut out: Vec<String> = drone.graph.nodes.iter().filter_map(|n| n.data.get("kind").and_then(Value::as_str)).map(str::to_string).collect();
     out.sort();
     out.dedup();
@@ -195,6 +203,12 @@ fn brief(d: &DroneDefinition) -> Value {
     if let Some(why) = why {
         v["why_not"] = json!(why);
     }
+    v
+}
+
+/// Whether the agent made the drone or was given it: what `fire` runs at once.
+fn with_yours(mut v: Value, yours: bool) -> Value {
+    v["yours"] = json!(yours);
     v
 }
 
