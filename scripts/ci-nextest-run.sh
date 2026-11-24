@@ -260,25 +260,24 @@ attempt() {
     local pkgs="$CRATES"
     [ "${IN_QUEUE:-}" = true ] && pkgs="$QUEUE_CRATES"
     if [ "${IN_QUEUE:-}" = true ]; then
-        # The merge queue builds what its run needs in ONE call, one rustc at a time, and the run after it compiles nothing.
-        # It used to build in three calls (the core's harness, the server layer's, then the run's own targets), and the
-        # third compiled the core's test harness a second time: a queue run on 2026-11-24 (job 138636759675) spent 13.2 of
-        # its 14.4 minutes compiling, and the core crate was built at +71 s, +288 s and +655 s. Its verbose log shows the
-        # third compile (3.5 minutes) is the same unit as the first, built against a different build of one third-party
-        # dependency (age), and that the third call is the only one that names mcp's binary and common's integration
-        # test. Why cargo resolves it differently is not known; one call has one set of targets and so one build of each
-        # unit, which does not depend on knowing. One job, as for the PR lane's last build (see 7. in the header): the
-        # core's harness (about 10 GB) and the server layer's must not be compiled at the same time on a 16 GB runner,
-        # which is what the staged calls were for.
-        local targets=(--lib --bin agentmux-srv --bin agentmux-mcp --test spawn_no_window_inventory)
+        # The merge queue skips the first call below. It built the core's test harness on its own (`--lib`), and the run's
+        # call built it again: a queue run on 2026-11-24 (job 138636759675) spent 13.2 of its 14.4 minutes compiling, and
+        # the core crate was built at +71 s, +288 s and +655 s. The verbose log of a run of the queue's shape (PR 8308)
+        # shows the two harnesses are the same unit built against two builds of one third-party dependency (age): the
+        # `--lib` call resolves it one way, and the server layer's call and the run's call resolve it the other way, so
+        # with the `--lib` call gone the run builds the harness once, after the server layer's. Why a call of `--lib`
+        # alone differs is not known. A single call for everything with one job was tried and is slower (14.3 minutes of
+        # compiling: with one job each rustc also gets one LLVM thread, and the core's harness took 5.5 minutes, not 3.5).
+        # The order keeps what the staged calls were for: the server layer's harness (8 to 9 GB) is built alone, and the
+        # run's call then builds the core's harness (about 10 GB) beside only small crates (mcp, common's one test).
         # shellcheck disable=SC2086 # pkgs is a list of arguments
-        CARGO_BUILD_JOBS="$FINAL_JOBS" cargo nextest run --no-run $pkgs "${targets[@]}" 2>&1 | tee -a "$BUILD_LOG" || return $?
+        cargo nextest run --no-run $pkgs --bin agentmux-srv 2>&1 | tee -a "$BUILD_LOG" || return $?
         # The queue builds only what its tests need: srv's unit tests (where most guards are), mcp's unit tests and
         # common's one integration test. The other crates keep the cheaper check (srv's own is covered by its test
         # build).
         cargo check --tests -p agentmux-common -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats 2>&1 | tee -a "$BUILD_LOG" || return $?
         # shellcheck disable=SC2086
-        cargo nextest run --profile queue $pkgs "${targets[@]}" 2>&1 | tee -a "$BUILD_LOG" || return $?
+        cargo nextest run --profile queue $pkgs --lib --bin agentmux-srv --bin agentmux-mcp --test spawn_no_window_inventory 2>&1 | tee -a "$BUILD_LOG" || return $?
         return 0
     fi
     # The core's test harness first: it is the biggest compile (rustc reaches about 10 GB), and cargo would otherwise

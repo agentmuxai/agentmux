@@ -134,10 +134,6 @@ rm -f "$log"
 env PATH="$STUB_BIN:$PATH" IN_QUEUE="" CI_BUILD_LOG="$log" CI_TRACE_FILE="$TMP/final.trace" CI_FINAL_JOBS=2 bash "$SCRIPT" --attempt > /dev/null 2>&1
 if grep -E -- '--no-run --profile ci' "$log" | grep -q 'CARGO_BUILD_JOBS=2$'; then ok "CI_FINAL_JOBS sets the last build's jobs"; else bad "CI_FINAL_JOBS sets the last build's jobs" "$(cat "$log")"; fi
 rm -f "$log"
-env PATH="$STUB_BIN:$PATH" IN_QUEUE=true CI_BUILD_LOG="$log" CI_TRACE_FILE="$TMP/final.trace" bash "$SCRIPT" --attempt > /dev/null 2>&1
-if grep -E -- 'nextest run --no-run' "$log" | grep -q 'CARGO_BUILD_JOBS=1$'; then ok "the queue's one build runs with one job"; else bad "the queue's one build runs with one job" "$(cat "$log")"; fi
-if grep -E -- 'nextest run --profile queue' "$log" | grep -q 'CARGO_BUILD_JOBS=2$'; then ok "the queue's run after it keeps the attempt's jobs"; else bad "the queue's run after it keeps the attempt's jobs" "$(cat "$log")"; fi
-rm -f "$log"
 env PATH="$STUB_BIN:$PATH" IN_QUEUE="" CI_BUILD_LOG="$log" CI_TRACE_FILE="$TMP/final.trace" bash "$SCRIPT" --attempt 1 > /dev/null 2>&1
 if ! grep -q 'CARGO_BUILD_JOBS=2' "$log" && grep -q 'CARGO_BUILD_JOBS=1' "$log"; then ok "the retry builds everything with one job"; else bad "the retry builds everything with one job" "$(cat "$log")"; fi
 
@@ -159,15 +155,13 @@ for mode in pr queue; do
     mapfile -t calls < <(grep "^cargo nextest run" "$log")
     sets=$(for call in "${calls[@]}"; do echo "$call" | packages; echo; done | sort -u | grep -c .)
     if [ "$mode" = queue ]; then
-        # The queue builds in ONE call and runs with the same targets, so each unit is built once (2026-11-24: the three
-        # staged calls compiled the core's harness twice). Two calls: the build, then the run.
-        [ "${#calls[@]}" -eq 2 ] && [ "$sets" = 1 ] && ok "queue lane: one build and the run, naming the same packages" \
-            || bad "queue lane: one build and the run, naming the same packages" "$(cat "$log")"
-        build_targets=$(echo "${calls[0]:-}" | sed -e 's/^.*--no-run//' -e 's/-p [a-z-]*//g' | tr -s ' ')
-        run_targets=$(echo "${calls[1]:-}" | sed -e 's/^.*--profile queue//' -e 's/-p [a-z-]*//g' | tr -s ' ')
-        case "${calls[0]:-}" in *"--no-run"*"--lib"*"--bin agentmux-srv"*"--bin agentmux-mcp"*"--test spawn_no_window_inventory"*) ok "queue lane: the build names every target the run does" ;; *) bad "queue lane: the build names every target the run does" "${calls[0]:-}" ;; esac
-        [ -n "$build_targets" ] && [ "$build_targets" = "$run_targets" ] && ok "queue lane: the build and the run name exactly the same targets" \
-            || bad "queue lane: the build and the run name exactly the same targets" "build:$build_targets run:$run_targets"
+        # The queue has no `--lib` call of its own: the run's call builds the core's harness, after the server layer's
+        # (2026-11-24: with the `--lib` call first, the core's harness was compiled twice, 3.5 minutes). Two calls: the
+        # server layer's build, then the run.
+        [ "${#calls[@]}" -eq 2 ] && [ "$sets" = 1 ] && ok "queue lane: the server layer's build and the run name the same packages"             || bad "queue lane: the server layer's build and the run name the same packages" "$(cat "$log")"
+        case "${calls[0]:-}" in *"--no-run"*"--bin agentmux-srv") ok "queue lane: the server layer's harness is built first" ;; *) bad "queue lane: the server layer's harness is built first" "${calls[0]:-}" ;; esac
+        if grep "^cargo nextest run --no-run" "$log" | grep -q -- "--lib"; then bad "queue lane: no call builds the core's harness on its own" "$(cat "$log")"; else ok "queue lane: no call builds the core's harness on its own"; fi
+        case "${calls[1]:-}" in *"--profile queue"*"--lib"*"--bin agentmux-srv"*"--bin agentmux-mcp"*"--test spawn_no_window_inventory"*) ok "queue lane: the run names every target" ;; *) bad "queue lane: the run names every target" "${calls[1]:-}" ;; esac
         want_calls=2
     else
         # A PR attempt has one call more than the queue's used to: the last build, with its own job count, before the run.
