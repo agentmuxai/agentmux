@@ -58,6 +58,11 @@ export function layoutBehind(id: string): boolean {
     return behind().has(id);
 }
 
+/** Something other than the window (a splitter drag) ended: let the panes that waited for it catch up, unless the window is resizing again. */
+export function settleLayoutBehind(): void {
+    if (!untrack(resizing)) drainBehind();
+}
+
 function drainBehind(): void {
     cancelDrain?.();
     cancelDrain = drainWhenIdle(() => {

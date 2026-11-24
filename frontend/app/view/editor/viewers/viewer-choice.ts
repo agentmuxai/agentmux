@@ -11,16 +11,17 @@
 import type { FileProbeResult } from "@/types/rpc/FileProbeResult";
 import { AUDIO_EXTENSIONS, extOf, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from "@/app/element/local-media";
 
-export type ViewerId = "text" | "large" | "image" | "media" | "pdf" | "hex" | "info";
+export type ViewerId = "text" | "large" | "table" | "image" | "media" | "pdf" | "hex" | "info";
 
 /** readeditorfile's cap: a larger text file isn't loaded into CodeMirror. */
 export const TEXT_MAX_BYTES = 10_000_000;
 
-export const VIEWER_IDS: readonly ViewerId[] = ["text", "large", "image", "media", "pdf", "hex", "info"];
+export const VIEWER_IDS: readonly ViewerId[] = ["text", "large", "table", "image", "media", "pdf", "hex", "info"];
 
 export const VIEWER_LABELS: Record<ViewerId, { label: string; icon: string }> = {
     text: { label: "Text", icon: "file-lines" },
     large: { label: "Large text", icon: "file-lines" },
+    table: { label: "Table", icon: "table-list" },
     image: { label: "Image", icon: "image" },
     media: { label: "Audio and video", icon: "film" },
     pdf: { label: "PDF", icon: "file-pdf" },
@@ -33,17 +34,34 @@ export function isViewerId(v: unknown): v is ViewerId {
 }
 
 /** The probe of a file, as far as the viewers need it. */
-export type FileProbe = FileProbeResult;
+export type FileProbe = FileProbeResult & {
+    /** The file's path (canonical) when the editor found its first line too wide for the Text viewer: a small file that
+     *  the Large text viewer shows. Not from srv; set when the file was read. */
+    wideFirstLine?: string;
+};
+
+/** CSV and TSV, as the probe types them: files the Table viewer can show. */
+export function isDelimitedMime(mime: string | undefined): boolean {
+    return mime === "text/csv" || mime === "text/tab-separated-values";
+}
+
+/** Whether a file shown as text gets the "Show the file as" switch: a file that isn't text (the way back to its own
+ *  viewer) and a delimited one (the way to its table). */
+export function textNeedsSwitch(probe: FileProbe): boolean {
+    return probe.kind !== "text" || isDelimitedMime(probe.mime);
+}
 
 /** The viewers that can show the file, the default first. Every file can
  *  be shown as hex: its bytes are read in parts, whatever its size. A file
  *  over the editor's cap is shown as text by the Large text viewer, which
  *  reads it in parts too. */
 export function viewerOptions(probe: FileProbe): ViewerId[] {
-    const text: ViewerId[] = [probe.size <= TEXT_MAX_BYTES ? "text" : "large"];
+    const text: ViewerId[] = [probe.size <= TEXT_MAX_BYTES && !probe.wideFirstLine ? "text" : "large"];
+    // A delimited file can also be read as a table (an option, never the default).
+    const table: ViewerId[] = text[0] === "text" && isDelimitedMime(probe.mime) ? ["table"] : [];
     switch (probe.kind) {
         case "text":
-            return [...text, "info", "hex"];
+            return [...text, ...table, "info", "hex"];
         case "svg":
             return ["image", ...text, "info", "hex"];
         case "image":

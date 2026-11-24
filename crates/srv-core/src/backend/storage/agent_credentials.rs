@@ -59,7 +59,10 @@ impl Store {
                 expires_at: row.get(4)?,
             })
         }) {
-            Ok(c) => Ok(Some(c)),
+            Ok(c) => {
+                crate::backend::transcript::withhold_sources::agent_relay_credential(agent_id, &c.client_secret, &c.access_token, c.expires_at);
+                Ok(Some(c))
+            }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
         }
@@ -75,6 +78,7 @@ impl Store {
         client_secret: &str,
         token_endpoint: &str,
     ) -> Result<(), StoreError> {
+        crate::backend::transcript::withhold_sources::agent_relay_credential(agent_id, client_secret, "", 0);
         let key = scoped_key(agent_id);
         let conn = self.conn.lock().unwrap();
         conn.execute(
@@ -99,6 +103,7 @@ impl Store {
         access_token: &str,
         expires_at: i64,
     ) -> Result<(), StoreError> {
+        crate::backend::transcript::withhold_sources::agent_relay_credential(agent_id, "", access_token, expires_at);
         let key = scoped_key(agent_id);
         let conn = self.conn.lock().unwrap();
         conn.execute(

@@ -316,6 +316,7 @@ export const cefHostMisc = {
     // The host keeps one entry per window; name ours (drag_stash.rs).
     consumeDroppedFilePaths: () =>
         invokeCommand<string[]>("consume_drag_paths", { windowLabel: ownWindowLabel() }),
+    registerFileDrag: (paths: string[]) => invokeCommand<string | null>("register_file_drag", { paths }),
     peekDroppedFilePaths: () => invokeCommand<string[]>("peek_drag_paths", { windowLabel: ownWindowLabel() }),
     copyFileToDir: (sourcePath: string, targetDir: string) =>
         invokeCommand<string>("copy_file_to_dir", { sourcePath, targetDir }),

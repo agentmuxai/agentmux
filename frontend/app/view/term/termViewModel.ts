@@ -45,6 +45,11 @@ import { META_OSC_TITLE } from "@/app/store/meta-keys";
 import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
 import { isNewerControllerStatus } from "./controller-status";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
+/** The header's Start or Restart: the only way in to either, so it is kept in a narrow header (mixins.scss, `block-frame-end-keep`). */
+function startRestartButton(icon: string, title: string, click: () => void): IconButtonDecl {
+    return { elemtype: "iconbutton", icon, click, title, className: "block-frame-end-keep" };
+}
+
 /** The terminal's state behind its native pane tab (`terminalPaneTab`,
  *  term.tsx). */
 class TermViewModel {
@@ -264,13 +269,7 @@ class TermViewModel {
                 title = noun + " Exited. Click to Restart";
             }
             if (iconName == null) return [];
-            const buttonDecl: IconButtonDecl = {
-                elemtype: "iconbutton",
-                icon: iconName,
-                click: this.forceRestartController.bind(this),
-                title: title,
-            };
-            return [buttonDecl];
+            return [startRestartButton(iconName, title, this.forceRestartController.bind(this))];
         });
 
         // Voice input handle — streams transcript characters into the

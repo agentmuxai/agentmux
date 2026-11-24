@@ -9,7 +9,8 @@ use rusqlite::{params, OptionalExtension};
 
 use super::error::StoreError;
 use super::store::Store;
-use super::vault::VaultActivityRow;
+use super::vault::{VaultActivityRow, VaultRow};
+use super::vault_versions::VaultVersionRow;
 
 pub(super) const SCHEMA: &str = "
     -- The other link ids of an entry (`db_vault_link_ids` holds the one this machine gave it): a link made on another
@@ -46,6 +47,34 @@ pub(super) const SCHEMA: &str = "
 ";
 
 const REMOTE_COLUMNS: &str = "seq, at, entry_id, entry_label, actor, action, target, outcome, version, actor_kind, host, reason, refs";
+
+/// What [`Store::vault_take_write`] writes.
+pub struct TakeWrite<'a> {
+    /// The entry's whole row, its sealed parts under this machine's own key. A new entry's `created_at` is the record's;
+    /// an existing entry keeps its own.
+    pub row: &'a VaultRow,
+    /// The entry as it was read, if it exists: it is written only if it still is exactly that (its value, kind, label, fields,
+    /// tags, Vault and time of change), so a change made here since it was read is never overwritten, whichever part it changed.
+    pub was: Option<&'a VaultRow>,
+    pub primary: Option<&'a str>,
+    pub aliases: &'a [String],
+    pub revive: Option<&'a str>,
+    /// Versions the record's conflict keeps (`entry_created_at` is the entry's incarnation).
+    pub kept: &'a [VaultVersionRow],
+}
+
+/// Sets the ids of `entry_id` inside a transaction: see [`Store::vault_links_set`].
+fn links_set_in(tx: &rusqlite::Connection, entry_id: &str, primary: Option<&str>, aliases: &[String]) -> rusqlite::Result<()> {
+    let free = "NOT EXISTS (SELECT 1 FROM db_vault_link_retired WHERE link_id = ?2) AND NOT EXISTS (SELECT 1 FROM db_vault_link_ids WHERE link_id = ?2 AND entry_id != ?1) AND NOT EXISTS (SELECT 1 FROM db_vault_link_aliases WHERE link_id = ?2 AND entry_id != ?1)";
+    if let Some(p) = primary {
+        tx.execute(&format!("INSERT OR IGNORE INTO db_vault_link_ids (entry_id, link_id) SELECT ?1, ?2 WHERE {free}"), params![entry_id, p])?;
+    }
+    tx.execute("DELETE FROM db_vault_link_aliases WHERE entry_id = ?1", params![entry_id])?;
+    for a in aliases {
+        tx.execute(&format!("INSERT OR IGNORE INTO db_vault_link_aliases (link_id, entry_id) SELECT ?2, ?1 WHERE {free}"), params![entry_id, a])?;
+    }
+    Ok(())
+}
 
 impl Store {
     /// The link id this machine gave `entry_id` as its own, if it has one.
@@ -86,16 +115,52 @@ impl Store {
     pub fn vault_links_set(&self, entry_id: &str, primary: Option<&str>, aliases: &[String]) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         let tx = conn.unchecked_transaction()?;
-        let free = "NOT EXISTS (SELECT 1 FROM db_vault_link_retired WHERE link_id = ?2) AND NOT EXISTS (SELECT 1 FROM db_vault_link_ids WHERE link_id = ?2 AND entry_id != ?1) AND NOT EXISTS (SELECT 1 FROM db_vault_link_aliases WHERE link_id = ?2 AND entry_id != ?1)";
-        if let Some(p) = primary {
-            tx.execute(&format!("INSERT OR IGNORE INTO db_vault_link_ids (entry_id, link_id) SELECT ?1, ?2 WHERE {free}"), params![entry_id, p])?;
-        }
-        tx.execute("DELETE FROM db_vault_link_aliases WHERE entry_id = ?1", params![entry_id])?;
-        for a in aliases {
-            tx.execute(&format!("INSERT OR IGNORE INTO db_vault_link_aliases (link_id, entry_id) SELECT ?2, ?1 WHERE {free}"), params![entry_id, a])?;
-        }
+        links_set_in(&tx, entry_id, primary, aliases)?;
         tx.commit()?;
         Ok(())
+    }
+
+    /// What taking a record from another machine writes, in one transaction (`backend::vault::sync_take`): the entry's row
+    /// (made if there is none, else its label, kind, fields, tags, value, Vault and update time replaced), its link ids, and
+    /// the versions of it that the record's conflict keeps. If `was` is `Some`, the entry must still hold that sealed value:
+    /// a change made here since it was read is never overwritten, and `false` is returned with nothing written. `revive` is
+    /// an id the record itself names: if an entry that had it was deleted here, the record is a later change to that entry
+    /// and takes the id back (every other retired id stays retired).
+    pub fn vault_take_write(&self, w: &TakeWrite<'_>) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction()?;
+        let row = w.row;
+        match w.was {
+            Some(was) => {
+                // The incarnation (`created_at`) stays: the entry's earlier values are filed under it.
+                let n = tx.execute(
+                    "UPDATE db_vault_entries SET kind = ?2, label = ?3, fields = ?4, tags = ?5, sealed = ?6, updated_at = ?7, vault_id = ?8 \
+                     WHERE id = ?1 AND sealed = ?9 AND kind = ?10 AND label = ?11 AND fields = ?12 AND tags = ?13 AND updated_at = ?14 AND vault_id = ?15",
+                    params![row.id, row.kind, row.label, row.fields, row.tags, row.sealed, row.updated_at, row.vault_id, was.sealed, was.kind, was.label, was.fields, was.tags, was.updated_at, was.vault_id],
+                )?;
+                if n == 0 {
+                    return Ok(false);
+                }
+            }
+            None => {
+                if let Some(id) = w.revive {
+                    tx.execute("DELETE FROM db_vault_link_retired WHERE link_id = ?1", params![id])?;
+                }
+                tx.execute(
+                    "INSERT INTO db_vault_entries (id, kind, label, fields, tags, sealed, created_at, updated_at, last_used_at, vault_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    params![row.id, row.kind, row.label, row.fields, row.tags, row.sealed, row.created_at, row.updated_at, row.last_used_at, row.vault_id],
+                )?;
+            }
+        }
+        links_set_in(&tx, &row.id, w.primary, w.aliases)?;
+        for v in w.kept {
+            tx.execute(
+                "INSERT INTO db_vault_versions (entry_id, entry_created_at, sealed, replaced_at, replaced_by, how, state) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![v.entry_id, v.entry_created_at, v.sealed, v.replaced_at, v.replaced_by, v.how, v.state],
+            )?;
+        }
+        tx.commit()?;
+        Ok(true)
     }
 
     /// Adds an activity line that machine `machine` made as its number `seq`. `false` if this machine already has it.

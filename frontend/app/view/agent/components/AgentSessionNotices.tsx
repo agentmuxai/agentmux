@@ -35,6 +35,7 @@ import {
     type BlockAccessor,
 } from "../session-actions";
 import { tip } from "@/app/element/tip";
+import { t } from "@/app/i18n/i18n";
 
 interface AgentSessionNoticesProps {
     blockId: string;
@@ -87,14 +88,14 @@ export const AgentSessionNotices = (props: AgentSessionNoticesProps): JSX.Elemen
                 <Show when={wasInterrupted(() => props.blockAtom())}>
                     <div class="agent-interrupted-banner">
                         <span class="agent-interrupted-label">
-                            Session was interrupted by a restart. Your next message will resume it.
+                            {t("session.notice.interrupted")}
                         </span>
                         <Button
                             density="compact"
                             onClick={() => void dismiss("session:was_interrupted")}
-                            title="Dismiss this notice — your next message resumes the session either way"
+                            title={t("session.notice.dismissResumeTip")}
                         >
-                            Dismiss
+                            {t("session.notice.dismiss")}
                         </Button>
                     </div>
                 </Show>
@@ -108,8 +109,7 @@ export const AgentSessionNotices = (props: AgentSessionNoticesProps): JSX.Elemen
                 <Show when={isLargeSession(() => props.blockAtom())}>
                     <div class="agent-large-session-banner">
                         <span class="agent-large-session-label">
-                            Session has {sessionLineCount(() => props.blockAtom()).toLocaleString()} lines.
-                            Consider archiving to free disk space.
+                            {t("session.notice.large", { lines: sessionLineCount(() => props.blockAtom()).toLocaleString() })}
                         </span>
                         <Button
                             density="compact"
@@ -119,9 +119,9 @@ export const AgentSessionNotices = (props: AgentSessionNoticesProps): JSX.Elemen
                                     archiveSession(props.blockId)
                                 )
                             }
-                            title="Compress and archive this session's history to free disk space, then start fresh"
+                            title={t("session.notice.archiveTip")}
                         >
-                            {archiveBusy() ? "Archiving…" : "Archive"}
+                            {archiveBusy() ? t("session.notice.archiving") : t("session.notice.archive")}
                         </Button>
                     </div>
                 </Show>
@@ -129,8 +129,8 @@ export const AgentSessionNotices = (props: AgentSessionNoticesProps): JSX.Elemen
                 {/* ── Archived badge (shown when session is archived) ── */}
                 <Show when={isSessionArchived(() => props.blockAtom())}>
                     <div class="agent-archived-banner">
-                        <span class="agent-archived-label" {...tip(`Archived at ${archivedAtLabel()}`)}>
-                            Archived
+                        <span class="agent-archived-label" {...tip(t("session.notice.archivedAt", { when: archivedAtLabel() }))}>
+                            {t("session.notice.archived")}
                         </span>
                         <Button
                             density="compact"
@@ -140,9 +140,9 @@ export const AgentSessionNotices = (props: AgentSessionNoticesProps): JSX.Elemen
                                     restoreSession(props.blockId)
                                 )
                             }
-                            title="Restore this session's history from the archive"
+                            title={t("session.notice.restoreTip")}
                         >
-                            {restoreBusy() ? "Restoring…" : "Restore"}
+                            {restoreBusy() ? t("session.notice.restoring") : t("session.notice.restore")}
                         </Button>
                         <Button
                             density="compact"
@@ -152,9 +152,9 @@ export const AgentSessionNotices = (props: AgentSessionNoticesProps): JSX.Elemen
                                     exportSession(props.blockId)
                                 )
                             }
-                            title="Download this session's history as a .jsonl file"
+                            title={t("session.notice.exportTip")}
                         >
-                            {exportBusy() ? "Exporting…" : "Export"}
+                            {exportBusy() ? t("session.notice.exporting") : t("session.notice.export")}
                         </Button>
                     </div>
                 </Show>
@@ -194,15 +194,15 @@ const ResumeFailedBanner = (props: { onDismiss: () => void }): JSX.Element => {
     return (
         <div class="agent-resume-failed-banner">
             <span class="agent-resume-failed-label">
-                Couldn't resume the previous conversation — started a new one.
+                {t("session.notice.resumeFailed")}
             </span>
             <span class="agent-resume-failed-countdown">{remaining()}s</span>
             <Button
                 density="compact"
                 onClick={finish}
-                title="Dismiss this notice"
+                title={t("session.notice.dismissTip")}
             >
-                Dismiss
+                {t("session.notice.dismiss")}
             </Button>
         </div>
     );

@@ -2,23 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { atoms, getApi } from "@/store/global";
-import { createTab } from "@/store/tab-actions";
 import { hostHas } from "@/util/host-caps";
 import { OPACITY_MENUS_NOTE, pageCarriesWindowFade } from "@/util/window-fade";
 import { fireAndForget } from "@/util/util";
-import { openCommandPalette } from "@/app/store/open-command-palette";
 import {
     currentWindowLabel,
     currentWindowOpacity,
     currentWindowTheme,
-    openNewWindowFromHere,
     setCurrentWindowTheme,
 } from "@/app/store/window-appearance";
 import { liveWindowOpacity, setWindowOpacityFor } from "@/app/store/window-opacity-store";
 import { windowId } from "@/app/store/window-identity";
 import { devModeOn } from "@/app/store/dev-mode";
 import { THEME_OPTIONS } from "@/app/menu/base-menus";
-import { shortcutFor } from "@/app/keybindings";
+import { commandMenuParts } from "@/app/store/command-menu-parts";
 import { refreshWorkspaceList, workspaceList, workspaceName } from "@/app/store/user-workspace";
 import { createEffect, createMemo, on, onCleanup } from "solid-js";
 
@@ -140,25 +137,19 @@ function buildWorkspacesItem(openWorkspaceItems: () => MenuItem[]): MenuItem {
 function buildMenuItems(openWorkspaceItems: () => MenuItem[]): MenuItem[] {
     const themeSubItems = buildThemeItems();
     const opacitySubItems = buildOpacityItems();
+    const newTab = commandMenuParts("tab:new");
+    const newWindow = commandMenuParts("window:new");
+    const palette = commandMenuParts("view:command-palette");
+    const reload = commandMenuParts("window:reload");
 
     return [
-        {
-            label: "New Tab",
-            icon: "plus",
-            // Shortcut labels render the binding keymodel.ts registers,
-            // never a hand-written string: "Cmd" is Alt on Windows/Linux.
-            shortcut: shortcutFor("tab:new"),
-            onClick: () => createTab(),
-        },
+        // Name, key and action come from the command registry by id (command-menu-parts.ts), so a
+        // rename or a rebinding reaches the menu: "Cmd" is Alt on Windows/Linux.
+        { label: newTab.label, icon: "plus", shortcut: newTab.shortcut, onClick: newTab.run },
         { label: "", divider: true },
         ...(hostHas("multiWindow")
             ? [
-                  {
-                      label: "New Window",
-                      icon: "window-restore",
-                      shortcut: shortcutFor("window:new"),
-                      onClick: () => openNewWindowFromHere().catch(console.error),
-                  },
+                  { label: newWindow.label, icon: "window-restore", shortcut: newWindow.shortcut, onClick: newWindow.run },
                   { label: "", divider: true },
               ]
             : []),
@@ -181,12 +172,7 @@ function buildMenuItems(openWorkspaceItems: () => MenuItem[]): MenuItem[] {
         // Settings, Connectors, Memory and Toolchain open from the widget
         // bar, the palette and (Settings) its shortcut, not from here
         // (SPEC_WORKSPACES_2026_10_23.md §3).
-        {
-            label: "Command Palette",
-            icon: "magnifying-glass",
-            shortcut: shortcutFor("view:command-palette"),
-            onClick: () => void openCommandPalette(),
-        },
+        { label: palette.label, icon: "magnifying-glass", shortcut: palette.shortcut, onClick: palette.run },
         // Only in dev mode. Reading it here makes this memo rebuild once
         // when the setting changes, which never happens with the menu open.
         ...(devModeOn()
@@ -205,11 +191,7 @@ function buildMenuItems(openWorkspaceItems: () => MenuItem[]): MenuItem[] {
         },
         // A way out when the window shows nothing or stops following its tabs
         // (the stuck-window offer in workspace.tsx is not always there).
-        {
-            label: "Reload Window",
-            icon: "rotate-right",
-            onClick: () => getApi().reloadWindow(),
-        },
+        { label: reload.label, icon: "rotate-right", onClick: reload.run },
         { label: "", divider: true },
         {
             label: "Exit",

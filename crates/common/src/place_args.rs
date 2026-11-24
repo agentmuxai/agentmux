@@ -42,3 +42,22 @@ impl PlaceArgs {
         })
     }
 }
+
+/// `POST /api/v1/pane/place` — resize, move, place, dock or float a pane the caller opened
+/// (docs/specs/SPEC_AGENT_PANE_PLACEMENT_FLOATING_2026_11_22.md §2.2).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PanePlaceRequest {
+    /// `resize` (width and/or height), `move` (spot, or x and y), `place` (any of them, in one call), `dock`
+    /// (a floating pane back into a tab) or `float` (a docked pane into its own window; the placement as an open takes it).
+    pub op: String,
+    /// The pane to act on: a block id from `Pane layout`, one the caller opened.
+    pub target_id: String,
+    #[serde(flatten)]
+    pub place: PlaceArgs,
+    /// `dock`: put the pane beside the caller's own pane (`right`, `left`, `down`, `up`); absent, where it came from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub split: Option<String>,
+    /// The caller's own pane: `dock` goes into its tab, `float` is shown from its window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_id: Option<String>,
+}

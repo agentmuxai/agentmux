@@ -12,6 +12,7 @@
 
 import { createResource, createSignal, For, Show, type JSX } from "solid-js";
 import { Button, Pill } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AppSkillCatalogItem } from "@/types/rpc/AppSkillCatalogItem";
@@ -43,12 +44,12 @@ function errorText(e: unknown): string {
 
 function BadgePill(p: { item: AppSkillCatalogItem }): JSX.Element {
     return p.item.badge === "agentmux" ? (
-        <Pill tone="accent" icon="shield-halved" title={`Signed by the AgentMux key ${p.item.fingerprint}`}>
-            AgentMux
+        <Pill tone="accent" icon="shield-halved" title={t("skill.browse.signedAgentMux", { fingerprint: p.item.fingerprint })}>
+            {t("skill.browse.agentmux")}
         </Pill>
     ) : (
-        <Pill tone="neutral" title="Signed by its author's own key">
-            Community · {p.item.fingerprint}
+        <Pill tone="neutral" title={t("skill.browse.signedAuthor")}>
+            {t("skill.browse.community", { fingerprint: p.item.fingerprint })}
         </Pill>
     );
 }
@@ -91,7 +92,7 @@ function BrowseItem(p: {
     return (
         <li class="skill-browse-item" aria-label={p.item.entry.name}>
             <h4 class="skill-app-title">
-                {p.item.entry.name} <span class="skill-app-muted">{p.item.entry.app.vendor} · version {p.item.entry.version}</span>
+                {p.item.entry.name} <span class="skill-app-muted">{t("skill.browse.vendorVersion", { vendor: p.item.entry.app.vendor, version: p.item.entry.version })}</span>
             </h4>
             <p class="skill-app-line">
                 <BadgePill item={p.item} /> <Pill tone={pillTone(status().tone)}>{status().label}</Pill>
@@ -99,14 +100,14 @@ function BrowseItem(p: {
             <p class="skill-app-line">{p.item.entry.description}</p>
             <Show when={appHereLine(p.item, platform)}>{(line) => <p class="skill-app-line skill-app-muted">{line()}</p>}</Show>
             <p class="skill-app-line skill-app-muted">
-                Works on {osNames(p.item.entry.platforms) || "no platform listed"} · routes: {[...new Set(p.item.entry.routes)].join(", ")}
+                {t("skill.browse.worksOn", { platforms: osNames(p.item.entry.platforms) || t("skill.app.noPlatform"), routes: [...new Set(p.item.entry.routes)].join(", ") })}
             </p>
             <Show when={p.item.entry.hasScripts}>
-                <p class="skill-app-line skill-app-warn">Carries scripts: you review each one before an agent can use it.</p>
+                <p class="skill-app-line skill-app-warn">{t("skill.browse.scripts")}</p>
             </Show>
             <Show when={p.item.entry.mcp}>
                 <p class="skill-app-line skill-app-muted">
-                    Points at the MCP catalog entry {p.item.entry.mcp}. It is installed from the MCP tab, never from here.
+                    {t("skill.browse.mcp", { mcp: p.item.entry.mcp })}
                 </p>
             </Show>
             <Show
@@ -114,10 +115,10 @@ function BrowseItem(p: {
                 fallback={
                     <p class="skill-app-line skill-app-muted">
                         {otherOs()
-                            ? `Needs ${osNames(p.item.entry.platforms)}; this computer runs ${osNames([platform])}, so it is not offered here.`
+                            ? t("skill.browse.otherOs", { needs: osNames(p.item.entry.platforms), here: osNames([platform]) })
                             : p.item.state === "current"
-                              ? `Installed here at version ${p.item.installed_version}.`
-                              : `Installed here: ${p.item.installed_version}, newer than the catalog's ${p.item.entry.version}.`}
+                              ? t("skill.browse.installedHere", { version: p.item.installed_version })
+                              : t("skill.browse.installedNewer", { version: p.item.installed_version, catalog: p.item.entry.version })}
                     </p>
                 }
             >
@@ -137,7 +138,7 @@ function BrowseItem(p: {
                     <p class="skill-app-line" role="status">
                         {d().text}{" "}
                         <Button variant="link" onClick={() => p.onInstalled(d().skillId)}>
-                            Open it
+                            {t("skill.browse.openIt")}
                         </Button>
                     </p>
                 )}
@@ -166,29 +167,28 @@ export function SkillBrowse(p: { catalog: SkillCatalogModel; onOpen: (skillId: s
     const items = () => (list.error ? undefined : list());
     return (
         <div class="agent-primitive-modal-form skill-browse">
-            <h3 class="agent-primitive-modal-name">Browse computer-use skills</h3>
+            <h3 class="agent-primitive-modal-name">{t("skill.browse.title")}</h3>
             <p class="skill-app-line skill-app-muted">
-                The AgentMux catalog is checked against a key built into AgentMux. Installing adds a skill for you to review: its scripts
-                stay unapproved until you approve them.
+                {t("skill.browse.about")}
             </p>
             <Show when={list.error}>
                 <div class="agent-primitive-modal-error" role="alert">
                     {errorText(list.error)}
                 </div>
-                <p class="skill-app-line skill-app-muted">Nothing else depends on the catalog: your installed skills work as they are.</p>
+                <p class="skill-app-line skill-app-muted">{t("skill.browse.independent")}</p>
                 <div class="skill-browse-actions">
                     <Button density="compact" onClick={() => void refetch()}>
-                        Try again
+                        {t("skill.browse.tryAgain")}
                     </Button>
                 </div>
             </Show>
             <Show when={list.loading && !items()}>
-                <p class="skill-app-line skill-app-muted">Reading the catalog…</p>
+                <p class="skill-app-line skill-app-muted">{t("skill.browse.reading")}</p>
             </Show>
             <Show when={items()}>
                 {(l) => (
-                    <ul class="skill-browse-list" aria-label="Skills in the catalog">
-                        <For each={l().items} fallback={<li class="skill-app-muted">The catalog has no skills yet.</li>}>
+                    <ul class="skill-browse-list" aria-label={t("skill.browse.listAria")}>
+                        <For each={l().items} fallback={<li class="skill-app-muted">{t("skill.browse.empty")}</li>}>
                             {(item) => (
                                 <BrowseItem
                                     item={item}

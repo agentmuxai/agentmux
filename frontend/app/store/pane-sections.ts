@@ -74,10 +74,22 @@ const MOVED_SECTIONS: readonly { from: { view: string; section: string }; to: { 
     { from: { view: "warden", section: "kanban" }, to: { view: "kanban" } },
     { from: { view: "swarm", section: "kanban" }, to: { view: "kanban" } },
     { from: { view: "warden", section: "vault" }, to: { view: "vault" } },
-    { from: { view: "warden", section: "history" }, to: { view: "history" } },
+    { from: { view: "warden", section: "history" }, to: { view: "audit", section: "conversations" } },
     { from: { view: "warden", section: "audit" }, to: { view: "audit" } },
     { from: { view: "warden", section: "host" }, to: { view: "swarm" } },
 ];
+
+/** A pane that became a section of another pane, as `(old view, new view, section)`: the History pane is the Audit pane's
+ *  Conversations section. A saved pane, pin, widget entry, link or `panes.open` call naming the old view opens the new one
+ *  on that section. srv has the same table (`MOVED_VIEWS` in `crates/srv-core/src/backend/wconfig/types.rs`). */
+const MOVED_VIEWS: readonly { from: string; to: { view: string; section: string } }[] = [
+    { from: "history", to: { view: "audit", section: "conversations" } },
+];
+
+/** Where the pane `view` went, or null when it is still a pane of its own. */
+export function movedView(view: string | null | undefined): { view: string; section: string } | null {
+    return MOVED_VIEWS.find((m) => m.from === view)?.to ?? null;
+}
 
 /** Sections that left a pane with nowhere to go as a pane, and where they are instead. Naming one
  *  opens the pane with no section, and `sectionProblem` and the widget bridge say where it went. */
@@ -104,6 +116,12 @@ export function movedMeta(meta: Record<string, unknown>): Record<string, unknown
 export function movedMeta(meta: Record<string, unknown> | undefined): Record<string, unknown> | undefined;
 export function movedMeta(meta: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
     if (!meta) return meta;
+    const whole = typeof meta.view === "string" ? movedView(meta.view) : null;
+    if (whole) {
+        const { [sectionKeyOf(String(meta.view))]: _old, ...rest } = meta;
+        const key = sectionKeyOf(whole.view);
+        return { ...rest, view: whole.view, [key]: rest[key] ?? whole.section };
+    }
     const view = typeof meta.view === "string" ? meta.view : undefined;
     const section = String(meta[sectionKeyOf(view ?? "")]);
     if (view && retiredSection(view, section)) {
@@ -126,6 +144,8 @@ export function paneSectionsOf(view: string | null | undefined): PaneSections | 
  *  or `<id>/<sub id>` for a section of a section (`vault/cards` on Warden). */
 export function sectionProblem(view: string | null | undefined, section: string): string | null {
     if (!view) return `"section": "${section}" needs a "view" in its blockdef`;
+    const whole = movedView(view);
+    if (whole) return `"${view}" is now the ${whole.view} pane's ${whole.section} section: use "view": "${whole.view}"`;
     const sections = paneSectionsOf(view);
     if (!sections) return `the ${view} pane has no sections`;
     // srv keys the section by the view as written; an old name's pane reads its own name's key.
