@@ -69,6 +69,11 @@ pub struct HistorySearchOptions {
     /// Also search sessions found only by working directory or account, not
     /// in the agent's own record (see `HistoryService::search_for_agent`).
     pub include_inferred: bool,
+    /// Stop opening sessions at this instant and answer with what was read: the answer is then not `complete`
+    /// (`incomplete_reasons` holds `"time_limit"`, the rest counts in `sessions_skipped`) and carries a `hint`
+    /// on how to narrow. A caller waits only so long, and a partial answer says more than a timeout. `None`
+    /// is no limit.
+    pub deadline: Option<std::time::Instant>,
 }
 
 /// One match.
@@ -148,10 +153,10 @@ pub struct HistorySearchOutcome {
     /// true; otherwise the answer is "unknown", and `incomplete_reasons`
     /// says why.
     pub complete: bool,
-    /// `"hit_limit"`, `"max_sessions"`, `"unreadable_sessions"`,
+    /// `"hit_limit"`, `"max_sessions"`, `"time_limit"`, `"unreadable_sessions"`,
     /// `"unreadable_records"`, `"discovery_errors"`.
     pub incomplete_reasons: Vec<&'static str>,
-    /// Candidates `max_sessions` left unopened.
+    /// Candidates left unopened: by `max_sessions`, or by the time limit.
     pub sessions_skipped: u32,
     /// Candidates that could not be read, and why.
     pub sessions_unreadable: Vec<UnreadableSession>,
@@ -169,7 +174,15 @@ pub struct HistorySearchOutcome {
     /// because the agent's own record doesn't name them. `include_inferred`
     /// searches them too.
     pub inferred_sessions_excluded: u32,
+    /// How to get a complete answer, when the search stopped at its time limit.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<&'static str>,
 }
+
+/// What a search that ran out of time tells the caller to do.
+const TIME_LIMIT_HINT: &str =
+    "The search stopped at its time limit: the hits are from the newest sessions read so far, not from all of them. \
+     Narrow it with since and until (a time range), role, tool or a smaller max_sessions, and search again.";
 
 /// At most this many discovery errors are listed in a search's answer.
 const DISCOVERY_ERRORS_LISTED: usize = 20;
@@ -385,13 +398,20 @@ pub(crate) fn search_candidates(
     let mut truncated = false;
 
     let opened = opts.max_sessions.map_or(candidates.len(), |max| max.min(candidates.len()));
-    let sessions_skipped = (candidates.len() - opened) as u32;
+    let mut sessions_skipped = (candidates.len() - opened) as u32;
+    let mut timed_out = false;
 
-    for candidate in &candidates[..opened] {
+    for (position, candidate) in candidates[..opened].iter().enumerate() {
         let meta = &candidate.meta;
         if hits.len() >= opts.limit {
             // More candidates remained that were never opened.
             truncated = true;
+            break;
+        }
+        if opts.deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
+            // Out of time: the sessions not yet opened are counted, never dropped silently.
+            timed_out = true;
+            sessions_skipped += (opened - position) as u32;
             break;
         }
         // A session that fails to parse is skipped, not fatal: one
@@ -451,8 +471,11 @@ pub(crate) fn search_candidates(
     if truncated {
         incomplete_reasons.push("hit_limit");
     }
-    if sessions_skipped > 0 {
+    if candidates.len() > opened {
         incomplete_reasons.push("max_sessions");
+    }
+    if timed_out {
+        incomplete_reasons.push("time_limit");
     }
     if !sessions_unreadable.is_empty() {
         incomplete_reasons.push("unreadable_sessions");
@@ -474,6 +497,7 @@ pub(crate) fn search_candidates(
         ledger_sessions: 0,
         record_only_sessions: 0,
         inferred_sessions_excluded: 0,
+        hint: timed_out.then_some(TIME_LIMIT_HINT),
     }
 }
 
@@ -1885,6 +1909,56 @@ mod tests {
         let s = "İX";
         assert_eq!(find_case_insensitive(s, "x"), Some(2));
         assert!(s.is_char_boundary(find_case_insensitive(s, "x").unwrap()));
+    }
+
+    #[test]
+    fn a_search_that_runs_out_of_time_answers_with_what_it_read_and_says_how_to_narrow() {
+        let idx = search_index(vec![
+            ("s1", vec![at(2_000, "deploy one")]),
+            ("s2", vec![at(1_000, "deploy two")]),
+            ("s3", vec![at(500, "deploy three")]),
+        ]);
+        let cands: Vec<SearchCandidate> = ["s1", "s2", "s3"]
+            .iter()
+            .map(|id| SearchCandidate { meta: idx.get_meta(id).unwrap(), source: Source::Transcript, attribution: Attribution::AgentRecord })
+            .collect();
+        // Each session takes longer to read than the whole budget, so the first is read and the rest are not.
+        let mut o = opts("deploy");
+        o.deadline = Some(std::time::Instant::now() + std::time::Duration::from_millis(150));
+        let out = search_candidates(&cands, &o, &|c| {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            idx.get_full(&c.meta.session_id)
+        });
+        assert_eq!(out.sessions_scanned, 1, "{out:?}");
+        assert_eq!(out.sessions_skipped, 2);
+        assert_eq!(out.hits.len(), 1);
+        assert!(!out.complete, "a partial answer is never a complete one");
+        assert!(out.incomplete_reasons.contains(&"time_limit"));
+        assert!(!out.incomplete_reasons.contains(&"max_sessions"), "nothing was cut by max_sessions");
+        assert!(out.hint.is_some_and(|h| h.contains("since and until")));
+    }
+
+    #[test]
+    fn a_search_with_time_to_spare_is_complete_and_has_no_hint() {
+        let idx = search_index(vec![("s1", vec![at(2_000, "deploy one")]), ("s2", vec![at(1_000, "deploy two")])]);
+        let cands = vec![idx.get_meta("s1").unwrap(), idx.get_meta("s2").unwrap()];
+        let mut o = opts("deploy");
+        o.deadline = Some(std::time::Instant::now() + std::time::Duration::from_secs(60));
+        let out = idx.search_sessions(&cands, &o);
+        assert_eq!((out.hits.len(), out.complete, out.hint), (2, true, None));
+        assert!(out.incomplete_reasons.is_empty());
+    }
+
+    #[test]
+    fn a_search_already_out_of_time_reads_nothing_and_counts_every_session_skipped() {
+        let idx = search_index(vec![("s1", vec![at(2_000, "deploy one")]), ("s2", vec![at(1_000, "deploy two")])]);
+        let cands = vec![idx.get_meta("s1").unwrap(), idx.get_meta("s2").unwrap()];
+        let mut o = opts("deploy");
+        o.deadline = Some(std::time::Instant::now());
+        let out = idx.search_sessions(&cands, &o);
+        assert_eq!((out.sessions_scanned, out.sessions_skipped, out.hits.len()), (0, 2, 0));
+        assert!(!out.complete);
+        assert_eq!(out.incomplete_reasons, vec!["time_limit"]);
     }
 }
 
