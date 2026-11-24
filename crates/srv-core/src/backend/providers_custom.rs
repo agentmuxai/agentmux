@@ -12,7 +12,7 @@
 //! SPEC_BYO_HARNESS_CUSTOM_ACP_MANIFEST_2026_11_12.md §4.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 
 use sha2::{Digest, Sha256};
@@ -72,10 +72,12 @@ pub struct LoadReport {
     pub refused: Vec<(String, String)>,
 }
 
-#[derive(Default)]
 struct Entry {
     hash: String,
     config: Option<&'static ProviderConfig>,
+    manifest: HarnessManifest,
+    /// The harness's own folder, when it was read from disk: where its approval is kept.
+    dir: Option<PathBuf>,
 }
 
 /// The harnesses registered and every config ever built, by content hash.
@@ -112,7 +114,9 @@ impl CustomLayer {
             }
         };
         let changed = self.live.get(&manifest.id).is_none_or(|e| e.hash != hash);
-        self.live.insert(manifest.id.clone(), Entry { hash, config: Some(config) });
+        // A harness registered again keeps the folder it was read from.
+        let dir = self.live.get(&manifest.id).and_then(|e| e.dir.clone());
+        self.live.insert(manifest.id.clone(), Entry { hash, config: Some(config), manifest: manifest.clone(), dir });
         Ok((config, changed))
     }
 
@@ -133,6 +137,16 @@ impl CustomLayer {
         all
     }
 
+    /// The program a start of harness `id` runs: the one that was approved, as an absolute path, after checking that the
+    /// manifest is the approved one and the program still hashes to what was approved. `Ok(None)` for an id that is not
+    /// registered here (a built-in harness has no approval). Run before every start of a custom harness.
+    pub fn approved_command(&self, id: &str) -> Result<Option<String>, String> {
+        let Some(entry) = self.live.get(id) else { return Ok(None) };
+        let dir = entry.dir.as_deref().ok_or_else(|| super::harness_approval::Refusal::NotApproved.to_string())?;
+        let approval = super::harness_approval::check(&entry.manifest, dir).map_err(|r| r.to_string())?;
+        Ok(Some(approval.binary_path))
+    }
+
     /// The content hash a registered harness was built from.
     pub fn hash_of(&self, id: &str) -> Option<&str> {
         self.live.get(id).map(|e| e.hash.as_str())
@@ -148,7 +162,12 @@ impl CustomLayer {
         for folder in folders {
             let name = folder.file_name().to_string_lossy().into_owned();
             match read_folder(&folder.path(), &name).and_then(|m| self.register(&m).map_err(|e| e.to_string())) {
-                Ok((config, _)) => report.loaded.push(config.id.to_string()),
+                Ok((config, _)) => {
+                    if let Some(entry) = self.live.get_mut(config.id) {
+                        entry.dir = Some(folder.path());
+                    }
+                    report.loaded.push(config.id.to_string());
+                }
                 Err(reason) => report.refused.push((name, reason)),
             }
         }
@@ -276,6 +295,16 @@ pub fn get_custom_provider(id: &str) -> Option<&'static ProviderConfig> {
     }
     ensure_loaded();
     layer().get(id)
+}
+
+/// The program to start for provider `id`, when it is a custom harness: refused unless the person's approval of it still
+/// holds (see [`CustomLayer::approved_command`]). `Ok(None)`: not a custom harness, run what the block says.
+pub fn approved_command(id: &str) -> Result<Option<String>, String> {
+    if !id.starts_with(super::harness_manifest::ID_PREFIX) {
+        return Ok(None);
+    }
+    ensure_loaded();
+    layer().approved_command(id)
 }
 
 /// Every registered custom harness, by id.

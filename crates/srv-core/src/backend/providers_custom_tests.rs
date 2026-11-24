@@ -5,6 +5,7 @@ use super::*;
 use crate::backend::harness_manifest::{DownloadAsset, MANIFEST_VERSION};
 use crate::backend::providers::{get_provider, ControllerType, Tier};
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 fn manifest(id: &str) -> HarnessManifest {
     HarnessManifest {
@@ -170,4 +171,67 @@ fn a_directory_of_harnesses_loads_what_is_valid_and_reports_the_rest() {
     assert!(reason("custom-icon").contains("logo.png"), "{}", reason("custom-icon"));
     assert!(layer.get("custom-good").is_some() && layer.get("custom-misnamed").is_none());
     assert!(CustomLayer::new(1, 1).load_dir(&dir.path().join("missing")).loaded.is_empty());
+}
+
+/// A harness folder read from disk whose manifest names a real file as its program.
+fn on_disk(id: &str) -> (tempfile::TempDir, CustomLayer, PathBuf, PathBuf) {
+    let root = tempfile::tempdir().unwrap();
+    let binary = root.path().join(if cfg!(windows) { "program.exe" } else { "program" });
+    std::fs::write(&binary, b"program v1").unwrap();
+    let folder = root.path().join("harnesses").join(id);
+    std::fs::create_dir_all(&folder).unwrap();
+    let mut m = manifest(id);
+    m.command = std::fs::canonicalize(&binary).unwrap().to_string_lossy().into_owned();
+    m.install = Install::Path;
+    std::fs::write(folder.join(MANIFEST_FILE), serde_json::to_string(&m).unwrap()).unwrap();
+    let mut layer = CustomLayer::new(4, 8);
+    assert_eq!(layer.load_dir(&root.path().join("harnesses")).loaded, [id]);
+    (root, layer, folder, binary)
+}
+
+fn approve_on_disk(layer: &CustomLayer, folder: &Path, id: &str) -> super::super::harness_approval::Approval {
+    use super::super::harness_approval as approval;
+    let entry = &layer.live[id];
+    let real = approval::resolve_command(&entry.manifest).unwrap();
+    let a = approval::approval_for(&entry.manifest, &real, "someone", 1).unwrap();
+    approval::write(folder, &a).unwrap();
+    a
+}
+
+#[test]
+fn a_start_runs_only_the_approved_program_and_only_while_the_approval_holds() {
+    let (_root, layer, folder, binary) = on_disk("custom-gate");
+    // Not a custom harness here: nothing to refuse, the block's own command runs.
+    assert_eq!(layer.approved_command("claude"), Ok(None));
+    // Registered and not approved: refused.
+    assert!(layer.approved_command("custom-gate").unwrap_err().contains("not been approved"));
+    // Approved: the approved program, as the absolute path it was approved at.
+    let approval = approve_on_disk(&layer, &folder, "custom-gate");
+    assert_eq!(layer.approved_command("custom-gate"), Ok(Some(approval.binary_path.clone())));
+    // The program swapped: refused again, until it is approved again.
+    std::fs::write(&binary, b"program v2").unwrap();
+    assert!(layer.approved_command("custom-gate").unwrap_err().contains("changed since it was approved"));
+    approve_on_disk(&layer, &folder, "custom-gate");
+    assert!(layer.approved_command("custom-gate").unwrap().is_some());
+}
+
+#[test]
+fn a_harness_registered_in_memory_has_no_folder_and_so_no_approval() {
+    let mut layer = CustomLayer::new(4, 8);
+    layer.register(&manifest("custom-mem")).unwrap();
+    assert!(layer.approved_command("custom-mem").unwrap_err().contains("not been approved"));
+}
+
+#[test]
+fn registering_a_harness_again_keeps_the_folder_its_approval_lives_in() {
+    let (_root, mut layer, folder, _binary) = on_disk("custom-again");
+    approve_on_disk(&layer, &folder, "custom-again");
+    let same = layer.live["custom-again"].manifest.clone();
+    layer.register(&same).unwrap();
+    assert!(layer.approved_command("custom-again").unwrap().is_some());
+    // An edited manifest is a different manifest: its approval no longer matches.
+    let mut edited = same;
+    edited.args.push("--changed".to_string());
+    layer.register(&edited).unwrap();
+    assert!(layer.approved_command("custom-again").unwrap_err().contains("manifest changed"));
 }

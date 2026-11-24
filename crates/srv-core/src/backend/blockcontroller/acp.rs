@@ -568,6 +568,8 @@ impl Controller for AcpController {
         super::acp_prelaunch::prepare_env(&provider, &mut env_vars);
         super::acp_prelaunch::prepare(&provider, &env_vars, &session_cwd(&cwd));
         super::acp_prelaunch::check_runtime(&provider, &env_vars)?;
+        // A custom harness runs only the program its approval names, and only while that approval still holds.
+        let cmd = crate::backend::providers_custom::approved_command(&provider)?.unwrap_or(cmd);
         {
             let mut inner = self.inner.lock().unwrap();
             inner.mcp_json = mcp_json;
