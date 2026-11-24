@@ -22,7 +22,12 @@ const tokenized = vi.hoisted(() => [] as string[]);
 vi.mock("../../../../util/shiki-highlighter", () => ({
     codeToTokens: async (code: string) => {
         tokenized.push(code);
-        return { tokens: code.split("\n").map((l) => [{ content: l, color: "#ff0000" }]) };
+        // Two themes, as Shiki gives them: a dark and a light colour as CSS variables.
+        return {
+            tokens: code
+                .split("\n")
+                .map((l) => [{ content: l, htmlStyle: { "--shiki-dark": "#ff0000", "--shiki-light": "#aa0000" } }]),
+        };
     },
 }));
 
@@ -37,7 +42,7 @@ const params = (over: Record<string, unknown> = {}) => ({
 
 /** Everything the user can actually read in the rendered preview. */
 const visibleText = (c: HTMLElement) => c.textContent ?? "";
-const highlighted = (c: HTMLElement) => c.querySelector('.agent-preview-text span[style*="color"]');
+const highlighted = (c: HTMLElement) => c.querySelector('.agent-preview-text span.sh-tok[style*="--shiki-light"]');
 
 describe("DiffViewer — the preview survives the Shiki swap", () => {
     afterEach(cleanup);

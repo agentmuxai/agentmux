@@ -308,7 +308,7 @@ fn refuse_unreadable(harness: &str, route: &str, model: &str, images: u32) -> Re
 }
 
 /// What a fresh session on a model change needs, checked before anything is changed: a handoff within the limit, and every
-/// pane of the agent able to start a fresh session (a container's can't yet, as `Agents fresh` says).
+/// pane of the agent able to start a fresh session (the test `Agents fresh` applies to its own pane).
 pub(crate) fn check_fresh(state: &AppState, def_id: &str, handoff: &str) -> Result<(), String> {
     if handoff.chars().count() > super::agent_context::HANDOFF_MAX_CHARS {
         return Err(format!("the handoff is over {} characters: shorten it, with the next step in it", super::agent_context::HANDOFF_MAX_CHARS));
@@ -319,14 +319,9 @@ pub(crate) fn check_fresh(state: &AppState, def_id: &str, handoff: &str) -> Resu
     Ok(())
 }
 
-/// What a refused fresh session says: why, and what to do instead. A container agent can't start a fresh session yet
-/// (its turns run on a per-turn exec controller that has no session to end); what it can do is compact first.
+/// What a refused fresh session says: why, and what to do instead.
 fn fresh_refused(why: &str) -> String {
-    if why.contains("containers") {
-        "a fresh session is not built for container agents yet, so this model change was not made: compact the conversation first (Agents compact, or Compact, then switch in the model panel) and change the model after, or change it without fresh to resume the conversation as it is".to_string()
-    } else {
-        format!("a fresh session is not possible for this agent ({why}), so this model change was not made: change it without fresh to resume the conversation, or compact it first")
-    }
+    format!("a fresh session is not possible for this agent ({why}), so this model change was not made: change it without fresh to resume the conversation, or compact it first")
 }
 
 /// Starts the fresh sessions of a model change. A running pane ends its session when its turn ends and starts the new one
