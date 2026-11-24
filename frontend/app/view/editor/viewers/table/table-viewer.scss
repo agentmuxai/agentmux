@@ -56,15 +56,14 @@
     border-bottom: 1px solid var(--border-color);
 }
 
-// The header row stays at the top of the scroller and takes no room in the scrolled content, so the rows' arithmetic
-// is the same with it or without.
+// The header row stays at the top of the scroller, over the rows that scroll under it, on a surface that is not
+// see-through (--main-bg-color follows the window's opacity, and the rows would show through).
 .table-viewer-head {
     position: sticky;
     top: 0;
     z-index: var(--z-over-content);
-    margin-bottom: calc(var(--table-row-h) * -1);
     font-weight: 600;
-    background: var(--main-bg-color);
+    background: var(--menu-bg-color);
 }
 
 .table-viewer-number {

@@ -41,6 +41,12 @@ export function isDelimitedMime(mime: string | undefined): boolean {
     return mime === "text/csv" || mime === "text/tab-separated-values";
 }
 
+/** Whether a file shown as text gets the "Show the file as" switch: a file that isn't text (the way back to its own
+ *  viewer) and a delimited one (the way to its table). */
+export function textNeedsSwitch(probe: FileProbe): boolean {
+    return probe.kind !== "text" || isDelimitedMime(probe.mime);
+}
+
 /** The viewers that can show the file, the default first. Every file can
  *  be shown as hex: its bytes are read in parts, whatever its size. A file
  *  over the editor's cap is shown as text by the Large text viewer, which

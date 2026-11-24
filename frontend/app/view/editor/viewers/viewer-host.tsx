@@ -25,7 +25,7 @@ import { LargeTextViewer } from "./large/large-text-viewer";
 import { PdfViewer } from "./pdf/pdf-viewer";
 import { TableViewer } from "./table/table-viewer";
 import { ViewerBar, type ViewerBarProps } from "./viewer-bar";
-import { isProgramPath, TEXT_MAX_BYTES, type ViewerId } from "./viewer-choice";
+import { isProgramPath, TEXT_MAX_BYTES, textNeedsSwitch, type ViewerId } from "./viewer-choice";
 import { droppedFileOf, isDroppedPath, neighbourInFolder } from "./viewer-tabs";
 import "./viewers.scss";
 
@@ -48,14 +48,15 @@ export function ViewerHost(props: { model: EditorViewModel }): JSX.Element {
 }
 
 /** The switch over the text editor for a file that isn't text (an image or
- *  binary shown as text): the only way back to its own viewer. A text file
- *  shown as text gets none. */
+ *  binary shown as text): the only way back to its own viewer. A delimited
+ *  file gets it too, to reach its table. Any other text file shown as text
+ *  gets none. */
 export function TextViewerSwitch(props: { model: EditorViewModel }): JSX.Element {
     const model = props.model;
     const tabId = () => model.activeTabAtom()?.id ?? null;
     const options = (): ViewerId[] => {
         const probe = model.viewerTabs.probe(tabId());
-        return probe && probe.kind !== "text" ? model.viewerTabs.options(tabId(), "text") : [];
+        return probe && textNeedsSwitch(probe) ? model.viewerTabs.options(tabId(), "text") : [];
     };
     const reopen = (v: ViewerId) => {
         const id = tabId();
