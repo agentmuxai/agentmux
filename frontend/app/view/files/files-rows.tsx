@@ -58,6 +58,28 @@ const GIT_MARKS: Record<Exclude<FsGitState, "ignored">, { letter: string; title:
     conflicted: { letter: "!", title: "Merge conflict" },
 };
 
+/** A tree row's indent and the chevron that opens or closes its folder (a file gets the chevron's room, empty). */
+function TreeIndent(props: { row: TreeRow; onToggle?: () => void }): JSX.Element {
+    return (
+        <>
+            <span class="files-tree-indent" style={{ width: `${props.row.depth * 16}px` }} />
+            <Show when={props.row.expandable} fallback={<span class="files-twisty files-twisty-none" />}>
+                <i
+                    class={`fa fa-chevron-${props.row.expanded ? "down" : "right"} files-twisty`}
+                    role="button"
+                    aria-label={props.row.expanded ? t("files.tree.close", { name: props.row.label }) : t("files.tree.open", { name: props.row.label })}
+                    aria-expanded={props.row.expanded}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        props.onToggle?.();
+                    }}
+                    onDblClick={(e) => e.stopPropagation()}
+                />
+            </Show>
+        </>
+    );
+}
+
 export function FileRow(props: {
     model: FilesModel;
     entry: FsEntry;
@@ -104,26 +126,7 @@ export function FileRow(props: {
             {...tip(props.entry.error ?? (props.entry.link_target ? `→ ${props.entry.link_target}` : undefined))}
         >
             <div class="files-cell files-col-name" role="gridcell" aria-level={props.tree ? props.tree.depth + 1 : undefined}>
-                <Show when={props.tree}>
-                    {(row) => (
-                        <>
-                            <span class="files-tree-indent" style={{ width: `${row().depth * 16}px` }} />
-                            <Show when={row().expandable} fallback={<span class="files-twisty files-twisty-none" />}>
-                                <i
-                                    class={`fa fa-chevron-${row().expanded ? "down" : "right"} files-twisty`}
-                                    role="button"
-                                    aria-label={row().expanded ? t("files.tree.close", { name: row().label }) : t("files.tree.open", { name: row().label })}
-                                    aria-expanded={row().expanded}
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        props.onToggle?.();
-                                    }}
-                                    onDblClick={(e) => e.stopPropagation()}
-                                />
-                            </Show>
-                        </>
-                    )}
-                </Show>
+                <Show when={props.tree}>{(row) => <TreeIndent row={row()} onToggle={props.onToggle} />}</Show>
                 <span class="files-icon-box"><TypeIcon model={props.model} entry={props.entry} cssPx={16} glyphClass="files-icon" /></span>
                 <Show when={props.entry.is_symlink}>
                     <i class="fa fa-share files-link-mark" aria-label="link" />
