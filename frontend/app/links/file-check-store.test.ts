@@ -26,6 +26,15 @@ describe("the file check store", () => {
         expect(deadReason("pane-1", "a.md")).toBeUndefined();
     });
 
+    it("does not make a missing name that is also a web site dead: it is the site", async () => {
+        ask.mockResolvedValue({ state: "missing", reason: "Not found.", resolved: "" });
+        await checkFileNow("pane-4", "docs.rs");
+        expect(fileCheck("pane-4", "docs.rs")?.state).toBe("missing");
+        expect(deadReason("pane-4", "docs.rs")).toBeUndefined();
+        await checkFileNow("pane-4", "gone.md");
+        expect(deadReason("pane-4", "gone.md")).toBe("Not found.");
+    });
+
     it("makes a missing file, and one outside the folders, dead with the reason srv gave", async () => {
         ask.mockResolvedValueOnce({ state: "missing", reason: "Not found.", resolved: "" }).mockResolvedValueOnce({ state: "outside", reason: "Outside this agent's folders.", resolved: "" });
         await checkFileNow("pane-2", "gone.md");
