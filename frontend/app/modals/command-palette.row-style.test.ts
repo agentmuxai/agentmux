@@ -36,7 +36,7 @@ describe("the command palette's search row", () => {
     const cell = rule(row, ".ui-search-icon");
 
     it("gives the kit's magnifier cell a definite height to be square against", () => {
-        expect(row).toMatch(/--ui-height:\s*42px;/);
+        expect(row).toMatch(/--ui-height:\s*32px;/);
         expect(row).toMatch(/min-height:\s*var\(--ui-height\);/);
         expect(row).toMatch(/box-sizing:\s*border-box;/);
     });
@@ -47,7 +47,7 @@ describe("the command palette's search row", () => {
         expect(cell).not.toMatch(/aspect-ratio/);
     });
 
-    it("puts as much room right of the input as the cell leaves left of the glyph, ((42 - 2) - 10) / 2 = 15px", () => {
-        expect(row).toMatch(/padding:\s*0 15px 0 0;/);
+    it("puts as much room right of the input as the cell leaves left of the glyph, ((32 - 2) - 10) / 2 = 10px", () => {
+        expect(row).toMatch(/padding:\s*0 10px 0 0;/);
     });
 });
