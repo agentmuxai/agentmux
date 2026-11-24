@@ -42,7 +42,9 @@ import { crawlFolders, rankMatches, whereOf } from "./files-find";
 import { ColumnsState } from "./files-columns-state";
 import { EMPTY_SELECTION, pruneSelection, type Selection } from "./files-selection";
 import { addRecent } from "./files-pins";
-import { clipboard, FilesOps, opFinishedText, sameVolume, setClipboard } from "./files-ops";
+import { childNamesOf, namesIn } from "./files-names";
+import { landedAsPlanned, movedOk, planMoveUndo, restorable, type MovedItem, type UndoPlan } from "./files-undo-move";
+import { clipboard, FilesOps, opFinishedText, sameVolume, setClipboard, type OpView } from "./files-ops";
 import { systemIconsAvailable } from "./files-icons";
 import { sortEntries, type SortDir, type SortKey } from "./files-sort";
 
@@ -58,6 +60,8 @@ const META_PREVIEW = "files:preview";
 /** Set by srv when a container agent opens a folder of its workspace: the one folder this pane may show. */
 const META_ROOT = "files:root";
 const META_VIEW = "files:view";
+/** A move of more items than this is not offered Undo: each folder among them is listed to be sure of it. */
+const MAX_UNDO_ITEMS = 200;
 /** The most folders a pane keeps open in place at once: each one is watched, and srv allows 64 watches to a pane. */
 const MAX_EXPANDED = 40;
 /** The most matches a find shows. */
@@ -97,7 +101,9 @@ export interface AgentPlace {
 type UndoEntry =
     | { kind: "trash"; paths: string[] }
     | { kind: "rename"; from: string; to: string }
-    | { kind: "create"; path: string };
+    | { kind: "create"; path: string }
+    /** A finished move that is certain to have put each item at `<destination>/<its name>` (files-undo-move.ts). */
+    | { kind: "move"; items: MovedItem[] };
 
 /** An SSH host in the Remote section of Places. */
 export interface FilesRemote {
@@ -388,12 +394,7 @@ export class FilesModel {
         this.order = createMemo(() => this.entries().map((e) => e.name));
 
         this.ops = new FilesOps(ctx.blockId);
-        this.ops.onFinished = (op) => {
-            this.setStatus(opFinishedText(op), op.state === "done" && !op.failures?.length ? 4000 : 10000);
-            // The watcher re-lists the folder shown; a move OUT of it (or a
-            // copy into a folder this pane isn't watching) may not be seen.
-            this.refresh();
-        };
+        this.ops.onFinished = (op) => this.onOpFinished(op);
         this.unsubscribe = onMuxEvent(WpsEvent.FilesChanged, (data) => {
                 const dir = data.dir;
                 if (!this.path()) return;
@@ -1082,7 +1083,7 @@ export class FilesModel {
         }
     }
 
-    /** Ctrl+Z, or Undo in the status line: reverses the last rename, new
+    /** Ctrl+Z, or Undo in the status line: reverses the last rename, move, new
      *  item, or move to Trash. */
     async undo(): Promise<void> {
         if (this.refuseInRoot("Undo")) return;
@@ -1095,6 +1096,8 @@ export class FilesModel {
             if (last.kind === "rename") {
                 await RpcApi.FsRenameCommand(TabRpcClient, { path: last.to, new_name: baseName(last.from), ...this.on() });
                 this.setStatus({ text: `Renamed back to ${baseName(last.from)}`, tone: "info" });
+            } else if (last.kind === "move") {
+                await this.undoMove(last.items);
             } else if (last.kind === "create" && this.connection()) {
                 // Undoing a new item moves it to the Trash, and a host has
                 // none: deleting it for good is not an undo.
@@ -1157,16 +1160,101 @@ export class FilesModel {
         sourceConnection: string = ""
     ): Promise<boolean> {
         if (this.refuseInRoot("Copying and moving")) return false;
+        // Where it goes is fixed now: the pane may be moved to another host while the destination is being read.
+        const connection = this.connection();
         try {
-            await this.ops.start(kind, sources, destDir, {
-                sourceConnection: sourceConnection || undefined,
-                connection: this.connection() || undefined,
-            });
+            // A move on this computer is undoable when the names in the destination show where it will land.
+            const planned = kind === "move" && !connection && !sourceConnection ? await this.planUndo(sources, destDir) : null;
+            if (this.connection() !== connection) {
+                this.setStatus({ text: "The pane changed host before the move began, so nothing was moved.", tone: "info" });
+                return false;
+            }
+            await this.ops.start(
+                kind,
+                sources,
+                destDir,
+                {
+                    sourceConnection: sourceConnection || undefined,
+                    connection: connection || undefined,
+                },
+                planned ?? undefined
+            );
             return true;
         } catch (err) {
             this.setStatus({ text: errorText(err), tone: "error" });
             return false;
         }
+    }
+
+    private namesIn(dir: string): Promise<Set<string> | null> {
+        return namesIn(dir, this.on());
+    }
+
+    /** What a finished copy or move says, and Undo for a move that landed as planned. */
+    private onOpFinished(op: OpView): void {
+        const text = opFinishedText(op);
+        const ms = op.state === "done" && !op.failures?.length ? 4000 : 10000;
+        this.setStatus(text, ms);
+        // Undo is offered once the destination shows the move landed as planned.
+        void this.noteMoveForUndo(op).then((undoable) => {
+            if (undoable) this.setStatus({ ...text, undo: true }, ms);
+        });
+        // The watcher re-lists the folder shown; a move OUT of it (or a
+        // copy into a folder this pane isn't watching) may not be seen.
+        this.refresh();
+    }
+
+    private childNamesOf(path: string): Promise<Set<string> | "file" | null> {
+        return childNamesOf(path, this.on());
+    }
+
+    private async planUndo(sources: string[], destDir: string): Promise<UndoPlan | null> {
+        const destNames = await this.namesIn(destDir);
+        const items = destNames && sources.length <= MAX_UNDO_ITEMS ? planMoveUndo(sources, destDir, destNames) : null;
+        if (!items || !destNames) return null;
+        const children = new Map<string, ReadonlySet<string>>();
+        for (const item of items) {
+            const names = await this.childNamesOf(item.from);
+            if (names === null) return null;
+            if (names !== "file") children.set(baseName(item.from).toLowerCase(), names);
+        }
+        return { items, destDir, before: destNames, children };
+    }
+
+    /** A finished move that went to plan joins the undo stack, once the destination shows it landed as planned
+     *  (a conflict answered while the job ran puts an item under another name). True when it did. */
+    private async noteMoveForUndo(op: { kind: string; state: string; tag?: unknown; failures?: { path: string }[] }): Promise<boolean> {
+        const plan = op.tag as UndoPlan | undefined;
+        if (op.kind !== "move" || op.state !== "done" || !plan?.items || this.connection()) return false;
+        const items = movedOk(plan.items, op.failures?.map((f) => f.path));
+        if (items.length === 0) return false;
+        const after = await this.namesIn(plan.destDir);
+        const childrenAfter = new Map<string, ReadonlySet<string> | null>();
+        for (const key of plan.children.keys()) {
+            const item = items.find((i) => baseName(i.to).toLowerCase() === key);
+            if (!item) continue;
+            const names = await this.childNamesOf(item.to);
+            childrenAfter.set(key, names === "file" ? null : names);
+        }
+        // The pane may have been moved to a host while the destination was being read: the stack was cleared then.
+        if (this.connection() || !landedAsPlanned(plan, items, after, childrenAfter)) return false;
+        this.undoStack.push({ kind: "move", items });
+        return true;
+    }
+
+    /** Ctrl+Z on a move: each item back where it came from, if it is still where the move left it. */
+    private async undoMove(items: MovedItem[]): Promise<void> {
+        const dirs = new Set<string>();
+        for (const i of items) for (const p of [parentOf(i.from), parentOf(i.to)]) if (p) dirs.add(p);
+        const listed = new Map<string, Set<string> | null>();
+        for (const d of dirs) listed.set(d, await this.namesIn(d));
+        const groups = restorable(items, (d) => listed.get(d) ?? null);
+        if (groups.length === 0) {
+            this.setStatus({ text: "Can't undo that move: the items aren't where it left them.", tone: "error" });
+            return;
+        }
+        // Each group moves back as its own job; srv asks if something has since taken a name.
+        for (const g of groups) await this.ops.start("move", g.paths, g.parent);
     }
 
     /** What dropping `sources` here does: move within a drive when the drag

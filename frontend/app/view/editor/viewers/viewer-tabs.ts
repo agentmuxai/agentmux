@@ -38,9 +38,11 @@ export class ViewerTabs {
 
     /** A new probe of the tab's file at `path`: a file found too wide for the Text viewer stays in the Large text viewer
      *  while it is the same file (a log that grows is not read whole again to learn that). */
-    reprobe(tabId: string, fresh: FileProbe, path: string): void {
+    reprobe(tabId: string, fresh: FileProbe, path: string): FileProbe {
         const wide = this.probes.get(tabId)?.wideFirstLine === path;
-        this.setProbe(tabId, wide ? { ...fresh, wideFirstLine: path } : fresh);
+        const merged = wide ? { ...fresh, wideFirstLine: path } : fresh;
+        this.setProbe(tabId, merged);
+        return merged;
     }
 
     /** The file at `path` has a first line too wide for the Text viewer: its probe now offers the Large text viewer. */

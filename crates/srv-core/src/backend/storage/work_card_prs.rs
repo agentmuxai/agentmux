@@ -486,9 +486,14 @@ pub(crate) fn link_in(tx: &Transaction, work_id: &str, repo: &str, number: u64, 
         .optional()?;
     let changed = match existing {
         None => {
+            // A repository's id, once any row learned it, belongs to every row of that repository: a new link
+            // starts with it, so a notice that names the id finds the row without a guess.
+            let known_id: Option<i64> = tx
+                .query_row("SELECT repo_id FROM db_work_card_prs WHERE repo = ?1 AND repo_id IS NOT NULL LIMIT 1", params![repo], |r| r.get(0))
+                .optional()?;
             tx.execute(
-                "INSERT INTO db_work_card_prs (work_id, repo, number, source, linked_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![work_id, repo, number as i64, source.as_str(), now_ms],
+                "INSERT INTO db_work_card_prs (work_id, repo, number, source, linked_at, repo_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![work_id, repo, number as i64, source.as_str(), now_ms, known_id],
             )?;
             true
         }
@@ -620,7 +625,14 @@ impl Store {
 
 /// [`Store::work_card_pr_flow_apply`] inside the caller's transaction.
 fn flow_apply_in(tx: &Transaction, note: &FlowNote, now_ms: i64) -> Result<usize, StoreError> {
+    flow_apply_with(tx, note, now_ms, &pr_flow::recent())
+}
+
+/// [`flow_apply_in`] against `recent`, the notices srv kept: when this one teaches a repository's id, the kept
+/// notices that named that id and were left unplaced for want of it go through the join again.
+fn flow_apply_with(tx: &Transaction, note: &FlowNote, now_ms: i64, recent: &PrFlowSnapshot) -> Result<usize, StoreError> {
     let id = note.repo_id as i64;
+    let mut learned = false;
     let candidates: Vec<(String, Option<i64>)> = {
         let mut stmt = tx.prepare(
             "SELECT r.repo, r.repo_id FROM db_work_card_prs r JOIN db_work_queue q ON q.id = r.work_id
@@ -648,6 +660,7 @@ fn flow_apply_in(tx: &Transaction, note: &FlowNote, now_ms: i64) -> Result<usize
                 return Ok(0);
             }
             tx.execute("UPDATE db_work_card_prs SET repo_id = ?1 WHERE repo = ?2", params![id, only])?;
+            learned = true;
             only.to_string()
         }
     };
@@ -701,6 +714,16 @@ fn flow_apply_in(tx: &Transaction, note: &FlowNote, now_ms: i64) -> Result<usize
             changed += 1;
         }
     }
+    if learned {
+        // The id is known now, so each earlier notice for it takes the known-id path (and learns nothing more):
+        // the ones that were dropped as ambiguous reach their rows, and the ones already there are ignored as
+        // not newer.
+        let mut earlier: Vec<FlowNote> = pr_flow::notes_of(recent).into_iter().filter(|n| n.repo_id == note.repo_id && *n != *note).collect();
+        earlier.sort_by_key(|n| n.at_ms);
+        for n in &earlier {
+            changed += flow_apply_with(tx, n, now_ms, recent)?;
+        }
+    }
     Ok(changed)
 }
 
@@ -719,7 +742,7 @@ fn replay_in(tx: &Transaction, work_id: &str, number: u64, recent: &PrFlowSnapsh
     let mut notes: Vec<FlowNote> = pr_flow::notes_of(recent).into_iter().filter(|n| n.number == number && n.agent.eq_ignore_ascii_case(&holder)).collect();
     notes.sort_by_key(|n| n.at_ms);
     for n in &notes {
-        flow_apply_in(tx, n, now_ms)?;
+        flow_apply_with(tx, n, now_ms, recent)?;
     }
     Ok(())
 }

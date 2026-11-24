@@ -435,18 +435,7 @@ setInterval(() => {{}}, 1000);
     Controller::start(&c, meta, None, false).unwrap();
     assert!(wait_for_spawn(&c).await, "expected a real process to spawn");
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    let argv: Vec<String> = loop {
-        if let Ok(raw) = std::fs::read_to_string(&argv_out) {
-            if let Ok(parsed) = serde_json::from_str(&raw) {
-                break parsed;
-            }
-        }
-        if std::time::Instant::now() >= deadline {
-            panic!("stub never wrote its argv file");
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    };
+    let argv = argv_the_stub_wrote(&c, &argv_out).await;
     assert!(
         argv.windows(2).any(|w| w[0] == "--resume" && w[1] == "sid-to-resume"),
         "expected --resume sid-to-resume in argv, got {argv:?}"
@@ -493,14 +482,29 @@ setInterval(() => {{}}, 1000);
     Controller::start(&c, meta, None, false).unwrap();
     assert!(wait_for_spawn(&c).await, "expected a real process to spawn");
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    argv_the_stub_wrote(&c, &argv_out).await
+}
+
+/// The argv a stub wrote to `argv_out` as its first act. A cold `node` start on a busy runner can
+/// take longer than any fixed wait a test could pick, so the wait ends on what is known: the file
+/// is there, or the process is gone (it never will write it); the long bound only stops a hang.
+async fn argv_the_stub_wrote(c: &PersistentSubprocessController, argv_out: &std::path::Path) -> Vec<String> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
     loop {
-        if let Ok(raw) = std::fs::read_to_string(&argv_out) {
+        if let Ok(raw) = std::fs::read_to_string(argv_out) {
             if let Ok(parsed) = serde_json::from_str(&raw) {
                 return parsed;
             }
         }
-        assert!(std::time::Instant::now() < deadline, "stub never wrote its argv file");
+        let running = c.inner.lock().unwrap().current_pid.is_some();
+        if !running {
+            // One last look: the stub may have written the file and exited between the two checks.
+            if let Some(parsed) = std::fs::read_to_string(argv_out).ok().and_then(|raw| serde_json::from_str(&raw).ok()) {
+                return parsed;
+            }
+            panic!("the stub exited without writing its argv file");
+        }
+        assert!(std::time::Instant::now() < deadline, "the stub was still starting after 120 s");
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
 }
