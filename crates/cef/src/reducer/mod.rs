@@ -714,11 +714,7 @@ impl std::fmt::Debug for HostCommand {
                 .field("label", label)
                 .finish(),
             #[cfg(any(target_os = "windows", test))]
-            HostCommand::ClaimFreeWindowHwnd { label, candidates } => f
-                .debug_struct("ClaimFreeWindowHwnd")
-                .field("label", label)
-                .field("candidates", &candidates.len())
-                .finish(),
+            HostCommand::ClaimFreeWindowHwnd { label, candidates } => write!(f, "ClaimFreeWindowHwnd({label}, {} candidates)", candidates.len()),
         }
     }
 }
@@ -1241,9 +1237,7 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         #[cfg(any(target_os = "windows", test))]
         HostCommand::EvictWindowHwnd { label } => window_hwnds::handle_evict_window_hwnd(state, label),
         #[cfg(any(target_os = "windows", test))]
-        HostCommand::ClaimFreeWindowHwnd { label, candidates } => {
-            window_hwnds::handle_claim_free_window_hwnd(state, label, &candidates)
-        }
+        HostCommand::ClaimFreeWindowHwnd { label, candidates } => window_hwnds::handle_claim_free_window_hwnd(state, label, &candidates),
     };
     // Pillar 2 — level-triggered quit reconciliation. After any transition that
     // can change the decision's inputs, recompute the pure `reconcile_quit` over
