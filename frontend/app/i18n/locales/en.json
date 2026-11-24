@@ -1850,6 +1850,8 @@
     "drone.trigger.kindWebhook": "local webhook",
     "drone.trigger.kindPoll": "poll",
     "drone.trigger.kindExpect": "expect",
+    "drone.once.key": "key",
+    "drone.once.keyPlaceholder": "{{trigger.run_id}}",
     "drone.templates.open": "From a template…",
     "drone.templates.title": "New from a template",
     "drone.templates.close": "Close",

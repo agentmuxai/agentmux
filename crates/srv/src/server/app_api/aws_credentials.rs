@@ -32,6 +32,9 @@ pub(crate) struct AwsCredentialsRequest {
     pub(crate) profile: String,
     #[serde(default)]
     pub(crate) reason: Option<String>,
+    /// The value of the one tag a grant takes from the caller (`AGENTMUX_AWS_TAG`).
+    #[serde(default)]
+    pub(crate) tag: Option<String>,
     #[serde(default)]
     pub(crate) duration_seconds: Option<u64>,
 }
@@ -59,7 +62,9 @@ pub(crate) fn audit_granted(state: &AppState, slug: &str, uid: &str, granted: &G
 fn granted_note(g: &Granted) -> String {
     let renewed = if g.source == Source::Fresh { "minted" } else { "reused" };
     let reason = if g.reason.is_empty() { "no reason given".to_string() } else { format!("reason: {}", g.reason) };
-    format!("{} tier, {} s, {renewed}; {reason}", g.grant.tier.as_str(), g.seconds)
+    // The tag's value was checked (letters, digits and _.:/=+-@, at most 256), so it is safe to record.
+    let tag = g.tag.as_ref().map(|(k, v)| format!("; tag {k}: {v}")).unwrap_or_default();
+    format!("{} tier, {} s, {renewed}; {reason}{tag}", g.grant.tier.as_str(), g.seconds)
 }
 
 /// `POST /api/v1/aws/credentials`
@@ -98,6 +103,7 @@ pub(crate) async fn serve<R: Runner>(
         in_container: def.runtime().is_container(),
         profile: shown_profile(req.profile.trim()),
         reason: req.reason.as_deref(),
+        tag: req.tag.as_deref(),
         seconds: req.duration_seconds,
     };
     match credentials_for(policy, sessions, runner, &ask, chrono::Utc::now()).await {

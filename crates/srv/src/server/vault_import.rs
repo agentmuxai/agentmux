@@ -166,7 +166,7 @@ pub(super) async fn credentials(state: &AppState, who: &Who, profile: &str, reas
         return Ok(None);
     }
     let current = tokio::task::spawn_blocking(policy::current).await.unwrap_or_else(|e| Err(e.to_string()));
-    let ask = Ask { agent_uid: &who.uid, agent_slug: &who.slug, in_container: true, profile, reason: Some(reason), seconds: None };
+    let ask = Ask { agent_uid: &who.uid, agent_slug: &who.slug, in_container: true, profile, reason: Some(reason), tag: None, seconds: None };
     match credentials_for(current, sessions::global(), &HostRunner, &ask, chrono::Utc::now()).await {
         Ok(granted) => {
             super::app_api::aws_credentials::audit_granted(state, &who.slug, &who.uid, &granted);
