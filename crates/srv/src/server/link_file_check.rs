@@ -330,6 +330,20 @@ mod tests {
     }
 
     #[test]
+    fn a_container_agents_bare_name_and_relative_path_are_found_in_its_workspace() {
+        let dir = folder();
+        let mut meta = MetaMapType::new();
+        meta.insert("agentMode".to_string(), serde_json::json!("container"));
+        meta.insert("cmd:cwd".to_string(), serde_json::json!(dir.path().join("work").to_string_lossy()));
+        std::fs::write(dir.path().join("work").join("findings.md"), "x").unwrap();
+        for asked in ["findings.md", "./findings.md", "notes/plan.md", "/workspace/notes/plan.md"] {
+            assert_eq!(check_in_container(&meta, asked).state, FOUND, "{asked}");
+        }
+        assert_eq!(check_in_container(&meta, "notes/none.md").state, MISSING);
+        assert_eq!(check_in_container(&meta, "../secret.txt").state, OUTSIDE);
+    }
+
+    #[test]
     fn no_answer_names_a_host_path() {
         let dir = folder();
         let host = dir.path().to_string_lossy().to_string();

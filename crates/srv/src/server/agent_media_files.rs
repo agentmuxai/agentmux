@@ -88,6 +88,12 @@ fn within(bind: &WritableBind, lexical: &str) -> Option<(usize, String)> {
     relative_to(lexical, &host).map(|rest| (host.len(), rest))
 }
 
+/// Whether `path` is a name or a path from the working folder: not rooted, and not led by a drive.
+fn is_relative(path: &str) -> bool {
+    let text = path.replace('\\', "/");
+    !text.starts_with('/') && !text.split_once('/').is_some_and(|(drive, _)| drive.ends_with(':'))
+}
+
 /// `asked`, as a message of the container agent of the pane `meta` wrote it, found in the agent's own folders.
 pub(crate) fn resolve(meta: &MetaMapType, asked: &str) -> Result<Found, String> {
     let binds = writable_binds(meta, None);
@@ -99,6 +105,9 @@ pub(crate) fn resolve(meta: &MetaMapType, asked: &str) -> Result<Found, String> 
     if asked.is_empty() || asked.starts_with('~') || asked.starts_with("\\\\") || asked.starts_with("//") {
         return Err(OUTSIDE.to_string());
     }
+    // A name with no folder is read from where the agent's shell starts, its workspace.
+    let from_workspace = format!("{}/{asked}", crate::backend::container::CONTAINER_WORKSPACE_DIR.trim_end_matches('/'));
+    let asked = if is_relative(asked) { from_workspace.as_str() } else { asked };
     let lexical = collapse(asked).ok_or_else(|| OUTSIDE.to_string())?;
     let (bind, rest) = binds
         .iter()
@@ -210,7 +219,7 @@ mod tests {
     #[test]
     fn home_unc_drive_and_dot_dot_paths_are_refused() {
         let f = fixture();
-        for asked in ["~/img/a.png", "~", "//server/share/a.png", "\\\\server\\share\\a.png", "C:/Users/me/photo.png", "C:\\Users\\me\\photo.png", "/../x.png", "", "  ", "a.png"] {
+        for asked in ["~/img/a.png", "~", "//server/share/a.png", "\\\\server\\share\\a.png", "C:/Users/me/photo.png", "C:\\Users\\me\\photo.png", "/../x.png", "", "  "] {
             assert_eq!(resolve(&f.meta, asked).unwrap_err(), OUTSIDE, "{asked:?}");
         }
     }
@@ -262,6 +271,15 @@ mod tests {
         assert_eq!(resolve(&f.meta, &host).unwrap_err(), LEADS_OUT);
         // A link inside the folder whose target is not there yet is only a file that is not there.
         assert_eq!(resolve(&f.meta, "/workspace/soon.png").unwrap_err(), "That file doesn't exist.");
+    }
+
+    #[test]
+    fn a_name_with_no_folder_is_read_from_the_workspace() {
+        let f = fixture();
+        assert_eq!(resolve(&f.meta, "img/a.png").unwrap().of, "/workspace/img/a.png");
+        assert_eq!(read(open(&f.meta, "img/a.png")), "the agent's picture");
+        assert_eq!(resolve(&f.meta, "img/none.png").unwrap_err(), "That file doesn't exist.");
+        assert_eq!(resolve(&f.meta, "../a.png").unwrap_err(), OUTSIDE);
     }
 
     #[cfg(unix)]
