@@ -29,7 +29,7 @@ fn each_action_takes_what_it_changes_and_names_the_one_to_use_for_the_rest() {
     assert!(e("move", json!({})).contains("move needs spot, or x and y"));
     assert!(e("move", json!({ "spot": "left", "height": 400 })).contains("use resize for a size, or place for both"));
     assert!(e("place", json!({})).contains("place needs a size, a position, or both"));
-    assert!(e("shrink", json!({ "width": 5 })).contains("use resize, move or place"));
+    assert!(e("shrink", json!({ "width": 5 })).contains("use resize, move, place, dock or float"));
 }
 
 #[test]

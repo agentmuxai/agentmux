@@ -181,6 +181,7 @@ pub(crate) mod browser_same_site;
 pub(crate) mod browser_pane_gone;
 pub(crate) mod pane_openers;
 pub(crate) mod pane_place;
+pub(crate) mod pane_dock;
 pub(crate) mod browser_pane_records;
 pub(crate) mod browser_zoom;
 pub(crate) mod browser_popup;

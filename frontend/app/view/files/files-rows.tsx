@@ -17,7 +17,7 @@ import { type FilesModel, windowsNames } from "./files-model";
 import { nameProblem, stemLength } from "./files-path";
 import { extensionOf } from "./files-sort";
 import { cachedThumbnail, hasThumbnail, thumbnail } from "./files-thumbs";
-import { labelOf, type TreeRow } from "./files-tree";
+import { labelOf, type TreeRow } from "@/app/fs/tree/tree-rows";
 import { TypeIcon } from "./files-type-icon";
 export const ROW_HEIGHT = 24;
 /** A grid tile's box (thumbnail and a two-line name). */
@@ -100,6 +100,8 @@ export function FileRow(props: {
     /** In the tree view: the row's depth and whether it is open; `onToggle` opens or closes it. */
     tree?: TreeRow;
     onToggle?: () => void;
+    /** A found row: the folder it is in, from the shown folder, shown after its name ("" at the first level). */
+    where?: string;
 }): JSX.Element {
     return (
         <div
@@ -141,8 +143,11 @@ export function FileRow(props: {
                         />
                     )}
                 </Show>
-                <Show when={props.renaming} fallback={<span class="files-name">{props.tree?.label ?? props.entry.name}</span>}>
+                <Show when={props.renaming} fallback={<span class="files-name" classList={{ "files-name--found": !!props.where }}>{props.tree?.label ?? labelOf(props.entry.name)}</span>}>
                     <RenameInput model={props.model} entry={props.entry} onDone={props.onRenameDone} />
+                </Show>
+                <Show when={props.where}>
+                    <span class="files-where">{props.where}</span>
                 </Show>
                 <Show when={props.entry.error}>
                     <i class="fa fa-triangle-exclamation files-entry-error" aria-label={props.entry.error} />

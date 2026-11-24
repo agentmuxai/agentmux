@@ -244,6 +244,8 @@ const REPLACED: &[(&str, &str)] = &[
     ("ResizePane", "Pane with action \"resize\""),
     ("MovePane", "Pane with action \"move\""),
     ("PlacePane", "Pane with action \"place\""),
+    ("DockPane", "Pane with action \"dock\""),
+    ("FloatPane", "Pane with action \"float\""),
     ("QuitSelf", "Stop with action \"self\""),
     ("FleetBulkStop", "Stop with action \"agents\""),
     ("ClosePane", "Stop with action \"pane\" (and block_id; to end your own session, action \"self\")"),
