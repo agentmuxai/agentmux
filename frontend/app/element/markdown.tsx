@@ -149,7 +149,7 @@ import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { onLinkAuxClick, onLinkClick } from "./link-open";
 import { classifyHref } from "./link-target";
-import { deadReason, requestFileCheck } from "@/app/links/file-check-store";
+import { deadReason, isPlain, requestFileCheck } from "@/app/links/file-check-store";
 import { getSettingsKeyAtom } from "../store/global";
 import { rehypeLinkifyWith } from "./rehype-linkify";
 import { Code, CodeBlock } from "./markdown-codeblock";
@@ -211,13 +211,17 @@ const Link = ({
         const path = fileOf();
         return path && media?.blockId ? deadReason(media.blockId, path) : undefined;
     };
+    const plain = () => {
+        const path = fileOf();
+        return Boolean(path && media?.blockId && isPlain(media.blockId, path));
+    };
     const check = () => {
         const path = fileOf();
         if (path && media?.blockId) requestFileCheck(media.blockId, path);
     };
     const onClick = (e: MouseEvent) => {
         const href = (props as any).href as string;
-        if (dead()) {
+        if (dead() || plain()) {
             e.preventDefault();
             return;
         }
@@ -245,9 +249,9 @@ const Link = ({
         <a
             href={p.href}
             class={p.class ?? p.className}
-            classList={{ "entity-link--dead": Boolean(dead()) }}
-            aria-label={dead() ?? name}
-            {...tip(dead() ?? name)}
+            classList={{ "entity-link--dead": Boolean(dead()), "entity-link--plain": plain() }}
+            aria-label={plain() ? undefined : (dead() ?? name)}
+            {...tip(plain() ? undefined : (dead() ?? name))}
             onClick={onClick}
             onAuxClick={onAuxClick}
             onMouseEnter={check}

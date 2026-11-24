@@ -8,7 +8,7 @@
  * muted word with the reason. The recogniser never reads the disk and never builds a path of its own.
  */
 
-import { siteOf } from "../bare-domain";
+import { isWebName, siteOf } from "../bare-domain";
 import { openFileEntity } from "../openers";
 import type { Candidate, EntityKind } from "../types";
 
@@ -38,7 +38,7 @@ const WHOLE = new RegExp(`^(${PATH_FORMS.join("|")})${LINE}$`);
  *  like a bare `.md` name (which reads as a domain) is not made a web address first. */
 export function looksLikeFile(raw: string): boolean {
     const m = WHOLE.exec(raw);
-    return m !== null && !readsAsHost(m[1]);
+    return m !== null && !readsAsHost(m[1]) && !isWebName(m[1]);
 }
 
 export const fileKind: EntityKind = {
@@ -49,7 +49,8 @@ export const fileKind: EntityKind = {
         if (ctx.author.kind !== "agent" || ctx.author.remote) return [];
         const found: Candidate[] = [];
         for (const m of text.matchAll(FILE)) {
-            if (readsAsHost(m[1])) continue;
+            // A name written with `www.` is a web address, which the web linker makes a link of.
+            if (readsAsHost(m[1]) || isWebName(m[1])) continue;
             found.push({ kind: "file", start: m.index, end: m.index + m[0].length, data: { path: m[1] } });
         }
         return found;
