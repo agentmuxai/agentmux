@@ -8,14 +8,13 @@
  *  - a short list of well-known sites is the file when the agent has such a file and the site when it has not;
  *  - a name written with `www.` is a web address, never a file;
  *  - any other such name is a file when the agent has it, and plain text when it has not.
- * A name that reads as a file (upper case, a usual file stem, an underscore or a hyphen) is only ever a file, and so
- * is a `.md` name.
+ * A name that reads as a file (upper case, a usual file stem) is only ever a file, and so is a `.md` name.
  */
 
 import { isLikelyFilename } from "@/app/element/linkify-config";
 
 const ENDINGS = "rs|sh|py|pl|ml";
-const BARE = new RegExp(`^[A-Za-z0-9]+\\.(?:${ENDINGS})$`, "i");
+const BARE = new RegExp(`^[A-Za-z0-9][\\w-]*\\.(?:${ENDINGS})$`, "i");
 const WWW = new RegExp(`^www\\.[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*\\.(?:${ENDINGS})$`, "i");
 
 /** The well-known sites with those endings. Kept short on purpose: each one is a name a message really means as the site. */
