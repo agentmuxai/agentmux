@@ -1,7 +1,7 @@
 # Report: Pane tabs that run out of space shrink in steps instead of scrolling
 
 **Date:** 2026-11-23
-**Status:** Investigation complete, no code changed. Written to inform the build that follows.
+**Status:** analysis. Investigation complete; it informed the build in PR #8192 (pane tabs shrink in steps).
 **Scope:** `frontend/app/element/PaneTabStrip.tsx`, `PaneTabStrip.scss`, `pane-tab-pill.tsx`, `strip-reveal-controller.ts`, `frontend/app/block/block.scss` (the header's scroll range), `DocTabStrip.tsx`.
 **Requirement:** when a pane's tabs do not fit, they should shrink in steps, as a browser's tab strip does: the text labels go first, then everything but the icon, with a highlight on hover. The horizontal scroll is what happens today; research whether the stepped shrink is better.
 
