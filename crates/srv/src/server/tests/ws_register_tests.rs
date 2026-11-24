@@ -40,13 +40,13 @@ async fn get_meta_of_a_missing_object_is_an_error() {
 async fn a_sub_block_is_linked_to_its_parent_and_unlinked_on_delete() {
     let state = test_state();
     let parent = insert_block(&state);
-    let oref = create_sub_block(&state, serde_json::json!({ "parentblockid": parent, "blockdef": { "meta": {} } })).unwrap();
+    let oref = create_sub_block(&state, &RpcContext::default(), serde_json::json!({ "parentblockid": parent, "blockdef": { "meta": {} } })).unwrap();
     let child = oref.strip_prefix("block:").expect("a block: oref").to_string();
     let linked = state.mstore.must_get::<Block>(&parent).unwrap().subblockids.unwrap_or_default();
     assert_eq!(linked, vec![child.clone()]);
     assert_eq!(state.mstore.must_get::<Block>(&child).unwrap().parentoref, format!("block:{parent}"));
 
-    delete_sub_block(&state, req(serde_json::json!({ "blockid": child }))).unwrap();
+    delete_sub_block(&state, &RpcContext::default(), req(serde_json::json!({ "blockid": child }))).unwrap();
     assert!(state.mstore.get::<Block>(&child).unwrap().is_none());
     assert!(state.mstore.must_get::<Block>(&parent).unwrap().subblockids.unwrap_or_default().is_empty());
 }

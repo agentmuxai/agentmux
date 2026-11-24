@@ -42,6 +42,7 @@ mod transcript_key_tests;
 pub(crate) mod bundle;
 pub(crate) mod container_turn;
 mod composer_origin;
+pub(crate) use composer_origin::window_only;
 pub(crate) mod input;
 pub(crate) mod turn_steps;
 pub(crate) use crate::backend::spawn_env::identity as identity_env;

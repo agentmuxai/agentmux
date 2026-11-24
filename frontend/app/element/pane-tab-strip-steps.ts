@@ -43,28 +43,32 @@ function contentWidth(el: HTMLElement): number {
     return width + (parseFloat(getComputedStyle(el).columnGap) || 0) * Math.max(0, count - 1);
 }
 
+/** What the visible children of `row` other than `except` take of it: their widths and the gaps between them and `except`. */
+function othersIn(row: HTMLElement, except: Element): number {
+    let others = 0;
+    let count = 0;
+    for (const child of row.children) {
+        if (child === except || !(child instanceof HTMLElement) || child.offsetParent === null) continue;
+        others += (parseFloat(getComputedStyle(child).flexGrow) || 0) > 0 ? contentWidth(child) : outerWidth(child);
+        count++;
+    }
+    return others + (parseFloat(getComputedStyle(row).columnGap) || 0) * count;
+}
+
 /**
- * The strip's room in real px: the header range's width less what else the range holds, or the parent's width. Undefined
- * when the surroundings have no width (hidden).
+ * The strip's room in real px: the header range's width less what else the range holds, or, outside a header, the parent's
+ * width less what else is in the parent's row (the Editor's file tree toggle before its tabs). Undefined when the
+ * surroundings have no width (hidden).
  */
 export function stripRoom(strip: HTMLElement): number | undefined {
     const holder = strip.closest<HTMLElement>(HEADER_HOLDER);
     const host = holder?.closest<HTMLElement>(HEADER_CONTENT);
     const range = host?.parentElement;
     if (holder && host && range) {
-        let others = 0;
-        let count = 0;
-        for (const child of host.children) {
-            if (child === holder || !(child instanceof HTMLElement) || child.offsetParent === null) continue;
-            others += (parseFloat(getComputedStyle(child).flexGrow) || 0) > 0 ? contentWidth(child) : outerWidth(child);
-            count++;
-        }
-        const gap = parseFloat(getComputedStyle(host).columnGap) || 0;
-        const room = range.clientWidth - others - gap * count;
-        return range.clientWidth > 0 ? room : undefined;
+        return range.clientWidth > 0 ? range.clientWidth - othersIn(host, holder) : undefined;
     }
     const parent = strip.parentElement;
-    return parent && parent.clientWidth > 0 ? parent.clientWidth : undefined;
+    return parent && parent.clientWidth > 0 ? parent.clientWidth - othersIn(parent, strip) : undefined;
 }
 
 /** Whether a tab's label is cut short by the squeeze: the only time a strip needs a step. Reads every label once. */
@@ -133,7 +137,10 @@ export function createStripSteps(opts: {
             const next = new Set<Element>();
             if (host?.parentElement) next.add(host.parentElement);
             if (host) for (const child of host.children) if (child !== holder) next.add(child);
-            if (!host && strip.parentElement) next.add(strip.parentElement);
+            if (!host && strip.parentElement) {
+                next.add(strip.parentElement);
+                for (const child of strip.parentElement.children) if (child !== strip) next.add(child);
+            }
             for (const el of watched) if (!next.has(el)) observer?.unobserve(el);
             for (const el of next) if (!watched.has(el)) observer?.observe(el);
             watched = next;
@@ -142,9 +149,10 @@ export function createStripSteps(opts: {
         watch();
         // At once, not a frame later: the limit is on the strip before anything else first measures it.
         measure();
-        const host = strip.closest<HTMLElement>(HEADER_CONTENT);
-        const mutations = host && typeof MutationObserver !== "undefined" ? new MutationObserver(watch) : undefined;
-        if (host) mutations?.observe(host, { childList: true });
+        // The row the strip shares with other items: an item that comes or goes (the Editor's tree toggle) changes its room.
+        const row = strip.closest<HTMLElement>(HEADER_CONTENT) ?? strip.parentElement;
+        const mutations = row && typeof MutationObserver !== "undefined" ? new MutationObserver(watch) : undefined;
+        if (row) mutations?.observe(row, { childList: true });
         onCleanup(() => {
             observer?.disconnect();
             mutations?.disconnect();

@@ -28,7 +28,10 @@ use std::sync::Once;
 const COUNT: &str = "GIT_CONFIG_COUNT";
 pub(crate) const HOOKS_PATH_KEY: &str = "core.hooksPath";
 /// Larger counts already in the env are not trusted (and not looped over).
-const MAX_ENTRIES: usize = 256;
+pub(crate) const MAX_ENTRIES: usize = 1024;
+/// How many entries of its own an environment can hold: the room an addition to a count of
+/// this size (`git_program_settings::entries_over`) is sure to fit in below `MAX_ENTRIES`.
+pub(crate) const MAX_CARRIED: usize = MAX_ENTRIES - 256;
 /// The line `gh-agent` writes into every hook it generates.
 const MARKER: &str = "gh-agent publish guard";
 
@@ -64,6 +67,22 @@ fn parse_count(get: &impl Fn(&str) -> Option<String>) -> usize {
         .and_then(|c| c.trim().parse().ok())
         .filter(|c: &usize| *c <= MAX_ENTRIES)
         .unwrap_or(0)
+}
+
+/// The count `GIT_CONFIG_COUNT` names, as written (0 when it is absent or not a number).
+pub(crate) fn declared_count(get: &impl Fn(&str) -> Option<String>) -> usize {
+    get(COUNT).and_then(|c| c.trim().parse().ok()).unwrap_or(0)
+}
+
+/// The variables that make `entries` the whole `GIT_CONFIG_*` list: the slots numbered from 0, and the count.
+pub(crate) fn git_config_slots(entries: &[(String, String)]) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::with_capacity(entries.len() * 2 + 1);
+    for (i, (k, v)) in entries.iter().enumerate() {
+        out.push((format!("GIT_CONFIG_KEY_{i}"), k.clone()));
+        out.push((format!("GIT_CONFIG_VALUE_{i}"), v.clone()));
+    }
+    out.push((COUNT.to_string(), entries.len().to_string()));
+    out
 }
 
 /// The variables that set `key = value` on top of the `GIT_CONFIG_*` entries
