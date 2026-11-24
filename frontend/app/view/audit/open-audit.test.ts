@@ -18,7 +18,7 @@ describe("openAuditAtSound", () => {
         const [view, create, existing] = open.mock.calls[0];
         expect(view).toBe("audit");
         expect(create.meta.view).toBe("audit");
-        expect(existing).toEqual({ "audit:sound": create.meta["audit:sound"] });
+        expect(existing).toEqual({ "audit:section": "events", "audit:sound": create.meta["audit:sound"] });
         expect(parseSoundRef(existing["audit:sound"])).toMatchObject({ blockId: "blk-korp", event: "tool", at: 1234 });
     });
 });
@@ -30,7 +30,7 @@ describe("openAuditAtMessage", () => {
         const [view, create, existing] = open.mock.calls[0];
         expect(view).toBe("audit");
         expect(create.meta.view).toBe("audit");
-        expect(existing).toEqual({ "audit:message": create.meta["audit:message"] });
+        expect(existing).toEqual({ "audit:section": "events", "audit:message": create.meta["audit:message"] });
         expect(parseMessageRef(existing["audit:message"])).toMatchObject({ msgId: "m-77", at: 4321 });
     });
 });

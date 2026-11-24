@@ -147,6 +147,8 @@ pub(super) async fn pull(state: &AppState, caller: &RemoteCaller, params: Value)
 
 pub(super) async fn push(state: &AppState, caller: &RemoteCaller, params: Value) -> RemoteResult {
     run(state, caller, "sync.push", params, |ctx, who, req: PushReq| -> Result<PushAns, OpError> {
+        // The lock and membership first: a caller that fails them is not told what kind of collection it is.
+        ops::admit(ctx, &req.collection, who)?;
         let kind = ops::kind_of(ctx.conn, &req.collection).map_err(|_| OpError::NotMember)?;
         let adapter = adapter_for(&kind).ok_or(OpError::Bad)?;
         ops::push(ctx, who, &req, adapter.as_ref())

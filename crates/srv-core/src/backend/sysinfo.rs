@@ -760,9 +760,11 @@ mod handle_anomaly_tests {
         // process list's initial capacity) that isn't part of the per-call
         // leak this test is checking for.
         refresh(5);
-        const CALLS: u32 = 500;
+        // A leak is one handle per call in every window; the count is the whole process's, so other tests add noise to some
+        // windows: many short ones, and one quiet one shows there is no leak.
+        const CALLS: u32 = 100; const WINDOWS: usize = 20;
         let mut growth = Vec::new();
-        for _ in 0..3 {
+        for _ in 0..WINDOWS {
             let before = process_handle_count(pid).expect("own handle count must be queryable");
             refresh(CALLS);
             let after = process_handle_count(pid).expect("own handle count must be queryable");
@@ -772,7 +774,7 @@ mod handle_anomaly_tests {
             }
             growth.push(grew_by);
         }
-        panic!("handle count grew by {growth:?} over three windows of {CALLS} refresh_processes_specifics calls: a per-call handle leak (the CreateToolhelp32Snapshot bug fixed in sysinfo 0.35.0 leaked exactly 1/call)");
+        panic!("handle count grew by {growth:?} over {WINDOWS} windows of {CALLS} refresh_processes_specifics calls: a per-call handle leak (the CreateToolhelp32Snapshot bug fixed in sysinfo 0.35.0 leaked a handle per call)");
     }
 
     fn anomaly(pid: u32) -> HandleAnomaly {

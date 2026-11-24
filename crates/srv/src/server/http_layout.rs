@@ -7,8 +7,11 @@
 use super::*;
 
 /// `GET /api/v1/layout` — read-only window → workspace → tab → pane tree.
+/// The floating panes agents opened say so and where they are (`pane_place::report_floaters`).
 pub(super) async fn handle_layout(State(state): State<AppState>) -> impl IntoResponse {
-    Json(service::agent_layout(&state.mstore))
+    let mut layout = service::agent_layout(&state.mstore);
+    pane_place::report_floaters(&state, &mut layout).await;
+    Json(layout)
 }
 
 /// `GET /api/v1/windows` — flat list of windows.

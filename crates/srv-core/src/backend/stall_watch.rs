@@ -16,16 +16,22 @@
 //!
 //! ```text
 //! runtime-stall: start late_ms=1830 cause=runtime workers=8 alive_tasks=412 queue=17 load1=3.2
+//! runtime-stall: start late_ms=1830 cause=runtime workers=32 alive_tasks=412 queue=0 over_ms=2000 cpu_machine=94 cpu_srv=2 io_read_mb=0 io_write_mb=3 mem_load=58
 //! runtime-stall: end lasted_ms=5300 worst_late_ms=5200 stalls=2
 //! ```
 //!
 //! `cause=machine` says the watching thread was itself late (the machine was
 //! suspended or had no CPU for srv); `cause=runtime` says only the runtime was,
-//! which is a blocked worker or a task that did not yield.
+//! which is a blocked worker or a task that did not yield, or a machine that did not schedule srv's workers while it
+//! kept the watching thread's sleep honest. The `cpu_` and `io_` figures (Windows, `stall_load`) say which: the share of
+//! all cores the machine used and srv used over the last two seconds, srv's reads and writes in MB, and how full memory
+//! was. A machine at 95% and srv at 2% is a machine with no CPU for srv; both low is a blocked worker.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+use crate::backend::stall_load;
 
 /// Every line this watch writes starts with it, so a log search finds them all.
 pub const PREFIX: &str = "runtime-stall:";
@@ -61,6 +67,8 @@ pub struct Snapshot {
     pub queue: usize,
     /// One-minute load average, in hundredths, where the OS gives one.
     pub load1_centis: Option<u32>,
+    /// What the machine and srv were doing over the last seconds, where the OS gives it (Windows).
+    pub load: Option<crate::backend::stall_load::Load>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,6 +83,7 @@ impl Event {
         match self {
             Event::Start { late_ms, machine, snapshot: s } => {
                 let load = s.load1_centis.map(|c| format!(" load1={}.{:02}", c / 100, c % 100)).unwrap_or_default();
+                let load = format!("{load}{}", s.load.map(load_fields).unwrap_or_default());
                 let cause = if *machine { "machine" } else { "runtime" };
                 format!(
                     "{PREFIX} start late_ms={late_ms} cause={cause} workers={} alive_tasks={} queue={}{load}",
@@ -86,6 +95,15 @@ impl Event {
             }
         }
     }
+}
+
+/// The fields a line carries for a reading of the machine, with a leading space. Numbers only.
+fn load_fields(l: stall_load::Load) -> String {
+    let mem = l.mem_load_pct.map(|p| format!(" mem_load={p}")).unwrap_or_default();
+    format!(
+        " over_ms={} cpu_machine={} cpu_srv={} io_read_mb={} io_write_mb={}{mem}",
+        l.over_ms, l.machine_cpu_pct, l.srv_cpu_pct, l.io_read_mb, l.io_write_mb
+    )
 }
 
 /// Where a stall is, one look at a time. Pure over the times it is given.
@@ -185,6 +203,7 @@ pub fn watch(runtime: tokio::runtime::Handle, cfg: Config, on_event: impl Fn(Eve
     let metrics = runtime.clone();
     let spawned = std::thread::Builder::new().name("runtime-stall-watch".into()).spawn(move || {
         let mut tracker = Tracker::new(cfg);
+        let mut history = stall_load::History::default();
         loop {
             let slept = Instant::now();
             std::thread::sleep(cfg.poll_every);
@@ -193,9 +212,18 @@ pub fn watch(runtime: tokio::runtime::Handle, cfg: Config, on_event: impl Fn(Eve
             }
             let watcher_late_ms = slept.elapsed().saturating_sub(cfg.poll_every).as_millis() as u64;
             let now_ms = epoch.elapsed().as_millis() as u64;
+            if let Some(reading) = stall_load::read(now_ms) {
+                history.push(reading);
+            }
             let snapshot = || {
                 let m = metrics.metrics();
-                Snapshot { workers: m.num_workers(), alive_tasks: m.num_alive_tasks(), queue: m.global_queue_depth(), load1_centis: load1_centis() }
+                Snapshot {
+                    workers: m.num_workers(),
+                    alive_tasks: m.num_alive_tasks(),
+                    queue: m.global_queue_depth(),
+                    load1_centis: load1_centis(),
+                    load: history.load_over(stall_load::REPORT_OVER_MS, stall_load::mem_load_pct()),
+                }
             };
             if let Some(ev) = tracker.look(now_ms, beat.load(Ordering::Relaxed), watcher_late_ms, snapshot) {
                 on_event(ev);
@@ -347,12 +375,25 @@ mod tests {
 
     #[test]
     fn every_line_starts_with_the_prefix() {
-        let snapshot = Snapshot { workers: 8, alive_tasks: 412, queue: 17, load1_centis: Some(320) };
+        let snapshot = Snapshot { workers: 8, alive_tasks: 412, queue: 17, load1_centis: Some(320), load: None };
         let start = Event::Start { late_ms: 1830, machine: false, snapshot }.line();
         let end = Event::End { lasted_ms: 5300, worst_late_ms: 5200, stalls: 2 }.line();
         assert_eq!(start, "runtime-stall: start late_ms=1830 cause=runtime workers=8 alive_tasks=412 queue=17 load1=3.20");
         assert_eq!(end, "runtime-stall: end lasted_ms=5300 worst_late_ms=5200 stalls=2");
         assert!(start.starts_with(PREFIX) && end.starts_with(PREFIX));
+    }
+
+    #[test]
+    fn a_start_line_carries_what_the_machine_and_srv_were_doing() {
+        let load = stall_load::Load { over_ms: 2_000, machine_cpu_pct: 94, srv_cpu_pct: 2, io_read_mb: 0, io_write_mb: 3, mem_load_pct: Some(58) };
+        let snapshot = Snapshot { workers: 32, alive_tasks: 412, queue: 0, load1_centis: None, load: Some(load) };
+        let start = Event::Start { late_ms: 1830, machine: false, snapshot }.line();
+        assert_eq!(
+            start,
+            "runtime-stall: start late_ms=1830 cause=runtime workers=32 alive_tasks=412 queue=0 over_ms=2000 cpu_machine=94 cpu_srv=2 io_read_mb=0 io_write_mb=3 mem_load=58"
+        );
+        let no_memory = Snapshot { load: Some(stall_load::Load { mem_load_pct: None, ..load }), ..snapshot };
+        assert!(!Event::Start { late_ms: 1830, machine: true, snapshot: no_memory }.line().contains("mem_load"));
     }
 
     fn fast() -> Config {

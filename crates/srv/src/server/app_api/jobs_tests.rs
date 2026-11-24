@@ -149,7 +149,7 @@ async fn a_drone_run_is_recorded_as_the_connection_that_started_it() {
     }
     // The Drone tool's `fire` names the agent the same way, even for an agent whose id is "operator".
     for (who, id) in [("fired by opaz", "opaz"), ("fired by an agent called operator", "operator")] {
-        let run_id = crate::server::drone_handlers::start_agent_drone_run(&state, &drone.id, json!({}), id).await.unwrap();
+        let run_id = crate::server::drone_handlers::start_agent_drone_run(&state, &drone, json!({}), id).await.unwrap();
         started.push((who, run_id));
     }
     let rows = ledger_of(&state).store().job_runs_for_job(&drone.id, 10, None).unwrap();
