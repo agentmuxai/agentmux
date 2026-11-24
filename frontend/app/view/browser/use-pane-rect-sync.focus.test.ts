@@ -8,6 +8,8 @@ const claimFocusOnMount = vi.hoisted(() => vi.fn());
 vi.mock("@/app/store/focusManager", () => ({ focusManager: { claimFocusOnMount } }));
 vi.mock("@/app/platform/ipc", () => ({ invokeCommand: vi.fn(() => Promise.resolve()) }));
 vi.mock("@/app/store/block-component-registry", () => ({ isBlockDormant: () => () => false }));
+// The page's wait for its pane to hold still is tested on its own (settled-pane-rect.test.ts).
+vi.mock("./settled-pane-rect", () => ({ settledPaneRect: (measure: () => unknown) => Promise.resolve(measure()) }));
 
 import { usePaneRectSync } from "./use-pane-rect-sync";
 import { installCefWireHost } from "../../../test/cef-wire-host";

@@ -32,6 +32,10 @@ const [visibility, setVisibility] = createSignal<"active" | "dormant" | "windowH
 vi.mock("@/app/block/pane-tab-visibility", () => ({ usePaneTabVisibility: () => visibility }));
 vi.mock("@/app/platform/pane-rect-registry", () => ({ registerPaneRect: () => {}, unregisterPaneRect: () => {} }));
 vi.mock("@/app/platform/pane-anim", () => ({ paneReflowActive: () => false, notifyPaneReflow: () => {} }));
+// The page waits for its pane to hold still before it is made (settled-pane-rect.ts, tested on its own); here a test
+// decides what that wait answers. By default it answers at once with the rect as measured.
+let settleImpl: ((measure: () => any) => Promise<any>) | null = null;
+vi.mock("./settled-pane-rect", () => ({ settledPaneRect: (measure: () => any) => (settleImpl ? settleImpl(measure) : Promise.resolve(measure())) }));
 
 import { usePaneRectSync } from "./use-pane-rect-sync";
 import { installCefWireHost } from "../../../test/cef-wire-host";
@@ -68,6 +72,7 @@ afterEach(() => {
     calls.length = 0;
     pendingCreates.length = 0;
     setVisibility("active");
+    settleImpl = null;
 });
 
 describe("usePaneRectSync — an agent's site limit goes with the page's creation", () => {
@@ -106,6 +111,7 @@ describe("usePaneRectSync — the native page follows the tab's visibility", () 
         // jsdom lays nothing out; give the placeholder a real rect.
         vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ x: 10, y: 20, width: 300, height: 200 } as DOMRect);
         render(() => <Mount blockId="v1" />);
+        await flush();
         pendingCreates[0]();
         await flush();
 
@@ -125,9 +131,11 @@ describe("usePaneRectSync — the native page follows the tab's visibility", () 
 describe("usePaneRectSync — a block's native page belongs to its latest mount", () => {
     it("a mount whose create returns after it unmounted does not close a newer mount's page", async () => {
         const a = render(() => <Mount blockId="b1" />);
+        await flush();
         expect(pendingCreates).toHaveLength(1);
         a.unmount();
         render(() => <Mount blockId="b1" />);
+        await flush();
         expect(pendingCreates).toHaveLength(2);
 
         pendingCreates[1](); // B: host says already live, B adopts the page
@@ -139,6 +147,7 @@ describe("usePaneRectSync — a block's native page belongs to its latest mount"
 
     it("still closes the orphan when no newer mount wants the page", async () => {
         const a = render(() => <Mount blockId="b2" />);
+        await flush();
         a.unmount();
         pendingCreates[0]();
         await flush();
@@ -148,9 +157,11 @@ describe("usePaneRectSync — a block's native page belongs to its latest mount"
 
     it("an older mount's unmount does not close the page a newer mount now owns", async () => {
         const a = render(() => <Mount blockId="b3" />);
+        await flush();
         pendingCreates[0]();
         await flush();
         render(() => <Mount blockId="b3" />); // newer mount claims the page
+        await flush();
         pendingCreates[1]();
         await flush();
         a.unmount();
@@ -160,10 +171,40 @@ describe("usePaneRectSync — a block's native page belongs to its latest mount"
 
     it("the owning mount's unmount closes its page", async () => {
         const a = render(() => <Mount blockId="b4" />);
+        await flush();
         pendingCreates[0]();
         await flush();
         a.unmount();
 
         expect(closes()).toHaveLength(1);
+    });
+});
+
+describe("usePaneRectSync — the page is made at its pane's final size", () => {
+    const created = () => calls.find((c) => c.cmd === "browser_pane_create")?.args;
+
+    it("makes nothing while its pane is still taking its place, then makes it at the settled rect", async () => {
+        vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ x: 0, y: 0, width: 686, height: 900 } as DOMRect);
+        let settle!: (r: { x: number; y: number; width: number; height: number }) => void;
+        settleImpl = () => new Promise((resolve) => (settle = resolve));
+        render(() => <Mount blockId="s1" />);
+        await flush();
+        expect(created()).toBeUndefined();
+        settle({ x: 0, y: 0, width: 1586, height: 900 });
+        await flush();
+        expect(created()).toMatchObject({ block_id: "s1", width: 1586, height: 900 });
+        vi.restoreAllMocks();
+    });
+
+    it("makes nothing at all when the view went before its pane settled", async () => {
+        let settle!: (r: { x: number; y: number; width: number; height: number }) => void;
+        settleImpl = () => new Promise((resolve) => (settle = resolve));
+        const a = render(() => <Mount blockId="s2" />);
+        await flush();
+        a.unmount();
+        settle({ x: 0, y: 0, width: 1586, height: 900 });
+        await flush();
+        expect(created()).toBeUndefined();
+        expect(closes()).toHaveLength(0);
     });
 });

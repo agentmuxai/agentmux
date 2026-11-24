@@ -15,6 +15,7 @@ import type { BrowserViewModel } from "./browser-model";
 import { afterDiscard } from "./hibernation";
 import { paneRectBatcher } from "./pane-rect-batcher";
 import { observePaneElement } from "./pane-resize-observer";
+import { rectToCreatePageAt } from "./pane-create-rect";
 
 /** How long a hidden pane parked at its real size settles before a discard:
  *  Chromium reports a page's scroll position to the browser about a second
@@ -347,16 +348,11 @@ export function usePaneRectSync(params: PaneRectSyncParams): PaneRectSync {
         ownerToken = token;
         nativePaneOwners.set(model.blockId, token);
         try {
-            diag(`createPane url=${JSON.stringify(url)} window_label=${windowLabel}${takePaneOpenTiming(model.blockId)}`);
-            await getApi().browserPanes.create(
-                model.blockId,
-                url || "about:blank",
-                windowLabel,
-                // A pane that can't be seen (a wake on hover, a tab loaded
-                // hidden) is created collapsed, so its page never shows over
-                // the tab that is; the first sync on show lays it out.
-                visibility() === "active" ? paneRect() : { x: 0, y: 0, width: 0, height: 0 },
-                {
+            // The page is made at its pane's final size (pane-create-rect.ts).
+            const rect = await rectToCreatePageAt(() => visibility() === "active", () => (placeholderRef() ? paneRect() : null));
+            if (disposed || !placeholderRef()) return void releaseNativePane(model.blockId, token);
+            diag(`createPane url=${JSON.stringify(url)} window_label=${windowLabel} rect=${rect.width}x${rect.height}${takePaneOpenTiming(model.blockId)}`);
+            await getApi().browserPanes.create(model.blockId, url || "about:blank", windowLabel, rect, {
                     // Only while an agent drives the pane: Take over ends the
                     // limit but leaves the meta key behind.
                     allowedOrigins: model.driverAgentAtom() ? model.allowedOriginsAtom() : undefined,

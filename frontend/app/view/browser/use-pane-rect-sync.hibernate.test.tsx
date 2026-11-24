@@ -30,6 +30,8 @@ const [visibility, setVisibility] = createSignal<"active" | "dormant" | "windowH
 vi.mock("@/app/block/pane-tab-visibility", () => ({ usePaneTabVisibility: () => visibility }));
 vi.mock("@/app/platform/pane-rect-registry", () => ({ registerPaneRect: () => {}, unregisterPaneRect: () => {} }));
 vi.mock("@/app/platform/pane-anim", () => ({ paneReflowActive: () => false, notifyPaneReflow: () => {} }));
+// The page's wait for its pane to hold still is tested on its own (settled-pane-rect.test.ts).
+vi.mock("./settled-pane-rect", () => ({ settledPaneRect: (measure: () => unknown) => Promise.resolve(measure()) }));
 
 import { usePaneRectSync } from "./use-pane-rect-sync";
 import { installCefWireHost } from "../../../test/cef-wire-host";
