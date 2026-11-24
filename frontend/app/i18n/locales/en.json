@@ -1404,5 +1404,11 @@
     "jobs.droneTemplate.pill": "Drone",
     "jobs.droneTemplate.make": "Make a drone",
     "workspaceStop.chip": "Stops in {{left}}",
-    "workspaceStop.tip": "This workspace stops at {{time}} because {{reason}}. Your data is saved, and you can start it again from the Console."
+    "workspaceStop.tip": "This workspace stops at {{time}} because {{reason}}. Your data is saved, and you can start it again from the Console.",
+    "workspaceStop.keep": "Keep running",
+    "workspaceStop.stopNow": "Stop now",
+    "workspaceStop.open": "This workspace is going to stop. Open for choices.",
+    "workspaceStop.unreachable": "The workspace could not be reached. Try again.",
+    "workspaceStop.signedOut": "You are signed out. Sign in again to change this.",
+    "workspaceStop.failed": "That could not be done. Try again."
 }
