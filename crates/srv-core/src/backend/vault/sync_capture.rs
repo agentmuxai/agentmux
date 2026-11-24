@@ -39,6 +39,15 @@ const SCHEMA: &str = "
         vault    TEXT NOT NULL,
         record   TEXT NOT NULL,
         hash     TEXT NOT NULL
+    );
+    -- Records the log holds that the store could not take (an error, or a kind this version does not know yet): taken again
+    -- from the log by `Taker::retake`, because a record the log holds is never sent again.
+    CREATE TABLE IF NOT EXISTS db_sync_vault_retake (
+        vault  TEXT NOT NULL,
+        record TEXT NOT NULL,
+        -- Why the other side of a conflict was kept, when the record won one: the retake keeps it the same way.
+        kept   TEXT,
+        PRIMARY KEY (vault, record)
     );";
 
 /// Creates the log's tables and this module's.
@@ -92,6 +101,29 @@ pub(super) fn mark_seen(store: &Store, row: &VaultRow, record: &str, key: &Key, 
     let conn = store.conn().lock().unwrap_or_else(|e| e.into_inner());
     conn.execute("INSERT OR REPLACE INTO db_sync_vault_seen (entry_id, vault, record, hash) VALUES (?1, ?2, ?3, ?4)", params![row.id, row.vault_id, record, hash]).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Notes that the store did not take `record` of `vault`, which the log holds: `Taker::retake` takes it again.
+/// `kept` is why the side of a conflict this machine held is kept, if the record won one.
+pub(super) fn retake_mark(store: &Store, vault: &str, record: &str, kept: Option<&str>) -> Result<(), String> {
+    let conn = store.conn().lock().unwrap_or_else(|e| e.into_inner());
+    conn.execute("INSERT OR IGNORE INTO db_sync_vault_retake (vault, record, kept) VALUES (?1, ?2, ?3)", params![vault, record, kept]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// `record` of `vault` is in the store, or is no longer to be taken.
+pub(super) fn retake_clear(store: &Store, vault: &str, record: &str) -> Result<(), String> {
+    let conn = store.conn().lock().unwrap_or_else(|e| e.into_inner());
+    conn.execute("DELETE FROM db_sync_vault_retake WHERE vault = ?1 AND record = ?2", params![vault, record]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// The records of `vault` to take again, in the order they were noted.
+pub(super) fn retake_pending(store: &Store, vault: &str) -> Result<Vec<(String, Option<String>)>, String> {
+    let conn = store.conn().lock().unwrap_or_else(|e| e.into_inner());
+    let mut stmt = conn.prepare("SELECT record, kept FROM db_sync_vault_retake WHERE vault = ?1 ORDER BY rowid").map_err(|e| e.to_string())?;
+    let rows = stmt.query_map(params![vault], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))).map_err(|e| e.to_string())?;
+    rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
 }
 
 /// Forgets an entry that was deleted here because a record said so: its tombstone is already in the log.

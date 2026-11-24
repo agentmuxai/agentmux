@@ -166,11 +166,15 @@ pub fn install(
     });
     // The delivery log is a short ring (`AUDIT_LOG_MAX`): copy reports out
     // of it often enough that one isn't gone before its turn ends.
+    let (flush_mstore, flush_config) = (mstore.clone(), config.clone());
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(std::time::Duration::from_secs(2));
         loop {
             tick.tick().await;
             absorb(&crate::backend::reactive::get_global_handler().get_audit_log(usize::MAX));
+            // The notes gathered for a leader leave when their window is over.
+            let (mstore, config) = (flush_mstore.clone(), flush_config.clone());
+            let _ = tokio::task::spawn_blocking(move || super::note_outbox::flush_due(&mstore, &config, agentmux_common::time::now_ms_u64())).await;
         }
     });
     tokio::spawn(async move {
@@ -193,14 +197,14 @@ pub fn install(
     });
 }
 
-/// The note for `ev`, delivered.
+/// The note for `ev`, queued for its watchers: it leaves at once when nothing else waits for that leader, else with
+/// the others in the leader's window (`note_outbox`).
 async fn send_note(ev: WorkerEvent, mstore: Arc<Store>, work: Arc<Store>, filestore: Arc<FileStore>, config: Arc<crate::backend::wconfig::ConfigState>) {
     let store = mstore.clone();
-    let note = tokio::task::spawn_blocking(move || note_for(&store, Some(&work), &filestore, &ev)).await;
-    if let Ok(Some((leader_blocks, text, wait_key))) = note {
-        for leader_block in &leader_blocks {
-            deliver(&mstore, &config, leader_block, &text, wait_key.as_deref());
-        }
+    let note = tokio::task::spawn_blocking(move || note_line_for(&store, Some(&work), &filestore, &ev)).await;
+    if let Ok(Some(n)) = note {
+        let line = super::note_outbox::Line { agent: n.def_id, text: n.text, held_key: n.wait_key };
+        let _ = tokio::task::spawn_blocking(move || super::note_outbox::queue(&mstore, &config, &n.watchers, &line, agentmux_common::time::now_ms_u64())).await;
     }
 }
 
@@ -325,6 +329,19 @@ pub fn live_panes_of(mstore: &Store, def_id: &str) -> Vec<String> {
 /// waiting for an answer). `None` when `ev` isn't a watched agent's, nobody watching is open, or the
 /// agent's gap runs. `work` is the Kanban store, which says which agents hold a claimed task.
 pub(crate) fn note_for(mstore: &Store, work: Option<&Store>, filestore: &FileStore, ev: &WorkerEvent) -> Option<(Vec<String>, String, Option<String>)> {
+    note_line_for(mstore, work, filestore, ev).map(|n| (n.watchers, format!("[AgentMux] {}", n.text), n.wait_key))
+}
+
+/// A note about a watched agent, before it is addressed: who is told, which agent it is about, what it says (quoted,
+/// with no `[AgentMux]` prefix) and the key it may wait under (see `note_for`).
+pub(crate) struct NoteLine {
+    pub watchers: Vec<String>,
+    pub def_id: String,
+    pub text: String,
+    pub wait_key: Option<String>,
+}
+
+pub(crate) fn note_line_for(mstore: &Store, work: Option<&Store>, filestore: &FileStore, ev: &WorkerEvent) -> Option<NoteLine> {
     let block_id = match ev {
         WorkerEvent::TurnEnded { block_id, .. }
         | WorkerEvent::Exited { block_id, .. }
@@ -392,7 +409,7 @@ pub(crate) fn note_for(mstore: &Store, work: Option<&Store>, filestore: &FileSto
         super::worker_failure_note::record_failure_admission(block_id, admitted.is_some());
     }
     let body = admitted?;
-    Some((worker.watchers, format!("[AgentMux] {}", crate::backend::reactive::sanitize::quote_in_system_note(&body)), None))
+    Some(NoteLine { watchers: worker.watchers, def_id: worker.def_id, text: crate::backend::reactive::sanitize::quote_in_system_note(&body), wait_key: None })
 }
 
 /// One note per agent per `NOTE_GAP_MS`, shared by every kind of note about it (`quiet_watch` uses it too): the

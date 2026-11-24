@@ -665,24 +665,27 @@ pub(crate) fn capture_hwnd_for_label(state: &Arc<AppState>, label: &str) {
     // pool label itself the window legitimately IS off-screen, so the skip
     // is disabled for `window-pool-*` labels.
     let capturing_pool_label = label.starts_with("window-pool-");
-    let known = state.bound_window_hwnds();
+    // The window list is filtered here (a Win32 question about the window, not
+    // the registry); which of those is still unbound is decided by the claim,
+    // under the registry's lock, so a second label can't take the same one.
+    let mut candidates = Vec::new();
     for hwnd_raw in find_all_own_windows() {
-        let raw = hwnd_raw as isize;
-        if known.contains(&raw) {
-            continue;
-        }
         if !capturing_pool_label && unsafe { is_offscreen_pool_window(hwnd_raw) } {
             tracing::debug!(
                 "[opacity] capture_hwnd_for_label: skipping off-screen pool window {:#x} for label={}",
-                raw, label
+                hwnd_raw as isize, label
             );
             continue;
         }
-        state.bind_window_hwnd_if_absent(label, raw);
-        tracing::debug!("[opacity] captured hwnd fallback label={} hwnd={:#x}", label, raw);
-        return;
+        candidates.push(hwnd_raw as isize);
     }
-    tracing::warn!("[opacity] capture_hwnd_for_label: no available HWND for label={}", label);
+    match state.claim_free_window_hwnd(label, candidates) {
+        Some(raw) => tracing::debug!("[opacity] captured hwnd fallback label={} hwnd={:#x}", label, raw),
+        None if state.window_hwnd(label).is_some() => {
+            tracing::debug!("[opacity] capture_hwnd_for_label: label={} was bound meanwhile, preserving", label)
+        }
+        None => tracing::warn!("[opacity] capture_hwnd_for_label: no available HWND for label={}", label),
+    }
 }
 
 /// Pure routing predicate for `close_window_by_label` (task #29 round 2)

@@ -71,7 +71,7 @@ function EditorBar(props: { model: GlobalBundleViewModel; isNew: boolean; confir
                             confirm: askDiscard(props.confirm),
                         })
                     }
-                    title="Cancel (Esc)"
+                    title={`Cancel (${keyLabel("Escape")})`}
                 >
                     Cancel
                 </Button>

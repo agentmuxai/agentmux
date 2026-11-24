@@ -148,6 +148,12 @@ async fn print_shows_the_line_and_opens_no_browser() {
     assert_eq!(run(&server, ORIGIN, true, &mut t).await, 0);
     assert!(t.opened.is_empty());
     assert!(t.said.iter().any(|l| l.starts_with("http://127.0.0.1:7380/auth/enter#")), "{:?}", t.said);
+    // A narrow terminal wraps that line: the short address and the code on a line of its own come with it.
+    let line = t.said.iter().find(|l| l.starts_with("http://127.0.0.1:7380/auth/enter#")).unwrap();
+    let code = line.trim_start_matches("http://127.0.0.1:7380/auth/enter#");
+    let at = t.said.iter().position(|l| l.contains("http://127.0.0.1:7380/auth/enter in your own browser and paste")).expect("the short form");
+    assert_eq!(t.said[at + 1], code, "{:?}", t.said);
+    assert!(t.said[at + 1].len() < line.len() && !t.said[at + 1].contains('/'));
 }
 
 #[tokio::test]

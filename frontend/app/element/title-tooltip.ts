@@ -10,7 +10,7 @@
 // its accessible name or description are already on it. (The status bar's own `data-tip` is a different
 // tooltip, StatusBarTip.tsx, and is left alone.)
 
-import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
+import { autoUpdate, computePosition, flip, offset, shift, type VirtualElement } from "@floating-ui/dom";
 import { carryPaneScope } from "@/app/backdrop/overlay-scope";
 import { isPrimaryButtonDown, isRestingAtPress } from "@/app/util/pointer-drag-state";
 import { claimOpen, HIDE_DELAY_MS, isWarm, releaseOpen, SHOW_DELAY_MS, type OpenTip } from "./tooltip-timing";
@@ -21,6 +21,8 @@ const CANDIDATE = "[title], [data-hover-tip]";
 const KEEP_NATIVE = "option, optgroup, iframe, [data-native-title]";
 /** Set by `tip(text, { instant: true })`: no rest before it shows, and it shows on keyboard focus too. */
 const INSTANT = "data-hover-tip-instant";
+/** On a panel of controls: the tips of what is inside it sit beside the panel (`tipTarget`), not above each control. */
+const BESIDE = "[data-hover-tip-beside]";
 /** Set on an element whose `aria-label` or `aria-description` is this tooltip's text, so it can be taken back. */
 const LABELLED = "data-title-tip-aria";
 
@@ -161,12 +163,34 @@ function paint(t: TipState): void {
     if (t.panel) t.panel.style.opacity = t.visible && t.positioned ? "1" : "0";
 }
 
+/**
+ * Where a tip goes for `el`: above it, unless it is in a panel marked `data-hover-tip-beside` (a popover of
+ * controls stacked in rows, where a tip above a lower row covers the rows over it). Then it goes beside the panel,
+ * level with `el`: the reference is the panel's width and `el`'s height. Flip takes it to the other side when the
+ * first has no room.
+ */
+export function tipTarget(el: HTMLElement): { reference: Element | VirtualElement; placement: "top" | "left" } {
+    const panel = el.closest<HTMLElement>(BESIDE);
+    if (!panel) return { reference: el, placement: "top" };
+    const reference: VirtualElement = {
+        contextElement: el,
+        getBoundingClientRect: () => {
+            const p = panel.getBoundingClientRect();
+            const r = el.getBoundingClientRect();
+            return new DOMRect(p.left, r.top, p.width, r.height);
+        },
+    };
+    return { reference, placement: "left" };
+}
+
 async function place(t: TipState): Promise<void> {
     const reference = t.current;
     if (!reference || !t.shell) return;
-    const pos = await computePosition(reference, t.shell, {
+    const target = tipTarget(reference);
+    const placement = target.placement;
+    const pos = await computePosition(target.reference, t.shell, {
         strategy: "fixed",
-        placement: "top",
+        placement,
         middleware: [offset(10), flip(), shift({ padding: 12 })],
     });
     if (t.current !== reference || !t.shell) return;

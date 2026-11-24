@@ -7,6 +7,7 @@ import { getApi } from "@/util/app-api";
 import { FLOATER_BROWSER_EDGE_INSET } from "@/app/workspace/floater-resize";
 import { registerPaneRect, unregisterPaneRect } from "@/app/platform/pane-rect-registry";
 import { paneReflowActive, notifyPaneReflow } from "@/app/platform/pane-anim";
+import { dragRefreshTick } from "@/app/block/pane-body-hold";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { focusManager } from "@/app/store/focusManager";
 import { takePaneOpenTiming } from "@/app/store/pane-open-marks";
@@ -47,13 +48,21 @@ export function holdRectDuringDrag(rect: PaneRect, start: { width: number; heigh
 /** The page's hold for one splitter drag: the pane's size when the drag began, taken at the first rect of the drag
  *  and dropped when the drag ends. `apply` holds a rect in device px (holdRectDuringDrag); `sizeCss` is the held
  *  page's size in CSS px, rounded, from the placeholder's own rect. */
-export function createDragHold(dragging: () => boolean) {
+export function createDragHold(dragging: () => boolean, refresh?: () => number) {
     let start: { width: number; height: number } | null = null;
+    let seen = refresh?.() ?? 0;
     return {
         apply(rect: PaneRect): PaneRect {
             if (!dragging()) {
                 start = null;
                 return rect;
+            }
+            // On each tick of the drag's refresh clock the page catches up with its pane (it lays out once more),
+            // so a browser repaints during the drag at the pace the other panes' bodies do; between ticks it holds.
+            const tick = refresh?.() ?? 0;
+            if (tick !== seen) {
+                seen = tick;
+                start = null;
             }
             start ??= { width: rect.width, height: rect.height };
             return holdRectDuringDrag(rect, start);
@@ -237,7 +246,7 @@ export function usePaneRectSync(params: PaneRectSyncParams): PaneRectSync {
     // and Win32 SetWindowPos expect physical / device pixels. Multiply by
     // devicePixelRatio to convert. On HiDPI displays (dpr > 1) the pane
     // would be mispositioned/missized without this.
-    const dragHold = createDragHold(() => model.splitterDragging?.() ?? false);
+    const dragHold = createDragHold(() => model.splitterDragging?.() ?? false, dragRefreshTick);
     const paneRect = (): PaneRect => {
         const r = placeholderRef()!.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
@@ -538,10 +547,10 @@ export function usePaneRectSync(params: PaneRectSyncParams): PaneRectSync {
     });
 
     // A splitter drag starts or ends: leave (or give back) the size badge's
-    // strip at once, even before the pointer moves. During the drag the rect
-    // is re-sent every frame anyway (ResizeObserver), with the strip applied.
+    // strip at once, even before the pointer moves. During the drag the rect is
+    // re-sent every frame (ResizeObserver); a refresh tick lets the page catch up.
     createEffect(() => {
-        model.splitterDragging?.();
+        model.splitterDragging?.(); dragRefreshTick();
         if (placeholderRef()) syncPosition();
     });
 
