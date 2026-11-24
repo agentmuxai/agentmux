@@ -889,12 +889,31 @@ describe("the Files pane: preview and filter (Phase 2a)", () => {
         await waitFor(() => expect(v.names()).toHaveLength(4));
     });
 
+    it("offers to clear a filter that matches nothing, also when its box is hidden, in the list and in columns", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.keyDown(v.list(), { key: "/" });
+        const input = v.container.querySelector<HTMLInputElement>(".files-filter-input")!;
+        fireEvent.input(input, { target: { value: "zzz" } });
+        await waitFor(() => expect(v.names()).toHaveLength(0));
+        // A press elsewhere hides the box and keeps the filter applied.
+        fireEvent.pointerDown(document.body);
+        await waitFor(() => expect(v.container.querySelector(".files-filter-input")).toBeNull());
+        expect(v.model.filter()).toBe("zzz");
+        v.model.toggleColumns();
+        await waitFor(() => expect(v.model.columnsOn()).toBe(true));
+        expect(v.container.querySelector(".files-notice p")?.textContent).toBe("Nothing here matches “zzz”.");
+        fireEvent.click(v.getByText("Clear filter"));
+        await waitFor(() => expect(v.model.filter()).toBe(""));
+        await waitFor(() => expect(v.container.querySelector(".files-notice")).toBeNull());
+    });
+
     it("a new folder clears the filter", async () => {
         const v = mount();
         await waitFor(() => expect(v.names()).toHaveLength(4));
         v.model.setFilter("zzz");
         await waitFor(() => expect(v.names()).toHaveLength(0));
-        expect(v.container.querySelector(".files-notice")?.textContent).toBe("Nothing here matches “zzz”.");
+        expect(v.container.querySelector(".files-notice p")?.textContent).toBe("Nothing here matches “zzz”.");
         v.model.setFilter("sr");
         await waitFor(() => expect(v.names()).toEqual(["src"]));
         fireEvent.dblClick(v.row("src"));

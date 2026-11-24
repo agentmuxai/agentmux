@@ -10,6 +10,7 @@
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import { ContextMenu } from "@/app/components/context-menu";
 import { endPathDrag } from "@/app/drag/file-drop";
+import { t } from "@/app/i18n/i18n";
 import { Button } from "@/app/element/ui";
 import { useWidthFit } from "@/app/element/width-fit";
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
@@ -272,7 +273,7 @@ function FilesColumnHeader(props: { model: FilesModel; fv: FilesLocal }): JSX.El
 
 /** Why there are no rows: a macOS prompt to answer, a slow load, an error, or an empty folder. */
 function FilesNotices({ v }: { v: FilesViewParts }): JSX.Element {
-    const { model, win, pointer } = v;
+    const { model, win, pointer, fv } = v;
     const { placeLabel } = pointer;
     return (
         <Switch>
@@ -306,11 +307,16 @@ function FilesNotices({ v }: { v: FilesViewParts }): JSX.Element {
             </Match>
             <Match when={model.phase() === "ready" && win.entries().length === 0 && !model.partial()}>
                 <div class="files-notice">
-                    {model.filter()
-                        ? `Nothing here matches “${model.filter()}”.`
-                        : model.rawEntries().length > 0
-                          ? "Only hidden files here."
-                          : "This folder is empty."}
+                    <Show
+                        when={model.filter()}
+                        fallback={model.rawEntries().length > 0 ? t("files.empty.hidden") : t("files.empty.folder")}
+                    >
+                        {/* The filter box may be hidden while its filter is still applied: the way out is here. */}
+                        <p>{t("files.filter.nomatch", { filter: model.filter() })}</p>
+                        <Button class="files-button" onClick={fv.closeFilter}>
+                            {t("files.filter.clear")}
+                        </Button>
+                    </Show>
                 </div>
             </Match>
         </Switch>
