@@ -603,6 +603,13 @@ fn verify_release_merges_only_behind_an_approval_and_the_template_guard_says_so(
     assert_eq!(edges_from(&g, "approve", None), ["merge"]);
     assert_eq!(edges_from(&g, "found", Some("true")), ["tell"]);
     assert_eq!(edges_from(&g, "found", Some("false")), ["missing"]);
+    // The release is fetched again after the delay, and every check reads that answer, not the event's old copy.
+    assert_eq!(edges_from(&g, "release", None), ["published"]);
+    assert_eq!(edges_from(&g, "published", Some("false")), ["skipped"]);
+    for id in ["published", "manifest"] {
+        let data = serde_json::to_string(&g.nodes.iter().find(|n| n.id == id).unwrap().data).unwrap();
+        assert!(data.contains("release.body") && !data.contains("trigger.item"), "{id}: {data}");
+    }
     // The merge reads nothing from the release: only the template's own values.
     let merge = g.nodes.iter().find(|n| n.id == "merge").unwrap();
     assert!(!serde_json::to_string(&merge.data).unwrap().contains("trigger"), "{}", merge.data);

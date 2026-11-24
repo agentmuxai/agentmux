@@ -4,7 +4,7 @@
   "name": "Verify a release, then merge the held pull request",
   "version": "1.0.0",
   "kind": "drone",
-  "description": "Every 10 minutes it looks at the repository's newest releases. Two and a half hours after one is published, it checks that the release is not a draft or a pre-release and that its update manifest is among the assets, and tells the leader what it found. When the release is good, a card asks you to merge the one pull request that was held for it; only your yes merges it.",
+  "description": "Every 10 minutes it looks at the repository's newest releases. Two and a half hours after it first sees one, it fetches the release again and checks that the release is not a draft or a pre-release and that its update manifest is among the assets, and tells the leader what it found. When the release is good, a card asks you to merge the one pull request that was held for it; only your yes merges it.",
   "params": {
     "type": "object",
     "properties": {

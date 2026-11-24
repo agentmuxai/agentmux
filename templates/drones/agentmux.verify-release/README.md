@@ -1,6 +1,6 @@
 # Verify a release, then merge the held pull request
 
-Every 10 minutes this looks at the repository's five newest releases on GitHub. Two and a half hours after a release is published (the trigger's delay), it checks that the release is not a draft or a pre-release and that its update manifest is among the assets. The leader gets one line either way. When the manifest is there, a card appears in the Drone pane with the proposed merge and the release's notes (marked as outside text); only your yes merges the pull request. Silence rejects after a day, and a rejection ends the run.
+Every 10 minutes this looks at the repository's five newest releases on GitHub. Two and a half hours after the poll first sees a release (the trigger's delay), it fetches the release again and checks that it is not a draft or a pre-release and that its update manifest is among the assets. The leader gets one line whatever it finds. When the manifest is there, a card appears in the Drone pane with the proposed merge and the release's notes (marked as outside text); only your yes merges the pull request. Silence rejects after a day, and a rejection ends the run.
 
 Change first: the repository (`repo`), the held pull request (`held_pr`, its number) and who is told (`leader`). `manifest_asset` is the file name the release must carry (`latest.json` unless you say otherwise).
 

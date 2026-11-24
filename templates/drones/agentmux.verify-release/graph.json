@@ -1,6 +1,39 @@
 {
   "nodes": [
     {
+      "id": "release",
+      "position": {
+        "x": -240,
+        "y": 0
+      },
+      "data": {
+        "kind": "api",
+        "method": "GET",
+        "url": "https://api.github.com/repos/{{param.repo}}/releases/{{trigger.item.id}}",
+        "headers": {
+          "Accept": "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": "AgentMux-Drone"
+        },
+        "auth": {
+          "vault": "{{param.credential}}",
+          "as": "bearer"
+        }
+      }
+    },
+    {
+      "id": "skipped",
+      "position": {
+        "x": 240,
+        "y": 160
+      },
+      "data": {
+        "kind": "message",
+        "to": "{{param.leader}}",
+        "body": "Release {{release.body.tag_name}} of {{param.repo}} is a draft or a pre-release, so it was not checked ({{release.body.html_url}}). Pull request #{{param.held_pr}} stays held. No reply needed."
+      }
+    },
+    {
       "id": "published",
       "position": {
         "x": 0,
@@ -8,7 +41,7 @@
       },
       "data": {
         "kind": "condition",
-        "expr": "!{{trigger.item.draft}} && !{{trigger.item.prerelease}}"
+        "expr": "!{{release.body.draft}} && !{{release.body.prerelease}}"
       }
     },
     {
@@ -19,7 +52,7 @@
       },
       "data": {
         "kind": "transform",
-        "input": "{{trigger.item.assets}}",
+        "input": "{{release.body.assets}}",
         "ops": [
           {
             "op": "filter",
@@ -51,7 +84,7 @@
       "data": {
         "kind": "message",
         "to": "{{param.leader}}",
-        "body": "Release {{trigger.item.tag_name}} of {{param.repo}} was published two and a half hours ago and its manifest {{param.manifest_asset}} is among the assets ({{trigger.item.html_url}}). A card asks whether to merge pull request #{{param.held_pr}}. No reply needed."
+        "body": "Release {{release.body.tag_name}} of {{param.repo}} was first seen two and a half hours ago and its manifest {{param.manifest_asset}} is among the assets ({{release.body.html_url}}). A card asks whether to merge pull request #{{param.held_pr}}. No reply needed."
       }
     },
     {
@@ -63,7 +96,7 @@
       "data": {
         "kind": "message",
         "to": "{{param.leader}}",
-        "body": "Release {{trigger.item.tag_name}} of {{param.repo}} was published two and a half hours ago and {{param.manifest_asset}} is NOT among its assets ({{trigger.item.html_url}}). Pull request #{{param.held_pr}} stays held. No reply needed."
+        "body": "Release {{release.body.tag_name}} of {{param.repo}} was first seen two and a half hours ago and {{param.manifest_asset}} is NOT among its assets ({{release.body.html_url}}). Pull request #{{param.held_pr}} stays held. No reply needed."
       }
     },
     {
@@ -78,11 +111,11 @@
         "show": [
           {
             "label": "Release",
-            "value": "{{trigger.item.tag_name}}"
+            "value": "{{release.body.tag_name}}"
           },
           {
             "label": "Release notes",
-            "value": "{{trigger.item.body}}"
+            "value": "{{release.body.body}}"
           }
         ],
         "timeout_seconds": 86400
@@ -112,6 +145,17 @@
     }
   ],
   "edges": [
+    {
+      "id": "release-published",
+      "source": "release",
+      "target": "published"
+    },
+    {
+      "id": "published-skipped",
+      "source": "published",
+      "target": "skipped",
+      "sourceHandle": "false"
+    },
     {
       "id": "published-manifest",
       "source": "published",
