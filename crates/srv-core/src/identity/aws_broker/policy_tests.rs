@@ -247,6 +247,21 @@ fn a_grant_may_take_one_tag_from_the_caller_and_the_file_says_how() {
     }
     // No prefix is allowed: only the characters are checked.
     assert!(Policy::parse(&file(&command("{tag}"), &tag("K", ""))).is_ok());
+    // A key or prefix that starts with '-' would be read as an option by the program that gets it.
+    for (key, prefix) in [("-K", "a/"), ("K", "-a/")] {
+        assert!(Policy::parse(&file(&command("{tag}"), &tag(key, prefix))).unwrap_err().contains("may not start with '-'"), "{key:?} {prefix:?}");
+    }
+}
+
+#[test]
+fn a_tag_value_that_starts_with_a_dash_is_refused_even_when_the_grant_has_no_prefix() {
+    let open = CallerTag { key: "K".into(), prefix: String::new() };
+    for value in ["--profile", "-x", " -x"] {
+        let sentence = open.check("g", Some(value)).unwrap_err();
+        assert!(sentence.contains("may not start with '-'"), "{value:?}: {sentence}");
+    }
+    // A dash inside is allowed.
+    assert_eq!(open.check("g", Some("a-b")).unwrap(), "a-b");
 }
 
 #[test]

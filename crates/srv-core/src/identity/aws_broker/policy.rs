@@ -81,6 +81,10 @@ impl CallerTag {
                 self.key, self.prefix
             ));
         };
+        // The value is one whole argument of a program, which reads one that starts with '-' as an option: never given to it.
+        if value.starts_with('-') {
+            return Err(format!("The {} tag for the grant '{grant}' may not start with '-'.", self.key));
+        }
         if value.chars().count() > TAG_VALUE_MAX || !tag_chars_ok(value) {
             return Err(format!(
                 "The {} tag for the grant '{grant}' may hold only letters, digits and _.:/=+-@ (no spaces), at most {TAG_VALUE_MAX} characters.",
@@ -223,6 +227,10 @@ fn caller_tag_of(raw: Option<RawCallerTag>, mint: &Mint) -> Result<Option<Caller
     }
     if t.prefix.len() > TAG_VALUE_MAX || !tag_chars_ok(&t.prefix) {
         return Err(format!("caller_tag prefix {:?}: letters, digits and _.:/=+-@, at most {TAG_VALUE_MAX} characters", t.prefix));
+    }
+    // Both reach the program as whole arguments, which it would read as options.
+    if t.key.starts_with('-') || t.prefix.starts_with('-') {
+        return Err("caller_tag: the key and the prefix may not start with '-'".to_string());
     }
     Ok(Some(CallerTag { key: t.key, prefix: t.prefix }))
 }
