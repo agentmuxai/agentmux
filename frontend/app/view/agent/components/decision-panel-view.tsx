@@ -5,6 +5,7 @@
 
 import { For, Show, type Accessor, type JSX } from "solid-js";
 import { Button } from "@/app/element/ui/Button";
+import { t } from "@/app/i18n/i18n";
 import { TextArea } from "@/app/element/ui/inputs";
 import clsx from "clsx";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
@@ -42,15 +43,15 @@ function MinimizedBar(props: DecisionViewProps): JSX.Element {
             }}
             class="agent-decision-panel-minimized"
             onClick={() => s.setMinimized(false)}
-            aria-label="Re-open decision prompt"
+            aria-label={t("decision.reopen")}
         >
             <DecisionPanelClip getEl={() => s.rootEl} />
             <span class="agent-decision-panel-icon" aria-hidden="true">⚠</span>
             <span>
-                Decision pending — {s.request()!.tool}
-                <Show when={s.queueDepth() > 1}> ({s.queueDepth()} total)</Show>
+                {t("decision.pending", { tool: s.request()!.tool })}
+                <Show when={s.queueDepth() > 1}> {t("decision.total", { n: s.queueDepth() })}</Show>
             </span>
-            <span class="agent-decision-panel-minimized-cta">click to decide</span>
+            <span class="agent-decision-panel-minimized-cta">{t("decision.clickToDecide")}</span>
         </Button>
     );
 }
@@ -61,15 +62,15 @@ function DecisionHeader(props: DecisionViewProps): JSX.Element {
         <div class="agent-decision-panel-header">
             <span class="agent-decision-panel-icon" aria-hidden="true">⚠</span>
             <span class="agent-decision-panel-title">
-                Decision required
+                {t("decision.required")}
             </span>
             <Show when={s.queueDepth() > 1}>
                 <span class="agent-decision-panel-queue">
-                    {s.queueDepth() - 1} more queued
+                    {t("decision.moreQueued", { n: s.queueDepth() - 1 })}
                 </span>
             </Show>
             <Show when={s.risk() === "high"}>
-                <span class="agent-decision-panel-risk">high-risk</span>
+                <span class="agent-decision-panel-risk">{t("decision.highRisk")}</span>
             </Show>
         </div>
     );
@@ -90,14 +91,14 @@ function DecisionDetails(props: DecisionViewProps): JSX.Element {
     return (
         <>
             <dl class="agent-decision-panel-meta">
-                <dt>Tool</dt>
+                <dt>{t("decision.tool")}</dt>
                 <dd>{s.request()!.tool}</dd>
                 <Show when={s.request()!.target}>
-                    <dt>Target</dt>
+                    <dt>{t("decision.target")}</dt>
                     <dd><code>{s.request()!.target}</code></dd>
                 </Show>
                 <Show when={s.request()!.reason}>
-                    <dt>Why</dt>
+                    <dt>{t("decision.why")}</dt>
                     <dd>{s.request()!.reason}</dd>
                 </Show>
             </dl>
@@ -113,7 +114,7 @@ function ScopeFieldset(props: DecisionViewProps): JSX.Element {
     const s = props.s;
     return (
         <fieldset class="agent-decision-panel-scope">
-            <legend>Scope</legend>
+            <legend>{t("decision.scope")}</legend>
             <For each={SCOPE_ORDER}>
                 {(sc) => (
                     <label
@@ -139,12 +140,12 @@ function DenyFeedback(props: DecisionViewProps): JSX.Element {
     const s = props.s;
     return (
         <label class="agent-decision-panel-feedback">
-            <span>Tell the agent why (sent verbatim on the next turn)</span>
+            <span>{t("decision.feedback")}</span>
             <TextArea
                 variant="plain"
                 class={clsx("agent-decision-panel-feedback-input", s.denyError() != null && "agent-decision-panel-feedback-input--error")}
                 value={s.feedback()}
-                placeholder="e.g. don't delete my node_modules; run npm ci"
+                placeholder={t("decision.feedbackPlaceholder")}
                 onInput={(e) => {
                     s.setFeedback(e.currentTarget.value);
                     if (s.denyError()) s.setDenyError(null);
@@ -177,10 +178,10 @@ function DecisionActionsRow(props: DecisionViewProps): JSX.Element {
                     <Button
                         onClick={() => { s.setDenyMode(false); s.setFeedback(""); }}
                     >
-                        Back
+                        {t("decision.back")}
                     </Button>
                     <Button tone="danger" onClick={d.dispatchDeny}>
-                        Send denial
+                        {t("decision.sendDenial")}
                     </Button>
                 </>
             }>
@@ -190,14 +191,14 @@ function DecisionActionsRow(props: DecisionViewProps): JSX.Element {
                     onClick={(e) => d.dispatchAllow(e)}
                     title={
                         s.risk() === "high"
-                            ? "Hold Shift while clicking, or press Enter twice (high-risk confirm)"
-                            : "Allow this tool call"
+                            ? t("decision.allowHighRiskTip")
+                            : t("decision.allowTip")
                     }
                 >
-                    {s.risk() === "high" && s.highRiskArmed() ? "Press again to allow" : "Allow"}
+                    {s.risk() === "high" && s.highRiskArmed() ? t("decision.pressAgain") : t("decision.allow")}
                 </Button>
                 <Button tone="danger" onClick={() => s.setDenyMode(true)}>
-                    Deny + feedback
+                    {t("decision.denyFeedback")}
                 </Button>
                 <Show when={s.props.onDefer}>
                     <Button
@@ -210,7 +211,7 @@ function DecisionActionsRow(props: DecisionViewProps): JSX.Element {
                             s.props.onDefer?.();
                         }}
                     >
-                        Defer
+                        {t("decision.defer")}
                     </Button>
                 </Show>
             </Show>
@@ -234,7 +235,7 @@ function DecisionPanelFull(props: DecisionViewProps): JSX.Element {
                 "agent-decision-panel--armed": s.highRiskArmed(),
             }}
             role="dialog"
-            aria-label="Permission decision required"
+            aria-label={t("decision.aria")}
             tabIndex={-1}
         >
             <DecisionPanelClip getEl={() => s.rootEl} />

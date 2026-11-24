@@ -43,6 +43,8 @@ import { connectionName, parseDestination } from "./add-remote";
 import { DetailActions, DetailAgents, DetailSettings, TestResult } from "./remotes-detail-parts";
 import { connectionAction, runConnectionAction } from "./remotes-connection";
 import { tip } from "@/app/element/tip";
+import { t } from "@/app/i18n/i18n";
+import { Rich } from "@/app/i18n/rich";
 
 interface MenuState {
     items: ContextMenuItem[];
@@ -82,16 +84,16 @@ export function RemotesView(props: { model: RemotesViewModel }): JSX.Element {
 
     return (
         <PaneBody class="remotes-view ui-card-section" density="compact">
-            <SectionHeader title="Remotes" count={model.loaded() ? model.records().length : undefined}>
+            <SectionHeader title={t("remotes.title")} count={model.loaded() ? model.records().length : undefined}>
                 <FilterInput
                     class="ui-card-section-filter"
                     value={model.filter()}
                     onInput={model.setFilter}
-                    placeholder="Filter remotes"
+                    placeholder={t("remotes.filter")}
                 />
-                <IconButton icon="rotate-right" label="Refresh" onClick={() => void model.refresh()} />
+                <IconButton icon="rotate-right" label={t("remotes.refresh")} onClick={() => void model.refresh()} />
                 <Button tone="accent" icon="plus" aria-expanded={adding()} onClick={() => setAdding(!adding())}>
-                    Add remote
+                    {t("remotes.add")}
                 </Button>
             </SectionHeader>
             <Show when={adding()}>
@@ -106,7 +108,7 @@ export function RemotesView(props: { model: RemotesViewModel }): JSX.Element {
                 </Notice>
             </Show>
             <PaneScroll class="remotes-list">
-                <Show when={model.loaded()} fallback={<EmptyState loading>Loading…</EmptyState>}>
+                <Show when={model.loaded()} fallback={<EmptyState loading>{t("remotes.loading")}</EmptyState>}>
                     <Show when={groups().length > 0} fallback={<EmptyList filter={model.filter()} />}>
                         <For each={groups().map((g) => g.section)}>
                             {(section) => (
@@ -140,13 +142,10 @@ function EmptyList(props: { filter: string }): JSX.Element {
             <Show
                 when={props.filter.trim()}
                 fallback={
-                    <>
-                        No remotes yet. Hosts in <code>~/.ssh/config</code> appear here, and so does any host you connect
-                        to from a terminal's connection menu.
-                    </>
+                    <Rich k="remotes.none" />
                 }
             >
-                No remotes match “{props.filter.trim()}”.
+                {t("remotes.noMatch", { filter: props.filter.trim() })}
             </Show>
         </EmptyState>
     );
@@ -253,10 +252,10 @@ function RemoteCard(props: {
             onContextMenu={(e) => props.onMenu(r(), e)}
             actions={
                 <>
-                    <IconButton icon="terminal" label={`New terminal on ${r().name}`} onClick={newTerminal} />
+                    <IconButton icon="terminal" label={t("remotes.newTerminal", { name: r().name })} onClick={newTerminal} />
                     <IconButton
                         icon="folder-open"
-                        label={`Browse files on ${r().name}`}
+                        label={t("remotes.browseFiles", { name: r().name })}
                         onClick={() => void model.run("Browse files", () => model.browseFiles(r().name))}
                     />
                 </>
@@ -318,17 +317,17 @@ function AddRemoteForm(props: { model: RemotesViewModel; onDone: () => void }): 
         <form class="remotes-add" onSubmit={(e) => void submit(e)}>
             <TextInput
                 class="remotes-add-destination"
-                aria-label="Connect to"
+                aria-label={t("remotes.connectTo")}
                 placeholder="user@host:port"
                 value={destination()}
                 onInput={(e) => setDestination(e.currentTarget.value)}
                 ref={focusOnOpen}
             />
             <details class="remotes-add-more">
-                <summary>Advanced</summary>
+                <summary>{t("remotes.advanced")}</summary>
                 <div class="remotes-settings">
                     <label class="remotes-setting">
-                        <span>Name</span>
+                        <span>{t("remotes.name")}</span>
                         <TextInput
                             placeholder={(() => {
                                 const d = parsed();
@@ -339,21 +338,20 @@ function AddRemoteForm(props: { model: RemotesViewModel; onDone: () => void }): 
                         />
                     </label>
                     <label class="remotes-setting">
-                        <span>Identity file</span>
+                        <span>{t("remotes.identityFile")}</span>
                         <TextInput
                             placeholder="~/.ssh/id_ed25519"
                             value={identityfile()}
                             onInput={(e) => setIdentityfile(e.currentTarget.value)}
                         />
                     </label>
-                    <label class="remotes-setting" {...tip("An SSH server to hop through to reach this one (ssh's ProxyJump)")}>
-                        <span>Connect through</span>
+                    <label class="remotes-setting" {...tip(t("remotes.connectThroughTip"))}>
+                        <span>{t("remotes.connectThrough")}</span>
                         <TextInput placeholder="user@bastion" value={proxyjump()} onInput={(e) => setProxyjump(e.currentTarget.value)} />
                     </label>
                 </div>
                 <div class="remotes-add-note">
-                    With an identity file or a host to connect through, the remote is added to the end of ~/.ssh/config (a copy of
-                    the file is kept first), and you'll see exactly what is written before it is.
+                    {t("remotes.sshNote")}
                 </div>
             </details>
             <Show when={error()}>
@@ -361,9 +359,9 @@ function AddRemoteForm(props: { model: RemotesViewModel; onDone: () => void }): 
             </Show>
             <div class="remotes-detail-actions">
                 <Button type="submit" tone="accent" disabled={busy()}>
-                    {busy() ? (writesSshConfig() ? "Waiting for you to confirm…" : "Adding…") : "Add"}
+                    {busy() ? (writesSshConfig() ? t("remotes.waitingConfirm") : t("remotes.adding")) : t("remotes.addShort")}
                 </Button>
-                <Button onClick={() => props.onDone()}>Cancel</Button>
+                <Button onClick={() => props.onDone()}>{t("remotes.cancel")}</Button>
             </div>
         </form>
     );

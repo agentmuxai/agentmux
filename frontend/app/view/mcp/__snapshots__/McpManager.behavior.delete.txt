@@ -100,8 +100,7 @@
                 <span>
                   "Connected"
                   "·"
-                  "3"
-                  "tools"
+                  "3 tools"
             <ul class="mcp-uses" aria-label="Agents that report it">
               <li class="mcp-use" data-status="connected">
                 <span role="img" class="ui-status-dot ui-status-dot--ok" aria-label="connected" title="connected">
@@ -355,8 +354,7 @@
                 <span>
                   "Connected"
                   "·"
-                  "3"
-                  "tools"
+                  "3 tools"
             <ul class="mcp-uses" aria-label="Agents that report it">
               <li class="mcp-use" data-status="connected">
                 <span role="img" class="ui-status-dot ui-status-dot--ok" aria-label="connected" title="connected">
@@ -610,8 +608,7 @@
                 <span>
                   "Connected"
                   "·"
-                  "3"
-                  "tools"
+                  "3 tools"
             <ul class="mcp-uses" aria-label="Agents that report it">
               <li class="mcp-use" data-status="connected">
                 <span role="img" class="ui-status-dot ui-status-dot--ok" aria-label="connected" title="connected">
@@ -841,8 +838,7 @@
                 <span>
                   "Connected"
                   "·"
-                  "3"
-                  "tools"
+                  "3 tools"
             <ul class="mcp-uses" aria-label="Agents that report it">
               <li class="mcp-use" data-status="needs-auth">
                 <span role="img" class="ui-status-dot ui-status-dot--warn" aria-label="needs sign-in" title="needs sign-in">

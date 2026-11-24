@@ -250,6 +250,13 @@ describe("permissions", () => {
         expect(h.openPane).toHaveBeenLastCalledWith("vault", { "vault:section": "cards" }, "right");
         await handleBridgeRequest(h, state, "panes.open", { view: "warden", meta: { "warden:section": "audit" } });
         expect(h.openPane).toHaveBeenLastCalledWith("audit", {}, "right");
+        // The History pane is Audit's Conversations section; the call needs no meta (the SDK makes it optional), and
+        // with none it opens the same pane as with an empty one. (The section key itself needs Audit's sections registered, which this file does not do.)
+        await handleBridgeRequest(h, state, "panes.open", { view: "history", meta: {} });
+        const withMeta = vi.mocked(h.openPane).mock.calls.at(-1) as unknown[] | undefined;
+        expect(withMeta?.[0]).toBe("audit");
+        await handleBridgeRequest(h, state, "panes.open", { view: "history" });
+        expect(vi.mocked(h.openPane).mock.calls.at(-1)).toEqual(withMeta);
         // A retired section says where it went instead of opening something else.
         const gone = await handleBridgeRequest(h, state, "panes.open", { view: "warden", meta: { "warden:section": "lan" } });
         expect(JSON.stringify(gone)).toMatch(/that section is gone: LAN peers are in the status bar/);

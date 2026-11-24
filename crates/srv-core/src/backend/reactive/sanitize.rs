@@ -580,7 +580,10 @@ pub fn jekt_origin(
     use crate::backend::message_origin::{MessageOrigin, OriginDelivery, OriginSig, OriginTier};
     let mut origin = match req.source_agent.as_deref() {
         Some(from) if super::sender::is_shown_as_agent(from, delivery_tier, req.reagent_verified) => MessageOrigin::from_sender(from),
-        _ => MessageOrigin::of(crate::backend::blockcontroller::health::TriggerKind::Agent),
+        // A sender that can't be shown as an agent keeps the name it claimed, marked with the `?` the marker shows,
+        // and the generic agent kind: the name never gives it the kind of a schedule or a service.
+        Some(claimed) => MessageOrigin { from: Some(format!("?{}", marker_field(claimed))), ..MessageOrigin::of(crate::backend::blockcontroller::health::TriggerKind::Agent) },
+        None => MessageOrigin::of(crate::backend::blockcontroller::health::TriggerKind::Agent),
     };
     let wan_pinned = delivery_tier == "wan" && req.wan_instance.is_some() && req.wan_verified == Some(true);
     origin.trust = Some(jekt_trust(delivery_tier, req.sig_verified, req.lan_verified, req.channel_verified, wan_pinned));

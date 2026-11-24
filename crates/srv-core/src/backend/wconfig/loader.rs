@@ -281,8 +281,9 @@ mod tests {
             assert!(old.section.is_empty());
         }
 
-        // The Vault, History and Audit are panes of their own; Host is the Swarm.
-        for (section, view) in [("vault", "vault"), ("history", "history"), ("audit", "audit"), ("host", "swarm")] {
+        // The Vault and Audit are panes of their own; Host is the Swarm. History is the Audit pane's Conversations
+        // section, so an entry that names it opens Audit on that section.
+        for (section, view) in [("vault", "vault"), ("audit", "audit"), ("host", "swarm")] {
             let mut old: WidgetConfigType = serde_json::from_str(&format!(
                 r#"{{"label":"X","section":"{section}","blockdef":{{"meta":{{"view":"warden","warden:section":"{section}"}}}}}}"#
             ))
@@ -293,6 +294,15 @@ mod tests {
             assert!(old.block_def.meta.get(&format!("{view}:section")).is_none(), "from {section}");
             assert!(old.section.is_empty());
         }
+        let mut history: WidgetConfigType = serde_json::from_str(
+            r#"{"label":"X","section":"history","blockdef":{"meta":{"view":"warden","warden:section":"history"}}}"#,
+        )
+        .unwrap();
+        history.resolve_section();
+        assert_eq!(history.block_def.meta.get("view").and_then(|v| v.as_str()), Some("audit"));
+        assert_eq!(history.block_def.meta.get("audit:section").and_then(|v| v.as_str()), Some("conversations"));
+        assert!(history.block_def.meta.get("warden:section").is_none());
+        assert!(history.section.is_empty());
 
         // A section with no pane any more is cleared and the entry stays on Warden.
         for retired in ["lan", "internet", "ambient"] {

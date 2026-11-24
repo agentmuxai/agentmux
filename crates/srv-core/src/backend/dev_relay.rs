@@ -112,6 +112,7 @@ async fn ensure_named(manager: &ContainerManager, image: &str, name: &str) -> Re
                 if details.state.as_ref().and_then(|s| s.running).unwrap_or(false) {
                     let addr = SocketAddr::from(([127, 0, 0, 1], port));
                     wait_until_listening(addr).await?;
+                    crate::backend::transcript::withhold_sources::relay_token(&token);
                     return Ok(RelayEndpoint { addr, token });
                 }
             }
@@ -126,6 +127,7 @@ async fn ensure_named(manager: &ContainerManager, image: &str, name: &str) -> Re
     }
 
     let token = token();
+    crate::backend::transcript::withhold_sources::relay_token(&token);
     let mut ports = HashMap::new();
     ports.insert(format!("{RELAY_PORT}/tcp"), Some(vec![PortBinding { host_ip: Some("127.0.0.1".into()), host_port: Some(String::new()) }]));
     let config = Config {

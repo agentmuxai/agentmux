@@ -5,7 +5,7 @@
 // Sysinfo widget, Drag & drop, Environment and Developer. Each group is its header and its rows.
 
 import { t } from "@/app/i18n/i18n";
-import { TextInput } from "@/app/element/ui";
+import { Button, TextInput } from "@/app/element/ui";
 import { For, type JSX } from "solid-js";
 
 import { DEV_MODE_KEY, devModeOn, setDevMode } from "@/app/store/dev-mode";
@@ -14,7 +14,7 @@ import { KANBAN_REMINDERS_SETTING, kanbanRemindersOn } from "@/app/view/kanban/k
 import { resolveSkidNotches, SKID_NOTCHES_MAX, SKID_NOTCHES_SETTING } from "@/app/view/agent/components/scroll-handoff";
 import { KeyValueEditor, NumberControl, SectionHeader, set, SettingRow, ToggleControl } from "../settings-controls";
 import { trackSave } from "../settings-saved";
-import { ADVANCED_SETTINGS } from "./advanced-settings-index";
+import { ADVANCED_SETTINGS, openHistoryStorage } from "./advanced-settings-index";
 
 const s = () => settingsAtom() ?? ({} as any);
 
@@ -58,6 +58,21 @@ function LimitInput(props: { settingKey: "agent:container_memory" | "agent:conta
                 else e.currentTarget.value = props.value == null ? "auto" : String(props.value);
             }}
         />
+    );
+}
+
+/** Conversation history: where it is kept and for how long is the Audit pane's Storage section; this row opens it. */
+export function HistoryGroup(): JSX.Element {
+    return (
+        <>
+            <SectionHeader label={t("settings.advanced.group.history")} />
+            <SettingRow
+                id={ADVANCED_SETTINGS.historyStorage.id}
+                label={ADVANCED_SETTINGS.historyStorage.label}
+                description={ADVANCED_SETTINGS.historyStorage.description}
+                control={<Button onClick={openHistoryStorage}>{t("settings.advanced.historyStorage.open")}</Button>}
+            />
+        </>
     );
 }
 

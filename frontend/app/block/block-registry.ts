@@ -26,7 +26,6 @@ import { toolchainPaneTab } from "@/app/view/toolchain/toolchain";
 import { towerPaneTab } from "@/app/view/tower/tower";
 import { wardenPaneTab } from "@/app/view/warden/warden";
 import { vaultPaneTab } from "@/app/view/vault/vault";
-import { historyPaneTab } from "@/app/view/history/history";
 import { auditPaneTab } from "@/app/view/audit/audit";
 import { helpPaneTab } from "@/view/helpview/helpview";
 import { terminalPaneTab } from "@/view/term/term";
@@ -59,7 +58,6 @@ const builtins = [
     dronePaneTab, // native — Phase 2c (keeps the "workflows" alias)
     wardenPaneTab, // native — Phase 2c; only Jobs is left of it
     vaultPaneTab, // native — was Warden's Vault section
-    historyPaneTab, // native — was Warden's History section
     auditPaneTab, // native — was Warden's Audit section
     toolchainPaneTab, // native — Phase 2c
     towerPaneTab, // native: the read-only task manager

@@ -6,6 +6,7 @@
  * FilesView; the hooks are called in the order they were there.
  */
 
+import { prepareFileDragOut, markFileDragOut } from "@/app/drag/file-drag-out";
 import { beginPathDrag, pathDragPaths, pathDragSource, registerFileDropTarget } from "@/app/drag/file-drop";
 import type { FsEntry } from "@/types/rpc/FsEntry";
 import { onCleanup, onMount } from "solid-js";
@@ -60,6 +61,21 @@ export function useFilesDrag(fv: FilesLocal) {
         setDropRow(entry.is_dir && !self ? entry.name : null);
     };
 
+    // What a drag from `entry` carries: the selection if the row is in it, else the row alone. A host's paths mean nothing to this
+    // computer's panes and apps, and a confined folder's are not handed out.
+    const draggedPaths = (entry: FsEntry): string[] | null => {
+        if (model.connection() || model.root()) return null;
+        const names = model.selection().names.has(entry.name) ? model.selectedEntries().map((x) => x.name) : [entry.name];
+        return names.map((n) => model.pathOf(n));
+    };
+
+    // The pointer is down on a row: register what a drag from it would carry, so the drag can take the files out to other apps.
+    const onRowPointerDown = (e: PointerEvent, entry: FsEntry): void => {
+        if (e.button !== 0) return;
+        const paths = draggedPaths(entry);
+        if (paths) prepareFileDragOut(paths);
+    };
+
     const onRowDragStart = (e: DragEvent, entry: FsEntry): void => {
         if (!e.dataTransfer) return;
         // A host's paths mean nothing to this computer's panes and apps; a confined folder's are not handed out.
@@ -72,7 +88,8 @@ export function useFilesDrag(fv: FilesLocal) {
         }
         const paths = model.selectedEntries().map((x) => model.pathOf(x.name));
         beginPathDrag(e.dataTransfer, paths, model.blockId);
+        markFileDragOut(e.dataTransfer, paths);
     };
 
-    return { onRowDragOver, onRowDragStart };
+    return { onRowDragOver, onRowDragStart, onRowPointerDown };
 }

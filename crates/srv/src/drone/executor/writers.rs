@@ -132,7 +132,8 @@ pub(super) fn check(sorted: &[&FlowNode], edges: &[(usize, usize, &FlowEdge)], r
         has_incoming[t] = true;
     }
     let roots: Vec<usize> = (0..n).filter(|i| !has_incoming[*i]).collect();
-    let conditions: Vec<usize> = (0..n).filter(|i| is_kind(sorted[*i], "condition")).collect();
+    // A Condition and a Once each send a run down one of two sides, `true` or `false`.
+    let conditions: Vec<usize> = (0..n).filter(|i| is_kind(sorted[*i], "condition") || is_kind(sorted[*i], "once")).collect();
     let side = sides(n, &out, &roots, &conditions);
     let exclusive = |a: usize, b: usize| side.values().any(|s| matches!((s[a], s[b]), (Some(x), Some(y)) if x != y));
 
@@ -239,6 +240,20 @@ mod tests {
             edges: vec![edge("e1", "start", "c", None), edge("e2", "c", "yes", Some("true")), edge("e3", "c", "no", Some("false"))],
         };
         assert!(analyze(&sides).is_ok(), "only one side runs");
+    }
+
+    #[test]
+    fn the_first_run_and_the_seen_sides_of_a_once_may_share_a_variable_too() {
+        let g = DroneGraph {
+            nodes: vec![
+                writer("start", "s", None),
+                node("once", json!({ "kind": "once", "key": "release-1" })),
+                writer("first", "x", None),
+                writer("seen", "x", None),
+            ],
+            edges: vec![edge("e1", "start", "once", None), edge("e2", "once", "first", Some("true")), edge("e3", "once", "seen", Some("false"))],
+        };
+        assert!(analyze(&g).is_ok(), "only one side of a Once runs");
     }
 
     #[test]

@@ -9,8 +9,7 @@ loadRuns j1 before=- limit=50
         <span class="ui-pill ui-pill--ok">
           "Active"
         <span class="warden-manager-dim">
-          "by"
-          "Builder"
+          "by Builder"
         <span class="warden-manager-dim">
           "→"
           "Builder"
@@ -72,8 +71,7 @@ loadRuns j1 before=- limit=50
               "Agent"
             <button title="The incident's task, in the Kanban" type="button" class="ui-button ui-tone-quiet ui-density-compact">
               <i aria-hidden="true" class="fa-solid fa-table-columns">
-              "Kanban #"
-              "12"
+              "Kanban #12"
             <span class="warden-manager-dim" data-hover-tip="drone-5" aria-description="drone-5">
               "Drone run"
             <button title="https://example.com/a" type="button" class="ui-button ui-tone-quiet ui-density-compact">

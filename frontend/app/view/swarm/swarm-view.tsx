@@ -6,6 +6,7 @@ import { tip } from "@/app/element/tip";
 import { Button, CloseButton, IconButton } from "@/app/element/ui";
 import { Tag } from "@/app/element/ui/Tag";
 import { useTick } from "@/app/hook/useTick";
+import { t } from "@/app/i18n/i18n";
 import { subagentStatus } from "@/app/store/agent-status";
 import { unavailableOfMeta } from "@/app/store/agent-unavailable";
 import { showCopyContextMenu } from "@/app/store/contextmenu";
@@ -74,10 +75,10 @@ export function ClearCompletedButton(props: { model: SwarmViewModel; count: numb
         <div class="swarm-toolbar">
             <Button
                 density="compact"
-                title="Dismiss every completed/interrupted row currently shown"
+                title={t("swarm.clear.tip")}
                 onClick={() => props.model.retireAllCompleted()}
             >
-                Clear completed ({props.count})
+                {t("swarm.clear.label", { n: props.count })}
             </Button>
         </div>
     );
@@ -131,8 +132,8 @@ export function RemoteAgentRow(props: { model: SwarmViewModel; row: RemoteRow })
                     onChange={() => props.model.toggleSelected(key())}
                     title={
                         section().stale
-                            ? "Not seen recently, so it can't be selected"
-                            : "Select for a fleet action (broadcast/stop)"
+                            ? t("swarm.select.stale")
+                            : t("swarm.select.fleet")
                     }
                 />
                 <SwarmProviderIcon provider={props.row.agent.provider} unknownTitle={REMOTE_PROVIDER_UNKNOWN} />
@@ -250,7 +251,7 @@ function AgentSelectCheckbox(props: { node: Accessor<AgentTreeNode>; model: Swar
             checked={props.model.isSelected(props.node().blockId!)}
             onClick={(e) => e.stopPropagation()}
             onChange={() => props.model.toggleSelected(props.node().blockId!)}
-            title="Select for a fleet action (broadcast/stop)"
+            title={t("swarm.select.fleet")}
         />
     );
 }
@@ -506,7 +507,7 @@ function TodoBucket({
         <Show when={rows.length > 0}>
             <div class="swarm-bucket swarm-bucket--todo">
                 <div class="swarm-bucket-header">
-                    <span class="swarm-bucket-label">Todos</span>
+                    <span class="swarm-bucket-label">{t("swarm.bucket.todos")}</span>
                     {/* done/total, not a bare count like the other buckets —
                         for a checklist the useful number is progress. */}
                     <span class="swarm-bucket-count">
@@ -515,7 +516,7 @@ function TodoBucket({
                 </div>
                 <For each={rows}>{(todo) => <TodoRow todo={todo} />}</For>
                 <Show when={truncated > 0}>
-                    <div class="swarm-todo-truncated">+{truncated} more</div>
+                    <div class="swarm-todo-truncated">{t("swarm.todo.more", { n: truncated })}</div>
                 </Show>
                 {/* Distinct from "+N more" above, and deliberately so: that is
                     a cap we chose and can count, this is history the backend
@@ -527,10 +528,10 @@ function TodoBucket({
                     <div
                         class="swarm-todo-partial"
                         {...tip(
-                            "AgentMux started watching this agent mid-session, so items created before that may be missing."
+                            t("swarm.todo.partialTip")
                         )}
                     >
-                        earlier items may be missing
+                        {t("swarm.todo.partial")}
                     </div>
                 </Show>
             </div>
@@ -577,7 +578,7 @@ function AgentToolBucket({
         <Show when={rows.length > 0}>
             <div class="swarm-bucket swarm-bucket--agent-tool">
                 <div class="swarm-bucket-header">
-                    <span class="swarm-bucket-label">Agent Tool</span>
+                    <span class="swarm-bucket-label">{t("swarm.bucket.agentTool")}</span>
                     <span class="swarm-bucket-count">{rows.length}</span>
                 </div>
                 <For each={rows}>
@@ -600,7 +601,7 @@ function WorkflowBucket({ rows, model }: { rows: WorkflowDispatch[]; model: Swar
         <Show when={rows.length > 0}>
             <div class="swarm-bucket swarm-bucket--workflow">
                 <div class="swarm-bucket-header">
-                    <span class="swarm-bucket-label">Workflow</span>
+                    <span class="swarm-bucket-label">{t("swarm.bucket.workflow")}</span>
                     <span class="swarm-bucket-count">{rows.length}</span>
                 </div>
                 <For each={rows}>{(group) => <WorkflowDispatchRow group={group} model={model} />}</For>
@@ -621,7 +622,7 @@ function ShellBucket({ rows }: { rows: ActiveShell[] }): JSX.Element {
         <Show when={rows.length > 0}>
             <div class="swarm-bucket swarm-bucket--shell">
                 <div class="swarm-bucket-header">
-                    <span class="swarm-bucket-label">Shell</span>
+                    <span class="swarm-bucket-label">{t("swarm.bucket.shell")}</span>
                     <span class="swarm-bucket-count">{rows.length}</span>
                 </div>
                 <For each={rows}>{(shell) => <ShellRow shell={shell} />}</For>
@@ -663,7 +664,7 @@ function ShellRow({ shell }: { shell: ActiveShell }): JSX.Element {
         >
             <span class="swarm-shell-title">{shell.title}</span>
             <span class="swarm-shell-elapsed">{elapsed()}</span>
-            <IconButton icon="stop" label="Stop" density="compact" class="swarm-shell-stop" onClick={handleStop} />
+            <IconButton icon="stop" label={t("swarm.shell.stop")} density="compact" class="swarm-shell-stop" onClick={handleStop} />
         </div>
     );
 }
@@ -733,7 +734,7 @@ function LongRunningBucket({ rows }: { rows: LongRunningToolRow[] }): JSX.Elemen
         <Show when={rows.length > 0}>
             <div class="swarm-bucket swarm-bucket--longrunning">
                 <div class="swarm-bucket-header">
-                    <span class="swarm-bucket-label">Running</span>
+                    <span class="swarm-bucket-label">{t("swarm.bucket.running")}</span>
                     <span class="swarm-bucket-count">{rows.length}</span>
                 </div>
                 <For each={rows}>{(row) => <LongRunningRow row={row} />}</For>
@@ -783,7 +784,7 @@ function CronBucket({ rows }: { rows: ActiveCron[] }): JSX.Element {
         <Show when={rows.length > 0}>
             <div class="swarm-bucket swarm-bucket--cron">
                 <div class="swarm-bucket-header">
-                    <span class="swarm-bucket-label">Cron</span>
+                    <span class="swarm-bucket-label">{t("swarm.bucket.cron")}</span>
                     <span class="swarm-bucket-count">{rows.length}</span>
                 </div>
                 <For each={rows}>{(cron) => <CronRow cron={cron} />}</For>
@@ -849,7 +850,7 @@ function CronRow({ cron }: { cron: ActiveCron }): JSX.Element {
                 </span>
             </Show>
             <Tag size="xs" tone={cron.enabled ? "accent" : "neutral"}>
-                {cron.enabled ? "Active" : "Paused"}
+                {cron.enabled ? t("swarm.state.active") : t("swarm.state.paused")}
             </Tag>
         </div>
     );
@@ -917,21 +918,21 @@ function WorkflowDispatchRow({ group, model }: { group: WorkflowDispatch; model:
                 <span class="swarm-workflow-name">{group.name}</span>
                 <span class="swarm-workflow-count">
                     {group.status === "active"
-                        ? `${activeCount()}/${group.memberCount} active`
-                        : `${group.memberCount} retired`}
+                        ? t("swarm.workflow.activeOf", { active: activeCount(), total: group.memberCount })
+                        : t("swarm.workflow.retired", { n: group.memberCount })}
                 </span>
                 <Tag size="xs" tone={group.status === "active" ? "warn" : "neutral"}>
-                    {group.status === "active" ? "Active" : "Retired"}
+                    {group.status === "active" ? t("swarm.state.active") : t("swarm.state.retired")}
                 </Tag>
                 <Show when={countdownSeconds() != null}>
-                    <span class="swarm-subagent-countdown">disappearing in {countdownSeconds()}s</span>
+                    <span class="swarm-subagent-countdown">{t("swarm.subagent.disappearing", { n: countdownSeconds() })}</span>
                 </Show>
                 <Show when={group.status === "retired"}>
                     <CloseButton
                         size="sm"
-                        label="Retire"
+                        label={t("swarm.subagent.retire")}
                         tooltip={false}
-                        title="Retire"
+                        title={t("swarm.subagent.retire")}
                         class="swarm-subagent-retire"
                         onClick={handleRetire}
                     />
@@ -994,7 +995,7 @@ function DispatchActivityFeed({
     return (
         <div class="swarm-dispatch-feed">
             <Show when={entries().length === 0}>
-                <div class="swarm-dispatch-feed-empty">No activity yet.</div>
+                <div class="swarm-dispatch-feed-empty">{t("swarm.feed.empty")}</div>
             </Show>
             <For each={entries()}>
                 {(entry) => <DispatchActivityFeedEntry entry={entry} showAgentTag={showAgentTag} />}
@@ -1069,7 +1070,7 @@ export function DispatchActivityFeedEntry({
                             <i
                                 class={`fa-solid fa-${expanded() ? "chevron-down" : "chevron-right"} swarm-subagent-detail-expand-icon`}
                             />
-                            <span>{et.is_error ? "Error" : "Result"}</span>
+                            <span>{et.is_error ? t("swarm.subagent.error") : t("swarm.subagent.result")}</span>
                         </div>
                         <Show when={expanded()}>
                             <AnsiText
@@ -1205,14 +1206,14 @@ function SubagentRow({
                 <span class="swarm-subagent-slug">{displayLabel()}</span>
                 <AgentStatusChip status={displayStatus()} />
                 <Show when={countdownSeconds() != null}>
-                    <span class="swarm-subagent-countdown">disappearing in {countdownSeconds()}s</span>
+                    <span class="swarm-subagent-countdown">{t("swarm.subagent.disappearing", { n: countdownSeconds() })}</span>
                 </Show>
                 <Show when={canRetire()}>
                     <CloseButton
                         size="sm"
-                        label="Retire"
+                        label={t("swarm.subagent.retire")}
                         tooltip={false}
-                        title="Retire"
+                        title={t("swarm.subagent.retire")}
                         class="swarm-subagent-retire"
                         onClick={handleRetire}
                     />
