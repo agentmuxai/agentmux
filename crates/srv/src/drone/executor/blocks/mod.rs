@@ -5,6 +5,7 @@ pub mod agent;
 pub mod agent_output;
 pub mod app_query;
 pub mod api;
+pub mod approval;
 pub mod api_auth;
 pub mod api_poll;
 pub mod call;

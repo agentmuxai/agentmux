@@ -360,6 +360,7 @@ function FilesGridTiles({ v }: { v: FilesViewParts }): JSX.Element {
                                 onClick={(e) => pointer.onRowClick(e, entry())}
                                 onOpen={() => opening.openEntry(entry())}
                                 onContextMenu={(e) => pointer.onRowContextMenu(e, entry())}
+                                onPointerDown={(e) => drag.onRowPointerDown(e, entry())}
                                 onDragStart={(e) => drag.onRowDragStart(e, entry())}
                                 onDragOver={() => drag.onRowDragOver(entry())}
                                 onDragEnd={() => endPathDrag()}
@@ -395,6 +396,7 @@ function FilesDetailRows({ v }: { v: FilesViewParts }): JSX.Element {
                                 onClick={(e) => pointer.onRowClick(e, entry())}
                                 onOpen={() => opening.openEntry(entry())}
                                 onContextMenu={(e) => pointer.onRowContextMenu(e, entry())}
+                                onPointerDown={(e) => drag.onRowPointerDown(e, entry())}
                                 onDragStart={(e) => drag.onRowDragStart(e, entry())}
                                 onDragOver={() => drag.onRowDragOver(entry())}
                                 dropTarget={fv.dropRow() === name}

@@ -3,10 +3,28 @@
 
 /** The Files pane's sidebar: Places, Drives, WSL, Remote hosts and the agents' folders. */
 
-import { Button, IconButton } from "@/app/element/ui";
+import { Button, CloseButton, IconButton } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { openRemotesInPane } from "@/app/view/remotes/open-remotes";
 import { For, Show, type JSX } from "solid-js";
 import { readableAgentColor, type FilesModel } from "./files-model";
+import { pinnedPlaces, placeLabel, placeTitle, recentPlaces, unpinPlace, type PlaceRef } from "./files-pins";
+
+/** A folder the person pinned or opened lately: one click opens it; a pinned one has a button to unpin it. */
+function PlaceRow(props: { model: FilesModel; place: PlaceRef; pinned?: boolean }): JSX.Element {
+    const open = (): void => void props.model.openOn(props.place.connection ?? "", props.place.path);
+    return (
+        <div class="files-place-row">
+            <Button variant="row" density="compact" class="files-place" title={placeTitle(props.place)} onClick={open}>
+                <i class={`fa ${props.pinned ? "fa-thumbtack" : "fa-clock-rotate-left"}`} />
+                <span>{placeLabel(props.place)}</span>
+            </Button>
+            <Show when={props.pinned}>
+                <CloseButton size="sm" tooltip={false} label={t("files.places.unpin", { name: placeLabel(props.place) })} class="files-place-unpin" onClick={() => unpinPlace(props.place)} />
+            </Show>
+        </div>
+    );
+}
 
 export function FilesPlaces(props: { model: FilesModel }): JSX.Element {
     const model = props.model;
@@ -22,6 +40,14 @@ export function FilesPlaces(props: { model: FilesModel }): JSX.Element {
                         </Button>
                     )}
                 </For>
+                <Show when={pinnedPlaces().length > 0}>
+                    <div class="files-places-heading">{t("files.places.pinned")}</div>
+                    <For each={pinnedPlaces()}>{(p) => <PlaceRow model={model} place={p} pinned />}</For>
+                </Show>
+                <Show when={recentPlaces().length > 0}>
+                    <div class="files-places-heading">{t("files.places.recent")}</div>
+                    <For each={recentPlaces()}>{(p) => <PlaceRow model={model} place={p} />}</For>
+                </Show>
                 <Show when={model.places().some((p) => p.kind === "drive")}>
                     <div class="files-places-heading">Drives</div>
                     <For each={model.places().filter((p) => p.kind === "drive")}>
