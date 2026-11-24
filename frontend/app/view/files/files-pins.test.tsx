@@ -138,6 +138,8 @@ describe("the menus", () => {
             root: () => undefined,
             selectedEntries: () => [],
             showHidden: () => false,
+            treeEnabled: () => false,
+            columnsOn: () => false,
         }) as unknown as FilesModel;
     const actions = { openEntry: vi.fn(), openInNewTab: vi.fn(), copyPaths: vi.fn(), askDeletePermanently: vi.fn() };
     const label = (items: { label?: string }[], re: RegExp) => items.find((i) => i.label && re.test(i.label)) as { label: string; onSelect: () => void } | undefined;
