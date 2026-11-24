@@ -465,6 +465,19 @@ pub fn install(mstore: Arc<Store>, work: Arc<Store>, filestore: Arc<FileStore>, 
     });
 }
 
+/// The tasks an agent owes: the ones it holds, and the ones an urgent message asked it about, each ask kept once. A
+/// task that is both held and asked stays in both lists, so the sender of the message is a watcher (its filer) and
+/// the words name the message as well as the task.
+fn with_asked(mut held: Vec<OwedTask>, asked: Vec<OwedTask>) -> Vec<OwedTask> {
+    for more in asked {
+        if !held.iter().any(|t| t.asked && t.num == more.num) {
+            held.push(more);
+        }
+    }
+    held.sort_by_key(|t| (t.num, t.asked));
+    held
+}
+
 /// One look at every agent that owes work.
 pub fn sweep(watch: &mut Watch, mstore: &Store, work: &Store, filestore: &FileStore, config: &ConfigState, now_ms: u64) {
     let Some(lim) = limits_from(&config.get_settings().extra) else {
@@ -481,13 +494,7 @@ pub fn sweep(watch: &mut Watch, mstore: &Store, work: &Store, filestore: &FileSt
     let mut quiet_now = HashMap::new();
     for def in &defs {
         let Some(block_id) = panes.get(&def.id) else { continue };
-        let mut tasks = owed_by(&claimed, def);
-        for more in asked.remove(&def.id).unwrap_or_default() {
-            if !tasks.iter().any(|t| t.num == more.num) {
-                tasks.push(more);
-            }
-        }
-        tasks.sort_by_key(|t| t.num);
+        let tasks = with_asked(owed_by(&claimed, def), asked.remove(&def.id).unwrap_or_default());
         if tasks.is_empty() && !owes_report(mstore, &defs, def, block_id) {
             continue;
         }
@@ -498,7 +505,9 @@ pub fn sweep(watch: &mut Watch, mstore: &Store, work: &Store, filestore: &FileSt
         if let Some(since_ms) = watch.quiet_since(&def.id, reading.turn_active, &lim, now_ms) {
             let filers: Vec<String> = tasks.iter().map(|t| t.filer_uid.clone()).collect();
             let watchers = watcher_panes(mstore, &def.id, &filers).iter().filter_map(|p| agent_name_of_pane(mstore, &defs, p)).collect();
-            quiet_now.insert(def.id.clone(), QuietView { since_ms, tasks: tasks.iter().map(|t| t.num).collect(), watchers });
+            let mut nums: Vec<i64> = tasks.iter().map(|t| t.num).collect();
+            nums.dedup();
+            quiet_now.insert(def.id.clone(), QuietView { since_ms, tasks: nums, watchers });
         }
         match action {
             None => {}

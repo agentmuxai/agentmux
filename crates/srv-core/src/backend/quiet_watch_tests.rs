@@ -540,4 +540,23 @@ async fn an_urgent_message_makes_the_recipient_owe_its_sender_an_answer_until_th
     let open = open_asks_by_def(&state.mstore, &work, &defs, &HashMap::new(), now);
     assert_eq!(open.get(&recipient_id).map(|v| v.iter().map(|t| t.num).collect::<Vec<_>>()), Some(vec![num]), "only the task that waits on it");
     assert!(urgent_asks::open_asks(now).iter().all(|a| !a.tasks.contains(&999_999)), "forgotten");
+
+    // The recipient holds the task the message named: the ask stays open until that task moves after the message.
+    let held = |updated_ms| HashMap::from([(recipient_id.clone(), vec![OwedTask { num, filer_uid: "filer".into(), updated_ms, asked: false }])]);
+    assert!(open_asks_by_def(&state.mstore, &work, &defs, &held(1), now).contains_key(&recipient_id), "held and not moved since: still owed");
+    assert!(!open_asks_by_def(&state.mstore, &work, &defs, &held(now), now).contains_key(&recipient_id), "the held task moved after the message: answered");
+}
+
+#[test]
+fn a_task_the_agent_holds_and_was_also_asked_about_is_owed_both_ways() {
+    let asked = OwedTask { num: 7, filer_uid: "sender".into(), updated_ms: 5, asked: true };
+    let held = OwedTask { num: 7, filer_uid: "filer".into(), updated_ms: 1, asked: false };
+    let owed = with_asked(vec![held.clone()], vec![asked.clone(), asked.clone()]);
+    assert_eq!(owed, vec![held, asked], "the held task and the ask, the ask once");
+    let filers: Vec<&str> = owed.iter().map(|t| t.filer_uid.as_str()).collect();
+    assert_eq!(filers, ["filer", "sender"], "the sender of the message is a watcher, as the filer is");
+    assert_eq!(
+        quiet_body("Pulp", false, &owed, 22, false, ""),
+        "Your agent Pulp has been quiet for 22 min on #7, and has not answered your urgent message about #7. It is idle."
+    );
 }
