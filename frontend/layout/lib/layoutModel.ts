@@ -372,6 +372,11 @@ export class LayoutModel {
      */
     isSplitterDragging: () => boolean;
     /**
+     * The panes (leaf node ids) whose size the splitter being dragged changes, or null when none is dragged.
+     * Only these hold their body (pane-body-hold.ts); the others keep their size and have nothing to lay out.
+     */
+    splitterHeldNodeIds: SignalAtom<ReadonlySet<string> | null> = createSignalAtom<ReadonlySet<string> | null>(null);
+    /**
      * True if the whole TileLayout container is being resized.
      * @internal
      */

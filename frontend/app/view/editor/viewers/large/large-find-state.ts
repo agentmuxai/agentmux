@@ -82,8 +82,8 @@ function reasonOf(e: unknown): string {
     return (e instanceof Error ? e.message : String(e)).replace(/^filesearch(?:text|bytes):\s*/, "");
 }
 
-/** "Aa" (exact case, on) and ".*" (the text is a regular expression, off). A change of either calls `onChange`. */
-function createFindOptions(onChange: () => void) {
+/** "Aa" (exact case, on) and ".*" (the text is a regular expression, off). `onChange` runs before a change of either, `onChanged` after it. */
+function createFindOptions(onChange: () => void, onChanged: () => void) {
     const [matchCase, setMatchCase] = createSignal(true);
     const [regex, setRegex] = createSignal(false);
     return {
@@ -93,12 +93,19 @@ function createFindOptions(onChange: () => void) {
         toggleCase: () => {
             onChange();
             setMatchCase((v) => !v);
+            onChanged();
         },
         toggleRegex: () => {
             onChange();
             setRegex((v) => !v);
+            onChanged();
         },
     };
+}
+
+/** Why the typed text can't be searched, "" when it can. */
+function errorOf(p: LargeSearch): string {
+    return p && "error" in p ? p.error : "";
 }
 
 export function createLargeFind(o: LargeFindParts) {
@@ -106,8 +113,9 @@ export function createLargeFind(o: LargeFindParts) {
     const [text, setText] = createSignal("");
     const [status, setStatus] = createSignal("");
     const [busy, setBusy] = createSignal(false);
-    // A change of how the text is read ends the search on show: its match was of another question.
-    const opts = createFindOptions(() => reset());
+    // A change of how the text is read ends the search on show: its match was of another question. With a text typed,
+    // the search is asked again at once, with the new reading, rather than on the next Enter.
+    const opts = createFindOptions(() => reset(), () => text() && void go(false));
     /** What marks the match on show in its line (its text, or an expression); "" when none. */
     const [needle, setNeedle] = createSignal<LineMatcher>("");
     /** Where the match on show starts: the next search goes on from it. `key` is the text and options it was found with. */
@@ -117,10 +125,7 @@ export function createLargeFind(o: LargeFindParts) {
     const options = opts.get;
     const key = () => `${opts.matchCase() ? "A" : "a"}${opts.regex() ? "r" : "t"}:${text()}`;
     const pattern = createMemo(() => largeSearchFor(o.encoding(), text(), options()));
-    const error = (): string => {
-        const p = pattern();
-        return p && "error" in p ? p.error : "";
-    };
+    const error = () => errorOf(pattern());
     const reset = () => {
         run++;
         setBusy(false);

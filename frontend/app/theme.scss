@@ -276,6 +276,16 @@
     // A destructive row: the error text pulled toward the text colour, because the lifted surface leaves the plain
     // error text under 4.5:1 on a hovered row in eight themes.
     --menu-danger-text-color: color-mix(in srgb, var(--error-text-color) 65%, var(--main-text-color));
+    // The rows of a menu, one set for `.menu` (element/flyoutmenu.scss) and the Solid context menu
+    // (components/context-menu.scss): a row's padding and gap, its text size, the icon column and the divider's margin.
+    --menu-pad: var(--space-0-5);
+    --menu-row-gap: 1px;
+    --menu-row-pad-y: var(--space-1);
+    --menu-row-pad-x: var(--space-1-5);
+    --menu-row-font-size: var(--text-sm);
+    --menu-icon-col: 14px;
+    --menu-icon-gap: var(--space-1);
+    --menu-divider-margin: var(--space-0-5) var(--space-1);
     --menu-separator-color: color-mix(in srgb, var(--menu-edge-color, var(--border-color)) 55%, var(--menu-bg-color, var(--modal-bg-color)));
     --modal-border-radius: 0; /* SPEC_HARD_CORNERS_2026_05_26 */
     --toggle-bg-color: var(--border-color);

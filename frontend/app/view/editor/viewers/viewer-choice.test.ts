@@ -70,6 +70,12 @@ describe("viewerOptions", () => {
         expect(viewerOptions(probe("other", TEXT_MAX_BYTES + 1))).toEqual(["hex", "info", "large"]);
         expect(viewerOptions(probe("text", TEXT_MAX_BYTES + 1))).toEqual(["large", "info", "hex"]);
     });
+
+    it("offers the Large text viewer in place of Text for a small file whose first line was found too wide", () => {
+        const wide = { ...probe("text"), wideFirstLine: "C:/x/wide.log" };
+        expect(viewerOptions(wide)).toEqual(["large", "info", "hex"]);
+        expect(chooseViewer(wide, "text")).toBe("large");
+    });
 });
 
 describe("viewerForDropped", () => {
