@@ -4,14 +4,16 @@
 // Global command registry — the single source of truth for all palette commands.
 // Both the Ctrl+P UI and the `run_command` IPC endpoint use this registry.
 
-import { atoms, getApi, MOS } from "@/app/store/global";
-import { createBlock, createBlockSplitHorizontally, createBlockSplitVertically } from "@/app/store/block-layout-actions";
-import { createTab, setActiveTab } from "@/app/store/tab-actions";
-import { shortcutsSplitBlockDef } from "@/app/store/split-block-def";
+import { atoms, getApi } from "@/app/store/global";
+import { createBlock } from "@/app/store/block-layout-actions";
+import { handleSplitHorizontal, handleSplitVertical } from "@/app/store/keymodel-blockcreate";
+import { switchTab } from "@/app/store/keymodel-nav";
+import { createTab } from "@/app/store/tab-actions";
 import { hostHas } from "@/util/host-caps";
 import { WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import { fireAndForget } from "@/util/util";
+import { genericClose, simpleCloseStaticTab } from "@/app/store/keymodel-nav";
 import { openCommandPalette } from "@/app/store/open-command-palette";
 import { openConfigFileOrTell } from "@/app/util/open-config-file";
 import { setAnimationPreset } from "@/app/store/animation-config";
@@ -46,6 +48,9 @@ export interface CommandEntry {
     keywords?: string;
     /** Secondary text the palette shows after the label, and searches (an agent's seat and state). */
     detail?: string;
+    /** The id whose key the palette shows on this row, for a command that is the same action as a pane's own key command
+     *  (the agent view's "Find in conversation" shows the key of `pane:find`). Absent: the row's own id. */
+    keyOf?: string;
     /** Left out of the palette; still runs by id (a menu, a keybinding). */
     hidden?: boolean;
     /** A host capability the command needs. Without it the command is left
@@ -119,33 +124,13 @@ export const commandRegistry = new CommandRegistry();
 // Helpers
 // ---------------------------------------------------------------------------
 
-function getFocusedBlockIdForSplit(): string | null {
-    const layoutModel = getLayoutModelForStaticTab();
-    const focusedNode = layoutModel.focusedNode?.();
-    return focusedNode?.data?.blockId ?? null;
-}
 
-/** What a palette split of `blockId` creates: a Shortcuts pane (its tiles start where the pane
- *  was). SPEC_SHORTCUTS_PANE_FOR_SPLITS_2026_10_28.md. */
-function getSplitBlockDef(blockId: string): BlockDef {
-    return shortcutsSplitBlockDef(MOS.getObjectValue<Block>(MOS.makeORef("block", blockId)), () => ({
-        meta: { view: "shortcuts" },
-    }));
-}
 
-function getAllTabs(ws: any): string[] {
-    return [...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])];
-}
 
-function switchTab(offset: number) {
-    const ws = atoms.workspace();
-    const curTabId = atoms.activeTabId();
-    const tabids = getAllTabs(ws);
-    const tabIdx = tabids.indexOf(curTabId);
-    if (tabIdx === -1) return;
-    const newTabIdx = (tabIdx + offset + tabids.length) % tabids.length;
-    setActiveTab(tabids[newTabIdx]);
-}
+
+
+
+
 
 // ---------------------------------------------------------------------------
 // Registration
@@ -297,20 +282,15 @@ function registerSplitCommands(): void {
         label: "Split Right",
         category: "Split",
         icon: "table-columns",
-        execute: async () => {
-            const blockId = getFocusedBlockIdForSplit();
-            if (blockId) await createBlockSplitHorizontally(getSplitBlockDef(blockId), blockId, "after");
-        },
+        // What its key does (a Shortcuts pane that starts where the focused pane was).
+        execute: () => handleSplitHorizontal("after"),
     });
     commandRegistry.register({
         id: "split:down",
         label: "Split Down",
         category: "Split",
         icon: "table-list",
-        execute: async () => {
-            const blockId = getFocusedBlockIdForSplit();
-            if (blockId) await createBlockSplitVertically(getSplitBlockDef(blockId), blockId, "after");
-        },
+        execute: () => handleSplitVertical("after"),
     });
 }
 
@@ -449,12 +429,8 @@ function registerTabCommands(): void {
         label: "Close Tab",
         category: "Tab",
         icon: "xmark",
-        execute: () => {
-            const ws = atoms.workspace();
-            if (!ws) return;
-            const tabId = atoms.activeTabId();
-            WorkspaceService.CloseTab(ws.oid, tabId).catch(console.error);
-        },
+        // What its key does: the close-confirmation (the setting, an agent at work) and the last-tab guard.
+        execute: () => simpleCloseStaticTab(),
     });
     commandRegistry.register({
         id: "tab:next",
@@ -477,10 +453,8 @@ function registerPaneCommands(): void {
         label: "Close Pane",
         category: "Pane",
         icon: "xmark",
-        execute: () => {
-            const layoutModel = getLayoutModelForStaticTab();
-            fireAndForget(layoutModel.closeFocusedNode.bind(layoutModel));
-        },
+        // What its key does: closes the focused pane, or the tab when it has none left.
+        execute: () => genericClose(),
     });
     commandRegistry.register({
         id: "pane:magnify",

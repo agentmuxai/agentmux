@@ -164,6 +164,30 @@ async fn a_push_for_a_kind_this_build_does_not_merge_is_refused() {
 }
 
 #[tokio::test]
+async fn a_push_from_a_stranger_is_refused_alike_whatever_the_collections_kind() {
+    let state = with_identity();
+    let p = peer();
+    collection_with_peer(&state, "vault", &p);
+    let rec = from_peer(&p, "secret.1", 1, "x");
+    // The kind is not looked at before membership: a stranger gets what it gets for a collection that does not exist.
+    assert_eq!(code(push(&state, &caller("stranger"), json!({ "collection": C, "records": [rec] })).await), "not_member");
+}
+
+#[tokio::test]
+async fn a_push_is_not_answered_while_another_install_holds_the_lock_whatever_the_collections_kind() {
+    let state = with_identity();
+    let p = peer();
+    collection_with_peer(&state, "vault", &p);
+    {
+        let conn = state.id_store.conn().lock().unwrap();
+        let taken = lock::acquire(&conn, "another-install", agentmux_common::time::now_ms(), LEASE_MS).unwrap();
+        assert!(matches!(taken, Lock::Held { .. }));
+    }
+    let rec = from_peer(&p, "secret.1", 1, "x");
+    assert_eq!(code(push(&state, &caller(&p.subject.id), json!({ "collection": C, "records": [rec] })).await), "not_active");
+}
+
+#[tokio::test]
 async fn a_member_is_given_the_collections_keys_sealed_to_it_and_nobody_else_is() {
     let state = with_identity();
     let p = peer();

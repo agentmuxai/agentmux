@@ -25,6 +25,7 @@ const PANELS = [
     "RestartToUpdatePopover",
     "SummaryPopover",
     "TokenBreakdownPopover",
+    "WorkspaceStopStatus",
 ];
 
 /** The opening tag of the file's AnchoredPopover, props and all. */

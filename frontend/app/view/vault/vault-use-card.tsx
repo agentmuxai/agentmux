@@ -9,6 +9,7 @@
 import { createEffect, createSignal, Show, type JSX } from "solid-js";
 
 import { Field, Pill, Select, TextInput } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { CARD_BRANDS, cardBrand, cardCvcLength, cardDigits, cardGroup, cardLuhn, expiryYears } from "./vault-card";
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0"));
@@ -28,21 +29,21 @@ export function cardAnswerText(card: { number: string; month: string; year: stri
 /** The expiry: a month and a year to choose from, side by side. */
 function CardExpiry(props: { month: string; year: string; busy: boolean; onMonth: (m: string) => void; onYear: (y: string) => void }): JSX.Element {
     return (
-        <Field label="Expiry" layout="stacked">
+        <Field label={t("vault.useCard.expiry")} layout="stacked">
             <div class="vault-part vault-card-expiry">
                 <Select
-                    ariaLabel="Expiry month"
+                    ariaLabel={t("vault.useCard.expiryMonth")}
                     value={props.month}
                     disabled={props.busy}
                     onChange={props.onMonth}
-                    options={[{ value: "", label: "Month" }, ...MONTHS.map((m) => ({ value: m, label: m }))]}
+                    options={[{ value: "", label: t("vault.useCard.month") }, ...MONTHS.map((m) => ({ value: m, label: m }))]}
                 />
                 <Select
-                    ariaLabel="Expiry year"
+                    ariaLabel={t("vault.useCard.expiryYear")}
                     value={props.year}
                     disabled={props.busy}
                     onChange={props.onYear}
-                    options={[{ value: "", label: "Year" }, ...expiryYears().map((y) => ({ value: String(y), label: String(y) }))]}
+                    options={[{ value: "", label: t("vault.useCard.year") }, ...expiryYears().map((y) => ({ value: String(y), label: String(y) }))]}
                 />
             </div>
         </Field>
@@ -88,9 +89,9 @@ export function CardTyped(props: {
             }}
         >
             <p class="warden-manager-dim">
-                {props.why} You type the card here and it fills the form's card fields. The agent never sees it.
+                {t("vault.useCard.intro", { why: props.why })}
             </p>
-            <Field label="Card number" layout="stacked">
+            <Field label={t("vault.useCard.number")} layout="stacked">
                 <div class="vault-part vault-card-number">
                     <TextInput
                         inputmode="numeric"
@@ -107,12 +108,12 @@ export function CardTyped(props: {
                 </div>
                 <Show when={digits().length >= 12 && !cardLuhn(digits())}>
                     <div class="vault-card-warn" role="note">
-                        This number doesn't look right. It can still be filled in.
+                        {t("vault.useCard.warn")}
                     </div>
                 </Show>
             </Field>
             <CardExpiry month={month()} year={year()} busy={props.busy} onMonth={setMonth} onYear={setYear} />
-            <Field label={length() === 4 ? "Security code (CID, 4 digits)" : "Security code (CVC, 3 digits)"} layout="stacked">
+            <Field label={length() === 4 ? t("vault.useCard.cid") : t("vault.useCard.cvc")} layout="stacked">
                 <TextInput
                     inputmode="numeric"
                     autocomplete="off"
@@ -123,15 +124,15 @@ export function CardTyped(props: {
                     disabled={props.busy}
                 />
             </Field>
-            <Field label="Name on card" layout="stacked">
+            <Field label={t("vault.useCard.name")} layout="stacked">
                 <TextInput autocomplete="off" spellcheck={false} value={name()} onInput={(e) => setName(e.currentTarget.value)} disabled={props.busy} />
             </Field>
-            <Field label="Billing ZIP" layout="stacked">
+            <Field label={t("vault.useCard.zip")} layout="stacked">
                 <TextInput autocomplete="off" spellcheck={false} value={zip()} onInput={(e) => setZip(e.currentTarget.value)} disabled={props.busy} />
             </Field>
             <label class="vault-check">
                 <input type="checkbox" checked={props.save} onChange={(e) => props.onSave(e.currentTarget.checked)} disabled={props.busy} />
-                Save to the Vault as "{props.label}"
+                {t("vault.useCard.saveAs", { label: props.label })}
             </label>
             <input type="submit" hidden />
         </form>

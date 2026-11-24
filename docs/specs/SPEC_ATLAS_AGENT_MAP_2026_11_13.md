@@ -336,7 +336,8 @@ one more border, outside its own, in a colour that belongs to its host.
   The card says "Host" with how the machine was found (this machine, LAN, cloud), its platform and any channel.
 - **The ring**: a second border outside the node's own and a container agent's frame, with a gap of 2 px (a seventh of the
   gap between two nodes) and 2 px wide, never less than 1 px; both close in with the gaps as the map is zoomed in, so two
-  neighbours' rings never meet. The node's own border (its state on the left), its selection and its focus ring (drawn inside the node's border) keep their
+  neighbours' rings never meet. A container agent's ring stands outside its dashed frame, which would put its 2 px edge half
+  a gap out and make two container neighbours' rings touch; its ring is 1 px wide, which leaves 2 px between them (`containerRing`, #48375). The node's own border (its state on the left), its selection and its focus ring (drawn inside the node's border) keep their
   meaning beside it. With **one host** there is nothing to tell apart: no ring, no legend, the label stays (chosen).
 - **The colour of a host** is stable: a hash of the host's name (the computer's, so a machine's other channels share it),
   never the order hosts arrived in, so it is the same after a restart and on every computer that sees the same hosts.

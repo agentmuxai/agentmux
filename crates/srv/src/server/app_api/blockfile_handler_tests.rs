@@ -92,3 +92,42 @@ async fn the_transcript_and_its_sidecars_cannot_be_written_as_state() {
         assert!(err.contains("is a transcript file and can't be written through this RPC"), "{name}: {err}");
     }
 }
+
+/// A store another thread holds busy holds the answer, not a runtime worker. One worker makes the difference plain:
+/// if the handler waited on the store itself, the second task could never run.
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn a_busy_store_holds_the_count_but_not_the_runtime() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+    let state = test_state();
+    let block_id = add_block(&state, &[("session:line_count", serde_json::json!(7))]);
+    let (held_tx, held_rx) = std::sync::mpsc::channel();
+    let (free_tx, free_rx) = std::sync::mpsc::channel::<()>();
+    let store = state.mstore.clone();
+    let holder = std::thread::spawn(move || {
+        let _held = store.hold_for_tests();
+        held_tx.send(()).unwrap();
+        let _ = free_rx.recv();
+    });
+    held_rx.recv().unwrap();
+
+    let asked = tokio::spawn({
+        let state = state.clone();
+        async move { blockfile_line_count(&state, count_req(&block_id, "output")).await }
+    });
+    std::thread::sleep(Duration::from_millis(200));
+    let ran = Arc::new(AtomicBool::new(false));
+    let other = tokio::spawn({
+        let ran = ran.clone();
+        async move { ran.store(true, Ordering::SeqCst) }
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    let others_ran = ran.load(Ordering::SeqCst);
+    // Free the store before judging, so a failure does not leave the handler waiting for good.
+    free_tx.send(()).unwrap();
+    holder.join().unwrap();
+    let answer = asked.await.unwrap().unwrap();
+    other.await.unwrap();
+    assert!(others_ran, "a task on the runtime did not run while the line count waited for a busy store");
+    assert_eq!(answer.count, 7, "the count answers once the store is free");
+}

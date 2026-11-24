@@ -8,6 +8,7 @@
 import { createSignal, onCleanup, type Accessor } from "solid-js";
 import { joinLease } from "./lease-step";
 import { t } from "@/app/i18n/i18n";
+import { writeText } from "@/util/clipboard";
 import { openStreamedPane, screenModeAsked, type StreamedHandle } from "./streamed-client";
 import type { ServerMsg, WindowInfo } from "./streamed-protocol";
 
@@ -92,13 +93,11 @@ function applyServerMessage(m: ServerMsg, to: Sinks): void {
 }
 
 /**
- * Put the text the person copied in the remote browser on their own clipboard. The page is in the foreground and the person just pressed a
- * key, so the browser lets it write their clipboard; if it does not, say so.
+ * Put the text the person copied in the remote browser on their own clipboard, through the app's clipboard helper (the desktop host's native
+ * clipboard, not the page's, which the embedded browser may refuse); if it cannot, say so.
  */
 function copyToClipboard(text: string, setNotice: (text: string) => void): void {
-    const put = navigator.clipboard?.writeText(text);
-    if (put) put.catch(() => setNotice(t("browser.streamed.copyFailed")));
-    else setNotice(t("browser.streamed.copyFailed"));
+    writeText(text).catch(() => setNotice(t("browser.streamed.copyFailed")));
 }
 
 /** The message that tells the server the stage's size. */

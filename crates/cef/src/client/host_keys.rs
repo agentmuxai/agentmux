@@ -160,12 +160,14 @@ pub(crate) fn chord_event(pane: &str, phase: Phase, key: KeyStep, mac: bool, now
 }
 
 fn step(st: &mut ChordState, keys: &[HostKey], pane: &str, phase: Phase, key: KeyStep, now: Instant) -> Chord {
-    st.held = st.held.take().filter(|h| now.saturating_duration_since(h.at) <= HELD_MAX);
-    if let Some((here, vk)) = st.held.as_ref().map(|h| (h.pane == pane, h.vk)) {
+    // A key is held back only for the pane that kept it: any key event of another pane (its release among them, which the
+    // pane that kept it will not see) lets it go, or the character typed on coming back would be dropped.
+    st.held = st.held.take().filter(|h| h.pane == pane && now.saturating_duration_since(h.at) <= HELD_MAX);
+    if let Some(vk) = st.held.as_ref().map(|h| h.vk) {
         match phase {
-            Phase::Char if here => return Chord::Kept,
-            Phase::Down if here && key.vk == vk => return Chord::Kept,
-            Phase::Up if here && key.vk == vk => {
+            Phase::Char => return Chord::Kept,
+            Phase::Down if key.vk == vk => return Chord::Kept,
+            Phase::Up if key.vk == vk => {
                 st.held = None;
                 return Chord::Kept;
             }
@@ -372,6 +374,24 @@ mod tests {
         // A release that was never seen does not keep the key from the page for ever.
         chord(&mut st, "p", Phase::Down, step_of(true, true, O), at(4000, t));
         assert_eq!(chord(&mut st, "p", Phase::Char, step_of(false, false, 0x6C), at(4000 + 6000, t)), Chord::Pass);
+    }
+
+    #[test]
+    fn a_kept_key_whose_release_goes_to_another_pane_does_not_swallow_the_typing_on_coming_back() {
+        let (mut st, t) = (fresh(), Instant::now());
+        // The chord runs in pane a, which keeps its second key.
+        chord(&mut st, "a", Phase::Down, step_of(true, true, O), t);
+        assert!(matches!(chord(&mut st, "a", Phase::Down, step_of(false, false, L), at(200, t)), Chord::Run(_)));
+        // Its release goes to pane b (the person moved), which sees an ordinary key.
+        assert_eq!(chord(&mut st, "b", Phase::Up, step_of(false, false, L), at(300, t)), Chord::Pass);
+        // Back in pane a within the five seconds: the same letter is typed, and its character reaches the page.
+        assert_eq!(chord(&mut st, "a", Phase::Down, step_of(false, false, L), at(1000, t)), Chord::Pass);
+        assert_eq!(chord(&mut st, "a", Phase::Char, step_of(false, false, 0x6C), at(1001, t)), Chord::Pass);
+        // Any other key of another pane lets a kept key go too, not only its own release.
+        chord(&mut st, "a", Phase::Down, step_of(true, true, O), at(2000, t));
+        assert!(matches!(chord(&mut st, "a", Phase::Down, step_of(false, false, L), at(2100, t)), Chord::Run(_)));
+        assert_eq!(chord(&mut st, "b", Phase::Down, step_of(false, false, 0x41), at(2200, t)), Chord::Pass);
+        assert_eq!(chord(&mut st, "a", Phase::Char, step_of(false, false, 0x6C), at(2300, t)), Chord::Pass);
     }
 
     #[test]

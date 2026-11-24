@@ -26,6 +26,9 @@ function page({ vw = 800, vh = 600, topmost } = {}) {
     const win = {
         innerWidth: vw,
         innerHeight: vh,
+        // `extra` maps an element to more computed style (opacity, visibility); `display` to its display value.
+        extra: new Map(),
+        display: new Map(),
         getComputedStyle: e => ({
             overflowX: e.overflow || "visible",
             overflowY: e.overflow || "visible",
@@ -33,6 +36,8 @@ function page({ vw = 800, vh = 600, topmost } = {}) {
             transform: "none",
             perspective: "none",
             filter: "none",
+            display: win.display.get(e) || "block",
+            ...(win.extra.get(e) || {}),
         }),
     };
     const doc = {
@@ -69,7 +74,7 @@ function page({ vw = 800, vh = 600, topmost } = {}) {
         els.push(e);
         return e;
     };
-    return { el, doc };
+    return { el, doc, win };
 }
 
 describe("click_point: where the click goes", () => {
@@ -172,10 +177,98 @@ describe("click_point: a click that can't land says why", () => {
         expect(clickPoint.call(b).error).toContain("nothing at <button>");
     });
 
-    it("keeps the old answer for an element with no size", () => {
+    it("says an element with a box of no size is 0 x 0", () => {
         const { el } = page();
         const b = el("button", rect(0, 0, 0, 0));
-        expect(clickPoint.call(b)).toEqual({ error: "the element is not visible" });
+        expect(clickPoint.call(b)).toEqual({ error: "the element is not visible: it is 0 x 0 on the page" });
+    });
+
+    it("says an element with no box at all is not displayed, and names whether it is the element or what is around it", () => {
+        const { el, win } = page();
+        const wrap = el("div", rect(0, 0, 0, 0));
+        const b = el("button", rect(0, 0, 0, 0), { parent: wrap });
+        b.getClientRects = () => [];
+        win.display = new Map([[wrap, "none"]]);
+        expect(clickPoint.call(b).error).toBe("the element is not visible: it is inside something that is not displayed (display: none)");
+        win.display = new Map([[b, "none"]]);
+        expect(clickPoint.call(b).error).toBe("the element is not visible: it is not displayed (display: none)");
+        win.display = new Map();
+        expect(clickPoint.call(b).error).toBe("the element is not visible: it or something around it is not displayed (display: none)");
+    });
+});
+
+describe("click_point: a cover nobody can see", () => {
+    // `style(e)` gives what getComputedStyle adds for an element: the opacity, visibility and the rest.
+    const covered = (cover, style = {}) => {
+        const { el, win } = page({ topmost: (x, y, els) => els[1] });
+        win.extra = new Map();
+        const b = el("button", rect(100, 100, 200, 140), { text: "Search" });
+        const c = el("span", rect(0, 0, 800, 200), cover);
+        win.extra.set(c, style);
+        return { b, c, win, el };
+    };
+
+    it("says a cover with opacity 0 takes the mouse although nobody sees it, and names the keyboard way out", () => {
+        const { b } = covered({ text: "Articles of incorporation" }, { opacity: "0" });
+        const e = clickPoint.call(b).error;
+        expect(e).toContain('<button "Search"> is covered by <span "Articles of incorporation">, which nobody can see (opacity 0)');
+        expect(e).toContain("Browser focus");
+        expect(e).toContain("Browser key");
+    });
+
+    it("sees through an ancestor with opacity 0, or visibility hidden", () => {
+        const { el, win } = page({ topmost: (x, y, els) => els[2] });
+        win.extra = new Map();
+        const b = el("button", rect(100, 100, 200, 140), { text: "Go" });
+        const panel = el("div", rect(0, 0, 800, 200));
+        const text = el("span", rect(0, 0, 800, 200), { parent: panel, text: "Old tab" });
+        win.extra.set(panel, { visibility: "hidden" });
+        expect(clickPoint.call(b).error).toContain("which nobody can see (visibility: hidden)");
+        win.extra.set(panel, { opacity: "0" });
+        expect(clickPoint.call(b).error).toContain("which nobody can see (opacity 0)");
+        expect(text).toBeTruthy();
+    });
+
+    it("sees the text of an inactive tab panel (hidden, or aria-hidden on a tabpanel) as unseen", () => {
+        const { el } = page({ topmost: (x, y, els) => els[2] });
+        const b = el("button", rect(100, 100, 200, 140), { text: "Search" });
+        const panel = el("div", rect(0, 0, 800, 200));
+        panel.hasAttribute = a => a === "hidden";
+        el("span", rect(0, 0, 800, 200), { parent: panel, text: "Other tab" });
+        expect(clickPoint.call(b).error).toContain("which nobody can see (hidden)");
+        panel.hasAttribute = () => false;
+        panel.getAttribute = a => (a === "role" ? "tabpanel" : a === "aria-hidden" ? "true" : null);
+        expect(clickPoint.call(b).error).toContain("which nobody can see (in a tab panel that is not showing)");
+    });
+
+    it("keeps naming a cover people can see, and does not take aria-hidden alone for unseen", () => {
+        const { el } = page({ topmost: (x, y, els) => els[1] });
+        const b = el("button", rect(100, 100, 200, 140), { text: "Buy" });
+        const banner = el("div", rect(0, 0, 800, 200), { text: "Sticky header" });
+        banner.getAttribute = a => (a === "aria-hidden" ? "true" : null);
+        const e = clickPoint.call(b).error;
+        expect(e).toContain('<button "Buy"> is covered by <div "Sticky header">');
+        expect(e).not.toContain("nobody can see");
+    });
+
+    it("reports a visible cover in preference to an invisible one at another point", () => {
+        const { el, win } = page({ topmost: (x, y, els) => (y < 120 ? els[1] : els[2]) });
+        win.extra = new Map();
+        const b = el("button", rect(100, 100, 200, 140), { text: "Pay" });
+        const ghost = el("span", rect(0, 0, 800, 120), { text: "Ghost" });
+        el("div", rect(0, 120, 800, 200), { text: "Banner" });
+        win.extra.set(ghost, { opacity: "0" });
+        expect(clickPoint.call(b).error).toContain('<button "Pay"> is covered by <div "Banner">');
+    });
+
+    it("still clicks at a point the invisible cover does not hold", () => {
+        const { el, win } = page({ topmost: (x, y, els) => (x < 150 ? els[1] : els[0]) });
+        win.extra = new Map();
+        const b = el("button", rect(100, 100, 200, 140), { text: "Search" });
+        const ghost = el("span", rect(0, 0, 150, 200));
+        win.extra.set(ghost, { opacity: "0" });
+        const got = clickPoint.call(b);
+        expect(got.x).toBeGreaterThanOrEqual(150);
     });
 });
 

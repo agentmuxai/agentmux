@@ -83,6 +83,10 @@ vi.mock("@/app/element/ui/CloseButton", () => ({
     ),
 }));
 vi.mock("./search.scss", () => ({}));
+// The key notation is the shortcut table's; here the names of a platform that spells them out.
+vi.mock("@/app/keybindings", () => ({
+    keyLabel: (spec: string) => spec.replace(/^shift\+/i, "Shift+").replace("Escape", "Esc"),
+}));
 
 import { Search, useSearch } from "./search";
 

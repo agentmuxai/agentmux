@@ -32,7 +32,7 @@ body{margin:0;background:#111;color:#ddd;font:13px Arial,sans-serif}
 .pane{margin:6px 0}`;
 
 /** `parked`: the row carries the "No pane" mark. Widths are the Swarm pane's, which the row is measured against. */
-function row(id: string, width: number, parked: boolean): string {
+function row(id: string, width: number, parked: boolean, quiet = false, state = "Waiting for an answer"): string {
     const mark = parked
         ? `<span class="swarm-nopane-slot"><span class="ui-tag ui-tag--chip ui-tag--ok ui-tag--sm">No pane</span></span>`
         : "";
@@ -45,7 +45,8 @@ function row(id: string, width: number, parked: boolean): string {
 ${mark}
 <span class="swarm-ctx-size">63k</span>
 <span class="swarm-last-active">1m ago</span>
-<span class="swarm-status-chip" style="display:inline-flex;align-items:center;gap:4px;padding:0 6px;border:1px solid #444;white-space:nowrap"><i style="display:inline-block;width:6px;height:6px;background:#58c142;border-radius:3px"></i><span class="swarm-status-label">Waiting for an answer</span></span>
+<span class="swarm-status-chip" style="display:inline-flex;align-items:center;gap:4px;padding:0 6px;border:1px solid #444;white-space:nowrap"><i style="display:inline-block;width:6px;height:6px;background:#58c142;border-radius:3px"></i><span class="swarm-status-label">${state}</span></span>
+${quiet ? `<span class="swarm-quiet">quiet 22 min</span>` : ""}
 <span class="swarm-supervisor-chip" style="display:inline-flex;flex:none;gap:2px"><i style="display:inline-block;width:14px;height:14px;background:#777"></i><span class="swarm-supervisor-mode">auto</span></span>
 </div></div></div>`;
 }
@@ -53,6 +54,9 @@ ${mark}
 // Every 10 px: the squeeze that cut a badge to "Wor…" sits in a narrow band, and which width it is depends on the
 // fonts, so the test sweeps instead of naming one.
 const WIDTHS = Array.from({ length: 33 }, (_, i) => 240 + i * 10);
+
+// Where the "quiet 22 min" note sits beside the name: from the narrowest pane the layout allows up to a wide one.
+const QUIET_WIDTHS = [196, 210, 220, 236, 250, 260, 270, 280, 300, 330, 360, 420];
 
 const MEASURE = `
 const fits = (el, whole) => {
@@ -71,6 +75,7 @@ for (const tree of document.querySelectorAll('.swarm-tree')) {
   result[tree.id] = {
     row: { scrollWidth: r.scrollWidth, clientWidth: r.clientWidth },
     name: fits(q('.swarm-agent-label'), q('.swarm-agent-label')) && q('.swarm-agent-label').scrollWidth <= q('.swarm-agent-label').clientWidth + 0.5,
+    note: fits(q('.swarm-quiet'), q('.swarm-quiet')) && q('.swarm-quiet').scrollWidth <= q('.swarm-quiet').clientWidth + 0.5,
     badge: fits(badge, q('.swarm-seat-slot')) && badge.scrollWidth <= badge.clientWidth + 0.5,
     mark: fits(q('.swarm-nopane-slot .ui-tag'), q('.swarm-nopane-slot')),
     markVisibleWidth: (() => { const t = q('.swarm-nopane-slot .ui-tag'), s = q('.swarm-nopane-slot'); if (!t) return 0; const a = t.getBoundingClientRect(), b = s.getBoundingClientRect(); const left = Math.max(a.left, b.left), right = Math.min(a.right, b.right), top = Math.max(a.top, b.top), bottom = Math.min(a.bottom, b.bottom); return right > left && bottom > top ? Math.round(right - left) : 0; })(),
@@ -84,6 +89,7 @@ const out = document.createElement('pre'); out.id = 'result'; out.textContent = 
 interface Measured {
     row: { scrollWidth: number; clientWidth: number };
     name: boolean;
+    note: boolean;
     badge: boolean;
     mark: boolean;
     markVisibleWidth: number;
@@ -96,7 +102,10 @@ let measured: Record<string, Measured> = {};
 
 beforeAll(async () => {
     if (!BROWSER) return;
-    const html = WIDTHS.flatMap((w) => [row(`plain-${w}`, w, false), row(`parked-${w}`, w, true)]).join("");
+    const html = [
+        ...WIDTHS.flatMap((w) => [row(`plain-${w}`, w, false), row(`parked-${w}`, w, true)]),
+        ...QUIET_WIDTHS.flatMap((w) => [row(`nonote-${w}`, w, false, false, "idle"), row(`note-${w}`, w, false, true, "idle")]),
+    ].join("");
     measured = await measureInBrowser<Record<string, Measured>>(
         BROWSER,
         `<!doctype html><meta charset="utf-8"><style>${TOKENS}\n${css}</style>${html}<script>window.addEventListener("load",()=>{${MEASURE}})</script>`,
@@ -140,6 +149,16 @@ describe.skipIf(!BROWSER)("Swarm row in a narrow pane", () => {
             const m = measured[`parked-${w}`];
             if (m.badge) expect(m.name, `name with the badge at ${w}px`).toBe(true);
         }
+    });
+
+    it("shows the quiet note whole or not at all, and never at the name's cost", () => {
+        for (const w of QUIET_WIDTHS) {
+            const without = measured[`nonote-${w}`];
+            const m = measured[`note-${w}`];
+            expect(m.name, `name with the note at ${w}px: ${JSON.stringify(m)}`).toBe(without.name);
+            if (m.note) expect(m.name, `note shown but the name is cut at ${w}px`).toBe(true);
+        }
+        expect(measured["note-360"].note, "the note fits in a pane with room").toBe(true);
     });
 
     it("never grows past the pane", () => {

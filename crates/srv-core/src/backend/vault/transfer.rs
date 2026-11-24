@@ -44,7 +44,20 @@ const MAX_ENTRIES: usize = 100_000;
 pub const MIN_PASSPHRASE: usize = 8;
 /// How long a staged import waits for the person to commit it.
 const STAGED_TTL: Duration = Duration::from_secs(10 * 60);
+/// How many imports wait for a person at once: the oldest makes room for a new one.
 const MAX_STAGED: usize = 4;
+/// [`MAX_STAGED`], and in a test run (where every test shares the one table) enough that another test's imports never
+/// push out the one a test is working on.
+fn stage_limit() -> usize {
+    if cfg!(test) { 256 } else { MAX_STAGED }
+}
+/// Drops the oldest staged imports until there is room for one more under `limit`.
+fn make_room(held: &mut HashMap<String, Staged>, limit: usize) {
+    while held.len() >= limit {
+        let Some(oldest) = held.iter().min_by_key(|(_, s)| s.at).map(|(k, _)| k.clone()) else { break };
+        held.remove(&oldest);
+    }
+}
 const AGE_MAGIC: &[u8] = b"age-encryption.org/v1";
 
 #[derive(Serialize, Deserialize)]
@@ -420,10 +433,7 @@ pub fn inspect_keyed(store: &Store, path: &Path, passphrase: Option<&str>, mappi
     };
     let mut held = staged().lock().unwrap_or_else(|p| p.into_inner());
     held.retain(|_, s| s.at.elapsed() < STAGED_TTL);
-    while held.len() >= MAX_STAGED {
-        let Some(oldest) = held.iter().min_by_key(|(_, s)| s.at).map(|(k, _)| k.clone()) else { break };
-        held.remove(&oldest);
-    }
+    make_room(&mut held, stage_limit());
     held.insert(preview.token.clone(), Staged { file_name, entries, at: Instant::now() });
     Ok(preview)
 }
@@ -645,3 +655,7 @@ fn write_staged(store: &Store, incoming: &Staged, duplicates: Duplicates, vault_
 pub fn cancel(token: &str) {
     staged().lock().unwrap_or_else(|p| p.into_inner()).remove(token);
 }
+
+#[cfg(test)]
+#[path = "transfer_stage_tests.rs"]
+mod stage_tests;

@@ -35,6 +35,7 @@ import { CloseButton } from "./ui/CloseButton";
 import { tip } from "./tip";
 import "./PaneTabStrip.scss";
 import { createScrollEdges } from "./scroll-edges";
+import { createStripSteps } from "./pane-tab-strip-steps";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
 import type { PaneTabSelectionApi } from "./pane-tab-selection";
@@ -271,6 +272,15 @@ export interface PaneTabStripProps<T> {
 function createStripState<T>(props: PaneTabStripProps<T>) {
     const refs: { strip?: HTMLDivElement } = {};
 
+    // As the tabs run out of room they shrink in steps (pane-tab-steps.ts): the width limit and the step are set on the
+    // strip, the rest is CSS. Made before the edge fades below, so the limit is on the strip before they first look.
+    const steps = createStripSteps({
+        strip: () => refs.strip,
+        tabCount: () => props.tabs.length,
+        zoom: () => props.zoomFactor?.() ?? 1,
+        revision: () => props.tabs.map(props.getLabel).join("\u0000"),
+    });
+
     // Edge fades while the tabs overflow (scroll-edge-fade, PaneTabStrip.scss).
     // The selected tab sitting flush at the left edge drops the left fade, so it is not dimmed.
     const edges = createScrollEdges(
@@ -316,7 +326,7 @@ function createStripState<T>(props: PaneTabStripProps<T>) {
             if (shown()) edges.remeasure();
         }, { defer: true })
     );
-    return { refs, edges, reveal };
+    return { refs, edges, reveal, steps };
 }
 type StripState = ReturnType<typeof createStripState>;
 
@@ -417,6 +427,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
 
     useStripScrollInput(() => s.refs.strip, s.reveal);
 
+
     return (
         <div
             class="pane-tab-strip"
@@ -429,6 +440,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                 "pane-tab-strip--flush-left": s.edges.flushLeft(),
             }}
             ref={(el) => { s.refs.strip = el; }}
+            data-step={s.steps.step() === "full" ? undefined : s.steps.step()}
             // Double-click inside the strip should never bubble up and
             // maximize the pane — matches the icon-toggle pattern from
             // blockframe.tsx. True for every consumer, not just the editor.
