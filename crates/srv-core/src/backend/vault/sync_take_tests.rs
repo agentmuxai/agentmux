@@ -702,3 +702,34 @@ fn an_activity_line_names_its_entry_by_the_id_it_has_on_the_machine_that_takes_i
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0].1.entry_id, on_b, "b's own id for the entry, not a's");
 }
+
+#[test]
+fn a_grant_record_for_an_agent_or_a_setting_is_not_made_here_and_its_revoke_ends_nothing() {
+    let mut a = machine("a", 1);
+    let mut b = machine("b", 2);
+    let p = pins(&a, &b);
+    a.store.vault_insert(&entry("entry-a", "Invoice provider key", "api-key", "sk_test_invented_0001", "[]")).unwrap();
+    a.capture(VAULT, NOW);
+    ship(&a, &mut b, &p, NOW + 10);
+    let on_b = b.entry_of(&a.link("entry-a")).unwrap();
+    // Grants of this machine's own that no record may make or end.
+    let agent_key = "signin:agent-x|profile-y|https://billing.example.com";
+    b.store.vault_grant_add(&on_b, agent_key, NOW + 11, 1).unwrap();
+    // A record from a machine that says it grants an agent key.
+    let body = sync_grant::GrantBody::new(&a.link("entry-a"), "setting:example-setting", NOW, 1);
+    write_sealed(&mut a, &body.record_id(), &body, NOW + 20);
+    let taken = ship(&a, &mut b, &p, NOW + 30);
+    assert!(matches!(&taken[0].effect, Effect::Skipped(why) if why.contains("not a site")), "{taken:?}");
+    assert!(!b.store.vault_grant_check(&on_b, "setting:example-setting").unwrap());
+    // A revoke of the record an agent key would make ends nothing here.
+    let agent = sync_grant::GrantBody::new(&a.link("entry-a"), agent_key, NOW, 1);
+    write_sealed(&mut a, &agent.record_id(), &agent, NOW + 40);
+    ship(&a, &mut b, &p, NOW + 50);
+    {
+        let mut signer = Signer { machine: &a.id, private: &a.private, clock: &mut a.clock };
+        let conn = a.store.conn().lock().unwrap();
+        log::append_local(&conn, &mut signer, VAULT, &agent.record_id(), Vec::new(), true, NOW + 60).unwrap();
+    }
+    ship(&a, &mut b, &p, NOW + 70);
+    assert!(b.store.vault_grant_check(&on_b, agent_key).unwrap(), "this machine's own agent grant is still there");
+}

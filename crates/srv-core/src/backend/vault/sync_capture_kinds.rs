@@ -182,7 +182,7 @@ fn seen_grants(conn: &Connection, vault_id: &str) -> Result<Vec<Seen>, String> {
 
 /// Whether a grant's key is a site. The same table holds an agent's grants and a setting's, whose keys name an agent, a
 /// profile or a setting of this machine: those are not written.
-fn is_site(key: &str) -> bool {
+pub(super) fn is_site(key: &str) -> bool {
     key.starts_with("https://") || key.starts_with("http://")
 }
 
