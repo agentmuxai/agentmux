@@ -82,6 +82,18 @@ export const cefBrowserPanes: BrowserPaneHostApi = {
     stop: async (blockId) => {
         await invokeCommand("browser_pane_stop", { block_id: blockId });
     },
+    find: async (blockId, text, opts) => {
+        await invokeCommand("browser_pane_find", {
+            block_id: blockId,
+            text,
+            forward: opts?.forward ?? true,
+            match_case: opts?.matchCase ?? false,
+            find_next: opts?.findNext ?? false,
+        });
+    },
+    stopFind: async (blockId, clearSelection) => {
+        await invokeCommand("browser_pane_stop_find", { block_id: blockId, clear_selection: clearSelection ?? true });
+    },
     cancelDownload: async (blockId, downloadId) => {
         await invokeCommand("browser_download_cancel", { block_id: blockId, download_id: downloadId });
     },

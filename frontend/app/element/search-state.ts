@@ -19,6 +19,8 @@ export type SearchProps = SearchAtoms & {
     onSearch?: (search: string) => void;
     onNext?: () => void;
     onPrev?: () => void;
+    /** Whose bar this is (a pane's block id), so a host can find the right one when several are open. */
+    owner?: string;
 };
 
 export type SearchState = ReturnType<typeof createSearch>;
@@ -174,6 +176,7 @@ export function createSearch(props: SearchProps) {
 
     return {
         isOpen: isOpenAtom,
+        owner: props.owner,
         style: floating.style,
         register: floating.register,
         searchValue: searchAtom,

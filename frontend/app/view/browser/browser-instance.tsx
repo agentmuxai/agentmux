@@ -20,6 +20,8 @@ export function create(ctx: PaneTabHostContext): PaneTabInstance {
         },
         liveFavicon: () => model.viewFaviconUrl(),
         contextMenu: (browserCtx) => model.getBodyContextMenuItems(browserCtx as never),
+        // The find bar (Ctrl/Cmd+F, Escape): a getter, as the bar is made when the view mounts.
+        search: () => model.searchAtoms,
         focus: () => model.giveFocus(),
         dispose: () => model.dispose(),
     };

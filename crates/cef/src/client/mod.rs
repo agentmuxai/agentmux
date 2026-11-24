@@ -71,6 +71,7 @@ pub(crate) mod filedialog;
 pub(crate) mod jsdialog;
 mod handlers;
 mod pane_shortcuts;
+pub(crate) mod page_find;
 pub(crate) mod host_keys;
 pub(crate) mod menu_keys;
 pub(crate) mod helpers;
