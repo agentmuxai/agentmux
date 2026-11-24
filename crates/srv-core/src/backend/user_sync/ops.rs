@@ -317,6 +317,36 @@ pub struct MembersAns {
 /// (one removal moves it one epoch): in either direction, so a removal that lost a fork to another entry leaves
 /// nothing behind. Called after every change to a chain.
 pub fn sync_epoch(conn: &Connection, collection: &str, chain: &Chain) -> Result<(), OpError> {
+    atomically(conn, |c| epoch_to_chain(c, collection, chain))
+}
+
+/// Runs `f` as one change to the store: all of what it wrote stays, or (when it fails) none of it.
+fn atomically<T>(conn: &Connection, f: impl FnOnce(&Connection) -> Result<T, OpError>) -> Result<T, OpError> {
+    conn.execute_batch("SAVEPOINT sync_atomic")?;
+    match f(conn) {
+        Ok(v) => {
+            conn.execute_batch("RELEASE sync_atomic")?;
+            Ok(v)
+        }
+        Err(e) => {
+            // Undone, then closed: a savepoint left open would hold the store's write lock.
+            let _ = conn.execute_batch("ROLLBACK TO sync_atomic; RELEASE sync_atomic");
+            Err(e)
+        }
+    }
+}
+
+/// The key epoch and the stored chain, moved together: the log never keeps an epoch its stored chain does not say, nor
+/// a chain whose epoch was not moved with it, whatever stops the write part-way.
+fn store_chain(conn: &Connection, collection: &str, chain: &Chain) -> Result<(), OpError> {
+    atomically(conn, |c| {
+        epoch_to_chain(c, collection, chain)?;
+        chain_store::save_in(c, collection, chain)?;
+        Ok(())
+    })
+}
+
+fn epoch_to_chain(conn: &Connection, collection: &str, chain: &Chain) -> Result<(), OpError> {
     let removals: Vec<&BTreeMap<String, u64>> = chain.entries.iter().filter_map(|e| if let Change::Remove { ended, .. } = &e.change { Some(ended) } else { None }).collect();
     let cuts: Vec<(u32, &log::Vector)> = removals.iter().enumerate().map(|(i, ended)| (i as u32, *ended)).collect();
     log::reset_epochs(conn, collection, removals.len() as u32, &cuts)?;
@@ -357,10 +387,14 @@ pub fn members(ctx: &mut Ctx, caller: &str, req: &MembersReq) -> Result<MembersA
     let mut taken = Vec::new();
     if was_current {
         let chain = ctx.chains.get_mut(&req.collection).ok_or(OpError::NotMember)?;
+        let before = chain.clone();
         taken = req.offered.iter().map(|e| chain.take(&req.collection, e.clone())).collect();
+        if let Err(e) = store_chain(ctx.conn, &req.collection, chain) {
+            // Not stored: the chain held here stays what the store says, and no key is discarded for it.
+            *chain = before;
+            return Err(e);
+        }
         discard_lost_keys(ctx.keys, &req.collection, chain, &taken);
-        sync_epoch(ctx.conn, &req.collection, chain)?;
-        chain_store::save(ctx.conn, &req.collection, chain)?;
     }
     // What the caller may read is decided after its offers are taken: one that removes the caller itself ends what it sees.
     let still_current = matches!(standing(ctx, &req.collection, caller), Standing::Current(_));
@@ -449,9 +483,12 @@ fn chain_epoch(ctx: &Ctx, collection: &str) -> Result<u32, OpError> {
 fn sign_and_take(ctx: &mut Ctx, collection: &str, change: Change) -> Result<Entry, OpError> {
     let chain = ctx.chains.get_mut(collection).ok_or(OpError::NotMember)?;
     let entry = chain.next(ctx.me.private, collection, ctx.me.id, change).ok_or(OpError::Bad)?;
+    let before = chain.clone();
     chain.take(collection, entry.clone()).map_err(|_| OpError::Bad)?;
-    sync_epoch(ctx.conn, collection, chain)?;
-    chain_store::save(ctx.conn, collection, chain)?;
+    if let Err(e) = store_chain(ctx.conn, collection, chain) {
+        *chain = before;
+        return Err(e);
+    }
     Ok(entry)
 }
 
@@ -583,8 +620,7 @@ pub fn found(conn: &Connection, chains: &mut BTreeMap<String, Chain>, keys: &dyn
 /// key epoch where the chain says it is.
 pub fn adopt(conn: &Connection, chains: &mut BTreeMap<String, Chain>, collection: &str, kind: &str, chain: Chain, now_ms: i64) -> Result<(), OpError> {
     log::ensure_collection(conn, collection, kind, now_ms)?;
-    sync_epoch(conn, collection, &chain)?;
-    chain_store::save(conn, collection, &chain)?;
+    store_chain(conn, collection, &chain)?;
     chains.insert(collection.to_string(), chain);
     Ok(())
 }

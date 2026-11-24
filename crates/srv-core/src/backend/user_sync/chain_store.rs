@@ -56,6 +56,12 @@ impl From<rusqlite::Error> for LoadError {
 /// Stores the chain and its unsettled forks, replacing what was stored for the collection.
 pub fn save(conn: &Connection, collection: &str, chain: &Chain) -> rusqlite::Result<()> {
     let tx = conn.unchecked_transaction()?;
+    save_in(&tx, collection, chain)?;
+    tx.commit()
+}
+
+/// [`save`] without a transaction of its own, for a caller that makes it one with other writes.
+pub(super) fn save_in(tx: &Connection, collection: &str, chain: &Chain) -> rusqlite::Result<()> {
     tx.execute("DELETE FROM db_sync_chain WHERE collection = ?1", params![collection])?;
     tx.execute("DELETE FROM db_sync_chain_head WHERE collection = ?1", params![collection])?;
     if let Some(last) = chain.entries.last() {
@@ -67,7 +73,7 @@ pub fn save(conn: &Connection, collection: &str, chain: &Chain) -> rusqlite::Res
             tx.execute("INSERT INTO db_sync_chain (collection, slot, idx, entry) VALUES (?1, ?2, ?3, ?4)", params![collection, slot, i as i64, text])?;
         }
     }
-    tx.commit()
+    Ok(())
 }
 
 fn read(conn: &Connection, collection: &str, slot: &str) -> Result<Vec<Entry>, LoadError> {
