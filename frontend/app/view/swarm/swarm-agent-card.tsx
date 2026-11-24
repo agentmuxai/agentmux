@@ -24,6 +24,7 @@ import { BuildSlotNote, LongToolNote, RowStateNotes, UnavailableChip } from "./s
 import { RegistrationBadge, type RegistrationFlag } from "./swarm-row-registration";
 import type { ModelFacts } from "@/app/agent-model/model-tag";
 import { SwarmTagsLine } from "./swarm-model-tag";
+import { QuietNote } from "./swarm-quiet-note";
 import { SwarmSeatBadge } from "./swarm-seats";
 import { AgentStatusChip } from "./swarm-status-chip";
 import { setSupervisorMode, SupervisorChip } from "./swarm-supervisor";
@@ -150,6 +151,7 @@ export function AgentCardHead(props: AgentCardHeadProps): JSX.Element {
                     </>
                 )}
             </Show>
+            <QuietNote meta={blockMeta()} now={rowNow} />
             <Show when={node().blockId}>
                 {(blockId) => (
                     <SupervisorChip

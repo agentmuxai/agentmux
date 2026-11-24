@@ -7,6 +7,7 @@
 // file-tree-state.ts, file-tree-node.tsx and file-tree-model.ts apply what these return.
 // docs/specs/SPEC_EDITOR_TREE_KEYBOARD_ICONS_AND_CLICK_ZOOM_2026_10_16.md §4, §5.
 
+import { treeMove as sharedTreeMove } from "@/app/fs/tree/tree-keys";
 import type { DirEntry } from "@/app/store/rpc-api";
 import { samePath } from "@/app/view/files/files-path";
 
@@ -79,45 +80,18 @@ export type TreeMove =
     | { kind: "collapse"; path: string }
     | { kind: "none" };
 
-const NAV_KEYS = new Set(["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft", "Home", "End", "PageDown", "PageUp"]);
-
 /**
- * Where `key` takes the selection from `selected` (a row's path, or null),
- * or null when `key` isn't a navigation key. `pageSize` is how many rows a
- * screenful holds. With no row selected, every key starts at the first row
- * (End at the last).
+ * Where `key` takes the selection from `selected` (a row's path, or null), or null when `key` isn't a navigation
+ * key. `pageSize` is how many rows a screenful holds. The keys are the shared tree's (app/fs/tree/tree-keys.ts).
  */
 export function treeMove(rows: TreeRow[], selected: string | null, key: string, pageSize: number): TreeMove | null {
-    if (!NAV_KEYS.has(key)) return null;
-    if (rows.length === 0) return { kind: "none" };
-    const last = rows.length - 1;
-    const at = (i: number): TreeMove => ({ kind: "select", path: rows[Math.max(0, Math.min(last, i))].path });
-    const i = selected == null ? -1 : rows.findIndex((r) => r.path === selected);
-    if (i < 0) return at(key === "End" ? last : 0);
-    const row = rows[i];
-    switch (key) {
-        case "ArrowDown":
-            return at(i + 1);
-        case "ArrowUp":
-            return at(i - 1);
-        case "Home":
-            return at(0);
-        case "End":
-            return at(last);
-        case "PageDown":
-            return at(i + Math.max(1, pageSize));
-        case "PageUp":
-            return at(i - Math.max(1, pageSize));
-        case "ArrowRight":
-            if (!row.isDir) return { kind: "none" };
-            if (!row.expanded) return { kind: "expand", path: row.path };
-            // Its first child, once there is one (it may still be loading).
-            return rows[i + 1]?.parent === row.path ? at(i + 1) : { kind: "none" };
-        case "ArrowLeft":
-            if (row.isDir && row.expanded) return { kind: "collapse", path: row.path };
-            return row.parent != null ? { kind: "select", path: row.parent } : { kind: "none" };
-    }
-    return { kind: "none" };
+    const move = sharedTreeMove(
+        rows.map((r) => ({ id: r.path, expandable: r.isDir, expanded: r.expanded, parent: r.parent })),
+        selected,
+        key,
+        pageSize
+    );
+    return move && (move.kind === "none" ? move : { kind: move.kind, path: move.id });
 }
 
 const TYPEAHEAD_RESET_MS = 500;

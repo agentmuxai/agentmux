@@ -935,6 +935,14 @@
             "send": "data ?? {}"
         },
         {
+            "command": "getdroneaccess",
+            "method": "GetDroneAccessCommand"
+        },
+        {
+            "command": "setdroneagents",
+            "method": "SetDroneAgentsCommand"
+        },
+        {
             "command": "getdronepayloadschema",
             "method": "GetDronePayloadSchemaCommand"
         },

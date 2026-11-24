@@ -24,6 +24,7 @@ import { isFailure, type Intent, type RemoteOutcome, type SelectionResult } from
 import { createSelectionTrace } from "@/app/selection/selection-trace";
 import { atoms, getApi, MOS, pushNotification, workspace } from "@/app/store/global";
 import { setActiveTab } from "@/app/store/tab-actions";
+import { resolvePaneTabView } from "@/app/store/pane-tab-registry";
 import { afterTwoFrames } from "./after-two-frames";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -69,7 +70,8 @@ export async function findTabHolding(blockId: string, hint?: string): Promise<st
  * A pane of `view` open in THIS window: the first of this window's tabs (the shown one first) whose blocks
  * include one with that view. Read from the tabs' block lists, not from mounted components, so it also
  * finds a pane that is an inactive member of a pane's stack (not mounted) and a minimized one.
- * With `shownTabOnly`, only the shown tab is read. Null when none is open.
+ * With `shownTabOnly`, only the shown tab is read. Null when none is open. A block saved under an old name of
+ * the view (a Reviews pane, which renders as the Kanban) counts as a pane of the view the name now stands for.
  */
 export async function findOpenBlockByView(view: string, identity?: string, opts: { shownTabOnly?: boolean } = {}): Promise<string | null> {
     const ws = workspace();
@@ -83,7 +85,9 @@ export async function findOpenBlockByView(view: string, identity?: string, opts:
         for (const blockId of tab?.blockids ?? []) {
             const blockRef = MOS.makeORef("block", blockId);
             const block = MOS.getObjectValue<Block>(blockRef) ?? (await MOS.reloadMuxObject<Block>(blockRef));
-            if (block?.meta?.["view"] === view && (identity == null || paneIdentity(view, block.meta) === identity)) return blockId;
+            const stored = block?.meta?.["view"];
+            if (block == null || typeof stored !== "string" || resolvePaneTabView(stored) !== resolvePaneTabView(view)) continue;
+            if (identity == null || paneIdentity(view, block.meta) === identity) return blockId;
         }
     }
     return null;

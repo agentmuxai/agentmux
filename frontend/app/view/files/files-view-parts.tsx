@@ -18,6 +18,7 @@ import { MAIN_PART, zoomPartAttrs } from "@/app/store/zoom-parts";
 import { For, Match, Show, Switch, type Accessor, type JSX } from "solid-js";
 import { ColumnResizer } from "./files-column-resizer";
 import { META_COLWIDTHS } from "./files-columns";
+import { FilesColumns } from "./files-columns-view";
 import { FilesFooter } from "./FilesFooter";
 import { FilesPlaces } from "./FilesPlaces";
 import { FilesToolbar } from "./FilesToolbar";
@@ -218,12 +219,17 @@ function FilesList({ v }: { v: FilesViewParts }): JSX.Element {
                 if (e.target === e.currentTarget) model.setSelection({ ...model.selection(), names: new Set() });
             }}
         >
-            <FilesColumnHeader model={model} fv={fv} />
+            <Show when={!model.columnsOn()}>
+                <FilesColumnHeader model={model} fv={fv} />
+            </Show>
             <FilesNotices v={v} />
+            <Show when={model.phase() === "ready" && model.columnsOn()}>
+                <FilesColumns v={v} />
+            </Show>
             <Show when={model.phase() === "ready" && win.grid()}>
                 <FilesGridTiles v={v} />
             </Show>
-            <Show when={model.phase() === "ready" && !win.grid()}>
+            <Show when={model.phase() === "ready" && !win.grid() && !model.columnsOn()}>
                 <FilesDetailRows v={v} />
             </Show>
         </div>
@@ -394,6 +400,9 @@ function FilesDetailRows({ v }: { v: FilesViewParts }): JSX.Element {
                                 dropTarget={fv.dropRow() === name}
                                 onDragEnd={() => endPathDrag()}
                                 onRenameDone={() => fv.refs.list?.focus()}
+                                tree={model.treeInfo().get(name)}
+                                onToggle={() => model.toggleExpanded(name)}
+                                where={model.findWhere(name)}
                             />
                         </Show>
                     );

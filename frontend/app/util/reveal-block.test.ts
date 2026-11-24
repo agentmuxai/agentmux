@@ -103,6 +103,7 @@ vi.mock("@/app/store/services", () => ({
 }));
 
 import { isWorkspaceClosedFailure } from "@/app/selection/reveal-failure";
+import { registerPaneTab } from "@/app/store/pane-tab-registry";
 import { findOpenBlockByView, revealBlock, showBlockInPane, showBlockWithoutFocus } from "./reveal-block";
 
 /** A layout model whose one pane holds `members` as tabs. */
@@ -258,6 +259,19 @@ describe("findOpenBlockByView — an open pane the component registry does not l
 
     it("is null when no pane of that view is open", async () => {
         expect(await findOpenBlockByView("settings")).toBeNull();
+    });
+
+    it("finds a Reviews pane saved before the fold as the window's Kanban, and the Kanban as Reviews", async () => {
+        const off = registerPaneTab({ apiVersion: 1, view: "kanban", aliases: ["reviews"], label: "Kanban", icon: "table", create: () => ({}) as never });
+        try {
+            tabs.r1 = { meta: { view: "reviews" } } as never;
+            tabs.t1 = { blockids: ["a", "r1"] };
+            expect(await findOpenBlockByView("kanban")).toBe("r1");
+            expect(await findOpenBlockByView("reviews")).toBe("r1");
+            expect(await findOpenBlockByView("settings")).toBeNull();
+        } finally {
+            off();
+        }
     });
 
     it("finds the pane of one agent, not the first agent pane", async () => {

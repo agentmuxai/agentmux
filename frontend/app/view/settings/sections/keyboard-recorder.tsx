@@ -8,6 +8,7 @@
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 
 import { Button, Select, Switch, TextInput } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { captureKey } from "@/app/keybindings/capture";
 import { formatKey, type KeyPlatform } from "@/app/keybindings/keys";
 import type { CommandBindings } from "@/app/keybindings/registry";
@@ -21,10 +22,10 @@ function Findings(p: { proposal: Proposal; mine: string; platform: KeyPlatform }
     return (
         <ul class="kb-recorder-findings" role="list">
             <Show when={p.proposal.refusedPlain}>
-                <li class="kb-recorder-finding--error">A plain key would fire while you type. Allow plain keys below to use it; it then works only outside text fields and terminals.</li>
+                <li class="kb-recorder-finding--error">{t("keyRecorder.plainRefused")}</li>
             </Show>
             <Show when={p.proposal.blocked}>
-                <li class="kb-recorder-finding--error">{p.proposal.blocked!.reason}. It cannot be used.</li>
+                <li class="kb-recorder-finding--error">{t("keyRecorder.blocked", { reason: p.proposal.blocked!.reason })}</li>
             </Show>
             <Show when={p.proposal.warned}>
                 <li class="kb-recorder-finding--warn">{p.proposal.warned!.reason}.</li>
@@ -53,15 +54,15 @@ function Choices(p: {
         <div class="kb-recorder-choices">
             <Show when={p.c().keys.length > 0 && !p.c().unbound}>
                 <label class="kb-recorder-choice">
-                    <Switch checked={p.keepCurrent} onChange={p.setKeepCurrent} ariaLabel="Keep the current keys too" />
-                    <span>Keep the current keys too</span>
+                    <Switch checked={p.keepCurrent} onChange={p.setKeepCurrent} ariaLabel={t("keyRecorder.keepCurrent")} />
+                    <span>{t("keyRecorder.keepCurrent")}</span>
                 </label>
             </Show>
             <label class="kb-recorder-choice">
-                <span>Works</span>
+                <span>{t("keyRecorder.works")}</span>
                 <Select
                     class="setting-select"
-                    ariaLabel="Where this shortcut works"
+                    ariaLabel={t("keyRecorder.worksAria")}
                     value={p.where}
                     disabled={p.proposal?.plain && p.allowPlain}
                     onChange={p.setWhere}
@@ -70,14 +71,14 @@ function Choices(p: {
             </label>
             <Show when={p.proposal?.plain}>
                 <label class="kb-recorder-choice">
-                    <Switch checked={p.allowPlain} onChange={p.setAllowPlain} ariaLabel="Allow plain keys" />
-                    <span>Allow plain keys (only outside text fields and terminals)</span>
+                    <Switch checked={p.allowPlain} onChange={p.setAllowPlain} ariaLabel={t("keyRecorder.allowPlainAria")} />
+                    <span>{t("keyRecorder.allowPlain")}</span>
                 </label>
             </Show>
             <Show when={p.proposal?.warned && !p.proposal?.blocked}>
                 <label class="kb-recorder-choice">
-                    <Switch checked={p.confirmed} onChange={p.setConfirmed} ariaLabel="Use it anyway" />
-                    <span>Use it anyway</span>
+                    <Switch checked={p.confirmed} onChange={p.setConfirmed} ariaLabel={t("keyRecorder.useAnyway")} />
+                    <span>{t("keyRecorder.useAnyway")}</span>
                 </label>
             </Show>
         </div>
@@ -88,12 +89,12 @@ function Choices(p: {
 function Actions(p: { verdict: Verdict | null; onSave: () => void; onReplace: () => void; onClose: () => void }): JSX.Element {
     return (
         <div class="kb-recorder-actions">
-            <Show when={p.verdict === "replace"} fallback={<Button tone="accent" disabled={p.verdict !== "save"} onClick={p.onSave}>Save</Button>}>
+            <Show when={p.verdict === "replace"} fallback={<Button tone="accent" disabled={p.verdict !== "save"} onClick={p.onSave}>{t("keyRecorder.save")}</Button>}>
                 <Button tone="accent" onClick={p.onReplace}>
-                    Replace
+                    {t("keyRecorder.replace")}
                 </Button>
             </Show>
-            <Button onClick={p.onClose}>Cancel</Button>
+            <Button onClick={p.onClose}>{t("keyRecorder.cancel")}</Button>
         </div>
     );
 }
@@ -145,7 +146,7 @@ export function KeyRecorder(p: { c: () => CommandBindings; edit: KeyboardEdit; o
         <div
             class="kb-recorder"
             role="group"
-            aria-label={`Set the shortcut for ${c().label}`}
+            aria-label={t("keyRecorder.setFor", { label: c().label })}
             onKeyDown={(e) => {
                 // From a button or the picker (the field handles its own presses): Escape cancels.
                 if (e.key !== "Escape") return;
@@ -157,7 +158,7 @@ export function KeyRecorder(p: { c: () => CommandBindings; edit: KeyboardEdit; o
                 {recorderStatus(c().label, proposal(), verdict(), edit.platform)}
             </p>
             <Show when={altGr()}>
-                <p class="kb-recorder-finding--note">AltGr types a character on this keyboard, so it cannot be part of a shortcut. Try Ctrl or Alt on their own.</p>
+                <p class="kb-recorder-finding--note">{t("keyRecorder.altGr")}</p>
             </Show>
             <div class="kb-recorder-field">
                 <TextInput
@@ -165,13 +166,13 @@ export function KeyRecorder(p: { c: () => CommandBindings; edit: KeyboardEdit; o
                     readOnly
                     ref={(el) => (field = el)}
                     class="kb-capture"
-                    aria-label={`New shortcut for ${c().label}`}
-                    placeholder="Press the new shortcut"
+                    aria-label={t("keyRecorder.newFor", { label: c().label })}
+                    placeholder={t("keyRecorder.press")}
                     value={steps().length > 0 ? formatKey(steps().join(" "), edit.platform) : ""}
                 />
-                <Button onClick={() => record("Enter")}>Enter</Button>
+                <Button onClick={() => record("Enter")}>{t("keyRecorder.enter")}</Button>
                 <Button onClick={() => setSteps([])} disabled={steps().length === 0}>
-                    Clear
+                    {t("keyRecorder.clear")}
                 </Button>
             </div>
             <Show when={proposal()}>

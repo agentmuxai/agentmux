@@ -83,6 +83,17 @@ pub(super) const SHARED_STORE_TABLES_SQL: &str = "CREATE TABLE IF NOT EXISTS db_
             PRIMARY KEY (drone_id, version)
         );
 
+        -- Who may fire a drone (m0052): its owner, and the agents it was given to. No FK to
+        -- db_drone_definitions, for the reason db_drone_versions has none.
+        CREATE TABLE IF NOT EXISTS db_drone_access (
+            drone_id TEXT NOT NULL,
+            agent    TEXT NOT NULL,
+            kind     TEXT NOT NULL,
+            set_at   INTEGER NOT NULL,
+            set_by   TEXT NOT NULL,
+            PRIMARY KEY (drone_id, agent, kind)
+        );
+
         CREATE TABLE IF NOT EXISTS db_muxbus_credentials (
             id             TEXT PRIMARY KEY DEFAULT 'global',
             cognito_domain TEXT NOT NULL DEFAULT '',

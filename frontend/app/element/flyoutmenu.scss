@@ -17,7 +17,7 @@
     flex-direction: column;
     justify-content: flex-end;
     align-items: flex-start;
-    gap: 1px;
+    gap: var(--menu-row-gap);
 }
 
 .menu.sub-menu {
@@ -28,10 +28,10 @@
 .menu-item {
     display: flex;
     align-items: center;
-    padding: var(--space-1) var(--space-1-5);
+    padding: var(--menu-row-pad-y) var(--menu-row-pad-x);
     cursor: default;
     color: var(--main-text-color);
-    font-size: var(--text-sm);
+    font-size: var(--menu-row-font-size);
     font-style: normal;
     font-weight: 400;
     line-height: normal;
@@ -106,14 +106,14 @@
 .menu-divider {
     height: 1px;
     background-color: var(--menu-separator-color);
-    margin: var(--space-0-5) var(--space-1);
+    margin: var(--menu-divider-margin);
     pointer-events: none;
 }
 
 .menu-item-icon {
-    width: 14px;
+    width: var(--menu-icon-col);
     font-size: var(--text-xs);
-    margin-right: var(--space-1);
+    margin-right: var(--menu-icon-gap);
     opacity: 0.7;
     flex-shrink: 0;
 

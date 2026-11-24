@@ -30,6 +30,13 @@ export interface CliCatalogEntry {
     icon: string;
     /** Capability-first one-liner used as the card title. */
     blurb: string;
+    /**
+     * How the harness is paid for, in a few words, for the card's caption (SPEC_AGENT_HARNESS_CURATION §7): "Your Claude plan"
+     * where the lab's own sign-in is the expected bill, how it signs in where its plan is not confirmed, "Your … key" where the
+     * key is the bill. Absent for a harness that makes no billing claim. Kept apart from `blurb`, which other text compares with
+     * (an agent's stored description equal to its harness's blurb is the default description).
+     */
+    billing?: string;
     /** Primary context file the CLI reads at startup — shown as a badge. */
     primaryContextFile: string;
     /** Short MCP-support summary; "none" hides the badge. */
@@ -51,6 +58,7 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         displayName: "Claude Code",
         icon: "✖",
         blurb: "Anthropic's coding agent",
+        billing: "Your Claude plan",
         primaryContextFile: "CLAUDE.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
@@ -64,6 +72,7 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         displayName: "Codex CLI",
         icon: "✦",
         blurb: "OpenAI's coding agent",
+        billing: "Your ChatGPT plan",
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http+oauth",
         popoverMarkdown:
@@ -79,10 +88,11 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         // Since 2026-06-18 Gemini CLI no longer serves personal Google
         // accounts (free, AI Pro, Ultra); Antigravity replaced it for those.
         blurb: "Google's coding agent, with a Gemini API key",
+        billing: "Your Gemini key",
         primaryContextFile: "GEMINI.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
-            "Google's coding agent. Very large context window — it can look at a lot of code at once. Defaults to reading + planning before it writes anything, so it's a safer pick when you're still deciding what to change. Needs a paid Gemini API key or a company Gemini Code Assist licence: since June 2026 it no longer works with a personal Google account. For that, pick Antigravity.",
+            "Google's coding agent. Very large context window — it can look at a lot of code at once. Defaults to reading + planning before it writes anything, so it's a safer pick when you're still deciding what to change. Needs a Gemini API key (Google AI Studio gives a free one, with daily limits) or a company Gemini Code Assist licence: since June 2026 it no longer works with a personal Google account. For that, pick Antigravity.",
         hostSupported: true,
         // No container image built yet — host-only until agentmux/gemini ships.
         containerSupported: false,
@@ -105,6 +115,7 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         displayName: "Qwen Code",
         icon: "❖",
         blurb: "Alibaba's open-source coding agent",
+        billing: "Your own key",
         primaryContextFile: "QWEN.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
@@ -119,6 +130,7 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         displayName: "Kimi Code",
         icon: "◈",
         blurb: "Moonshot's 262k-context agent",
+        billing: "Your Moonshot key",
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
@@ -157,6 +169,7 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         displayName: "GitHub Copilot CLI",
         icon: "⛶",
         blurb: "Microsoft's coding agent",
+        billing: "Your Copilot plan",
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
@@ -223,10 +236,11 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         displayName: "Grok Build",
         icon: "X",
         blurb: "xAI's coding agent",
+        billing: "xAI sign-in",
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
-            "xAI's coding agent, running Grok 4.6 by default. AgentMux installs it for you; then sign in with `grok login` (a SuperGrok or X Premium+ account) or set XAI_API_KEY.",
+            "xAI's coding agent, running Grok 4.6 by default. AgentMux installs it for you; then sign in with `grok login` (a Grok or X account: free to try, with limits that aren't published) or set XAI_API_KEY.",
         hostSupported: true,
         // ACP runs on the host only (no container ACP path yet).
         containerSupported: false,
@@ -275,6 +289,7 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         displayName: "Muse Code",
         icon: "M",
         blurb: "Meta's coding agent",
+        billing: "Meta sign-in",
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
@@ -294,4 +309,10 @@ const CLI_CATALOG: CliCatalogEntry[] = [
 export function getCliCatalogEntry(provider: string): CliCatalogEntry | null {
     const lower = (provider || "").toLowerCase();
     return CLI_CATALOG.find((c) => c.provider === lower) ?? null;
+}
+
+/** The caption under a harness card: how it is billed first (it is what a narrow card must not cut), then what it is. */
+export function cardCaption(entry: CliCatalogEntry | null | undefined): string {
+    if (!entry) return "";
+    return entry.billing ? `${entry.billing} · ${entry.blurb}` : entry.blurb;
 }
