@@ -1,6 +1,8 @@
 # REPORT: dragging files (images, media) out of AgentMux to the desktop and other apps
 
-Research for Kanban #47953. Build follows in #47954 after approval. Nothing here is built; no lab was run.
+**Status:** active — step 1 (Windows, local files, from a Files row or tile) is built in PR #8203; macOS, Linux, the image viewer, document tabs and remote files are not built.
+
+Research for Kanban #47953. Build follows in #47954 after approval. Only the first step is built (the Status line says which); no lab was run.
 
 **The ask, restated as a requirement.** A person should be able to take an image or other media file from an Editor tab, an image view or a row in the Files pane and drop it on the desktop, a file manager, or another app such as a chat client or a browser page, on Windows, macOS and Linux, and have the other app receive the real file.
 
