@@ -68,8 +68,9 @@ export function openFileEntity(dest: Extract<Destination, { kind: "file" }>, opt
         const { checkFileNow } = await import("../file-check-store");
         const found = await checkFileNow(dest.blockId, dest.path);
         if (found.state !== "found") {
-            // A name that is also a web site is the site when no such file is there.
-            const site = siteOf(dest.path);
+            // A name that is also a web site is the site when srv says no such file is there; a check that could not be
+            // made, or a path outside the folders, says its reason instead.
+            const site = found.state === "missing" ? siteOf(dest.path) : null;
             if (site) {
                 const opened = await openUrlEntity(site, options);
                 if ("reason" in opened) throw new Error(opened.reason);

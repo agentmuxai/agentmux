@@ -63,6 +63,14 @@ describe("opening it", () => {
         expect(openPathLink).not.toHaveBeenCalled();
     });
 
+    it("says why, and does not open the site, when the check could not be made or the path is outside", async () => {
+        checkFileNow.mockResolvedValueOnce({ state: "limited", reason: "The file couldn't be checked right now.", resolved: "" });
+        expect(await openFileEntity(dest("parser.rs"), {})).toEqual({ ok: false, reason: "The file couldn't be checked right now." });
+        checkFileNow.mockResolvedValueOnce({ state: "outside", reason: "Outside this agent's folders.", resolved: "" });
+        expect(await openFileEntity(dest("parser.rs"), {})).toEqual({ ok: false, reason: "Outside this agent's folders." });
+        expect(openLink).not.toHaveBeenCalled();
+    });
+
     it("says why when a file name that is only a file is not there", async () => {
         checkFileNow.mockResolvedValue({ state: "missing", reason: "Not found.", resolved: "" });
         expect(await openFileEntity(dest("gone.md"), {})).toEqual({ ok: false, reason: "Not found." });
