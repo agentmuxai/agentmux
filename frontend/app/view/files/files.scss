@@ -512,6 +512,12 @@
 .files-name {
     overflow: hidden;
     text-overflow: ellipsis;
+
+    // A found row that shows a folder: the name stays whole while the folder after it takes the ellipsis.
+    &.files-name--found {
+        flex-shrink: 0;
+        max-width: 100%;
+    }
 }
 
 .files-entry-error {
@@ -598,6 +604,18 @@
 
 // The filter button, while the box is shown or a filter is applied: the kit's accent tone and pressed look,
 // and a dot when the box is hidden but the list is still filtered.
+// A found row's folder, after its name.
+.files-where {
+    margin-left: 8px;
+    min-width: 0;
+    // The folder gives way before the name does: it takes the ellipsis while the name is whole.
+    flex: 0 100 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--secondary-text-color);
+    font-size: var(--text-xs);
+}
+
 .files-filter-button {
     position: relative;
 

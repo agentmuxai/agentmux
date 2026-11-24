@@ -11,6 +11,7 @@ import { formatBytes } from "@/util/format-bytes";
 import type { AttachmentInfo } from "@/types/rpc/AttachmentInfo";
 import { extLabel, fileKind, isPicture, kindIcon, kindLabel } from "./file-kind";
 import type { LightboxProps, LightboxState } from "./attachment-lightbox-state";
+import { keyLabel } from "@/app/keybindings";
 
 /** A file with no preview: its type icon and what the agent is told about it. */
 function FileDetails(props: { name: string; kind: ReturnType<typeof fileKind>; info?: AttachmentInfo }) {
@@ -169,7 +170,7 @@ function Actions(props: { s: LightboxState; p: LightboxProps }): JSX.Element {
                     Remove
                 </Button>
             </Show>
-            <CloseButton label="Close preview" tooltip={false} title="Close (Esc)" onClick={() => p.onClose()} />
+            <CloseButton label="Close preview" tooltip={false} title={`Close (${keyLabel("Escape")})`} onClick={() => p.onClose()} />
         </span>
     );
 }

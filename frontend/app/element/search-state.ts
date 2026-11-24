@@ -10,6 +10,7 @@
 import { createSignalAtom, type SignalAtom } from "@/util/util";
 import { autoUpdate, computePosition, offset, type Middleware } from "@floating-ui/dom";
 import { createEffect, onCleanup } from "solid-js";
+import { keyLabel } from "@/app/keybindings";
 
 export type SearchProps = SearchAtoms & {
     anchorRef?: { current: HTMLElement | null };
@@ -152,7 +153,7 @@ export function createSearch(props: SearchProps) {
     const prevDecl: IconButtonDecl = {
         elemtype: "iconbutton",
         icon: "chevron-up",
-        title: "Previous Result (Shift+Enter)",
+        title: `Previous Result (${keyLabel("shift+Enter")})`,
         get disabled() { return numResultsAtom() === 0; },
         click: onPrevWrapper,
     };
@@ -160,7 +161,7 @@ export function createSearch(props: SearchProps) {
     const nextDecl: IconButtonDecl = {
         elemtype: "iconbutton",
         icon: "chevron-down",
-        title: "Next Result (Enter)",
+        title: `Next Result (${keyLabel("Enter")})`,
         get disabled() { return numResultsAtom() === 0; },
         click: onNextWrapper,
     };

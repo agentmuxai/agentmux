@@ -471,6 +471,8 @@ pub fn backend_name() -> &'static str {
 /// completing write can land after the caller has already acted on the
 /// assumption it failed).
 pub fn put(account_id: &str, secret: &str) -> Result<(), String> {
+    // From the moment srv holds the value, whether or not the write below succeeds.
+    crate::backend::transcript::withhold_sources::keychain(account_id, secret);
     if let Some(dir) = FILE_STORE.get() {
         return file::put(dir, &account_key(account_id), secret);
     }
@@ -490,9 +492,8 @@ pub fn put(account_id: &str, secret: &str) -> Result<(), String> {
 /// Read the secret for `account_id`. Returned wrapped in `Zeroizing` so it
 /// is wiped on drop. Resolved at agent spawn time when injecting env vars.
 pub fn get(account_id: &str) -> Result<Zeroizing<String>, String> {
-    if let Some(dir) = FILE_STORE.get() {
-        return file::get_optional(dir, &account_key(account_id))?
-            .ok_or_else(|| "secret store read failed: no entry for this account".to_string());
+    if FILE_STORE.get().is_some() {
+        return get_optional(account_id)?.ok_or_else(|| "secret store read failed: no entry for this account".to_string());
     }
     get_optional(account_id)?
         .ok_or_else(|| format!("keychain read failed: {}", keyring_core::Error::NoEntry))
@@ -508,6 +509,14 @@ pub fn get(account_id: &str) -> Result<Zeroizing<String>, String> {
 /// failure as "no credential" can silently present as a full logout. Use
 /// this variant when that distinction matters.
 pub fn get_optional(account_id: &str) -> Result<Option<Zeroizing<String>>, String> {
+    let read = read_optional(account_id)?;
+    if let Some(secret) = &read {
+        crate::backend::transcript::withhold_sources::keychain(account_id, secret);
+    }
+    Ok(read)
+}
+
+fn read_optional(account_id: &str) -> Result<Option<Zeroizing<String>>, String> {
     if let Some(dir) = FILE_STORE.get() {
         return file::get_optional(dir, &account_key(account_id));
     }

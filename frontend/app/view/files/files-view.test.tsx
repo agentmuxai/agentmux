@@ -1796,6 +1796,186 @@ describe("the Files pane: tree view", () => {
     });
 });
 
+describe("the Files pane: tree view, folders that change under it", () => {
+    const SRC = `${HOME}\\src`;
+    const LIB = `${SRC}\\lib`;
+    const changed = (dir: string) => h.state.byType.get("files:changed")?.forEach((fn) => fn({ data: { dir } }));
+    const twisty = (v: ReturnType<typeof mount>, label: string) => v.container.querySelector(`[aria-label="${label}"]`) as HTMLElement;
+
+    beforeEach(() => {
+        h.state.dirs.set(SRC, [f("main.rs"), d("lib")]);
+        h.state.dirs.set(LIB, [f("util.ts")]);
+    });
+
+    it("closes an open folder that was renamed or deleted, with no error, and stops watching it", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(v.names()).toContain("main.rs"));
+        // The folder is renamed on disk, and the pane is refreshed (as it is after the person's own rename).
+        h.state.dirs.set(HOME, [f("b.txt"), d("source"), f("a10.md"), f("a2.md")]);
+        h.state.dirs.delete(SRC);
+        h.state.errors.set(SRC, { kind: "not_found", message: "gone" });
+        v.model.refresh();
+        await waitFor(() => expect(v.names()).toEqual(["source", "a2.md", "a10.md", "b.txt"]));
+        await waitFor(() => expect(h.rpc.FsUnwatchCommand).toHaveBeenCalled());
+        expect(v.container.querySelector(".files-status")?.textContent ?? "").not.toContain("Couldn't open");
+        // A folder of the old name coming back is a closed folder, not one that silently reopens.
+        h.state.errors.delete(SRC);
+        h.state.dirs.set(HOME, [f("b.txt"), d("src"), f("a10.md"), f("a2.md")]);
+        h.state.dirs.set(SRC, [f("main.rs")]);
+        v.model.refresh();
+        await waitFor(() => expect(v.names()).toEqual(["src", "a2.md", "a10.md", "b.txt"]));
+        expect(twisty(v, "Open src")).not.toBeNull();
+    });
+
+    it("keeps the newest listing of an open folder when an older one ends last", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        const real = h.rpc.FsListCommand.getMockImplementation()!;
+        let release!: () => void;
+        const slow = new Promise<void>((resolve) => (release = resolve));
+        // The first listing of src is held back after it has read the folder as it was.
+        h.rpc.FsListCommand.mockImplementationOnce(async (c: unknown, req: { path: string; cursor?: string }) => {
+            const old = await real(c, req);
+            await slow;
+            return old;
+        });
+        fireEvent.click(twisty(v, "Open src"));
+        h.state.dirs.set(SRC, [f("main.rs"), d("lib"), f("new.txt")]);
+        changed(SRC);
+        await waitFor(() => expect(v.names()).toContain("new.txt"));
+        release();
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(v.names()).toContain("new.txt");
+    });
+
+    it("lets go of a second watch of a folder that was closed and opened again while the first was pending", async () => {
+        const v = mount({ "files:tree": true });
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        const resolvers: Array<(id: string) => void> = [];
+        const pending = () => new Promise<{ watch_id: string }>((resolve) => resolvers.push((id) => resolve({ watch_id: id })));
+        h.rpc.FsWatchCommand.mockImplementationOnce(pending).mockImplementationOnce(pending);
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(resolvers).toHaveLength(1));
+        fireEvent.click(twisty(v, "Close src"));
+        fireEvent.click(twisty(v, "Open src"));
+        await waitFor(() => expect(resolvers).toHaveLength(2));
+        resolvers[0]("w-first");
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        resolvers[1]("w-second");
+        await waitFor(() => expect(h.rpc.FsUnwatchCommand).toHaveBeenCalledWith(expect.anything(), { watch_id: "w-second" }));
+        expect(h.rpc.FsUnwatchCommand).not.toHaveBeenCalledWith(expect.anything(), { watch_id: "w-first" });
+    });
+});
+
+describe("the Files pane: find in subfolders", () => {
+    const SRC = `${HOME}\\src`;
+    const LIB = `${SRC}\\lib`;
+    const where = (v: ReturnType<typeof mount>) => [...v.container.querySelectorAll(".files-rows .files-where")].map((n) => n.textContent);
+    const status = (v: ReturnType<typeof mount>) => v.container.querySelector(".files-status")?.textContent ?? "";
+
+    beforeEach(() => {
+        h.state.dirs.set(SRC, [f("main.rs"), d("lib")]);
+        h.state.dirs.set(LIB, [f("util.ts")]);
+    });
+
+    it("shows what matches in the folders under the shown one, with the folder after each name", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        v.model.toggleDeep();
+        v.model.setFilter("util");
+        await waitFor(() => expect(v.names()).toEqual(["util.ts"]));
+        expect(where(v)).toEqual(["src/lib"]);
+        expect(v.model.pathOf("src/lib/util.ts")).toBe(`${LIB}\\util.ts`);
+        // Folders and files both match, best first.
+        v.model.setFilter("lib");
+        await waitFor(() => expect(v.names()).toContain("lib"));
+        // Clearing what was typed brings the folder back.
+        v.model.setFilter("");
+        await waitFor(() => expect(v.names()).toEqual(["src", "a2.md", "a10.md", "b.txt"]));
+    });
+
+    it("is the plain filter of the shown folder while it is off", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        v.model.setFilter("util");
+        await waitFor(() => expect(v.names()).toEqual([]));
+        v.model.setFilter("b.");
+        await waitFor(() => expect(v.names()).toEqual(["b.txt"]));
+        expect(where(v)).toEqual([]);
+    });
+
+    it("works on a found row by its real path", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        v.model.toggleDeep();
+        v.model.setFilter("util");
+        await waitFor(() => expect(v.names()).toEqual(["util.ts"]));
+        await v.model.rename("src/lib/util.ts", "tools.ts");
+        expect(h.rpc.FsRenameCommand).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ path: `${LIB}\\util.ts`, new_name: "tools.ts" }));
+    });
+
+    it("is turned on from the filter box, and turns off when another folder is shown", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.keyDown(v.list(), { key: "/" });
+        const button = await waitFor(() => {
+            const b = v.container.querySelector('[aria-label="Search subfolders too"]') as HTMLElement | null;
+            expect(b).not.toBeNull();
+            return b!;
+        });
+        // A real press goes pointerdown first: it must not count as a press outside the box and hide it.
+        fireEvent.pointerDown(button);
+        expect(v.container.querySelector(".files-filter-input")).not.toBeNull();
+        fireEvent.click(button);
+        await waitFor(() => expect(v.container.querySelector(".files-filter-input")?.getAttribute("placeholder")).toBe("Find in this folder and its subfolders"));
+        await v.model.navigate(SRC);
+        await waitFor(() => expect(v.names()).toEqual(["lib", "main.rs"]));
+        expect(v.model.deepMode()).toBe(false);
+    });
+
+    it("says it isn't available on a host", async () => {
+        const v = mount({ connection: "user@box" });
+        await waitFor(() => expect(v.container.querySelector(".files-status")).not.toBeNull());
+        v.model.toggleDeep();
+        expect(status(v)).toContain("isn't available");
+        expect(v.model.deepMode()).toBe(false);
+    });
+
+    it("indexes hidden folders once hidden files are turned on, though the setting is saved a moment later", async () => {
+        h.state.dirs.set(HOME, [d(".cache", { hidden: true }), d("src")]);
+        h.state.dirs.set(`${HOME}\\.cache`, [f("secret.ts")]);
+        const v = mount();
+        await waitFor(() => expect(v.names()).toEqual(["src"]));
+        v.model.toggleDeep();
+        v.model.setFilter("secret");
+        await new Promise((r) => setTimeout(r, 300));
+        expect(v.names()).toEqual([]);
+        // Saving the setting takes a round trip: the find must not read the old one in the meantime.
+        const save = v.ctx.setMeta;
+        (v.ctx as { setMeta: typeof save }).setMeta = async (patch) => {
+            await new Promise((r) => setTimeout(r, 40));
+            await save(patch);
+        };
+        v.model.toggleHidden();
+        await waitFor(() => expect(v.names()).toEqual(["secret.ts"]));
+    });
+
+    it("leaves out a hidden folder's files unless hidden files are shown", async () => {
+        h.state.dirs.set(HOME, [d(".cache", { hidden: true }), d("src")]);
+        h.state.dirs.set(`${HOME}\\.cache`, [f("secret.ts")]);
+        const v = mount();
+        await waitFor(() => expect(v.names()).toEqual(["src"]));
+        v.model.toggleDeep();
+        v.model.setFilter("secret");
+        await waitFor(() => expect(h.rpc.FsListCommand.mock.calls.some((c) => (c[1] as { path: string }).path === SRC)).toBe(true));
+        await new Promise((r) => setTimeout(r, 300));
+        expect(v.names()).toEqual([]);
+        expect(h.rpc.FsListCommand.mock.calls.some((c) => (c[1] as { path: string }).path === `${HOME}\\.cache`)).toBe(false);
+    });
+});
+
 describe("the Files pane: columns view", () => {
     const SRC = `${HOME}\\src`;
     const LIB = `${SRC}\\lib`;

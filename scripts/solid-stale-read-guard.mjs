@@ -14,9 +14,10 @@
 // so nothing in the log said which read it was.
 //
 // This changes the two accessors so a read after the condition went false answers with the last value the accessor
-// held, instead of throwing, and writes one `[solid]` warning with an `Error` made where the read happened (its
-// stack starts at the accessor and goes down through the reader; the release build ships source maps, so it
-// decodes to the component's own file and line). A read while the condition holds is unchanged.
+// held, instead of throwing, and writes one `[solid]` warning carrying the stack of an `Error` made where the read
+// happened (it starts at the accessor and goes down through the reader; the release build ships source maps, so it
+// decodes to the component's own file and line). The stack is in the message text: the log keeps only the text of
+// a console call, so an `Error` passed as a second argument arrived as its bare message, with no stack. A read while the condition holds is unchanged.
 /**
  * @param {string} id  a module id
  * @returns {boolean}
@@ -42,7 +43,8 @@ const STALE_READ_HELPER = [
     "function staleRead(name, last) {",
     "  staleReads++;",
     "  if (staleReads <= 20 || staleReads % 100 === 0) {",
-    "    console.warn(`[solid] a stale read from <${name}> got its last value, not an error (${staleReads} so far); the read:`, new Error(narrowedError(name)));",
+    "    const read = new Error(narrowedError(name));",
+    "    console.warn(`[solid] a stale read from <${name}> got its last value, not an error (${staleReads} so far); the read:\\n${(read.stack || String(read)).split('\\n').slice(0, 12).join('\\n')}`);",
     "  }",
     "  return last;",
     "}",

@@ -50,6 +50,8 @@ export function AgentViewPopover(props: AgentViewPopoverProps): JSX.Element {
             class="menu agent-view-popover"
             role="dialog"
             aria-label="Agent view"
+            // Its tips sit beside the panel, level with the control, so none covers another row (title-tooltip.ts).
+            ref={(el) => el.setAttribute("data-hover-tip-beside", "")}
             onDismiss={() => controls.setPopoverOpen(false)}
         >
             <div class="agent-view-popover-title">View</div>

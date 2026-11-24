@@ -8,6 +8,7 @@
 import { createEffect, createSignal, For, on, Show, type JSX } from "solid-js";
 
 import { Button, CloseButton, Field, TextInput } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import type { JobReporterInfo } from "@/types/rpc/JobReporterInfo";
 import type { JobReportersResult } from "@/types/rpc/JobReportersResult";
 
@@ -23,7 +24,7 @@ function ReporterRow(props: { reporter: JobReporterInfo; confirming: boolean; bu
             <td>{rep().name}</td>
             <td class="warden-jobs-fingerprint">{rep().fingerprint}</td>
             <td>
-                <Show when={rep().templates.length > 0} fallback={<span class="warden-manager-dim">none approved</span>}>
+                <Show when={rep().templates.length > 0} fallback={<span class="warden-manager-dim">{t("jobs.reporters.noneApproved")}</span>}>
                     {rep().templates.join(", ")}
                 </Show>
             </td>
@@ -32,7 +33,7 @@ function ReporterRow(props: { reporter: JobReporterInfo; confirming: boolean; bu
                     when={props.confirming}
                     fallback={
                         <Button density="compact" tone="danger" icon="trash" disabled={props.busy != null} onClick={() => props.onAsk()}>
-                            Forget
+                            {t("jobs.reporters.forget")}
                         </Button>
                     }
                 >
@@ -41,13 +42,13 @@ function ReporterRow(props: { reporter: JobReporterInfo; confirming: boolean; bu
                         tone="danger"
                         icon="trash"
                         busy={props.busy === `forget:${rep().name}`}
-                        title={rep().templates.length > 0 ? "Its approved jobs stop receiving events" : undefined}
+                        title={rep().templates.length > 0 ? t("jobs.reporters.forgetTip") : undefined}
                         onClick={() => props.onForget()}
                     >
-                        Forget it
+                        {t("jobs.reporters.forgetIt")}
                     </Button>
                     <Button density="compact" tone="quiet" onClick={() => props.onKeep()}>
-                        Keep
+                        {t("jobs.reporters.keep")}
                     </Button>
                 </Show>
             </td>
@@ -67,10 +68,10 @@ function PinForm(props: { busy: boolean; disabled: boolean; onPin: (name: string
     };
     return (
         <div class="warden-jobs-reporter-add">
-            <Field label="Name" layout="stacked" description="Lowercase letters, digits and dashes.">
+            <Field label={t("jobs.reporters.name")} layout="stacked" description={t("jobs.reporters.nameHelp")}>
                 <TextInput value={name()} onInput={(e) => setName(e.currentTarget.value)} spellcheck={false} />
             </Field>
-            <Field label="Public key" layout="stacked" description="An Ed25519 public key, base64.">
+            <Field label={t("jobs.reporters.key")} layout="stacked" description={t("jobs.reporters.keyHelp")}>
                 <TextInput value={key()} onInput={(e) => setKey(e.currentTarget.value)} spellcheck={false} />
             </Field>
             <Button
@@ -81,7 +82,7 @@ function PinForm(props: { busy: boolean; disabled: boolean; onPin: (name: string
                 disabled={props.disabled || !name().trim() || !key().trim()}
                 onClick={() => void pin()}
             >
-                Pin reporter
+                {t("jobs.reporters.pin")}
             </Button>
         </div>
     );
@@ -131,28 +132,28 @@ export function CloudReporters(props: {
     };
 
     return (
-        <section class="warden-jobs-history warden-jobs-reporters" aria-label="Cloud reporters">
+        <section class="warden-jobs-history warden-jobs-reporters" aria-label={t("jobs.reporters.title")}>
             <header class="warden-jobs-history-head">
                 <div class="warden-jobs-history-title">
-                    <strong>Cloud reporters</strong>
-                    <span class="warden-manager-dim">A pinned key lets no event in by itself: an approved cloud job has to name the same key.</span>
+                    <strong>{t("jobs.reporters.title")}</strong>
+                    <span class="warden-manager-dim">{t("jobs.reporters.about")}</span>
                 </div>
                 <div class="warden-jobs-actions">
-                    <CloseButton size="sm" text="Close" onClick={() => props.onClose()} />
+                    <CloseButton size="sm" text={t("jobs.reporters.close")} onClick={() => props.onClose()} />
                 </div>
             </header>
             <Show when={note()}>
                 <div class="warden-manager-error">{note()}</div>
             </Show>
-            <Show when={result()} fallback={<div class="warden-section-stub">Loading…</div>}>
+            <Show when={result()} fallback={<div class="warden-section-stub">{t("jobs.reporters.loading")}</div>}>
                 {(r) => (
-                    <Show when={r().reporters.length > 0} fallback={<div class="warden-section-stub">No reporter is pinned.</div>}>
+                    <Show when={r().reporters.length > 0} fallback={<div class="warden-section-stub">{t("jobs.reporters.none")}</div>}>
                         <table class="warden-manager-table">
                             <thead>
                                 <tr>
-                                    <th>Reporter</th>
-                                    <th>Key</th>
-                                    <th>Jobs</th>
+                                    <th>{t("jobs.reporters.colReporter")}</th>
+                                    <th>{t("jobs.reporters.colKey")}</th>
+                                    <th>{t("jobs.reporters.colJobs")}</th>
                                     <th />
                                 </tr>
                             </thead>

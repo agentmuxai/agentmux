@@ -402,6 +402,7 @@ function FilesDetailRows({ v }: { v: FilesViewParts }): JSX.Element {
                                 onRenameDone={() => fv.refs.list?.focus()}
                                 tree={model.treeInfo().get(name)}
                                 onToggle={() => model.toggleExpanded(name)}
+                                where={model.findWhere(name)}
                             />
                         </Show>
                     );

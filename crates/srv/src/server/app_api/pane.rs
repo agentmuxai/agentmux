@@ -240,7 +240,7 @@ pub(super) async fn open_pane_floating(
 /// Tell the source window to open the floater. For an agent's open the event carries what it asked for, and
 /// the open waits for the window to say where the pane went (`placed`), or says `queued` when it does not
 /// answer in time.
-async fn announce_floater(
+pub(crate) async fn announce_floater(
     state: &AppState,
     source_ws_id: &str,
     new_ws_id: &str,

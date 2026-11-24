@@ -167,7 +167,7 @@ describe("History pane", () => {
     it("opens an agent's history in the History pane", async () => {
         render(() => <HistoryManager paneBlockId="warden-1" visible={true} />);
         await waitFor(() => expect(screen.getByText("Parent")).toBeInTheDocument());
-        fireEvent.click(screen.getAllByRole("button", { name: "Open history" })[0]);
+        fireEvent.click(screen.getAllByRole("button", { name: "Open conversation" })[0]);
         expect(openOrFocusHistoryTab).toHaveBeenCalledWith({
             currentBlockId: "warden-1",
             agentId: "parent-1",
