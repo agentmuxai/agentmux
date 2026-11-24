@@ -11,8 +11,9 @@ import { CHECK_ROWS, NOTICE_ROWS, STORE_ROWS, UPDATE_ROWS } from "./maintenance-
 
 export const MaintenanceSection = (): JSX.Element => {
     const m = createMaintenance();
+    // Its buttons start a download, an upgrade and a restart: they take input from the person only.
     return (
-        <>
+        <div data-operator-only style={{ display: "contents" }}>
             <div class="instance-panel-section-title">
                 Maintenance
                 <Show when={m.badge() != null}>
@@ -25,7 +26,7 @@ export const MaintenanceSection = (): JSX.Element => {
             <MessageRows m={m} defs={NOTICE_ROWS} />
             <MessageRows m={m} defs={STORE_ROWS} />
             <MessageRows m={m} defs={CHECK_ROWS} />
-        </>
+        </div>
     );
 };
 

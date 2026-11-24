@@ -5,6 +5,8 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { agentReach } from "./person-only-reach.testutil";
+import { operatorPromptOpen } from "@/app/store/keymodel-dispatch";
 
 const updateStatus = vi.fn();
 const updateCheck = vi.fn();
@@ -1067,5 +1069,39 @@ describe("Maintenance on a Microsoft Store install", () => {
         expect(await screen.findByRole("button", { name: "Open the download page" })).toBeTruthy();
         expect(updateCheck).toHaveBeenCalledTimes(1);
         expect(storeCheck).not.toHaveBeenCalled();
+    });
+});
+
+describe("the update controls take input from the person only", () => {
+    it("the Restart to update panel's buttons are out of the UI tool's reach, and keys and commands are held back while it is open", async () => {
+        updateStatus.mockResolvedValue(download("ready", { folder: "C:/apps/x" }));
+        render(() => <UpdateStatus />);
+        expect(operatorPromptOpen()).toBe(false);
+        fireEvent.click(await screen.findByText("Restart to update"));
+        await screen.findByText("AgentMux 0.59.27 is ready");
+        const reach = agentReach();
+        const buttons = [...document.querySelectorAll(".update-popover button")];
+        expect(buttons.length).toBeGreaterThan(1);
+        for (const b of buttons) expect(reach.allowed(b)).toBe(false);
+        expect(reach.click(".update-popover button")).toMatchObject({ operatorOnly: true });
+        expect(operatorPromptOpen()).toBe(true);
+        expect(upgradeRestart).not.toHaveBeenCalled();
+    });
+
+    it("the Maintenance section's buttons are out of the UI tool's reach", async () => {
+        updateStatus.mockResolvedValue(PORTABLE);
+        render(() => <MaintenanceSection />);
+        const download = await screen.findByRole("button", { name: "Download" });
+        const reach = agentReach();
+        for (const b of document.querySelectorAll("button")) expect(reach.allowed(b)).toBe(false);
+        expect(reach.click("button")).toMatchObject({ operatorOnly: true });
+        expect(operatorPromptOpen()).toBe(true);
+        expect(download.closest("[data-operator-only]")).not.toBeNull();
+        expect(installAppUpdate).not.toHaveBeenCalled();
+    });
+
+    it("a control that is not the person's stays within reach", () => {
+        render(() => <button class="plain">ok</button>);
+        expect(agentReach().allowed(document.querySelector(".plain")!)).toBe(true);
     });
 });

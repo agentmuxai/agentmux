@@ -149,3 +149,74 @@ describe("prompts that speak for the person", () => {
         expect(unmarked).toEqual([]);
     });
 });
+
+/**
+ * The host-relayed answers (`getApi().approvals.*`) are the person's too: a source file that calls one must be a
+ * prompt that carries the marker, or a control that is listed with why. The same goes for a control that acts for the
+ * person without a command (the hosted workspace's stop panel).
+ */
+const RELAYED_PROMPTS: Record<string, string[]> = {
+    "app/block/desktop-requests.tsx": ["app/block/desktop-requests.tsx"],
+    "app/block/upgrade-requests.tsx": ["app/block/upgrade-requests.tsx"],
+    "app/block/widget-install-requests.tsx": ["app/block/widget-install-requests.tsx"],
+    "app/store/app-update.ts": ["app/statusbar/RestartToUpdatePopover.tsx", "app/statusbar/MaintenanceSection.tsx"],
+    "app/statusbar/maintenance-store.ts": ["app/statusbar/MaintenanceSection.tsx"],
+};
+
+const RELAYED_CONTROLS: Record<string, string> = {
+    "app/store/rpc-util.ts": "proves the window's own connection; no prompt",
+    "app/view/accounts/google-services.ts": OWN_VIEW,
+    "app/view/agent/components/DesktopDrivingBar.tsx": "ends the agent's own desktop grants",
+    "app/view/browser/browser-model.ts": OWN_VIEW,
+    "app/view/credential-approval/CredentialApprovalWindow.tsx": OWN_VIEW,
+    "app/view/settings/sections/widgets-section-parts.tsx": SETTING,
+    "app/view/settings/sections/widgets-section.tsx": SETTING,
+    "app/view/ssh-approval/SshApprovalWindow.tsx": OWN_VIEW,
+    "app/view/vault/vault-store.ts": OWN_VIEW,
+};
+
+/** Controls that act for the person with no command or relay of their own, and so are named here. */
+const MARKED_CONTROLS = ["app/statusbar/WorkspaceStopStatus.tsx"];
+
+const RELAY_CALL = /\bapprovals\??\.[A-Za-z]+/;
+
+describe("host-relayed answers that speak for the person", () => {
+    it("has every caller on one of the two lists, so none is added unmarked", () => {
+        const unclassified: string[] = [];
+        for (const file of sources(FRONTEND)) {
+            const rel = relative(FRONTEND, file).split("\\").join("/");
+            if (rel.startsWith("app/host/")) continue;
+            if (!RELAY_CALL.test(readFileSync(file, "utf8"))) continue;
+            if (!(rel in RELAYED_PROMPTS) && !(rel in RELAYED_CONTROLS)) {
+                unclassified.push(
+                    `${rel} calls a host-relayed answer (approvals.*). If it draws a prompt or panel whose answer is the person's own, mark its root with data-operator-only ` +
+                        `(a Modal's or AnchoredPopover's operatorOnly prop, a pane request's operatorOnly: true) and add the file to RELAYED_PROMPTS in ${relative(FRONTEND, fileURLToPath(import.meta.url))}; ` +
+                        `otherwise add it to RELAYED_CONTROLS there with the reason.`
+                );
+            }
+        }
+        expect(unclassified).toEqual([]);
+    });
+
+    it("lists no file that is gone or no longer calls one", () => {
+        const stale = [...Object.keys(RELAYED_PROMPTS), ...Object.keys(RELAYED_CONTROLS)].filter((rel) => {
+            try {
+                return !RELAY_CALL.test(readFileSync(join(FRONTEND, rel), "utf8"));
+            } catch {
+                return true;
+            }
+        });
+        expect(stale, "remove these from RELAYED_PROMPTS or RELAYED_CONTROLS").toEqual([]);
+    });
+
+    it("carries the marker in every file that draws such a prompt or panel", () => {
+        const unmarked: string[] = [];
+        const drawn = [...Object.values(RELAYED_PROMPTS).flat(), ...MARKED_CONTROLS];
+        for (const file of new Set(drawn)) {
+            if (!/data-operator-only|operatorOnly/.test(readFileSync(join(FRONTEND, file), "utf8"))) {
+                unmarked.push(`${file} draws controls that act for the person and has no data-operator-only`);
+            }
+        }
+        expect(unmarked).toEqual([]);
+    });
+});

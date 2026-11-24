@@ -7,6 +7,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { agentReach } from "./person-only-reach.testutil";
 
 type Stop = { stopAtMs: number; reasonId: string; reason: string } | null;
 const h = vi.hoisted(() => ({
@@ -99,6 +100,15 @@ describe("the choices it offers", () => {
         fireEvent.keyDown(document, { key: "Escape" });
         await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
         expect(document.activeElement).toBe(container.querySelector(".status-bar-item"));
+    });
+
+    it("its buttons are out of the UI tool's reach", () => {
+        openPanel();
+        const reach = agentReach();
+        for (const name of ["Keep running", "Stop now"]) expect(reach.allowed(screen.getByRole("button", { name }))).toBe(false);
+        expect(reach.click("button")).toMatchObject({ operatorOnly: true });
+        expect(h.keep).not.toHaveBeenCalled();
+        expect(h.stop).not.toHaveBeenCalled();
     });
 
     it("keeps the workspace running on Keep running, and closes the panel", async () => {
