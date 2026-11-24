@@ -313,6 +313,31 @@ describe("the Large text viewer", () => {
         expect(document.querySelector(".large-text-hit")?.textContent).toBe("line 5");
     });
 
+    it("asks again at once when Match case or Regular expression is toggled with a text typed, and not with none", async () => {
+        await mount();
+        key("f", { ctrlKey: true });
+        await settle();
+        fireEvent.click(screen.getByRole("button", { name: "Match case" }));
+        await settle();
+        expect(searchText).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole("button", { name: "Match case" }));
+        fireEvent.input(findBox(), { target: { value: "LINE 5" } });
+        fireEvent.keyDown(findBox(), { key: "Enter" });
+        await settle();
+        expect(document.querySelector(".large-text-find-status")?.textContent).toBe("No match");
+        searchText.mockClear();
+        fireEvent.click(screen.getByRole("button", { name: "Match case" }));
+        await settle();
+        expect(searchText).toHaveBeenCalledTimes(1);
+        expect(searchText).toHaveBeenLastCalledWith({}, { path: "C:/logs/big.log", query: "LINE 5", regex: false, ignore_case: true, from: 0, backward: false });
+        expect(markedLine()).toBe("5");
+        searchText.mockClear();
+        fireEvent.click(screen.getByRole("button", { name: "Regular expression" }));
+        await settle();
+        expect(searchText).toHaveBeenCalledTimes(1);
+        expect(searchText).toHaveBeenLastCalledWith({}, { path: "C:/logs/big.log", query: "LINE 5", regex: true, ignore_case: true, from: 0, backward: false });
+    });
+
     it("finds a regular expression on srv and marks what it matched", async () => {
         await mount();
         key("f", { ctrlKey: true });

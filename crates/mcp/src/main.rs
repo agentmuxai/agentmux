@@ -29,7 +29,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use agentmux_common::api_types::{
-    InjectRequest, PaneOpenRequest, PaneOpenResponse, PlaceArgs, PtyShellCreateRequest, PtyShellCreateResponse,
+    InjectRequest, PaneOpenRequest, PaneOpenResponse, PanePlaceRequest, PlaceArgs, PtyShellCreateRequest, PtyShellCreateResponse,
     PtyShellInputRequest, PtyShellInputResponse, PtyShellReadRequest, PtyShellReadResponse,
     PtyShellResizeRequest, PtyShellResizeResponse,
     PtyShellStatusRequest, PtyShellStatusResponse, PtyShellStopRequest, PtyShellStopResponse,

@@ -14,23 +14,26 @@
     @include menu-frame.menu-surface;
     min-width: 180px;
     max-width: 260px;
-    padding: 4px 0;
+    padding: var(--menu-pad);
+    display: flex;
+    flex-direction: column;
+    gap: var(--menu-row-gap);
     user-select: none;
-    font-size: var(--text-base);
+    font-size: var(--menu-row-font-size);
     color: var(--main-text-color);
 }
 
 .ctx-menu-sep {
     height: 1px;
     background: var(--menu-separator-color);
-    margin: 4px 0;
+    margin: var(--menu-divider-margin);
 }
 
 .ctx-menu-item {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 5px 12px;
+    padding: var(--menu-row-pad-y) var(--menu-row-pad-x);
     cursor: default;
     gap: 16px;
 

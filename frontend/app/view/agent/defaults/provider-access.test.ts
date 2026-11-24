@@ -71,6 +71,18 @@ describe("the access data", () => {
             if (a.successor) expect(getCliCatalogEntry(a.successor.provider)).not.toBeNull();
         }
     });
+
+    // The card's own description must not contradict the Free tag on the same card: a person who reads "needs a paid
+    // key" next to a Free tag trusts neither.
+    it("does not describe a free route as paid-only or subscription-only on the same card", () => {
+        const gemini = getCliCatalogEntry("gemini")!.popoverMarkdown;
+        expect(gemini).not.toMatch(/paid Gemini API key/);
+        expect(gemini).toMatch(/free one/);
+        const grok = getCliCatalogEntry("grok")!.popoverMarkdown;
+        expect(grok).not.toMatch(/SuperGrok or X Premium\+/);
+        expect(grok).toMatch(/free to try/);
+        for (const provider of ["gemini", "grok"]) expect(getProviderAccess(provider)?.free).toBeDefined();
+    });
 });
 
 // The operator approved these sets on 2026-10-29 (SPEC_PROVIDER_CARD_TAGS_FREE_LOCAL §4 and §11). A

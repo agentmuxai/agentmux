@@ -24,7 +24,7 @@ async fn full_config_is_a_json_object() {
 async fn set_meta_then_get_meta_round_trips_a_key() {
     let state = test_state();
     let id = insert_block(&state);
-    set_meta(&state, serde_json::json!({ "oref": format!("block:{id}"), "meta": { "ws-test:key": "v1" } })).unwrap();
+    set_meta(&state, &RpcContext::default(), serde_json::json!({ "oref": format!("block:{id}"), "meta": { "ws-test:key": "v1" } })).unwrap();
     let meta = get_meta(&state, serde_json::json!({ "oref": format!("block:{id}") })).unwrap();
     assert_eq!(meta["ws-test:key"], "v1");
 }
@@ -54,7 +54,7 @@ async fn a_sub_block_is_linked_to_its_parent_and_unlinked_on_delete() {
 #[tokio::test]
 async fn controller_resync_of_an_unknown_block_is_an_error() {
     let state = test_state();
-    let err = controller_resync(&state, serde_json::json!({ "blockid": "no-such-block", "tabid": "t" })).unwrap_err();
+    let err = controller_resync(&state, &RpcContext::default(), serde_json::json!({ "blockid": "no-such-block", "tabid": "t" })).unwrap_err();
     assert_eq!(err, "controllerresync: block no-such-block not found");
 }
 

@@ -44,7 +44,7 @@
     <div class="browser-action-log-head">
       <span>
         "What"
-        <b>
+        <strong>
           "Posa"
         "did here, newest first"
       <button type="button" class="ui-button ui-tone-neutral ui-density-compact">
@@ -90,7 +90,7 @@
     <div class="browser-action-log-head">
       <span>
         "What"
-        <b>
+        <strong>
           "The agent"
         "did here, newest first"
       <button type="button" class="ui-button ui-tone-neutral ui-density-compact">

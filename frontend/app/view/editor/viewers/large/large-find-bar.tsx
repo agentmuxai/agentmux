@@ -58,8 +58,8 @@ export function LargeFindBar(props: { find: LargeFind }): JSX.Element {
                 >
                     {t("editor.find.regexShort")}
                 </Button>
-                <IconButton icon="chevron-up" density="compact" label="Previous match (Shift+Enter)" disabled={!f.canSearch()} onClick={f.previous} />
-                <IconButton icon="chevron-down" density="compact" label="Next match (Enter)" disabled={!f.canSearch()} onClick={f.next} />
+                <IconButton icon="chevron-up" density="compact" label={`Previous match (${keyLabel("shift+Enter")})`} disabled={!f.canSearch()} onClick={f.previous} />
+                <IconButton icon="chevron-down" density="compact" label={`Next match (${keyLabel("Enter")})`} disabled={!f.canSearch()} onClick={f.next} />
                 {/* Nothing to say yet: the close button travels with the arrows, so a narrow strip never leaves it alone. */}
                 <Show when={idle()}>{closeButton()}</Show>
             </div>
