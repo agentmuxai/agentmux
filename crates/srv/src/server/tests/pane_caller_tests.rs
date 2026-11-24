@@ -1,4 +1,4 @@
-// The window commands `setmeta`, `controllerresync`, `agentstop` and the `agentinput` pre-start, through the real
+// The window commands `setmeta`, `controllerresync`, `agentstop`, `createsubblock`, `deletesubblock` and the `agentinput` pre-start, through the real
 // registered handlers, from the four callers: the agent that runs the pane, another agent, a connection nothing proved,
 // and the window.
 
@@ -140,4 +140,72 @@ async fn the_agentinput_pre_start_is_checked_before_it_runs_and_a_typed_message_
     // Not a pre-start: a message typed into the composer is the person's, so an agent connection is refused whichever pane it names.
     let typed = call(&state, agent(&owner), "agentinput", serde_json::json!({ "blockid": mine, "message": "hello" })).await;
     assert!(typed.error.starts_with("FORBIDDEN: only the AgentMux window"), "{}", typed.error);
+}
+
+
+#[tokio::test]
+async fn createsubblock_is_for_a_sub_block_under_the_pane_of_the_agent_that_asks() {
+    let Fleet { state, owner, panes: [mine, theirs, persons], .. } = fleet();
+    let create = |parent: &str| serde_json::json!({ "parentblockid": parent, "blockdef": { "meta": { "view": "term" } } });
+    for ctx in [agent(&owner), RpcContext::operator_for_tests(), RpcContext::default()] {
+        assert_reached(&call(&state, ctx, "createsubblock", create(&mine)).await);
+    }
+    assert_refused(&call(&state, agent(&owner), "createsubblock", create(&theirs)).await, "another agent's pane");
+    assert_refused(&call(&state, agent(&owner), "createsubblock", create(&persons)).await, "no agent runs");
+    let under = |block: &str| state.mstore.must_get::<Block>(block).unwrap().subblockids.unwrap_or_default().len();
+    assert_eq!(under(&mine), 3, "the three allowed calls each made one");
+    assert_eq!(under(&theirs), 0, "a refused call made nothing");
+    for ctx in [RpcContext::operator_for_tests(), RpcContext::default()] {
+        assert_reached(&call(&state, ctx, "createsubblock", create(&theirs)).await);
+    }
+}
+
+#[tokio::test]
+async fn deletesubblock_removes_only_a_sub_block_of_the_pane_of_the_agent_that_asks() {
+    let Fleet { state, owner, panes: [mine, theirs, persons], .. } = fleet();
+    let sub = |parent: &str| {
+        let mut block = Block { oid: uuid::Uuid::new_v4().to_string(), parentoref: format!("block:{parent}"), ..Default::default() };
+        state.mstore.insert(&mut block).unwrap();
+        block.oid
+    };
+    let delete = |block: &str| serde_json::json!({ "blockid": block });
+    let exists = |block: &str| state.mstore.get::<Block>(block).ok().flatten().is_some();
+
+    let own = sub(&mine);
+    assert_reached(&call(&state, agent(&owner), "deletesubblock", delete(&own)).await);
+    assert!(!exists(&own), "an agent deletes a sub-block of its own pane");
+
+    let (theirs_sub, persons_sub) = (sub(&theirs), sub(&persons));
+    assert_refused(&call(&state, agent(&owner), "deletesubblock", delete(&theirs_sub)).await, "another agent's pane");
+    assert_refused(&call(&state, agent(&owner), "deletesubblock", delete(&persons_sub)).await, "no agent runs");
+    assert!(exists(&theirs_sub) && exists(&persons_sub), "a refused call deletes nothing");
+
+    // The pane itself is not a sub-block: an agent does not delete its own pane through this call, and is told what to use.
+    let refused = call(&state, agent(&owner), "deletesubblock", delete(&mine)).await;
+    assert!(refused.error.starts_with("FORBIDDEN") && refused.error.contains("Terminal close") && refused.error.contains("Pane close"), "{}", refused.error);
+    assert!(exists(&mine));
+
+    for ctx in [RpcContext::operator_for_tests(), RpcContext::default()] {
+        let other = sub(&theirs);
+        assert_reached(&call(&state, ctx, "deletesubblock", delete(&other)).await);
+        assert!(!exists(&other), "the window and an unproven connection delete as before");
+    }
+}
+
+#[tokio::test]
+async fn setmeta_on_a_tab_window_or_workspace_is_the_persons_and_an_agent_is_told_what_to_use() {
+    let Fleet { state, owner, .. } = fleet();
+    for kind in ["tab", "window", "workspace", "client"] {
+        let oref = format!("{kind}:{}", uuid::Uuid::new_v4());
+        let write = serde_json::json!({ "oref": oref, "meta": { "name": "renamed" } });
+        let refused = call(&state, agent(&owner), "setmeta", write.clone()).await;
+        assert!(
+            refused.error.starts_with("FORBIDDEN") && refused.error.contains(kind) && refused.error.contains("Pane and UI tools") && refused.error.contains("ask the person"),
+            "{oref}: {}",
+            refused.error
+        );
+        for ctx in [RpcContext::operator_for_tests(), RpcContext::default()] {
+            assert_reached(&call(&state, ctx, "setmeta", write.clone()).await);
+        }
+    }
 }

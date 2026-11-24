@@ -147,6 +147,15 @@ On 2026-11-24 each queue entry took 13.5 to 18.5 minutes (the last twelve `merge
 - **Fail open (R2):** no sha, a failed fetch or diff, an empty list, an entry that is not a path, a classifier error: `rust=true`. The outputs are written once, after the decision. A workflow, a script, a manifest, a lock file, a Rust file or a path the classifier does not know runs the job. A release PR (R7) is not skipped in the queue: it changes manifests.
 - **`CI required`** reads a skipped `rust` job as passed, as for a pull request, and fails when it ran and failed or when `changes` failed.
 
+### Phase 10: the queue builds the core crate's test harness once (2026-11-24)
+
+A queue entry that does change Rust took 14.4 minutes in the Ubuntu job (job 138636759675), of which 13.2 were cargo compiling in three staged calls of `scripts/ci-nextest-run.sh` and the 1,212 tests took 6.9 seconds. The verbose log of a queue-shaped run on a PR shows the core crate's test harness compiled in the first call (`--lib`) and again in the third (the run's call), 3.5 minutes each. The two compiles are the same unit, built against two builds of one third-party dependency: the `--lib` call resolves it one way, and the server layer's call and the run's call resolve it the other way. Why a `--lib` call alone differs was not pinned down.
+
+- **What changes:** the queue lane drops the first call. It builds the server layer's harness alone (`--bin agentmux-srv`), checks the other crates, and the run's call builds the core's harness once, with only small crates beside it (mcp, common's one integration test).
+- **Tried and not used:** one call for everything with one job. It builds each unit once but took 14.3 minutes of compiling, because with one job each rustc also gets one LLVM thread (the core's harness took 5.5 minutes, not 3.5).
+- **Memory:** the staged calls existed so the core's harness (about 10 GB) and the server layer's (8 to 9 GB) are not compiled at the same time on a 16 GB runner. The order keeps that: the server layer's harness is built alone, and the core's is built later beside only small crates, as it already was in the third call. The resource trace, the memory ceiling, the time limits and the retry of a stalled attempt are unchanged.
+- **Unchanged:** the pull-request lane keeps its staged builds; the bindings checks and the tests the queue runs are the same.
+
 ## 6. Order and size
 
 1. Phase 0: #5118.

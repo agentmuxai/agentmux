@@ -4,7 +4,7 @@ onSearch ""
 state: open=false search="" index=0 count=0
 requestAnimationFrame
 -- open, no toggles
-<div class="search-container" data-pane-overlay="" style="position: absolute; left: 0px; top: 0px;">
+<div class="search-container" style="position: absolute; left: 0px; top: 0px;">
   <input data-stand="Input" placeholder="Search" data-autofocus="true" data-autoselect="true">
   <div aria-live="polite" aria-label="Search Results" class="search-results hidden">
     "1"
@@ -16,7 +16,7 @@ requestAnimationFrame
     <button data-stand="DeclIconButton" data-elemtype="closebutton" title="Close (Esc)">
 state: open=true search="" index=0 count=0
 -- open, 3 of 5
-<div class="search-container" data-pane-overlay="" style="position: absolute; left: 0px; top: 0px;">
+<div class="search-container" style="position: absolute; left: 0px; top: 0px;">
   <input data-stand="Input" placeholder="Search" data-autofocus="true" data-autoselect="true">
   <div aria-live="polite" aria-label="Search Results" class="search-results">
     "3"
@@ -31,7 +31,7 @@ state: open=true search="" index=2 count=5
 onSearch ""
 requestAnimationFrame
 -- open, three toggles
-<div class="search-container" data-pane-overlay="" style="position: absolute; left: 0px; top: 0px;">
+<div class="search-container" style="position: absolute; left: 0px; top: 0px;">
   <input data-stand="Input" placeholder="Search" data-autofocus="true" data-autoselect="true">
   <div aria-live="polite" aria-label="Search Results" class="search-results hidden">
     "1"
@@ -49,7 +49,7 @@ state: open=true search="" index=0 count=0
 -- only one toggle
 requestAnimationFrame
 -- open, case only
-<div class="search-container" data-pane-overlay="" style="position: absolute; left: 0px; top: 0px;">
+<div class="search-container" style="position: absolute; left: 0px; top: 0px;">
   <input data-stand="Input" placeholder="Search" data-autofocus="true" data-autoselect="true">
   <div aria-live="polite" aria-label="Search Results" class="search-results hidden">
     "1"

@@ -353,6 +353,24 @@ describe("the identity colour inside a backdrop", () => {
     });
 });
 
+describe("the header of a pane with a backdrop", () => {
+    const base = { view: "agent", "frame:hue": 270 };
+    const headerOf = (meta: Record<string, unknown>) => {
+        const t = setup({ meta, noHeader: false });
+        const el = t.view.container.querySelector<HTMLElement>('[data-role="block-header"]');
+        const out = el ? { bg: el.style.backgroundColor, color: el.style.color } : undefined;
+        cleanup();
+        return out;
+    };
+
+    it("takes the pane's surface and ink, not the identity tint", () => {
+        const plain = headerOf(base);
+        const inside = headerOf({ ...base, backdrop: { kind: "color", hex: "#fff6b0", polarity: "follow", version: 1 } });
+        expect(inside).toEqual({ bg: "var(--block-bg-solid-color)", color: "var(--main-text-color)" });
+        expect(plain?.bg).not.toBe("var(--block-bg-solid-color)");
+    });
+});
+
 describe("a drag preview", () => {
     it("is lit as focused whether or not the pane is, and is not interactive", () => {
         const t = setup({ preview: true, focused: false });

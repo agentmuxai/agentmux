@@ -10,21 +10,25 @@ import { For, Show, type JSX } from "solid-js";
 import type { SkillImportItem } from "@/types/rpc/SkillImportItem";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { Button, TextInput } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { ImportAppFacts } from "./skill-app-scripts";
 import { diffLineClass, diffLines, lineDiff } from "@/app/view/memory-editor/line-diff";
 import { SOURCE_KIND_LABELS, type SkillImportModel, type SkillSourceKind } from "./skill-import-model";
 
-const STATUS_TEXT: Record<string, string> = {
-    new: "New",
-    changed: "Differs from the catalog",
-    same: "Already up to date",
-};
+const statusText = (status: string): string =>
+    status === "new" || status === "changed" || status === "same" ? t(`skill.import.status.${status}`) : status;
 
-const LOCATION_HINT: Record<SkillSourceKind, string> = {
-    folder: "A folder with a SKILL.md, or a folder of skills",
-    file: "The path of a .skill file",
-    git: "https://github.com/owner/skills.git",
-    url: "https://example.com/my-skill/SKILL.md",
+const locationHint = (kind: SkillSourceKind): string => {
+    switch (kind) {
+        case "folder":
+            return t("skill.import.hint.folder");
+        case "file":
+            return t("skill.import.hint.file");
+        case "git":
+            return "https://github.com/owner/skills.git";
+        case "url":
+            return "https://example.com/my-skill/SKILL.md";
+    }
 };
 
 function SkillImportRow(props: { model: SkillImportModel; item: SkillImportItem }): JSX.Element {
@@ -39,10 +43,10 @@ function SkillImportRow(props: { model: SkillImportModel; item: SkillImportItem 
                     checked={props.model.pickedAtom().has(item().key)}
                     disabled={item().status === "same" || props.model.busyAtom()}
                     onChange={() => props.model.toggle(item())}
-                    aria-label={`Import ${item().name}`}
+                    aria-label={t("skill.import.rowAria", { name: item().name })}
                 />
                 <span class="skill-import-item-name">{item().name}</span>
-                <span class="skill-import-item-status">{STATUS_TEXT[item().status] ?? item().status}</span>
+                <span class="skill-import-item-status">{statusText(item().status)}</span>
             </label>
             <Show when={item().key}>
                 <div class="skill-import-item-path">{item().key}</div>
@@ -54,9 +58,9 @@ function SkillImportRow(props: { model: SkillImportModel; item: SkillImportItem 
             <Show when={item().status !== "same"}>
                 <Show
                     when={item().status === "changed"}
-                    fallback={<pre class="skill-import-text">{item().content || "(empty)"}</pre>}
+                    fallback={<pre class="skill-import-text">{item().content || t("skill.import.empty")}</pre>}
                 >
-                    <div class="skill-import-diff-label">What would change in the catalog</div>
+                    <div class="skill-import-diff-label">{t("skill.import.diffLabel")}</div>
                     <pre class="skill-import-text" data-testid="skill-import-diff">
                         <For each={diffLines(changedText())}>
                             {(line) => <div class={diffLineClass(line)}>{line || " "}</div>}
@@ -72,11 +76,11 @@ export function SkillImportPanel(props: { model: SkillImportModel; onCancel: () 
     const model = props.model;
     return (
         <div class="agent-primitive-modal-form skill-import">
-            <h3 class="agent-primitive-modal-name">Import a skill</h3>
+            <h3 class="agent-primitive-modal-name">{t("skill.import.title")}</h3>
             <Show when={model.errorAtom()}>
                 <div class="agent-primitive-modal-error">{model.errorAtom()}</div>
             </Show>
-            <span class="agent-primitive-modal-field-label">From</span>
+            <span class="agent-primitive-modal-field-label">{t("skill.import.from")}</span>
             <select
                 class="agent-primitive-modal-input"
                 value={model.kindAtom()}
@@ -88,37 +92,37 @@ export function SkillImportPanel(props: { model: SkillImportModel; onCancel: () 
             </select>
             <TextInput variant="plain"
                 class="agent-primitive-modal-input"
-                aria-label="Where the skill is"
+                aria-label={t("skill.import.where")}
                 value={model.locationAtom()}
                 onInput={(e) => model.setLocation(e.currentTarget.value)}
                 onContextMenu={showTextInputContextMenu}
                 onKeyDown={(e) => {
                     if (e.key === "Enter") void model.read();
                 }}
-                placeholder={LOCATION_HINT[model.kindAtom()]}
+                placeholder={locationHint(model.kindAtom())}
                 spellcheck={false}
             />
             <Show when={model.kindAtom() === "git"}>
                 <TextInput variant="plain"
                     class="agent-primitive-modal-input"
-                    aria-label="Branch or tag"
+                    aria-label={t("skill.import.branch")}
                     value={model.gitRefAtom()}
                     onInput={(e) => model.setGitRef(e.currentTarget.value)}
                     onContextMenu={showTextInputContextMenu}
-                    placeholder="Branch or tag (default branch if empty)"
+                    placeholder={t("skill.import.branchPlaceholder")}
                     spellcheck={false}
                 />
             </Show>
             <div class="agent-primitive-modal-actions">
                 <Button class="agent-primitive-modal-btn" onClick={() => props.onCancel()}>
-                    Cancel
+                    {t("skill.import.cancel")}
                 </Button>
                 <Button
                     class="agent-primitive-modal-btn"
                     disabled={model.busyAtom() || !model.locationAtom().trim()}
                     onClick={() => model.read()}
                 >
-                    {model.busyAtom() && !model.previewAtom() ? "Reading…" : "Read"}
+                    {model.busyAtom() && !model.previewAtom() ? t("skill.import.reading") : t("skill.import.read")}
                 </Button>
             </div>
             <SkillImportResult model={model} />
@@ -129,7 +133,7 @@ export function SkillImportPanel(props: { model: SkillImportModel; onCancel: () 
 /** The result of reading a source, shared by the import panel and "check for changes". */
 export function SkillImportResult(props: { model: SkillImportModel; verb?: string }): JSX.Element {
     const model = props.model;
-    const verb = () => props.verb ?? "Import";
+    const verb = () => props.verb ?? t("skill.import.verb");
     const count = () =>
         (model.previewAtom()?.items ?? []).filter((i) => model.pickedAtom().has(i.key) && i.status !== "same").length;
     return (
@@ -137,15 +141,14 @@ export function SkillImportResult(props: { model: SkillImportModel; verb?: strin
             {(preview) => (
                 <>
                     <Show when={preview().warnings.length > 0}>
-                        <ul class="skill-import-warnings" aria-label="Notes about the source">
+                        <ul class="skill-import-warnings" aria-label={t("skill.import.notes")}>
                             <For each={preview().warnings}>{(w) => <li>{w}</li>}</For>
                         </ul>
                     </Show>
                     <p class="agent-primitive-modal-global-note">
-                        An imported skill tells every agent that gets it what to do. Read it first. A new one starts
-                        bound to nobody and is not given to new agents until you choose that.
+                        {t("skill.import.warning")}
                     </p>
-                    <ul class="skill-import-list" aria-label="Skills found">
+                    <ul class="skill-import-list" aria-label={t("skill.import.found")}>
                         <For each={preview().items}>{(item) => <SkillImportRow model={model} item={item} />}</For>
                     </ul>
                     <div class="agent-primitive-modal-actions">
@@ -155,7 +158,9 @@ export function SkillImportResult(props: { model: SkillImportModel; verb?: strin
                             disabled={model.busyAtom() || count() === 0}
                             onClick={() => model.commit()}
                         >
-                            {count() === 0 ? `Nothing to ${verb().toLowerCase()}` : `${verb()} ${count()} ${count() === 1 ? "skill" : "skills"}`}
+                            {count() === 0
+                                ? t("skill.import.nothing", { verb: verb().toLowerCase() })
+                                : t("skill.import.verbCount", { verb: verb(), count: count() })}
                         </Button>
                     </div>
                 </>

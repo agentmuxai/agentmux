@@ -10,6 +10,7 @@
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import { ContextMenu } from "@/app/components/context-menu";
 import { endPathDrag } from "@/app/drag/file-drop";
+import { t } from "@/app/i18n/i18n";
 import { Button } from "@/app/element/ui";
 import { useWidthFit } from "@/app/element/width-fit";
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
@@ -221,8 +222,8 @@ function FilesList({ v }: { v: FilesViewParts }): JSX.Element {
             <Show when={!model.columnsOn()}>
                 <FilesColumnHeader model={model} fv={fv} />
             </Show>
-            <FilesNotices v={v} />
-            <Show when={model.phase() === "ready" && model.columnsOn()}>
+            {/* A filter that matches nothing in the first column leaves the notice alone: no later column drawn under it. */}
+            <Show when={model.phase() === "ready" && model.columnsOn() && !(model.filter() && win.entries().length === 0)}>
                 <FilesColumns v={v} />
             </Show>
             <Show when={model.phase() === "ready" && win.grid()}>
@@ -231,6 +232,8 @@ function FilesList({ v }: { v: FilesViewParts }): JSX.Element {
             <Show when={model.phase() === "ready" && !win.grid() && !model.columnsOn()}>
                 <FilesDetailRows v={v} />
             </Show>
+            {/* Last: its buttons must not sit under the columns view's layer, which covers the whole list area. */}
+            <FilesNotices v={v} />
         </div>
     );
 }
@@ -271,7 +274,7 @@ function FilesColumnHeader(props: { model: FilesModel; fv: FilesLocal }): JSX.El
 
 /** Why there are no rows: a macOS prompt to answer, a slow load, an error, or an empty folder. */
 function FilesNotices({ v }: { v: FilesViewParts }): JSX.Element {
-    const { model, win, pointer } = v;
+    const { model, win, pointer, fv } = v;
     const { placeLabel } = pointer;
     return (
         <Switch>
@@ -305,11 +308,16 @@ function FilesNotices({ v }: { v: FilesViewParts }): JSX.Element {
             </Match>
             <Match when={model.phase() === "ready" && win.entries().length === 0 && !model.partial()}>
                 <div class="files-notice">
-                    {model.filter()
-                        ? `Nothing here matches “${model.filter()}”.`
-                        : model.rawEntries().length > 0
-                          ? "Only hidden files here."
-                          : "This folder is empty."}
+                    <Show
+                        when={model.filter()}
+                        fallback={model.rawEntries().length > 0 ? t("files.empty.hidden") : t("files.empty.folder")}
+                    >
+                        {/* The filter box may be hidden while its filter is still applied: the way out is here. */}
+                        <p>{t("files.filter.nomatch", { filter: model.filter() })}</p>
+                        <Button class="files-button" onClick={fv.closeFilter}>
+                            {t("files.filter.clear")}
+                        </Button>
+                    </Show>
                 </div>
             </Match>
         </Switch>

@@ -16,6 +16,7 @@ import { For, Show, type Accessor, type JSX } from "solid-js";
 import { Button, IconButton } from "@/app/element/ui";
 import { WORKSPACE_NAME_MAX_LEN, workspaceHeading } from "@/app/store/user-workspace";
 import { tip } from "@/app/element/tip";
+import { t } from "@/app/i18n/i18n";
 import { resolveFloatingName } from "./instance-floating-name";
 import type { OpacityControlComponent } from "./InstancePanelRows";
 import type { AboutDetails, WorkspaceRename } from "./instance-panel-state";
@@ -27,7 +28,7 @@ export const AboutSection = (props: { about: Accessor<AboutDetails> }): JSX.Elem
     return (
         <div class="instance-panel-header">
             <div class="instance-panel-row instance-panel-row-meta">
-                <span class="instance-panel-label">Version</span>
+                <span class="instance-panel-label">{t("instancePanel.version")}</span>
                 <span class="instance-panel-value">
                     v{about().version}
                     <Show when={isDev()}>
@@ -36,7 +37,7 @@ export const AboutSection = (props: { about: Accessor<AboutDetails> }): JSX.Elem
                 </span>
                 <IconButton
                     icon="copy"
-                    label="Copy version"
+                    label={t("instancePanel.copyVersion")}
                     density="compact"
                     class="instance-panel-copy"
                     onClick={() => clipboardWriteText(`version: v${about().version}`)}
@@ -44,11 +45,11 @@ export const AboutSection = (props: { about: Accessor<AboutDetails> }): JSX.Elem
             </div>
             <Show when={about().channel}>
                 <div class="instance-panel-row instance-panel-row-meta">
-                    <span class="instance-panel-label">Channel</span>
+                    <span class="instance-panel-label">{t("instancePanel.channel")}</span>
                     <span class="instance-panel-value instance-panel-mono">{about().channel}</span>
                     <IconButton
                         icon="copy"
-                        label="Copy channel"
+                        label={t("instancePanel.copyChannel")}
                         density="compact"
                         class="instance-panel-copy"
                         onClick={() => clipboardWriteText(about().channel!)}
@@ -57,11 +58,11 @@ export const AboutSection = (props: { about: Accessor<AboutDetails> }): JSX.Elem
             </Show>
             <Show when={about().gitHash}>
                 <div class="instance-panel-row instance-panel-row-meta">
-                    <span class="instance-panel-label">Commit</span>
+                    <span class="instance-panel-label">{t("instancePanel.commit")}</span>
                     <span class="instance-panel-value instance-panel-mono">{about().gitHash}</span>
                     <IconButton
                         icon="copy"
-                        label="Copy commit hash"
+                        label={t("instancePanel.copyCommit")}
                         density="compact"
                         class="instance-panel-copy"
                         onClick={() => clipboardWriteText(about().gitHash!)}
@@ -74,7 +75,7 @@ export const AboutSection = (props: { about: Accessor<AboutDetails> }): JSX.Elem
                     <span class="instance-panel-value instance-panel-mono">{about().cefVersion}</span>
                     <IconButton
                         icon="copy"
-                        label="Copy CEF version"
+                        label={t("instancePanel.copyCef")}
                         density="compact"
                         class="instance-panel-copy"
                         onClick={() => clipboardWriteText(about().cefVersion!)}
@@ -83,7 +84,7 @@ export const AboutSection = (props: { about: Accessor<AboutDetails> }): JSX.Elem
             </Show>
             <Show when={about().platform || about().arch}>
                 <div class="instance-panel-row instance-panel-row-meta">
-                    <span class="instance-panel-label">Runtime</span>
+                    <span class="instance-panel-label">{t("instancePanel.runtime")}</span>
                     <span class="instance-panel-value instance-panel-mono">
                         {[about().platform, about().arch].filter(Boolean).join(" · ")}
                     </span>
@@ -91,7 +92,7 @@ export const AboutSection = (props: { about: Accessor<AboutDetails> }): JSX.Elem
             </Show>
             <Show when={about().buildTime}>
                 <div class="instance-panel-row instance-panel-row-meta">
-                    <span class="instance-panel-label">Build Time</span>
+                    <span class="instance-panel-label">{t("instancePanel.buildTime")}</span>
                     <span class="instance-panel-value instance-panel-mono">{formatUtcTimestamp(about().buildTime!)}</span>
                 </div>
             </Show>
@@ -106,7 +107,7 @@ export const WorkspaceTitle = (props: { rename: WorkspaceRename; windowCount: ()
         <div
             class="instance-panel-section-title instance-panel-workspace-title"
             classList={{ "instance-panel-workspace-title-editing": r.editing() }}
-            {...tip(`The open workspace — double-click to rename (${keyLabel("F2")})`)}
+            {...tip(t("instancePanel.workspaceTip", { key: keyLabel("F2") }))}
             role="button"
             tabIndex={0}
             onDblClick={(e) => {
@@ -133,7 +134,7 @@ export const WorkspaceTitle = (props: { rename: WorkspaceRename; windowCount: ()
                         }
                     }}
                     class="instance-panel-window-name-input instance-panel-workspace-name-input" size={1} data-raw-text-field="the workspace title's inline rename: it takes the name's place and ends on Enter, Escape or blur, not a form field"
-                    aria-label="Workspace name"
+                    aria-label={t("instancePanel.workspaceName")}
                     value={r.value()}
                     maxLength={WORKSPACE_NAME_MAX_LEN}
                     onInput={(e) => r.setValue(e.currentTarget.value)}
@@ -168,12 +169,12 @@ const handleFocusPane = async (label: string) => {
 export const FloatingPanesSection = (props: { entries: Accessor<FloatingPaneEntry[]>; OpacityControl: OpacityControlComponent }): JSX.Element => (
     <div class="instance-panel-section">
         <div class="instance-panel-section-title">
-            Floating panes — {props.entries().length}
+            {t("instancePanel.floating", { count: props.entries().length })}
         </div>
         <Show
             when={props.entries().length > 0}
             fallback={
-                <div class="instance-panel-pane-empty">No floating panes</div>
+                <div class="instance-panel-pane-empty">{t("instancePanel.noFloating")}</div>
             }
         >
             <For each={props.entries()}>
@@ -187,7 +188,7 @@ export const FloatingPanesSection = (props: { entries: Accessor<FloatingPaneEntr
                                 handleFocusPane(entry.label);
                             }
                         }}
-                        {...tip("Click to focus")}
+                        {...tip(t("instancePanel.clickFocus"))}
                         role="button"
                         tabIndex={0}
                     >
@@ -230,14 +231,14 @@ export const PanelFooter = (props: { onClose: () => void }): JSX.Element => {
                     class="instance-panel-btn instance-panel-btn-primary"
                     onClick={handleOpenNewWindow}
                 >
-                    + Open another window
+                    {t("instancePanel.openWindow")}
                 </Button>
             </Show>
             <Button
                 class="instance-panel-btn"
                 onClick={props.onClose}
             >
-                Close
+                {t("instancePanel.close")}
             </Button>
         </div>
     );

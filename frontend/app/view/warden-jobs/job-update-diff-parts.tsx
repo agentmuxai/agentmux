@@ -7,6 +7,7 @@
 import { For, Show, type Accessor, type JSX } from "solid-js";
 
 import { Button, Pill } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import type { TemplateUpdateDiff } from "@/types/rpc/TemplateUpdateDiff";
 
 import type { UpdateDiffState } from "./job-update-diff-state";
@@ -31,7 +32,7 @@ function AvailableFacts(props: { d: Accessor<TemplateUpdateDiff> }): JSX.Element
                 <Show when={d().brief}>
                     {(b) => (
                         <>
-                            <dt>Brief</dt>
+                            <dt>{t("jobs.updateDiff.brief")}</dt>
                             <dd class="warden-jobs-brief-diff">
                                 <pre class="warden-jobs-brief" data-side="before">
                                     {b().before}
@@ -44,10 +45,10 @@ function AvailableFacts(props: { d: Accessor<TemplateUpdateDiff> }): JSX.Element
                     )}
                 </Show>
                 <Show when={d().outputs}>
-                    {(o) => <Change label="Outputs" added={o().added} removed={o().removed} />}
+                    {(o) => <Change label={t("jobs.updateDiff.outputs")} added={o().added} removed={o().removed} />}
                 </Show>
                 <Show when={d().secrets}>
-                    {(s) => <Change label="Secrets" added={s().added} removed={s().removed} />}
+                    {(s) => <Change label={t("jobs.updateDiff.secrets")} added={s().added} removed={s().removed} />}
                 </Show>
                 <For each={d().policy}>
                     {(c) => (
@@ -62,9 +63,7 @@ function AvailableFacts(props: { d: Accessor<TemplateUpdateDiff> }): JSX.Element
                 </For>
             </dl>
             <Show when={!d().brief && !d().outputs && !d().secrets && d().policy.length === 0}>
-                <div class="warden-section-stub">
-                    Nothing the job holds changes; accepting moves it to the new version.
-                </div>
+                <div class="warden-section-stub">{t("jobs.updateDiff.nothing")}</div>
             </Show>
         </>
     );
@@ -78,15 +77,14 @@ function DiffBody(props: { d: Accessor<TemplateUpdateDiff> }): JSX.Element {
                 {d().template_id}: <strong>{d().from_version}</strong> → <strong>{d().to_version}</strong>
             </p>
             <Show when={d().status === "none"}>
-                <div class="warden-section-stub">This job is at the template's version.</div>
+                <div class="warden-section-stub">{t("jobs.updateDiff.same")}</div>
             </Show>
             <Show when={d().status === "unavailable" || d().status === "needs_approval"}>
                 <div class="warden-jobs-note">{d().reason}</div>
             </Show>
             <Show when={d().params_error}>
                 <div class="warden-manager-error" role="alert">
-                    The new version can't take this job's settings as they are: {d().params_error}. Edit the job to fix
-                    them, then accept.
+                    {t("jobs.updateDiff.paramsError", { error: d().params_error ?? "" })}
                 </div>
             </Show>
             <Show when={d().status === "available" && !d().params_error}>
@@ -102,16 +100,16 @@ function Actions(props: { s: UpdateDiffState; onClose: () => void }): JSX.Elemen
         <div class="warden-jobs-actions">
             <Show when={s.diff()?.status === "available" && !s.diff()?.params_error}>
                 <Button tone="accent" icon="check" busy={s.busy()} onClick={() => s.accept()}>
-                    Accept the update
+                    {t("jobs.updateDiff.accept")}
                 </Button>
             </Show>
             <Show when={s.diff()?.status === "needs_approval"}>
                 <Button tone="accent" icon="shield-halved" onClick={() => s.review()}>
-                    Review and approve {s.diff()?.to_version}
+                    {t("jobs.updateDiff.reviewApprove", { version: s.diff()?.to_version ?? "" })}
                 </Button>
             </Show>
             <Button tone="quiet" onClick={() => props.onClose()}>
-                Close
+                {t("jobs.updateDiff.close")}
             </Button>
         </div>
     );
@@ -121,8 +119,8 @@ export function UpdateView(props: { s: UpdateDiffState; name: string; onClose: (
     const s = props.s;
     return (
         <>
-            <h3 class="warden-jobs-heading">Update for {props.name}</h3>
-            <Show when={s.diff()} fallback={<div class="warden-section-stub">{s.error() ? "" : "Loading…"}</div>}>
+            <h3 class="warden-jobs-heading">{t("jobs.updateDiff.title", { name: props.name })}</h3>
+            <Show when={s.diff()} fallback={<div class="warden-section-stub">{s.error() ? "" : t("jobs.updateDiff.loading")}</div>}>
                 {(d) => <DiffBody d={d} />}
             </Show>
             <Show when={s.error()}>
