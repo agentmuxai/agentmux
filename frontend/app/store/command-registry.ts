@@ -45,6 +45,8 @@ export interface CommandEntry {
     category: string;
     icon?: string;
     iconColor?: string;
+    /** An agent's stored identity colour (`#rrggbb`): the palette draws it in the theme's identity tone, as the agent's pane, tab and Swarm row do. */
+    identity?: string;
     /** More words the palette's search matches, beyond the label. */
     keywords?: string;
     /** Secondary text the palette shows after the label, and searches (an agent's seat and state). */

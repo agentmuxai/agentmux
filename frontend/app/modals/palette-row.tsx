@@ -10,6 +10,8 @@
 // list at once, after the frame that drew it.
 
 import { createMemo, For, Show, type JSX } from "solid-js";
+import { isLightThemeActive } from "@/app/block/pane-identity";
+import { paneRoleColor } from "@/app/block/pane-color-scheme";
 import { Kbd } from "@/app/element/ui";
 import { shortcutFor } from "@/app/keybindings";
 import { keyCaps, keyCapsWords } from "@/app/keybindings/caps";
@@ -30,6 +32,9 @@ function ShortcutCaps(props: { label: string }): JSX.Element {
     );
 }
 
+/** An icon-font name ("robot", "arrow-right"), as against a glyph drawn as text. */
+const isIconName = (icon: string | undefined): boolean => !!icon && /^[a-z0-9-]+$/i.test(icon);
+
 /** What a screen reader says for a row: the label, the detail and the shortcut in words (R26). */
 function rowName(cmd: PaletteRowModel["cmd"], shortcut: string): string {
     return [cmd.label, cmd.detail, shortcut && keyCapsWords(shortcut)].filter(Boolean).join(", ");
@@ -47,6 +52,12 @@ export function PaletteRow(props: {
     const cmd = () => props.row.cmd;
     // Looked up once per change of command, not once per use (the name, the caps and the test for them each need it).
     const shortcut = createMemo(() => shortcutFor(cmd().keyOf ?? cmd().id));
+    // An agent's row is marked in its own colour: the identity tone the pane's ring and the Swarm row use, so the
+    // mark follows the theme. An agent with no colour yet has no mark and a muted icon.
+    const identity = () => {
+        const hex = cmd().identity;
+        return hex ? paneRoleColor(undefined, hex, isLightThemeActive(), "identity") : undefined;
+    };
     return (
         <div
             id={props.id}
@@ -54,14 +65,25 @@ export function PaletteRow(props: {
             aria-selected={props.selected}
             aria-label={rowName(cmd(), shortcut())}
             class="command-palette-item"
-            classList={{ selected: props.selected, "group-start": props.row.divider }}
+            classList={{ selected: props.selected, "group-start": props.row.divider, "has-identity": identity() !== undefined }}
+            style={identity() ? { "--palette-identity": identity() } : undefined}
             onClick={(e) => props.onPick(e)}
         >
             <Show when={cmd().icon}>
-                <i
-                    class={`fa-solid fa-${cmd().icon} command-palette-item-icon`}
-                    style={cmd().iconColor ? { color: cmd().iconColor } : {}}
-                />
+                <Show
+                    when={isIconName(cmd().icon)}
+                    fallback={
+                        // An agent's provider glyph ("✦") is text, not an icon-font name.
+                        <span class="command-palette-item-icon" style={cmd().iconColor ? { color: cmd().iconColor } : {}}>
+                            {cmd().icon}
+                        </span>
+                    }
+                >
+                    <i
+                        class={`fa-solid fa-${cmd().icon} command-palette-item-icon`}
+                        style={cmd().iconColor ? { color: cmd().iconColor } : {}}
+                    />
+                </Show>
             </Show>
             <span class="command-palette-item-text">
                 <span class="command-palette-item-label">{cmd().label}</span>

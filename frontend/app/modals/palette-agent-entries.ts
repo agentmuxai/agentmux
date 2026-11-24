@@ -60,7 +60,7 @@ export function agentEntries(
             label: row.name,
             category: AGENT_CATEGORY,
             icon: row.icon || "robot",
-            iconColor: row.color,
+            identity: row.color,
             detail: agentDetail(row, seat),
             keywords: [seatText(seat), row.provider, stateText(row.state)].filter(Boolean).join(" "),
             execute: () => go({ agent_id: row.agent_id, name: row.name }),
