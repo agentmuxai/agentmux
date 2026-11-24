@@ -37,7 +37,7 @@ WidgetsInstall {"path":"C:/src/acme.notes/widget.json","replace":false}
       <div class="setting-devices-description">
         "Widgets add your own kinds of pane. A widget runs only after you approve it here, and asks again whenever its files change."
       <div class="widgets-toolbar">
-        <button type="button" class="ui-button ui-tone-neutral" disabled="">
+        <button type="button" class="ui-button ui-tone-neutral" aria-busy="true" data-pending="true" disabled="">
           <i aria-hidden="true" class="fa-solid fa-plus">
           "Install…"
         <button type="button" class="ui-button ui-tone-neutral">

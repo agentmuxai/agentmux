@@ -68,7 +68,7 @@ function SeatActions(props: { s: AgentSeatState }): JSX.Element {
                 tone="danger"
                 busy={f.busy() === "clear"}
                 disabled={f.busy() !== null || !s.seat()}
-                onClick={() => void s.run("clear")}
+                onClick={() => s.run("clear")}
             >
                 Clear
             </Button>
@@ -76,7 +76,7 @@ function SeatActions(props: { s: AgentSeatState }): JSX.Element {
                 tone="accent"
                 busy={f.busy() === "save"}
                 disabled={f.busy() !== null || f.role() === ""}
-                onClick={() => void s.run("save")}
+                onClick={() => s.run("save")}
             >
                 Save
             </Button>

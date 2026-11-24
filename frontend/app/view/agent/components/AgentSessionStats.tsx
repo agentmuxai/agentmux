@@ -360,7 +360,7 @@ function SessionActions(props: { s: StatsState }): JSX.Element {
                         density="compact"
                         disabled={s.archiveBusy()}
                         onClick={() =>
-                            void run(s.archiveBusy, s.setArchiveBusy, "archive", () => archiveSession(s.props.blockId))
+                            run(s.archiveBusy, s.setArchiveBusy, "archive", () => archiveSession(s.props.blockId))
                         }
                         title="Compress and archive this session's history to free disk space, then start fresh"
                     >
@@ -372,7 +372,7 @@ function SessionActions(props: { s: StatsState }): JSX.Element {
                     density="compact"
                     disabled={s.restoreBusy()}
                     onClick={() =>
-                        void run(s.restoreBusy, s.setRestoreBusy, "restore", () => restoreSession(s.props.blockId))
+                        run(s.restoreBusy, s.setRestoreBusy, "restore", () => restoreSession(s.props.blockId))
                     }
                     title="Restore this session's history from the archive"
                 >
@@ -382,7 +382,7 @@ function SessionActions(props: { s: StatsState }): JSX.Element {
             <Button
                 density="compact"
                 disabled={s.exportBusy()}
-                onClick={() => void run(s.exportBusy, s.setExportBusy, "export", () => exportSession(s.props.blockId))}
+                onClick={() => run(s.exportBusy, s.setExportBusy, "export", () => exportSession(s.props.blockId))}
                 title="Download this session's history as a .jsonl file"
             >
                 {s.exportBusy() ? "Exporting…" : "Export"}

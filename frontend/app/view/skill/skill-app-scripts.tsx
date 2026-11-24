@@ -84,13 +84,13 @@ export function ScriptReview(p: {
                                 <p class="skill-app-line skill-app-muted">
                                     Approving lets agents that use this skill receive and run this exact script.
                                 </p>
-                                <Button tone="accent" busy={busy()} onClick={() => void setApproved(true)}>
+                                <Button tone="accent" busy={busy()} onClick={() => setApproved(true)}>
                                     Approve script
                                 </Button>
                             </>
                         }
                     >
-                        <Button tone="danger" busy={busy()} onClick={() => void setApproved(false)}>
+                        <Button tone="danger" busy={busy()} onClick={() => setApproved(false)}>
                             Revoke approval
                         </Button>
                     </Show>

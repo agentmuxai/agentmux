@@ -255,7 +255,7 @@ export function VaultEntryForm(props: FormProps): JSX.Element {
                 <Button data-modal-dismiss onClick={() => props.onClose()} disabled={s.busy()}>
                     {t("vault.form.cancel")}
                 </Button>
-                <Button tone="accent" busy={s.busy()} onClick={() => void save(s)}>
+                <Button tone="accent" busy={s.busy()} onClick={() => save(s)}>
                     {editing ? t("vault.form.saveChanges") : t("vault.form.save")}
                 </Button>
             </ModalFooter>

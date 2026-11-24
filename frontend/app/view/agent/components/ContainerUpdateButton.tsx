@@ -28,7 +28,7 @@ export function ContainerUpdateButton(props: { blockId: string }) {
     };
     return (
         <div class="agent-cli-notice-actions">
-            <Button density="compact" busy={busy()} onClick={() => void update()}>
+            <Button density="compact" busy={busy()} onClick={() => update()}>
                 {busy() ? "Updating…" : "Update container"}
             </Button>
             <Show when={refused()}>

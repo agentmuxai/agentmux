@@ -41,7 +41,7 @@ function DeviceRow(props: { s: DevicesState; device: ViewerDeviceInfo }): JSX.El
                 <Button
                     tone="danger"
                     disabled={s.revoking() === device.device_id}
-                    onClick={() => void s.revoke(device)}
+                    onClick={() => s.revoke(device)}
                 >
                     {s.revoking() === device.device_id ? "Revoking…" : "Revoke"}
                 </Button>

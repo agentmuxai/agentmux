@@ -38,7 +38,7 @@ export const EndpointNoticeLine = (props: { agentId: string }): JSX.Element => {
                     {endpointNoticeText(n())}
                     <Show when={undoable()}>
                         {" "}
-                        <Button onClick={() => void undo()}>Undo</Button>
+                        <Button onClick={() => undo()}>Undo</Button>
                     </Show>
                     <Show when={error()}>{(why) => <span class="agent-primitive-modal-error"> {why()}</span>}</Show>
                 </p>

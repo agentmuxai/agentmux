@@ -58,10 +58,10 @@ export function FolderOverlapAskCard(props: FolderOverlapAskCardProps): JSX.Elem
                 </Show>
             </div>
             <div class="vault-request-card-actions">
-                <Button tone="quiet" disabled={busy()} onClick={() => void answer(props.decline)} data-testid="folder-overlap-ask-decline">
+                <Button tone="quiet" disabled={busy()} onClick={() => answer(props.decline)} data-testid="folder-overlap-ask-decline">
                     {t("agentPicker.sharedFolder.cancel")}
                 </Button>
-                <Button tone="accent" busy={busy()} onClick={() => void answer(props.goAhead)} data-testid="folder-overlap-ask-go-ahead">
+                <Button tone="accent" busy={busy()} onClick={() => answer(props.goAhead)} data-testid="folder-overlap-ask-go-ahead">
                     {t("agentPicker.sharedFolder.goAhead")}
                 </Button>
             </div>

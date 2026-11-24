@@ -50,7 +50,7 @@ export function AgentModelUndoneCard(props: AgentModelUndoneCardProps): JSX.Elem
                         </Show>
                     </div>
                     <div class="agent-model-undone-actions">
-                        <Button disabled={busy()} onClick={() => void run(card())}>
+                        <Button disabled={busy()} onClick={() => run(card())}>
                             {busy() ? "Compacting…" : "Compact, then switch"}
                         </Button>
                         <Button disabled={busy()} onClick={() => props.onDismiss()}>

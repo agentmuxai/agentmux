@@ -88,7 +88,7 @@ export function VaultMoveDialog(props: { entry: VaultEntryInfo; onClose: () => v
                 <Button data-modal-dismiss onClick={props.onClose} disabled={busy()}>
                     {t("vault.vaults.cancel")}
                 </Button>
-                <Button tone="accent" busy={busy()} disabled={!target()} onClick={() => void move()}>
+                <Button tone="accent" busy={busy()} disabled={!target()} onClick={() => move()}>
                     {t("vault.vaults.move")}
                 </Button>
             </ModalFooter>

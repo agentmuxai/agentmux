@@ -90,7 +90,7 @@ export function ToolsStep(props: { p: PanelParts }): JSX.Element {
                     <Button tone="neutral" onClick={() => s.props.onClose()}>
                         Cancel
                     </Button>
-                    <Button tone="neutral" onClick={() => void tools.checkTools(true)}>
+                    <Button tone="neutral" onClick={() => tools.checkTools(true)}>
                         Check again
                     </Button>
                     <Button tone="accent" onClick={() => tools.setSkipTools(true)} data-testid="agent-create-tools-continue">

@@ -51,7 +51,7 @@ export function TypedBar(props: Part): JSX.Element {
                         </Button>
                     }
                 >
-                    <Button tone="danger" density="compact" onClick={() => void t.clearAll()}>
+                    <Button tone="danger" density="compact" onClick={() => t.clearAll()}>
                         {`Forget everything typed to ${t.agentName()}`}
                     </Button>
                     <Button tone="quiet" density="compact" onClick={() => t.setConfirmClear(false)}>
@@ -90,7 +90,7 @@ function EntryRow(props: Part & { item: InputHistoryItem }): JSX.Element {
                         </Button>
                     }
                 >
-                    <Button tone="danger" density="compact" onClick={() => void t.forget(item)}>
+                    <Button tone="danger" density="compact" onClick={() => t.forget(item)}>
                         Forget this
                     </Button>
                     <Button tone="quiet" density="compact" onClick={() => t.setConfirmId(null)}>
@@ -133,7 +133,7 @@ export function TypedEntries(props: Part): JSX.Element {
                 </tbody>
             </table>
             <Show when={t.more()}>
-                <Button tone="quiet" density="compact" busy={t.loading()} onClick={() => void t.read(true)}>
+                <Button tone="quiet" density="compact" busy={t.loading()} onClick={() => t.read(true)}>
                     Show older
                 </Button>
             </Show>
@@ -156,7 +156,7 @@ export function TypedTrash(props: Part): JSX.Element {
                                 {batch.count > 1 ? `${batch.count} entries, from “${batch.sample}”` : batch.sample}
                             </span>
                             <span class="warden-manager-dim">{`by ${batch.deleted_by}`}</span>
-                            <Button tone="quiet" density="compact" onClick={() => void t.restore(batch)}>
+                            <Button tone="quiet" density="compact" onClick={() => t.restore(batch)}>
                                 Restore
                             </Button>
                         </div>

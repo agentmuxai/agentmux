@@ -101,12 +101,12 @@ function Actions(props: { s: UpdateDiffState; onClose: () => void }): JSX.Elemen
     return (
         <div class="warden-jobs-actions">
             <Show when={s.diff()?.status === "available" && !s.diff()?.params_error}>
-                <Button tone="accent" icon="check" busy={s.busy()} onClick={() => void s.accept()}>
+                <Button tone="accent" icon="check" busy={s.busy()} onClick={() => s.accept()}>
                     Accept the update
                 </Button>
             </Show>
             <Show when={s.diff()?.status === "needs_approval"}>
-                <Button tone="accent" icon="shield-halved" onClick={() => void s.review()}>
+                <Button tone="accent" icon="shield-halved" onClick={() => s.review()}>
                     Review and approve {s.diff()?.to_version}
                 </Button>
             </Show>

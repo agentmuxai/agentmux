@@ -69,7 +69,7 @@ export const AgentStoppedBanner = (props: AgentStoppedBannerProps): JSX.Element 
                     tone="accent"
                     density="compact"
                     busy={busy()}
-                    onClick={() => void onStart()}
+                    onClick={() => onStart()}
                     title="Start this agent and resume its session"
                 >
                     Start

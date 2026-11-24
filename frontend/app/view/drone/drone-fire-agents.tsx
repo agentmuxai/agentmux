@@ -64,7 +64,7 @@ export const DroneFireAgents = (p: { droneId: () => string }): JSX.Element => {
                 </Show>
                 <For each={given()}>
                     {(id) => (
-                        <Button class="drone-btn" onClick={() => void save(given().filter((a) => a !== id))}>
+                        <Button class="drone-btn" onClick={() => save(given().filter((a) => a !== id))}>
                             {t("drone.trigger.agentsRemove", { agent: id })}
                         </Button>
                     )}

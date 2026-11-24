@@ -135,7 +135,7 @@ export function TestNotificationRow(): JSX.Element {
                 description={NOTIFICATIONS_SETTINGS.osTest.description}
                 control={
                     <Button
-                        onClick={() => void RpcApi.NotifyTestCommand(TabRpcClient).catch(() => {})}
+                        onClick={() => RpcApi.NotifyTestCommand(TabRpcClient).catch(() => {})}
                     >
                         {t("settings.notifications.test.send")}
                     </Button>

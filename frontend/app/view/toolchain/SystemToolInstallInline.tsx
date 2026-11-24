@@ -150,7 +150,7 @@ export const SystemToolInstallInline = (props: SystemToolInstallInlineProps): JS
                             needsElevation={info().needsElevation}
                             brandIcon={brandIcon()}
                         >
-                            <Button tone="accent" onClick={() => void session.start()}>
+                            <Button tone="accent" onClick={() => session.start()}>
                                 {info().resolvedVersion ? `Install v${info().resolvedVersion} now` : "Install"}
                             </Button>
                         </InstallConfirm>
@@ -165,7 +165,7 @@ export const SystemToolInstallInline = (props: SystemToolInstallInlineProps): JS
                     <InstallProgress session={session} kind="system-tool" />
                     <Show when={session.state() === "failed"}>
                         <div>
-                            <Button onClick={() => void session.start()}>Retry</Button>
+                            <Button onClick={() => session.start()}>Retry</Button>
                         </div>
                     </Show>
                 </Show>

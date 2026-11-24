@@ -113,7 +113,7 @@ export function KanbanToolbar(props: Part): JSX.Element {
             >
                 New task
             </Button>
-            <IconButton icon="rotate" label="Refresh" onClick={() => void s.model.refresh()} />
+            <IconButton icon="rotate" label="Refresh" onClick={() => s.model.refresh()} />
             <IconButton
                 icon="gear"
                 label={t("kanban.settings")}

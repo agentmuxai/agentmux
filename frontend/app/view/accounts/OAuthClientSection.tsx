@@ -190,7 +190,7 @@ export function OAuthClientSection(props: { client: ReturnType<typeof createOAut
                     <Button density="compact" onClick={() => v.setChanging(true)}>
                         Use a different client
                     </Button>
-                    <Button density="compact" tone="danger" busy={v.forgetting()} onClick={() => void v.forget()}>
+                    <Button density="compact" tone="danger" busy={v.forgetting()} onClick={() => v.forget()}>
                         Forget this client
                     </Button>
                 </div>
