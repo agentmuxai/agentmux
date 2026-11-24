@@ -41,6 +41,58 @@ fn service_call(method: &str, args: Vec<serde_json::Value>) -> WebCallType {
     WebCallType { service: "block".to_string(), method: method.to_string(), uicontext: None, args }
 }
 
+/// Redock the floating pane `target` (in `src`, a tab and its workspace) into `tgt`: beside `beside`'s pane on its
+/// side code, or, with none, where it was torn from when that place can still be found. The pane is no floater after.
+async fn redock_into(
+    state: &AppState,
+    target: &str,
+    src: (&str, &str),
+    tgt: (&str, &str),
+    beside: Option<(&str, u8)>,
+) -> Result<serde_json::Value, String> {
+    // [block, source tab, source workspace, target tab, target workspace, beside block, side, as tab, members, active, to origin]
+    let call = service_call(
+        "RedockFloatingPane",
+        vec![
+            json!(target),
+            json!(src.0),
+            json!(src.1),
+            json!(tgt.0),
+            json!(tgt.1),
+            beside.map_or(serde_json::Value::Null, |(b, _)| json!(b)),
+            beside.map_or(serde_json::Value::Null, |(_, c)| json!(c)),
+            json!(false),
+            json!(null),
+            json!(null),
+            json!(beside.is_none()),
+        ],
+    );
+    let ret = crate::server::service::handle_redock_floating_pane(state, &call).await;
+    if let Some(e) = ret.error {
+        return Err(e);
+    }
+    super::pane_openers::set_floating(target, false);
+    Ok(ret.data.unwrap_or_default())
+}
+
+/// A Stop of the agent `agent_uid`: each floating pane it opened is docked into the tab `home_block` (its own pane)
+/// is in, where it was torn from when that place can still be found. Nothing is closed. Returns how many were docked.
+pub(crate) async fn dock_all(state: &AppState, agent_uid: &str, home_block: &str) -> usize {
+    let Some((tgt_tab, tgt_ws)) = home_of(state, home_block).await else { return 0 };
+    let mut docked = 0;
+    for pane in floater_place::live_floaters(state, agent_uid).await {
+        let Some((src_tab, src_ws)) = home_of(state, &pane).await else { continue };
+        if src_tab == tgt_tab {
+            continue;
+        }
+        match redock_into(state, &pane, (&src_tab, &src_ws), (&tgt_tab, &tgt_ws), None).await {
+            Ok(_) => docked += 1,
+            Err(e) => tracing::warn!(pane = %pane, "agent stop: a floating pane could not be docked: {e}"),
+        }
+    }
+    docked
+}
+
 /// `dock`: a floating pane the caller opened goes back into the caller's own tab, beside the caller's pane on the
 /// side `split` names, or where it was torn from when that place can still be found. The window closes with its
 /// last pane.
@@ -72,19 +124,12 @@ pub(super) async fn dock(state: &AppState, agent: &str, req: &PanePlaceRequest) 
     if src_tab == tgt_tab {
         return refuse(StatusCode::CONFLICT, format!("NOT_FLOATING: {target} is already in your tab"));
     }
-    // [block, source tab, source workspace, target tab, target workspace, beside block, side, as tab, members, active, to origin]
-    let beside = split.map_or(serde_json::Value::Null, |_| json!(own));
-    let side = split.map_or(serde_json::Value::Null, |c| json!(c));
-    let call = service_call(
-        "RedockFloatingPane",
-        vec![json!(target), json!(src_tab), json!(src_ws), json!(tgt_tab), json!(tgt_ws), beside, side, json!(false), json!(null), json!(null), json!(split.is_none())],
-    );
-    let ret = crate::server::service::handle_redock_floating_pane(state, &call).await;
-    if let Some(e) = ret.error {
-        return refuse(StatusCode::BAD_GATEWAY, format!("the pane could not be docked: {e}"));
-    }
-    super::pane_openers::set_floating(target, false);
-    let at = ret.data.as_ref().and_then(|d| d.get("placed")).cloned().unwrap_or(json!(null));
+    let beside = split.map(|c| (own, c));
+    let ret = match redock_into(state, target, (&src_tab, &src_ws), (&tgt_tab, &tgt_ws), beside).await {
+        Ok(data) => data,
+        Err(e) => return refuse(StatusCode::BAD_GATEWAY, format!("the pane could not be docked: {e}")),
+    };
+    let at = ret.get("placed").cloned().unwrap_or(json!(null));
     (StatusCode::OK, Json(json!({ "pane": target, "docked": true, "tab_id": tgt_tab, "placed_by": at }))).into_response()
 }
 

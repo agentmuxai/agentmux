@@ -251,3 +251,29 @@ async fn an_agent_with_four_floaters_open_cannot_float_a_fifth() {
         pane_openers::forget(b);
     }
 }
+
+#[tokio::test]
+async fn a_stop_docks_the_floaters_its_agent_opened_and_no_one_elses() {
+    let state = test_state();
+    let (tab, _, own, pane) = a_tab_with_two_panes(&state, "sysinfo").await;
+    let (_, _, _, others_pane) = a_tab_with_two_panes(&state, "sysinfo").await;
+    let (agent, other) = (an_agent(), an_agent());
+    pane_openers::record(&pane, &agent, false);
+    pane_openers::record(&others_pane, &other, false);
+    watch(&state, rect());
+    for (who, p) in [(&agent, &pane), (&other, &others_pane)] {
+        let (status, body) = said(float(&state, who, &request("float", p, Some(&own))).await).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+
+    assert_eq!(dock_all(&state, &agent, &own).await, 1);
+
+    assert!(!pane_openers::is_floating(&pane), "the stopped agent's floater is docked");
+    assert_eq!(home_of(&state, &pane).await.unwrap().0, tab, "into the tab its agent is in");
+    assert!(pane_openers::is_floating(&others_pane), "another agent's floater stays where it is");
+    assert_eq!(dock_all(&state, &agent, &own).await, 0, "nothing left to dock");
+    assert_eq!(dock_all(&state, &agent, "no-such-pane").await, 0, "no home tab, nothing moves");
+    for b in [&pane, &others_pane] {
+        pane_openers::forget(b);
+    }
+}
