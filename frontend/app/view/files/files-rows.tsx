@@ -154,7 +154,7 @@ export function FileRow(props: {
                     <RenameInput model={props.model} entry={props.entry} onDone={props.onRenameDone} />
                 </Show>
                 <Show when={props.where}>
-                    <span class="files-where">{props.where}</span>
+                    <span class="files-where" {...tip(props.where)}>{props.where}</span>
                 </Show>
                 <Show when={props.entry.error}>
                     <i class="fa fa-triangle-exclamation files-entry-error" aria-label={props.entry.error} />
