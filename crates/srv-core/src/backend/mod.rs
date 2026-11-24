@@ -204,6 +204,7 @@ pub mod sampler;
 // The commit attribution that uses it is Windows-only; the logic is tested everywhere.
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub mod own_instance;
+pub mod stall_load;
 pub mod stall_watch;
 pub mod net_counters;
 pub mod sysinfo;
