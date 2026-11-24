@@ -57,13 +57,13 @@
 }
 
 // The header row stays at the top of the scroller, over the rows that scroll under it, on a surface that is not
-// see-through (--main-bg-color follows the window's opacity, and the rows would show through).
+// see-through (--main-bg-color follows the window's opacity, and --menu-bg-color is not set in every theme).
 .table-viewer-head {
     position: sticky;
     top: 0;
     z-index: var(--z-over-content);
     font-weight: 600;
-    background: var(--menu-bg-color);
+    background: var(--modal-bg-color);
 }
 
 .table-viewer-number {
