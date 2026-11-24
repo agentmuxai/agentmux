@@ -12,6 +12,7 @@ import { hostHas } from "@/util/host-caps";
 import { WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import { fireAndForget } from "@/util/util";
+import { genericClose, simpleCloseStaticTab } from "@/app/store/keymodel-nav";
 import { openCommandPalette } from "@/app/store/open-command-palette";
 import { openConfigFileOrTell } from "@/app/util/open-config-file";
 import { setAnimationPreset } from "@/app/store/animation-config";
@@ -449,12 +450,8 @@ function registerTabCommands(): void {
         label: "Close Tab",
         category: "Tab",
         icon: "xmark",
-        execute: () => {
-            const ws = atoms.workspace();
-            if (!ws) return;
-            const tabId = atoms.activeTabId();
-            WorkspaceService.CloseTab(ws.oid, tabId).catch(console.error);
-        },
+        // What its key does: the close-confirmation (the setting, an agent at work) and the last-tab guard.
+        execute: () => simpleCloseStaticTab(),
     });
     commandRegistry.register({
         id: "tab:next",
@@ -477,10 +474,8 @@ function registerPaneCommands(): void {
         label: "Close Pane",
         category: "Pane",
         icon: "xmark",
-        execute: () => {
-            const layoutModel = getLayoutModelForStaticTab();
-            fireAndForget(layoutModel.closeFocusedNode.bind(layoutModel));
-        },
+        // What its key does: closes the focused pane, or the tab when it has none left.
+        execute: () => genericClose(),
     });
     commandRegistry.register({
         id: "pane:magnify",

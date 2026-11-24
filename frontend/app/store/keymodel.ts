@@ -23,10 +23,8 @@ import { type KeyHandler, keyCommands } from "./keymodel-dispatch";
 import { clearPaneTabSelection } from "@/app/element/pane-tab-selection";
 import {
     cyclePaneFocus,
-    genericClose,
     getFocusedBlockInStaticTab,
     handleCmdI,
-    simpleCloseStaticTab,
     switchBlockByBlockNum,
     switchBlockInDirection,
     switchTab,
@@ -79,7 +77,6 @@ function registerTabKeys() {
         return true;
     });
     on("tab:new", run(() => createTab()));
-    on("tab:close", run(() => simpleCloseStaticTab()));
     on("tab:next", run(() => switchTab(1)));
     on("tab:prev", run(() => switchTab(-1)));
     for (let idx = 1; idx <= 8; idx++) {
@@ -96,7 +93,6 @@ function registerPaneLayoutKeys() {
     on("pane:new", run(() => handleCmdN()));
     on("split:right", run(() => handleSplitHorizontal("after")));
     on("split:down", run(() => handleSplitVertical("after")));
-    on("pane:close", run(() => genericClose()));
     on("pane:magnify", () => {
         const layoutModel = getLayoutModelForStaticTab();
         const focusedNode = layoutModel.focusedNode?.();
