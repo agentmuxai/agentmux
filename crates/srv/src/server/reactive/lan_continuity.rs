@@ -92,6 +92,16 @@ pub(super) async fn on_first_contact(state: &AppState, claimed: &str, observed_k
     }
 }
 
+/// A machine's sender-key lookup answer with this install's certificate for the key, as an agent's key is answered, so a
+/// peer that trusts the install pins it at first contact (a Swarm broadcast, a quiet note) instead of waiting for the person.
+pub(super) fn with_sender_cert(state: &AppState, mut sender: serde_json::Value) -> serde_json::Value {
+    let shown = sender.get("agent_id").zip(sender.get("lan_public_key")).and_then(|(a, k)| Some((a.as_str()?.to_string(), k.as_str()?.to_string())));
+    if let (Some((agent, key)), Some(obj)) = (shown, sender.as_object_mut()) {
+        add_cert(state, &agent, &key, obj);
+    }
+    sender
+}
+
 /// Put this install's certificate for `public_key_b64` into a lookup answer as `lan_cert`.
 pub(super) fn add_cert(state: &AppState, agent: &str, public_key_b64: &str, answer: &mut serde_json::Map<String, serde_json::Value>) {
     if let Some(cert) = issue_cert(state, agent, public_key_b64) {

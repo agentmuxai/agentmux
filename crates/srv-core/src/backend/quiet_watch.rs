@@ -610,10 +610,19 @@ fn background_label(block_id: &str, now_ms: u64) -> String {
 fn tell(mstore: &Store, filestore: &FileStore, config: &ConfigState, def: &AgentDefinition, block_id: &str, tasks: &[OwedTask], running: bool, idle_minutes: u64, now_ms: u64) -> bool {
     let filers: Vec<String> = tasks.iter().map(|t| t.filer_uid.clone()).collect();
     let watchers = watcher_panes(mstore, &def.id, &filers);
-    if watchers.is_empty() {
+    let remote_lead = crate::backend::agent_seat::effective_seat_by_id(mstore, &def.id).and_then(|seat| seat.lead).filter(|lead| crate::backend::agent_seat::is_remote_lead(lead));
+    if watchers.is_empty() && remote_lead.is_none() {
         return false;
     }
     let words = if running { String::new() } else { notes::last_words_of(mstore, filestore, block_id) };
+    // A lead on another machine is sent the same facts by that machine's AgentMux (section 19): queued here, sent by srv.
+    if let Some(lead) = &remote_lead {
+        let nums: Vec<i64> = tasks.iter().map(|t| t.num).collect();
+        super::quiet_remote::queue(lead, super::quiet_remote::Note::new(&def.name, running, idle_minutes, &nums, &words));
+    }
+    if watchers.is_empty() {
+        return true;
+    }
     let is_worker = crate::backend::agent_seat::worker_of(mstore, &def.id).is_some();
     let background = if running { String::new() } else { background_label(block_id, now_ms) };
     let body = quiet_body(&def.name, is_worker, tasks, idle_minutes, running, &words, &background);

@@ -603,6 +603,7 @@ async fn admit(
     verify_cross_channel_signature(state, req);
     lan_v2::log_receipt(req);
     let mut replay = replay::reserve(req, now_unix_secs());
+    if let Some(answer) = super::quiet_remote::intercept(state, req).await { return Err(answer); } // a quiet note is answered, never delivered
     req.route_unsigned_target();
     resolve_transcript_request_tier_fields(&state.mstore, req);
 
@@ -900,9 +901,7 @@ pub(super) async fn handle_reactive_agent(
                 .into_response()
         }
     };
-    if let Some(sender) = crate::backend::lan::swarm_broadcast::sender_lookup(&state.mstore, &state.hostname, id) {
-        return Json(sender).into_response();
-    }
+    if let Some(sender) = crate::backend::lan::swarm_broadcast::sender_lookup(&state.mstore, &state.hostname, id) { return Json(lan_continuity::with_sender_cert(&state, sender)).into_response(); }
     match state.reactive_handler.get_delivery_target(id) {
         Some(agent) => {
             // Merged in, not part of AgentRegistration's serialization: the LAN pubkey-lookup half
