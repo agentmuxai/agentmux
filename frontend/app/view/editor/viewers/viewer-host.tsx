@@ -23,6 +23,7 @@ import { HexViewer } from "./hex/hex-viewer";
 import { InfoCard } from "./info/info-card";
 import { LargeTextViewer } from "./large/large-text-viewer";
 import { PdfViewer } from "./pdf/pdf-viewer";
+import { TableViewer } from "./table/table-viewer";
 import { ViewerBar, type ViewerBarProps } from "./viewer-bar";
 import { isProgramPath, TEXT_MAX_BYTES, type ViewerId } from "./viewer-choice";
 import { droppedFileOf, isDroppedPath, neighbourInFolder } from "./viewer-tabs";
@@ -81,6 +82,11 @@ function openWithTheSystemsApp(path: string): void {
     );
 }
 
+/** A PDF's external link: a Browser pane beside this one, never the app. */
+function openLinkBeside(blockId: string, url: string): void {
+    void RpcApi.PaneOpenCommand(TabRpcClient, { view: "browser", url, split_direction: "right", split_reference_block_id: blockId }, {}).catch(() => {});
+}
+
 function ViewerFor(props: { model: EditorViewModel; tabId: string; viewer: ViewerId }): JSX.Element {
     const model = props.model;
     const tab = () => model.tabsAtom().find((t) => t.id === props.tabId);
@@ -111,11 +117,7 @@ function ViewerFor(props: { model: EditorViewModel; tabId: string; viewer: Viewe
         onOpenWithSystem: dropped() || isProgramPath(path()) ? undefined : openWithSystem,
     });
     const mime = () => probe()?.mime || file()?.type || "";
-    // A PDF's external link: a Browser pane beside this one, never the app.
-    const openLink = (url: string) =>
-        void RpcApi.PaneOpenCommand(TabRpcClient, { view: "browser", url, split_direction: "right", split_reference_block_id: model.blockId }, {}).catch(
-            () => {}
-        );
+    const openLink = (url: string) => openLinkBeside(model.blockId, url);
 
     return (
         <Switch>
@@ -158,6 +160,9 @@ function ViewerFor(props: { model: EditorViewModel; tabId: string; viewer: Viewe
             </Match>
             <Match when={props.viewer === "large"}>
                 <LargeTextViewer path={dropped() ? "" : path()} revision={revision()} probe={probe()} blockId={model.blockId} bar={bar()} />
+            </Match>
+            <Match when={props.viewer === "table"}>
+                <TableViewer path={dropped() ? "" : path()} revision={revision()} probe={probe()} blockId={model.blockId} bar={bar()} />
             </Match>
             <Match when={props.viewer === "info"}>
                 <InfoCard

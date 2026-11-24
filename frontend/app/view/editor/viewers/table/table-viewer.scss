@@ -1,0 +1,86 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// The Editor's Table viewer (table-viewer.tsx): a delimited file as rows of
+// cells in the editor's monospace font. A row's height is --table-row-h, which
+// the viewer's arithmetic shares (hex-layout.ts ROW_H). Theme variables only.
+
+@use "../../../../mixins.scss";
+
+.table-viewer-body {
+    position: relative;
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    background: var(--main-bg-color);
+}
+
+.table-viewer-error {
+    padding: var(--space-1) var(--space-2);
+    color: var(--error-text-color);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.table-viewer-grid {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: auto;
+    font-family: var(--font-mono);
+    font-size: var(--text-base);
+    line-height: var(--table-row-h);
+
+    &:focus {
+        outline: none;
+    }
+
+    &:focus-visible {
+        @include mixins.focus-ring-inset;
+    }
+}
+
+// As tall as the file's rows; the rows on screen sit in it by a top margin the viewer sets.
+.table-viewer-spacer {
+    overflow: hidden;
+    width: max-content;
+    min-width: 100%;
+}
+
+.table-viewer-row {
+    display: flex;
+    width: max-content;
+    min-width: 100%;
+    height: var(--table-row-h);
+    padding: 0 var(--space-2);
+    white-space: pre;
+    border-bottom: 1px solid var(--border-color);
+}
+
+// The header row stays at the top of the scroller and takes no room in the scrolled content, so the rows' arithmetic
+// is the same with it or without.
+.table-viewer-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    margin-bottom: calc(var(--table-row-h) * -1);
+    font-weight: 600;
+    background: var(--block-bg-color, var(--main-bg-color));
+}
+
+.table-viewer-number {
+    flex: 0 0 auto;
+    width: calc(var(--table-digits, 3) * 1ch);
+    margin-right: 2ch;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: var(--secondary-text-color);
+    user-select: none;
+}
+
+.table-viewer-cell {
+    flex: 0 0 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    box-sizing: border-box;
+    padding-right: 2ch;
+}

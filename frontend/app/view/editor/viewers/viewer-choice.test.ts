@@ -70,6 +70,15 @@ describe("viewerOptions", () => {
         expect(viewerOptions(probe("other", TEXT_MAX_BYTES + 1))).toEqual(["hex", "info", "large"]);
         expect(viewerOptions(probe("text", TEXT_MAX_BYTES + 1))).toEqual(["large", "info", "hex"]);
     });
+
+    it("offers the Table viewer for a CSV or TSV file under the editor's cap, after Text and never first", () => {
+        expect(viewerOptions({ ...probe("text"), mime: "text/csv" })).toEqual(["text", "table", "info", "hex"]);
+        expect(viewerOptions({ ...probe("text"), mime: "text/tab-separated-values" })).toEqual(["text", "table", "info", "hex"]);
+        expect(viewerOptions({ ...probe("text", TEXT_MAX_BYTES + 1), mime: "text/csv" })).toEqual(["large", "info", "hex"]);
+        expect(chooseViewer({ ...probe("text"), mime: "text/csv" })).toBe("text");
+        expect(chooseViewer({ ...probe("text"), mime: "text/csv" }, "table")).toBe("table");
+        expect(chooseViewer(probe("text"), "table")).toBe("text");
+    });
 });
 
 describe("viewerForDropped", () => {
