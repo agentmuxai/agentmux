@@ -393,7 +393,6 @@
     "frontend/app/view/warden-jobs/cloud-job-bits.tsx": 7,
     "frontend/app/view/warden-jobs/cloud-reporters.tsx": 19,
     "frontend/app/view/warden-jobs/job-dry-run.tsx": 24,
-    "frontend/app/view/warden-jobs/job-editor-fields.tsx": 36,
     "frontend/app/view/warden-jobs/job-editor.tsx": 18,
     "frontend/app/view/warden-jobs/job-params-form.tsx": 2,
     "frontend/app/view/warden-jobs/job-template-approval.tsx": 35,
