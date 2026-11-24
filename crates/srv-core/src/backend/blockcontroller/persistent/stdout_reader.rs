@@ -65,7 +65,9 @@ struct StdoutReader {
     task_feed: crate::backend::background_task_feed::TaskFeed,
     api_retry: crate::backend::agent_api_retry::ApiRetryReader,
     parked_notices_due: bool,
-    login_failed_in_band: bool,
+    /// What the turn's synthetic assistant message said failed ("authentication_failed", or the limit or
+    /// error sentence it carries), for the result frame that follows: that frame names no cause of its own.
+    inband_text: String,
     cli_native: crate::backend::cli_native::reader::CliNativeReader,
     /// What this turn has done, for the loop guard (`agents::loop_guard`).
     loop_guard: crate::agents::loop_guard::LoopGuard,
@@ -88,7 +90,7 @@ struct FrameOutcome {
 /// What a frame says about its turn, before the turn-end work.
 struct FrameVerdict {
     is_result_frame: bool,
-    inband_error: &'static str,
+    inband_error: String,
     early_failure: Option<crate::agents::failure::AgentFailure>,
 }
 
@@ -181,8 +183,8 @@ impl StdoutReader {
             // command's output), and is written just ahead of it
             // (SPEC_CONTEXT_DELIVERY_2026_09_30.md §9 C2).
             parked_notices_due: false,
-            // The turn's synthetic assistant message said the login failed; its result frame follows.
-            login_failed_in_band: false,
+            // The turn's synthetic assistant message said what failed; its result frame follows.
+            inband_text: String::new(),
             cli_native,
             loop_guard: Default::default(),
             ended_by_guard: None,
@@ -387,7 +389,7 @@ impl StdoutReader {
             is_error_result,
             hold_back_for_resume_retry,
             early_failure.is_none(),
-            inband_error,
+            &inband_error,
             flushed_failure_this_tick,
         );
         FrameOutcome { skip: false, hold_back_for_resume_retry, release_parked_notices, ended_because: ended_because.filter(|_| parsed.get("is_error").and_then(|v| v.as_bool()) == Some(true)) }
@@ -562,12 +564,9 @@ impl StdoutReader {
         let is_result_frame =
             parsed.get("type").and_then(|v| v.as_str()) == Some("result");
         if parsed.get("type").and_then(|v| v.as_str()) == Some("assistant") {
-            self.login_failed_in_band = crate::agents::limit_reset::is_login_failure_frame(parsed);
+            self.inband_text = crate::agents::limit_reset::assistant_error_evidence(parsed);
         }
-        let inband_error = if is_result_frame && self.login_failed_in_band { "authentication_failed" } else { "" };
-        if is_result_frame {
-            self.login_failed_in_band = false;
-        }
+        let inband_error = if is_result_frame { std::mem::take(&mut self.inband_text) } else { String::new() };
         // A quota or sign-in failure is stored, and a successful turn's
         // stale failure cleared, before the turn's end is published
         // (`on_turn_end`): whoever reacts to that end (the Supervisor) reads the
@@ -576,7 +575,7 @@ impl StdoutReader {
         // failure.
         let result_is_error = is_result_frame && parsed.get("is_error").and_then(|v| v.as_bool()) == Some(true);
         let early_failure = (result_is_error && self.inner_read.lock().unwrap().shutdown_generation != Some(self.my_generation_read))
-            .then(|| crate::agents::failure::classify(None, None, inband_error, Some(parsed)))
+            .then(|| crate::agents::failure::classify(None, None, &inband_error, Some(parsed)))
             .filter(|f| matches!(f.code, crate::agents::failure::FailureClass::UsageLimit | crate::agents::failure::FailureClass::Auth));
         if let Some(failure) = &early_failure {
             surface_failure(&self.block_id_read, failure, self.broker_read.as_deref(), &self.mstore_read, &self.event_bus_read);
