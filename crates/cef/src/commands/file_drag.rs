@@ -134,6 +134,22 @@ pub fn drop_files_bytes(paths: &[PathBuf]) -> Vec<u8> {
     out
 }
 
+/// The drag IPCs, one arm of the host's command router: `consume_drag_paths` and `peek_drag_paths` give the paths of the OS
+/// drag that entered the caller's window (the renderer passes its own `windowLabel`; `drag_stash.rs`); `register_file_drag`
+/// registers the files a drag out of AgentMux will carry and answers the nonce, or null where no platform hook takes files out yet.
+pub fn ipc(cmd: &str, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let label = args.get("windowLabel").and_then(|v| v.as_str());
+    match cmd {
+        "consume_drag_paths" => Ok(serde_json::json!(crate::drag_stash::take(label))),
+        "peek_drag_paths" => Ok(serde_json::json!(crate::drag_stash::peek(label))),
+        _ if !cfg!(windows) => Ok(serde_json::Value::Null),
+        _ => {
+            let paths: Vec<String> = args.get("paths").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|p| p.as_str().map(str::to_string)).collect()).unwrap_or_default();
+            register(&paths).map(|nonce| serde_json::json!(nonce))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

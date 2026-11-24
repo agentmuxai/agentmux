@@ -501,25 +501,8 @@ async fn route_command(
                 .await
                 .map_err(|e| format!("copy_file_to_dir join error: {}", e))?
         }
-        // Paths of the OS file drag that entered the caller's window. The
-        // renderer passes its own `?windowLabel=`; see drag_stash.rs.
-        "consume_drag_paths" => {
-            let label = args.get("windowLabel").and_then(|v| v.as_str());
-            Ok(serde_json::json!(crate::drag_stash::take(label)))
-        }
-        // The files a drag out of AgentMux will carry (`commands/file_drag.rs`): checked here, once; the answer is the nonce
-        // the drag holds, or null where no platform hook takes files out yet.
-        "register_file_drag" => {
-            if !cfg!(windows) {
-                return Ok(serde_json::Value::Null);
-            }
-            let paths: Vec<String> = args.get("paths").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|p| p.as_str().map(str::to_string)).collect()).unwrap_or_default();
-            commands::file_drag::register(&paths).map(|nonce| serde_json::json!(nonce))
-        }
-        "peek_drag_paths" => {
-            let label = args.get("windowLabel").and_then(|v| v.as_str());
-            Ok(serde_json::json!(crate::drag_stash::peek(label)))
-        }
+        // The drag IPCs: the paths of an OS drag into a window (`drag_stash.rs`) and the files a drag out will carry.
+        "consume_drag_paths" | "peek_drag_paths" | "register_file_drag" => commands::file_drag::ipc(cmd, args),
 
         // ---- Command palette ----
         "run_command" => commands::palette::run_command(state, args),
