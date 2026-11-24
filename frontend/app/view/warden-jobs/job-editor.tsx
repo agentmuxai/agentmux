@@ -6,7 +6,7 @@
 // sends it with `jobs.save`, which only the operator's own window may do. Dry run shows what the
 // definition would do and starts nothing. A template must be approved before a job is made from it.
 
-import { createMemo, createSignal, For, onMount, Show, type Accessor, type JSX, type Setter } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, onMount, Show, type Accessor, type JSX, type Setter } from "solid-js";
 import { createStore, reconcile, type SetStoreFunction } from "solid-js/store";
 
 import {
@@ -20,6 +20,8 @@ import {
     type SelectOption,
 } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
+import { onMuxEvent } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { sortByLastUsed } from "@/app/view/agent/agent-recency";
@@ -131,9 +133,10 @@ function createEditorState(props: JobEditorProps): EditorState {
         ).map((a) => ({ value: a.id, label: a.name }))
     );
     const [droneOptions, setDroneOptions] = createSignal<SelectOption[]>([]);
-    onMount(() => {
-        void loadDroneOptions().then(setDroneOptions);
-    });
+    // The list follows drones made or removed while the editor is open.
+    const reloadDrones = () => void loadDroneOptions().then(setDroneOptions);
+    onMount(reloadDrones);
+    onCleanup(onMuxEvent(WpsEvent.DronesChanged, reloadDrones));
     const nameOf = (id: string) => agentOptions().find((o) => o.value === id)?.label ?? id;
     const vault = () => (vaultAvailable() ? (vaultEntries() ?? []) : null);
     return {
