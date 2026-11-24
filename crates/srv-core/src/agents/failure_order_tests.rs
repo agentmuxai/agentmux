@@ -134,3 +134,38 @@ fn a_failure_explains_itself_with_its_evidence_and_tail() {
     let f = classify(Some(2), None, "boom", None);
     assert_eq!(f.explain(), "Agent failed — The agent exited with a non-zero status and no recognized error. The raw stderr tail is included below. [exit 2]\n--- claude stderr (tail) ---\nboom");
 }
+
+#[test]
+fn a_limit_sentence_in_the_result_field_is_not_hidden_behind_an_earlier_error_field() {
+    let frame = json!({
+        "type": "result", "is_error": true, "subtype": "success", "error": "rate_limit",
+        "result": "You've hit your 5-hour limit · resets 8:10pm (America/Los_Angeles)"
+    });
+    let f = classify(None, None, "", Some(&frame));
+    assert_eq!(f.code, FailureClass::UsageLimit);
+    assert!(f.stderr_tail.contains("8:10pm"), "{}", f.stderr_tail);
+}
+
+#[test]
+fn the_synthetic_message_text_is_the_evidence_when_the_result_frame_names_no_cause() {
+    let frame = json!({ "type": "result", "is_error": true, "subtype": "success" });
+    let said = "rate_limit You've hit your 5-hour limit · resets 8:10pm (America/Los_Angeles)";
+    assert_eq!(classify(None, None, said, Some(&frame)).code, FailureClass::UsageLimit);
+    // Without that text the same frame has no recognized cause, as before.
+    assert_eq!(classify(None, None, "", Some(&frame)).code, FailureClass::UnknownNonZero);
+    // The server's own throttle in the same place is still the transient class, not the plan's limit.
+    let throttle = "rate_limit API Error: Request rejected (429) · temporarily limiting requests (not your usage limit)";
+    assert_eq!(classify(None, None, throttle, Some(&frame)).code, FailureClass::RateLimited);
+}
+
+#[test]
+fn every_error_field_of_a_result_frame_is_read_once() {
+    let frame = json!({
+        "type": "result", "is_error": true, "subtype": "error_during_execution",
+        "error": "boom", "result": "boom", "errors": ["No conversation found with session ID: x"]
+    });
+    let text = super::frame_error_text(&frame);
+    assert_eq!(text, "boom\nNo conversation found with session ID: x");
+    // The subtype is the text only when nothing else says anything.
+    assert_eq!(super::frame_error_text(&json!({ "subtype": "success", "result": "" })), "success");
+}

@@ -54,7 +54,7 @@ function EditorActions(props: Props & { confirm: PaneConfirm }): JSX.Element {
                     // Its click waits for the person's answer to the discard question, which is not work in progress.
                     pending={false}
                     onClick={() => requestCancel({ isDirty: draft.dirtyAtom, onCancel: props.t.cancel, confirm: askDiscard(props.confirm) })}
-                    title="Cancel (Esc)"
+                    title={`Cancel (${keyLabel("Escape")})`}
                 >
                     Cancel
                 </Button>
