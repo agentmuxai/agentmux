@@ -163,13 +163,17 @@ fn answer(req_id: &str, ok: bool, error: &str) -> Value {
 
 /// A jekt that claims to be a quiet note: answered here (`Some`), never delivered as a jekt. `None` for every other jekt.
 pub(crate) async fn intercept(state: &AppState, req: &crate::backend::reactive::types::InjectionRequest, replay: &mut super::reactive::replay::Reservation) -> Option<Value> {
+    intercept_among(state, req, replay, state.lan_discovery.get_instances()).await
+}
+
+/// [`intercept`] with the LAN peers named, so the whole path can be run with the peers a test lists.
+async fn intercept_among(state: &AppState, req: &crate::backend::reactive::types::InjectionRequest, replay: &mut super::reactive::replay::Reservation, peers: Vec<LanInstance>) -> Option<Value> {
     let sender = req.source_agent.as_deref().unwrap_or_default();
     if req.delivery_tier.as_deref() != Some("lan") || !note::is_quiet_note(&req.message) || !is_machine_sender(sender) {
         return None;
     }
     let req_id = req.request_id.clone().unwrap_or_default();
     let install_ok = req.lan_verified == Some(true) && install_approved(state, sender).await;
-    let peers = state.lan_discovery.get_instances();
     let (n, machine) = match judge(&req.message, sender, req.lan_verified, install_ok, &peers) {
         Verdict::Ordinary => return None,
         Verdict::Refuse(why) => {

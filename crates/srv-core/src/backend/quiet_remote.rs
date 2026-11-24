@@ -43,8 +43,11 @@ pub struct Note {
     pub last: String,
 }
 
+/// The agent's name as the LAN lists it (its route name, `Loap #3` is `Loap-3`), kept to the characters a name may hold.
+/// The receiving machine compares it with the agents the sending machine lists, so it must be that name and not the
+/// definition's display text.
 fn clean_name(raw: &str) -> String {
-    let kept: String = raw.chars().filter(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | ' ')).collect();
+    let kept: String = agentmux_common::slug::agent_route_name(raw.trim()).chars().filter(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | ' ')).collect();
     kept.trim().chars().take(MAX_NAME).collect()
 }
 
@@ -77,7 +80,7 @@ pub fn is_quiet_note(text: &str) -> bool {
 /// agent name. The fields are cleaned again, whatever the sender did.
 pub fn parse(text: &str) -> Option<Note> {
     let note: Note = serde_json::from_str(text.strip_prefix(PREFIX)?).ok()?;
-    if note.state != "idle" && note.state != "running" {
+    if (note.state != "idle" && note.state != "running") || !note.agent.chars().any(char::is_alphanumeric) {
         return None;
     }
     let clean = Note::new(&note.agent, note.state == "running", note.minutes, &note.tasks, &note.last);

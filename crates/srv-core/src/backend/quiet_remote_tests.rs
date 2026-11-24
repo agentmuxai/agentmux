@@ -102,3 +102,14 @@ fn a_lead_is_named_with_its_machine_and_a_drop_is_logged_once() {
     assert!(first_drop("zed@nowhere:no-route"));
     assert!(!first_drop("ZED@nowhere:no-route"));
 }
+
+/// The name sent is the one the LAN lists for the agent (its route name), so the other machine can find the worker
+/// among the agents the sender lists.
+#[test]
+fn the_worker_is_named_as_the_lan_lists_it() {
+    assert_eq!(Note::new("Loap #3", false, 1, &[], "").agent, "Loap-3");
+    assert_eq!(Note::new("Wren", false, 1, &[], "").agent, "Wren");
+    assert_eq!(Note::new("Loap-3", false, 1, &[], "").agent, "Loap-3", "a name that is already one stays");
+    let parsed = parse(&Note::new("Loap #3", true, 4, &[2], "").wire()).expect("a note");
+    assert_eq!(parsed.agent, "Loap-3");
+}
