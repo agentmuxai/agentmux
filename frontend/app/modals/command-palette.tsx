@@ -16,6 +16,7 @@ import { Modal } from "@/element/modal";
 import { searchCommands } from "./command-palette-search";
 import { usePaletteAgents } from "./palette-agents";
 import { arrangeRecent, paletteRows, paletteSegments, sortCommands, type PaletteRowModel } from "./palette-groups";
+import { afterNextPaint } from "./palette-after-paint";
 import { watchCutLabels } from "./palette-cut-labels";
 import { PaletteRow } from "./palette-row";
 import { markEnd, markStart } from "@/perf/marks";
@@ -138,34 +139,41 @@ function usePaletteResults(query: () => string, selectedIdx: () => number) {
     return { filtered, clampedIdx, rows, hasGroups };
 }
 
-/** How many rows are built at once. The rest follow a frame at a time, so a list of thousands costs one chunk a press. */
+/** How many rows are built a time once the first ones are up: the rest follow a chunk after each frame is drawn. */
 export const ROW_CHUNK = 60;
 
 /**
- * The rows built so far: the first `ROW_CHUNK` at once, then another chunk each frame until the list is whole. A keystroke
- * starts over from the first chunk (rows that stay are kept), and a key that moves the selection past the built rows
- * builds through it before it is shown.
+ * The rows built at once, when the palette opens and at each keystroke: about what the list shows (the box is a dozen
+ * rows tall, and a row or two more is built beside them), so the first frame mounts little.
+ */
+export const FIRST_ROWS = 24;
+
+/**
+ * The rows built so far: the first `FIRST_ROWS` at once, then a `ROW_CHUNK` more after each frame that is drawn, until the
+ * list is whole. The chunks follow the paint, not the next rendering step: they would be in the first frame otherwise.
+ * A keystroke starts over from the first rows (rows that stay are kept), and a key that moves the selection past the built
+ * rows builds through it before it is shown.
  */
 function useBuiltRows(rows: () => PaletteRowModel[]) {
-    const [built, setBuilt] = createSignal(ROW_CHUNK);
-    let frame = 0;
+    const [built, setBuilt] = createSignal(FIRST_ROWS);
+    let cancel: (() => void) | undefined;
     const grow = (): void => {
-        if (frame || built() >= rows().length) return;
-        frame = requestAnimationFrame(() => {
-            frame = 0;
+        if (cancel || built() >= rows().length) return;
+        cancel = afterNextPaint(() => {
+            cancel = undefined;
             setBuilt(built() + ROW_CHUNK);
             grow();
         });
     };
-    // The rows past the first chunk, a chunk a frame: from the start, and again whenever the list grows past what is built
+    // The rows past the first ones, a chunk a frame: from the start, and again whenever the list grows past what is built
     // (an agent starts while the palette is open), not only when a character is typed.
     createEffect(on(() => rows().length, grow));
-    onCleanup(() => cancelAnimationFrame(frame));
+    onCleanup(() => cancel?.());
     return {
         segments: createMemo(() => paletteSegments(rows().slice(0, built()))),
-        /** The list changed: build from the first chunk again, and the rest in the frames after. */
+        /** The list changed: build from the first rows again, and the rest after the frames that follow. */
         restart: () => {
-            setBuilt(ROW_CHUNK);
+            setBuilt(FIRST_ROWS);
             grow();
         },
         /** Row `idx` is about to be shown: it, and a chunk after it, are built. */

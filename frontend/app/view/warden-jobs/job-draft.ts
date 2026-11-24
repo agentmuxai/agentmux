@@ -11,7 +11,7 @@ import type { JobTemplateManifest } from "@/types/rpc/JobTemplateManifest";
 import type { JobTemplateParam } from "@/types/rpc/JobTemplateParam";
 
 export type TriggerKind = "cron" | "every" | "once" | "manual";
-export type ActionKind = "message" | "task" | "spawn";
+export type ActionKind = "message" | "task" | "spawn" | "drone";
 export type Json = Record<string, unknown>;
 
 /** A parameter's form value: text for most kinds, on or off for a boolean. */
@@ -53,6 +53,8 @@ export interface JobDraft {
     model: string;
     account: string;
     keepWorker: boolean;
+    /** The drone a `drone` action runs. */
+    droneId: string;
     overlap: string;
     catchUp: string;
     timeoutMinutes: string;
@@ -113,6 +115,7 @@ export function blankDraft(tz: string = localZone()): JobDraft {
         model: "",
         account: "",
         keepWorker: false,
+        droneId: "",
         overlap: "skip",
         catchUp: "skip",
         timeoutMinutes: "",
@@ -273,7 +276,8 @@ export function draftFromDefinition(def: Json, manifest: JobTemplateManifest | n
     applyTrigger(d, obj(def.trigger));
     const action = obj(def.action);
     const kind = str(action.kind);
-    if (kind === "message" || kind === "task" || kind === "spawn") d.actionKind = kind;
+    if (kind === "message" || kind === "task" || kind === "spawn" || kind === "drone") d.actionKind = kind;
+    d.droneId = str(action.drone_id);
     d.to = str(action.to);
     d.brief = str(action.brief);
     d.title = str(action.title);
@@ -361,6 +365,9 @@ function buildAction(d: JobDraft, errors: string[]): Json {
             if (d.payload) action.payload = d.payload;
             return action;
         }
+        case "drone":
+            need(d.droneId, "Choose the drone to run.");
+            return { kind: "drone", drone_id: d.droneId };
         default: {
             need(d.leader, "Choose the leader of the worker.");
             if (!templated) need(d.brief, "Write the brief the worker gets.");
@@ -383,7 +390,8 @@ function buildPolicy(d: JobDraft, errors: string[]): Json {
         else apply(n);
     };
     whole(d.timeoutMinutes, "Timeout (minutes)", (n) => (policy.timeout_minutes = n));
-    whole(d.retries, "Retries", (n) => (policy.retries = n));
+    // A drone run is not run again after a failure (srv refuses retries for a drone job).
+    if (d.actionKind !== "drone") whole(d.retries, "Retries", (n) => (policy.retries = n));
     if (d.group.trim()) policy.group = d.group.trim();
     const caps: Json = {};
     for (const [text, key, what] of [

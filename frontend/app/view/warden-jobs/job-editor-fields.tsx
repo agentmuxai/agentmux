@@ -9,8 +9,8 @@
 import { Show, type JSX } from "solid-js";
 import type { SetStoreFunction } from "solid-js/store";
 
-import { Field, SegmentedControl, Select, Switch, TextArea, TextInput, type SelectOption } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
+import { Field, SegmentedControl, Select, Switch, TextArea, TextInput, type SelectOption } from "@/app/element/ui";
 import type { CapDefaults } from "@/types/rpc/CapDefaults";
 
 import { CATCH_UPS, OVERLAPS, type ActionKind, type JobDraft, type TriggerKind } from "./job-draft";
@@ -39,6 +39,7 @@ const actions = (): { value: ActionKind; label: string }[] => [
     { value: "message", label: t("jobs.fields.action.message") },
     { value: "task", label: t("jobs.fields.action.task") },
     { value: "spawn", label: t("jobs.fields.action.spawn") },
+    { value: "drone", label: t("jobs.fields.action.drone") },
 ];
 
 export function WhenSection(props: SectionProps): JSX.Element {
@@ -101,13 +102,58 @@ export function WhenSection(props: SectionProps): JSX.Element {
     );
 }
 
-export function WhatSection(
-    props: SectionProps & {
-        agents: readonly SelectOption[];
-        /** A template writes the brief. */
-        templated: boolean;
-    }
-): JSX.Element {
+/** The drone a job runs, chosen from the drones this workspace has. */
+function DroneField(props: SectionProps & { drones: readonly SelectOption[] }): JSX.Element {
+    return (
+        <Field
+            label={t("jobs.fields.drone")}
+            layout="stacked"
+            description={t("jobs.fields.droneHint")}
+        >
+            <Select
+                value={props.draft.droneId}
+                onChange={(v) => props.set("droneId", v)}
+                options={withCurrent(props.drones, props.draft.droneId, "Choose a drone")}
+            />
+        </Field>
+    );
+}
+
+/** Timeout, and retries for an agent run: a drone is not run again after a failure. */
+function RunLimitFields(props: SectionProps): JSX.Element {
+    return (
+        <>
+            <Field label={t("jobs.fields.timeout")} layout="stacked">
+                <TextInput
+                    type="number"
+                    min="1"
+                    value={props.draft.timeoutMinutes}
+                    onInput={(e) => props.set("timeoutMinutes", e.currentTarget.value)}
+                />
+            </Field>
+            <Show when={props.draft.actionKind !== "drone"}>
+                <Field label={t("jobs.fields.retries")} layout="stacked" description={t("jobs.fields.retriesHelp")}>
+                    <TextInput
+                        type="number"
+                        min="0"
+                        max="3"
+                        value={props.draft.retries}
+                        onInput={(e) => props.set("retries", e.currentTarget.value)}
+                    />
+                </Field>
+            </Show>
+        </>
+    );
+}
+
+type WhatProps = SectionProps & {
+    agents: readonly SelectOption[];
+    drones: readonly SelectOption[];
+    /** A template writes the brief. */
+    templated: boolean;
+};
+
+export function WhatSection(props: WhatProps): JSX.Element {
     const brief = (field: "brief" | "payload", label: string) => (
         <Show
             when={!props.templated}
@@ -168,6 +214,9 @@ export function WhatSection(
                     </Field>
                 </div>
                 {brief("payload", t("jobs.fields.details"))}
+            </Show>
+            <Show when={props.draft.actionKind === "drone"}>
+                <DroneField {...props} />
             </Show>
             <Show when={props.draft.actionKind === "spawn"}>
                 <Field
@@ -234,23 +283,7 @@ export function PolicySection(props: SectionProps & { defaults: CapDefaults | un
                         options={CATCH_UPS.map((o) => ({ value: o, label: o }))}
                     />
                 </Field>
-                <Field label={t("jobs.fields.timeout")} layout="stacked">
-                    <TextInput
-                        type="number"
-                        min="1"
-                        value={props.draft.timeoutMinutes}
-                        onInput={(e) => props.set("timeoutMinutes", e.currentTarget.value)}
-                    />
-                </Field>
-                <Field label={t("jobs.fields.retries")} layout="stacked" description={t("jobs.fields.retriesHelp")}>
-                    <TextInput
-                        type="number"
-                        min="0"
-                        max="3"
-                        value={props.draft.retries}
-                        onInput={(e) => props.set("retries", e.currentTarget.value)}
-                    />
-                </Field>
+                <RunLimitFields {...props} />
                 <Field label={t("jobs.fields.group")} layout="stacked" description={t("jobs.fields.groupHelp")}>
                     <TextInput value={props.draft.group} onInput={(e) => props.set("group", e.currentTarget.value)} />
                 </Field>

@@ -82,7 +82,7 @@ export function ConnectorDetails(props: ConnectorDetailsProps): JSX.Element {
             fallback={<AgentMuxConnectBody muxbus={props.muxbus} />}
         >
             <div class="connector-details">
-                <Accounts {...props} />
+                {/* Above the accounts: under a long list it opened out of sight, and the press on Connect looked dead. */}
                 <Show when={props.adding()}>
                     <AddAccountSection
                         tile={props.entry().tile}
@@ -93,6 +93,7 @@ export function ConnectorDetails(props: ConnectorDetailsProps): JSX.Element {
                         onClose={() => props.setAdding(false)}
                     />
                 </Show>
+                <Accounts {...props} />
             </div>
         </Show>
     );

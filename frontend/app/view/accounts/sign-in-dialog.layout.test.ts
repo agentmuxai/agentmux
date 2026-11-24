@@ -39,7 +39,7 @@ const steps = `
 const dialog = (name: string, z: number, w: number, h: number) =>
     `<div data-case="${name}" style="position:relative;display:flex;flex-direction:column;width:${w}px;height:${h}px;--pane-zoom:${z}">` +
     `<div class="modal-layer-mount modal-layer-mount--fill"><div class="modal-root" data-scope="pane">` +
-    `<div class="modal-panel accounts-chooser accounts-chooser--pane"><div class="in-app-login-waiting">${steps}</div></div></div></div></div>`;
+    `<div class="modal-panel accounts-chooser accounts-chooser--pane"><div class="accounts-chooser-login-body"><div class="in-app-login-waiting">${steps}</div></div></div></div></div></div>`;
 
 /** The docked card under a short transcript, in a pane `h` tall. */
 const docked = (name: string, h: number) =>
@@ -63,6 +63,8 @@ for (const el of document.querySelectorAll("[data-case]")) {
         inside: pr.top >= r.top - 1 && pr.bottom <= r.bottom + 1,
         hint: num(panel.querySelector(".in-app-login-waiting-title").getBoundingClientRect().height),
         buttonsInside: right <= pr.right + 0.5,
+        // Room between the panel's edge and the first line, in the panel's own (zoomed) px.
+        inset: num(panel.querySelector(".in-app-login-waiting-title").getBoundingClientRect().left - pr.left),
         panelHeight: num(pr.height),
         transcriptHeight: transcript ? num(transcript.getBoundingClientRect().height) : null,
         // The top stays reachable: scrolling to the top shows the title, which is not cut off.
@@ -78,6 +80,7 @@ interface Measured {
     inside: boolean;
     hint: number;
     buttonsInside: boolean;
+    inset: number;
     panelHeight: number;
     transcriptHeight: number | null;
     topReachable: boolean;
@@ -98,6 +101,9 @@ describe.skipIf(!BROWSER)("sign-in dialog over an agent pane", () => {
             expect(r[k].buttonsInside).toBe(true); // the rows wrapped
             expect(r[k].topReachable).toBe(true);
         }
+        // Text and controls sit in from the dialog's edge, not against it; the docked card has its own padding.
+        expect(r.z1.inset).toBeGreaterThanOrEqual(14);
+        expect(r.docked.inset).toBeGreaterThanOrEqual(12);
         // A narrow pane at zoom 2 (about 128 px of room): a button wider than that wraps its label, it is not cut off.
         expect(r.narrow.buttonsInside).toBe(true);
 
