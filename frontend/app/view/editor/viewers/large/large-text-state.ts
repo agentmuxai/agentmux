@@ -17,6 +17,7 @@ import type { FileProbe } from "../viewer-choice";
 import { rangeReaderOf } from "../hex/hex-chunks";
 import { takeOpenPosition, watchOpenPosition } from "../../open-position";
 import { LineSource, type LineText } from "./line-source";
+import { createFollow } from "./large-follow";
 import { createLargeFind } from "./large-find-state";
 import { hitOrdinal, type LineMatcher } from "./large-find";
 import { createLineScroll } from "./line-scroll";
@@ -104,6 +105,16 @@ function createLineFeed(props: LargeTextProps) {
         setError("");
         setLoaded((v) => v + 1);
     };
+    /** Show more of a cut line (0-based). */
+    const expand = (n: number): void => {
+        const s = untrack(source);
+        if (!s) return;
+        void s.expand(n).then(
+            () => untrack(source) === s && setLoaded((v) => v + 1),
+            (e) => untrack(source) === s && setError(`Couldn't read the file: ${e instanceof Error ? e.message : String(e)}`)
+        );
+    };
+    const canExpand = (n: number): boolean => (void loaded(), source()?.canExpand(n) ?? false);
     /** The 0-based line that holds a byte of the file. */
     const lineOf = async (offset: number): Promise<number> => {
         const { path } = props;
@@ -115,7 +126,7 @@ function createLineFeed(props: LargeTextProps) {
         );
         return r.line_at ?? 0;
     };
-    return { source, total, loaded, error, want, lineAt, retry, lineOf };
+    return { source, total, loaded, error, want, lineAt, retry, lineOf, expand, canExpand };
 }
 
 /**
@@ -281,6 +292,7 @@ export function createLargeText(props: LargeTextProps) {
     };
     useOpenLine(props, lines, goTo);
     const hit = createCurrentHit(feed, () => find.needle(), () => props.probe?.text?.encoding);
+    const follow = createFollow(lines, scroll);
     const find = createLargeFind({
         path: () => props.path,
         size: () => props.probe?.size ?? 0,
@@ -337,6 +349,7 @@ export function createLargeText(props: LargeTextProps) {
         clearBadLine: () => setBadLine(false),
         bindLineBox: (el: HTMLInputElement) => (lineBox = el),
         find,
+        follow,
         onKeyDown,
         onBarKeyDown,
         facts,

@@ -137,6 +137,13 @@ pub(crate) fn sign_in_url(origin: &str, code: &str) -> String {
     format!("{}/auth/enter#{code}", origin.trim_end_matches('/'))
 }
 
+/// A narrow terminal wraps the long line above and a copy of it breaks: the same sign-in by a short address and the code on its own
+/// line, pasted into the page.
+fn say_short_form<T: Terminal>(terminal: &mut T, origin: &str, code: &str) {
+    terminal.say(&format!("If the line wraps and will not copy, open {}/auth/enter in your own browser and paste this code there:", origin.trim_end_matches('/')));
+    terminal.say(code);
+}
+
 /// `y` or `yes` is yes; anything else, including a bare Enter, is no.
 pub(crate) fn is_yes(answer: &str) -> bool {
     matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
@@ -183,11 +190,13 @@ pub(crate) async fn run<S: Server, T: Terminal>(server: &S, origin: &str, print:
     if print {
         terminal.say("Open this line in your own browser within a minute (it works once):");
         terminal.say(&url);
+        say_short_form(terminal, origin, &code);
     } else if terminal.open_browser(&url) {
         terminal.say("Opened your browser. The page shows a short phrase.");
     } else {
         terminal.say("Could not open a browser. Open this line in your own browser within a minute (it works once):");
         terminal.say(&url);
+        say_short_form(terminal, origin, &code);
     }
 
     // Wait for a browser to enter the code.

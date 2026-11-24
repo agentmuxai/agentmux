@@ -153,10 +153,10 @@ pub(crate) fn close_pane_outcome(block: &str, now: &Value) -> anyhow::Result<Str
         };
     }
     match now["status"].as_str().unwrap_or("") {
-        "shut_down" => Ok(format!("Closed pane {block:?}: its user didn't keep it in time.")),
+        "shut_down" => Ok(format!("Closed pane {block:?}. Its user was given a few seconds to keep it and did not.")),
         "kept_by_user" => Ok(format!("Not closed: the user chose to keep pane {block:?} running.")),
         "superseded" => Ok(format!("Pane {block:?} was already closed.")),
-        "proceeding" => Ok(format!("Pane {block:?} is shutting down: its user didn't keep it.")),
+        "proceeding" => Ok(format!("Pane {block:?} is closing. Its user was given a few seconds to keep it and did not.")),
         "failed" => anyhow::bail!("close failed: {}", now["error"].as_str().unwrap_or("no detail")),
         _ => anyhow::bail!("close of {block:?}: no answer from the user's override window"),
     }
@@ -521,4 +521,28 @@ fn delivery_failure(to: &str, result: &Value) -> Result<String> {
         )
     }
     anyhow::bail!("Message delivery failed: {err}")
+}
+
+#[cfg(test)]
+mod close_answer_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// The person is given a window to keep a pane the agent closes; a pane that closed says it closed, and why the person's
+    /// silence did not stop it, not a sentence that reads like an error.
+    #[test]
+    fn a_closed_pane_says_it_closed_and_that_its_user_did_not_keep_it() {
+        let closed = close_pane_outcome("b1", &json!({ "status": "shut_down" })).unwrap();
+        assert!(closed.starts_with("Closed pane \"b1\"."), "{closed}");
+        assert!(closed.contains("was given a few seconds to keep it and did not"), "{closed}");
+        assert!(!closed.contains("in time"), "{closed}");
+        let closing = close_pane_outcome("b1", &json!({ "status": "proceeding" })).unwrap();
+        assert!(closing.starts_with("Pane \"b1\" is closing."), "{closing}");
+    }
+
+    #[test]
+    fn a_pane_the_person_kept_still_says_so() {
+        let kept = close_pane_outcome("b1", &json!({ "status": "kept_by_user" })).unwrap();
+        assert!(kept.starts_with("Not closed: the user chose to keep pane"), "{kept}");
+    }
 }

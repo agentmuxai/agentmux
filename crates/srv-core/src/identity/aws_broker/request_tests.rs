@@ -18,7 +18,7 @@ fn policy() -> Result<Option<Arc<Policy>>, String> {
 }
 
 fn ask<'a>(profile: &'a str, reason: Option<&'a str>) -> Ask<'a> {
-    Ask { agent_uid: "uid-jcont", agent_slug: "jcont", in_container: true, profile, reason, seconds: None }
+    Ask { agent_uid: "uid-jcont", agent_slug: "jcont", in_container: true, profile, reason, tag: None, seconds: None }
 }
 
 async fn go(fake: &Fake, sessions: &Sessions, ask: Ask<'_>) -> Result<Granted, Refusal> {
@@ -173,4 +173,65 @@ async fn a_grant_that_is_held_or_refused_is_never_minted() {
         assert!(r.message.contains("Identity aws_grants"), "{}", r.message);
         assert_eq!(fake.runs(), 0, "nothing is minted for a held grant");
     }
+}
+
+/// A grant that takes one tag from the caller. The key and prefix are invented.
+const TAGGED: &str = r#"{ "version": 1, "grants": {
+    "scoped": { "tier": "read", "mint": { "kind": "command", "argv": ["/opt/mint", "--tag", "{tag_key}={tag}", "--reason", "{reason}"] }, "agents": ["jcont"], "needs_reason": true,
+                "caller_tag": { "key": "Scope", "prefix": "team-a/" } },
+    "plain": { "tier": "read", "mint": { "kind": "command", "argv": ["/opt/read"] }, "agents": ["*"] }
+} }"#;
+
+async fn tagged(fake: &Fake, sessions: &Sessions, tag: Option<&str>, reason: Option<&str>) -> Result<Granted, Refusal> {
+    let policy = Ok(Some(Arc::new(Policy::parse(TAGGED).unwrap())));
+    credentials_for(policy, sessions, fake, &Ask { tag, ..ask("scoped", reason) }, now()).await
+}
+
+#[tokio::test]
+async fn a_grant_that_takes_a_tag_mints_with_the_callers_value_and_records_it() {
+    let fake = Fake::ok(creds_json(30));
+    let g = tagged(&fake, &Sessions::default(), Some(" team-a/db/password "), Some("check the rotation")).await.unwrap();
+    assert_eq!(g.tag, Some(("Scope".to_string(), "team-a/db/password".to_string())));
+    let seen = fake.seen.lock().unwrap();
+    assert_eq!(seen[0].1, ["--tag", "Scope=team-a/db/password", "--reason", "check the rotation"]);
+}
+
+#[tokio::test]
+async fn a_value_that_is_missing_has_other_characters_or_another_prefix_is_refused_with_a_sentence_and_not_minted() {
+    let long = format!("team-a/{}", "x".repeat(250));
+    for (value, says) in [
+        (None, "needs the Scope tag"),
+        (Some("  "), "needs the Scope tag"),
+        (Some("team-a/has space"), "only letters, digits and _.:/=+-@"),
+        (Some("team-a/*"), "only letters, digits and _.:/=+-@"),
+        (Some("team-a/x,Other=y"), "only letters, digits and _.:/=+-@"),
+        (Some("team-a/new\nline"), "only letters, digits and _.:/=+-@"),
+        (Some(long.as_str()), "at most 256 characters"),
+        (Some("team-b/other"), "has to start with 'team-a/'"),
+        (Some("TEAM-A/upper"), "has to start with 'team-a/'"),
+    ] {
+        let fake = Fake::ok(creds_json(30));
+        let r = tagged(&fake, &Sessions::default(), value, Some("why")).await.err().unwrap_or_else(|| panic!("{value:?} was granted"));
+        assert_eq!((r.status, r.code), (StatusCode::BAD_REQUEST, "TAG_REFUSED"), "{value:?}");
+        assert!(r.message.contains(says), "{value:?}: {}", r.message);
+        assert_eq!(fake.runs(), 0, "{value:?}: nothing was minted");
+    }
+    // 256 characters is allowed.
+    let edge = format!("team-a/{}", "x".repeat(249));
+    assert!(tagged(&Fake::ok(creds_json(30)), &Sessions::default(), Some(&edge), Some("why")).await.is_ok());
+}
+
+#[tokio::test]
+async fn a_session_is_for_one_value_and_a_grant_that_takes_no_tag_ignores_one() {
+    let fake = Fake::ok(creds_json(30));
+    let sessions = Sessions::default();
+    let first = tagged(&fake, &sessions, Some("team-a/one"), Some("why")).await.unwrap();
+    let again = tagged(&fake, &sessions, Some("team-a/one"), Some("why")).await.unwrap();
+    let other = tagged(&fake, &sessions, Some("team-a/two"), Some("why")).await.unwrap();
+    assert_eq!((first.source, again.source, other.source), (Source::Fresh, Source::Reused, Source::Fresh));
+    assert_eq!(fake.runs(), 2, "another value is another mint");
+    // A grant with no tag mints as it always did, whatever the caller sent.
+    let policy = Ok(Some(Arc::new(Policy::parse(TAGGED).unwrap())));
+    let plain = credentials_for(policy, &Sessions::default(), &Fake::ok(creds_json(30)), &Ask { tag: Some("team-a/x"), ..ask("plain", None) }, now()).await.unwrap();
+    assert_eq!(plain.tag, None);
 }

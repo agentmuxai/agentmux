@@ -39,6 +39,8 @@ pub fn effect_of(kind: BlockKind, node: &FlowNode, body: Effect, resolve: &dyn F
         BlockKind::Task | BlockKind::Agent | BlockKind::Message | BlockKind::Notify | BlockKind::Spawn => Effect::Effectful,
         // A command may change anything it can reach, and a restart cannot tell how far it got.
         BlockKind::Run => Effect::Effectful,
+        // It claims a key: claimed again by a run that is taken up after a restart it would say "seen", so a restart asks.
+        BlockKind::Once => Effect::Effectful,
         // The callee may do anything, and a restart cannot tell how far it got.
         BlockKind::Drone => Effect::Effectful,
         // The items already done would be done again, so it is as the body is.

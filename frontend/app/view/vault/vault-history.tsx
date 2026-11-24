@@ -11,6 +11,7 @@ import { Modal } from "@/app/element/modal";
 import { ModalBody, ModalFooter, ModalHeader } from "@/app/element/modal-parts";
 import { tip } from "@/app/element/tip";
 import { Button } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import type { VaultActivity } from "@/types/rpc/VaultActivity";
 import type { VaultChain } from "@/types/rpc/VaultChain";
 import { formatWhen } from "./vault-format";
@@ -18,10 +19,11 @@ import { loadChain, loadHistory } from "./vault-store";
 
 type Filter = "all" | "changes" | "uses";
 
-const FILTERS: { id: Filter; label: string }[] = [
-    { id: "all", label: "All" },
-    { id: "changes", label: "Changes" },
-    { id: "uses", label: "Uses" },
+// Built when drawn, so a change of language shows.
+const filters = (): { id: Filter; label: string }[] => [
+    { id: "all", label: t("vault.history.filterAll") },
+    { id: "changes", label: t("vault.history.filterChanges") },
+    { id: "uses", label: t("vault.history.filterUses") },
 ];
 
 export function historyFilter(rows: VaultActivity[], filter: Filter): VaultActivity[] {
@@ -31,13 +33,13 @@ export function historyFilter(rows: VaultActivity[], filter: Filter): VaultActiv
 /** Why a row says what it does: the agent's words, or what a missing reason means for that row. */
 export function whyOf(a: VaultActivity): string {
     if (a.reason) return a.reason;
-    if (!a.actor_kind) return "(before reasons were recorded)";
-    return a.actor_kind === "agent" ? "(no reason given)" : "";
+    if (!a.actor_kind) return t("vault.history.beforeReasons");
+    return a.actor_kind === "agent" ? t("vault.history.noReason") : "";
 }
 
 /** Who did it, with the machine when the rows come from more than one. */
 export function whoOf(a: VaultActivity): string {
-    return a.actor === "you" ? "You" : agentNameOf(a.actor);
+    return a.actor === "you" ? t("vault.history.you") : agentNameOf(a.actor);
 }
 
 /** An agent's row is written `agent:<id>`; the panel shows the name alone, as it always has. */
@@ -47,11 +49,11 @@ export function agentNameOf(actor: string): string {
 
 export function chainNote(c: VaultChain | undefined): string {
     if (!c) return "";
-    if (!c.intact) return `The record has been changed: line ${c.broken_at} — ${c.problem}.`;
-    const before = c.before_chain > 0 ? `; ${c.before_chain} older ${c.before_chain === 1 ? "line was" : "lines were"} made before checking began` : "";
-    const older = c.unchained_after > 0 ? ` ${c.unchained_after} ${c.unchained_after === 1 ? "line was" : "lines were"} written without a place in the chain, as an older AgentMux on this computer does; they are not checked.` : "";
-    const head = c.head_checked ? "" : " The copy of the newest line kept in the keychain could not be checked, so lines removed from the end would not show.";
-    return `Each line follows the one before it (${c.checked} checked${before}).${older}${head} This is evidence for you, not proof against someone who holds both this computer's database and its keychain.`;
+    if (!c.intact) return t("vault.history.chainBroken", { line: c.broken_at, problem: c.problem });
+    const before = c.before_chain > 0 ? `; ${t("vault.history.chainBefore", { count: c.before_chain })}` : "";
+    const older = c.unchained_after > 0 ? ` ${t("vault.history.chainOlder", { count: c.unchained_after })}` : "";
+    const head = c.head_checked ? "" : ` ${t("vault.history.chainHead")}`;
+    return t("vault.history.chain", { checked: c.checked, before, older, head });
 }
 
 function HistoryRow(props: { row: VaultActivity; showHost: boolean }): JSX.Element {
@@ -90,10 +92,10 @@ export function VaultHistoryDialog(props: { entryId: string; label: string; onCl
 
     return (
         <Modal open={true} scope="pane" onClose={props.onClose} size="lg" panelClass="vault-form vault-history">
-            <ModalHeader title={`History of ${props.label}`} description="Every change and every use, newest first. A row never holds a value." />
+            <ModalHeader title={t("vault.history.title", { label: props.label })} description={t("vault.history.description")} />
             <ModalBody>
-                <div class="vault-history-filters" role="group" aria-label="Show">
-                    <For each={FILTERS}>
+                <div class="vault-history-filters" role="group" aria-label={t("vault.history.show")}>
+                    <For each={filters()}>
                         {(f) => (
                             <Button density="compact" pressed={filter() === f.id} onClick={() => setFilter(f.id)}>
                                 {f.label}
@@ -106,18 +108,18 @@ export function VaultHistoryDialog(props: { entryId: string; label: string; onCl
                         ⚠ {String(history.error)}
                     </div>
                 </Show>
-                <Show when={rows().length > 0} fallback={<div class="warden-section-stub">{history.loading ? "Loading…" : "Nothing here yet."}</div>}>
+                <Show when={rows().length > 0} fallback={<div class="warden-section-stub">{history.loading ? t("vault.history.loading") : t("vault.history.nothing")}</div>}>
                     <div class="vault-dialog-scope">
                     <table class="warden-manager-table vault-history-table">
                         <thead>
                             <tr>
-                                <th>When</th>
-                                <th>Who</th>
-                                <th>What</th>
-                                <th>Where</th>
-                                <th>Version</th>
-                                <th>Why</th>
-                                <th>Outcome</th>
+                                <th>{t("vault.activity.when")}</th>
+                                <th>{t("vault.activity.who")}</th>
+                                <th>{t("vault.activity.what")}</th>
+                                <th>{t("vault.activity.where")}</th>
+                                <th>{t("vault.history.colVersion")}</th>
+                                <th>{t("vault.activity.why")}</th>
+                                <th>{t("vault.secrets.outcome")}</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -136,7 +138,7 @@ export function VaultHistoryDialog(props: { entryId: string; label: string; onCl
             </ModalBody>
             <ModalFooter>
                 <Button data-modal-dismiss onClick={props.onClose}>
-                    Close
+                    {t("vault.history.close")}
                 </Button>
             </ModalFooter>
         </Modal>
