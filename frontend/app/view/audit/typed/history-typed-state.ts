@@ -12,7 +12,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { clearInputHistory, forgetInputHistoryEntry, restoreInputHistory } from "@/app/view/agent/agent-input-history";
 import type { InputHistoryItem } from "@/types/rpc/InputHistoryItem";
 import type { InputHistoryTrashItem } from "@/types/rpc/InputHistoryTrashItem";
-import { typedAgents, type TypedAgent } from "./history-shared";
+import { typedAgents, type TypedAgent } from "../history-shared";
 
 /** Entries read at a time (srv's default page). */
 const PAGE = 200;
