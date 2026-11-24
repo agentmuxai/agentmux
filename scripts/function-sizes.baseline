@@ -72,7 +72,7 @@
 130 crates/cef/src/launcher_ipc/mod.rs::apply_event_to_shadow
 259 crates/cef/src/launcher_ipc/mod.rs::connect_to_launcher
 209 crates/cef/src/launcher_ipc/mod.rs::connect_to_launcher#2
-1181 crates/cef/src/lib.rs::run
+1151 crates/cef/src/lib.rs::run
 152 crates/cef/src/macos_compat.rs::install_macos_accessibility_governor
 135 crates/cef/src/macos_compat.rs::set_macos_app_display_name_impl
 138 crates/cef/src/memory_heartbeat.rs::start
@@ -383,7 +383,6 @@
 112 frontend/app/view/native-memory/NativeMemoryCreate.tsx::NativeMemoryCreate
 132 frontend/app/view/settings/sections/animations-section.tsx::AnimationsSection
 124 frontend/app/view/settings/sections/browser-section.tsx::BrowserSection
-102 frontend/app/view/settings/sections/pinned-senders.tsx::PinnedSenders
 115 frontend/app/view/settings/sections/widget-bar-settings.tsx::WidgetBarSettings
 104 frontend/app/view/settings/sections/widget-catalog.tsx::WidgetCatalog
 137 frontend/app/view/shortcuts/shortcuts.tsx::ShortcutsView

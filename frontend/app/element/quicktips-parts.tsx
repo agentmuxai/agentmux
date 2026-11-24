@@ -2,6 +2,8 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { t } from "@/app/i18n/i18n";
+import { Rich } from "@/app/i18n/rich";
 import { shortcutFor } from "@/app/keybindings";
 import { Button } from "@/app/element/ui";
 import { openKeyboardSettings } from "@/app/store/keyboard-focus-request";
@@ -58,7 +60,7 @@ const CardTitle = (props: { children: JSX.Element }): JSX.Element => (
 /** What the pane says when the filter leaves nothing. */
 export const EmptyNotice = (props: { filter?: string }): JSX.Element => {
     return (
-        <div class="quicktips-empty p-5 text-secondary">Nothing in Help matches “{props.filter?.trim()}”.</div>
+        <div class="quicktips-empty p-5 text-secondary">{t("quicktips.empty", { filter: props.filter?.trim() ?? "" })}</div>
     );
 };
 
@@ -66,7 +68,7 @@ export const EmptyNotice = (props: { filter?: string }): JSX.Element => {
 export const HeaderIconsCard = ({ s }: { s: QuickTipsState }): JSX.Element => {
     return (
         <div class={CARD}>
-            <CardTitle>Header Icons</CardTitle>
+            <CardTitle>{t("quicktips.headerIcons")}</CardTitle>
             <div class="grid grid-cols-[repeat(auto-fit,minmax(min(15rem,100%),1fr))] gap-3">
                 <For each={s.headerIcons()}>
                     {(it) => (
@@ -93,9 +95,9 @@ export const ShortcutsCard = ({ s }: { s: QuickTipsState }): JSX.Element => {
     return (
         <div class={CARD}>
             <div class="flex items-center justify-between gap-3">
-                <CardTitle>Keyboard Shortcuts</CardTitle>
+                <CardTitle>{t("quicktips.shortcuts")}</CardTitle>
                 <Button icon="keyboard" onClick={() => void openKeyboardSettings()}>
-                    Customize
+                    {t("quicktips.customize")}
                 </Button>
             </div>
 
@@ -118,14 +120,14 @@ export const ShortcutsCard = ({ s }: { s: QuickTipsState }): JSX.Element => {
                                         <div class="flex flex-row flex-wrap items-center gap-1">
                                             <For each={entry.keys}>{(k) => <KeyCap>{k}</KeyCap>}</For>
                                             <Show when={entry.unbound}>
-                                                <span class="quicktips-unbound text-secondary">Not set</span>
+                                                <span class="quicktips-unbound text-secondary">{t("quicktips.notSet")}</span>
                                                 <Button class="quicktips-set" onClick={() => void openKeyboardSettings(entry.command)}>
-                                                    Set…
+                                                    {t("quicktips.set")}
                                                 </Button>
                                             </Show>
                                         </div>
                                         <Show when={entry.defaults}>
-                                            <div class="quicktips-default text-[13px] text-secondary">Default: {entry.defaults!.join(", ")}</div>
+                                            <div class="quicktips-default text-[13px] text-secondary">{t("quicktips.default", { keys: entry.defaults!.join(", ") })}</div>
                                         </Show>
                                     </div>
                                 )}
@@ -142,7 +144,7 @@ export const ShortcutsCard = ({ s }: { s: QuickTipsState }): JSX.Element => {
 export const GesturesCard = ({ s }: { s: QuickTipsState }): JSX.Element => {
     return (
         <div class={CARD}>
-            <CardTitle>Mouse and gestures</CardTitle>
+            <CardTitle>{t("quicktips.gestures")}</CardTitle>
             {/* From keybindings/tips.ts, whose rows are anchored to the code
                 they describe (tips.test.ts). Same columns as the keyboard list. */}
             <div class="columns-[17rem] gap-x-5">
@@ -159,7 +161,7 @@ export const GesturesCard = ({ s }: { s: QuickTipsState }): JSX.Element => {
                                                 {(alt, i) => (
                                                     <>
                                                         <Show when={i() > 0}>
-                                                            <span class="text-secondary">or</span>
+                                                            <span class="text-secondary">{t("quicktips.or")}</span>
                                                         </Show>
                                                         <For each={alt}>{(k) => <KeyCap>{k}</KeyCap>}</For>
                                                     </>
@@ -184,7 +186,7 @@ export const GesturesCard = ({ s }: { s: QuickTipsState }): JSX.Element => {
 export const TipsCard = ({ s }: { s: QuickTipsState }): JSX.Element => {
     return (
         <div class={CARD}>
-            <CardTitle>More Tips</CardTitle>
+            <CardTitle>{t("quicktips.moreTips")}</CardTitle>
             <div class="flex flex-col gap-2">
                 <For each={s.tips()}>
                     {(tip) => (
@@ -207,7 +209,7 @@ export const TipsCard = ({ s }: { s: QuickTipsState }): JSX.Element => {
 export const LinksCard = ({ s }: { s: QuickTipsState }): JSX.Element => {
     return (
         <div class={CARD}>
-            <CardTitle>Need More Help?</CardTitle>
+            <CardTitle>{t("quicktips.needHelp")}</CardTitle>
             <div class="grid grid-cols-[repeat(auto-fit,minmax(min(15rem,100%),1fr))] gap-2">
                 <For each={s.links()}>
                     {(link) => (
@@ -237,17 +239,13 @@ export const AlphaNotice = (): JSX.Element => {
         <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-amber-900/20 to-transparent rounded-lg border border-amber-500/20">
             <div class="flex items-center gap-2 text-xl font-bold">
                 <div class="w-1 h-6 bg-amber-400 rounded-full" />
-                <span class="text-foreground">Alpha Software &amp; AI Content</span>
+                <span class="text-foreground">{t("quicktips.alpha.title")}</span>
             </div>
             <div class="flex flex-col gap-2 text-secondary text-sm">
                 <p>
-                    AgentMux is <b>alpha software</b>. Features may be incomplete, unstable, or change between releases.
-                    AI agents generate code, text, and other outputs that may be <b>inaccurate, incomplete, or inappropriate</b>.
-                    Always review agent outputs before using them.
+                    <Rich k="quicktips.alpha.body" />
                 </p>
-                <p>
-                    To report bugs, request features, or flag issues with AI-generated content:
-                </p>
+                <p>{t("quicktips.alpha.report")}</p>
                 <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors mt-1">
                     <IconBox variant="secondary">
                         <i class="fa-brands fa-github fa-fw" />
@@ -258,7 +256,7 @@ export const AlphaNotice = (): JSX.Element => {
                         rel="noopener"
                         class="hover:text-accent-400 hover:underline transition-colors font-medium"
                     >
-                        Open an Issue on GitHub
+                        {t("quicktips.alpha.issue")}
                     </a>
                 </div>
             </div>

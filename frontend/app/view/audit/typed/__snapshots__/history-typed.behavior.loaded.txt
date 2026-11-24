@@ -104,6 +104,4 @@ rpc AgentInputHistory agent=a1 before=undefined limit=200
         <button type="button" class="ui-button ui-tone-quiet ui-density-compact">
           "Restore"
     <div class="warden-manager-footnote">
-      "What was typed to an agent is kept with the agent, up to its limit (the agent:inputhistory:max setting), and goes when the agent is deleted. Forgotten entries can be restored for"
-      "7"
-      "days, then they are gone."
+      "What was typed to an agent is kept with the agent, up to its limit (the agent:inputhistory:max setting), and goes when the agent is deleted. Forgotten entries can be restored for 7 days, then they are gone."

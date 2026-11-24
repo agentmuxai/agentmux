@@ -15,6 +15,7 @@ import { createSignal, For, onCleanup, onMount, Show, type Accessor, type JSX, t
 
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import { Button, TextInput } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { ForkSlugBlocker } from "@/types/rpc/ForkSlugBlocker";
@@ -36,8 +37,6 @@ export const FORK_SLUG_SETTING = settingEntry({
 
 type Phase = "loading" | "checking" | "idle" | "stopping" | "applying" | "undoing";
 
-const plural = (n: number, one: string, many: string = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
-
 const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -58,16 +57,16 @@ export function unclearable(plan: ForkSlugPlan | null | undefined): ForkSlugBloc
 export function planLine(plan: ForkSlugPlan): string {
     if (plan.last_run && !plan.last_run.finished) {
         return plan.last_run.failed
-            ? `An update stopped before it finished: ${plan.last_run.failed}`
-            : "An update stopped before it finished.";
+            ? t("settings.forkSlugs.stoppedWhy", { failed: plan.last_run.failed })
+            : t("settings.forkSlugs.stopped");
     }
     const n = plan.candidates.length;
-    if (n === 0) return "Every agent has an up-to-date id.";
-    const base = `${plural(n, "agent")} ${n === 1 ? "has" : "have"} an outdated id.`;
+    if (n === 0) return t("settings.forkSlugs.allCurrent");
+    const base = t("settings.forkSlugs.outdated", { count: n });
     const refused = plan.candidates.filter((c) => c.refused).length;
     if (refused === 0) return base;
-    if (refused === n) return `${base} ${n === 1 ? "It can't" : "None can"} be updated yet: pick another id below.`;
-    return `${base} ${refused} can't be updated yet: pick another id below.`;
+    if (refused === n) return `${base} ${t("settings.forkSlugs.noneUpdatable", { count: n })}`;
+    return `${base} ${t("settings.forkSlugs.someRefused", { n: refused })}`;
 }
 
 /** A plan this old is shown again, when the card comes back into view. */
@@ -201,7 +200,7 @@ async function readPlan(s: MigrationState): Promise<ForkSlugPlan | null> {
         s.setPlan(p);
         return p;
     } catch (e) {
-        s.setError(`Couldn't check the agent ids: ${errorText(e)}`);
+        s.setError(t("settings.forkSlugs.checkFailed", { error: errorText(e) }));
         return null;
     }
 }
@@ -224,9 +223,9 @@ async function apply(s: MigrationState) {
     try {
         const r = await call("apply", undefined, s.chosen());
         s.setReport(r.report ?? null);
-        if (r.report?.failed) s.setError(`The update stopped: ${r.report.failed}`);
+        if (r.report?.failed) s.setError(t("settings.forkSlugs.updateStopped", { failed: r.report.failed }));
     } catch (e) {
-        s.setError(`Couldn't update: ${errorText(e)}`);
+        s.setError(t("settings.forkSlugs.updateFailed", { error: errorText(e) }));
     }
     s.setChosen([]);
     await s.load();
@@ -248,7 +247,7 @@ async function stopThenApply(s: MigrationState) {
         const r = await call("stop", undefined, s.chosen());
         if (r.wait_ms > 0) await sleep(r.wait_ms + 1000);
     } catch (e) {
-        s.setError(`Couldn't stop the panes: ${errorText(e)}`);
+        s.setError(t("settings.forkSlugs.stopFailed", { error: errorText(e) }));
         s.setPhase("idle");
         return;
     }
@@ -284,7 +283,7 @@ async function useId(s: MigrationState, c: ForkSlugCandidate, slug: string) {
     const mine = p?.candidates.find((x) => x.uid === c.uid);
     if (!mine || mine.refused) {
         // Taken after all, or not an id: say so, and show the plan as it was.
-        if (mine?.refused) s.setError(`${id} can't be used: ${mine.refused}`);
+        if (mine?.refused) s.setError(t("settings.forkSlugs.idRefused", { id, why: mine.refused }));
         s.setChosen([]);
         await s.load();
         s.setPhase("idle");
@@ -320,7 +319,7 @@ async function undo(s: MigrationState) {
         await call("rollback", journal);
         s.setReport(null);
     } catch (e) {
-        s.setError(`Couldn't undo the update: ${errorText(e)}`);
+        s.setError(t("settings.forkSlugs.undoFailed", { error: errorText(e) }));
     }
     await s.load();
     s.setPhase("idle");
@@ -330,13 +329,13 @@ const statusLine = (s: MigrationState) => {
     switch (s.phase()) {
         case "loading":
         case "checking":
-            return "Checking agent ids…";
+            return t("settings.forkSlugs.checking");
         case "stopping":
-            return "Stopping the panes. Each can still be kept running from its own pane for 30 s.";
+            return t("settings.forkSlugs.stopping");
         case "applying":
-            return "Updating…";
+            return t("settings.forkSlugs.updating");
         case "undoing":
-            return "Undoing the update…";
+            return t("settings.forkSlugs.undoing");
     }
     const p = s.plan();
     return p ? planLine(p) : "";
@@ -362,7 +361,7 @@ export function ForkSlugMigration(): JSX.Element {
             </Show>
             <CandidateList s={s} />
             <Show when={blockers(s).length > 0 && !busy(s)}>
-                <ul class="setting-fork-slugs-blockers" aria-label="What has to change first">
+                <ul class="setting-fork-slugs-blockers" aria-label={t("settings.forkSlugs.blockersAria")}>
                     <For each={blockers(s)}>{(b) => <li>{b.message}</li>}</For>
                 </ul>
             </Show>
@@ -371,7 +370,7 @@ export function ForkSlugMigration(): JSX.Element {
             <Show when={undoJournal(s)}>
                 <div class="setting-fork-slugs-actions">
                     <Button tone="quiet" density="compact" disabled={busy(s)} onClick={() => s.setConfirmUndo(true)}>
-                        Undo the update
+                        {t("settings.forkSlugs.undo")}
                     </Button>
                 </div>
             </Show>
@@ -390,7 +389,7 @@ const StatusRow = (p: { s: MigrationState }): JSX.Element => {
             </span>
             <Show when={unfinished(s)}>
                 <Button tone="accent" busy={s.phase() === "applying"} disabled={busy(s)} onClick={() => void apply(s)}>
-                    Finish the update
+                    {t("settings.forkSlugs.finish")}
                 </Button>
             </Show>
             <Show when={!unfinished(s) && (s.plan()?.candidates.length ?? 0) > 0}>
@@ -400,7 +399,7 @@ const StatusRow = (p: { s: MigrationState }): JSX.Element => {
                     disabled={!canStart(s)}
                     onClick={() => start(s)}
                 >
-                    Update them
+                    {t("settings.forkSlugs.updateThem")}
                 </Button>
             </Show>
         </div>
@@ -411,12 +410,12 @@ const CandidateList = (p: { s: MigrationState }): JSX.Element => {
     const s = p.s;
     return (
         <Show when={(s.plan()?.candidates.length ?? 0) > 0}>
-            <ul class="setting-fork-slugs-list" aria-label="Agents with an outdated id">
+            <ul class="setting-fork-slugs-list" aria-label={t("settings.forkSlugs.listAria")}>
                 <For each={s.plan()!.candidates}>{(c) => <CandidateItem s={s} c={c} />}</For>
             </ul>
             <div class="setting-fork-slugs-actions">
                 <Button tone="quiet" density="compact" onClick={() => s.setShowWhere(!s.showWhere())}>
-                    {s.showWhere() ? "Hide where the old ids are stored" : "Show where the old ids are stored"}
+                    {s.showWhere() ? t("settings.forkSlugs.hideWhere") : t("settings.forkSlugs.showWhere")}
                 </Button>
             </div>
         </Show>
@@ -431,7 +430,7 @@ const CandidateItem = (p: { s: MigrationState; c: ForkSlugCandidate }): JSX.Elem
             <span class="mono">{c.new_slug}</span>
             <Show when={c.refused}>{(why) => <RefusedNote s={s} c={c} why={why()} />}</Show>
             <Show when={!c.refused && c.running.length > 0 && unclearable(s.plan()).length === 0}>
-                <div class="setting-fork-slugs-note">Running: it is stopped first.</div>
+                <div class="setting-fork-slugs-note">{t("settings.forkSlugs.running")}</div>
             </Show>
             <Show when={s.showWhere()}>
                 <ul class="setting-fork-slugs-where">
@@ -453,10 +452,10 @@ const RefusedNote = (p: { s: MigrationState; c: ForkSlugCandidate; why: string }
     const { s, c } = p;
     return (
         <div class="setting-fork-slugs-note">
-            Not now: {p.why}
-            <Show when={c.suggestion}>{(sug) => <> (the next free id is {sug()})</>}</Show>
+            {t("settings.forkSlugs.notNow", { why: p.why })}
+            <Show when={c.suggestion}>{(sug) => <> {t("settings.forkSlugs.nextFree", { id: sug() })}</>}</Show>
             <Show when={ready(s).length > 0}>
-                <div>Update the other agents first; then this one can take another id.</div>
+                <div>{t("settings.forkSlugs.updateOthersFirst")}</div>
             </Show>
             <div class="setting-fork-slugs-actions">
                 <Show when={c.suggestion}>
@@ -467,7 +466,7 @@ const RefusedNote = (p: { s: MigrationState; c: ForkSlugCandidate; why: string }
                             disabled={!canPick(s)}
                             onClick={() => void useId(s, c, sug())}
                         >
-                            Use {sug()}
+                            {t("settings.forkSlugs.use", { id: sug() })}
                         </Button>
                     )}
                 </Show>
@@ -477,7 +476,7 @@ const RefusedNote = (p: { s: MigrationState; c: ForkSlugCandidate; why: string }
                     disabled={!canPick(s)}
                     onClick={() => s.setCustomFor(s.customFor() === c.uid ? null : c.uid)}
                 >
-                    Choose another id
+                    {t("settings.forkSlugs.chooseAnother")}
                 </Button>
             </div>
             <Show when={s.customFor() === c.uid}>
@@ -493,8 +492,8 @@ const CustomIdRow = (p: { s: MigrationState; c: ForkSlugCandidate }): JSX.Elemen
         <div class="setting-fork-slugs-actions">
             <TextInput
                 density="compact"
-                aria-label={`New id for ${c.name}`}
-                placeholder="a-new-id"
+                aria-label={t("settings.forkSlugs.newIdFor", { name: c.name })}
+                placeholder={t("settings.forkSlugs.newIdPlaceholder")}
                 value={s.customId()}
                 onInput={(e) => s.setCustomId(e.currentTarget.value)}
                 onKeyDown={(e) => {
@@ -507,7 +506,7 @@ const CustomIdRow = (p: { s: MigrationState; c: ForkSlugCandidate }): JSX.Elemen
                 disabled={!canPick(s) || s.customId().trim() === ""}
                 onClick={() => void useId(s, c, s.customId())}
             >
-                Use this id
+                {t("settings.forkSlugs.useThis")}
             </Button>
         </div>
     );
@@ -518,10 +517,9 @@ const DuplicateList = (p: { s: MigrationState }): JSX.Element => {
     return (
         <Show when={duplicates(s).length > 0}>
             <div class="setting-fork-slugs-note">
-                These agents share an id, as older builds could leave them. An update doesn't change them; the oldest
-                keeps the id.
+                {t("settings.forkSlugs.shareNote")}
             </div>
-            <ul class="setting-fork-slugs-list" aria-label="Agents that share an id">
+            <ul class="setting-fork-slugs-list" aria-label={t("settings.forkSlugs.shareAria")}>
                 <For each={duplicates(s)}>
                     {(d) => (
                         <li>
@@ -533,14 +531,14 @@ const DuplicateList = (p: { s: MigrationState }): JSX.Element => {
                                             <span class="setting-fork-slugs-name">{h.name}</span>{" "}
                                             <span class="setting-fork-slugs-place">{h.place}</span>
                                             {i() === 0 ? (
-                                                " keeps it"
+                                                <> {t("settings.forkSlugs.keeps")}</>
                                             ) : h.proposed ? (
                                                 <>
                                                     {" "}
-                                                    could be renamed to <span class="mono">{h.proposed}</span>
+                                                    {t("settings.forkSlugs.couldRename")} <span class="mono">{h.proposed}</span>
                                                 </>
                                             ) : (
-                                                " needs a new id"
+                                                <> {t("settings.forkSlugs.needsNew")}</>
                                             )}
                                         </li>
                                     )}
@@ -555,16 +553,16 @@ const DuplicateList = (p: { s: MigrationState }): JSX.Element => {
 };
 
 const ReportView = (p: { r: ForkSlugReport }): JSX.Element => (
-    <div class="setting-fork-slugs-report" aria-label="Update report">
+    <div class="setting-fork-slugs-report" aria-label={t("settings.forkSlugs.reportAria")}>
         <For each={p.r.migrated}>
             {(m) => (
                 <div>
-                    Updated {m.name}: <span class="mono">{m.old_slug}</span> → <span class="mono">{m.new_slug}</span>
+                    {t("settings.forkSlugs.updated", { name: m.name })} <span class="mono">{m.old_slug}</span> → <span class="mono">{m.new_slug}</span>
                 </div>
             )}
         </For>
         <Show when={p.r.pr_searches.length > 0}>
-            <div class="setting-fork-slugs-note">Open PRs may still name an old id. Find them with:</div>
+            <div class="setting-fork-slugs-note">{t("settings.forkSlugs.prNote")}</div>
             <pre class="setting-fork-slugs-commands">{p.r.pr_searches.join("\n")}</pre>
         </Show>
         <For each={p.r.notes}>{(n) => <div class="setting-fork-slugs-note">{n}</div>}</For>
@@ -578,9 +576,9 @@ const StopModal = (p: { s: MigrationState }): JSX.Element => {
             open={s.confirmStop()}
             destructive
             scope="pane"
-            title={`Stop ${plural(running(s).length, "pane")}?`}
-            description="These panes run agents being updated. Each one shows a Keep running button for 30 seconds before it stops; the update starts once they have."
-            confirmLabel="Stop and update"
+            title={t("settings.forkSlugs.stopTitle", { count: running(s).length })}
+            description={t("settings.forkSlugs.stopDescription")}
+            confirmLabel={t("settings.forkSlugs.stopConfirm")}
             onConfirm={() => stopThenApply(s)}
             onCancel={() => cancelStop(s)}
         >
@@ -605,9 +603,9 @@ const UndoModal = (p: { s: MigrationState }): JSX.Element => {
             open={s.confirmUndo()}
             destructive
             scope="pane"
-            title="Undo the update?"
-            description="Every change it made is reversed, step by step, from its journal, and the agents take their old ids at their next launch."
-            confirmLabel="Undo"
+            title={t("settings.forkSlugs.undoTitle")}
+            description={t("settings.forkSlugs.undoDescription")}
+            confirmLabel={t("settings.forkSlugs.undoConfirm")}
             onConfirm={() => undo(s)}
             onCancel={() => s.setConfirmUndo(false)}
         />

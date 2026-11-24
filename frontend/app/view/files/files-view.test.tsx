@@ -136,7 +136,7 @@ import { getPaneTab } from "@/app/store/pane-tab-registry";
 import { runCommand } from "@/app/keybindings/app-api";
 import { setPlatform } from "@/util/platformutil";
 import { FilesModel } from "./files-model";
-import { openTargetOf } from "./files-open";
+import { openTargetOf, runsWhenOpenedByOs } from "./files-open";
 import { clipboard, setClipboard } from "./files-ops";
 import { buildRowMenu } from "./files-menus";
 import { recentPlaces, resetPlacesForTests } from "./files-pins";
@@ -471,6 +471,66 @@ describe("the Files pane: navigation", () => {
         expect(h.rpc.FsOpenCommand).not.toHaveBeenCalled();
         fireEvent.click(screen.getByText("Run"));
         expect(h.rpc.FsOpenCommand).toHaveBeenCalledWith(expect.anything(), { path: `${HOME}\\setup.exe`, block_id: "b1" });
+    });
+
+    it("knows what each system runs when it opens a file with its default app, and still opens scripts in the Editor", async () => {
+        expect(runsWhenOpenedByOs("setup.exe")).toBe(true);
+        expect(runsWhenOpenedByOs("notes.docx")).toBe(false);
+        // The tests run as Windows.
+        for (const name of ["a.bat", "a.CMD", "a.vbs", "a.js", "a.hta", "a.jar", "a.wsf", "a.msc"]) expect(runsWhenOpenedByOs(name), name).toBe(true);
+        expect(runsWhenOpenedByOs("a.command")).toBe(false);
+        setPlatform("darwin");
+        for (const name of ["a.command", "a.tool", "a.terminal", "a.jar", "a.app"]) expect(runsWhenOpenedByOs(name), name).toBe(true);
+        for (const name of ["a.js", "a.bat", "a.desktop"]) expect(runsWhenOpenedByOs(name), name).toBe(false);
+        setPlatform("linux");
+        for (const name of ["a.desktop", "a.AppImage", "a.jar"]) expect(runsWhenOpenedByOs(name), name).toBe(true);
+        for (const name of ["a.js", "a.command", "a.bat"]) expect(runsWhenOpenedByOs(name), name).toBe(false);
+        setPlatform("win32");
+        // A double-click on source still opens it in the Editor.
+        expect(openTargetOf("build.bat")).toBe("editor");
+        expect(openTargetOf("app.js")).toBe("editor");
+    });
+
+    const chooseFromMenu = async (v: ReturnType<typeof mount>, name: string, label: string) => {
+        fireEvent.contextMenu(v.row(name));
+        const item = [...document.body.querySelectorAll(".ctx-menu .ctx-menu-item")].find((row) => row.querySelector(".ctx-menu-label")?.textContent === label);
+        fireEvent.pointerDown(item!);
+    };
+
+    it("asks before the menu's Open with default app runs a script, and not for a document", async () => {
+        h.state.dirs.set(HOME, [f("build.bat"), f("notes.docx")]);
+        const v = mount();
+        await waitFor(() => expect(v.names()).toEqual(["build.bat", "notes.docx"]));
+        await chooseFromMenu(v, "build.bat", "Open with default app");
+        expect(h.rpc.FsOpenCommand).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByText("Run"));
+        expect(h.rpc.FsOpenCommand).toHaveBeenCalledWith(expect.anything(), { path: `${HOME}\\build.bat`, block_id: "b1" });
+        h.rpc.FsOpenCommand.mockClear();
+        fireEvent.keyDown(document.body, { key: "Escape" });
+        await chooseFromMenu(v, "notes.docx", "Open with default app");
+        expect(h.rpc.FsOpenCommand).toHaveBeenCalledWith(expect.anything(), { path: `${HOME}\\notes.docx`, block_id: "b1" });
+    });
+
+    it("asks first, naming the agent, for a file srv says a container agent can write, and opens it once confirmed", async () => {
+        h.state.dirs.set(HOME, [f("notes.docx")]);
+        h.rpc.FsOpenCommand.mockRejectedValueOnce(new Error("[asks-first:aria] This file is in the folder of aria, a container agent that can change it."));
+        const v = mount();
+        await waitFor(() => expect(v.names()).toEqual(["notes.docx"]));
+        await chooseFromMenu(v, "notes.docx", "Open with default app");
+        await waitFor(() => expect(screen.getByText("Open notes.docx?")).toBeTruthy());
+        expect(document.body.textContent).toContain("the folder of aria, a container agent that can change it");
+        fireEvent.click(screen.getByText("Open"));
+        expect(h.rpc.FsOpenCommand).toHaveBeenLastCalledWith(expect.anything(), { path: `${HOME}\\notes.docx`, block_id: "b1", confirmed: true });
+    });
+
+    it("shows any other failure to open as a status, not a question", async () => {
+        h.state.dirs.set(HOME, [f("notes.docx")]);
+        h.rpc.FsOpenCommand.mockRejectedValueOnce(new Error("no app for this file"));
+        const v = mount();
+        await waitFor(() => expect(v.names()).toEqual(["notes.docx"]));
+        await chooseFromMenu(v, "notes.docx", "Open with default app");
+        await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toContain("no app for this file"));
+        expect(screen.queryByText("Open notes.docx?")).toBeNull();
     });
 
     it("shows each agent's name in its pane colour, at the theme's text lightness", async () => {
@@ -2064,7 +2124,7 @@ describe("the Files pane: tree view, rows that share a label or a name with anot
         // Both rows selected: the menu of the inner one acts on the selection, which is the folder.
         v.model.setSelection({ names: new Set(["src", "src/main.rs"]), focus: "src/main.rs", anchor: "src" });
         const entry = v.model.entries().find((e) => e.name === "src/main.rs")!;
-        const menu = buildRowMenu(v.model, entry, { openEntry: () => {}, openInNewTab: () => {}, copyPaths: () => {}, askDeletePermanently: () => {} });
+        const menu = buildRowMenu(v.model, entry, { openEntry: () => {}, openWithDefaultApp: () => {}, openInNewTab: () => {}, copyPaths: () => {}, askDeletePermanently: () => {} });
         (menu.find((i) => i.type === "action" && i.label === "Copy") as { onSelect: () => void }).onSelect();
         expect(clipboard()).toEqual({ kind: "copy", paths: [SRC] });
     });

@@ -159,6 +159,7 @@ const RELAYED_PROMPTS: Record<string, string[]> = {
     "app/block/desktop-requests.tsx": ["app/block/desktop-requests.tsx"],
     "app/block/upgrade-requests.tsx": ["app/block/upgrade-requests.tsx"],
     "app/block/widget-install-requests.tsx": ["app/block/widget-install-requests.tsx"],
+    "app/view/browser/browser-model.ts": ["app/view/browser/browser-attention.tsx"],
     "app/store/app-update.ts": ["app/statusbar/RestartToUpdatePopover.tsx", "app/statusbar/MaintenanceSection.tsx"],
     "app/statusbar/maintenance-store.ts": ["app/statusbar/MaintenanceSection.tsx"],
 };
@@ -167,7 +168,6 @@ const RELAYED_CONTROLS: Record<string, string> = {
     "app/store/rpc-util.ts": "proves the window's own connection; no prompt",
     "app/view/accounts/google-services.ts": OWN_VIEW,
     "app/view/agent/components/DesktopDrivingBar.tsx": "ends the agent's own desktop grants",
-    "app/view/browser/browser-model.ts": OWN_VIEW,
     "app/view/credential-approval/CredentialApprovalWindow.tsx": OWN_VIEW,
     "app/view/settings/sections/widgets-section-parts.tsx": SETTING,
     "app/view/settings/sections/widgets-section.tsx": SETTING,

@@ -13,6 +13,7 @@ import { pushNotification } from "@/app/store/global";
 import { createMemo, Match, Show, Switch, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { withoutAskMarker } from "@/app/util/open-asks-first";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { copyEditorMedia } from "../editor-media-copy";
 import type { EditorViewModel } from "../editor-model";
@@ -75,7 +76,7 @@ function openWithTheSystemsApp(path: string): void {
         pushNotification({
             icon: "fa-triangle-exclamation",
             title: "Couldn't open the file",
-            message: e instanceof Error ? e.message : String(e),
+            message: withoutAskMarker(e instanceof Error ? e.message : String(e)),
             timestamp: new Date().toISOString(),
             type: "error",
             expiration: Date.now() + 8000,

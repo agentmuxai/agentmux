@@ -19,7 +19,7 @@ import type { FilesWindow } from "./files-view-window";
 
 export function useFilesPointer(fv: FilesLocal, win: FilesWindow, opening: FilesOpening) {
     const { model, refs, setMenu, setScrollTop } = fv;
-    const { openEntry, openInNewTab, copyPaths, askDeletePermanently } = opening;
+    const { openEntry, openWithDefaultApp, openInNewTab, copyPaths, askDeletePermanently } = opening;
     const { entries, order } = win;
 
     const onRowClick = (e: MouseEvent, entry: FsEntry): void => {
@@ -27,7 +27,7 @@ export function useFilesPointer(fv: FilesLocal, win: FilesWindow, opening: Files
         model.setSelection(clickRow(model.selection(), order(), entry.name, { toggle: isMod(e), range: e.shiftKey }));
     };
 
-    const rowMenu = (entry: FsEntry): ContextMenuItem[] => buildRowMenu(model, entry, { openEntry, openInNewTab, copyPaths, askDeletePermanently });
+    const rowMenu = (entry: FsEntry): ContextMenuItem[] => buildRowMenu(model, entry, { openEntry, openWithDefaultApp, openInNewTab, copyPaths, askDeletePermanently });
     const folderMenu = (): ContextMenuItem[] => buildFolderMenu(model, { openInNewTab });
 
     const onRowContextMenu = (e: MouseEvent, entry: FsEntry): void => {

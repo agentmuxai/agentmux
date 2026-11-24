@@ -188,6 +188,18 @@ describe("pressCanStartPaneDrag", () => {
         expect(pressCanStartPaneDrag(q(".pane-tab-strip-add"))).toBe(false);
     });
 
+    it("a press on a header control can't: Minimize, Close and a menu button are clicks, not drags (#48231)", () => {
+        document.body.innerHTML =
+            '<div data-role="block-header"><span class="title">T</span><button class="minimize"><svg class="glyph"></svg></button>' +
+            '<a class="link" href="#">l</a><div role="button" class="menu">m</div><span data-no-drag class="chip">c</span>' +
+            '<span class="pane-grip" role="button">g</span></div>';
+        const q = (sel: string) => document.querySelector(sel);
+        for (const sel of [".minimize", ".minimize .glyph", ".link", ".menu", ".chip"]) expect(pressCanStartPaneDrag(q(sel)), sel).toBe(false);
+        // The grip is a button that is a drag handle first, and the header's own area still drags.
+        expect(pressCanStartPaneDrag(q(".pane-grip"))).toBe(true);
+        expect(pressCanStartPaneDrag(q(".title"))).toBe(true);
+    });
+
     it("a press in the pane body can't", () => {
         const q = header();
         expect(pressCanStartPaneDrag(q(".body p"))).toBe(false);
