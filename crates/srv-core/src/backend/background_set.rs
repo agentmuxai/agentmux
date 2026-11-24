@@ -105,6 +105,16 @@ pub fn set_of(now_ms: u64, tasks: &[BackgroundTask], members: &[TrackedProcess])
     items
 }
 
+/// What the agent in pane `block_id` has running in the background now: its declared background shells and the process
+/// trees its calls left behind, past the grace period and not a daemon on the denylist. Empty when none, or when the
+/// tracker or the store is not up. Blocking: reads the tracker and the store.
+pub fn for_block(block_id: &str, now_ms: u64) -> Vec<Item> {
+    let Some(registry) = crate::backend::process_tracker::registry::global() else { return Vec::new() };
+    let members = registry.list_block(block_id);
+    let tasks = STORE.get().and_then(|s| s.background_task_list_for_block(block_id).ok()).unwrap_or_default();
+    set_of(now_ms, &tasks, &members)
+}
+
 /// Who entered or left the would-be Background set since the last look, and how long each who left was in it.
 /// `before` is the set (block id → when it entered) the last look left; `now` is this look's.
 fn changes(before: &mut HashMap<String, u64>, now: &HashMap<String, u64>, at_ms: u64) -> (Vec<String>, Vec<(String, u64)>) {
