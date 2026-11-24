@@ -282,3 +282,24 @@ fn a_restore_and_its_later_edit_delivered_out_of_order_end_with_the_edit_on_ever
         assert_eq!(machine.state("entry-1").as_deref(), Some("edited again"), "{}", machine.id);
     }
 }
+
+#[test]
+fn a_grant_changed_on_two_machines_apart_ends_as_the_later_one_with_no_conflict_and_a_line_is_never_a_conflict() {
+    let (mut a, mut b) = (machine("a", 1), machine("b", 2));
+    let all = pins(&[&a, &b]);
+    let grant = format!("g-{}", "0123456789abcdef0123456789abcdef");
+    a.write(&grant, "granted", NOW);
+    b.pull(&a, &all, NOW + 1);
+    // a revokes it, and b, not having heard, grants it again later.
+    a.delete(&grant, NOW + 100);
+    b.write(&grant, "granted again", NOW + 200);
+    let on_a = a.pull(&b, &all, NOW + 300);
+    let on_b = b.pull(&a, &all, NOW + 300);
+    assert!(on_a.iter().chain(on_b.iter()).all(|o| *o != Outcome::Conflict), "{on_a:?} {on_b:?}: a grant has no keep-both");
+    // The later one is the grant on both.
+    assert_eq!((a.state(&grant).as_deref(), b.state(&grant).as_deref()), (Some("granted again"), Some("granted again")));
+    // An activity line is one that never changes: the second copy of it is the one already held.
+    a.write("a.a.1", "line", NOW + 400);
+    assert_eq!(b.pull(&a, &all, NOW + 500), [Outcome::Applied]);
+    assert!(b.pull(&a, &all, NOW + 600).is_empty());
+}
