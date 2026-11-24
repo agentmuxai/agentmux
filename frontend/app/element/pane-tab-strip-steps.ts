@@ -10,7 +10,7 @@
  */
 
 import { createEffect, createSignal, on, onCleanup, onMount, type Accessor } from "solid-js";
-import { minTabsRoom, stepFor, type PaneTabStep } from "./pane-tab-steps";
+import { minTabsRoom, RESTING_FLOOR_PX, RESTING_NO_ICON_FLOOR_PX, stepFor, type PaneTabStep } from "./pane-tab-steps";
 
 const HEADER_CONTENT = ".block-frame-header-content";
 const HEADER_HOLDER = ".block-frame-default-header-tabstrip";
@@ -22,34 +22,44 @@ export interface StripSteps {
     room: Accessor<number | undefined>;
 }
 
-/** The width an element takes in its row, margins included, in real px. */
-function outerWidth(el: Element): number {
+/**
+ * How much bigger than its layout width an element is drawn: the chrome zoom, which the Editor's document bar is drawn at,
+ * scales what getBoundingClientRect reports but not clientWidth. 1 when it can't be told (no layout).
+ */
+function layoutScale(el: HTMLElement): number {
+    const layout = el.clientWidth;
+    const drawn = el.getBoundingClientRect().width;
+    return layout > 0 && drawn > 0 ? drawn / layout : 1;
+}
+
+/** The width an element takes in its row, margins included, in the row's own (layout) px: `scale` is how much bigger it is drawn. */
+function outerWidth(el: Element, scale: number): number {
     const style = getComputedStyle(el);
-    return el.getBoundingClientRect().width + (parseFloat(style.marginLeft) || 0) + (parseFloat(style.marginRight) || 0);
+    return el.getBoundingClientRect().width / scale + (parseFloat(style.marginLeft) || 0) + (parseFloat(style.marginRight) || 0);
 }
 
 /**
  * What a growing item of the header needs, not the width it has grown to: its own contents. An item that grows into
  * free room (the header's inline elements, the spacer) would otherwise count the room the strip just left as its own.
  */
-function contentWidth(el: HTMLElement): number {
+function contentWidth(el: HTMLElement, scale: number): number {
     let width = 0;
     let count = 0;
     for (const child of el.children) {
         if (!(child instanceof HTMLElement) || child.offsetParent === null) continue;
-        width += outerWidth(child);
+        width += outerWidth(child, scale);
         count++;
     }
     return width + (parseFloat(getComputedStyle(el).columnGap) || 0) * Math.max(0, count - 1);
 }
 
 /** What the visible children of `row` other than `except` take of it: their widths and the gaps between them and `except`. */
-function othersIn(row: HTMLElement, except: Element): number {
+function othersIn(row: HTMLElement, except: Element, scale: number): number {
     let others = 0;
     let count = 0;
     for (const child of row.children) {
         if (child === except || !(child instanceof HTMLElement) || child.offsetParent === null) continue;
-        others += (parseFloat(getComputedStyle(child).flexGrow) || 0) > 0 ? contentWidth(child) : outerWidth(child);
+        others += (parseFloat(getComputedStyle(child).flexGrow) || 0) > 0 ? contentWidth(child, scale) : outerWidth(child, scale);
         count++;
     }
     return others + (parseFloat(getComputedStyle(row).columnGap) || 0) * count;
@@ -65,10 +75,10 @@ export function stripRoom(strip: HTMLElement): number | undefined {
     const host = holder?.closest<HTMLElement>(HEADER_CONTENT);
     const range = host?.parentElement;
     if (holder && host && range) {
-        return range.clientWidth > 0 ? range.clientWidth - othersIn(host, holder) : undefined;
+        return range.clientWidth > 0 ? range.clientWidth - othersIn(host, holder, layoutScale(range)) : undefined;
     }
     const parent = strip.parentElement;
-    return parent && parent.clientWidth > 0 ? parent.clientWidth - othersIn(parent, strip) : undefined;
+    return parent && parent.clientWidth > 0 ? parent.clientWidth - othersIn(parent, strip, layoutScale(parent)) : undefined;
 }
 
 /** Whether a tab's label is cut short by the squeeze: the only time a strip needs a step. Reads every label once. */
@@ -113,7 +123,9 @@ export function createStripSteps(opts: {
         if (strip.querySelector(".pane-tab-rename-input")) next = previous;
         if (next !== previous) setStep(next);
         // Never narrower than the tabs' own floors: past that the header scrolls, as it always did.
-        const limit = Math.max(total, minTabsRoom(count) * zoom + addWidth);
+        // A tab with no icon keeps a wider floor (a few letters of its label), as its style says.
+        const resting = strip.querySelector(".pane-tab.doc-tab--no-icon") ? RESTING_NO_ICON_FLOOR_PX : RESTING_FLOOR_PX;
+        const limit = Math.max(total, minTabsRoom(count, resting) * zoom + addWidth);
         // A new limit changes how far the labels are cut: look once more when it has settled.
         if (room() === undefined || Math.abs((room() ?? 0) - limit) >= 0.5) {
             setRoom(limit);
