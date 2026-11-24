@@ -72,6 +72,7 @@ const WorkspaceStopStatus = (): JSX.Element => {
                             <AnchoredPopover
                                 anchor={chip}
                                 placement="top-end"
+                                fitHeight
                                 onDismiss={() => setOpen(false)}
                                 class="status-bar-popover"
                                 role="dialog"
