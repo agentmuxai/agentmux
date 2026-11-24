@@ -44,8 +44,10 @@ fn versions_held(conn: &Connection, incoming: &Header) -> rusqlite::Result<Vec<V
     rows.collect()
 }
 
-impl Adapter for VaultAdapter<'_> {
-    fn merge(&self, local: Option<&Header>, incoming: &Header) -> Merge {
+impl VaultAdapter<'_> {
+    /// The whole answer for `incoming`, with what is kept and why (the layer is told only `Merge`; taking the record into
+    /// the store needs the rest, see `sync_take`).
+    pub fn decide(&self, local: Option<&Header>, incoming: &Header) -> Decision {
         let held = local.map(|l| {
             // The current version first, then the others it had. If the log can't be read, only the current one is known,
             // which can only turn a late ancestor into a kept version, never lose a change.
@@ -58,11 +60,22 @@ impl Adapter for VaultAdapter<'_> {
             Held { versions, deleted: l.tombstone, pending_rotation: self.rotations.rotating(&l.record), tags: Vec::new() }
         });
         let change = Change { version: incoming.version.clone(), base: incoming.base.clone(), tags: (!incoming.tombstone).then(Vec::new) };
-        match sync_merge::merge(held.as_ref(), &change) {
-            Decision::Applied => Merge::Applied,
-            Decision::KeptLocal => Merge::KeptLocal,
-            Decision::Conflict { current, .. } => Merge::Conflict { current: if current == Chose::Local { Side::Local } else { Side::Incoming } },
-        }
+        sync_merge::merge(held.as_ref(), &change)
+    }
+}
+
+/// What the layer is told of a [`Decision`].
+pub fn merge_of(decision: &Decision) -> Merge {
+    match decision {
+        Decision::Applied => Merge::Applied,
+        Decision::KeptLocal => Merge::KeptLocal,
+        Decision::Conflict { current, .. } => Merge::Conflict { current: if *current == Chose::Local { Side::Local } else { Side::Incoming } },
+    }
+}
+
+impl Adapter for VaultAdapter<'_> {
+    fn merge(&self, local: Option<&Header>, incoming: &Header) -> Merge {
+        merge_of(&self.decide(local, incoming))
     }
 }
 
