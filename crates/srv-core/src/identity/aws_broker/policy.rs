@@ -212,6 +212,21 @@ fn placeholders_of(arg: &str) -> Result<Vec<&str>, String> {
     Ok(found)
 }
 
+/// A grant's `caller_tag`, checked: it needs a command recipe, and a key and prefix with only the characters a tag may hold.
+fn caller_tag_of(raw: Option<RawCallerTag>, mint: &Mint) -> Result<Option<CallerTag>, String> {
+    let Some(t) = raw else { return Ok(None) };
+    if matches!(mint, Mint::HostProfile { .. }) {
+        return Err("a caller_tag needs a command recipe".to_string());
+    }
+    if t.key.is_empty() || t.key.len() > TAG_KEY_MAX || !tag_chars_ok(&t.key) || t.key.to_ascii_lowercase().starts_with("aws:") {
+        return Err(format!("caller_tag key {:?}: letters, digits and _.:/=+-@, at most {TAG_KEY_MAX} characters, and not starting with aws:", t.key));
+    }
+    if t.prefix.len() > TAG_VALUE_MAX || !tag_chars_ok(&t.prefix) {
+        return Err(format!("caller_tag prefix {:?}: letters, digits and _.:/=+-@, at most {TAG_VALUE_MAX} characters", t.prefix));
+    }
+    Ok(Some(CallerTag { key: t.key, prefix: t.prefix }))
+}
+
 impl Policy {
     /// Parse and check a policy file's text. The error names the line (JSON errors) or the grant.
     pub fn parse(text: &str) -> Result<Policy, String> {
@@ -260,19 +275,7 @@ impl Policy {
                     Mint::Command { argv }
                 }
             };
-            let caller_tag = match g.caller_tag {
-                None => None,
-                Some(_) if matches!(mint, Mint::HostProfile { .. }) => return Err(at("a caller_tag needs a command recipe".to_string())),
-                Some(t) => {
-                    if t.key.is_empty() || t.key.len() > TAG_KEY_MAX || !tag_chars_ok(&t.key) || t.key.to_ascii_lowercase().starts_with("aws:") {
-                        return Err(at(format!("caller_tag key {:?}: letters, digits and _.:/=+-@, at most {TAG_KEY_MAX} characters, and not starting with aws:", t.key)));
-                    }
-                    if t.prefix.len() > TAG_VALUE_MAX || !tag_chars_ok(&t.prefix) {
-                        return Err(at(format!("caller_tag prefix {:?}: letters, digits and _.:/=+-@, at most {TAG_VALUE_MAX} characters", t.prefix)));
-                    }
-                    Some(CallerTag { key: t.key, prefix: t.prefix })
-                }
-            };
+            let caller_tag = caller_tag_of(g.caller_tag, &mint).map_err(&at)?;
             let default_seconds = g.default_seconds.unwrap_or(if tier == Tier::Read { DEFAULT_READ_SECONDS } else { DEFAULT_WRITE_SECONDS });
             let max_seconds = g.max_seconds.unwrap_or(MAX_SECONDS);
             for (what, secs) in [("default_seconds", default_seconds), ("max_seconds", max_seconds)] {
