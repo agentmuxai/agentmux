@@ -15,7 +15,7 @@ use windows_sys::Win32::Graphics::Gdi::{CreateRectRgn, DeleteObject, GetWindowRg
 use windows_sys::Win32::System::Com::{DVASPECT_CONTENT, FORMATETC, STGMEDIUM, TYMED_HGLOBAL};
 use windows_sys::Win32::System::DataExchange::RegisterClipboardFormatW;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::System::Memory::{GlobalLock, GlobalUnlock, VirtualProtect, PAGE_READWRITE};
+use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, VirtualProtect, GMEM_MOVEABLE, PAGE_READWRITE};
 use windows_sys::Win32::System::Ole::{DoDragDrop, ReleaseStgMedium};
 use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -106,13 +106,17 @@ unsafe extern "system" fn wrapper_query_continue_drag(this: *mut c_void, escape:
     ((*(*inner).vtbl).query_continue_drag)(inner as *mut c_void, escape, keys)
 }
 
-/// The first four entries of an `IDataObject` vtable: `IUnknown`, then `GetData`.
+/// The entries of an `IDataObject` vtable up to `SetData`: `IUnknown`, `GetData`, then the three it does not use here.
 #[repr(C)]
 struct DataObjectVtblHead {
     query_interface: unsafe extern "system" fn(*mut c_void, *const [u8; 16], *mut *mut c_void) -> HResult,
     add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
     release: unsafe extern "system" fn(*mut c_void) -> u32,
     get_data: unsafe extern "system" fn(*mut c_void, *const FORMATETC, *mut STGMEDIUM) -> HResult,
+    get_data_here: usize,
+    query_get_data: usize,
+    get_canonical_format_etc: usize,
+    set_data: unsafe extern "system" fn(*mut c_void, *const FORMATETC, *mut STGMEDIUM, BOOL) -> HResult,
 }
 
 #[repr(C)]
@@ -258,6 +262,60 @@ unsafe extern "system" fn wrapper_give_feedback(this: *mut c_void, effect: u32) 
     answer
 }
 
+/// The registered files of a drag the app's own UI marked (`file_drag.rs`): the drag's data object gets them as a file list
+/// (`CF_HDROP`), so Explorer, the desktop and another app's page receive the real files. A drag with no marker, or
+/// one whose nonce is not valid, is left exactly as Chromium made it.
+unsafe fn attach_files(data: *mut c_void) {
+    if data.is_null() {
+        return;
+    }
+    let name: Vec<u16> = "Chromium Web Custom MIME Data Format\0".encode_utf16().collect();
+    let custom = RegisterClipboardFormatW(name.as_ptr());
+    if custom == 0 {
+        return;
+    }
+    let object = data as *mut RawDataObject;
+    let ask = FORMATETC { cfFormat: custom as u16, ptd: std::ptr::null_mut(), dwAspect: DVASPECT_CONTENT as u32, lindex: -1, tymed: TYMED_HGLOBAL as u32 };
+    let mut medium: STGMEDIUM = std::mem::zeroed();
+    if ((*(*object).vtbl).get_data)(data, &ask, &mut medium) != S_OK {
+        return;
+    }
+    let mut nonce = None;
+    if medium.tymed == TYMED_HGLOBAL as u32 && !medium.u.hGlobal.is_null() {
+        let size = GlobalSize(medium.u.hGlobal);
+        let p = GlobalLock(medium.u.hGlobal) as *const u8;
+        if !p.is_null() {
+            nonce = super::file_drag::marker_in(std::slice::from_raw_parts(p, size));
+            GlobalUnlock(medium.u.hGlobal);
+        }
+    }
+    ReleaseStgMedium(&mut medium);
+    let Some(files) = nonce.and_then(|n| super::file_drag::take(&n)) else { return };
+    let bytes = super::file_drag::drop_files_bytes(&files);
+    let hglobal = GlobalAlloc(GMEM_MOVEABLE, bytes.len());
+    if hglobal.is_null() {
+        return;
+    }
+    let dst = GlobalLock(hglobal) as *mut u8;
+    if dst.is_null() {
+        return;
+    }
+    std::ptr::copy_nonoverlapping(bytes.as_ptr(), dst, bytes.len());
+    GlobalUnlock(hglobal);
+    const CF_HDROP: u16 = 15;
+    let format = FORMATETC { cfFormat: CF_HDROP, ptd: std::ptr::null_mut(), dwAspect: DVASPECT_CONTENT as u32, lindex: -1, tymed: TYMED_HGLOBAL as u32 };
+    let mut stg: STGMEDIUM = std::mem::zeroed();
+    stg.tymed = TYMED_HGLOBAL as u32;
+    stg.u.hGlobal = hglobal;
+    // The data object owns the memory from here (TRUE: it releases it).
+    if ((*(*object).vtbl).set_data)(data, &format, &mut stg, 1) == S_OK {
+        tracing::info!(target: "dnd:file-out", files = files.len(), "[file-drag] the drag carries the registered files");
+    } else {
+        ReleaseStgMedium(&mut stg);
+        tracing::warn!(target: "dnd:file-out", "[file-drag] the drag's data object refused the file list");
+    }
+}
+
 /// What libcef calls instead of `DoDragDrop`: the same drag, with our drop source around Chromium's.
 unsafe extern "system" fn do_drag_drop_wrapped(
     data: *mut c_void,
@@ -265,6 +323,7 @@ unsafe extern "system" fn do_drag_drop_wrapped(
     ok_effects: u32,
     effect: *mut u32,
 ) -> HResult {
+    attach_files(data);
     if source.is_null() {
         return DoDragDrop(data, source, ok_effects, effect);
     }

@@ -507,6 +507,15 @@ async fn route_command(
             let label = args.get("windowLabel").and_then(|v| v.as_str());
             Ok(serde_json::json!(crate::drag_stash::take(label)))
         }
+        // The files a drag out of AgentMux will carry (`commands/file_drag.rs`): checked here, once; the answer is the nonce
+        // the drag holds, or null where no platform hook takes files out yet.
+        "register_file_drag" => {
+            if !cfg!(windows) {
+                return Ok(serde_json::Value::Null);
+            }
+            let paths: Vec<String> = args.get("paths").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|p| p.as_str().map(str::to_string)).collect()).unwrap_or_default();
+            commands::file_drag::register(&paths).map(|nonce| serde_json::json!(nonce))
+        }
         "peek_drag_paths" => {
             let label = args.get("windowLabel").and_then(|v| v.as_str());
             Ok(serde_json::json!(crate::drag_stash::peek(label)))

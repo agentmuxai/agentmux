@@ -504,6 +504,8 @@ declare global {
         writeClipboardImage?(png: string): Promise<void>;
         /** Local paths of the files an OS drag just dropped into this window (`nativeFileDrop`). */
         consumeDroppedFilePaths(): Promise<string[]>;
+        /** Register the local files a drag out of AgentMux will carry: the nonce the drag holds (`file-drag-out.ts`), or null where this host cannot take files out to other apps. */
+        registerFileDrag?(paths: string[]): Promise<string | null>;
         /** The same paths while the drag is still hovering; doesn't consume them. */
         peekDroppedFilePaths?(): Promise<string[]>;
         /** Copy a local file into a directory; resolves to the destination path. */

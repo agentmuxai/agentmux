@@ -68,6 +68,7 @@ export function FileRow(props: {
     onContextMenu: (e: MouseEvent) => void;
     onRenameDone: () => void;
     onDragStart: (e: DragEvent) => void;
+    onPointerDown?: (e: PointerEvent) => void;
     onDragEnd: () => void;
     git?: FsGitState;
     touch?: Touch;
@@ -93,6 +94,7 @@ export function FileRow(props: {
             onDblClick={props.onOpen}
             onContextMenu={props.onContextMenu}
             draggable={!props.renaming}
+            onPointerDown={props.onPointerDown}
             onDragStart={props.onDragStart}
             onDragOver={props.onDragOver}
             onDragEnd={props.onDragEnd}
@@ -158,6 +160,7 @@ export function GridTile(props: {
     onOpen: () => void;
     onContextMenu: (e: MouseEvent) => void;
     onDragStart: (e: DragEvent) => void;
+    onPointerDown?: (e: PointerEvent) => void;
     onDragOver: () => void;
     onDragEnd: () => void;
     onRenameDone: () => void;
@@ -205,6 +208,7 @@ export function GridTile(props: {
             onDblClick={props.onOpen}
             onContextMenu={props.onContextMenu}
             draggable={!props.renaming}
+            onPointerDown={props.onPointerDown}
             onDragStart={props.onDragStart}
             onDragOver={props.onDragOver}
             onDragEnd={props.onDragEnd}
