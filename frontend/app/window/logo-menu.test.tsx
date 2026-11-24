@@ -117,7 +117,12 @@ vi.mock("@/app/store/command-registry", async () => {
     return {
         commandRegistry: {
             get: (id: string) => commands[id],
-            run: vi.fn((id: string) => (commands[id] ? (void commands[id].execute(), true) : false)),
+            // Like the real registry, a command that needs several windows declines on a host without them.
+            run: vi.fn((id: string) => {
+                if (!commands[id] || (id === "window:new" && !h.caps.multiWindow)) return false;
+                void commands[id].execute();
+                return true;
+            }),
         },
     };
 });
@@ -162,6 +167,7 @@ vi.mock("@/app/element/flyoutmenu", () => ({
 
 import { formatCommand } from "@/app/keybindings/registry";
 import { registerGlobalKeys } from "@/app/store/keymodel";
+import { commandRegistry } from "@/app/store/command-registry";
 import { appHandleKeyDown, keyCommands } from "@/app/store/keymodel-dispatch";
 import { adaptFromReactOrNativeKeyEvent, setKeyUtilPlatform } from "@/util/keyutil";
 import { setPlatform } from "@/util/platformutil";
@@ -250,7 +256,9 @@ describe.each(["darwin", "win32", "linux"] as Platform[])("AgentMux logo menu sh
     describe.each(ITEMS)("$label", (spec) => {
         it("shows the command's shortcut from the shortcut table", () => {
             const mac = platform === "darwin" ? "mac" : "other";
-            expect(keyCommands.has(spec.command), `keymodel handles ${spec.command}`).toBe(true);
+            // The key runs the command through the registry when keymodel has no handler of its own.
+            const reachable = keyCommands.has(spec.command) || commandRegistry.get(spec.command) !== undefined;
+            expect(reachable, `the key reaches ${spec.command}`).toBe(true);
             expect(menuItem(spec.label).shortcut).toBe(formatCommand(spec.command, mac));
             expect(menuItem(spec.label).shortcut).toBe(spec.shown[platform]);
         });
