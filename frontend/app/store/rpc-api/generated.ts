@@ -59,6 +59,8 @@ import type { AgentSpendResult } from "@/types/rpc/AgentSpendResult";
 import type { AgentStartResult } from "@/types/rpc/AgentStartResult";
 import type { AgentTakeoverResult } from "@/types/rpc/AgentTakeoverResult";
 import type { AgentTrackedBlocksResult } from "@/types/rpc/AgentTrackedBlocksResult";
+import type { AnswerDroneApprovalReq } from "@/types/rpc/AnswerDroneApprovalReq";
+import type { AnswerDroneApprovalResp } from "@/types/rpc/AnswerDroneApprovalResp";
 import type { ApiRetryEvent } from "@/types/rpc/ApiRetryEvent";
 import type { AppInfoResult } from "@/types/rpc/AppInfoResult";
 import type { AppSkillInstallResult } from "@/types/rpc/AppSkillInstallResult";
@@ -330,6 +332,7 @@ import type { DeleteDroneResp } from "@/types/rpc/DeleteDroneResp";
 import type { DeleteEditorFileReq } from "@/types/rpc/DeleteEditorFileReq";
 import type { DeleteIdentityAccountResult } from "@/types/rpc/DeleteIdentityAccountResult";
 import type { DesktopEvent } from "@/types/rpc/DesktopEvent";
+import type { DroneApproval } from "@/types/rpc/DroneApproval";
 import type { DroneDefinition } from "@/types/rpc/DroneDefinition";
 import type { DroneRun } from "@/types/rpc/DroneRun";
 import type { EditorRootsReq } from "@/types/rpc/EditorRootsReq";
@@ -464,6 +467,7 @@ import type { LayoutIntentResult } from "@/types/rpc/LayoutIntentResult";
 import type { LayoutOpenResult } from "@/types/rpc/LayoutOpenResult";
 import type { LayoutPreviewResult } from "@/types/rpc/LayoutPreviewResult";
 import type { LayoutSaveResult } from "@/types/rpc/LayoutSaveResult";
+import type { ListDroneApprovalsReq } from "@/types/rpc/ListDroneApprovalsReq";
 import type { ListDronesReq } from "@/types/rpc/ListDronesReq";
 import type { ListEditorDirReq } from "@/types/rpc/ListEditorDirReq";
 import type { ListEditorDirResult } from "@/types/rpc/ListEditorDirResult";
@@ -1986,6 +1990,22 @@ export const GeneratedApi = {
   // command "listmemories"
   ListBundlesCommand(client: RpcClient, data?: CommandListBundlesData, opts?: RpcOpts): Promise<Array<Bundle>> {
     return client.rpcCall("listmemories", data ?? {}, opts);
+  },
+  // command "listdroneapprovals"
+  ListDroneApprovalsCommand(
+    client: RpcClient,
+    data?: ListDroneApprovalsReq | null,
+    opts?: RpcOpts
+  ): Promise<Array<DroneApproval>> {
+    return client.rpcCall("listdroneapprovals", data, opts);
+  },
+  // command "answerdroneapproval"
+  AnswerDroneApprovalCommand(
+    client: RpcClient,
+    data: AnswerDroneApprovalReq,
+    opts?: RpcOpts
+  ): Promise<AnswerDroneApprovalResp> {
+    return client.rpcCall("answerdroneapproval", data, opts);
   },
   // command "getdronepayloadschema"
   GetDronePayloadSchemaCommand(client: RpcClient, data: PayloadSchemaReq, opts?: RpcOpts): Promise<PayloadSchemaResp> {

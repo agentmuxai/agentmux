@@ -312,6 +312,50 @@
     gap: 6px;
 }
 
+.drone-approval {
+    flex: none;
+    padding: 6px 10px;
+    background: var(--main-bg-color);
+    border-bottom: 1px solid var(--accent-color);
+    font-size: var(--text-sm);
+}
+
+.drone-approval-title {
+    margin: 0 0 4px;
+    font-size: inherit;
+}
+
+.drone-approval-item {
+    margin: 2px 0;
+}
+
+.drone-approval-label {
+    font-weight: 600;
+}
+
+.drone-approval-outside {
+    margin-left: 6px;
+    padding: 0 4px;
+    border: 1px solid var(--accent-color);
+    border-radius: 3px;
+    font-size: var(--text-xs);
+}
+
+.drone-approval-text {
+    margin: 0;
+    max-height: 8em;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.drone-approval-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+}
+
 .drone-trigger-name {
     max-width: 16em;
     overflow: hidden;
