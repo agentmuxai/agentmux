@@ -98,6 +98,17 @@ describe("the Audit pane", () => {
         await waitFor(() => expect(setMeta).toHaveBeenCalledWith({ "audit:section": "events" }));
     });
 
+    it("lets the person pick another section while an agent's events stay in the meta", async () => {
+        setBlockMeta({ "audit:agent": "korp" });
+        mount();
+        await screen.findByTestId("events");
+        fireEvent.click(screen.getByRole("tab", { name: "Conversations" }));
+        await screen.findByTestId("conversations");
+        await new Promise((r) => setTimeout(r, 20));
+        expect(setMeta).not.toHaveBeenCalledWith({ "audit:section": "events" });
+        expect(screen.getByRole("tab", { name: "Conversations" }).getAttribute("aria-selected")).toBe("true");
+    });
+
     it("zooms with term:zoom", async () => {
         setBlockMeta({ "term:zoom": 1.1 });
         const { container } = mount();
