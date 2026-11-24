@@ -658,7 +658,7 @@ describe("R12 — a documentation file a Rust test reads runs the Rust legs", ()
                 return statSync(full).isDirectory() ? rustFiles(full) : name.endsWith(".rs") ? [full] : [];
             });
         // A file of docs/ named within a few lines of where the test finds the repository root (CARGO_MANIFEST_DIR, or a
-        // call of a repo_root() helper). A bare "docs/x.md" in a fixture is not a read.
+        // call of a repo_root() helper). A bare docs path in a test fixture is not a read.
         const found = new Map();
         for (const file of rustFiles(root)) {
             const lines = readFileSync(file, "utf8").split("\n");
