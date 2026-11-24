@@ -69,10 +69,10 @@ describe("LowDiskNotice", () => {
         expect(b.onDismiss).toHaveBeenCalledTimes(1);
     });
 
-    it("Open History dismisses it and opens the History pane", () => {
+    it("Open Storage dismisses it and opens the Audit pane", () => {
         const { getByText, onDismiss } = mount("warn");
-        fireEvent.click(getByText("Open History"));
+        fireEvent.click(getByText("Open Storage"));
         expect(onDismiss).toHaveBeenCalledTimes(1);
-        expect(h.opened).toEqual(["history"]);
+        expect(h.opened).toEqual(["audit"]);
     });
 });

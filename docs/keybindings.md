@@ -19,7 +19,7 @@ The same list is in the app: press F1, or open the Help pane. A terminal keeps e
 | Open Swarm | ⇧⌘O then S | Ctrl+Shift+O then S |
 | Open Kanban | ⇧⌘O then K | Ctrl+Shift+O then K |
 | Open Vault | ⇧⌘O then V | Ctrl+Shift+O then V |
-| Open History | ⇧⌘O then H | Ctrl+Shift+O then H |
+| Open Audit: Conversations | ⇧⌘O then H | Ctrl+Shift+O then H |
 | Open System Info | ⇧⌘O then I | Ctrl+Shift+O then I |
 | Connectors | ⇧⌘O then C | Ctrl+Shift+O then C |
 | Memory | ⇧⌘O then M | Ctrl+Shift+O then M |

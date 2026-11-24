@@ -172,8 +172,8 @@
 201 crates/srv-core/src/backend/lan/discovery.rs::LanDiscovery::handle_event
 176 crates/srv-core/src/backend/lan/discovery.rs::LanDiscovery::start
 141 crates/srv-core/src/backend/layout/mod.rs::validate_layout_invariants
-201 crates/srv-core/src/backend/layout_file.rs::PlanBuilder::view_meta
-134 crates/srv-core/src/backend/layout_file.rs::view_from_block
+188 crates/srv-core/src/backend/layout_file.rs::PlanBuilder::view_meta
+127 crates/srv-core/src/backend/layout_file.rs::view_from_block
 113 crates/srv-core/src/backend/lsp/supervisor.rs::LspSupervisor::start
 114 crates/srv-core/src/backend/memory/adopt.rs::adopt_under_lease
 159 crates/srv-core/src/backend/memory/reconcile.rs::reconcile_file
@@ -337,7 +337,7 @@
 110 frontend/app/view/agent/commands/global/login.ts::runLogin
 116 frontend/app/view/agent/components/AgentDocumentView.tsx::AgentDocumentView
 115 frontend/app/view/agent/components/AgentEnvPanel.tsx::AgentEnvPanel
-120 frontend/app/view/agent/components/AgentSessionNotices.tsx::AgentSessionNotices
+119 frontend/app/view/agent/components/AgentSessionNotices.tsx::AgentSessionNotices
 126 frontend/app/view/agent/components/AgentShellInfoPanel.tsx::AgentShellInfoPanel
 130 frontend/app/view/agent/components/HiddenTemplatesSection.tsx::HiddenTemplatesSection
 141 frontend/app/view/agent/components/MyAgentsList.tsx::MyAgentsList
@@ -403,7 +403,7 @@
 103 frontend/app/view/warden-jobs/job-dry-run.tsx::JobDryRun
 101 frontend/app/view/warden-jobs/job-editor-fields.tsx::PolicySection
 102 frontend/app/view/warden-jobs/job-editor-fields.tsx::WhatSection
-137 frontend/app/view/warden-jobs/warden-jobs-manager.tsx::WardenJobsManager
+136 frontend/app/view/warden-jobs/warden-jobs-manager.tsx::WardenJobsManager
 107 frontend/app/window/pane-media-capture-indicator.tsx::PaneMediaCaptureIndicator
 102 frontend/app/window/titlebar-context-menu.tsx::TitleBarContextMenu
 128 frontend/app/window/use-widget-bar-responsive.ts::useWidgetBarResponsive
