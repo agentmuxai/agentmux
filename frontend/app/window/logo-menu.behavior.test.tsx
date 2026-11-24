@@ -51,6 +51,21 @@ vi.mock("@/util/util", () => ({
     },
 }));
 vi.mock("@/app/store/open-command-palette", () => ({ openCommandPalette: () => log("openCommandPalette") }));
+// The commands the menu names and runs by id: the names and actions of command-registry.ts, logging what they do.
+vi.mock("@/app/store/command-registry", () => {
+    const commands: Record<string, { label: string; execute: () => void }> = {
+        "tab:new": { label: "New Tab", execute: () => log("createTab") },
+        "window:new": { label: "New Window", execute: () => log("openNewWindowFromHere") },
+        "view:command-palette": { label: "Command Palette", execute: () => log("openCommandPalette") },
+        "window:reload": { label: "Reload Window", execute: () => log("reloadWindow") },
+    };
+    return {
+        commandRegistry: {
+            get: (id: string) => commands[id],
+            run: (id: string) => (commands[id] ? (commands[id].execute(), true) : false),
+        },
+    };
+});
 vi.mock("@/app/store/window-appearance", () => ({
     currentWindowLabel: () => h.label[0](),
     currentWindowOpacity: () => h.opacity[0](),
