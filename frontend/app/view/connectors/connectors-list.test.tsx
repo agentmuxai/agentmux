@@ -254,6 +254,31 @@ describe("Connectors as cards", () => {
 });
 
 describe("Connect", () => {
+    it("draws the Connect button of every card at the comfortable size, not the compact one", async () => {
+        render(() => <ConnectorsList />);
+        await ready();
+        const buttons = [...document.querySelectorAll<HTMLElement>(".connector-card-control .ui-button")];
+        expect(buttons.length).toBeGreaterThan(3);
+        for (const b of buttons) {
+            expect(b.classList.contains("ui-density-comfortable"), b.getAttribute("aria-label") ?? "").toBe(true);
+            expect(b.classList.contains("ui-density-compact")).toBe(false);
+        }
+    });
+
+    it("opens a connected card's Connect section above its accounts, so it shows however many accounts the card has", async () => {
+        const many = Array.from({ length: 8 }, (_, i) => account(`m${i}`, "claude", `m${i}@example.com`));
+        rpc.ListIdentityAccountsCommand.mockResolvedValue([...ACCOUNTS, ...many]);
+        render(() => <ConnectorsList />);
+        await ready();
+        const button = screen.getByRole("button", { name: "Connect another Anthropic account" });
+        fireEvent.click(button);
+        const section = await screen.findByRole("group", { name: "Connect Anthropic" });
+        const accounts = document.querySelector(".connector-accounts")!;
+        // Under the card, before the nine accounts: below them it was out of sight and the press looked dead.
+        expect(section.compareDocumentPosition(accounts) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(button.getAttribute("aria-expanded")).toBe("true");
+    });
+
     it("opens the add section under the card, in the caret-topped details, with no dialog over the pane", async () => {
         render(() => <ConnectorsList />);
         await ready();
