@@ -369,7 +369,6 @@
     "frontend/app/view/tower/tower-memory.tsx": 19,
     "frontend/app/view/tower/tower-panes.tsx": 29,
     "frontend/app/view/tower/tower-process-name.tsx": 1,
-    "frontend/app/view/tower/tower-view.tsx": 46,
     "frontend/app/view/vault/vault-entries.tsx": 16,
     "frontend/app/view/vault/vault-entry-form.tsx": 21,
     "frontend/app/view/vault/vault-entry-grants.tsx": 4,
