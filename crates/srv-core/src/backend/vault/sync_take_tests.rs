@@ -293,6 +293,23 @@ fn a_delete_does_not_take_an_entry_that_moved_to_another_vault() {
 }
 
 #[test]
+fn a_rotation_started_while_a_delete_waited_is_not_deleted_with_the_entry() {
+    let (mut a, mut b, p, _, on_b) = both_hold_one();
+    a.store.vault_delete("entry-a").unwrap();
+    a.capture(VAULT, NOW + 100);
+    let taken = ship(&a, &mut b, &p, NOW + 110);
+    assert!(matches!(&taken[0].effect, Effect::Deferred(_)), "{taken:?}");
+    // A rotation starts here before the next round: its new value waits beside the entry.
+    let row = b.store.vault_get(&on_b).unwrap().unwrap();
+    let pending = VaultVersionRow { seq: 0, entry_id: on_b.clone(), entry_created_at: row.created_at, sealed: row.sealed.clone(), replaced_at: NOW + 150, replaced_by: "you".into(), how: "rotation".into(), state: versions::PENDING.into() };
+    b.store.vault_version_add(&pending).unwrap();
+    let again = settle(&b, NOW + 200);
+    assert!(matches!(&again[..], [(_, Ok(Effect::Wrote { .. }))]), "{again:?}");
+    assert!(b.store.vault_get(&on_b).unwrap().is_some(), "the entry and its pending value stay");
+    assert!(b.versions(&on_b).iter().any(|(s, v)| s == &format!("{KEPT_PREFIX}deleted on a while this was being rotated") && *v));
+}
+
+#[test]
 fn the_old_vaults_tombstone_taken_before_the_new_vaults_record_does_not_delete_the_entry() {
     let (mut a, mut b, p, _, on_b) = both_hold_one();
     // A kept earlier value the entry has on b: a delete and a re-make would lose it.

@@ -194,7 +194,7 @@ impl Taker<'_> {
             }
             Decision::Conflict { current: Chose::Local, kept, .. } => {
                 let label = kept.label();
-                self.keep_incoming(rec, &kept, now_ms).map(|effect| Taken { outcome, effect, kept: Some(label) })
+                self.keep_incoming(rec, &label, now_ms).map(|effect| Taken { outcome, effect, kept: Some(label) })
             }
         };
         // The log holds the record now. What the store could not take of it is noted, so a record that is never sent again is
@@ -242,7 +242,7 @@ impl Taker<'_> {
     /// conflict, which this machine held, and which is kept.
     fn current(&self, rec: &Record, lost: Option<&str>, settled: bool, now_ms: i64) -> Result<Effect, String> {
         if rec.header.tombstone {
-            return self.delete(rec, lost, settled);
+            return self.delete(rec, lost, settled, now_ms);
         }
         let body = open_body(self.ring, rec)?;
         if let Some(why) = refused(&body) {
@@ -320,7 +320,7 @@ impl Taker<'_> {
     /// already in the log, and not on first sight either, when it may still come in this round. The delete waits one round
     /// (`settled` is false then, true when [`Taker::retake`] takes it again), and by then the new Vault's record has moved the
     /// entry, which keeps its grants, versions and ids; if it has not, the entry is deleted.
-    fn delete(&self, rec: &Record, lost: Option<&str>, settled: bool) -> Result<Effect, String> {
+    fn delete(&self, rec: &Record, lost: Option<&str>, settled: bool, now_ms: i64) -> Result<Effect, String> {
         let h = &rec.header;
         let Some(id) = self.store.vault_entry_of_link(&h.record).map_err(|e| e.to_string())? else { return Ok(Effect::None) };
         let Some(row) = self.store.vault_get(&id).map_err(|e| e.to_string())? else { return Ok(Effect::None) };
@@ -331,6 +331,12 @@ impl Taker<'_> {
         let moved = log::live_elsewhere(&self.store.conn().lock().unwrap_or_else(|e| e.into_inner()), &h.collection, &h.record).map_err(|e| e.to_string())?;
         if moved {
             return Ok(Effect::None);
+        }
+        // A rotation may have started since the tombstone came (a rotation holds a pending value beside the entry, and is not a
+        // change to it): the delete does not take the pending value with it, and is kept beside the entry, as a delete that
+        // came while the entry was being rotated is.
+        if self.rotation_waits(&id)? {
+            return self.keep_incoming(rec, &format!("deleted on {} while this was being rotated", h.version.machine), now_ms);
         }
         if !settled {
             return Ok(Effect::Deferred("deleted in this Vault: it waits one round, in case the entry moved to another Vault whose record has not come yet".to_string()));
@@ -344,9 +350,9 @@ impl Taker<'_> {
     }
 
     /// `rec` lost a conflict: this machine's value stays, and `rec` is kept beside it as a version, with its tags.
-    fn keep_incoming(&self, rec: &Record, why: &Kept, now_ms: i64) -> Result<Effect, String> {
+    fn keep_incoming(&self, rec: &Record, label: &str, now_ms: i64) -> Result<Effect, String> {
         let h = &rec.header;
-        let label = why.label();
+        let label = label.to_string();
         let Some(id) = self.store.vault_entry_of_link(&h.record).map_err(|e| e.to_string())? else { return Ok(Effect::KeptInLog(label)) };
         let machine = h.version.machine.as_str();
         let state = format!("{KEPT_PREFIX}{label}");
