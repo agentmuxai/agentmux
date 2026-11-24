@@ -90,6 +90,22 @@ describe("stripRoom", () => {
         Object.defineProperty(parent, "clientWidth", { value: 321 });
         expect(stripRoom(strip)).toBe(321);
     });
+
+    it("is the parent's width less what else is in its row, for a strip beside other items (the Editor's file tree toggle)", () => {
+        const parent = document.createElement("div");
+        const toggle = document.createElement("button");
+        const hidden = document.createElement("div");
+        const strip = document.createElement("div");
+        parent.append(toggle, hidden, strip);
+        document.body.append(parent);
+        Object.defineProperty(parent, "clientWidth", { value: 500 });
+        toggle.getBoundingClientRect = () => ({ width: 28 }) as DOMRect;
+        Object.defineProperty(toggle, "offsetParent", { value: document.body });
+        // Not shown: takes no room (its offsetParent is null, as for `display: none`).
+        hidden.getBoundingClientRect = () => ({ width: 99 }) as DOMRect;
+        // the toggle and one gap of 8
+        expect(stripRoom(strip)).toBe(500 - 28 - 8);
+    });
 });
 
 describe("createStripSteps", () => {
