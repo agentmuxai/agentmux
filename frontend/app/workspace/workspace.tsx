@@ -181,7 +181,7 @@ function WorkspaceElem(): JSX.Element {
     createEffect(() => {
         const id = displayTabId();
         const el = tabEls.get(id);
-        if (el) settleTabHeaders(el, tabSwitching());
+        if (el) settleTabHeaders(el, untrack(tabSwitching));
         if (focusWhenShown === id) {
             focusWhenShown = null;
             focusManager.focusShownTab(id);
