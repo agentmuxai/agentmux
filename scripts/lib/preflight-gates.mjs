@@ -105,6 +105,7 @@ export const NOT_RUN = Object.fromEntries(
         "scripts/ci-install-go-task.test.sh",
         "scripts/build-slot/build-slot.test.sh",
         "scripts/ci-nextest-run.test.sh",
+        "scripts/ci-srv-single-process.test.sh",
         "scripts/check-taskfile-target-dir.test.sh",
         "scripts/check-taskfile-dev-cargo-env.test.sh",
     ].map((script) => [script, "self-test of a build, packaging or CI script; it only matters to a PR that edits that script, and CI runs it"]),

@@ -8,15 +8,47 @@
 //! The blocks that act on AgentMux itself (App query, Message, Task, Spawn, Notify) read it here.
 //! Set once at startup, the way `server::job_actions::install` and `server::jekt_cold::install` are.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
+#[cfg(not(test))]
+use std::sync::OnceLock;
 
 use crate::server::AppState;
 
+#[cfg(not(test))]
 static HOST: OnceLock<AppState> = OnceLock::new();
 
+#[cfg(test)]
+thread_local! {
+    /// In a test the server is the test's own, on its own thread: a process-wide one set by one test would
+    /// reach every test after it when they share a process (the nightly's `cargo test`), and a block that
+    /// has no server there would find one.
+    static HOST: std::cell::Cell<Option<&'static AppState>> = const { std::cell::Cell::new(None) };
+}
+
 /// Give the drone blocks the server. Later calls change nothing.
+#[cfg(not(test))]
 pub(crate) fn install(state: &AppState) {
     let _ = HOST.set(state.clone());
+}
+
+/// Give the drone blocks the server, for the test's own thread only.
+#[cfg(test)]
+pub(crate) fn install(state: &AppState) {
+    HOST.with(|h| {
+        if h.get().is_none() {
+            h.set(Some(Box::leak(Box::new(state.clone()))));
+        }
+    });
+}
+
+#[cfg(not(test))]
+fn current() -> Option<&'static AppState> {
+    HOST.get()
+}
+
+#[cfg(test)]
+fn current() -> Option<&'static AppState> {
+    HOST.with(std::cell::Cell::get)
 }
 
 /// Where a Drone block finds the drone it calls.
@@ -57,10 +89,10 @@ impl DroneLookup for Saved {
 
 /// The lookup a run gives its Drone blocks: the saved drones, once the server is set.
 pub(crate) fn lookup() -> Option<Arc<dyn DroneLookup>> {
-    HOST.get().map(|_| Arc::new(Saved) as Arc<dyn DroneLookup>)
+    current().map(|_| Arc::new(Saved) as Arc<dyn DroneLookup>)
 }
 
 /// The server, or why a block can't act yet.
 pub(crate) fn state() -> Result<&'static AppState, String> {
-    HOST.get().ok_or_else(|| "AgentMux isn't ready for this block yet".to_string())
+    current().ok_or_else(|| "AgentMux isn't ready for this block yet".to_string())
 }

@@ -925,3 +925,59 @@ describe("R10 — the agentmux-cef crate's tests run when what it is built from 
         expect(unlisted, "add these crates to CEF_BUILT_FROM in scripts/ci-classify-changes.mjs").toEqual([]);
     });
 });
+
+describe("R12 — the srv binary's tests also run in one process when a srv crate changes", () => {
+    it("runs for a file of either srv crate and for the step's own files", () => {
+        for (const p of [
+            "crates/srv/src/server/tests.rs",
+            "crates/srv/Cargo.toml",
+            "crates/srv-core/src/backend/mod.rs",
+            ".github/workflows/ci-pr.yml",
+            "scripts/ci-srv-single-process.sh",
+            "scripts/ci-srv-single-process.test.sh",
+            "scripts/ci-classify-changes.mjs",
+        ]) {
+            expect(classifyChanges([p]).srv, p).toBe(true);
+        }
+    });
+
+    it("does not run for a PR that touches no srv crate", () => {
+        for (const p of [
+            "frontend/app/app.tsx",
+            "docs/a.md",
+            "crates/cef/src/ipc.rs",
+            "crates/common/src/lib.rs",
+            "crates/mcp/src/main.rs",
+            "crates/srvx/src/lib.rs",
+            "Cargo.lock",
+            "scripts/ci-nextest-run.sh",
+        ]) {
+            expect(classifyChanges([p]).srv, p).toBe(false);
+        }
+    });
+
+    it("runs when one changed file among others is a srv file, and when a path uses backslashes", () => {
+        expect(classifyChanges(["frontend/app/app.tsx", "docs/a.md", "crates/srv/src/x.rs"]).srv).toBe(true);
+        expect(classifyChanges(["crates\\srv\\src\\x.rs"]).srv).toBe(true);
+    });
+
+    it("runs on anything unrecognised (R2)", () => {
+        expect(classifyChanges([]).srv).toBe(true);
+        expect(classifyChanges(undefined).srv).toBe(true);
+        expect(classifyChanges(["frontend/app/app.tsx", 7]).srv).toBe(true);
+        expect(classifyPullFiles([{ filename: "docs/a.md" }, { nothing: true }]).srv).toBe(true);
+    });
+
+    it("counts the old name of a renamed file", () => {
+        const moved = classifyPullFiles([{ filename: "crates/cef/src/x.rs", previous_filename: "crates/srv/src/x.rs", patch: "" }]);
+        expect(moved.srv).toBe(true);
+    });
+
+    it("prints srv= for the workflow", () => {
+        const repo = join(dirname(fileURLToPath(import.meta.url)), "..");
+        const out = spawnSync(process.execPath, [join(repo, "scripts", "ci-classify-changes.mjs"), "crates/srv/src/x.rs"], { encoding: "utf8" });
+        expect(out.stdout).toContain("srv=true\n");
+        const none = spawnSync(process.execPath, [join(repo, "scripts", "ci-classify-changes.mjs"), "docs/a.md"], { encoding: "utf8" });
+        expect(none.stdout).toContain("srv=false\n");
+    });
+});
