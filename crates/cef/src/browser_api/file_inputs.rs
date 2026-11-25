@@ -59,6 +59,11 @@ pub async fn file_inputs_route(
         Err(e) => return fail(e),
     };
     let (frames, _) = super::frames::current_frames(&mut cdp).await;
+    // No frame listed at all is a read that failed, not a page with no files: say so, so it is not taken for "none".
+    if let Err(e) = frames_listed(frames.len()) {
+        let _ = cdp.close().await;
+        return fail(e);
+    }
     let mut names: Vec<String> = Vec::new();
     let mut unreadable = 0usize;
     for f in &frames {
@@ -78,6 +83,11 @@ pub async fn file_inputs_route(
     }
     let _ = cdp.close().await;
     (StatusCode::OK, Json(ApiResponse::ok(json!({ "names": names, "unreadable": unreadable }))))
+}
+
+/// `current_frames` answers an empty list when the page's frames could not be listed; a page always has one.
+fn frames_listed(count: usize) -> Result<(), String> {
+    if count == 0 { Err("couldn't list the page's frames".to_string()) } else { Ok(()) }
 }
 
 /// The names one frame's script answered, cut to what the host keeps.
@@ -102,6 +112,12 @@ mod tests {
         assert_eq!(frame_names(&text).len(), NAMES_PER_FRAME);
         let cut = frame_names(&json!({ "names": [long] }).to_string());
         assert_eq!(cut[0].chars().count(), NAME_CHARS);
+    }
+
+    #[test]
+    fn a_page_whose_frames_could_not_be_listed_is_an_error_not_an_empty_answer() {
+        assert!(frames_listed(0).is_err());
+        assert!(frames_listed(1).is_ok());
     }
 
     #[test]

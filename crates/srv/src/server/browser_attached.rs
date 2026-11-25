@@ -15,13 +15,16 @@ use super::AppState;
 
 /// The most names put in a sentence; the rest are counted.
 const SHOWN: usize = 10;
-/// How long the host gets to read a pane's inputs: the person is waiting on Done.
+/// How long the host gets to read a pane's inputs when Done was clicked: the agent is waiting on the answer.
 const READ_WITHIN: std::time::Duration = std::time::Duration::from_secs(8);
+/// And for the baseline, taken before the person's card goes up: short, so the card is not held back (a read that
+/// does not come in time leaves the agent told that nothing could be checked).
+const BASELINE_WITHIN: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// The file names in a pane's file inputs, and how many of its frames could not be read.
-async fn names_in(state: &AppState, pane: &str) -> Result<(Vec<String>, usize), String> {
+async fn names_in(state: &AppState, pane: &str, within: std::time::Duration) -> Result<(Vec<String>, usize), String> {
     let host = get_host_ipc(state).await?;
-    let v = proxy_to_host_timeout(state, &host, "file_inputs", json!({ "block_id": pane }), Some(READ_WITHIN)).await?;
+    let v = proxy_to_host_timeout(state, &host, "file_inputs", json!({ "block_id": pane }), Some(within)).await?;
     if v.get("ok").and_then(|o| o.as_bool()) == Some(false) {
         return Err(v.get("error").and_then(|e| e.as_str()).unwrap_or("couldn't read the page's file inputs").to_string());
     }
@@ -41,12 +44,12 @@ pub(crate) struct Watch {
 
 impl Watch {
     pub(crate) async fn begin(state: &AppState, pane: &str) -> Self {
-        Self { before: names_in(state, pane).await.ok().map(|(names, _)| names) }
+        Self { before: names_in(state, pane, BASELINE_WITHIN).await.ok().map(|(names, _)| names) }
     }
 
     /// The sentence for the agent once the person clicked Done: what they attached.
     pub(crate) async fn sentence(&self, state: &AppState, pane: &str) -> String {
-        sentence(self.before.as_deref(), names_in(state, pane).await)
+        sentence(self.before.as_deref(), names_in(state, pane, READ_WITHIN).await)
     }
 }
 
