@@ -242,7 +242,7 @@ describe("FloatingPaneWorkspace: closing an empty window when the watcher did no
 
     it("closes the window itself after the tab has been empty for two ticks, and says why", () => {
         vi.useFakeTimers();
-        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const warn = vi.spyOn(console, "log").mockImplementation(() => {});
         mount();
         vi.advanceTimersByTime(1000);
         emptyBehindTheGraph();
@@ -654,7 +654,7 @@ describe("FloatingPaneWorkspace: header drag on macOS and Linux (JS-driven)", ()
             h.reload.mockImplementation(async (oref: string) =>
                 oref === "window:w1" ? { workspaceid: "ws2" } : { oid: "ws2", activetabid: "" }
             );
-            const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+            const warn = vi.spyOn(console, "log").mockImplementation(() => {});
             release();
             await flush();
             await flush();
@@ -850,6 +850,28 @@ describe("FloatingPaneWorkspace: header drag on Windows (host-side move loop)", 
                 exclude_label: LABEL,
             });
         });
+    });
+
+    it("closes the floater itself once a drag redock has returned and its tab is empty, without waiting for the watcher", async () => {
+        h.arming.isArmed.mockReturnValue(true);
+        h.arming.target.mockReturnValue("main-1");
+        h.api.windows.resolveWindowAtCursor.mockResolvedValue({ label: "main-1", window_id: "w1" });
+        h.reload.mockImplementation(async (oref: string) =>
+            oref === "window:w1" ? { workspaceid: "ws2" } : { oid: "ws2", activetabid: "tab9" }
+        );
+        // The saga takes the pane out of the floater's tab; the reactive watcher is lost (the plain read sees it, the graph does not).
+        h.redockFloaterPane.mockImplementation(async () => {
+            setPlainBlocks([]);
+        });
+        const log = vi.spyOn(console, "log").mockImplementation(() => {});
+        const { gap } = mount();
+        await flush();
+        press(gap);
+        document.dispatchEvent(mouse("mouseup", { screenX: 640, screenY: 360 }));
+        h.listeners["window_drag_ended"]({ label: LABEL, moved: true });
+        await vi.waitFor(() => expect(h.api.closeWindowByLabel).toHaveBeenCalledWith(LABEL));
+        expect(h.api.closeWindowByLabel).toHaveBeenCalledTimes(1);
+        log.mockRestore();
     });
 
     describe("the host's hover samples", () => {

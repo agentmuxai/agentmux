@@ -48,6 +48,7 @@ import { TabContent } from "@/app/tab/tabcontent";
 import { atoms, getApi } from "@/store/global";
 import * as MOS from "@/store/mos";
 import { isFloaterHeaderMovePress } from "./floater-header-press";
+import { closeFloaterIfEmpty, tabIsEmpty } from "./floater-close";
 import { holdRedock, redockInProgress } from "./floating-redock-guard";
 import { floaterPaneBlockId, floaterPanes, redockFloaterPane } from "./floater-panes";
 import { Show, createEffect, createMemo, onCleanup, onMount, type JSX } from "solid-js";
@@ -911,6 +912,8 @@ function installMouseMoveTracking(s: FloaterDragState, env: FloaterEnv): () => v
 
 async function tryRedockAtCursor(s: FloaterDragState, env: FloaterEnv, screenX: number, screenY: number, expectedTarget: string | null) {
     await holdRedock(() => tryRedockAtCursorInner(s, env, screenX, screenY, expectedTarget));
+    // The pane is docked: the window goes now, from here, not from the update that emptied its tab (which can throw).
+    if (!s.cleaned) closeFloaterIfEmpty(env.tabId(), env.windowLabel(), "redock by drag");
 }
 
 /** The window under the cursor that a redock would dock into, or null when there is none to dock into. */
@@ -1208,23 +1211,18 @@ export function useCloseEmptyFloaterBackstop(tabId: typeof atoms.activeTabId, wi
     let hadBlocks = false;
     let emptyTicks = 0;
     const timer = setInterval(() => {
-        const tid = tabId();
-        const label = windowLabel();
-        if (!tid || !label || redockInProgress()) {
-            emptyTicks = 0;
+        const empty = tabIsEmpty(tabId());
+        if (!windowLabel() || redockInProgress() || empty === null) {
+            if (empty === null || redockInProgress()) emptyTicks = 0;
             return;
         }
-        const blockids = MOS.getObjectValue<Tab>(MOS.makeORef("tab", tid))?.blockids;
-        if (!blockids) return;
-        if (blockids.length > 0) {
+        if (!empty) {
             hadBlocks = true;
             emptyTicks = 0;
-            return;
+        } else if (hadBlocks && ++emptyTicks >= EMPTY_FLOATER_TICKS) {
+            clearInterval(timer);
+            closeFloaterIfEmpty(tabId(), windowLabel(), "backstop: the empty-tab watcher did not run");
         }
-        if (!hadBlocks || ++emptyTicks < EMPTY_FLOATER_TICKS) return;
-        console.warn("[floating-pane] closing a floating window whose pane has left it (the empty-tab watcher did not run)", { label, tabId: tid });
-        clearInterval(timer);
-        getApi().closeWindowByLabel(label).catch((e) => console.error("[floating-pane] backstop close failed", e));
     }, EMPTY_FLOATER_CHECK_MS);
     onCleanup(() => clearInterval(timer));
 }
