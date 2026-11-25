@@ -298,16 +298,7 @@ async fn call_tool(
         )
         .await
     };
-    match run().await {
-        // srv rejected the signature: its key for this agent is not the one held (replaced while this process ran).
-        // A rejected call did nothing, so it is asked for the current keys and made once more.
-        Err(e) if self_keys::is_rejected_signature(&format!("{e:#}")) => {
-            self_keys::forget_fetched();
-            self_keys::refresh_if_stale(client, local_url, auth_key).await;
-            run().await
-        }
-        other => other,
-    }
+    self_keys::run_healing_a_rejected_signature(client, local_url, auth_key, run).await
 }
 
 #[cfg(test)]

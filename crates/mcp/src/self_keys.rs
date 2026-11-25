@@ -64,6 +64,27 @@ pub(crate) fn is_rejected_signature(error: &str) -> bool {
     error.contains(REJECTED_SIGNATURE)
 }
 
+/// `run`, and once more after srv rejects its signature: the key held is not the one srv has (it was replaced while
+/// this process ran), so the keys are asked for again first. A rejected call did nothing, so repeating it is safe.
+pub(crate) async fn run_healing_a_rejected_signature<T, Fut>(
+    client: &reqwest::Client,
+    local_url: &str,
+    auth_key: &str,
+    run: impl Fn() -> Fut,
+) -> anyhow::Result<T>
+where
+    Fut: std::future::Future<Output = anyhow::Result<T>>,
+{
+    match run().await {
+        Err(e) if is_rejected_signature(&format!("{e:#}")) => {
+            forget_fetched();
+            refresh_if_stale(client, local_url, auth_key).await;
+            run().await
+        }
+        other => other,
+    }
+}
+
 /// Drop the held copy and the retry gate, so the next `refresh_if_stale` asks srv again at once.
 pub(crate) fn forget_fetched() {
     *CACHE.lock().unwrap_or_else(|e| e.into_inner()) = None;
@@ -243,6 +264,69 @@ mod tests {
         assert_eq!(served.load(std::sync::atomic::Ordering::SeqCst), 1, "one request, not two");
         super::forget_fetched();
         std::env::remove_var("AGENTMUX_AGENT_TOKEN");
+    }
+
+    /// Answers the key request with each of `bodies` in turn (the last one again after that); returns srv's url.
+    async fn serve_keys(bodies: Vec<&'static str>) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            for n in 0.. {
+                let Ok((mut sock, _)) = listener.accept().await else { return };
+                let body = bodies[n.min(bodies.len() - 1)];
+                let mut buf = [0u8; 2048];
+                let _ = sock.read(&mut buf).await;
+                let reply = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                let _ = sock.write_all(reply.as_bytes()).await;
+            }
+        });
+        url
+    }
+
+    /// An MCP that outlives the re-issue: it holds the old key, srv rejects its signature once, it asks srv again, and
+    /// the same call goes through with the current key. A different error is not repeated.
+    #[tokio::test]
+    async fn an_old_key_held_is_replaced_after_one_rejected_signature_and_the_call_goes_through() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let _guard = super::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        super::forget_fetched();
+        std::env::set_var("AGENTMUX_AGENT_TOKEN", "t");
+        std::env::set_var("AGENTMUX_AGENT_ID", "aria");
+        std::env::remove_var("AGENTMUX_IN_CONTAINER");
+        std::env::remove_var("AGENTMUX_JEKT_KEY");
+        // srv served [7; 32] to this process at its start, and has served [1; 32] since the re-issue.
+        let url = serve_keys(vec![
+            r#"{"slug":"aria","jekt_key":"BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=","lan_key":null,"uid":""}"#,
+            r#"{"slug":"aria","jekt_key":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=","lan_key":null,"uid":""}"#,
+        ])
+        .await;
+        let client = reqwest::Client::new();
+        super::refresh_if_stale(&client, &url, "k").await;
+        assert_eq!(jekt_key().as_deref(), Some(&[7u8; 32][..]), "the old key is held");
+
+        let calls = AtomicUsize::new(0);
+        let signs_as_srv_expects = || async {
+            calls.fetch_add(1, Ordering::SeqCst);
+            match jekt_key().as_deref() {
+                Some(k) if k == [1u8; 32] => Ok("verified"),
+                _ => Err(anyhow::anyhow!("srv returned 403: identity signature verification failed")),
+            }
+        };
+        let out = super::run_healing_a_rejected_signature(&client, &url, "k", signs_as_srv_expects).await;
+        assert_eq!(out.unwrap(), "verified", "the next message verifies");
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "one rejection, one repeat");
+
+        let other = AtomicUsize::new(0);
+        let fails_otherwise = || async {
+            other.fetch_add(1, Ordering::SeqCst);
+            Err::<&str, _>(anyhow::anyhow!("the pane is gone"))
+        };
+        assert!(super::run_healing_a_rejected_signature(&client, &url, "k", fails_otherwise).await.is_err());
+        assert_eq!(other.load(Ordering::SeqCst), 1, "any other error is returned as it is");
+        super::forget_fetched();
+        std::env::remove_var("AGENTMUX_AGENT_TOKEN");
+        std::env::remove_var("AGENTMUX_AGENT_ID");
     }
 
     #[test]
