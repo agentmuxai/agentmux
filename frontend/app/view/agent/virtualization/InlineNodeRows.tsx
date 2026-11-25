@@ -11,6 +11,7 @@
 import { createMemo, Show, type Accessor, type JSX } from "solid-js";
 import { Button } from "@/app/element/ui";
 import { tip } from "@/app/element/tip";
+import { t } from "@/app/i18n/i18n";
 import { CopyErrorButton } from "@/app/errors/CopyErrorButton";
 import { formatErrorReport } from "@/app/errors/error-report";
 import { showCopyContextMenu } from "@/app/store/contextmenu";
@@ -38,6 +39,11 @@ export interface RowPeek {
 }
 
 /** The version of the AgentMux showing the conversation; a persisted row may name an older one. */
+function errorTitle(code: number): string {
+    // code=0 is a sentinel for non-HTTP errors (network/CLI); don't show "HTTP 0"
+    return code > 0 ? t("inlineNode.httpCode", { code }) : t("inlineNode.error");
+}
+
 function runningAppVersion(): string | undefined {
     try {
         return getApi().getAboutModalDetails().version;
@@ -71,7 +77,7 @@ export function AgentErrorRow(props: AgentErrorRowProps): JSX.Element {
                 onContextMenu={(e) => {
                     const n = props.node() as Extract<DocumentNode, { type: "agent_error" }>;
                     showCopyContextMenu(
-                        [{ label: "Copy error", value: formatErrorReport({ title: n.code > 0 ? `HTTP ${n.code}` : "Error", message: n.message }) }],
+                        [{ label: t("inlineNode.copyError"), value: formatErrorReport({ title: errorTitle(n.code), message: n.message }) }],
                         e
                     );
                 }}
@@ -79,15 +85,14 @@ export function AgentErrorRow(props: AgentErrorRowProps): JSX.Element {
                 <span class="agent-error-code">
                     {(() => {
                         const n = props.node() as Extract<DocumentNode, { type: "agent_error" }>;
-                        // code=0 is a sentinel for non-HTTP errors (network/CLI); don't show "HTTP 0"
-                        return n.code > 0 ? `HTTP ${n.code}` : "Error";
+                        return errorTitle(n.code);
                     })()}
                 </span>
                 <span class="agent-error-message">
                     {(props.node() as Extract<DocumentNode, { type: "agent_error" }>).message}
                 </span>
                 <Show when={(props.node() as Extract<DocumentNode, { type: "agent_error" }>).resolved}>
-                    <span class="agent-error-resolved">signed in since</span>
+                    <span class="agent-error-resolved">{t("inlineNode.signedInSince")}</span>
                 </Show>
                 {/* An auth error (401/403) is recoverable by logging in again: an inline button drives the
                     same flow as the failure banner (SPEC_REAUTH_FROM_AUTH_ERROR §7). Kept beside that
@@ -100,7 +105,7 @@ export function AgentErrorRow(props: AgentErrorRowProps): JSX.Element {
                     && [401, 403].includes((props.node() as Extract<DocumentNode, { type: "agent_error" }>).code)
                 }>
                     <Button tone="danger" density="compact" class="agent-error-login-btn" onClick={() => props.onAgentErrorLogin?.()}>
-                        Login Again →
+                        {t("inlineNode.loginAgain")}
                     </Button>
                 </Show>
                 {/* SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md surface 3 —
@@ -110,7 +115,7 @@ export function AgentErrorRow(props: AgentErrorRowProps): JSX.Element {
                     className="agent-error-copy"
                     report={() => {
                         const n = props.node() as Extract<DocumentNode, { type: "agent_error" }>;
-                        return formatErrorReport({ title: n.code > 0 ? `HTTP ${n.code}` : "Error", message: n.message });
+                        return formatErrorReport({ title: errorTitle(n.code), message: n.message });
                     }}
                 />
                 {(() => {
@@ -120,7 +125,7 @@ export function AgentErrorRow(props: AgentErrorRowProps): JSX.Element {
                     const n = props.node() as Extract<DocumentNode, { type: "agent_error" }>;
                     const estimateText = createMemo(() => {
                         const count = estimateTokenCount(n.message);
-                        return count > 0 ? `~${formatCompactNumber(count)} tok (est.)` : null;
+                        return count > 0 ? t("inlineNode.tokensEst", { tokens: formatCompactNumber(count) }) : null;
                     });
                     return (
                         <PeekOverlay show={isPeeking() && estimateText() != null} rowEl={peekRowEl}>
@@ -153,12 +158,12 @@ export function ContextCompactedRow(props: ContextCompactedRowProps): JSX.Elemen
                 // providers, or a missed real event) has neither. See
                 // docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md §4.3.
                 const triggerLabel = n.trigger === "manual"
-                    ? "you ran /compact"
+                    ? t("inlineNode.ranCompact")
                     : n.trigger === "auto"
-                        ? "auto-compacted"
+                        ? t("inlineNode.autoCompacted")
                         : null;
                 const durationLabel = n.durationMs != null
-                    ? ` · took ${(n.durationMs / 1000).toFixed(1)}s`
+                    ? ` · ${t("inlineNode.took", { seconds: (n.durationMs / 1000).toFixed(1) })}`
                     : "";
                 // Only a time line — tokensBefore/After/duration are already
                 // visible in the row itself, and there's no free-text body to
@@ -177,11 +182,11 @@ export function ContextCompactedRow(props: ContextCompactedRowProps): JSX.Elemen
                     >
                         <div class="agent-context-compacted-rule">
                             <span class="agent-context-compacted-label">
-                                context compacted{triggerLabel ? ` — ${triggerLabel}` : ""}
+                                {triggerLabel ? t("inlineNode.compactedVia", { trigger: triggerLabel }) : t("inlineNode.compacted")}
                             </span>
                         </div>
                         <div class="agent-context-compacted-detail">
-                            Earlier history summarized · {compactionCardTokens(n, fmt)}{durationLabel}
+                            {t("inlineNode.summarized")} · {compactionCardTokens(n, fmt)}{durationLabel}
                         </div>
                         <PeekOverlay show={isPeeking() && timeText() != null} rowEl={peekRowEl}>
                             <div class="agent-node-peek-tooltip-meta">{timeText()}</div>
@@ -205,7 +210,7 @@ export function CompactionStartedRow(props: CompactionStartedRowProps): JSX.Elem
         <>
             {(() => {
                 const n = props.node() as Extract<DocumentNode, { type: "compaction_started" }>;
-                const triggerLabel = n.trigger === "manual" ? "you ran /compact" : "context filled up";
+                const triggerLabel = n.trigger === "manual" ? t("inlineNode.ranCompact") : t("inlineNode.contextFilled");
                 // Node uses `startedAt`, not `timestamp` — same time-only peek
                 // shape as context_compacted above.
                 const timeText = createMemo(() => {
@@ -221,7 +226,7 @@ export function CompactionStartedRow(props: CompactionStartedRowProps): JSX.Elem
                         onMouseLeave={handlePeekLeave}
                     >
                         <div class="agent-compaction-started-label">
-                            Compacting conversation…
+                            {t("inlineNode.compacting")}
                         </div>
                         <div class="agent-compaction-started-detail">
                             {triggerLabel}
@@ -255,7 +260,7 @@ export function MemoryReinjectionRow(props: MemoryReinjectionRowProps): JSX.Elem
                 // §3.2.
                 const n = props.node() as Extract<DocumentNode, { type: "memory_reinjection" }>;
                 const fmt = formatCompactNumber;
-                const countLabel = `${n.globalMemoryCount} global, ${n.personalMemoryCount} personal`;
+                const countLabel = t("inlineNode.memoryCounts", { global: n.globalMemoryCount, personal: n.personalMemoryCount });
                 // Per-entry breakdown + real byte totals — "the token
                 // count of each" (§4) surfaced on hover, same PeekOverlay
                 // pattern the other compaction-family nodes already use
@@ -264,9 +269,18 @@ export function MemoryReinjectionRow(props: MemoryReinjectionRowProps): JSX.Elem
                     if (!peekPanelVisible()) return null;
                     peekTick();
                     const lines = n.perEntryTokens.map(
-                        (e) => `${e.source === "global" ? "🌐" : "👤"} ${e.label} — ~${fmt(e.tokens)} tok (est.), ${fmt(e.sizeBytes)} B`,
+                        (e) =>
+                            t("inlineNode.memoryEntry", {
+                                icon: e.source === "global" ? "🌐" : "👤",
+                                label: e.label,
+                                tokens: fmt(e.tokens),
+                                size: fmt(e.sizeBytes),
+                            }),
                     );
-                    const totalsLine = `Total: ${fmt(n.totalSizeBytes.global)} B global, ${fmt(n.totalSizeBytes.personal)} B personal`;
+                    const totalsLine = t("inlineNode.memoryTotals", {
+                        global: fmt(n.totalSizeBytes.global),
+                        personal: fmt(n.totalSizeBytes.personal),
+                    });
                     // Informational suggestion text only, §3.4.3 — no
                     // action affordance (compress button / "create a
                     // WorkItem" click) is wired here. §3.4.4 leaves
@@ -279,9 +293,9 @@ export function MemoryReinjectionRow(props: MemoryReinjectionRowProps): JSX.Elem
                         n.sizeBand === "high" || n.sizeBand === "critical"
                             ? [
                                   "",
-                                  "Personal memory has grown large. Consider:",
-                                  "• Compress: Memory list → consolidate with Memory write (check its history and diff first)",
-                                  "• Delegate: hand the next segment of work to another agent via Tasks enqueue",
+                                  t("inlineNode.memoryLarge"),
+                                  t("inlineNode.memoryCompress"),
+                                  t("inlineNode.memoryDelegate"),
                               ]
                             : [];
                     return [...lines, totalsLine, ...suggestionLines].join("\n");
@@ -294,7 +308,7 @@ export function MemoryReinjectionRow(props: MemoryReinjectionRowProps): JSX.Elem
                         onMouseLeave={handlePeekLeave}
                     >
                         <div class="agent-memory-reinjection-label">
-                            🧠 Memory reinjected — {countLabel} (~{fmt(n.estimatedTokens)} tok, est.)
+                            {t("inlineNode.memoryReinjected", { counts: countLabel, tokens: fmt(n.estimatedTokens) })}
                         </div>
                         <PeekOverlay show={isPeeking() && breakdownText() != null} rowEl={peekRowEl}>
                             {/* white-space: pre-line (see scss) renders the \n-joined
@@ -372,7 +386,7 @@ export function HistoryLinkRow(props: HistoryLinkRowProps): JSX.Element {
             >
                 <span class="agent-history-link-sigil">⌛</span>
                 <span class="agent-history-link-label">{historyLinkLabel(props.node() as HistoryLinkNode)}</span>
-                <span class="agent-history-link-cta">Open Agent History →</span>
+                <span class="agent-history-link-cta">{t("inlineNode.openHistory")}</span>
             </div>
         </>
     );
@@ -399,7 +413,7 @@ export function ResumePreflightRow(props: ResumePreflightRowProps): JSX.Element 
                             <div class="agent-resume-preflight agent-resume-preflight-pending">
                                 <span class="agent-resume-preflight-sigil">⟳</span>
                                 <span class="agent-resume-preflight-label">
-                                    Checking whether this conversation can resume…
+                                    {t("inlineNode.resumeChecking")}
                                 </span>
                             </div>
                         }
@@ -416,8 +430,8 @@ export function ResumePreflightRow(props: ResumePreflightRowProps): JSX.Element 
                             </span>
                             <span class="agent-resume-preflight-label">
                                 {n.verdict === "recover"
-                                    ? "This agent will reconnect to its conversation — it may pause briefly on your first message."
-                                    : "This agent will start a new conversation — the history below isn't available to it."}
+                                    ? t("inlineNode.resumeRecover")
+                                    : t("inlineNode.resumeFresh")}
                             </span>
                             <Show when={n.verdict === "fresh" && props.onOpenHistory}>
                                 <span
@@ -432,7 +446,7 @@ export function ResumePreflightRow(props: ResumePreflightRowProps): JSX.Element 
                                         }
                                     }}
                                 >
-                                    Open Agent History →
+                                    {t("inlineNode.openHistory")}
                                 </span>
                             </Show>
                         </div>
@@ -474,7 +488,7 @@ export function SessionOutcomeRow(props: SessionOutcomeRowProps): JSX.Element {
                 // `fresh_start_needs_disclosure` path), as opposed to
                 // having attempted one that was rejected. Render it as "—"
                 // so the peek body doesn't read as a truncated id.
-                const bodyText = `attempted: ${n.attemptedSid || "—"} · actual: ${n.actualSid ?? "—"}`;
+                const bodyText = t("inlineNode.sessionIds", { attempted: n.attemptedSid || "—", actual: n.actualSid ?? "—" });
                 return (
                     <div
                         ref={setPeekRowEl}
@@ -526,10 +540,10 @@ export function CliNoticeRow(props: CliNoticeRowProps): JSX.Element {
                             <ContainerUpdateButton blockId={node().blockId!} />
                         </Show>
                         <Show when={node().kind === "container_limit" && node().limitState === "oom" && node().agentId}>
-                            <ContainerLimitButton agentId={node().agentId!} agentName={node().agentName || "this agent"} />
+                            <ContainerLimitButton agentId={node().agentId!} agentName={node().agentName || t("inlineNode.thisAgent")} />
                         </Show>
                         <Show when={node().kind === "container_caches" && node().agentId}>
-                            <ContainerLimitButton agentId={node().agentId!} agentName={node().agentName || "this agent"} label="Container settings" />
+                            <ContainerLimitButton agentId={node().agentId!} agentName={node().agentName || t("inlineNode.thisAgent")} label={t("inlineNode.containerSettings")} />
                         </Show>
                     </div>
                 );

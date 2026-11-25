@@ -7,6 +7,7 @@
 
 import { Button } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
+import { Rich } from "@/app/i18n/rich";
 import type { RecentSessionRow } from "@/types/rpc/RecentSessionRow";
 import { batch, For, Match, Show, Switch, type JSX } from "solid-js";
 import { AgentBundlesTab } from "./AgentBundlesTab";
@@ -19,16 +20,27 @@ import { NamePrompt } from "./NamePrompt";
 import type { RowPanels, SubView } from "./my-agents-list-panels";
 
 type PanelView = "actions" | "rename" | "fork-name" | SubView;
-const PANEL_SUBTITLE: Record<PanelView, string | undefined> = {
-    actions: undefined,
-    rename: "Rename",
-    "fork-name": "New session",
-    seat: "Seat",
-    bundles: "Bundles",
-    env: "Environment",
-    spend: undefined, // its subtitle is the dictionary's (see MyAgentsRowPanel)
-    delete: "Delete",
-};
+/** The panel's subtitle for a view; read where it is drawn, so it follows the language. */
+function panelSubtitle(view: PanelView): string | undefined {
+    switch (view) {
+        case "rename":
+            return t("myAgentsRow.subtitleRename");
+        case "fork-name":
+            return t("myAgentsRow.subtitleNewSession");
+        case "seat":
+            return t("myAgentsRow.subtitleSeat");
+        case "bundles":
+            return t("myAgentsRow.subtitleBundles");
+        case "env":
+            return t("myAgentsRow.subtitleEnv");
+        case "spend":
+            return t("agentSpend.subtitle");
+        case "delete":
+            return t("myAgentsRow.subtitleDelete");
+        default:
+            return undefined;
+    }
+}
 // The choices are the answer to a click on the tile, so they have nothing to go back to.
 const PANEL_HAS_BACK: ReadonlySet<PanelView> = new Set(["rename", "fork-name", "seat", "bundles", "env", "spend", "delete"]);
 
@@ -50,8 +62,8 @@ interface PanelState {
     isActive: () => boolean;
     withoutPane: () => boolean;
     openWhere: () => string;
-    /** What the panel says about the agent before its choices. */
-    note: () => string | undefined;
+    /** What the panel says about the agent before its choices: it is open in a pane, or runs with none. */
+    note: () => "active" | "nopane" | undefined;
     naming: () => NamingState | null;
     toActions: () => void;
 }
@@ -63,7 +75,7 @@ function createPanelState(props: PanelProps): PanelState {
     const id = row.definition_id;
     const isActive = () => openMap().has(id);
     const withoutPane = () => runsWithoutPane(id);
-    const openWhere = () => props.openLocations?.().get(id)?.label ?? "open in another pane";
+    const openWhere = () => props.openLocations?.().get(id)?.label ?? t("myAgentsRow.openElsewhere");
     return {
         props,
         row,
@@ -79,8 +91,7 @@ function createPanelState(props: PanelProps): PanelState {
         isActive,
         withoutPane,
         openWhere,
-        note: (): string | undefined =>
-            isActive() ? `is already ${openWhere()}.` : withoutPane() ? "is running with no pane." : undefined,
+        note: (): "active" | "nopane" | undefined => (isActive() ? "active" : withoutPane() ? "nopane" : undefined),
         naming: () => {
             const fs = getForkState(id);
             return fs.kind === "naming" ? fs : null;
@@ -100,7 +111,7 @@ export const MyAgentsRowPanel = (props: PanelProps): JSX.Element => {
     return (
         <AgentRowPanel
             title={name}
-            subtitle={view() === "spend" ? t("agentSpend.subtitle") : PANEL_SUBTITLE[view()]}
+            subtitle={panelSubtitle(view())}
             viewKey={view()}
             tile={() => tileEls.get(id)}
             onClose={() => {
@@ -155,14 +166,14 @@ function PanelBody({ s }: { s: PanelState }) {
 }
 
 function ActionsView({ s }: { s: PanelState }) {
-    const { name, row, note, isActive, withoutPane } = s;
+    const { name, row, note, isActive, withoutPane, openWhere } = s;
     const { rowActions } = s.props.panels;
     return (
         <div class="agent-row-panel-actions-view" data-testid="agent-row-actions">
             <Show when={note()}>
-                {(text) => (
+                {(kind) => (
                     <p class="agent-row-panel-note">
-                        <strong>{name}</strong> {text()}
+                        <Rich k={kind() === "active" ? "myAgentsRow.noteActive" : "myAgentsRow.noteNoPane"} params={{ name, where: openWhere() }} />
                     </p>
                 )}
             </Show>
@@ -200,7 +211,7 @@ function OpenButtons({ s }: { s: PanelState }) {
                     data-testid="agent-fork-switch"
                     onClick={() => handleSwitchToExisting(row)}
                 >
-                    Switch to existing
+                    {t("myAgentsRow.switchExisting")}
                 </Button>
                 <Show when={canOpenHere(row.definition_id)}>
                     <Button
@@ -217,7 +228,7 @@ function OpenButtons({ s }: { s: PanelState }) {
                     data-testid="agent-fork-open-new"
                     onClick={() => handleOpenNewSession(row)}
                 >
-                    Fork…
+                    {t("myAgentsRow.fork")}
                 </Button>
             </Match>
             <Match when={withoutPane()}>
@@ -227,10 +238,10 @@ function OpenButtons({ s }: { s: PanelState }) {
                     data-testid="agent-fork-attach"
                     onClick={() => handleAttachNoPane(row)}
                 >
-                    Open it
+                    {t("myAgentsRow.openIt")}
                 </Button>
                 <Button icon="code-fork" data-testid="agent-fork-fork" onClick={() => handleOpenNewSession(row)}>
-                    Fork…
+                    {t("myAgentsRow.fork")}
                 </Button>
             </Match>
             <Match when={true}>
@@ -240,7 +251,7 @@ function OpenButtons({ s }: { s: PanelState }) {
                     data-testid="agent-my-agents-open"
                     onClick={() => handleOpen(row)}
                 >
-                    Open
+                    {t("myAgentsRow.open")}
                 </Button>
             </Match>
         </Switch>
@@ -255,12 +266,12 @@ function RenameView({ s }: { s: PanelState }) {
             {(rs) => (
                 <div data-testid="agent-rename-prompt">
                     <NamePrompt
-                        label="Rename to:"
-                        placeholder="Agent name"
+                        label={t("myAgentsRow.renameTo")}
+                        placeholder={t("myAgentsRow.agentName")}
                         value={rs().label}
                         loading={rs().loading}
                         error={rs().error}
-                        submitLabel="Save"
+                        submitLabel={t("myAgentsRow.save")}
                         inputTestid="agent-rename-input"
                         submitTestid="agent-rename-save"
                         onInput={(label) => setRenameState(id, { ...rs(), label })}
@@ -282,16 +293,16 @@ function ForkNameView({ s }: { s: PanelState }) {
                 <div data-testid="agent-fork-prompt">
                     <Show when={isActive()}>
                         <p class="agent-row-panel-note">
-                            <strong>{name}</strong> is already {openWhere()}.
+                            <Rich k="myAgentsRow.noteActive" params={{ name, where: openWhere() }} />
                         </p>
                     </Show>
                     <NamePrompt
-                        label="Name for new session:"
-                        placeholder="Session name"
+                        label={t("myAgentsRow.nameForSession")}
+                        placeholder={t("myAgentsRow.sessionName")}
                         value={ns().label}
                         loading={ns().loading}
                         error={ns().error}
-                        submitLabel="Start"
+                        submitLabel={t("myAgentsRow.start")}
                         inputTestid="agent-fork-name-input"
                         submitTestid="agent-fork-start"
                         onInput={(label) =>
@@ -323,8 +334,7 @@ function DeleteView({ s }: { s: PanelState }) {
     return (
         <div data-testid="agent-delete-confirm">
             <p class="agent-row-panel-note">
-                This permanently deletes the agent and its credentials, skills, and activity history. Its bundle and any
-                manually-saved transcripts are not affected. This cannot be undone.
+                {t("myAgentsRow.deleteWarning")}
             </p>
             <div class="agent-row-panel-actions">
                 <Button
@@ -334,10 +344,10 @@ function DeleteView({ s }: { s: PanelState }) {
                     busy={deleteBusy()}
                     onClick={() => confirmDelete(row)}
                 >
-                    Delete {name}
+                    {t("myAgentsRow.delete", { name })}
                 </Button>
                 <Button disabled={deleteBusy()} onClick={toActions}>
-                    Cancel
+                    {t("myAgentsRow.cancel")}
                 </Button>
             </div>
         </div>
