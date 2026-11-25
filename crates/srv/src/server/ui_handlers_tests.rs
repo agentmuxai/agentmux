@@ -4,17 +4,17 @@
 //! Tests of `ui_handlers.rs`, kept beside it so the handlers file stays
 //! within its size baseline (scripts/check-file-sizes.mjs).
 
-use super::{prune_old_screenshots, BROWSER_DEFAULT_SPLIT, SCREENSHOT_RETENTION};
+use super::{prune_old_screenshots, SCREENSHOT_RETENTION};
 use crate::server::app_api::pane::resolve_placement;
 use crate::server::service::layout_intents::Placement;
 use agentmux_common::SplitPosition::After;
 
-/// A browser an agent opens without saying where goes below the agent, each with half of the
-/// space the agent had; an explicit "down" keeps the layout's default size.
+/// A split asked for as `down:half` gives the new pane half of the space the pane had; a plain "down" keeps the layout's
+/// default size. (A browser an agent opens without saying where is a tab, not a split: `agent_tab_default`.)
 #[test]
-fn an_agents_browser_opens_below_it_taking_half_its_space() {
+fn a_split_asked_for_as_half_takes_half_the_space() {
     assert_eq!(
-        resolve_placement(Some(BROWSER_DEFAULT_SPLIT), Some("agent-block"), false),
+        resolve_placement(Some("down:half"), Some("agent-block"), false),
         Placement::Split { target_block_id: "agent-block".into(), horizontal: false, position: After, size_fraction: Some(0.5), focused: false }
     );
     assert!(matches!(

@@ -156,7 +156,7 @@ fn a_catalog_server(state: &crate::server::AppState, id: &str) {
         created_at: 1,
         updated_at: 1,
     };
-    state.identity_store.mcp_server_upsert_unique_global(&server).unwrap();
+    state.identity_store.mcp_server_upsert_unique_global(&server, "test").unwrap();
 }
 
 /// What `command` answers for the window: the probe's error text, or the error of the call.
@@ -189,7 +189,7 @@ async fn a_catalog_probe_starts_nothing_on_this_computer_for_a_server_bound_only
         a_catalog_server(&state, id);
     }
     let reach = |id: &str, all_agents: bool, in_containers: bool| state.identity_store.mcp_server_set_reach(id, McpServerReach { all_agents, in_containers }, 1).unwrap();
-    let bind = |agent: &str, id: &str| state.mstore.mcp_server_bind(&state.identity_store, &format!("uid-{agent}"), id).unwrap();
+    let bind = |agent: &str, id: &str| state.mstore.mcp_server_bind(&state.identity_store, &format!("uid-{agent}"), id, "test", 1).unwrap();
     reach("only-boxed", false, true);
     bind("boxed", "only-boxed");
     reach("boxed-and-hosted", false, true);

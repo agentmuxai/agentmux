@@ -157,7 +157,7 @@ fn world(fx: &Fixture, container: bool) -> World {
             created_at: 1_700_000_000_000,
             updated_at: 1_700_000_000_000,
         };
-        store.mcp_server_upsert_unique_global(&server).unwrap();
+        store.mcp_server_upsert_unique_global(&server, "test").unwrap();
         store
             .mcp_server_set_reach(&m.id, McpServerReach { all_agents: m.all_agents, in_containers: m.in_containers }, 1)
             .unwrap();

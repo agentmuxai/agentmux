@@ -228,6 +228,13 @@
     // download only when you click Download.
     // "update:autodownload": true,
 
+    // Measuring aid, off by default. While on, a call that makes the page lay out during a
+    // websocket message (getBoundingClientRect, offsetWidth and the like) and takes 1 ms or
+    // more is written to the log as a [perf] layout-read line: the message's kind, the call,
+    // the place in the code and the milliseconds. Never message content; at most 20 lines per
+    // 10 seconds.
+    // "debug:layoutreadprobe": false,
+
     // Show an AgentMux icon in the system tray / menu bar while AgentMux is running. On by
     // default. Always shown while app:runinbackground is on (a process that keeps running must
     // show an icon). Read by agentmux-launcher at startup, so a change applies at the NEXT

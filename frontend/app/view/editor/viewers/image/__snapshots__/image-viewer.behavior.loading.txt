@@ -13,7 +13,7 @@ ResizeObserver observe
       <div class="ui-tooltip-anchor">
         <button aria-label="Background: checker (B)" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
           <i aria-hidden="true" class="fa-solid fa-chess-board">
-    <div tabindex="0" aria-label="Image" class="image-viewer-content image-viewer-bg-checker">
+    <div tabindex="0" class="image-viewer-content image-viewer-bg-checker" aria-label="Image">
       <div class="editor-viewer-message">
         "Loading…"
 -- bytes arrived, not decoded
@@ -27,7 +27,7 @@ ResizeObserver observe
       <div class="ui-tooltip-anchor">
         <button aria-label="Background: checker (B)" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
           <i aria-hidden="true" class="fa-solid fa-chess-board">
-    <div tabindex="0" aria-label="Image" class="image-viewer-content image-viewer-bg-checker">
+    <div tabindex="0" class="image-viewer-content image-viewer-bg-checker" aria-label="Image">
       <img class="image-viewer-img" style="transition: opacity var(--duration-quick) ease; opacity: 0; transform: translate(0px, 0px) scale(1);" draggable="false" alt="C:/pics/a.png" src="blob:one">
 -- decoded
 <div>
@@ -42,7 +42,7 @@ ResizeObserver observe
       <div class="ui-tooltip-anchor">
         <button aria-label="Background: checker (B)" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
           <i aria-hidden="true" class="fa-solid fa-chess-board">
-    <div tabindex="0" aria-label="Image" class="image-viewer-content image-viewer-bg-checker">
+    <div tabindex="0" class="image-viewer-content image-viewer-bg-checker" aria-label="Image">
       <img class="image-viewer-img" style="transition: opacity var(--duration-quick) ease; opacity: 1; transform: translate(0px, 0px) scale(1);" draggable="false" alt="C:/pics/a.png" src="blob:one">
 -- a new image, not decoded
 <div>
@@ -55,5 +55,5 @@ ResizeObserver observe
       <div class="ui-tooltip-anchor">
         <button aria-label="Background: checker (B)" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
           <i aria-hidden="true" class="fa-solid fa-chess-board">
-    <div tabindex="0" aria-label="Image" class="image-viewer-content image-viewer-bg-checker">
+    <div tabindex="0" class="image-viewer-content image-viewer-bg-checker" aria-label="Image">
       <img class="image-viewer-img" style="transition: opacity var(--duration-quick) ease; opacity: 0; transform: translate(0px, 0px) scale(1);" draggable="false" alt="C:/pics/a.png" src="blob:two">

@@ -32,7 +32,11 @@ pub const MAX_BATCH_RECORDS: usize = 200;
 /// this goes alone (up to `MAX_RECORD_BYTES`).
 pub const MAX_BATCH_BYTES: usize = 256 * 1024;
 /// Most entries of a membership chain one answer carries; a longer chain is not served until it is compacted.
+#[cfg(not(test))]
 pub const MAX_ENTRIES: usize = 256;
+/// Small under test, so a chain over it is built with a few entries.
+#[cfg(test)]
+pub const MAX_ENTRIES: usize = 16;
 /// Most join requests one collection keeps waiting for a person.
 pub const MAX_PENDING: usize = 16;
 /// How long a join waits for a person before it is dropped (the machine asks again).
@@ -375,13 +379,17 @@ fn epoch_to_chain(conn: &Connection, collection: &str, chain: &Chain) -> Result<
 }
 
 /// A removal that lost a fork to another entry leaves no key behind for its epoch, whichever machine signed it or made
-/// the key: the winner's key is the one that counts, and is taken when it is offered.
+/// the key: the winner's key is the one that counts, and is taken when it is offered. A branch that lost may hold several
+/// removals, each at the epoch the entries before it on that branch made.
 pub(super) fn discard_lost_keys(keys: &dyn KeyDelivery, collection: &str, chain: &Chain, taken: &[Result<Taken, MemberError>]) {
+    let removes = |e: &Entry| matches!(e.change, Change::Remove { .. });
     for t in taken {
-        if let Ok(Taken::Replaced(old)) = t {
-            if matches!(old.change, Change::Remove { .. }) {
-                let before = chain.entries.iter().take(old.n.saturating_sub(1) as usize).filter(|e| matches!(e.change, Change::Remove { .. })).count();
-                keys.discard(collection, before as u32 + 1);
+        if let Ok(Taken::Replaced(lost)) = t {
+            // The entries before the first one lost are the chain's own, which the lost branch shared.
+            let mut epoch = chain.entries.iter().take(lost.first().map_or(0, |e| e.n.saturating_sub(1) as usize)).filter(|e| removes(e)).count() as u32;
+            for e in lost.iter().filter(|e| removes(e)) {
+                epoch += 1;
+                keys.discard(collection, epoch);
             }
         }
     }

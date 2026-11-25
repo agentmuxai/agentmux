@@ -202,7 +202,8 @@ pub enum MemberError {
     AlreadyMember,
     /// A removal of someone who is not a member, or of the last machine, or an `ended` naming a non-member.
     BadRemoval,
-    /// An entry beside the head (same position, same predecessor) that settled against it, or a second founding entry.
+    /// An entry on a branch that settled against the chain (beside the head, or beside an earlier entry the chain has gone
+    /// on from), or a second founding entry.
     ForkLost,
 }
 
@@ -307,16 +308,25 @@ pub enum Taken {
     Extended,
     /// Already held.
     Duplicate,
-    /// It was beside the head and settled in its favour: it replaced the head, which is returned.
-    Replaced(Entry),
+    /// It was on a branch that settled in its favour, at the head or at an earlier place the chain had gone on from: the
+    /// entries it displaced, from the first of them to the old head, are returned. The chain may now be shorter or longer.
+    Replaced(Vec<Entry>),
 }
 
-/// The entries a machine holds for one collection: the chain, and the other entries seen at the head's position (a
-/// fork not yet outgrown), so the winner is a function of everything seen and not of the order it arrived in.
+/// The most entries kept that are not in the chain (branches that lost), so a member's flood of them has a limit. The oldest
+/// positions are dropped first.
+pub const MAX_SIDE: usize = 64;
+
+/// The entries a machine holds for one collection: the chain, and the other entries it has seen that are valid on their own
+/// branch (a fork, at the head or further back, and what was signed on top of the branch that lost), so the winner at every
+/// position is a function of everything seen and not of the order it arrived in.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Chain {
     pub entries: Vec<Entry>,
+    /// The entries beside the head: at its position, naming the head's predecessor.
     contested: Vec<Entry>,
+    /// The other entries off the chain, by position then hash.
+    older: Vec<Entry>,
 }
 
 /// Which of the entries at one position wins. An entry signed by a member another entry removes loses to it, so a
@@ -345,29 +355,35 @@ impl Chain {
         &self.contested
     }
 
-    /// A chain read back from the store: the entries are checked in order, and each fork entry must be one that was
-    /// valid beside the head.
-    pub fn restore(collection: &str, entries: Vec<Entry>, forks: Vec<Entry>) -> Result<Chain, MemberError> {
+    /// Every entry held that is not in the chain: those beside the head, then the older ones.
+    pub fn side(&self) -> impl Iterator<Item = &Entry> {
+        self.contested.iter().chain(self.older.iter())
+    }
+
+    /// A chain read back from the store: the entries are checked in order, and each other entry must be valid on its own
+    /// branch, every entry it follows being held.
+    pub fn restore(collection: &str, entries: Vec<Entry>, side: Vec<Entry>) -> Result<Chain, MemberError> {
         Chain::replay(collection, &entries)?;
-        if !forks.is_empty() {
-            // A fork is an entry beside the head at a position after the founding one, never the head itself and
-            // never held twice.
-            let before = entries.split_last().filter(|(_, rest)| !rest.is_empty()).map(|(_, rest)| rest).ok_or(MemberError::ForkLost)?;
-            for (i, f) in forks.iter().enumerate() {
-                if entries.last() == Some(f) || forks[..i].contains(f) {
-                    return Err(MemberError::ForkLost);
-                }
-                let mut state = Chain::replay(collection, before)?;
-                state.apply(f)?;
-            }
+        if !side.is_empty() && entries.len() < 2 {
+            // Something beside the founding entry, which is never replaced.
+            return Err(MemberError::ForkLost);
         }
-        Ok(Chain { entries, contested: forks })
+        let held: Vec<&Entry> = entries.iter().chain(side.iter()).collect();
+        for (i, f) in side.iter().enumerate() {
+            if entries.contains(f) || side[..i].contains(f) {
+                return Err(MemberError::ForkLost);
+            }
+            Chain::before(collection, &held, f)?.apply(f)?;
+        }
+        let mut chain = Chain { entries, contested: Vec::new(), older: Vec::new() };
+        chain.keep(side);
+        Ok(chain)
     }
 
     /// A chain from entries received whole: every one is checked in order.
     pub fn from_entries(collection: &str, entries: Vec<Entry>) -> Result<Chain, MemberError> {
         Chain::replay(collection, &entries)?;
-        Ok(Chain { entries, contested: Vec::new() })
+        Ok(Chain { entries, contested: Vec::new(), older: Vec::new() })
     }
 
     /// The members, epoch and policy the chain leaves, or why the chain is not sound (a chain that was altered
@@ -389,47 +405,134 @@ impl Chain {
         Entry::sign(private, collection, self.entries.len() as u64 + 1, prev, change, signer)
     }
 
-    /// Takes in an entry from anywhere. It must verify and extend the head. An entry beside the head (same position
-    /// and predecessor, valid there) is a fork: the winner is [`settle`]d over every entry seen at that position, the
-    /// same on every machine that sees them all. The founding entry is never replaced: a second one is a different
-    /// collection, and who founded this one is anchored by the joiner's own trust (`State::anchored`).
-    pub fn take(&mut self, collection: &str, entry: Entry) -> Result<Taken, MemberError> {
-        if self.entries.contains(&entry) || self.contested.contains(&entry) {
-            return Ok(Taken::Duplicate);
+    /// The state the entry applies on: the state after the entries it follows, found by the hashes each names among `held`.
+    /// It does not extend anything held when a link is missing.
+    fn before(collection: &str, held: &[&Entry], entry: &Entry) -> Result<State, MemberError> {
+        let by_hash: BTreeMap<String, &Entry> = held.iter().map(|h| (h.hash(), *h)).collect();
+        let mut path: Vec<&Entry> = Vec::new();
+        let mut at = entry;
+        while at.n > 1 {
+            let parent = at.prev.as_ref().and_then(|p| by_hash.get(p)).copied().filter(|h| h.n + 1 == at.n && h.collection == collection);
+            let parent = parent.ok_or(MemberError::DoesNotExtend)?;
+            path.push(parent);
+            at = parent;
         }
-        let mut state = Chain::replay(collection, &self.entries)?;
-        match state.apply(&entry) {
-            Ok(()) => {
-                self.entries.push(entry);
-                self.contested.clear();
-                Ok(Taken::Extended)
-            }
-            Err(MemberError::DoesNotExtend) if entry.n == self.entries.len() as u64 && entry.n > 1 => self.fork(collection, entry),
-            Err(MemberError::DoesNotExtend) if entry.n == 1 && !self.entries.is_empty() => Err(MemberError::ForkLost),
-            Err(e) => Err(e),
+        if at.prev.is_some() || entry.collection != collection {
+            return Err(MemberError::DoesNotExtend);
+        }
+        let mut state = State::empty(collection);
+        for e in path.iter().rev() {
+            state.apply(e)?;
+        }
+        Ok(state)
+    }
+
+    /// The chain every machine that holds all of `seen` agrees on: from the founding entry, at each position the entries
+    /// that name the head and are valid on it are [`settle`]d. The founding entry already held is never replaced.
+    fn walk(collection: &str, seen: &[Entry], founder: Option<&Entry>) -> Vec<Entry> {
+        let mut state = State::empty(collection);
+        let mut chain: Vec<Entry> = Vec::new();
+        loop {
+            let at = state.clone();
+            // The entries that name the head and are valid on it, each with the state it leaves.
+            let next: Vec<(Entry, State)> = seen
+                .iter()
+                .filter(|e| e.n == at.n + 1 && e.prev == at.head)
+                .filter_map(|e| {
+                    let mut after = at.clone();
+                    after.apply(e).ok().map(|_| (e.clone(), after))
+                })
+                .collect();
+            let entries: Vec<Entry> = next.iter().map(|(e, _)| e.clone()).collect();
+            let winner = match founder {
+                Some(f) if at.n == 0 && entries.contains(f) => f.clone(),
+                _ if entries.is_empty() => return chain,
+                _ => settle(&at, &entries),
+            };
+            let Some((_, after)) = next.into_iter().find(|(e, _)| *e == winner) else { return chain };
+            state = after;
+            chain.push(winner);
         }
     }
 
-    fn fork(&mut self, collection: &str, entry: Entry) -> Result<Taken, MemberError> {
-        let (head, before) = self.entries.split_last().ok_or(MemberError::DoesNotExtend)?;
-        let mut base = Chain::replay(collection, before)?;
-        let at = base.clone();
-        base.apply(&entry)?;
-        let mut set = self.contested.clone();
-        set.push(head.clone());
-        set.push(entry.clone());
-        let winner = settle(&at, &set);
-        let old = head.clone();
-        let won = winner != old;
-        set.retain(|e| *e != winner);
-        set.sort_by_key(Entry::hash);
-        self.contested = set;
-        if won {
-            self.entries.pop();
-            self.entries.push(winner);
-            Ok(Taken::Replaced(old))
-        } else {
+    /// Keeps the entries that are not in the chain: those beside the head apart, the older ones by position, no more than
+    /// [`MAX_SIDE`] and only those still joined to the chain through entries kept.
+    fn keep(&mut self, mut rest: Vec<Entry>) {
+        rest.sort_by_key(|e| (e.n, e.hash()));
+        rest.dedup();
+        let joined = |chain: &[Entry], rest: Vec<Entry>| -> Vec<Entry> {
+            let mut linked: Vec<String> = chain.iter().map(Entry::hash).collect();
+            let mut kept = Vec::new();
+            for e in rest {
+                if e.prev.as_ref().is_some_and(|p| linked.contains(p)) {
+                    linked.push(e.hash());
+                    kept.push(e);
+                }
+            }
+            kept
+        };
+        let mut kept = joined(&self.entries, rest);
+        if kept.len() > MAX_SIDE {
+            kept.drain(..kept.len() - MAX_SIDE);
+            // What followed an entry dropped no longer joins the chain.
+            kept = joined(&self.entries, kept);
+        }
+        let place = self.entries.len() as u64;
+        let before = self.entries.len().checked_sub(2).and_then(|i| self.entries.get(i)).map(Entry::hash);
+        let (mut beside, older): (Vec<Entry>, Vec<Entry>) = kept.into_iter().partition(|e| place > 1 && e.n == place && e.prev == before);
+        beside.sort_by_key(Entry::hash);
+        self.contested = beside;
+        self.older = older;
+    }
+
+    /// Takes in an entry from anywhere. It must verify on the entries it follows, which must be held. One that extends the
+    /// head extends the chain. One that follows an earlier entry (a fork at the head, or further back where the chain has
+    /// gone on) is held beside it, and the chain is settled again over everything held: the same on every machine that
+    /// sees it all. When the entry's branch wins, the entries of the branch it displaces are returned; what was signed on
+    /// top of the branch that lost stays off the chain, hash-linked to an entry no longer in it, until its branch wins.
+    /// The founding entry is never replaced: a second one is a different collection, and who founded this one is anchored
+    /// by the joiner's own trust (`State::anchored`).
+    pub fn take(&mut self, collection: &str, entry: Entry) -> Result<Taken, MemberError> {
+        if self.entries.contains(&entry) || self.contested.contains(&entry) || self.older.contains(&entry) {
+            return Ok(Taken::Duplicate);
+        }
+        if entry.collection != collection {
+            return Err(MemberError::DoesNotExtend);
+        }
+        if entry.n <= 1 {
+            if !self.entries.is_empty() {
+                return Err(MemberError::ForkLost);
+            }
+            State::empty(collection).apply(&entry)?;
+            self.entries.push(entry);
+            return Ok(Taken::Extended);
+        }
+        let mut seen: Vec<Entry> = self.entries.iter().chain(self.side()).cloned().collect();
+        {
+            let held: Vec<&Entry> = seen.iter().collect();
+            Chain::before(collection, &held, &entry)?.apply(&entry)?;
+        }
+        if self.entries.last().map(Entry::hash) == entry.prev && entry.n == self.entries.len() as u64 + 1 {
+            // The usual case: it goes on from the head, and nothing held can change what stands before it.
+            let rest: Vec<Entry> = self.side().cloned().collect();
+            self.entries.push(entry);
+            self.keep(rest);
+            return Ok(Taken::Extended);
+        }
+        seen.push(entry);
+        let now = Chain::walk(collection, &seen, self.entries.first());
+        let common = self.entries.iter().zip(&now).take_while(|(a, b)| a == b).count();
+        let displaced: Vec<Entry> = self.entries[common..].to_vec();
+        let extended = displaced.is_empty() && now.len() > self.entries.len();
+        let rest: Vec<Entry> = seen.into_iter().filter(|e| !now.contains(e)).collect();
+        self.entries = now;
+        self.keep(rest);
+        if extended {
+            Ok(Taken::Extended)
+        } else if displaced.is_empty() {
             Err(MemberError::ForkLost)
+        } else {
+            Ok(Taken::Replaced(displaced))
         }
     }
 }

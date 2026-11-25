@@ -197,15 +197,13 @@ fn check_config(report: &mut Report, path: &Path) -> Option<Entry> {
         .and_then(Value::as_array)
         .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
         .unwrap_or_default();
-    // Present or not, never their values.
-    let key_set = |k: &str| server.pointer(&format!("/env/{k}")).and_then(Value::as_str).is_some_and(|v| !v.is_empty());
-    if key_set("AGENTMUX_JEKT_KEY") {
-        report.ok(format!("{} has the agentmux entry ({command}) and its signing key", path.display()));
+    // The file holds references, not values: the keys come from srv. A value an older version wrote is
+    // replaced at the agent's next start. Present or not, never the value.
+    let has_value = |k: &str| server.pointer(&format!("/env/{k}")).and_then(Value::as_str).is_some_and(|v| !v.is_empty());
+    if has_value("AGENTMUX_JEKT_KEY") || has_value("AGENTMUX_LAN_KEY") {
+        report.ok(format!("{} has the agentmux entry ({command}); it still holds a signing value an older version wrote, replaced when the agent next starts", path.display()));
     } else {
-        report.fail(format!(
-            "{}'s agentmux entry has no AGENTMUX_JEKT_KEY: messages can't be signed; restart the agent to get one",
-            path.display()
-        ));
+        report.ok(format!("{} has the agentmux entry ({command}); its signing keys come from srv", path.display()));
     }
     Some(Entry { command, args })
 }

@@ -34,7 +34,7 @@ function Picture(props: { s: MessageLightboxState }): JSX.Element {
                         ? s.isVideo()
                             ? t("mediaPreview.videoGone")
                             : t("mediaPreview.imageGone")
-                        : "Loading…"}
+                        : t("mediaPreview.loading")}
                 </span>
             }
         >
@@ -89,15 +89,15 @@ function Actions(props: { s: MessageLightboxState; onClose: () => void }): JSX.E
     const s = props.s;
     return (
         <span class={`${BLOCK}__actions`}>
-            <IconButton icon="chevron-left" label="Previous" tooltip={false} title="Previous (←)" onClick={() => s.go(s.index() - 1)} />
+            <IconButton icon="chevron-left" label={t("mediaPreview.previous")} tooltip={false} title={t("mediaPreview.previousTip")} onClick={() => s.go(s.index() - 1)} />
             <span class="pos">
                 {Math.min(s.index(), s.count() - 1) + 1} / {s.count()}
             </span>
-            <IconButton icon="chevron-right" label="Next" tooltip={false} title="Next (→)" onClick={() => s.go(s.index() + 1)} />
-            <Button title="Open this file in the editor (E)" onClick={s.openEditor}>
-                Open in editor
+            <IconButton icon="chevron-right" label={t("mediaPreview.next")} tooltip={false} title={t("mediaPreview.nextTip")} onClick={() => s.go(s.index() + 1)} />
+            <Button title={t("mediaPreview.openEditorTip")} onClick={s.openEditor}>
+                {t("mediaPreview.openEditor")}
             </Button>
-            <CloseButton label="Close preview" tooltip={false} title={`Close (${keyLabel("Escape")})`} onClick={props.onClose} />
+            <CloseButton label={t("mediaPreview.close")} tooltip={false} title={t("mediaPreview.closeTip", { key: keyLabel("Escape") })} onClick={props.onClose} />
         </span>
     );
 }

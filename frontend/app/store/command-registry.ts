@@ -45,6 +45,8 @@ export interface CommandEntry {
     category: string;
     icon?: string;
     iconColor?: string;
+    /** An agent's provider ("claude", "codex"): the palette draws that provider's own logo for the row when it has no icon-font `icon`. */
+    provider?: string;
     /** An agent's stored identity colour (`#rrggbb`): the palette draws it in the theme's identity tone, as the agent's pane, tab and Swarm row do. */
     identity?: string;
     /** More words the palette's search matches, beyond the label. */
@@ -337,7 +339,7 @@ function registerWindowCommands(): void {
         id: "pane:redock",
         label: "Redock floating pane",
         category: "Pane",
-        icon: "table-columns",
+        icon: "window-restore",
         // Only a floating pane's window acts on it; anywhere else it does nothing.
         execute: () => runViewAction("redockThisFloater"),
     });

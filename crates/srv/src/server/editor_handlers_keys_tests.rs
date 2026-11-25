@@ -58,10 +58,13 @@ async fn write_mcp_json(ctx: RpcContext, slug: &str) -> Result<serde_json::Value
 }
 
 #[tokio::test]
-async fn only_the_window_is_handed_an_agents_signing_keys() {
+async fn the_start_file_holds_no_signing_value_and_only_the_window_has_keys_made() {
     let window = write_mcp_json(RpcContext::operator_for_tests(), "victim").await.unwrap();
     let env = &window["mcpServers"]["agentmux"]["env"];
-    assert!(env["AGENTMUX_JEKT_KEY"].as_str().is_some_and(|k| !k.is_empty()), "the window's launch carries the keys: {window}");
+    for name in ["AGENTMUX_JEKT_KEY", "AGENTMUX_LAN_KEY", "AGENTMUX_WAN_KEY"] {
+        assert!(env.get(name).is_none(), "the file holds references, not values: {window}");
+    }
+    assert!(env["AGENTMUX_CHANNEL"].as_str().is_some_and(|c| !c.is_empty()), "the window's launch had the agent's keys ensured: {window}");
 
     // A connection that is neither the window nor an agent (an agent using the instance key without registering)
     // writes nothing at all, so there is no file for keys to be left out of.

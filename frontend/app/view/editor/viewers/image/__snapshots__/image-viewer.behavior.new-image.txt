@@ -14,7 +14,7 @@ zoomed: translate(0px, 0px) scale(5.7707996236288555)
       <div class="ui-tooltip-anchor">
         <button aria-label="Background: checker (B)" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
           <i aria-hidden="true" class="fa-solid fa-chess-board">
-    <div tabindex="0" aria-label="Image" class="image-viewer-content image-viewer-bg-checker">
+    <div tabindex="0" class="image-viewer-content image-viewer-bg-checker" aria-label="Image">
       <img class="image-viewer-img image-viewer-pixels" style="transition: opacity var(--duration-quick) ease; opacity: 0; transform: translate(0px, 0px) scale(5.7707996236288555);" draggable="false" alt="C:/pics/a.png" src="blob:same-size">
 same size decoded: translate(0px, 0px) scale(5.7707996236288555)
 other size decoded: translate(0px, 0px) scale(1)
@@ -31,5 +31,5 @@ other size decoded: translate(0px, 0px) scale(1)
       <div class="ui-tooltip-anchor">
         <button aria-label="Background: checker (B)" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
           <i aria-hidden="true" class="fa-solid fa-chess-board">
-    <div tabindex="0" aria-label="Image" class="image-viewer-content image-viewer-bg-checker">
+    <div tabindex="0" class="image-viewer-content image-viewer-bg-checker" aria-label="Image">
       <img class="image-viewer-img" style="transition: opacity var(--duration-quick) ease; opacity: 1; transform: translate(0px, 0px) scale(1);" draggable="false" alt="C:/pics/a.png" src="blob:other-size">

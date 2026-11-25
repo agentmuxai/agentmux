@@ -83,6 +83,8 @@ pub(super) async fn handle_pane_open(
     // Set last: the snapshot step above may have rebuilt the request.
     req.opener = opener.clone();
     let floating = req.floating == Some(true);
+    // An agent that names no place gets a tab of its own pane group, not a split.
+    app_api::agent_tab_default::apply(&state, by_agent, opener.as_deref(), &mut req);
     match app_api::open_pane(&state, req).await {
         Ok(result) => {
             if by_agent {

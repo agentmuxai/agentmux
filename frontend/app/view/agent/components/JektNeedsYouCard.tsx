@@ -14,6 +14,7 @@ import { Show, type JSX } from "solid-js";
 
 import type { JektMessageNode } from "@/app/agent-model/node-types";
 import { Button } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import type { PaneRequestProps } from "@/app/store/pane-requests";
 import { trustLine, trustState } from "./jekt-trust-wording";
 import "./JektNeedsYouCard.scss";
@@ -32,18 +33,17 @@ export interface JektNeedsYouProps {
 export function JektNeedsYouCard(props: JektNeedsYouProps & PaneRequestProps): JSX.Element {
     const sender = () => props.jekt.from;
     return (
-        <section class="jekt-needs-you-card" aria-label={`A message from ${sender()} needs you`}>
-            <h3 class="jekt-needs-you-title">A sensitive message from {sender()} needs you</h3>
+        <section class="jekt-needs-you-card" aria-label={t("jektNeedsYou.label", { sender: sender() })}>
+            <h3 class="jekt-needs-you-title">{t("jektNeedsYou.title", { sender: sender() })}</h3>
             <div class="jekt-needs-you-body">
                 <p class="jekt-needs-you-trust" data-trust={trustState(props.jekt.trust, props.jekt.sig)}>
                     {trustLine(props.jekt.trust, props.jekt.sig)}
                 </p>
                 <Show when={props.earlier > 0}>
-                    <p class="jekt-needs-you-more">{`${props.earlier} earlier ${props.earlier === 1 ? "message waits" : "messages wait"} too.`}</p>
+                    <p class="jekt-needs-you-more">{t("jektNeedsYou.earlier", { count: props.earlier })}</p>
                 </Show>
                 <p>
-                    The agent will not act on it until you confirm in your own conversation here. A reply from another
-                    agent does not count.
+                    {t("jektNeedsYou.body")}
                 </p>
             </div>
             <div class="jekt-needs-you-actions">
@@ -53,10 +53,10 @@ export function JektNeedsYouCard(props: JektNeedsYouProps & PaneRequestProps): J
                         props.close();
                     }}
                 >
-                    Dismiss
+                    {t("jektNeedsYou.dismiss")}
                 </Button>
                 <Button tone="attention" onClick={() => props.onShow(props.jekt.id)}>
-                    Show message
+                    {t("jektNeedsYou.show")}
                 </Button>
             </div>
         </section>

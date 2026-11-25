@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 
-use super::members::{Change, Chain, Entry, Kind, MemberError, Policy, State, Subject, Taken};
+use super::members::{Change, Chain, Entry, Kind, MemberError, Policy, State, Subject, Taken, MAX_SIDE};
 
 const C: &str = "c1";
 
@@ -327,4 +327,131 @@ fn a_chain_that_was_altered_after_it_was_taken_in_reads_as_an_error_not_an_empty
     let (mut chain, _, _) = founded();
     chain.entries[0].sig = "AAAA".into();
     assert_eq!(chain.state(C), Err(MemberError::BadSignature));
+}
+
+
+/// Two branches off a chain of three machines: the entries `[lo, lo2]` (the one with the lower hash, and one that goes on
+/// from it) and `[hi, hi2]`, all signed by the founder at positions 4 and 5. The lower hash wins at position 4.
+fn two_branches() -> (Chain, [Entry; 2], [Entry; 2], [[u8; 32]; 3], [Subject; 3]) {
+    let (chain, keys, subjects) = three();
+    let [ka, ..] = keys;
+    let [a, ..] = &subjects;
+    let hi = chain.next(&ka, C, &a.id, Change::SetPolicy { policy: Policy::Approve }).unwrap();
+    let lo = grind_add(&chain, &ka, a, &hi.hash());
+    let after = |first: &Entry, policy: Policy| {
+        let mut c = chain.clone();
+        assert_eq!(c.take(C, first.clone()), Ok(Taken::Extended));
+        c.next(&ka, C, &a.id, Change::SetPolicy { policy }).unwrap()
+    };
+    let (lo2, hi2) = (after(&lo, Policy::AutoProven), after(&hi, Policy::AutoProven));
+    (chain, [lo, lo2], [hi, hi2], keys, subjects)
+}
+
+/// Delivers `entries` in order, again and again until a pass takes nothing more (an entry whose predecessor has not
+/// come yet is refused, and offered again by its sender).
+fn deliver(chain: &mut Chain, entries: &[&Entry]) {
+    for _ in 0..entries.len() + 1 {
+        for e in entries {
+            let _ = chain.take(C, (*e).clone());
+        }
+    }
+}
+
+#[test]
+fn a_fork_further_back_than_the_head_settles_after_one_branch_was_extended() {
+    let (base, [lo, lo2], [hi, hi2], ..) = two_branches();
+    assert!(lo.hash() < hi.hash());
+    // The machine that went on from `hi` is told of `lo`: `lo` wins at position 4, so `hi2` leaves the chain with `hi`.
+    let mut p = base.clone();
+    assert_eq!(p.take(C, hi.clone()), Ok(Taken::Extended));
+    assert_eq!(p.take(C, hi2.clone()), Ok(Taken::Extended));
+    assert_eq!(p.take(C, lo.clone()), Ok(Taken::Replaced(vec![hi.clone(), hi2.clone()])));
+    assert_eq!(p.entries[3..], [lo.clone()]);
+    assert_eq!(p.side().cloned().collect::<Vec<_>>(), vec![hi.clone(), hi2.clone()], "both are held");
+    // The machine that went on from `lo` is told of `hi` and `hi2`: neither displaces anything.
+    let mut q = base.clone();
+    assert_eq!(q.take(C, lo.clone()), Ok(Taken::Extended));
+    assert_eq!(q.take(C, lo2.clone()), Ok(Taken::Extended));
+    assert_eq!(q.take(C, hi.clone()), Err(MemberError::ForkLost));
+    assert_eq!(q.take(C, hi2.clone()), Err(MemberError::ForkLost), "on a branch that lost");
+    assert_eq!(q.entries[3..], [lo.clone(), lo2.clone()]);
+    // `p` goes on from `lo` as `q` did.
+    assert_eq!(p.take(C, lo2.clone()), Ok(Taken::Extended));
+    assert_eq!(p.entries, q.entries);
+    assert_eq!(p, q, "the same entries are held on both, in the chain and beside it");
+}
+
+#[test]
+fn a_branch_that_was_extended_wins_whole_when_its_first_entry_has_the_lower_hash() {
+    let (base, [lo, lo2], [hi, hi2], ..) = two_branches();
+    // The machine that held `hi` and `hi2` is told of `lo` and `lo2` and takes them over its own.
+    let mut p = base.clone();
+    deliver(&mut p, &[&hi, &hi2]);
+    assert_eq!(p.take(C, lo.clone()), Ok(Taken::Replaced(vec![hi, hi2])));
+    assert_eq!(p.take(C, lo2.clone()), Ok(Taken::Extended));
+    assert_eq!(p.entries[3..], [lo, lo2]);
+}
+
+#[test]
+fn a_fork_two_places_back_settles_the_same_in_every_order_of_delivery() {
+    let (base, [lo, lo2], [hi, hi2], ..) = two_branches();
+    let all = [&lo, &lo2, &hi, &hi2];
+    let mut ends = Vec::new();
+    // Every order of the four entries, each given again until nothing more is taken.
+    let mut order = [0usize, 1, 2, 3];
+    let mut orders = Vec::new();
+    fn permute(k: usize, a: &mut [usize; 4], out: &mut Vec<[usize; 4]>) {
+        if k == a.len() {
+            out.push(*a);
+            return;
+        }
+        for i in k..a.len() {
+            a.swap(k, i);
+            permute(k + 1, a, out);
+            a.swap(k, i);
+        }
+    }
+    permute(0, &mut order, &mut orders);
+    assert_eq!(orders.len(), 24);
+    for order in orders {
+        let mut p = base.clone();
+        deliver(&mut p, &order.map(|i| all[i]));
+        ends.push(p);
+    }
+    assert!(ends.iter().all(|p| *p == ends[0]), "every order ends in the same chain and the same side entries");
+    assert_eq!(ends[0].entries[3..], [lo, lo2], "the lower hash won, and its branch went on");
+    assert_eq!(ends[0].side().count(), 2);
+}
+
+#[test]
+fn a_removal_on_a_branch_that_lost_is_returned_with_what_followed_it() {
+    let (chain, [ka, kb, _], [a, b, c]) = three();
+    let ra = chain.next(&ka, C, &a.id, Change::Remove { id: c.id.clone(), ended: ended(&[(&a, 1), (&b, 1)]) }).unwrap();
+    let rival = grind_add(&chain, &ka, &a, &ra.hash());
+    // `b` went on from the removal with a second one (of itself, signed by `a`), then `rival` arrives.
+    let mut p = chain.clone();
+    assert_eq!(p.take(C, ra.clone()), Ok(Taken::Extended));
+    let second = p.next(&ka, C, &a.id, Change::Remove { id: b.id.clone(), ended: ended(&[(&a, 1)]) }).unwrap();
+    assert_eq!(p.take(C, second.clone()), Ok(Taken::Extended));
+    assert_eq!(p.take(C, rival.clone()), Ok(Taken::Replaced(vec![ra, second])));
+    assert_eq!(p.entries[3..], [rival]);
+    let _ = kb;
+}
+
+#[test]
+fn the_entries_held_beside_the_chain_are_kept_to_a_limit_and_read_back() {
+    let (base, [ka, ..], [a, ..]) = three();
+    let mut p = base.clone();
+    for i in 0..(MAX_SIDE + 8) {
+        let (_, d) = machine(60);
+        let d = Subject { sealed_label: format!("rival-{i}"), ..d };
+        let e = base.next(&ka, C, &a.id, Change::Add { member: d }).unwrap();
+        let _ = p.take(C, e);
+    }
+    assert!(p.side().count() <= MAX_SIDE, "{}", p.side().count());
+    let back = Chain::restore(C, p.entries.clone(), p.side().cloned().collect()).unwrap();
+    assert_eq!(back, p, "what is held reads back as it was");
+    // An entry that follows nothing held is not held.
+    let stray = Entry::sign(&ka, C, 7, Some("ab".repeat(32)), Change::SetPolicy { policy: Policy::Approve }, &a.id).unwrap();
+    assert_eq!(Chain::restore(C, p.entries.clone(), vec![stray]), Err(MemberError::DoesNotExtend));
 }

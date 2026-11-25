@@ -178,6 +178,14 @@
     flex-shrink: 0;
 }
 
+// An agent with no icon of its own wears its provider's logo, in the icon's 14px box.
+.command-palette-item-logo {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 0;
+}
+
 // An agent's icon is drawn in its colour as well as marked by the bar.
 .command-palette-item.has-identity .command-palette-item-icon {
     color: var(--palette-identity);
