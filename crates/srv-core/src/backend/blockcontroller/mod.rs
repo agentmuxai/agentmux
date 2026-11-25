@@ -983,7 +983,7 @@ pub fn resync_controller(
         return Err(format!("resync_controller: block {block_id} is closing"));
     }
 
-    let controller_type = resync_steps::effective_controller_type(block, controller_type);
+    let controller_type = resync_steps::effective_controller_type(block, controller_type)?;
 
     tracing::info!(
         block_id = %block_id,
@@ -1142,5 +1142,7 @@ mod cmd_env_tests {
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod container_pane_controller_tests;
 #[cfg(test)]
 mod folder_rule_tests;

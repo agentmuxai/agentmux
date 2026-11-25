@@ -28,6 +28,20 @@ fn runs_in_a_container(store: &Store, id: &str) -> Option<bool> {
     Some(def.runtime().is_container())
 }
 
+/// Whether a catalog server starts only in containers: it reaches container agents and no host agent by
+/// reach (`McpServerReach`), and every agent it is bound to runs in a container. A server bound to no one, to
+/// an agent whose runtime can't be told, or that reaches every agent, is not.
+pub(crate) fn catalog_server_runs_only_in_containers(mstore: &Store, identity_store: &Store, mcp_id: &str) -> bool {
+    let reach = identity_store.mcp_server_reach_all().ok().and_then(|all| all.get(mcp_id).copied()).unwrap_or_default();
+    if reach.all_agents || !reach.in_containers {
+        return false;
+    }
+    let Ok(bound) = mstore.mcp_server_bound_agent_ids(mcp_id) else {
+        return false;
+    };
+    !bound.is_empty() && bound.iter().all(|id| runs_in_a_container(mstore, id) == Some(true))
+}
+
 /// `Err` with [`REFUSAL`] when `ctx` is a connection of a container agent, and with [`UNKNOWN_REFUSAL`] when it is
 /// an agent's whose runtime can't be told; otherwise records the actor and goes on.
 pub(crate) fn refuse_container_agent(store: &Store, ctx: &RpcContext, command: &str) -> Result<(), String> {
