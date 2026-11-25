@@ -76,7 +76,7 @@ vi.mock("@/app/drag/window-drag-events", () => ({
     },
 }));
 vi.mock("@/app/drag/wayland-drag-image", () => ({ hideDragImageOnNativeWayland: () => false }));
-vi.mock("html-to-image", () => ({ toPng: (...a: unknown[]) => h.toPng(...a) }));
+vi.mock("html-to-image", () => ({ toPng: (...a: unknown[]) => h.toPng(...a), getFontEmbedCSS: async () => "" }));
 vi.mock("./layoutModel", () => ({ LayoutModel: class {} }));
 vi.mock("./liveReflow", async (original) => ({
     ...(await original<typeof import("./liveReflow")>()),

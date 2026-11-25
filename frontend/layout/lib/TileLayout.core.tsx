@@ -47,6 +47,7 @@ import { clearPlacement } from "./placementPreview";
 import { releaseTileDrag, startTileDrag } from "./tile-drag";
 import { dragState } from "./tilelayout-drag-state";
 import { createTileDragRegistrar } from "./tile-drag-registrar";
+import { rasterisePane, warmDragPreview } from "./drag-preview-raster";
 import {
     computeDragPreviewSize,
     dragImageChoice,
@@ -322,6 +323,7 @@ function useDragPreview(
     const [previewElementGeneration, setPreviewElementGeneration] = createSignal(0);
     const [previewImageGeneration, setPreviewImageGeneration] = createSignal(0);
 
+    warmDragPreview(PREVIEW_RASTER);
     // Monotonic token for in-flight rasterisations. `toPng` is async and a
     // pane can be resized between two hovers, so two requests can be pending
     // at once; without this the OLDER one resolving last overwrites the
@@ -359,8 +361,7 @@ function useDragPreview(
             setPreviewImageGeneration(prevElGen);
             const seq = ++previewRequestSeq;
             // Loaded with the first drag preview, not at startup.
-            import("html-to-image")
-                .then(({ toPng }) => toPng(getPreviewRef(), PREVIEW_RASTER))
+            rasterisePane(getPreviewRef(), PREVIEW_RASTER)
                 .then((url) => {
                     // A newer rasterisation was requested while this one was in
                     // flight — it measured the pane more recently, so drop this
