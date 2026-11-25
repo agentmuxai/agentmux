@@ -8,6 +8,8 @@ import {
     minTabsRoom,
     NO_LABEL_BELOW_PX,
     RESTING_FLOOR_PX,
+    ACTIVE_NO_ICON_FLOOR_PX,
+    RESTING_NO_ICON_FLOOR_PX,
     STEP_HYSTERESIS_PX,
     stepFor,
 } from "./pane-tab-steps";
@@ -49,5 +51,15 @@ describe("minTabsRoom", () => {
         expect(minTabsRoom(0)).toBe(0);
         expect(minTabsRoom(1)).toBe(ACTIVE_FLOOR_PX);
         expect(minTabsRoom(5)).toBe(ACTIVE_FLOOR_PX + 4 * RESTING_FLOOR_PX);
+    });
+
+    it("takes the wider floor of tabs that have no icon", () => {
+        expect(minTabsRoom(5, RESTING_NO_ICON_FLOOR_PX, ACTIVE_NO_ICON_FLOOR_PX)).toBe(
+            ACTIVE_NO_ICON_FLOOR_PX + 4 * RESTING_NO_ICON_FLOOR_PX
+        );
+        expect(RESTING_NO_ICON_FLOOR_PX).toBeGreaterThan(RESTING_FLOOR_PX);
+        // The selected one keeps its close button on top of the letters the others keep.
+        expect(ACTIVE_NO_ICON_FLOOR_PX).toBeGreaterThan(RESTING_NO_ICON_FLOOR_PX);
+        expect(ACTIVE_NO_ICON_FLOOR_PX).toBeGreaterThan(ACTIVE_FLOOR_PX);
     });
 });
