@@ -213,18 +213,30 @@ export function closeHoverOverrides(source) {
 const KIT_BUTTONS = new Set(["Button", "IconButton", "CloseButton"]);
 
 /**
+ * `source` with its block comments and whole-line `//` comments blanked to spaces: the same offsets and line breaks.
+ * A `/*` begins a comment only after a space, a line start or one of `{(;,}>`: not inside a string such as
+ * `accept="image/*"`, which would otherwise blank the code up to the next real comment.
+ */
+function blankComments(source) {
+    const blank = (text) => text.replace(/[^\n]/g, " ");
+    return source.replace(/(?<![^\s{(;,}>])\/\*[\s\S]*?\*\//g, blank).replace(/^[ \t]*\/\/.*$/gm, blank);
+}
+
+/**
  * The kit buttons whose `onClick` is an arrow function that starts with `void` (`() => void save()`, with a block
- * too), so the button never sees the promise. A line that says `quick action` (on it or above) doesn't count.
+ * too, and with typed parameters: `(e: MouseEvent) => void save(e)`), so the button never sees the promise. Code in
+ * a comment doesn't count (a line comment, a block comment, or a JSX comment). A line that says `quick action` (on it
+ * or above) doesn't count.
  */
 export function countDiscardedClicks(source) {
     const lines = source.split("\n");
+    const code = blankComments(source);
     let n = 0;
-    for (const m of source.matchAll(/\bonClick=\{\s*(?:async\s*)?\(?[\w\s,]*\)?\s*=>\s*(?:\{\s*)?void\s/g)) {
-        const before = source.slice(Math.max(0, m.index - 600), m.index);
+    for (const m of code.matchAll(/\bonClick=\{\s*(?:async\s*)?(?:\([^)]*\)(?:\s*:\s*[\w<>[\]|.\s]+?)?|\w+)?\s*=>\s*(?:\{\s*)?void\s/g)) {
+        const before = code.slice(Math.max(0, m.index - 600), m.index);
         const tag = [...before.matchAll(/<([A-Za-z][\w.]*)/g)].at(-1)?.[1];
         if (!KIT_BUTTONS.has(tag)) continue;
-        const at = source.slice(0, m.index).split("\n").length - 1;
-        if (/^\s*(?:\/\/|\*|\/\*)/.test(lines[at])) continue;
+        const at = code.slice(0, m.index).split("\n").length - 1;
         if (/quick action/.test(lines[at]) || /quick action/.test(lines[at - 1] ?? "")) continue;
         n++;
     }

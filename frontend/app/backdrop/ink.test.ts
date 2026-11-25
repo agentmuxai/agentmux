@@ -44,6 +44,8 @@ function assertTargets(d: DerivedBackdrop, text: number, label: string) {
         for (const k of ["accent", "error", "warning", "success", "info", "attention", "focus"] as const) {
             at(k, d.ink[k], INK_TARGETS.signal.floor);
         }
+        // The text on an accent fill reads on it (an active pill, a primary button).
+        expect(contrastRatio(d.ink.onAccent, d.ink.accent), `${label}: onAccent on accent`).toBeGreaterThanOrEqual(INK_TARGETS.signal.floor);
         // The text stays readable over a hovered and a selected row.
         at("text on hover", d.ink.text, text);
         expect(contrastRatio(d.ink.text, washed(layer, d.ink.text, 0.16)), `${label}: text on selected`).toBeGreaterThanOrEqual(

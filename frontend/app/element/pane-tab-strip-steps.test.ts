@@ -91,6 +91,21 @@ describe("stripRoom", () => {
         expect(stripRoom(strip)).toBe(321);
     });
 
+    it.each([2, 0.5])("counts a neighbour in the parent's own pixels when the row is drawn at a zoom of %s", (zoom) => {
+        const parent = document.createElement("div");
+        const toggle = document.createElement("button");
+        const strip = document.createElement("div");
+        parent.append(toggle, strip);
+        document.body.append(parent);
+        // 500 layout px, drawn at `zoom` times that; the 28 px toggle is drawn at `zoom` times its layout width too.
+        Object.defineProperty(parent, "clientWidth", { value: 500 });
+        parent.getBoundingClientRect = () => ({ width: 500 * zoom }) as DOMRect;
+        toggle.getBoundingClientRect = () => ({ width: 28 * zoom }) as DOMRect;
+        Object.defineProperty(toggle, "offsetParent", { value: document.body });
+        // the toggle and one gap of 8, both in layout px
+        expect(stripRoom(strip)).toBe(500 - 28 - 8);
+    });
+
     it("is the parent's width less what else is in its row, for a strip beside other items (the Editor's file tree toggle)", () => {
         const parent = document.createElement("div");
         const toggle = document.createElement("button");
@@ -142,6 +157,18 @@ describe("createStripSteps", () => {
         // 47 + 5 * 27 + the add button
         expect(tight.steps.room()).toBe(47 + 5 * 27 + 28);
         tight.dispose();
+    });
+
+    it("keeps a wider floor for tabs that have no icon, so the strip scrolls before they become slivers", async () => {
+        const m = mount(120, 6, []);
+        const tab = document.createElement("div");
+        tab.className = "pane-tab doc-tab--no-icon";
+        m.strip.append(tab);
+        m.setRevision(1);
+        await vi.advanceTimersByTimeAsync(40);
+        // the selected tab's 76 + 5 * 56 + the add button
+        expect(m.steps.room()).toBe(76 + 5 * 56 + 28);
+        m.dispose();
     });
 
     it("stays full when the room is short but no label is cut", async () => {

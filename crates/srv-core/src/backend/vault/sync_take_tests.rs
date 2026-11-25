@@ -260,6 +260,23 @@ fn a_change_made_after_a_delete_brings_the_entry_back_and_keeps_the_delete() {
 }
 
 #[test]
+fn a_change_that_beats_a_delete_has_its_own_tags_on_both_machines() {
+    let (mut a, mut b, p, _, on_b) = both_hold_one();
+    let link = a.link("entry-a");
+    // b deletes it, and a, not having heard, changes it later and adds a tag.
+    b.store.vault_delete(&on_b).unwrap();
+    b.capture(VAULT, NOW + 100);
+    a.edit("entry-a", "sk_test_invented_changed_later", "[\"prod\",\"billing\"]", NOW + 200);
+    a.capture(VAULT, NOW + 200);
+    ship(&a, &mut b, &p, NOW + 300);
+    let back = b.entry_of(&link).expect("the entry is back");
+    ship(&b, &mut a, &p, NOW + 310);
+    let tags = |m: &Machine, id: &str| m.store.vault_get(id).unwrap().unwrap().tags;
+    assert_eq!(tags(&b, &back), "[\"prod\",\"billing\"]", "the tags of the change that came back");
+    assert_eq!(tags(&a, "entry-a"), tags(&b, &back), "both machines agree");
+}
+
+#[test]
 fn a_delete_made_after_a_change_ends_the_entry_and_the_change_stays_in_the_log() {
     let (mut a, mut b, p, _, on_b) = both_hold_one();
     // a changes it, and b, not having heard, deletes it later.

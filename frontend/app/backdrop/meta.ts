@@ -11,15 +11,15 @@ import { hexToRgb } from "../theme/oklch";
 import { builtinId, deriveBuiltin, type AppScheme } from "./builtins";
 import { deriveInk, type DerivedBackdrop } from "./ink";
 
+/** A widget pane's view id starts with this (`ext:<id>/<pane>`). A widget takes its colors from the SDK's theme variables, which follow the pane (§7.5). */
+const WIDGET_VIEW_PREFIX = "ext:";
+
 /**
  * The pane views whose own colours follow a backdrop (spec §6, §14). Phase 1 is the agent pane. A terminal keeps its
  * default text and ANSI colours, so a backdrop on one is unreadable; the other panes come with phase 2. A view is added
  * here only when its text can be shown to follow the ink.
  */
-/** A widget pane's view id starts with this (`ext:<id>/<pane>`). A widget takes its colors from the SDK's theme variables, which follow the pane (§7.5). */
-const WIDGET_VIEW_PREFIX = "ext:";
-
-const BACKDROP_VIEWS: ReadonlySet<string> = new Set(["agent"]);
+const BACKDROP_VIEWS: ReadonlySet<string> = new Set(["agent", "files", "editor", "kanban", "swarm"]);
 
 /** Whether a pane of this view takes a backdrop: it is offered in its menu, and a record on any other view is ignored. */
 export const supportsBackdrop = (view: unknown): boolean => typeof view === "string" && (BACKDROP_VIEWS.has(view) || view.startsWith(WIDGET_VIEW_PREFIX));

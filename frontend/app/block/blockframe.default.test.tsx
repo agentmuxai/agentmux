@@ -309,27 +309,43 @@ describe("the backdrop", () => {
         expect(frame(live.view.container).style.getPropertyValue("--surface")).toBe(scope?.["--surface"]);
     });
 
-    it("an agent pane's menu has a Backdrop submenu, after Pane Color, laid out like it; other panes have none yet", () => {
+    it("an agent pane's menu has a Backdrop submenu, after Pane Color, laid out like it; so does each pane built from the app's own components, and a terminal or the browser has none yet", () => {
         const items = buildPaneColorSubmenu({ oid: "x", meta: { view: "agent" } } as unknown as Block);
         const labels = items.map((i) => i.label);
         expect(labels.indexOf("Backdrop")).toBe(labels.indexOf("Pane Color") + 1);
+        for (const view of ["files", "editor", "kanban", "swarm"]) {
+            const same = buildPaneColorSubmenu({ oid: "x", meta: { view } } as unknown as Block);
+            expect(same.map((i) => i.label), view).toContain("Backdrop");
+        }
         const HUES = ["Rose", "Red", "Orange", "Amber", "Yellow", "Green", "Jade", "Teal", "Sky", "Blue", "Violet", "Magenta"];
         const rows = items.find((i) => i.label === "Backdrop")!.submenu!.map((i) => (i.type === "separator" ? "-" : i.label));
         expect(rows).toEqual(["None", "-", ...HUES, "-", "Black", "White"]);
-        for (const view of ["term", "files", "browser"]) {
+        for (const view of ["term", "browser"]) {
             const other = buildPaneColorSubmenu({ oid: "x", meta: { view } } as unknown as Block);
             expect(other.map((i) => i.label), view).not.toContain("Backdrop");
         }
     });
 
-    it("a terminal, a files pane and the browser ignore a backdrop record and an old plain bg: no vars, no data-backdrop, nothing registered", () => {
+    it("a terminal, the system-info pane and the browser ignore a backdrop record and an old plain bg: no vars, no data-backdrop, nothing registered", () => {
         const record = { kind: "builtin", id: "teal", polarity: "follow", version: 1 };
-        for (const view of ["term", "files", "browser", "sysinfo"]) {
+        for (const view of ["term", "browser", "sysinfo"]) {
             const t = setup({ meta: { view, backdrop: record, bg: "#336699" } });
             expect(frame(t.view.container).hasAttribute("data-backdrop"), view).toBe(false);
             expect(style(t.view.container).getPropertyValue("--surface"), view).toBe("");
             expect(style(t.view.container).getPropertyValue("--main-text-color"), view).toBe("");
             expect(getPaneScope(t.blockId)(), view).toBeUndefined();
+            cleanup();
+        }
+    });
+
+    it("a files, editor, Kanban or Swarm pane with a backdrop carries its scope on its frame, like the agent pane", () => {
+        const record = { kind: "builtin", id: "teal", polarity: "follow", version: 1 };
+        for (const view of ["files", "editor", "kanban", "swarm"]) {
+            const t = setup({ meta: { view, backdrop: record } });
+            expect(frame(t.view.container).getAttribute("data-backdrop"), view).toBe("builtin:teal");
+            expect(frame(t.view.container).getAttribute("data-backdrop-scheme"), view).toMatch(/^(dark|light)$/);
+            expect(style(t.view.container).getPropertyValue("--surface"), view).toMatch(/^#[0-9a-f]{6}$/);
+            expect(getPaneScope(t.blockId)()?.["--ink-text"], view).toMatch(/^#[0-9a-f]{6}$/);
             cleanup();
         }
     });
