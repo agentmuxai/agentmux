@@ -711,9 +711,8 @@ impl LanDiscovery {
                 let now = agentmux_common::time::now_secs_u64();
                 let mut instances = self.instances.write();
                 let before = instances.len();
-                instances.retain(|_, inst| {
-                    now.saturating_sub(inst.last_seen) <= peer_staleness_window_secs(inst.other_ttl_secs)
-                });
+                instances.retain(|_, inst| now.saturating_sub(inst.last_seen) <= peer_staleness_window_secs(inst.other_ttl_secs));
+                one_per_instance::drop_superseded(&mut instances);
                 instances.len() != before
             };
             // A connected frontend only updates `lanInstancesAtom` on a

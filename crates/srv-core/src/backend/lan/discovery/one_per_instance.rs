@@ -9,6 +9,10 @@
 //! machine has managed to poll it). Listed twice, a host named in a remote operation fits "more
 //! than one instance" and the Swarm shows the machine twice.
 //!
+//! An address and port serve one instance at a time, so two entries at the same address and port
+//! are one instance too, whatever else they say: the one left behind by a peer that came back
+//! under a new key or version is the old word, and the entry this machine can still reach wins.
+//!
 //! The entries stay in the store, so when the preferred address goes stale the other one is what
 //! is left and takes over: this only chooses which one to show. Anything that reaches out to find
 //! an agent asks every address (`get_all_instances`), so a lookup does not depend on the choice.
@@ -76,14 +80,21 @@ pub fn peer_base_url(address: &str, port: u16) -> String {
     }
 }
 
-/// Whether two entries are the same running instance: the same host name, channel and port, and
-/// the same `lan_key`. An entry with no key says nothing about who it is, so it is never merged.
+/// Whether two entries are the same running instance: the same address and port (one instance
+/// serves there), or the same host name, channel and port with the same `lan_key` (one machine
+/// found at two addresses). An entry with no key says nothing about who it is, so it is never merged
+/// by key.
 fn same_instance(a: &LanInstance, b: &LanInstance) -> bool {
-    !a.auth_key.is_empty()
-        && a.auth_key == b.auth_key
-        && a.port == b.port
-        && a.hostname.trim().eq_ignore_ascii_case(b.hostname.trim())
-        && a.channel.eq_ignore_ascii_case(&b.channel)
+    same_endpoint(a, b)
+        || (!a.auth_key.is_empty()
+            && a.auth_key == b.auth_key
+            && a.port == b.port
+            && a.hostname.trim().eq_ignore_ascii_case(b.hostname.trim())
+            && a.channel.eq_ignore_ascii_case(&b.channel))
+}
+
+fn same_endpoint(a: &LanInstance, b: &LanInstance) -> bool {
+    !a.address.is_empty() && a.address == b.address && a.port == b.port
 }
 
 /// Whether `a` is a better entry to show than `b` for the same instance: one this machine has
@@ -92,6 +103,21 @@ fn same_instance(a: &LanInstance, b: &LanInstance) -> bool {
 fn better(a: &LanInstance, b: &LanInstance) -> bool {
     let key = |p: &LanInstance| (p.last_polled_ok == 0, address_rank(&p.address), std::cmp::Reverse(p.last_polled_ok), std::cmp::Reverse(p.last_seen));
     key(a) < key(b)
+}
+
+/// Removes from the table every entry that another entry at the same address and port has replaced: one this
+/// machine last reached before the other was reached, so a stale entry is not kept alive by the probe answers
+/// its successor's address gets. An entry never reached is never removed (a peer that has just come back is
+/// new until its first poll), and neither is one reached as lately as the newest. Whether anything was removed.
+pub(super) fn drop_superseded(instances: &mut std::collections::HashMap<String, LanInstance>) -> bool {
+    let mut newest: std::collections::HashMap<(String, u16), u64> = std::collections::HashMap::new();
+    for inst in instances.values().filter(|i| !i.address.is_empty()) {
+        let at = newest.entry((inst.address.clone(), inst.port)).or_default();
+        *at = (*at).max(inst.last_polled_ok);
+    }
+    let before = instances.len();
+    instances.retain(|_, i| i.last_polled_ok == 0 || i.address.is_empty() || i.last_polled_ok >= newest[&(i.address.clone(), i.port)]);
+    instances.len() != before
 }
 
 /// `peers` with each running instance once, in the order its first entry was listed.
@@ -242,16 +268,72 @@ mod tests {
 
     #[test]
     fn different_channels_ports_keys_or_hosts_are_different_instances() {
+        // An address and port serve one instance, so each of these is somewhere else.
         let mut other_channel = peer("198.51.100.25", 1, 1);
         other_channel.channel = "stable".into();
+        other_channel.port = 29702;
         let mut other_port = peer("198.51.100.25", 1, 1);
         other_port.port = 29701;
-        let mut other_key = peer("198.51.100.25", 1, 1);
+        let mut other_key = peer("198.51.100.26", 1, 1);
         other_key.auth_key = "another-key".into();
-        let mut other_host = peer("198.51.100.25", 1, 1);
+        let mut other_host = peer("198.51.100.27", 1, 1);
         other_host.hostname = "starpower".into();
         let listed = one_per_instance(vec![peer(V4, 1, 1), other_channel, other_port, other_key, other_host]);
         assert_eq!(listed.len(), 5);
+    }
+
+    /// A peer that came back on a new release under a new key leaves its old entry behind at the same address and
+    /// port; a probe answer keeps that old entry fresh, so it would never expire on its own.
+    fn left_behind_and_current() -> (LanInstance, LanInstance) {
+        let mut old = peer(V4, 100, 1_000);
+        old.version = "0.60.40".into();
+        old.auth_key = "old-key".into();
+        let mut new = peer(V4, 900, 800);
+        new.version = "0.60.41".into();
+        new.auth_key = "new-key".into();
+        (old, new)
+    }
+
+    #[test]
+    fn two_entries_at_one_address_and_port_are_one_instance_and_the_reachable_one_is_listed() {
+        let (old, new) = left_behind_and_current();
+        for order in [vec![old.clone(), new.clone()], vec![new.clone(), old.clone()]] {
+            let listed = one_per_instance(order);
+            assert_eq!(listed.len(), 1, "{listed:?}");
+            assert_eq!(listed[0].version, "0.60.41");
+        }
+    }
+
+    #[test]
+    fn the_entry_a_newer_one_replaced_is_removed_from_the_table() {
+        let (old, new) = left_behind_and_current();
+        let mut other_port = peer(V4, 5, 5);
+        other_port.port = 29701;
+        let mut table = std::collections::HashMap::new();
+        table.insert("agentmux-charlie-29700._agentmux._tcp.local.".to_string(), old);
+        table.insert("udp:198.51.100.25:29700".to_string(), new);
+        table.insert("agentmux-charlie-29701._agentmux._tcp.local.".to_string(), other_port);
+        assert!(drop_superseded(&mut table));
+        assert_eq!(table.len(), 2);
+        assert_eq!(table["udp:198.51.100.25:29700"].version, "0.60.41");
+        assert!(table.contains_key("agentmux-charlie-29701._agentmux._tcp.local."), "another port is another instance");
+        assert!(!drop_superseded(&mut table), "nothing left to remove");
+    }
+
+    /// A peer that has just come back is a new entry that was never polled: the old entry stays until the new
+    /// one has been reached, and only then goes.
+    #[test]
+    fn an_entry_not_yet_reached_is_not_removed_in_favour_of_the_old_one() {
+        let (old, mut new) = left_behind_and_current();
+        new.last_polled_ok = 0;
+        let mut table = std::collections::HashMap::new();
+        table.insert("old".to_string(), old);
+        table.insert("new".to_string(), new);
+        assert!(!drop_superseded(&mut table));
+        assert_eq!(table.len(), 2);
+        table.get_mut("new").unwrap().last_polled_ok = 1_000;
+        assert!(drop_superseded(&mut table));
+        assert_eq!(table.keys().collect::<Vec<_>>(), ["new"]);
     }
 
     #[test]
@@ -260,7 +342,10 @@ mod tests {
         a.auth_key.clear();
         let mut b = peer(LINK_LOCAL_V6, 1, 1);
         b.auth_key.clear();
-        assert_eq!(one_per_instance(vec![a, b]).len(), 2);
+        assert_eq!(one_per_instance(vec![a.clone(), b]).len(), 2, "two addresses, no key to say they are one");
+        let mut same_place = peer(V4, 1, 1);
+        same_place.auth_key.clear();
+        assert_eq!(one_per_instance(vec![a, same_place]).len(), 1, "the same address and port is one instance");
     }
 
     #[test]

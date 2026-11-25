@@ -189,12 +189,35 @@ async fn the_audit_names_the_requesting_agent_and_never_the_operator() {
 }
 
 fn peer(host: &str, channel: &str) -> LanInstance {
+    // Each is its own machine: an address and port serve one instance.
+    static NEXT: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(1);
+    let address = format!("192.0.2.{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
     serde_json::from_value(json!({
         "instance_id": "v0", "hostname": host, "version": "0.60.7", "channel": channel, "os": "windows",
-        "address": "192.0.2.10", "port": 29700, "auth_key": "k", "agents": [], "first_seen": 0, "last_seen": 0,
+        "address": address, "port": 29700, "auth_key": "k", "agents": [], "first_seen": 0, "last_seen": 0,
         "other_ttl_secs": 4500
     }))
     .unwrap()
+}
+
+#[test]
+fn a_peer_back_under_a_new_key_is_one_instance_a_caller_can_name() {
+    // The entry left at its address by the old release, and the one the new release made there.
+    let mut old = peer("charlie", "stable");
+    old.install = "linux-appimage".into();
+    old.version = "0.60.40".into();
+    old.auth_key = "old".into();
+    old.last_polled_ok = 100;
+    let mut new = old.clone();
+    new.version = "0.60.41".into();
+    new.auth_key = "new".into();
+    new.last_polled_ok = 900;
+    for peers in [vec![old.clone(), new.clone()], vec![new.clone(), old.clone()]] {
+        for host in ["charlie", "charlie/stable", "charlie/stable/linux-appimage"] {
+            let found = resolve_peer(&peers, host).unwrap_or_else(|e| panic!("{host}: {e}"));
+            assert_eq!((found.version.as_str(), found.auth_key.as_str()), ("0.60.41", "new"), "{host}");
+        }
+    }
 }
 
 #[test]
