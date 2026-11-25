@@ -662,6 +662,9 @@ fn register_mcp_catalog_probe(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 if !server.is_global {
                     return Err("FORBIDDEN: mcp.catalog.probe only probes global servers".to_string());
                 }
+                if super::mcp_actor::catalog_server_runs_only_in_containers(&actor_store, &identity_store, &req.id) {
+                    return Ok(crate::backend::mcp_probe::ProbeResult::runs_in_container());
+                }
                 let result = crate::backend::mcp_probe::probe(&server.transport, &server.config).await;
                 Ok(result)
             }

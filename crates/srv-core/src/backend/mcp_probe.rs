@@ -56,7 +56,15 @@ pub struct ProbeResult {
     pub error: Option<String>,
 }
 
+/// What a probe of a server that runs only in containers answers: nothing is started on this computer for it.
+pub const RUNS_IN_CONTAINER: &str = "runs in the container: this server is started in its agent's container, not on this computer, so it is not started here";
+
 impl ProbeResult {
+    /// The answer for a server that runs only in containers, in place of starting its command here.
+    pub fn runs_in_container() -> Self {
+        Self::unreachable(RUNS_IN_CONTAINER)
+    }
+
     fn empty(status: ProbeStatus, error: Option<String>) -> Self {
         Self { status, tool_count: None, server_name: None, server_version: None, error }
     }
