@@ -128,10 +128,13 @@ async fn run_open_widget(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> 
         }
     }
     meta.insert("view".into(), json!(view));
-    let split = arguments.get("split").and_then(Value::as_str).filter(|s| matches!(*s, "right" | "down")).unwrap_or("right");
+    let split = arguments.get("split").and_then(Value::as_str).filter(|s| matches!(*s, "right" | "down"));
     let mut req = json!({ "view": view, "meta": meta, "focus": true });
+    // Only a split the agent asked for is sent: with none, srv opens the pane as a tab of the agent's own pane group.
     if !cx.block_id.is_empty() {
-        req["split_direction"] = json!(split);
+        if let Some(split) = split {
+            req["split_direction"] = json!(split);
+        }
         req["split_reference_block_id"] = json!(cx.block_id);
     }
     if arguments.get("floating").and_then(Value::as_bool) == Some(true) {

@@ -574,6 +574,8 @@ pub fn store_value(store: &Store, plan: &Plan, value: &Zeroizing<String>, userna
         Target::Link { label, .. } => return Err(format!("{label} is a link, which holds no value")),
     };
     note(store, plan, &id, &label, agent, "done");
+    // Nobody was asked, so the value is the agent's until the person has seen it (`agent_set`).
+    super::agent_set::mark(store, &id, agent);
     Ok(Imported { id, label, vault: plan.vault_name.clone() })
 }
 

@@ -34,6 +34,9 @@ struct Entry {
     /// Whether the pane is a floating window now.
     #[serde(default)]
     floating: bool,
+    /// When it was opened, in Unix milliseconds (0 for a record from before this was kept).
+    #[serde(default)]
+    at_ms: u64,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,9 +54,24 @@ fn lock() -> std::sync::MutexGuard<'static, BTreeMap<String, Entry>> {
     map().lock().unwrap_or_else(|p| p.into_inner())
 }
 
+/// The time to put on a record: Unix milliseconds, and never the same or lower than the one before, so records made in
+/// the same millisecond still have an order.
+fn stamp() -> u64 {
+    static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let now = agentmux_common::time::now_ms_u64();
+    let mut last = LAST.load(std::sync::atomic::Ordering::Relaxed);
+    loop {
+        let next = now.max(last + 1);
+        match LAST.compare_exchange_weak(last, next, std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed) {
+            Ok(_) => return next,
+            Err(seen) => last = seen,
+        }
+    }
+}
+
 /// Record `agent` as the opener of `block_id`; `floating` says it opened as a floating window.
 pub(crate) fn record(block_id: &str, agent: &str, floating: bool) {
-    lock().insert(block_id.to_string(), Entry { agent: agent.to_string(), floating });
+    lock().insert(block_id.to_string(), Entry { agent: agent.to_string(), floating, at_ms: stamp() });
     crate::server::browser_owner::changed().notify_one();
 }
 
@@ -79,6 +97,15 @@ pub(crate) fn note_docked(opener: Option<&str>, result: &crate::backend::rpc_typ
     if let (Some(agent), true, false) = (opener, result.created, floating) {
         record(&result.block_id, agent, false);
     }
+}
+
+/// The docked panes `agent` opened, the newest first: where its next open goes by default
+/// (`app_api::agent_tab_default`).
+pub(crate) fn docked_of(agent: &str) -> Vec<String> {
+    let mut mine: Vec<(u64, String)> =
+        lock().iter().filter(|(_, e)| !e.floating && e.agent.eq_ignore_ascii_case(agent)).map(|(b, e)| (e.at_ms, b.clone())).collect();
+    mine.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+    mine.into_iter().map(|(_, b)| b).collect()
 }
 
 /// The panes `agent` opened that are floating windows now, sorted.
@@ -149,7 +176,7 @@ mod tests {
     use super::*;
 
     fn entry(agent: &str, floating: bool) -> Entry {
-        Entry { agent: agent.to_string(), floating }
+        Entry { agent: agent.to_string(), floating, at_ms: 0 }
     }
 
     #[test]

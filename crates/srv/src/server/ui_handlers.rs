@@ -706,10 +706,6 @@ pub(crate) async fn handle_ui_browser_focus_info(
     (StatusCode::OK, Json(json!({ "ok": true, "data": data }))).into_response()
 }
 
-/// Where an agent's browser pane goes when it names no placement: below the agent's own pane, which
-/// gives up half of its space (`down:half`, see `resolve_placement`).
-const BROWSER_DEFAULT_SPLIT: &str = "down:half";
-
 /// `POST /api/v1/ui/browser/open` — backs `OpenBrowser`. Opens a browser pane
 /// below the caller's own pane (or where it asks) and records the caller as its owner, so the
 /// `Browser*`/`UI*` tools accept it as `pane`
@@ -731,10 +727,10 @@ pub(crate) async fn handle_ui_browser_open(
             format!("Browser's open action takes an http:// or https:// URL, not {url:?}"),
         );
     }
-    // With no placement asked for, the browser goes below the agent: its space split in half, top and bottom.
+    // With no placement asked for, the browser is a tab of the agent's own pane group (`agent_tab_default`).
     let split = match req.split.as_deref() {
-        None => BROWSER_DEFAULT_SPLIT,
-        Some(s @ ("right" | "left" | "up" | "down")) => s,
+        None => None,
+        Some(s @ ("right" | "left" | "up" | "down")) => Some(s),
         Some(other) => {
             return err_response(StatusCode::BAD_REQUEST, format!("split must be right, left, up or down, not {other:?}"));
         }
@@ -747,7 +743,7 @@ pub(crate) async fn handle_ui_browser_open(
         view: "browser".to_string(),
         url: Some(url.to_string()),
         title: req.title.clone(),
-        split_direction: Some(split.to_string()),
+        split_direction: split.map(str::to_string),
         split_reference_block_id: Some(own.clone()),
         focus: Some(false),
         ..Default::default()
@@ -756,6 +752,8 @@ pub(crate) async fn handle_ui_browser_open(
     if let Err(e) = crate::server::app_api::floater_place::for_browser(&mut cmd, &req, caller.as_ref().map(|c| &c.0)) {
         return err_response(StatusCode::BAD_REQUEST, e);
     }
+    let opener = cmd.opener.clone();
+    crate::server::app_api::agent_tab_default::apply(&state, true, opener.as_deref(), &mut cmd);
     let mut meta = match crate::server::app_api::pane::build_pane_meta(&cmd) {
         Ok(m) => m,
         Err(e) => return err_response(StatusCode::BAD_REQUEST, e),

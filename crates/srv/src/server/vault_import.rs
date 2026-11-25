@@ -4,8 +4,9 @@
 //! `POST /api/v1/vault/import`: an agent has the Vault copy a secret from AWS Secrets Manager into an entry
 //! (docs/specs/SPEC_VAULT_PARITY_ENTRY_HISTORY_REASONS_AND_IMPORT_2026_11_06.md §7).
 //!
-//! The arguments are checked first. Then the person is asked once (Allow once or Deny, never Always, and silence
-//! denies), srv reads the secret with the host's AWS CLI, and only ids and names come back. A container agent reads
+//! The arguments are checked first. Nobody is asked (the history line is the record), except for a login the agent asks to
+//! have shared with it: the share is a use, and its card is asked once (Allow once or Deny, never Always, and silence
+//! denies). srv reads the secret with the host's AWS CLI, and only ids and names come back. A container agent reads
 //! under a broker session for the grant it names; a native agent under the host's own AWS setup.
 
 use std::time::Duration;
@@ -93,7 +94,17 @@ pub(super) async fn share_made(state: &AppState, who: &Who, id: &str, ticked: bo
     }
 }
 
-/// The question for the person: the secret, where it goes, and what the agent says it is for.
+/// What an import writes, as the pace counts it: a new entry, or a new value for one that exists.
+pub(super) fn act_of(target: &Target) -> crate::backend::vault::pace::Act {
+    use crate::backend::vault::pace::Act;
+    match target {
+        Target::Replace { id, .. } => Act::Replace(id.clone()),
+        Target::New { .. } | Target::Link { .. } => Act::New,
+    }
+}
+
+/// The question for the person about an import that makes a login to be shared with the agent: the secret, where it goes,
+/// what the agent says it is for, and the share.
 fn card(plan: &Plan, who: &Who) -> UseRequest {
     let replaces = matches!(plan.target, Target::Replace { .. });
     UseRequest {
@@ -189,29 +200,49 @@ pub(crate) async fn handle_vault_import(State(state): State<AppState>, caller: O
         Ok(plan) => plan,
         Err(refusal) => return refusal,
     };
-    let wait = body.wait_secs.map(Duration::from_secs).unwrap_or(ANSWER_WAIT).min(ANSWER_WAIT_MAX);
-    let (ended, answer) = super::vault_ask::ask(&state, &who.pane, card(&plan, &who), wait, &headline(&plan, &who)).await;
-    if !ended.allowed() {
-        return refused(&state, &plan, &who, ended.outcome(), StatusCode::FORBIDDEN, not_allowed(ended));
+    let spent = [act_of(&plan.target)];
+    if let Err(why) = crate::backend::vault::pace::admit(&who.agent, &spent) {
+        return refused(&state, &plan, &who, "refused: pace", StatusCode::TOO_MANY_REQUESTS, why);
     }
-    let minted = match credentials(&state, &who, plan.source.profile.as_deref().unwrap_or_default(), &plan.reason).await {
+    let response = import_admitted(&state, &body, &who, &plan).await;
+    if !response.status().is_success() {
+        // Nothing was stored: a call that failed does not use up the agent's pace.
+        crate::backend::vault::pace::refund(&who.agent, &spent);
+    }
+    response
+}
+
+/// The rest of an import the pace let through.
+async fn import_admitted(state: &AppState, body: &ImportBody, who: &Who, plan: &Plan) -> Response {
+    // Nobody is asked to allow a copy of a secret: the history line is the record. A login to be shared is the one exception,
+    // because the share is a use: its card, with the tick, is still asked (spec §4).
+    let mut answer = None;
+    if plan.share {
+        let wait = body.wait_secs.map(Duration::from_secs).unwrap_or(ANSWER_WAIT).min(ANSWER_WAIT_MAX);
+        let (ended, said) = super::vault_ask::ask(state, &who.pane, card(plan, who), wait, &headline(plan, who)).await;
+        if !ended.allowed() {
+            return refused(state, plan, who, ended.outcome(), StatusCode::FORBIDDEN, not_allowed(ended));
+        }
+        answer = said;
+    }
+    let minted = match credentials(state, who, plan.source.profile.as_deref().unwrap_or_default(), &plan.reason).await {
         Ok(minted) => minted,
-        Err(why) => return refused(&state, &plan, &who, "failed", StatusCode::SERVICE_UNAVAILABLE, why),
+        Err(why) => return refused(state, plan, who, "failed", StatusCode::SERVICE_UNAVAILABLE, why),
     };
     let via = minted.as_ref().map_or(Via::Host, Via::Session);
-    match aws_import::perform(&state.identity_store, &HostRunner, &plan, via, &who.agent).await {
+    match aws_import::perform(&state.identity_store, &HostRunner, plan, via, &who.agent).await {
         Ok(done) => {
             let mut out = json!({ "status": "imported", "id": done.id, "label": done.label, "vault": done.vault });
             if plan.share {
                 let ticked = answer.as_ref().and_then(|a| a.share) == Some(true);
-                let (shared, said) = share_made(&state, &who, &done.id, ticked).await;
+                let (shared, said) = share_made(state, who, &done.id, ticked).await;
                 out["shared"] = json!(shared);
                 out["share_note"] = json!(said);
             }
-            super::vault_handlers::publish(&state);
+            super::vault_handlers::publish(state);
             Json(out).into_response()
         }
-        Err(why) => refused(&state, &plan, &who, "failed", StatusCode::BAD_GATEWAY, why),
+        Err(why) => refused(state, plan, who, "failed", StatusCode::BAD_GATEWAY, why),
     }
 }
 
@@ -282,11 +313,11 @@ mod tests {
     }
 
     #[test]
-    fn a_replacement_card_says_which_entry_and_silence_never_lets_either_go_ahead() {
-        let replacing = card(&plan(true), &who());
-        assert!(replacing.import.as_ref().unwrap().replaces);
-        assert_eq!((replacing.entry_id.as_str(), replacing.entry_label.as_str()), ("api-key-stripe", "Stripe"));
-        // An api-key use goes ahead on silence; an import of one never does.
+    fn an_import_is_a_new_entry_or_a_replacement_for_the_pace_and_a_share_card_never_goes_ahead_on_silence() {
+        use crate::backend::vault::pace::Act;
+        assert_eq!(act_of(&plan(false).target), Act::New);
+        assert_eq!(act_of(&plan(true).target), Act::Replace("api-key-stripe".into()));
+        // An api-key use goes ahead on silence; the card an import asks (for its share) never does.
         assert!(crate::backend::vault::uses::goes_ahead_on_silence("api-key", false));
         for plan in [plan(false), plan(true)] {
             assert!(!crate::backend::vault::uses::goes_ahead(&card(&plan, &who())));

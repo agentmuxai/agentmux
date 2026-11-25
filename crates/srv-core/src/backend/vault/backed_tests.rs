@@ -193,10 +193,10 @@ fn whether_an_entry_is_backed_is_set_when_it_is_made() {
     assert_eq!(change(&only, &place(BACKED)), Err(SET_WHEN_MADE.into()));
     assert_eq!(change(&backed, &place(ONLY)), Err(SET_WHEN_MADE.into()));
     assert_eq!(change(&backed, &place(BACKED)), Ok(()));
-    // An agent's edit, however it words it: one that flips the mark is refused before the person is asked.
+    // An agent's edit, however it words it: one that flips the mark is refused.
     let asked = |id: &str, mark: &str| UpdateRequest { id: id.into(), label: None, fields: fields(&[(LINK, mark)]), tags: None, reason: Some("see whether it can be read".into()) };
-    assert_eq!(inspect::link_change(&s, &asked(&only, BACKED), "builder"), Err(SET_WHEN_MADE.into()));
-    assert_eq!(inspect::link_change(&s, &asked(&backed, ONLY), "builder"), Err(SET_WHEN_MADE.into()));
+    assert_eq!(inspect::update_details(&s, &asked(&only, BACKED), "builder").unwrap_err(), SET_WHEN_MADE);
+    assert_eq!(inspect::update_details(&s, &asked(&backed, ONLY), "builder").unwrap_err(), SET_WHEN_MADE);
 }
 
 #[test]

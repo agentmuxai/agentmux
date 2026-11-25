@@ -244,26 +244,6 @@ fn what_changed(row: &VaultRow, label: &str, fields: &BTreeMap<String, String>, 
     out
 }
 
-/// A change `update` would make to where an entry's machine copy is, or to what the entry says of its key beside
-/// the place (who reads it, when it last changed, where else it is kept). The place decides what a check reads, and
-/// all of it is what the Vault tells the next agent, so the person is asked before an agent changes it, and is shown
-/// what is recorded now and what is asked for.
-#[derive(Debug, Clone, PartialEq)]
-pub struct LinkChange {
-    pub entry_id: String,
-    pub label: String,
-    pub kind: String,
-    pub from: Option<Link>,
-    pub to: Option<Link>,
-    /// What the entry says of its key beside the place, now and as asked (`linked::about`); empty when it says nothing.
-    pub about_from: String,
-    pub about_to: String,
-    /// The entry is a link: it holds no value.
-    pub only: bool,
-    /// The agent's reason, as the person is shown it.
-    pub reason: String,
-}
-
 /// An `update` that has been checked: the entry as read, and what it would become.
 struct Planned {
     row: VaultRow,
@@ -272,25 +252,6 @@ struct Planned {
     fields: BTreeMap<String, String>,
     tags: Vec<String>,
     changed: Vec<String>,
-}
-
-impl Planned {
-    fn link_change(&self) -> Option<LinkChange> {
-        let before = fields_of(&self.row);
-        let (from, to) = (Link::of(&before), Link::of(&self.fields));
-        let (about_from, about_to) = (linked::about(&before), linked::about(&self.fields));
-        (from != to || about_from != about_to).then(|| LinkChange {
-            entry_id: self.row.id.clone(),
-            label: self.row.label.clone(),
-            kind: self.row.kind.clone(),
-            from,
-            to,
-            about_from,
-            about_to,
-            only: linked::is_linked(&before),
-            reason: self.reason.clone(),
-        })
-    }
 }
 
 /// Every check of an `update`, with nothing written: the reason, that the agent may use the entry, and that the new
@@ -314,38 +275,26 @@ fn planned(store: &Store, req: &UpdateRequest, agent: &str) -> Result<Planned, S
     Ok(Planned { row, reason, label, fields, tags, changed })
 }
 
-/// What `update` would do to the entry's machine copy, after every other check of the request: `None` when it leaves
-/// the link alone, and the request can go ahead without asking anyone.
-pub fn link_change(store: &Store, req: &UpdateRequest, agent: &str) -> Result<Option<LinkChange>, String> {
-    Ok(planned(store, req, agent)?.link_change())
+/// What an `update` that passed every check is about, for the line a refusal of it leaves.
+pub struct Checked {
+    pub id: String,
+    pub label: String,
+    pub reason: String,
 }
 
-/// Records that a change to an entry's machine copy did not happen, and why (`denied`, `expired`).
-pub fn note_link_refused(store: &Store, change: &LinkChange, agent: &str, outcome: &str) {
-    record_line(store, Line { entry_id: &change.entry_id, label: &change.label, actor: agent, action: CHANGED_DETAILS, target: "machine copy", outcome, reason: &change.reason });
+/// Every check of an `update` with nothing written, so a refusal that follows (the pace) is only ever written for a call
+/// that was valid: a reason, an entry the agent may use, and a change.
+pub fn check_update(store: &Store, req: &UpdateRequest, agent: &str) -> Result<Checked, String> {
+    let planned = planned(store, req, agent)?;
+    Ok(Checked { id: planned.row.id, label: planned.row.label, reason: planned.reason })
 }
 
 /// `update`: changes an entry's label, plain fields and tags, with the agent's reason, for an entry in a Vault it may
-/// use. The sealed value is not opened or touched. Records one `changed details` line. A change to where the entry's
-/// machine copy is refused here: that one goes through [`update_details_allowed`], after the person's yes.
+/// use. The sealed value is not opened or touched. Nobody is asked, a change to where the entry's machine copy is
+/// included: it records one `changed details` line, which is the record
+/// (docs/specs/SPEC_VAULT_AGENT_ADDS_AND_EDITS_WITHOUT_ASKING_2026_11_25.md).
 pub fn update_details(store: &Store, req: &UpdateRequest, agent: &str) -> Result<Updated, String> {
-    update_with(store, req, agent, None)
-}
-
-/// [`update_details`] for a request that changes the machine copy, which the person allowed as `allowed` shows it.
-/// If the entry changed while they were asked, so that the change is no longer that one, nothing is written.
-pub fn update_details_allowed(store: &Store, req: &UpdateRequest, agent: &str, allowed: &LinkChange) -> Result<Updated, String> {
-    update_with(store, req, agent, Some(allowed))
-}
-
-fn update_with(store: &Store, req: &UpdateRequest, agent: &str, allowed: Option<&LinkChange>) -> Result<Updated, String> {
     let plan = planned(store, req, agent)?;
-    match (plan.link_change(), allowed) {
-        (None, _) => {}
-        (Some(change), Some(allowed)) if &change == allowed => {}
-        (Some(_), Some(_)) => return Err("the entry changed while the person was asked, so nothing was changed: look at it and ask again".into()),
-        (Some(_), None) => return Err("where an entry's machine copy is decides what a check reads, so the person is asked before it changes: nothing was changed".into()),
-    }
     let Planned { row, reason, label, fields, tags, changed } = plan;
     let (was, was_fields) = (row.sealed.clone(), row.fields.clone());
     let new = VaultRow {

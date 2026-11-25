@@ -11,7 +11,7 @@
  * taken at release would add its capture time to the tear-off. The browser
  * pane's drag catcher prewarms the same way (use-drag-snapshot.ts).
  *
- * The capture is the window's whole viewport, cropped here to the pane. A
+ * The capture is the window's whole viewport, cropped to the pane (in the host, for a pane shown whole). A
  * clipped CDP screenshot (the block-scoped `browserPanes.screenshot`) makes
  * Chromium briefly change the visible page's viewport to render the clip,
  * which flickered the window as the drag began.
@@ -211,8 +211,22 @@ function ownWindowLabel(): string {
     return new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
 }
 
-/** The window's viewport, cropped to `rect`, as a base64 JPEG. `shot` is called once the window has been pictured. */
+/**
+ * The window's viewport, cropped to `rect`, as a base64 JPEG. `shot` is called once the window has been pictured.
+ * On Windows a pane shown whole is cut out in the host: the host takes the window's picture and keeps it, `shot`
+ * is called as soon as it has, and the cut (decode, crop, encode) is asked for after: the page neither takes the
+ * window's whole picture over the host channel nor decodes, draws and encodes it on the thread the drag's first
+ * frames need, and the drag's drawing is held only while the window is pictured, as before. The host's cut is
+ * Windows only; the other platforms take the landing picture of a pane here, as before. A tab alone (`solo`) draws
+ * its pill from the window's picture, so that one is still cut here.
+ */
 async function capturePane(rect: CssRect, shot: () => void, solo?: TabStripInPane): Promise<string | null> {
+    if (!solo && isWindows()) {
+        const { pictureId } = await getApi().windows.keepViewport(ownWindowLabel(), 80);
+        shot();
+        const { jpeg_base64 } = await getApi().windows.cutKeptViewport(pictureId, rect, window.innerWidth);
+        return jpeg_base64;
+    }
     const { jpeg_base64 } = await getApi().windows.captureViewport(ownWindowLabel(), 80);
     shot();
     return track(cropToPane(jpeg_base64, rect, solo));

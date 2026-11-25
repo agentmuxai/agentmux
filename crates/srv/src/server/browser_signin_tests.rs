@@ -547,6 +547,30 @@ async fn a7_removing_one_agents_share_leaves_an_ordinary_card_on_the_entry_waiti
 }
 
 #[tokio::test]
+async fn a_value_an_agent_replaced_while_the_person_was_asked_is_not_used_on_silence() {
+    let s = setup_as(None, None).await;
+    let entry = save(&s, "alex");
+    let ask = |agent: &str| {
+        let card = UseRequest { id: uuid::Uuid::new_v4().to_string(), agent: agent.to_string(), entry_id: entry.clone(), kind: "login".into(), offer_always: true, ..Default::default() };
+        let state = s.state.clone();
+        tokio::spawn(async move { crate::server::vault_ask::ask(&state, "", card, Duration::from_millis(300), "a use").await.0 })
+    };
+    // Nobody touches the entry meanwhile: silence goes ahead, as before.
+    assert_eq!(ask("quiet-agent").await.unwrap(), Ended::WentAhead);
+    // An agent replaces its value while the card is up: the silence that follows is a no, and the entry stays unseen.
+    let asked = ask("waiting-agent");
+    for _ in 0..200 {
+        if uses::uses().list().iter().any(|u| u.agent == "waiting-agent") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    crate::backend::vault::agent_set::mark(&s.state.identity_store, &entry, "importer");
+    assert_eq!(asked.await.unwrap(), Ended::NoAnswer);
+    assert!(crate::backend::vault::agent_set::is_unseen(&s.state.identity_store, &entry));
+}
+
+#[tokio::test]
 async fn a7_a_share_removed_and_made_again_while_asked_types_nothing_and_gives_no_always() {
     let owner = format!("uid-share-owner-{}", uuid::Uuid::new_v4().simple());
     let owner = owner.as_str();

@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! `Browser` action `open`: a browser pane below the agent's own, or a floating one.
+//! `Browser` action `open`: a browser pane in a new tab of the agent's own pane group (or in a split it asks for), or a floating one.
 
 use super::*;
 use agentmux_common::shown_url::shown_url;

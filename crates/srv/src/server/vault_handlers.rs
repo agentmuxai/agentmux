@@ -352,7 +352,7 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                     }
                 }
                 let save = request.needs_value && body.get("save").and_then(Value::as_bool).unwrap_or(false);
-                let answer = vault::uses::UseAnswer { decision, value: if request.needs_value { value } else { None }, save, by: vault::uses::By::Person, choice: chosen_card(&request, body.get("choice").and_then(Value::as_str), decision)?, rows: super::vault_import_batch::ticked_rows(&request, body.get("rows"), decision)?, vault: super::vault_import_batch::chosen_vault(&request, body.get("vault").and_then(Value::as_str), decision)?, share: super::vault_import::ticked_share(&request, body.get("share"), decision) };
+                let answer = vault::uses::UseAnswer { decision, value: if request.needs_value { value } else { None }, save, by: vault::uses::By::Person, choice: chosen_card(&request, body.get("choice").and_then(Value::as_str), decision)?, rows: None, vault: None, share: super::vault_import::ticked_share(&request, body.get("share"), decision) };
                 if !vault::uses::uses().answer(&id, answer) {
                     return Err("that request is no longer waiting".into());
                 }

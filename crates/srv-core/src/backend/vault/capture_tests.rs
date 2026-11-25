@@ -127,6 +127,8 @@ fn a_match_into_an_existing_entry_is_its_new_value_and_the_old_one_is_kept() {
     let kept = versions::list(&s, &id).unwrap();
     assert_eq!(kept.len(), 1);
     assert_eq!((kept[0].replaced_by.as_str(), kept[0].how.as_str()), ("Agent2-6", "captured"));
+    // Nobody was asked, so the value is the agent's until the person has looked.
+    assert_eq!(s.vault_unseen_get(&id).unwrap().map(|u| u.by_agent), Some("Agent2-6".to_string()));
 }
 
 #[test]

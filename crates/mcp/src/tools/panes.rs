@@ -55,18 +55,15 @@ async fn run_open_editor(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     let split = arguments
         .get("split")
         .and_then(|v| v.as_str())
-        .filter(|s| matches!(*s, "right" | "left" | "down" | "up"))
-        .unwrap_or("right");
+        .filter(|s| matches!(*s, "right" | "left" | "down" | "up"));
 
     let url = format!("{}/api/v1/pane/open", local_url.trim_end_matches('/'));
     // Place the editor relative to the calling agent pane when we know
     // its block id (AGENTMUX_BLOCKID); otherwise the sidecar inserts it
     // at the tab root.
-    let (split_direction, split_reference_block_id) = if block_id.is_empty() {
-        (None, None)
-    } else {
-        (Some(split.to_string()), Some(block_id.to_string()))
-    };
+    // Only a split the agent asked for is sent: with none, srv opens the pane as a tab of the agent's own pane group.
+    let split_direction = split.map(str::to_string);
+    let split_reference_block_id = (!block_id.is_empty()).then(|| block_id.to_string());
     let req = PaneOpenRequest {
         view: "editor".to_string(),
         file: Some(file.to_string()),
@@ -295,15 +292,12 @@ async fn run_open_files(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let split = arguments
         .get("split")
         .and_then(|v| v.as_str())
-        .filter(|s| matches!(*s, "right" | "left" | "down" | "up"))
-        .unwrap_or("right");
+        .filter(|s| matches!(*s, "right" | "left" | "down" | "up"));
 
     let url = format!("{}/api/v1/pane/open", local_url.trim_end_matches('/'));
-    let (split_direction, split_reference_block_id) = if block_id.is_empty() {
-        (None, None)
-    } else {
-        (Some(split.to_string()), Some(block_id.to_string()))
-    };
+    // Only a split the agent asked for is sent: with none, srv opens the pane as a tab of the agent's own pane group.
+    let split_direction = split.map(str::to_string);
+    let split_reference_block_id = (!block_id.is_empty()).then(|| block_id.to_string());
     let req = PaneOpenRequest {
         view: "files".to_string(),
         file: Some(path.to_string()),

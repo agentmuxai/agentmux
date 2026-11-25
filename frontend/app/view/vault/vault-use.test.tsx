@@ -39,6 +39,8 @@ const use = (over: Partial<UseRequest> = {}): UseRequest => ({
     deadline_ms: 1,
     expires_ms: 1,
     goes_ahead: false,
+    set_by: "",
+    set_ms: 0,
     ...over,
 });
 

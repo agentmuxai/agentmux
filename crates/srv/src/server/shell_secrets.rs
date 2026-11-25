@@ -161,12 +161,11 @@ fn agent_of(
     Ok(agent.chars().take(64).collect())
 }
 
-/// Checks a command's `capture` before it runs (spec §4.2 of the generate spec).
-/// A rule that makes a new entry asks nobody: like `generate`, it holds nothing
-/// of the person's yet, and the agent could run the command without it and read
-/// the value. A rule that replaces an existing entry's value asks the person, each
-/// time, naming the command. `None` when there is no capture; with it, the labels
-/// of the entries nobody answered for, which went ahead.
+/// Checks a command's `capture` before it runs (spec §4.2 of the generate spec). Nobody is asked: a rule that makes a new
+/// entry holds nothing of the person's yet, and one that replaces an entry's value keeps the old one 7 days and leaves a
+/// history line (docs/specs/SPEC_VAULT_AGENT_ADDS_AND_EDITS_WITHOUT_ASKING_2026_11_25.md), within the agent's pace. `None`
+/// when there is no capture. The labels returned are the entries nobody was asked about and that went ahead: always none
+/// now, kept for the shape every caller reads.
 pub(super) async fn plan_capture(
     state: &AppState,
     caller: Option<&super::caller::Caller>,
@@ -174,7 +173,7 @@ pub(super) async fn plan_capture(
     auth: Option<&agentmux_common::api_types::UiAutomationAuth>,
     rules: Option<&[agentmux_common::api_types::CaptureRule]>,
     cmd: &str,
-    cwd: &str,
+    _cwd: &str,
     reason: &str,
 ) -> Result<(Option<capture::Job>, Vec<String>), Refusal> {
     let Some(rules) = rules.filter(|r| !r.is_empty()) else {
@@ -187,58 +186,19 @@ pub(super) async fn plan_capture(
         .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .map_err(|e| refuse(StatusCode::BAD_REQUEST, e))?;
     plan.reason = reason.to_string();
-    let replaced: Vec<(String, String, &'static str, String)> = plan
-        .replaces()
-        .filter_map(|t| match t {
-            capture::Target::Existing { id, label, part, kind, .. } => Some((id.clone(), label.clone(), *part, kind.clone())),
-            capture::Target::New { .. } => None,
-        })
-        .collect();
-    if !replaced.is_empty() && (cmd.chars().count() > MAX_COMMAND || cwd.chars().count() > MAX_CWD) {
-        return Err(refuse(
-            StatusCode::BAD_REQUEST,
-            format!("a command that replaces a Vault value must fit in the approval prompt ({MAX_COMMAND} characters, folder {MAX_CWD}): put the steps in a script file and run that"),
-        ));
-    }
-    let mut went_ahead = Vec::new();
-    // Asked at once, each with its own deadline, so the asking fits the Terminal
-    // tool's wait however many entries the command replaces.
-    let who = &agent;
-    let mut asking: FuturesUnordered<_> = replaced.iter().map(|(id, label, part, kind)| async move {
-        let request = UseRequest {
-            id: uuid::Uuid::new_v4().to_string(),
-            agent: who.clone(),
-            entry_id: id.clone(),
-            entry_label: label.clone(),
-            what: part.to_string(),
-            origin: String::new(),
-            field: String::new(),
-            offer_always: false,
-            reason: "what the command prints replaces the value".into(),
-            agent_reason: reason.to_string(),
-            kind: kind.clone(),
-            command: cmd.to_string(),
-            cwd: cwd.to_string(),
-            replaces: true,
-            requested_ms: agentmux_common::time::now_ms_u64(),
-            ..Default::default()
-        };
-        (id, label, ask(state, agent_block_id, request, &format!("{who} wants to replace {label} with what a command prints")).await)
-    }).collect();
-    while let Some((id, label, ended)) = asking.next().await {
-        if !ended.allowed() {
-            vault::record_line(&state.identity_store, vault::Line { entry_id: id, label, actor: &agent, action: capture::CAPTURED, target: &clip(cmd, 160), outcome: ended.outcome(), reason });
-            super::vault_handlers::publish(state);
-            return Err(refused(ended));
+    let acts = plan.acts();
+    if let Err(why) = crate::backend::vault::pace::admit(&agent, &acts) {
+        for t in plan.replaces().filter(|_| crate::backend::vault::pace::may_note_refusal(&agent)) {
+            if let capture::Target::Existing { id, label, .. } = t {
+                vault::record_line(&state.identity_store, vault::Line { entry_id: id, label, actor: &agent, action: capture::CAPTURED, target: &clip(cmd, 160), outcome: "refused: pace", reason });
+            }
         }
-        if ended == Ended::WentAhead {
-            went_ahead.push(label.clone());
-        }
+        super::vault_handlers::publish(state);
+        return Err(refuse(StatusCode::TOO_MANY_REQUESTS, why));
     }
-    drop(asking);
     let changed_state = state.clone();
-    let job = capture::Job { capture: plan, store: state.identity_store.clone(), changed: Box::new(move || super::vault_handlers::publish(&changed_state)) };
-    Ok((Some(job), went_ahead))
+    let job = capture::Job { capture: plan, store: state.identity_store.clone(), changed: Box::new(move || super::vault_handlers::publish(&changed_state)), reservation: crate::backend::vault::pace::Reservation::new(&agent, acts) };
+    Ok((Some(job), Vec::new()))
 }
 
 /// One entry's question for a command: the entry, the parts of it asked for, the

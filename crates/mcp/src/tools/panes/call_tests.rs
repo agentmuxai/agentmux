@@ -28,7 +28,7 @@ fn cases() -> Vec<Case> {
             json!({ "block_id": "b1", "note": "n" }),
             "/api/v1/pane/open",
             json!({
-                "view": "editor", "file": "/w/a.rs", "focus": true, "split_direction": "right", "split_reference_block_id": "blk",
+                "view": "editor", "file": "/w/a.rs", "focus": true, "split_reference_block_id": "blk",
                 "title": "T", "tree_expanded": false, "floating": true, "reuse_editor_pane": true, "target_block_id": "b9"
             }),
             &["Opened /w/a.rs in editor pane (block b1). n"],
@@ -181,6 +181,25 @@ async fn every_pane_tool_sends_the_request_it_did_and_says_what_it_said() {
             assert!(said.contains(want), "{} {}: said {said:?}, wanted {want:?}", case.tool, case.args);
         }
     }
+}
+
+/// A pane an agent opens asks for no split unless the agent did: srv then opens it as a tab of the agent's own pane group.
+/// The reference stays (the agent's own pane), so srv knows whose group it is.
+#[tokio::test]
+async fn an_open_sends_a_split_only_when_the_agent_asked_for_one() {
+    for (tool, args) in [("OpenEditor", json!({ "file": "/w/a.rs" })), ("OpenFiles", json!({ "path": "/w" }))] {
+        let srv = stub_srv("200 OK", json!({ "block_id": "b1" }));
+        let fx = Fixture::new(&srv);
+        call(tool, &args, &fx.cx()).await.unwrap();
+        let (_, body) = srv.seen.lock().unwrap()[0].clone();
+        assert!(body.get("split_direction").is_none(), "{tool} sent a split nobody asked for: {body}");
+        assert_eq!(body.get("split_reference_block_id"), Some(&json!("blk")), "{tool}: {body}");
+    }
+    let srv = stub_srv("200 OK", json!({ "block_id": "b1" }));
+    let fx = Fixture::new(&srv);
+    call("OpenFiles", &json!({ "path": "/w", "split": "down" }), &fx.cx()).await.unwrap();
+    let (_, body) = srv.seen.lock().unwrap()[0].clone();
+    assert_eq!(body.get("split_direction"), Some(&json!("down")), "an asked-for split is sent: {body}");
 }
 
 #[tokio::test]

@@ -335,20 +335,16 @@ async fn a_capture_into_a_new_entry_asks_nobody_but_needs_the_agents_signature()
 }
 
 #[tokio::test]
-async fn a_capture_that_replaces_a_value_asks_each_time_naming_the_command() {
+async fn a_capture_that_replaces_a_value_asks_nobody() {
     let s = setup().await;
     let rules = capture_rule(agentmux_common::api_types::CaptureInto { id: Some(s.entry.clone()), ..Default::default() });
-    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Once));
-    assert!(plan_capture(&s.state, None, &s.block, Some(&s.auth), Some(&rules), "stripe keys roll", "C:/work", WHY).await.unwrap().0.is_some());
-    let shown = ask.await.unwrap();
-    assert!(shown.replaces && !shown.offer_always, "replacing a value is asked about every time");
-    assert_eq!(shown.agent_reason, WHY, "the card says what the agent said");
-    assert_eq!((shown.entry_id.as_str(), shown.command.as_str(), shown.cwd.as_str()), (s.entry.as_str(), "stripe keys roll", "C:/work"));
-    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Deny));
-    let err = plan_capture(&s.state, None, &s.block, Some(&s.auth), Some(&rules), "stripe keys roll", "C:/work", WHY).await.err().expect("refused");
-    ask.await.unwrap();
-    assert_eq!(err.0, StatusCode::FORBIDDEN);
-    assert!(activity(&s).contains("captured stripe keys roll denied"), "{}", activity(&s));
+    // Nothing waits: no card is put up, whatever is answering.
+    let (job, went_ahead) = tokio::time::timeout(Duration::from_secs(5), plan_capture(&s.state, None, &s.block, Some(&s.auth), Some(&rules), "stripe keys roll", "C:/work", WHY))
+        .await
+        .expect("nobody was asked")
+        .unwrap();
+    assert!(job.is_some() && went_ahead.is_empty());
+    assert!(crate::backend::vault::uses::uses().list().iter().all(|u| u.entry_id != s.entry), "no card for the person");
 }
 
 #[tokio::test]
