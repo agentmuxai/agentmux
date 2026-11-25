@@ -25,6 +25,9 @@ export interface BodyHold {
 /** Views whose body is never held: a native window follows the pane's rect. */
 const NEVER_HELD_VIEWS: ReadonlySet<string> = new Set(["browser"]);
 
+/** Views whose body is known to cost a layout a frame cannot spare (a transcript re-measures its rows): heavy from the start. */
+const HEAVY_VIEWS: ReadonlySet<string> = new Set(["agent"]);
+
 /** Whether a pane showing `view` holds its body during a splitter drag. */
 export function holdsBodyDuringDrag(view: string | undefined): boolean {
     return !(view !== undefined && NEVER_HELD_VIEWS.has(view));
@@ -56,6 +59,8 @@ const REFRESH_KEY = "agentmux:pane-drag-refresh-ms";
 export const DRAG_PAUSE_MS = 80;
 /** A frame that began this long, in ms, after the one before it means the page is behind: no body catches up in it. */
 export const BEHIND_FRAME_MS = 28;
+/** A heavy body (its catch-up made the next frame late) catches up mid-drag only every this many paces, or on a pause. */
+export const HEAVY_ROUNDS = 4;
 /** Unless the bodies have waited this many paces: a page that is always behind is not left held until release. */
 export const STARVED_ROUNDS = 3;
 
@@ -90,6 +95,10 @@ let lastMoveAt = 0;
 let lastFrameAt = 0;
 let lastRoundAt = 0;
 let round: CatchUp[] | null = null;
+// A body whose catch-up was followed by a frame that began late is heavy: it waits for a pause, or HEAVY_ROUNDS paces.
+const heavy = new WeakSet<CatchUp>();
+let lastRan: { run: CatchUp; at: number } | null = null;
+let lastHeavyRoundAt = 0;
 
 function onDragPointerMove(e: Event): void {
     lastMoveAt = e.timeStamp;
@@ -99,17 +108,27 @@ function clockStep(t: number): void {
     clockFrame = undefined;
     if (catchUps.size === 0) return;
     const behind = lastFrameAt > 0 && t - lastFrameAt > BEHIND_FRAME_MS;
+    if (lastRan && behind && t - lastRan.at > BEHIND_FRAME_MS) heavy.add(lastRan.run);
+    lastRan = null;
     lastFrameAt = t;
     const pace = dragRefreshMs();
     // A page that is only ever late (a display that draws 30 times a second) still catches up, at a bounded wait.
     const starved = t - lastRoundAt >= pace * STARVED_ROUNDS;
     if ((!behind || starved) && pace > 0) {
-        if (!round && (t - lastMoveAt >= DRAG_PAUSE_MS || t - lastRoundAt >= pace)) round = [...catchUps];
+        const paused = t - lastMoveAt >= DRAG_PAUSE_MS;
+        if (!round && (paused || t - lastRoundAt >= pace)) {
+            const heavyDue = paused || t - lastHeavyRoundAt >= pace * HEAVY_ROUNDS;
+            round = [...catchUps].filter((run) => heavyDue || !heavy.has(run));
+            if (heavyDue) lastHeavyRoundAt = t;
+        }
         if (round) {
             // The bodies that have nothing to do cost nothing: the frame is spent on the first that lays out.
             while (round.length > 0) {
                 const next = round.shift()!;
-                if (catchUps.has(next) && next()) break;
+                if (catchUps.has(next) && next()) {
+                    lastRan = { run: next, at: t };
+                    break;
+                }
             }
             if (round.length === 0) {
                 round = null;
@@ -125,6 +144,7 @@ function addCatchUp(run: CatchUp): void {
     if (catchUps.size === 0) {
         lastFrameAt = 0;
         lastRoundAt = performance.now();
+        lastHeavyRoundAt = lastRoundAt;
         lastMoveAt = lastRoundAt;
         window.addEventListener("pointermove", onDragPointerMove, { capture: true, passive: true });
         if (typeof requestAnimationFrame === "function" && dragRefreshMs() > 0) clockFrame = requestAnimationFrame(clockStep);
@@ -139,11 +159,21 @@ function removeCatchUp(run: CatchUp): void {
     if (clockFrame !== undefined) cancelAnimationFrame(clockFrame);
     clockFrame = undefined;
     round = null;
+    const held = [...afterDrag];
+    afterDrag.clear();
+    for (const cb of held) cb();
 }
 
 /** Whether a splitter drag is on in this window: for what only needs to keep up with the page while none is. */
 export function splitterDragActive(): boolean {
     return catchUps.size > 0;
+}
+
+const afterDrag = new Set<() => void>();
+/** Runs `cb` once, when the splitter drag that is on ends (at once when none is): for work a drag held back. */
+export function afterSplitterDrag(cb: () => void): void {
+    if (catchUps.size === 0) return cb();
+    afterDrag.add(cb);
 }
 
 // A pane's body size is kept up to date by a ResizeObserver, so a drag never has to ask the page for a layout (reading
@@ -202,6 +232,8 @@ export function usePaneBodyHold(
         };
         // The body holds the size it has as the drag begins; later it catches up with the clock.
         catchUp();
+        const kind = untrack(view);
+        if (kind !== undefined && HEAVY_VIEWS.has(kind)) heavy.add(catchUp);
         addCatchUp(catchUp);
         onCleanup(() => removeCatchUp(catchUp));
     });
