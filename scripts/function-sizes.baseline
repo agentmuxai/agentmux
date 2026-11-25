@@ -341,7 +341,7 @@
 126 frontend/app/view/agent/components/AgentShellInfoPanel.tsx::AgentShellInfoPanel
 130 frontend/app/view/agent/components/HiddenTemplatesSection.tsx::HiddenTemplatesSection
 141 frontend/app/view/agent/components/MyAgentsList.tsx::MyAgentsList
-130 frontend/app/view/agent/components/SeatRosterImport.tsx::SeatRosterImport
+128 frontend/app/view/agent/components/SeatRosterImport.tsx::SeatRosterImport
 108 frontend/app/view/agent/components/SlashCommandPicker.tsx::SlashCommandPicker
 227 frontend/app/view/agent/components/agent-picker-launch.ts::createPickerLaunch
 127 frontend/app/view/agent/components/agent-picker-templates.ts::createTemplates

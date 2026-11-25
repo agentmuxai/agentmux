@@ -39,6 +39,13 @@ interface Outcome {
     error: string | null;
 }
 
+/** What one "Will set" line says: who, the seat's badge and whom it reports to. */
+const lineParams = (line: RosterPlan["seats"][number]) => ({
+    name: line.agent.name,
+    badge: seatBadgeText({ role: line.seat.role, qualifier: line.seat.qualifier ?? null }),
+    lead: line.leadName,
+});
+
 const EXAMPLE = `{
   "AgentX": { "role": "leader", "qualifier": "product", "lead": null, "area": "agent pane, identity" },
   "Camper": { "role": "worker", "lead": "AgentX", "area": "panes, layout, tabs" }
@@ -110,14 +117,7 @@ export const SeatRosterImport = (props: SeatRosterImportProps): JSX.Element => {
                                 <For each={p().seats}>
                                     {(line) => (
                                         <li>
-                                            <Rich
-                                                k="seatRoster.line"
-                                                params={{
-                                                    name: line.agent.name,
-                                                    badge: seatBadgeText({ role: line.seat.role, qualifier: line.seat.qualifier ?? null }),
-                                                    lead: line.leadName,
-                                                }}
-                                            />
+                                            <Rich k="seatRoster.line" params={lineParams(line)} />
                                             <Show when={line.seat.area}> — {line.seat.area}</Show>
                                         </li>
                                     )}
