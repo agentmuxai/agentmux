@@ -139,7 +139,7 @@ export function headerGrabOffset(
 }
 
 /**
- * How long the pointer must rest on a pane before its drag ghost is
+ * How long the pointer must rest on a pane's header before its drag ghost is
  * rasterised. `toPng` of a pane costs ~170 ms of main thread
  * (SPEC_AGENT_OPEN_LATENCY_2026_09_27.md F4), and it used to run the moment
  * the pointer entered any pane whose cached ghost was stale — every pane
@@ -177,6 +177,15 @@ export function createDragPreviewIntent(
         },
         dispose: cancel,
     };
+}
+
+/**
+ * Whether `target` is in a pane's header, the only place a whole-pane drag starts from. A pointer resting anywhere else on
+ * the pane (its body, where the person clicks and types) has no use for the drag ghost, and making it costs the main
+ * thread 100 to 260 ms for a pane with much on screen.
+ */
+export function overPaneHeader(target: Element | null): boolean {
+    return !!target?.closest?.('[data-role="block-header"]');
 }
 
 /**
