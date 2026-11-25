@@ -109,11 +109,18 @@ describe("revealOrOpen", () => {
             ["record", "create"],
         ],
         [
-            "a block of the shown tab that is in no pane of its layout is not waited for: a new pane is opened",
-            { unmounted: "b3", unmountedShown: true, stray: true },
+            "a block of the shown tab that is in no pane of its layout is waited for once, then a new pane is opened",
+            { unmounted: "b3", unmountedShown: true, stray: true, reveal: { ok: false, reason: "layout-timeout" } as Reveal },
             { currentTabOnly: true },
             { kind: "opened_here", blockId: "new-block" },
-            ["record", "create"],
+            ["record", "reveal:b3", "create"],
+        ],
+        [
+            "a block whose pane is still being placed is revealed when the layout catches up: nothing is opened",
+            { unmounted: "b3", unmountedShown: true, stray: true },
+            { currentTabOnly: true },
+            { kind: "shown_here", blockId: "b3" },
+            ["record", "reveal:b3"],
         ],
         [
             "a block of another tab that is in no pane is replaced too, once its tab is shown and the layout has no pane for it",
