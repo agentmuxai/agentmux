@@ -1,5 +1,73 @@
 # AgentMux Version History
 
+## 0.60.42 — 2026-11-25
+
+- Vault sync: records are sealed with the layer's own seal, so a removal's re-issue at the new key epoch opens them
+- Vault merge: a later edit that beats a held delete has its own tags
+- A process srv starts for an agent or a pane does not inherit the container's cloud credential variables
+- Buttons that start a slow action (installs, saves, decisions, updates) now lock and show a spinner while it runs
+- A websocket command that is not open to every connection is called only by the AgentMux window
+- Editor: tab strips measure their neighbours in the row's own pixels at any chrome zoom, and tabs with no icon keep a few letters of their label at a narrow pane, the strip scrolling before they shrink to slivers
+- A files, editor, Kanban or Swarm pane takes a backdrop, like the agent pane: its washes, info and accent-fill text, file-tree text, syntax and file-icon colours follow it and read on it
+- Connectors: deleting an account asks in a panel under its row instead of a pane modal, and each connector card's control is a square at its right edge
+- ci: a change to a docs file a Rust test reads runs the Rust job instead of being treated as documentation-only
+- A container agent's pane never starts its CLI on this computer through an ACP, MSP or app-server controller; the CLI installer's npm runs in its install folder; and a probe of a catalog MCP server that runs only in containers says so instead of starting it on this computer.
+- Atlas: each agent's node lists its Kanban tasks as links, held ones first, then those waiting for it
+- A quiet note about an agent on another machine keeps the agent's whole name, up to 64 characters
+- docs(skills): ui-confirm-panels says pane modals are decided one at a time, not banned
+- Vault: Import, Export and the note on what may ask you are buttons in the Vault's body, not in the pane's tab
+- Editor tab strip: the selected tab with no icon keeps a few letters of its name next to its close button at a very narrow pane
+- Pane tab strip: the selected tab keeps its buttons and the start of its title; the other tabs give up width before it does
+- A floating window closes itself after its pane is docked back, even if the window's own update fails, instead of staying open and black
+- Clicking a widget whose view already has a block in the tab but no pane now opens a pane at once, the notice for a slow tab says what to do, and the layout doctor closes such a stray block of a management view
+- An agent pane going away no longer throws inside the framework while it saves its scroll place, which could leave other updates undone
+- Pane tabs show only their icon, title and close: the pane's own buttons are rows of its right-click menu, and an agent's tab has an immediate card
+- Atlas: a node's last task line keeps a little room above the node's bottom border
+- A floating window closes at once after its pane is docked back even when the redock's reply arrives before the tab update, by reading the tab again from the backend (#48685)
+- Desktop: a drag action, so an agent can wire ports, move faders and work a canvas
+- A headless srv keeps browser sign-ins across a restart: digests only, owner-only file, refused and cleared when it cannot be trusted; sign out of every browser from the page
+- A widget click on a view whose block is still being placed waits for its pane instead of opening a second one
+- UI check rule 18 (discarded button clicks): skips commented-out code and counts handlers with typed parameters
+- i18n: the Seat panel and roster import, the My agents row panel, the Swarm fleet toolbar and stopped agents, and the transcript's inline rows read from the dictionary (batch 8, #21624)
+- An MCP server records who added and last changed it, and a binding records who bound it and when; Connectors shows them
+- A replaced stray block shows no failure notice when a widget is clicked
+- A widget pane takes a backdrop: the theme variables a widget gets come from its pane, with three more (--am-surface-raised, --am-fg-faint, --am-info), and are sent again when the backdrop changes
+- The layout doctor puts a management view's block that is in no pane back in a pane, instead of closing it
+- An agent that closes a browser tab or a pane through Stop pane or Browser close now closes only the tab it names; the pane's other tabs stay, and the pane closes with it only when it was the last one
+- A call to the host's credential or registration service that is refused or fails is recorded in the audit log
+- A pane drop no longer measures the layout's container again after its own writes
+- The service route refuses to delete or clear the session history and to define an agent
+- Tear-off on Windows: the pane's picture is cut out of the window's picture in the host, so the page no longer decodes and re-encodes it
+- On macOS a new browser pane's page is first laid out at the pane's own width, not at twice it
+- i18n: the attachment tray, the composer strip, the agent's question panel, the History navigator and the browser download strip read from the dictionary (batch 9, #21624)
+- A harness the person installed themselves (install kind path) with a bare command such as demo-acp now launches: its command is resolved to the absolute path it has on PATH when it is registered
+- The Swarm view reads its tracked blocks once per 150 ms window of process and registration events, not once per event (#48684)
+- docs(skills): ui-confirm-panels points at the reusable inline confirm panel (ConfirmPanel) for the next confirm or conversion
+- A measuring setting, off by default, names the code that makes the page lay out while a websocket message is handled (#48684)
+- The start file written for an agent's MCP server holds references, not values.
+- Sync members: a fork further back than the head settles after one branch was extended
+- i18n: the Audit pane, Memory pane, memory confirms and the restart-to-update popover read their text from the dictionary
+- A pane with a backdrop: the selected tab stands off the header (a hairline edge when its label leaves no room), the + hover shows on dark backdrops, an agent-coloured focus ring reads on the pane, selected Files rows keep their grey cells readable, and code colours keep a margin under the editor's active line
+- i18n: the image viewer, system overview, jekt needs-you card, message image preview, browser navigation and agent launch cost read their text from the dictionary
+- Command palette: an agent's row wears its provider's logo instead of a text glyph that read as an X; Redock has its own icon
+- Vault: an agent's adds and edits (import, batch, capture, machine-copy changes) ask nobody; the history line is the record, with a per-agent pace and an unseen mark on values an agent had the Vault read
+- An agent that opens a pane (Pane open, Browser open, Widget open, the Editor) and names no place now gets a new tab in its own pane group, not a split
+- Each agent's signing keys are issued again once at upgrade, and its MCP server asks srv for them again after a rejected signature. After this update each agent's signing keys are new; a peer that shows an agent as not bound moves its pin in the pins screen.
+- Vault: an agent sets a login's site, realm and proxy on a login it made and proposes it on any other; the details an edit replaced are kept 7 days
+- Vault: a strip of changes by agents (Review, Undo, Seen, Accept, Dismiss), a mark on changed entries and a line on a use card for a value or place an agent set
+- Tear-off on Windows: a dev-only measurement of a native copy of the window, for a faster picture at the press
+- A pane's drag ghost is made when the pointer rests on its header, not anywhere on the pane
+- Tear-off on Windows: a pane's picture is the host's own copy of the window (about 15 ms, the page's frames not held) instead of the page's screenshot, so a click on a pane's header costs nothing and a drag starts at once; browser panes and a tab dragged alone keep their path
+- Vault: the batch and link question cards, which nothing asks any more, are removed (4 of 4, #48657)
+- The agent pane's hover panel keeps the scroll wheel when it can scroll: the transcript behind it no longer moves, so the row stays under the pointer and the panel stays open
+- Dragging a pane border follows the pointer: the panes' bodies catch up one at a time in spare frames and when the pointer pauses, the browser pane's position poll waits, and each drag logs how far the border lagged (#48711)
+- A right-click on a document tab shows only the tab's own menu, ending at Close to the Right
+- Two srv tests no longer depend on running in a process of their own, so the nightly's single-process cargo test passes again
+- Update dompurify (used by Mermaid diagrams) from 3.4.17 to 3.5.0
+- Provider CLI pins move to the 2026-11-24 drift report: Gemini 0.71.1, Qwen 0.28.4, OpenClaw 2026.11.10, Copilot 1.0.115, Pi ACP 0.0.35, Kilo 7.8.32, Cline 3.0.75, OpenCode 1.19.6, Goose 1.60.2, Grok 1.0.92, DSH 0.2.2-rc.5, Crush 0.102.0, and Node 24.22.3; Claude, Codex and Muse stay at their pins
+- PRs that change a srv crate also run the srv tests in one process, so a test that only passes in a fresh process fails on the PR, not in the nightly
+- Dragging a pane border: a transcript catches up only when the pointer pauses or every 2 s, and the pane tab strip measures once at the end of the drag, so fewer frames draw the border late (#48711)
+
 ## 0.60.41 — 2026-11-24
 
 - A file a message names becomes a link in the agent pane when it is in the agent's own folders: srv checks it read-only and rate-limited, a missing or outside file is a muted word with the reason, and a click opens it as the agent's folders allow (#48249)
