@@ -1226,7 +1226,13 @@ mod close_pane_tests {
             }
         };
 
+        let queued = |state: &AppState| {
+            let tab = state.mstore.must_get::<crate::backend::obj::Tab>(&tab_id).unwrap();
+            let layout = state.mstore.must_get::<crate::backend::obj::LayoutState>(&tab.layoutstate).unwrap();
+            layout.pendingbackendactions.unwrap_or_default().into_iter().filter(|a| a.actiontype == "delete").map(|a| a.blockid).collect::<Vec<_>>()
+        };
         let first = close(background.clone()).await;
+        assert_eq!(queued(&state), vec![background.clone()], "the window is told to drop the closed tab of the kept pane");
         assert_eq!((first["tab"].as_str(), first["pane_closes"].as_bool()), (Some(background.as_str()), Some(false)));
         {
             let s = state.srv_state.lock().await;
