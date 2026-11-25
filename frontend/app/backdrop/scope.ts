@@ -13,7 +13,7 @@
  */
 
 import { createSignal, type Accessor } from "solid-js";
-import { hexToRgb } from "../theme/oklch";
+import { hexToRgb, oklchOfHex } from "../theme/oklch";
 import { contrastRatio } from "../block/pane-color-scheme";
 import type { AnsiColours } from "./ansi";
 import { toneMove, type DerivedBackdrop, type Surfaces } from "./ink";
@@ -41,18 +41,36 @@ function rgbTriplet(hex: string): string | undefined {
 /** What the transcript's terminal-palette colours are held to on a pane's surfaces (WCAG, as for muted text). */
 export const ANSI_CONTRAST = 4.5;
 
+/** What a file-type icon colour is held to: it is a graphic, not text (WCAG 1.4.11), and its shape and label carry the type. */
+export const GLYPH_CONTRAST = 3;
+const GLYPH_SET: ReadonlySet<string> = new Set(mapped.glyphs);
+
+/** What code colours are held to: a margin over 4.5, since a coloured token of a given lightness is not as luminous as a grey one. */
+export const SYNTAX_CONTRAST = 5;
+const SYNTAX_SET: ReadonlySet<string> = new Set(mapped.syntax);
+
+/**
+ * The lightness (OKLCH L) code colours are kept to inside a pane: at least this on a dark page, at most this on a light
+ * one. Highlighted code in a Files preview or a transcript carries one fixed palette for a dark page and one for a light
+ * page (Shiki), so a mid-tone backdrop is not served by either; a token at this lightness reads on all three layers.
+ */
+export function codeLightness(surfaces: Surfaces): number {
+    const grey = readableOn("#808080", surfaces, SYNTAX_CONTRAST + 0.5); // colour: fixed (a neutral start for the search; only its lightness is used)
+    return Math.round((oklchOfHex(grey)?.l ?? 0.5) * 1000) / 1000;
+}
+
 /**
  * A palette colour moved, in lightness only, to read on all three of the pane's layers. The layer that is hardest for
  * the colour changes as it moves (a colour that clears the raised layer can still miss the overlay one), so it is
  * moved again against whichever layer it is worst on, until it reads on all of them or stops moving.
  */
-function readableOn(hex: string, surfaces: Surfaces): string {
+function readableOn(hex: string, surfaces: Surfaces, min: number = ANSI_CONTRAST): string {
     const layers = [surfaces.surface, surfaces.raised, surfaces.overlay];
     let out = hex;
     for (let pass = 0; pass < layers.length + 1; pass++) {
         const worst = layers.reduce((a, b) => (contrastRatio(out, b) < contrastRatio(out, a) ? b : a));
-        if (contrastRatio(out, worst) >= ANSI_CONTRAST) break;
-        const next = toneMove(out, worst, ANSI_CONTRAST).hex;
+        if (contrastRatio(out, worst) >= min) break;
+        const next = toneMove(out, worst, min).hex;
         if (next === out) break;
         out = next;
     }
@@ -92,6 +110,8 @@ export function scopeVars(derived: DerivedBackdrop, ansi?: AnsiColours): ScopeVa
         "--ink-info": ink.info,
         "--ink-attention": ink.attention,
         "--ink-on-attention": ink.onAttention,
+        "--ink-on-accent": ink.onAccent,
+        "--code-l": String(codeLightness(surfaces)),
         "--ink-focus": ink.focus,
         "--ink-hover": ink.hover,
         "--ink-selected": ink.selected,
@@ -101,7 +121,7 @@ export function scopeVars(derived: DerivedBackdrop, ansi?: AnsiColours): ScopeVa
     // `rgba(var(--accent-color-rgb), a)` is how the theme tints with the accent, and it needs the channels, not a colour.
     const triplet = rgbTriplet(ink.accent);
     if (triplet) vars["--accent-color-rgb"] = triplet;
-    for (const [token, hex] of Object.entries(ansi ?? {})) vars[token] = readableOn(hex, surfaces);
+    for (const [token, hex] of Object.entries(ansi ?? {})) vars[token] = readableOn(hex, surfaces, GLYPH_SET.has(token) ? GLYPH_CONTRAST : SYNTAX_SET.has(token) ? SYNTAX_CONTRAST : ANSI_CONTRAST);
     return vars;
 }
 

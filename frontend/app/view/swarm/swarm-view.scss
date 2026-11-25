@@ -937,6 +937,10 @@
     &.swarm-activity-summary--fallback {
         opacity: 0.6;
         font-style: normal;
+        // The pane's muted ink is already chosen to read on its backdrop; dimming it again takes it under 3:1.
+        [data-backdrop] & {
+            opacity: 1;
+        }
     }
 }
 
@@ -1314,7 +1318,7 @@
 .swarm-longrunning-remaining {
     flex-shrink: 0;
     font-size: var(--text-2xs);
-    color: rgba(255, 255, 255, 0.35);
+    color: var(--tertiary-text-color);
 }
 
 // ── Other instances (SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md) ─────

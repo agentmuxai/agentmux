@@ -98,6 +98,12 @@
     initial-value: transparent;
 }
 
+@property --ink-on-accent {
+    syntax: "<color>";
+    inherits: true;
+    initial-value: transparent;
+}
+
 @property --ink-focus {
     syntax: "<color>";
     inherits: true;
