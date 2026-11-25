@@ -119,9 +119,10 @@ describe("resolveBackdrop", () => {
 });
 
 describe("supportsBackdrop", () => {
-    it("is the agent pane for now, and no terminal, widget or browser view", () => {
+    it("is the agent pane and any widget pane, and no terminal or browser view", () => {
         expect(supportsBackdrop("agent")).toBe(true);
-        for (const view of ["term", "files", "browser", "sysinfo", "kanban", "", undefined, null, 7]) expect(supportsBackdrop(view), String(view)).toBe(false);
+        expect(supportsBackdrop("ext:acme.clock/main")).toBe(true);
+        for (const view of ["term", "files", "browser", "sysinfo", "kanban", "ext", "", undefined, null, 7]) expect(supportsBackdrop(view), String(view)).toBe(false);
     });
 });
 

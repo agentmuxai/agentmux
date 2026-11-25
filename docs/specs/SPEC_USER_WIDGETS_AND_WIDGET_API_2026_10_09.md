@@ -204,7 +204,7 @@ Details:
 - **`agents.send`** delivers `text` to one of the user's own agents running on this machine (error `1003` if none has that name), as a message marked as sent by the widget (`FROM=widget:<id>`, `DELIVERY=host`, `TRUST=self-declared`), which the agent treats like any unverified message; the usual keyword escalation applies. At most 10 messages a minute per package, 8 KB each.
 - **`ui.setHeaderActions` / `ui.setContextMenu`** are drawn by AgentMux, in its own style; a click comes back as the `action` event.
 
-`Theme` is `{ mode: "dark" | "light", vars: { [name: string]: string } }`: the app's colors as CSS custom properties (`--am-bg`, `--am-fg`, `--am-muted`, `--am-accent`, `--am-border`, `--am-error`, `--am-warning`, `--am-success`, `--am-font`, `--am-font-mono`, `--am-radius`, plus the pane's hue as `--am-pane-hue`). The SDK applies them to the document (§7).
+`Theme` is `{ mode: "dark" | "light", vars: { [name: string]: string } }`: the app's colors as CSS custom properties (`--am-bg`, `--am-fg`, `--am-muted`, `--am-accent`, `--am-border`, `--am-error`, `--am-warning`, `--am-success`, `--am-font`, `--am-font-mono`, `--am-radius`, plus the pane's hue as `--am-pane-hue`, and `--am-surface-raised`, `--am-fg-faint` and `--am-info`). In a pane with a backdrop the colors are the pane's, and `mode` is its side; the `theme` event follows a change of backdrop. The SDK applies them to the document (§7).
 
 ### 6.4 Permissions
 

@@ -16,10 +16,13 @@ import { deriveInk, type DerivedBackdrop } from "./ink";
  * default text and ANSI colours, so a backdrop on one is unreadable; the other panes come with phase 2. A view is added
  * here only when its text can be shown to follow the ink.
  */
+/** A widget pane's view id starts with this (`ext:<id>/<pane>`). A widget takes its colors from the SDK's theme variables, which follow the pane (§7.5). */
+const WIDGET_VIEW_PREFIX = "ext:";
+
 const BACKDROP_VIEWS: ReadonlySet<string> = new Set(["agent"]);
 
 /** Whether a pane of this view takes a backdrop: it is offered in its menu, and a record on any other view is ignored. */
-export const supportsBackdrop = (view: unknown): boolean => typeof view === "string" && BACKDROP_VIEWS.has(view);
+export const supportsBackdrop = (view: unknown): boolean => typeof view === "string" && (BACKDROP_VIEWS.has(view) || view.startsWith(WIDGET_VIEW_PREFIX));
 
 /**
  * What a pane's tab pill and header need to know about its backdrop: which side its surface is on and the ink its

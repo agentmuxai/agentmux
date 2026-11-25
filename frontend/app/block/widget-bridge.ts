@@ -52,6 +52,8 @@ export interface BridgeHost {
     openPane?(view: string, meta: Record<string, unknown>, split: "right" | "down" | "tab"): Promise<string>;
     agentmuxVersion?(): string;
     hostName?(): string;
+    /** The element the colors of the widget are resolved on: the frame of its pane. Without one they are the app's. */
+    themeScope?(): Element | undefined;
     /** A method srv answers (storage, net, agents), through the pane's
      *  session; throws a `BridgeError` when srv refuses it. */
     srv?(method: string, params: Record<string, unknown>): Promise<unknown>;
@@ -102,11 +104,11 @@ const fail = (code: number, message: string, data?: unknown): BridgeReply => ({ 
  * `var(...)` (or a font shorthand) would mean nothing there. A hidden probe
  * element applies the variable to `property` and reads the computed result.
  */
-function resolveVar(name: string, property: "color" | "font-family" | "border-top-left-radius", fallback: string): string {
+function resolveVar(name: string, property: "color" | "font-family" | "border-top-left-radius", fallback: string, root: Element = document.documentElement): string {
     const probe = document.createElement("span");
     probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none;border-style:solid;";
     probe.style.setProperty(property, `var(${name})`);
-    document.documentElement.appendChild(probe);
+    root.appendChild(probe);
     try {
         const value = getComputedStyle(probe).getPropertyValue(property).trim();
         // An unset variable leaves the property at its initial value.
@@ -116,24 +118,37 @@ function resolveVar(name: string, property: "color" | "font-family" | "border-to
     }
 }
 
-/** The app's colors and fonts as the widget's CSS variables (§6.3 `Theme`). */
-export function bridgeTheme(pkg: Pick<WidgetPackageInfo, "default_hue">): { mode: "dark" | "light"; vars: Record<string, string> } {
-    const light = document.documentElement.classList.contains("light") || document.documentElement.dataset.theme === "light";
-    const color = (name: string, fallback: string) => resolveVar(name, "color", fallback);
+/**
+ * The colors and fonts a widget's CSS variables carry (§6.3 `Theme`), resolved where the widget lives: `scope` is its
+ * pane's frame, which carries the pane's backdrop when it has one (docs/specs/SPEC_PANE_BACKGROUND_THEMES_2026_11_15.md
+ * §7.5), so a widget in a pane with a backdrop gets the backdrop's colors and its side as `mode`. Without a scope, or in a
+ * pane with no backdrop, they are the app's.
+ */
+export function bridgeTheme(pkg: Pick<WidgetPackageInfo, "default_hue">, scope?: Element): { mode: "dark" | "light"; vars: Record<string, string> } {
+    const root = scope ?? document.documentElement;
+    const side = scope ? ((scope as HTMLElement).style?.getPropertyValue("color-scheme") || getComputedStyle(scope).colorScheme) : "";
+    const light = side.includes("light") || (!side.includes("dark") && (document.documentElement.classList.contains("light") || document.documentElement.dataset.theme === "light"));
+    const color = (name: string, fallback: string) => resolveVar(name, "color", fallback, root);
+    const bg = color("--main-bg-color", light ? "#ffffff" : "#1e1e1e");
+    const muted = color("--secondary-text-color", "#9a9a9a");
+    const accent = color("--accent-color", "#58c142");
     return {
         mode: light ? "light" : "dark",
         vars: {
-            "--am-bg": color("--main-bg-color", light ? "#ffffff" : "#1e1e1e"),
+            "--am-bg": bg,
             "--am-fg": color("--main-text-color", light ? "#1f1f1f" : "#e6e6e6"),
-            "--am-muted": color("--secondary-text-color", "#9a9a9a"),
-            "--am-accent": color("--accent-color", "#58c142"),
+            "--am-muted": muted,
+            "--am-accent": accent,
             "--am-border": color("--border-color", "#3a3a3a"),
+            "--am-surface-raised": color("--elevated-bg-color", bg),
+            "--am-fg-faint": color("--tertiary-text-color", muted),
+            "--am-info": color("--info-color", accent),
             "--am-error": color("--error-color", "#e5484d"),
             "--am-warning": color("--warning-color", "#f5a623"),
             "--am-success": color("--success-color", "#46a758"),
-            "--am-font": resolveVar("--font-sans", "font-family", "system-ui, sans-serif"),
-            "--am-font-mono": resolveVar("--font-mono", "font-family", "ui-monospace, monospace"),
-            "--am-radius": resolveVar("--radius-md", "border-top-left-radius", "6px"),
+            "--am-font": resolveVar("--font-sans", "font-family", "system-ui, sans-serif", root),
+            "--am-font-mono": resolveVar("--font-mono", "font-family", "ui-monospace, monospace", root),
+            "--am-radius": resolveVar("--radius-md", "border-top-left-radius", "6px", root),
             "--am-pane-hue": String(pkg.default_hue ?? 210),
         },
     };
@@ -221,7 +236,7 @@ async function answer(host: BridgeHost, state: BridgeState, method: string, para
             widget: { id: pkg.id, version: pkg.version, pane: pane.name },
             agentmux: { version: host.agentmuxVersion?.() ?? "", host: host.hostName?.() ?? "" },
             permissions: pkg.granted,
-            theme: bridgeTheme(pkg),
+            theme: bridgeTheme(pkg, host.themeScope?.()),
             meta,
             visibility: ctx.visibility(),
             focused: ctx.isFocused(),
@@ -332,7 +347,7 @@ async function answer(host: BridgeHost, state: BridgeState, method: string, para
             return ok();
         }
         case "theme.get":
-            return ok(bridgeTheme(pkg));
+            return ok(bridgeTheme(pkg, host.themeScope?.()));
         case "panes.open": {
             if (!str(p.view, 200)) return fail(ERR.INVALID_PARAMS, "panes.open needs { view }");
             // A section that moved opens where it lives now (`panes.open("warden", { "warden:section": "kanban" })`, or Warden's Vault, History, Audit and Host).
