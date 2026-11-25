@@ -15,6 +15,7 @@ import type { UseRequest } from "@/types/rpc/UseRequest";
 import type { VaultAgents } from "@/types/rpc/VaultAgents";
 import { ImportLogin } from "./vault-import-login";
 import { CardTyped } from "./vault-use-card";
+import { formatWhen } from "./vault-format";
 import { answerUse, currentVaults, holdUse, vaultUses, type UseDecision } from "./vault-store";
 // The question's styles, loaded with it: a card in an agent's pane is drawn
 // whether or not a Vault pane was opened.
@@ -630,12 +631,24 @@ function TypedValue(props: { use: UseRequest; answer: UseAnswerState; focus: boo
  *  entry's History has all of it. */
 function UseSays(props: { use: UseRequest }): JSX.Element {
     return (
-        <Show when={props.use.agent_reason}>
-            <p class="vault-use-says">
-                <strong>{clip(props.use.agent, CLIP.name)}</strong> {t("vault.use.says")} <q><Clipped text={props.use.agent_reason} max={CLIP.agent_reason} /></q>
-            </p>
-        </Show>
+        <>
+            <Show when={props.use.agent_reason}>
+                <p class="vault-use-says">
+                    <strong>{clip(props.use.agent, CLIP.name)}</strong> {t("vault.use.says")} <q><Clipped text={props.use.agent_reason} max={CLIP.agent_reason} /></q>
+                </p>
+            </Show>
+            <Show when={props.use.set_by}>
+                <p class="vault-use-unseen">{unseenLine(props.use)}</p>
+            </Show>
+        </>
     );
+}
+
+/** What an agent set on this entry and the person has not looked at: the value, the place it is offered, or both. It is the
+ *  reason this use waits for a yes and offers no Always. */
+export function unseenLine(u: Pick<UseRequest, "set_by" | "set_what" | "set_ms">): string {
+    const key = u.set_what === "site" ? "vault.use.unseenSite" : u.set_what === "value and site" ? "vault.use.unseenBoth" : "vault.use.unseenValue";
+    return t(key, { agent: u.set_by, when: formatWhen(u.set_ms) });
 }
 
 /** The cards the person may pick from for a whole-card fill, and why they are asked. */

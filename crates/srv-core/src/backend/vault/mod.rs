@@ -9,6 +9,7 @@
 //! the Vault makes itself (`generate`), which no one has seen. Everything here
 //! is blocking (the store, the keychain): call it off the async runtime.
 
+pub mod agent_changes;
 pub mod agent_set;
 pub mod aws_import;
 pub mod aws_import_batch;
@@ -967,6 +968,8 @@ pub fn activity(store: &Store, limit: i64) -> Result<Vec<VaultActivity>, String>
         .collect())
 }
 
+#[cfg(test)]
+mod agent_changes_tests;
 #[cfg(test)]
 mod agent_place_tests;
 #[cfg(test)]

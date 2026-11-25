@@ -91,7 +91,7 @@ pub fn accept(store: &Store, id: &str, field: &str) -> Result<(), String> {
         changed_by: PERSON.to_string(),
         what: format!("field {field}"),
     };
-    let new = crate::backend::storage::vault::VaultRow { fields: serde_json::to_string(&fields).map_err(|e| e.to_string())?, updated_at: now_ms(), ..row.clone() };
+    let new = crate::backend::storage::vault::VaultRow { fields: serde_json::to_string(&fields).map_err(|e| e.to_string())?, updated_at: now_ms().max(row.updated_at + 1), ..row.clone() };
     if !store.vault_update_details_kept(&new, &was.0, &was.1, &kept, None).map_err(|e| e.to_string())? {
         return Err("the login changed while this was being applied, so nothing was changed: look at it again".into());
     }

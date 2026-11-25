@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use super::inspect::{update_details_for, UpdateRequest};
 use super::uses::{goes_ahead, UseRequest};
 use super::*;
+use crate::backend::storage::vault_changes::DetailsKept;
 
 const OWN: &str = "profile:agent-builder-0123abcd";
 const REASON: &str = "point the dashboard login at its new address for task 31010";
@@ -18,6 +19,16 @@ fn store() -> Store {
     let s = Store::open_in_memory().unwrap();
     s.apply_identity_schema_for_tests().unwrap();
     s
+}
+
+trait WithLabel {
+    fn with_label(self, label: &str) -> Self;
+}
+impl WithLabel for UpdateRequest {
+    fn with_label(mut self, label: &str) -> Self {
+        self.label = Some(label.into());
+        self
+    }
 }
 
 fn asked(id: &str, fields: &[(&str, &str)]) -> UpdateRequest {
@@ -234,4 +245,21 @@ fn an_entry_with_no_local_creation_line_is_nobodys_to_set_however_the_agents_own
     let again = update_details_for(&s, &asked(&id, &[("site", "https://elsewhere.example.net")]), "builder", Some(OWN)).unwrap();
     assert!(again.changed.is_empty() && again.proposed == ["field site"], "{again:?}");
     assert_eq!(fields(&s, &id).get("site").map(String::as_str), Some("https://intranet.example.com"));
+}
+
+#[test]
+fn two_edits_that_change_only_the_label_do_not_overwrite_each_other_and_an_accept_after_one_is_refused() {
+    let s = store();
+    let id = persons_login(&s);
+    let before = s.vault_get(&id).unwrap().unwrap();
+    // A first edit lands after the second one was read.
+    update_details_for(&s, &asked(&id, &[]).with_label("Intranet A"), "builder", Some(OWN)).unwrap();
+    let kept = DetailsKept { entry_id: id.clone(), entry_created_at: before.created_at, label: before.label.clone(), fields: before.fields.clone(), tags: before.tags.clone(), changed_at: 1, changed_by: "agent:other".into(), what: "label".into() };
+    let stale = VaultRow { label: "Intranet B".into(), updated_at: before.updated_at + 5, ..before.clone() };
+    assert!(!s.vault_update_details_kept(&stale, &before.sealed, &before.fields, &kept, None).unwrap(), "written from a read older than the first edit: refused");
+    assert_eq!(s.vault_get(&id).unwrap().unwrap().label, "Intranet A");
+    // The accept of a proposal made before that edit is out of date too.
+    update_details_for(&s, &asked(&id, &[("realm", "Corp")]), "builder", Some(OWN)).unwrap();
+    update_details_for(&s, &asked(&id, &[]).with_label("Intranet C"), "builder", Some(OWN)).unwrap();
+    assert!(proposals::accept(&s, &id, "realm").unwrap_err().contains("changed after this was proposed"));
 }

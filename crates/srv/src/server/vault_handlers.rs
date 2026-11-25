@@ -253,6 +253,30 @@ fn entry_ops(state: &AppState, op: &str, body: &Value) -> Result<(Value, bool), 
             Ok((json!({ "history": vault::history::history_for(store, &s("id"), vault::history::Asker::Person, limit)? }), false))
         }
         "history_check" => Ok((json!({ "chain": vault::history::check(store)? }), false)),
+        // What agents changed that the person has not looked at, one entry's or all (spec: the strip and the History tab), and
+        // what the person does about each: marks it seen, undoes it, accepts or dismisses a proposal.
+        "agent_changes" => {
+            let entry = Some(s("id")).filter(|id| !id.is_empty());
+            let all = body.get("include_seen").and_then(Value::as_bool).unwrap_or(false);
+            Ok((json!({ "changes": vault::agent_changes::list(store, entry.as_deref(), all)? }), false))
+        }
+        "change_seen" => {
+            vault::agent_changes::seen(store, body.get("seq").and_then(Value::as_i64).ok_or("seen needs the change's seq")?)?;
+            Ok((json!({}), true))
+        }
+        "changes_seen_all" => {
+            vault::agent_changes::seen_all(store)?;
+            Ok((json!({}), true))
+        }
+        "change_undo" => {
+            vault::agent_changes::undo(store, body.get("seq").and_then(Value::as_i64).ok_or("undo needs the change's seq")?)?;
+            Ok((json!({}), true))
+        }
+        "proposal_accept" => {
+            vault::proposals::accept(store, &s("id"), &s("field"))?;
+            Ok((json!({}), true))
+        }
+        "proposal_dismiss" => Ok((json!({ "dismissed": vault::proposals::dismiss(store, &s("id"), &s("field"))? }), true)),
         _ => {
             let seq = body.get("seq").and_then(Value::as_i64).ok_or("restore needs the version's seq")?;
             vault::versions::restore(store, &s("id"), seq)?;
@@ -322,7 +346,7 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 vault::delete(&store, id)?;
                 Ok((json!({}), true))
             }
-            "vault_create" | "vault_update" | "vault_delete" | "move_entry" | "share_add" | "share_remove" | "share_list" | "signin_vault" | "allow_setting" | "check_source" | "versions" | "restore" | "history" | "history_check" => entry_ops(&st, &op, &body),
+            "vault_create" | "vault_update" | "vault_delete" | "move_entry" | "share_add" | "share_remove" | "share_list" | "signin_vault" | "allow_setting" | "check_source" | "versions" | "restore" | "history" | "history_check" | "agent_changes" | "change_seen" | "changes_seen_all" | "change_undo" | "proposal_accept" | "proposal_dismiss" => entry_ops(&st, &op, &body),
             "decline_request" => {
                 let id = body.get("request_id").and_then(Value::as_str).unwrap_or("");
                 if let Some(req) = requests::requests().get(id) {

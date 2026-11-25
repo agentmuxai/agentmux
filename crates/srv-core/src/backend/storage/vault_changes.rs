@@ -51,6 +51,16 @@ pub(super) const SCHEMA: &str = "
         at               INTEGER NOT NULL,
         PRIMARY KEY (entry_id, field)
     );
+
+    -- Which changes by agents the person has marked seen, on this machine only (never synced): one by one, or every change up
+    -- to a line (`Seen all`).
+    CREATE TABLE IF NOT EXISTS db_vault_changes_seen (
+        seq INTEGER PRIMARY KEY
+    );
+    CREATE TABLE IF NOT EXISTS db_vault_changes_seen_all (
+        id          INTEGER PRIMARY KEY CHECK (id = 1),
+        through_seq INTEGER NOT NULL
+    );
 ";
 /// Added to a table an older build made.
 pub(super) const COLUMNS: [&str; 1] = ["ALTER TABLE db_vault_unseen ADD COLUMN what TEXT NOT NULL DEFAULT 'value'"];
@@ -148,15 +158,16 @@ impl Store {
     }
 
     /// An edit of an entry's details (label, plain fields, tags), only if it still holds the sealed value `was` and the fields
-    /// `was_fields` that were read, and the details it replaces kept in the same transaction. False, with nothing written, if
+    /// `was_fields`, label and tags that were read (`kept` holds them: a change of only the label or the tags is not
+    /// overwritten by an older read), and the details it replaces kept in the same transaction. False, with nothing written, if
     /// the entry changed or is gone. With `unseen_site_by` (the agent), the entry's place is marked unseen and its *Always*
     /// grants dropped in the same transaction: a change of where a login is offered is never made without the mark.
     pub fn vault_update_details_kept(&self, row: &super::vault::VaultRow, was: &[u8], was_fields: &str, kept: &DetailsKept, unseen_site_by: Option<&str>) -> Result<bool, StoreError> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
         let n = tx.execute(
-            "UPDATE db_vault_entries SET label = ?2, fields = ?3, tags = ?4, updated_at = ?5 WHERE id = ?1 AND created_at = ?6 AND sealed = ?7 AND fields = ?8",
-            params![row.id, row.label, row.fields, row.tags, row.updated_at, row.created_at, was, was_fields],
+            "UPDATE db_vault_entries SET label = ?2, fields = ?3, tags = ?4, updated_at = ?5 WHERE id = ?1 AND created_at = ?6 AND sealed = ?7 AND fields = ?8 AND label = ?9 AND tags = ?10",
+            params![row.id, row.label, row.fields, row.tags, row.updated_at, row.created_at, was, was_fields, kept.label, kept.tags],
         )?;
         if n == 0 {
             return Ok(false);
@@ -216,6 +227,35 @@ impl Store {
     pub fn vault_proposal_delete(&self, entry_id: &str, field: &str) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         Ok(conn.execute("DELETE FROM db_vault_proposals WHERE entry_id = ?1 AND field = ?2", params![entry_id, field])? > 0)
+    }
+
+    /// The person marks the change recorded by history line `seq` as seen.
+    pub fn vault_change_seen(&self, seq: i64) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("INSERT OR IGNORE INTO db_vault_changes_seen (seq) VALUES (?1)", params![seq])?;
+        Ok(())
+    }
+
+    /// The person marks every change up to history line `through_seq` as seen. The one-by-one marks it covers go.
+    pub fn vault_changes_seen_all(&self, through_seq: i64) -> Result<(), StoreError> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT INTO db_vault_changes_seen_all (id, through_seq) VALUES (1, ?1) ON CONFLICT(id) DO UPDATE SET through_seq = MAX(through_seq, excluded.through_seq)",
+            params![through_seq],
+        )?;
+        tx.execute("DELETE FROM db_vault_changes_seen WHERE seq <= ?1", params![through_seq])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// What the person has marked seen: every change up to the first number, and the lines in the set.
+    pub fn vault_changes_seen(&self) -> Result<(i64, std::collections::HashSet<i64>), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let through: i64 = conn.query_row("SELECT through_seq FROM db_vault_changes_seen_all WHERE id = 1", [], |r| r.get(0)).optional()?.unwrap_or(0);
+        let mut stmt = conn.prepare("SELECT seq FROM db_vault_changes_seen")?;
+        let seqs = stmt.query_map([], |r| r.get::<_, i64>(0))?.collect::<Result<_, _>>()?;
+        Ok((through, seqs))
     }
 
     /// Drops the proposals older than `before_ms`.

@@ -92,6 +92,79 @@
     }
 }
 
+// What agents changed that the person has not looked at: one quiet line above the sections, and a list behind Review. It wraps at
+// any width, so it needs no sideways scroll; nothing in it is a modal.
+.vault-changes {
+    flex: 0 0 auto;
+    margin-top: var(--space-2);
+    padding: var(--space-2);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--main-bg-color);
+}
+
+.vault-changes__bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.vault-changes__text {
+    flex: 1 1 12rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.vault-changes__list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin: var(--space-2) 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.vault-change {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-2);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    overflow-wrap: anywhere;
+
+    // A proposal, and a new value on an entry the person made, come first and say so by their edge.
+    &[data-first] {
+        border-inline-start: 3px solid var(--accent-color);
+    }
+}
+
+.vault-change__reason {
+    margin: 0;
+}
+
+.vault-change__actions,
+.vault-change__confirm {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.vault-agent-mark {
+    margin-inline-start: var(--space-1);
+}
+
+.vault-use-unseen {
+    margin: 0 0 var(--space-2);
+    overflow-wrap: anywhere;
+}
+
+.vault-sr-only {
+    @include mixins.sr-only;
+}
+
 .vault-list__filter {
     flex: 1 1 6rem;
     min-width: 0;

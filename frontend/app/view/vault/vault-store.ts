@@ -16,6 +16,7 @@ import type { ExportResult } from "@/types/rpc/ExportResult";
 import type { ImportPreview } from "@/types/rpc/ImportPreview";
 import type { ImportResult } from "@/types/rpc/ImportResult";
 import type { MappingNeeded } from "@/types/rpc/MappingNeeded";
+import type { AgentChange } from "@/types/rpc/AgentChange";
 import type { VaultActivity } from "@/types/rpc/VaultActivity";
 import type { VaultChain } from "@/types/rpc/VaultChain";
 import type { VaultAgents } from "@/types/rpc/VaultAgents";
@@ -70,13 +71,14 @@ const store = createRoot(() => {
     const [signinVaults, setSigninVaults] = createSignal<Record<string, string>>({});
     const [requests, setRequests] = createSignal<VaultRequest[]>([]);
     const [uses, setUses] = createSignal<UseRequest[]>([]);
+    const [changes, setChanges] = createSignal<AgentChange[]>([]);
     const [problem, setProblem] = createSignal<string | null>(null);
     const [error, setError] = createSignal<string | null>(null);
     const [loading, setLoading] = createSignal(false);
     const [changedMs, setChangedMs] = createSignal(0);
     // The `changedMs` the list in `vaults` was read at; -1 until it is read.
     const [listAsOf, setListAsOf] = createSignal(-1);
-    return { entries, setEntries, vaults, setVaults, signinVaults, setSigninVaults, requests, setRequests, uses, setUses, problem, setProblem, error, setError, loading, setLoading, changedMs, setChangedMs, listAsOf, setListAsOf };
+    return { entries, setEntries, vaults, setVaults, signinVaults, setSigninVaults, requests, setRequests, uses, setUses, changes, setChanges, problem, setProblem, error, setError, loading, setLoading, changedMs, setChangedMs, listAsOf, setListAsOf };
 });
 
 export const vaultEntries = store.entries;
@@ -85,6 +87,8 @@ export const vaultList = store.vaults;
 /** The Vault each browser profile (`personal` or `profile:<id>`) keeps its sign-ins in, when not Personal. */
 export const signinVaultOf = store.signinVaults;
 export const vaultRequests = store.requests;
+/** What agents changed that the person has not looked at, proposals and replaced values first. */
+export const vaultChanges = store.changes;
 /** Agents' uses of an entry (filling a web form) waiting for the person to allow them. */
 export const vaultUses = store.uses;
 /** Why the values couldn't be opened, when they couldn't. */
@@ -118,12 +122,37 @@ export async function refreshVault(): Promise<void> {
         store.setRequests(data.requests);
         store.setUses(data.uses ?? []);
         store.setError(null);
+        await refreshChanges();
     } catch (e) {
         store.setError(e instanceof Error ? e.message : String(e));
     } finally {
         store.setLoading(false);
     }
 }
+
+/** The changes agents made that the person has not looked at. A failure leaves the strip as it was. */
+export async function refreshChanges(): Promise<void> {
+    try {
+        store.setChanges((await call<{ changes?: AgentChange[] }>("agent_changes"))?.changes ?? []);
+    } catch (e) {
+        console.log("vault: could not load the agents' changes", e);
+    }
+}
+
+const thenRefresh = async (done: Promise<unknown>) => {
+    await done;
+    await refreshChanges();
+};
+/** The person has looked at one change: it leaves the strip, and the value or place it set is trusted. */
+export const markChangeSeen = (seq: number) => thenRefresh(call<unknown>("change_seen", { seq }));
+export const markAllChangesSeen = () => thenRefresh(call<unknown>("changes_seen_all"));
+/** Puts back what a change replaced (its earlier value or details), or removes the entry it added. */
+export const undoChange = (seq: number) => thenRefresh(call<unknown>("change_undo", { seq }));
+/** Applies an agent's proposed site, realm or proxy for a login it did not make, or drops it. */
+export const acceptProposal = (id: string, field: string) => thenRefresh(call<unknown>("proposal_accept", { id, field }));
+export const dismissProposal = (id: string, field: string) => thenRefresh(call<unknown>("proposal_dismiss", { id, field }));
+/** One entry's changes by agents, the ones marked seen too: what its History offers to undo. */
+export const loadEntryChanges = (id: string) => call<{ changes: AgentChange[] }>("agent_changes", { id, include_seen: true }).then((r) => r.changes);
 
 /** Only the agents' requests: needs no keychain read. */
 export async function refreshVaultRequests(): Promise<void> {

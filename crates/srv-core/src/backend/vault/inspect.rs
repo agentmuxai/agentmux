@@ -431,7 +431,8 @@ pub fn update_details_for(store: &Store, req: &UpdateRequest, agent: &str, own_p
             label: label.clone(),
             fields: serde_json::to_string(&fields).map_err(|e| e.to_string())?,
             tags: serde_json::to_string(&tags).map_err(|e| e.to_string())?,
-            updated_at: now_ms(),
+            // Always later than what was read, so two changes in one millisecond are not taken for one revision.
+            updated_at: now_ms().max(row.updated_at + 1),
             ..row
         };
         // A place the person never saw is marked in the same transaction: a use there never goes ahead on silence (R9).

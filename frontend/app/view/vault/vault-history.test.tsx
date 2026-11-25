@@ -38,6 +38,8 @@ const chain = vi.fn<() => Promise<VaultChain>>();
 vi.mock("./vault-store", () => ({
     loadHistory: () => Promise.resolve(rows),
     loadChain: () => chain(),
+    loadEntryChanges: () => Promise.resolve([]),
+    undoChange: () => Promise.resolve({}),
 }));
 
 import { chainNote, historyFilter, VaultHistoryDialog, whyOf } from "./vault-history";
