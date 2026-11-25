@@ -97,6 +97,7 @@ fn a_value_an_agent_replaced_on_an_entry_the_person_made_comes_first_and_undo_pu
     assert_eq!(reveal(&s, &mine, "value", "revealed").unwrap().as_str(), "ghp_persons_old_000");
     let after = agent_changes::list(&s, None, false).unwrap();
     assert_eq!(after.len(), 1, "an undone change is looked at");
+    assert!(!agent_set::is_unseen(&s, &mine), "the value the agent set is gone, so the use card has nothing to say about it");
 }
 
 #[test]
@@ -161,5 +162,47 @@ fn seen_all_clears_the_strip_and_the_marks_and_the_persons_own_lines_are_never_i
     assert_eq!(agent_changes::list(&s, None, false).unwrap().len(), 1);
     // And a deleted entry has nothing to look at.
     delete(&s, &b).unwrap();
+    assert!(agent_changes::list(&s, None, false).unwrap().is_empty());
+}
+
+#[test]
+fn seen_on_one_change_keeps_the_entrys_mark_while_a_newer_change_is_unseen_and_refuses_a_line_that_is_not_an_agents() {
+    let s = store();
+    let id = key(&s, "GitHub", "ghp_persons_old_000");
+    capture_over(&s, &id, "builder", "ghp_agents_new_111");
+    capture_over(&s, &id, "other", "ghp_agents_new_222");
+    let all = agent_changes::list(&s, Some(&id), false).unwrap();
+    assert_eq!(all.len(), 2, "{all:?}");
+    let (newer, older) = (&all[0], &all[1]);
+    assert!(newer.seq > older.seq);
+
+    agent_changes::seen(&s, older.seq).unwrap();
+    assert!(agent_set::is_unseen(&s, &id), "the newer value is still unseen, so it still waits for a yes");
+    assert_eq!(agent_changes::list(&s, Some(&id), false).unwrap().len(), 1);
+    agent_changes::seen(&s, newer.seq).unwrap();
+    assert!(!agent_set::is_unseen(&s, &id));
+
+    let row = s.vault_get(&id).unwrap().unwrap();
+    let mine = s.vault_activity_first(&id, row.created_at).unwrap().unwrap();
+    assert_ne!(mine.actor_kind, "agent");
+    assert!(agent_changes::seen(&s, mine.seq).is_err(), "the person's own line is not a change by an agent");
+}
+
+#[test]
+fn seen_all_leaves_a_pending_proposal_in_the_strip_to_accept_or_dismiss() {
+    let s = store();
+    let early = key(&s, "Early", "sk_early_000000");
+    capture_over(&s, &early, "builder", "sk_agents_000001");
+    let fields: BTreeMap<String, String> = [("site".to_string(), "https://intranet.example.com".to_string())].into();
+    let login = create(&s, NewEntry { kind: "login".into(), label: "Intranet".into(), fields, tags: vec![], parts: Parts([("password".to_string(), "pw-persons".to_string())].into()) }).unwrap();
+    update_details_for(&s, &asked(&login, None, &[("site", "https://intranet2.example.com")]), "builder", Some(OWN)).unwrap();
+    let late = key(&s, "Late", "sk_late_0000000");
+    capture_over(&s, &late, "builder", "sk_agents_000002");
+
+    agent_changes::seen_all(&s).unwrap();
+    let left = agent_changes::list(&s, None, false).unwrap();
+    assert_eq!(left.iter().map(|c| c.kind.as_str()).collect::<Vec<_>>(), ["proposal"], "{left:?}");
+    assert!(!agent_set::is_unseen(&s, &early) && !agent_set::is_unseen(&s, &late), "the changes after the proposal are seen too");
+    proposals::accept(&s, &login, "site").unwrap();
     assert!(agent_changes::list(&s, None, false).unwrap().is_empty());
 }

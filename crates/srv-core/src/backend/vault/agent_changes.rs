@@ -160,23 +160,49 @@ pub fn list(store: &Store, entry: Option<&str>, include_seen: bool) -> Result<Ve
     Ok(out)
 }
 
-/// The person has looked at the change recorded by line `seq`: it leaves the list, and the value or place the agent set is
-/// trusted from now on, as if they had answered a use of it.
-pub fn seen(store: &Store, seq: i64) -> Result<(), String> {
-    if let Some(row) = store.vault_activity_get(seq).map_err(|e| e.to_string())? {
-        agent_set::clear(store, &row.entry_id);
+/// A change that can have left the entry's unseen mark: a new entry, a new value, or a changed place. A new label, tags or a
+/// plain field do not, and a proposal sets nothing until it is accepted.
+fn sets_the_mark(c: &AgentChange) -> bool {
+    match c.kind.as_str() {
+        "added" | "new value" => true,
+        "changed details" => c.target.split(", ").any(|t| matches!(t, "field site" | "field realm" | "field proxy")),
+        _ => false,
     }
-    store.vault_change_seen(seq).map_err(|e| e.to_string())
 }
 
-/// [`seen`] for every change listed now.
+/// The value or place an agent set is trusted once the person has dealt with every change by an agent on the entry: the mark
+/// is the entry's, not one change's, so a newer change that is still listed keeps it.
+fn trust_when_none_left(store: &Store, entry_id: &str) -> Result<(), String> {
+    if !list(store, Some(entry_id), false)?.iter().any(sets_the_mark) {
+        agent_set::clear(store, entry_id);
+    }
+    Ok(())
+}
+
+/// The person has looked at the change recorded by line `seq` (one an agent wrote): it leaves the list, and the value or place
+/// the agent set is trusted from now on, as if they had answered a use of it, once no other change by an agent on the entry
+/// is left unseen.
+pub fn seen(store: &Store, seq: i64) -> Result<(), String> {
+    let row = store.vault_activity_get(seq).map_err(|e| e.to_string())?.filter(|r| r.actor_kind == "agent").ok_or("no such change by an agent")?;
+    store.vault_change_seen(seq).map_err(|e| e.to_string())?;
+    trust_when_none_left(store, &row.entry_id)
+}
+
+/// [`seen`] for every change listed now except a proposal, which waits for Accept or Dismiss and so stays listed.
 pub fn seen_all(store: &Store) -> Result<(), String> {
     let all = list(store, None, false)?;
-    for c in &all {
+    let floor = all.iter().filter(|c| c.kind == "proposal").map(|c| c.seq).min();
+    let mut through = 0;
+    for c in all.iter().filter(|c| c.kind != "proposal") {
         agent_set::clear(store, &c.entry_id);
+        if floor.is_none_or(|f| c.seq < f) {
+            through = through.max(c.seq);
+        } else {
+            store.vault_change_seen(c.seq).map_err(|e| e.to_string())?;
+        }
     }
-    if let Some(top) = all.iter().map(|c| c.seq).max() {
-        store.vault_changes_seen_all(top).map_err(|e| e.to_string())?;
+    if through > 0 {
+        store.vault_changes_seen_all(through).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -196,7 +222,8 @@ pub fn undo(store: &Store, seq: i64) -> Result<(), String> {
         "restore details" => restore_details(store, &entry, &row)?,
         _ => return Err("there is nothing to put back for that change: the earlier version is past its 7 days".into()),
     }
-    store.vault_change_seen(seq).map_err(|e| e.to_string())
+    store.vault_change_seen(seq).map_err(|e| e.to_string())?;
+    trust_when_none_left(store, &change.entry_id)
 }
 
 fn restore_details(store: &Store, entry: &VaultRow, row: &VaultActivityRow) -> Result<(), String> {

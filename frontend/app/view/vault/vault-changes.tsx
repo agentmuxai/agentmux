@@ -16,7 +16,7 @@ import { acceptProposal, dismissProposal, markAllChangesSeen, markChangeSeen, un
 
 /** The strip's words: how many changes wait. */
 export function stripText(count: number): string {
-    return count === 1 ? t("vault.changes.one") : t("vault.changes.many", { count });
+    return count === 1 ? t("vault.changes.countOne") : t("vault.changes.countMany", { count });
 }
 
 /** What one change says, in words: who did what to which entry. The agent's reason is shown apart, quoted. */
