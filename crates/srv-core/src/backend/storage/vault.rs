@@ -689,6 +689,26 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// One history line by its number.
+    pub fn vault_activity_get(&self, seq: i64) -> Result<Option<VaultActivityRow>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        Ok(conn.query_row(&format!("SELECT {ACTIVITY_COLUMNS} FROM db_vault_activity WHERE seq = ?1"), params![seq], activity_of).optional()?)
+    }
+
+    /// The lines agents wrote that are changes to look at (`actions`), from `since_ms` on, newest first.
+    pub fn vault_activity_agent_changes(&self, since_ms: i64, actions: &[&str], limit: i64) -> Result<Vec<VaultActivityRow>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let marks = vec!["?"; actions.len()].join(", ");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {ACTIVITY_COLUMNS} FROM db_vault_activity WHERE actor_kind = 'agent' AND at >= ? AND action IN ({marks}) AND (outcome = 'done' OR outcome = 'waiting for the person') AND entry_id != '' ORDER BY seq DESC LIMIT ?"
+        ))?;
+        let mut args: Vec<rusqlite::types::Value> = vec![since_ms.into()];
+        args.extend(actions.iter().map(|a| rusqlite::types::Value::from(a.to_string())));
+        args.push(limit.into());
+        let rows = stmt.query_map(rusqlite::params_from_iter(args), activity_of)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// The first line of the entry's history from `since_ms` on (its `created_at`): who made it.
     pub fn vault_activity_first(&self, entry_id: &str, since_ms: i64) -> Result<Option<VaultActivityRow>, StoreError> {
         let conn = self.conn.lock().unwrap();

@@ -39,6 +39,7 @@ import { getApi, MOS } from "@/app/store/global";
 import { pressOnControl } from "@/app/util/press-on-control";
 import { Logger } from "@/util/logger";
 import { isWindows } from "@/util/platformutil";
+import { nativeCopyOff } from "./native-picture-probe";
 import { beginPaneCapture } from "./pane-capture-gate";
 
 /** A picture older than this is stale: the pane may have changed since. */
@@ -227,7 +228,7 @@ function ownWindowLabel(): string {
  */
 async function capturePane(rect: CssRect, shot: () => void, solo?: TabStripInPane, nativeCopy = false): Promise<string | null> {
     if (!solo && isWindows()) {
-        const { pictureId } = await getApi().windows.keepViewport(ownWindowLabel(), 80, nativeCopy);
+        const { pictureId } = await getApi().windows.keepViewport(ownWindowLabel(), 80, nativeCopy && !nativeCopyOff());
         shot();
         const { jpeg_base64 } = await getApi().windows.cutKeptViewport(pictureId, rect, window.innerWidth);
         return jpeg_base64;

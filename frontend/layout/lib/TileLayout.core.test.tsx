@@ -829,18 +829,34 @@ describe("createTileLayout: a tile", () => {
     });
 
     describe("the drag preview", () => {
-        it("is rasterised once the pointer rests on the tile, not when it only crosses it", async () => {
+        it("is rasterised once the pointer rests on the header, not when it only crosses it", async () => {
             vi.useFakeTimers();
             const { el } = mountWithTile(makePlatform());
-            el.dispatchEvent(new MouseEvent("pointerenter"));
+            const header = el.querySelector(".gap")!;
+            const over = (target: Element) => target.dispatchEvent(new MouseEvent("pointerover", { bubbles: true }));
+            over(header);
             await vi.advanceTimersByTimeAsync(DRAG_PREVIEW_HOVER_MS - 1);
             el.dispatchEvent(new MouseEvent("pointerleave"));
             await vi.advanceTimersByTimeAsync(DRAG_PREVIEW_HOVER_MS * 2);
             expect(h.toPng).not.toHaveBeenCalled();
-            el.dispatchEvent(new MouseEvent("pointerenter"));
+            over(header);
             await vi.advanceTimersByTimeAsync(DRAG_PREVIEW_HOVER_MS);
             expect(h.toPng).toHaveBeenCalledTimes(1);
             expect(h.toPng.mock.calls[0][0]).toBe(el.querySelector(".tile-preview"));
+        });
+
+        it("is not rasterised by a pointer resting on the body, or on one that moved from the header to the body", async () => {
+            vi.useFakeTimers();
+            const { el } = mountWithTile(makePlatform());
+            const over = (target: Element) => target.dispatchEvent(new MouseEvent("pointerover", { bubbles: true }));
+            over(el.querySelector(".tile-leaf")!);
+            await vi.advanceTimersByTimeAsync(DRAG_PREVIEW_HOVER_MS * 3);
+            expect(h.toPng).not.toHaveBeenCalled();
+            over(el.querySelector(".gap")!);
+            await vi.advanceTimersByTimeAsync(DRAG_PREVIEW_HOVER_MS - 1);
+            over(el.querySelector(".tile-leaf")!);
+            await vi.advanceTimersByTimeAsync(DRAG_PREVIEW_HOVER_MS * 3);
+            expect(h.toPng).not.toHaveBeenCalled();
         });
 
         it("is rasterised at once by a press on the header, but not by one on a pane tab pill or the body", async () => {

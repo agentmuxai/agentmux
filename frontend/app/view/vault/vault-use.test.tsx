@@ -101,6 +101,24 @@ describe("the prompt for an agent's use of an entry", () => {
         }
     });
 
+    it("says who set the value or the place, and when, only when an agent did and the person has not looked", async () => {
+        uses = [use({ command: "stripe balance retrieve", cwd: "C:/work", origin: "", field: "STRIPE_API_KEY", set_by: "builder", set_what: "value", set_ms: Date.now() - 120_000 })];
+        await refreshVault();
+        const first = render(() => <UsePrompt use={uses[0]} close={() => {}} />);
+        const line = (await screen.findByRole("group")).querySelector(".vault-use-unseen")!;
+        expect(line.textContent).toContain("builder set this value 2 min ago. You have not looked at it, so this waits for your yes.");
+        first.unmount();
+        uses = [use({ command: "stripe balance retrieve", cwd: "C:/work", origin: "", field: "STRIPE_API_KEY", set_by: "builder", set_what: "site", set_ms: Date.now() - 120_000 })];
+        await refreshVault();
+        const second = render(() => <UsePrompt use={uses[0]} close={() => {}} />);
+        expect((await screen.findByRole("group")).querySelector(".vault-use-unseen")!.textContent).toContain("builder chose where this is used");
+        second.unmount();
+        uses = [use({ command: "stripe balance retrieve", cwd: "C:/work", origin: "", field: "STRIPE_API_KEY" })];
+        await refreshVault();
+        render(() => <UsePrompt use={uses[0]} close={() => {}} />);
+        expect((await screen.findByRole("group")).querySelector(".vault-use-unseen")).toBeNull();
+    });
+
     it("shows the command and where it runs, and offers Always for the agent, when the entry goes to a command", async () => {
         uses = [use({ origin: "", field: "STRIPE_API_KEY", what: "API key", entry_label: "Stripe", command: "stripe balance retrieve", cwd: "C:/work", reason: "it is the first time Agent1 runs a command with this entry" })];
         await refreshVault();

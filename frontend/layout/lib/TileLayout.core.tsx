@@ -53,6 +53,7 @@ import {
     headerGrabOffset,
     createDragPreviewIntent,
     PANE_DRAG_EXCLUDED,
+    overPaneHeader,
     pressCanStartPaneDrag,
     dragPreviewCursorOffset,
     DRAG_PREVIEW_FALLBACK,
@@ -736,12 +737,16 @@ function displayNode(platform: TileLayoutPlatform, props: DisplayNodeProps): JSX
             ref={tileNodeRef}
             id={props.node.id}
             style={tileStyle()}
-            onPointerEnter={previewIntent.enter}
             onPointerLeave={previewIntent.leave}
             onPointerDown={(event) => {
                 if (pressCanStartPaneDrag(event.target as Element | null)) previewIntent.press();
             }}
-            onPointerOver={(event) => event.stopPropagation()}
+            onPointerOver={(event) => {
+                event.stopPropagation();
+                // The ghost is for a drag, which starts from the header: resting anywhere else on the pane makes none.
+                if (overPaneHeader(event.target as Element | null)) previewIntent.enter();
+                else previewIntent.leave();
+            }}
         >
             {leafContent()}
             <Show when={tearOffOffered()}>

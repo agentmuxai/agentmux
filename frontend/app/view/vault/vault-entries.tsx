@@ -16,6 +16,7 @@ import { VaultEntryForm, type VaultFormTarget } from "./vault-entry-form";
 import { VaultHistoryDialog } from "./vault-history";
 import { VaultRevealDialog } from "./vault-reveal";
 import { VaultVersionsDialog } from "./vault-versions";
+import { markOf } from "./vault-changes";
 import { EXPIRING_SOON_DAYS, expiryOf, formatWhen } from "./vault-format";
 import { CARD_BRANDS } from "./vault-card";
 import { kindsIn, SECTION_LABELS, vaultKind } from "./vault-kinds";
@@ -119,6 +120,7 @@ function EntryLabel(props: { entry: VaultEntryInfo }): JSX.Element {
     return (
         <>
             <span>{props.entry.label}</span>
+            <Show when={markOf(props.entry.id)}>{(mark) => <Pill tone="accent" class="vault-agent-mark">{mark()}</Pill>}</Show>
             <Show when={props.entry.kind === "card" && props.entry.fields.default === "yes"}>
                 <Pill tone="accent" class="vault-default-pill">
                     {t("vault.entries.default")}
