@@ -111,9 +111,9 @@ export interface RevealDeps {
     /** A pane of `view` (and `identity`) in the shown tab only, mounted or not (an inactive tab of a pane's stack is not mounted). */
     findInShownTab(view: string, identity?: string): Promise<string | null>;
     /**
-     * Whether `blockId` is in its tab's block list and in no pane of that tab's layout, which has loaded: nothing on screen
-     * can show it and waiting will not help. Read for the shown tab (a pane of another tab is looked at once its tab is
-     * shown). Absent: never.
+     * Whether `blockId` is in its tab's block list and in no pane of that tab's layout, which has loaded. Read only after
+     * the reveal waited for the layout and timed out, so a block whose pane is still being placed is not taken for a stray.
+     * Absent: never.
      */
     isUnplaced?(blockId: string): Promise<boolean>;
     setMeta(blockId: string, meta: MetaType): Promise<void>;
@@ -144,12 +144,12 @@ export async function revealOrOpen(req: RevealRequest, deps: RevealDeps): Promis
         const elsewhere = req.currentTabOnly
             ? ((await deps.findInShownTab(req.view, identity)) ?? undefined)
             : (mountedElsewhere ?? (await deps.findInWindow(req.view, identity)) ?? undefined);
-        // A block in no pane of its tab's layout cannot be shown, whatever is waited for: it is replaced, not revealed.
-        if (elsewhere && !(await deps.isUnplaced?.(elsewhere))) {
+        if (elsewhere) {
             if (req.focusMeta != null) await deps.setMeta(elsewhere, req.focusMeta);
             const shown = await deps.revealInWindow(elsewhere);
             if (!isFailure(shown)) return { kind: "shown_here", blockId: elsewhere };
-            // Only a pane that is not there (never found, or closed meanwhile, or in no pane of its layout) is opened
+            // Only a pane that is not there (never found, or closed meanwhile, or in no pane of its layout after the
+            // layout was waited for: a block just created is in its tab's list a moment before its pane) is opened
             // afresh: a newer click taking over, or a tab that was slow, leaves the pane where it is and a second one
             // would be a copy.
             const stray = shown.reason === "layout-timeout" && (await deps.isUnplaced?.(elsewhere)) === true;

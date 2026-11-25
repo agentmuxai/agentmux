@@ -151,12 +151,21 @@ describe("openOrFocusPaneIdByView", () => {
         expect(createBlock).toHaveBeenCalledTimes(1);
     });
 
-    it("opens a new pane, and never waits on the block, when the tab's block of the view is in no pane of its layout", async () => {
+    it("opens a new pane once the layout was waited for and still has no pane for the tab's block of the view", async () => {
         unmounted.set("vault", { id: "vault-stray", shown: true });
         strays.add("vault-stray");
+        revealBlock.mockResolvedValue({ ok: false, reason: "layout-timeout" });
         expect(await openOrFocusPaneIdByView("vault")).toBe("new-block");
+        expect(revealBlock).toHaveBeenCalledTimes(1);
         expect(createBlock).toHaveBeenCalledTimes(1);
-        expect(calls.filter((c) => c.startsWith("reveal:"))).toEqual([]);
+    });
+
+    it("shows, and does not copy, a block whose pane is still being placed when the layout catches up in the wait", async () => {
+        unmounted.set("vault", { id: "vault-placing", shown: true });
+        strays.add("vault-placing");
+        expect(await openOrFocusPaneIdByView("vault")).toBe("vault-placing");
+        expect(revealBlock).toHaveBeenCalledTimes(1);
+        expect(createBlock).not.toHaveBeenCalled();
     });
 
     it("opens a new pane only when the shown tab has none, mounted or not", async () => {
