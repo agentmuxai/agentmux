@@ -8,6 +8,7 @@ import { draggable } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { type Accessor, createMemo, For, type JSX, onCleanup, onMount, Show } from "solid-js";
 
 import { seatTooltipLine } from "@/app/agent-model/seat-format";
+import { useFitToPane } from "@/app/backdrop/pane-fit";
 import { t as tr } from "@/app/i18n/i18n";
 import { AgentLink, Linkified } from "@/app/links/linkified";
 import { kanbanCardItemType } from "@/app/drag/drag-types";
@@ -99,7 +100,8 @@ export function AgentChip(props: {
     plain?: boolean;
 }): JSX.Element {
     // The theme's readable variant of its hue, the one made for text and icons.
-    const nameColor = () => agentColor(props.agent, props.uid, props.colors, "identity");
+    const fit = useFitToPane();
+    const nameColor = () => fit(agentColor(props.agent, props.uid, props.colors, "identity"));
     const seats = useSeatIndex();
     const seat = () => (props.showSeat ? seatOf(seats(), props.uid || props.agent?.uid, props.name) : null);
     const shown = () => props.display || props.agent?.display || props.name;

@@ -7,7 +7,9 @@
         "--menu-bg-color": "var(--surface-overlay)",
         "--panel-bg-color": "color-mix(in srgb, var(--surface-raised) 50%, transparent)",
         "--block-bg-solid-color": "var(--surface)",
-        "--tab-strip-bg": "color-mix(in srgb, var(--ink-text) 3%, transparent)"
+        "--tab-strip-bg": "color-mix(in srgb, var(--ink-text) 3%, transparent)",
+        "--input-bg-color": "color-mix(in srgb, var(--ink-text) 8%, transparent)",
+        "--highlight-bg-color": "color-mix(in srgb, var(--ink-text) 20%, transparent)"
     },
     "ink": {
         "--main-text-color": "--ink-text",
@@ -27,7 +29,10 @@
         "--attention-color": "--ink-attention",
         "--attention-text-color": "--ink-on-attention",
         "--hover-bg-color": "--ink-hover",
-        "--grey-text-color": "--ink-faint"
+        "--grey-text-color": "--ink-faint",
+        "--info-color": "--ink-info",
+        "--file-tree-text-color": "--ink-text",
+        "--accent-text-color": "--ink-on-accent"
     },
     "channels": [
         "--accent-color-rgb"
@@ -42,6 +47,29 @@
         "--term-green",
         "--term-magenta",
         "--term-yellow"
+    ],
+    "syntax": [
+        "--syntax-comment",
+        "--syntax-constant",
+        "--syntax-function",
+        "--syntax-invalid",
+        "--syntax-keyword",
+        "--syntax-name",
+        "--syntax-operator",
+        "--syntax-plain",
+        "--syntax-string",
+        "--syntax-type"
+    ],
+    "glyphs": [
+        "--file-icon-blue",
+        "--file-icon-green",
+        "--file-icon-grey",
+        "--file-icon-orange",
+        "--file-icon-pink",
+        "--file-icon-purple",
+        "--file-icon-red",
+        "--file-icon-steel",
+        "--file-icon-yellow"
     ],
     "windowLevel": [
         "--app-warning-color"

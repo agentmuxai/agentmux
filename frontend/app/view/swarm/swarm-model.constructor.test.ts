@@ -278,11 +278,38 @@ describe("SwarmViewModel constructor wiring", () => {
     });
 
     describe("tracked-block events", () => {
-        it.each(TRACKED_BLOCK_EVENTS)("%s re-reads the tracked blocks at once, and nothing else", async (eventType) => {
+        it.each(TRACKED_BLOCK_EVENTS)("%s re-reads the tracked blocks after 150ms, and nothing else", async (eventType) => {
             fire(eventType);
-            await vi.advanceTimersByTimeAsync(0);
+            await vi.advanceTimersByTimeAsync(149);
+            expect(reloads()).toEqual(NONE);
+
+            await vi.advanceTimersByTimeAsync(1);
+            expect(reloads()).toEqual({ ...NONE, tracked: 1 });
+        });
+
+        it("a burst of events, of every kind, is one read", async () => {
+            for (let i = 0; i < 20; i++) for (const eventType of TRACKED_BLOCK_EVENTS) fire(eventType);
+            await vi.advanceTimersByTimeAsync(150);
 
             expect(reloads()).toEqual({ ...NONE, tracked: 1 });
+        });
+
+        it("a stream that never pauses is still read every 150ms", async () => {
+            for (let ms = 0; ms < 450; ms += 50) {
+                fire(WpsEvent.AgentProcessAdded);
+                await vi.advanceTimersByTimeAsync(50);
+            }
+
+            expect(reloads()).toEqual({ ...NONE, tracked: 3 });
+        });
+
+        it("an event after a read starts the next window", async () => {
+            fire(WpsEvent.AgentProcessExited);
+            await vi.advanceTimersByTimeAsync(150);
+            fire(WpsEvent.AgentProcessExited);
+            await vi.advanceTimersByTimeAsync(150);
+
+            expect(reloads()).toEqual({ ...NONE, tracked: 2 });
         });
     });
 
@@ -318,6 +345,7 @@ describe("SwarmViewModel constructor wiring", () => {
             fire(WpsEvent.ShellNodeCreate);
             fire(WpsEvent.CronChanged);
             fire(WpsEvent.BackgroundTaskUpdated);
+            fire(WpsEvent.AgentProcessAdded);
             vm.dispose();
             await vi.advanceTimersByTimeAsync(500);
 

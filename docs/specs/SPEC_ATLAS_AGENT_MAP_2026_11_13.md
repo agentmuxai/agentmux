@@ -216,12 +216,46 @@ does not change.
   use up the same quota. Nothing about an account leaves the machine that did not already.
 - **Branch.** The repository and branch of the agent's clone, from srv's work facts (`GET /api/v1/work-facts`),
   else the branch its newest held task was filed with.
-- **Tasks.** The Kanban tasks it holds (claimed, waiting on a question, or in review), the three touched last,
-  each with its pull request as a button that opens it. A title is cut after two lines, and the whole of it is
-  its hover label (the Linux look check had one title fill four lines of the card).
+- **Tasks.** The Kanban tasks of the agent: those it holds (claimed, waiting on a question, or in review), newest first,
+  then those waiting for it to take them, in the order srv hands them out. The card lists the first six and says how
+  many more there are. Each task is a line with its number and title (a title is cut after two lines, and the whole
+  of it is its hover label: the Linux look check had one title fill four lines of the card), a mark that says
+  whether the agent holds it, and its pull request as a button that opens it.
 
-Branch and tasks are this instance's facts, so they show for its own agents only. They are read while a card is
-open and not otherwise: the work facts once and then every 20 seconds, the board through the Kanban's own model.
+Branch is this instance's fact, so it shows for its own agents only, read while a card is open: the work facts once
+and then every 20 seconds.
+
+#### The tasks on the node (#48661)
+
+The same tasks are on the node itself, under its name and state, so the map can be read without opening a card:
+
+- **A line each**, up to three: a mark in the board's colour of the column the task sits in (a ring, not a dot, for one
+  that waits for the agent), the task as `#num title` cut with an ellipsis, with the whole of it as its hover label,
+  and its pull request, when it has one, as a second link beside it. With more than three the last line says
+  "+N more"; a click on it is a click on the node, which opens the card with the list. A node with no task has no row
+  and keeps the height every node has.
+- **Links.** The task opens its card on the Kanban (the same way a task link in a message does); the pull request
+  opens the page. A click on either neither opens the node's card nor selects the node. A press on a node is not on the
+  map's background, so it starts no pan and no selection box, and a link inside it inherits the map's
+  `user-select: none`, so a press on one starts no text selection and the window's selection guard
+  (pane-select.ts) has nothing to confine. Enter and Space on a link are the link's.
+- **Taller nodes.** A node with tasks is `nodeHeight(lines)` tall (atlas-layout.ts: the usual height, a gap, 14 px a
+  line and a little under the last); a row of the layout is as tall as its tallest node, and a level starts a gap under the level above it. With no
+  task the layout is the same, to the pixel, as before. The lines from a lead, the messages and the rings follow each
+  node's own height.
+- **When the map is small.** A node lists its tasks from a scale of 0.8, where its 10 px lines are 8 px and a number
+  and the start of a title still read. The fitted view lists them when the fitted map with the lines is at that scale or
+  more; a busy map fits smaller, and there each node says how many tasks it has (a small count in its name line) and
+  keeps its usual height. Zooming in to 0.8 or more lists them, as the gaps close up past the fitted view
+  (§6.6): the layout is formed again at that scale and the zoom keeps the node under the pointer.
+- **Whose.** The tasks are read from this instance's board while the map is open (the Kanban's own model: its change
+  event and a 15 s poll), for this instance's own agents. An agent of another machine lists none: its tasks are on its
+  machine's board, which the app has no read of yet (the board read the Tasks tool offers across the LAN is a tool
+  of the agent, not a route of the app); the node of such an agent shows nothing rather than a guess.
+- **Tests.** The choice and order of tasks (atlas-work.test.ts), the heights in the layout (atlas-layout.test.ts),
+  the rule for when to list (atlas-node-tasks.test.ts), the nodes through the component, including that a click on a
+  link opens neither the card nor a pan or a selection box (atlas-view.render.test.tsx), and the sizes in a real
+  browser at two pane zooms (atlas-node-tasks.layout.test.ts).
 
 ### 6.4 After v1: containers, the review bot, CI and the cloud tier (#47607)
 

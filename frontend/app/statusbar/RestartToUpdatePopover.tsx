@@ -20,6 +20,7 @@
 import { createEffect, createSignal, For, Show, type JSX } from "solid-js";
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { Button } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { cancelUpgrade, releaseDownload, releaseNotesUrl, stagedRelease, upgradeAndRestart, viaPackage } from "@/store/app-update";
 import { openLink } from "@/store/global";
 import { restartingLine, updateWait } from "./update-wait";
@@ -68,16 +69,16 @@ export const RestartToUpdatePopover = (props: RestartToUpdatePopoverProps): JSX.
             operatorOnly
             class="update-popover"
             role="dialog"
-            aria-label="Restart to update AgentMux"
+            aria-label={t("restartPopover.label")}
             style={{ width: "320px" }}
         >
-            <div class="update-popover-title">AgentMux {staged()?.version} is ready</div>
+            <div class="update-popover-title">{t("restartPopover.ready", { version: staged()?.version ?? "" })}</div>
             <div class="update-popover-note">
-                It was downloaded and checked in the background. Restarting installs it; your agents resume where they were.
+                {t("restartPopover.note")}
             </div>
             <Show when={wait()}>
                 <For each={wait()!.lines}>{(line) => <div class="update-popover-wait">{line}</div>}</For>
-                <div class="update-popover-note">The restart starts by itself then. {wait()!.interrupts}</div>
+                <div class="update-popover-note">{t("restartPopover.thenNote", { interrupts: wait()!.interrupts })}</div>
             </Show>
             <Show when={restarting()}>
                 <div class="update-popover-wait">{restartingLine(staged()?.version, viaPackage())}</div>
@@ -87,7 +88,7 @@ export const RestartToUpdatePopover = (props: RestartToUpdatePopoverProps): JSX.
             </Show>
             <div class="update-popover-actions">
                 <Button density="compact" onClick={() => void openLink(releaseNotesUrl(staged()?.version))}>
-                    What's new
+                    {t("restartPopover.whatsNew")}
                 </Button>
                 <Show when={!restarting()}>
                     <Show
@@ -95,19 +96,19 @@ export const RestartToUpdatePopover = (props: RestartToUpdatePopoverProps): JSX.
                         fallback={
                             <>
                                 <Button density="compact" onClick={props.onClose}>
-                                    Later
+                                    {t("restartPopover.later")}
                                 </Button>
                                 <Button density="compact" tone="accent" onClick={() => run(() => upgradeAndRestart(false))}>
-                                    Restart now
+                                    {t("restartPopover.restartNow")}
                                 </Button>
                             </>
                         }
                     >
                         <Button density="compact" onClick={() => run(cancelUpgrade)}>
-                            Cancel
+                            {t("restartPopover.cancel")}
                         </Button>
                         <Button density="compact" tone="accent" onClick={() => run(() => upgradeAndRestart(true))}>
-                            Restart anyway
+                            {t("restartPopover.restartAnyway")}
                         </Button>
                     </Show>
                 </Show>

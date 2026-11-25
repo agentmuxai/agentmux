@@ -80,6 +80,12 @@ fn store() -> &'static SessionStore {
     STORE.get_or_init(SessionStore::default)
 }
 
+/// Whether something here can vouch for a browser's connection as the person's: this srv serves its own
+/// sign-in, or a browser has signed in.
+pub(crate) fn sign_in_exists() -> bool {
+    crate::headless::local_sign_in() || store().session_count(std::time::Instant::now()) > 0
+}
+
 fn channels() -> &'static Channels {
     CHANNELS.get_or_init(Channels::default)
 }
@@ -89,6 +95,9 @@ pub(crate) fn enable(port: u16, instance_id: &str) {
     if crate::headless::local_sign_in() {
         let _ = SHAPE.set(Shape::new(port, instance_id, crate::headless::public_origin()));
         crate::headless::publish_port(port);
+        if let Some((path, binding)) = crate::headless::session_file() {
+            store().keep_in(path, binding, Instant::now(), agentmux_common::time::now_secs_u64());
+        }
     }
 }
 
@@ -116,6 +125,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/auth/enter.css", get(handle_style))
         .route("/auth/wait", post(handle_wait))
         .route("/auth/signout", post(handle_signout))
+        .route("/auth/signout-all", post(handle_signout_all))
         .layer(DefaultBodyLimit::max(1024))
 }
 
@@ -446,6 +456,26 @@ async fn handle_signout(req: Request<Body>) -> Response {
     let Some(session) = admit_session(&req) else { return refuse("/auth/signout", Reason::Session).await };
     let ended = store().revoke(session, Instant::now());
     tracing::info!(ended, "local sign-in session signed out");
+    let mut r = no_store(Json(json!({ "signedOut": ended })).into_response());
+    let cleared = format!("{}=; Max-Age=0; HttpOnly; SameSite=Strict; Path=/", shape.cookie_name);
+    if let Ok(v) = HeaderValue::from_str(&cleared) {
+        r.headers_mut().insert(header::SET_COOKIE, v);
+    }
+    r
+}
+
+/// `POST /auth/signout-all`: end every browser session, this one included, and clear the file that keeps them across a restart. It
+/// takes the session pair like any route of the UI, so a signed-in person can end every sign-in without a shell on the machine.
+async fn handle_signout_all(req: Request<Body>) -> Response {
+    let Some(shape) = SHAPE.get() else { return refusal() };
+    if let Err(reason) = check_shape(shape, req.headers(), Kind::Browser) {
+        return refuse("/auth/signout-all", reason).await;
+    }
+    if admit_session(&req).is_none() {
+        return refuse("/auth/signout-all", Reason::Session).await;
+    }
+    let ended = store().revoke_all();
+    tracing::info!(ended, "every local sign-in session signed out from a browser");
     let mut r = no_store(Json(json!({ "signedOut": ended })).into_response());
     let cleared = format!("{}=; Max-Age=0; HttpOnly; SameSite=Strict; Path=/", shape.cookie_name);
     if let Ok(v) = HeaderValue::from_str(&cleared) {

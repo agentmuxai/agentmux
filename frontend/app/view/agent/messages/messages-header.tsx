@@ -15,12 +15,6 @@ import { makeIconClass } from "@/util/util";
 import { badgeText } from "./messages-select";
 import { publishMessagesHeaderButton, type MessagesPanelControls } from "./messages-state";
 
-/** The class the header button carries, to put the keyboard back on it when the panel closes. */
-export const MESSAGES_TOGGLE_CLASS = "messages-toggle";
-
-/** Keeps the button in a narrow header: with the bar gone it is the only way in (mixins.scss, `block-frame-end-keep`). */
-const KEEP_CLASS = "block-frame-end-keep";
-
 /** The button's face: the envelope, the unread count and a dot while something waits on the person. */
 function ButtonFace(props: { unread: number; needsYou: boolean }): JSX.Element {
     return (
@@ -63,8 +57,10 @@ export function publishHeaderButton(
         get title() {
             return buttonTitle(unread(), needsYou());
         },
-        className: `${MESSAGES_TOGGLE_CLASS} ${KEEP_CLASS}`,
         fitContent: true,
+        menuIcon: "envelope",
+        // The button is a row of the pane's menu now, so what it carried (the count, the dot) is on the tab's icon.
+        attention: () => unread() > 0 || needsYou(),
         active,
     });
     onCleanup(() => publishMessagesHeaderButton(blockId, null));

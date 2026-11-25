@@ -8,7 +8,7 @@
 
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 const reveal = vi.hoisted(() => vi.fn(async () => true));
 vi.mock("@/app/util/reveal-block", () => ({ revealBlock: reveal }));
@@ -19,12 +19,23 @@ vi.mock("@/app/store/agent-runtime-live", () => ({
 }));
 vi.mock("@/app/store/contextmenu", () => ({ ContextMenuModel: { showContextMenu: vi.fn() } }));
 // What an open card reads from srv and the Kanban (atlas-work-store.test.ts): here, which pane it is asked about.
-const workFor = vi.hoisted(() => ({ asked: [] as (string | null)[] }));
+const workFor = vi.hoisted(() => ({ asked: [] as (string | null)[], board: [] as unknown[] }));
 vi.mock("./atlas-work-store", () => ({
-    useAtlasWork: (blockId: () => string | null) => () => {
-        workFor.asked.push(blockId());
-        return blockId() ? { repo: "agentmuxai/agentmux", branch: `branch-of-${blockId()}`, tasks: [] } : null;
+    useAtlasTasks: () => () => workFor.board,
+    useAtlasWork: (agent: () => { blockId: string | null } | null) => () => {
+        const blockId = agent()?.blockId ?? null;
+        workFor.asked.push(blockId);
+        return blockId ? { repo: "agentmuxai/agentmux", branch: `branch-of-${blockId}`, tasks: [], more: 0 } : null;
     },
+}));
+// A click on a task link or its pull request opens the Kanban's card or the page: here, which.
+const opened = vi.hoisted(() => ({ tasks: [] as number[], links: [] as string[] }));
+vi.mock("@/app/element/link-destinations", () => ({
+    openTaskLink: vi.fn(async (num: number) => void opened.tasks.push(num)),
+}));
+vi.mock("@/app/store/misc-utils", async (original) => ({
+    ...(await original<Record<string, unknown>>()),
+    openLink: vi.fn(async (url: string) => void opened.links.push(url)),
 }));
 // The Swarm's own stop confirmation, as a title and its button: what it asks is the Swarm's to test.
 vi.mock("@/app/element/confirm-modal", () => ({
@@ -40,7 +51,7 @@ vi.mock("@/app/element/confirm-modal", () => ({
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { buildAtlasGraph, type AtlasAgent, type AtlasExtras, type AtlasMachine } from "./atlas-graph";
 import type { AtlasFlow } from "./atlas-flow";
-import { layoutAtlas } from "./atlas-layout";
+import { layoutAtlas, NODE_H, nodeHeight } from "./atlas-layout";
 import type { AtlasData } from "./atlas-model";
 import { AtlasView } from "./atlas-view";
 
@@ -616,5 +627,140 @@ describe("what is not an agent", () => {
         const { queryByTestId, getByTestId } = rig([agent("Ann", "local"), agent("Zo", "far")], {}, [], { localNote: "container runtime not running" });
         expect(getByTestId("atlas-legend").textContent).toContain("container runtime not running");
         expect(queryByTestId("atlas-machine-note")).toBeNull();
+    });
+});
+
+describe("the tasks on the nodes", () => {
+    // A pane that is measured, as a real one is: the map is fitted to it, and the nodes list their tasks when it can be read.
+    const real = Object.getOwnPropertyDescriptor(Element.prototype, "clientWidth");
+    const realH = Object.getOwnPropertyDescriptor(Element.prototype, "clientHeight");
+    const size = { w: 1200, h: 700 };
+    beforeAll(() => {
+        Object.defineProperty(Element.prototype, "clientWidth", { configurable: true, get: () => size.w });
+        Object.defineProperty(Element.prototype, "clientHeight", { configurable: true, get: () => size.h });
+    });
+    afterAll(() => {
+        if (real) Object.defineProperty(Element.prototype, "clientWidth", real);
+        if (realH) Object.defineProperty(Element.prototype, "clientHeight", realH);
+    });
+    afterEach(() => {
+        workFor.board = [];
+        opened.tasks = [];
+        opened.links = [];
+        size.w = 1200;
+        size.h = 700;
+    });
+
+    const held = (num: number, block: string, over: { pr?: string; state?: string } = {}) => ({
+        title: `Task title ${num}`,
+        state: over.state ?? "claimed",
+        updated_at: num,
+        priority: 0,
+        target_agent: "",
+        target_agent_uid: "",
+        card: { num, pr_url: over.pr ?? "" },
+        holder: { name: "x", block_id: block, state: "working" },
+    });
+    const waiting = (num: number, who: string) => ({ ...held(num, ""), state: "open", target_agent: who, holder: null });
+
+    it("lists an agent's tasks under its name, held ones first, each a line that says its number and title", () => {
+        workFor.board = [held(5, "b-ann"), waiting(9, "ann"), held(7, "b-ann")];
+        const { getAllByTestId } = rig([agent("Ann", "local", { blockId: "b-ann" }), agent("Bo", "local")]);
+        const [ann, bo] = getAllByTestId("atlas-node");
+        const lines = [...ann.querySelectorAll("[data-testid=atlas-node-task]")];
+        expect(lines.map((l) => [l.textContent, l.getAttribute("data-held")])).toEqual([
+            ["#7 Task title 7", "true"],
+            ["#5 Task title 5", "true"],
+            ["#9 Task title 9", "false"],
+        ]);
+        expect(ann.style.height).toBe(`${nodeHeight(3)}px`);
+        // A node with no task shows no empty row and keeps the height every node has.
+        expect(bo.querySelector("[data-testid=atlas-node-tasks]")).toBeNull();
+        expect(bo.style.height).toBe(`${NODE_H}px`);
+    });
+
+    it("keeps the name and the state where they were, whatever the tasks under them", () => {
+        workFor.board = [held(5, "b-ann")];
+        const { getAllByTestId } = rig([agent("Ann", "local", { blockId: "b-ann", state: "working" })]);
+        const [ann] = getAllByTestId("atlas-node");
+        expect(ann.querySelector(".atlas-node__head .atlas-node__name")!.textContent).toBe("Ann");
+        expect(ann.className).toContain("atlas-node--working");
+        expect(ann.getAttribute("aria-label")).toBe("Ann, Working, on desk");
+    });
+
+    it("lists three and says how many more, the rest on the card", () => {
+        workFor.board = [1, 2, 3, 4, 5].map((n) => held(n, "b-ann"));
+        const { getAllByTestId, getByTestId, queryByTestId } = rig([agent("Ann", "local", { blockId: "b-ann" })]);
+        const [ann] = getAllByTestId("atlas-node");
+        expect(ann.querySelectorAll("[data-testid=atlas-node-task]")).toHaveLength(3);
+        expect(getByTestId("atlas-node-more").textContent).toBe("+2 more");
+        expect(ann.style.height).toBe(`${nodeHeight(4)}px`);
+        // A click on it is a click on the node: its card opens.
+        expect(queryByTestId("atlas-card")).toBeNull();
+        fireEvent.click(getByTestId("atlas-node-more"));
+        expect(getByTestId("atlas-card")).toBeTruthy();
+    });
+
+    it("opens the task on the Kanban from its line, and the pull request from its own link, and neither opens the node's card", () => {
+        workFor.board = [held(5, "b-ann", { pr: "https://github.com/o/r/pull/70" })];
+        const { getAllByTestId, queryByTestId, getByText } = rig([agent("Ann", "local", { blockId: "b-ann" })]);
+        const [line] = getAllByTestId("atlas-node-task");
+        fireEvent.click(line.querySelector(".atlas-node__task")!);
+        expect(opened.tasks).toEqual([5]);
+        fireEvent.click(getByText("#70"));
+        expect(opened.links).toEqual(["https://github.com/o/r/pull/70"]);
+        expect(opened.tasks).toEqual([5]);
+        expect(queryByTestId("atlas-card")).toBeNull();
+    });
+
+    it("starts no pan and draws no selection box from a press on a task link: a node is not the map's background", () => {
+        workFor.board = [held(5, "b-ann")];
+        const { getAllByTestId, getByTestId, queryByTestId, container, getByLabelText } = rig([agent("Ann", "local", { blockId: "b-ann" })]);
+        const link = getAllByTestId("atlas-node-task")[0].querySelector(".atlas-node__task")!;
+        const viewport = getByTestId("atlas-viewport");
+        const world = container.querySelector<HTMLElement>(".atlas-world")!;
+        const before = world.style.transform;
+        const press = () => {
+            fireEvent.pointerDown(link, { button: 0, buttons: 1, pointerId: 1, clientX: 100, clientY: 100 });
+            fireEvent.pointerMove(viewport, { buttons: 1, pointerId: 1, clientX: 180, clientY: 150 });
+        };
+        press();
+        expect(world.style.transform).toBe(before);
+        fireEvent.pointerUp(viewport, { button: 0, pointerId: 1, clientX: 180, clientY: 150 });
+        // With Select on, a drag from the background draws a box, and one from a link does not.
+        fireEvent.click(getByLabelText("Select agents (or hold Shift and drag)"));
+        press();
+        expect(queryByTestId("atlas-lasso")).toBeNull();
+        expect(world.style.transform).toBe(before);
+    });
+
+    it("leaves Enter and Space on a task's link to the link, not the node", () => {
+        workFor.board = [held(5, "b-ann")];
+        const { getAllByTestId, queryByTestId } = rig([agent("Ann", "local", { blockId: "b-ann" })]);
+        const link = getAllByTestId("atlas-node-task")[0].querySelector(".atlas-node__task")!;
+        fireEvent.keyDown(link, { key: "Enter" });
+        expect(queryByTestId("atlas-card")).toBeNull();
+    });
+
+    it("lists no task of an agent of another instance, whatever the board says of it", () => {
+        workFor.board = [held(5, "b-cy"), waiting(6, "cy")];
+        const { getAllByTestId } = rig([agent("Cy", "lab", { blockId: "b-cy" })]);
+        expect(getAllByTestId("atlas-node")[0].querySelector("[data-testid=atlas-node-tasks]")).toBeNull();
+    });
+
+    it("says only how many in a busy map that fits too small to read the lines, and lists them once the person zooms in", () => {
+        size.w = 520;
+        size.h = 320;
+        const names = Array.from({ length: 12 }, (_, i) => `A${i}`);
+        workFor.board = names.flatMap((n, i) => [1, 2, 3].map((t) => held(i * 10 + t, `b-${n}`)));
+        const { getAllByTestId, queryAllByTestId, getByLabelText } = rig(names.map((n) => agent(n, "local", { blockId: `b-${n}` })));
+        expect(queryAllByTestId("atlas-node-tasks")).toHaveLength(0);
+        const counts = getAllByTestId("atlas-node-count");
+        expect(counts).toHaveLength(12);
+        expect(counts[0].textContent).toBe("3");
+        expect(counts[0].getAttribute("aria-label")).toBe("Tasks: 3");
+        for (let i = 0; i < 3; i++) fireEvent.click(getByLabelText("Zoom in"));
+        expect(queryAllByTestId("atlas-node-count")).toHaveLength(0);
+        expect(getAllByTestId("atlas-node-tasks")).toHaveLength(12);
     });
 });

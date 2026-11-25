@@ -282,7 +282,7 @@ function hidesLabel(node: FlowNode, p: Placed, halfH = LABEL_HALF_H, halfW = LAB
  * none is free.
  */
 function labelBesideEnd(to: FlowNode, end: Placed, fromBelow: boolean, free: (p: Placed) => boolean): Placed | null {
-    const under = to.y + NODE_H + (to.pad ?? 0) + LABEL_TIGHT_H;
+    const under = to.y + (to.h ?? NODE_H) + (to.pad ?? 0) + LABEL_TIGHT_H;
     const over = to.y - (to.pad ?? 0) - LABEL_TIGHT_H;
     const inward = end.x >= to.x + NODE_W / 2 ? -1 : 1;
     for (let x = end.x; x > to.x - 1 && x < to.x + NODE_W + 1; x += inward * LABEL_STEP) {
@@ -325,7 +325,6 @@ function blockedInRow(from: Placed, to: Placed, nodes: readonly FlowNode[]): boo
     return nodes.some(
         (n) =>
             n.w === undefined &&
-            n.h === undefined &&
             !(n.x === from.x && n.y === from.y) &&
             !(n.x === to.x && n.y === to.y) &&
             Math.abs(n.y - from.y) < NODE_H &&
@@ -354,14 +353,14 @@ export function flowCurve(
     others: readonly (readonly Placed[])[] = []
 ): FlowCurve | null {
     const ax = from.x + NODE_W / 2;
-    const ay = from.y + NODE_H / 2;
+    const ay = from.y + (from.h ?? NODE_H) / 2;
     const bx = to.x + NODE_W / 2;
-    const by = to.y + NODE_H / 2;
+    const by = to.y + (to.h ?? NODE_H) / 2;
     const dx = bx - ax;
     const dy = by - ay;
     const length = Math.hypot(dx, dy);
     // How far along the line a node's own box reaches from its centre.
-    const reach = Math.min(dx === 0 ? Infinity : NODE_W / 2 / Math.abs(dx), dy === 0 ? Infinity : NODE_H / 2 / Math.abs(dy));
+    const reach = Math.min(dx === 0 ? Infinity : NODE_W / 2 / Math.abs(dx), dy === 0 ? Infinity : (to.h ?? NODE_H) / 2 / Math.abs(dy));
     if (length === 0 || reach >= 0.5) return null;
     // Two agents in one row with another between them: a straight line would run behind that card, and only its
     // two ends would show. It leaves the top of one card and arcs over the row to the top of the other.

@@ -3,8 +3,7 @@
   <div class="agent-primitive-modal-detail agent-seat-panel" data-testid="agent-seat-panel" data-operator-only="An agent sets a seat as itself with Agents set_seat.">
     <div class="agent-primitive-modal-readonly">
       <p class="agent-primitive-modal-global-note">
-        "AgentX"
-        "'s seat: its role, whom it reports to and what it owns. Only you set it; agents read it."
+        "AgentX's seat: its role, whom it reports to and what it owns. Only you set it; agents read it."
       <div class="agent-seat-panel-form">
         <div data-stand="Field" data-label="Role" data-layout="stacked">
           <div data-stand="Select" data-value="leader">
@@ -53,8 +52,7 @@
   <div class="agent-primitive-modal-detail agent-seat-panel" data-testid="agent-seat-panel" data-operator-only="An agent sets a seat as itself with Agents set_seat.">
     <div class="agent-primitive-modal-readonly">
       <p class="agent-primitive-modal-global-note">
-        "AgentX"
-        "'s seat: its role, whom it reports to and what it owns. Only you set it; agents read it."
+        "AgentX's seat: its role, whom it reports to and what it owns. Only you set it; agents read it."
       <div class="agent-seat-panel-form">
         <div data-stand="Field" data-label="Role" data-layout="stacked">
           <div data-stand="Select" data-value="leader">
@@ -102,8 +100,7 @@
   <div class="agent-primitive-modal-detail agent-seat-panel" data-testid="agent-seat-panel" data-operator-only="An agent sets a seat as itself with Agents set_seat.">
     <div class="agent-primitive-modal-readonly">
       <p class="agent-primitive-modal-global-note">
-        "AgentX"
-        "'s seat: its role, whom it reports to and what it owns. Only you set it; agents read it."
+        "AgentX's seat: its role, whom it reports to and what it owns. Only you set it; agents read it."
       <p class="agent-seat-panel-from-spawn" data-testid="agent-seat-from-spawn">
         "From spawn: it reports to the agent that spawned it. Save to give it a seat of its own."
       <div class="agent-seat-panel-form">
@@ -151,8 +148,7 @@
   <div class="agent-primitive-modal-detail agent-seat-panel" data-testid="agent-seat-panel" data-operator-only="An agent sets a seat as itself with Agents set_seat.">
     <div class="agent-primitive-modal-readonly">
       <p class="agent-primitive-modal-global-note">
-        "AgentX"
-        "'s seat: its role, whom it reports to and what it owns. Only you set it; agents read it."
+        "AgentX's seat: its role, whom it reports to and what it owns. Only you set it; agents read it."
       <p class="agent-primitive-modal-global-note">
         "No seat yet."
       <div class="agent-seat-panel-form">

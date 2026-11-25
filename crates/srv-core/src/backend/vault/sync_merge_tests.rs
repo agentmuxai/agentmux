@@ -147,6 +147,20 @@ fn a_delete_waits_while_the_entry_is_being_rotated() {
 }
 
 #[test]
+fn a_later_edit_that_beats_a_held_delete_brings_its_own_tags_and_an_older_one_leaves_the_delete_as_it_was() {
+    let gone = |own: &[&str]| Held { versions: vec![v(200, 0, "a"), v(50, 0, "a")], deleted: true, pending_rotation: false, tags: tags(own) };
+    // The edit is later: it is the current value, and its tags are the value's, as they are on the machine that kept it.
+    let Decision::Conflict { current, tags: got, .. } = merge(Some(&gone(&[])), &change(v(300, 0, "b"), Some(v(50, 0, "a")), Some(&["prod", "billing"]))) else { panic!("expected a conflict") };
+    assert_eq!((current, got), (Side::Incoming, tags(&["prod", "billing"])));
+    // A delete that still has tags of its own: the edit's come first, then the delete's that it lacks.
+    let Decision::Conflict { tags: got, .. } = merge(Some(&gone(&["prod", "old"])), &change(v(300, 0, "b"), Some(v(50, 0, "a")), Some(&["prod", "billing"]))) else { panic!("expected a conflict") };
+    assert_eq!(got, tags(&["prod", "billing", "old"]));
+    // The edit is older: the delete stays current and keeps what it had.
+    let Decision::Conflict { current, tags: got, .. } = merge(Some(&gone(&["old"])), &change(v(100, 0, "b"), Some(v(50, 0, "a")), Some(&["prod"]))) else { panic!("expected a conflict") };
+    assert_eq!((current, got), (Side::Local, tags(&["old"])));
+}
+
+#[test]
 fn a_delete_and_a_change_made_apart_end_as_the_later_of_the_two_with_the_other_kept() {
     let h = held(&[v(100, 0, "a")], &["prod"]);
     assert_eq!(merge(Some(&h), &change(v(200, 0, "b"), Some(v(100, 0, "a")), None)), Decision::Applied, "a delete of what we hold");

@@ -2,35 +2,45 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The work on an open card (atlas-work.ts), read only while a card of one of this instance's agents is open:
- * srv's work facts (`GET /api/v1/work-facts`), asked again every `REFRESH_MS`, and the Kanban's board, followed
- * through the Kanban's own model. With no card open nothing is asked.
+ * What the Atlas reads from srv and the Kanban: the Kanban's tasks while the map is open (the nodes list them,
+ * atlas-node-tasks.ts), and srv's work facts (`GET /api/v1/work-facts`) while a card of one of this instance's agents is
+ * open, asked again every `REFRESH_MS`. The tasks are followed through the Kanban's own model.
  */
 
 import { createEffect, createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
 import { KanbanModel } from "../kanban/kanban-model";
+import type { KanbanTask } from "../kanban/kanban-types";
 import { srvList } from "./atlas-srv";
-import { agentWork, type AtlasWork, type WorkFact } from "./atlas-work";
+import { agentWork, type AtlasWork, type TaskOwner, type WorkFact } from "./atlas-work";
 
 /** How often an open card asks for the work facts again: a branch changes rarely. */
 export const REFRESH_MS = 20_000;
 
-/** The work of the agent in pane `blockId()`, or null with no such card open or nothing known. */
-export function useAtlasWork(blockId: Accessor<string | null>): Accessor<AtlasWork | null> {
-    const [facts, setFacts] = createSignal<readonly WorkFact[]>([]);
+/** The Kanban's tasks, followed for as long as the map is open (the Kanban's own refresh: its change event, and a poll). */
+export function useAtlasTasks(): Accessor<readonly KanbanTask[]> {
     const kanban = new KanbanModel();
+    kanban.setVisible(true);
+    onCleanup(() => kanban.setVisible(false));
+    return () => kanban.board()?.tasks ?? [];
+}
+
+/** The work of `agent`, the one whose card is open, or null with no card open or nothing known. */
+export function useAtlasWork(
+    agent: Accessor<(TaskOwner & { blockId: string | null }) | null>,
+    tasks: Accessor<readonly KanbanTask[]>
+): Accessor<AtlasWork | null> {
+    const [facts, setFacts] = createSignal<readonly WorkFact[]>([]);
     let timer: ReturnType<typeof setInterval> | undefined;
     let disposed = false;
-    const load = () => void srvList<WorkFact>("/api/v1/work-facts", "agents").then((list) => !disposed && setFacts(list));
+    const load = () =>
+        void srvList<WorkFact>("/api/v1/work-facts", "agents").then((list) => !disposed && setFacts(list));
     const stop = () => {
         clearInterval(timer);
         timer = undefined;
-        kanban.setVisible(false);
     };
-    const open = createMemo(() => blockId() !== null);
+    const open = createMemo(() => agent()?.blockId != null);
     createEffect(() => {
         if (!open()) return stop();
-        kanban.setVisible(true);
         load();
         timer ??= setInterval(load, REFRESH_MS);
     });
@@ -39,7 +49,7 @@ export function useAtlasWork(blockId: Accessor<string | null>): Accessor<AtlasWo
         stop();
     });
     return createMemo(() => {
-        const id = blockId();
-        return id ? agentWork(id, facts(), kanban.board()?.tasks ?? []) : null;
+        const who = agent();
+        return who?.blockId ? agentWork(who.blockId, facts(), tasks(), who) : null;
     });
 }

@@ -549,6 +549,9 @@ declare global {
         /** A browser host signed in by `agentmux-srv open`: end this browser's session (not the others')
          *  and go to the page that says how to sign in again. Absent where the host holds the key. */
         signOutThisBrowser?(): Promise<void>;
+        /** A browser host signed in by `agentmux-srv open`: end every browser's session on this srv (this one's too), also the
+         *  ones it keeps across a restart, and go to the page that says how to sign in again. Absent where the host holds the key. */
+        signOutEverywhere?(): Promise<void>;
         /** Reload this window's page, keeping what the host needs to reconnect it. */
         reloadWindow(): void;
         getIsDev(): boolean;
@@ -917,6 +920,10 @@ declare global {
         noAction?: boolean;
         /** A face wider than one icon: the header gives its buttons a fixed width, and this one sizes to its face. */
         fitContent?: boolean;
+        /** The button has something for the person (unread messages): its pane's tab shows a dot on its icon, since the button itself is a row of the pane's menu. Read reactively. */
+        attention?: () => boolean;
+        /** The icon of this button's row in the pane's menu, for a button whose `icon` is a node rather than a name. */
+        menuIcon?: string;
     };
 
     type IconButtonDecl = IconButtonCommon & {

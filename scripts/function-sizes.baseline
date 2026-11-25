@@ -182,7 +182,7 @@
 101 crates/srv-core/src/backend/reactive/activity_watcher.rs::run_agent_summary_loop
 150 crates/srv-core/src/backend/reactive/handler.rs::Handler::register_agent_full
 110 crates/srv-core/src/backend/resume_preflight.rs::preflight
-157 crates/srv-core/src/backend/rpc/engine.rs::WshRpcEngine::handle_request
+155 crates/srv-core/src/backend/rpc/engine.rs::WshRpcEngine::handle_request
 270 crates/srv-core/src/backend/service.rs::get_method_meta
 238 crates/srv-core/src/backend/shell_node.rs::ShellNodeRunner::run
 111 crates/srv-core/src/backend/slug_migration/plan.rs::holder_of
@@ -289,7 +289,7 @@
 218 frontend/app-init.ts::initMux
 364 frontend/app/block/block.tsx::Block
 136 frontend/app/block/block.tsx::BlockFull
-264 frontend/app/block/blockframe.tsx::BlockFrame_Header
+263 frontend/app/block/blockframe.tsx::BlockFrame_Header
 114 frontend/app/block/blockutil.tsx::ConnectionButton
 109 frontend/app/block/lazy-pane-tab.tsx::createStandIn
 235 frontend/app/block/sandboxed-widget-host.tsx::createSandboxedInstance
@@ -341,7 +341,7 @@
 126 frontend/app/view/agent/components/AgentShellInfoPanel.tsx::AgentShellInfoPanel
 130 frontend/app/view/agent/components/HiddenTemplatesSection.tsx::HiddenTemplatesSection
 141 frontend/app/view/agent/components/MyAgentsList.tsx::MyAgentsList
-130 frontend/app/view/agent/components/SeatRosterImport.tsx::SeatRosterImport
+128 frontend/app/view/agent/components/SeatRosterImport.tsx::SeatRosterImport
 108 frontend/app/view/agent/components/SlashCommandPicker.tsx::SlashCommandPicker
 227 frontend/app/view/agent/components/agent-picker-launch.ts::createPickerLaunch
 127 frontend/app/view/agent/components/agent-picker-templates.ts::createTemplates

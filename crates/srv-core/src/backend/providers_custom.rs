@@ -100,14 +100,17 @@ impl CustomLayer {
         if !replacing && self.live.len() >= self.max_live {
             return Err(RegisterError::TooManyLive);
         }
-        let config = match self.leaked.get(&hash) {
+        // The same manifest whose command now resolves to another path (the program was installed since) is a new revision.
+        let command = launch_command(manifest, std::env::var_os("PATH").as_deref());
+        let revision = format!("{hash}\n{command}");
+        let config = match self.leaked.get(&revision) {
             Some(config) => *config,
             None => {
                 if self.leaked.len() >= self.max_leaked {
                     return Err(RegisterError::TooManyRevisions);
                 }
-                let config = leak_config(manifest);
-                self.leaked.insert(hash.clone(), config);
+                let config = leak_config(manifest, &command);
+                self.leaked.insert(revision, config);
                 config
             }
         };
@@ -198,9 +201,28 @@ fn leak_strs(items: &[String]) -> &'static [&'static str] {
     Box::leak(items.iter().map(|s| leak_str(s)).collect::<Vec<_>>().into_boxed_slice())
 }
 
+/// The command a registered harness is launched with. A harness the person
+/// installed themselves (`install.kind` `path`) named by a bare command such
+/// as `demo-acp` is registered under the absolute path the command has on
+/// `path` now: the launch looks up a custom harness only in AgentMux's own
+/// install folders, so a bare name would never be found. A command that is
+/// not on `path` yet stays as written (it can be found once registration runs
+/// again), and every other install kind keeps the manifest's command.
+fn launch_command(m: &HarnessManifest, path: Option<&std::ffi::OsStr>) -> String {
+    let bare = !m.command.contains(['/', '\\']);
+    if !matches!(m.install, Install::Path) || !bare {
+        return m.command.clone();
+    }
+    let found = path.and_then(|p| which::which_in(&m.command, Some(p), std::env::current_dir().ok()?).ok());
+    match found {
+        Some(abs) if abs.is_absolute() => abs.to_string_lossy().into_owned(),
+        _ => m.command.clone(),
+    }
+}
+
 /// The built-in shape of an ACP harness, filled from the manifest. A custom
 /// harness gets the generic ACP defaults for everything the manifest omits.
-fn leak_config(m: &HarnessManifest) -> &'static ProviderConfig {
+fn leak_config(m: &HarnessManifest, command: &str) -> &'static ProviderConfig {
     let (npm_package, pinned_version) = match &m.install {
         Install::Npm { package, version } => (leak_str(package), leak_str(version)),
         _ => ("", ""),
@@ -215,7 +237,7 @@ fn leak_config(m: &HarnessManifest) -> &'static ProviderConfig {
     Box::leak(Box::new(ProviderConfig {
         id: leak_str(&m.id),
         tier: Tier::Custom,
-        cli_command: leak_str(&m.command),
+        cli_command: leak_str(command),
         controller_type: ControllerType::Acp,
         app_server: None,
         launch_args: leak_strs(&m.args),

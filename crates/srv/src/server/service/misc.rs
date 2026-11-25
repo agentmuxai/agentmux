@@ -8,6 +8,12 @@ use crate::backend::service::{self, WebCallType, WebReturnType};
 
 use super::super::AppState;
 
+/// What a caller of `history.Delete` or `history.Clear` on the service route is told.
+const REFUSED_HISTORY: &str =
+    "FORBIDDEN: deleting a session from the history is the person's own action: ask the person to do it in the AgentMux window";
+/// What a caller of `agent.define` on the service route is told.
+const REFUSED_DEFINE: &str = "FORBIDDEN: this route does not define agents: use the agent.define command";
+
 /// A handler's result: the reply, or the message of the first argument that failed to decode.
 type Reply = Result<WebReturnType, String>;
 
@@ -35,11 +41,9 @@ pub(super) async fn handle_misc_service(state: &AppState, call: &WebCallType) ->
         ("history", "ListForAgent") => history_list_for_agent(state, args),
         ("history", "Get") => history_get(state, args),
         ("history", "Refresh") => Ok(WebReturnType::success(state.history_service.refresh())),
-        ("history", "Delete") => history_delete(state, args),
-        ("history", "Clear") => history_clear(state, args),
-
-        // MuxAPI (also reachable via WebSocket RPC in app_api/).
-        ("agent", "define") => agent_define(state, args).await,
+        // Nothing on this route proves who made the call, so it neither deletes history nor defines an agent.
+        ("history", "Delete" | "Clear") => Ok(WebReturnType::error(REFUSED_HISTORY.to_string())),
+        ("agent", "define") => Ok(WebReturnType::error(REFUSED_DEFINE.to_string())),
 
         _ => Err(format!("unknown service method: {}.{}", call.service, call.method)),
     };
@@ -213,23 +217,6 @@ fn history_list_for_agent(state: &AppState, args: &[serde_json::Value]) -> Reply
 fn history_get(state: &AppState, args: &[serde_json::Value]) -> Reply {
     let session_id: String = service::get_arg(args, 0)?;
     Ok(WebReturnType::success(state.history_service.get(&session_id)))
-}
-
-fn history_delete(state: &AppState, args: &[serde_json::Value]) -> Reply {
-    let session_id: String = service::get_arg(args, 0)?;
-    Ok(WebReturnType::success(state.history_service.delete(&session_id)))
-}
-
-fn history_clear(state: &AppState, args: &[serde_json::Value]) -> Reply {
-    let provider: Option<String> = service::get_optional_arg(args, 0).unwrap_or(None);
-    let project: Option<String> = service::get_optional_arg(args, 1).unwrap_or(None);
-    Ok(WebReturnType::success(state.history_service.clear(provider.as_deref(), project.as_deref())))
-}
-
-async fn agent_define(state: &AppState, args: &[serde_json::Value]) -> Reply {
-    let data: crate::backend::rpc_types::CommandAgentDefineData = service::get_arg(args, 0)?;
-    let result = super::super::app_api::agent_define_core(state.mstore.clone(), state.broker.clone(), data).await?;
-    Ok(json_reply(&result))
 }
 
 #[cfg(test)]

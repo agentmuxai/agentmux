@@ -39,7 +39,7 @@ export function toMapRect(rect: Rect, view: Viewport): Rect {
 export function nodesInRect(nodes: ReadonlyMap<string, Placed>, rect: Rect): string[] {
     const out: string[] = [];
     for (const [key, p] of nodes) {
-        const apart = p.x > rect.x + rect.w || p.x + NODE_W < rect.x || p.y > rect.y + rect.h || p.y + NODE_H < rect.y;
+        const apart = p.x > rect.x + rect.w || p.x + NODE_W < rect.x || p.y > rect.y + rect.h || p.y + (p.h ?? NODE_H) < rect.y;
         if (!apart) out.push(key);
     }
     return out;

@@ -231,20 +231,40 @@
 // hard-clamped at max-width, and it shrinks with its neighbours when the
 // strip has less room than the tabs' own widths, down to the floors below.
 .pane-tab-tip {
-    // Shrinks with its neighbours when the strip has less room than the tabs' own widths, down to a floor
-    // (pane-tab-steps.ts): the label is cut with an ellipsis first. The selected tab's floor keeps its icon and its close.
-    flex: 0 1 auto;
+    // Shrinks when the strip has less room than the tabs' own widths, down to a floor (pane-tab-steps.ts): the label is cut
+    // with an ellipsis first. The tabs that are not selected give way first (see below): they shrink 64 times as fast.
+    flex: 0 64 auto;
     min-width: 27px;
     max-width: 240px;
     display: flex;
     align-items: stretch;
 }
 
-// The selected tab keeps a floor wide enough for its icon and its close button, so
-// the squeeze takes the label (and then the other tabs' labels) before it takes
-// the selected tab's controls. A lone tab may shrink below it, to the strip (#30300).
+// A tab with no icon (a document tab) has only its label to say which it is: it keeps a few letters of it, not a sliver
+// (RESTING_NO_ICON_FLOOR_PX in pane-tab-steps.ts); the strip's header scrolls past that.
+.pane-tab-tip:has(.doc-tab--no-icon):not(:has(.pane-tab--active)) {
+    min-width: 56px;
+}
+
+// The selected tab has its room first: it shrinks only after the other tabs are down to their floors, and then only by its
+// title. Its floor is its icon and its close button whole, and the start
+// of its title: the strip measures it and writes it as `--pane-tab-active-floor` (pane-tab-strip-steps.ts; 47px, the icon and
+// the close button, until it has). Its title is capped by its own label (190px), not by the tab's width.
+// A lone tab may shrink below it, to the strip (#30300).
 .pane-tab-tip:has(.pane-tab--active) {
-    min-width: 47px;
+    flex-shrink: 1;
+    min-width: var(--pane-tab-active-floor, 47px);
+    max-width: none;
+}
+
+.pane-tab--active .pane-tab-label {
+    max-width: 190px;
+}
+
+// ...and a selected tab with no icon keeps a few letters of its label as well (ACTIVE_NO_ICON_FLOOR_PX in pane-tab-steps.ts).
+.pane-tab-tip:has(.pane-tab--active .doc-tab--no-icon),
+.pane-tab-tip:has(.pane-tab--active.doc-tab--no-icon) {
+    min-width: max(76px, var(--pane-tab-active-floor, 76px));
 }
 
 // A tab being renamed has the input in the place of its label: it keeps room to type in,
@@ -552,6 +572,23 @@
     }
 }
 
+// What a pane's own action (Messages) has for the person, on its tab's icon: a dot at the top-right, in the accent colour and
+// ringed like the badge. The action is a row of the pane's menu, so this is where the unread count shows.
+.pane-tab-icon-alert {
+    position: absolute;
+    right: -2px;
+    top: -2px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent-text-color);
+    box-shadow: 0 0 0 1.5px var(--pane-tab-bg, var(--pane-tab-neutral-bg, var(--block-bg-color)));
+
+    .pane-tab--active & {
+        box-shadow: 0 0 0 1.5px var(--pane-tab-bg-active, var(--pane-tab-bg, var(--block-bg-color)));
+    }
+}
+
 // The remote's colour on a tab whose pane runs there (PaneChrome's
 // renderLabel; SPEC_REMOTES_PANE_2026_10_05.md §4.8). Same mark as the
 // connection chip's swatch.
@@ -588,6 +625,11 @@
     --ui-close-fg: currentColor;
     opacity: 0;
     transition: opacity var(--duration-decorative-instant) var(--ease-standard);
+}
+
+// The selected tab always has its close, at every width; a resting tab shows it on hover.
+.pane-tab--active .pane-tab-close {
+    opacity: 1;
 }
 
 // The progress line along the top of a pill: what its agent is doing
@@ -664,9 +706,49 @@
     @include mixins.sr-only;
 }
 
-// The tooltip's state line (the Swarm chip's words).
+// The tooltip's state line (the Swarm chip's words), with a dot in the Swarm's colour for the state (working in the error
+// colour, waiting in the accent, idle in the success colour, signed out in the warning colour, as the Atlas draws them).
 .pane-tab-tip-state {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
     font-weight: 500;
+}
+
+.pane-tab-tip-dot {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--secondary-text-color);
+
+    [data-state="working"] > & {
+        background: var(--error-text-color);
+    }
+
+    [data-state="waiting"] > & {
+        background: var(--accent-text-color);
+    }
+
+    [data-state="idle"] > & {
+        background: var(--success-text-color);
+    }
+
+    [data-state="signed_out"] > & {
+        background: var(--warning-text-color);
+    }
+}
+
+// The task the agent holds: its number and title, wrapped like the summary.
+.pane-tab-tip-task {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    font-weight: 500;
+}
+
+.pane-tab-tip-age {
+    opacity: 0.7;
+    white-space: nowrap;
 }
 
 // The pill tooltip for an agent: its name, then its summary (the same line the Swarm
@@ -780,10 +862,10 @@
 // The steps of a strip that has run out of room (pane-tab-steps.ts; PaneTabStrip.tsx sets `data-step`). The tabs that are
 // not selected lose their label first, then their close button's place; the selected tab keeps its label, its close and its
 // underline. Hidden, not removed: a tab's accessible name is still its label, and its tooltip still names it.
-// A tab with no icon (a document tab) keeps its label: it has nothing else to say which it is. At the icon step the
-// selected tab is the icon and its close button too, so it is never left with a stub of a label.
+// A tab with no icon (a document tab) keeps its label: it has nothing else to say which it is. The selected tab keeps the
+// start of its title at every step (its floor reserves it, pane-tab-steps.ts `activeFloor`), so that room is never left empty.
 .pane-tab-strip[data-step="icon-close"] .pane-tab:not(.pane-tab--active):not(.doc-tab--no-icon) .pane-tab-label:not(.pane-tab-rename-input),
-.pane-tab-strip[data-step="icon"] .pane-tab:not(.doc-tab--no-icon) .pane-tab-label:not(.pane-tab-rename-input) {
+.pane-tab-strip[data-step="icon"] .pane-tab:not(.pane-tab--active):not(.doc-tab--no-icon) .pane-tab-label:not(.pane-tab-rename-input) {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -803,7 +885,7 @@
     }
 
     .pane-tab-tip:not(:has(.pane-tab--active)) {
-        flex: 1 1 27px;
+        flex: 1 64 27px;
         max-width: none;
     }
 

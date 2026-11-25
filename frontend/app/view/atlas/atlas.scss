@@ -482,6 +482,105 @@
     font-size: var(--text-2xs);
 }
 
+// The node's name and state, the two lines of every node. With tasks under them they keep the height every node has
+// (atlas-layout.ts NODE_H less the border), and the tasks follow.
+.atlas-node__head {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    min-height: 0;
+}
+
+.atlas-node--tasks {
+    justify-content: flex-start;
+}
+
+.atlas-node--tasks > .atlas-node__head {
+    flex: none;
+    // NODE_H (36) less the border above and under.
+    height: 34px;
+}
+
+// How many tasks an agent has, where the map is too small to list them (atlas-node-tasks.ts TASK_LINES_MIN_K).
+.atlas-node__count {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 2px;
+    color: var(--secondary-text-color);
+    font-size: var(--text-2xs);
+}
+
+// The tasks of an agent, a line each (atlas-layout.ts TASK_LINE_H, TASKS_GAP): a mark in the colour of the board's column, the
+// task as a link, and its pull request as a second one.
+.atlas-node__tasks {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    margin: 3px 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.atlas-node__task-line {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: var(--space-1);
+    min-width: 0;
+    height: 14px;
+    font-size: var(--text-2xs);
+    line-height: 14px;
+    white-space: nowrap;
+
+    // One an agent holds is in the board's colour of the column it sits in; one that waits for the agent is muted.
+    &--waiting {
+        color: var(--secondary-text-color);
+    }
+
+    // The task and its pull request are links (Button's `link` variant), cut to the line.
+    .ui-button.ui-button--link {
+        --ui-link-font-size: var(--text-2xs);
+        min-width: 0;
+        height: 14px;
+        padding: 0;
+        line-height: 14px;
+    }
+}
+
+.atlas-node__task-mark {
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--atlas-task-stage, var(--secondary-text-color));
+}
+
+.atlas-node__task-line--waiting .atlas-node__task-mark {
+    background: transparent;
+    box-shadow: inset 0 0 0 1px var(--atlas-task-stage, var(--secondary-text-color));
+}
+
+.atlas-node__task.ui-button {
+    // A block of text, not the kit button's flex box: a flex box centres what overflows (the title's start would be cut off
+    // on the left) and draws no ellipsis.
+    display: block;
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-align: left;
+    text-overflow: ellipsis;
+}
+
+.atlas-node__task-pr {
+    flex: none;
+}
+
+.atlas-node__more {
+    color: var(--secondary-text-color);
+}
+
 .atlas-node__sub {
     overflow: hidden;
     color: var(--secondary-text-color);
@@ -506,24 +605,24 @@
     background: var(--secondary-text-color);
 }
 
-.atlas-node--working > .atlas-node__top > .atlas-node__dot,
+.atlas-node--working .atlas-node__top > .atlas-node__dot,
 .atlas-node__dot.atlas-node--working {
     background: var(--error-text-color);
 }
 
-.atlas-node--waiting > .atlas-node__top > .atlas-node__dot,
+.atlas-node--waiting .atlas-node__top > .atlas-node__dot,
 .atlas-node__dot.atlas-node--waiting {
     background: var(--accent-color);
 }
 
-.atlas-node--idle > .atlas-node__top > .atlas-node__dot,
+.atlas-node--idle .atlas-node__top > .atlas-node__dot,
 .atlas-node__dot.atlas-node--idle {
     background: var(--success-text-color);
 }
 
-.atlas-node--error > .atlas-node__top > .atlas-node__dot,
-.atlas-node--limited > .atlas-node__top > .atlas-node__dot,
-.atlas-node--signed_out > .atlas-node__top > .atlas-node__dot,
+.atlas-node--error .atlas-node__top > .atlas-node__dot,
+.atlas-node--limited .atlas-node__top > .atlas-node__dot,
+.atlas-node--signed_out .atlas-node__top > .atlas-node__dot,
 .atlas-node__dot.atlas-node--error,
 .atlas-node__dot.atlas-node--limited,
 .atlas-node__dot.atlas-node--signed_out {

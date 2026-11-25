@@ -14,6 +14,7 @@ A confirm, a prompt or an approval is a panel inside the UI element that asks (t
 - **A window or tab modal is only for a question about a whole window or a whole tab:** closing a window, closing a tab with running work, quitting.
 - **A pane modal is allowed for a flow the person works through inside the pane:** a sign-in that needs a code, a form with several steps. It is not for a single yes-or-no question; that is a panel.
 - **When unsure which one a screen needs, ask the UI kit's owner** before building it.
+- **Reuse the inline confirm panel.** `ConfirmPanel` (`frontend/app/element/ui/ConfirmPanel.tsx`) is the confirm that asks inside the element that asked: a title that is the question, a body that says what the answer does, Cancel and the confirm (a danger tone for a deletion), Escape as Cancel, and focus moved to it on open. `CardGrid` hangs it under a card (`frontend/app/element/ui/CardGrid.tsx`; deleting an account in the identity accounts tab, `frontend/app/view/identity/identity-accounts-tab.tsx`, is the example). Use it for the next confirm or the next conversion instead of building another.
 
 ## Modals that already exist
 

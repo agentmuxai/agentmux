@@ -80,7 +80,7 @@ mod tests {
             "Only that agent's tab closes",
             "My Agents",
             "your own block (use self)",
-            "a pane that holds an agent is refused with a pointer to agents",
+            "An agent's tab is refused with a pointer to agents",
             "banner in the agent's pane and a notification, each with a countdown",
             "and Keep running and Close now buttons",
             "MAJOR WARNING",

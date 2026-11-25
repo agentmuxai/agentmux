@@ -10,7 +10,7 @@ import { ANSI_TOKENS } from "./ansi";
 import { BUILTINS, deriveBuiltin } from "./builtins";
 import { deriveInk } from "./ink";
 import { oklchToHex } from "../theme/oklch";
-import { getPaneScope, INK_TOKEN_MAP, MAPPED_TOKENS, registerPaneScope, releasePaneScope, scopeVars, SURFACE_TOKEN_MAP } from "./scope";
+import { codeLightness, getPaneScope, INK_TOKEN_MAP, MAPPED_TOKENS, registerPaneScope, releasePaneScope, scopeVars, SURFACE_TOKEN_MAP } from "./scope";
 
 // Any built-in will do: the first, on each of the app's two themes.
 const derived = deriveBuiltin(BUILTINS[0].id, "dark")!;
@@ -58,6 +58,11 @@ describe("scopeVars", () => {
         expect(vars["--attention-text-color"]).toBe("var(--ink-on-attention)");
         expect(vars["--ink-attention"]).toBe(derived.ink.attention);
         expect(vars["--ink-on-attention"]).toBe(derived.ink.onAttention);
+        // The same for text on an accent fill, and for the info colour and the file tree's text.
+        expect(vars["--accent-text-color"]).toBe("var(--ink-on-accent)");
+        expect(vars["--ink-on-accent"]).toBe(derived.ink.onAccent);
+        expect(vars["--info-color"]).toBe("var(--ink-info)");
+        expect(vars["--file-tree-text-color"]).toBe("var(--ink-text)");
     });
 
     it("re-points the fixed-colour tokens the agent pane paints with: panel, modal, hover, strip, solid block and grey", () => {
@@ -68,6 +73,9 @@ describe("scopeVars", () => {
         expect(vars["--tab-strip-bg"]).toBe("color-mix(in srgb, var(--ink-text) 3%, transparent)");
         expect(vars["--hover-bg-color"]).toBe("var(--ink-hover)");
         expect(vars["--grey-text-color"]).toBe("var(--ink-faint)");
+        // The washes the files, editor and swarm panes draw over their surface follow the pane's ink.
+        expect(vars["--input-bg-color"]).toBe("color-mix(in srgb, var(--ink-text) 8%, transparent)");
+        expect(vars["--highlight-bg-color"]).toBe("color-mix(in srgb, var(--ink-text) 20%, transparent)");
     });
 
     it("gives --accent-color-rgb the accent's channels, which rgba(var(--accent-color-rgb), a) needs", () => {
@@ -87,6 +95,8 @@ describe("scopeVars", () => {
             "--panel-bg-color",
             "--block-bg-solid-color",
             "--tab-strip-bg",
+            "--input-bg-color",
+            "--highlight-bg-color",
         ]);
     });
 
@@ -127,6 +137,47 @@ describe("scopeVars with the theme's terminal palette", () => {
         const pale = deriveBuiltin("yellow", "light")!;
         const moved = scopeVars(pale, { "--term-bright-cyan": "#34e2e2" })["--term-bright-cyan"];
         expect(moved).not.toBe("#34e2e2");
+    });
+});
+
+describe("scopeVars with the editor's syntax colours and the file-type icon colours", () => {
+    const dark = { "--syntax-plain": "#abb2bf", "--syntax-comment": "#969eac", "--file-icon-yellow": "#cbcb41", "--file-icon-blue": "#519aba" };
+
+    it("reads the dark theme's code on a pale backdrop: each syntax colour reaches 4.5:1 on all three layers", () => {
+        const d = deriveInk("#f4efe0");
+        const vars = scopeVars(d, dark);
+        for (const token of ["--syntax-plain", "--syntax-comment"]) {
+            for (const layer of Object.values(d.surfaces)) expect(contrastRatio(vars[token], layer), `${token} on ${layer}`).toBeGreaterThanOrEqual(4.5);
+        }
+    });
+
+    it("holds an icon colour to 3:1, not 4.5, since an icon is a graphic and its shape says what it is", () => {
+        const d = deriveInk("#f4efe0");
+        const vars = scopeVars(d, dark);
+        for (const token of ["--file-icon-yellow", "--file-icon-blue"]) {
+            for (const layer of Object.values(d.surfaces)) expect(contrastRatio(vars[token], layer), `${token} on ${layer}`).toBeGreaterThanOrEqual(3);
+        }
+        const keeps = deriveInk("#101820");
+        expect(scopeVars(keeps, dark)["--file-icon-blue"]).toBe("#519aba");
+    });
+});
+
+describe("the lightness highlighted code is kept to", () => {
+    it("is high on a dark pane and low on a light one, and the pane carries it", () => {
+        const dark = deriveInk("#101820");
+        const pale = deriveInk("#f4efe0");
+        expect(codeLightness(dark.surfaces)).toBeGreaterThan(0.6);
+        expect(codeLightness(pale.surfaces)).toBeLessThan(0.55);
+        expect(scopeVars(dark)["--code-l"]).toBe(String(codeLightness(dark.surfaces)));
+    });
+
+    it("gives a grey of that lightness at least 5:1 on all three layers of a mid-tone backdrop, either side", () => {
+        for (const hex of ["#808080", "#336699", "#5f5f5f", "#9a9a9a"]) {
+            const d = deriveInk(hex);
+            const l = codeLightness(d.surfaces);
+            const grey = oklchToHex(l, 0, 0);
+            for (const layer of Object.values(d.surfaces)) expect(contrastRatio(grey, layer), `${hex}: L ${l} on ${layer}`).toBeGreaterThanOrEqual(5);
+        }
     });
 });
 

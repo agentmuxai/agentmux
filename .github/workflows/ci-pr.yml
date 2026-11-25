@@ -1353,6 +1353,11 @@ jobs:
       - name: generated broker event types are current
         if: matrix.shard == 1
         run: node scripts/gen-mux-events.mjs --check
+      # frontend/app/store/operator-commands.generated.ts (the commands that wait for the window's proof), from
+      # srv's own decision of who may call what (action_commands.rs and action_access.rs).
+      - name: generated window-only command list is current
+        if: matrix.shard == 1
+        run: node scripts/gen-operator-commands.mjs --check
       # frontend/app/deeplinks/registry.generated.ts, crates/common/src/deeplinks/registry.rs and
       # docs/deep-links.md, from crates/common/deeplinks/destinations.json (the deep-link registry).
       - name: generated deep-link tables are current

@@ -61,6 +61,7 @@ import { latchLayout, SETTLE_MS, type Latch } from "./composer-row-latch";
 import { useStatsZone } from "./composer-stats-zone";
 import { isContainerAgentMode, parseRuntimeKind } from "@/util/runtime-kind";
 import { tip } from "@/app/element/tip";
+import { t } from "@/app/i18n/i18n";
 
 // ── Props ──────────────────────────────────────────────────────────────────
 
@@ -332,8 +333,14 @@ function authSlot(props: AgentComposerStripProps): Slot {
             // `cut` shortens an address: the full form cuts it to 22 characters, the budgeted form starts from the
             // whole address, so an address is cut once, not twice.
             const labelWith = (cut: (email: string) => string) => {
-                const base = accountKnown(props) ? (props.authEmail ? cut(props.authEmail) : "Account") : !authed() ? "Not logged in" : props.authEmail ? cut(props.authEmail) : "Logged in";
-                return props.pendingAccountLabel ? `${base} → ${cut(props.pendingAccountLabel)}` : base;
+                const base = accountKnown(props)
+                    ? (props.authEmail ? cut(props.authEmail) : t("composerStrip.account"))
+                    : !authed()
+                    ? t("composerStrip.notLoggedIn")
+                    : props.authEmail
+                    ? cut(props.authEmail)
+                    : t("composerStrip.loggedIn");
+                return props.pendingAccountLabel ? t("composerStrip.switchingLabel", { base, to: cut(props.pendingAccountLabel) }) : base;
             };
             const label = () => labelWith(shortenEmail);
             // The window srv gave the agent to reach a safe point: the time left rides on the label, the whole line
@@ -351,18 +358,18 @@ function authSlot(props: AgentComposerStripProps): Slot {
                 return room === undefined ? accountInitial(label()) : middleTruncate(labelWith((email) => email), room);
             };
             const title = () => {
-                if (!authed() && !accountKnown(props)) return hasOthers() ? "Not signed in — click to log in or switch account" : "Not signed in — click Log in to continue";
+                if (!authed() && !accountKnown(props)) return hasOthers() ? t("composerStrip.notSignedInSwitch") : t("composerStrip.notSignedInLogin");
                 const base = accountKnown(props)
-                    ? (props.authEmail ? `Account ${props.authEmail}` : "No account linked yet")
+                    ? (props.authEmail ? t("composerStrip.accountEmail", { email: props.authEmail }) : t("composerStrip.noAccount"))
                     : props.authEmail
-                    ? `Signed in as ${props.authEmail}`
-                    : "Signed in to this agent's provider";
-                if (props.prepCountdown) return `${base}. Switching to ${props.pendingAccountLabel ?? "another account"}: ${props.prepCountdown}. Click to switch now.`;
-                if (props.pendingAccountLabel) return `${base}. Switching to ${props.pendingAccountLabel} when this turn ends.`;
+                    ? t("composerStrip.signedInAs", { email: props.authEmail })
+                    : t("composerStrip.signedInProvider");
+                if (props.prepCountdown) {
+                    return t("composerStrip.switchingPrep", { base, to: props.pendingAccountLabel ?? t("composerStrip.anotherAccount"), countdown: props.prepCountdown });
+                }
+                if (props.pendingAccountLabel) return t("composerStrip.switchingPending", { base, to: props.pendingAccountLabel });
                 if (!hasOthers()) return base;
-                return busy()
-                    ? `${base}. Click to switch account; it takes effect when the current turn ends.`
-                    : `${base}. Click to switch account.`;
+                return busy() ? t("composerStrip.switchBusy", { base }) : t("composerStrip.switchIdle", { base });
             };
             return (
                 <span
@@ -436,18 +443,18 @@ function ctxSlot(props: AgentComposerStripProps, d: StripDerived): Slot {
                         class="agent-composer-strip-compact-btn"
                         data-strip-button
                         icon={compact() ? "custom@arrows-to-dot" : undefined}
-                        aria-label={compact() ? "Compact" : undefined}
+                        aria-label={compact() ? t("composerStrip.compact") : undefined}
                         disabled={!d.canCompact()}
                         title={
                             d.canCompact()
-                                ? "Summarize and trim this session's history now, instead of waiting for the CLI's own auto-compact threshold."
+                                ? t("composerStrip.compactTip")
                                 : props.compacting
-                                    ? "Already compacting…"
-                                    : "Wait for the current turn to finish before compacting."
+                                    ? t("composerStrip.compacting")
+                                    : t("composerStrip.compactWait")
                         }
                         onClick={() => props.onCompact?.()}
                     >
-                        {compact() ? undefined : "Compact"}
+                        {compact() ? undefined : t("composerStrip.compact")}
                     </Button>
                 </Show>
             );
@@ -470,13 +477,13 @@ function ctxSlot(props: AgentComposerStripProps, d: StripDerived): Slot {
                                   (compact() && d.ctxCountdownText() ? ` ${d.ctxCountdownText()}` : "")
                                 : undefined
                         }
-                        label={compact() ? shortContextText(d.ctxText() ?? "session") : (d.ctxText() ?? "session")}
+                        label={compact() ? shortContextText(d.ctxText() ?? t("composerStrip.session")) : (d.ctxText() ?? t("composerStrip.session"))}
                     />
                     <Show when={!compact() && d.ctxCountdownText()}>
                         <span
                             class={`agent-composer-strip-ctx-countdown ${d.ctxClass()}`}
                             classList={{ "agent-composer-strip-ctx-countdown--critical": d.ctxClass().endsWith("critical") }}
-                            {...tip("Applies to auto-compaction only — a manual /compact can happen at any fill level.")}
+                            {...tip(t("composerStrip.countdownTip"))}
                         >
                             {d.ctxCountdownText()}
                         </span>
@@ -506,7 +513,7 @@ function statsSlot(props: AgentComposerStripProps): Slot {
 }
 
 /** The accessible name and tooltip's lead of the eye: the view when it is not the plain Full one. */
-const viewName = (props: AgentComposerStripProps): string => (props.viewChip ? `View: ${props.viewChip}` : "View");
+const viewName = (props: AgentComposerStripProps): string => (props.viewChip ? t("composerStrip.viewNamed", { view: props.viewChip }) : t("composerStrip.view"));
 
 /**
  * The eye that opens the View popover: one form on every pane at every width (it has no text to give up, so
@@ -524,7 +531,7 @@ function viewEye(props: AgentComposerStripProps): JSX.Element {
                 aria-label={viewName(props)}
                 aria-haspopup="dialog"
                 aria-expanded={props.viewOpen ? "true" : "false"}
-                title={`${viewName(props)}. What this pane shows: click to change`}
+                title={t("composerStrip.viewTip", { name: viewName(props) })}
                 onClick={() => props.onOpenView?.()}
             />
         </Show>
@@ -565,11 +572,11 @@ function hostShellSlot(props: AgentComposerStripProps): Slot {
                     class="agent-composer-strip-log-btn"
                     pressed={props.logOpen}
                     icon={compact() ? "terminal" : undefined}
-                    aria-label={compact() ? "Shell" : undefined}
-                    title={props.logOpen ? "Hide the shell" : "Show the shell"}
+                    aria-label={compact() ? t("composerStrip.shell") : undefined}
+                    title={props.logOpen ? t("composerStrip.hideShell") : t("composerStrip.showShell")}
                     onClick={() => props.onToggleLog()}
                 >
-                    {compact() ? undefined : "Shell"}
+                    {compact() ? undefined : t("composerStrip.shell")}
                 </Button>
             );
             // The eye sits right of the NATIVE / CONTAINER label, on the Compact and Shell side.

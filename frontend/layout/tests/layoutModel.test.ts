@@ -1068,3 +1068,27 @@ describe("resize through collapsed panes", () => {
         expect(model.additionalProps()[root.id]?.resizeHandles ?? []).toHaveLength(1);
     });
 });
+
+describe("the container size held for a pane drag", () => {
+    it("is measured once for every read until it is released, and again after a resize", () => {
+        let reads = 0;
+        let box = { width: 800, height: 600 };
+        const model = createLayoutModel(() => {
+            reads++;
+            return { top: 0, left: 0, ...box };
+        });
+        model.holdContainerRect();
+        model.holdContainerRect();
+        expect(reads).toBe(1);
+        box = { width: 900, height: 700 };
+        expect(model.getBoundingRect()).toEqual({ top: 0, left: 0, width: 800, height: 600 });
+        expect(model.getBoundingRect()).toEqual({ top: 0, left: 0, width: 800, height: 600 });
+        expect(reads).toBe(1);
+        model.releaseContainerRect();
+        expect(model.getBoundingRect()).toEqual({ top: 0, left: 0, width: 900, height: 700 });
+        expect(reads).toBe(2);
+        model.holdContainerRect();
+        model.onContainerResize();
+        expect(model.getBoundingRect()).toEqual({ top: 0, left: 0, width: 900, height: 700 });
+    });
+});

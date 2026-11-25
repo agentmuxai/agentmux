@@ -145,10 +145,36 @@ async fn an_agents_service_read_is_recorded_but_the_windows_reads_and_bookkeepin
     let (_, id) = send(&state, Method::POST, "/agentmux/service", Some(&token), read).await;
     assert_eq!(recorded(&id).await.source_agent.as_deref(), Some("agent:uid-http-act-f"));
     let bookkeeping = r#"{"service":"object","method":"UpdateObjectMeta","args":["block:b1",{"term:osc_title":"build","term:human_turns":2}]}"#;
-    for quiet in [read, bookkeeping, r#"{"service":"credential","method":"Lookup","args":[]}"#, r#"{"service":"window","method":"SetWindowOpacity","args":[]}"#] {
+    for quiet in [read, bookkeeping, r#"{"service":"window","method":"SetWindowOpacity","args":[]}"#] {
         let (_, id) = send(&state, Method::POST, "/agentmux/service", None, quiet).await;
         not_recorded(&id).await;
     }
+}
+
+#[tokio::test]
+async fn the_hosts_plumbing_is_not_recorded_while_it_succeeds_and_is_when_it_is_refused() {
+    let mut state = test_state();
+    state.host_reg_secret = Some("test-host-secret".to_string());
+    // The host proves itself with the registration secret: nothing is written for what it does all the time.
+    let from_host = r#"{"service":"credential","method":"ResolveIdentity","args":[{"block_id":"b-none"},"test-host-secret"]}"#;
+    let (_, id) = send(&state, Method::POST, "/agentmux/service", None, from_host).await;
+    not_recorded(&id).await;
+    // A caller that does not hold the secret is refused, and the refusal is recorded with the names only.
+    for (body, names) in [
+        (r#"{"service":"credential","method":"Fill","args":[{"block_id":"b-none"},"a-guess"]}"#, "credential.Fill"),
+        (r#"{"service":"credential","method":"Lookup","args":[]}"#, "credential.Lookup"),
+        (r#"{"service":"host_ipc","method":"Register","args":[1234,"a-token","a-guess"]}"#, "host_ipc.Register"),
+    ] {
+        let (_, id) = send(&state, Method::POST, "/agentmux/service", None, body).await;
+        let line = recorded(&id).await;
+        assert_eq!((line.source_agent.as_deref(), line.reason.as_deref(), line.success), (Some("unproven"), Some(names), false), "{body}");
+        assert_eq!(line.error_message.as_deref(), Some("service call failed"));
+        assert!(!serde_json::to_string(&line).unwrap().contains("a-guess"), "{line:?}");
+    }
+    // With no secret configured at all the call is refused too, and recorded.
+    let state = test_state();
+    let (_, id) = send(&state, Method::POST, "/agentmux/service", None, from_host).await;
+    assert!(!recorded(&id).await.success);
 }
 
 #[tokio::test]

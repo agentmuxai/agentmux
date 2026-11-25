@@ -30,6 +30,7 @@ import {
     sendAsOperator,
     setOperatorRefusalHandler,
     sendRetryingUnproven,
+    waitsForProof,
 } from "./operator-proof";
 import { RpcClient } from "./rpc-client";
 
@@ -102,6 +103,36 @@ describe("operator proof", () => {
         const result = sendAsOperator(send);
         await vi.advanceTimersByTimeAsync(10_000);
         await expect(result).resolves.toBe("sent");
+    });
+
+    it("proves the connection again every few minutes, before a lease lapses, and not for a closed one", async () => {
+        vi.useFakeTimers();
+        let open = true;
+        const attest = vi.fn(async (_nonce: string) => {});
+        await proveOperatorConnection({ challenge: async () => ({ nonce: "n" }), attest, connected: () => open });
+        expect(attest).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(3 * 60_000);
+        expect(attest).toHaveBeenCalledTimes(2);
+        await vi.advanceTimersByTimeAsync(3 * 60_000);
+        expect(attest).toHaveBeenCalledTimes(3);
+        open = false;
+        await vi.advanceTimersByTimeAsync(10 * 60_000);
+        expect(attest).toHaveBeenCalledTimes(3);
+    });
+
+    it("does not renew when there is no host to vouch, or after a refused proof", async () => {
+        vi.useFakeTimers();
+        const challenge = vi.fn(async () => ({ nonce: "n" }));
+        await proveOperatorConnection({ challenge });
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const attest = vi.fn(async (_nonce: string) => {
+            throw new Error("refused");
+        });
+        await proveOperatorConnection({ challenge, attest });
+        await vi.advanceTimersByTimeAsync(10 * 60_000);
+        expect(attest).toHaveBeenCalledTimes(1);
+        expect(challenge).toHaveBeenCalledTimes(1);
+        warn.mockRestore();
     });
 
     it("sends once more when a reconnect started a new connection meanwhile", async () => {
@@ -242,7 +273,7 @@ describe("operator proof", () => {
         expect(attest).toHaveBeenCalledTimes(1);
     });
 
-    it("names the commands srv keeps for the operator, and only those", () => {
+    it("names the commands srv keeps for the window: every one that is not open", () => {
         for (const c of [
             "kanban.act",
             "jobs.act",
@@ -263,12 +294,37 @@ describe("operator proof", () => {
             "agentanswer",
             "agentcancel",
             "tooldecision",
+            // Reads of another agent's words and the person's own state are the window's too.
+            "agent.output",
+            "getmemory",
+            "getmeta",
+            "jobs.get",
+            "controllerinput",
+            "setmeta",
         ]) {
             expect(isOperatorCommand(c)).toBe(true);
         }
-        for (const c of ["kanban.list", "kanban.task", "operator.challenge", "jobs.list", "jobs.dryrun", "jobs.get"]) {
+        // What any connection may call, and so what the window sends before its proof lands.
+        for (const c of ["kanban.list", "operator.challenge", "jobs.list", "getfullconfig", "eventsub", "notify.ack", "setconfig"]) {
             expect(isOperatorCommand(c)).toBe(false);
         }
+    });
+});
+
+describe("which calls wait for the proof", () => {
+    it("holds a subscription or history read of any event but the launcher's, and sends those at once", () => {
+        for (const command of ["eventsub", "eventreadhistory"]) {
+            expect(waitsForProof(command, { event: "blockfile", allscopes: true })).toBe(true);
+            expect(waitsForProof(command, { event: "controllerstatus", scopes: ["block:x"] })).toBe(true);
+            expect(waitsForProof(command, {})).toBe(true);
+            expect(waitsForProof(command, null)).toBe(true);
+            for (const event of ["notification", "notification:retract", "notification:state"]) {
+                expect(waitsForProof(command, { event })).toBe(false);
+            }
+        }
+        expect(waitsForProof("eventunsub", "blockfile")).toBe(false);
+        expect(waitsForProof("getmemory", null)).toBe(true);
+        expect(waitsForProof("getfullconfig", null)).toBe(false);
     });
 });
 

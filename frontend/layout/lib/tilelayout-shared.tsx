@@ -49,6 +49,7 @@ import {
 } from "./crossTabDrag";
 import { dragState, isCrossTabDrag } from "./tilelayout-drag-state";
 import { stackMovePlan } from "./stackMembers";
+import { holdContainerFor } from "./tile-drag";
 import { tileItemType } from "@/app/drag/drag-types";
 import { setTransform } from "./utils";
 
@@ -70,6 +71,7 @@ function crossTabDropOffered(model: LayoutModel, compute: LayoutTreeComputeMoveN
  */
 function samplePlacement(model: LayoutModel, draggedId: string, target: Pick<PlacementInput, "targetId" | "rect" | "offset">): void {
     const crossTab = isCrossTabDrag(model);
+    if (crossTab) holdContainerFor(model);
     const { direction, compute, targetId } = previewPlacement(model, {
         ...target,
         draggedId,

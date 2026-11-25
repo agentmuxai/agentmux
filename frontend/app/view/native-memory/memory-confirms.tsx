@@ -16,6 +16,7 @@
 import { For, Show, type JSX } from "solid-js";
 
 import { ConfirmModal } from "@/app/element/confirm-modal";
+import { t } from "@/app/i18n/i18n";
 import { openPaneModal, type PaneRequestProps } from "@/app/store/pane-requests";
 
 export type AdoptionFolder = { account: string; files: string[] };
@@ -25,9 +26,9 @@ type Answer = { act: () => Promise<void>; cancel: () => void } & PaneRequestProp
 
 /** How a folder is named to the person. */
 export function accountLabel(account: string): string {
-    if (account === "held") return "Files already in its folder that match another agent's memory";
-    if (account === "default") return "The default (unlinked) account";
-    return `Account ${account.slice(0, 8)}`;
+    if (account === "held") return t("memoryConfirm.heldFolder");
+    if (account === "default") return t("memoryConfirm.defaultAccount");
+    return t("memoryConfirm.account", { id: account.slice(0, 8) });
 }
 
 function answers(props: Answer) {
@@ -48,13 +49,12 @@ export function AdoptConfirm(props: { agentName: string; folders: AdoptionFolder
         <ConfirmModal
             open={true}
             scope="pane"
-            title={`Adopt earlier memory into ${props.agentName}?`}
-            confirmLabel="Adopt"
+            title={t("memoryConfirm.adoptTitle", { name: props.agentName })}
+            confirmLabel={t("memoryConfirm.adopt")}
             {...answers(props)}
         >
             <p class="text-sm">
-                These files become part of {props.agentName}'s memory. Files it already has keep their current
-                content; older versions are kept in their history. They appear in its folder at its next launch.
+                {t("memoryConfirm.adoptBody", { name: props.agentName })}
             </p>
             <For each={props.folders}>
                 {(folder) => (
@@ -67,7 +67,7 @@ export function AdoptConfirm(props: { agentName: string; folders: AdoptionFolder
                 )}
             </For>
             <Show when={props.folders.length === 0}>
-                <p class="mt-3 text-sm">No folders were chosen.</p>
+                <p class="mt-3 text-sm">{t("memoryConfirm.noFolders")}</p>
             </Show>
         </ConfirmModal>
     );
@@ -78,15 +78,13 @@ export function ReleaseConfirm(props: { agentName: string; dir?: string } & Answ
         <ConfirmModal
             open={true}
             scope="pane"
-            title={`Release ${props.agentName}'s claim on this folder?`}
-            confirmLabel="Release"
+            title={t("memoryConfirm.releaseTitle", { name: props.agentName })}
+            confirmLabel={t("memoryConfirm.release")}
             {...answers(props)}
         >
-            <p class="text-sm font-mono break-all">{props.dir ?? "(folder not recorded)"}</p>
+            <p class="text-sm font-mono break-all">{props.dir ?? t("memoryConfirm.noDir")}</p>
             <p class="mt-3 text-sm">
-                While {props.agentName} claims it, no other agent's memory is written to or read from this folder.
-                Release it when {props.agentName} no longer uses it, so another agent that does can sync its memory
-                there. If {props.agentName} still uses it, its next launch claims it again.
+                {t("memoryConfirm.releaseBody", { name: props.agentName })}
             </p>
         </ConfirmModal>
     );

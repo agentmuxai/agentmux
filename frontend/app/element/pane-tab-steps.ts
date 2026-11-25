@@ -8,9 +8,13 @@
  * - `full`: every tab keeps its icon, label and close button; labels are clipped with an ellipsis as the tabs share the
  *   squeeze (plain CSS shrink, no decision needed).
  * - `icon-close`: tabs that are not selected lose their label; the selected tab keeps it.
- * - `icon`: tabs that are not selected are the icon alone; the selected tab keeps its icon and close button.
+ * - `icon`: tabs that are not selected are the icon alone; the selected tab keeps its icon, the start of its title and close button.
  *
  * Below the smallest widths the strip stops shrinking and its header scrolls, as it always did. Pure: no DOM.
+ *
+ * The rule for who gives way: the selected tab gets its room first (its icon, its own buttons and close button whole, and a
+ * readable part of its title), and the other tabs give up width before it does, down to their floors. So the step is
+ * decided by what the other tabs are left with once the selected tab has its room (`othersShare`), not by an equal share.
  */
 
 export type PaneTabStep = "full" | "icon-close" | "icon";
@@ -23,7 +27,15 @@ export const STEP_HYSTERESIS_PX = 8;
 
 /** The least a tab that is not selected keeps, and the least the selected one keeps (icon, close button), in unzoomed px. */
 export const RESTING_FLOOR_PX = 27;
+/** A tab with no icon (a document tab) has only its label to say which it is: its floor leaves a few letters of it. */
+export const RESTING_NO_ICON_FLOOR_PX = 56;
 export const ACTIVE_FLOOR_PX = 47;
+/** The part of the selected tab's title it keeps before anything of its icon, buttons or close button goes: about eight letters. */
+export const ACTIVE_LABEL_MIN_PX = 56;
+/** The most of its title the selected tab asks for (its label's own cap, PaneTabStrip.scss). */
+export const ACTIVE_LABEL_MAX_PX = 190;
+/** The selected tab with no icon: the resting floor's few letters of its label, plus its close button. */
+export const ACTIVE_NO_ICON_FLOOR_PX = 76;
 
 function rank(step: PaneTabStep): number {
     return step === "full" ? 0 : step === "icon-close" ? 1 : 2;
@@ -49,8 +61,34 @@ export function stepFor(share: number, fits: boolean, previous: PaneTabStep): Pa
     return target(share - STEP_HYSTERESIS_PX);
 }
 
-/** The least room, in unzoomed px, the tabs need before the strip stops shrinking and its header scrolls instead. */
-export function minTabsRoom(count: number): number {
+/**
+ * What the selected tab keeps at the least, in unzoomed px: what is not its title (`fixed`: icon, buttons, close button, padding)
+ * and the readable start of its title, or all of a title that is shorter (`label`).
+ */
+export function activeFloor(fixed: number, label: number): number {
+    return Math.max(ACTIVE_FLOOR_PX, fixed + Math.min(label, ACTIVE_LABEL_MIN_PX));
+}
+
+/** What the selected tab takes when nothing is squeezed: its fixed part and its title, to the title's cap. */
+export function activeWant(fixed: number, label: number): number {
+    return Math.max(ACTIVE_FLOOR_PX, fixed + Math.min(label, ACTIVE_LABEL_MAX_PX));
+}
+
+/** What each tab that is not selected is left with: the room less the selected tab's, shared by the others. */
+export function othersShare(room: number, count: number, want: number): number {
+    if (count <= 1) return room;
+    return Math.max(0, room - want) / (count - 1);
+}
+
+/**
+ * The least room, in unzoomed px, the tabs need before the strip stops shrinking and its header scrolls instead:
+ * the selected tab's floor (`activeFloor`: its icon and close button at the least) and the others'.
+ */
+export function minTabsRoom(
+    count: number,
+    restingFloor: number = RESTING_FLOOR_PX,
+    activeFloor: number = ACTIVE_FLOOR_PX
+): number {
     if (count <= 0) return 0;
-    return ACTIVE_FLOOR_PX + (count - 1) * RESTING_FLOOR_PX;
+    return Math.max(activeFloor, ACTIVE_FLOOR_PX) + (count - 1) * restingFloor;
 }

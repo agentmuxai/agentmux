@@ -37,7 +37,6 @@ function magnifier(controls: SearchControls): ToggleIconButtonDecl {
         elemtype: "toggleiconbutton",
         icon: "magnifying-glass",
         title: `Find in conversation (${isMacOS() ? "Cmd" : "Ctrl"}+F)`,
-        className: "agent-search-toggle",
         active,
     };
 }
@@ -74,11 +73,12 @@ export function focusSearchField(blockId: string): void {
 }
 
 /**
- * The bar closed: give focus back to the magnifier, so it is never lost to the page. Only when focus was in the bar
- * (or nowhere, because the bar that held it is gone): a close that came from elsewhere leaves focus where it is.
+ * The bar closed: give focus back to the conversation's composer (the magnifier is a row of the pane's menu now, not a
+ * button), so it is never lost to the page. Only when focus was in the bar (or nowhere, because the bar that held it is
+ * gone): a close that came from elsewhere leaves focus where it is.
  */
-export function restoreFocusToMagnifier(blockId: string): void {
+export function restoreFocusToComposer(blockId: string): void {
     const at = document.activeElement;
     if (at && at !== document.body && !at.closest(".agent-search-bar")) return;
-    frame(blockId)?.querySelector<HTMLElement>(".agent-search-toggle")?.focus();
+    frame(blockId)?.querySelector<HTMLElement>(".agent-input")?.focus();
 }

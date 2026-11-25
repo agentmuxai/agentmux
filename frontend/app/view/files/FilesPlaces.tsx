@@ -4,6 +4,7 @@
 /** The Files pane's sidebar: Places, Drives, WSL, Remote hosts and the agents' folders. */
 
 import { Button, CloseButton, IconButton } from "@/app/element/ui";
+import { useFitToPane } from "@/app/backdrop/pane-fit";
 import { t } from "@/app/i18n/i18n";
 import { openRemotesInPane } from "@/app/view/remotes/open-remotes";
 import { For, Show, type JSX } from "solid-js";
@@ -28,6 +29,7 @@ function PlaceRow(props: { model: FilesModel; place: PlaceRef; pinned?: boolean 
 
 export function FilesPlaces(props: { model: FilesModel }): JSX.Element {
     const model = props.model;
+    const fit = useFitToPane();
     return (
         <Show when={model.showSidebar()}>
             <nav class="files-places" aria-label="Places">
@@ -106,7 +108,7 @@ export function FilesPlaces(props: { model: FilesModel }): JSX.Element {
                         {(a) => (
                             <Button variant="row" density="compact" class="files-place" title={a.path} onClick={() => void model.openOn("", a.path)}>
                                 <i class="fa fa-robot" />
-                                <span style={a.color ? { color: readableAgentColor(a.color) } : undefined}>{a.name}</span>
+                                <span style={a.color ? { color: fit(readableAgentColor(a.color)) } : undefined}>{a.name}</span>
                             </Button>
                         )}
                     </For>
