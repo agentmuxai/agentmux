@@ -19,7 +19,9 @@
  */
 
 import { Show, createEffect, createMemo, type JSX } from "solid-js";
-import { getPaneScope } from "@/app/backdrop/scope";
+import { resolveBackdrop, supportsBackdrop } from "@/app/backdrop/meta";
+import { getPaneScope, identityInPane } from "@/app/backdrop/scope";
+import { useBackdropSuppressed } from "@/app/backdrop/usePaneBackdrop";
 import { UnseenTurnsDot } from "@/app/block/UnseenTurnsDot";
 import { computeFocusRingBorderColor } from "@/app/block/blockframe";
 import { isLightThemeActive } from "@/app/block/pane-identity";
@@ -93,9 +95,15 @@ function createShellLook(nodeModel: NodeModel, s: ShellState) {
             atoms.fullConfigAtom()?.connections,
             MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))()?.meta?.connection
         )?.color;
+    const backdropSuppressed = useBackdropSuppressed();
     const ringBorderColor = createMemo(() => {
         const isLightTheme = isLightThemeActive();
-        return computeFocusRingBorderColor(s.isFocused(), s.activeBlockData()?.meta, isLightTheme);
+        const meta = s.activeBlockData()?.meta;
+        const color = computeFocusRingBorderColor(s.isFocused(), meta, isLightTheme);
+        // The focused ring of a pane with a backdrop is its identity colour moved, in lightness only, to read on the pane's
+        // layers (as the tab's and the status text's are); the resting ring stays the dim one it is.
+        const derived = s.isFocused() && !backdropSuppressed() && supportsBackdrop(meta?.view) ? resolveBackdrop(meta, isLightTheme ? "light" : "dark")?.derived : undefined;
+        return derived ? identityInPane(color, derived) : color;
     });
     return { isAlone, remoteColor, remoteSwatchOf, ringBorderColor };
 }

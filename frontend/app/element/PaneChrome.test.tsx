@@ -21,6 +21,7 @@ import { cleanup, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { slotOf } from "@/app/theme/palette";
+import { contrastRatio } from "@/app/block/pane-color-scheme";
 import { deltaE, tabPaint } from "@/app/theme/paint";
 import { resolveBackdrop } from "@/app/backdrop/meta";
 import { registerPaneScope, releasePaneScope, scopeVars } from "@/app/backdrop/scope";
@@ -589,15 +590,33 @@ describe("renderPaneChromeShell — a pane with a backdrop", () => {
         expect(root.style.getPropertyValue("--surface")).toBe("");
     });
 
+    it("draws the focused ring in the identity colour moved to read on the pane's layers, and the resting ring as it was", () => {
+        setObjectValue("block:b1", { meta: { view: "agent", "frame:hue": 270, backdrop: yellow } });
+        mockLayoutModel = fakeLayoutModel(["b1"]);
+        computeFocusRingBorderColor.mockImplementation(() => "#fa81a4");
+        const d = resolveBackdrop({ backdrop: yellow }, "dark")!.derived;
+        const ring = (focused: boolean) => {
+            const { container, unmount } = render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1", isFocused: () => focused }), <div>content</div>) as any);
+            const value = (container.querySelector(".pane-stack") as HTMLElement).style.getPropertyValue("--pane-ring-color");
+            unmount();
+            return value;
+        };
+        const focused = ring(true);
+        for (const layer of Object.values(d.surfaces)) expect(contrastRatio(focused, layer), `ring on ${layer}`).toBeGreaterThanOrEqual(4.5);
+        expect(ring(false)).not.toBe(focused);
+        computeFocusRingBorderColor.mockImplementation(() => undefined);
+    });
+
     it("paints a pill for the side of the pane's own surface, with a fill its label reads on", () => {
         setObjectValue("block:b1", { meta: { view: "agent", "frame:hue": 270, backdrop: yellow } });
         mockLayoutModel = fakeLayoutModel(["b1"]);
         render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1" }), <div>content</div>) as any);
         const c = headerCalls.at(-1).getColor("b1")!;
         const d = resolveBackdrop({ backdrop: yellow }, "dark")!.derived;
-        const own = tabPaint(slotOf(270)!, d.scheme === "light", { selected: d.ink.text, unselected: d.ink.muted });
+        const own = tabPaint(slotOf(270)!, d.scheme === "light", { selected: d.ink.text, unselected: d.ink.muted }, d.surfaces.surface);
         expect(c.background).toBe(own.unselected);
         expect(c.activeBackground).toBe(own.selected);
+        expect(c.edge).toBe(own.edge);
         expect(c.neutralBackground).toBe(d.surfaces.surface);
         expect(c.background).not.toBe(tabPaint(slotOf(270)!, false, undefined).unselected);
     });

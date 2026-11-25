@@ -151,6 +151,16 @@ describe("scopeVars with the editor's syntax colours and the file-type icon colo
         }
     });
 
+    it("leaves each syntax colour a margin over 5:1 on all three layers, for the editor's active-line tint", () => {
+        const d = deriveInk("#ffffff");
+        const vars = scopeVars(d, dark);
+        for (const token of ["--syntax-plain", "--syntax-comment"]) {
+            for (const layer of Object.values(d.surfaces)) {
+                expect(contrastRatio(vars[token], layer), `${token} on ${layer}`).toBeGreaterThanOrEqual(5.25);
+            }
+        }
+    });
+
     it("holds an icon colour to 3:1, not 4.5, since an icon is a graphic and its shape says what it is", () => {
         const d = deriveInk("#f4efe0");
         const vars = scopeVars(d, dark);

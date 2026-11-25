@@ -70,6 +70,8 @@ import type { PaneTabProgress } from "@/app/store/pane-tab-progress";
  *  tint through. */
 export interface PaneTabColors {
     underline?: string;
+    /** A hairline round the selected pill, for a pill whose fill is too near the header behind it (a pane's backdrop). */
+    edge?: string;
     background?: string;
     /** The selected pill's background (a step stronger than `background`);
      *  falls back to `background` when absent. */
@@ -552,6 +554,7 @@ function pillColorStyle(c: PaneTabColors | undefined): JSX.CSSProperties {
         ...(c.activeBackground ? { "--pane-tab-bg-active": c.activeBackground } : {}),
         ...(c.hoverBackground ? { "--pane-tab-bg-hover": c.hoverBackground } : {}),
         ...(c.underline ? { "--pane-tab-underline": c.underline } : {}),
+        ...(c.edge ? { "--pane-tab-edge": c.edge } : {}),
         ...(c.neutralBackground ? { "--pane-tab-neutral-bg": c.neutralBackground } : {}),
     } as JSX.CSSProperties;
 }

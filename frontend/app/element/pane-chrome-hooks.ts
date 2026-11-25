@@ -328,10 +328,11 @@ export function createTabColors(tabIds: Accessor<string[]>, activeBlockId: Acces
         for (const blockId of tabIds()) {
             const meta = blockMeta(blockId);
             const slot = blockIdentitySlot(meta);
-            const paint = slot ? tabPaint(slot, onBackdrop ? onBackdrop.light : isLightTheme, onBackdrop ? onBackdrop.ink : ink) : undefined;
+            const paint = slot ? tabPaint(slot, onBackdrop ? onBackdrop.light : isLightTheme, onBackdrop ? onBackdrop.ink : ink, onBackdrop?.surface) : undefined;
             colors.set(blockId, {
                 // The bar, moved in lightness until it is seen on the selected pill; an uncoloured tab falls back to accent.
                 underline: paint?.bar,
+                edge: paint?.edge,
                 background: paint?.unselected,
                 activeBackground: paint?.selected,
                 hoverBackground: paint?.unselectedHover,

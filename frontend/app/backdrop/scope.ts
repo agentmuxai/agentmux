@@ -45,8 +45,12 @@ export const ANSI_CONTRAST = 4.5;
 export const GLYPH_CONTRAST = 3;
 const GLYPH_SET: ReadonlySet<string> = new Set(mapped.glyphs);
 
-/** What code colours are held to: a margin over 4.5, since a coloured token of a given lightness is not as luminous as a grey one. */
-export const SYNTAX_CONTRAST = 5;
+/**
+ * What code colours are held to: a margin over 4.5, since a coloured token of a given lightness is not as luminous as a
+ * grey one, and a little over 5 so that the editor's active line (a tint of the accent, which lowers the contrast of the
+ * text on it by about 3%) still leaves it at 5.
+ */
+export const SYNTAX_CONTRAST = 5.3;
 const SYNTAX_SET: ReadonlySet<string> = new Set(mapped.syntax);
 
 /**

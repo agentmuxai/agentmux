@@ -63,6 +63,11 @@ export interface TabPaint {
     selectedHover: string;
     /** The bar on the selected tab. */
     bar: string;
+    /**
+     * A hairline round the selected tab, in the bar's colour: set only when the fill cannot stand off the surface it sits on
+     * by `BAR_FLOOR` under its label (a pane's backdrop), so the tab's edge still does.
+     */
+    edge?: string;
 }
 
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
@@ -93,6 +98,45 @@ export function moveTone(hex: string, checks: Check[], direction: 1 | -1): strin
         if (holds(last)) return last;
     }
     return last;
+}
+
+/**
+ * `hex` moved in OKLCH lightness only to the nearest tone, on either side, that passes every check: the same colour when it
+ * already does, and undefined when no tone does. (`moveTone` goes one way; a fill that has to hold a label on one side and a
+ * surface on the other can need either.)
+ */
+export function nearestTone(hex: string, checks: Check[]): string | undefined {
+    const o = oklchOfHex(hex);
+    const holds = (c: string) => checks.every((k) => contrastRatio(c, k.against) >= k.floor);
+    if (!o || holds(hex)) return hex;
+    for (let step = 0.005; step <= 1; step += 0.005) {
+        for (const l of [o.l - step, o.l + step]) {
+            if (l < 0 || l > 1) continue;
+            const c = oklchToHex(l, o.c, o.h);
+            if (holds(c)) return c;
+        }
+    }
+    return undefined;
+}
+
+/**
+ * The tone of `hex`'s hue and chroma that holds every check and is the furthest from `surface` (the nearest one that reaches
+ * `floor` when some does); `hex` itself when no tone is further than it is.
+ */
+export function standOff(hex: string, checks: Check[], surface: string, floor: number): string {
+    const reached = nearestTone(hex, [...checks, { against: surface, floor }]);
+    if (reached) return reached;
+    const o = oklchOfHex(hex);
+    if (!o) return hex;
+    let best = hex;
+    let bestRatio = checks.every((k) => contrastRatio(hex, k.against) >= k.floor) ? contrastRatio(hex, surface) : 0;
+    for (let l = 0; l <= 1; l += 0.005) {
+        const c = oklchToHex(l, o.c, o.h);
+        if (!checks.every((k) => contrastRatio(c, k.against) >= k.floor)) continue;
+        const r = contrastRatio(c, surface);
+        if (r > bestRatio) [best, bestRatio] = [c, r];
+    }
+    return best;
 }
 
 /** The side of its checks a fill moves to: away from the first one's colour (toward white from dark ink, toward black from light). */
@@ -145,10 +189,17 @@ function hoverFill(rest: string, checks: Check[], step: number): string {
 /**
  * The bar of the selected tab: the slot's identity tone, moved in lightness away from the fills it sits on (lighter on a
  * dark theme, darker on a light one, the side the strip behind it is on) until it holds `BAR_TARGET` against the selected
- * fill and its hover. So the bar is the picked hue, drawn so that it can be seen on the tab it marks.
+ * fill and its hover. So the bar is the picked hue, drawn so that it can be seen on the tab it marks. On a `surface` (a
+ * pane's backdrop) it holds that too, on whichever side it can.
  */
-function barOn(slot: PaletteSlot, isLightTheme: boolean, fills: string[]): string {
-    return moveTone(slotRoleColor(slot, isLightTheme, "identity"), fills.map((against) => ({ against, floor: BAR_TARGET })), isLightTheme ? -1 : 1);
+function barOn(slot: PaletteSlot, isLightTheme: boolean, fills: string[], surface?: string): string {
+    const identity = slotRoleColor(slot, isLightTheme, "identity");
+    const checks = fills.map((against) => ({ against, floor: BAR_TARGET }));
+    if (surface) {
+        const fitted = nearestTone(identity, [...checks, { against: surface, floor: BAR_TARGET }]);
+        if (fitted) return fitted;
+    }
+    return moveTone(identity, checks, isLightTheme ? -1 : 1);
 }
 
 /**
@@ -171,8 +222,12 @@ function tabFills(slot: PaletteSlot, theme: Theme): { selected: string; unselect
     return { selected: oklchToHex(t.selected.l, t.selected.c, hue), unselected: oklchToHex(t.unselected.l, t.unselected.c, hue) };
 }
 
-/** What a window tab of this slot paints in a theme, every fill readable under `ink`. */
-export function tabPaint(slot: PaletteSlot, isLightTheme: boolean, ink?: TabInk): TabPaint {
+/**
+ * What a window tab of this slot paints in a theme, every fill readable under `ink`. With a `surface` (the header row
+ * of a pane with a backdrop) the selected fill stands off it as far as its label allows (by `BAR_FLOOR` when the label
+ * floor leaves room, and the `edge` when it does not), and the bar reads on both.
+ */
+export function tabPaint(slot: PaletteSlot, isLightTheme: boolean, ink?: TabInk, surface?: string): TabPaint {
     const theme: Theme = isLightTheme ? "light" : "dark";
     const labels = ink ?? DEFAULT_TAB_INK[theme];
     const base = tabFills(slot, theme);
@@ -180,15 +235,19 @@ export function tabPaint(slot: PaletteSlot, isLightTheme: boolean, ink?: TabInk)
     // The selected tab's label is the main text, and its close mark (shown on it always) the secondary text.
     const onSelected: Check[] = [{ against: labels.selected, floor: LABEL_FLOOR }, { against: labels.unselected, floor: CLOSE_FLOOR }];
     const onUnselected: Check[] = [{ against: labels.unselected, floor: LABEL_FLOOR }];
-    const selected = fitFill(base.selected, onSelected);
+    const fitted = fitFill(base.selected, onSelected);
+    const selected = surface ? standOff(fitted, onSelected, surface, BAR_TARGET) : fitted;
     const unselected = fitFill(base.unselected, onUnselected);
     const selectedHover = hoverFill(selected, onSelected, step);
+    const bar = barOn(slot, isLightTheme, [selected, selectedHover], surface);
+    const standsOff = !surface || contrastRatio(selected, surface) >= BAR_FLOOR;
     return {
         selected,
         selectedHover,
         unselected,
         unselectedHover: hoverFill(unselected, onUnselected, step),
-        bar: barOn(slot, isLightTheme, [selected, selectedHover]),
+        bar,
+        ...(standsOff ? {} : { edge: bar }),
     };
 }
 
