@@ -198,3 +198,12 @@ Small PRs, each with before and after numbers from section 6:
 A fix that changes what the person sees during the drag (a different picture, a different order of what appears) goes to
 the requester first with a screenshot or recording. The redock side of these windows has a fix of its own in progress, so
 its files are not changed without checking with its author.
+
+## 8. What the first two fixes measured
+
+Real-mouse runs on Windows test hosts, one isolated build at a time, host log at debug.
+
+- **Clicks, picture at the press taken only when the press becomes a drag (the first fix).** 10 header clicks: 10 window pictures before, 0 after (each took 149 to 402 ms). Real, and kept as the goal.
+- **Drags with that fix.** One picture per drag on both sides, taking the same time (about 100 ms ordinary, 140 to 200 ms quick, within the noise of 3 drags a group). But the picture now starts at the first 3 px of movement instead of at the press, so a drag that starts shortly after the press has lost the head start the picture had. With the host's cut in place, the drag's drawing waited for the picture 112 to 142 ms (median 124) when the pointer moved 90 ms after the press, and 0 ms when the press was held 300 ms. The 90 ms case is how a person normally starts a drag, so the first fix was taken out again until the picture can be made at the press without the click cost (the press arms the host, which keeps the window picture and cuts the pane out of it only when a drag begins).
+- **The host's cut (the second fix).** Kept. The drag's drawing is released when the window has been pictured, as before; decode, crop and encode happen in the host after that. Each drag now logs how long its drawing was held for the picture (`[tearoff-perf]` in the page's log lines), so a person's own drags measure it with no special run.
+- **What stays the same on both sides.** The long blocked frames of a drag (200 to 300 ms) are the drag ghost's rasterising (html-to-image re-embedding the page's fonts), not the window picture; they are the next cost.
