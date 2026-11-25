@@ -213,12 +213,13 @@ function ownWindowLabel(): string {
 
 /**
  * The window's viewport, cropped to `rect`, as a base64 JPEG. `shot` is called once the window has been pictured.
- * A pane shown whole is cut out in the host: the page neither takes the window's whole picture over the host
- * channel nor decodes, draws and encodes it on the thread the drag's first frames need. A tab alone (`solo`) draws its
- * pill from the window's picture, so that one is still cut here.
+ * On Windows a pane shown whole is cut out in the host: the page neither takes the window's whole picture over the
+ * host channel nor decodes, draws and encodes it on the thread the drag's first frames need. The host's cut is
+ * Windows only; the other platforms take the landing picture of a pane here, as before. A tab alone (`solo`) draws
+ * its pill from the window's picture, so that one is still cut here.
  */
 async function capturePane(rect: CssRect, shot: () => void, solo?: TabStripInPane): Promise<string | null> {
-    if (!solo) {
+    if (!solo && isWindows()) {
         const { jpeg_base64 } = await getApi().windows.capturePanePicture(ownWindowLabel(), rect, window.innerWidth, 80);
         shot();
         return jpeg_base64;

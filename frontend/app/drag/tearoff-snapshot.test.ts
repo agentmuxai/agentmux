@@ -7,6 +7,7 @@
  * SPEC_TEAROFF_PAINT_LATENCY_2026_09_30.md phase 3.1.
  */
 
+import { setPlatform } from "@/util/platformutil";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const shots = vi.hoisted(() => ({
@@ -104,10 +105,12 @@ beforeEach(() => {
     shots.cut = [];
     shots.cutPicture = "cropped-pane";
     shots.page = "browser-page";
+    setPlatform("win32");
     resetTearOffSnapshotForTests();
     stubImagePipeline();
 });
 afterEach(async () => {
+    setPlatform("darwin");
     vi.useRealTimers();
     // No capture a test didn't await may finish after it: one that did used to
     // throw inside jsdom after teardown (docs/reports/
@@ -125,6 +128,15 @@ describe("tear-off snapshot", () => {
         // The host is asked for the pane's CSS rect of the window, and cuts it out: the page draws nothing.
         expect(shots.cut).toEqual([{ rect: { left: 10, top: 20, width: 300, height: 200 }, viewportWidth: window.innerWidth }]);
         expect(shots.drawn).toEqual([]);
+    });
+
+    it("off Windows the pane is cut out in the page from the window's picture, as before: the host's cut is Windows only", async () => {
+        setPlatform("darwin");
+        mountPane("b1");
+        prewarmTearOffSnapshot("b1");
+        expect(await takeTearOffSnapshot("b1")).toBe(btoa("cropped-pane"));
+        expect(shots.cut).toEqual([]);
+        expect(shots.drawn).toEqual([[20, 40, 600, 400, 0, 0, 600, 400]]);
     });
 
     it("a picture older than the age limit is dropped, unless the live follow has been showing it", async () => {

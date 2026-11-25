@@ -10,12 +10,12 @@ use std::sync::Arc;
 use crate::state::AppState;
 
 /// The quality the cut picture is encoded at, as the page encoded it (0.8).
-#[cfg(any(target_os = "windows", test))]
+#[cfg(target_os = "windows")]
 const CUT_QUALITY: u8 = 80;
 
 /// The pane's rect of the page (left, top, width, height, CSS px) cut out of `jpeg`, a picture of the page's
 /// whole viewport that is `viewport_width` CSS px wide, as a JPEG. None when nothing of the pane is in it.
-#[cfg(any(target_os = "windows", test))]
+#[cfg(target_os = "windows")]
 pub(crate) fn cut_pane(
     jpeg: &[u8],
     rect: (f64, f64, f64, f64),
@@ -98,7 +98,7 @@ pub async fn capture(
     Err("capture_pane_picture is only available on Windows".to_string())
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "windows"))]
 mod tests {
     use super::cut_pane;
 
