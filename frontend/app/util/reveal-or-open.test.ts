@@ -23,6 +23,10 @@ interface World {
     /** `unmounted`, but in the shown tab (a background member of one of its panes' stacks). */
     unmountedShown?: boolean;
     reveal?: Reveal;
+    /** The block `unmounted` is in the tab's block list and in no pane of its layout, which has loaded. */
+    stray?: boolean;
+    /** `stray`, but only seen once the block's tab is shown (the reveal ran): another tab's layout is not read before that. */
+    strayOnceShown?: boolean;
 }
 
 function run(world: World, req: Partial<RevealRequest> = {}) {
@@ -42,6 +46,7 @@ function run(world: World, req: Partial<RevealRequest> = {}) {
             calls.push(`reveal:${id}`);
             return world.reveal ?? { ok: true };
         },
+        isUnplaced: async (id) => id === world.unmounted && (world.stray === true || (world.strayOnceShown === true && calls.some((c) => c.startsWith("reveal:")))),
         create: async () => {
             calls.push("create");
             return "new-block";
@@ -102,6 +107,27 @@ describe("revealOrOpen", () => {
             { currentTabOnly: true },
             { kind: "opened_here", blockId: "new-block" },
             ["record", "create"],
+        ],
+        [
+            "a block of the shown tab that is in no pane of its layout is not waited for: a new pane is opened",
+            { unmounted: "b3", unmountedShown: true, stray: true },
+            { currentTabOnly: true },
+            { kind: "opened_here", blockId: "new-block" },
+            ["record", "create"],
+        ],
+        [
+            "a block of another tab that is in no pane is replaced too, once its tab is shown and the layout has no pane for it",
+            { unmounted: "b3", strayOnceShown: true, reveal: { ok: false, reason: "layout-timeout" } as Reveal },
+            {},
+            { kind: "opened_here", blockId: "new-block" },
+            ["record", "reveal:b3", "create"],
+        ],
+        [
+            "a layout that is only slow still leaves its pane where it is",
+            { unmounted: "b3", reveal: { ok: false, reason: "layout-timeout" } as Reveal },
+            {},
+            { kind: "failed", reason: "layout-timeout", blockId: "b3" },
+            ["record", "reveal:b3"],
         ],
         ["no pane open: one is opened here", {}, {}, { kind: "opened_here", blockId: "new-block" }, ["record", "create"]],
         [
