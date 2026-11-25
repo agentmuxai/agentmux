@@ -8,6 +8,7 @@
 //! when it asks for one (`split`), a floating window only when it asks for one (`floating`), and a tab of the person's
 //! other panes or of another window tab never: the group is looked for in the agent's own tab only.
 
+use crate::backend::obj::{LayoutState, Tab};
 use crate::backend::storage::store::Store;
 use crate::backend::rpc_types::CommandPaneOpenData;
 use crate::server::AppState;
@@ -23,11 +24,18 @@ fn names_where(cmd: &CommandPaneOpenData) -> bool {
         || super::floater_place::names_placement(cmd)
 }
 
-/// The pane `agent` stacks its next pane onto: the newest pane it opened that is still there, docked, in the tab of its
-/// own pane `own`; else `own`. `opened` is the agent's docked panes, newest first.
+/// The panes the layout of tab `tab_id` holds: a block made with no placement is in the tab but in no pane.
+fn laid_out(mstore: &Store, tab_id: &str) -> Vec<String> {
+    let layout = mstore.get::<Tab>(tab_id).ok().flatten().and_then(|tab| mstore.get::<LayoutState>(&tab.layoutstate).ok().flatten());
+    layout.and_then(|l| l.rootnode).map(|root| super::member_block_ids(&root)).unwrap_or_default()
+}
+
+/// The pane `agent` stacks its next pane onto: the newest pane it opened that is still there, docked, in a pane of the
+/// tab of its own pane `own`; else `own`. `opened` is the agent's docked panes, newest first.
 pub(crate) fn target_for(mstore: &Store, opened: &[String], own: &str) -> Option<String> {
     let own_tab = super::resolve_tab_id_for_block(mstore, own).ok()?;
-    let earlier = opened.iter().find(|pane| super::resolve_tab_id_for_block(mstore, pane).is_ok_and(|tab| tab == own_tab));
+    let held = laid_out(mstore, &own_tab);
+    let earlier = opened.iter().find(|pane| held.contains(pane));
     Some(earlier.map_or_else(|| own.to_string(), Clone::clone))
 }
 

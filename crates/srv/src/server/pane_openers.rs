@@ -58,7 +58,7 @@ fn lock() -> std::sync::MutexGuard<'static, BTreeMap<String, Entry>> {
 /// the same millisecond still have an order.
 fn stamp() -> u64 {
     static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+    let now = agentmux_common::time::now_ms_u64();
     let mut last = LAST.load(std::sync::atomic::Ordering::Relaxed);
     loop {
         let next = now.max(last + 1);

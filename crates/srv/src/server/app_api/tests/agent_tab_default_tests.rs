@@ -173,6 +173,17 @@ async fn a_pane_that_is_gone_or_in_another_tab_is_not_a_group_to_join() {
     let (_t2, mine) = (&_tab, own.clone());
     let live = vec!["a-pane-that-was-closed".to_string(), elsewhere, mine.clone()];
     assert_eq!(target_for(&state.mstore, &live, &own).as_deref(), Some(mine.as_str()));
+    // A block made with no placement is in the tab but in no pane: not a group to join (it would fail the open).
+    let (tab, own) = tab_with_a_pane(&state).await;
+    let unplaced = dispatch_apply(&state, Command::CreateBlock { tab_id: tab, meta: json!({ "view": "files" }) }).await;
+    let unplaced = unplaced
+        .iter()
+        .find_map(|e| match e {
+            Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(target_for(&state.mstore, &[unplaced], &own).as_deref(), Some(own.as_str()));
     // Its own pane is not in any tab: nothing to join.
     assert_eq!(target_for(&state.mstore, &[], "no-such-pane"), None);
 }
