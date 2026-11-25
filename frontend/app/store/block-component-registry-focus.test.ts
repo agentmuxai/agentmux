@@ -45,6 +45,8 @@ vi.mock("@/app/util/reveal-app-scope", () => ({ appRevealDeps: {} }));
 const unmounted = vi.hoisted(() => new Map<string, { id: string; shown: boolean }>());
 const searched = vi.hoisted(() => [] as unknown[]);
 const strays = vi.hoisted(() => new Set<string>());
+/** The failure notices a click left to the person: `block:reason`. */
+const told = vi.hoisted(() => [] as string[]);
 vi.mock("@/app/util/reveal-block", () => ({
     findOpenBlockByView: async (view: string, _identity?: string, opts?: { shownTabOnly?: boolean }) => {
         searched.push(opts);
@@ -52,6 +54,7 @@ vi.mock("@/app/util/reveal-block", () => ({
         return found && (found.shown || !opts?.shownTabOnly) ? found.id : null;
     },
     isUnplacedInShownTab: async (id: string) => strays.has(id),
+    tellRevealFailure: (id: string, failure: { reason: string }) => void told.push(`${id}:${failure.reason}`),
     revealBlock: async (id: string, opts?: unknown) => {
         calls.push(`reveal:${id}`);
         return revealBlock(id, opts);
@@ -81,6 +84,7 @@ describe("openOrFocusPaneIdByView", () => {
         layout.magnified = undefined;
         unmounted.clear();
         strays.clear();
+        told.length = 0;
         for (const id of ["warden-1", "mem-1", "settings-1"]) unregisterBlockComponentModel(id);
     });
 
@@ -131,15 +135,18 @@ describe("openOrFocusPaneIdByView", () => {
             expect(await openOrFocusPaneIdByView("warden")).toBe("warden-1");
         }
         expect(createBlock).not.toHaveBeenCalled();
+        expect(told).toEqual(["warden-1:superseded", "warden-1:layout-timeout", "warden-1:mismatch"]);
+        told.length = 0;
         revealBlock.mockResolvedValue({ ok: false, reason: "gone" });
         expect(await openOrFocusPaneIdByView("warden")).toBe("new-block");
+        expect(told).toEqual([]);
     });
 
     it("brings an inactive tab of a pane's stack to the front instead of opening a copy of it", async () => {
         unmounted.set("memory", { id: "mem-stacked", shown: true }); // open, but unmounted: not in the component registry
         expect(await openOrFocusPaneIdByView("memory")).toBe("mem-stacked");
         expect(calls).toEqual(["reveal:mem-stacked"]);
-        expect(revealBlock).toHaveBeenCalledWith("mem-stacked", { source: "widget", localOnly: true });
+        expect(revealBlock).toHaveBeenCalledWith("mem-stacked", { source: "widget", localOnly: true, quiet: true });
         expect(searched).toEqual([{ shownTabOnly: true }]);
         expect(createBlock).not.toHaveBeenCalled();
     });
@@ -158,6 +165,7 @@ describe("openOrFocusPaneIdByView", () => {
         expect(await openOrFocusPaneIdByView("vault")).toBe("new-block");
         expect(revealBlock).toHaveBeenCalledTimes(1);
         expect(createBlock).toHaveBeenCalledTimes(1);
+        expect(told).toEqual([]);
     });
 
     it("shows, and does not copy, a block whose pane is still being placed when the layout catches up in the wait", async () => {
@@ -191,7 +199,7 @@ describe("openOrFocusPaneIdByView", () => {
     it("goes to a pane mounted in another tab when asked to switch tabs, instead of opening a second one", async () => {
         register("settings-1", "settings");
         expect(await openOrFocusPaneIdByView("settings", undefined, undefined, { switchTabs: true })).toBe("settings-1");
-        expect(revealBlock).toHaveBeenCalledWith("settings-1", { source: "widget", localOnly: true });
+        expect(revealBlock).toHaveBeenCalledWith("settings-1", { source: "widget", localOnly: true, quiet: true });
         expect(createBlock).not.toHaveBeenCalled();
     });
 
