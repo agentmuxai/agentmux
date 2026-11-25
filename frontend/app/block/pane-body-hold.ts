@@ -43,13 +43,19 @@ export function measureBodyHold(content: HTMLElement): BodyHold | null {
 }
 
 /**
- * How often, during a drag, a held body is laid out again at the size its frame has by then, in ms. The body is
- * never laid out per pointer move (that was the slowness); this is the pace at which it catches up, so a terminal
- * or a transcript is not left broken until release. `localStorage["agentmux:pane-drag-refresh-ms"]` overrides it
- * for tuning (0: only on release, as before).
+ * How long, during a drag, a held body may go without being laid out again at the size its frame has by then, in
+ * ms. The body is never laid out per pointer move (that was the slowness): the bodies catch up when the pointer
+ * pauses (DRAG_PAUSE_MS), and at the latest this long after the last catch-up while it keeps moving, one pane to
+ * a frame and not when the page is behind (see below), so a terminal or a transcript is not left broken until
+ * release. `localStorage["agentmux:pane-drag-refresh-ms"]` overrides it for tuning (0: only on release).
  */
-export const DEFAULT_DRAG_REFRESH_MS = 120;
+export const DEFAULT_DRAG_REFRESH_MS = 500;
 const REFRESH_KEY = "agentmux:pane-drag-refresh-ms";
+
+/** A pointer that has not moved for this long, in ms, is a pause: the bodies catch up. */
+export const DRAG_PAUSE_MS = 80;
+/** A frame that began this long, in ms, after the one before it means the page is behind: no body catches up in it. */
+export const BEHIND_FRAME_MS = 28;
 
 export function dragRefreshMs(): number {
     try {
@@ -61,24 +67,79 @@ export function dragRefreshMs(): number {
     return DEFAULT_DRAG_REFRESH_MS;
 }
 
-// One clock for every held pane of a drag: a tick says "measure again".
+// A round of catching up bumps this once it has been through every held pane: a held thing that is not a body (a
+// browser pane's native page) catches up on it.
 const [holdTick, setHoldTick] = createSignal(0);
-/** The drag's refresh clock, for a held thing that is not a body (a browser pane's native page): it catches up on each tick. */
+/** The drag's catch-up clock, for a held thing that is not a body (a browser pane's native page): it catches up on each round. */
 export const dragRefreshTick: Accessor<number> = holdTick;
-let tickTimer: ReturnType<typeof setInterval> | undefined;
-let tickUsers = 0;
 
-function startTicks(): void {
-    if (++tickUsers !== 1) return;
-    const ms = dragRefreshMs();
-    if (ms > 0) tickTimer = setInterval(() => setHoldTick((n) => n + 1), ms);
+/** Lays one held body out again at its frame's size; false when it had nothing to do (its size has not changed). */
+type CatchUp = () => boolean;
+
+/**
+ * The window's one catch-up clock for every held pane of a drag. A pane that lays its body out again costs a layout
+ * (a terminal refits, a transcript re-measures its rows): all of them in one go made a frame of 100 ms and more, which
+ * is where the border stalled behind the pointer. So a round goes through the panes one body to a frame, never in a frame
+ * that began late (the page is behind), and only when the pointer has paused or the bodies have waited the pace.
+ */
+const catchUps = new Set<CatchUp>();
+let clockFrame: number | undefined;
+let lastMoveAt = 0;
+let lastFrameAt = 0;
+let lastRoundAt = 0;
+let round: CatchUp[] | null = null;
+
+function onDragPointerMove(e: Event): void {
+    lastMoveAt = e.timeStamp;
 }
 
-function stopTicks(): void {
-    if (--tickUsers > 0) return;
-    tickUsers = 0;
-    if (tickTimer !== undefined) clearInterval(tickTimer);
-    tickTimer = undefined;
+function clockStep(t: number): void {
+    clockFrame = undefined;
+    if (catchUps.size === 0) return;
+    const behind = lastFrameAt > 0 && t - lastFrameAt > BEHIND_FRAME_MS;
+    lastFrameAt = t;
+    const pace = dragRefreshMs();
+    if (!behind && pace > 0) {
+        if (!round && (t - lastMoveAt >= DRAG_PAUSE_MS || t - lastRoundAt >= pace)) round = [...catchUps];
+        if (round) {
+            // The bodies that have nothing to do cost nothing: the frame is spent on the first that lays out.
+            while (round.length > 0) {
+                const next = round.shift()!;
+                if (catchUps.has(next) && next()) break;
+            }
+            if (round.length === 0) {
+                round = null;
+                lastRoundAt = t;
+                setHoldTick((n) => n + 1);
+            }
+        }
+    }
+    clockFrame = requestAnimationFrame(clockStep);
+}
+
+function addCatchUp(run: CatchUp): void {
+    if (catchUps.size === 0) {
+        lastFrameAt = 0;
+        lastRoundAt = performance.now();
+        lastMoveAt = lastRoundAt;
+        window.addEventListener("pointermove", onDragPointerMove, { capture: true, passive: true });
+        if (typeof requestAnimationFrame === "function" && dragRefreshMs() > 0) clockFrame = requestAnimationFrame(clockStep);
+    }
+    catchUps.add(run);
+}
+
+function removeCatchUp(run: CatchUp): void {
+    catchUps.delete(run);
+    if (catchUps.size > 0) return;
+    window.removeEventListener("pointermove", onDragPointerMove, { capture: true });
+    if (clockFrame !== undefined) cancelAnimationFrame(clockFrame);
+    clockFrame = undefined;
+    round = null;
+}
+
+/** Whether a splitter drag is on in this window: for what only needs to keep up with the page while none is. */
+export function splitterDragActive(): boolean {
+    return catchUps.size > 0;
 }
 
 // A pane's body size is kept up to date by a ResizeObserver, so a drag never has to ask the page for a layout (reading
@@ -127,20 +188,24 @@ export function usePaneBodyHold(
     const [hold, setHold] = createSignal<BodyHold | null>(null, { equals: sameHold });
     createEffect(() => {
         if (!dragging()) return setHold(null);
-        startTicks();
-        onCleanup(stopTicks);
+        const catchUp: CatchUp = () => {
+            const el = content();
+            if (!el || !holdsBodyDuringDrag(untrack(view))) return false;
+            const next = bodySize(el);
+            if (sameHold(untrack(hold), next)) return false;
+            setHold(next);
+            return true;
+        };
+        // The body holds the size it has as the drag begins; later it catches up with the clock.
+        catchUp();
+        addCatchUp(catchUp);
+        onCleanup(() => removeCatchUp(catchUp));
     });
     createEffect(() => {
         const el = content();
         if (!el) return;
         observeBody(el);
         onCleanup(() => unobserveBody(el));
-    });
-    createEffect(() => {
-        if (!dragging()) return;
-        holdTick();
-        const el = content();
-        if (el && holdsBodyDuringDrag(untrack(view))) setHold(bodySize(el));
     });
     return hold;
 }

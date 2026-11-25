@@ -4,7 +4,7 @@
 
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_DRAG_REFRESH_MS, dragRefreshMs, usePaneBodyHold } from "./pane-body-hold";
+import { BEHIND_FRAME_MS, DEFAULT_DRAG_REFRESH_MS, DRAG_PAUSE_MS, dragRefreshMs, dragRefreshTick, splitterDragActive, usePaneBodyHold } from "./pane-body-hold";
 
 const KEY = "agentmux:pane-drag-refresh-ms";
 
@@ -85,6 +85,98 @@ describe("usePaneBodyHold during a drag", () => {
         expect(vi.getTimerCount()).toBe(0);
         m1.dispose();
         m2.dispose();
+    });
+
+
+    describe("the catch-up clock", () => {
+        const move = () => window.dispatchEvent(new Event("pointermove"));
+        // A frame is 16 ms on the fake clock.
+        const frames = (n: number) => vi.advanceTimersByTime(16 * n);
+
+        it("waits while the pointer keeps moving, and catches up when it pauses", () => {
+            const f = frame({ w: 400, h: 300 });
+            const [dragging, setDragging] = createSignal(true);
+            const { hold, dispose } = mount(dragging, f.el);
+            f.size.w = 450;
+            for (let t = 0; t < DEFAULT_DRAG_REFRESH_MS - 100; t += 16) {
+                move();
+                frames(1);
+            }
+            expect(hold()).toEqual({ width: 400, height: 300 });
+            vi.advanceTimersByTime(DRAG_PAUSE_MS + 32);
+            expect(hold()).toEqual({ width: 450, height: 300 });
+            setDragging(false);
+            dispose();
+        });
+
+        it("catches up at the latest after the pace even while the pointer keeps moving", () => {
+            const f = frame({ w: 400, h: 300 });
+            const [dragging, setDragging] = createSignal(true);
+            const { hold, dispose } = mount(dragging, f.el);
+            f.size.w = 450;
+            for (let t = 0; t < DEFAULT_DRAG_REFRESH_MS + 64; t += 16) {
+                move();
+                frames(1);
+            }
+            expect(hold()).toEqual({ width: 450, height: 300 });
+            setDragging(false);
+            dispose();
+        });
+
+        it("lays out one body in a frame, not all of them in one", () => {
+            const a = frame({ w: 400, h: 300 });
+            const b = frame({ w: 200, h: 300 });
+            const c = frame({ w: 300, h: 300 });
+            const [dragging, setDragging] = createSignal(true);
+            const holds = [mount(dragging, a.el), mount(dragging, b.el), mount(dragging, c.el)];
+            for (const fr of [a, b, c]) fr.size.w += 50;
+            vi.advanceTimersByTime(DRAG_PAUSE_MS);
+            const changed = () => holds.filter((m, i) => m.hold()!.width !== [400, 200, 300][i]).length;
+            let most = 0;
+            for (let i = 0; i < 8; i++) {
+                const before = changed();
+                frames(1);
+                most = Math.max(most, changed() - before);
+            }
+            expect(most).toBe(1);
+            expect(changed()).toBe(3);
+            setDragging(false);
+            holds.forEach((m) => m.dispose());
+        });
+
+        it("does not lay out a body in a frame that began late: the page is behind", () => {
+            // Every frame comes later than BEHIND_FRAME_MS after the one before it.
+            const spy = vi
+                .spyOn(window, "requestAnimationFrame")
+                .mockImplementation((cb) => window.setTimeout(() => cb(performance.now()), BEHIND_FRAME_MS + 20) as unknown as number);
+            const cancel = vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => window.clearTimeout(id));
+            const f = frame({ w: 400, h: 300 });
+            const [dragging, setDragging] = createSignal(true);
+            const { hold, dispose } = mount(dragging, f.el);
+            f.size.w = 450;
+            vi.advanceTimersByTime(DEFAULT_DRAG_REFRESH_MS * 3);
+            expect(hold()).toEqual({ width: 400, height: 300 });
+            setDragging(false);
+            dispose();
+            spy.mockRestore();
+            cancel.mockRestore();
+        });
+
+        it("ticks the browser panes' clock once a round, and says a drag is on only while it is", () => {
+            const f = frame({ w: 400, h: 300 });
+            const [dragging, setDragging] = createSignal(false);
+            const { dispose } = mount(dragging, f.el);
+            expect(splitterDragActive()).toBe(false);
+            setDragging(true);
+            expect(splitterDragActive()).toBe(true);
+            const before = dragRefreshTick();
+            f.size.w = 450;
+            vi.advanceTimersByTime(DEFAULT_DRAG_REFRESH_MS);
+            expect(dragRefreshTick()).toBeGreaterThan(before);
+            setDragging(false);
+            expect(splitterDragActive()).toBe(false);
+            dispose();
+        });
     });
 
     describe("with a ResizeObserver", () => {
