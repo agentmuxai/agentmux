@@ -1569,6 +1569,8 @@
     "vault.secrets.olderNotRead": "Older lines exist; this list reads no further back.",
     "vault.secrets.outcome": "Outcome",
     "vault.tooNarrow": "This pane is too narrow for the Vault. Make it wider.",
+    "vault.import": "Import",
+    "vault.export": "Export",
     "vault.vaults.change": "Change {{name}}",
     "vault.vaults.delete": "Delete {{name}}",
     "vault.vaults.deleteTitle": "Delete {{name}}?",
