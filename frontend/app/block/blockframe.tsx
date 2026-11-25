@@ -20,7 +20,7 @@ import { remoteSettingsMenuItems } from "@/app/view/remotes/open-remotes";
 import { BlockStatsBadge, statsBadgeShown } from "@/element/blockstats";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { ClosingLabel } from "./closing-label";
-import { KeptEndIcons } from "./pane-tab-actions";
+import { paneActionMenuItems } from "./pane-action-menu";
 import { minimizeToHeader, useBlockConnection, useBodyContextMenu, useHeaderFit } from "./blockframe-hooks";
 import { useHeaderScrollRange } from "./header-scroll-range";
 import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
@@ -235,9 +235,11 @@ function handleHeaderContextMenu(
     e.preventDefault();
     e.stopPropagation();
 
-    // Start with the shared pane actions (paste, split, magnify, close). No Copy: a right-click on
-    // the header never has a selection to copy.
-    const menu: ContextMenuItem[] = buildPaneContextMenu(
+    // The pane type's own actions first (an agent's Find and Messages, a terminal's Restart): they are not buttons in the
+    // tab, so this menu is where they are (pane-action-menu.ts). Then the shared pane actions (paste, split, magnify,
+    // close). No Copy: a right-click on the header never has a selection to copy.
+    const menu: ContextMenuItem[] = paneActionMenuItems(viewModel, e);
+    menu.push(...buildPaneContextMenu(
         blockData,
         {
             magnified,
@@ -248,7 +250,7 @@ function handleHeaderContextMenu(
             omit: new Set<PaneMenuSection>(["copy"]),
         },
         viewModel
-    );
+    ));
 
     // Header-only: pane color submenu
     menu.push(...buildPaneColorSubmenu(blockData, () => MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockData.oid))()));
@@ -594,7 +596,7 @@ function BlockFrame_Header(
     // header, instead.
     const [headerHovering, setHeaderHovering] = createSignal(false);
     let headerRef: HTMLDivElement | undefined;
-    useHeaderFit(() => headerRef, () => util.useAtomValueSafe(props.viewModel?.endIconButtons));
+    useHeaderFit(() => headerRef);
     // One horizontal range (#29325, SPEC_PANE_HEADER_SCROLL_RANGE_2026_11_10.md); the window controls stay pinned.
     const headerScroll = useHeaderScrollRange(() => headerRef);
     const viewName = createMemo(() => {
@@ -794,7 +796,6 @@ function BlockFrame_Header(
                 </Show>
             </div>
             <div class="block-frame-header-spacer" aria-hidden="true" />
-            <KeptEndIcons viewModel={props.viewModel} nodeModel={props.nodeModel} />
             </div>
             </div>
             {/* Away from the scrolling range, so an overflow box can never clip or follow it. */}

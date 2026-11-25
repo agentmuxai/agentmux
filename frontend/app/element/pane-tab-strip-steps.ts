@@ -13,7 +13,10 @@ import { createEffect, createSignal, on, onCleanup, onMount, type Accessor } fro
 import {
     ACTIVE_FLOOR_PX,
     ACTIVE_NO_ICON_FLOOR_PX,
+    activeFloor,
+    activeWant,
     minTabsRoom,
+    othersShare,
     RESTING_FLOOR_PX,
     RESTING_NO_ICON_FLOOR_PX,
     stepFor,
@@ -89,6 +92,35 @@ export function stripRoom(strip: HTMLElement): number | undefined {
     return parent && parent.clientWidth > 0 ? parent.clientWidth - othersIn(parent, strip, layoutScale(parent)) : undefined;
 }
 
+/** The padding a pill keeps at its right: its own `padding-right` and the border (PaneTabStrip.scss `.pane-tab`), in unzoomed px. */
+const PILL_RIGHT_PX = 5;
+
+/**
+ * What the selected tab needs, in unzoomed px: `fixed`, all of the pill that is not its title (icon, the pane's own
+ * buttons, close button, the gaps and padding), and `label`, how long its title is. Read from where the pill's items
+ * stand, not from the pill's width, so it is the same whether the pill is squeezed or not. Null with no selected tab or
+ * no room to measure.
+ */
+export function activeTabNeeds(strip: HTMLElement, zoom: number): { fixed: number; label: number } | null {
+    const pill = strip.querySelector<HTMLElement>(".pane-tab--active");
+    const label = pill?.querySelector<HTMLElement>(".pane-tab-label");
+    if (!pill || !label) return null;
+    const items = [...pill.children].filter(
+        (el): el is HTMLElement => el instanceof HTMLElement && el.offsetParent !== null && getComputedStyle(el).position !== "absolute"
+    );
+    const pillBox = pill.getBoundingClientRect();
+    if (items.length === 0 || pillBox.width === 0) return null;
+    const first = items[0].getBoundingClientRect();
+    const last = items[items.length - 1].getBoundingClientRect();
+    const labelBox = label.getBoundingClientRect();
+    // The items' span, from the first to the last, less the title between them: the same squeezed or not.
+    const inner = last.right - first.left - labelBox.width;
+    const pad = Math.max(0, first.left - pillBox.left);
+    // The title's own length: its box as laid out, scaled as its content is (a title that is not cut is its own width).
+    const scale = label.clientWidth > 0 ? labelBox.width / label.clientWidth : 1;
+    return { fixed: (inner + pad) / zoom + PILL_RIGHT_PX, label: (label.scrollWidth * scale) / zoom };
+}
+
 /** Whether a tab's label is cut short by the squeeze: the only time a strip needs a step. Reads every label once. */
 function anyLabelCut(strip: HTMLElement): boolean {
     for (const label of strip.querySelectorAll<HTMLElement>(".pane-tab-label")) {
@@ -111,6 +143,8 @@ export function createStripSteps(opts: {
     const [step, setStep] = createSignal<PaneTabStep>("full");
     const [room, setRoom] = createSignal<number | undefined>(undefined);
     let frame: number | undefined;
+    /** The floor last written to the strip. */
+    let lastFloor: number | undefined;
 
     const measure = () => {
         if (frame !== undefined) cancelAnimationFrame(frame);
@@ -122,7 +156,20 @@ export function createStripSteps(opts: {
         const zoom = opts.zoom() || 1;
         const addWidth = strip.querySelector(ADD_BUTTON)?.getBoundingClientRect().width ?? 0;
         const tabsRoom = Math.max(0, total - addWidth);
-        const share = tabsRoom / zoom / count;
+        // The selected tab has its room first (icon, its own buttons, close button and a readable start of its title); the
+        // other tabs give up width before it does, so the step is the one their share asks for.
+        const needs = activeTabNeeds(strip, zoom);
+        const share = needs ? othersShare(tabsRoom / zoom, count, activeWant(needs.fixed, needs.label)) : tabsRoom / zoom / count;
+        const floor = needs ? activeFloor(needs.fixed, needs.label) : undefined;
+        if (floor !== undefined && Math.abs(floor - (lastFloor ?? -1)) >= 0.5) {
+            lastFloor = floor;
+            strip.style.setProperty("--pane-tab-active-floor", `${floor}px`);
+            // The selected tab keeps another width now: look once more when it has settled.
+            schedule();
+        } else if (floor === undefined && lastFloor !== undefined) {
+            lastFloor = undefined;
+            strip.style.removeProperty("--pane-tab-active-floor");
+        }
         const previous = step();
         let next = stepFor(share, false, previous);
         // Labels are laid out at "full": if none is cut short the tabs fit as they are and nothing needs to give.
@@ -131,11 +178,12 @@ export function createStripSteps(opts: {
         if (strip.querySelector(".pane-tab-rename-input")) next = previous;
         if (next !== previous) setStep(next);
         // Never narrower than the tabs' own floors: past that the header scrolls, as it always did.
-        // A tab with no icon keeps a wider floor (a few letters of its label), as its style says.
+        // A tab with no icon keeps a wider floor (a few letters of its label), as its style says; the selected tab's own
+        // floor is its measured one, at least that.
         const noIcon = strip.querySelector(".pane-tab.doc-tab--no-icon") !== null;
         const resting = noIcon ? RESTING_NO_ICON_FLOOR_PX : RESTING_FLOOR_PX;
-        const active = noIcon ? ACTIVE_NO_ICON_FLOOR_PX : ACTIVE_FLOOR_PX;
-        const limit = Math.max(total, minTabsRoom(count, resting, active) * zoom + addWidth);
+        const activeLeast = noIcon ? ACTIVE_NO_ICON_FLOOR_PX : ACTIVE_FLOOR_PX;
+        const limit = Math.max(total, minTabsRoom(count, resting, Math.max(floor ?? activeLeast, activeLeast)) * zoom + addWidth);
         // A new limit changes how far the labels are cut: look once more when it has settled.
         if (room() === undefined || Math.abs((room() ?? 0) - limit) >= 0.5) {
             setRoom(limit);
@@ -175,9 +223,13 @@ export function createStripSteps(opts: {
         const row = strip.closest<HTMLElement>(HEADER_CONTENT) ?? strip.parentElement;
         const mutations = row && typeof MutationObserver !== "undefined" ? new MutationObserver(watch) : undefined;
         if (row) mutations?.observe(row, { childList: true });
+        // Another tab selected, or the selected tab's own buttons come or go: what it needs has changed.
+        const tabs = typeof MutationObserver === "undefined" ? undefined : new MutationObserver(schedule);
+        tabs?.observe(strip, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
         onCleanup(() => {
             observer?.disconnect();
             mutations?.disconnect();
+            tabs?.disconnect();
             if (frame !== undefined) cancelAnimationFrame(frame);
         });
     });

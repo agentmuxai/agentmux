@@ -26,7 +26,7 @@ import { useScrollToNode } from "./hooks/useScrollToNode";
 import { useShowMessage } from "./hooks/useShowMessage";
 import { showInPanelIfHeld } from "./messages/messages-state";
 import { createSearchReveal } from "./search-reveal";
-import { focusSearchField, registerSearchControls, restoreFocusToMagnifier } from "./search/search-bridge";
+import { focusSearchField, registerSearchControls, restoreFocusToComposer } from "./search/search-bridge";
 import { topVisibleNodeId } from "./search/top-row";
 import { rawIdAtOrAfter, topRowId } from "./search/transcript-index";
 
@@ -61,7 +61,7 @@ export function usePaneInput(p: { found: PaneFoundation; model: AgentViewModel; 
         jumpTo: (id) => void (showInPanelIfHeld(model.blockId, paneModel.document(), id) || reveal.jumpTo(id)),
         onClose: () => {
             reveal.release();
-            restoreFocusToMagnifier(model.blockId);
+            restoreFocusToComposer(model.blockId);
         },
         onNoMatch: reveal.release,
         topNodeId: () => {

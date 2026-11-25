@@ -37,7 +37,7 @@ import { awaitingYou, dismissAwaiting } from "../hooks/useJektsAwaitingYou";
 import { deliveredAt } from "../jekts-awaiting-you";
 import { proseDoc, rawDoc } from "../preview-text/docs";
 import { scrollMessagesTo } from "../scroll/one-way-flow";
-import { MESSAGES_TOGGLE_CLASS, publishHeaderButton } from "./messages-header";
+import { publishHeaderButton } from "./messages-header";
 import "./messages-panel.scss";
 import {
     applyFilter,
@@ -94,11 +94,12 @@ function MessagesDock(props: MessagesPanelProps): JSX.Element {
     let dock: HTMLDivElement | undefined;
     const close = () => {
         controls.patch({ open: false });
-        // Back to the header button it came from, so the keyboard is not left on a panel that is gone.
+        // Back to the composer (the Messages button is a row of the pane's menu now), so the keyboard is not left on a
+        // panel that is gone.
         queueMicrotask(() =>
             document
                 .querySelector(`[data-blockid="${CSS.escape(props.blockId)}"]:not(.block-preview)`)
-                ?.querySelector<HTMLElement>(`.${MESSAGES_TOGGLE_CLASS}`)
+                ?.querySelector<HTMLElement>(".agent-input")
                 ?.focus()
         );
     };

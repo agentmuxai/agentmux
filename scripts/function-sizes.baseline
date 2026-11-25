@@ -289,7 +289,7 @@
 218 frontend/app-init.ts::initMux
 364 frontend/app/block/block.tsx::Block
 136 frontend/app/block/block.tsx::BlockFull
-264 frontend/app/block/blockframe.tsx::BlockFrame_Header
+263 frontend/app/block/blockframe.tsx::BlockFrame_Header
 114 frontend/app/block/blockutil.tsx::ConnectionButton
 109 frontend/app/block/lazy-pane-tab.tsx::createStandIn
 235 frontend/app/block/sandboxed-widget-host.tsx::createSandboxedInstance

@@ -14,7 +14,6 @@ import { getApi } from "@/util/app-api";
 import * as util from "@/util/util";
 import type { NodeModel } from "@/layout/index";
 import { resolveContextMenuRegion } from "./context-menu-region";
-import { headerOverrunPx } from "./header-fit-measure";
 import { buildPaneContextMenu, joinMenuGroups, type PaneMenuSection } from "./pane-actions";
 
 /** The menu's "Minimize to Header" for an expanded pane that can minimize, else none. */
@@ -29,18 +28,11 @@ export function minimizeToHeader(nodeModel: NodeModel): (() => void) | undefined
  * A narrow pane's header sheds its tab strip's last sliver, then its view's extra end buttons, then
  * its window controls (the grip's menu has them), so Close stays in the pane: `data-fit` "tabs",
  * "trim", then "min", which mixins.scss's header layout turns into what is hidden. Fitted again when
- * the header or its end controls change size, when the chrome zoom does, and when the selected tab's own buttons
- * change (`buttons`). A header too narrow to show its selected tab whole is too narrow too (header-fit-measure.ts):
- * the "tabs" tier then draws the buttons that are the only way in to something in the header itself.
+ * the header or its end controls change size, and when the chrome zoom does. A view's own buttons are not in the header
+ * or its tabs: they are rows of the pane's menu (pane-action-menu.ts).
  */
-export function useHeaderFit(getHeader: () => HTMLElement | undefined, buttons?: () => unknown): void {
-    useWidthFit(
-        getHeader,
-        ["tabs", "trim", "min"],
-        (el) => [...el.querySelectorAll(".block-frame-end-icons")],
-        () => [chromeZoomAtom(), buttons?.()],
-        headerOverrunPx
-    );
+export function useHeaderFit(getHeader: () => HTMLElement | undefined): void {
+    useWidthFit(getHeader, ["tabs", "trim", "min"], (el) => [...el.querySelectorAll(".block-frame-end-icons")], () => [chromeZoomAtom()]);
 }
 
 /**
