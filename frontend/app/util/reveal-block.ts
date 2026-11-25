@@ -220,32 +220,46 @@ const liveDeps: SelectionDeps = {
         // A block that is not in this window, asked for in this window only, is not a failure to tell the
         // user about: the caller has the answer (false) and may look elsewhere.
         if (intent.quiet || (intent.localOnly && reason === "not-found")) return;
-        pushNotification({
-            icon: "fa-triangle-exclamation",
-            title: `Couldn't show ${blockName(intent.blockId)}`,
-            message: failText(reason, detail),
-            timestamp: new Date().toISOString(),
-            type: "info",
-            expiration: Date.now() + 5000,
-            debug: {
-                blockId: intent.blockId,
-                tabId: intent.tabHint,
-                agentId: blockMetaText(intent.blockId, "agentId"),
-                agentName: blockMetaText(intent.blockId, "agentName"),
-                code: `reveal:${reason}`,
-                detail: {
-                    source: intent.source,
-                    reason,
-                    intent: { id: intent.id, focusCaret: intent.focusCaret, localOnly: intent.localOnly },
-                    selectionTrace: selectionTrace.entries().slice(-20).map((e) => `${new Date(e.at).toISOString()} ${e.line}`),
-                },
-            },
-        });
+        publishRevealFailure(intent, reason, detail);
     },
     setTimer: (fn, ms) => setTimeout(fn, ms),
     clearTimer: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
     now: () => Date.now(),
 };
+
+/** The failure notice of a reveal (the selection machine's, or a caller's that held it back to decide first). */
+function publishRevealFailure(intent: Intent, reason: string, detail?: string): void {
+    pushNotification({
+        icon: "fa-triangle-exclamation",
+        title: `Couldn't show ${blockName(intent.blockId)}`,
+        message: failText(reason, detail),
+        timestamp: new Date().toISOString(),
+        type: "info",
+        expiration: Date.now() + 5000,
+        debug: {
+            blockId: intent.blockId,
+            tabId: intent.tabHint,
+            agentId: blockMetaText(intent.blockId, "agentId"),
+            agentName: blockMetaText(intent.blockId, "agentName"),
+            code: `reveal:${reason}`,
+            detail: {
+                source: intent.source,
+                reason,
+                intent: { id: intent.id, focusCaret: intent.focusCaret, localOnly: intent.localOnly },
+                selectionTrace: selectionTrace.entries().slice(-20).map((e) => `${new Date(e.at).toISOString()} ${e.line}`),
+            },
+        },
+    });
+}
+
+/**
+ * Tell the person why a pane could not be shown, for a caller that asked for a `quiet` reveal so it could first
+ * decide whether the failure is one (a block in no pane is replaced, and that is no failure).
+ */
+export function tellRevealFailure(blockId: string, failure: { reason: string; detail?: string }, source: string): void {
+    if (failure.reason === "superseded" || failure.reason === "not-found") return;
+    publishRevealFailure({ id: 0, blockId, source, focusCaret: true, localOnly: true, quiet: false }, failure.reason, failure.detail);
+}
 
 const selectionTrace = createSelectionTrace();
 const selection = createSelectionRunner(liveDeps, selectionTrace);

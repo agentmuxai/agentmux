@@ -46,6 +46,7 @@ function run(world: World, req: Partial<RevealRequest> = {}) {
             calls.push(`reveal:${id}`);
             return world.reveal ?? { ok: true };
         },
+        tell: (id, failure) => void calls.push(`tell:${id}:${failure.reason}`),
         isUnplaced: async (id) => id === world.unmounted && (world.stray === true || (world.strayOnceShown === true && calls.some((c) => c.startsWith("reveal:")))),
         create: async () => {
             calls.push("create");
@@ -134,7 +135,7 @@ describe("revealOrOpen", () => {
             { unmounted: "b3", reveal: { ok: false, reason: "layout-timeout" } as Reveal },
             {},
             { kind: "failed", reason: "layout-timeout", blockId: "b3" },
-            ["record", "reveal:b3"],
+            ["record", "reveal:b3", "tell:b3:layout-timeout"],
         ],
         ["no pane open: one is opened here", {}, {}, { kind: "opened_here", blockId: "new-block" }, ["record", "create"]],
         [
@@ -156,14 +157,14 @@ describe("revealOrOpen", () => {
             { mountedElsewhere: "b2", reveal: { ok: false, reason: "tab-timeout" } as Reveal },
             {},
             { kind: "failed", reason: "tab-timeout", blockId: "b2" },
-            ["record", "reveal:b2"],
+            ["record", "reveal:b2", "tell:b2:tab-timeout"],
         ],
         [
             "a newer click taking over also leaves the pane",
             { mountedElsewhere: "b2", reveal: { ok: false, reason: "superseded" } as Reveal },
             {},
             { kind: "failed", reason: "superseded", blockId: "b2" },
-            ["record", "reveal:b2"],
+            ["record", "reveal:b2", "tell:b2:superseded"],
         ],
         [
             "forceNew opens another even when one is shown",
