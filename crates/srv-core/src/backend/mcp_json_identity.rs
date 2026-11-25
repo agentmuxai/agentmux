@@ -242,7 +242,12 @@ pub fn keys_for_agent_open(
     crate::backend::agent_resolve::record_config_id_drift("m4d.config_id_drift.agent_open", agent_slug, Some(&agent.slug));
     match crate::backend::agent_config::inject_jekt_signing_keys_into_mcp_json(content, mstore, agent_slug) {
         Some(rewritten) => *content = rewritten,
-        None => tracing::warn!(agent_id = %agent.id, "agent_open: the agent's signing keys could not be ensured"),
+        None => {
+            tracing::warn!(agent_id = %agent.id, "agent_open: the agent's signing keys could not be ensured");
+            if let Some(stripped) = strip_signing_keys(content) {
+                *content = stripped; // a legacy blob's own agentmux entry may carry values
+            }
+        }
     }
 }
 
@@ -286,7 +291,12 @@ pub fn finish_launch(
     }
     match crate::backend::agent_config::inject_jekt_signing_keys_into_mcp_json(&files[pos].content, mstore, &agent_slug) {
         Some(rewritten) => files[pos].content = rewritten,
-        None => tracing::warn!(agent_slug = %agent_slug, "WriteAgentConfig: the agent's signing keys could not be ensured"),
+        None => {
+            tracing::warn!(agent_slug = %agent_slug, "WriteAgentConfig: the agent's signing keys could not be ensured");
+            if let Some(stripped) = strip_signing_keys(&files[pos].content) {
+                files[pos].content = stripped; // a legacy blob's own agentmux entry may carry values
+            }
+        }
     }
 }
 
@@ -541,6 +551,19 @@ mod tests {
             assert!(holds_no_key(&content), "{agent_type}: {content}");
             assert_eq!(store.agent_jekt_key_load(&slug).unwrap().is_some(), keyed, "{agent_type}");
         }
+    }
+
+    /// A legacy blob's own agentmux entry may carry values; they are taken out even when the keys cannot be ensured.
+    #[test]
+    fn a_launch_removes_values_a_legacy_entry_carries_even_when_the_keys_cannot_be_ensured() {
+        let broken = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let (id, slug) = agent_of_type(&broken, "host");
+        broken.test_break_name_key_tables().unwrap();
+        assert!(holds_no_key(&launch(&broken, &id, &slug, true)));
+        let agent = broken.agent_def_get(&id).unwrap().unwrap();
+        let mut content = mcp(&slug);
+        keys_for_agent_open(&mut content, &broken, &slug, &agent);
+        assert!(holds_no_key(&content), "{content}");
     }
 
     /// No lock, no rewrite: a `.claude` that is a file makes the lock

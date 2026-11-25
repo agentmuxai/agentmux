@@ -27,7 +27,7 @@ use agentmux_common::AUTH_KEY_HEADER;
 use serde::Deserialize;
 
 /// Re-fetch a copy this old even with no expiry to go by (an older srv).
-const REFRESH_AFTER: Duration = Duration::from_secs(20 * 60 * 60);
+const REFRESH_AFTER: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Deserialize, Default, Clone)]
 struct Wire {
@@ -53,6 +53,44 @@ static CACHE: Mutex<Option<Cached>> = Mutex::new(None);
 #[cfg(test)]
 pub(crate) static ENV_LOCK: Mutex<()> = Mutex::new(());
 
+static FETCH: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// The answer srv gives a request whose identity signature does not verify: the key this process holds is not the
+/// one srv has (it was replaced while this process ran).
+const REJECTED_SIGNATURE: &str = "identity signature verification failed";
+
+/// Whether a tool's error is srv rejecting this agent's signature.
+pub(crate) fn is_rejected_signature(error: &str) -> bool {
+    error.contains(REJECTED_SIGNATURE)
+}
+
+/// `run`, and once more after srv rejects its signature: the key held is not the one srv has (it was replaced while
+/// this process ran), so the keys are asked for again first. A rejected call did nothing, so repeating it is safe.
+pub(crate) async fn run_healing_a_rejected_signature<T, Fut>(
+    client: &reqwest::Client,
+    local_url: &str,
+    auth_key: &str,
+    run: impl Fn() -> Fut,
+) -> anyhow::Result<T>
+where
+    Fut: std::future::Future<Output = anyhow::Result<T>>,
+{
+    match run().await {
+        Err(e) if is_rejected_signature(&format!("{e:#}")) => {
+            forget_fetched();
+            refresh_if_stale(client, local_url, auth_key).await;
+            run().await
+        }
+        other => other,
+    }
+}
+
+/// Drop the held copy and the retry gate, so the next `refresh_if_stale` asks srv again at once.
+pub(crate) fn forget_fetched() {
+    *CACHE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    *LAST_ATTEMPT.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
 /// When a fetch was last tried. With no usable copy (an srv without the
 /// endpoint, an unreachable one), every tool call would otherwise retry and
 /// wait out the request; this spaces the retries.
@@ -72,10 +110,13 @@ fn is_container_hint(value: Option<&str>) -> bool {
     value == Some("1")
 }
 
-/// Fetch the keys if there is no copy yet, or it is older than 20 h. Errors
+/// Fetch the keys if there is no copy yet, or it is older than five minutes (a key replaced while this process ran is picked up then; srv serves the same one until it is replaced). Errors
 /// leave the old copy (or none) in place: signing then falls back to the env
 /// keys, exactly as before M4d-3.
 pub(crate) async fn refresh_if_stale(client: &reqwest::Client, local_url: &str, auth_key: &str) {
+    // One fetch at a time: a call made while the startup fetch is in flight waits for it (the start file holds
+    // no key to sign with meanwhile), then finds the copy it left.
+    let _one_fetch = FETCH.lock().await;
     let fresh = CACHE.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|c| still_good(c, agentmux_common::time::now_secs()));
     // In a container srv signs for the agent and refuses this route: the hint skips the call.
     if fresh || in_container() || local_url.is_empty() || std::env::var("AGENTMUX_AGENT_TOKEN").map_or(true, |t| t.trim().is_empty()) {
@@ -172,6 +213,123 @@ pub(crate) fn clear_for_test() {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn only_srvs_own_rejection_is_a_rejected_signature() {
+        assert!(super::is_rejected_signature("srv returned 403: identity signature verification failed"));
+        assert!(!super::is_rejected_signature("agent_id=\"x\" is not currently registered with a pane"));
+    }
+
+    #[test]
+    fn forgetting_the_fetched_copy_lets_the_next_call_fetch_at_once() {
+        let _guard = super::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        super::set_for_test("aria", Some("AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="));
+        *super::LAST_ATTEMPT.lock().unwrap() = Some(std::time::Instant::now());
+        super::forget_fetched();
+        assert!(super::CACHE.lock().unwrap().is_none());
+        assert!(super::LAST_ATTEMPT.lock().unwrap().is_none(), "the 60 s retry gate is open again");
+    }
+
+    /// A call made while the first fetch is in flight waits for it and uses its answer, with one request made.
+    #[tokio::test]
+    async fn a_call_during_the_first_fetch_waits_for_it() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let _guard = super::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        super::forget_fetched();
+        std::env::set_var("AGENTMUX_AGENT_TOKEN", "t");
+        std::env::remove_var("AGENTMUX_IN_CONTAINER");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let served = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = served.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else { return };
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let mut buf = [0u8; 2048];
+                let _ = sock.read(&mut buf).await;
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                let body = r#"{"slug":"aria","jekt_key":"BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=","lan_key":null,"uid":""}"#;
+                let _ = sock
+                    .write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes())
+                    .await;
+            }
+        });
+        let client = reqwest::Client::new();
+        let (first, second) = tokio::join!(super::refresh_if_stale(&client, &url, "k"), async {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            super::refresh_if_stale(&client, &url, "k").await;
+            super::CACHE.lock().unwrap().is_some()
+        });
+        let _ = first;
+        assert!(second, "the second call returned with the first call's keys held");
+        assert_eq!(served.load(std::sync::atomic::Ordering::SeqCst), 1, "one request, not two");
+        super::forget_fetched();
+        std::env::remove_var("AGENTMUX_AGENT_TOKEN");
+    }
+
+    /// Answers the key request with each of `bodies` in turn (the last one again after that); returns srv's url.
+    async fn serve_keys(bodies: Vec<&'static str>) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            for n in 0.. {
+                let Ok((mut sock, _)) = listener.accept().await else { return };
+                let body = bodies[n.min(bodies.len() - 1)];
+                let mut buf = [0u8; 2048];
+                let _ = sock.read(&mut buf).await;
+                let reply = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                let _ = sock.write_all(reply.as_bytes()).await;
+            }
+        });
+        url
+    }
+
+    /// An MCP that outlives the re-issue: it holds the old key, srv rejects its signature once, it asks srv again, and
+    /// the same call goes through with the current key. A different error is not repeated.
+    #[tokio::test]
+    async fn an_old_key_held_is_replaced_after_one_rejected_signature_and_the_call_goes_through() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let _guard = super::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        super::forget_fetched();
+        std::env::set_var("AGENTMUX_AGENT_TOKEN", "t");
+        std::env::set_var("AGENTMUX_AGENT_ID", "aria");
+        std::env::remove_var("AGENTMUX_IN_CONTAINER");
+        std::env::remove_var("AGENTMUX_JEKT_KEY");
+        // srv served [7; 32] to this process at its start, and has served [1; 32] since the re-issue.
+        let url = serve_keys(vec![
+            r#"{"slug":"aria","jekt_key":"BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=","lan_key":null,"uid":""}"#,
+            r#"{"slug":"aria","jekt_key":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=","lan_key":null,"uid":""}"#,
+        ])
+        .await;
+        let client = reqwest::Client::new();
+        super::refresh_if_stale(&client, &url, "k").await;
+        assert_eq!(jekt_key().as_deref(), Some(&[7u8; 32][..]), "the old key is held");
+
+        let calls = AtomicUsize::new(0);
+        let signs_as_srv_expects = || async {
+            calls.fetch_add(1, Ordering::SeqCst);
+            match jekt_key().as_deref() {
+                Some(k) if k == [1u8; 32] => Ok("verified"),
+                _ => Err(anyhow::anyhow!("srv returned 403: identity signature verification failed")),
+            }
+        };
+        let out = super::run_healing_a_rejected_signature(&client, &url, "k", signs_as_srv_expects).await;
+        assert_eq!(out.unwrap(), "verified", "the next message verifies");
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "one rejection, one repeat");
+
+        let other = AtomicUsize::new(0);
+        let fails_otherwise = || async {
+            other.fetch_add(1, Ordering::SeqCst);
+            Err::<&str, _>(anyhow::anyhow!("the pane is gone"))
+        };
+        assert!(super::run_healing_a_rejected_signature(&client, &url, "k", fails_otherwise).await.is_err());
+        assert_eq!(other.load(Ordering::SeqCst), 1, "any other error is returned as it is");
+        super::forget_fetched();
+        std::env::remove_var("AGENTMUX_AGENT_TOKEN");
+        std::env::remove_var("AGENTMUX_AGENT_ID");
+    }
+
+    #[test]
     fn only_a_one_is_the_container_hint() {
         assert!(super::is_container_hint(Some("1")));
         assert!(!super::is_container_hint(None));
@@ -246,7 +404,7 @@ mod tests {
         };
         assert!(still_good(&cached(Some(1_000)), 999));
         assert!(!still_good(&cached(Some(1_000)), 1_000), "expired: srv may rotate it now");
-        assert!(still_good(&cached(None), 1_000_000), "no expiry served: the 20 h clock");
+        assert!(still_good(&cached(None), 1_000_000), "no expiry served: the five minute clock");
     }
 
     #[test]
