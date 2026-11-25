@@ -37,6 +37,7 @@ import type { LayoutNode } from "@/layout/lib/types";
 import { endDrag, endReleasedSession, session } from "./drag-session";
 import { endedByEscape } from "./native-cancel";
 import { dragWasStalled } from "./drag-stall";
+import { probeNativePicture } from "./native-picture-probe";
 import { paneDragCandidate, pressIsOnTab, prewarmTearOffSnapshot, takeTearOffSnapshot, takeWindowTabSnapshot } from "./tearoff-snapshot";
 
 // Shared drag state set by TileLayout / TabBar drag handlers
@@ -69,7 +70,9 @@ export function getCurrentDragPayload(): DragItemPayload | null {
 function picturePaneOnPress(e: PointerEvent): void {
     if (e.button !== 0) return;
     const blockId = paneDragCandidate(e.target);
-    if (blockId) prewarmTearOffSnapshot(blockId, { x: e.clientX, y: e.clientY }, pressIsOnTab(e.target));
+    if (!blockId) return;
+    if (probeNativePicture()) return; // the spike of #48707: off unless the window's debug flag is set
+    prewarmTearOffSnapshot(blockId, { x: e.clientX, y: e.clientY }, pressIsOnTab(e.target));
 }
 
 function CrossWindowDragMonitor(): JSX.Element {

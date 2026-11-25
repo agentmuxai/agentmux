@@ -144,6 +144,7 @@ function desktopOnlyApi() {
                 "getPaneDebugState",
                 "captureViewport",
                 "keepViewport",
+                "nativePictureProbe",
                 "cutKeptViewport",
                 "recycleBegin",
                 "recycleDeclined",

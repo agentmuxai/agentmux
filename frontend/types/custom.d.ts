@@ -411,6 +411,9 @@ declare global {
         /** The host takes this window's whole viewport and keeps it, answering its id once the window is pictured: the
          *  pane's cut of it is asked for after (`cutKeptViewport`). Windows only (the tear-off picture). */
         keepViewport(windowLabel: string, quality?: number): Promise<{ pictureId: number }>;
+        /** Spike (#48707, dev only): the host copies this window natively, logs how long it took and drops the copy;
+         *  with `compare` it also takes the CDP screenshot and logs how much of the two agree. Windows only. */
+        nativePictureProbe(windowLabel: string, compare: boolean): Promise<{ ok: boolean }>;
         /** The pane at `rect` (CSS px of the window, which is `viewportWidth` wide) cut out of the kept picture
          *  `pictureId` by the host, as a base64 JPEG; null when none of it is in the picture. A picture is cut once. */
         cutKeptViewport(

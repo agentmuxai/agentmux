@@ -101,6 +101,7 @@ pub async fn route(cmd: &str, state: &Arc<AppState>, args: &serde_json::Value) -
         "live_follow_capture" => capture(state, args).await,
         "capture_pane_picture" => super::pane_picture::capture(state, args).await,
         "cut_pane_picture" => super::pane_picture::cut(args).await,
+        "debug_native_window_picture" => super::native_picture::measure(state, args).await,
         "live_follow_quiet" => quiet(args),
         "live_follow_fade" => fade(args),
         _ => end(),
