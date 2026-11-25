@@ -64,7 +64,7 @@ pub enum Action {
     /// Another agent's `Stop agents` over several agents at once: one window for all of them, each
     /// closed as a `CloseTab` is. The user can keep one of them (`batch::keep_member`) or all.
     CloseTabs { block_ids: Vec<String>, detail: String },
-    /// Another agent's `ClosePane block_id=`: close the whole pane.
+    /// Another agent's `ClosePane block_id=`: close the named tab (and its pane when it was the last).
     ClosePane { block_ids: Vec<String> },
     /// Stop the controller and keep the block, as `agent.stop` does. Internal
     /// only (the fork slug migration): no tool an agent can call opens one.

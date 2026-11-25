@@ -207,15 +207,15 @@ async fn stop_agents_refuses_its_own_block_a_non_agent_pane_and_a_missing_block(
     assert!(state.srv_state.lock().await.blocks.contains_key(&own), "still open");
 }
 
-/// `Stop pane` refuses a pane that holds an agent, and a pane that mixes
-/// an agent with something else; no window opens (spec §3.2).
+/// `Stop pane` refuses a tab that is an agent, even in a pane that mixes it with something else;
+/// no window opens (spec §3.2).
 #[tokio::test]
-async fn stop_pane_refuses_a_pane_that_holds_an_agent() {
+async fn stop_pane_refuses_a_tab_that_is_an_agent() {
     let state = test_state();
     let (caller_tab, caller_block) = seed(&state).await;
     let caller_id = format!("pane-caller-{}", uuid::Uuid::new_v4());
     state.reactive_handler.register_agent(&caller_id, &caller_block, Some(&caller_tab)).unwrap();
-    let (_, visible, background) = seed_two_agent_pane(&state).await;
+    let (_, _visible, background) = seed_two_agent_pane(&state).await;
 
     let resp = handle_close_pane(
         axum::extract::State(state.clone()),
@@ -231,7 +231,7 @@ async fn stop_pane_refuses_a_pane_that_holds_an_agent() {
     assert_eq!(resp.status(), axum::http::StatusCode::CONFLICT);
     let error = body_json(resp).await["error"].as_str().unwrap_or_default().to_string();
     assert!(error.contains("Stop with action \"agents\""), "{error}");
-    assert!(error.contains(&background) && error.contains(&visible), "names the agents in the pane: {error}");
+    assert!(error.contains(&background), "names the agent's tab: {error}");
     assert!(crate::sagas::pending_shutdown::active_for(&background).is_none(), "no window opened");
     assert!(state.srv_state.lock().await.blocks.contains_key(&background));
 }
