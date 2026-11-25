@@ -1,6 +1,6 @@
 # Spec: tear-off, the host arms the pane's picture at the press (#48707)
 
-**Status:** Draft, for the platform lead's decision on the spike (section 4). Not committed; it ships with the first PR that implements it.
+**Status:** active. The spike (section 4) measured the native copy and the platform lead approved the build on its numbers (#48707).
 
 ## 1. What is wanted
 
@@ -32,6 +32,10 @@ Both rows pay the same price when the picture is needed: the screenshot takes th
 ## 4. The spike (first, small, measured)
 
 One PR: a native capture function in the host (Windows only) that is used by nothing yet except a debug command and a log line (`[tearoff-perf] native window picture: N ms, WxH, nonblank`), plus the page's one call at the press that only logs. It answers three questions with numbers on the test host: how long the native copy takes at 890 x 900 and larger windows; whether its pixels are right (the pane's content, not black, including with a browser pane); whether a click group shows any long frame from it. Decision after it: go on with arm-at-the-press as designed, or fall back as written above.
+
+**Result, on a Windows test host (one 890 x 900 window at 100% scale).** The native copy took a median of 14.5 ms (at most 28 ms) against a median of 79 ms for the screenshot of the same moment; 10 plain clicks with the copy standing in for the press's screenshot showed no window picture, no slow capture call and no long frame. The copy was never blank. It agreed with the screenshot on a coarse grid for 92 to 96 percent of the picture with terminal and agent panes only, 74 percent with a browser pane at 28 percent of the window and 31 percent with a browser pane at 99 percent of it: **a native copy does not carry a browser pane's content.** A window half covered by another window of the same app gave the same copy time and similarity. A minimised window gave a 160 x 28 blank picture with no error. A second monitor at another scale was not measured (the host has one display).
+
+**Decision.** Arm at the press with the native copy for a plain, non-browser pane on Windows. A browser pane, a tab dragged alone, a blank or tiny copy and anything the host cannot place fall back to the page's picture, and the drag's log line says which path it took. The build also has to show: the crop is right at a display scale other than 100% (or say "not checked"); a pane that holds an embedded web view inside a non-browser view is checked for pixels and falls back if they are wrong; the copy lives in host memory only from the press to the drag's start or the release, and a release without a drag drops it.
 
 ## 5. Order
 

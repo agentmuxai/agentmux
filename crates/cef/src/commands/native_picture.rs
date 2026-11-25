@@ -124,6 +124,8 @@ mod win {
             let bitmap = CreateCompatibleBitmap(window_dc, w as i32, h as i32);
             let old = SelectObject(dc, bitmap);
             let printed = PrintWindow(hwnd, dc, PW_CLIENTONLY | PW_RENDERFULLCONTENT);
+            // GetDIBits needs the bitmap out of every device context.
+            SelectObject(dc, old);
             let mut info: BITMAPINFO = std::mem::zeroed();
             info.bmiHeader = BITMAPINFOHEADER {
                 biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
@@ -152,7 +154,6 @@ mod win {
             } else {
                 0
             };
-            SelectObject(dc, old);
             DeleteObject(bitmap);
             DeleteDC(dc);
             ReleaseDC(hwnd, window_dc);

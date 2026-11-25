@@ -260,7 +260,7 @@ than none. Add the line when you touch one and know which area it belongs to.
 
 | Spec | Title | Status | Date | Replaces / replaced by |
 |---|---|---|---|---|
-| [`SPEC_TEAROFF_HOST_ARMED_PICTURE_2026_11_25`](SPEC_TEAROFF_HOST_ARMED_PICTURE_2026_11_25.md) | Spec: tear-off, the host arms the pane's picture at the press (#48707) | draft | 2026-11-25 |  |
+| [`SPEC_TEAROFF_HOST_ARMED_PICTURE_2026_11_25`](SPEC_TEAROFF_HOST_ARMED_PICTURE_2026_11_25.md) | Spec: tear-off, the host arms the pane's picture at the press (#48707) | active | 2026-11-25 |  |
 | [`SPEC_VAULT_AGENT_ADDS_AND_EDITS_WITHOUT_ASKING_2026_11_25`](SPEC_VAULT_AGENT_ADDS_AND_EDITS_WITHOUT_ASKING_2026_11_25.md) | Spec: An agent adds or edits a Vault entry without asking the person; the history line is the record | active | 2026-11-25 |  |
 | [`SPEC_AGENT_PANE_PLACEMENT_FLOATING_2026_11_22`](SPEC_AGENT_PANE_PLACEMENT_FLOATING_2026_11_22.md) | Spec: Agents place their panes: open floating (browser included), with a size and position, then resize, move and dock them | active | 2026-11-22 |  |
 | [`SPEC_FOLD_REVIEWS_INTO_THE_KANBAN_2026_11_22`](SPEC_FOLD_REVIEWS_INTO_THE_KANBAN_2026_11_22.md) | Spec: fold Reviews into the Kanban: a card shows what its pull requests wait on, and the Reviews pane goes away | active | 2026-11-22 |  |
