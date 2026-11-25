@@ -47,6 +47,7 @@ import { clearPlacement } from "./placementPreview";
 import { releaseTileDrag, startTileDrag } from "./tile-drag";
 import { dragState } from "./tilelayout-drag-state";
 import { createTileDragRegistrar } from "./tile-drag-registrar";
+import { insideGhost } from "./drag-preview-filter";
 import {
     computeDragPreviewSize,
     dragImageChoice,
@@ -360,7 +361,7 @@ function useDragPreview(
             const seq = ++previewRequestSeq;
             // Loaded with the first drag preview, not at startup.
             import("html-to-image")
-                .then(({ toPng }) => toPng(getPreviewRef(), PREVIEW_RASTER))
+                .then(({ toPng }) => toPng(getPreviewRef(), { ...PREVIEW_RASTER, filter: insideGhost(getPreviewRef()) }))
                 .then((url) => {
                     // A newer rasterisation was requested while this one was in
                     // flight — it measured the pane more recently, so drop this
