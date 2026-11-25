@@ -4,7 +4,8 @@
 //! Rungs 3 and 4 of the MCP self-heal ladder (`mcp_health`,
 //! `docs/specs/SPEC_AGENT_MCP_SELF_HEAL_2026_10_10.md` §5): put the `agentmux` entry of the agent's
 //! workspace `.mcp.json` right, then reconnect. Rung 3 rewrites it the way a launch writes it (the
-//! bare `agentmux-mcp` command, this agent's id and signing keys), which mends a missing or stale
+//! bare `agentmux-mcp` command, this agent's id and channel, and no signing value: the file holds
+//! references, not values), which mends a missing or stale
 //! entry or one the user edited. Rung 4 makes the command the absolute path of the `agentmux-mcp`
 //! that ships with this install, which mends a `PATH` that does not find it.
 //!
@@ -109,6 +110,7 @@ fn rewrite_file(
         } else {
             body
         };
+        let body = crate::backend::mcp_json_identity::strip_signing_keys(&body).unwrap_or(body);
         // In a folder a container agent can write the command stays named by its path, whatever the rung.
         let body = crate::backend::mcp_config_file::host_content(&expanded, body);
         if serde_json::from_str::<Value>(&body).ok() == serde_json::from_str::<Value>(&content).ok() {
@@ -131,12 +133,13 @@ fn rewrite_file(
         Err(e) => return Err(format!("cannot read .mcp.json: {e}")),
     };
     let body = repaired(&content, slug, shape, exe)?;
-    // Keys kept as the file has them if they cannot be ensured now.
+    // The keys are ensured in the store; the file holds none of their values, whether or not that worked.
     let body = if carries_keys {
         crate::backend::agent_config::inject_jekt_signing_keys_into_mcp_json(&body, mstore, slug).unwrap_or(body)
     } else {
         body
     };
+    let body = crate::backend::mcp_json_identity::strip_signing_keys(&body).unwrap_or(body);
     if serde_json::from_str::<Value>(&body).ok() == serde_json::from_str::<Value>(&content).ok() {
         return Ok(false);
     }
@@ -204,7 +207,7 @@ mod tests {
         assert_eq!(out["args"], json!([]));
         assert!(out.get("extra").is_none());
         assert_eq!(out["env"]["AGENTMUX_AGENT_BUS_ID"], "bus-1");
-        assert_eq!(out["env"]["AGENTMUX_JEKT_KEY"], "k", "the id is unchanged, so its key still signs");
+        assert_eq!(out["env"]["AGENTMUX_JEKT_KEY"], "k", "the repair keeps the env; the signing values go when the file is written");
     }
 
     #[test]
@@ -254,13 +257,35 @@ mod tests {
             let after: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
             assert_eq!(after["mcpServers"]["agentmux"]["command"], "agentmux-mcp");
             assert_eq!(after["mcpServers"]["github"]["command"], "gh-mcp");
-            assert!(after["mcpServers"]["agentmux"]["env"]["AGENTMUX_JEKT_KEY"].is_string(), "its keys are put back");
+            let env = &after["mcpServers"]["agentmux"]["env"];
+            assert!(env.get("AGENTMUX_JEKT_KEY").is_none() && env.get("AGENTMUX_LAN_KEY").is_none(), "the file holds references, not values");
+            assert!(env["AGENTMUX_CHANNEL"].is_string(), "its keys are ensured in the store");
 
             assert_eq!(rewrite_file(&store, &work_dir, "manoz", Shape::Canonical, None, true), Ok(false), "nothing left to change");
             let exe = dir.path().join("agentmux-mcp");
             assert_eq!(rewrite_file(&store, &work_dir, "manoz", Shape::AbsolutePath, Some(&exe), true), Ok(true));
             assert_eq!(rewrite_file(&store, &work_dir, "manoz", Shape::AbsolutePath, Some(&exe), true), Ok(false));
             assert!(!dir.path().join(".mcp.json").exists(), "the project's own file is never written");
+        });
+    }
+
+    #[test]
+    fn a_repair_takes_out_a_signing_value_even_when_the_keys_cannot_be_ensured() {
+        let broken = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        broken.test_break_name_key_tables().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let work_dir = dir.path().to_string_lossy().into_owned();
+        let old = json!({ "mcpServers": { "agentmux": { "command": "agentmux-mcp", "args": [], "env": {
+            "AGENTMUX_AGENT_ID": "manoz", "AGENTMUX_JEKT_KEY": "old-jekt-value", "AGENTMUX_LAN_KEY": "old-lan-value"
+        }}}})
+        .to_string();
+        crate::backend::mcp_config_file::with_data_home(data.path(), || {
+            let file = crate::backend::mcp_config_file::config_path(&work_dir);
+            crate::backend::mcp_config_file::write_relocated(&file, &old).unwrap();
+            assert_eq!(rewrite_file(&broken, &work_dir, "manoz", Shape::Canonical, None, true), Ok(true));
+            let text = std::fs::read_to_string(&file).unwrap();
+            assert!(!text.contains("old-jekt-value") && !text.contains("old-lan-value"), "{text}");
         });
     }
 

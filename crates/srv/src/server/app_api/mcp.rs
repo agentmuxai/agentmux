@@ -14,6 +14,7 @@
 //! mirrors it exactly for MCP servers.
 
 use super::*;
+use crate::backend::rpc::actor::actor_of;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_mcp_list(engine, state);
@@ -133,7 +134,7 @@ fn register_mcp_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // the ref-bind (Phase 2 of SPEC_DURABLE_BINDINGS_2026_09_10.md
                 // §5.4, accepted interim gap) — see
                 // `Store::managed_upsert_unique`'s doc comment.
-                mstore.mcp_server_upsert_unique(&identity_store, &req.agent_id, &server, req.id.is_empty())
+                mstore.mcp_server_upsert_unique(&identity_store, &req.agent_id, &server, req.id.is_empty(), &actor_of(&ctx).label())
                     .map_err(|e| format!("mcp.upsert: {e}"))?;
                 broker.publish_event::<crate::backend::mps_events::McpChanged>(&(), vec![], 0);
                 Ok(server)
@@ -204,7 +205,7 @@ fn register_mcp_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                     Some(_) => {}
                 }
-                mstore.mcp_server_bind(&identity_store, &req.agent_id, &req.mcp_id)
+                mstore.mcp_server_bind(&identity_store, &req.agent_id, &req.mcp_id, &actor_of(&ctx).label(), now_ms())
                     .map_err(|e| format!("mcp.bind: {e}"))?;
                 // An agent binding a server to itself over its own authenticated
                 // connection should reach an already-open Stash MCP Servers tab
@@ -344,7 +345,7 @@ fn register_mcp_catalog_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // servers would silently clobber each other's config for
                 // every agent that has either bound. Reagent P1 on #1948.
                 // Pure single-table op — called directly on identity_store.
-                identity_store.mcp_server_upsert_unique_global(&server)
+                identity_store.mcp_server_upsert_unique_global(&server, &actor_of(&ctx).label())
                     .map_err(|e| format!("mcp.catalog.upsert: {e}"))?;
                 broker.publish_event::<crate::backend::mps_events::McpChanged>(&(), vec![], 0);
                 Ok(server)
@@ -394,7 +395,7 @@ fn register_mcp_catalog_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                     Some(_) => {}
                 }
-                mstore.mcp_server_bind(&identity_store, &req.agent_id, &req.mcp_id)
+                mstore.mcp_server_bind(&identity_store, &req.agent_id, &req.mcp_id, &actor_of(&ctx).label(), now_ms())
                     .map_err(|e| format!("mcp.catalog.bind: {e}"))?;
                 // Lets any other open Stash/Connectors view for this agent pick up
                 // the new binding without a manual refresh — mcp.bind (the

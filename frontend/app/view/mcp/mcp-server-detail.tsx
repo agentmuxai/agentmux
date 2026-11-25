@@ -12,9 +12,11 @@ import { t } from "@/app/i18n/i18n";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { getMcpCapability, watchMcpCapability, type McpCapabilityStatus } from "@/app/store/mcp-capabilities";
 import type { McpServerCatalogItem } from "@/types/rpc/McpServerCatalogItem";
+import { tip } from "@/app/element/tip";
 import { focusOnOpen } from "@/util/focusutil";
 import { McpUsesList } from "./mcp-in-use";
-import { reachLabel, type McpCatalogModel, type McpDraft } from "./mcp-model";
+import { reachLabel, type BoundAgent, type McpCatalogModel, type McpDraft } from "./mcp-model";
+import { originLine, type AgentNameOf } from "./mcp-origin";
 import type { ServerUse } from "./mcp-observed";
 import { findPreloadEntryByName, MCP_PRELOAD_CATALOG } from "./mcp-preload-catalog";
 
@@ -76,6 +78,60 @@ function McpProbeStatus(props: { serverId: string; serverName: string }): JSX.El
     );
 }
 
+/** Who added the server and, when it was changed since, who last changed it. */
+function McpOriginLines(props: { server: McpServerCatalogItem; agentNameOf: AgentNameOf }): JSX.Element {
+    const server = () => props.server;
+    const changed = () => server().changed_by !== server().added_by || server().updated_at !== server().created_at;
+    return (
+        <>
+            <p class="mcp-detail-origin">{originLine("added", server().added_by, server().created_at, props.agentNameOf)}</p>
+            <Show when={changed()}>
+                <p class="mcp-detail-origin">
+                    {originLine("changed", server().changed_by, server().updated_at, props.agentNameOf)}
+                </p>
+            </Show>
+        </>
+    );
+}
+
+/** The agents a server is bound to, each with who bound it and when, and an Unbind. */
+function McpBoundAgents(props: {
+    model: McpCatalogModel;
+    serverId: string;
+    agents: BoundAgent[];
+    agentNameOf: AgentNameOf;
+}): JSX.Element {
+    return (
+        <Show when={props.agents.length > 0}>
+            <span class="mcp-detail-label">{t("mcp.detail.boundLabel")}</span>
+            <ul class="mcp-bound" aria-label={t("mcp.detail.boundAria")}>
+                <For each={props.agents}>
+                    {(agent) => {
+                        const boundBy = () => originLine("bound", agent.bound_by, agent.bound_at, props.agentNameOf);
+                        return (
+                            <li class="mcp-bound-agent">
+                                <span class="mcp-use-agent" {...tip(agent.name)}>
+                                    {agent.name}
+                                </span>
+                                <span class="mcp-bound-by" {...tip(boundBy())}>
+                                    {boundBy()}
+                                </span>
+                                <Button
+                                    density="compact"
+                                    aria-label={t("mcp.detail.unbindAria", { name: agent.name })}
+                                    onClick={() => props.model.unbindFromAgent(props.serverId, agent.id)}
+                                >
+                                    {t("mcp.detail.unbind")}
+                                </Button>
+                            </li>
+                        );
+                    }}
+                </For>
+            </ul>
+        </Show>
+    );
+}
+
 export function McpServerDetail(props: {
     model: McpCatalogModel;
     server: McpServerCatalogItem;
@@ -98,6 +154,8 @@ export function McpServerDetail(props: {
         () => ({ server: server(), revision: model.revisionAtom(), agents: model.agentsAtom() }),
         ({ server }) => model.boundAgents(server),
     );
+    // An actor label names an agent by the slug it connected as; the list carries its id and slug.
+    const agentNameOf: AgentNameOf = (id) => model.agentsAtom().find((a) => a.id === id || a.slug === id)?.name;
     const agentOptions = () => [
         { value: "", label: t("mcp.detail.selectAgent") },
         ...model.agentsAtom().map((a) => ({ value: a.id, label: a.name })),
@@ -108,6 +166,7 @@ export function McpServerDetail(props: {
             <p class="mcp-detail-note">
                 {server().all_agents ? t("mcp.detail.everyAgent") : t("mcp.detail.boundTo", { reach: reachLabel(server()) })}
             </p>
+            <McpOriginLines server={server()} agentNameOf={agentNameOf} />
             <Show when={props.notLoaded}>{(text) => <p class="mcp-not-loaded">{text()}</p>}</Show>
             <Field label={t("mcp.detail.allAgents")} description={t("mcp.detail.allAgentsHelp")}>
                 <Switch checked={server().all_agents} onChange={(on) => setReach({ all_agents: on })} />
@@ -126,25 +185,7 @@ export function McpServerDetail(props: {
             <Show when={props.uses.length > 0}>
                 <McpUsesList uses={props.uses} />
             </Show>
-            <Show when={(bound() ?? []).length > 0}>
-                <span class="mcp-detail-label">{t("mcp.detail.boundLabel")}</span>
-                <ul class="mcp-bound" aria-label={t("mcp.detail.boundAria")}>
-                    <For each={bound()}>
-                        {(agent) => (
-                            <li class="mcp-bound-agent">
-                                <span class="mcp-use-agent">{agent.name}</span>
-                                <Button
-                                    density="compact"
-                                    aria-label={t("mcp.detail.unbindAria", { name: agent.name })}
-                                    onClick={() => model.unbindFromAgent(server().id, agent.id)}
-                                >
-                                    {t("mcp.detail.unbind")}
-                                </Button>
-                            </li>
-                        )}
-                    </For>
-                </ul>
-            </Show>
+            <McpBoundAgents model={model} serverId={server().id} agents={bound() ?? []} agentNameOf={agentNameOf} />
             <span class="mcp-detail-label">{t("mcp.detail.transport")}</span>
             <pre class="mcp-detail-value">{server().transport}</pre>
             <span class="mcp-detail-label">{t("mcp.detail.config")}</span>

@@ -53,6 +53,9 @@ function server(id: string, name: string, over: Partial<McpServerCatalogItem> = 
         is_global: true,
         created_at: 1,
         updated_at: 1,
+        added_by: "operator",
+        changed_by: "operator",
+        bindings: [],
         bound_count: 0,
         all_agents: false,
         in_containers: false,
@@ -61,7 +64,11 @@ function server(id: string, name: string, over: Partial<McpServerCatalogItem> = 
 }
 
 const SERVERS = [
-    server("s1", "Ableton Live", { config: '{"command":"uvx","args":["ableton-mcp"]}', bound_count: 2 }),
+    server("s1", "Ableton Live", {
+        config: '{"command":"uvx","args":["ableton-mcp"]}',
+        bound_count: 2,
+        bindings: [{ agent_id: "a1", bound_by: "operator", bound_at: 0 }],
+    }),
     server("s2", "git", {
         config: '{"command":"npx","args":["-y","git-mcp"],"env":{"GITHUB_TOKEN":"ghp_secret123"}}',
         all_agents: true,
@@ -255,7 +262,7 @@ describe("McpManager", () => {
         await renderManager();
         fireEvent.click(card("Ableton Live"));
         const list = await screen.findByRole("list", { name: "Agents it is bound to" });
-        expect(within(list).getAllByRole("listitem").map((li) => li.textContent?.replace("Unbind", ""))).toEqual(["Korp"]);
+        expect(within(list).getAllByRole("listitem").map((li) => li.textContent?.replace("Unbind", ""))).toEqual(["KorpBound by you"]);
 
         // Once unbound, the catalog and the per-agent lists no longer show the bind.
         rpc.McpCatalogUnbindCommand.mockResolvedValue({ unbound: true });
@@ -268,6 +275,33 @@ describe("McpManager", () => {
         );
         await waitFor(() => expect(screen.queryByRole("list", { name: "Agents it is bound to" })).toBeNull());
         expect(card("Ableton Live").textContent).toContain("0 agents");
+    });
+
+    it("says who added the server, who last changed it, and who bound each agent, and when", async () => {
+        const at = new Date(2026, 10, 8, 15, 46, 12).getTime();
+        const changed = server("s1", "Ableton Live", {
+            added_by: "agent:a2",
+            changed_by: "operator",
+            created_at: at,
+            updated_at: at + 60_000,
+            bound_count: 2,
+            bindings: [
+                { agent_id: "a1", bound_by: "agent:a1", bound_at: at },
+                { agent_id: "a2", bound_by: "unknown", bound_at: 0 },
+            ],
+        });
+        rpc.McpCatalogListCommand.mockResolvedValue([changed, ...SERVERS.slice(1)]);
+        rpc.McpCatalogListForAgentCommand.mockImplementation(() => Promise.resolve([{ ...changed, bound_to_agent: true }]));
+        await renderManager();
+        fireEvent.click(card("Ableton Live"));
+        const list = await screen.findByRole("list", { name: "Agents it is bound to" });
+        const detail = list.parentElement!;
+        expect(detail.textContent).toMatch(/Added by AgentY, .*3:46:12 PM/);
+        expect(detail.textContent).toMatch(/Last changed by you, .*3:47:12 PM/);
+        const rows = within(list).getAllByRole("listitem").map((li) => li.textContent?.replace("Unbind", ""));
+        // Listed by name: AgentY, then Korp.
+        expect(rows[0]).toBe("AgentYBound by unknown (made before this was recorded)");
+        expect(rows[1]).toMatch(/^KorpBound by Korp, .*3:46:12 PM$/);
     });
 
     it("shows a failed unbind and keeps the agent listed", async () => {

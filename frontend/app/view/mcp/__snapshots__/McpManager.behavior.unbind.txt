@@ -76,6 +76,8 @@
           <div class="mcp-detail">
             <p class="mcp-detail-note">
               "Bound to 2 agents"
+            <p class="mcp-detail-origin">
+              "Added by you"
             <div class="ui-field ui-field--inline">
               <div class="ui-field-text">
                 <label class="ui-field-label" for="ui-field-cl-N">
@@ -115,8 +117,10 @@
               "Bound to"
             <ul class="mcp-bound" aria-label="Agents it is bound to">
               <li class="mcp-bound-agent">
-                <span class="mcp-use-agent">
+                <span class="mcp-use-agent" data-hover-tip="Korp" aria-description="Korp">
                   "Korp"
+                <span class="mcp-bound-by" data-hover-tip="Bound by unknown (made before this was recorded)" aria-description="Bound by unknown (made before this was recorded)">
+                  "Bound by unknown (made before this was recorded)"
                 <button aria-label="Unbind Korp" type="button" class="ui-button ui-tone-neutral ui-density-compact">
                   "Unbind"
             <span class="mcp-detail-label">
@@ -312,6 +316,8 @@
           <div class="mcp-detail">
             <p class="mcp-detail-note">
               "Bound to 0 agents"
+            <p class="mcp-detail-origin">
+              "Added by you"
             <div class="ui-field ui-field--inline">
               <div class="ui-field-text">
                 <label class="ui-field-label" for="ui-field-cl-N">
