@@ -357,6 +357,17 @@ fn planned(store: &Store, req: &UpdateRequest, agent: &str, own_profile: Option<
         None => had,
     };
     validate(kind, &label, &fields, &tags, &Parts::default())?;
+    // A proposal is held to the same rules as the change it asks for: it is never queued if it could not be applied.
+    if !proposals.is_empty() {
+        let mut proposed = fields.clone();
+        for (field, value) in &proposals {
+            match value.as_str() {
+                "" => proposed.remove(field),
+                v => proposed.insert(field.clone(), v.to_string()),
+            };
+        }
+        validate(kind, &label, &proposed, &tags, &Parts::default())?;
+    }
     let changed = what_changed(&row, &label, &fields, &tags);
     let place_changed = changed.iter().any(|c| matches!(c.as_str(), "field site" | "field realm" | "field proxy"));
     if changed.is_empty() && proposals.is_empty() {
@@ -414,22 +425,34 @@ pub fn update_details_for(store: &Store, req: &UpdateRequest, agent: &str, own_p
             updated_at: now_ms(),
             ..row
         };
-        if !store.vault_update_details_kept(&new, &was, &was_fields, &kept).map_err(|e| e.to_string())? {
+        // A place the person never saw is marked in the same transaction: a use there never goes ahead on silence (R9).
+        let mark = place_changed.then_some(agent);
+        if !store.vault_update_details_kept(&new, &was, &was_fields, &kept, mark).map_err(|e| e.to_string())? {
             return Err(format!("{label} changed while this was being saved, so nothing was changed: look at it again"));
         }
         let target = changed.join(", ");
         record_line(store, Line { entry_id: &new.id, label: &label, actor: agent, action: CHANGED_DETAILS, target: &target, outcome: "done", reason: &reason });
-        if place_changed {
-            // A place the person never saw: a use there never goes ahead on silence (R9).
-            agent_set::mark_site(store, &new.id, agent);
-        }
     }
     let mut proposed = Vec::new();
+    let mut failed = Vec::new();
     for (field, value) in &proposals {
-        super::proposals::propose(store, &id, field, value, agent, &reason)?;
-        proposed.push(format!("field {field}"));
+        match super::proposals::propose(store, &id, field, value, agent, &reason) {
+            Ok(()) => proposed.push(format!("field {field}")),
+            Err(e) => failed.push(format!("{field}: {e}")),
+        }
     }
-    let note = (!proposed.is_empty()).then(|| PROPOSED_NOTE.to_string());
+    if changed.is_empty() && proposed.is_empty() && !failed.is_empty() {
+        return Err(failed.join("; "));
+    }
+    let mut notes = Vec::new();
+    if !proposed.is_empty() {
+        notes.push(PROPOSED_NOTE.to_string());
+    }
+    if !failed.is_empty() {
+        // What was changed stays changed: the agent is told, not given an error for a change that was made.
+        notes.push(format!("the change was made, but a proposal was not recorded ({}): ask again", failed.join("; ")));
+    }
+    let note = (!notes.is_empty()).then(|| notes.join(" "));
     Ok(Updated { id, label, changed, proposed, note })
 }
 

@@ -197,3 +197,21 @@ fn a_changed_label_keeps_the_previous_details_for_seven_days_in_the_same_change(
     assert_eq!(s.vault_details_prune(kept[0].changed_at + 1).unwrap(), 1, "past 7 days it goes");
     assert!(s.vault_details_kept(&id, row.created_at).unwrap().is_empty());
 }
+
+#[test]
+fn a_proposal_is_held_to_the_rules_of_the_change_it_asks_for_when_proposed_and_when_accepted() {
+    let s = store();
+    let id = persons_login(&s);
+    // The same checks an edit passes: proxy is "yes" or left out, and a field has a length.
+    assert!(update_details_for(&s, &asked(&id, &[("proxy", "maybe")]), "builder", Some(OWN)).is_err());
+    assert!(update_details_for(&s, &asked(&id, &[("realm", &"r".repeat(5000))]), "builder", Some(OWN)).is_err());
+    assert!(proposals::list(&s).unwrap().is_empty(), "nothing invalid is queued");
+    // One that got in some other way is not written by an accept.
+    update_details_for(&s, &asked(&id, &[("realm", "Corp")]), "builder", Some(OWN)).unwrap();
+    let mut p = s.vault_proposals(Some(&id), 0).unwrap().remove(0);
+    p.field = "proxy".into();
+    p.value = "maybe".into();
+    s.vault_proposal_put(&p).unwrap();
+    assert!(proposals::accept(&s, &id, "proxy").is_err());
+    assert!(fields(&s, &id).get("proxy").is_none());
+}

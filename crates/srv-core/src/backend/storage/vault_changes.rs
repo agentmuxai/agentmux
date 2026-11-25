@@ -105,6 +105,18 @@ pub struct Proposal {
     pub at: i64,
 }
 
+/// [`Store::vault_unseen_mark`] inside the caller's transaction.
+fn mark_in(tx: &rusqlite::Transaction<'_>, entry_id: &str, entry_created_at: i64, by_agent: &str, at: i64, what: &str) -> Result<(), StoreError> {
+    tx.execute("DELETE FROM db_vault_grants WHERE entry_id = ?1", params![entry_id])?;
+    let before: Option<String> = tx.query_row("SELECT what FROM db_vault_unseen WHERE entry_id = ?1 AND entry_created_at = ?2", params![entry_id, entry_created_at], |r| r.get(0)).optional()?;
+    let what = before.map_or_else(|| what.to_string(), |old| merged(&old, what));
+    tx.execute(
+        "INSERT OR REPLACE INTO db_vault_unseen (entry_id, entry_created_at, by_agent, at, what) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![entry_id, entry_created_at, by_agent, at, what],
+    )?;
+    Ok(())
+}
+
 impl Store {
     /// Records that `by_agent` set the `what` (value or site) of `entry_id` (made at `entry_created_at`) at `at`, unseen by the person. The
     /// entry's *Always* grants go in the same step: they were given for the value the person saw, and several uses skip the
@@ -112,13 +124,7 @@ impl Store {
     pub fn vault_unseen_mark(&self, entry_id: &str, entry_created_at: i64, by_agent: &str, at: i64, what: &str) -> Result<(), StoreError> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
-        tx.execute("DELETE FROM db_vault_grants WHERE entry_id = ?1", params![entry_id])?;
-        let before: Option<String> = tx.query_row("SELECT what FROM db_vault_unseen WHERE entry_id = ?1 AND entry_created_at = ?2", params![entry_id, entry_created_at], |r| r.get(0)).optional()?;
-        let what = before.map_or_else(|| what.to_string(), |old| merged(&old, what));
-        tx.execute(
-            "INSERT OR REPLACE INTO db_vault_unseen (entry_id, entry_created_at, by_agent, at, what) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![entry_id, entry_created_at, by_agent, at, what],
-        )?;
+        mark_in(&tx, entry_id, entry_created_at, by_agent, at, what)?;
         tx.commit()?;
         Ok(())
     }
@@ -143,8 +149,9 @@ impl Store {
 
     /// An edit of an entry's details (label, plain fields, tags), only if it still holds the sealed value `was` and the fields
     /// `was_fields` that were read, and the details it replaces kept in the same transaction. False, with nothing written, if
-    /// the entry changed or is gone.
-    pub fn vault_update_details_kept(&self, row: &super::vault::VaultRow, was: &[u8], was_fields: &str, kept: &DetailsKept) -> Result<bool, StoreError> {
+    /// the entry changed or is gone. With `unseen_site_by` (the agent), the entry's place is marked unseen and its *Always*
+    /// grants dropped in the same transaction: a change of where a login is offered is never made without the mark.
+    pub fn vault_update_details_kept(&self, row: &super::vault::VaultRow, was: &[u8], was_fields: &str, kept: &DetailsKept, unseen_site_by: Option<&str>) -> Result<bool, StoreError> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
         let n = tx.execute(
@@ -158,6 +165,9 @@ impl Store {
             "INSERT INTO db_vault_details_kept (entry_id, entry_created_at, label, fields, tags, changed_at, changed_by, what) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![kept.entry_id, kept.entry_created_at, kept.label, kept.fields, kept.tags, kept.changed_at, kept.changed_by, kept.what],
         )?;
+        if let Some(agent) = unseen_site_by {
+            mark_in(&tx, &row.id, row.created_at, agent, row.updated_at, SITE)?;
+        }
         tx.commit()?;
         Ok(true)
     }

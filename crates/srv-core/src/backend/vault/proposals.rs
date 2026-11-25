@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 
 use agentmux_common::time::now_ms;
 
-use super::{history, record_line, signins, Line, PERSON};
+use super::{history, kinds, record_line, signins, validate, Line, Parts, PERSON};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::vault_changes::{DetailsKept, Proposal};
 
@@ -77,6 +77,9 @@ pub fn accept(store: &Store, id: &str, field: &str) -> Result<(), String> {
         v => fields.insert(field.to_string(), v.to_string()),
     };
     signins::normalize_site(&row.kind, &mut fields);
+    // The same checks an edit passes: a value that was never valid for the field is not written.
+    let kind = kinds::kind(&row.kind).ok_or_else(|| format!("entry {} has an unknown kind", row.id))?;
+    validate(kind, &row.label, &fields, &signins::tags_of(&row), &Parts::default())?;
     let was = (row.sealed.clone(), row.fields.clone());
     let kept = DetailsKept {
         entry_id: row.id.clone(),
@@ -89,7 +92,7 @@ pub fn accept(store: &Store, id: &str, field: &str) -> Result<(), String> {
         what: format!("field {field}"),
     };
     let new = crate::backend::storage::vault::VaultRow { fields: serde_json::to_string(&fields).map_err(|e| e.to_string())?, updated_at: now_ms(), ..row.clone() };
-    if !store.vault_update_details_kept(&new, &was.0, &was.1, &kept).map_err(|e| e.to_string())? {
+    if !store.vault_update_details_kept(&new, &was.0, &was.1, &kept, None).map_err(|e| e.to_string())? {
         return Err("the login changed while this was being applied, so nothing was changed: look at it again".into());
     }
     let _ = store.vault_proposal_delete(id, field);
