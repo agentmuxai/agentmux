@@ -9,11 +9,13 @@
 //! change replaced (the earlier value, the earlier details) or removes an entry an agent added, as the person's own action.
 //! Nothing here holds a value.
 
+use std::collections::BTreeMap;
+
 use serde::Serialize;
 
 use agentmux_common::time::now_ms;
 
-use super::{agent_set, history, inspect, proposals, record_line, versions, Line, PERSON};
+use super::{agent_set, expiry, history, inspect, proposals, record_line, versions, Line, PERSON};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::vault::{VaultActivityRow, VaultRow};
 use crate::backend::storage::vault_changes::DetailsKept;
@@ -226,8 +228,32 @@ pub fn undo(store: &Store, seq: i64) -> Result<(), String> {
     trust_when_none_left(store, &change.entry_id)
 }
 
+/// Puts back only what the agent's change touched (the names in its line's target), so a later edit of something else by the
+/// person is kept, and drops the kept row it read so the same change cannot be undone twice.
 fn restore_details(store: &Store, entry: &VaultRow, row: &VaultActivityRow) -> Result<(), String> {
     let kept = earlier_details(store, entry, row).ok_or("the earlier details are past their 7 days")?;
+    let earlier: BTreeMap<String, String> = serde_json::from_str(&kept.fields).unwrap_or_default();
+    let mut fields = super::signins::fields_of(entry);
+    let (mut label, mut tags) = (entry.label.clone(), entry.tags.clone());
+    let mut put_back = |name: &str| {
+        match earlier.get(name) {
+            Some(v) => fields.insert(name.to_string(), v.clone()),
+            None => fields.remove(name),
+        };
+    };
+    for part in row.target.split(", ") {
+        match part {
+            "label" => label = kept.label.clone(),
+            "tags" => tags = kept.tags.clone(),
+            "no expiry date" => put_back(expiry::FIELD),
+            p if p.starts_with("expires ") => put_back(expiry::FIELD),
+            p => {
+                if let Some(name) = p.strip_prefix("field ") {
+                    put_back(name);
+                }
+            }
+        }
+    }
     let now = DetailsKept {
         entry_id: entry.id.clone(),
         entry_created_at: entry.created_at,
@@ -238,10 +264,12 @@ fn restore_details(store: &Store, entry: &VaultRow, row: &VaultActivityRow) -> R
         changed_by: PERSON.to_string(),
         what: RESTORED_DETAILS.to_string(),
     };
-    let put_back = VaultRow { label: kept.label.clone(), fields: kept.fields.clone(), tags: kept.tags.clone(), updated_at: now_ms().max(entry.updated_at + 1), ..entry.clone() };
-    if !store.vault_update_details_kept(&put_back, &entry.sealed, &entry.fields, &now, None).map_err(|e| e.to_string())? {
+    let fields_json = serde_json::to_string(&fields).map_err(|e| e.to_string())?;
+    let changed = VaultRow { label: label.clone(), fields: fields_json, tags, updated_at: now_ms().max(entry.updated_at + 1), ..entry.clone() };
+    if !store.vault_update_details_kept(&changed, &entry.sealed, &entry.fields, &now, None).map_err(|e| e.to_string())? {
         return Err(format!("{} changed while this was being put back: nothing was changed", entry.label));
     }
-    record_line(store, Line { entry_id: &entry.id, label: &kept.label, actor: PERSON, action: RESTORED_DETAILS, target: &kept.what, outcome: "done", reason: "" });
+    store.vault_details_kept_delete(&kept).map_err(|e| e.to_string())?;
+    record_line(store, Line { entry_id: &entry.id, label: &label, actor: PERSON, action: RESTORED_DETAILS, target: &row.target, outcome: "done", reason: "" });
     Ok(())
 }

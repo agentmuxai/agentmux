@@ -206,3 +206,25 @@ fn seen_all_leaves_a_pending_proposal_in_the_strip_to_accept_or_dismiss() {
     proposals::accept(&s, &login, "site").unwrap();
     assert!(agent_changes::list(&s, None, false).unwrap().is_empty());
 }
+
+#[test]
+fn undoing_changed_details_twice_is_refused_and_keeps_what_the_person_edited_since() {
+    let s = store();
+    let id = key(&s, "Stripe", "sk_value_000000");
+    update_details_for(&s, &asked(&id, Some("Stripe live"), &[("notes", "moved")]), "builder", Some(OWN)).unwrap();
+    // The person tags the entry after the agent's change.
+    let row = s.vault_get(&id).unwrap().unwrap();
+    update(&s, EntryChange { id: id.clone(), label: row.label.clone(), fields: signins::fields_of(&row), tags: vec!["ops".into()], parts: Parts::default(), clear: vec![] }).unwrap();
+
+    let change = agent_changes::list(&s, Some(&id), false).unwrap().into_iter().find(|c| c.kind == "changed details").unwrap();
+    agent_changes::undo(&s, change.seq).unwrap();
+    let now = s.vault_get(&id).unwrap().unwrap();
+    assert_eq!(now.label, "Stripe");
+    assert!(!signins::fields_of(&now).contains_key("notes"), "what the agent added is gone");
+    assert_eq!(now.tags, r#"["ops"]"#, "the person's later edit stays");
+
+    let listed = agent_changes::list(&s, Some(&id), true).unwrap().into_iter().find(|c| c.seq == change.seq).unwrap();
+    assert_eq!(listed.undo, "", "it is not offered again");
+    assert!(agent_changes::undo(&s, change.seq).is_err(), "and a second try changes nothing");
+    assert_eq!(s.vault_get(&id).unwrap().unwrap().tags, r#"["ops"]"#);
+}

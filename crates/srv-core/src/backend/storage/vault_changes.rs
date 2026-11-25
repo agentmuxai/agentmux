@@ -195,6 +195,16 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// Drops one kept row, once its change has been put back, so it is not offered again.
+    pub fn vault_details_kept_delete(&self, kept: &DetailsKept) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM db_vault_details_kept WHERE entry_id = ?1 AND entry_created_at = ?2 AND changed_at = ?3 AND changed_by = ?4 AND what = ?5",
+            params![kept.entry_id, kept.entry_created_at, kept.changed_at, kept.changed_by, kept.what],
+        )?;
+        Ok(())
+    }
+
     /// Drops the kept details older than `before_ms`.
     pub fn vault_details_prune(&self, before_ms: i64) -> Result<usize, StoreError> {
         let conn = self.conn.lock().unwrap();
