@@ -469,3 +469,9 @@ export const OPERATOR_COMMANDS: ReadonlySet<string> = new Set([
     "writeeditorfile",
     "wsllist",
 ]);
+
+/** Commands that name an event: srv lets a connection that is not the window name only `OPEN_EVENTS` in them. */
+export const EVENT_COMMANDS: ReadonlySet<string> = new Set(["eventsub", "eventreadhistory"]);
+
+/** The events any connection may subscribe to or read the history of (the launcher's notification events). */
+export const OPEN_EVENTS: ReadonlySet<string> = new Set(["notification", "notification:retract", "notification:state"]);

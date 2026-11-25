@@ -18,18 +18,31 @@ pub const OPEN: &[&str] = &[
     "routeannounce", "routeunannounce", "setconfig", "waveinfo", "widgets.catalog", "widgets.list", "operator.challenge",
 ];
 
+/// The commands that carry an event name, which only the events in [`OPEN_EVENTS`] may be named in by a connection
+/// that is not the window: every event is delivered to whoever subscribed to it, and most carry another's words
+/// (a pane's output, a person's typing, an agent's turns).
+pub const EVENT_COMMANDS: &[&str] = &["eventsub", "eventreadhistory"];
+
+/// The events any connection may subscribe to or read the history of: the launcher's notification events.
+pub const OPEN_EVENTS: &[&str] = &["notification", "notification:retract", "notification:state"];
+
 /// Calls a connection registered as an agent may make although they are the window's: the handler lets the
 /// agent act on its own pane only (`server::pane_caller`) and refuses the rest.
 pub const OWN_PANE: &[&str] = &["agentinput", "agentstop", "controllerresync", "createsubblock", "deletesubblock", "setmeta"];
 
-/// Whether any connection may call `command`.
-pub fn is_open(command: &str) -> bool {
-    OPEN.contains(&command)
+/// Whether any connection may call `command` with this request: it is open, and when it names an event (`eventsub`,
+/// `eventreadhistory`) the event is one of [`OPEN_EVENTS`].
+pub fn is_open_for(command: &str, data: &serde_json::Value) -> bool {
+    if !OPEN.contains(&command) {
+        return false;
+    }
+    !EVENT_COMMANDS.contains(&command) || data.get("event").and_then(serde_json::Value::as_str).is_some_and(|e| OPEN_EVENTS.contains(&e))
 }
 
-/// Whether a connection registered as an agent may reach `command`'s handler, which checks the pane.
-pub fn agent_reaches_handler(command: &str) -> bool {
-    is_open(command) || OWN_PANE.contains(&command)
+/// Whether a connection registered as an agent reaches `command`'s handler although the command is not open: the
+/// handler checks the pane.
+pub fn is_own_pane(command: &str) -> bool {
+    OWN_PANE.contains(&command)
 }
 
 #[cfg(test)]
@@ -48,6 +61,26 @@ mod tests {
         for name in OWN_PANE {
             assert!(!OPEN.contains(name), "{name} is in OPEN and OWN_PANE");
         }
+        for name in EVENT_COMMANDS {
+            assert!(OPEN.contains(name), "{name} names an event and is open only for OPEN_EVENTS");
+        }
+    }
+
+    #[test]
+    fn an_event_is_open_only_when_it_carries_nobody_elses_words() {
+        use serde_json::json;
+        for event in OPEN_EVENTS {
+            assert!(is_open_for("eventsub", &json!({"event": event, "allscopes": true})), "{event}");
+            assert!(is_open_for("eventreadhistory", &json!({"event": event, "scope": "", "maxitems": 5})), "{event}");
+        }
+        // Another pane's output, the person's typing, an agent's turns and the message flow.
+        for event in ["blockfile", "userinput", "agentturn", "message-flow", "controllerstatus", "a-new-event", ""] {
+            assert!(!is_open_for("eventsub", &json!({"event": event, "allscopes": true})), "{event}");
+            assert!(!is_open_for("eventreadhistory", &json!({"event": event, "scope": ""})), "{event}");
+        }
+        assert!(!is_open_for("eventsub", &json!({})) && !is_open_for("eventsub", &serde_json::Value::Null));
+        assert!(is_open_for("eventunsub", &json!("blockfile")), "taking a subscription away reveals nothing");
+        assert!(!is_open_for("agent.kill-tree", &json!({})));
     }
 
     #[test]
@@ -61,7 +94,7 @@ mod tests {
             "readeditorfile", "listeditordir", "fs.list", "fs.places", "fileprobe", "filesearchtext", "filesearchbytes",
             "fileindexlines", "widgets.readfile",
         ] {
-            assert!(!is_open(name), "{name} must be the window's alone");
+            assert!(!OPEN.contains(&name), "{name} must be the window's alone");
         }
     }
 }

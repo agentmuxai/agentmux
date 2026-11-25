@@ -43,7 +43,7 @@ export function operatorCommands(commandsSource, accessSource) {
     return [...decided].filter((c) => !open.has(c)).sort();
 }
 
-export function render(commands) {
+export function render(commands, events = { eventCommands: [], openEvents: [] }) {
     return [
         "// Copyright 2026, AgentMux Corp.",
         "// SPDX-License-Identifier: Apache-2.0",
@@ -57,12 +57,24 @@ export function render(commands) {
         ...commands.map((c) => `    ${JSON.stringify(c)},`),
         "]);",
         "",
+        "/** Commands that name an event: srv lets a connection that is not the window name only `OPEN_EVENTS` in them. */",
+        `export const EVENT_COMMANDS: ReadonlySet<string> = new Set([${events.eventCommands.map((c) => JSON.stringify(c)).join(", ")}]);`,
+        "",
+        "/** The events any connection may subscribe to or read the history of (the launcher's notification events). */",
+        `export const OPEN_EVENTS: ReadonlySet<string> = new Set([${events.openEvents.map((c) => JSON.stringify(c)).join(", ")}]);`,
+        "",
     ].join("\n");
+}
+
+/** The commands that name an event, and the events open to every connection (action_access.rs). */
+export function eventRules(accessSource) {
+    return { eventCommands: constList(accessSource, "EVENT_COMMANDS"), openEvents: constList(accessSource, "OPEN_EVENTS") };
 }
 
 function current() {
     const read = (f) => readFileSync(join(RPC_DIR, f), "utf8");
-    return render(operatorCommands(read("action_commands.rs"), read("action_access.rs")));
+    const access = read("action_access.rs");
+    return render(operatorCommands(read("action_commands.rs"), access), eventRules(access));
 }
 
 if (isMain(import.meta.url)) {

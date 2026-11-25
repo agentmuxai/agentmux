@@ -7,7 +7,7 @@
 // Kept free of store imports: rpc-client.ts imports it. Which commands wait for the proof is srv's own decision
 // (`OPERATOR_COMMANDS`, generated from crates/srv-core/src/backend/rpc/action_access.rs): every command that is not open.
 
-import { OPERATOR_COMMANDS } from "./operator-commands.generated";
+import { EVENT_COMMANDS, OPEN_EVENTS, OPERATOR_COMMANDS } from "./operator-commands.generated";
 
 /** How srv words a refusal for a connection it hasn't seen proven. */
 const UNPROVEN = "isn't the AgentMux window";
@@ -114,6 +114,15 @@ export function isOperatorProofSettled(): boolean {
 
 export function isOperatorCommand(command: string): boolean {
     return OPERATOR_COMMANDS.has(command);
+}
+
+/** Whether this call waits for the proof: a command only the window may call, or one that names an event (a
+ *  subscription, a history read) other than the few srv opens to every connection. */
+export function waitsForProof(command: string, data: unknown): boolean {
+    if (OPERATOR_COMMANDS.has(command)) return true;
+    if (!EVENT_COMMANDS.has(command)) return false;
+    const event = (data as { event?: unknown } | null | undefined)?.event;
+    return !(typeof event === "string" && OPEN_EVENTS.has(event));
 }
 
 /** srv refused one of the window's own keystrokes or resizes (a `bus:error` frame, not an RPC answer) because this

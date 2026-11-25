@@ -31,7 +31,7 @@ pub type HandlerResult = Result<Option<serde_json::Value>, String>;
 
 /// Decides, before a command's handler runs, whether this connection may call it: `Err` is the refusal the
 /// caller is sent. Set per connection by srv (`server::dispatch_guard`).
-pub type DispatchGuard = Arc<dyn Fn(&str, &RpcContext) -> Result<(), String> + Send + Sync>;
+pub type DispatchGuard = Arc<dyn Fn(&str, &serde_json::Value, &RpcContext) -> Result<(), String> + Send + Sync>;
 
 /// A boxed async handler function.
 /// Takes the command data and returns either:
@@ -382,17 +382,17 @@ impl WshRpcEngine {
 
     /// Whether this connection may call `command` (also asked for the websocket's own input commands, which
     /// do not go through [`Self::handle_message`]).
-    pub fn check_dispatch(&self, command: &str) -> Result<(), String> {
+    pub fn check_dispatch(&self, command: &str, data: &serde_json::Value) -> Result<(), String> {
         let (guard, ctx) = {
             let inner = self.lock_inner();
             (inner.guard.clone(), inner.rpc_context.clone().unwrap_or_default())
         };
-        guard.map_or(Ok(()), |g| g(command, &ctx))
+        guard.map_or(Ok(()), |g| g(command, data, &ctx))
     }
 
     /// Answers a call that must not run (no such command, or the guard refuses this connection it), recording a refusal; true when it did.
     fn refuse_before_running(&self, command: &str, data: &serde_json::Value, ctx: &RpcContext, reqid: &str, handler: &RpcResponseHandler, known: bool) -> bool {
-        let refusal = if known { self.check_dispatch(command).err() } else { Some(format!("unknown command: {command}")) };
+        let refusal = if known { self.check_dispatch(command, data).err() } else { Some(format!("unknown command: {command}")) };
         let Some(refusal) = refusal else { return false };
         if known {
             super::action_record::after_call(command, data, ctx, reqid, &Err(refusal.clone()));

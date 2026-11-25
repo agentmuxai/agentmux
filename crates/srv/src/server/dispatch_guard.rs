@@ -51,12 +51,12 @@ pub(crate) enum Verdict {
     Refuse(String),
 }
 
-pub(crate) fn decide(command: &str, ctx: &RpcContext, mode: Mode) -> Verdict {
-    if mode.dev_open || action_access::is_open(command) {
+pub(crate) fn decide(command: &str, data: &serde_json::Value, ctx: &RpcContext, mode: Mode) -> Verdict {
+    if mode.dev_open || action_access::is_open_for(command, data) {
         return Verdict::Allow;
     }
     if !ctx.agent_id.is_empty() {
-        return if action_access::agent_reaches_handler(command) {
+        return if action_access::is_own_pane(command) {
             Verdict::Allow
         } else {
             Verdict::Refuse(format!("FORBIDDEN: {command} is the AgentMux window's call; an agent reaches AgentMux with its MuxAPI tools"))
@@ -110,12 +110,12 @@ pub(crate) fn install(engine: &Arc<WshRpcEngine>) {
 
 fn guard_with(mode: impl Fn() -> Mode + Send + Sync + 'static) -> DispatchGuard {
     let logged = AtomicBool::new(false);
-    Arc::new(move |command: &str, ctx: &RpcContext| {
+    Arc::new(move |command: &str, data: &serde_json::Value, ctx: &RpcContext| {
         // The window's own calls, keystrokes among them, take no further look.
         if ctx.agent_id.is_empty() && ctx.operator_proven_now() {
             return Ok(());
         }
-        match decide(command, ctx, mode()) {
+        match decide(command, data, ctx, mode()) {
             Verdict::Allow => Ok(()),
             Verdict::AllowUnproven => {
                 if !logged.swap(true, Ordering::Relaxed) {

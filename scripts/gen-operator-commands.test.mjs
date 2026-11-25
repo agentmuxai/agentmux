@@ -4,7 +4,7 @@
 //
 // gen-operator-commands.mjs: the window's commands are every decided command that is not open.
 import { describe, expect, it } from "vitest";
-import { constList, operatorCommands, render } from "./gen-operator-commands.mjs";
+import { constList, eventRules, operatorCommands, render } from "./gen-operator-commands.mjs";
 
 const commands = `
 pub const ALWAYS: &[&str] = &[
@@ -30,9 +30,12 @@ describe("operatorCommands", () => {
         expect(() => operatorCommands(commands, 'pub const OPEN: &[&str] = &["nobody-decided"];')).toThrow(/nobody-decided/);
     });
 
-    it("renders the set the app reads", () => {
-        const src = render(["getmemory"]);
+    it("renders the set the app reads, and the events open to every connection", () => {
+        const events = eventRules('pub const EVENT_COMMANDS: &[&str] = &["eventsub"]; pub const OPEN_EVENTS: &[&str] = &["notification"];');
+        const src = render(["getmemory"], events);
         expect(src).toContain("@generated");
         expect(src).toContain('    "getmemory",');
+        expect(src).toContain('EVENT_COMMANDS: ReadonlySet<string> = new Set(["eventsub"])');
+        expect(src).toContain('OPEN_EVENTS: ReadonlySet<string> = new Set(["notification"])');
     });
 });

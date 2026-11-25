@@ -716,7 +716,7 @@ pub(super) fn refuse_agent_input(ctx: &RpcContext) -> Result<(), String> {
 /// as a `bus:error` frame (the one agent clients already read); a closed socket is the only `Err`.
 async fn input_command(wscommand: &str, incoming: &WSIncoming, engine: &Arc<WshRpcEngine>, socket: &mut WebSocket) -> Result<(), ()> {
     let Some(block_id) = incoming.blockid.as_deref() else { return Ok(()) };
-    if let Err(refusal) = engine.check_dispatch(wscommand) {
+    if let Err(refusal) = engine.check_dispatch(wscommand, &serde_json::Value::Null) {
         let frame = serde_json::to_string(&json!({ "type": "bus:error", "error": refusal })).unwrap_or_default();
         return socket.send(Message::Text(frame.into())).await.map_err(|_| ());
     }

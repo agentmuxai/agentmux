@@ -30,6 +30,7 @@ import {
     sendAsOperator,
     setOperatorRefusalHandler,
     sendRetryingUnproven,
+    waitsForProof,
 } from "./operator-proof";
 import { RpcClient } from "./rpc-client";
 
@@ -277,6 +278,23 @@ describe("operator proof", () => {
         for (const c of ["kanban.list", "operator.challenge", "jobs.list", "getfullconfig", "eventsub", "notify.ack", "setconfig"]) {
             expect(isOperatorCommand(c)).toBe(false);
         }
+    });
+});
+
+describe("which calls wait for the proof", () => {
+    it("holds a subscription or history read of any event but the launcher's, and sends those at once", () => {
+        for (const command of ["eventsub", "eventreadhistory"]) {
+            expect(waitsForProof(command, { event: "blockfile", allscopes: true })).toBe(true);
+            expect(waitsForProof(command, { event: "controllerstatus", scopes: ["block:x"] })).toBe(true);
+            expect(waitsForProof(command, {})).toBe(true);
+            expect(waitsForProof(command, null)).toBe(true);
+            for (const event of ["notification", "notification:retract", "notification:state"]) {
+                expect(waitsForProof(command, { event })).toBe(false);
+            }
+        }
+        expect(waitsForProof("eventunsub", "blockfile")).toBe(false);
+        expect(waitsForProof("getmemory", null)).toBe(true);
+        expect(waitsForProof("getfullconfig", null)).toBe(false);
     });
 });
 
