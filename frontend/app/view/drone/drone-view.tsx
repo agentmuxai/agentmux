@@ -116,7 +116,7 @@ const NodeTypeBar = (p: { model: DroneViewModel; onTemplates: () => void }): JSX
                 <Button class="drone-btn" onClick={() => p.onTemplates()}>
                     {t("drone.templates.open")}
                 </Button>
-                <Button class="drone-btn" onClick={() => void m.save()}>
+                <Button class="drone-btn" onClick={() => m.save()}>
                     Save
                 </Button>
                 <Button
@@ -124,7 +124,7 @@ const NodeTypeBar = (p: { model: DroneViewModel; onTemplates: () => void }): JSX
                     class="drone-btn drone-btn--primary"
                     disabled={!validation().ok || m.runningAtom()}
                     title={validation().errors.join(" · ")}
-                    onClick={() => void m.run()}
+                    onClick={() => m.run()}
                 >
                     {m.runningAtom() ? "Running…" : "▶ Run"}
                 </Button>

@@ -141,3 +141,75 @@ async fn a_host_agent_the_window_and_an_unproven_connection_are_not_refused() {
         }
     }
 }
+
+/// A catalog server whose command no program answers to: a probe that starts it on this computer says so ("failed to
+/// start"), one that does not says it runs in the container.
+const NO_SUCH_PROGRAM: &str = "agentmux-test-no-such-program";
+
+fn a_catalog_server(state: &crate::server::AppState, id: &str) {
+    let server = crate::backend::storage::mcp_servers::McpServer {
+        id: id.to_string(),
+        name: id.to_string(),
+        transport: "stdio".to_string(),
+        config: format!("{{\"command\":\"{NO_SUCH_PROGRAM}\"}}"),
+        is_global: true,
+        created_at: 1,
+        updated_at: 1,
+    };
+    state.identity_store.mcp_server_upsert_unique_global(&server).unwrap();
+}
+
+/// What `command` answers for the window: the probe's error text, or the error of the call.
+async fn probe_error_text(engine: &Arc<WshRpcEngine>, rx: &mut tokio::sync::mpsc::UnboundedReceiver<RpcMessage>, command: &str, agent: &str, server: &str) -> String {
+    let reqid = format!("mcp-probe-{}", uuid::Uuid::new_v4());
+    let data = json!({ "agent_id": agent, "id": server });
+    engine.handle_message(RpcMessage { command: command.to_string(), reqid: reqid.clone(), data: Some(data), ..Default::default() });
+    let answer = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        loop {
+            let m = rx.recv().await.expect("the connection stays open");
+            if m.resid == reqid {
+                return m;
+            }
+        }
+    })
+    .await
+    .expect("an answer within 20s");
+    format!("{} {}", answer.error, answer.data.map(|d| d.to_string()).unwrap_or_default())
+}
+
+#[tokio::test]
+async fn a_catalog_probe_starts_nothing_on_this_computer_for_a_server_bound_only_to_container_agents() {
+    use crate::backend::storage::mcp_servers::McpServerReach;
+    let in_container = crate::backend::mcp_probe::RUNS_IN_CONTAINER;
+    let (engine, mut rx, state) = connection();
+    assert!(engine.mark_operator_proven());
+    an_agent(&state, "boxed", "container");
+    an_agent(&state, "hosted", "agent");
+    for id in ["only-boxed", "boxed-and-hosted", "not-in-containers", "bound-to-nobody", "every-agent"] {
+        a_catalog_server(&state, id);
+    }
+    let reach = |id: &str, all_agents: bool, in_containers: bool| state.identity_store.mcp_server_set_reach(id, McpServerReach { all_agents, in_containers }, 1).unwrap();
+    let bind = |agent: &str, id: &str| state.mstore.mcp_server_bind(&state.identity_store, &format!("uid-{agent}"), id).unwrap();
+    reach("only-boxed", false, true);
+    bind("boxed", "only-boxed");
+    reach("boxed-and-hosted", false, true);
+    bind("boxed", "boxed-and-hosted");
+    bind("hosted", "boxed-and-hosted");
+    reach("not-in-containers", false, false);
+    bind("boxed", "not-in-containers");
+    reach("bound-to-nobody", false, true);
+    reach("every-agent", true, true);
+    bind("boxed", "every-agent");
+
+    let only = probe_error_text(&engine, &mut rx, "mcp.catalog.probe", "", "only-boxed").await;
+    assert!(only.contains(in_container) && !only.contains("failed to start"), "{only}");
+    for (id, why) in [
+        ("boxed-and-hosted", "a host agent has it too"),
+        ("not-in-containers", "it does not reach containers"),
+        ("bound-to-nobody", "no agent has it"),
+        ("every-agent", "it reaches every agent"),
+    ] {
+        let started = probe_error_text(&engine, &mut rx, "mcp.catalog.probe", "", id).await;
+        assert!(started.contains("failed to start") && !started.contains(in_container), "{why}: {started}");
+    }
+}

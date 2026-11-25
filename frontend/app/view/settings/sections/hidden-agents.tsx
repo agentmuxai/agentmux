@@ -104,7 +104,7 @@ export function HiddenAgents(): JSX.Element {
                                     <Button
                                         disabled={busy() === agent.id}
                                         aria-label={`Remove ${agentName(agent)} from the hidden list`}
-                                        onClick={() => void change(agent, false)}
+                                        onClick={() => change(agent, false)}
                                     >
                                         Remove
                                     </Button>

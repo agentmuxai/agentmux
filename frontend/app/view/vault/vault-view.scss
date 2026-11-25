@@ -972,9 +972,8 @@
     font-size: var(--text-sm);
 }
 
-// Import, Export and the note, here instead of in a header too narrow for them (vault-narrow-actions.tsx): at the
-// row's end.
-.vault-narrow-actions {
+// Import, Export and the note (vault-body-actions.tsx): at the row's end.
+.vault-body-actions {
     display: flex;
     gap: var(--space-1);
     margin-left: auto;

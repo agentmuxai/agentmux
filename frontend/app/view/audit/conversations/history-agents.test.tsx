@@ -505,7 +505,7 @@ describe("HistoryAgents", () => {
             const refresh = screen.getByRole("button", { name: "Refresh" });
             fireEvent.click(refresh);
             await waitFor(() => expect(container.querySelector(".warden-manager-error")).not.toBeNull());
-            expect(refresh.getAttribute("aria-busy")).toBeNull();
+            await waitFor(() => expect(refresh.getAttribute("aria-busy")).toBeNull());
             expect(container.querySelector(".warden-manager-error")!.textContent).toBe("⚠ no route");
         });
     });

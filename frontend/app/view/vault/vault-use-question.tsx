@@ -761,16 +761,16 @@ export function UseQuestion(props: { use: UseRequest; answer: UseAnswerState; Bo
                 </Show>
             </props.Body>
             <props.Actions>
-                <Button data-modal-dismiss tone="danger" disabled={a.busy()} onClick={() => void a.decide("deny")}>
+                <Button data-modal-dismiss tone="danger" disabled={a.busy()} onClick={() => a.decide("deny")}>
                     {t("vault.use.deny")}
                 </Button>
                 {/* The yeses wrap as one group, so a narrow card never puts Always beside Deny. */}
                 <span class="vault-use-allow">
-                    <Button tone={u.needs_value ? "accent" : "neutral"} disabled={a.busy() || (u.needs_value && !a.typed()) || (!!u.choices?.length && !a.card()) || (!!u.batch && a.rows().length === 0)} onClick={() => void a.decide("once")}>
+                    <Button tone={u.needs_value ? "accent" : "neutral"} disabled={a.busy() || (u.needs_value && !a.typed()) || (!!u.choices?.length && !a.card()) || (!!u.batch && a.rows().length === 0)} onClick={() => a.decide("once")}>
                         {u.batch ? t("vault.batchCard.allow", { count: a.rows().length }) : u.needs_value ? t("vault.use.fillIn") : u.share ? t("vault.shareCard.allow") : t("vault.use.allowOnce")}
                     </Button>
                     <Show when={u.offer_always && !pickedExpired(u, a)}>
-                        <Button tone="attention" disabled={a.busy() || (!!u.choices?.length && !a.card())} onClick={() => void a.decide("always")}>
+                        <Button tone="attention" disabled={a.busy() || (!!u.choices?.length && !a.card())} onClick={() => a.decide("always")}>
                             {alwaysLabel(u)}
                         </Button>
                     </Show>

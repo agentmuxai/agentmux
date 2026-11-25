@@ -35,6 +35,9 @@
  *       from A to B. Proven from the diff itself, never from a path or a
  *       title, so a "release" PR that also bumps a dependency runs everything.
  *
+ *   R12 A documentation file a Rust test reads (RUST_READS_DOCS: the app API manifest and the redaction vectors)
+ *       is not documentation-only: a change to it runs the Rust legs, in a PR and in the merge queue.
+ *
  *   R9  The production frontend build (a step of the frontend job) runs unless
  *       every changed file is documentation or one of BUILD_NEVER_READS: the
  *       Rust sources and their manifests. A file the list does not name runs it.
@@ -129,6 +132,16 @@ const RUST_READS_FRONTEND = [
     /^frontend\/app\/util\/widgets-json-template\.jsonc$/,
     /^frontend\/app\/store\/low-disk-levels\.json$/,
 ];
+
+/**
+ * R12. The documentation files the Rust tests read at run time (the app API manifest, which three crates check
+ * their routes against, and the redaction vectors the frontend shares with the common crate). They are under
+ * docs/ but are test inputs, so a change to one is not documentation-only: the Rust legs run (R1, R2). A PR of
+ * these alone skipped the Rust job, in a pull request and, since the merge queue applies the same rule to an
+ * entry's diff, in the queue; only the push to main ran the tests. scripts/ci-classify-changes.test.mjs scans the
+ * crates for a path of docs/ read from the manifest directory and fails when one is not listed here.
+ */
+const RUST_READS_DOCS = [/^docs\/specs\/app-api-manifest\.json$/, /^docs\/specs\/fixtures\/redaction-vectors\.json$/];
 
 /**
  * R9. What the production frontend build never bundles: the Rust sources and what configures only their build. A
@@ -308,6 +321,7 @@ export function isDocsOnlyPath(rawPath) {
     if (p === "") return false; // R2
     if (NEVER_DOCS_EXACT.includes(p)) return false; // R3
     if (NEVER_DOCS_PREFIXES.some((prefix) => p.startsWith(prefix))) return false; // R3
+    if (RUST_READS_DOCS.some((re) => re.test(p))) return false; // R12
     return DOCS_ONLY_PATTERNS.some((re) => re.test(p));
 }
 

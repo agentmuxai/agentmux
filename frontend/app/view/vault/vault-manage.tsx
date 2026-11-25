@@ -87,7 +87,7 @@ function VaultEditor(props: { vault: VaultInfo | null; onDone: (created?: string
                 <Button density="compact" onClick={() => props.onDone()} disabled={busy()}>
                     {t("vault.manage.cancel")}
                 </Button>
-                <Button density="compact" tone="accent" busy={busy()} onClick={() => void save()}>
+                <Button density="compact" tone="accent" busy={busy()} onClick={() => save()}>
                     {props.vault ? t("vault.manage.save") : t("vault.manage.add")}
                 </Button>
             </div>

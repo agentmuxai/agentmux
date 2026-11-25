@@ -198,7 +198,7 @@ function OpenButtons({ s }: { s: PanelState }) {
                     tone="accent"
                     icon="right-left"
                     data-testid="agent-fork-switch"
-                    onClick={() => void handleSwitchToExisting(row)}
+                    onClick={() => handleSwitchToExisting(row)}
                 >
                     Switch to existing
                 </Button>
@@ -207,7 +207,7 @@ function OpenButtons({ s }: { s: PanelState }) {
                         icon="arrow-right-to-bracket"
                         title={t("agentPicker.openHereTip", { name: s.name })}
                         data-testid="agent-open-here"
-                        onClick={() => void handleOpenHere(row)}
+                        onClick={() => handleOpenHere(row)}
                     >
                         {t("agentPicker.openHere")}
                     </Button>
@@ -215,7 +215,7 @@ function OpenButtons({ s }: { s: PanelState }) {
                 <Button
                     icon="code-fork"
                     data-testid="agent-fork-open-new"
-                    onClick={() => void handleOpenNewSession(row)}
+                    onClick={() => handleOpenNewSession(row)}
                 >
                     Fork…
                 </Button>
@@ -229,7 +229,7 @@ function OpenButtons({ s }: { s: PanelState }) {
                 >
                     Open it
                 </Button>
-                <Button icon="code-fork" data-testid="agent-fork-fork" onClick={() => void handleOpenNewSession(row)}>
+                <Button icon="code-fork" data-testid="agent-fork-fork" onClick={() => handleOpenNewSession(row)}>
                     Fork…
                 </Button>
             </Match>
@@ -238,7 +238,7 @@ function OpenButtons({ s }: { s: PanelState }) {
                     tone="accent"
                     icon="arrow-right-to-bracket"
                     data-testid="agent-my-agents-open"
-                    onClick={() => void handleOpen(row)}
+                    onClick={() => handleOpen(row)}
                 >
                     Open
                 </Button>
@@ -332,7 +332,7 @@ function DeleteView({ s }: { s: PanelState }) {
                     icon="trash-can"
                     data-testid="agent-delete-confirm-yes"
                     busy={deleteBusy()}
-                    onClick={() => void confirmDelete(row)}
+                    onClick={() => confirmDelete(row)}
                 >
                     Delete {name}
                 </Button>

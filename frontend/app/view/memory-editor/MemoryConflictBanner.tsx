@@ -84,7 +84,7 @@ export function MemoryConflictBanner<T>(props: MemoryConflictBannerProps<T>): JS
                                 class="memory-editor-btn"
                                 disabled={conflict().current === undefined || props.model.savingAtom()}
                                 title="Replace the saved version with your draft"
-                                onClick={() => void props.model.overwrite()}
+                                onClick={() => props.model.overwrite()}
                             >
                                 Save anyway
                             </Button>

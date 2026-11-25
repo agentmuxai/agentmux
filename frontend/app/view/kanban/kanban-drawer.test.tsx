@@ -123,6 +123,7 @@ describe("KanbanDrawer: taking a task back", () => {
         fireEvent.click(screen.getByText("Give"));
         await waitFor(() => expect(act).toHaveBeenCalledTimes(1));
         expect(act.mock.calls[0][0]).toEqual({ id: "w1", action: "reassign", agent: "Loap-3" });
+        await waitFor(() => expect(document.querySelector("[data-pending]")).toBeNull());
         fireEvent.change(select, { target: { value: "__anyone" } });
         fireEvent.click(screen.getByText("Give"));
         await waitFor(() => expect(act).toHaveBeenCalledTimes(2));

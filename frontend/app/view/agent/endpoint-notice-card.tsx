@@ -48,7 +48,7 @@ export function EndpointNoticeCard(props: { notice: EndpointNoticeEvent } & Pane
             <div class="endpoint-notice-card-actions">
                 <Button onClick={() => props.close()}>Keep it</Button>
                 <Show when={canUndoEndpoint(props.notice, now())}>
-                    <Button tone="attention" busy={busy()} disabled={busy()} onClick={() => void undo()}>
+                    <Button tone="attention" busy={busy()} disabled={busy()} onClick={() => undo()}>
                         {`Undo (${left()} s)`}
                     </Button>
                 </Show>

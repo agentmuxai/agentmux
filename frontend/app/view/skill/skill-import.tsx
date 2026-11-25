@@ -120,7 +120,7 @@ export function SkillImportPanel(props: { model: SkillImportModel; onCancel: () 
                 <Button
                     class="agent-primitive-modal-btn"
                     disabled={model.busyAtom() || !model.locationAtom().trim()}
-                    onClick={() => void model.read()}
+                    onClick={() => model.read()}
                 >
                     {model.busyAtom() && !model.previewAtom() ? t("skill.import.reading") : t("skill.import.read")}
                 </Button>
@@ -156,7 +156,7 @@ export function SkillImportResult(props: { model: SkillImportModel; verb?: strin
                             tone="accent"
                             class="agent-primitive-modal-btn agent-primitive-modal-btn-primary"
                             disabled={model.busyAtom() || count() === 0}
-                            onClick={() => void model.commit()}
+                            onClick={() => model.commit()}
                         >
                             {count() === 0
                                 ? t("skill.import.nothing", { verb: verb().toLowerCase() })

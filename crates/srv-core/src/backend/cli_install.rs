@@ -447,7 +447,19 @@ pub fn npm_isolation_args(dir: &Path) -> std::io::Result<Vec<String>> {
 /// (async IOCP and sync blocking alike) receives nothing from `cmd.exe /C`
 /// batch children on Windows until the process exits.
 fn run_npm_install(dir: &Path, package: &str, background: bool) -> std::io::Result<NpmRun> {
-    let out = {
+    let out = npm_install_command(dir, package, background)?.output()?;
+    Ok(NpmRun {
+        success: out.status.success(),
+        code: out.status.code(),
+        stdout: out.stdout,
+        stderr: out.stderr,
+    })
+}
+
+/// The command [`run_npm_install`] runs. Its working folder is the install folder `dir`, so nothing it does
+/// depends on the folder srv was started in (on Windows `cmd /C npm` looks in the working folder before PATH).
+fn npm_install_command(dir: &Path, package: &str, background: bool) -> std::io::Result<std::process::Command> {
+    let command = {
         #[cfg(windows)]
         {
             // npm on Windows is a .cmd batch script — it must run via
@@ -478,9 +490,10 @@ fn run_npm_install(dir: &Path, package: &str, background: bool) -> std::io::Resu
             c.arg("/C")
                 .raw_arg(&cmdline)
                 .creation_flags(flags)
+                .current_dir(dir)
                 .env("CI", "true")
-                .env("FORCE_COLOR", "0")
-                .output()?
+                .env("FORCE_COLOR", "0");
+            c
         }
         #[cfg(not(windows))]
         {
@@ -498,6 +511,7 @@ fn run_npm_install(dir: &Path, package: &str, background: bool) -> std::io::Resu
             .arg("--prefix")
             .arg(dir)
             .args(package.split_whitespace())
+            .current_dir(dir)
             .env("CI", "true")
             .env("FORCE_COLOR", "0");
             if background {
@@ -511,15 +525,10 @@ fn run_npm_install(dir: &Path, package: &str, background: bool) -> std::io::Resu
                     });
                 }
             }
-            c.output()?
+            c
         }
     };
-    Ok(NpmRun {
-        success: out.status.success(),
-        code: out.status.code(),
-        stdout: out.stdout,
-        stderr: out.stderr,
-    })
+    Ok(command)
 }
 
 // ─── install on demand ──────────────────────────────────────────────────────
@@ -661,6 +670,17 @@ pub fn warm_used_providers(
 
 #[cfg(test)]
 mod tests {
+
+    /// What the install does must not depend on the folder srv was started in: npm runs in the install folder.
+    #[test]
+    fn the_npm_install_runs_in_the_install_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("cli").join("claude").join("1.0.0");
+        for background in [false, true] {
+            let command = super::npm_install_command(&dir, "@anthropic-ai/claude-code@1.0.0", background).unwrap();
+            assert_eq!(command.get_current_dir(), Some(dir.as_path()), "background {background}");
+        }
+    }
 
     /// A `.npmrc` routing @agentmuxai to GitHub Packages made the muxcode install 404, and any
     /// package could be pulled from the person's own registry: every install now names the public

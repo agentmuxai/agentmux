@@ -53,10 +53,10 @@ export const DroneApprovals = (p: { droneId: () => string }): JSX.Element => {
                         )}
                     </For>
                     <div class="drone-approval-actions">
-                        <Button class="drone-btn" onClick={() => void answer(a, true)}>
+                        <Button class="drone-btn" onClick={() => answer(a, true)}>
                             {t("drone.approval.approve")}
                         </Button>
-                        <Button class="drone-btn" onClick={() => void answer(a, false)}>
+                        <Button class="drone-btn" onClick={() => answer(a, false)}>
                             {t("drone.approval.reject")}
                         </Button>
                         <span class="drone-approval-until">{t("drone.approval.until", { time: new Date(a.deadline_ms).toLocaleString() })}</span>

@@ -89,7 +89,7 @@ function NoPaneRow(props: { agent: AgentRuntime; runner: Runner; onOpen: Action;
                         aria-label={`Start ${agent().name}`}
                         title="Run it with no pane, resuming its session"
                         disabled={runner.busy().has(agent().agent_id)}
-                        onClick={() => void runner.run(agent(), props.onStart)}
+                        onClick={() => runner.run(agent(), props.onStart)}
                     >
                         {runner.busy().has(agent().agent_id) ? "Starting…" : "Start"}
                     </Button>
@@ -99,7 +99,7 @@ function NoPaneRow(props: { agent: AgentRuntime; runner: Runner; onOpen: Action;
                     aria-label={`Open ${agent().name}`}
                     title={runsWithoutPane(agent()) ? "Show it in a pane" : "Open it in a pane (starts it)"}
                     disabled={runner.busy().has(agent().agent_id)}
-                    onClick={() => void runner.run(agent(), props.onOpen)}
+                    onClick={() => runner.run(agent(), props.onOpen)}
                 >
                     Open
                 </Button>

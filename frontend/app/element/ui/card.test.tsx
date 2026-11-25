@@ -152,6 +152,36 @@ describe("CardGrid", () => {
         spy.mockRestore();
     });
 
+    it("shows a question below its card's row, before the details, and gives focus back to the card when it goes", async () => {
+        const spy = widthOf(406); // 2 columns
+        const [asked, setAsked] = createSignal<string | null>("a");
+        const { container } = render(() => (
+            <CardGrid
+                items={items}
+                keyOf={(i) => i}
+                selectedKey="a"
+                askKey={asked()}
+                renderCard={(i) => <Card title={i} aria-label={i} />}
+                renderDetail={(i) => <div>details of {i}</div>}
+                renderAsk={(i) => <button>Delete {i}?</button>}
+            />
+        ));
+        const order = () =>
+            [...container.querySelector(".ui-card-grid")!.children].map((el) =>
+                el.classList.contains("ui-card-detail") ? "D" : el.classList.contains("ui-card-ask") ? "Q" : el.getAttribute("data-card-key"),
+            );
+        expect(order()).toEqual(["a", "b", "Q", "D", "c", "d", "e"]);
+        setAsked("e");
+        expect(order()).toEqual(["a", "b", "D", "c", "d", "e", "Q"]);
+        expect(screen.getByRole("button", { name: "Delete e?" })).toBeTruthy();
+        // Closed while focus is on the question's button, which leaves with it: the card the question was about has it.
+        screen.getByRole("button", { name: "Delete e?" }).focus();
+        setAsked(null);
+        expect(order()).toEqual(["a", "b", "D", "c", "d", "e"]);
+        await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "e" })));
+        spy.mockRestore();
+    });
+
     it("stops at maxColumns however wide it is, and sets each track to at most maxCardWidth", () => {
         const spy = widthOf(2400);
         const { container } = render(() => (

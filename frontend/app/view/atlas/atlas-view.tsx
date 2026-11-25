@@ -143,13 +143,13 @@ function StoppedChip(props: { agents: { agent: AtlasAgent; host: string }[] }): 
                                 <Show when={agent.runtimeId}>
                                     <Button
                                         density="compact"
-                                        onClick={() => void openAgentInActiveTab({ agent_id: agent.runtimeId!, name: agent.name })}
+                                        onClick={() => openAgentInActiveTab({ agent_id: agent.runtimeId!, name: agent.name })}
                                     >
                                         {t("atlas.open")}
                                     </Button>
                                     <Button
                                         density="compact"
-                                        onClick={() => void startAgent({ agent_id: agent.runtimeId!, name: agent.name })}
+                                        onClick={() => startAgent({ agent_id: agent.runtimeId!, name: agent.name })}
                                     >
                                         {t("atlas.start")}
                                     </Button>

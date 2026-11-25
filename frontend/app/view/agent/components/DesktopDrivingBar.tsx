@@ -43,7 +43,7 @@ export const DesktopDrivingBar = (props: { blockId: string }): JSX.Element => {
                     </For>
                 </span>
                 {error() && <span class="agent-desktop-bar-error">{error()}</span>}
-                <Button tone="danger" onClick={() => void stop()}>
+                <Button tone="danger" onClick={() => stop()}>
                     Stop
                 </Button>
             </div>

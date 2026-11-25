@@ -91,7 +91,7 @@ function EpisodeRow(props: { ep: Accessor<AccountAvailability> }): JSX.Element {
                             label: `${c.label} (${statusWord(c.status)})`,
                         }))}
                     />
-                    <Button density="compact" tone="accent" busy={moving()} disabled={!to()} onClick={() => void move()}>
+                    <Button density="compact" tone="accent" busy={moving()} disabled={!to()} onClick={() => move()}>
                         Move
                     </Button>
                     <Button density="compact" tone="quiet" onClick={() => setPicking(false)}>

@@ -388,7 +388,7 @@ function TakeBackRows(props: { m: DrawerState }): JSX.Element {
                     icon="rotate-left"
                     disabled={m.busy()}
                     title={tr("kanban.drawer.takeItBackTitle")}
-                    onClick={() => void m.takeBack({ action: "release" })}
+                    onClick={() => m.takeBack({ action: "release" })}
                 >
                     {tr("kanban.drawer.takeItBack")}
                 </Button>
@@ -408,7 +408,7 @@ function TakeBackRows(props: { m: DrawerState }): JSX.Element {
                     tone="accent"
                     icon="share"
                     disabled={!m.giveTo() || m.busy()}
-                    onClick={() => void m.takeBack({ action: "reassign", agent: m.giveTo() === ANYONE ? "" : m.giveTo() })}
+                    onClick={() => m.takeBack({ action: "reassign", agent: m.giveTo() === ANYONE ? "" : m.giveTo() })}
                 >
                     {tr("kanban.drawer.give")}
                 </Button>
@@ -423,7 +423,7 @@ function TakeBackRows(props: { m: DrawerState }): JSX.Element {
                                 tone="danger"
                                 icon="rotate-left"
                                 disabled={m.busy()}
-                                onClick={() => void m.takeBack({ ...c().req, confirm: true })}
+                                onClick={() => m.takeBack({ ...c().req, confirm: true })}
                             >
                                 {tr("kanban.drawer.takeAnyway")}
                             </Button>
@@ -452,14 +452,14 @@ function StartRows(props: { m: DrawerState }): JSX.Element {
                     ariaLabel={tr("kanban.drawer.startOnAria")}
                     options={[{ value: "", label: tr("kanban.drawer.startOn") }, ...m.runningAgents().map((a) => ({ value: a.name, label: `${agentLabel(a)} (${agentStateWords(a.state)})` }))]}
                 />
-                <Button density="compact" tone="accent" icon="play" disabled={!m.startOn() || m.busy()} onClick={() => void m.act({ action: "start", agent: m.startOn() })}>
+                <Button density="compact" tone="accent" icon="play" disabled={!m.startOn() || m.busy()} onClick={() => m.act({ action: "start", agent: m.startOn() })}>
                     {tr("kanban.drawer.start")}
                 </Button>
-                <Button density="compact" icon={t().state === "held" ? "play" : "pause"} disabled={m.busy()} onClick={() => void m.act({ action: "move", hold: t().state !== "held" })}>
+                <Button density="compact" icon={t().state === "held" ? "play" : "pause"} disabled={m.busy()} onClick={() => m.act({ action: "move", hold: t().state !== "held" })}>
                     {t().state === "held" ? tr("kanban.drawer.releaseHold") : tr("kanban.drawer.hold")}
                 </Button>
                 <Show when={t().target_agent}>
-                    <Button density="compact" tone="quiet" disabled={m.busy()} onClick={() => void m.act({ action: "move", agent: "" })}>
+                    <Button density="compact" tone="quiet" disabled={m.busy()} onClick={() => m.act({ action: "move", agent: "" })}>
                         {tr("kanban.drawer.giveAnyone")}
                     </Button>
                 </Show>
@@ -491,7 +491,7 @@ function MoveButtons(props: { m: DrawerState }): JSX.Element {
     return (
         <div class="kanban-drawer__row">
             <Show when={t().state === "blocked"}>
-                <Button density="compact" tone="accent" icon="reply" disabled={!m.text().trim() || m.busy()} onClick={() => void m.act({ action: "answer", text: m.text() })}>
+                <Button density="compact" tone="accent" icon="reply" disabled={!m.text().trim() || m.busy()} onClick={() => m.act({ action: "answer", text: m.text() })}>
                     {tr("kanban.drawer.answer")}
                 </Button>
             </Show>
@@ -502,11 +502,11 @@ function MoveButtons(props: { m: DrawerState }): JSX.Element {
                     icon="check"
                     disabled={m.busy()}
                     title={m.specUnlocks() || undefined}
-                    onClick={() => void m.act({ action: "accept" })}
+                    onClick={() => m.act({ action: "accept" })}
                 >
                     {isResearchKind(t().kind) ? tr("kanban.drawer.acceptKind", { kind: t().kind.trim().toLowerCase() }) : tr("kanban.drawer.accept")}
                 </Button>
-                <Button density="compact" icon="rotate-left" disabled={m.busy()} onClick={() => void m.act({ action: "send_back", text: m.text() })}>
+                <Button density="compact" icon="rotate-left" disabled={m.busy()} onClick={() => m.act({ action: "send_back", text: m.text() })}>
                     {tr("kanban.drawer.sendBack")}
                 </Button>
             </Show>
@@ -517,14 +517,14 @@ function MoveButtons(props: { m: DrawerState }): JSX.Element {
                         icon="rotate-left"
                         disabled={m.busy()}
                         title={tr("kanban.drawer.reopenTitle", { name: a().name })}
-                        onClick={() => void m.act({ action: "reopen", text: m.text() })}
+                        onClick={() => m.act({ action: "reopen", text: m.text() })}
                     >
                         {tr("kanban.drawer.reopen")}
                     </Button>
                 )}
             </Show>
             <Show when={t().state === "failed"}>
-                <Button density="compact" tone="accent" icon="rotate-right" disabled={m.busy()} onClick={() => void m.act({ action: "retry" })}>
+                <Button density="compact" tone="accent" icon="rotate-right" disabled={m.busy()} onClick={() => m.act({ action: "retry" })}>
                     {tr("kanban.drawer.tryAgain")}
                 </Button>
             </Show>
@@ -557,7 +557,7 @@ function CancelControls(props: { m: DrawerState }): JSX.Element {
             </Show>
             <Show when={!isFinishedColumn(m.column())}>
                 <Button density="compact" tone="danger" icon="ban" disabled={m.busy()} onClick={() =>
-                        void m.act({
+                        m.act({
                             action: "cancel",
                             text: m.text(),
                             followers: m.openFollowers().length ? (m.cancelBuild() ? "cancel" : "hold") : undefined,
@@ -591,7 +591,7 @@ function MoveToBoardRows(props: { m: DrawerState }): JSX.Element {
                             {tr("kanban.drawer.movingWarn", { board: b().name })}
                         </p>
                         <div class="kanban-drawer__row">
-                            <Button density="compact" tone="danger" disabled={m.busy()} onClick={() => void m.moveToBoard(b())}>
+                            <Button density="compact" tone="danger" disabled={m.busy()} onClick={() => m.moveToBoard(b())}>
                                 {tr("kanban.drawer.moveAndDrop")}
                             </Button>
                             <Button density="compact" tone="quiet" disabled={m.busy()} onClick={() => m.setMoving(null)}>

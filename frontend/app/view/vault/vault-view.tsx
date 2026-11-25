@@ -12,7 +12,7 @@ import { Button } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
 import { VaultList } from "./vault-list";
-import { VaultNarrowActions } from "./vault-narrow-actions";
+import { VaultBodyActions } from "./vault-body-actions";
 import { VaultPicker } from "./vault-picker";
 import { ALL_VAULTS } from "./vault-vaults";
 import { VaultRequestsList } from "./vault-requests-list";
@@ -177,7 +177,7 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
                     <VaultPicker
                         value={vault()}
                         onChange={(id) => model.setMeta({ "vault:vault": id || null })}
-                        extra={<Show when={model.narrow()}><VaultNarrowActions model={model} /></Show>}
+                        extra={<VaultBodyActions model={model} />}
                     />
                     <Show when={vaultError() ?? vaultProblem()}>
                         <div class="warden-manager-error vault-problem" role="alert">

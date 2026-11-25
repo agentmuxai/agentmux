@@ -52,7 +52,7 @@ export function TypedBar(props: Part): JSX.Element {
                         </Button>
                     }
                 >
-                    <Button tone="danger" density="compact" onClick={() => void st.clearAll()}>
+                    <Button tone="danger" density="compact" onClick={() => st.clearAll()}>
                         {t("history.typed.forgetAll", { name: st.agentName() })}
                     </Button>
                     <Button tone="quiet" density="compact" onClick={() => st.setConfirmClear(false)}>
@@ -91,7 +91,7 @@ function EntryRow(props: Part & { item: InputHistoryItem }): JSX.Element {
                         </Button>
                     }
                 >
-                    <Button tone="danger" density="compact" onClick={() => void st.forget(item)}>
+                    <Button tone="danger" density="compact" onClick={() => st.forget(item)}>
                         {t("history.typed.forgetThis")}
                     </Button>
                     <Button tone="quiet" density="compact" onClick={() => st.setConfirmId(null)}>
@@ -134,7 +134,7 @@ export function TypedEntries(props: Part): JSX.Element {
                 </tbody>
             </table>
             <Show when={st.more()}>
-                <Button tone="quiet" density="compact" busy={st.loading()} onClick={() => void st.read(true)}>
+                <Button tone="quiet" density="compact" busy={st.loading()} onClick={() => st.read(true)}>
                     {t("history.typed.older")}
                 </Button>
             </Show>
@@ -157,7 +157,7 @@ export function TypedTrash(props: Part): JSX.Element {
                                 {batch.count > 1 ? t("history.typed.batch", { count: batch.count, sample: batch.sample }) : batch.sample}
                             </span>
                             <span class="warden-manager-dim">{t("history.typed.by", { name: batch.deleted_by })}</span>
-                            <Button tone="quiet" density="compact" onClick={() => void st.restore(batch)}>
+                            <Button tone="quiet" density="compact" onClick={() => st.restore(batch)}>
                                 {t("history.typed.restore")}
                             </Button>
                         </div>

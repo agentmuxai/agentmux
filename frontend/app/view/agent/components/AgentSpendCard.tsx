@@ -50,10 +50,10 @@ export function AgentSpendCard(props: AgentSpendCardProps): JSX.Element {
                         </div>
                         <div class="agent-spend-card-actions">
                             <Show when={card().scope === "agent"}>
-                                <Button disabled={busy()} onClick={() => void run(() => props.onRaise(raisedCap(card().cap)))}>
+                                <Button disabled={busy()} onClick={() => run(() => props.onRaise(raisedCap(card().cap)))}>
                                     Raise to ${raisedCap(card().cap)}
                                 </Button>
-                                <Button disabled={busy()} onClick={() => void run(props.onReset)}>
+                                <Button disabled={busy()} onClick={() => run(props.onReset)}>
                                     Reset today
                                 </Button>
                             </Show>

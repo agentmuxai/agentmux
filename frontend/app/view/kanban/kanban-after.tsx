@@ -65,7 +65,7 @@ export function KanbanAfterSection(props: {
                                             label={`Don't wait for #${a.num}`}
                                             disabled={busy()}
                                             onClick={() =>
-                                                void save(
+                                                save(
                                                     after()
                                                         .filter((x) => x.id !== a.id)
                                                         .map((x) => x.id)

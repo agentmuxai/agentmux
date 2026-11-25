@@ -123,7 +123,7 @@ export function CloudPresence(): JSX.Element {
                 <Button
                     busy={publishing()}
                     disabled={!canPublish()}
-                    onClick={() => void publishNow()}
+                    onClick={() => publishNow()}
                 >
                     Publish now
                 </Button>

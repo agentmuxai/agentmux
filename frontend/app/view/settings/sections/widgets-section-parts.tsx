@@ -58,11 +58,11 @@ function ApprovalPrompt(props: { pkg: WidgetPackageInfo; onDone: () => void }): 
                 <Button
                     tone={props.pkg.signature?.state === "key_changed" ? "danger" : "accent"}
                     disabled={busy()}
-                    onClick={() => void decide(true)}
+                    onClick={() => decide(true)}
                 >
                     {installLabel(props.pkg, updated() ? t("settings.widgets.approve") : t("settings.widgets.install"))}
                 </Button>
-                <Button disabled={busy()} onClick={() => void decide(false).then(props.onDone)}>
+                <Button disabled={busy()} onClick={() => decide(false).then(props.onDone)}>
                     {t("settings.widgets.cancel")}
                 </Button>
             </div>
@@ -89,13 +89,13 @@ export function WidgetsToolbar(part: { s: WidgetsSectionState }): JSX.Element {
     const { busy, install, run, reveal, widgetsDir } = part.s;
     return (
         <div class="widgets-toolbar">
-            <Button icon="plus" disabled={busy() === "install"} onClick={() => void install()}>
+            <Button icon="plus" disabled={busy() === "install"} onClick={() => install()}>
                 {t("settings.widgets.installEllipsis")}
             </Button>
             <Button
                 icon="rotate"
                 disabled={busy() === "rescan"}
-                onClick={() => void run("rescan", async () => (await RpcApi.WidgetsRescanCommand(TabRpcClient)).packages)}
+                onClick={() => run("rescan", async () => (await RpcApi.WidgetsRescanCommand(TabRpcClient)).packages)}
             >
                 {t("settings.widgets.rescan")}
             </Button>
@@ -119,7 +119,7 @@ export function ReplacePrompt(part: { s: WidgetsSectionState }): JSX.Element {
                 <div class="widget-approval">
                     {t("settings.widgets.replaceQuestion")}
                     <div class="widget-approval-actions">
-                        <Button tone="accent" onClick={() => void installFrom(path(), true)}>
+                        <Button tone="accent" onClick={() => installFrom(path(), true)}>
                             {t("settings.widgets.replace")}
                         </Button>
                         <Button onClick={() => setReplacePath(null)}>{t("settings.widgets.cancel")}</Button>
@@ -144,7 +144,7 @@ function RowActions(part: { pkg: WidgetPackageInfo; s: WidgetsSectionState }): J
                 <Button
                     disabled={busy() === pkg.id}
                     onClick={() =>
-                        void run(pkg.id, async () =>
+                        run(pkg.id, async () =>
                             (await RpcApi.WidgetsSetEnabledCommand(TabRpcClient, { id: pkg.id, enabled: false })).packages
                         )
                     }
@@ -156,7 +156,7 @@ function RowActions(part: { pkg: WidgetPackageInfo; s: WidgetsSectionState }): J
                 <Button
                     disabled={busy() === pkg.id}
                     onClick={() =>
-                        void run(pkg.id, async () =>
+                        run(pkg.id, async () =>
                             (await RpcApi.WidgetsSetEnabledCommand(TabRpcClient, { id: pkg.id, enabled: true })).packages
                         )
                     }
@@ -181,7 +181,7 @@ function RowActions(part: { pkg: WidgetPackageInfo; s: WidgetsSectionState }): J
                         tone="danger"
                         disabled={busy() === pkg.id}
                         onClick={() =>
-                            void run(pkg.id, async () => {
+                            run(pkg.id, async () => {
                                 setConfirmRemove(null);
                                 return (await RpcApi.WidgetsUninstallCommand(TabRpcClient, { id: pkg.id })).packages;
                             })
@@ -265,7 +265,7 @@ export function Publishers(part: { s: WidgetsSectionState }): JSX.Element {
                                 <Button
                                     disabled={busy() === `key:${pin.publisher}`}
                                     onClick={() =>
-                                        void run(`key:${pin.publisher}`, async () => {
+                                        run(`key:${pin.publisher}`, async () => {
                                             await getApi().approvals.forgetWidgetKey!(pin.publisher);
                                             await refreshWidgetPackages();
                                         })

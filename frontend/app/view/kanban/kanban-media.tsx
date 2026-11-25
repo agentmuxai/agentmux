@@ -164,7 +164,7 @@ export function DrawerMedia(props: {
                                             tone="quiet"
                                             icon="trash"
                                             disabled={props.busy}
-                                            onClick={() => void props.onAct({ action: "media_remove", media_id: item.id })}
+                                            onClick={() => props.onAct({ action: "media_remove", media_id: item.id })}
                                         >
                                             Remove
                                         </Button>

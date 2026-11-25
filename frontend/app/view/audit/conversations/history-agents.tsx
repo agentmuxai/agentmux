@@ -98,7 +98,7 @@ function useAgentsList(props: HistoryAgentsProps): AgentsList {
 const AgentsBar = (props: { list: AgentsList }): JSX.Element => (
     <div class="warden-history-bar">
         <FilterInput class="warden-history-filter" value={props.list.filter()} onInput={props.list.setFilter} placeholder={t("history.agents.filter")} />
-        <Button tone="quiet" density="compact" icon="rotate" busy={props.list.refreshing()} onClick={() => void props.list.refresh()}>
+        <Button tone="quiet" density="compact" icon="rotate" busy={props.list.refreshing()} onClick={() => props.list.refresh()}>
             {t("history.agents.refresh")}
         </Button>
     </div>

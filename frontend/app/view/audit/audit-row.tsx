@@ -66,7 +66,7 @@ export const AuditRow = (props: { entry: AuditEntry; now: number; paneBlockId: s
             <span class="audit-row-links">
                 <For each={entryLinks(props.entry)}>
                     {(item) => (
-                        <Button tone="quiet" density="compact" onClick={(e) => void open(item, e)}>
+                        <Button tone="quiet" density="compact" onClick={(e) => open(item, e)}>
                             {item.label}
                         </Button>
                     )}

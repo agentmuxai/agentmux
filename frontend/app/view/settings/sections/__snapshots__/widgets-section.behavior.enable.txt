@@ -42,7 +42,7 @@ WidgetsSetEnabled {"id":"acme.notes","enabled":false}
           <div class="widget-row-permissions">
             "Keep its own data on this computer · Connect to https://api.github.com · Send messages to your agents. An agent acts on what it's told, so only allow this for a widget you trust."
           <div class="widget-row-actions">
-            <button type="button" class="ui-button ui-tone-neutral" disabled="">
+            <button type="button" class="ui-button ui-tone-neutral" disabled="" aria-busy="true" data-pending="true">
               "Turn off"
             <button type="button" class="ui-button ui-tone-neutral">
               <i aria-hidden="true" class="fa-solid fa-folder-open">
