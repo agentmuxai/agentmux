@@ -741,8 +741,9 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&rewritten).unwrap();
         let env = &parsed["mcpServers"]["agentmux"]["env"];
         assert_eq!(env["AGENTMUX_AGENT_ID"], "aria");
-        assert!(env["AGENTMUX_JEKT_KEY"].is_string() && !env["AGENTMUX_JEKT_KEY"].as_str().unwrap().is_empty());
-        assert!(env["AGENTMUX_LAN_KEY"].is_string() && !env["AGENTMUX_LAN_KEY"].as_str().unwrap().is_empty());
+        // The file holds references, not values: the keys are ensured in the store and not written.
+        assert!(env.get("AGENTMUX_JEKT_KEY").is_none() && env.get("AGENTMUX_LAN_KEY").is_none());
+        assert!(store.agent_jekt_key_load("aria").unwrap().is_some() && store.agent_lan_key_load("aria").unwrap().is_some());
         // No WAN key on this path either (SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md):
         // srv signs WAN jekts, and the key it uses is minted in wan.db here.
         assert!(env.get("AGENTMUX_WAN_KEY").is_none());

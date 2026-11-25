@@ -13,10 +13,10 @@
 //! follows it is what rotates it. Checked before every tool call, so a UI
 //! automation proof is signed with a live key too.
 //!
-//! The fetched name-keyed keys are used only when the slug srv served them
-//! for is exactly this process's `AGENTMUX_AGENT_ID`: an agent signing under
-//! a name its row doesn't have (a collision-suffixed backfill, a #3573 stub)
-//! keeps its env keys, which are the ones filed under the name it signs as.
+//! The start file holds no signing value, so these fetched keys are the keys. The name-keyed ones
+//! are used only when the slug srv served them for is exactly this process's `AGENTMUX_AGENT_ID`
+//! (a spawn writes the definition's slug there, so the two agree; an agent that still signs under
+//! a name its row doesn't have signs with the env keys of a file an older version wrote, if any).
 //! The UID-keyed keys are held for M4d-6's v2 signatures. Nothing here is
 //! logged.
 
@@ -129,12 +129,12 @@ fn name_key(pick: impl Fn(&Wire) -> Option<&String>) -> Option<Vec<u8>> {
     agentmux_common::jekt_sign::decode_key(pick(&cached.keys)?)
 }
 
-/// The host jekt HMAC key: the fetched one when it is ours, else the env's.
+/// The host jekt HMAC key: the fetched one when it is ours, else the env's (set only by a file an older version wrote).
 pub(crate) fn jekt_key() -> Option<Vec<u8>> {
     name_key(|k| k.jekt_key.as_ref()).or_else(|| env_key("AGENTMUX_JEKT_KEY"))
 }
 
-/// The LAN (and cross-channel) private key: fetched when ours, else the env's.
+/// The LAN (and cross-channel) private key: fetched when ours, else the env's (set only by a file an older version wrote).
 pub(crate) fn lan_key() -> Option<Vec<u8>> {
     name_key(|k| k.lan_key.as_ref()).or_else(|| env_key("AGENTMUX_LAN_KEY"))
 }
