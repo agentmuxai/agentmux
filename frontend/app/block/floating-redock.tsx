@@ -9,7 +9,7 @@
 
 import { PaneRestoreGlyph } from "@/app/element/pane-control-glyphs";
 import * as MOS from "@/app/store/mos";
-import { closeFloaterIfEmpty } from "@/app/workspace/floater-close";
+import { closeFloaterAfterRedock } from "@/app/workspace/floater-close";
 import { holdRedock } from "@/app/workspace/floating-redock-guard";
 import { floaterPanes, redockFloaterPane } from "@/app/workspace/floater-panes";
 import { atoms, getApi } from "@/store/global";
@@ -151,7 +151,7 @@ export async function redockThisFloater(): Promise<boolean> {
         return true;
     });
     // The pane is docked: close the window from here, not from the update that emptied its tab (which can throw).
-    if (redocked) closeFloaterIfEmpty(atoms.activeTabId(), floatingWindowLabel() ?? "", "redock by command or button");
+    if (redocked) await closeFloaterAfterRedock(atoms.activeTabId(), floatingWindowLabel() ?? "", "redock by command or button");
     return redocked;
 }
 
