@@ -38,6 +38,9 @@ export function seatText(seat: Pick<AgentSeat, "role" | "qualifier" | "area"> | 
     return area ? `${badge} · ${area}` : badge;
 }
 
+/** An icon-font name ("robot", "shield"), as against a text glyph a provider's definition carries ("✖", "X", "✦"). */
+const isIconName = (icon: string | undefined): icon is string => !!icon && /^[a-z0-9-]+$/i.test(icon) && icon.length > 1;
+
 /** What the palette shows after an agent's name: its seat and area, then its state. */
 export function agentDetail(row: Pick<AgentRuntime, "state">, seat: AgentSeat | undefined): string {
     return [seatText(seat), stateText(row.state)].filter(Boolean).join(" · ");
@@ -59,7 +62,11 @@ export function agentEntries(
             id: `agent:${row.agent_id}`,
             label: row.name,
             category: AGENT_CATEGORY,
-            icon: row.icon || "robot",
+            // An agent definition's own icon is an icon-font name when the person chose one; otherwise it holds its provider's
+            // text glyph ("✖" for Claude, "X" for Grok), which at row size reads as a close mark or a stray letter. Those rows
+            // wear the provider's own logo, as the agent's tab and the Accounts view do.
+            icon: isIconName(row.icon) ? row.icon : row.provider ? undefined : "robot",
+            provider: row.provider || undefined,
             identity: row.color,
             detail: agentDetail(row, seat),
             keywords: [seatText(seat), row.provider, stateText(row.state)].filter(Boolean).join(" "),
