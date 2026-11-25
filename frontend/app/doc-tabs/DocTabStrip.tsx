@@ -17,6 +17,7 @@
  */
 
 import { registerContextMenuRegion } from "@/app/block/context-menu-region";
+import type { PaneMenuSection } from "@/app/block/pane-actions";
 import { PaneTabStrip } from "@/app/element/PaneTabStrip";
 import { t as translate } from "@/app/i18n/i18n";
 import { onCleanup, onMount, Show, type JSX } from "solid-js";
@@ -29,11 +30,16 @@ import { keyLabel } from "@/app/keybindings";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { writeText } from "@/util/clipboard";
 
+/** Every section of the pane menu: a tab's menu has none of them, only its own items. */
+const PANE_MENU_SECTIONS: PaneMenuSection[] = ["viewItems", "clipboard", "split", "magnify", "close", "inspect"];
+
 /**
- * A right-click on a tab adds its items to the pane menu (blockframe's body
- * menu reads the region): the pane's own (`own`), then the strip's. The tab
- * is noted as the click starts, so the items, built a moment later, act on
- * it. Returns the strip row's `ref`.
+ * A right-click on a tab shows the tab's menu and nothing else (blockframe's body
+ * menu reads the region): the pane's own items (`own`), then the strip's; the pane
+ * body's items and the pane's actions are left out, they have their own menus. The
+ * tab is noted as the click starts, so the items, built a moment later, act on
+ * it. A right-click on the strip with no tab under it keeps the pane menu as it was.
+ * Returns the strip row's `ref`.
  */
 function tabMenuBinder<P>(
     ctl: DocTabsModel<P>,
@@ -75,7 +81,10 @@ function tabMenuBinder<P>(
     return (el) => {
         onMount(() => {
             el.addEventListener("contextmenu", noteTab, true);
-            const off = registerContextMenuRegion(el, { items: tabMenu });
+            const off = registerContextMenuRegion(el, {
+                items: tabMenu,
+                omit: () => (rightClicked && ctl.tabs().some((t) => t.id === rightClicked) ? PANE_MENU_SECTIONS : []),
+            });
             onCleanup(() => {
                 el.removeEventListener("contextmenu", noteTab, true);
                 off();

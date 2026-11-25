@@ -109,7 +109,7 @@ export function useBodyContextMenu(opts: {
         // sections that make no sense there. No region (every other click,
         // and the synthetic browser path, which has no DOM target): unchanged.
         const region = resolveContextMenuRegion(e.target, frameEl());
-        const omit = new Set<PaneMenuSection>(region?.omit);
+        const omit = new Set<PaneMenuSection>(typeof region?.omit === "function" ? region.omit() : region?.omit);
         const menu = joinMenuGroups([
             region?.items?.() ?? [],
             omit.has("viewItems") ? [] : (viewModel?.getBodyContextMenuItems?.(browserCtx) ?? []),

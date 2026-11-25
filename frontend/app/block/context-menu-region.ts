@@ -22,8 +22,11 @@
 import type { PaneMenuSection } from "./pane-actions";
 
 export interface ContextMenuRegion {
-    /** Sections to drop from the pane menu for a right-click inside this region. */
-    omit?: PaneMenuSection[];
+    /**
+     * Sections to drop from the pane menu for a right-click inside this region. A function is
+     * called at right-click time (like `items`), for a region that drops them only on part of itself.
+     */
+    omit?: PaneMenuSection[] | (() => PaneMenuSection[]);
     /**
      * Items rendered at the TOP of the menu, above the surviving pane sections.
      * Called at right-click time, not registration time, so it reads live state
