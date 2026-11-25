@@ -5,18 +5,17 @@
 // countdown: the card in the agent's pane and, for a use with no pane, the
 // window's prompt (docs/specs/SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01.md §4).
 
-import { createEffect, createRoot, createSignal, For, onCleanup, Show, type Accessor, type Component, type JSX, type Setter } from "solid-js";
+import { createEffect, createSignal, onCleanup, Show, type Accessor, type Component, type JSX } from "solid-js";
 
 import { tip } from "@/app/element/tip";
 import { Button, Field, Pill, Select, TextInput, type SelectOption } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
 import { Rich } from "@/app/i18n/rich";
 import type { UseRequest } from "@/types/rpc/UseRequest";
-import type { VaultAgents } from "@/types/rpc/VaultAgents";
 import { ImportLogin } from "./vault-import-login";
 import { CardTyped } from "./vault-use-card";
 import { formatWhen } from "./vault-format";
-import { answerUse, currentVaults, holdUse, vaultUses, type UseDecision } from "./vault-store";
+import { answerUse, holdUse, vaultUses, type UseDecision } from "./vault-store";
 // The question's styles, loaded with it: a card in an agent's pane is drawn
 // whether or not a Vault pane was opened.
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
@@ -71,29 +70,13 @@ export function siteOf(origin: string): string {
     }
 }
 
-/** Whether every row of a batch is a link: nothing is read, and only where the keys live is recorded. */
-function linksOnly(batch: NonNullable<UseRequest["batch"]>): boolean {
-    return batch.items.every((item) => item.link);
-}
-
 /** The question's title: who wants to do what. `short` cuts the agent's words
  *  (`CLIP`), for where it is shown; the whole title is for its tooltip. */
 export function promptTitle(u: UseRequest, short = false): string {
     const agent = short ? clip(u.agent, CLIP.name) : u.agent;
     const label = short ? clip(u.entry_label, CLIP.label) : u.entry_label;
-    if (u.batch) {
-        const params = { agent, count: u.batch.items.length, service: u.batch.service, name: short ? clip(u.batch.name, CLIP.label) : u.batch.name };
-        return linksOnly(u.batch) ? t("vault.batchCard.titleLinks", params) : t("vault.batchCard.title", params);
-    }
     if (u.import) {
         return t(u.import.replaces ? "vault.use.title.importReplaces" : "vault.use.title.import", { agent, label, from: u.import.service });
-    }
-    if (u.link) {
-        // A link holds no value, so its place is where the key itself lives; and a change that leaves the place alone
-        // is to what the entry says of the key (who reads it, when it last changed, where else it is kept).
-        if (u.link.only || u.link.from === u.link.to) return t("vault.linkCard.titleAbout", { agent, label });
-        if (!u.link.from) return t("vault.use.title.linkAdd", { agent, label });
-        return t(u.link.to ? "vault.use.title.linkChange" : "vault.use.title.linkRemove", { agent, label });
     }
     if (u.share) return t(u.prompt ? "vault.shareCard.titlePrompt" : "vault.shareCard.title", { agent, site: siteOf(u.origin), label });
     if (u.account && u.change) return t("vault.use.title.accountChange", { agent, site: siteOf(u.origin) });
@@ -106,10 +89,7 @@ export function promptTitle(u: UseRequest, short = false): string {
 
 /** The line under the question: what the agent never sees. */
 function promptNote(u: UseRequest): string {
-    if (u.batch) return linksOnly(u.batch) ? t("vault.batchCard.noteLinks") : t("vault.batchCard.note", { count: u.batch.items.length });
     if (u.import) return t("vault.use.note.import");
-    if (u.link?.only) return t("vault.linkCard.noteLinked");
-    if (u.link) return t("vault.use.note.link");
     if (u.replaces) return t("vault.use.note.replaces");
     if (u.command) return t("vault.use.note.command");
     if (u.share) return t(u.prompt ? "vault.shareCard.notePrompt" : "vault.shareCard.note");
@@ -181,69 +161,6 @@ function UseTarget(props: { use: UseRequest }): JSX.Element {
     );
 }
 
-/** A line of what an entry says of its key, and how the change asked for touches it. */
-export type SaidLine = { text: string; mark?: "changed" | "added" | "removed" };
-
-const SAID_MARKS = { changed: "vault.linkCard.changed", added: "vault.linkCard.added", removed: "vault.linkCard.removed" } as const;
-
-/** What an entry says of its key, one thing a line ("Read by: …", "Last changed: …", "Also kept at: …"), as srv
- *  writes it. With `against` (what is recorded now) each line of what is asked for is marked when it is new or
- *  differs, and a thing the change takes away is a line of its own: the difference is said in a word, not left
- *  for the eye to find in two long lines. */
-export function saidLines(text: string, against?: string): SaidLine[] {
-    const split = (said: string) => said.split("\n").filter(Boolean).map((line) => ({ what: line.split(": ")[0], text: line }));
-    const lines = split(text);
-    if (against === undefined) return lines.map(({ text }) => ({ text }));
-    const before = split(against);
-    const asked = lines.map(({ what, text }): SaidLine => {
-        const was = before.find((b) => b.what === what);
-        return was?.text === text ? { text } : { text, mark: was ? "changed" : "added" };
-    });
-    const gone = before.filter((b) => !lines.some((line) => line.what === b.what)).map((b): SaidLine => ({ text: b.what, mark: "removed" }));
-    return [...asked, ...gone];
-}
-
-function SaidLines(props: { name: string; text: string; against?: string }): JSX.Element {
-    return (
-        <span data-link={props.name}>
-            <For each={saidLines(props.text, props.against)}>
-                {(line) => (
-                    <span class="vault-link-said-line" data-said={line.mark ?? "same"}>
-                        <Show when={line.mark}>{(mark) => <Pill tone="accent">{t(SAID_MARKS[mark()])}</Pill>}</Show> <Clipped text={line.text} max={CLIP.about} />
-                    </span>
-                )}
-            </For>
-        </span>
-    );
-}
-
-/** A change to where an entry's machine copy is: the place it has now and the place the agent asks for. */
-function UseLinkSubject(props: { use: UseRequest; link: NonNullable<UseRequest["link"]> }): JSX.Element {
-    return (
-        <>
-            <p {...tip(clip(props.use.entry_label, CLIP.label) === props.use.entry_label ? undefined : props.use.entry_label)}>
-                <Rich k={props.link.only ? "vault.linkCard.whatLinked" : "vault.linkCard.what"} params={{ label: clip(props.use.entry_label, CLIP.label) }} />
-            </p>
-            <p data-link="from">
-                {t("vault.linkCard.now")} <Show when={props.link.from} fallback={t("vault.linkCard.noPlaceNow")}>
-                    <strong class="warden-manager-mono vault-import-id"><ClippedId text={props.link.from} max={CLIP.reason} /></strong>
-                </Show>
-                <Show when={props.link.about_from}>
-                    <SaidLines name="about-from" text={props.link.about_from} />
-                </Show>
-            </p>
-            <p data-link="to">
-                {t("vault.linkCard.askedFor")} <Show when={props.link.to} fallback={t("vault.linkCard.noPlaceAsked")}>
-                    <strong class="warden-manager-mono vault-import-id"><ClippedId text={props.link.to} max={CLIP.reason} /></strong>
-                </Show>
-                <Show when={props.link.about_to || props.link.about_from}>
-                    <SaidLines name="about-to" text={props.link.about_to} against={props.link.about_from} />
-                </Show>
-            </p>
-        </>
-    );
-}
-
 /** The secret an import copies, and where it goes: the secret, its key and region, the Vault, and what happens to a value it replaces. */
 function UseImportSubject(props: { use: UseRequest; import: NonNullable<UseRequest["import"]>; answer: UseAnswerState }): JSX.Element {
     const i = props.import;
@@ -293,121 +210,6 @@ function UseImportSubject(props: { use: UseRequest; import: NonNullable<UseReque
                 </p>
             </Show>
         </>
-    );
-}
-
-/** The most agents a batch's card names before it counts the rest: a long list pushed the rows out of a narrow card. */
-const NAMED_AGENTS = 3;
-
-/** Who may use what is in a Vault, as the batch card says it. `whole` is every name, when the line counts some. */
-function vaultOpenTo(agents: VaultAgents): { text: string; whole?: string } {
-    if (agents.mode === "all") return { text: t("vault.batchCard.openToAll") };
-    if (agents.mode === "none" || agents.agents.length === 0) return { text: t("vault.batchCard.openToNone") };
-    const names = agents.agents.map((name) => clip(name, CLIP.name));
-    if (names.length <= NAMED_AGENTS) return { text: t("vault.batchCard.openToNamed", { agents: names.join(", ") }) };
-    const shown = names.slice(0, NAMED_AGENTS).join(", ");
-    return { text: t("vault.batchCard.openToNamedMore", { agents: shown, count: names.length - NAMED_AGENTS }), whole: agents.agents.join(", ") };
-}
-
-/** A batch of imports: the one account, region and Vault, and a row for every secret with its tick. A row left
- *  unticked is not read. Every row is shown; a long list scrolls. With `rowsFirst` the rows come before the count of
- *  what is ticked, the account and the Vault: a card in an agent's pane has a share of the pane's height, and in a
- *  narrow, zoomed pane the text above the rows filled it, so the answers were in view and what they allow was not. */
-function UseBatchSubject(props: { batch: NonNullable<UseRequest["batch"]>; answer: UseAnswerState; rowsFirst: boolean }): JSX.Element {
-    const b = props.batch;
-    const a = props.answer;
-    const links = () => linksOnly(b);
-    // "The key is", "It is read": one row is said as one.
-    const count = b.items.length;
-    // The Vault the rows go into as the card stands: the one asked for, or the one the person chose. Who may use it
-    // is read from the person's Vaults while that list is current, so a change made in the Vaults row's form shows on a
-    // card that is already open; otherwise it is what srv said when it asked.
-    const into = () => {
-        const asked = b.vaults.find((v) => v.name === a.vault()) ?? { name: b.vault, agents: b.agents };
-        return { name: asked.name, agents: currentVaults()?.find((v) => v.name === asked.name)?.agents ?? asked.agents };
-    };
-    const openTo = () => vaultOpenTo(into().agents);
-    // A batch of both kinds: how many of the ticked rows are read and copied, and how many are only recorded.
-    const mixed = () => !links() && b.items.some((item) => item.link);
-    const ticked = () => {
-        const recorded = a.rows().filter((i) => b.items[i]?.link).length;
-        return { read: a.rows().length - recorded, links: recorded };
-    };
-    const offered = (): SelectOption[] => b.vaults.map((v) => ({ value: v.name, label: clip(v.name, CLIP.label) }));
-    const About = (): JSX.Element => (
-        <>
-            <p data-batch="source">
-                <Show when={b.region} fallback={t(links() ? "vault.batchCard.linksAtDefaultRegion" : "vault.batchCard.fromDefaultRegion", { service: b.service, count })}>
-                    <Rich k={links() ? "vault.batchCard.linksAt" : "vault.batchCard.from"} params={{ service: b.service, region: b.region, count }} />
-                </Show>{" "}
-                <Show when={!links()}>
-                    <span {...tip(clip(b.profile, CLIP.label) === b.profile ? undefined : b.profile)}>
-                        <Show when={b.profile} fallback={t("vault.batchCard.defaultLogin", { count })}>
-                            <Show when={b.grant} fallback={<Rich k="vault.batchCard.profile" params={{ profile: clip(b.profile, CLIP.label), count }} />}>
-                                <Rich k="vault.batchCard.grant" params={{ profile: clip(b.profile, CLIP.label), count }} />
-                            </Show>
-                        </Show>
-                    </span>
-                </Show>
-            </p>
-            <p data-batch="vault" {...tip(clip(into().name, CLIP.label) === into().name ? undefined : into().name)}>
-                <Rich k={links() ? "vault.batchCard.linksInto" : "vault.batchCard.into"} params={{ vault: clip(into().name, CLIP.label) }} />{" "}
-                <span data-batch="agents" {...tip(openTo().whole)}>
-                    {openTo().text}
-                </span>
-            </p>
-            <Show when={b.vaults.length > 1}>
-                <Field label={t("vault.batchCard.chooseVault")} layout="stacked" class="vault-batch-vault">
-                    <Select value={a.vault()} onChange={a.setVault} options={offered()} ariaLabel={t("vault.batchCard.chooseVault")} disabled={a.busy()} />
-                </Field>
-            </Show>
-        </>
-    );
-    const Tally = (): JSX.Element => (
-        <Show when={mixed()}>
-            <p data-batch="mixed">{t("vault.batchCard.mixed", ticked())}</p>
-        </Show>
-    );
-    const Rows = (): JSX.Element => (
-        <>
-            <ul class="vault-batch-rows" aria-label={t("vault.batchCard.rows")}>
-                <For each={b.items}>
-                    {(item, i) => (
-                        <li>
-                            <label class="vault-batch-row">
-                                <input type="checkbox" checked={a.rows().includes(i())} onChange={(e) => a.tickRow(i(), e.currentTarget.checked)} disabled={a.busy()} />
-                                <span class="vault-batch-entry">
-                                    <strong>
-                                        <Clipped text={item.label} max={CLIP.label} />
-                                    </strong>
-                                    <span class="warden-manager-dim" data-row={item.link ? "link" : "copy"}>
-                                        {item.link ? t("vault.batchCard.link") : item.replaces ? t("vault.batchCard.replaces") : t("vault.batchCard.new", { kind: item.kind })}
-                                    </span>
-                                </span>
-                                <span class="vault-batch-secret warden-manager-mono warden-manager-dim vault-import-id">
-                                    <ClippedId text={item.secret} max={CLIP.secret} />
-                                    <Show when={item.key}>
-                                        {" "}
-                                        ({t("vault.batchCard.key")} <ClippedId text={item.key} max={CLIP.label} />
-                                        <Show when={item.user_key}>
-                                            {t("vault.batchCard.userKey")} <ClippedId text={item.user_key} max={CLIP.label} />
-                                        </Show>
-                                        )
-                                    </Show>
-                                </span>
-                            </label>
-                        </li>
-                    )}
-                </For>
-            </ul>
-        </>
-    );
-    return (
-        <Show when={props.rowsFirst} fallback={[<About />, <Tally />, <Rows />]}>
-            <Rows />
-            <Tally />
-            <About />
-        </Show>
     );
 }
 
@@ -470,7 +272,7 @@ function UseDeadline(props: { use: UseRequest }): JSX.Element {
             fallback={
                 <Show when={!props.use.needs_value}>
                     <p class="vault-use-deadline">
-                        <strong>{t("vault.use.deadline.waiting")}</strong>: {props.use.batch && linksOnly(props.use.batch) ? t("vault.batchCard.needsYesLinks") : props.use.import || props.use.batch ? t("vault.use.deadline.copyNeedsYes") : props.use.share ? t("vault.shareCard.needsYes") : props.use.link ? t(props.use.link.only || props.use.link.from === props.use.link.to ? "vault.linkCard.needsYesAbout" : "vault.linkCard.needsYes") : t("vault.use.deadline.idNeedsYes")}
+                        <strong>{t("vault.use.deadline.waiting")}</strong>: {props.use.import ? t("vault.use.deadline.copyNeedsYes") : props.use.share ? t("vault.shareCard.needsYes") : t("vault.use.deadline.idNeedsYes")}
                     </p>
                 </Show>
             }
@@ -496,49 +298,6 @@ function holdOnActivity(u: UseRequest): () => void {
     };
 }
 
-/** What the person has chosen on a batch's card so far: the rows left ticked, by their place in its list, and the
- *  Vault they go into. */
-interface BatchChoice {
-    rows: Accessor<number[]>;
-    setRows: Setter<number[]>;
-    vault: Accessor<string>;
-    setVault: Setter<string>;
-}
-
-/** Every row ticked, and the Vault that was asked for: how a batch's card starts. */
-function newBatchChoice(u: UseRequest): BatchChoice {
-    const [rows, setRows] = createSignal<number[]>(u.batch ? u.batch.items.map((_, i) => i) : []);
-    const [vault, setVault] = createSignal(u.batch?.vault ?? "");
-    return { rows, setRows, vault, setVault };
-}
-
-// A batch's card is shown in the agent's pane and, while the Vault pane is open, there too. Its choice is kept once
-// for the use, so both copies show the same thing and either Allow sends what the person sees.
-const batchChoices = new Map<string, BatchChoice>();
-let forgetsBatchChoices = false;
-
-/** The one choice of the batch `u`, shared by every copy of its card; a use that is no batch has none to share. */
-function batchChoiceOf(u: UseRequest): BatchChoice {
-    if (!u.batch) return newBatchChoice(u);
-    if (!forgetsBatchChoices) {
-        forgetsBatchChoices = true;
-        // A use that was answered, or given up, takes its choice with it.
-        createRoot(() =>
-            createEffect(() => {
-                const waiting = new Set(vaultUses().map((x) => x.id));
-                for (const id of [...batchChoices.keys()]) if (!waiting.has(id)) batchChoices.delete(id);
-            })
-        );
-    }
-    let choice = batchChoices.get(u.id);
-    if (!choice) {
-        // Owned by no card, so it outlives the copy that made it.
-        choice = createRoot(() => newBatchChoice(u));
-        batchChoices.set(u.id, choice);
-    }
-    return choice;
-}
-
 /** The person's answer to `u` as it is being given: the decision, and the value
  *  they type when no entry holds it yet (spec §6.5). `done` runs once it is
  *  answered, here or elsewhere (another window, or the agent gave up). */
@@ -553,20 +312,15 @@ export function createUseAnswer(u: UseRequest, done: () => void) {
     const [answered, setAnswered] = createSignal(false);
     // The card the person picks for a whole-card fill: the agent's own, or the default, to begin with; none otherwise.
     const [card, setCard] = createSignal(u.choices?.some((c) => c.id === u.entry_id) ? u.entry_id : "");
-    // The rows of a batch the person leaves ticked (all of them to begin with) and the Vault they go into (the one
-    // asked for, until the person chooses another the card offers): one choice for every copy of the card.
-    const { rows, setRows, vault, setVault } = batchChoiceOf(u);
-    const tickRow = (row: number, on: boolean) => setRows((was) => (on ? [...was.filter((r) => r !== row), row].sort((x, y) => x - y) : was.filter((r) => r !== row)));
     createEffect(() => {
         if (!vaultUses().some((x) => x.id === u.id)) done();
     });
     const decide = async (decision: UseDecision) => {
         setBusy(true);
         try {
-            await answerUse(u.id, decision, u.needs_value && decision !== "deny" ? { value: typed(), save: save() } : undefined, u.choices?.length && decision !== "deny" ? card() : undefined, u.batch && decision !== "deny" ? rows() : undefined, u.batch && decision !== "deny" && vault() !== u.batch.vault ? vault() : undefined, u.import?.share && decision !== "deny" ? share() : undefined);
-            // The typed value doesn't outlive the answer, and neither does what was chosen on a batch's card.
+            await answerUse(u.id, decision, u.needs_value && decision !== "deny" ? { value: typed(), save: save() } : undefined, u.choices?.length && decision !== "deny" ? card() : undefined, u.import?.share && decision !== "deny" ? share() : undefined);
+            // The typed value doesn't outlive the answer.
             setTyped("");
-            batchChoices.delete(u.id);
             setAnswered(true);
             done();
         } catch (e) {
@@ -580,7 +334,7 @@ export function createUseAnswer(u: UseRequest, done: () => void) {
             setBusy(false);
         }
     };
-    return { decide, busy, error, typed, setTyped, save, setSave, share, setShare, card, setCard, answered, rows, tickRow, vault, setVault };
+    return { decide, busy, error, typed, setTyped, save, setSave, share, setShare, card, setCard, answered };
 }
 
 export type UseAnswerState = ReturnType<typeof createUseAnswer>;
@@ -717,45 +471,22 @@ function UseSubject(props: { use: UseRequest; answer: UseAnswerState; focus: boo
 
 /** The question and its answers, laid out by `Body` and `Actions` (the modal's
  *  parts, or the card's). `focus` lets a typed value's field take the focus: the
- *  window's prompt may, a card in the agent's pane never does (spec §4.4). `rowsFirst`
- *  puts a batch's rows at the top of the body (`UseBatchSubject`). */
-export function UseQuestion(props: { use: UseRequest; answer: UseAnswerState; Body: Component<{ children: JSX.Element }>; Actions: Component<{ children: JSX.Element }>; focus: boolean; rowsFirst?: boolean }): JSX.Element {
+ *  window's prompt may, a card in the agent's pane never does (spec §4.4). */
+export function UseQuestion(props: { use: UseRequest; answer: UseAnswerState; Body: Component<{ children: JSX.Element }>; Actions: Component<{ children: JSX.Element }>; focus: boolean }): JSX.Element {
     const u = props.use;
     const a = props.answer;
     const held = holdOnActivity(u);
     return (
         <div class="vault-use-activity" onPointerMove={held} onKeyDown={held} onFocusIn={held}>
             <props.Body>
-                <Show when={u.batch}>
-                    {(b) => (
-                        <>
-                            <UseBatchSubject batch={b()} answer={a} rowsFirst={!!props.rowsFirst} />
-                            <UseSays use={u} />
-                            <UseDeadline use={u} />
-                        </>
-                    )}
-                </Show>
                 <Show
                     when={u.import}
                     fallback={
-                        <Show
-                            when={u.link}
-                            fallback={
-                                <Show when={!u.batch}>
-                                    <UseDeadline use={u} />
-                                    <UseSays use={u} />
-                                    <UseSubject use={u} answer={a} focus={props.focus} />
-                                </Show>
-                            }
-                        >
-                            {(l) => (
-                                <>
-                                    <UseLinkSubject use={u} link={l()} />
-                                    <UseSays use={u} />
-                                    <UseDeadline use={u} />
-                                </>
-                            )}
-                        </Show>
+                        <>
+                            <UseDeadline use={u} />
+                            <UseSays use={u} />
+                            <UseSubject use={u} answer={a} focus={props.focus} />
+                        </>
                     }
                 >
                     {(i) => (
@@ -779,8 +510,8 @@ export function UseQuestion(props: { use: UseRequest; answer: UseAnswerState; Bo
                 </Button>
                 {/* The yeses wrap as one group, so a narrow card never puts Always beside Deny. */}
                 <span class="vault-use-allow">
-                    <Button tone={u.needs_value ? "accent" : "neutral"} disabled={a.busy() || (u.needs_value && !a.typed()) || (!!u.choices?.length && !a.card()) || (!!u.batch && a.rows().length === 0)} onClick={() => a.decide("once")}>
-                        {u.batch ? t("vault.batchCard.allow", { count: a.rows().length }) : u.needs_value ? t("vault.use.fillIn") : u.share ? t("vault.shareCard.allow") : t("vault.use.allowOnce")}
+                    <Button tone={u.needs_value ? "accent" : "neutral"} disabled={a.busy() || (u.needs_value && !a.typed()) || (!!u.choices?.length && !a.card())} onClick={() => a.decide("once")}>
+                        {u.needs_value ? t("vault.use.fillIn") : u.share ? t("vault.shareCard.allow") : t("vault.use.allowOnce")}
                     </Button>
                     <Show when={u.offer_always && !pickedExpired(u, a)}>
                         <Button tone="attention" disabled={a.busy() || (!!u.choices?.length && !a.card())} onClick={() => a.decide("always")}>

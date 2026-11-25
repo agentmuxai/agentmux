@@ -27,7 +27,6 @@ vi.mock("@/util/clipboard", () => ({ writeText: (text: string) => copied(text) }
 import { VaultEntries } from "./vault-entries";
 import { VaultEntryForm } from "./vault-entry-form";
 import { isBacked, isLinked, linkFields, uncheckedDays } from "./vault-linked";
-import { VaultUseItem as UsePrompt } from "./vault-requests-list";
 import { sourceCheck } from "./vault-source";
 import { refreshVault } from "./vault-store";
 
@@ -52,35 +51,6 @@ const entry = (over: Partial<VaultEntryInfo> = {}): VaultEntryInfo => ({
     last_used_at: 0,
     ...over,
 });
-
-const use = (over: Partial<UseRequest>): UseRequest =>
-    ({
-        id: "use-1",
-        agent: "Agent1",
-        entry_id: "",
-        entry_label: "Invoice provider key",
-        what: "machine copy",
-        origin: "",
-        page: "",
-        field: "",
-        offer_always: false,
-        reason: "",
-        agent_reason: "record the keys the invoice service reads for task 31007",
-        needs_value: false,
-        kind: "api-key",
-        command: "",
-        cwd: "",
-        replaces: false,
-        signin: false,
-        account: false,
-        change: false,
-        requested_ms: 1,
-        block_id: "pane-1",
-        deadline_ms: Date.now() + 120_000,
-        expires_ms: Date.now() + 120_000,
-        goes_ahead: false,
-        ...over,
-    }) as UseRequest;
 
 const calls = (op: string) => vault.mock.calls.filter((c) => c[0] === op).map((c) => c[1] ?? {});
 const row = (id: string) => document.querySelector(`tr[data-entry="${id}"]`) as HTMLElement;
@@ -248,64 +218,5 @@ describe("a linked entry in the form", () => {
         const sent = calls("create")[0];
         expect(sent.fields).toEqual({ link: "only", source_kind: "aws-secret", source_location: "prod/invoice-sync", readers: "invoice-sync (lambda): at run time" });
         expect(sent.parts).toEqual({});
-    });
-});
-
-describe("the questions that make or change a linked entry", () => {
-    const shown = async (over: Partial<UseRequest>) => {
-        uses = [use(over)];
-        await refreshVault();
-        render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
-        return await screen.findByRole("group");
-    };
-
-    it("says a batch of links records where keys live and reads nothing", async () => {
-        const items = [
-            { label: "Invoice provider key", kind: "api-key", secret: "prod/invoice-sync", key: "api.token", user_key: "", replaces: false, link: true },
-            { label: "Mail provider key", kind: "api-key", secret: "prod/mail", key: "", user_key: "", replaces: false, link: true },
-        ];
-        const card = await shown({ entry_label: "invoice service keys", what: "secrets", batch: { name: "invoice service keys", service: "AWS Secrets Manager", region: "eu-west-1", profile: "work-read", grant: false, vault: "Fleet", agents: { mode: "all" }, vaults: [], items } });
-        expect(card.textContent).toContain("Agent1 wants to record where 2 keys live: invoice service keys");
-        expect(card.querySelector('[data-batch="source"]')?.textContent).toBe("The keys are in AWS Secrets Manager in eu-west-1. Nothing is read. ");
-        expect(card.querySelector('[data-batch="vault"]')?.textContent).toContain("becomes a linked entry in the Vault Fleet");
-        expect([...card.querySelectorAll('[data-row="link"]')].map((r) => r.textContent?.trim())).toEqual(["link only (no value read)", "link only (no value read)"]);
-        expect(card.querySelector('[data-batch="mixed"]')).toBeNull();
-        expect(card.textContent).toContain("nothing is recorded without a yes");
-        expect(card.textContent).toContain("No value is read and none is kept.");
-        expect(card.textContent).not.toContain("work-read");
-    });
-
-    it("keeps the copying words for a batch that mixes links and copies", async () => {
-        const items = [
-            { label: "Invoice provider key", kind: "api-key", secret: "prod/invoice-sync", key: "", user_key: "", replaces: false, link: true },
-            { label: "Alpha", kind: "login", secret: "hosts/alpha", key: "", user_key: "", replaces: false, link: false },
-        ];
-        const card = await shown({ entry_label: "mixed", what: "secrets", batch: { name: "mixed", service: "AWS Secrets Manager", region: "", profile: "", grant: false, vault: "Personal", agents: { mode: "all" }, vaults: [], items } });
-        expect(card.textContent).toContain("Agent1 wants to copy 2 secrets from AWS Secrets Manager into your Vault: mixed");
-        expect(card.querySelectorAll('[data-row="link"]').length).toBe(1);
-        expect(card.querySelector('[data-row="copy"]')?.textContent?.trim()).toBe("new login entry");
-        // How many of the ticked rows are read, and how many only recorded; it follows the ticks.
-        const mixed = () => card.querySelector('[data-batch="mixed"]')?.textContent;
-        expect(mixed()).toBe("Ticked: 1 to read and copy, 1 to record only.");
-        fireEvent.click(within(card).getAllByRole("checkbox")[0]);
-        await waitFor(() => expect(mixed()).toBe("Ticked: 1 to read and copy, 0 to record only."));
-    });
-
-    it("shows what a link says now and what is asked for, when an agent changes who reads the key", async () => {
-        const place = "the AWS secret prod/invoice-sync, key api.token, region eu-west-1";
-        const [readers, more, date, copy] = ["Read by: invoice-sync (lambda): at run time.", "Read by: invoice-sync (lambda): at run time; release (workflow): on a tag.", "Last changed: 2026-10-01.", "Also kept at: aws-secret: prod/invoice-sync-replica."];
-        const link = { from: place, to: place, about_from: [readers, date, copy].join("\n"), about_to: [more, date, "Expires: 2027-01-01."].join("\n"), only: true };
-        const card = await shown({ entry_id: "api-key-invoice", link });
-        expect(card.textContent).toContain("Agent1 wants to change what the Vault says about the key Invoice provider key");
-        expect(card.textContent).toContain("is a linked entry: it holds no value");
-        // One thing a line, the date on its own; what is recorded now carries no mark.
-        const lines = (name: string) => [...card.querySelectorAll(`[data-link="${name}"] .vault-link-said-line`)].map((l) => [l.getAttribute("data-said"), l.textContent?.trim()]);
-        expect(lines("about-from")).toEqual([["same", readers], ["same", date], ["same", copy]]);
-        // What is asked for says in a word which line differs, which is new and what is taken away.
-        expect(lines("about-to")).toEqual([["changed", `changed ${more}`], ["same", date], ["added", "new Expires: 2027-01-01."], ["removed", "removed Also kept at"]]);
-        // The place stays as it is, so the card does not speak of changing it.
-        expect(card.textContent).toContain("nothing is changed without a yes.");
-        expect(card.textContent).toContain("This is what the Vault tells the next agent about the key.");
-        expect(screen.queryByRole("button", { name: /Always/ })).toBeNull();
     });
 });

@@ -223,8 +223,8 @@ export type UseDecision = "once" | "always" | "deny";
 
 /** The person's answer to an agent's use of an entry; srv takes it only from the host. `rows` are the rows of a
  *  batch left ticked, by their place in its list; `share` is whether an import's share was left ticked. */
-export const answerUse = (id: string, decision: UseDecision, typed?: { value: string; save: boolean }, card?: string, rows?: number[], vault?: string, share?: boolean) =>
-    call<unknown>("answer_use", { id, decision, ...(typed ? { value: typed.value, save: typed.save } : {}), ...(card ? { choice: card } : {}), ...(rows ? { rows } : {}), ...(vault ? { vault } : {}), ...(share === undefined ? {} : { share }) });
+export const answerUse = (id: string, decision: UseDecision, typed?: { value: string; save: boolean }, card?: string, share?: boolean) =>
+    call<unknown>("answer_use", { id, decision, ...(typed ? { value: typed.value, save: typed.save } : {}), ...(card ? { choice: card } : {}), ...(share === undefined ? {} : { share }) });
 /** The person is reading or acting in use `id`'s prompt: srv holds its countdown. */
 export const holdUse = (id: string) => call<unknown>("hold_use", { id });
 /** Stops an agent filling an entry on a site without asking. */
