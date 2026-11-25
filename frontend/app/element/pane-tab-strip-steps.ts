@@ -130,6 +130,18 @@ function anyLabelCut(strip: HTMLElement): boolean {
 }
 
 /**
+ * The room the strip is given, never narrower than the tabs' own floors: past that the header scrolls, as it always did.
+ * A tab with no icon keeps a wider floor (a few letters of its label), as its style says; the selected tab's own floor is
+ * its measured one, at least that.
+ */
+function roomLimit(strip: HTMLElement, a: { total: number; count: number; zoom: number; addWidth: number; floor: number | undefined }): number {
+    const noIcon = strip.querySelector(".pane-tab.doc-tab--no-icon") !== null;
+    const resting = noIcon ? RESTING_NO_ICON_FLOOR_PX : RESTING_FLOOR_PX;
+    const activeLeast = noIcon ? ACTIVE_NO_ICON_FLOOR_PX : ACTIVE_FLOOR_PX;
+    return Math.max(a.total, minTabsRoom(a.count, resting, Math.max(a.floor ?? activeLeast, activeLeast)) * a.zoom + a.addWidth);
+}
+
+/**
  * Keeps `strip`'s step and room current: called once, in the strip's own component. `tabCount` and `zoom` are what
  * the strip draws now; `revision` changes when a label does (the tab list, a rename), so a strip whose labels got longer
  * looks again.
@@ -177,13 +189,7 @@ export function createStripSteps(opts: {
         // A rename in progress holds the step: the input must not change under the typing.
         if (strip.querySelector(".pane-tab-rename-input")) next = previous;
         if (next !== previous) setStep(next);
-        // Never narrower than the tabs' own floors: past that the header scrolls, as it always did.
-        // A tab with no icon keeps a wider floor (a few letters of its label), as its style says; the selected tab's own
-        // floor is its measured one, at least that.
-        const noIcon = strip.querySelector(".pane-tab.doc-tab--no-icon") !== null;
-        const resting = noIcon ? RESTING_NO_ICON_FLOOR_PX : RESTING_FLOOR_PX;
-        const activeLeast = noIcon ? ACTIVE_NO_ICON_FLOOR_PX : ACTIVE_FLOOR_PX;
-        const limit = Math.max(total, minTabsRoom(count, resting, Math.max(floor ?? activeLeast, activeLeast)) * zoom + addWidth);
+        const limit = roomLimit(strip, { total, count, zoom, addWidth, floor });
         // A new limit changes how far the labels are cut: look once more when it has settled.
         if (room() === undefined || Math.abs((room() ?? 0) - limit) >= 0.5) {
             setRoom(limit);

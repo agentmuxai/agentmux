@@ -107,14 +107,16 @@ const SELECTED_CASES: Array<[string, number, number, string, number]> = [
 ];
 
 // [id, header width, tab count, step, zoom]
+// With a tab that has no icon (a row of five or more) the others keep the wider floors too, so these rows are wide enough
+// to hold them: a narrower header scrolls instead (the "floors" row).
 const CASES: Array<[string, number, number, string, number, boolean?]> = [
     ["renaming", 400, 8, "icon", 1, true],
     ["fit", 900, 3, "full", 1],
     ["clipped", 700, 6, "full", 1],
-    ["noLabel", 480, 7, "icon-close", 1],
-    ["iconOnly", 400, 8, "icon", 1],
+    ["noLabel", 600, 7, "icon-close", 1],
+    ["iconOnly", 640, 8, "icon", 1],
     ["floors", 260, 8, "icon", 1],
-    ["zoomed", 480, 7, "icon-close", 1.25],
+    ["zoomed", 700, 7, "icon-close", 1.25],
 ];
 
 /**
