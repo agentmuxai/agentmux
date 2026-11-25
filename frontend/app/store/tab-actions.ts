@@ -18,6 +18,8 @@ import { fireAndForget } from "@/util/util";
 import { focusManager } from "./focusManager";
 import { WorkspaceService } from "./services";
 import { holdRevealGate, logUngatedReveal, markTabShown, scheduleRevealLift, tabWasShown } from "./tab-reveal";
+import { dirtyAtClick } from "./switch-activity";
+import { pendingMuxUpdateCount } from "./mos-update-queue";
 import { activeTabId, workspace } from "./window-identity";
 import { createEffect, createRoot, createSignal } from "solid-js";
 
@@ -326,6 +328,18 @@ function guardStep(name: string, counter: { threw: number }, step: () => void): 
     }
 }
 
+/** What was pending at the click, taken then and printed with the switch's line: long-task time in the second before it,
+ *  what arrived in that second (websocket events, Vault calls) by kind, and the object updates still queued. */
+function snapshotDirty(clickedAt: number): (tabId: string) => void {
+    const dirty = dirtyAtClick(clickedAt);
+    const busy = blockedMsBetween(clickedAt - 1000, clickedAt);
+    const pending = pendingMuxUpdateCount();
+    return (tabId) =>
+        console.info(
+            `[perf] tab-switch-dirty to=${tabId} busy-before=${busy == null ? "n/a" : `${busy}ms`} arrived-1s=${dirty.total}${dirty.mix ? `(${dirty.mix})` : ""} pending-updates=${pending}`
+        );
+}
+
 /** One line per switch, always (#47767): the click to the RPC's return and to two frames later, how many browser
  *  panes a layout change must clip, and how many steps threw. A superseded switch says so. */
 function logSwitch(
@@ -393,6 +407,7 @@ export async function setActiveTab(tabId: string): Promise<void> {
     // SMOOTHNESS_2026_09_24.md §6.4, measured on #3686).
     const gated = !(keepInactiveTabsLaidOut() && tabWasShown(tabId));
     if (gated) guardStep("the reveal gate", guard, () => holdRevealGate(tabId));
+    const logDirty = snapshotDirty(clickedAt);
     const cancelIntent = showSwitchIntent(tabId, (write) => guardStep("the switch intent", guard, write));
     let rpcMs = -1;
     try {
@@ -413,6 +428,7 @@ export async function setActiveTab(tabId: string): Promise<void> {
         requestAnimationFrame(() =>
             requestAnimationFrame(() => {
                 logSwitch(tabId, mySeq === tabSwitchSeq, gated, rpcMs, performance.now() - clickedAt, guard.threw, clickedAt);
+                logDirty(tabId);
                 if (mySeq === tabSwitchSeq) {
                     markEnd("tab-switch");
                     tabSwitchInFlight = false;
