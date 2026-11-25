@@ -50,3 +50,20 @@ fn prune_old_screenshots_deletes_only_stale_pngs() {
     assert!(!stale.exists(), "stale screenshot must be pruned");
     assert!(other.exists(), "non-png files must never be pruned");
 }
+
+/// A hand-off's reason reaches the person whole: a long one is refused with the limit, never cut.
+#[test]
+fn a_handoff_reason_is_carried_whole_or_refused_with_the_limit() {
+    use super::{handoff_reason, HANDOFF_REASON_MAX};
+    let long_but_ok = "Upload the file on the form, then press Done. ".repeat(12);
+    assert!(long_but_ok.chars().count() > 300 && long_but_ok.chars().count() <= HANDOFF_REASON_MAX);
+    assert_eq!(handoff_reason(&long_but_ok).unwrap(), long_but_ok, "past the old 300-character cut, carried whole");
+    let exactly = "x".repeat(HANDOFF_REASON_MAX);
+    assert_eq!(handoff_reason(&exactly).unwrap(), exactly);
+    let over = "x".repeat(HANDOFF_REASON_MAX + 1);
+    let why = handoff_reason(&over).unwrap_err();
+    assert!(why.contains(&(HANDOFF_REASON_MAX + 1).to_string()) && why.contains(&HANDOFF_REASON_MAX.to_string()) && why.contains("not cut"), "{why}");
+    assert!(handoff_reason("").unwrap_err().contains("what the user should do"));
+    // Characters, not bytes: a reason in another script is not refused early.
+    assert!(handoff_reason(&"é".repeat(HANDOFF_REASON_MAX)).is_ok());
+}
