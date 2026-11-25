@@ -9,6 +9,7 @@
 
 import { tip } from "@/app/element/tip";
 import { Button } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { For, Show, type JSX } from "solid-js";
 import type { BrowserViewModel } from "./browser-model";
 import { progressText, type DownloadRow } from "./downloads";
@@ -21,14 +22,14 @@ function RowStatus(props: { row: DownloadRow }): JSX.Element {
                 <span class="browser-download-progress">{progressText(row())}</span>
             </Show>
             <Show when={row().state === "done"}>
-                <span class="browser-download-progress">{row().reason ?? "saved"}</span>
+                <span class="browser-download-progress">{row().reason ?? t("downloadStrip.saved")}</span>
             </Show>
             <Show when={row().state === "cancelled"}>
-                <span class="browser-download-progress">cancelled</span>
+                <span class="browser-download-progress">{t("downloadStrip.cancelled")}</span>
             </Show>
             <Show when={row().state === "failed"}>
-                <span class="browser-download-failed" {...tip(row().reason ?? "The download failed.")}>
-                    {row().reason ?? "The download failed."}
+                <span class="browser-download-failed" {...tip(row().reason ?? t("downloadStrip.failed"))}>
+                    {row().reason ?? t("downloadStrip.failed")}
                 </span>
             </Show>
         </>
@@ -39,7 +40,7 @@ export function DownloadStrip(props: { model: BrowserViewModel }): JSX.Element {
     const model = props.model;
     return (
         <Show when={model.downloadsAtom().length > 0}>
-            <div class="browser-downloads" role="status" aria-label="Downloads">
+            <div class="browser-downloads" role="status" aria-label={t("downloadStrip.label")}>
                 <For each={model.downloadsAtom()}>
                     {(row) => (
                         <div class="browser-download-row" classList={{ "browser-download-row--failed": row.state === "failed" }}>
@@ -54,20 +55,20 @@ export function DownloadStrip(props: { model: BrowserViewModel }): JSX.Element {
                                         <Button
                                             density="compact"
                                             class="browser-download-cancel"
-                                            title="Stop this download"
+                                            title={t("downloadStrip.stop")}
                                             onClick={() => model.cancelDownload(row.id as number)}
                                         >
-                                            Cancel
+                                            {t("downloadStrip.cancel")}
                                         </Button>
                                     </Show>
                                     <Show when={row.state === "done" && row.path}>
                                         <Button
                                             density="compact"
                                             class="browser-download-reveal"
-                                            title="Show the file in its folder"
+                                            title={t("downloadStrip.revealTip")}
                                             onClick={() => model.revealDownload(row.path as string)}
                                         >
-                                            Show in folder
+                                            {t("downloadStrip.reveal")}
                                         </Button>
                                     </Show>
                                 </span>
@@ -76,11 +77,11 @@ export function DownloadStrip(props: { model: BrowserViewModel }): JSX.Element {
                                 <Button
                                     density="compact"
                                     class="browser-download-dismiss"
-                                    title="Hide this line"
-                                    aria-label="Hide this download line"
+                                    title={t("downloadStrip.hideTip")}
+                                    aria-label={t("downloadStrip.hideLabel")}
                                     onClick={() => model.dismissDownload(row.key)}
                                 >
-                                    Hide
+                                    {t("downloadStrip.hide")}
                                 </Button>
                             </Show>
                         </div>
