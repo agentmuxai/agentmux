@@ -5,9 +5,12 @@ use super::*;
 use serde_json::json;
 
 fn peer(host: &str, channel: &str, install: &str) -> LanInstance {
+    // Each is its own instance: an address and port serve one instance.
+    static NEXT: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(1);
+    let address = format!("192.0.2.{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
     let mut p: LanInstance = serde_json::from_value(json!({
         "instance_id": "v0", "hostname": host, "version": "0.60.7", "channel": channel, "os": "windows",
-        "address": "192.0.2.10", "port": 29700, "auth_key": "k", "agents": [], "first_seen": 0, "last_seen": 0,
+        "address": address, "port": 29700, "auth_key": "k", "agents": [], "first_seen": 0, "last_seen": 0,
         "other_ttl_secs": 4500
     }))
     .unwrap();
