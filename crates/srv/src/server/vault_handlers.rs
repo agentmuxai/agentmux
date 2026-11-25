@@ -356,10 +356,6 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 if !vault::uses::uses().answer(&id, answer) {
                     return Err("that request is no longer waiting".into());
                 }
-                // A yes to a use of a value an agent had the Vault read is the person's look at it: it is trusted from now on.
-                if decision != vault::uses::Decision::Deny {
-                    vault::agent_set::clear(&store, &request.entry_id);
-                }
                 Ok((json!({}), true))
             }
             "hold_use" => hold_use(&body),

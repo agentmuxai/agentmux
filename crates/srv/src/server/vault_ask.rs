@@ -46,6 +46,10 @@ pub(super) async fn ask(state: &AppState, attention_block: &str, mut request: Us
         Err(_) => None,
     };
     let ended = Ended::of(answer.as_ref());
+    // The person's yes to a use of a value an agent had the Vault read is their look at it: it is trusted from now on.
+    if matches!(ended, Ended::Once | Ended::Always) {
+        crate::backend::vault::agent_set::clear(&state.identity_store, &entry);
+    }
     if ended == Ended::WentAhead {
         let line = crate::backend::vault::Line { entry_id: &entry, label: &label, actor: &agent, action: ASKED, target: &target, outcome: uses::WENT_AHEAD_OUTCOME, reason: &agent_reason };
         crate::backend::vault::record_line(&state.identity_store, line);

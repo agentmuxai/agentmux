@@ -1,7 +1,8 @@
 # Spec: An agent adds or edits a Vault entry without asking the person; the history line is the record
 
-**Task:** #48656 (the build is #48657). **Author:** Agent2-6 (Vault). **Date:** 2026-11-25. **Status:** draft 2, for the
-operator's "looks good" through AgentY. Written against origin/main `d7ebfaba77`. It changes
+**Task:** #48656 (the build is #48657). **Author:** Agent2-6 (Vault). **Date:** 2026-11-25.
+**Status:** active — approved 2026-11-25 with every recommended answer; built in three PRs (§11): PR 1 (adds and edits ask nobody, the pace, the unseen mark) is open, PRs 2 and 3 are not started.
+Written against origin/main `d7ebfaba77`. It changes
 `SPEC_VAULT_AGENT_ASKS_TO_BIND_A_LOGIN_TO_A_SITE_2026_11_19.md` (#48141): §7 says how. It builds on
 `SPEC_VAULT_PARITY_ENTRY_HISTORY_REASONS_AND_IMPORT_2026_11_06.md` (history lines, reasons, import) and
 `SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01.md` (the cards).
