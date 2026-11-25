@@ -10,6 +10,7 @@ use super::capture::{plan, Outcome};
 use super::inspect::{update_details_for, UpdateRequest};
 use super::*;
 use agentmux_common::api_types::{CaptureFrom, CaptureInto, CaptureRule};
+use crate::backend::storage::vault::{VaultActivityRow, VaultRow};
 
 const OWN: &str = "profile:agent-builder-0123abcd";
 const REASON: &str = "keep the staging details tidy for task 31020";
@@ -241,4 +242,21 @@ fn two_quick_changes_by_one_agent_each_undo_to_their_own_earlier_value() {
     assert_eq!(first.undo, "restore value");
     agent_changes::undo(&s, first.seq).unwrap();
     assert_eq!(reveal(&s, &id, "value", "revealed").unwrap().as_str(), "ghp_a_000000000", "the first change put back its own earlier value, not the second's");
+}
+
+#[test]
+fn only_a_creating_line_written_with_the_entry_makes_it_added_and_offers_removal() {
+    let s = store();
+    let id = key(&s, "Synced", "sk_synced_00000");
+    capture_over(&s, &id, "builder", "sk_agents_00001");
+    let row = s.vault_get(&id).unwrap().unwrap();
+    let line = s.vault_activity_agent_changes(0, &["captured"], 10).unwrap().remove(0);
+    // An entry with no local creation line (from sync or a bulk import) has an edit like this one for its first line.
+    let long_before = VaultRow { created_at: line.at - 60_000, ..row.clone() };
+    assert!(!inspect::is_creation(&line, &long_before), "a capture long after the entry was made is an edit, not its creation");
+    let edit = VaultActivityRow { action: inspect::CHANGED_DETAILS.into(), ..line.clone() };
+    assert!(!inspect::is_creation(&edit, &row), "an edit of details is never a creation");
+    // And the person's own entry is never listed as added: its first line is theirs.
+    let c = agent_changes::list(&s, Some(&id), false).unwrap().remove(0);
+    assert_eq!((c.kind.as_str(), c.undo.as_str()), ("new value", "restore value"), "{c:?}");
 }

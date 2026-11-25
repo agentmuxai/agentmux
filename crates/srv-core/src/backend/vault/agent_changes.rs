@@ -79,45 +79,54 @@ fn is_agent(row: &VaultActivityRow, agent_label: &str) -> bool {
     row.actor_kind == "agent" && history::actor_label(&row.actor) == agent_label
 }
 
-/// True when line `seq` is the one that wrote what was kept at `at`: of the lines by this agent on this entry that `keep`
-/// accepts, the nearest in time. A line is written in the same call as the version or details it replaced, so each of two
-/// quick changes by one agent keeps its own, and a kept row whose own line is gone belongs to no other line.
-fn written_by(rows: &[VaultActivityRow], entry_id: &str, label: &str, at: i64, seq: i64, keep: impl Fn(&VaultActivityRow) -> bool) -> bool {
-    let mine = rows.iter().filter(|r| r.entry_id == entry_id && is_agent(r, label) && keep(r));
-    mine.min_by_key(|r| ((r.at - at).abs(), r.seq)).is_some_and(|r| r.seq == seq && (r.at - at).abs() <= NEAR_MS)
+/// The lines by this agent on this entry that `keep` accepts, as (time, line number).
+fn agent_lines(rows: &[VaultActivityRow], entry_id: &str, label: &str, keep: impl Fn(&VaultActivityRow) -> bool) -> Vec<(i64, i64)> {
+    rows.iter().filter(|r| r.entry_id == entry_id && is_agent(r, label) && keep(r)).map(|r| (r.at, r.seq)).collect()
+}
+
+/// Gives each thing kept (the times in `kept`, oldest first) the one line of `lines` that wrote it: a line is written in the
+/// same call as the version or details it replaced, so each takes the nearest line not already taken. Two quick changes by one
+/// agent each keep their own, even in one millisecond, and a kept row whose own line is gone is nobody's.
+fn assign(lines: &[(i64, i64)], kept: &[i64]) -> Vec<Option<i64>> {
+    let mut taken = std::collections::HashSet::new();
+    kept.iter()
+        .map(|at| {
+            let line = lines.iter().filter(|l| !taken.contains(&l.1) && (l.0 - at).abs() <= NEAR_MS).min_by_key(|l| ((l.0 - at).abs(), l.1)).map(|l| l.1);
+            taken.extend(line);
+            line
+        })
+        .collect()
 }
 
 /// The earlier value `row` replaced, while it is still kept.
 fn earlier_value(store: &Store, entry: &VaultRow, row: &VaultActivityRow, rows: &[VaultActivityRow]) -> Option<i64> {
     let label = history::actor_label(&row.actor);
-    let value_line = |r: &VaultActivityRow| r.action != inspect::CHANGED_DETAILS && r.action != proposals::PROPOSED;
-    store
-        .vault_versions(&entry.id, entry.created_at)
-        .ok()?
-        .into_iter()
-        .filter(|v| v.state == versions::PREVIOUS && history::actor_label(&v.replaced_by) == label && written_by(rows, &entry.id, &label, v.replaced_at, row.seq, value_line))
-        .min_by_key(|v| (v.replaced_at - row.at).abs())
-        .map(|v| v.seq)
+    let lines = agent_lines(rows, &entry.id, &label, |r| r.action != inspect::CHANGED_DETAILS && r.action != proposals::PROPOSED);
+    let mut mine: Vec<_> = store.vault_versions(&entry.id, entry.created_at).ok()?.into_iter().filter(|v| v.state == versions::PREVIOUS && history::actor_label(&v.replaced_by) == label).collect();
+    mine.sort_by_key(|v| (v.replaced_at, v.seq));
+    let owners = assign(&lines, &mine.iter().map(|v| v.replaced_at).collect::<Vec<_>>());
+    mine.iter().zip(owners).find(|(_, owner)| *owner == Some(row.seq)).map(|(v, _)| v.seq)
 }
 
 /// The details `row` replaced, while they are still kept.
 fn earlier_details(store: &Store, entry: &VaultRow, row: &VaultActivityRow, rows: &[VaultActivityRow]) -> Option<DetailsKept> {
     let label = history::actor_label(&row.actor);
-    let same = |r: &VaultActivityRow| r.action == inspect::CHANGED_DETAILS && r.target == row.target;
-    store
-        .vault_details_kept(&entry.id, entry.created_at)
-        .ok()?
-        .into_iter()
-        .filter(|d| d.changed_by == label && d.what == row.target && written_by(rows, &entry.id, &label, d.changed_at, row.seq, same))
-        .min_by_key(|d| (d.changed_at - row.at).abs())
+    let lines = agent_lines(rows, &entry.id, &label, |r| r.action == inspect::CHANGED_DETAILS && r.target == row.target);
+    let mut mine: Vec<_> = store.vault_details_kept(&entry.id, entry.created_at).ok()?.into_iter().rev().filter(|d| d.changed_by == label && d.what == row.target).collect();
+    mine.sort_by_key(|d| d.changed_at);
+    let owners = assign(&lines, &mine.iter().map(|d| d.changed_at).collect::<Vec<_>>());
+    mine.into_iter().zip(owners).find(|(_, owner)| *owner == Some(row.seq)).map(|(d, _)| d)
 }
 
 /// `row` as a change the person can look at, or none when it is not one now (the entry is gone, the proposal is settled).
 fn change_of(store: &Store, rows: &[VaultActivityRow], row: &VaultActivityRow, seen: bool) -> Option<AgentChange> {
     let entry = store.vault_get(&row.entry_id).ok()??;
     let first = store.vault_activity_first(&entry.id, entry.created_at).ok()?;
-    let by_agent = first.as_ref().is_some_and(|f| f.actor_kind == "agent");
-    let added = first.as_ref().is_some_and(|f| f.seq == row.seq);
+    // Only a creation line makes an entry "added": one with no local creation line (from sync or a bulk import) has an edit
+    // for its first line, and removing it as an Undo would delete the person's entry.
+    let created_here = first.as_ref().filter(|f| inspect::is_creation(f, &entry));
+    let by_agent = created_here.is_some_and(|f| f.actor_kind == "agent");
+    let added = created_here.is_some_and(|f| f.seq == row.seq);
     let mut change = AgentChange {
         seq: row.seq,
         at: row.at,
@@ -137,8 +146,8 @@ fn change_of(store: &Store, rows: &[VaultActivityRow], row: &VaultActivityRow, s
     if row.action == proposals::PROPOSED {
         let field = row.target.strip_prefix("field ").unwrap_or(&row.target).to_string();
         let waiting = store.vault_proposals(Some(&entry.id), now_ms() - proposals::KEEP_MS).ok()?.into_iter().find(|p| {
-            let same = |r: &VaultActivityRow| r.action == proposals::PROPOSED && r.target == row.target;
-            p.field == field && history::actor_label(&p.agent) == history::actor_label(&row.actor) && written_by(rows, &entry.id, &history::actor_label(&row.actor), p.at, row.seq, same)
+            let lines = agent_lines(rows, &entry.id, &history::actor_label(&row.actor), |r| r.action == proposals::PROPOSED && r.target == row.target);
+            p.field == field && history::actor_label(&p.agent) == history::actor_label(&row.actor) && assign(&lines, &[p.at]) == [Some(row.seq)]
         })?;
         let current = signins_field(&entry, &field);
         change.kind = "proposal".into();

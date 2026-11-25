@@ -16,7 +16,7 @@ use super::source_link::{self, Link};
 use super::{agent_set, expiry, history, kinds, linked, record_line, seal, shares, signins, signups, validate, vaults, Line, Parts};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::vault_changes::DetailsKept;
-use crate::backend::storage::vault::{VaultRow, VALUE_SETTING};
+use crate::backend::storage::vault::{VaultActivityRow, VaultRow, VALUE_SETTING};
 
 /// The Activity action of a change to an entry's label, plain fields or tags.
 pub const CHANGED_DETAILS: &str = "changed details";
@@ -298,9 +298,13 @@ const CREATION_LINE_MS: i64 = 10_000;
 /// later `import` over it, or a proposal, is not its making) and written when the entry was.
 fn made_by(store: &Store, row: &VaultRow, agent: &str) -> bool {
     let first = store.vault_activity_first(&row.id, row.created_at).ok().flatten();
-    first.is_some_and(|line| {
-        line.actor_kind == "agent" && history::actor_label(&line.actor) == history::actor_label(agent) && CREATING.contains(&line.action.as_str()) && (0..=CREATION_LINE_MS).contains(&(line.at - row.created_at))
-    })
+    first.is_some_and(|line| line.actor_kind == "agent" && history::actor_label(&line.actor) == history::actor_label(agent) && is_creation(&line, row))
+}
+
+/// Whether `line`, the first local line of `row`, is the creation of it: a creating action written when the entry was. An
+/// entry with no local creation line (taken from another machine, imported in bulk) has none, and its first line is an edit.
+pub(super) fn is_creation(line: &VaultActivityRow, row: &VaultRow) -> bool {
+    CREATING.contains(&line.action.as_str()) && (0..=CREATION_LINE_MS).contains(&(line.at - row.created_at))
 }
 
 /// Splits the place fields out of what an agent asked for and settles each: on a login the agent made, a site, realm or proxy
