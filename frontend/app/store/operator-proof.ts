@@ -13,12 +13,17 @@ import { EVENT_COMMANDS, OPEN_EVENTS, OPERATOR_COMMANDS } from "./operator-comma
 const UNPROVEN = "isn't the AgentMux window";
 /** The longest an operator RPC waits for a proof before it is sent anyway. */
 const PROOF_WAIT_MS = 10_000;
+/** A host that vouches for a lease (an external host: five minutes, six at most) is asked again this often, well
+ *  before the lease lapses, so the window's keystrokes are never refused for it. */
+const PROOF_RENEW_MS = 3 * 60_000;
 
 type OperatorProofDeps = {
     /** `operator.challenge` on the connection that just opened. */
     challenge: () => Promise<{ nonce: string }>;
     /** The host's `operator_attest`; absent when there is no host to vouch. */
     attest?: (nonce: string) => Promise<void>;
+    /** Whether the connection is still open: a renewal for a closed one is skipped (the next connect proves its own). */
+    connected?: () => boolean;
 };
 
 let generation = 0;
@@ -29,6 +34,7 @@ let settleExpected: ((proven: boolean) => void) | null = null;
 /** The last connection's proof deps, to prove it again when its proof lapses (a host that vouches for a lease). */
 let lastDeps: OperatorProofDeps | null = null;
 let reproving: Promise<boolean> | null = null;
+let renewTimer: ReturnType<typeof setTimeout> | null = null;
 let refusalHandler: ((refusal: OperatorRefusal) => void) | null = null;
 
 /** An operator-only action srv refused that the app could not put right: the person must be told. */
@@ -83,7 +89,18 @@ export function proveOperatorConnection(deps: OperatorProofDeps): Promise<boolea
     const settle = settleExpected;
     settleExpected = null;
     if (settle) void attempt.then(settle);
+    if (renewTimer) clearTimeout(renewTimer);
+    renewTimer = null;
+    if (attest) void attempt.then((proven) => proven && current === attempt && scheduleRenewal(deps));
     return attempt;
+}
+
+/** Prove the connection again before its lease lapses. Stops when the connection has closed or a proof fails. */
+function scheduleRenewal(deps: OperatorProofDeps): void {
+    renewTimer = setTimeout(() => {
+        renewTimer = null;
+        if (lastDeps === deps && deps.connected?.() !== false) void reprove();
+    }, PROOF_RENEW_MS);
 }
 
 /** Resolves when the current connection's proof has settled (true if it was
@@ -191,5 +208,7 @@ export function resetOperatorProofForTests(): void {
     settleExpected = null;
     lastDeps = null;
     reproving = null;
+    if (renewTimer) clearTimeout(renewTimer);
+    renewTimer = null;
     refusalHandler = null;
 }
