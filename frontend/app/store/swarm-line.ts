@@ -220,6 +220,20 @@ export function readPaneSummary(meta: Record<string, unknown> | undefined, now: 
     return titleIsNewer ? title : phrase.text;
 }
 
+/**
+ * How old the line `readPaneSummary` returns is, in ms, when it is the agent's own status line (a generated title has no
+ * age to say); null otherwise.
+ */
+export function readPaneSummaryAgeMs(meta: Record<string, unknown> | undefined, now: number = Date.now()): number | null {
+    const phrase = readLivePhrase(meta, now);
+    if (!phrase || phrase.source !== "declared" || phrase.setAt === undefined) return null;
+    if ((phrase.ageMs ?? Infinity) > FRESH_STATUS_MS) return null;
+    const title = readSwarmSummary(meta);
+    const titleAt = meta?.[META_TITLE_AT];
+    if (title !== null && typeof titleAt === "number" && titleAt >= phrase.setAt) return null;
+    return phrase.ageMs ?? null;
+}
+
 /** The ranked status of a Swarm agent, from what its row knows: whether a
  *  turn is in flight, the pending-question flag (`term:awaiting_user`),
  *  whether the Swarm Supervisor stopped it for the user, and whether a Browser

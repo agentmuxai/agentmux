@@ -40,7 +40,11 @@ const overlay = () => document.body.querySelector("[data-pane-overlay]") as HTML
 
 afterEach(() => cleanup());
 
-function renderStrip(detail: (t: T) => string | undefined, seat?: (t: T) => string | undefined) {
+function renderStrip(
+    detail: (t: T) => string | undefined,
+    seat?: (t: T) => string | undefined,
+    extra: Partial<Parameters<typeof PaneTabStrip<T>>[0]> = {}
+) {
     return render(() => (
         <PaneTabStrip
             tabs={TABS}
@@ -50,6 +54,7 @@ function renderStrip(detail: (t: T) => string | undefined, seat?: (t: T) => stri
             getTooltipDetail={detail}
             getTooltipSeat={seat}
             onActivate={vi.fn()}
+            {...extra}
         />
     ));
 }
@@ -67,7 +72,7 @@ describe("PaneTabStrip tooltip detail", () => {
         expect(tip.firstElementChild!.getAttribute("style")).toContain("transition: none");
     });
 
-    it("leaves a tab with no summary exactly as it was: just the label, with the default fade", async () => {
+    it("shows a tab with no summary just its label, and at once like every tab: the whole title of a tab cut to its start", async () => {
         const { container } = renderStrip((t) => (t.id === "agent" ? "Fixing login" : undefined));
         const pill = container.querySelectorAll(".pane-tab-tip")[1] as HTMLElement;
         fireEvent.mouseEnter(pill);
@@ -75,8 +80,8 @@ describe("PaneTabStrip tooltip detail", () => {
         const tip = overlay()!;
         expect(tip.textContent).toBe("Terminal");
         expect(tip.querySelector(".pane-tab-tip-summary")).toBeNull();
-        // The default (not `immediate`) keeps its short fade rather than "none".
-        expect(tip.firstElementChild!.getAttribute("style")).toContain("opacity var(--duration-instant)");
+        // At once (no fade), whatever the tab: a tab cut to an icon is named the moment the pointer is on it.
+        expect(tip.firstElementChild!.getAttribute("style")).toContain("transition: none");
     });
 
     it("goes away the moment the pointer leaves", async () => {
@@ -151,5 +156,88 @@ describe("PaneTabStrip tooltip detail", () => {
         setSummary("Reviewing the pull request");
         await new Promise((resolve) => setTimeout(resolve, 0));
         expect(overlay()!.querySelector(".pane-tab-tip-summary")!.textContent).toBe("Reviewing the pull request");
+    });
+});
+
+describe("an agent's hover card", () => {
+    const agentOnly = (value: string) => (t: T) => (t.id === "agent" ? value : undefined);
+
+    it("says its name, its state with a dot in the Swarm's colour, where it runs, its status line and how old that is", async () => {
+        const { container } = renderStrip(agentOnly("Fixing login"), agentOnly("Worker · reports to AgentY"), {
+            getTooltipWhere: agentOnly("In a container · On this computer"),
+            getTooltipAge: agentOnly("12 min ago"),
+            getTooltipModel: agentOnly("Claude · Opus"),
+            useProgress: (t: T) => () => (t.id === "agent" ? { state: "working" as const, text: "Working" } : null),
+        });
+        fireEvent.mouseEnter(container.querySelectorAll(".pane-tab-tip")[0] as HTMLElement);
+        await frame();
+        const tip = overlay()!;
+        expect(tip.querySelector(".pane-tab-tip-label")!.textContent).toBe("AgentX");
+        const state = tip.querySelector("[data-testid=pane-tab-tip-state]")!;
+        expect(state.textContent).toBe("Working");
+        expect(state.getAttribute("data-state")).toBe("working");
+        expect(state.querySelector(".pane-tab-tip-dot")).not.toBeNull();
+        expect(tip.querySelector("[data-testid=pane-tab-tip-where]")!.textContent).toBe("In a container · On this computer");
+        expect(tip.querySelector(".pane-tab-tip-summary")!.textContent).toContain("Fixing login");
+        expect(tip.querySelector("[data-testid=pane-tab-tip-age]")!.textContent).toContain("12 min ago");
+        expect(tip.textContent).toContain("Claude · Opus");
+        expect(tip.textContent).toContain("Worker · reports to AgentY");
+    });
+
+    it("says the task the agent holds and how full its context is, and nothing for either until it has them", async () => {
+        const { container } = renderStrip(agentOnly("Fixing login"), undefined, {
+            getTooltipWhere: agentOnly("On this computer"),
+            getTooltipTask: agentOnly("#48669 Pane tabs: no extra buttons"),
+            getTooltipContext: agentOnly("41% of context"),
+        });
+        fireEvent.mouseEnter(container.querySelectorAll(".pane-tab-tip")[0] as HTMLElement);
+        await frame();
+        const tip = overlay()!;
+        expect(tip.querySelector("[data-testid=pane-tab-tip-task]")!.textContent).toBe("#48669 Pane tabs: no extra buttons");
+        expect(tip.querySelector("[data-testid=pane-tab-tip-context]")!.textContent).toBe("41% of context");
+        // Text, not a link: the card never takes the pointer.
+        expect(tip.querySelector("a, button")).toBeNull();
+        cleanup();
+        const bare = renderStrip(agentOnly("Fixing login"), undefined, { getTooltipWhere: agentOnly("On this computer") });
+        fireEvent.mouseEnter(bare.container.querySelectorAll(".pane-tab-tip")[0] as HTMLElement);
+        await frame();
+        expect(overlay()!.querySelector("[data-testid=pane-tab-tip-task]")).toBeNull();
+        expect(overlay()!.querySelector("[data-testid=pane-tab-tip-context]")).toBeNull();
+    });
+
+    it("calls an agent with no turn running idle, in the Swarm's idle colour", async () => {
+        const { container } = renderStrip(() => undefined, undefined, {
+            getTooltipWhere: agentOnly("On this computer"),
+            getTooltipIdle: () => true,
+        });
+        fireEvent.mouseEnter(container.querySelectorAll(".pane-tab-tip")[0] as HTMLElement);
+        await frame();
+        const state = overlay()!.querySelector("[data-testid=pane-tab-tip-state]")!;
+        expect(state.textContent).toBe("Idle");
+        expect(state.getAttribute("data-state")).toBe("idle");
+    });
+
+    it("does not call an agent idle when it cannot start a turn (a usage limit, a refused sign-in)", async () => {
+        const { container } = renderStrip(() => undefined, undefined, {
+            getTooltipWhere: agentOnly("On this computer"),
+            getTooltipIdle: () => false,
+        });
+        fireEvent.mouseEnter(container.querySelectorAll(".pane-tab-tip")[0] as HTMLElement);
+        await frame();
+        expect(overlay()!.querySelector("[data-testid=pane-tab-tip-state]")).toBeNull();
+        expect(overlay()!.textContent).toContain("On this computer");
+    });
+
+    it("has no age when the line is not the agent's own, and no state line for a tab that is not an agent's", async () => {
+        const { container } = renderStrip(agentOnly("Generated title"), undefined, { getTooltipWhere: agentOnly("On this computer") });
+        fireEvent.mouseEnter(container.querySelectorAll(".pane-tab-tip")[0] as HTMLElement);
+        await frame();
+        expect(overlay()!.querySelector("[data-testid=pane-tab-tip-age]")).toBeNull();
+        cleanup();
+        const plain = renderStrip(() => undefined);
+        fireEvent.mouseEnter(plain.container.querySelectorAll(".pane-tab-tip")[1] as HTMLElement);
+        await frame();
+        expect(overlay()!.querySelector("[data-testid=pane-tab-tip-state]")).toBeNull();
+        expect(overlay()!.textContent).toBe("Terminal");
     });
 });

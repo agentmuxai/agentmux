@@ -8,6 +8,7 @@
  */
 
 import { Button } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { For, Show, onCleanup } from "solid-js";
 import clsx from "clsx";
 import { formatBytes } from "@/util/format-bytes";
@@ -34,13 +35,17 @@ export function TrayHeader(props: Part) {
             >
                 <span class="agent-attachment-tray__processing">
                     <span class="text">
-                        Processing {d.progress().count} of {d.count()} ·{" "}
-                        {formatBytes(d.progress().done)} of {formatBytes(d.progress().total)}
+                        {t("attachmentTray.processing", {
+                            n: d.progress().count,
+                            total: d.count(),
+                            done: formatBytes(d.progress().done),
+                            size: formatBytes(d.progress().total),
+                        })}
                     </span>
                     <span
                         class="agent-attachment-tray__bar"
                         role="progressbar"
-                        aria-label={`Processing ${noun(2)}`}
+                        aria-label={t("attachmentTray.processingLabel", { noun: noun(2) })}
                         aria-valuemin={0}
                         aria-valuemax={100}
                         aria-valuenow={Math.round(
@@ -55,19 +60,19 @@ export function TrayHeader(props: Part) {
                         />
                     </span>
                     <Button variant="link" onClick={() => d.cancel()}>
-                        Cancel
+                        {t("attachmentTray.cancel")}
                     </Button>
                 </span>
             </Show>
             <span class="agent-attachment-tray__header-actions">
                 <Show when={expanded()}>
                     <Button variant="link" onClick={() => setExpanded(false)}>
-                        Show less
+                        {t("attachmentTray.showLess")}
                     </Button>
                 </Show>
                 <Show when={d.count() > 1}>
                     <Button variant="link" onClick={clearAll}>
-                        Clear
+                        {t("attachmentTray.clear")}
                     </Button>
                 </Show>
             </span>
@@ -92,8 +97,8 @@ function MoreTile(props: Part) {
         <li class="agent-attachment-tile agent-attachment-tile--more">
             <Button
                 class="agent-attachment-tile__main"
-                aria-label={`Show all ${d.count()} ${noun(d.count())}`}
-                title={`Show all ${d.count()} ${noun(d.count())}`}
+                aria-label={t("attachmentTray.showAll", { n: d.count(), noun: noun(d.count()) })}
+                title={t("attachmentTray.showAll", { n: d.count(), noun: noun(d.count()) })}
                 onClick={() => setExpanded(true)}
             >
                 <span class="mosaic" aria-hidden="true">
@@ -115,13 +120,13 @@ function MoreTile(props: Part) {
 
 /** The tiles in one row (or all of them, expanded), then the "+N" tile. */
 export function TileList(props: Part) {
-    const t = props.t;
-    const { d, noun, expanded, layout, shownKeys, tileByKey, tileEls, setLightboxIndex } = t;
+    const tray = props.t;
+    const { d, noun, expanded, layout, shownKeys, tileByKey, tileEls, setLightboxIndex } = tray;
     return (
         <ul
-            ref={t.observeList}
+            ref={tray.observeList}
             class="agent-attachment-tray__tiles"
-            aria-label={`Attached ${noun(2)}: ${d.count()}`}
+            aria-label={t("attachmentTray.attached", { noun: noun(2), n: d.count() })}
         >
             <For each={shownKeys()}>
                 {(key) => {
@@ -135,16 +140,16 @@ export function TileList(props: Part) {
                                 flash={d.flashKey() === key}
                                 caption={expanded()}
                                 onOpen={() => setLightboxIndex(tile()!.number - 1)}
-                                onRemove={() => t.removeTile(key, false)}
-                                onKeyDown={t.onTileKeyDown(key)}
-                                reorder={t.reorderFor(key)}
+                                onRemove={() => tray.removeTile(key, false)}
+                                onKeyDown={tray.onTileKeyDown(key)}
+                                reorder={tray.reorderFor(key)}
                             />
                         </Show>
                     );
                 }}
             </For>
             <Show when={!expanded() && layout().overflow > 0}>
-                <MoreTile t={t} />
+                <MoreTile t={tray} />
             </Show>
         </ul>
     );
@@ -165,7 +170,7 @@ export function UndoLine(props: Part) {
                             undoState.dismiss();
                         }}
                     >
-                        Undo
+                        {t("attachmentTray.undo")}
                     </Button>
                 </div>
             )}

@@ -124,6 +124,14 @@ export interface PaneTabStripProps<T> {
     getTooltipSeat?: (tab: T) => string | undefined;
     /** An agent tab's harness and the model answering, as a line of its tooltip. */
     getTooltipModel?: (tab: T) => string | undefined;
+    /** An agent's tab: where it runs, and how long ago its status line was set: lines of its hover card. */
+    getTooltipWhere?: (tab: T) => string | undefined;
+    getTooltipAge?: (tab: T) => string | undefined;
+    /** The task the agent holds ("#12 Title"), and how full its context is ("41% of context"): more lines of its card. */
+    getTooltipTask?: (tab: T) => string | undefined;
+    getTooltipContext?: (tab: T) => string | undefined;
+    /** Whether the agent can start a turn now: only then does the card say it is idle. */
+    getTooltipIdle?: (tab: T) => boolean;
     /** No tooltip for this tab now (its label is a text box, with its own line under it). */
     getTooltipOff?: (tab: T) => boolean;
     /** "Attention" tabs (unsaved changes, needs-review, …) always show
@@ -165,8 +173,6 @@ export interface PaneTabStripProps<T> {
     /** Custom label content (e.g. an inline "Save As" path input) instead
      *  of the plain text label. */
     renderLabel?: (tab: T) => JSX.Element;
-    /** The tab type's own buttons, drawn in the selected tab only, right of its label: they leave when another tab is selected. */
-    renderActions?: (tab: T) => JSX.Element;
 
     /** The far-right `+` — omitted entirely when the pane type has no
      *  "add tab" action. Always pinned last regardless of tab count or
@@ -362,6 +368,11 @@ function StripTabs<T>(props: { strip: PaneTabStripProps<T> }): JSX.Element {
                     getTooltipDetail={p.getTooltipDetail}
                     getTooltipSeat={p.getTooltipSeat}
                     getTooltipModel={p.getTooltipModel}
+                    getTooltipWhere={p.getTooltipWhere}
+                    getTooltipAge={p.getTooltipAge}
+                    getTooltipTask={p.getTooltipTask}
+                    getTooltipContext={p.getTooltipContext}
+                    getTooltipIdle={p.getTooltipIdle}
                     getTooltipOff={p.getTooltipOff}
                     getAttention={p.getAttention}
                     getTabClass={p.getTabClass}
@@ -377,7 +388,6 @@ function StripTabs<T>(props: { strip: PaneTabStripProps<T> }): JSX.Element {
                     onClose={p.onClose}
                     onDoubleClick={p.onTabDoubleClick}
                     renderLabel={p.renderLabel}
-                    renderActions={p.renderActions}
                     onReorder={p.onReorder}
                     paneKey={p.paneKey}
                     sourceTabId={p.sourceTabId}
@@ -486,6 +496,13 @@ interface PaneTabStripItemProps<T> {
     getTooltipDetail?: (tab: T) => string | undefined;
     getTooltipSeat?: (tab: T) => string | undefined;
     getTooltipModel?: (tab: T) => string | undefined;
+    getTooltipWhere?: (tab: T) => string | undefined;
+    getTooltipAge?: (tab: T) => string | undefined;
+    /** The task the agent holds ("#12 Title"), and how full its context is ("41% of context"): more lines of its card. */
+    getTooltipTask?: (tab: T) => string | undefined;
+    getTooltipContext?: (tab: T) => string | undefined;
+    /** Whether the agent can start a turn now: only then does the card say it is idle. */
+    getTooltipIdle?: (tab: T) => boolean;
     getTooltipOff?: (tab: T) => boolean;
     getAttention?: (tab: T) => boolean;
     getTabClass?: (tab: T) => Record<string, boolean>;
@@ -501,7 +518,6 @@ interface PaneTabStripItemProps<T> {
     onClose?: (id: string) => void;
     onDoubleClick?: (tab: T) => void;
     renderLabel?: (tab: T) => JSX.Element;
-    renderActions?: (tab: T) => JSX.Element;
     onReorder?: (blockId: string, targetId: string, position: "before" | "after") => boolean | void;
     paneKey?: string;
     sourceTabId?: string;
@@ -581,7 +597,7 @@ interface PillContentProps<T> {
     onCloseClick: (e: MouseEvent) => void;
 }
 
-/** The progress line and its words, the selected mark, the icon, the label, the selected tab's own buttons and the close button, in that order. */
+/** The progress line and its words, the selected mark, the icon, the label and the close button, in that order. */
 function PillContent<T>(p: PillContentProps<T>): JSX.Element {
     const item = p.item;
     const { lineState, lineLook, progressInfo, descriptionId } = p.progress;
@@ -619,7 +635,6 @@ function PillContent<T>(p: PillContentProps<T>): JSX.Element {
             ) : (
                 <span class="pane-tab-label">{item.getLabel(item.tab)}</span>
             )}
-            <Show when={item.active && item.renderActions}>{item.renderActions!(item.tab)}</Show>
             <Show when={item.onClose}>
                 {/* Always in the DOM for attention tabs (closing those may need confirmation); hover-shown
                     otherwise, purely via CSS opacity. */}
@@ -691,7 +706,9 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
             placement="bottom"
             divClassName="pane-tab-tip"
             disable={props.getTooltipOff?.(props.tab) ?? false}
-            immediate={!!(props.getTooltipDetail?.(props.tab) || props.getTooltipSeat?.(props.tab) || props.getTooltipModel?.(props.tab) || progressInfo())}
+            // At once, for every tab: a tab cut to its icon, or to the start of its title, is named by the card the moment the
+            // pointer is on it (an agent's card says more, pill-tooltip content), and a file tab's says its whole path.
+            immediate
             content={pillTooltipContent(props, progressInfo)}
         >
             <div

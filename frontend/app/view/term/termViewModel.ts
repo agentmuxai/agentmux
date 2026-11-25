@@ -45,9 +45,9 @@ import { META_OSC_TITLE } from "@/app/store/meta-keys";
 import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
 import { isNewerControllerStatus } from "./controller-status";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
-/** The header's Start or Restart: the only way in to either, so it is kept in a narrow header (mixins.scss, `block-frame-end-keep`). */
+/** The header's Start or Restart: a row of the pane's menu. */
 function startRestartButton(icon: string, title: string, click: () => void): IconButtonDecl {
-    return { elemtype: "iconbutton", icon, click, title, className: "block-frame-end-keep" };
+    return { elemtype: "iconbutton", icon, click, title };
 }
 
 /** The terminal's state behind its native pane tab (`terminalPaneTab`,

@@ -215,7 +215,12 @@ function sameIcon(a: PaneTabIcon | undefined, b: PaneTabIcon | undefined): boole
 /** Renders a tab icon (PaneTabStrip supplies the fixed-size `.pane-tab-icon`
  *  box). `icon` is an accessor so the element is only rebuilt when the icon
  *  actually changes, not on every tab-list recompute. */
-export function PaneTabIconView(props: { icon: () => PaneTabIcon | undefined; badge?: () => PaneTabBadge | undefined }): JSX.Element {
+export function PaneTabIconView(props: {
+    icon: () => PaneTabIcon | undefined;
+    badge?: () => PaneTabBadge | undefined;
+    /** A dot at the icon's top-right: something in the pane is waiting for the person (its Messages has unread). */
+    alert?: () => boolean;
+}): JSX.Element {
     const icon = createMemo(props.icon, undefined, { equals: sameIcon });
     return (
         <>
@@ -241,6 +246,9 @@ export function PaneTabIconView(props: { icon: () => PaneTabIcon | undefined; ba
         </Switch>
         <Show when={props.badge?.()}>
             {(badge) => <span class="pane-tab-icon-badge" style={{ background: badge().color }} aria-hidden="true" />}
+        </Show>
+        <Show when={props.alert?.()}>
+            <span class="pane-tab-icon-alert" data-testid="pane-tab-icon-alert" aria-hidden="true" />
         </Show>
         </>
     );

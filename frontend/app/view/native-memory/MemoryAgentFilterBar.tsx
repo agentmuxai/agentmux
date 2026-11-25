@@ -19,6 +19,7 @@
 import { type Accessor, type JSX } from "solid-js";
 import { FilterInput } from "@/app/element/ui";
 import { tip } from "@/app/element/tip";
+import { t } from "@/app/i18n/i18n";
 
 export type MemoryAgentSortOption = "tokens" | "name" | "count" | "provider";
 
@@ -51,11 +52,11 @@ export const MemoryAgentFilterBar = (props: MemoryAgentFilterBarProps): JSX.Elem
                     value={props.value()}
                     onInput={props.onInput}
                     onClear={props.onClear}
-                    placeholder="Filter agents..."
+                    placeholder={t("memoryFilter.placeholder")}
                     testId="memory-agent-filter"
                 />
             </span>
-            <label class="memory-agent-filter-toggle" data-testid="memory-agent-filter-toggle" {...tip("Has memories")}>
+            <label class="memory-agent-filter-toggle" data-testid="memory-agent-filter-toggle" {...tip(t("memoryFilter.hasMemories"))}>
                 <input
                     type="checkbox"
                     checked={props.onlyWithMemories()}
@@ -70,24 +71,24 @@ export const MemoryAgentFilterBar = (props: MemoryAgentFilterBarProps): JSX.Elem
                     // visibility, since `display: none` on a span also
                     // removes it from the accessibility tree, not just the
                     // visual layout.
-                    aria-label="Has memories"
+                    aria-label={t("memoryFilter.hasMemories")}
                 />
-                <span class="memory-agent-filter-toggle-label-full">Has memories</span>
-                <span class="memory-agent-filter-toggle-label-compact" aria-hidden="true">Mem</span>
+                <span class="memory-agent-filter-toggle-label-full">{t("memoryFilter.hasMemories")}</span>
+                <span class="memory-agent-filter-toggle-label-compact" aria-hidden="true">{t("memoryFilter.mem")}</span>
             </label>
             <label class="memory-agent-sort" data-testid="memory-agent-sort">
-                <span class="memory-agent-sort-label">Sort</span>
+                <span class="memory-agent-sort-label">{t("memoryFilter.sort")}</span>
                 <select
                     class="memory-agent-sort-select"
-                    aria-label="Sort agents by"
+                    aria-label={t("memoryFilter.sortBy")}
                     data-testid="memory-agent-sort-select"
                     value={props.sortBy()}
                     onChange={(e) => props.onSortChange(e.currentTarget.value as MemoryAgentSortOption)}
                 >
-                    <option value="tokens">Most tokens</option>
-                    <option value="name">Name (A–Z)</option>
-                    <option value="count">Most files</option>
-                    <option value="provider">Provider</option>
+                    <option value="tokens">{t("memoryFilter.tokens")}</option>
+                    <option value="name">{t("memoryFilter.name")}</option>
+                    <option value="count">{t("memoryFilter.count")}</option>
+                    <option value="provider">{t("memoryFilter.provider")}</option>
                 </select>
             </label>
         </div>

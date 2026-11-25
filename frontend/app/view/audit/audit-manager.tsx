@@ -9,6 +9,7 @@ import { createMemo, createSignal, onCleanup, Show, untrack, type JSX } from "so
 import { useTick } from "@/app/hook/useTick";
 
 import { Button, FilterInput, Select, SegmentedControl } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { sharedAgentRuntime } from "@/app/store/agent-runtime-live";
 import { VaultSecrets } from "@/app/view/vault/vault-secrets";
 import { AuditFeed } from "./audit-feed";
@@ -77,14 +78,14 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
 
     return (
         <div class="warden-manager-body" ref={body}>
-            <p class="warden-manager-summary">Every jekt, fleet action, registration and agent start and end, most recent first</p>
+            <p class="warden-manager-summary">{t("audit.summary")}</p>
             <div class="audit-filter-bar">
                 <SegmentedControl
                     options={SCOPES}
                     value={filter().scope}
                     onChange={(scope) => set({ scope: scope as AuditScope })}
                     density="compact"
-                    ariaLabel="Whose entries"
+                    ariaLabel={t("audit.scopeLabel")}
                 />
                 <FilterInput
                     value={agentText()}
@@ -92,8 +93,8 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
                         setAgentText(agent);
                         typed();
                     }}
-                    placeholder="Agent"
-                    ariaLabel="Only entries of this agent"
+                    placeholder={t("audit.agentPlaceholder")}
+                    ariaLabel={t("audit.agentLabel")}
                 />
                 <FilterInput
                     value={searchText()}
@@ -101,15 +102,15 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
                         setSearchText(text);
                         typed();
                     }}
-                    placeholder="Search entries"
-                    ariaLabel="Search the entries' summary, agents and reason"
+                    placeholder={t("audit.searchPlaceholder")}
+                    ariaLabel={t("audit.searchLabel")}
                 />
                 <Select
                     value={filter().range}
                     onChange={(range) => set({ range: range as AuditRange })}
                     options={RANGES.map((r) => ({ value: r.value, label: r.label }))}
                     density="compact"
-                    ariaLabel="How far back"
+                    ariaLabel={t("audit.rangeLabel")}
                 />
             </div>
             <AuditKindChips kinds={filter().kinds} onToggle={toggleKind} />
@@ -129,7 +130,7 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
             </Show>
             <Show
                 when={!empty()}
-                fallback={<div class="warden-section-stub">{list.loading() ? "Loading…" : "No entries match."}</div>}
+                fallback={<div class="warden-section-stub">{list.loading() ? t("audit.loading") : t("audit.noMatch")}</div>}
             >
                 <AuditFeed
                     entries={list.entries()}
@@ -142,13 +143,13 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
                 <Show when={list.cursor()}>
                     <div class="audit-more">
                         <Button tone="quiet" density="compact" icon="arrow-down" busy={list.loadingMore()} onClick={() => list.loadMore()}>
-                            Show older
+                            {t("audit.showOlder")}
                         </Button>
                     </div>
                 </Show>
             </Show>
             <VaultSecrets visible={props.visible} />
-            <div class="warden-manager-footnote">New entries appear as they are written while you are at the newest ones.</div>
+            <div class="warden-manager-footnote">{t("audit.footnote")}</div>
         </div>
     );
 };

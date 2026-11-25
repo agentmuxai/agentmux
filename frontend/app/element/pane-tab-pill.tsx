@@ -8,6 +8,7 @@
 
 import { createMemo, onCleanup, onMount, Show, createSignal, type Accessor, type JSX } from "solid-js";
 import { guardControlPress } from "@/app/util/press-on-control";
+import { t } from "@/app/i18n/i18n";
 import { draggable, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { preventUnhandled } from "@atlaskit/pragmatic-drag-and-drop/prevent-unhandled";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
@@ -423,19 +424,65 @@ export function pillTooltipContent<T>(
         getTooltipDetail?: (tab: T) => string | undefined;
         getTooltipSeat?: (tab: T) => string | undefined;
         getTooltipModel?: (tab: T) => string | undefined;
+        /** An agent's tab: where it runs ("On this computer", "In a container · On a remote"). Its presence marks the tab as an agent's. */
+        getTooltipWhere?: (tab: T) => string | undefined;
+        /** How long ago the status line in `getTooltipDetail` was set ("12 min ago"). */
+        getTooltipAge?: (tab: T) => string | undefined;
+        /** The task the agent holds, and how full its context is. */
+        getTooltipTask?: (tab: T) => string | undefined;
+        getTooltipContext?: (tab: T) => string | undefined;
+        /** Whether the agent can start a turn now (no usage limit, no refused sign-in): only then does the card say it is idle. */
+        getTooltipIdle?: (tab: T) => boolean;
     },
     progressInfo: () => PaneTabProgress | null
 ): JSX.Element {
+    const where = props.getTooltipWhere?.(props.tab);
     return props.getTooltipDetail?.(props.tab) ||
         props.getTooltipSeat?.(props.tab) ||
         props.getTooltipModel?.(props.tab) ||
+        where ||
         progressInfo() ? (
         <div class="pane-tab-tip-body" data-testid="pane-tab-tip-body">
             <div class="pane-tab-tip-label">{props.getTooltip?.(props.tab) ?? props.getLabel(props.tab)}</div>
-            <Show when={progressInfo()}>{(info) => <div class="pane-tab-tip-state">{info().text}</div>}</Show>
+            {/* The state with the Swarm's colour (PaneTabStrip.scss), words as well as colour. An agent with no turn running is idle. */}
+            <Show
+                when={progressInfo()}
+                fallback={
+                    <Show when={where && props.getTooltipIdle?.(props.tab)}>
+                        <div class="pane-tab-tip-state" data-state="idle" data-testid="pane-tab-tip-state">
+                            <span class="pane-tab-tip-dot" aria-hidden="true" />
+                            {t("pane.tab.tip.idle")}
+                        </div>
+                    </Show>
+                }
+            >
+                {(info) => (
+                    <div class="pane-tab-tip-state" data-state={info().state} data-testid="pane-tab-tip-state">
+                        <span class="pane-tab-tip-dot" aria-hidden="true" />
+                        {info().text}
+                    </div>
+                )}
+            </Show>
             <Show when={props.getTooltipSeat?.(props.tab)}>{(seat) => <div class="pane-tab-tip-seat">{seat()}</div>}</Show>
             <Show when={props.getTooltipModel?.(props.tab)}>{(model) => <div class="pane-tab-tip-seat">{model()}</div>}</Show>
-            <Show when={props.getTooltipDetail?.(props.tab)}>{(detail) => <div class="pane-tab-tip-summary">{detail()}</div>}</Show>
+            <Show when={where}>{(place) => <div class="pane-tab-tip-seat" data-testid="pane-tab-tip-where">{place()}</div>}</Show>
+            <Show when={props.getTooltipContext?.(props.tab)}>
+                {(context) => <div class="pane-tab-tip-seat" data-testid="pane-tab-tip-context">{context()}</div>}
+            </Show>
+            <Show when={props.getTooltipTask?.(props.tab)}>
+                {/* Text, not a link: a card that takes the pointer would close as it is reached. */}
+                {(task) => <div class="pane-tab-tip-task" data-testid="pane-tab-tip-task">{task()}</div>}
+            </Show>
+            <Show when={props.getTooltipDetail?.(props.tab)}>
+                {(detail) => (
+                    <div class="pane-tab-tip-summary">
+                        {detail()}
+                        <Show when={props.getTooltipAge?.(props.tab)}>
+                            {(age) => <span class="pane-tab-tip-age" data-testid="pane-tab-tip-age"> · {age()}</span>}
+                        </Show>
+                    </div>
+                )}
+            </Show>
         </div>
     ) : (
         (props.getTooltip?.(props.tab) ?? props.getLabel(props.tab))
