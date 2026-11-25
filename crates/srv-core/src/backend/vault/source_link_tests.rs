@@ -365,60 +365,34 @@ async fn a_check_whose_link_changed_while_it_was_read_says_nothing_about_the_new
 }
 
 #[test]
-fn an_agent_changes_the_link_only_as_the_person_allowed_it() {
+fn an_agent_changes_where_the_machine_copy_is_with_no_card_and_the_history_line_is_the_record() {
     let s = store();
     let id = key_entry(&s, &[("service", "Example")]);
-    // Any other detail goes through as before, and asks nobody.
-    assert_eq!(inspect::link_change(&s, &asked(&id, &[("service", "Example DB")]), "builder").unwrap(), None);
     inspect::update_details(&s, &asked(&id, &[("service", "Example DB")]), "builder").unwrap();
 
-    let set = asked(&id, &aws());
-    let refused = inspect::update_details(&s, &set, "builder").unwrap_err();
-    assert!(refused.contains("the person is asked before it changes"), "{refused}");
-    assert!(link_of(&s, &id).is_none());
-
-    let change = inspect::link_change(&s, &set, "builder").unwrap().unwrap();
-    assert_eq!((change.from.clone(), change.to.as_ref().map(Link::describe)), (None, Some("the AWS secret staging/app, key db.password, region eu-west-1".to_string())));
-    assert_eq!((change.label.as_str(), change.reason.as_str()), ("Staging database", REASON));
-    let done = inspect::update_details_allowed(&s, &set, "builder", &change).unwrap();
+    let done = inspect::update_details(&s, &asked(&id, &aws()), "builder").unwrap();
     assert!(done.changed.contains(&"field source_location".to_string()), "{:?}", done.changed);
     assert_eq!(link_of(&s, &id).unwrap().text(), "aws-secret:staging/app#db.password");
 
-    // A change to one part is a change of place, shown with the place it has now.
-    let repoint = asked(&id, &[(LOCATION, "production/app")]);
-    let change = inspect::link_change(&s, &repoint, "builder").unwrap().unwrap();
-    assert_eq!(change.from.as_ref().map(Link::text), Some("aws-secret:staging/app#db.password".to_string()));
-    assert_eq!(change.to.as_ref().map(Link::text), Some("aws-secret:production/app#db.password".to_string()));
-    // The person moved the link while they were asked: the yes was for another change, so nothing is written.
-    let mut by_person = fields(&aws());
-    by_person.insert(KEY.into(), "db.user".into());
-    update(&s, EntryChange { id: id.clone(), label: "Staging database".into(), fields: by_person, tags: vec![], parts: Parts::default(), clear: vec![] }).unwrap();
-    let stale = inspect::update_details_allowed(&s, &repoint, "builder", &change).unwrap_err();
-    assert!(stale.contains("changed while the person was asked"), "{stale}");
-    assert_eq!(link_of(&s, &id).unwrap().text(), "aws-secret:staging/app#db.user");
+    // A change to one part is a change of place.
+    inspect::update_details(&s, &asked(&id, &[(LOCATION, "production/app")]), "builder").unwrap();
+    assert_eq!(link_of(&s, &id).unwrap().text(), "aws-secret:production/app#db.password");
 
     // A new kind of place takes the old kind's region with it: the agent names the new place and nothing else.
-    let to_github = asked(&id, &[(KIND, GITHUB_SECRET), (LOCATION, "acme/web@staging"), (KEY, "DEPLOY_TOKEN")]);
-    let change = inspect::link_change(&s, &to_github, "builder").unwrap().unwrap();
-    assert_eq!(change.to.as_ref().map(Link::describe), Some("the GitHub secret DEPLOY_TOKEN of acme/web@staging".to_string()));
-    assert_eq!(change.to.as_ref().map(|l| l.region.as_str()), Some(""));
+    inspect::update_details(&s, &asked(&id, &[(KIND, GITHUB_SECRET), (LOCATION, "acme/web@staging"), (KEY, "DEPLOY_TOKEN")]), "builder").unwrap();
+    let now = link_of(&s, &id).unwrap();
+    assert_eq!((now.describe(), now.region.as_str()), ("the GitHub secret DEPLOY_TOKEN of acme/web@staging".to_string(), ""));
     // A region the update itself gives to a place that has none is still refused.
     let with_region = asked(&id, &[(KIND, GITHUB_SECRET), (LOCATION, "acme/web"), (KEY, "DEPLOY_TOKEN"), (REGION, "eu-west-1")]);
-    let refused = inspect::link_change(&s, &with_region, "builder").unwrap_err();
+    let refused = inspect::update_details(&s, &with_region, "builder").unwrap_err();
     assert!(refused.contains("are for an aws-secret only"), "{refused}");
-    // And a part changed without naming the kind keeps the region the AWS place has.
-    let rekey = inspect::link_change(&s, &asked(&id, &[(KEY, "db.host")]), "builder").unwrap().unwrap();
-    assert_eq!(rekey.to.as_ref().map(|l| l.region.as_str()), Some("eu-west-1"));
 
-    // Taking the link off is a change too: an empty kind is enough. A refusal is a line in the entry's history.
-    let clear = asked(&id, &[(KIND, "")]);
-    let change = inspect::link_change(&s, &clear, "builder").unwrap().unwrap();
-    assert!(change.to.is_none() && change.from.is_some());
-    let spelled_out = asked(&id, &[(KIND, ""), (LOCATION, ""), (KEY, ""), (REGION, "")]);
-    assert_eq!(inspect::link_change(&s, &spelled_out, "builder").unwrap().unwrap(), change);
-    inspect::note_link_refused(&s, &change, "builder", "denied");
-    let line = rows(&s).into_iter().find(|r| r.outcome == "denied").unwrap();
-    assert_eq!((line.action.as_str(), line.target.as_str(), line.actor.as_str(), line.reason.as_str()), (inspect::CHANGED_DETAILS, "machine copy", "agent:builder", REASON));
+    // Taking the link off is a change too: an empty kind is enough.
+    inspect::update_details(&s, &asked(&id, &[(KIND, "")]), "builder").unwrap();
+    assert!(link_of(&s, &id).is_none());
+    // Every change is a line of the entry's history, with the agent's reason and what changed in names.
+    let lines: Vec<_> = rows(&s).into_iter().filter(|r| r.action == inspect::CHANGED_DETAILS).collect();
+    assert!(lines.len() >= 5 && lines.iter().all(|l| l.actor == "agent:builder" && l.reason == REASON && l.outcome == "done"), "{lines:?}");
 }
 
 #[test]

@@ -456,3 +456,15 @@ async fn a_key_that_is_missing_or_holds_no_text_refuses_the_whole_login_before_a
     assert!(pick_both(whole, Some("a"), Some("b")).unwrap_err().contains("isn't JSON"));
     assert!(s.vault_list().unwrap().is_empty(), "nothing was written");
 }
+
+#[tokio::test]
+async fn an_imported_value_is_the_agents_and_unseen_until_the_person_has_looked() {
+    let s = store();
+    let plan = plan(&s, &request(source("staging/app", None)));
+    let done = perform(&s, &Fake::ok(serde_json::to_string(VALUE).unwrap()), &plan, Via::Host, "builder").await.unwrap();
+    let unseen = s.vault_unseen_get(&done.id).unwrap().expect("nobody was asked, so the value is marked");
+    assert_eq!(unseen.by_agent, "builder");
+    let mut next = crate::backend::vault::uses::UseRequest { entry_id: done.id.clone(), kind: "api-key".into(), offer_always: true, ..Default::default() };
+    crate::backend::vault::agent_set::apply(&s, &mut next);
+    assert!(!crate::backend::vault::uses::goes_ahead(&next) && !next.offer_always && next.set_by == "builder");
+}

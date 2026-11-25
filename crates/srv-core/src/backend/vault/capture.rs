@@ -560,6 +560,8 @@ impl Capture {
         let target = clip(&self.cmd, 160);
         for (id, label) in &made {
             record_line(store, Line { entry_id: id, label, actor: &self.agent, action: CAPTURED, target: &target, outcome: "done", reason: &self.reason });
+            // Nobody was asked, so the value is the agent's until the person has seen it (`agent_set`).
+            super::agent_set::mark(store, id, &self.agent);
         }
         Ok(made.into_iter().map(|(id, _)| id).collect())
     }

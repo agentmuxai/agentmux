@@ -98,6 +98,13 @@ pub struct UseRequest {
     pub expires_ms: u64,
     /// Nobody answering lets it go ahead, once.
     pub goes_ahead: bool,
+    /// The agent that set the entry's value, when an agent had the Vault read it (an import or a capture) and the person has
+    /// not seen it yet (`agent_set`); empty for any other use. Such a use never goes ahead on silence, offers no *Always*, and
+    /// the card says who set the value and when.
+    pub set_by: String,
+    /// When `set_by` set it, in ms.
+    #[ts(type = "number")]
+    pub set_ms: u64,
     /// A secret an agent wants copied into the Vault from another service (`Vault` `import`); never goes ahead on silence.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -252,7 +259,7 @@ pub const DRONE_ACTOR: &str = "drone:";
 
 /// Whether `req` goes ahead when nobody answers: [`goes_ahead_on_silence`], and never a copy of a secret from elsewhere
 /// (one or a batch), a new place for an entry's machine copy, nor a new account (an agent makes one only on the person's yes), nor a
-/// drone's use: the 30 s rule assumes the person is at the desk while an agent works, and a drone often runs
+/// value an agent had the Vault read that the person has not seen, nor a drone's use: the 30 s rule assumes the person is at the desk while an agent works, and a drone often runs
 /// unattended (at night, on a webhook), so for it silence is a no.
 pub fn goes_ahead(req: &UseRequest) -> bool {
     req.import.is_none()
@@ -260,6 +267,7 @@ pub fn goes_ahead(req: &UseRequest) -> bool {
         && req.link.is_none()
         && !req.account
         && !req.share
+        && req.set_by.is_empty()
         && !req.agent.starts_with(DRONE_ACTOR)
         && goes_ahead_on_silence(&req.kind, req.needs_value)
 }

@@ -28,6 +28,8 @@ const ASKED: &str = "asked to use it";
 /// by the caller, with what it did.
 pub(super) async fn ask(state: &AppState, attention_block: &str, mut request: UseRequest, wait: Duration, headline: &str) -> (Ended, Option<UseAnswer>) {
     request.block_id = shown_pane(state, &request.block_id);
+    // A value an agent had the Vault read, and the person has not seen, is never used on silence.
+    crate::backend::vault::agent_set::apply(&state.identity_store, &mut request);
     let (id, entry, label, agent) = (request.id.clone(), request.entry_id.clone(), request.entry_label.clone(), request.agent.clone());
     let agent_reason = request.agent_reason.clone();
     let target = target_of(&request);

@@ -68,6 +68,7 @@ pub mod snapshot;
 pub mod store;
 pub mod timed_mutex;
 pub mod vault;
+pub mod vault_changes;
 pub mod vault_sync;
 pub mod vault_versions;
 pub mod viewer_devices;

@@ -156,8 +156,8 @@ fn whether_an_entry_is_a_link_is_set_when_it_is_made() {
     assert!(is_linked_row(&s.vault_get(&link).unwrap().unwrap()));
 
     let asked = |id: &str, f: &[(&str, &str)]| UpdateRequest { id: id.into(), label: None, fields: fields(f), tags: None, reason: Some(REASON.into()) };
-    assert_eq!(inspect::link_change(&s, &asked(&held, &place()), "builder"), Err(SET_WHEN_MADE.into()));
-    assert_eq!(inspect::link_change(&s, &asked(&link, &[(LINK, "")]), "builder"), Err(SET_WHEN_MADE.into()));
+    assert_eq!(inspect::update_details(&s, &asked(&held, &place()), "builder").unwrap_err(), SET_WHEN_MADE);
+    assert_eq!(inspect::update_details(&s, &asked(&link, &[(LINK, "")]), "builder").unwrap_err(), SET_WHEN_MADE);
 }
 
 #[test]
@@ -329,21 +329,15 @@ fn health_counts_links_by_their_checks_and_verify_finds_nothing_wrong_with_one()
 }
 
 #[test]
-fn an_agents_change_to_what_a_link_says_is_the_persons_to_allow() {
+fn an_agents_change_to_what_a_link_says_is_made_with_no_card_and_recorded() {
     let s = store();
     let id = linked_with(&s, &[(READERS, "invoice-sync (lambda): at run time")]);
     let asked = UpdateRequest { id: id.clone(), label: None, fields: fields(&[(READERS, READERS_TEXT), (ROTATED, "2026-11-02")]), tags: None, reason: Some(REASON.into()) };
-    let change = inspect::link_change(&s, &asked, "builder").unwrap().expect("a change to the readers is asked about");
-    assert!(change.only && change.from == change.to);
-    assert_eq!(change.about_from, "Read by: invoice-sync (lambda): at run time.");
-    // One thing a line: the card shows the date on a line of its own.
-    assert_eq!(change.about_to, "Read by: invoice-sync (lambda): at run time; release (workflow): on a tag.\nLast changed: 2026-11-02.");
-    assert!(inspect::update_details(&s, &asked, "builder").unwrap_err().contains("the person is asked before it changes"));
-    let updated = inspect::update_details_allowed(&s, &asked, "builder", &change).unwrap();
+    let updated = inspect::update_details(&s, &asked, "builder").unwrap();
     assert_eq!(updated.changed, ["field readers", "field rotated"]);
-    // A change to its notes alone asks nobody.
-    let notes = UpdateRequest { fields: fields(&[("notes", "billing asks for it monthly")]), ..asked };
-    assert_eq!(inspect::link_change(&s, &notes, "builder"), Ok(None));
+    // The notes are plain text the entry keeps about its key: nothing in them grants a use to anyone.
+    let row = s.vault_get(&id).unwrap().unwrap();
+    assert!(row.fields.contains("release (workflow): on a tag"));
 }
 
 /// The pane finds a place's check by the line as the entry writes it, so a line with no space after its kind is

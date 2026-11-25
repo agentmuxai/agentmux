@@ -34,7 +34,7 @@ use zeroize::Zeroizing;
 use agentmux_common::api_types::{CaptureFrom, CaptureInto, CaptureRule, UiAutomationAuth};
 
 use crate::backend::vault::capture::{self, Found, Target};
-use crate::backend::vault::uses::{Ended, UseRequest};
+use crate::backend::vault::pace::{admit, Act};
 
 use super::browser_actions::{note, How, Kind};
 use super::browser_capture_read::{begin, check_shape, read_page, what_to_read};
@@ -42,8 +42,6 @@ use super::ui_handlers::{err_response, proxy_value, target_block_id};
 use super::AppState;
 
 pub(super) const HOST_WAIT: Duration = Duration::from_secs(30);
-/// How long the person has to allow a capture that replaces a value.
-const ANSWER_WAIT: Duration = Duration::from_secs(120);
 /// The longest the host waits for a download after its click (2 minutes), and
 /// time for the click and the reply.
 pub(super) const DOWNLOAD_WAIT: Duration = Duration::from_secs(150);
@@ -127,51 +125,6 @@ fn rule_of(req: &CaptureRequest) -> Result<CaptureRule, String> {
     Ok(CaptureRule { into, from: CaptureFrom::Stdout("all".into()) })
 }
 
-/// Who is asking to replace an entry's value with what a page shows, and why.
-struct Asking<'a> {
-    state: &'a AppState,
-    block_id: &'a str,
-    agent: &'a str,
-    agent_pane: &'a str,
-    origin: &'a str,
-    reason: &'a str,
-}
-
-/// Asks the person to let `entry` (id, label, part, kind) be replaced by what the page shows. True when nobody
-/// answered and it went ahead; a refusal is the answer to give the agent, after the denied try is recorded.
-async fn ask_to_replace(who: &Asking<'_>, entry: &(String, String, &'static str, String)) -> Result<bool, Response> {
-    let (id, label, part, kind) = entry;
-    let (agent, origin) = (who.agent, who.origin);
-    let request = UseRequest {
-        id: uuid::Uuid::new_v4().to_string(),
-        agent: agent.to_string(),
-        block_id: who.agent_pane.to_string(),
-        entry_id: id.clone(),
-        entry_label: label.clone(),
-        what: part.to_string(),
-        origin: origin.to_string(),
-        field: String::new(),
-        offer_always: false,
-        reason: "what the page shows replaces the value".into(),
-        agent_reason: who.reason.to_string(),
-        kind: kind.clone(),
-        replaces: true,
-        requested_ms: agentmux_common::time::now_ms_u64(),
-        ..Default::default()
-    };
-    let headline = format!("{agent} wants to replace {label} with what {origin} shows");
-    let (ended, _) = super::vault_ask::ask(who.state, who.block_id, request, ANSWER_WAIT, &headline).await;
-    if !ended.allowed() {
-        let outcome = ended.outcome();
-        let target = format!("from {origin}");
-        let line = crate::backend::vault::Line { entry_id: id, label, actor: agent, action: capture::CAPTURED, target: &target, outcome, reason: who.reason };
-        crate::backend::vault::record_line(&who.state.identity_store, line);
-        super::vault_handlers::publish(who.state);
-        return Err(err_response(StatusCode::FORBIDDEN, format!("the person didn't allow it ({outcome}): nothing was saved")));
-    }
-    Ok(ended == Ended::WentAhead)
-}
-
 /// `POST /api/v1/ui/browser/capture`.
 /// `POST /api/v1/ui/browser/capture`: a card the page shows is saved whole, anything else is one value.
 pub(crate) async fn handle_capture(
@@ -206,7 +159,6 @@ async fn handle_browser_capture(
     if let Err(e) = begin(shape.as_ref(), &agent) {
         return err_response(StatusCode::TOO_MANY_REQUESTS, e);
     }
-    let agent_pane = super::vault_ask::agent_pane(&state, caller.as_deref(), &req.auth);
     let rule = match rule_of(&req) {
         Ok(r) => r,
         Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
@@ -219,11 +171,19 @@ async fn handle_browser_capture(
     };
 
     plan.reason = reason.clone();
-    // Replacing the person's value asks them, naming the page once it is known.
-    let replaces = match &plan.rules[0].into {
-        Target::Existing { id, label, part, kind, .. } => Some((id.clone(), label.clone(), *part, kind.clone())),
-        Target::New { .. } => None,
+    // Nobody is asked to allow the write, replacing a value included: the history line is the record, the old value is kept
+    // 7 days, and the agent's pace bounds how much it does in an hour.
+    let act = match &plan.rules[0].into {
+        Target::Existing { id, .. } => Act::Replace(id.clone()),
+        Target::New { .. } => Act::New,
     };
+    if let Err(e) = admit(&agent, &[act]) {
+        if let Target::Existing { id, label, .. } = &plan.rules[0].into {
+            let line = crate::backend::vault::Line { entry_id: id, label, actor: &agent, action: capture::CAPTURED, target: "from a page", outcome: "refused: pace", reason: &reason };
+            crate::backend::vault::record_line(&state.identity_store, line);
+        }
+        return err_response(StatusCode::TOO_MANY_REQUESTS, e);
+    }
 
     // Held until the approved click is made, if one waits for the person.
     let (read, _approved_click) = match read_page(&state, &req, &block_id, &agent, (&ref_, shape.as_ref())).await {
@@ -243,15 +203,6 @@ async fn handle_browser_capture(
     if origin.is_empty() {
         return err_response(StatusCode::BAD_REQUEST, "AgentMux can't tell which site this page is, so nothing was saved".into());
     }
-    let mut went_ahead = false;
-    if let Some(entry) = &replaces {
-        let asking = Asking { state: &state, block_id: &block_id, agent: &agent, agent_pane: &agent_pane, origin: &origin, reason: &reason };
-        match ask_to_replace(&asking, entry).await {
-            Ok(ahead) => went_ahead = ahead,
-            Err(refused) => return refused,
-        }
-    }
-
     let (store, given, from) = (state.identity_store.clone(), req.into, origin.clone());
     let stored = tokio::task::spawn_blocking(move || store_captured(&store, plan, value, &from, given.as_ref())).await;
     super::vault_handlers::publish(&state);
@@ -279,7 +230,7 @@ async fn handle_browser_capture(
         Ok(Ok((id, label))) => {
             let note = if file.is_some() { DOWNLOADED_NOTE } else if req.copy { COPIED_NOTE } else { captured_note(marked) };
             let out = json!({ "ok": true, "id": id, "label": label, "captured_from": origin, "file": file, "marked": marked, "copied": req.copy, "note": note });
-            (StatusCode::OK, Json(super::vault_ask::with_approval(out, went_ahead))).into_response()
+            (StatusCode::OK, Json(out)).into_response()
         }
         Ok(Err(e)) => err_response(StatusCode::BAD_REQUEST, format!("nothing was saved: {e}")),
         Err(e) => err_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
