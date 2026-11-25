@@ -33,12 +33,13 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 Some("look") => look(arguments, cx).await,
                 Some("click") => click(arguments, cx).await,
                 Some("scroll") => scroll(arguments, cx).await,
+                Some("drag") => drag(arguments, cx).await,
                 Some("type") => type_text(arguments, cx).await,
                 Some("key") => key(arguments, cx).await,
                 Some("wait") => wait(arguments).await,
                 Some("release") => release(arguments, cx).await,
                 other => anyhow::bail!(
-                    "Desktop: unknown action {other:?}; use apps, look, click, scroll, type, key, wait or release"
+                    "Desktop: unknown action {other:?}; use apps, look, click, scroll, drag, type, key, wait or release"
                 ),
             }
         }
@@ -258,34 +259,35 @@ fn screen_point(id: u32, x: i64, y: i64) -> Result<(i32, i32)> {
 }
 
 /// What every input action does after the gate: bring the window forward and
-/// check the point isn't covered, run `act`, and record the outcome.
+/// check every point isn't covered, run `act` with the points' screen
+/// positions, and record the outcome.
 async fn drive(
     cx: &ToolCtx<'_>,
     action: &str,
     id: u32,
-    point: Option<(i64, i64)>,
+    points: &[(i64, i64)],
     details: Value,
-    act: impl FnOnce(Option<(i32, i32)>) -> Result<(), String>,
+    act: impl FnOnce(&[(i32, i32)]) -> Result<(), String>,
 ) -> Result<AgentMuxWindowInfo> {
     input::win::ensure_dpi_aware();
     let w = find_window(id)?;
-    // Check the point before asking, so a bad one doesn't use up a slot.
-    if let Some((x, y)) = point {
-        screen_point(id, x, y)?;
+    // Check the points before asking, so a bad one doesn't use up a slot.
+    for (x, y) in points {
+        screen_point(id, *x, *y)?;
     }
     let grant = authorize(cx, action, &w, id).await?;
     // The user may have taken a while to answer: read the window again.
     let w = find_window(id)?;
     let outcome = (|| -> Result<(), String> {
-        let screen = match point {
-            Some((x, y)) => Some(screen_point(id, x, y).map_err(|e| e.to_string())?),
-            None => None,
-        };
+        let screen = points
+            .iter()
+            .map(|(x, y)| screen_point(id, *x, *y).map_err(|e| e.to_string()))
+            .collect::<Result<Vec<_>, _>>()?;
         input::win::bring_to_front(id)?;
-        if let Some((sx, sy)) = screen {
-            input::win::point_belongs_to(id, sx, sy)?;
+        for (sx, sy) in &screen {
+            input::win::point_belongs_to(id, *sx, *sy)?;
         }
-        act(screen)
+        act(&screen)
     })();
     match &outcome {
         Ok(()) => record(cx, &grant, action, &w, id, details, "ok").await,
@@ -303,8 +305,8 @@ async fn click(args: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let count = int_arg(args, "count").unwrap_or(1).clamp(1, 3) as u32;
     let details = json!({ "x": x, "y": y, "button": button, "count": count });
     let b = button.clone();
-    let w = drive(cx, "click", id, Some((x, y)), details, move |p| {
-        let (sx, sy) = p.ok_or("no point")?;
+    let w = drive(cx, "click", id, &[(x, y)], details, move |p| {
+        let (sx, sy) = *p.first().ok_or("no point")?;
         input::win::click(sx, sy, &b, count)
     })
     .await?;
@@ -320,12 +322,85 @@ async fn scroll(args: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     if dx == 0 && dy == 0 {
         anyhow::bail!("scroll needs dy (notches, positive is up) or dx (positive is right)");
     }
-    let w = drive(cx, "scroll", id, Some((x, y)), json!({ "x": x, "y": y, "dx": dx, "dy": dy }), move |p| {
-        let (sx, sy) = p.ok_or("no point")?;
+    let w = drive(cx, "scroll", id, &[(x, y)], json!({ "x": x, "y": y, "dx": dx, "dy": dy }), move |p| {
+        let (sx, sy) = *p.first().ok_or("no point")?;
         input::win::scroll(sx, sy, dx, dy)
     })
     .await?;
     Ok(format!("Scrolled at ({x}, {y}) in {:?} (dx {dx}, dy {dy}). Look again to see the result.", w.title))
+}
+
+/// A drag's two ends, the points it passes through, and what it holds, read
+/// from the call's arguments.
+#[derive(Debug, PartialEq, Eq)]
+struct DragArgs {
+    /// Where it presses, each `via` point in order, and where it lets go.
+    points: Vec<(i64, i64)>,
+    button: String,
+    hold: Vec<u16>,
+    hold_text: String,
+}
+
+/// Read a drag's arguments. Refuses what can't be a drag, with the fix.
+fn parse_drag(args: &Value) -> Result<DragArgs> {
+    let need = |k: &str| {
+        int_arg(args, k).ok_or_else(|| {
+            anyhow::anyhow!(
+                "drag needs x, y (where to press) and x2, y2 (where to let go): pixels of your last look; {k} is missing"
+            )
+        })
+    };
+    let (x, y, x2, y2) = (need("x")?, need("y")?, need("x2")?, need("y2")?);
+    let mut via = Vec::new();
+    if let Some(v) = args.get("via") {
+        let list = v.as_array().ok_or_else(|| anyhow::anyhow!("via is a list of {{x, y}} points to pass through"))?;
+        if list.len() > input::MAX_DRAG_WAYPOINTS {
+            anyhow::bail!("via has {} points; a drag passes through at most {}", list.len(), input::MAX_DRAG_WAYPOINTS);
+        }
+        for p in list {
+            let (Some(vx), Some(vy)) = (int_arg(p, "x"), int_arg(p, "y")) else {
+                anyhow::bail!("every via point needs x and y")
+            };
+            via.push((vx, vy));
+        }
+    }
+    let mut points = vec![(x, y)];
+    points.extend(via);
+    points.push((x2, y2));
+    if points.windows(2).all(|w| w[0] == w[1]) {
+        anyhow::bail!("the drag starts and ends at the same point; use click for that");
+    }
+    let button = str_arg(args, "button").unwrap_or_else(|| "left".into());
+    if !["left", "right", "middle"].contains(&button.as_str()) {
+        anyhow::bail!("unknown button {button:?}; use left, right or middle");
+    }
+    let hold_text = str_arg(args, "hold").unwrap_or_default();
+    let hold = input::parse_hold(&hold_text).map_err(|e| anyhow::anyhow!("{e}"))?;
+    Ok(DragArgs { points, button, hold, hold_text })
+}
+
+async fn drag(args: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let id = window_id(args)?;
+    let d = parse_drag(args)?;
+    let (from, to) = (d.points[0], d.points[d.points.len() - 1]);
+    let details = json!({
+        "from": [from.0, from.1],
+        "to": [to.0, to.1],
+        "via": d.points.len() - 2,
+        "button": d.button,
+        "hold": d.hold_text,
+    });
+    let (button, hold) = (d.button.clone(), d.hold.clone());
+    let w = drive(cx, "drag", id, &d.points, details, move |screen| {
+        let last = screen.len() - 1;
+        input::win::drag(&input::drag_path(screen[0], &screen[1..last], screen[last]), &button, &hold)
+    })
+    .await?;
+    let held = if d.hold_text.is_empty() { String::new() } else { format!(", holding {}", d.hold_text) };
+    Ok(format!(
+        "Dragged from ({}, {}) to ({}, {}) in {:?} ({}{held}); the button is let go. Look again to see the result.",
+        from.0, from.1, to.0, to.1, w.title, d.button
+    ))
 }
 
 async fn type_text(args: &Value, cx: &ToolCtx<'_>) -> Result<String> {
@@ -334,7 +409,7 @@ async fn type_text(args: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     input::check_text(&text).map_err(|e| anyhow::anyhow!("{e}"))?;
     let chars = text.chars().count();
     // The log gets the length, never the text.
-    let w = drive(cx, "type", id, None, json!({ "chars": chars }), move |_| input::win::type_text(&text)).await?;
+    let w = drive(cx, "type", id, &[], json!({ "chars": chars }), move |_| input::win::type_text(&text)).await?;
     Ok(format!("Typed {chars} characters into {:?}. Don't type passwords: ask the user to. Look again to see the result.", w.title))
 }
 
@@ -342,7 +417,7 @@ async fn key(args: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let id = window_id(args)?;
     let keys = str_arg(args, "keys").ok_or_else(|| anyhow::anyhow!("key needs keys, such as \"enter\" or \"ctrl+s\""))?;
     let chord = input::parse_keys(&keys).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let w = drive(cx, "key", id, None, json!({ "keys": keys }), move |_| input::win::press(&chord)).await?;
+    let w = drive(cx, "key", id, &[], json!({ "keys": keys }), move |_| input::win::press(&chord)).await?;
     Ok(format!("Pressed {keys} in {:?}. Look again to see the result.", w.title))
 }
 
@@ -393,5 +468,32 @@ mod tests {
     fn numbers_may_arrive_as_floats() {
         assert_eq!(int_arg(&json!({ "x": 10.0 }), "x"), Some(10));
         assert_eq!(int_arg(&json!({ "x": "10" }), "x"), None);
+    }
+
+    #[test]
+    fn a_drag_is_read_from_its_ends_and_waypoints() {
+        let d = parse_drag(&json!({ "x": 1, "y": 2, "x2": 30, "y2": 40, "via": [{ "x": 10, "y": 10 }], "hold": "ctrl+shift" })).unwrap();
+        assert_eq!(d.points, vec![(1, 2), (10, 10), (30, 40)]);
+        assert_eq!(d.button, "left");
+        assert_eq!(d.hold.len(), 2);
+    }
+
+    #[test]
+    fn a_drag_that_cannot_be_one_is_refused_with_the_fix() {
+        let err = |v: Value| parse_drag(&v).unwrap_err().to_string();
+        assert!(err(json!({ "x": 1, "y": 2, "x2": 3 })).contains("y2 is missing"));
+        assert!(err(json!({ "x": 5, "y": 5, "x2": 5, "y2": 5 })).contains("use click"));
+        assert!(err(json!({ "x": 1, "y": 2, "x2": 3, "y2": 4, "button": "back" })).contains("unknown button"));
+        assert!(err(json!({ "x": 1, "y": 2, "x2": 3, "y2": 4, "hold": "win" })).contains("not allowed"));
+        assert!(err(json!({ "x": 1, "y": 2, "x2": 3, "y2": 4, "via": "nope" })).contains("list"));
+        assert!(err(json!({ "x": 1, "y": 2, "x2": 3, "y2": 4, "via": [{ "x": 1 }] })).contains("x and y"));
+        let many: Vec<Value> = (0..9).map(|i| json!({ "x": i, "y": i })).collect();
+        assert!(err(json!({ "x": 1, "y": 2, "x2": 3, "y2": 4, "via": many })).contains("at most 8"));
+    }
+
+    #[test]
+    fn a_drag_that_returns_to_its_start_by_way_of_a_waypoint_is_allowed() {
+        let d = parse_drag(&json!({ "x": 5, "y": 5, "x2": 5, "y2": 5, "via": [{ "x": 50, "y": 5 }] })).unwrap();
+        assert_eq!(d.points, vec![(5, 5), (50, 5), (5, 5)]);
     }
 }

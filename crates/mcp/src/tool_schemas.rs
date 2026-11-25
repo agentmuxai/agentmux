@@ -476,15 +476,19 @@ pub(crate) const APP_TOOL: &str = r#"{
 /// turns it on; the description stays short because every agent is shown it.
 pub(crate) const DESKTOP_TOOL: &str = r#"{
   "name": "Desktop",
-  "description": "Look at and control a native desktop app (Windows only for now). The last resort: use a connector, the app's own API, Browser, Terminal or UI first. Off unless the user turned it on in Settings; you need a grant for each app, which you ask for as a sensitive operation (the super agent decides, and the person sees a countdown and can veto it), and the user can Stop you at any time; every action is logged. Web browsers, password managers and AgentMux itself are refused. Every call takes an action. apps: the windows you could control, with their ids. look: a screenshot of one window (saved to a path; Read it). click, scroll: x and y are pixels of your last look at that window; it is refused if the window moved since, so look again. type: text into the focused control (never passwords: ask the user). key: a chord such as enter or ctrl+s (no Windows key). wait: pause up to 5 seconds. release: give your access back.",
+  "description": "Look at and control a native desktop app (Windows only for now). The last resort: use a connector, the app's own API, Browser, Terminal or UI first. Off unless the user turned it on in Settings; you need a grant for each app, which you ask for as a sensitive operation (the super agent decides, and the person sees a countdown and can veto it), and the user can Stop you at any time; every action is logged. Web browsers, password managers and AgentMux itself are refused. Every call takes an action. apps: the windows you could control, with their ids. look: a screenshot of one window (saved to a path; Read it). click, scroll: x and y are pixels of your last look at that window; it is refused if the window moved since, so look again. drag: press at x, y, move in steps (through any via points) and let go at x2, y2, all inside that one window: faders, sliders, wires, canvases, moving items; the button is always let go, and hold can keep ctrl, alt or shift down. type: text into the focused control (never passwords: ask the user). key: a chord such as enter or ctrl+s (no Windows key). wait: pause up to 5 seconds. release: give your access back.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "action": { "type": "string", "enum": ["apps", "look", "click", "scroll", "type", "key", "wait", "release"], "description": "What to do" },
+      "action": { "type": "string", "enum": ["apps", "look", "click", "scroll", "drag", "type", "key", "wait", "release"], "description": "What to do" },
       "window": { "type": "integer", "description": "The window's id, from apps" },
       "x":      { "type": "integer", "description": "click, scroll: pixels from the left of your last look at the window" },
       "y":      { "type": "integer", "description": "click, scroll: pixels from the top of your last look at the window" },
-      "button": { "type": "string", "enum": ["left", "right", "middle"], "description": "click: default left" },
+      "x2":     { "type": "integer", "description": "drag: where to let go, pixels from the left of your last look" },
+      "y2":     { "type": "integer", "description": "drag: where to let go, pixels from the top of your last look" },
+      "via":    { "type": "array", "items": { "type": "object", "properties": { "x": { "type": "integer" }, "y": { "type": "integer" } }, "required": ["x", "y"] }, "description": "drag: up to 8 points to pass through between the ends, in order, in pixels of your last look" },
+      "hold":   { "type": "string", "description": "drag: keys held down during it: ctrl, alt, shift or a mix such as ctrl+shift" },
+      "button": { "type": "string", "enum": ["left", "right", "middle"], "description": "click, drag: default left" },
       "count":  { "type": "integer", "description": "click: 1 to 3 (2 is a double click)" },
       "dx":     { "type": "integer", "description": "scroll: notches right (negative left)" },
       "dy":     { "type": "integer", "description": "scroll: notches up (negative down)" },
