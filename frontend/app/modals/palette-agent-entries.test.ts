@@ -61,10 +61,24 @@ describe("agentEntries", () => {
         expect(plain.identity).toBeUndefined();
     });
 
-    it("shows an agent with no seat or icon by its name and state alone", () => {
+    it("shows an agent with no seat or icon by its name and state alone, as its provider's logo", () => {
         const [plain] = entries([{ ...row("x", "Plain", "stopped"), icon: "" }]);
         expect(plain.detail).toBe("stopped");
-        expect(plain.icon).toBe("robot");
+        expect(plain.icon).toBeUndefined();
+        expect(plain.provider).toBe("claude");
+    });
+
+    it("never hands the row a provider's text glyph (✖ for Claude, X for Grok) to draw as its icon", () => {
+        for (const [provider, glyph] of [["claude", "✖"], ["codex", "✦"], ["grok", "X"], ["kilo", "K"], ["pi", "π"]]) {
+            const [e] = entries([{ ...row("x", "A"), provider, icon: glyph }]);
+            expect(e.icon, provider).toBeUndefined();
+            expect(e.provider, provider).toBe(provider);
+        }
+    });
+
+    it("keeps an icon the person chose by name, and falls back to the robot when there is no provider either", () => {
+        expect(entries([{ ...row("x", "A"), icon: "shield" }])[0].icon).toBe("shield");
+        expect(entries([{ ...row("x", "A"), provider: "", icon: "" }])[0]).toMatchObject({ icon: "robot", provider: undefined });
     });
 
     it("runs go with the agent's id and name when selected", () => {

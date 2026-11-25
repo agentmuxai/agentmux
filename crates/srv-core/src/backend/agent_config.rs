@@ -1566,23 +1566,20 @@ fn back_up_legacy_claude_md(wd: &crate::backend::workdir_fs::Workdir, content: &
     }
 }
 
-/// Best-effort: mint-or-reuse `agent_slug`'s jekt/LAN signing keys
+/// Best-effort: make sure `agent_slug` has its jekt/LAN signing keys
 /// (`SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md` §2.2,
-/// `SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md` §2.1) and patch them into a
-/// `.mcp.json` file's `mcpServers.agentmux.env` block. Returns `None` on
-/// any parse failure, missing `mcpServers.agentmux.env` object, or if
-/// neither key could be ensured — callers must keep the original content
-/// in that case; this must never block writing the agent's config.
+/// `SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md` §2.1), and write the rest of
+/// what a `.mcp.json` file's `mcpServers.agentmux.env` block carries for
+/// them. The file holds references, not values: no signing value is written,
+/// and one an older version wrote is removed. The agent's MCP server asks srv
+/// for its keys with its own token (`/agentmux/agents/self/keys`).
 ///
+/// Returns `None` on a parse failure, a missing `mcpServers.agentmux.env` object, or
+/// if no key could be ensured: callers keep the original content, and this must never block writing the agent's config.
 /// Shared by `agent.open` (`server/app_api/agent_open.rs`) and the
-/// `WriteAgentConfig` "click Launch" path (`server/editor_handlers.rs`) —
-/// per this module's own doc comment, the two `.mcp.json`-materializing
-/// call sites that must not drift out of sync. Before this function
-/// existed, only `agent.open` injected these keys — `WriteAgentConfig`
-/// (the path a normal Launch-button click actually goes through) silently
-/// never did, so ordinarily-launched agents' jekts rendered
-/// `TRUST=self-declared` even on builds well past both features shipping.
-/// See `docs/specs/REPORT_JEKT_SIGNING_KEY_INJECTION_GAP_2026_08_16.md`.
+/// `WriteAgentConfig` "click Launch" path (`server/editor_handlers.rs`), per
+/// this module's own doc comment the two `.mcp.json`-materializing call sites
+/// that must not drift out of sync.
 pub fn inject_jekt_signing_keys_into_mcp_json(
     content: &str,
     mstore: &crate::backend::storage::store::Store,
@@ -1593,21 +1590,16 @@ pub fn inject_jekt_signing_keys_into_mcp_json(
         .pointer_mut("/mcpServers/agentmux/env")
         .and_then(|v| v.as_object_mut())?;
 
-    let mut patched = false;
+    let mut ensured = false;
     // Keys are stored under the folded name: two rows folding to it (`Victim`
     // beside `victim`) get none, and old ones are removed (actor::uid_owns_name).
     if mstore.agent_ids_for_slug_folded(agent_slug).is_ok_and(|ids| ids.len() > 1) {
         for k in ["AGENTMUX_JEKT_KEY", "AGENTMUX_LAN_KEY", "AGENTMUX_WAN_KEY", "AGENTMUX_HOST_LABEL"] { env.remove(k); }
         return serde_json::to_string_pretty(&mcp_json).ok();
     }
-    if let Ok(key) = mstore.agent_jekt_key_ensure(agent_slug) {
-        use base64::Engine as _;
-        let key_b64 = base64::engine::general_purpose::STANDARD.encode(&key);
-        env.insert("AGENTMUX_JEKT_KEY".to_string(), json!(key_b64));
-        patched = true;
-    }
-    if let Ok(keypair) = mstore.agent_lan_key_ensure(agent_slug) {
-        env.insert("AGENTMUX_LAN_KEY".to_string(), json!(keypair.private_key));
+    // Ensured in the store for the agent's fetch; a value is never written.
+    ensured |= mstore.agent_jekt_key_ensure(agent_slug).is_ok();
+    if mstore.agent_lan_key_ensure(agent_slug).is_ok() {
         // SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D5 (Phase B): the
         // cross-channel signature binds the sending channel into the signed
         // material, so the MCP process must know its channel by the SAME
@@ -1621,11 +1613,11 @@ pub fn inject_jekt_signing_keys_into_mcp_json(
             "AGENTMUX_CHANNEL".to_string(),
             json!(crate::backend::reactive::registry::local_channel_id()),
         );
-        patched = true;
+        ensured = true;
     }
-    // srv signs WAN jekts (SPEC_WAN_JEKT_SIGNED_BY_SRV): drop an old WAN key.
-    for stale in ["AGENTMUX_WAN_KEY", "AGENTMUX_HOST_LABEL"] {
-        patched |= env.remove(stale).is_some();
+    // No signing value at rest: remove what an older version wrote (srv serves the keys).
+    for stale in crate::backend::mcp_json_identity::SIGNING_SECRETS.into_iter().chain(["AGENTMUX_HOST_LABEL"]) {
+        env.remove(stale);
     }
     // Still ensured and published at spawn, so it is in the directory before
     // the first WAN jekt. No `wan.db`, nothing minted anywhere else.
@@ -1643,7 +1635,7 @@ pub fn inject_jekt_signing_keys_into_mcp_json(
             ),
         }
     }
-    if !patched {
+    if !ensured {
         return None;
     }
     serde_json::to_string_pretty(&mcp_json).ok()
@@ -2592,25 +2584,28 @@ mod tests {
     // (the actual "click Launch" path) can't drift out of sync on jekt/LAN
     // key injection the way they did before this fix.
     #[test]
-    fn inject_jekt_signing_keys_into_mcp_json_patches_both_keys_into_the_env_block() {
+    fn inject_jekt_signing_keys_into_mcp_json_ensures_the_keys_and_writes_no_value_into_the_env_block() {
         let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
         let (_wan_dir, wan) = crate::backend::storage::wan_identity::attach_temp_wan_identity(&store);
         let content = serde_json::to_string(&json!({
             "mcpServers": { "agentmux": { "type": "stdio", "command": "agentmux-mcp", "env": { "AGENTMUX_AGENT_ID": "aria" } } }
         }))
         .unwrap();
-
         let rewritten = inject_jekt_signing_keys_into_mcp_json(&content, &store, "aria")
             .expect("both keys should ensure successfully against a fresh in-memory store");
         let parsed: Value = serde_json::from_str(&rewritten).unwrap();
         let env = &parsed["mcpServers"]["agentmux"]["env"];
         assert_eq!(env["AGENTMUX_AGENT_ID"], "aria", "existing fields must survive the patch");
-        assert!(env["AGENTMUX_JEKT_KEY"].is_string() && !env["AGENTMUX_JEKT_KEY"].as_str().unwrap().is_empty());
-        assert!(env["AGENTMUX_LAN_KEY"].is_string() && !env["AGENTMUX_LAN_KEY"].as_str().unwrap().is_empty());
-        // No WAN key (SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md): srv signs
-        // WAN jekts itself. The key is still minted in wan.db, ready to publish.
-        assert!(env.get("AGENTMUX_WAN_KEY").is_none());
-        assert!(env.get("AGENTMUX_HOST_LABEL").is_none());
+        // The file holds references, not values: neither key is written, and the agent's MCP server asks srv.
+        for name in crate::backend::mcp_json_identity::SIGNING_SECRETS.into_iter().chain(["AGENTMUX_HOST_LABEL"]) {
+            assert!(env.get(name).is_none(), "{name} in {rewritten}");
+        }
+        use base64::Engine as _;
+        let jekt = base64::engine::general_purpose::STANDARD.encode(store.agent_jekt_key_load("aria").unwrap().expect("ensured in the store"));
+        let lan = store.agent_lan_key_load("aria").unwrap().expect("ensured in the store").private_key;
+        assert!(!rewritten.contains(&jekt) && !rewritten.contains(&lan), "no value of either key is in the file");
+        // The keys are minted at spawn, so srv has them ready for the agent's first fetch and WAN
+        // (SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md) is published before use.
         assert!(wan.agent_key_load("aria").unwrap().is_some(), "minted at spawn, so it is published before use");
         // SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md Phase B: the channel the
         // sender signs under must be the one the shared registry publishes.
@@ -2629,16 +2624,15 @@ mod tests {
         }))
         .unwrap();
 
-        let first = inject_jekt_signing_keys_into_mcp_json(&content, &store, "aria").unwrap();
-        let second = inject_jekt_signing_keys_into_mcp_json(&content, &store, "aria").unwrap();
-        let first_key = serde_json::from_str::<Value>(&first).unwrap()["mcpServers"]["agentmux"]["env"]["AGENTMUX_JEKT_KEY"].clone();
-        let second_key = serde_json::from_str::<Value>(&second).unwrap()["mcpServers"]["agentmux"]["env"]["AGENTMUX_JEKT_KEY"].clone();
-        assert_eq!(first_key, second_key, "minted-on-first-use key must be reused, not re-minted, on every materialization");
+        inject_jekt_signing_keys_into_mcp_json(&content, &store, "aria").unwrap();
+        let (jekt, lan) = (store.agent_jekt_key_load("aria").unwrap().unwrap(), store.agent_lan_key_load("aria").unwrap().unwrap());
+        inject_jekt_signing_keys_into_mcp_json(&content, &store, "aria").unwrap();
+        assert_eq!(store.agent_jekt_key_load("aria").unwrap().unwrap(), jekt, "minted-on-first-use key must be reused, not re-minted");
+        assert_eq!(store.agent_lan_key_load("aria").unwrap().unwrap(), lan);
     }
 
-    /// W3-S §2.2: without a `wan.db` the agent gets no WAN key and no
-    /// instance label — never a key minted in `objects.db` instead. Host and
-    /// LAN keys are unaffected.
+    /// W3-S §2.2: without a `wan.db` nothing is minted in `objects.db` for WAN. Host and LAN keys are
+    /// ensured in the store as before, and none of them is written to the file.
     #[test]
     fn inject_jekt_signing_keys_gives_no_wan_key_without_a_wan_identity_store() {
         let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
@@ -2648,10 +2642,10 @@ mod tests {
         .unwrap();
         let rewritten = inject_jekt_signing_keys_into_mcp_json(&content, &store, "aria").unwrap();
         let env = serde_json::from_str::<Value>(&rewritten).unwrap()["mcpServers"]["agentmux"]["env"].clone();
-        assert!(env["AGENTMUX_JEKT_KEY"].is_string());
-        assert!(env["AGENTMUX_LAN_KEY"].is_string());
+        assert!(env.get("AGENTMUX_JEKT_KEY").is_none() && env.get("AGENTMUX_LAN_KEY").is_none());
         assert!(env.get("AGENTMUX_WAN_KEY").is_none());
         assert!(env.get("AGENTMUX_HOST_LABEL").is_none());
+        assert!(store.agent_jekt_key_load("aria").unwrap().is_some() && store.agent_lan_key_load("aria").unwrap().is_some());
         assert!(store.agent_wan_key_load("aria").unwrap().is_none(), "nothing minted in objects.db");
     }
 
@@ -2672,22 +2666,27 @@ mod tests {
         assert_eq!(key.private_key, legacy.private_key);
     }
 
-    /// SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md §3.3: a config written
-    /// before srv signed WAN jekts loses its WAN key and instance label.
+    /// A config written by an older version loses every signing value it holds: the host jekt key, the
+    /// LAN key, and the WAN key and instance label of before srv signed WAN jekts
+    /// (SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md §3.3).
     #[test]
-    fn inject_jekt_signing_keys_removes_a_wan_key_an_older_config_holds() {
+    fn inject_jekt_signing_keys_removes_every_signing_value_an_older_config_holds() {
         let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
         let content = serde_json::to_string(&json!({
             "mcpServers": { "agentmux": { "env": {
                 "AGENTMUX_AGENT_ID": "aria",
+                "AGENTMUX_JEKT_KEY": "old-jekt-value",
+                "AGENTMUX_LAN_KEY": "old-lan-value",
                 "AGENTMUX_WAN_KEY": "old-private-key",
                 "AGENTMUX_HOST_LABEL": "old-instance"
             } } }
         }))
         .unwrap();
         let rewritten = inject_jekt_signing_keys_into_mcp_json(&content, &store, "aria").unwrap();
-        assert!(!rewritten.contains("old-private-key"), "{rewritten}");
-        assert!(!rewritten.contains("AGENTMUX_HOST_LABEL"), "{rewritten}");
+        for old in ["old-jekt-value", "old-lan-value", "old-private-key", "AGENTMUX_HOST_LABEL"] {
+            assert!(!rewritten.contains(old), "{old} in {rewritten}");
+        }
+        assert!(rewritten.contains("\"AGENTMUX_AGENT_ID\""), "{rewritten}");
     }
 
     #[test]

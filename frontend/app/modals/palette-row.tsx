@@ -12,6 +12,7 @@
 import { createMemo, For, Show, type JSX } from "solid-js";
 import { isLightThemeActive } from "@/app/block/pane-identity";
 import { paneRoleColor } from "@/app/block/pane-color-scheme";
+import { ProviderLogo } from "@/app/element/ProviderLogo";
 import { Kbd } from "@/app/element/ui";
 import { shortcutFor } from "@/app/keybindings";
 import { keyCaps, keyCapsWords } from "@/app/keybindings/caps";
@@ -69,6 +70,13 @@ export function PaletteRow(props: {
             style={identity() ? { "--palette-identity": identity() } : undefined}
             onClick={(e) => props.onPick(e)}
         >
+            <Show when={!cmd().icon && cmd().provider}>
+                {(provider) => (
+                    <span class="command-palette-item-icon command-palette-item-logo" aria-hidden="true">
+                        <ProviderLogo provider={provider()} size={14} />
+                    </span>
+                )}
+            </Show>
             <Show when={cmd().icon}>
                 <Show
                     when={isIconName(cmd().icon)}

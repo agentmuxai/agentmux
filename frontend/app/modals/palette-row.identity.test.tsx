@@ -16,19 +16,20 @@ import type { CommandEntry } from "@/app/store/command-registry";
 import { PaletteRow } from "./palette-row";
 
 const STORED = "#4f8cff";
-const entry = (identity?: string): CommandEntry => ({
+const entry = (identity?: string, over: Partial<CommandEntry> = {}): CommandEntry => ({
     id: "agent:a",
     label: "Camper",
     category: "Agent",
     icon: "robot",
     identity,
+    ...over,
     execute: () => {},
 });
 
-function renderRow(identity?: string): HTMLElement {
+function renderRow(identity?: string, over: Partial<CommandEntry> = {}): HTMLElement {
     const { container } = render(() => (
         <PaletteRow
-            row={{ cmd: entry(identity), index: 0, divider: false }}
+            row={{ cmd: entry(identity, over), index: 0, divider: false }}
             id="r0"
             selected={false}
             groupColumn={false}
@@ -84,5 +85,20 @@ describe("an agent's icon", () => {
         expect(icon.tagName).toBe("SPAN");
         expect(icon.textContent).toBe("✦");
         expect(container.querySelector("i.fa-solid")).toBeNull();
+    });
+});
+
+describe("an agent's palette row icon", () => {
+    it("draws the provider's logo, not a text glyph, when the agent has no icon of its own", () => {
+        const row = renderRow(STORED, { icon: undefined, provider: "claude" });
+        expect(row.querySelector(".command-palette-item-logo .provider-logo")).not.toBeNull();
+        expect(row.querySelector("i.command-palette-item-icon")).toBeNull();
+        expect(row.textContent).not.toContain("✖");
+    });
+
+    it("draws an icon-font icon the agent has, and no logo", () => {
+        const row = renderRow(STORED, { icon: "shield", provider: "claude" });
+        expect(row.querySelector("i.fa-shield")).not.toBeNull();
+        expect(row.querySelector(".command-palette-item-logo")).toBeNull();
     });
 });
