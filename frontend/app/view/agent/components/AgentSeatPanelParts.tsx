@@ -6,6 +6,7 @@
 import { Show, type JSX } from "solid-js";
 
 import { Button, Field, Select, TextInput } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { MAX_AREA_CHARS, MAX_QUALIFIER_CHARS, type SeatRole } from "../../../agent-model/seat-format";
 import type { AgentSeatState } from "./AgentSeatPanelState";
 import { SeatRosterImport } from "./SeatRosterImport";
@@ -15,14 +16,13 @@ export function SeatIntro(props: { s: AgentSeatState; agentName: string }): JSX.
     return (
         <>
             <p class="agent-primitive-modal-global-note">
-                {props.agentName}'s seat: its role, whom it reports to and what it owns. Only you set it; agents read
-                it.
+                {t("seatPanel.intro", { name: props.agentName })}
             </p>
             <Show when={s.loadError()}>
                 <div class="agent-primitive-modal-error">{s.loadError()}</div>
             </Show>
             <Show when={s.agents() !== undefined && !s.self()}>
-                <p class="agent-primitive-modal-global-note">This pane has no saved agent, so it has no seat.</p>
+                <p class="agent-primitive-modal-global-note">{t("seatPanel.noAgent")}</p>
             </Show>
         </>
     );
@@ -33,25 +33,25 @@ function SeatFields(props: { s: AgentSeatState }): JSX.Element {
     const f = s.form;
     return (
         <div class="agent-seat-panel-form">
-            <Field label="Role" layout="stacked">
+            <Field label={t("seatPanel.role")} layout="stacked">
                 <Select options={s.roleOptions()} value={f.role()} onChange={(v) => f.setRole(v as SeatRole)} />
             </Field>
-            <Field label="Qualifier" layout="stacked" hint='Shown after the role, e.g. "product".'>
+            <Field label={t("seatPanel.qualifier")} layout="stacked" hint={t("seatPanel.qualifierHint")}>
                 <TextInput
                     value={f.qualifier()}
                     maxLength={MAX_QUALIFIER_CHARS}
-                    placeholder="product"
+                    placeholder={t("seatPanel.qualifierPlaceholder")}
                     onInput={(e) => f.setQualifier(e.currentTarget.value)}
                 />
             </Field>
-            <Field label="Reports to" layout="stacked">
+            <Field label={t("seatPanel.reportsTo")} layout="stacked">
                 <Select options={s.leadOptions()} value={f.lead()} onChange={f.setLead} />
             </Field>
-            <Field label="Area" layout="stacked" hint="One line: what it owns.">
+            <Field label={t("seatPanel.area")} layout="stacked" hint={t("seatPanel.areaHint")}>
                 <TextInput
                     value={f.area()}
                     maxLength={MAX_AREA_CHARS}
-                    placeholder="panes, layout, tabs"
+                    placeholder={t("seatPanel.areaPlaceholder")}
                     onInput={(e) => f.setArea(e.currentTarget.value)}
                 />
             </Field>
@@ -70,7 +70,7 @@ function SeatActions(props: { s: AgentSeatState }): JSX.Element {
                 disabled={f.busy() !== null || !s.seat()}
                 onClick={() => s.run("clear")}
             >
-                Clear
+                {t("seatPanel.clear")}
             </Button>
             <Button
                 tone="accent"
@@ -78,7 +78,7 @@ function SeatActions(props: { s: AgentSeatState }): JSX.Element {
                 disabled={f.busy() !== null || f.role() === ""}
                 onClick={() => s.run("save")}
             >
-                Save
+                {t("seatPanel.save")}
             </Button>
         </div>
     );
@@ -91,11 +91,11 @@ export function SeatEditor(props: { s: AgentSeatState }): JSX.Element {
         <>
             <Show when={s.seat()?.set_at_ms === 0}>
                 <p class="agent-seat-panel-from-spawn" data-testid="agent-seat-from-spawn">
-                    From spawn: it reports to the agent that spawned it. Save to give it a seat of its own.
+                    {t("seatPanel.fromSpawn")}
                 </p>
             </Show>
             <Show when={!s.seat()}>
-                <p class="agent-primitive-modal-global-note">No seat yet.</p>
+                <p class="agent-primitive-modal-global-note">{t("seatPanel.noSeat")}</p>
             </Show>
             <SeatFields s={s} />
             <Show when={s.form.error()}>
@@ -121,7 +121,7 @@ export function RosterRow(props: { s: AgentSeatState }): JSX.Element {
                 when={s.importing()}
                 fallback={
                     <Button icon="file-import" onClick={() => s.setImporting(true)}>
-                        Import roster…
+                        {t("seatPanel.importRoster")}
                     </Button>
                 }
             >
