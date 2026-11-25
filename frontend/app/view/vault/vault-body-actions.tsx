@@ -6,6 +6,7 @@
 
 import { Show, type JSX } from "solid-js";
 import { Button, IconButton } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import type { VaultViewModel } from "./vault-model";
 
 const IMPORT = "Import into the Vault";
@@ -26,10 +27,10 @@ export function VaultBodyActions(props: { model: VaultViewModel }): JSX.Element 
                 }
             >
                 <Button density="compact" icon="file-import" title={IMPORT} aria-label={IMPORT} onClick={() => model().openTransfer("import")}>
-                    Import
+                    {t("vault.import")}
                 </Button>
                 <Button density="compact" icon="file-export" title={EXPORT} aria-label={EXPORT} onClick={() => model().openTransfer("export")}>
-                    Export
+                    {t("vault.export")}
                 </Button>
             </Show>
             <IconButton density="compact" icon="circle-info" label={NOTE} onClick={() => model().setMeta({ "vault:prompts-read": null })} />
