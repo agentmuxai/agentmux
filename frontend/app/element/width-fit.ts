@@ -17,6 +17,10 @@
  * measured, one layout a step however many there are. While a window is resized, an element that
  * is still narrower than its tier below needed is not put back to the full set first: it is only
  * measured, which costs no layout, and is fitted from the full set once the resizing has stopped.
+ *
+ * A window tab that is not the displayed one keeps the tier it was last fitted at: its elements are not fitted
+ * while it is hidden (each step lays the whole page out, and a hidden tab's panes change size all the time as
+ * agents stream into them), only marked stale, and `fitStaleWithin` fits the stale ones when the tab is shown.
  */
 
 import { createEffect, onCleanup, onMount } from "solid-js";
@@ -37,6 +41,8 @@ interface Fit {
     at: number;
     /** The width its content needed at the tier below `at`, where it did not fit. */
     neededBelow: number | undefined;
+    /** It was due a fitting that was left for its tab's show, or has not been fitted yet. */
+    stale: boolean;
 }
 
 const fits = new WeakMap<HTMLElement, Fit>();
@@ -51,7 +57,7 @@ export type Overrun = (el: HTMLElement) => number;
 function fitOf(el: HTMLElement, tiers: readonly string[], overrun?: Overrun): Fit {
     let fit = fits.get(el);
     if (!fit || fit.tiers !== tiers || fit.overrun !== overrun) {
-        fit = { el, tiers, overrun, at: 0, neededBelow: undefined };
+        fit = { el, tiers, overrun, at: 0, neededBelow: undefined, stale: true };
         fits.set(el, fit);
     }
     return fit;
@@ -75,6 +81,12 @@ function contentWidth(fit: Fit): number {
         if (box.width > 0) overrun = Math.max(overrun, left - box.left);
     }
     return el.clientWidth + Math.max(overrun, clipped);
+}
+
+/** Whether the element is in a window tab that is not the displayed one (workspace.tsx marks the tab and its z-index). */
+function inHiddenTab(el: HTMLElement): boolean {
+    const tab = el.closest<HTMLElement>("[data-window-tab]");
+    return tab !== null && tab.style.zIndex !== "1";
 }
 
 /** Whether a fitting may start at the element's own tier: the tier below still needs more than it has. */
@@ -103,7 +115,17 @@ function settleSoon(): void {
  * each is measured, so a step costs one layout. `true` fits an element from the full set; `false`
  * lets one that is still too narrow for its tier below start at its own tier.
  */
-function fitAll(work: Map<Fit, boolean>): void {
+function fitAll(all: Map<Fit, boolean>): void {
+    const work = new Map<Fit, boolean>();
+    for (const [fit, fromFullSet] of all) {
+        if (inHiddenTab(fit.el)) {
+            fit.stale = true;
+            unsettled.delete(fit);
+        } else {
+            fit.stale = false;
+            work.set(fit, fromFullSet);
+        }
+    }
     let open: { fit: Fit; at: number }[] = [];
     for (const [fit, fromFullSet] of work) {
         const stay = !fromFullSet && stillTooNarrow(fit);
@@ -138,6 +160,14 @@ function fitAll(work: Map<Fit, boolean>): void {
 /** Sets `el`'s `data-fit` to the first of `tiers` at which it no longer overflows (the last one if none does). */
 export function fitToWidth(el: HTMLElement, tiers: readonly string[], overrun?: Overrun): void {
     fitAll(new Map([[fitOf(el, tiers, overrun), true]]));
+}
+
+/** Fits the elements inside `root`, a window tab now shown, that were left stale while it was hidden. */
+export function fitStaleWithin(root: HTMLElement): number {
+    const work = new Map<Fit, boolean>();
+    for (const { fit } of observed.values()) if (fit.stale && root.contains(fit.el)) work.set(fit, true);
+    if (work.size > 0) fitAll(work);
+    return work.size;
 }
 
 /** What the window's observer watches: a fitted element itself, or a part whose size says its content changed. */

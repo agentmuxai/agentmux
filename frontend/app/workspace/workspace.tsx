@@ -37,6 +37,7 @@ import { startAgentPrewarm } from "./agent-prewarm-driver";
 import { createDisplayWatchdog } from "./display-watchdog";
 import { createPaneWatchdog } from "./pane-watchdog";
 import { mountedPaneIds } from "./mounted-panes";
+import { registerTabEl, settleTabHeaders } from "./tab-headers-fit";
 import { chosenReloadOffer, WindowReloadOffer } from "./window-reload-offer";
 import { peekLayoutModelForTab } from "@/layout/index";
 import { onWindowErrorBurst } from "@/app/util/window-error-burst";
@@ -180,7 +181,7 @@ function WorkspaceElem(): JSX.Element {
     createEffect(() => {
         const id = displayTabId();
         const el = tabEls.get(id);
-        if (el) void el.getBoundingClientRect();
+        if (el) settleTabHeaders(el, tabSwitching());
         if (focusWhenShown === id) {
             focusWhenShown = null;
             focusManager.focusShownTab(id);
@@ -368,7 +369,7 @@ function WorkspaceElem(): JSX.Element {
                                 );
                                 return (
                                 <div
-                                    ref={(el) => tabEls.set(tid, el)}
+                                    ref={(el) => registerTabEl(tabEls, tid, el)}
                                     class="flex flex-row h-full w-full"
                                     style={{
                                         // Absolutely positioned, stacked on top of each other,

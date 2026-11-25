@@ -3,7 +3,7 @@
 import { cleanup, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fitToWidth, useWidthFit } from "./width-fit";
+import { fitStaleWithin, fitToWidth, useWidthFit } from "./width-fit";
 
 afterEach(() => {
     cleanup();
@@ -149,6 +149,43 @@ describe("useWidthFit", () => {
         view.unmount();
         expect(observer.targets).toEqual([]);
         expect(observer.disconnected).toBe(true);
+    });
+
+    it("leaves an element of a hidden window tab at its tier until the tab is shown, then fits it once", () => {
+        vi.stubGlobal("ResizeObserver", FakeObserver);
+        const tab = document.createElement("div");
+        tab.setAttribute("data-window-tab", "t1");
+        const el = sized(250, need);
+        tab.append(el);
+        document.body.append(tab);
+        render(() => {
+            useWidthFit(() => el, ["trim", "min"]);
+            return null;
+        });
+        theObserver().resized(el);
+        expect(el.hasAttribute("data-fit")).toBe(false);
+        tab.style.zIndex = "1";
+        fitStaleWithin(tab);
+        expect(el.getAttribute("data-fit")).toBe("trim");
+        el.removeAttribute("data-fit");
+        fitStaleWithin(tab);
+        expect(el.hasAttribute("data-fit")).toBe(false);
+    });
+
+    it("fits an element of the displayed window tab when it changes size, as before", () => {
+        vi.stubGlobal("ResizeObserver", FakeObserver);
+        const tab = document.createElement("div");
+        tab.setAttribute("data-window-tab", "t2");
+        tab.style.zIndex = "1";
+        const el = sized(250, need);
+        tab.append(el);
+        document.body.append(tab);
+        render(() => {
+            useWidthFit(() => el, ["trim", "min"]);
+            return null;
+        });
+        theObserver().resized(el);
+        expect(el.getAttribute("data-fit")).toBe("trim");
     });
 
     it("watches every fitted element of the window with one observer", () => {
