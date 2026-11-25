@@ -163,6 +163,15 @@ export function useScrollMemo(opts: {
     const capture = (): ScrollMemo | null =>
         captureScrollMemo(opts.scroller(), untrack(opts.following), opts.zoom ? untrack(opts.zoom) : 1);
     capturers.set(blockId, capture);
+    // What the cleanup below reads, kept as plain values: `following` and `zoom` are memos of the pane's state, and
+    // reading a stale memo while the pane is being disposed re-runs a computation that is half cleaned. Solid then
+    // cleans a node that is already inside its own cleanup and throws (`Cannot read properties of null`), which
+    // dropped every effect queued in the same update (a floating window left open when its pane was docked back).
+    const last = { following: untrack(opts.following), zoom: opts.zoom ? untrack(opts.zoom) : 1 };
+    createEffect(() => {
+        last.following = opts.following();
+        last.zoom = opts.zoom ? opts.zoom() : 1;
+    });
     // Set once the pane has taken a place it was given (below). A pane that goes away before its history
     // loaded has not: what it would record is only its default, and would wipe the place still waiting.
     let restored = false;
@@ -177,7 +186,7 @@ export function useScrollMemo(opts: {
         if (capturers.get(blockId) === capture) capturers.delete(blockId);
         // The pane is going away (unmounted behind another tab, or closed): keep where it was scrolled to.
         // The scroller is still attached while the owner is disposed; if it is not, there is nothing to read.
-        if (restored) rememberLeft(key, capture());
+        if (restored) rememberLeft(key, captureScrollMemo(opts.scroller(), last.following, last.zoom));
     });
     // A reload reads only the tail, so a pane scrolled up into pages it loaded
     // later would come back at the bottom.
