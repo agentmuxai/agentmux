@@ -85,6 +85,20 @@ fn compare_grids(a: &[(i32, i32, i32)], b: &[(i32, i32, i32)]) -> (u32, u32) {
 
 /// Whether a top-down BGRA copy of `width` x `height` is a window's picture a pane can be cut from: not tiny and not
 /// blank. The caller takes the CDP screenshot when it is not.
+/// The native copy is used only where the crop has been shown right: a window on the primary display's scale. A
+/// window on a display whose scale differs, or one the host cannot place, takes the page's picture.
+#[cfg(any(target_os = "windows", test))]
+fn check_same_scale(window_dpi: Option<u32>, primary_dpi: Option<u32>) -> Result<(), String> {
+    match (window_dpi, primary_dpi) {
+        (Some(w), Some(p)) if w == p => Ok(()),
+        (Some(w), Some(p)) => Err(format!(
+            "the window is on a display at {} dpi, the primary is at {} dpi",
+            w, p
+        )),
+        _ => Err("the host cannot tell which display the window is on".to_string()),
+    }
+}
+
 #[cfg(any(target_os = "windows", test))]
 fn check_copy(width: usize, height: usize, bgra: &[u8]) -> Result<(), String> {
     if width < MIN_SIDE || height < MIN_SIDE || bgra.len() < width * height * 4 {
@@ -194,12 +208,42 @@ mod win {
         }
     }
 
+    /// The effective dpi of the display `hmonitor` is, if the host can tell.
+    fn monitor_dpi(hmonitor: *mut std::ffi::c_void) -> Option<u32> {
+        use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
+        if hmonitor.is_null() {
+            return None;
+        }
+        let (mut dx, mut dy) = (0u32, 0u32);
+        let hr = unsafe { GetDpiForMonitor(hmonitor, MDT_EFFECTIVE_DPI, &mut dx, &mut dy) };
+        (hr == 0 && dx > 0).then_some(dx)
+    }
+
+    /// Whether the window is on a display at the primary display's scale (see `check_same_scale`).
+    fn on_primary_scale(hwnd: *mut std::ffi::c_void) -> Result<(), String> {
+        use windows_sys::Win32::Foundation::POINT;
+        use windows_sys::Win32::Graphics::Gdi::{
+            MonitorFromPoint, MonitorFromWindow, MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTOPRIMARY,
+        };
+        let (window, primary) = unsafe {
+            (
+                monitor_dpi(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)),
+                monitor_dpi(MonitorFromPoint(
+                    POINT { x: 0, y: 0 },
+                    MONITOR_DEFAULTTOPRIMARY,
+                )),
+            )
+        };
+        super::check_same_scale(window, primary)
+    }
+
     /// A copy of window `label` that a pane can be cut from, or why there is none (no such window, minimised, the
     /// copy failed, tiny or blank): the caller then takes the page's own picture. The copy is made on the blocking pool.
     pub(crate) async fn copy_window(state: &Arc<AppState>, label: &str) -> Result<Grab, String> {
         let hwnd = unsafe { crate::commands::window::resolve_window_hwnd_strict(state, label) }
             .ok_or("no such window")? as usize;
         let got = tokio::task::spawn_blocking(move || {
+            on_primary_scale(hwnd as *mut std::ffi::c_void)?;
             let g = grab(hwnd as *mut std::ffi::c_void)?;
             super::check_copy(g.width, g.height, &g.bgra)?;
             Ok::<Grab, String>(g)
@@ -302,7 +346,15 @@ pub async fn measure(
 
 #[cfg(test)]
 mod tests {
-    use super::{check_copy, compare_grids, grid_means, GRID};
+    use super::{check_copy, check_same_scale, compare_grids, grid_means, GRID};
+
+    #[test]
+    fn the_native_copy_is_used_only_on_the_primary_displays_scale() {
+        assert!(check_same_scale(Some(120), Some(120)).is_ok());
+        assert!(check_same_scale(Some(144), Some(96)).is_err());
+        assert!(check_same_scale(None, Some(96)).is_err());
+        assert!(check_same_scale(Some(96), None).is_err());
+    }
 
     #[test]
     fn a_tiny_or_blank_copy_is_not_a_picture_to_cut_from() {
