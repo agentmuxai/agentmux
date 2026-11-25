@@ -65,6 +65,10 @@ pub enum Effect {
     Deleted { entry: String },
     /// An activity line another machine made was added to the lines shown with a Machine column.
     Line { machine: String, seq: i64 },
+    /// A site grant another machine made was made here, for the entry.
+    Granted { entry: String },
+    /// A site grant another machine revoked was ended here, for the entry.
+    Revoked { entry: String },
     /// The record was not taken into the store, and why (no value in it), and it is not going to be.
     Skipped(String),
     /// The record was not taken into the store yet, and why: a kind this version does not know, or an id another entry holds.
@@ -143,7 +147,7 @@ pub struct Taker<'a> {
 }
 
 /// The body of `rec`, opened with the Vault's key at the place its header names.
-fn open_body<T: serde::de::DeserializeOwned>(ring: &KeyRing, rec: &Record) -> Result<T, String> {
+pub(super) fn open_body<T: serde::de::DeserializeOwned>(ring: &KeyRing, rec: &Record) -> Result<T, String> {
     let h = &rec.header;
     let key = ring.get(h.epoch).ok_or_else(|| format!("no key for epoch {}", h.epoch))?;
     let place = Place { vault: &h.collection, record: &h.record, version: &h.version, base: h.base.as_ref(), epoch: h.epoch };
@@ -292,7 +296,7 @@ impl Taker<'_> {
     fn current(&self, rec: &Record, lost: Option<&str>, settled: bool, now_ms: i64) -> Result<Effect, String> {
         match Kind::of(&rec.header.record) {
             Kind::Activity => return self.line(rec),
-            Kind::Grant => return Ok(Effect::Skipped("a site grant is not taken into the store yet".to_string())),
+            Kind::Grant => return self.grant(rec),
             Kind::Entry => {}
         }
         if !sync_links::is_link_id(&rec.header.record) {
@@ -309,7 +313,13 @@ impl Taker<'_> {
         // over, and the decision is not run again against it: the change here is sent by the next capture, and `retake` takes
         // the record's state then.
         match self.write(rec, &body, lost, now_ms)? {
-            Some(effect) => Ok(effect),
+            Some(effect) => {
+                // Grants that came before the entry did are made now.
+                if let Effect::Wrote { entry } = &effect {
+                    self.apply_waiting(entry, &rec.header.collection)?;
+                }
+                Ok(effect)
+            }
             None => Err("the entry was changed here while its record was taken, so nothing was overwritten".to_string()),
         }
     }
@@ -420,7 +430,11 @@ impl Taker<'_> {
         if machine != h.origin {
             return Ok(Effect::Skipped("an activity line named for another machine".to_string()));
         }
-        let body: ActivityBody = open_body(self.ring, rec)?;
+        let mut body: ActivityBody = open_body(self.ring, rec)?;
+        // A line names its entry by its record; here the entry has an id of its own, if it is here.
+        if let Some(entry) = self.store.vault_entry_of_link(&body.entry_id).map_err(|e| e.to_string())? {
+            body.entry_id = entry;
+        }
         Ok(match apply_activity(self.store, machine, seq, &body)? {
             Decision::Applied => Effect::Line { machine: machine.to_string(), seq },
             _ => Effect::None,

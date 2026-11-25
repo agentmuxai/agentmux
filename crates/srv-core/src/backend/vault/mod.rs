@@ -51,6 +51,7 @@ pub mod sync_record;
 pub mod sync_seal;
 pub mod sync_store;
 pub mod sync_take;
+mod sync_take_grants;
 pub mod transfer;
 pub mod uses;
 pub mod vaults;
