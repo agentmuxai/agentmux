@@ -283,19 +283,22 @@ async fn call_tool(
     // Identity M4d-3: every tool may sign (a jekt, a UI-automation proof), so
     // the fetched keys are checked here, once, before any of them runs.
     self_keys::refresh_if_stale(client, local_url, auth_key).await;
-    tools::call(
-        name,
-        &arguments,
-        &tools::ToolCtx {
-            local_url,
-            auth_key,
-            block_id,
-            client,
-            loops,
-            loop_counter,
-        },
-    )
-    .await
+    let run = || async {
+        tools::call(
+            name,
+            &arguments,
+            &tools::ToolCtx {
+                local_url,
+                auth_key,
+                block_id,
+                client,
+                loops,
+                loop_counter,
+            },
+        )
+        .await
+    };
+    self_keys::run_healing_a_rejected_signature(client, local_url, auth_key, run).await
 }
 
 #[cfg(test)]

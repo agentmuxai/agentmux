@@ -703,3 +703,78 @@ async fn a_machine_sender_is_approved_only_while_its_install_is_trusted_here() {
     state.lan_discovery.seed_lan_pubkey_with_cert_for_test(sender, public.to_vec(), Some(cert(&sender_wan, sender, &other, now())));
     assert!(!crate::server::quiet_remote::install_approved(&state, sender).await);
 }
+
+/// The agent's own host's lookup answer after its key was replaced: the new public key with this install's
+/// certificate and the agent's statement, as `add_cert` puts them in (`/agentmux/lan` lookups).
+fn lookup_answer(host_state: &AppState, agent: &str, public_b64: &str) -> (WanKeyRecord, String) {
+    let mut answer = serde_json::Map::new();
+    add_cert(host_state, agent, public_b64, &mut answer);
+    let cert: WanKeyRecord = serde_json::from_value(answer["lan_cert"].clone()).expect("the host certifies the key it hosts");
+    (cert, answer["lan_install_sig"].as_str().expect("and the agent's statement comes with it").to_string())
+}
+
+fn key_bytes(b64: &str) -> [u8; 32] {
+    BASE64.decode(b64).unwrap().try_into().unwrap()
+}
+
+/// Two installs: B hosts the agent and replaces its LAN key (the one-time re-issue); A pinned the old key, bound to B's
+/// install. A's verified lookup carries B's certificate: the pin moves with no one's hand and the next message verifies.
+#[tokio::test]
+async fn after_the_one_time_re_issue_a_peer_pinned_to_the_old_key_follows_by_itself() {
+    let (b, a) = (test_state(), test_state());
+    let (_bdir, b_wan) = host("starpower");
+    b.mstore.set_wan_identity(b_wan.clone());
+    let (_adir, a_wan) = host("narko");
+    trust(&a, &a_wan, &b_wan);
+
+    let old = b.mstore.agent_lan_key_ensure("maop-r").unwrap();
+    let old_public = key_bytes(&old.public_key);
+    pin(&a, "maop-r", &old_public);
+    let instance = b_wan.instance_ensure("starpower").unwrap();
+    let install = PinInstall { instance_id: instance.instance_id, host_hint: instance.host_hint };
+    assert!(a.mstore.lan_pin_bind("maop-r", &old.public_key, &install, now() - 60).unwrap(), "A pinned it a minute ago, from B's install");
+
+    // The re-issue comes later than the pin: a certificate issued in the second the pin was made does not replace it.
+    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+    // The re-issue on B.
+    assert!(b.mstore.agent_lan_key_rotate("maop-r").unwrap());
+    let new = b.mstore.agent_lan_key_load("maop-r").unwrap().unwrap();
+    assert_ne!(new.public_key, old.public_key);
+
+    // A's lookup of the agent answers with the new key and B's certificate.
+    let (cert, statement) = lookup_answer(&b, "maop-r", &new.public_key);
+    a.lan_discovery.seed_lan_pubkey_with_cert_for_test("maop-r", key_bytes(&new.public_key).to_vec(), Some(cert));
+    a.lan_discovery.seed_lan_install_sig_for_test("maop-r", statement);
+
+    let req = verified(&a, "maop-r", &key_bytes(&new.private_key)).await;
+    assert_eq!(req.lan_verified, Some(true), "the next message from the agent verifies");
+    assert_eq!(pinned(&a, "maop-r"), new.public_key, "the pin moved with no one's hand");
+    assert!(lan_refusals::get("maop-r").is_none());
+    assert_eq!(audited_for("maop-r").len(), 1);
+}
+
+/// A peer whose pin is not bound to B's install (it pinned the key some other way) is not moved by a certificate: it
+/// keeps flagging that agent, and the screen says why. This is the peer that needs a person to move its pin.
+#[tokio::test]
+async fn a_peer_whose_pin_is_not_bound_to_the_hosting_install_keeps_flagging_after_the_re_issue_and_says_why() {
+    let (b, a) = (test_state(), test_state());
+    let (_bdir, b_wan) = host("starpower");
+    b.mstore.set_wan_identity(b_wan.clone());
+    let (_adir, a_wan) = host("narko");
+    trust(&a, &a_wan, &b_wan);
+
+    let old = b.mstore.agent_lan_key_ensure("maop-u").unwrap();
+    pin(&a, "maop-u", &key_bytes(&old.public_key));
+    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+    assert!(b.mstore.agent_lan_key_rotate("maop-u").unwrap());
+    let new = b.mstore.agent_lan_key_load("maop-u").unwrap().unwrap();
+    let (cert, statement) = lookup_answer(&b, "maop-u", &new.public_key);
+    a.lan_discovery.seed_lan_pubkey_with_cert_for_test("maop-u", key_bytes(&new.public_key).to_vec(), Some(cert));
+    a.lan_discovery.seed_lan_install_sig_for_test("maop-u", statement);
+
+    let req = verified(&a, "maop-u", &key_bytes(&new.private_key)).await;
+    assert_eq!(req.lan_verified, Some(false), "flagged, not verified");
+    assert_eq!(pinned(&a, "maop-u"), old.public_key, "the pin did not move");
+    let why = lan_refusals::get("maop-u").and_then(|r| r.why).expect("the refusal says why");
+    assert!(why.contains("not bound to an install yet"), "{why}");
+}
