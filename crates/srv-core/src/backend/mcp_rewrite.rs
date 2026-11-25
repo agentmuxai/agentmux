@@ -4,7 +4,8 @@
 //! Rungs 3 and 4 of the MCP self-heal ladder (`mcp_health`,
 //! `docs/specs/SPEC_AGENT_MCP_SELF_HEAL_2026_10_10.md` §5): put the `agentmux` entry of the agent's
 //! workspace `.mcp.json` right, then reconnect. Rung 3 rewrites it the way a launch writes it (the
-//! bare `agentmux-mcp` command, this agent's id and signing keys), which mends a missing or stale
+//! bare `agentmux-mcp` command, this agent's id and channel, and no signing value: the file holds
+//! references, not values), which mends a missing or stale
 //! entry or one the user edited. Rung 4 makes the command the absolute path of the `agentmux-mcp`
 //! that ships with this install, which mends a `PATH` that does not find it.
 //!

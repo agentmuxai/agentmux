@@ -143,7 +143,11 @@ pub(crate) fn realign_workspace_mcp_json(
             None => return,
         };
         let Some(body) = crate::backend::agent_config::inject_jekt_signing_keys_into_mcp_json(&patched, mstore, slug) else {
-            tracing::warn!(work_dir, agent_id = slug, "spawn: the agent's keys could not be ensured; its MCP config left as it was");
+            tracing::warn!(work_dir, agent_id = slug, "spawn: the agent's keys could not be ensured; its MCP config keeps its id and loses any signing value");
+            if let Some(stripped) = strip_signing_keys(&content) {
+                let body = crate::backend::mcp_config_file::host_content(&expanded, stripped);
+                let _ = crate::backend::mcp_config_file::write_relocated(&path, &body);
+            }
             return;
         };
         let body = crate::backend::mcp_config_file::host_content(&expanded, body);
@@ -192,7 +196,10 @@ pub(crate) fn realign_workspace_mcp_json(
     // id already matching and leave the agent unsigned. Left as it was, the
     // next spawn tries again.
     let Some(body) = crate::backend::agent_config::inject_jekt_signing_keys_into_mcp_json(&patched, mstore, slug) else {
-        tracing::warn!(work_dir, agent_id = slug, "spawn: the agent's keys could not be ensured; workspace .mcp.json left as it was");
+        tracing::warn!(work_dir, agent_id = slug, "spawn: the agent's keys could not be ensured; workspace .mcp.json keeps its id and loses any signing value");
+        if let Some(stripped) = strip_signing_keys(&content) {
+            let _ = wd.write(".mcp.json", stripped.as_bytes(), true);
+        }
         return;
     };
     if serde_json::from_str::<Value>(&body).ok() == serde_json::from_str::<Value>(&content).ok() {
@@ -367,7 +374,10 @@ mod tests {
             let broken = crate::backend::storage::store::Store::open_in_memory().unwrap();
             broken.test_break_name_key_tables().unwrap();
             realign_workspace_mcp_json(&broken, &work_dir, "host", "loap-2");
-            assert_eq!(std::fs::read_to_string(&file).unwrap(), mcp("loap-loap-2"), "not half-realigned");
+            let text = std::fs::read_to_string(&file).unwrap();
+            assert_eq!(serde_json::from_str::<Value>(&text).unwrap(), serde_json::from_str::<Value>(&strip_signing_keys(&mcp("loap-loap-2")).unwrap()).unwrap(), "not half-realigned, but no value is left in it");
+            assert!(holds_no_key(&text));
+            crate::backend::mcp_config_file::write_relocated(&file, &mcp("loap-loap-2")).unwrap();
 
             let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
             realign_workspace_mcp_json(&store, &work_dir, "host", "loap-2");

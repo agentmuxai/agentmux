@@ -1574,10 +1574,8 @@ fn back_up_legacy_claude_md(wd: &crate::backend::workdir_fs::Workdir, content: &
 /// and one an older version wrote is removed. The agent's MCP server asks srv
 /// for its keys with its own token (`/agentmux/agents/self/keys`).
 ///
-/// Returns `None` on any parse failure, a missing `mcpServers.agentmux.env`
-/// object, or if no key could be ensured: callers keep the original content in
-/// that case, and this must never block writing the agent's config.
-///
+/// Returns `None` on a parse failure, a missing `mcpServers.agentmux.env` object, or
+/// if no key could be ensured: callers keep the original content, and this must never block writing the agent's config.
 /// Shared by `agent.open` (`server/app_api/agent_open.rs`) and the
 /// `WriteAgentConfig` "click Launch" path (`server/editor_handlers.rs`), per
 /// this module's own doc comment the two `.mcp.json`-materializing call sites
@@ -1599,7 +1597,7 @@ pub fn inject_jekt_signing_keys_into_mcp_json(
         for k in ["AGENTMUX_JEKT_KEY", "AGENTMUX_LAN_KEY", "AGENTMUX_WAN_KEY", "AGENTMUX_HOST_LABEL"] { env.remove(k); }
         return serde_json::to_string_pretty(&mcp_json).ok();
     }
-    // The keys exist in the store, so the agent's first fetch finds them. A value is never written.
+    // Ensured in the store for the agent's fetch; a value is never written.
     ensured |= mstore.agent_jekt_key_ensure(agent_slug).is_ok();
     if mstore.agent_lan_key_ensure(agent_slug).is_ok() {
         // SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D5 (Phase B): the
@@ -1617,8 +1615,7 @@ pub fn inject_jekt_signing_keys_into_mcp_json(
         );
         ensured = true;
     }
-    // No signing value at rest: remove what an older version wrote. srv signs
-    // WAN jekts (SPEC_WAN_JEKT_SIGNED_BY_SRV), and the others come from srv.
+    // No signing value at rest: remove what an older version wrote (srv serves the keys).
     for stale in crate::backend::mcp_json_identity::SIGNING_SECRETS.into_iter().chain(["AGENTMUX_HOST_LABEL"]) {
         env.remove(stale);
     }

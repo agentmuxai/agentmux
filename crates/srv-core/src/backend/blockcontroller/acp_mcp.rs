@@ -68,7 +68,7 @@ pub(super) fn acp_mcp_servers(
 /// that its entry does not set. Claude Code starts an MCP server with the agent's own environment, so
 /// `agentmux-mcp` finds `AGENTMUX_AUTH_KEY` there; an ACP agent that starts it with only the `env` of its
 /// `session/new` (dsh) left it without the key, and every call was refused, `Pane` `whoami` included.
-/// Entries the server already has (the identity and signing keys of `.mcp.json`) win; other servers are
+/// Entries the server already has (the identity and channel of `.mcp.json`) win; other servers are
 /// untouched. The agent holds these values itself, so nothing new reaches it.
 pub(super) fn carry_agentmux_env(servers: &mut [Value], agent_env: &std::collections::HashMap<String, String>) {
     for server in servers.iter_mut() {
