@@ -68,7 +68,7 @@ export function NewProfileModal(props: { onCreated: (profile: BrowserProfile) =>
             </ModalBody>
             <ModalFooter>
                 <Button onClick={props.close}>Cancel</Button>
-                <Button tone="accent" busy={busy()} disabled={!name().trim()} onClick={() => void create()}>
+                <Button tone="accent" busy={busy()} disabled={!name().trim()} onClick={() => create()}>
                     Create
                 </Button>
             </ModalFooter>

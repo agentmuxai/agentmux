@@ -32,7 +32,7 @@ export function ExportSkill(p: { skillId: string }): JSX.Element {
 
     return (
         <div class="skill-app-export">
-            <Button icon="file-export" busy={busy()} onClick={() => void run()}>
+            <Button icon="file-export" busy={busy()} onClick={() => run()}>
                 Export as a .skill file
             </Button>
             <Show when={saved()}>

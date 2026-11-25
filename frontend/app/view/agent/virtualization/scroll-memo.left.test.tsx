@@ -129,3 +129,42 @@ describe("scroll-memo: a pane that goes away scrolled up leaves its place", () =
         expect(hasScrolledUpMemo("b104")).toBe(true);
     });
 });
+
+describe("scroll-memo: the cleanup reads nothing reactive", () => {
+    // Reading a memo (the pane's follow state or zoom) while the pane is disposed re-runs a computation that is half
+    // cleaned; Solid throws from cleanNode and drops the update's queued effects (a floater left open on redock).
+    it("takes the follow state and zoom it last saw, and calls neither accessor while the pane is disposed", () => {
+        agentOf.set("blk-1", "agent-a");
+        const following = vi.fn(() => false);
+        const zoom = vi.fn(() => 2);
+        const [ready, setReady] = createSignal(false);
+        let dispose = () => {};
+        createRoot((d) => {
+            dispose = d;
+            useScrollMemo({ blockId: "blk-1", scroller: () => scrollerWith([{ id: "r2", top: -40 }]), following, zoom, historyReady: ready, scrollToRow: vi.fn() });
+        });
+        setReady(true);
+        following.mockClear();
+        zoom.mockClear();
+        dispose();
+        expect(following).not.toHaveBeenCalled();
+        expect(zoom).not.toHaveBeenCalled();
+        // The place was still recorded, from the values seen before: unzoomed by the last zoom (40 / 2).
+        expect(hasScrolledUpMemo("blk-1")).toBe(true);
+    });
+
+    it("follows a change of the accessors, so the place it files is the one the pane had", () => {
+        agentOf.set("blk-1", "agent-a");
+        const [following, setFollowing] = createSignal(false);
+        const [ready, setReady] = createSignal(false);
+        let dispose = () => {};
+        createRoot((d) => {
+            dispose = d;
+            useScrollMemo({ blockId: "blk-1", scroller: () => scrollerWith([{ id: "r2", top: -40 }]), following, historyReady: ready, scrollToRow: vi.fn() });
+        });
+        setReady(true);
+        setFollowing(true);
+        dispose();
+        expect(hasScrolledUpMemo("blk-1"), "a pane that was following leaves nothing").toBe(false);
+    });
+});

@@ -359,7 +359,7 @@ function SessionActions(props: { s: StatsState }): JSX.Element {
                         density="compact"
                         disabled={s.archiveBusy()}
                         onClick={() =>
-                            void run(s.archiveBusy, s.setArchiveBusy, "archive", () => archiveSession(s.props.blockId))
+                            run(s.archiveBusy, s.setArchiveBusy, "archive", () => archiveSession(s.props.blockId))
                         }
                         title={t("agent.sessionStats.archiveTip")}
                     >
@@ -371,7 +371,7 @@ function SessionActions(props: { s: StatsState }): JSX.Element {
                     density="compact"
                     disabled={s.restoreBusy()}
                     onClick={() =>
-                        void run(s.restoreBusy, s.setRestoreBusy, "restore", () => restoreSession(s.props.blockId))
+                        run(s.restoreBusy, s.setRestoreBusy, "restore", () => restoreSession(s.props.blockId))
                     }
                     title={t("agent.sessionStats.restoreTip")}
                 >
@@ -381,7 +381,7 @@ function SessionActions(props: { s: StatsState }): JSX.Element {
             <Button
                 density="compact"
                 disabled={s.exportBusy()}
-                onClick={() => void run(s.exportBusy, s.setExportBusy, "export", () => exportSession(s.props.blockId))}
+                onClick={() => run(s.exportBusy, s.setExportBusy, "export", () => exportSession(s.props.blockId))}
                 title={t("agent.sessionStats.exportTip")}
             >
                 {s.exportBusy() ? t("agent.sessionStats.exporting") : t("agent.sessionStats.export")}

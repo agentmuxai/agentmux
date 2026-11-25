@@ -91,7 +91,7 @@ export function RemotesView(props: { model: RemotesViewModel }): JSX.Element {
                     onInput={model.setFilter}
                     placeholder={t("remotes.filter")}
                 />
-                <IconButton icon="rotate-right" label={t("remotes.refresh")} onClick={() => void model.refresh()} />
+                <IconButton icon="rotate-right" label={t("remotes.refresh")} onClick={() => model.refresh()} />
                 <Button tone="accent" icon="plus" aria-expanded={adding()} onClick={() => setAdding(!adding())}>
                     {t("remotes.add")}
                 </Button>
@@ -256,7 +256,7 @@ function RemoteCard(props: {
                     <IconButton
                         icon="folder-open"
                         label={t("remotes.browseFiles", { name: r().name })}
-                        onClick={() => void model.run("Browse files", () => model.browseFiles(r().name))}
+                        onClick={() => model.run("Browse files", () => model.browseFiles(r().name))}
                     />
                 </>
             }

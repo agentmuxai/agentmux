@@ -87,13 +87,13 @@ export function ScriptReview(p: {
                                 <p class="skill-app-line skill-app-muted">
                                     {t("skill.script.approveNote")}
                                 </p>
-                                <Button tone="accent" busy={busy()} onClick={() => void setApproved(true)}>
+                                <Button tone="accent" busy={busy()} onClick={() => setApproved(true)}>
                                     {t("skill.script.approve")}
                                 </Button>
                             </>
                         }
                     >
-                        <Button tone="danger" busy={busy()} onClick={() => void setApproved(false)}>
+                        <Button tone="danger" busy={busy()} onClick={() => setApproved(false)}>
                             {t("skill.script.revoke")}
                         </Button>
                     </Show>

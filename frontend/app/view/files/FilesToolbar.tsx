@@ -105,7 +105,7 @@ export function FilesToolbar(props: {
                 />
             </Show>
             <FilterButton model={model} open={props.filterOpen} toggle={props.toggleFilter} buttonRef={props.filterButtonRef} />
-            <IconButton icon="folder-plus" label="New folder" class="files-tool files-tool--action" onClick={() => void model.createNew("dir")} />
+            <IconButton icon="folder-plus" label="New folder" class="files-tool files-tool--action" onClick={() => model.createNew("dir")} />
             <IconButton icon={model.showHidden() ? "eye" : "eye-slash"} label={model.showHidden() ? "Hide hidden files" : "Show hidden files"} pressed={model.showHidden()} class="files-tool files-tool--view" onClick={() => model.toggleHidden()} />
             <IconButton icon="arrows-rotate" label={`Refresh (${keyLabel("F5")})`} class="files-tool files-tool--action" onClick={() => model.refresh()} />
             <IconButton icon="table-columns" label={model.showSidebar() ? "Hide Places" : "Show Places"} pressed={model.showSidebar()} class="files-tool files-tool--places" onClick={() => model.toggleSidebar()} />

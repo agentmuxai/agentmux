@@ -63,7 +63,7 @@ function UnmatchedRow(props: { pr: KanbanUnmatchedPr; reload: () => Promise<void
                 <Button type="submit" density="compact" icon="link" busy={busy()} disabled={!taskId()}>
                     {tr("kanban.prs.linkTo")}
                 </Button>
-                <Button density="compact" tone="quiet" disabled={busy()} onClick={() => void run({ action: "pr_dismiss", pr: nameOf(props.pr) })}>
+                <Button density="compact" tone="quiet" disabled={busy()} onClick={() => run({ action: "pr_dismiss", pr: nameOf(props.pr) })}>
                     {tr("kanban.prs.dismiss")}
                 </Button>
             </form>

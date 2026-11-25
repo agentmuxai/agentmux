@@ -123,7 +123,7 @@ export function WidgetCatalog(props: { onInstalled: (id: string, packages: Widge
                                         <Show when={action(i)}>
                                             {(label) => (
                                                 <div class="widget-row-actions">
-                                                    <Button tone="accent" disabled={busy() === i.entry.id} onClick={() => void install(i.entry.id)}>
+                                                    <Button tone="accent" disabled={busy() === i.entry.id} onClick={() => install(i.entry.id)}>
                                                         {busy() === i.entry.id ? "Installing…" : label()}
                                                     </Button>
                                                 </div>

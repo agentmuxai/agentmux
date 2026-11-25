@@ -44,7 +44,7 @@ export const TriggerCard = (p: { model: DroneViewModel }): JSX.Element => {
             <h3 class="drone-trigger-title">{t("drone.trigger.title")}</h3>
             <div class="drone-trigger-row">
                 <span class="drone-trigger-name">{t("drone.trigger.byHand")}</span>
-                <Button class="drone-btn" disabled={!canRun()} onClick={() => void m.run()}>
+                <Button class="drone-btn" disabled={!canRun()} onClick={() => m.run()}>
                     {m.runningAtom() ? t("drone.trigger.running") : t("drone.trigger.run")}
                 </Button>
             </div>

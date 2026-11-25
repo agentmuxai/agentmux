@@ -47,7 +47,7 @@ export function VendorInstall(props: { p: PanelParts }): JSX.Element {
                 <Button tone="neutral" onClick={() => s.props.onClose()}>
                     {t("createPanel.install.cancel")}
                 </Button>
-                <Button tone="accent" busy={install.checkingAgain()} onClick={() => void install.checkAgain()} data-testid="agent-create-check-again">
+                <Button tone="accent" busy={install.checkingAgain()} onClick={() => install.checkAgain()} data-testid="agent-create-check-again">
                     {t("createPanel.install.checkAgain")}
                 </Button>
             </div>
@@ -131,12 +131,12 @@ export function NpmInstall(props: { p: PanelParts; session: Accessor<Session> })
                         <Button tone="neutral" onClick={() => s.props.onClose()}>
                             {t("createPanel.install.cancel")}
                         </Button>
-                        <Button tone="accent" onClick={() => void sess().start()} data-testid="agent-create-install-start">
+                        <Button tone="accent" onClick={() => sess().start()} data-testid="agent-create-install-start">
                             {t("createPanel.install.now")}
                         </Button>
                     </Match>
                     <Match when={sess().state() === "running"}>
-                        <Button tone="neutral" onClick={() => void sess().cancel()} data-testid="agent-create-install-cancel">
+                        <Button tone="neutral" onClick={() => sess().cancel()} data-testid="agent-create-install-cancel">
                             {t("createPanel.install.cancelInstall")}
                         </Button>
                     </Match>
@@ -144,7 +144,7 @@ export function NpmInstall(props: { p: PanelParts; session: Accessor<Session> })
                         <Button tone="neutral" onClick={() => s.props.onClose()}>
                             {t("createPanel.install.close")}
                         </Button>
-                        <Button tone="accent" onClick={() => void sess().start()}>
+                        <Button tone="accent" onClick={() => sess().start()}>
                             {t("createPanel.install.retry")}
                         </Button>
                     </Match>

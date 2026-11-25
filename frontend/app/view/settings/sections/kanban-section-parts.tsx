@@ -274,7 +274,7 @@ export function Notices(props: Part): JSX.Element {
                     actions={
                         <>
                             <Button density="compact" onClick={s.discard}>{t("settings.kanban.loadTheirs")}</Button>
-                            <Button density="compact" onClick={() => void s.applyMine()}>{t("settings.kanban.applyMine")}</Button>
+                            <Button density="compact" onClick={() => s.applyMine()}>{t("settings.kanban.applyMine")}</Button>
                         </>
                     }
                 >
@@ -367,7 +367,7 @@ export function Footer(props: Part): JSX.Element {
                 tone="accent"
                 busy={s.busy()}
                 disabled={!s.editable() || !s.dirty() || s.problems().length > 0}
-                onClick={() => void s.apply()}
+                onClick={() => s.apply()}
             >
                 {t("settings.kanban.apply")}
             </Button>

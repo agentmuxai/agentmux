@@ -97,16 +97,16 @@ export const RestartToUpdatePopover = (props: RestartToUpdatePopoverProps): JSX.
                                 <Button density="compact" onClick={props.onClose}>
                                     Later
                                 </Button>
-                                <Button density="compact" tone="accent" onClick={() => void run(() => upgradeAndRestart(false))}>
+                                <Button density="compact" tone="accent" onClick={() => run(() => upgradeAndRestart(false))}>
                                     Restart now
                                 </Button>
                             </>
                         }
                     >
-                        <Button density="compact" onClick={() => void run(cancelUpgrade)}>
+                        <Button density="compact" onClick={() => run(cancelUpgrade)}>
                             Cancel
                         </Button>
-                        <Button density="compact" tone="accent" onClick={() => void run(() => upgradeAndRestart(true))}>
+                        <Button density="compact" tone="accent" onClick={() => run(() => upgradeAndRestart(true))}>
                             Restart anyway
                         </Button>
                     </Show>

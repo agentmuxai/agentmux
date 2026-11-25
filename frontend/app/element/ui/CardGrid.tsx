@@ -14,6 +14,10 @@ export interface CardGridProps<T> {
     /** The open card's key; its details show below its row. */
     selectedKey?: string | null;
     renderDetail?: (item: T) => JSX.Element;
+    /** The key of the card a question hangs under (a delete confirm); it shows below the card's row, before any details. */
+    askKey?: string | null;
+    /** What that question is (a `ConfirmPanel`). Whoever shows it closes it: when it goes, focus returns to the card. */
+    renderAsk?: (item: T) => JSX.Element;
     /** Escape inside the details: close them (focus returns to the card).
      *  Return `false` to keep them open, e.g. while they commit a change. */
     onClose?: () => unknown;
@@ -74,6 +78,63 @@ function useColumnCount(grid: () => HTMLElement | undefined, min: () => number, 
 }
 
 /**
+ * Brings the open card's details into view without moving the card above them out of it (detail-reveal.ts), and moves focus
+ * into them when asked to. It runs again when a resize changes the column count, which moves the panel to the end of the
+ * card's new row. Answers the ref for the details' element.
+ */
+function useDetailReveal<T>(props: CardGridProps<T>, columns: () => number, cellOf: (key: string) => HTMLElement | undefined) {
+    let detailRef: HTMLElement | undefined;
+    const reveal = (key: string | null | undefined, focus: boolean) => {
+        if (key == null) return;
+        requestAnimationFrame(() => {
+            const card = cellOf(key);
+            if (detailRef && card) revealDetail(detailRef, card);
+            if (focus && props.focusDetails) detailRef?.focus({ preventScroll: true });
+        });
+    };
+    createEffect(on(() => props.selectedKey, (key) => reveal(key, true), { defer: true }));
+    createEffect(on(columns, () => reveal(props.selectedKey, false), { defer: true }));
+    return (el: HTMLElement) => (detailRef = el);
+}
+
+/**
+ * The question under a card (`askKey`): the row it follows, bringing it into view when it opens, and, when it goes while
+ * focus has fallen to the page (it was in the question), giving focus back to the card it was about. The question holds
+ * focus itself when it opens (ConfirmPanel). It is keyed on the card asked about, so another card's question replaces it.
+ */
+function useQuestion<T>(
+    props: CardGridProps<T>,
+    keys: () => string[],
+    columns: () => number,
+    cellOf: (key: string) => HTMLElement | undefined,
+) {
+    let el: HTMLElement | undefined;
+    const after = () => {
+        const key = props.askKey;
+        const i = key == null ? -1 : keys().indexOf(key);
+        return i < 0 || !props.renderAsk ? -1 : rowEnd(i, columns(), props.items.length);
+    };
+    createEffect(
+        on(
+            () => props.askKey,
+            (key, was) => {
+                if (key != null) {
+                    requestAnimationFrame(() => {
+                        const card = cellOf(key);
+                        if (el && card) revealDetail(el, card);
+                    });
+                } else if (was != null && (!document.activeElement || document.activeElement === document.body)) {
+                    const cell = cellOf(was);
+                    (cell?.querySelector<HTMLElement>(".ui-card") ?? cell?.querySelector<HTMLElement>('[tabindex="0"], button'))?.focus();
+                }
+            },
+            { defer: true },
+        ),
+    );
+    return { after, setEl: (e: HTMLElement) => (el = e) };
+}
+
+/**
  * Cards in an auto-fill grid. An open card's details take a full-width row
  * after the last card of its row, so the row stays together
  * (docs/specs/SPEC_CONNECTORS_CARDS_2026_10_13.md §3.4).
@@ -106,19 +167,9 @@ export function CardGrid<T>(props: CardGridProps<T>): JSX.Element {
             | HTMLElement
             | undefined;
 
-    let detailRef: HTMLDivElement | undefined;
-    // Bring the details into view without moving the card above them out of it (detail-reveal.ts). It runs again when a
-    // resize changes the column count, which moves the panel to the end of the card's new row.
-    const reveal = (key: string | null | undefined, focus: boolean) => {
-        if (key == null) return;
-        requestAnimationFrame(() => {
-            const card = cellOf(key);
-            if (detailRef && card) revealDetail(detailRef, card);
-            if (focus && props.focusDetails) detailRef?.focus({ preventScroll: true });
-        });
-    };
-    createEffect(on(() => props.selectedKey, (key) => reveal(key, true), { defer: true }));
-    createEffect(on(columns, () => reveal(props.selectedKey, false), { defer: true }));
+    const ask = useQuestion(props, keys, columns, cellOf);
+    const setDetailEl = useDetailReveal(props, columns, cellOf);
+
     const capped = () => props.maxColumns !== undefined || props.maxCardWidth !== undefined;
 
     const detailName = () => {
@@ -158,9 +209,19 @@ export function CardGrid<T>(props: CardGridProps<T>): JSX.Element {
                                 {(item) => props.renderCard(item)}
                             </Show>
                         </div>
+                        <Show when={index() === ask.after()}>
+                            <div ref={ask.setEl} class="ui-card-ask">
+                                <Show when={props.askKey ?? undefined} keyed>
+                                    {(key) => {
+                                        const asked = untrack(() => byKey().get(key));
+                                        return asked !== undefined ? props.renderAsk?.(asked) : null;
+                                    }}
+                                </Show>
+                            </div>
+                        </Show>
                         <Show when={index() === detailAfter()}>
                             <div
-                                ref={detailRef}
+                                ref={setDetailEl}
                                 id={props.detailId}
                                 class="ui-card-detail"
                                 role={props.detailLabel ? "region" : undefined}

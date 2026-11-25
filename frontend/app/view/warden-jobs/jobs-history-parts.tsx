@@ -155,19 +155,19 @@ export function HistoryActions(part: { props: JobHistoryProps; h: JobHistoryStat
                     busy={busy() === "run_now"}
                     disabled={props.pausedAll || busy() != null}
                     title={props.pausedAll ? t("jobs.history.allPaused") : t("jobs.history.runOnce")}
-                    onClick={() => void doAct("run_now")}
+                    onClick={() => doAct("run_now")}
                 >
                     {t("jobs.history.runNow")}
                 </Button>
                 <Show
                     when={paused()}
                     fallback={
-                        <Button density="compact" icon="pause" busy={busy() === "pause"} disabled={busy() != null} onClick={() => void doAct("pause")}>
+                        <Button density="compact" icon="pause" busy={busy() === "pause"} disabled={busy() != null} onClick={() => doAct("pause")}>
                             {t("jobs.history.pause")}
                         </Button>
                     }
                 >
-                    <Button density="compact" icon="play" busy={busy() === "resume"} disabled={busy() != null} onClick={() => void doAct("resume")}>
+                    <Button density="compact" icon="play" busy={busy() === "resume"} disabled={busy() != null} onClick={() => doAct("resume")}>
                         {t("jobs.history.resume")}
                     </Button>
                 </Show>
@@ -179,7 +179,7 @@ export function HistoryActions(part: { props: JobHistoryProps; h: JobHistoryStat
                         </Button>
                     }
                 >
-                    <Button density="compact" tone="danger" icon="trash" busy={busy() === "delete"} onClick={() => void doAct("delete")}>
+                    <Button density="compact" tone="danger" icon="trash" busy={busy() === "delete"} onClick={() => doAct("delete")}>
                         {t("jobs.history.deleteKeep")}
                     </Button>
                     <Button density="compact" tone="quiet" onClick={() => setConfirmDelete(false)}>
@@ -194,7 +194,7 @@ export function HistoryActions(part: { props: JobHistoryProps; h: JobHistoryStat
                 <Button density="compact" icon="clone" disabled={busy() != null} onClick={() => props.onClone()}>
                     {t("jobs.history.clone")}
                 </Button>
-                <Button density="compact" icon="vial" busy={busy() === "dryrun"} disabled={busy() != null} title={t("jobs.history.dryRunTip")} onClick={() => void doDryRun()}>
+                <Button density="compact" icon="vial" busy={busy() === "dryrun"} disabled={busy() != null} title={t("jobs.history.dryRunTip")} onClick={() => doDryRun()}>
                     {t("jobs.history.dryRun")}
                 </Button>
             </Show>
@@ -262,7 +262,7 @@ export function HistoryRuns(part: { props: JobHistoryProps; h: JobHistoryState }
                 </tbody>
             </table>
             <Show when={more()}>
-                <Button density="compact" tone="quiet" onClick={() => void loadOlder()}>
+                <Button density="compact" tone="quiet" onClick={() => loadOlder()}>
                     {t("jobs.history.older")}
                 </Button>
             </Show>

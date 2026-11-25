@@ -39,7 +39,7 @@ function CardActions(props: { children: JSX.Element }): JSX.Element {
 function DenyAll(props: { agent: string }): JSX.Element {
     return (
         <Show when={pendingFrom(props.agent) > 1}>
-            <Button tone="danger" density="compact" class="vault-request-card-deny-all" onClick={() => void denyAllFrom(props.agent)}>
+            <Button tone="danger" density="compact" class="vault-request-card-deny-all" onClick={() => denyAllFrom(props.agent)}>
                 Deny all {pendingFrom(props.agent)} from <Clipped text={props.agent} max={CLIP.name} />
             </Button>
         </Show>
@@ -96,7 +96,7 @@ export function VaultRequestCard(props: { request: VaultRequest } & PaneRequestP
                 <p class="warden-manager-dim">{"The agent gets the entry's name to use, never its value."}</p>
             </div>
             <div class="vault-request-card-actions">
-                <Button tone="quiet" onClick={() => void declineRequest(r.id).catch(() => {})}>
+                <Button tone="quiet" onClick={() => declineRequest(r.id).catch(() => {})}>
                     Not now
                 </Button>
                 <Button tone="accent" onClick={() => openPaneModal(r.block_id, RequestForm, { request: r }, { source: "vault-request-form", waits: false, operatorOnly: true })}>

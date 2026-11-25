@@ -832,14 +832,14 @@ export function ToolchainView(props: { zoom?: () => number } = {}): JSX.Element 
                     </Pill>
                 </Show>
                 <FilterInput class="ui-card-section-filter" value={s.filter()} onInput={s.setFilter} placeholder={t("toolchain.filter")} />
-                <Button tone="quiet" icon="rotate" busy={s.refreshing()} onClick={() => void refresh(s)}>
+                <Button tone="quiet" icon="rotate" busy={s.refreshing()} onClick={() => refresh(s)}>
                     {t("toolchain.refresh")}
                 </Button>
                 <Button
                     tone="quiet"
                     icon="arrow-up"
                     busy={s.latestLoading()}
-                    onClick={() => void checkLatestVersions(s)}
+                    onClick={() => checkLatestVersions(s)}
                     title={t("toolchain.checkLatestTip")}
                 >
                     {t("toolchain.checkLatest")}

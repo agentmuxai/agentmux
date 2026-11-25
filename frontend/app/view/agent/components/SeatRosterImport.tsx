@@ -163,7 +163,7 @@ export const SeatRosterImport = (props: SeatRosterImportProps): JSX.Element => {
                         tone="accent"
                         busy={applying()}
                         disabled={(plan()?.seats.length ?? 0) === 0}
-                        onClick={() => void apply()}
+                        onClick={() => apply()}
                     >
                         Apply {plan()?.seats.length ?? 0} {plan()?.seats.length === 1 ? "seat" : "seats"}
                     </Button>

@@ -63,7 +63,7 @@ export const ProviderUninstallInline = (props: ProviderUninstallInlineProps): JS
                         </Button>
                     }
                 >
-                    <Button tone="accent" onClick={() => void remove()} disabled={busy()}>
+                    <Button tone="accent" onClick={() => remove()} disabled={busy()}>
                         Remove
                     </Button>
                     <Button onClick={() => setAsking(false)} disabled={busy()}>

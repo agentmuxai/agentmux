@@ -92,7 +92,7 @@ export const AgentSessionNotices = (props: AgentSessionNoticesProps): JSX.Elemen
                         </span>
                         <Button
                             density="compact"
-                            onClick={() => void dismiss("session:was_interrupted")}
+                            onClick={() => dismiss("session:was_interrupted")}
                             title={t("session.notice.dismissResumeTip")}
                         >
                             {t("session.notice.dismiss")}
@@ -115,7 +115,7 @@ export const AgentSessionNotices = (props: AgentSessionNoticesProps): JSX.Elemen
                             density="compact"
                             disabled={archiveBusy()}
                             onClick={() =>
-                                void run(archiveBusy, setArchiveBusy, "archive", () =>
+                                run(archiveBusy, setArchiveBusy, "archive", () =>
                                     archiveSession(props.blockId)
                                 )
                             }
@@ -136,7 +136,7 @@ export const AgentSessionNotices = (props: AgentSessionNoticesProps): JSX.Elemen
                             density="compact"
                             disabled={restoreBusy()}
                             onClick={() =>
-                                void run(restoreBusy, setRestoreBusy, "restore", () =>
+                                run(restoreBusy, setRestoreBusy, "restore", () =>
                                     restoreSession(props.blockId)
                                 )
                             }
@@ -148,7 +148,7 @@ export const AgentSessionNotices = (props: AgentSessionNoticesProps): JSX.Elemen
                             density="compact"
                             disabled={exportBusy()}
                             onClick={() =>
-                                void run(exportBusy, setExportBusy, "export", () =>
+                                run(exportBusy, setExportBusy, "export", () =>
                                     exportSession(props.blockId)
                                 )
                             }

@@ -66,7 +66,7 @@ export function VaultVersionsDialog(props: { entry: VaultEntryInfo; onClose: () 
                                     </span>
                                     <Show when={stateNote(v.state)}>{(note) => <span class="warden-manager-dim">{note()}</span>}</Show>
                                     <Show when={v.state !== "pending"}>
-                                        <Button density="compact" icon="rotate-left" busy={busy() === v.seq} onClick={() => void restore(v.seq)}>
+                                        <Button density="compact" icon="rotate-left" busy={busy() === v.seq} onClick={() => restore(v.seq)}>
                                             {t("vault.versions.restore")}
                                         </Button>
                                     </Show>

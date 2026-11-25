@@ -87,7 +87,7 @@ const ReclaimLine = (props: { c: HistoryCompression; onChange: (r: HistoryReclai
                 <Show when={r().waiting_for}>
                     <span class="warden-manager-dim"> {t("historyStorage.reclaim.lastStart", { reason: r().waiting_for ?? "" })}</span>
                 </Show>{" "}
-                <Button tone="quiet" density="compact" busy={busy()} onClick={() => void act("cancel")}>
+                <Button tone="quiet" density="compact" busy={busy()} onClick={() => act("cancel")}>
                     {t("historyStorage.reclaim.cancel")}
                 </Button>
             </Show>
@@ -104,7 +104,7 @@ const ReclaimLine = (props: { c: HistoryCompression; onChange: (r: HistoryReclai
                     <span class="warden-manager-dim">
                         {t("historyStorage.reclaim.explain")}{" "}
                     </span>
-                    <Button tone="accent" density="compact" busy={busy()} onClick={() => void act("request")}>
+                    <Button tone="accent" density="compact" busy={busy()} onClick={() => act("request")}>
                         {t("historyStorage.reclaim.confirm")}
                     </Button>
                     <Button tone="quiet" density="compact" onClick={() => setConfirm(false)}>
@@ -204,7 +204,7 @@ export const HistoryStorage = (props: { visible: boolean }): JSX.Element => {
                         </Show>
                         <div class="warden-history-bar">
                             <span class="warden-manager-dim">{t("historyUsage.measured", { ago: measuredAgo(u().computed_at_ms, Date.now(), formatLocale()) })}</span>
-                            <Button tone="quiet" density="compact" busy={loading()} onClick={() => void load(true)}>
+                            <Button tone="quiet" density="compact" busy={loading()} onClick={() => load(true)}>
                                 {loading() ? t("historyUsage.measuring") : t("historyUsage.measureAgain")}
                             </Button>
                         </div>

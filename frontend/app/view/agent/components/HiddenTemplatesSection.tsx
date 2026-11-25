@@ -162,7 +162,7 @@ export const HiddenTemplatesSection = (): JSX.Element => {
                                             <Button
                                                 density="compact"
                                                 class="agent-picker-hidden-template-unhide-btn"
-                                                onClick={() => void handleUnhide(agent)}
+                                                onClick={() => handleUnhide(agent)}
                                                 data-testid={`agent-hidden-template-unhide-${agent.id}`}
                                                 aria-label={`Unhide template ${agent.name}`}
                                             >

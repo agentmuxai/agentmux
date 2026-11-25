@@ -80,7 +80,7 @@ function PinForm(props: { busy: boolean; disabled: boolean; onPin: (name: string
                 icon="plus"
                 busy={props.busy}
                 disabled={props.disabled || !name().trim() || !key().trim()}
-                onClick={() => void pin()}
+                onClick={() => pin()}
             >
                 {t("jobs.reporters.pin")}
             </Button>

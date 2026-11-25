@@ -565,7 +565,7 @@ function KeyEntry({ ctx }: { ctx: FormCtx }): JSX.Element {
                         tone="accent"
                         class="identity-btn identity-btn-primary"
                         disabled={key.keyBusy()}
-                        onClick={() => void submitKey(ctx, true)}
+                        onClick={() => submitKey(ctx, true)}
                     >
                         {key.keyBusy() ? t("accountForm.validating") : t("accountForm.validateSave")}
                     </Button>
@@ -573,7 +573,7 @@ function KeyEntry({ ctx }: { ctx: FormCtx }): JSX.Element {
                 <Button
                     class="identity-btn identity-btn-secondary"
                     disabled={key.keyBusy()}
-                    onClick={() => void submitKey(ctx, false)}
+                    onClick={() => submitKey(ctx, false)}
                     title={t("accountForm.saveWithoutValidatingTitle")}
                 >
                     {t("accountForm.saveWithoutValidating")}

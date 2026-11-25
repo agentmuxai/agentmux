@@ -107,7 +107,7 @@ function FileTreeToolbar(props: FileTreeToolbarProps): JSX.Element {
                 icon="arrows-rotate"
                 label="Refresh tree"
                 density="compact"
-                onClick={() => void props.model.refresh()}
+                onClick={() => props.model.refresh()}
             />
         </div>
     );

@@ -146,7 +146,7 @@ export function VaultRevealDialog(props: { entry: VaultEntryInfo; onClose: () =>
                                     disabled={!available}
                                     busy={busy() === `copy:${p.name}`}
                                     title={available ? undefined : confirmUnavailable()}
-                                    onClick={() => void copy(p.name)}
+                                    onClick={() => copy(p.name)}
                                 >
                                     {t("vault.reveal.copy")}
                                 </Button>
