@@ -123,6 +123,21 @@ fn launch_env_edits() -> Vec<(String, Option<String>)> {
 /// (`crates/launcher/src/data_dir.rs`).
 pub const NESTING_SENTINEL_KEY: &str = "AGENTMUX";
 
+/// Names a container platform puts in a process's environment that lead to the container's own cloud credentials (the path of
+/// its credentials endpoint is the whole capability to ask for them) or to the container's metadata. Nothing srv starts for an
+/// agent or a pane has a use for them, and a process that held one could act as the container's role, so none crosses into a
+/// pane or an external program. The container should not start srv with them at all (a process's initial environment is
+/// readable by every process of the same user); this is the second line, for what srv starts.
+pub const CONTAINER_CREDENTIAL_ENV: &[&str] = &[
+    "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+    "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+    "ECS_CONTAINER_METADATA_URI",
+    "ECS_CONTAINER_METADATA_URI_V4",
+    "ECS_AGENT_URI",
+];
+
 /// Keys in *this process's* environment that must not cross into a pane.
 ///
 /// Computed from the live environment rather than a hardcoded list, so a
@@ -137,6 +152,9 @@ pub fn keys_to_strip() -> Vec<String> {
 
 /// Is `key` an AgentMux variable that must not be inherited by a pane?
 pub fn should_strip(key: &str) -> bool {
+    if CONTAINER_CREDENTIAL_ENV.contains(&key) {
+        return true;
+    }
     if !key.starts_with("AGENTMUX") {
         return false;
     }
@@ -244,11 +262,11 @@ pub fn sanitize_external_pty_command(c: &mut portable_pty::CommandBuilder) {
     c.env(NESTING_SENTINEL_KEY, "1");
 }
 
-/// Every `AGENTMUX*` key in this process's environment except the sentinel.
+/// Every `AGENTMUX*` key in this process's environment except the sentinel, and the container's credential names.
 fn all_agentmux_keys() -> Vec<String> {
     std::env::vars_os()
         .filter_map(|(k, _)| k.into_string().ok())
-        .filter(|k| k.starts_with("AGENTMUX") && k != NESTING_SENTINEL_KEY)
+        .filter(|k| (k.starts_with("AGENTMUX") && k != NESTING_SENTINEL_KEY) || CONTAINER_CREDENTIAL_ENV.contains(&k.as_str()))
         .collect()
 }
 
@@ -942,6 +960,31 @@ mod tests {
         assert_eq!(envs["AGENTMUX_VERSION"], version, "the plain version: log pointer files are named by it");
         assert!(envs["AGENTMUX_BUILD"].starts_with(version));
         assert!(!envs.contains_key("AGENTMUX_CHANNEL"), "the data channel itself still never reaches a pane");
+    }
+
+    /// A container's credential variables are not an agent's or a pane's to hold, in a pane's environment or an external program's.
+    #[test]
+    fn a_containers_credential_variables_are_stripped_from_panes_and_external_programs() {
+        for key in CONTAINER_CREDENTIAL_ENV {
+            assert!(should_strip(key), "{key} is stripped from a pane");
+            std::env::set_var(key, "/v2/credentials/test-only");
+        }
+        assert!(keys_to_strip().iter().any(|k| k == "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"));
+        let external = all_agentmux_keys();
+        for key in CONTAINER_CREDENTIAL_ENV {
+            assert!(external.iter().any(|k| k == key), "{key} is stripped from an external program");
+        }
+        let mut cmd = std::process::Command::new("noop");
+        for key in CONTAINER_CREDENTIAL_ENV {
+            cmd.env(key, "inherited");
+        }
+        sanitize_external_std_command(&mut cmd);
+        for key in CONTAINER_CREDENTIAL_ENV {
+            assert_eq!(cmd.get_envs().find(|(k, _)| *k == std::ffi::OsStr::new(key)).map(|(_, v)| v), Some(None), "{key} is removed from the command");
+        }
+        for key in CONTAINER_CREDENTIAL_ENV {
+            std::env::remove_var(key);
+        }
     }
 
     #[test]
