@@ -1117,10 +1117,10 @@ pub(crate) async fn handle_ui_browser_handoff(
             "Browser's handoff action needs a browser pane: pass the `pane` its open action returned".to_string(),
         );
     }
-    let reason: String = req.reason.trim().chars().take(300).collect();
-    if reason.is_empty() {
-        return err_response(StatusCode::BAD_REQUEST, "say what the user should do (`reason`)".to_string());
-    }
+    let reason = match crate::server::browser_handoff_reason::handoff_reason(req.reason.trim()) {
+        Ok(r) => r,
+        Err(why) => return err_response(StatusCode::BAD_REQUEST, why),
+    };
     // Only the host relays the user's Done or Cancel (`/api/v1/host/browser_attention`).
     // With none connected nobody can answer: refuse now rather than hold the
     // agent's tools on this pane until the timeout.
