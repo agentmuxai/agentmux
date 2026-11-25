@@ -15,15 +15,15 @@ const [changes, setChanges] = createSignal<AgentChange[]>([]);
 const markChangeSeen = vi.fn<(seq: number) => Promise<unknown>>();
 const markAllChangesSeen = vi.fn<() => Promise<unknown>>();
 const undoChange = vi.fn<(seq: number) => Promise<unknown>>();
-const acceptProposal = vi.fn<(id: string, field: string) => Promise<unknown>>();
-const dismissProposal = vi.fn<(id: string, field: string) => Promise<unknown>>();
+const acceptProposal = vi.fn<(id: string, field: string, at: number) => Promise<unknown>>();
+const dismissProposal = vi.fn<(id: string, field: string, at: number) => Promise<unknown>>();
 vi.mock("./vault-store", () => ({
     vaultChanges: () => changes(),
     markChangeSeen: (seq: number) => markChangeSeen(seq),
     markAllChangesSeen: () => markAllChangesSeen(),
     undoChange: (seq: number) => undoChange(seq),
-    acceptProposal: (id: string, field: string) => acceptProposal(id, field),
-    dismissProposal: (id: string, field: string) => dismissProposal(id, field),
+    acceptProposal: (id: string, field: string, at: number) => acceptProposal(id, field, at),
+    dismissProposal: (id: string, field: string, at: number) => dismissProposal(id, field, at),
 }));
 
 import { markOf, stripText, VaultChangesStrip } from "./vault-changes";
@@ -52,7 +52,7 @@ const proposal = change({
     action: "proposed a change",
     target: "field site",
     undo: "",
-    proposal: { field: "site", value: "https://intranet2.example.com", current: "https://intranet.example.com" },
+    proposal: { field: "site", at: 1700000000000, value: "https://intranet2.example.com", current: "https://intranet.example.com" },
 });
 const replaced = change({ seq: 2, kind: "new value", action: "captured", entry_label: "GitHub", entry_id: "api-key-github", undo: "restore value", replaces_yours: true });
 const added = change({ seq: 1 });
@@ -110,10 +110,10 @@ describe("Changes by agents", () => {
         expect(names(p)).toEqual(["Accept", "Dismiss"]);
         expect(names(r)).toEqual(["Undo", "Seen"]);
         fireEvent.click(screen.getByRole("button", { name: "Accept" }));
-        await waitFor(() => expect(acceptProposal).toHaveBeenCalledWith("login-intranet", "site"));
+        await waitFor(() => expect(acceptProposal).toHaveBeenCalledWith("login-intranet", "site", 1700000000000));
         await waitFor(() => expect((screen.getByRole("button", { name: "Dismiss" }) as HTMLButtonElement).disabled).toBe(false));
         fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
-        await waitFor(() => expect(dismissProposal).toHaveBeenCalledWith("login-intranet", "site"));
+        await waitFor(() => expect(dismissProposal).toHaveBeenCalledWith("login-intranet", "site", 1700000000000));
         await waitFor(() => expect((screen.getByRole("button", { name: "Undo" }) as HTMLButtonElement).disabled).toBe(false));
         fireEvent.click(screen.getByRole("button", { name: "Undo" }));
         await waitFor(() => expect(undoChange).toHaveBeenCalledWith(2));

@@ -74,10 +74,10 @@ function ChangeRow(props: { change: AgentChange; busy: boolean; run: (what: () =
                         </>
                     }
                 >
-                    <Button density="compact" disabled={props.busy} onClick={() => props.run(() => acceptProposal(c().entry_id, c().proposal!.field))}>
+                    <Button density="compact" disabled={props.busy} onClick={() => props.run(() => acceptProposal(c().entry_id, c().proposal!.field, c().proposal!.at))}>
                         {t("vault.changes.accept")}
                     </Button>
-                    <Button density="compact" disabled={props.busy} onClick={() => props.run(() => dismissProposal(c().entry_id, c().proposal!.field))}>
+                    <Button density="compact" disabled={props.busy} onClick={() => props.run(() => dismissProposal(c().entry_id, c().proposal!.field, c().proposal!.at))}>
                         {t("vault.changes.dismiss")}
                     </Button>
                 </Show>

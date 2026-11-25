@@ -37,6 +37,9 @@ const ACTIONS: [&str; 5] = ["generated", "imported", "captured", inspect::CHANGE
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ProposalInfo {
     pub field: String,
+    /// When it was proposed: what Accept and Dismiss name, so a replacement is never applied in its place.
+    #[ts(type = "number")]
+    pub at: i64,
     pub value: String,
     pub current: String,
 }
@@ -151,7 +154,7 @@ fn change_of(store: &Store, rows: &[VaultActivityRow], row: &VaultActivityRow, s
         })?;
         let current = signins_field(&entry, &field);
         change.kind = "proposal".into();
-        change.proposal = Some(ProposalInfo { field, value: waiting.value, current });
+        change.proposal = Some(ProposalInfo { field, at: waiting.at, value: waiting.value, current });
     } else if added {
         change.kind = "added".into();
         change.undo = "remove".into();

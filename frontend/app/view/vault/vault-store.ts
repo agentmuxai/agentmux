@@ -149,8 +149,8 @@ export const markAllChangesSeen = () => thenRefresh(call<unknown>("changes_seen_
 /** Puts back what a change replaced (its earlier value or details), or removes the entry it added. */
 export const undoChange = (seq: number) => thenRefresh(call<unknown>("change_undo", { seq }));
 /** Applies an agent's proposed site, realm or proxy for a login it did not make, or drops it. */
-export const acceptProposal = (id: string, field: string) => thenRefresh(call<unknown>("proposal_accept", { id, field }));
-export const dismissProposal = (id: string, field: string) => thenRefresh(call<unknown>("proposal_dismiss", { id, field }));
+export const acceptProposal = (id: string, field: string, at: number) => thenRefresh(call<unknown>("proposal_accept", { id, field, at }));
+export const dismissProposal = (id: string, field: string, at: number) => thenRefresh(call<unknown>("proposal_dismiss", { id, field, at }));
 /** One entry's changes by agents, the ones marked seen too: what its History offers to undo. */
 export const loadEntryChanges = (id: string) => call<{ changes: AgentChange[] }>("agent_changes", { id, include_seen: true }).then((r) => r.changes);
 

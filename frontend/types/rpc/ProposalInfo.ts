@@ -3,4 +3,8 @@
 /**
  * A pending proposal's field, what is proposed and what the login has now.
  */
-export type ProposalInfo = { field: string, value: string, current: string, };
+export type ProposalInfo = { field: string, 
+/**
+ * When it was proposed: what Accept and Dismiss name, so a replacement is never applied in its place.
+ */
+at: number, value: string, current: string, };

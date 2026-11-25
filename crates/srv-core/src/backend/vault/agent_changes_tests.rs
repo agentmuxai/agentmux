@@ -140,10 +140,14 @@ fn a_proposal_is_listed_first_with_what_it_would_change_and_leaves_when_accepted
     assert_eq!((p.value.as_str(), p.current.as_str(), site.entry_id.as_str()), ("https://intranet2.example.com", "https://intranet.example.com", login.as_str()));
     assert_eq!(site.undo, "", "a proposal has Accept and Dismiss, not Undo");
 
+    // A proposal the agent replaced after it was shown is refused, and the replacement stays waiting.
+    let shown = site.proposal.as_ref().unwrap().at;
+    assert_eq!(proposals::accept_shown(&s, &login, "site", Some(shown - 1)).unwrap_err(), proposals::REPLACED);
+    assert_eq!(proposals::dismiss_shown(&s, &login, "realm", Some(0)).unwrap_err(), proposals::REPLACED);
     proposals::dismiss(&s, &login, "realm").unwrap();
     let rest = agent_changes::list(&s, None, false).unwrap();
     assert_eq!(rest.iter().filter(|c| c.kind == "proposal").count(), 1, "a dismissed proposal is gone from the list");
-    proposals::accept(&s, &login, "site").unwrap();
+    proposals::accept_shown(&s, &login, "site", Some(shown)).unwrap();
     assert!(agent_changes::list(&s, None, false).unwrap().iter().all(|c| c.kind != "proposal"));
 }
 

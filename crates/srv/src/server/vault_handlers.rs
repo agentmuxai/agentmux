@@ -273,10 +273,14 @@ fn entry_ops(state: &AppState, op: &str, body: &Value) -> Result<(Value, bool), 
             Ok((json!({}), true))
         }
         "proposal_accept" => {
-            vault::proposals::accept(store, &s("id"), &s("field"))?;
+            let shown = body.get("at").and_then(Value::as_i64).ok_or("accept needs the time of the proposal that was shown")?;
+            vault::proposals::accept_shown(store, &s("id"), &s("field"), Some(shown))?;
             Ok((json!({}), true))
         }
-        "proposal_dismiss" => Ok((json!({ "dismissed": vault::proposals::dismiss(store, &s("id"), &s("field"))? }), true)),
+        "proposal_dismiss" => {
+            let shown = body.get("at").and_then(Value::as_i64).ok_or("dismiss needs the time of the proposal that was shown")?;
+            Ok((json!({ "dismissed": vault::proposals::dismiss_shown(store, &s("id"), &s("field"), Some(shown))? }), true))
+        }
         _ => {
             let seq = body.get("seq").and_then(Value::as_i64).ok_or("restore needs the version's seq")?;
             vault::versions::restore(store, &s("id"), seq)?;
