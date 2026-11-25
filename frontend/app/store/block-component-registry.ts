@@ -236,7 +236,7 @@ export async function openOrFocusPaneIdByView(
     }
     // Loaded here, not at the top: reveal-block reaches back into this module and the store.
     const { revealOrOpen, outcomeBlockId } = await import("@/app/util/reveal-or-open");
-    const { showBlockInPane, findOpenBlockByView, revealBlock, isUnplacedInShownTab } = await import("@/app/util/reveal-block");
+    const { showBlockInPane, findOpenBlockByView, revealBlock, isUnplacedInShownTab, tellRevealFailure } = await import("@/app/util/reveal-block");
     const { paneScope } = await import("./widget-singleton");
     const { emitPaneLocate } = await import("@/app/util/pane-locate");
     const { appRevealDeps } = await import("@/app/util/reveal-app-scope");
@@ -285,7 +285,9 @@ export async function openOrFocusPaneIdByView(
             isUnplaced: isUnplacedInShownTab,
             setMeta: setBlockMeta,
             // This window only: the pane is in one of its tabs.
-            revealInWindow: (blockId) => revealBlock(blockId, { source: "widget", localOnly: true }),
+            // Quiet: a block in no pane is replaced, and `tell` speaks only when the click ends in a failure.
+            revealInWindow: (blockId) => revealBlock(blockId, { source: "widget", localOnly: true, quiet: true }),
+            tell: (blockId, failure) => tellRevealFailure(blockId, failure, "widget"),
             create: createVisibleBlock,
             app: appRevealDeps,
         }
