@@ -105,6 +105,7 @@ mod attachments;
 pub(crate) mod local_proof;
 pub(crate) mod confirm_peer;
 pub(crate) mod local_session;
+pub(crate) mod local_session_file;
 pub(crate) mod local_session_routes;
 pub(crate) mod peer_process;
 mod ui_cache;

@@ -224,6 +224,18 @@ function identityAndEnvApi(platform: NodeJS.Platform) {
             }
             window.location.replace("/auth/enter");
         },
+        signOutEverywhere: async () => {
+            const token = window.sessionStorage.getItem("amx-session") ?? "";
+            // Every browser signed in to this srv ends, this one too, and srv forgets them across a restart as well.
+            const resp = await fetch("/auth/signout-all", { method: "POST", headers: { "X-AM-Session": token }, credentials: "same-origin" });
+            if (!resp.ok) throw new Error("the browsers' sign-ins were not ended: srv did not accept the request");
+            try {
+                window.sessionStorage.removeItem("amx-session");
+            } catch {
+                // The session is already ended on srv's side; the token is no use without it.
+            }
+            window.location.replace("/auth/enter");
+        },
         reloadWindow: () => window.location.reload(),
         getIsDev: () => false,
         getCursorPoint: () => lastPointer,

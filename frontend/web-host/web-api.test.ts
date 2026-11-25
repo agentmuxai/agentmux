@@ -111,3 +111,47 @@ describe("signing out of this browser", () => {
         }
     });
 });
+
+describe("signing out of every browser", () => {
+    const stubLocation = () => {
+        const replace = vi.fn();
+        const real = window.location;
+        Object.defineProperty(window, "location", { configurable: true, value: { ...real, replace } });
+        return { replace, restore: () => Object.defineProperty(window, "location", { configurable: true, value: real }) };
+    };
+
+    it("asks srv to end every session with this tab's token, forgets the token and goes to the sign-in page", async () => {
+        window.sessionStorage.setItem("amx-session", "tab-token");
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+        vi.stubGlobal("fetch", fetchMock);
+        const loc = stubLocation();
+        try {
+            await buildWebApi().signOutEverywhere?.();
+            expect(fetchMock).toHaveBeenCalledWith("/auth/signout-all", {
+                method: "POST",
+                headers: { "X-AM-Session": "tab-token" },
+                credentials: "same-origin",
+            });
+            expect(window.sessionStorage.getItem("amx-session")).toBeNull();
+            expect(loc.replace).toHaveBeenCalledWith("/auth/enter");
+        } finally {
+            loc.restore();
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it("keeps the token and says so when srv did not end the sessions", async () => {
+        window.sessionStorage.setItem("amx-session", "tab-token");
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
+        const loc = stubLocation();
+        try {
+            await expect(buildWebApi().signOutEverywhere?.()).rejects.toThrow("not ended");
+            expect(window.sessionStorage.getItem("amx-session")).toBe("tab-token");
+            expect(loc.replace).not.toHaveBeenCalled();
+        } finally {
+            loc.restore();
+            vi.unstubAllGlobals();
+            window.sessionStorage.clear();
+        }
+    });
+});
