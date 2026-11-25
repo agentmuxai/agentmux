@@ -20,10 +20,12 @@ export const NODE_H = 36;
 /** One line of a node's tasks (atlas.scss `.atlas-node__task`), and the room between the node's two lines and the first. */
 export const TASK_LINE_H = 14;
 export const TASKS_GAP = 3;
+/** Under the last line, so its letters do not touch the node's bottom border. */
+export const TASKS_PAD_BOTTOM = 3;
 
 /** The height of a node with `lines` lines of tasks under its name and state: `NODE_H` with none. */
 export function nodeHeight(lines: number): number {
-    return lines > 0 ? NODE_H + TASKS_GAP + lines * TASK_LINE_H : NODE_H;
+    return lines > 0 ? NODE_H + TASKS_GAP + lines * TASK_LINE_H + TASKS_PAD_BOTTOM : NODE_H;
 }
 /** How far the dashed frame of a container agent reaches past its node (atlas.scss `.atlas-node--container`). */
 export const CONTAINER_FRAME_OUT = 7;

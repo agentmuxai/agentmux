@@ -14,7 +14,7 @@ import { join } from "node:path";
 import * as sass from "sass";
 import { beforeAll, describe, expect, it } from "vitest";
 import { findBrowser, measureInBrowser, NO_BROWSER_HINT } from "@/app/view/agent/components/layout-browser";
-import { NODE_H, nodeHeight, TASK_LINE_H } from "./atlas-layout";
+import { NODE_H, nodeHeight, TASK_LINE_H, TASKS_PAD_BOTTOM } from "./atlas-layout";
 
 const BROWSER = findBrowser();
 if (!BROWSER) console.info(NO_BROWSER_HINT);
@@ -186,6 +186,8 @@ describe.skipIf(!BROWSER)("Atlas node tasks", () => {
             for (const h of m.lineHeights) expect(h, `a line at zoom ${z}`).toBeCloseTo(TASK_LINE_H, 0);
             m.lineTops.slice(1).forEach((top, i) => expect(top - m.lineTops[i], `line ${i + 1} at zoom ${z}`).toBeCloseTo(TASK_LINE_H, 0));
             expect(m.lineTops[0] + TASK_LINE_H * 4, `bottom at zoom ${z}`).toBeLessThanOrEqual(m.height + 2);
+            // A little room under the last line: its letters do not touch the node's bottom border.
+            expect(m.height - (m.lineTops[0] + TASK_LINE_H * 4), `room under the last line at zoom ${z}`).toBeGreaterThanOrEqual(TASKS_PAD_BOTTOM - 1);
         }
     });
 

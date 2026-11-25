@@ -16,6 +16,7 @@ import {
     nodeHeight,
     TASK_LINE_H,
     TASKS_GAP,
+    TASKS_PAD_BOTTOM,
     ROW_MAX_W,
     type AtlasLayout,
     type PaneShape,
@@ -508,8 +509,8 @@ describe("nodes that list tasks are taller", () => {
 
     it("is a node's height with a gap and a line for each task, and the usual one with none", () => {
         expect(nodeHeight(0)).toBe(NODE_H);
-        expect(nodeHeight(1)).toBe(NODE_H + TASKS_GAP + TASK_LINE_H);
-        expect(nodeHeight(4)).toBe(NODE_H + TASKS_GAP + 4 * TASK_LINE_H);
+        expect(nodeHeight(1)).toBe(NODE_H + TASKS_GAP + TASK_LINE_H + TASKS_PAD_BOTTOM);
+        expect(nodeHeight(4)).toBe(NODE_H + TASKS_GAP + 4 * TASK_LINE_H + TASKS_PAD_BOTTOM);
     });
 
     it("is the same picture, to the pixel, when no node is taller", () => {

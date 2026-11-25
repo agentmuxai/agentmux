@@ -239,8 +239,8 @@ The same tasks are on the node itself, under its name and state, so the map can 
   map's background, so it starts no pan and no selection box, and a link inside it inherits the map's
   `user-select: none`, so a press on one starts no text selection and the window's selection guard
   (pane-select.ts) has nothing to confine. Enter and Space on a link are the link's.
-- **Taller nodes.** A node with tasks is `nodeHeight(lines)` tall (atlas-layout.ts: the usual height, a gap and 14 px a
-  line); a row of the layout is as tall as its tallest node, and a level starts a gap under the level above it. With no
+- **Taller nodes.** A node with tasks is `nodeHeight(lines)` tall (atlas-layout.ts: the usual height, a gap, 14 px a
+  line and a little under the last); a row of the layout is as tall as its tallest node, and a level starts a gap under the level above it. With no
   task the layout is the same, to the pixel, as before. The lines from a lead, the messages and the rings follow each
   node's own height.
 - **When the map is small.** A node lists its tasks from a scale of 0.8, where its 10 px lines are 8 px and a number
