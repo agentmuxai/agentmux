@@ -69,7 +69,7 @@ fn host_agents(store: &Store) -> Result<Vec<(String, String)>, String> {
         .agent_def_list()
         .map_err(|e| format!("rotate_host_agent_keys: read agents: {e}"))?
         .into_iter()
-        .filter(|def| def.agent_type != "container" && !def.slug.trim().is_empty())
+        .filter(|def| !def.runtime().is_container() && !def.slug.trim().is_empty())
         .map(|def| (def.id, def.slug))
         .collect();
     agents.sort();
