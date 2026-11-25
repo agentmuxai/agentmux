@@ -7000,6 +7000,10 @@ async fn an_attributed_history_search_finds_a_session_in_a_bundle_created_after_
 async fn m4c2d_the_senders_uid_is_audited_and_carried() {
     let _counters = M4_ACTOR_COUNTERS.lock().await;
     let state = test_state();
+    // The bus send names its sender, and the token must be that agent's.
+    let mut def = crate::backend::storage::agents::test_agent_def("uid-m4c2d", "M4c2d Sender", "claude", "agent", 1, "");
+    def.slug = "m4c2d-sender".to_string();
+    state.mstore.agent_def_insert(&mut def).unwrap();
     state.mstore.attach_token_index().unwrap();
     let token = state.mstore.agent_token_ensure("uid-m4c2d").unwrap();
 
@@ -7039,7 +7043,7 @@ async fn m4c2d_the_senders_uid_is_audited_and_carried() {
         messages.iter().find(|m| m.payload == payload).map(|m| m.from_uid.clone())
     };
     assert_eq!(uid_of("attributed").as_deref(), Some("uid-m4c2d"), "{messages:?}");
-    assert_eq!(uid_of("unattributed").as_deref(), Some(""), "{messages:?}");
+    assert_eq!(uid_of("unattributed"), None, "a send with no token queues nothing: {messages:?}");
 }
 
 // ---- identity M4c-3: cron fires in process ----
