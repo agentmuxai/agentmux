@@ -11,7 +11,7 @@
  */
 
 import { join } from "node:path";
-import { build } from "esbuild";
+import { build } from "vite";
 import { beforeAll, describe, expect, it } from "vitest";
 import { findBrowser, NO_BROWSER_HINT } from "./layout-browser";
 import { withInputPage, type InputPage } from "./layout-browser-input";
@@ -27,28 +27,29 @@ const OVER_HEADER = { x: 300, y: 112 };
 
 /** The real hand-off, with the app's settings store and Solid's cleanup stood in for: neither matters to a wheel. */
 async function bundleHandoff(): Promise<string> {
-    const entry = join(__dirname, "scroll-handoff.ts");
+    const stubs: Record<string, string> = {
+        "stub:global": "export const getSettingsKeyAtom = () => () => undefined;",
+        "stub:solid": "export const onCleanup = () => {};",
+    };
     const out = await build({
-        entryPoints: [entry],
-        bundle: true,
-        write: false,
-        format: "iife",
-        globalName: "Handoff",
-        platform: "browser",
+        configFile: false,
         logLevel: "silent",
         plugins: [
             {
                 name: "stand-ins",
-                setup(b) {
-                    b.onResolve({ filter: /^@\/app\/store\/global$/ }, () => ({ path: "global", namespace: "stub" }));
-                    b.onResolve({ filter: /^solid-js$/ }, () => ({ path: "solid", namespace: "stub" }));
-                    b.onLoad({ filter: /^global$/, namespace: "stub" }, () => ({ contents: "export const getSettingsKeyAtom = () => () => undefined;" }));
-                    b.onLoad({ filter: /^solid$/, namespace: "stub" }, () => ({ contents: "export const onCleanup = () => {};" }));
-                },
+                resolveId: (id) => (id === "@/app/store/global" ? "stub:global" : id === "solid-js" ? "stub:solid" : null),
+                load: (id) => stubs[id] ?? null,
             },
         ],
+        build: {
+            write: false,
+            minify: false,
+            lib: { entry: join(__dirname, "scroll-handoff.ts"), name: "Handoff", formats: ["iife"], fileName: "handoff" },
+        },
     });
-    return out.outputFiles[0].text;
+    const results = Array.isArray(out) ? out : [out];
+    const first = (results[0] as { output: { type: string; code?: string }[] }).output.find((o) => o.type === "chunk");
+    return first!.code!;
 }
 
 /** `log`: the panel fits and its log scrolls inside it. `panel`: the log has no cap and the panel itself scrolls. */
