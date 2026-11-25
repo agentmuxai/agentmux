@@ -107,6 +107,8 @@ for (const pane of document.querySelectorAll('.pane')) {
       lineTops: lines.map((l) => unit(l.top - rect.top)),
       overflowX: node.scrollWidth - node.clientWidth,
       linkCut: link ? link.scrollWidth > link.clientWidth + 1 : null,
+      titleStart: link ? (() => { const r = document.createRange(); r.selectNodeContents(link); return unit(r.getBoundingClientRect().left - link.getBoundingClientRect().left); })() : null,
+      linkDisplay: link ? getComputedStyle(link).display : null,
       linkRight: link ? unit(link.getBoundingClientRect().right - rect.left) : null,
       linkHeight: link ? unit(link.getBoundingClientRect().height) : null,
       prLeft: pr ? unit(pr.getBoundingClientRect().left - rect.left) : null,
@@ -129,6 +131,8 @@ interface Measured {
     lineTops: number[];
     overflowX: number;
     linkCut: boolean | null;
+    titleStart: number | null;
+    linkDisplay: string | null;
     linkRight: number | null;
     linkHeight: number | null;
     prLeft: number | null;
@@ -189,6 +193,9 @@ describe.skipIf(!BROWSER)("Atlas node tasks", () => {
         for (const z of ZOOMS) {
             const m = at("full", z);
             expect(m.linkCut, `title cut at zoom ${z}`).toBe(true);
+            // The start of the title is what shows, cut at its end with an ellipsis (a flex box centres what overflows and draws no ellipsis).
+            expect(m.titleStart!, `title starts at the link's left edge at zoom ${z}`).toBeGreaterThanOrEqual(-0.5);
+            expect(m.linkDisplay, `link is a block of text at zoom ${z}`).not.toMatch(/flex/);
             expect(m.prWidthWhole).toBe(true);
             expect(m.linkRight!, `title ends before the pull request at zoom ${z}`).toBeLessThanOrEqual(m.prLeft! + 1);
             expect(m.prRight!, `pull request inside the node at zoom ${z}`).toBeLessThanOrEqual(m.nodeWidth);

@@ -563,7 +563,10 @@
     box-shadow: inset 0 0 0 1px var(--atlas-task-stage, var(--secondary-text-color));
 }
 
-.atlas-node__task {
+.atlas-node__task.ui-button {
+    // A block of text, not the kit button's flex box: a flex box centres what overflows (the title's start would be cut off
+    // on the left) and draws no ellipsis.
+    display: block;
     flex: 1 1 auto;
     overflow: hidden;
     text-align: left;
