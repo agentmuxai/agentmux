@@ -10,6 +10,7 @@
  */
 
 import { createEffect, createSignal, on, onCleanup, onMount, type Accessor } from "solid-js";
+import { afterSplitterDrag, splitterDragActive } from "@/app/block/pane-body-hold";
 import {
     ACTIVE_FLOOR_PX,
     ACTIVE_NO_ICON_FLOOR_PX,
@@ -198,6 +199,8 @@ export function createStripSteps(opts: {
         }
     };
     const schedule = () => {
+        // Not while a pane border is dragged: the strip's room changes every frame, and each look reads the layout. One look at the end.
+        if (splitterDragActive()) return afterSplitterDrag(schedule);
         if (frame === undefined) frame = requestAnimationFrame(measure);
     };
 
