@@ -159,6 +159,8 @@ fn taken_count(taken: &[Result<Taken, MemberError>]) -> usize {
 struct Ask {
     have: u64,
     offered: Vec<Entry>,
+    /// Only the end of a long chain was asked for, so an entry may follow one that is not held.
+    windowed: bool,
 }
 
 /// Learns the membership entries each side lacks. A removal of this machine ends the round.
@@ -167,16 +169,20 @@ fn exchange_members<S: Session, P: PeerCalls>(s: &mut S, peer: &mut P, collectio
         let ask = lent(s, |ctx| {
             let chain = ctx.chains.get(collection).ok_or(Ended::NotHere)?;
             let len = chain.entries.len();
-            // The chains are the same up to the shorter one's head only when they are as long as each other with the same
-            // head, or the peer says nothing of its head. Otherwise each may hold its own entry at the last place, or at
-            // any place the longer one has gone on from: one place back, each side is offered the other's entry beside
-            // its own and settles it. An entry both hold is only a duplicate.
+            // The chains are the same only when they are as long as each other with the same head, or the peer says nothing
+            // of its head. When the heads are known to differ, the peer may hold a different entry anywhere the chains
+            // differ (a fork that one side has since gone on from), so each side is given the other's chain from half the
+            // cap back from where the shorter ends: held entries are only duplicates, and a fork is settled where it is. Later
+            // asks (the head is no longer known) go on from where the peer is.
             let same = peer_n as usize == len && chain.entries.last().map(Entry::hash) == peer_head;
-            let back = usize::from(len > 1 && peer_head.is_some() && !same);
-            let offered = chain.entries.iter().skip((peer_n as usize).saturating_sub(back)).take(ops::MAX_ENTRIES).cloned().collect();
-            Ok::<_, Ended>(Ask { have: (len - back) as u64, offered })
+            let divergent = !same && peer_head.is_some();
+            let start = (len.min(peer_n as usize)).saturating_sub(ops::MAX_ENTRIES / 2);
+            let (have, skip) = if divergent { (start, start) } else { (len, peer_n as usize) };
+            let offered = chain.entries.iter().skip(skip).take(ops::MAX_ENTRIES).cloned().collect();
+            Ok::<_, Ended>(Ask { have: have as u64, offered, windowed: divergent && start > 0 })
         })??;
         peer_head = None;
+        let windowed = ask.windowed;
         let ans = peer.members(&MembersReq { collection: collection.to_string(), have_n: ask.have, offered: ask.offered }).map_err(stop)?;
         if ans.entries.len() > ops::MAX_ENTRIES {
             return Err(Ended::Distrusted("a membership answer over the cap".into()));
@@ -189,8 +195,10 @@ fn exchange_members<S: Session, P: PeerCalls>(s: &mut S, peer: &mut P, collectio
             for entry in ans.entries.iter().cloned() {
                 match chain.take(collection, entry) {
                     Ok(t) => taken.push(Ok(t)),
-                    // An entry beside this machine's head that loses to it is a result, as `ops::members` records it.
+                    // An entry on a branch that loses is a result, as `ops::members` records it. So is one that follows no entry
+                    // held, when only the end of a long chain was asked for: its start is not here to join to.
                     Err(MemberError::ForkLost) => taken.push(Err(MemberError::ForkLost)),
+                    Err(MemberError::DoesNotExtend) if windowed => taken.push(Err(MemberError::DoesNotExtend)),
                     Err(e) => {
                         unsound = Some(e);
                         break;

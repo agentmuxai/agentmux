@@ -67,8 +67,8 @@ pub(super) fn save_in(tx: &Connection, collection: &str, chain: &Chain) -> rusql
     if let Some(last) = chain.entries.last() {
         tx.execute("INSERT INTO db_sync_chain_head (collection, n, head) VALUES (?1, ?2, ?3)", params![collection, chain.entries.len() as i64, last.hash()])?;
     }
-    for (slot, entries) in [("chain", chain.entries.as_slice()), ("fork", chain.forks())] {
-        for (i, e) in entries.iter().enumerate() {
+    for (slot, entries) in [("chain", chain.entries.iter().collect::<Vec<_>>()), ("fork", chain.side().collect::<Vec<_>>())] {
+        for (i, e) in entries.into_iter().enumerate() {
             let text = serde_json::to_string(e).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
             tx.execute("INSERT INTO db_sync_chain (collection, slot, idx, entry) VALUES (?1, ?2, ?3, ?4)", params![collection, slot, i as i64, text])?;
         }
