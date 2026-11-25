@@ -528,7 +528,7 @@ export class LayoutModel {
                 const activeDrag = this.activeDrag();
                 const showOverlay = this.showOverlay();
                 if (this.displayContainerRef.current) {
-                    const displayBoundingRect = this.displayContainerRef.current.getBoundingClientRect();
+                    const displayBoundingRect = this.heldContainerRect ?? this.displayContainerRef.current.getBoundingClientRect();
                     // Park with a LARGE constant floor, never purely
                     // height-derived: when this memo recomputes while the tab
                     // is hidden (display:none — e.g. a spring-switched
@@ -780,8 +780,33 @@ export class LayoutModel {
     private observedContainerSize: Dimensions | undefined = undefined;
 
     getBoundingRect: () => Dimensions = () => {
-        return this.observedContainerSize ?? this.splitterDragContainerSize() ?? getBoundingRectImpl(this);
+        const held = this.heldContainerRect;
+        return (
+            this.observedContainerSize ??
+            this.splitterDragContainerSize() ??
+            (held ? { top: 0, left: 0, width: held.width, height: held.height } : undefined) ??
+            getBoundingRectImpl(this)
+        );
     };
+
+    /**
+     * The container's rect as measured when a pane drag began or first reached this layout. A drag does not change the
+     * container, and the drop's own writes (the ghost and the guides coming down, the dragged pane's frame) made each later
+     * measure lay the whole page out again inside the drop's listener (22 to 143 ms in the field). Held until the drop's
+     * handlers are done (`releaseContainerRect`), or the container resizes.
+     */
+    private heldContainerRect: { top: number; left: number; width: number; height: number } | undefined = undefined;
+
+    /** Measure the container once and use that for every read until `releaseContainerRect`. Not while one is already held. */
+    holdContainerRect(): void {
+        if (this.heldContainerRect) return;
+        const rect = this.displayContainerRef.current?.getBoundingClientRect();
+        if (rect) this.heldContainerRect = { top: rect.top, left: rect.left, width: rect.width, height: rect.height };
+    }
+
+    releaseContainerRect(): void {
+        this.heldContainerRect = undefined;
+    }
 
     /**
      * The container's size as measured when the splitter drag in progress began. A drag does not
@@ -1037,6 +1062,8 @@ export class LayoutModel {
      * Callback that is invoked when the TileLayout container is being resized.
      */
     onContainerResize = (_rect?: DOMRectReadOnly, entry?: ResizeObserverEntry) => {
+        // The container changed: what a drag held of it is out of date.
+        this.heldContainerRect = undefined;
         const box = entry?.borderBoxSize?.[0];
         this.observedContainerSize = box ? { top: 0, left: 0, width: box.inlineSize, height: box.blockSize } : undefined;
         // The container changed size in the middle of a splitter drag: the drag goes on from the new measure.
