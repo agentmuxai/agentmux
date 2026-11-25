@@ -207,6 +207,19 @@ It needs no change to the branch protection. A failing step fails the frontend j
 aggregate). Where the step does not run it is skipped inside a job that reports as usual, so no check is left
 pending.
 
+### R12 — A documentation file a Rust test reads is not documentation-only (added 2026-11-24)
+
+Two files under `docs/specs/` are inputs of Rust tests: the app API manifest (`app-api-manifest.json`, which three crates
+check their routes against) and the redaction vectors (`fixtures/redaction-vectors.json`, shared with the frontend).
+`docs/**` counts as documentation, so a change to only one of them set `rust` false: the Rust job was skipped on the pull
+request and, since the merge queue applies the same rule to each entry's diff (`SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19.md`
+Phase 9), in the queue too; only the push to main would have run the tests that read them.
+
+`RUST_READS_DOCS` (`scripts/ci-classify-changes.mjs`) lists them, and `isDocsOnlyPath` treats a listed file like a CI
+file (R3): not documentation, so the Rust legs run, and with them the frontend legs (conservative: the classifier does
+not know whether a frontend test also reads them). A test scans the crates for a file of `docs/` named within a few
+lines of `CARGO_MANIFEST_DIR` or a `repo_root()` call and fails when one is not listed, as R8's test does for `frontend/`.
+
 ## 3. Design
 
 ```
