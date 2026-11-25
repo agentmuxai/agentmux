@@ -41,6 +41,14 @@ fn only_a_verified_sender_with_files_that_are_not_withheld_waits() {
     assert!(!peer_files_wait(&InjectionRequest { request_id: None, ..lan_with_files(Some(true)) }, false));
 }
 
+/// Whether a delivered message carries the files' part, in either wording the replay gives it: "1 file sent with this
+/// message couldn't be delivered: …" when the process-wide attachment store has not been set up, "<sender> sent 1 file
+/// with this message. - notes.txt …" once an earlier test in the same process has set it up (`cargo test`, the nightly;
+/// nextest gives each test a process of its own).
+fn has_files_part(message: &str) -> bool {
+    message.contains("1 file") && message.contains("with this message")
+}
+
 /// A state with an agent whose last run hit its limit (or a sign-in refusal), and what its replay delivers.
 struct Limited {
     state: AppState,
@@ -109,7 +117,7 @@ async fn a_lan_message_with_files_to_a_limited_agent_is_held_with_its_files_and_
     let delivered = t.deliveries.lock().unwrap().clone();
     assert_eq!(delivered.len(), 1);
     assert!(delivered[0].contains("MSGID=req-files"), "{}", delivered[0]);
-    assert!(delivered[0].contains("1 file sent with this message"), "the replay builds the files' part of the message: {}", delivered[0]);
+    assert!(has_files_part(&delivered[0]), "the replay builds the files' part of the message: {}", delivered[0]);
     crate::backend::blockcontroller::delete_controller(&t.block.oid);
 }
 
@@ -170,7 +178,7 @@ async fn a_wan_message_with_files_to_a_limited_agent_is_held_with_them() {
     t.recovers();
     let outcomes = crate::server::jekt_held::replay_pass(&t.state).await;
     assert!(outcomes.iter().any(|(id, _)| id == "req-wan-files"), "{outcomes:?}");
-    assert!(t.deliveries.lock().unwrap()[0].contains("1 file sent with this message"));
+    assert!(has_files_part(&t.deliveries.lock().unwrap()[0]), "{}", t.deliveries.lock().unwrap()[0]);
     crate::backend::blockcontroller::delete_controller(&t.block.oid);
 }
 

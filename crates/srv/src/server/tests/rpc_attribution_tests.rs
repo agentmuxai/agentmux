@@ -62,12 +62,16 @@ async fn every_registered_command_is_decided_and_every_decided_command_is_regist
 async fn an_agents_call_is_recorded_as_that_agent_with_its_target() {
     let (engine, mut rx) = connection();
     engine.set_rpc_context(RpcContext { agent_id: "agent-attr".into(), ..Default::default() });
-    let reqid = call(&engine, &mut rx, "agent.kill-tree", json!({"blockid": "no-such-pane", "agentid": "victim"})).await;
+    // A pane id of its own: the reactive handler is process-wide, and a test that registers an agent on a shared
+    // id such as "no-such-pane" (http_pty_shell_tests) would otherwise name that agent as the target when every
+    // test of the crate runs in one process (`cargo test`, the nightly) rather than one per process (nextest).
+    let pane = format!("no-such-pane-{}", uuid::Uuid::new_v4());
+    let reqid = call(&engine, &mut rx, "agent.kill-tree", json!({"blockid": pane, "agentid": "victim"})).await;
     let lines = recorded(&reqid);
     assert_eq!(lines.len(), 1, "{lines:?}");
     let l = &lines[0];
     assert_eq!(l.source_agent.as_deref(), Some("agent:agent-attr"));
-    assert_eq!((l.outcome.as_deref(), l.target_agent.as_str(), l.block_id.as_str()), (Some("agent.kill-tree"), "victim", "no-such-pane"));
+    assert_eq!((l.outcome.as_deref(), l.target_agent.as_str(), l.block_id.as_str()), (Some("agent.kill-tree"), "victim", pane.as_str()));
 }
 
 #[tokio::test]
