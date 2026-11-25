@@ -4,7 +4,7 @@
 
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BEHIND_FRAME_MS, DEFAULT_DRAG_REFRESH_MS, DRAG_PAUSE_MS, dragRefreshMs, dragRefreshTick, splitterDragActive, usePaneBodyHold } from "./pane-body-hold";
+import { BEHIND_FRAME_MS, DEFAULT_DRAG_REFRESH_MS, STARVED_ROUNDS, DRAG_PAUSE_MS, dragRefreshMs, dragRefreshTick, splitterDragActive, usePaneBodyHold } from "./pane-body-hold";
 
 const KEY = "agentmux:pane-drag-refresh-ms";
 
@@ -154,8 +154,11 @@ describe("usePaneBodyHold during a drag", () => {
             const [dragging, setDragging] = createSignal(true);
             const { hold, dispose } = mount(dragging, f.el);
             f.size.w = 450;
-            vi.advanceTimersByTime(DEFAULT_DRAG_REFRESH_MS * 3);
+            vi.advanceTimersByTime(DEFAULT_DRAG_REFRESH_MS * (STARVED_ROUNDS - 1));
             expect(hold()).toEqual({ width: 400, height: 300 });
+            // ... but not for ever: a display that only ever draws late still catches up, at a bounded wait.
+            vi.advanceTimersByTime(DEFAULT_DRAG_REFRESH_MS * 2);
+            expect(hold()).toEqual({ width: 450, height: 300 });
             setDragging(false);
             dispose();
             spy.mockRestore();

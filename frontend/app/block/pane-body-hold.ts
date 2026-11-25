@@ -56,6 +56,8 @@ const REFRESH_KEY = "agentmux:pane-drag-refresh-ms";
 export const DRAG_PAUSE_MS = 80;
 /** A frame that began this long, in ms, after the one before it means the page is behind: no body catches up in it. */
 export const BEHIND_FRAME_MS = 28;
+/** Unless the bodies have waited this many paces: a page that is always behind is not left held until release. */
+export const STARVED_ROUNDS = 3;
 
 export function dragRefreshMs(): number {
     try {
@@ -99,7 +101,9 @@ function clockStep(t: number): void {
     const behind = lastFrameAt > 0 && t - lastFrameAt > BEHIND_FRAME_MS;
     lastFrameAt = t;
     const pace = dragRefreshMs();
-    if (!behind && pace > 0) {
+    // A page that is only ever late (a display that draws 30 times a second) still catches up, at a bounded wait.
+    const starved = t - lastRoundAt >= pace * STARVED_ROUNDS;
+    if ((!behind || starved) && pace > 0) {
         if (!round && (t - lastMoveAt >= DRAG_PAUSE_MS || t - lastRoundAt >= pace)) round = [...catchUps];
         if (round) {
             // The bodies that have nothing to do cost nothing: the frame is spent on the first that lays out.
