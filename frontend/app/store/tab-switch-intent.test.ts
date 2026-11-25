@@ -43,6 +43,8 @@ vi.mock("./tab-reveal", () => ({
     scheduleRevealLift: () => reveal.lifts++,
     logUngatedReveal: () => {},
     tabWasShown: () => reveal.shown,
+    tabCanSwapAtClick: () => reveal.shown,
+    whenGateLifted: (fn: () => void) => fn(),
 }));
 vi.mock("./focusManager", () => ({ focusManager: { refocusNode: () => {} } }));
 
