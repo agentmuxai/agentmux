@@ -51,9 +51,13 @@ export interface PaneSections {
 
 export interface Theme {
     mode: "dark" | "light";
-    /** CSS custom properties: --am-bg, --am-fg, --am-muted, --am-accent, --am-border,
-     *  --am-error, --am-warning, --am-success, --am-font, --am-font-mono, --am-radius,
-     *  --am-pane-hue. */
+    /** CSS custom properties: --am-bg, --am-fg, --am-fg-faint, --am-muted, --am-accent,
+     *  --am-border, --am-surface-raised, --am-error, --am-warning, --am-success,
+     *  --am-info, --am-font, --am-font-mono, --am-radius, --am-pane-hue. In a pane the
+     *  user gave a backdrop, the colors are the backdrop's and `mode` is its side; they
+     *  are sent again (the `theme` event) when it changes. `--am-fg` and `--am-muted` are
+     *  for text (4.5:1 or better on a backdrop); `--am-fg-faint` is held to 3:1, for hints,
+     *  placeholders and large text. */
     vars: Record<string, string>;
 }
 

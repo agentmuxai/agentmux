@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -218,15 +216,11 @@ describe("MessagesPanel", () => {
         expect(el.querySelector(".messages-header-button")?.textContent).toBe("3");
     });
 
-    it("stays reachable in a narrow header: the class the fit rules spare, drawn in the header when the tab strip is hidden", () => {
+    it("is a row of the pane's menu, with the envelope for its icon, and no header class", () => {
         mount([jekt()]);
-        expect(messagesHeaderButtons("p1")[0].className).toContain("block-frame-end-keep");
-        const rules = readFileSync(resolve(__dirname, "../../../mixins.scss"), "utf8");
-        // The tab strip, and the selected tab's buttons with it, is hidden at these tiers; the kept button then shows in the header.
-        for (const tier of ["tabs", "trim", "min"]) {
-            expect(rules).toContain(`&[data-fit="${tier}"] .block-frame-end-kept`);
-        }
-        expect(rules).toContain(".block-frame-end-icons > :not(.block-frame-default-close):not(.block-frame-end-keep)");
+        const [decl] = messagesHeaderButtons("p1");
+        expect(decl.menuIcon).toBe("envelope");
+        expect(decl.className).toBeUndefined();
     });
 
     it("takes the button away when the pane goes", () => {
@@ -243,12 +237,14 @@ describe("MessagesPanel", () => {
         expect(panel.classList.contains("ui-side-panel--docked")).toBe(false);
     });
 
-    it("closes from its close button, and on Esc, and puts the keyboard back on the header button", async () => {
+    it("closes from its close button, and on Esc, and puts the keyboard back on the composer", async () => {
         const frame = document.createElement("div");
         frame.setAttribute("data-blockid", "p1");
+        const composer = document.createElement("textarea");
+        composer.className = "agent-input";
+        frame.appendChild(composer);
         document.body.appendChild(frame);
         const { controls, view } = mount([jekt()]);
-        const button = render(() => <DeclIconButton decl={messagesHeaderButtons("p1")[0]} />, { container: frame });
         fireEvent.click(screen.getByLabelText("Close"));
         expect(controls.state().open).toBe(false);
         expect(view.container.querySelector(".messages-panel")).toBeNull();
@@ -259,8 +255,7 @@ describe("MessagesPanel", () => {
         fireEvent.keyDown(panelButton, { key: "Escape" });
         expect(controls.state().open).toBe(false);
         await Promise.resolve();
-        expect(document.activeElement).toBe(button.container.querySelector(".messages-toggle"));
-        button.unmount();
+        expect(document.activeElement).toBe(composer);
         frame.remove();
     });
 

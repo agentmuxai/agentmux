@@ -819,7 +819,7 @@ pub(crate) async fn handle_close_pane(
 
     // No arguments: the agent closing itself. That is `QuitSelf` without its
     // quote (§7): its own tab only, siblings keep running, and only after the
-    // user's 15 s window. Closing the whole pane takes an explicit block_id.
+    // user's 15 s window. An explicit block_id closes that tab, and the pane with it only when it was the last.
     if req.block_id.is_none() {
         let reason = req.reason.clone().unwrap_or_default();
         return quit_self(&state, &verified_own_block_id, &caller_agent_id, "ClosePane", reason.trim(), "");
@@ -830,11 +830,26 @@ pub(crate) async fn handle_close_pane(
     (code, Json(body)).into_response()
 }
 
-/// Close the pane that holds `target_block_id` on behalf of `caller_agent_id`:
-/// it waits 30 s for its user to keep it (§6.5) and answers 202 with the
-/// pending request. That includes a pane the caller is in: closing it ends
-/// the caller (which only `QuitSelf` may do without the user's window) and
-/// every other tab stacked in it. Audited as `pane.close`. Shared by ClosePane
+/// Whether closing `target` takes its pane with it (nothing else is left in it); `None` when there is no such block.
+async fn closes_its_pane(state: &AppState, target: &str) -> Option<bool> {
+    let s = state.srv_state.lock().await;
+    let b = s.blocks.get(target)?;
+    let stack = s
+        .tabs
+        .get(&b.tab_id)
+        .and_then(|t| t.rootnode.as_ref())
+        .and_then(|root| crate::backend::layout::find_leaf_containing_block(root, target))
+        .and_then(|leaf| leaf.data.as_ref())
+        .map(crate::backend::layout::leaf_members)
+        .unwrap_or_default();
+    Some(stack.iter().all(|m| m == target || !s.blocks.contains_key(m)))
+}
+
+/// Close the tab `target_block_id` on behalf of `caller_agent_id`: it waits 30 s for its
+/// user to keep it (§6.5) and answers 202 with the pending request, which names the tab and
+/// says whether the pane closes with it (`pane_closes`: it was the pane's last tab). The
+/// pane's other tabs stay. That includes a tab the caller is in: closing it ends the caller
+/// (which only `QuitSelf` may do without the user's window). Audited as `pane.close`. Shared by ClosePane
 /// and RunCommand's `pane:close` (`server/ui_shortcuts.rs`), so both carry the
 /// same protection. `via` names the tool in the pending request and the audit.
 pub(crate) async fn close_pane_as(
@@ -860,44 +875,30 @@ pub(crate) async fn close_pane_as(
         .map(|a| a.agent_id)
         .unwrap_or_else(|| target_block_id.clone());
 
-    // The whole pane the target lives in — every member of its tab stack, not
-    // just the target (#3202; SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md §4.1).
-    let pane_block_ids = {
-        let s = state.srv_state.lock().await;
-        match s.blocks.get(&target_block_id) {
-            Some(b) => s
-                .tabs
-                .get(&b.tab_id)
-                .and_then(|t| t.rootnode.as_ref())
-                .and_then(|root| {
-                    crate::backend::layout::find_leaf_containing_block(root, &target_block_id)
-                })
-                .and_then(|leaf| leaf.data.as_ref())
-                .map(crate::backend::layout::leaf_members)
-                .unwrap_or_else(|| vec![target_block_id.clone()]),
-            None => {
-                let err = format!("block not found: {target_block_id}");
-                let request_id = uuid::Uuid::new_v4().to_string();
-                state.reactive_handler.log_fleet_action_audit(
-                    Some(&caller_agent_id), &target_agent, &target_block_id,
-                    "pane.close", false, Some(&err), &request_id, reason,
-                );
-                return (StatusCode::NOT_FOUND, json!({ "error": err }));
-            }
-        }
+    // The target alone closes, and its pane goes with it only when nothing else is left in it (the
+    // close saga prunes just the closed tab otherwise).
+    let Some(pane_closes) = closes_its_pane(state, &target_block_id).await else {
+        let err = format!("block not found: {target_block_id}");
+        let request_id = uuid::Uuid::new_v4().to_string();
+        state.reactive_handler.log_fleet_action_audit(
+            Some(&caller_agent_id), &target_agent, &target_block_id,
+            "pane.close", false, Some(&err), &request_id, reason,
+        );
+        return (StatusCode::NOT_FOUND, json!({ "error": err }));
     };
+    let pane_block_ids = vec![target_block_id.clone()];
 
-    // A pane that holds an agent is closed by closing the agent, with `Stop
+    // A tab that is an agent is closed by closing the agent, with `Stop
     // agents`: one way to stop an agent, and only that agent's tab goes
     // (docs/specs/SPEC_STOP_AN_AGENT_ONE_WAY_AND_SHUTDOWN_TOAST_2026_10_23.md
     // §3.2). Refused here, not in the tool, so `UI run_command pane:close` has
-    // no way round it.
+    // no way round it. A non-agent tab beside an agent closes without it.
     let agents: Vec<&String> =
         pane_block_ids.iter().filter(|b| crate::sagas::orphan_reaper::is_agent_block(state, b)).collect();
     if !agents.is_empty() {
         let names = agents.iter().map(|b| b.as_str()).collect::<Vec<_>>().join(", ");
         let err = format!(
-            "not a pane to close this way: it holds an agent (block {names}). Use Stop with action \"agents\" and targets [{names}], which closes the agent's tab and leaves the others in the pane running"
+            "not a tab to close this way: it is an agent (block {names}). Use Stop with action \"agents\" and targets [{names}], which closes the agent's tab and leaves the others in the pane running"
         );
         let request_id = uuid::Uuid::new_v4().to_string();
         state.reactive_handler.log_fleet_action_audit(
@@ -907,9 +908,8 @@ pub(crate) async fn close_pane_as(
         return (StatusCode::CONFLICT, json!({ "error": err }));
     }
 
-    // Its user has 30 s to keep it (§6.5; 10 s for a browser pane, which holds no conversation), whoever's pane it
-    // is. A pane the caller is in is no exception: closing it would end the caller without QuitSelf's check, and
-    // any other agent stacked in it with no window.
+    // Its user has 30 s to keep it (§6.5; 10 s for a browser pane, which holds no conversation), whoever's tab it
+    // is. A tab the caller is in is no exception: closing it would end the caller without QuitSelf's check.
     let reason = reason.unwrap_or_default().to_string();
     let window = crate::sagas::pending_shutdown::close_window(state, &pane_block_ids);
     let pending = crate::sagas::pending_shutdown::request_within(
@@ -935,7 +935,10 @@ pub(crate) async fn close_pane_as(
         &pending.request_id,
         Some(&format!("{}: {reason}", crate::sagas::pending_shutdown::audit_note(state, &pending, &caller_agent_id, via))),
     );
-    (StatusCode::ACCEPTED, pending_body(&pending))
+    let mut body = pending_body(&pending);
+    body["tab"] = json!(target_block_id);
+    body["pane_closes"] = json!(pane_closes);
+    (StatusCode::ACCEPTED, body)
 }
 
 #[cfg(test)]
@@ -1162,10 +1165,10 @@ mod close_pane_tests {
         serde_json::from_slice(&bytes).unwrap()
     }
 
-    /// #3202: closing a pane through the MCP tool closes every tab in it, not
-    /// just the targeted block — even when the target is a background tab.
+    /// Stop pane names a tab: that tab closes, even when it is a background one, and the pane's
+    /// other tab stays. The pane goes only with its last tab.
     #[tokio::test]
-    async fn close_closes_every_tab_in_the_target_s_pane() {
+    async fn close_closes_just_the_named_tab_and_the_pane_with_its_last() {
         let state = test_state();
         let (caller_tab, caller_block) = seed(&state).await;
         let caller_id = format!("close-stack-caller-{}", uuid::Uuid::new_v4());
@@ -1204,23 +1207,46 @@ mod close_pane_tests {
         )
         .await;
 
-        let resp = handle_close_pane(
-            axum::extract::State(state.clone()),
-            None,
-            axum::Json(ClosePaneRequest { auth, block_id: Some(background.clone()), reason: None }),
-        )
-        .await
-        .into_response();
-        assert_eq!(resp.status(), axum::http::StatusCode::ACCEPTED);
-        let request_id = body_json(resp).await["request_id"].as_str().unwrap().to_string();
-        crate::sagas::pending_shutdown::expire_now(&request_id);
-        crate::sagas::pending_shutdown::settled(&request_id).await;
+        let close = |block: String| {
+            let (state, auth) = (state.clone(), auth.clone());
+            async move {
+                let resp = handle_close_pane(
+                    axum::extract::State(state),
+                    None,
+                    axum::Json(ClosePaneRequest { auth, block_id: Some(block), reason: None }),
+                )
+                .await
+                .into_response();
+                assert_eq!(resp.status(), axum::http::StatusCode::ACCEPTED);
+                let body = body_json(resp).await;
+                let request_id = body["request_id"].as_str().unwrap().to_string();
+                crate::sagas::pending_shutdown::expire_now(&request_id);
+                crate::sagas::pending_shutdown::settled(&request_id).await;
+                body
+            }
+        };
 
+        let queued = |state: &AppState| {
+            let tab = state.mstore.must_get::<crate::backend::obj::Tab>(&tab_id).unwrap();
+            let layout = state.mstore.must_get::<crate::backend::obj::LayoutState>(&tab.layoutstate).unwrap();
+            layout.pendingbackendactions.unwrap_or_default().into_iter().filter(|a| a.actiontype == "delete").map(|a| a.blockid).collect::<Vec<_>>()
+        };
+        let first = close(background.clone()).await;
+        assert_eq!(queued(&state), vec![background.clone()], "the window is told to drop the closed tab of the kept pane");
+        assert_eq!((first["tab"].as_str(), first["pane_closes"].as_bool()), (Some(background.as_str()), Some(false)));
+        {
+            let s = state.srv_state.lock().await;
+            assert!(!s.blocks.contains_key(&background), "the named tab closed");
+            assert!(s.blocks.contains_key(&visible), "the pane's other tab stays");
+            assert!(s.tabs[&tab_id].rootnode.is_some(), "and so does the pane");
+        }
+
+        let last = close(visible.clone()).await;
+        assert_eq!(last["pane_closes"].as_bool(), Some(true), "the last tab says the pane goes with it");
         let s = state.srv_state.lock().await;
-        assert!(!s.blocks.contains_key(&visible), "visible tab closed with its pane");
-        assert!(!s.blocks.contains_key(&background), "background tab closed with its pane");
+        assert!(!s.blocks.contains_key(&visible));
         assert!(s.tabs[&tab_id].block_ids.is_empty());
-        assert!(s.tabs[&tab_id].rootnode.is_none(), "pane removed");
+        assert!(s.tabs[&tab_id].rootnode.is_none(), "pane removed with its last tab");
         assert!(s.blocks.contains_key(&caller_block), "caller untouched");
     }
 

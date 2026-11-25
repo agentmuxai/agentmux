@@ -1,9 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
-//! `POST /api/v1/ui/browser/close`: backs Browser's `close`. An agent closes a browser pane it drives, when
-//! its job is done. The pane goes through the same check every other agent browser call does
+//! `POST /api/v1/ui/browser/close`: backs Browser's `close`. An agent closes a browser tab it drives, when
+//! its job is done. The tab goes through the same check every other agent browser call does
 //! (`target_block_id`: it must still be the agent's, not taken over, paused or another agent's), then the
-//! shared close path, where the user has 30 s to keep it.
+//! shared close path, where the user has a few seconds to keep it. Only that tab closes: the pane's other
+//! tabs, the person's or another agent's, stay, and the pane goes with it only when it was the last tab.
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -24,30 +25,14 @@ pub(crate) async fn handle_ui_browser_close(
     };
     let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, Some(pane)) {
         Ok(b) => b,
+        Err((StatusCode::FORBIDDEN, e)) => {
+            return err_response(StatusCode::FORBIDDEN, format!("{e}. Browser close closes only tabs you opened with Browser open; for this one, ask the user to close it"));
+        }
         Err((code, e)) => return err_response(code, e),
     };
-    // The shared close takes the whole pane, every tab stacked in it: each must be one the agent may close.
-    let members = {
-        let s = state.srv_state.lock().await;
-        let leaf = s.blocks.get(&block_id).and_then(|b| s.tabs.get(&b.tab_id)).and_then(|t| t.rootnode.as_ref());
-        leaf.and_then(|root| crate::backend::layout::find_leaf_containing_block(root, &block_id))
-            .and_then(|leaf| leaf.data.as_ref())
-            .map(crate::backend::layout::leaf_members)
-            .unwrap_or_default()
-    };
-    let allowed = |m: &str| target_block_id(&state, caller.as_deref(), &req.auth, Some(m)).is_ok();
-    if let Some(other) = first_not_theirs(&members, &block_id, allowed) {
-        let why = format!("pane {block_id:?} also holds the tab {other:?}, which is not a browser pane you own; it would be closed with it. Ask the user to close it");
-        return err_response(StatusCode::CONFLICT, why);
-    }
-    let reason = "the agent is done with its browser pane";
+    let reason = "the agent is done with its browser tab";
     let (code, body) = crate::server::app_api::pane::close_pane_as(&state, &req.auth.agent_id, &block_id, Some(reason), "Browser close").await;
     (code, Json(body)).into_response()
-}
-
-/// The first tab stacked with `target` that the agent may not close.
-fn first_not_theirs<'a>(members: &'a [String], target: &str, allowed: impl Fn(&str) -> bool) -> Option<&'a String> {
-    members.iter().find(|m| m.as_str() != target && !allowed(m))
 }
 
 #[cfg(test)]
@@ -90,16 +75,6 @@ mod tests {
         handle_ui_browser_close(State(state.clone()), None, Json(req)).await.into_response().status()
     }
 
-    #[test]
-    fn a_pane_stacked_with_a_tab_that_is_not_the_agents_is_not_closed() {
-        let stack = ["mine".to_string(), "users".to_string(), "mine-too".to_string()];
-        let mine = |m: &str| m.starts_with("mine");
-        assert_eq!(first_not_theirs(&stack, "mine", mine).map(String::as_str), Some("users"));
-        assert_eq!(first_not_theirs(&stack[..1], "mine", mine), None, "alone in its pane");
-        assert_eq!(first_not_theirs(&[stack[0].clone(), stack[2].clone()], "mine", mine), None, "all the agent's");
-        assert_eq!(first_not_theirs(&[], "mine", mine), None, "no layout to read: the target alone");
-    }
-
     #[tokio::test]
     async fn close_needs_a_pane_and_only_closes_a_browser_pane_the_agent_drives() {
         let state = test_state();
@@ -117,5 +92,97 @@ mod tests {
         }
         let s = state.srv_state.lock().await;
         assert!(s.blocks.contains_key(&own) && s.blocks.contains_key(&other), "nothing was closed");
+    }
+
+    /// A browser block in `tab`, opened by `owner` (recorded as Browser open does).
+    async fn browser_block(state: &AppState, tab: &str, owner: &str) -> String {
+        let meta = serde_json::json!({ "view": "browser", crate::server::browser_owner::OWNER_META_KEY: owner });
+        let evs = apply(state, Command::CreateBlock { tab_id: tab.to_string(), meta }).await;
+        let id = evs.iter().find_map(|e| if let Event::BlockCreated { block_id, .. } = e { Some(block_id.clone()) } else { None }).unwrap();
+        crate::server::browser_owner::record(&id, owner);
+        id
+    }
+
+    /// One pane holding `stack` as tabs, the first showing.
+    async fn stack_in_one_pane(state: &AppState, tab: &str, stack: &[&str]) {
+        let tree = agentmux_common::LayoutNode {
+            id: "leaf".into(),
+            data: Some(agentmux_common::LayoutNodeData {
+                block_id: stack[0].to_string(),
+                block_stack: stack.iter().map(|b| b.to_string()).collect(),
+                active_block_id: stack[0].to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        apply(state, Command::LayoutSetTree { tab_id: tab.to_string(), new_tree: Some(tree), correlation_id: String::new(), slices: None }).await;
+    }
+
+    async fn close_and_settle(state: &AppState, agent: &str, pane: &str) -> serde_json::Value {
+        let resp = handle_ui_browser_close(State(state.clone()), None, Json(UiBrowserCloseRequest { auth: auth(state, agent), pane: Some(pane.to_string()) }))
+            .await
+            .into_response();
+        assert_eq!(resp.status(), StatusCode::ACCEPTED);
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let id = body["request_id"].as_str().unwrap().to_string();
+        crate::sagas::pending_shutdown::expire_now(&id);
+        crate::sagas::pending_shutdown::settled(&id).await;
+        body
+    }
+
+    #[tokio::test]
+    async fn an_agents_tab_closes_alone_when_the_pane_holds_a_tab_that_is_not_its_own() {
+        let state = test_state();
+        let (tab, caller, persons) = two_blocks(&state).await;
+        let agent = format!("close-tab-{}", uuid::Uuid::new_v4());
+        state.reactive_handler.register_agent(&agent, &caller, Some(&tab)).unwrap();
+        let mine = browser_block(&state, &tab, &agent).await;
+        stack_in_one_pane(&state, &tab, &[&mine, &persons]).await;
+
+        let body = close_and_settle(&state, &agent, &mine).await;
+
+        assert_eq!(body["tab"], mine.as_str(), "the answer names the tab");
+        assert_eq!(body["pane_closes"], false, "the person's tab keeps the pane");
+        let s = state.srv_state.lock().await;
+        assert!(!s.blocks.contains_key(&mine), "its own tab closed");
+        assert!(s.blocks.contains_key(&persons), "the other tab is untouched");
+        assert!(s.tabs[&tab].rootnode.is_some(), "the pane stays");
+    }
+
+    #[tokio::test]
+    async fn the_last_tab_takes_its_pane_with_it() {
+        let state = test_state();
+        let (tab, caller, _) = two_blocks(&state).await;
+        let agent = format!("close-last-{}", uuid::Uuid::new_v4());
+        state.reactive_handler.register_agent(&agent, &caller, Some(&tab)).unwrap();
+        let mine = browser_block(&state, &tab, &agent).await;
+        stack_in_one_pane(&state, &tab, &[&mine]).await;
+
+        let body = close_and_settle(&state, &agent, &mine).await;
+
+        assert_eq!(body["pane_closes"], true);
+        let s = state.srv_state.lock().await;
+        assert!(!s.blocks.contains_key(&mine));
+        assert!(s.tabs[&tab].rootnode.is_none(), "the pane went with its last tab");
+    }
+
+    #[tokio::test]
+    async fn a_tab_another_agent_opened_is_refused_and_stays() {
+        let state = test_state();
+        let (tab, caller, _) = two_blocks(&state).await;
+        let agent = format!("close-mine-{}", uuid::Uuid::new_v4());
+        state.reactive_handler.register_agent(&agent, &caller, Some(&tab)).unwrap();
+        let mine = browser_block(&state, &tab, &agent).await;
+        let theirs = browser_block(&state, &tab, "somebody-else").await;
+        stack_in_one_pane(&state, &tab, &[&mine, &theirs]).await;
+
+        let resp = handle_ui_browser_close(State(state.clone()), None, Json(UiBrowserCloseRequest { auth: auth(&state, &agent), pane: Some(theirs.clone()) }))
+            .await
+            .into_response();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        assert!(String::from_utf8_lossy(&bytes).contains("not a browser pane you own"));
+        assert!(state.srv_state.lock().await.blocks.contains_key(&theirs));
     }
 }

@@ -20,6 +20,8 @@ const hub = vi.hoisted(() => ({
     closed: [] as string[],
     // The saga takes the pane out of the floater's tab, as srv does.
     emptiesTab: false,
+    // What the backend holds for the floater's tab when this window's copy of it is behind (the event stream has not delivered the emptied tab yet).
+    backendTab: undefined as unknown,
     // What the guard read at each step (the saga calls and the focus call).
     guardAt: [] as string[],
 }));
@@ -44,6 +46,8 @@ vi.mock("@/app/store/mos", () => ({
     makeORef: (t: string, id: string) => `${t}:${id}`,
     reloadMuxObject: async (oref: string) => {
         hub.reloads.push(oref);
+        if (oref === "tab:ftab" && hub.backendTab === "throw") throw new Error("backend down");
+        if (oref === "tab:ftab" && hub.backendTab !== undefined) return hub.backendTab;
         const o = hub.objects.get(oref);
         if (!o) throw new Error("missing " + oref);
         return o;
@@ -86,6 +90,7 @@ beforeEach(() => {
     hub.focused = [];
     hub.closed = [];
     hub.emptiesTab = false;
+    hub.backendTab = undefined;
     hub.guardAt = [];
     hub.guard = redockInProgress;
     setLabel("floating-1");
@@ -165,6 +170,29 @@ describe("redockThisFloater", () => {
         expect(hub.closed).toEqual(["floating-1"]);
         expect(redockInProgress()).toBe(false);
         log.mockRestore();
+    });
+    // The emptied tab comes on the event stream, the redock's reply on another connection: the reply can win.
+    it("closes the floater at once when the redock returned before this window's copy of the tab emptied", async () => {
+        hub.backendTab = { blockids: [] };
+        const log = vi.spyOn(console, "log").mockImplementation(() => {});
+        expect(await redockThisFloater()).toBe(true);
+        expect(hub.reloads).toContain("tab:ftab");
+        expect(hub.closed).toEqual(["floating-1"]);
+        log.mockRestore();
+    });
+    it("leaves the floater when this window's copy of the tab is behind but the backend still holds a pane", async () => {
+        hub.backendTab = { blockids: ["b2"] };
+        const log = vi.spyOn(console, "log").mockImplementation(() => {});
+        expect(await redockThisFloater()).toBe(true);
+        expect(hub.closed).toEqual([]);
+        log.mockRestore();
+    });
+    it("leaves the floater when the tab cannot be read back", async () => {
+        hub.backendTab = "throw";
+        const err = vi.spyOn(console, "error").mockImplementation(() => {});
+        expect(await redockThisFloater()).toBe(true);
+        expect(hub.closed).toEqual([]);
+        err.mockRestore();
     });
     it("leaves the floater when a pane is still in it, and when the redock failed", async () => {
         expect(await redockThisFloater()).toBe(true);

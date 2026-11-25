@@ -144,8 +144,8 @@ async fn run(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     Ok(out)
 }
 
-/// `close`: Stop's `pane` with the pane named. With none, ClosePane would end the caller's own session, so a
-/// pane is required and there is no default.
+/// `close`: Stop's `pane` with the tab named: that tab closes, and its pane only when it was the last. With none,
+/// ClosePane would end the caller's own session, so a pane is required and there is no default.
 async fn close(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let pane = arguments.get("pane").and_then(|v| v.as_str()).map(str::trim).filter(|p| !p.is_empty());
     let Some(pane) = pane.filter(|p| *p != cx.block_id) else {
@@ -161,13 +161,13 @@ async fn close(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         // The pane's user has 10 s to keep it; wait for their answer.
         let body: Value = resp.json().await.unwrap_or(Value::Null);
         let now = await_shutdown(client, local_url, auth_key, body["request_id"].as_str().unwrap_or_default(), true).await;
-        return close_pane_outcome(pane, &now);
+        return close_pane_outcome_for(pane, &now, body["pane_closes"].as_bool());
     }
     if !status.is_success() {
         let text = resp.text().await.unwrap_or_default();
         anyhow::bail!("Browser close failed: HTTP {status} — {text}");
     }
-    Ok(format!("Closed pane {pane:?}"))
+    Ok(format!("Closed tab {pane:?}"))
 }
 
 /// `retake`: drive again a pane the user took over and gave back. The pane is required (it is not the caller's own), and

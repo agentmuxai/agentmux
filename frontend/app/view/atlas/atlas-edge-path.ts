@@ -18,6 +18,9 @@ export interface Pt {
     y: number;
 }
 
+/** A node's top left and, when it is taller than `NODE_H` (it lists tasks), its height. */
+export type Anchor = Pt & { h?: number };
+
 /** The two gaps a wrapped report's line runs along the middle of. */
 export interface EdgeGaps {
     x: number;
@@ -35,12 +38,12 @@ const CORNER_R = 8;
  * card, and ends at the card's left edge. `gaps` are the layout's (`AtlasLayout.gaps`): the gap under the lead's row
  * and the one between two columns, which close up as the map is zoomed in.
  */
-export function wrappedRoute(from: Pt, to: Pt, gaps: EdgeGaps = FULL): Pt[] {
+export function wrappedRoute(from: Anchor, to: Anchor, gaps: EdgeGaps = FULL): Pt[] {
     const x1 = from.x + NODE_W / 2;
-    const y1 = from.y + NODE_H;
+    const y1 = from.y + (from.h ?? NODE_H);
     const bus = y1 + gaps.level / 2;
     const railX = to.x - gaps.x / 2;
-    const yMid = to.y + NODE_H / 2;
+    const yMid = to.y + (to.h ?? NODE_H) / 2;
     const pts: Pt[] = [{ x: x1, y: y1 }];
     if (Math.abs(railX - x1) >= 1) pts.push({ x: x1, y: bus }, { x: railX, y: bus });
     pts.push({ x: railX, y: yMid }, { x: to.x, y: yMid });
@@ -69,10 +72,10 @@ function roundedPath(pts: readonly Pt[]): string {
 }
 
 /** The path of a line from a lead's node to a report's; `wrapped`: the layout wrapped that report onto a later row. */
-export function edgePath(from: Pt, to: Pt, wrapped = false, gaps: EdgeGaps = FULL): string {
+export function edgePath(from: Anchor, to: Anchor, wrapped = false, gaps: EdgeGaps = FULL): string {
     if (wrapped) return roundedPath(wrappedRoute(from, to, gaps));
     const x1 = from.x + NODE_W / 2;
-    const y1 = from.y + NODE_H;
+    const y1 = from.y + (from.h ?? NODE_H);
     const x2 = to.x + NODE_W / 2;
     const y2 = to.y;
     const mid = (y1 + y2) / 2;
@@ -80,10 +83,10 @@ export function edgePath(from: Pt, to: Pt, wrapped = false, gaps: EdgeGaps = FUL
 }
 
 /** Points along the line from a lead's node to a report's, as a polyline, for what must keep clear of it (a task's number). */
-export function edgePoints(from: Pt, to: Pt, wrapped = false, gaps: EdgeGaps = FULL): Pt[] {
+export function edgePoints(from: Anchor, to: Anchor, wrapped = false, gaps: EdgeGaps = FULL): Pt[] {
     if (wrapped) return wrappedRoute(from, to, gaps);
     const x1 = from.x + NODE_W / 2;
-    const y1 = from.y + NODE_H;
+    const y1 = from.y + (from.h ?? NODE_H);
     const x2 = to.x + NODE_W / 2;
     const y2 = to.y;
     const mid = (y1 + y2) / 2;

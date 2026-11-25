@@ -15,7 +15,8 @@
 //!
 //! A service call with no agent token is recorded as `unproven`, not skipped, so a process that merely
 //! holds the instance key leaves a line. The window's own reads and bookkeeping ([`QUIET`]) are the
-//! exception; a method not named there is recorded. A write of an object's meta is left out only when every
+//! exception; a method not named there is recorded. The host's own plumbing ([`QUIET_SERVICES`]) is quiet
+//! only while it succeeds: a call of it that is refused or fails is recorded. A write of an object's meta is left out only when every
 //! key it writes is one the window keeps for itself ([`QUIET_META_KEYS`]); any other write is recorded with the
 //! object and the key names, never the values.
 
@@ -63,9 +64,20 @@ const QUIET_META_KEYS: &[&str] = &[
     "term:last_prompt", "term:human_turns", "term:next_prompt_suggestion", "term:next_prompt_suggestion_gen",
     "term:question_timer", "term:awaiting_user", "term:awaiting_confirm", "cmd:cwd",
 ];
-/// The services that are the host's own plumbing (the credential bridge, the host's registration): none of
-/// their calls is recorded without an agent token.
+/// The services that are the host's own plumbing (the credential bridge, the host's registration): a call of
+/// them with no agent token is not recorded while it succeeds, and is when it is refused or fails.
 const QUIET_SERVICES: &[&str] = &["credential", "host_ipc"];
+
+/// How a service call with no agent token is left out of the record.
+#[derive(Debug, PartialEq)]
+enum Quiet {
+    /// Recorded.
+    No,
+    /// Never recorded.
+    Always,
+    /// Recorded only when the reply says it was refused or failed.
+    UnlessFailed,
+}
 
 /// A service call's names, and for a write of an object's meta, the object and the keys it sets.
 struct ServiceCall {
@@ -75,12 +87,19 @@ struct ServiceCall {
 }
 
 impl ServiceCall {
-    /// Whether the call, with no agent token, is left out of the record.
-    fn is_quiet(&self) -> bool {
+    /// How the call, with no agent token, is left out of the record.
+    fn quiet(&self) -> Quiet {
         if self.names == META_WRITE {
-            return self.keys.as_ref().is_some_and(|keys| !keys.is_empty() && keys.iter().all(|k| QUIET_META_KEYS.contains(&k.as_str())));
+            let quiet = self.keys.as_ref().is_some_and(|keys| !keys.is_empty() && keys.iter().all(|k| QUIET_META_KEYS.contains(&k.as_str())));
+            return if quiet { Quiet::Always } else { Quiet::No };
         }
-        QUIET.contains(&self.names.as_str()) || self.names.split_once('.').is_some_and(|(service, _)| QUIET_SERVICES.contains(&service))
+        if QUIET.contains(&self.names.as_str()) {
+            Quiet::Always
+        } else if self.names.split_once('.').is_some_and(|(service, _)| QUIET_SERVICES.contains(&service)) {
+            Quiet::UnlessFailed
+        } else {
+            Quiet::No
+        }
     }
 
     /// What the record says the call acted on: the names, and a meta write's object and key names (never values).
@@ -158,14 +177,17 @@ pub(super) async fn record_action(State(state): State<AppState>, mut req: Reques
     }
     let mut subject = path_params(&template, req.uri().path());
     let mut refused = None;
+    let mut quiet_unless_failed = false;
     if template == SERVICE_ROUTE {
         let (parts, body) = req.into_parts();
         match axum::body::to_bytes(body, SERVICE_BODY_MAX).await {
             Ok(bytes) => {
                 let call = service_call(&bytes);
                 req = Request::from_parts(parts, Body::from(bytes));
-                if untokened && call.as_ref().is_some_and(ServiceCall::is_quiet) {
-                    return next.run(req).await;
+                match call.as_ref().filter(|_| untokened).map(ServiceCall::quiet) {
+                    Some(Quiet::Always) => return next.run(req).await,
+                    Some(Quiet::UnlessFailed) => quiet_unless_failed = true,
+                    _ => {}
                 }
                 subject.extend(call.map(|c| c.subject()));
             }
@@ -201,6 +223,9 @@ pub(super) async fn record_action(State(state): State<AppState>, mut req: Reques
                 response = (StatusCode::INTERNAL_SERVER_ERROR, "reply too large").into_response();
             }
         }
+    }
+    if quiet_unless_failed && error.is_none() {
+        return response;
     }
     let store = state.mstore.clone();
     // Off the reply path: naming the agent reads the store.
@@ -243,27 +268,38 @@ mod tests {
     fn a_service_call_with_no_token_is_recorded_unless_it_is_a_read_or_the_windows_bookkeeping() {
         let quiet = |service: &str, method: &str| {
             let body = serde_json::json!({"service": service, "method": method, "args": []}).to_string();
-            service_call(body.as_bytes()).unwrap().is_quiet()
+            service_call(body.as_bytes()).unwrap().quiet() == Quiet::Always
         };
         assert!(quiet("object", "GetObject") && quiet("window", "SetWindowPosAndSize") && quiet("history", "List"));
-        assert!(quiet("credential", "Fill") && quiet("host_ipc", "Register"));
         for (service, method) in [("client", "AgreeTos"), ("object", "QuitAgent"), ("object", "ShutdownAgent"), ("agent", "define"), ("history", "Delete"), ("workspace", "DeleteWorkspace"), ("object", "NewMethod")] {
             assert!(!quiet(service, method), "{service}.{method}");
         }
     }
 
     #[test]
+    fn the_hosts_plumbing_is_quiet_only_while_it_succeeds() {
+        let quiet = |service: &str, method: &str| {
+            let body = serde_json::json!({"service": service, "method": method, "args": []}).to_string();
+            service_call(body.as_bytes()).unwrap().quiet()
+        };
+        assert_eq!(quiet("credential", "Fill"), Quiet::UnlessFailed);
+        assert_eq!(quiet("host_ipc", "Register"), Quiet::UnlessFailed);
+        assert_eq!(quiet("object", "GetObject"), Quiet::Always);
+        assert_eq!(quiet("object", "QuitAgent"), Quiet::No);
+    }
+
+    #[test]
     fn a_meta_write_is_quiet_only_when_every_key_is_one_the_window_keeps_for_itself() {
         let meta = |keys: serde_json::Value| {
             let body = serde_json::json!({"service": "object", "method": "UpdateObjectMeta", "args": ["block:b1", keys]}).to_string();
-            service_call(body.as_bytes()).unwrap().is_quiet()
+            service_call(body.as_bytes()).unwrap().quiet() == Quiet::Always
         };
         assert!(meta(serde_json::json!({"term:osc_title": "x", "term:human_turns": 3, "term:last_prompt": null})));
         assert!(!meta(serde_json::json!({"term:osc_title": "x", "controller": "term"})));
         assert!(!meta(serde_json::json!({"cmd:env": {"A": "b"}})));
         assert!(!meta(serde_json::json!({})));
         let no_meta = serde_json::json!({"service": "object", "method": "UpdateObjectMeta", "args": ["block:b1"]}).to_string();
-        assert!(!service_call(no_meta.as_bytes()).unwrap().is_quiet());
+        assert_eq!(service_call(no_meta.as_bytes()).unwrap().quiet(), Quiet::No);
     }
 
     #[test]

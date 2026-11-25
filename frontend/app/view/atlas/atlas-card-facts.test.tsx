@@ -77,11 +77,11 @@ describe("CardFacts", () => {
     });
 
     it("shows the repository and branch, or the repository alone", () => {
-        const both = show(agent("Ann"), [], { repo: "agentmuxai/agentmux", branch: "ann/fix", tasks: [] });
+        const both = show(agent("Ann"), [], { repo: "agentmuxai/agentmux", branch: "ann/fix", tasks: [], more: 0 });
         expect(both.getByTestId("atlas-card-branch").textContent).toBe("agentmuxai/agentmux · ann/fix");
         expect(both.getByText("Branch")).toBeTruthy();
         cleanup();
-        const repoOnly = show(agent("Ann"), [], { repo: "agentmuxai/agentmux", branch: null, tasks: [] });
+        const repoOnly = show(agent("Ann"), [], { repo: "agentmuxai/agentmux", branch: null, tasks: [], more: 0 });
         expect(repoOnly.getByTestId("atlas-card-branch").textContent).toBe("agentmuxai/agentmux");
         expect(repoOnly.getByText("Repository")).toBeTruthy();
     });
@@ -92,9 +92,10 @@ describe("CardFacts", () => {
             repo: null,
             branch: null,
             tasks: [
-                { num: 7, title: "Fix the map", pr: { url, label: "#70" } },
-                { num: 8, title: "Then the card", pr: null },
+                { num: 7, title: "Fix the map", pr: { url, label: "#70" }, column: "review", held: true },
+                { num: 8, title: "Then the card", pr: null, column: "progress", held: true },
             ],
+            more: 0,
         });
         const items = getByTestId("atlas-card-tasks").querySelectorAll("li");
         expect(items).toHaveLength(2);
@@ -104,6 +105,26 @@ describe("CardFacts", () => {
         expect(items[1].querySelector("button")).toBeNull();
         fireEvent.click(getByText("#70"));
         expect(openLink).toHaveBeenCalledWith(url);
+    });
+
+    it("says which tasks wait for the agent to take them, and how many more there are than it lists", () => {
+        const { getByTestId, queryByTestId } = show(agent("Ann"), [], {
+            repo: null,
+            branch: null,
+            tasks: [
+                { num: 7, title: "Held", pr: null, column: "progress", held: true },
+                { num: 9, title: "Waiting", pr: null, column: "backlog", held: false },
+            ],
+            more: 3,
+        });
+        const items = getByTestId("atlas-card-tasks").querySelectorAll("li");
+        expect(items[0].textContent).not.toContain("waiting");
+        expect(items[1].textContent).toContain("waiting");
+        expect(getByTestId("atlas-card-more-tasks").textContent).toBe("+3 more");
+        cleanup();
+        const none = show(agent("Ann"), [], { repo: "o/r", branch: null, tasks: [], more: 0 });
+        expect(none.queryByTestId("atlas-card-more-tasks")).toBeNull();
+        expect(queryByTestId("atlas-card-more-tasks")).toBeNull();
     });
 });
 

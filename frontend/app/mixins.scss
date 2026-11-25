@@ -36,27 +36,10 @@
     justify-content: flex-end;
 
     // A header too narrow for its controls sheds them by priority (element/width-fit.ts sets the
-    // tier, each hiding what the one before did): the tab strip, with the selected tab's own buttons in it,
-    // then the window controls, which the grip's menu also offers. Close and the grip stay, and so does a
-    // button that is the only way in to something (`block-frame-end-keep`: the agent pane's Messages button,
-    // now that the panel has no bar): with the strip hidden it is drawn in the header's range instead
-    // (`block-frame-end-kept`, pane-tab-actions.tsx), and at every other width it is in the selected tab.
-    .block-frame-end-kept {
-        display: none;
-        flex-shrink: 0;
-    }
-    &[data-fit="tabs"] .block-frame-end-kept,
-    &[data-fit="trim"] .block-frame-end-kept,
-    &[data-fit="min"] .block-frame-end-kept {
-        display: flex;
-        // Against the pinned controls, as the spacer would put it: the spacer and an empty text wrapper are drawn no
-        // more while the strip is hidden, since each leaves a gap of the row's own width that a narrow range cannot spare.
-        margin-left: auto;
-    }
-
-    // The kept button is the one thing the range holds in these tiers, so a narrow pane at a high chrome zoom keeps it
-    // whole: the header's gaps shrink to the least that still separates the controls, and the range's edge fade (which
-    // would take half of a button this size) is not drawn.
+    // tier, each hiding what the one before did): the tab strip, then the window controls, which the grip's
+    // menu also offers. Close and the grip stay.
+    // In these tiers the header's gaps shrink to the least that still separates the controls, and the range's edge fade
+    // (which would take half of a button this size) is not drawn.
     &[data-fit="tabs"],
     &[data-fit="trim"],
     &[data-fit="min"] {
@@ -83,7 +66,7 @@
     &[data-fit="tabs"] .block-frame-default-header-tabstrip,
     &[data-fit="trim"] .block-frame-default-header-tabstrip,
     &[data-fit="min"] .block-frame-default-header-tabstrip,
-    &[data-fit="min"] .block-frame-end-icons > :not(.block-frame-default-close):not(.block-frame-end-keep):not(.pane-grip) {
+    &[data-fit="min"] .block-frame-end-icons > :not(.block-frame-default-close):not(.pane-grip) {
         display: none;
     }
 
@@ -267,13 +250,10 @@
         }
     }
 
-    // The kept buttons are the same controls in a different home: they live inside the header's
-    // scrolling range (#29325), so the sizes below must reach them too.
     .block-frame-end-icons {
         display: flex;
     }
-    .block-frame-end-icons,
-    .block-frame-end-kept {
+    .block-frame-end-icons {
         flex-shrink: 0;
 
         .ui-button--chrome {

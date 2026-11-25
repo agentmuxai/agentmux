@@ -780,7 +780,7 @@ async fn run_close_pane(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         };
     }
     match target_block_id {
-        Some(b) => Ok(format!("Closed pane {b:?}")),
+        Some(b) => Ok(format!("Closed tab {b:?}")),
         // srv's only 200 for the no-argument form (§7): a quit already
         // scheduled or under way.
         None => quit_self_result(200, &Value::Null),

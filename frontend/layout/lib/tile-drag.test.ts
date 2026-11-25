@@ -28,12 +28,19 @@ vi.mock("./crossTabDrag", () => ({ clearCrossTabDrop: () => hub.crossTabCleared+
 vi.mock("./layoutIntents", () => ({ layoutDragEnded: (m: unknown) => hub.dragsEnded.push(m) }));
 
 import { beginDrag, endDrag, isUnderway, session } from "@/app/drag/drag-session";
-import { endTileDrag, releaseTileDrag, startTileDrag } from "./tile-drag";
+import { endTileDrag, holdContainerFor, releaseTileDrag, startTileDrag } from "./tile-drag";
 import { dragState } from "./tilelayout-drag-state";
 
 function fakeModel(tabId = "tab-1") {
     const [get, set] = createSignal(false);
-    return { activeDrag: Object.assign(get, { _set: set }), tabAtom: () => ({ oid: tabId }) } as any;
+    const held = { holds: 0, releases: 0 };
+    return {
+        activeDrag: Object.assign(get, { _set: set }),
+        tabAtom: () => ({ oid: tabId }),
+        held,
+        holdContainerRect: () => void held.holds++,
+        releaseContainerRect: () => void held.releases++,
+    } as any;
 }
 const node = { id: "node-1", data: { blockId: "b1" } } as any;
 
@@ -146,5 +153,17 @@ describe("tile drag", () => {
             await Promise.resolve();
             expect(hub.window).toEqual(["in"]);
         });
+    });
+
+    it("measures the container once for the drag and lets go of it after the drop's own handlers, a frame later", async () => {
+        const model = fakeModel();
+        startTileDrag(node, model);
+        expect(model.held).toEqual({ holds: 1, releases: 0 });
+        holdContainerFor(model);
+        expect(model.held.holds).toBe(1);
+        releaseTileDrag(model);
+        expect(model.held.releases).toBe(0);
+        await new Promise((r) => setTimeout(r, 40));
+        expect(model.held.releases).toBe(1);
     });
 });
