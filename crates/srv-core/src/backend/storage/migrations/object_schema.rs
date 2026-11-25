@@ -292,6 +292,13 @@ pub(super) const OBJECT_TABLES_SQL: &str = "CREATE TABLE IF NOT EXISTS db_agent_
             updated_at  INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_mcp_servers_is_global ON db_mcp_servers(is_global);
+        -- Who added a server and who last changed it (`mcp_origin.rs`): beside every `db_mcp_servers`, this
+        -- channel's local copy included. No version bump: an older build ignores the table.
+        CREATE TABLE IF NOT EXISTS db_mcp_server_origin (
+            mcp_id     TEXT PRIMARY KEY,
+            added_by   TEXT NOT NULL DEFAULT 'unknown',
+            changed_by TEXT NOT NULL DEFAULT 'unknown'
+        );
         -- v44: who a catalog server reaches beyond its
         -- binds — see OBJECT_SCHEMA_VERSION's v44 doc comment.
         CREATE TABLE IF NOT EXISTS db_mcp_server_reach (
@@ -333,6 +340,17 @@ pub(super) const OBJECT_TABLES_SQL: &str = "CREATE TABLE IF NOT EXISTS db_agent_
         CREATE TABLE IF NOT EXISTS db_agent_mcp_ref (
             agent_id TEXT NOT NULL,
             mcp_id   TEXT NOT NULL,
+            PRIMARY KEY (agent_id, mcp_id),
+            FOREIGN KEY (agent_id) REFERENCES db_agents(id) ON DELETE CASCADE
+        );
+
+        -- Who bound an MCP server to an agent, and when (`mcp_origin.rs`). A table of its own, not columns
+        -- on the ref table, which two migrations rebuild; no version bump: an older build ignores it.
+        CREATE TABLE IF NOT EXISTS db_agent_mcp_binding (
+            agent_id TEXT NOT NULL,
+            mcp_id   TEXT NOT NULL,
+            bound_by TEXT NOT NULL DEFAULT 'unknown',
+            bound_at INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (agent_id, mcp_id),
             FOREIGN KEY (agent_id) REFERENCES db_agents(id) ON DELETE CASCADE
         );

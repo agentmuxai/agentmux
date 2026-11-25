@@ -23,6 +23,14 @@ import type { AgentDefinition } from "@/app/store/rpc-api";
 import { WpsEvent } from "@/app/store/mps-events";
 import type { McpServer } from "@/types/rpc/McpServer";
 import type { McpServerCatalogItem } from "@/types/rpc/McpServerCatalogItem";
+/** An agent a server is bound to, with who bound it (an actor label) and when (epoch ms, 0 when not recorded). */
+export interface BoundAgent {
+    id: string;
+    name: string;
+    bound_by: string;
+    bound_at: number;
+}
+
 export interface McpDraft {
     id?: string;
     name: string;
@@ -267,15 +275,15 @@ export class McpCatalogModel {
 
     /** The agents a server is bound to. The catalog only counts them, so
      *  each agent is asked; one that can't be asked is left out. */
-    async boundAgents(server: McpServerCatalogItem): Promise<{ id: string; name: string }[]> {
+    async boundAgents(server: McpServerCatalogItem): Promise<BoundAgent[]> {
         if (server.bound_count === 0) return [];
         const bound = await Promise.all(
             this.agentsAtom().map(async (agent) => {
                 try {
                     const list = await RpcApi.McpCatalogListForAgentCommand(TabRpcClient, { agent_id: agent.id });
-                    return list.some((s) => s.id === server.id && s.bound_to_agent)
-                        ? { id: agent.id, name: agent.name }
-                        : null;
+                    if (!list.some((s) => s.id === server.id && s.bound_to_agent)) return null;
+                    const bound = server.bindings.find((b) => b.agent_id === agent.id);
+                    return { id: agent.id, name: agent.name, bound_by: bound?.bound_by ?? "unknown", bound_at: bound?.bound_at ?? 0 };
                 } catch {
                     return null;
                 }

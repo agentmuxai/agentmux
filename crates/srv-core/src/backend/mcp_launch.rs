@@ -201,7 +201,7 @@ mod tests {
     fn an_agent_that_started_before_a_server_was_switched_on_is_missing_it() {
         use crate::backend::storage::{store::Store, McpServerReach};
         let store = Store::open_in_memory().unwrap();
-        store.mcp_server_upsert_unique_global(&row("git", r#"{"command":"uvx"}"#)).unwrap();
+        store.mcp_server_upsert_unique_global(&row("git", r#"{"command":"uvx"}"#), "test").unwrap();
         let before = [reported("agentmux", "connected")];
         assert!(missing_for_agent(&store, &store, "agent-1", false, &before).is_empty(), "not switched on yet");
 
@@ -221,7 +221,7 @@ mod tests {
     fn a_pane_is_judged_by_how_it_was_launched() {
         use crate::backend::storage::{store::Store, McpServerReach};
         let store = Store::open_in_memory().unwrap();
-        store.mcp_server_upsert_unique_global(&row("git", "{}")).unwrap();
+        store.mcp_server_upsert_unique_global(&row("git", "{}"), "test").unwrap();
         store.mcp_server_set_reach("id-git", McpServerReach { all_agents: true, in_containers: false }, 1).unwrap();
         let none = [reported("agentmux", "connected")];
         let missing = |mode: Option<&str>, def: Option<&str>| missing_for_pane(&store, &store, "a", mode, def, &none);
@@ -270,7 +270,7 @@ mod tests {
     fn a_picker_launch_gets_the_catalog_servers_that_reach_it() {
         use crate::backend::storage::{store::Store, McpServerReach};
         let store = Store::open_in_memory().unwrap();
-        store.mcp_server_upsert_unique_global(&row("git", r#"{"command":"uvx"}"#)).unwrap();
+        store.mcp_server_upsert_unique_global(&row("git", r#"{"command":"uvx"}"#), "test").unwrap();
         let built = r#"{"mcpServers":{"agentmux":{"command":"agentmux-mcp"}}}"#;
         let launch = |container| names(&overlay_for_agent(built, &store, &store, "agent-1", container).unwrap());
 

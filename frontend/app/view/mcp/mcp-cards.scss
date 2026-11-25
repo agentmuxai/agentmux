@@ -32,6 +32,11 @@
     color: var(--secondary-text-color);
 }
 
+.mcp-detail-origin {
+    margin: 0;
+    color: var(--secondary-text-color);
+}
+
 .mcp-detail-label {
     margin-top: var(--space-1);
     font-size: var(--text-2xs);
@@ -132,6 +137,13 @@
     justify-content: space-between;
     gap: var(--space-1-5);
     min-width: 0;
+}
+
+.mcp-bound-by {
+    @include mixins.truncate;
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--secondary-text-color);
 }
 
 .mcp-use {
