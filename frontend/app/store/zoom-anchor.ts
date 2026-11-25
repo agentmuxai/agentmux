@@ -123,7 +123,12 @@ export function useZoomAnchor(opts: UseZoomAnchor): void {
     );
 }
 
-/** Restore now, and again each frame until two passes in a row agree, the reader scrolls or it follows. */
+/**
+ * Restore at the next frame (before it paints, so nothing shows in between), and again each frame until two passes in a
+ * row agree, the reader scrolls or it follows. Not inside the wheel tick that changed the zoom: the pane was just resized,
+ * so reading its place there made the browser lay the page out in the middle of the listener, once per tick, where a
+ * frame has one place to measure.
+ */
 function settle(token: unknown, opts: UseZoomAnchor): () => void {
     const scroller = opts.scroller();
     let cancelled = false;
@@ -161,6 +166,6 @@ function settle(token: unknown, opts: UseZoomAnchor): () => void {
         if (agreed >= 2 || ++frame >= SETTLE_FRAMES) return cancel();
         raf = requestAnimationFrame(pass);
     };
-    pass();
+    raf = requestAnimationFrame(pass);
     return cancel;
 }
