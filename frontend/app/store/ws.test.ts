@@ -179,6 +179,26 @@ describe("WSControl holds the window's keystrokes until its proof settles", () =
         expect(attest).toHaveBeenCalledTimes(2);
     });
 
+    it("holds a raw subscription for a sensitive event until the proof, and sends the launcher's at once", async () => {
+        vi.useFakeTimers();
+        resetOperatorProofForTests();
+        expectOperatorProof();
+        const ws = new WSControl("ws://127.0.0.1:1", "tab", () => {});
+        // What the reconnect handlers repeat: subscriptions sent without RpcClient.
+        addWSReconnectHandler(() => {
+            ws.pushMessage(cmd({ wscommand: "rpc", message: { command: "eventsub", data: { event: "blockfile", scopes: ["block:x"] } } }));
+        });
+        ws.connectNow("test");
+        lastSocket.onopen(new Event("open"));
+        const events = () => lastSocket.sent.map((m) => JSON.parse(m).message?.data?.event).filter((e) => e !== undefined);
+        expect(events()).toEqual([]);
+        await proveOperatorConnection({ challenge: async () => ({ nonce: "n" }), attest: async () => {} });
+        await vi.advanceTimersByTimeAsync(20);
+        expect(events()).toEqual(["blockfile"]);
+        ws.pushMessage(cmd({ wscommand: "rpc", message: { command: "eventsub", data: { event: "notification" } } }));
+        expect(events()).toEqual(["blockfile", "notification"]);
+    });
+
     it("does not hold anything when there is no host to prove the connection", () => {
         resetOperatorProofForTests();
         const ws = new WSControl("ws://127.0.0.1:1", "tab", () => {});

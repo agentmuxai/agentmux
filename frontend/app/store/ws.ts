@@ -7,7 +7,7 @@ import { type WebSocket, newWebSocket } from "@/util/wsutil";
 import { debugLog } from "@/util/debuglog";
 import { createSlowHandlerWatch } from "./ws-slow-handler";
 import { createHandlerCostTally } from "./ws-handler-cost";
-import { isOperatorProofSettled, operatorProofReady, reproveAfterRefusedInput } from "./operator-proof";
+import { isOperatorProofSettled, operatorProofReady, reproveAfterRefusedInput, waitsForProof } from "./operator-proof";
 
 const dlog = debugLog("wave:ws");
 
@@ -22,9 +22,12 @@ const StableConnTime = 2000;
 // imported: that module imports this one).
 const QueuedInputPaceMs = 5;
 // The window's keystrokes and resizes are not RPCs, and srv refuses them to a connection the host has not proven the
-// window's: they wait in the queue, in order, until this connection's proof has settled.
+// window's: they wait in the queue, in order, until this connection's proof has settled. So does an RPC sent
+// without `RpcClient` (a subscription the reconnect handler repeats) that names a command, or an event, srv keeps for the window.
 const windowOnlyWsCommands = new Set(["blockinput", "setblocktermsize"]);
-const isWindowOnlyWsCommand = (msg: any) => windowOnlyWsCommands.has(msg?.wscommand);
+const isWindowOnlyWsCommand = (msg: any) =>
+    windowOnlyWsCommands.has(msg?.wscommand) ||
+    (msg?.wscommand === "rpc" && typeof msg.message?.command === "string" && waitsForProof(msg.message.command, msg.message.data));
 
 function addWSReconnectHandler(handler: () => void) {
     reconnectHandlers.push(handler);
