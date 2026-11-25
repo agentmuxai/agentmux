@@ -20,8 +20,11 @@
 // mid-drag) is well under a second.
 //
 // Never reaped:
-// - non-agent blocks (terminals etc. — narrower scope first; widen once this
-//   has run in the field);
+// - blocks of any other kind than an agent or a management view (a terminal,
+//   an editor, a browser: they may hold running work or unsaved text). A
+//   management view (the Vault, Settings, the Kanban, ...: `MANAGEMENT_VIEWS`)
+//   shows only the app's own state, so it is closed like an agent block and the
+//   next click on its widget opens a fresh pane;
 // - sub-blocks (their parent is a block, not a pane — they sit in a parent's
 //   `subblockids`);
 // - blocks already closing;
@@ -31,8 +34,8 @@
 // Every sweep also checks each tab's pane invariants
 // (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.1) and logs each
 // violation once, at error level, with full tab and block ids: a block of any
-// kind that stays in no pane past `MIN_ORPHAN_AGE` (I1; only agents are
-// reaped), and whatever `validate_layout_invariants` finds in a stored tree.
+// kind that stays in no pane past `MIN_ORPHAN_AGE` (I1; only agents and
+// management views are reaped), and whatever `validate_layout_invariants` finds in a stored tree.
 
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
@@ -103,19 +106,23 @@ pub(crate) async fn sweep(state: &AppState, watch: &mut Watch, now: Instant, min
                 block_id = %u.block_id,
                 view = %u.view,
                 unplaced_secs = age.as_secs(),
-                reaped = u.is_agent(),
+                reaped = u.is_repairable(),
                 "layout-doctor: I1 violation: a block of this tab has been in no pane of it for too long"
             );
         }
-        if u.is_agent() {
-            due.push(u.block_id.clone());
+        if u.is_repairable() {
+            due.push((u.block_id.clone(), u.view.clone(), u.is_management()));
         }
     }
     watch.reported.retain(|key| still_violated.contains(key));
 
     let mut reaped = Vec::new();
-    for id in due {
-        tracing::warn!(block_id = %id, "orphan_reaper: agent block has been in no pane for too long — closing it");
+    for (id, view, management) in due {
+        if management {
+            tracing::warn!(block_id = %id, view = %view, "layout-doctor: repair: a management view block has been in no pane for too long, closing it (the next click on its widget opens a new pane)");
+        } else {
+            tracing::warn!(block_id = %id, "orphan_reaper: agent block has been in no pane for too long — closing it");
+        }
         match super::close_pane::run(state, vec![id.clone()]).await {
             Ok(_) => {
                 watch.first_seen.remove(&id);
@@ -142,7 +149,22 @@ impl Unplaced {
     fn is_agent(&self) -> bool {
         is_agent_view(&self.view, self.has_agent_id)
     }
+
+    /// One of the app's own management views, which holds nothing of the person's.
+    fn is_management(&self) -> bool {
+        MANAGEMENT_VIEWS.contains(&self.view.as_str())
+    }
+
+    /// What the doctor closes once it has been in no pane for too long.
+    fn is_repairable(&self) -> bool {
+        self.is_agent() || self.is_management()
+    }
 }
+
+/// The built-in management views (the widget bar's one-per-tab panes). They show the app's own state, so a block of one
+/// that is in no pane holds no work: closing it costs nothing, and the next click on its widget opens a fresh pane. Any
+/// other view (a terminal, an editor with unsaved text, a browser) is only reported, never closed.
+const MANAGEMENT_VIEWS: &[&str] = &["atlas", "audit", "connectors", "drone", "help", "kanban", "memory", "settings", "swarm", "toolchain", "tower", "vault"];
 
 /// An agent's block: the `agent` view, or a `term` block with an `agentId` in
 /// its meta (a terminal-tier agent).
@@ -541,6 +563,34 @@ mod tests {
         assert!(!seen.reported.contains(&key), "placed again: no longer a violation");
     }
 
+    /// A management view (the Vault, Settings, the Kanban, ...) holds nothing of the person's: left in no pane it is
+    /// closed after the minimum age, so the next click on its widget opens a fresh one. A terminal or an editor in the
+    /// same state is only reported: it may hold running work or unsaved text.
+    #[tokio::test]
+    async fn an_unplaced_management_view_block_is_repaired_after_the_minimum_age_and_work_is_left() {
+        let state = test_state();
+        let tab = seed_tab(&state).await;
+        let placed = seed_block(&state, &tab, "agent").await;
+        let vault = seed_block(&state, &tab, "vault").await;
+        let settings = seed_block(&state, &tab, "settings").await;
+        let term = seed_block(&state, &tab, "term").await;
+        let editor = seed_block(&state, &tab, "editor").await;
+        place(&state, &tab, &[&placed]).await;
+
+        let t0 = Instant::now();
+        let mut seen = Watch::default();
+        let age = Duration::from_secs(90);
+        assert!(sweep(&state, &mut seen, t0, age).await.is_empty(), "first sighting: too young");
+        let mut repaired = sweep(&state, &mut seen, t0 + age, age).await;
+        repaired.sort();
+        let mut expected = vec![vault.clone(), settings.clone()];
+        expected.sort();
+        assert_eq!(repaired, expected);
+        let s = state.srv_state.lock().await;
+        assert!(!s.blocks.contains_key(&vault) && !s.blocks.contains_key(&settings), "management views closed");
+        assert!(s.blocks.contains_key(&term) && s.blocks.contains_key(&editor) && s.blocks.contains_key(&placed), "work left alone");
+    }
+
     /// A stored tree that breaks an invariant (here I1's other half: one
     /// block in two panes) is reported with its tab, once while it lasts.
     #[tokio::test]
@@ -562,6 +612,17 @@ mod tests {
         sweep(&state, &mut seen, Instant::now(), Duration::from_secs(90)).await;
         let prefix = format!("tree:{tab}:BLOCK_IN_TWO_PANES");
         assert!(seen.reported.iter().any(|k| k.starts_with(&prefix)), "{:?}", seen.reported);
+    }
+
+    #[test]
+    fn only_the_management_views_are_repaired_besides_agents() {
+        let u = |view: &str| super::Unplaced { tab_id: "t".into(), block_id: "b".into(), view: view.into(), has_agent_id: false };
+        for view in ["vault", "settings", "connectors", "kanban", "memory", "swarm", "audit", "atlas", "drone", "help", "toolchain", "tower"] {
+            assert!(u(view).is_repairable(), "{view}");
+        }
+        for view in ["term", "editor", "preview", "browser", "files", "agent", "sysinfo", ""] {
+            assert!(!u(view).is_management(), "{view}");
+        }
     }
 
     #[test]

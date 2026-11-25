@@ -67,6 +67,17 @@ export async function findTabHolding(blockId: string, hint?: string): Promise<st
 }
 
 /**
+ * Whether `blockId` is one of the shown tab's blocks that no pane of its loaded layout holds (a stray: nothing on screen
+ * can show it). False while the layout has not loaded, and for a block of another tab.
+ */
+export async function isUnplacedInShownTab(blockId: string): Promise<boolean> {
+    const tabId = atoms.activeTabId();
+    const model = getLayoutModelForTabById(tabId);
+    if (!model?.treeState?.rootNode || model.getNodeByBlockId(blockId)?.id != null) return false;
+    return (await findTabHolding(blockId, tabId)) === tabId;
+}
+
+/**
  * A pane of `view` open in THIS window: the first of this window's tabs (the shown one first) whose blocks
  * include one with that view. Read from the tabs' block lists, not from mounted components, so it also
  * finds a pane that is an inactive member of a pane's stack (not mounted) and a minimized one.
