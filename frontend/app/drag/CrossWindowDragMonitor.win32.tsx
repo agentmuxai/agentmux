@@ -37,7 +37,6 @@ import type { LayoutNode } from "@/layout/lib/types";
 import { endDrag, endReleasedSession, session } from "./drag-session";
 import { endedByEscape } from "./native-cancel";
 import { dragWasStalled } from "./drag-stall";
-import { armPressCapture, disarmPressCapture } from "./press-capture";
 import { paneDragCandidate, pressIsOnTab, prewarmTearOffSnapshot, takeTearOffSnapshot, takeWindowTabSnapshot } from "./tearoff-snapshot";
 
 // Shared drag state set by TileLayout / TabBar drag handlers
@@ -64,21 +63,13 @@ export function getCurrentDragPayload(): DragItemPayload | null {
 }
 
 /**
- * A pane about to be dragged: picture it while it's still drawn normally, in case the drag tears it off
+ * A pane about to be dragged: picture it now, while it's still drawn normally, in case the drag tears it off
  * (tearoff-snapshot.ts). A press on a tab's pill may drag that tab alone; anywhere else on the header, the whole pane.
- * The picture is taken once the press becomes a drag or a hold (press-capture.ts), not at every press: a click on a
- * header never pays for a screenshot of the window.
  */
 function picturePaneOnPress(e: PointerEvent): void {
     if (e.button !== 0) return;
     const blockId = paneDragCandidate(e.target);
-    if (!blockId) {
-        disarmPressCapture();
-        return;
-    }
-    const press = { x: e.clientX, y: e.clientY };
-    const onTab = pressIsOnTab(e.target);
-    armPressCapture(press, () => prewarmTearOffSnapshot(blockId, press, onTab));
+    if (blockId) prewarmTearOffSnapshot(blockId, { x: e.clientX, y: e.clientY }, pressIsOnTab(e.target));
 }
 
 function CrossWindowDragMonitor(): JSX.Element {
