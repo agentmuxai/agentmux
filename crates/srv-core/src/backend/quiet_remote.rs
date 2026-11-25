@@ -20,7 +20,7 @@ pub const PREFIX: &str = "QUIET-NOTE ";
 /// The most task numbers, characters of the last line and characters of a name that are kept.
 const MAX_TASKS: usize = 8;
 const MAX_LAST: usize = 120;
-const MAX_NAME: usize = 40;
+const MAX_NAME: usize = agentmux_common::slug::AGENT_ID_MAX_LEN;
 const MAX_MINUTES: u64 = 100_000;
 /// A lead is shown this many quiet notes an hour from one machine; the rest are folded into one line.
 pub const SHOWN_PER_HOUR: usize = 4;
