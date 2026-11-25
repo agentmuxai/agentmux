@@ -13,6 +13,7 @@ import {
     pressCanStartPaneDrag,
     dragImageChoice,
     headerGrabOffset,
+    overPaneHeader,
 } from "./drag-preview-size";
 
 const ratio = (s: { width: number; height: number }) => s.width / s.height;
@@ -234,5 +235,14 @@ describe("headerGrabOffset", () => {
     });
     it("has a small default without a start point", () => {
         expect(headerGrabOffset(rect, undefined)).toEqual({ x: 10, y: 10 });
+    });
+});
+
+describe("overPaneHeader", () => {
+    it("is true in the pane's header and false in its body or nowhere", () => {
+        document.body.innerHTML = '<div><div data-role="block-header"><span id="in"></span></div><div id="body"></div></div>';
+        expect(overPaneHeader(document.getElementById("in"))).toBe(true);
+        expect(overPaneHeader(document.getElementById("body"))).toBe(false);
+        expect(overPaneHeader(null)).toBe(false);
     });
 });
