@@ -37,14 +37,91 @@ pub(crate) struct Look {
     pub(crate) rect: Rect,
     pub(crate) image_w: u32,
     pub(crate) image_h: u32,
+    /// Which look of this window it was: 1 for the first, one more each time.
+    /// Set by [`remember_look`].
+    pub(crate) n: u32,
 }
 
 static LOOKS: Mutex<Option<HashMap<u32, Look>>> = Mutex::new(None);
 
-/// Remember what `look` showed of window `id`.
-pub(crate) fn remember_look(id: u32, look: Look) {
+/// Remember what `look` showed of window `id`, as the look after the one
+/// before it. Returns the look as stored (numbered) and the one it replaced.
+pub(crate) fn remember_look(id: u32, look: Look) -> (Look, Option<Look>) {
     let mut g = LOOKS.lock().unwrap_or_else(|e| e.into_inner());
-    g.get_or_insert_with(HashMap::new).insert(id, look);
+    let map = g.get_or_insert_with(HashMap::new);
+    let before = map.get(&id).copied();
+    let stored = Look { n: before.map_or(1, |b| b.n.wrapping_add(1).max(1)), ..look };
+    map.insert(id, stored);
+    (stored, before)
+}
+
+/// Whether coordinates the agent says come from look `of` can be used: they
+/// can when `of` is the window's latest look. Otherwise the answer says which
+/// look is the latest, and whether its size differs from the one the
+/// coordinates came from, so the agent knows they are stale.
+pub(crate) fn check_of_look(latest: &Look, of: i64) -> Result<(), String> {
+    if of == latest.n as i64 {
+        return Ok(());
+    }
+    Err(format!(
+        "your coordinates are from look #{of}, but the latest look at this window is #{} ({}×{} pixels); coordinates from an older look can point at the wrong place. Use the latest look's pixels, or look again",
+        latest.n, latest.image_w, latest.image_h
+    ))
+}
+
+/// What a `look` says about how its image relates to the window and to the
+/// look before it: the scale (window pixels per image pixel), and a warning
+/// when the image's size changed since the last look of the same window.
+pub(crate) fn describe_scale(look: &Look, before: Option<&Look>) -> String {
+    let scale = if look.image_w == 0 { 1.0 } else { look.rect.w as f64 / look.image_w as f64 };
+    let mut out = format!(
+        "This is look #{}: the image is {}×{} pixels for a window of {}×{} on the screen (scale {:.2}).",
+        look.n, look.image_w, look.image_h, look.rect.w, look.rect.h, scale
+    );
+    if let Some(b) = before {
+        if (b.image_w, b.image_h) != (look.image_w, look.image_h) {
+            out.push_str(&format!(
+                " The window's size changed since look #{} ({}×{}): coordinates from that look, or any earlier one, are stale.",
+                b.n, b.image_w, b.image_h
+            ));
+        }
+    }
+    out
+}
+
+/// A region of the last look, in that look's pixels, to be shown zoomed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Region {
+    pub(crate) x: u32,
+    pub(crate) y: u32,
+    pub(crate) w: u32,
+    pub(crate) h: u32,
+}
+
+/// The smallest region `look` zooms into: smaller is not worth an image.
+pub(crate) const MIN_REGION: u32 = 8;
+/// The most a region is enlarged.
+pub(crate) const MAX_ZOOM: f64 = 4.0;
+
+/// A region inside `look`'s image, or why not.
+pub(crate) fn check_region(look: &Look, x: i64, y: i64, w: i64, h: i64) -> Result<Region, String> {
+    if w < MIN_REGION as i64 || h < MIN_REGION as i64 {
+        return Err(format!("the region is {w}×{h}; it must be at least {MIN_REGION}×{MIN_REGION} pixels"));
+    }
+    if x < 0 || y < 0 || x + w > look.image_w as i64 || y + h > look.image_h as i64 {
+        return Err(format!(
+            "the region ({x}, {y}, {w}×{h}) is not inside look #{}'s image, which is {}×{}",
+            look.n, look.image_w, look.image_h
+        ));
+    }
+    Ok(Region { x: x as u32, y: y as u32, w: w as u32, h: h as u32 })
+}
+
+/// How much a `w`×`h` region is enlarged: up to [`MAX_ZOOM`], and not past
+/// [`MAX_IMAGE_EDGE`] on its long edge. Never below 1.
+pub(crate) fn zoom_for(w: u32, h: u32) -> f64 {
+    let long = w.max(h).max(1) as f64;
+    (MAX_IMAGE_EDGE as f64 / long).clamp(1.0, MAX_ZOOM)
 }
 
 /// What the last `look` at window `id` showed, if there was one.
@@ -339,13 +416,13 @@ pub(crate) mod win {
 
     use windows_sys::Win32::Foundation::{CloseHandle, BOOL, HWND, LPARAM, POINT, RECT};
     use windows_sys::Win32::System::Threading::{
-        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+        AttachThreadInput, GetCurrentThreadId, OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
     };
     use windows_sys::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumChildWindows, GetAncestor, GetForegroundWindow, GetSystemMetrics, GetWindowRect, GetWindowThreadProcessId,
-        IsIconic, SetForegroundWindow, ShowWindow, WindowFromPoint,
+        BringWindowToTop, EnumChildWindows, GetAncestor, GetForegroundWindow, GetSystemMetrics, GetWindowRect,
+        GetWindowTextW, GetWindowThreadProcessId, IsIconic, SetForegroundWindow, ShowWindow, WindowFromPoint,
         GA_ROOT, GA_ROOTOWNER, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_RESTORE,
     };
 
@@ -373,26 +450,123 @@ pub(crate) mod win {
         Some(Rect { x: r.left, y: r.top, w: (r.right - r.left) as u32, h: (r.bottom - r.top) as u32 })
     }
 
-    /// Whether `hwnd` is the foreground window, after one try at bringing it
-    /// there (restoring it if minimised).
-    pub(crate) fn bring_to_front(id: u32) -> Result<(), String> {
+    /// The text of a window's title bar, cut to 60 characters.
+    fn window_title(hwnd: HWND) -> String {
+        let mut buf = [0u16; 256];
+        let n = unsafe { GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32) };
+        let title = String::from_utf16_lossy(&buf[..n.max(0) as usize]);
+        title.chars().take(60).collect()
+    }
+
+    /// The executable's file name of the process that owns `hwnd`.
+    fn window_exe_name(hwnd: HWND) -> Option<String> {
+        let mut pid = 0u32;
+        unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+        if pid == 0 {
+            return None;
+        }
+        unsafe {
+            let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if process.is_null() {
+                return None;
+            }
+            let mut buf = [0u16; 1024];
+            let mut len = buf.len() as u32;
+            let ok = QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, buf.as_mut_ptr(), &mut len);
+            CloseHandle(process);
+            if ok == 0 || len == 0 {
+                return None;
+            }
+            let path = String::from_utf16_lossy(&buf[..len as usize]);
+            path.rsplit(['\\', '/']).next().map(str::to_string)
+        }
+    }
+
+    /// Restore window `id` if it is minimised, and wait for it to be drawn.
+    /// Returns whether it was minimised.
+    pub(crate) fn restore_if_minimized(id: u32) -> bool {
         ensure_dpi_aware();
         let hwnd = id as usize as HWND;
         unsafe {
-            if GetForegroundWindow() == hwnd {
-                return Ok(());
+            if IsIconic(hwnd) == 0 {
+                return false;
             }
-            if IsIconic(hwnd) != 0 {
-                ShowWindow(hwnd, SW_RESTORE);
+            ShowWindow(hwnd, SW_RESTORE);
+            for _ in 0..20 {
+                if IsIconic(hwnd) == 0 {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+        // Let it paint before it is captured.
+        std::thread::sleep(Duration::from_millis(300));
+        true
+    }
+
+    /// Try the usual ways to make `hwnd` the foreground window, in turn: ask;
+    /// share the input queue of the window that has the focus (Windows lets a
+    /// thread joined to it take the focus); and a harmless key press (F24),
+    /// which counts as the user's input and lifts the foreground lock.
+    unsafe fn try_foreground(hwnd: HWND, attempt: u32) -> bool {
+        unsafe {
+            if GetForegroundWindow() == hwnd {
+                return true;
             }
             SetForegroundWindow(hwnd);
+            if GetForegroundWindow() == hwnd {
+                return true;
+            }
+            let fg = GetForegroundWindow();
+            let fg_thread = if fg.is_null() { 0 } else { GetWindowThreadProcessId(fg, std::ptr::null_mut()) };
+            let me = GetCurrentThreadId();
+            let joined = fg_thread != 0 && fg_thread != me && AttachThreadInput(me, fg_thread, 1) != 0;
+            BringWindowToTop(hwnd);
+            SetForegroundWindow(hwnd);
+            if joined {
+                AttachThreadInput(me, fg_thread, 0);
+            }
+            if GetForegroundWindow() == hwnd {
+                return true;
+            }
+            if attempt >= 1 {
+                let _ = send(&[key(VK_F24, 0, 0), key(VK_F24, 0, KEYEVENTF_KEYUP)]);
+                SetForegroundWindow(hwnd);
+            }
+            GetForegroundWindow() == hwnd
         }
-        std::thread::sleep(Duration::from_millis(150));
+    }
+
+    /// Whether `hwnd` is the foreground window, after a few tries at bringing
+    /// it there (restoring it if minimised). When it can't be, the error names
+    /// the window that has the focus.
+    pub(crate) fn bring_to_front(id: u32) -> Result<(), String> {
+        ensure_dpi_aware();
+        let hwnd = id as usize as HWND;
+        restore_if_minimized(id);
+        for attempt in 0..3u32 {
+            if unsafe { try_foreground(hwnd, attempt) } {
+                // Give the app a moment to take the focus before input goes to it.
+                std::thread::sleep(Duration::from_millis(100));
+                if unsafe { GetForegroundWindow() } == hwnd {
+                    return Ok(());
+                }
+            }
+            std::thread::sleep(Duration::from_millis(150 * (attempt as u64 + 1)));
+        }
         if unsafe { GetForegroundWindow() } == hwnd {
-            Ok(())
-        } else {
-            Err("could not bring the window to the front; another window has the focus".into())
+            return Ok(());
         }
+        let fg = unsafe { GetForegroundWindow() };
+        let holder = if fg.is_null() {
+            "no window".to_string()
+        } else {
+            let exe = window_exe_name(fg).unwrap_or_else(|| "an app".into());
+            format!("{exe} (\"{}\")", window_title(fg))
+        };
+        Err(format!(
+            "could not bring the window to the front: {holder} has the focus and Windows would not hand it over. Call again in a few seconds; if it keeps failing, ask the person to click this app's window once"
+        ))
     }
 
     /// The window at screen point (`sx`, `sy`) must be `id` itself, a child
@@ -613,6 +787,9 @@ pub(crate) mod win {
     pub(crate) fn bring_to_front(_id: u32) -> Result<(), String> {
         Err(NOT_YET.into())
     }
+    pub(crate) fn restore_if_minimized(_id: u32) -> bool {
+        false
+    }
     pub(crate) fn point_belongs_to(_id: u32, _sx: i32, _sy: i32) -> Result<(), String> {
         Err(NOT_YET.into())
     }
@@ -641,7 +818,7 @@ mod tests {
     use super::*;
 
     fn look() -> Look {
-        Look { rect: Rect { x: 100, y: 50, w: 2000, h: 1000 }, image_w: 1000, image_h: 500 }
+        Look { rect: Rect { x: 100, y: 50, w: 2000, h: 1000 }, image_w: 1000, image_h: 500, n: 0 }
     }
 
     #[test]
@@ -842,9 +1019,53 @@ mod tests {
 
     #[test]
     fn looks_are_remembered_per_window() {
-        remember_look(7001, look());
-        assert_eq!(last_look(7001), Some(look()));
+        let (first, before) = remember_look(7001, look());
+        assert_eq!((first.n, before), (1, None));
+        assert_eq!(last_look(7001), Some(first));
         assert_eq!(last_look(7002), None);
+        // The next look of the same window is the second, and knows the first.
+        let (second, before) = remember_look(7001, Look { image_h: 600, ..look() });
+        assert_eq!(second.n, 2);
+        assert_eq!(before, Some(first));
+        assert_eq!(last_look(7001), Some(second));
+    }
+
+    #[test]
+    fn coordinates_from_an_older_look_are_refused_and_say_which_is_latest() {
+        let latest = Look { n: 3, ..look() };
+        assert_eq!(check_of_look(&latest, 3), Ok(()));
+        let e = check_of_look(&latest, 2).unwrap_err();
+        assert!(e.contains("look #2") && e.contains("latest look at this window is #3") && e.contains("1000×500"), "{e}");
+    }
+
+    #[test]
+    fn a_look_says_its_scale_and_when_the_size_changed() {
+        let a = Look { n: 1, ..look() };
+        let said = describe_scale(&a, None);
+        assert!(said.contains("look #1") && said.contains("1000×500") && said.contains("2000×1000") && said.contains("scale 2.00"), "{said}");
+        assert!(!said.contains("stale"));
+        let b = Look { n: 2, image_h: 540, ..look() };
+        let said = describe_scale(&b, Some(&a));
+        assert!(said.contains("changed since look #1 (1000×500)") && said.contains("stale"), "{said}");
+        assert!(!describe_scale(&b, Some(&Look { n: 1, ..b })).contains("stale"));
+    }
+
+    #[test]
+    fn a_region_must_be_inside_the_look_and_big_enough() {
+        let l = Look { n: 4, ..look() };
+        assert_eq!(check_region(&l, 10, 20, 100, 50), Ok(Region { x: 10, y: 20, w: 100, h: 50 }));
+        assert_eq!(check_region(&l, 900, 450, 100, 50), Ok(Region { x: 900, y: 450, w: 100, h: 50 }));
+        assert!(check_region(&l, 901, 450, 100, 50).unwrap_err().contains("not inside look #4"));
+        assert!(check_region(&l, -1, 0, 100, 50).is_err());
+        assert!(check_region(&l, 0, 0, 7, 50).unwrap_err().contains("at least 8"));
+    }
+
+    #[test]
+    fn a_small_region_is_enlarged_up_to_four_times_and_a_large_one_not_at_all() {
+        assert_eq!(zoom_for(100, 50), MAX_ZOOM);
+        assert_eq!(zoom_for(1568, 800), 1.0);
+        assert_eq!(zoom_for(2000, 1000), 1.0);
+        assert!((zoom_for(784, 100) - 2.0).abs() < 1e-9);
     }
 }
 

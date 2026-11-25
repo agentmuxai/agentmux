@@ -476,7 +476,7 @@ pub(crate) const APP_TOOL: &str = r#"{
 /// turns it on; the description stays short because every agent is shown it.
 pub(crate) const DESKTOP_TOOL: &str = r#"{
   "name": "Desktop",
-  "description": "Look at and control a native desktop app (Windows only for now). The last resort: use a connector, the app's own API, Browser, Terminal or UI first. Off unless the user turned it on in Settings; you need a grant for each app, which you ask for as a sensitive operation (the super agent decides, and the person sees a countdown and can veto it), and the user can Stop you at any time; every action is logged. Web browsers, password managers and AgentMux itself are refused. Every call takes an action. apps: the windows you could control, with their ids. look: a screenshot of one window (saved to a path; Read it). click, scroll: x and y are pixels of your last look at that window; it is refused if the window moved since, so look again. drag: press at x, y, move in steps (through any via points) and let go at x2, y2, all inside that one window: faders, sliders, wires, canvases, moving items; the button is always let go, and hold can keep ctrl, alt or shift down. type: text into the focused control (never passwords: ask the user). key: a chord such as enter or ctrl+s (no Windows key). wait: pause up to 5 seconds. release: give your access back.",
+  "description": "Look at and control a native desktop app (Windows only for now). The last resort: use a connector, the app's own API, Browser, Terminal or UI first. Off unless the user turned it on in Settings; you need a grant for each app, which you ask for as a sensitive operation (the super agent decides, and the person sees a countdown and can veto it), and the user can Stop you at any time; every action is logged. Web browsers, password managers and AgentMux itself are refused. Every call takes an action. apps: the windows you could control, with their ids. look: a screenshot of one window (saved to a path; Read it); it says its look number and scale, restores a minimised window, and with region (x, y, w, h in the pixels of your last look) returns that part enlarged for small labels. click, scroll: x and y are pixels of your last look at that window; it is refused if the window moved since, so look again. drag: press at x, y, move in steps (through any via points) and let go at x2, y2, all inside that one window: faders, sliders, wires, canvases, moving items; the button is always let go, and hold can keep ctrl, alt or shift down. type: text into the focused control (never passwords: ask the user). key: a chord such as enter or ctrl+s (no Windows key). click, scroll, drag, type and key take look: true to return the fresh look too, and of_look (the look number your x and y come from) to be told if a newer look has replaced it. wait: pause up to 5 seconds. release: give your access back.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -494,7 +494,10 @@ pub(crate) const DESKTOP_TOOL: &str = r#"{
       "dy":     { "type": "integer", "description": "scroll: notches up (negative down)" },
       "text":   { "type": "string", "description": "type: up to 500 characters; a newline is Enter" },
       "keys":   { "type": "string", "description": "key: one key or chord, e.g. enter, esc, ctrl+s, alt+left, f5" },
-      "ms":     { "type": "integer", "description": "wait: milliseconds, at most 5000" }
+      "ms":     { "type": "integer", "description": "wait: milliseconds, at most 5000" },
+      "look":   { "type": "boolean", "description": "click, scroll, drag, type, key: also return a fresh look at the window after the action" },
+      "of_look": { "type": "integer", "description": "click, scroll, drag: the look number your coordinates come from; refused if a newer look exists" },
+      "region": { "type": "object", "properties": { "x": { "type": "integer" }, "y": { "type": "integer" }, "w": { "type": "integer" }, "h": { "type": "integer" } }, "required": ["x", "y", "w", "h"], "description": "look: a part of your last look, in its pixels, returned enlarged up to 4 times (at least 8x8)" }
     },
     "required": ["action"]
   }
