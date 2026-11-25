@@ -57,9 +57,12 @@ export function usePeekTracking(s: PeekState, p: PeekPlacement, b: PeekBridge) {
     const registerFloating = (el: HTMLElement) => {
         s.floatingEl = el;
         // The panel is rendered at the document body, so a wheel over it never chains to the transcript it sits over.
-        // It hands the wheel on as a capped preview box does: every notch when it has nothing to scroll, and at its
-        // edge (after the skid) when it does.
-        onCleanup(attachScrollHandoff(el, { pane: () => s.props.rowEl()?.closest<HTMLElement>(".agent-document") }));
+        // A panel with something to scroll (itself, or a part inside it) keeps the wheel, at its ends too: moving the
+        // transcript would take the row from under the pointer and close it. One with nothing to scroll hands every
+        // notch to the transcript, as a capped preview box does.
+        onCleanup(
+            attachScrollHandoff(el, { pane: () => s.props.rowEl()?.closest<HTMLElement>(".agent-document"), keepWheel: true }),
+        );
         const rafId = requestAnimationFrame(() => {
             const row = s.props.rowEl();
             if (!row || !s.floatingEl) return;

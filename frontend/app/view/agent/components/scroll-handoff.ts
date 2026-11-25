@@ -32,6 +32,7 @@
 import { getSettingsKeyAtom } from "@/app/store/global";
 import { onCleanup } from "solid-js";
 import { scrollTranscriptBy } from "../scroll/one-way-flow";
+import { planPanelWheel } from "./panel-wheel";
 
 /** A continuous gesture (trackpad, high-res wheel) at the edge is absorbed
  *  until this long passes between two of its events: momentum arrives every
@@ -193,6 +194,9 @@ export interface ScrollHandoffOptions {
     /** The transcript the box hands scroll to, for a box that is not inside it: the hover panel is rendered at the
      *  document body, so its wheel never chains to the pane it sits over. Absent: the box's own `.agent-document`. */
     pane?: () => HTMLElement | null | undefined;
+    /** The box is the hover panel, whose wheel stays in it whenever it, or a part inside it, scrolls the wheel's way
+     *  (panel-wheel.ts): no skid, and no hand-off at an end. A panel with nothing to scroll still hands on. */
+    keepWheel?: boolean;
 }
 
 /**
@@ -224,10 +228,24 @@ export function attachScrollHandoff(el: HTMLElement, opts: ScrollHandoffOptions 
         flashTimer = setTimeout(() => el.classList.remove("scroll-handoff-skid--top", "scroll-handoff-skid--bottom"), SKID_FLASH_MS);
     };
 
+    /** The hover panel keeps a wheel it can scroll: the browser's own scroll, or a part's by hand, or none at an end. */
+    const keepInPanel = (e: WheelEvent): boolean => {
+        const plan = planPanelWheel(el, e.target as Element | null, e);
+        if (!plan) return false;
+        recordHandoff(e, plan.kind === "native" ? "native" : "absorb");
+        if (plan.kind === "native") return true;
+        e.preventDefault();
+        if (plan.kind === "move") plan.el[plan.axis === "y" ? "scrollTop" : "scrollLeft"] += plan.by;
+        return true;
+    };
+
     const onWheel = (e: WheelEvent): void => {
         // Ctrl/⌘+wheel is a ZOOM gesture (the pane zoom in app.tsx, which
-        // takes either), never a scroll; deltaY 0 is a horizontal scroll inside the box.
-        if (e.ctrlKey || e.metaKey || e.deltaY === 0) return;
+        // takes either), never a scroll.
+        if (e.ctrlKey || e.metaKey) return;
+        if (opts.keepWheel && keepInPanel(e)) return;
+        // deltaY 0 is a horizontal scroll inside the box.
+        if (e.deltaY === 0) return;
         const pane = paneOf();
         if (!pane) return;
         watchPane(pane);
