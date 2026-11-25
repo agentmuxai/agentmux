@@ -92,10 +92,7 @@ impl Machine {
 
 /// The body of a record, opened with the Vault's key at the place its header names.
 fn opened(ring: &KeyRing, r: &Record) -> EntryBody {
-    let h = &r.header;
-    let place = Place { vault: &h.collection, record: &h.record, version: &h.version, base: h.base.as_ref(), epoch: h.epoch };
-    let plain = sync_seal::open_raw(ring.get(h.epoch).unwrap(), &place, &r.body).unwrap();
-    serde_json::from_slice(&plain).unwrap()
+    opened_body(ring, r)
 }
 
 #[test]
@@ -240,9 +237,7 @@ fn grant_record(m: &Machine, vault: &str, entry: &str, origin: &str) -> Option<R
 }
 
 fn opened_body<T: serde::de::DeserializeOwned>(ring: &KeyRing, r: &Record) -> T {
-    let h = &r.header;
-    let place = Place { vault: &h.collection, record: &h.record, version: &h.version, base: h.base.as_ref(), epoch: h.epoch };
-    sync_seal::open_record(ring.get(h.epoch).unwrap(), &place, &r.body).unwrap()
+    serde_json::from_slice(&crate::backend::user_sync::seal::open(ring, &r.header, &r.body).unwrap()).unwrap()
 }
 
 #[test]
@@ -323,4 +318,27 @@ fn a_line_of_an_entry_that_stays_on_this_machine_is_not_written_even_after_it_wa
     let line = a.store.vault_activity_add(&made("entry-1", "Invoice provider key", "revealed")).unwrap();
     assert_eq!(a.capture(VAULT, NOW + 10), Captured::default());
     assert!(a.line_record(VAULT, line.seq).is_none());
+}
+
+#[test]
+fn what_a_machine_wrote_beyond_a_removal_is_written_again_at_the_new_epoch_by_the_layer_and_still_opens() {
+    let mut a = machine("a", 1);
+    a.store.vault_insert(&row("entry-1", "Invoice provider key", VAULT, "{}")).unwrap();
+    a.capture(VAULT, NOW);
+    a.store.vault_insert(&row("entry-2", "Second key", VAULT, "{}")).unwrap();
+    a.capture(VAULT, NOW + 10);
+    let second = a.record(VAULT, "entry-2").unwrap();
+    assert_eq!(second.header.epoch, 0);
+    // A member is removed: the others had a's first record and not the second, so the second is cut off.
+    a.ring.insert(1, Zeroizing::new([9u8; 32]));
+    log::set_epoch(&a.store.conn().lock().unwrap(), VAULT, 1, &[("a".to_string(), 1u64)].into_iter().collect()).unwrap();
+    let again = {
+        let mut signer = Signer { machine: &a.id, private: &a.private, clock: &mut a.clock };
+        crate::backend::user_sync::ops::reissue(&a.store.conn().lock().unwrap(), &mut signer, &a.ring, VAULT, NOW + 20).unwrap()
+    };
+    assert_eq!(again, 1, "only the record the others never had is written again");
+    let now = a.record(VAULT, "entry-2").unwrap();
+    assert_eq!(now.header.epoch, 1, "at the new epoch");
+    assert_eq!(opened(&a.ring, &now).label, "Second key", "and it opens with the new key, whole");
+    assert_eq!(a.record(VAULT, "entry-1").unwrap().header.epoch, 0, "what the others had stays as it was");
 }

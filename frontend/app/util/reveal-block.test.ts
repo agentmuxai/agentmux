@@ -210,7 +210,7 @@ describe("revealBlock in this window only", () => {
         const p = revealBlock("agentB", { localOnly: true });
         await vi.advanceTimersByTimeAsync(2000);
         expect((await p).ok).toBe(false);
-        expect(notices.map((n) => n.message)).toEqual(["its tab is still loading"]);
+        expect(notices.map((n) => n.message)).toEqual(["the tab did not show it in time. Click again"]);
     });
 
     it("a tabId hint is tried first", async () => {
