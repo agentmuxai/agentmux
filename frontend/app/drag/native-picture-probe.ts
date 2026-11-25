@@ -15,19 +15,24 @@ import { getApi } from "@/app/store/global";
 const FLAG = "debug:nativepicture";
 
 /** The mode the spike is switched to on this window, or none. */
-function mode(): "native" | "compare" | "only" | undefined {
+function mode(): "native" | "compare" | "only" | "off" | undefined {
     try {
         const v = window.localStorage.getItem(FLAG);
-        return v === "native" || v === "compare" || v === "only" ? v : undefined;
+        return v === "native" || v === "compare" || v === "only" || v === "off" ? v : undefined;
     } catch {
         return undefined;
     }
 }
 
+/** The window's flag is "off": a tear-off picture is the page's screenshot, not the host's native copy (to compare the two in one run). */
+export function nativeCopyOff(): boolean {
+    return mode() === "off";
+}
+
 /** A pane's header was pressed: ask for the native copy, without waiting for it. True when it stands in for the press's screenshot ("only"). */
 export function probeNativePicture(): boolean {
     const m = mode();
-    if (!m) return false;
+    if (!m || m === "off") return false;
     const label = new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
     getApi()
         .windows.nativePictureProbe(label, m === "compare")

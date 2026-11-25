@@ -18,6 +18,12 @@ const CELL_TOLERANCE: i32 = 40;
 /// A cell whose mean is darker than this on every channel is black (nothing was copied there).
 #[cfg(any(target_os = "windows", test))]
 const BLACK_BELOW: i32 = 8;
+/// A copy smaller than this in either side is not a window's picture (a minimised window is 160 x 28).
+#[cfg(any(target_os = "windows", test))]
+const MIN_SIDE: usize = 200;
+/// A copy with less than this percent of non-black cells is a failed copy, not a dark page.
+#[cfg(any(target_os = "windows", test))]
+const MIN_NONBLANK_PCT: u32 = 20;
 
 /// The mean colour (r, g, b) of each cell of a `GRID` x `GRID` grid over a picture: `pixel(x, y)` reads a pixel.
 /// A handful of pixels per cell is enough for a coarse comparison.
@@ -77,6 +83,37 @@ fn compare_grids(a: &[(i32, i32, i32)], b: &[(i32, i32, i32)]) -> (u32, u32) {
     ((nonblank * 100 / n) as u32, (same * 100 / n) as u32)
 }
 
+/// Whether a top-down BGRA copy of `width` x `height` is a window's picture a pane can be cut from: not tiny and not
+/// blank. The caller takes the CDP screenshot when it is not.
+/// The native copy is used only where the crop has been shown right: a window on the primary display's scale. A
+/// window on a display whose scale differs, or one the host cannot place, takes the page's picture.
+#[cfg(any(target_os = "windows", test))]
+fn check_same_scale(window_dpi: Option<u32>, primary_dpi: Option<u32>) -> Result<(), String> {
+    match (window_dpi, primary_dpi) {
+        (Some(w), Some(p)) if w == p => Ok(()),
+        (Some(w), Some(p)) => Err(format!(
+            "the window is on a display at {} dpi, the primary is at {} dpi",
+            w, p
+        )),
+        _ => Err("the host cannot tell which display the window is on".to_string()),
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn check_copy(width: usize, height: usize, bgra: &[u8]) -> Result<(), String> {
+    if width < MIN_SIDE || height < MIN_SIDE || bgra.len() < width * height * 4 {
+        return Err(format!("the copy is too small ({} x {})", width, height));
+    }
+    let cells = grid_means(width, height, |x, y| {
+        let i = (y * width + x) * 4;
+        (bgra[i + 2] as i32, bgra[i + 1] as i32, bgra[i] as i32)
+    });
+    if compare_grids(&cells, &cells).0 < MIN_NONBLANK_PCT {
+        return Err("the copy is blank".to_string());
+    }
+    Ok(())
+}
+
 #[cfg(target_os = "windows")]
 mod win {
     use super::{compare_grids, grid_means};
@@ -96,10 +133,10 @@ mod win {
     const PW_RENDERFULLCONTENT: u32 = 2;
 
     /// A copy of a window's client area, top-down BGRA.
-    struct Grab {
-        width: usize,
-        height: usize,
-        bgra: Vec<u8>,
+    pub(crate) struct Grab {
+        pub(crate) width: usize,
+        pub(crate) height: usize,
+        pub(crate) bgra: Vec<u8>,
     }
 
     /// Copy the client area of `hwnd` as the window draws it, whatever covers it: `PrintWindow` asks the window for
@@ -169,6 +206,51 @@ mod win {
                 bgra,
             })
         }
+    }
+
+    /// The effective dpi of the display `hmonitor` is, if the host can tell.
+    fn monitor_dpi(hmonitor: *mut std::ffi::c_void) -> Option<u32> {
+        use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
+        if hmonitor.is_null() {
+            return None;
+        }
+        let (mut dx, mut dy) = (0u32, 0u32);
+        let hr = unsafe { GetDpiForMonitor(hmonitor, MDT_EFFECTIVE_DPI, &mut dx, &mut dy) };
+        (hr == 0 && dx > 0).then_some(dx)
+    }
+
+    /// Whether the window is on a display at the primary display's scale (see `check_same_scale`).
+    fn on_primary_scale(hwnd: *mut std::ffi::c_void) -> Result<(), String> {
+        use windows_sys::Win32::Foundation::POINT;
+        use windows_sys::Win32::Graphics::Gdi::{
+            MonitorFromPoint, MonitorFromWindow, MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTOPRIMARY,
+        };
+        let (window, primary) = unsafe {
+            (
+                monitor_dpi(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)),
+                monitor_dpi(MonitorFromPoint(
+                    POINT { x: 0, y: 0 },
+                    MONITOR_DEFAULTTOPRIMARY,
+                )),
+            )
+        };
+        super::check_same_scale(window, primary)
+    }
+
+    /// A copy of window `label` that a pane can be cut from, or why there is none (no such window, minimised, the
+    /// copy failed, tiny or blank): the caller then takes the page's own picture. The copy is made on the blocking pool.
+    pub(crate) async fn copy_window(state: &Arc<AppState>, label: &str) -> Result<Grab, String> {
+        let hwnd = unsafe { crate::commands::window::resolve_window_hwnd_strict(state, label) }
+            .ok_or("no such window")? as usize;
+        let got = tokio::task::spawn_blocking(move || {
+            on_primary_scale(hwnd as *mut std::ffi::c_void)?;
+            let g = grab(hwnd as *mut std::ffi::c_void)?;
+            super::check_copy(g.width, g.height, &g.bgra)?;
+            Ok::<Grab, String>(g)
+        })
+        .await
+        .map_err(|e| format!("the copy's task failed: {}", e))??;
+        Ok(got)
     }
 
     /// `debug_native_window_picture`: copy the window `label` natively, log how long it took, and drop it. With
@@ -250,6 +332,8 @@ mod win {
 
 #[cfg(target_os = "windows")]
 pub use win::measure;
+#[cfg(target_os = "windows")]
+pub(crate) use win::{copy_window, Grab};
 
 /// Only Windows has the native copy this measures.
 #[cfg(not(target_os = "windows"))]
@@ -262,7 +346,22 @@ pub async fn measure(
 
 #[cfg(test)]
 mod tests {
-    use super::{compare_grids, grid_means, GRID};
+    use super::{check_copy, check_same_scale, compare_grids, grid_means, GRID};
+
+    #[test]
+    fn the_native_copy_is_used_only_on_the_primary_displays_scale() {
+        assert!(check_same_scale(Some(120), Some(120)).is_ok());
+        assert!(check_same_scale(Some(144), Some(96)).is_err());
+        assert!(check_same_scale(None, Some(96)).is_err());
+        assert!(check_same_scale(Some(96), None).is_err());
+    }
+
+    #[test]
+    fn a_tiny_or_blank_copy_is_not_a_picture_to_cut_from() {
+        assert!(check_copy(160, 28, &vec![200; 160 * 28 * 4]).is_err());
+        assert!(check_copy(400, 300, &vec![0; 400 * 300 * 4]).is_err());
+        assert!(check_copy(400, 300, &vec![120; 400 * 300 * 4]).is_ok());
+    }
 
     #[test]
     fn a_flat_picture_is_all_one_colour_and_matches_itself_at_another_size() {

@@ -218,7 +218,8 @@ export const cefWindows: WindowHostApi = {
     getPaneDebugState: () => invokeCommand<Record<string, unknown>>("get_pane_debug_state", {}),
     captureViewport: (windowLabel, quality) =>
         invokeCommand<{ jpeg_base64: string }>("capture_window_viewport", { label: windowLabel, quality }),
-    keepViewport: (windowLabel, quality) => invokeCommand<{ pictureId: number }>("capture_pane_picture", { label: windowLabel, quality }),
+    keepViewport: (windowLabel, quality, native) =>
+        invokeCommand<{ pictureId: number; path?: "native" | "page" }>("capture_pane_picture", { label: windowLabel, quality, native }),
     nativePictureProbe: (windowLabel, compare) =>
         invokeCommand<{ ok: boolean }>("debug_native_window_picture", { label: windowLabel, compare }),
     cutKeptViewport: (pictureId, rect, viewportWidth) =>

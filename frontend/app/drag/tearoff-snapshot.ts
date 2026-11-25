@@ -39,6 +39,7 @@ import { getApi, MOS } from "@/app/store/global";
 import { pressOnControl } from "@/app/util/press-on-control";
 import { Logger } from "@/util/logger";
 import { isWindows } from "@/util/platformutil";
+import { nativeCopyOff } from "./native-picture-probe";
 import { beginPaneCapture } from "./pane-capture-gate";
 
 /** A picture older than this is stale: the pane may have changed since. */
@@ -219,10 +220,15 @@ function ownWindowLabel(): string {
  * frames need, and the drag's drawing is held only while the window is pictured, as before. The host's cut is
  * Windows only; the other platforms take the landing picture of a pane here, as before. A tab alone (`solo`) draws
  * its pill from the window's picture, so that one is still cut here.
+ *
+ * The host's picture of the window is its own native copy (about 15 ms, the page's frames not held) when
+ * nativeCopy is set, and the page's screenshot (50 to 130 ms, its frames held) otherwise or when the copy fails or is
+ * blank. A native copy does not carry a native browser page (a separate surface above the DOM), so a pane that
+ * holds one asks for the screenshot.
  */
-async function capturePane(rect: CssRect, shot: () => void, solo?: TabStripInPane): Promise<string | null> {
+async function capturePane(rect: CssRect, shot: () => void, solo?: TabStripInPane, nativeCopy = false): Promise<string | null> {
     if (!solo && isWindows()) {
-        const { pictureId } = await getApi().windows.keepViewport(ownWindowLabel(), 80);
+        const { pictureId } = await getApi().windows.keepViewport(ownWindowLabel(), 80, nativeCopy && !nativeCopyOff());
         shot();
         const { jpeg_base64 } = await getApi().windows.cutKeptViewport(pictureId, rect, window.innerWidth);
         return jpeg_base64;
@@ -375,6 +381,9 @@ function isRendered(el: Element): boolean {
     return el.getClientRects().length > 0 && getComputedStyle(el).visibility === "visible";
 }
 
+/** Whether pane el holds a native browser page (its own, or one inside another view): the window's native copy lacks it. */
+const holdsNativeBrowserPage = (el: Element): boolean => Array.from(el.querySelectorAll(".browser-placeholder")).some(isRendered);
+
 /** The key a window tab's picture is held under (panes use their block id). */
 const windowTabKey = (tabId: string) => `window-tab:${tabId}`;
 
@@ -473,7 +482,7 @@ export function prewarmTearOffSnapshot(blockId: string, pointer?: { x: number; y
     const ph = isBrowser ? Array.from(el.querySelectorAll(".browser-placeholder")).find(isRendered)?.getBoundingClientRect() : undefined;
     const capture = isBrowser
         ? captureBrowserPane(blockId, paneRect, ph ? { left: ph.left, top: ph.top, width: ph.width, height: ph.height } : null, captured, solo)
-        : capturePane(paneRect, captured, solo);
+        : capturePane(paneRect, captured, solo, !holdsNativeBrowserPage(el));
     const picture = capture.then(
         (b64) => {
             captured();
@@ -539,7 +548,7 @@ export async function picturePaneNow(blockId: string): Promise<{ picture: string
     try {
         const picture = await (isBrowser
             ? captureBrowserPane(blockId, paneRect, ph ? { left: ph.left, top: ph.top, width: ph.width, height: ph.height } : null, captured, solo)
-            : capturePane(paneRect, captured, solo));
+            : capturePane(paneRect, captured, solo, !holdsNativeBrowserPage(el)));
         return picture ? { picture, size: { width: r.width, height: r.height } } : undefined;
     } catch (e) {
         Logger.debug("dnd:cross", "landing picture failed", { blockId, error: String(e) });
