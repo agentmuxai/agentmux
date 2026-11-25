@@ -874,6 +874,27 @@ describe("FloatingPaneWorkspace: header drag on Windows (host-side move loop)", 
         log.mockRestore();
     });
 
+    it("closes the floater after a drag redock even when this window's copy of the tab has not emptied yet, by reading the tab again", async () => {
+        h.arming.isArmed.mockReturnValue(true);
+        h.arming.target.mockReturnValue("main-1");
+        h.api.windows.resolveWindowAtCursor.mockResolvedValue({ label: "main-1", window_id: "w1" });
+        h.reload.mockImplementation(async (oref: string) => {
+            if (oref.startsWith("tab:")) return { blockids: [] };
+            return oref === "window:w1" ? { workspaceid: "ws2" } : { oid: "ws2", activetabid: "tab9" };
+        });
+        // The redock replied; the event stream has not delivered the emptied tab: the plain copy still lists the pane.
+        h.redockFloaterPane.mockImplementation(async () => {});
+        const log = vi.spyOn(console, "log").mockImplementation(() => {});
+        const { gap } = mount();
+        await flush();
+        press(gap);
+        document.dispatchEvent(mouse("mouseup", { screenX: 640, screenY: 360 }));
+        h.listeners["window_drag_ended"]({ label: LABEL, moved: true });
+        await vi.waitFor(() => expect(h.api.closeWindowByLabel).toHaveBeenCalledWith(LABEL));
+        expect(h.api.closeWindowByLabel).toHaveBeenCalledTimes(1);
+        log.mockRestore();
+    });
+
     describe("the host's hover samples", () => {
         const hover = (payload: Record<string, unknown>) => h.listeners["floating-redock:hover-state"](payload);
 
