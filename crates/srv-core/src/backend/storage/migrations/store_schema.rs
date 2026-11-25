@@ -484,6 +484,13 @@ pub(super) const IDENTITY_STORE_TABLES_SQL: &str = "CREATE TABLE IF NOT EXISTS d
             all_agents    INTEGER NOT NULL DEFAULT 0,
             in_containers INTEGER NOT NULL DEFAULT 0,
             updated_at    INTEGER NOT NULL DEFAULT 0
+        );
+        -- Who added a server and who last changed it (`mcp_origin.rs`). Added without a
+        -- version bump: an older build ignores the table.
+        CREATE TABLE IF NOT EXISTS db_mcp_server_origin (
+            mcp_id     TEXT PRIMARY KEY,
+            added_by   TEXT NOT NULL DEFAULT 'unknown',
+            changed_by TEXT NOT NULL DEFAULT 'unknown'
         );";
 
 /// The blank Bundle singleton in the shared store.

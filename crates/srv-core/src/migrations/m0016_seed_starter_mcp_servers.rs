@@ -127,7 +127,7 @@ mod tests {
             created_at: 0,
             updated_at: 0,
         };
-        mstore.mcp_server_upsert_unique_global(&pre_existing).unwrap();
+        mstore.mcp_server_upsert_unique_global(&pre_existing, "test").unwrap();
 
         M0016SeedStarterMcpServers.up(&ctx).unwrap();
 

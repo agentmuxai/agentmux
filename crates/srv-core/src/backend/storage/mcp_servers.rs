@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use super::error::StoreError;
 use crate::backend::audience::{Audience, HostCap, RuntimeCaps};
 use super::managed::{ManagedResource, Owner};
+use super::mcp_origin::{McpBinding, McpOrigin, UNKNOWN};
 use super::store::Store;
 
 /// Words in the name of an `env` or `headers` entry that say its value is a secret.
@@ -142,7 +143,14 @@ impl ManagedResource for McpServer {
 pub struct McpServerListItem {
     #[serde(flatten)]
     pub server: McpServer,
+    #[serde(flatten)]
+    pub origin: McpOrigin,
     pub bound_to_agent: bool,
+    /// Who bound it to this agent (`unknown` when not recorded); empty when this agent has not bound it.
+    pub bound_by: String,
+    /// When, epoch milliseconds; 0 when not bound or not recorded.
+    #[ts(type = "number")]
+    pub bound_at: i64,
 }
 
 /// `mcp_server_list_global`'s response shape: the server plus how many
@@ -153,6 +161,10 @@ pub struct McpServerListItem {
 pub struct McpServerCatalogItem {
     #[serde(flatten)]
     pub server: McpServer,
+    #[serde(flatten)]
+    pub origin: McpOrigin,
+    /// The agents it is bound to, with who bound each and when.
+    pub bindings: Vec<McpBinding>,
     #[ts(type = "number")]
     pub bound_count: i64,
     /// Reaches every agent, not only the bound ones (`McpServerReach`).
@@ -184,14 +196,31 @@ impl McpServerReach {
     }
 }
 
+/// A server with who added it and, when `bound_to_agent`, who bound it to this agent.
+fn list_item(
+    server: McpServer,
+    bound_to_agent: bool,
+    origins: &HashMap<String, McpOrigin>,
+    bindings: &HashMap<String, (String, i64)>,
+) -> McpServerListItem {
+    let origin = origins.get(&server.id).cloned().unwrap_or_default();
+    let (bound_by, bound_at) = match bindings.get(&server.id) {
+        Some((by, at)) if bound_to_agent => (by.clone(), *at),
+        _ => (String::new(), 0),
+    };
+    McpServerListItem { server, origin, bound_to_agent, bound_by, bound_at }
+}
+
 impl Store {
     /// List all MCP servers visible to an agent: own (referenced) + global,
     /// each annotated with whether this specific agent holds the bind ref.
     pub fn mcp_server_list(&self, catalog: &Store, agent_id: &str) -> Result<Vec<McpServerListItem>, StoreError> {
+        let origins = catalog.mcp_origin_all()?;
+        let bindings = self.mcp_bindings_of_agent(agent_id)?;
         Ok(self
             .managed_list::<McpServer>(catalog, Owner::Agent, agent_id)?
             .into_iter()
-            .map(|(server, bound_to_agent)| McpServerListItem { server, bound_to_agent })
+            .map(|(server, bound_to_agent)| list_item(server, bound_to_agent, &origins, &bindings))
             .collect())
     }
 
@@ -265,12 +294,16 @@ impl Store {
     /// §8 ("used by N agents"), tracked as gap #2 of #1960.
     pub fn mcp_server_list_global(&self, catalog: &Store) -> Result<Vec<McpServerCatalogItem>, StoreError> {
         let reach = catalog.mcp_server_reach_all()?;
+        let origins = catalog.mcp_origin_all()?;
+        let mut bindings = self.mcp_bindings_by_server()?;
         Ok(self
             .managed_list_global::<McpServer>(catalog)?
             .into_iter()
             .map(|(server, bound_count)| {
                 let r = reach.get(&server.id).copied().unwrap_or_default();
-                McpServerCatalogItem { server, bound_count, all_agents: r.all_agents, in_containers: r.in_containers }
+                let origin = origins.get(&server.id).cloned().unwrap_or_default();
+                let bindings = bindings.remove(&server.id).unwrap_or_default();
+                McpServerCatalogItem { server, origin, bindings, bound_count, all_agents: r.all_agents, in_containers: r.in_containers }
             })
             .collect())
     }
@@ -289,10 +322,12 @@ impl Store {
     /// alongside a caller-chosen agent's bind status is safe.
     /// reagentx P0 on PR #2329.
     pub fn mcp_server_list_global_for_agent(&self, catalog: &Store, agent_id: &str) -> Result<Vec<McpServerListItem>, StoreError> {
+        let origins = catalog.mcp_origin_all()?;
+        let bindings = self.mcp_bindings_of_agent(agent_id)?;
         Ok(self
             .managed_list_global_for_agent::<McpServer>(catalog, agent_id)?
             .into_iter()
-            .map(|(server, bound_to_agent)| McpServerListItem { server, bound_to_agent })
+            .map(|(server, bound_to_agent)| list_item(server, bound_to_agent, &origins, &bindings))
             .collect())
     }
 
@@ -312,6 +347,9 @@ impl Store {
             .lock()
             .unwrap()
             .execute("DELETE FROM db_mcp_server_reach WHERE mcp_id = ?1", params![id])?;
+        // So do who added it and who bound it.
+        catalog.mcp_origin_delete(id)?;
+        self.mcp_binding_delete_server(id)?;
         Ok(deleted)
     }
 
@@ -330,13 +368,23 @@ impl Store {
     /// case — reporting success while creating nothing. Same fix as
     /// skill_bind — see
     /// docs/reports/REPORT_ARMORY_SKILLS_MARKDOWN_AND_BIND_BUG_2026_07_27.md.
-    pub fn mcp_server_bind(&self, catalog: &Store, agent_id: &str, mcp_id: &str) -> Result<(), StoreError> {
-        self.managed_bind_agent::<McpServer>(catalog, agent_id, mcp_id)
+    ///
+    /// Records `by` (an actor label, `rpc::actor::Actor::label`) as who bound it, at `at` epoch ms,
+    /// when this is the bind that makes the pair; binding again changes nothing.
+    pub fn mcp_server_bind(&self, catalog: &Store, agent_id: &str, mcp_id: &str, by: &str, at: i64) -> Result<(), StoreError> {
+        let was_bound = self.mcp_server_is_bound_to(agent_id, mcp_id)?;
+        self.managed_bind_agent::<McpServer>(catalog, agent_id, mcp_id)?;
+        if !was_bound {
+            self.mcp_binding_record(agent_id, mcp_id, by, at)?;
+        }
+        Ok(())
     }
 
     /// Unbind an MCP server from an agent. Returns true if a row was removed.
     pub fn mcp_server_unbind(&self, agent_id: &str, mcp_id: &str) -> Result<bool, StoreError> {
-        self.managed_unbind::<McpServer>(Owner::Agent, agent_id, mcp_id)
+        let unbound = self.managed_unbind::<McpServer>(Owner::Agent, agent_id, mcp_id)?;
+        self.mcp_binding_delete(agent_id, mcp_id)?;
+        Ok(unbound)
     }
 
     /// Atomically upsert an MCP server enforcing per-agent name uniqueness, and
@@ -344,14 +392,24 @@ impl Store {
     /// `mcp.upsert` calls for the same name can't both pass a check and insert
     /// duplicate-named bindings. Returns an error if another server visible to
     /// the agent (bound or global) already uses the name.
+    ///
+    /// Records `by` (an actor label) as who added the server (a new one) or last changed it, and, when it
+    /// binds, as who bound it.
     pub fn mcp_server_upsert_unique(
         &self,
         catalog: &Store,
         agent_id: &str,
         server: &McpServer,
         bind_new: bool,
+        by: &str,
     ) -> Result<(), StoreError> {
-        self.managed_upsert_unique(catalog, Owner::Agent, agent_id, server, bind_new, None)
+        let existed = catalog.mcp_server_get(&server.id)?.is_some();
+        self.managed_upsert_unique(catalog, Owner::Agent, agent_id, server, bind_new, None)?;
+        catalog.mcp_origin_record(&server.id, if existed { UNKNOWN } else { by }, by)?;
+        if bind_new {
+            self.mcp_binding_record(agent_id, &server.id, by, server.updated_at)?;
+        }
+        Ok(())
     }
 
     /// Atomically upsert a GLOBAL MCP server enforcing catalog-wide name
@@ -362,8 +420,12 @@ impl Store {
     /// by `server.name` — two same-named global servers would silently
     /// clobber each other's config for every agent that has either bound.
     /// `server.is_global` must already be `true`; caller's job.
-    pub fn mcp_server_upsert_unique_global(&self, server: &McpServer) -> Result<(), StoreError> {
-        self.managed_upsert_unique_global(server)
+    ///
+    /// Records `by` (an actor label) as who added the server (a new one) or last changed it.
+    pub fn mcp_server_upsert_unique_global(&self, server: &McpServer, by: &str) -> Result<(), StoreError> {
+        let existed = self.mcp_server_get(&server.id)?.is_some();
+        self.managed_upsert_unique_global(server)?;
+        self.mcp_origin_record(&server.id, if existed { UNKNOWN } else { by }, by)
     }
 
     // ── Migration-only raw access — see skills.rs's identical trio (same
@@ -454,6 +516,12 @@ impl Store {
             params![old_id, new_id],
         )?;
         let agent = conn.execute("DELETE FROM db_agent_mcp_ref WHERE mcp_id = ?1", params![old_id])?;
+        conn.execute(
+            "INSERT OR IGNORE INTO db_agent_mcp_binding (agent_id, mcp_id, bound_by, bound_at)
+                SELECT agent_id, ?2, bound_by, bound_at FROM db_agent_mcp_binding WHERE mcp_id = ?1",
+            params![old_id, new_id],
+        )?;
+        conn.execute("DELETE FROM db_agent_mcp_binding WHERE mcp_id = ?1", params![old_id])?;
         conn.execute(
             "INSERT OR IGNORE INTO db_bundle_mcp_ref (bundle_id, mcp_id)
                 SELECT bundle_id, ?2 FROM db_bundle_mcp_ref WHERE mcp_id = ?1",
@@ -609,8 +677,8 @@ mod effective_tests {
         agent(&store, "agent-1", "own");
         store.agent_bundles_set("agent-1", &["picked".to_string()]).unwrap();
 
-        store.mcp_server_upsert_unique_global(&server("g", "Global", true)).unwrap();
-        store.mcp_server_upsert_unique(&store, "agent-1", &server("a", "Agent's", false), true).unwrap();
+        store.mcp_server_upsert_unique_global(&server("g", "Global", true), "test").unwrap();
+        store.mcp_server_upsert_unique(&store, "agent-1", &server("a", "Agent's", false), true, "test").unwrap();
         for (bundle_id, id, name) in [("own", "b1", "Own bundle's"), ("picked", "b2", "Picked bundle's")] {
             store.mcp_server_insert_raw(&server(id, name, false)).unwrap();
             bundle_ref(&store, bundle_id, id);
@@ -635,10 +703,10 @@ mod effective_tests {
         bundle(&store, "own");
         agent(&store, "agent-1", "own");
         agent(&store, "agent-2", "own");
-        store.mcp_server_upsert_unique_global(&server("g", "Catalog", true)).unwrap();
+        store.mcp_server_upsert_unique_global(&server("g", "Catalog", true), "test").unwrap();
         assert!(effective(&store, "agent-1", false).is_empty(), "in the catalog, bound to no one");
 
-        store.mcp_server_bind(&store, "agent-1", "g").unwrap();
+        store.mcp_server_bind(&store, "agent-1", "g", "test", 1).unwrap();
         assert_eq!(effective(&store, "agent-1", false), vec!["Catalog"]);
         assert!(effective(&store, "agent-2", false).is_empty());
 
@@ -655,8 +723,8 @@ mod effective_tests {
         let store = Store::open_in_memory().unwrap();
         bundle(&store, "own");
         agent(&store, "agent-1", "own");
-        store.mcp_server_upsert_unique_global(&server("g", "Catalog", true)).unwrap();
-        store.mcp_server_upsert_unique(&store, "agent-1", &server("a", "Own", false), true).unwrap();
+        store.mcp_server_upsert_unique_global(&server("g", "Catalog", true), "test").unwrap();
+        store.mcp_server_upsert_unique(&store, "agent-1", &server("a", "Own", false), true, "test").unwrap();
         store.mcp_server_set_reach("g", McpServerReach { all_agents: true, in_containers: false }, 1).unwrap();
         assert_eq!(effective(&store, "agent-1", true), vec!["Own"]);
         store.mcp_server_set_reach("g", McpServerReach { all_agents: true, in_containers: true }, 2).unwrap();
@@ -667,7 +735,7 @@ mod effective_tests {
     #[test]
     fn deleting_a_server_drops_its_reach() {
         let store = Store::open_in_memory().unwrap();
-        store.mcp_server_upsert_unique_global(&server("g", "Catalog", true)).unwrap();
+        store.mcp_server_upsert_unique_global(&server("g", "Catalog", true), "test").unwrap();
         store.mcp_server_set_reach("g", McpServerReach { all_agents: true, in_containers: true }, 1).unwrap();
         assert!(store.mcp_server_delete(&store, "g").unwrap());
         assert!(store.mcp_server_reach_all().unwrap().is_empty());

@@ -26,6 +26,7 @@ pub(super) fn purge_agent_dependents(
         "db_agent_identity_links",
         "db_agent_skills_ref",
         "db_agent_mcp_ref",
+        "db_agent_mcp_binding",
         "db_agent_credentials",
         "db_agent_native_memory",
         "db_agent_native_memory_versions",
