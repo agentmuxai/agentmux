@@ -1419,9 +1419,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                 {
                     "--magnified-block-opacity": s.magnifiedBlockOpacity(),
                     "--magnified-block-blur": `${s.magnifiedBlockBlur()}px`,
-                    // The focus ring of a pane with an agent colour is drawn in it; inside a backdrop it is moved, in lightness
-                    // only, to read on the pane's layers, as the identity colour is.
-                    "--block-agent-color": (backdrop() ? identityInPane(s.blockAgentColor(), backdrop()!.derived) : s.blockAgentColor()) ?? "transparent",
+                    "--block-agent-color": s.blockAgentColor() ?? "transparent",
                     // Inside a backdrop the identity colour is moved, in lightness only, to read on the pane's layers.
                     "--block-identity-color": backdrop() ? identityInPane(s.blockIdentityColor(), backdrop()!.derived) : s.blockIdentityColor(),
                     ...backdropVars(),
