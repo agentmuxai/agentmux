@@ -253,6 +253,12 @@
     min-width: 47px;
 }
 
+// ...and a selected tab with no icon keeps a few letters of its label as well (ACTIVE_NO_ICON_FLOOR_PX in pane-tab-steps.ts).
+.pane-tab-tip:has(.pane-tab--active .doc-tab--no-icon),
+.pane-tab-tip:has(.pane-tab--active.doc-tab--no-icon) {
+    min-width: 76px;
+}
+
 // A tab being renamed has the input in the place of its label: it keeps room to type in,
 // at every step (the strip holds its step while an input is open, pane-tab-strip-steps.ts).
 .pane-tab-tip:has(.pane-tab-rename-input) {

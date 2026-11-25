@@ -10,7 +10,15 @@
  */
 
 import { createEffect, createSignal, on, onCleanup, onMount, type Accessor } from "solid-js";
-import { minTabsRoom, RESTING_FLOOR_PX, RESTING_NO_ICON_FLOOR_PX, stepFor, type PaneTabStep } from "./pane-tab-steps";
+import {
+    ACTIVE_FLOOR_PX,
+    ACTIVE_NO_ICON_FLOOR_PX,
+    minTabsRoom,
+    RESTING_FLOOR_PX,
+    RESTING_NO_ICON_FLOOR_PX,
+    stepFor,
+    type PaneTabStep,
+} from "./pane-tab-steps";
 
 const HEADER_CONTENT = ".block-frame-header-content";
 const HEADER_HOLDER = ".block-frame-default-header-tabstrip";
@@ -124,8 +132,10 @@ export function createStripSteps(opts: {
         if (next !== previous) setStep(next);
         // Never narrower than the tabs' own floors: past that the header scrolls, as it always did.
         // A tab with no icon keeps a wider floor (a few letters of its label), as its style says.
-        const resting = strip.querySelector(".pane-tab.doc-tab--no-icon") ? RESTING_NO_ICON_FLOOR_PX : RESTING_FLOOR_PX;
-        const limit = Math.max(total, minTabsRoom(count, resting) * zoom + addWidth);
+        const noIcon = strip.querySelector(".pane-tab.doc-tab--no-icon") !== null;
+        const resting = noIcon ? RESTING_NO_ICON_FLOOR_PX : RESTING_FLOOR_PX;
+        const active = noIcon ? ACTIVE_NO_ICON_FLOOR_PX : ACTIVE_FLOOR_PX;
+        const limit = Math.max(total, minTabsRoom(count, resting, active) * zoom + addWidth);
         // A new limit changes how far the labels are cut: look once more when it has settled.
         if (room() === undefined || Math.abs((room() ?? 0) - limit) >= 0.5) {
             setRoom(limit);

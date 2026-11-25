@@ -26,6 +26,8 @@ export const RESTING_FLOOR_PX = 27;
 /** A tab with no icon (a document tab) has only its label to say which it is: its floor leaves a few letters of it. */
 export const RESTING_NO_ICON_FLOOR_PX = 56;
 export const ACTIVE_FLOOR_PX = 47;
+/** The selected tab with no icon: the resting floor's few letters of its label, plus its close button. */
+export const ACTIVE_NO_ICON_FLOOR_PX = 76;
 
 function rank(step: PaneTabStep): number {
     return step === "full" ? 0 : step === "icon-close" ? 1 : 2;
@@ -52,7 +54,11 @@ export function stepFor(share: number, fits: boolean, previous: PaneTabStep): Pa
 }
 
 /** The least room, in unzoomed px, the tabs need before the strip stops shrinking and its header scrolls instead. */
-export function minTabsRoom(count: number, restingFloor: number = RESTING_FLOOR_PX): number {
+export function minTabsRoom(
+    count: number,
+    restingFloor: number = RESTING_FLOOR_PX,
+    activeFloor: number = ACTIVE_FLOOR_PX
+): number {
     if (count <= 0) return 0;
-    return ACTIVE_FLOOR_PX + (count - 1) * restingFloor;
+    return activeFloor + (count - 1) * restingFloor;
 }

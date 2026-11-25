@@ -166,8 +166,8 @@ describe("createStripSteps", () => {
         m.strip.append(tab);
         m.setRevision(1);
         await vi.advanceTimersByTimeAsync(40);
-        // 47 + 5 * 56 + the add button
-        expect(m.steps.room()).toBe(47 + 5 * 56 + 28);
+        // the selected tab's 76 + 5 * 56 + the add button
+        expect(m.steps.room()).toBe(76 + 5 * 56 + 28);
         m.dispose();
     });
 
