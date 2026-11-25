@@ -410,7 +410,7 @@
 170 frontend/layout/lib/layoutModel.ts::LayoutModel::constructor
 156 frontend/layout/lib/layoutNodeModels.ts::getNodeModel
 232 frontend/layout/lib/layoutPersistence.ts::handleBackendAction
-136 frontend/layout/lib/layoutResize.ts::onResizeMove
+135 frontend/layout/lib/layoutResize.ts::onResizeMove
 200 frontend/layout/lib/layoutTree.ts::computeMoveNode
 123 frontend/layout/lib/tilelayout-shared.tsx::OverlayNodeWrapper
 105 frontend/perf/hud.tsx::PerfHud

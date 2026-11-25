@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { debounce } from "throttle-debounce";
+import { beginBorderDrag, endBorderDrag } from "./border-drag-lag";
 import { findNode } from "./layoutNode";
 import { isEffectivelyMinimized } from "./layoutMinimize";
 import {
@@ -423,9 +424,8 @@ export function onResizeMove(
                 stagedSizes: new Map(groupSiblingStartSizes.map((s) => [s.nodeId, s.size])),
                 floors,
             };
-            model.splitterHeldNodeIds?._set(
-                resizedLeafIds(groupResize ? (parentNode.children ?? []) : [beforeNode, afterNode])
-            );
+            model.splitterHeldNodeIds?._set(resizedLeafIds(groupResize ? (parentNode.children ?? []) : [beforeNode, afterNode]));
+            beginBorderDrag();
         } else {
             console.error(
                 "Invalid resize handle, cannot get the additional properties for the nodes in the resize handle properties."
@@ -508,6 +508,7 @@ export function onResizeMove(
  * Callback to end the current resize operation and commit its pending action.
  */
 export function onResizeEnd(model: LayoutModel) {
+    endBorderDrag();
     model.splitterHeldNodeIds?._set(null);
     if (model.resizeContext) {
         model.resizeContext = undefined;

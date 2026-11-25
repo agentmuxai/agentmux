@@ -7,7 +7,7 @@ import { getApi } from "@/util/app-api";
 import { FLOATER_BROWSER_EDGE_INSET } from "@/app/workspace/floater-resize";
 import { registerPaneRect, unregisterPaneRect } from "@/app/platform/pane-rect-registry";
 import { paneReflowActive, notifyPaneReflow } from "@/app/platform/pane-anim";
-import { dragRefreshTick } from "@/app/block/pane-body-hold";
+import { dragRefreshTick, splitterDragActive } from "@/app/block/pane-body-hold";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { focusManager } from "@/app/store/focusManager";
 import { takePaneOpenTiming } from "@/app/store/pane-open-marks";
@@ -154,6 +154,17 @@ export interface PaneRectSyncParams {
      * go through (a tab switched under the drag); the real rect is sent once this turns false.
      */
     held?: Accessor<boolean>;
+}
+
+/**
+ * The safety-net poll's step: not while a border is dragged. The observer and the drag's own catch-up
+ * (`dragRefreshTick`) keep the page on its pane then, and this poll's rect read lays out a page the drag has just
+ * made dirty, every 200 ms.
+ */
+function pollUnlessDragging(syncPosition: () => void): () => void {
+    return () => {
+        if (!splitterDragActive()) syncPosition();
+    };
 }
 
 /**
@@ -404,7 +415,7 @@ export function usePaneRectSync(params: PaneRectSyncParams): PaneRectSync {
             // The window's one observer: this pane's rect is recorded and the window's batch
             // goes out in the rendering step that laid it out (pane-resize-observer.ts).
             stopObserving = observePaneElement(windowLabel, ph, syncPosition, rects.flushNow);
-            positionInterval = setInterval(syncPosition, 200);
+            positionInterval = setInterval(pollUnlessDragging(syncPosition), 200);
         }
         // macOS/Linux: after a JS-driven drag moves the floating pane window,
         // paneRect() returns the same client coords (unchanged by window
