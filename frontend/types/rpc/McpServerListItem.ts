@@ -8,4 +8,12 @@
  * `bound_to_agent`, bind/unbind in the per-agent modal has no way to render
  * as a stateful toggle (see docs/specs, "bound to me" gap tracked in #1960).
  */
-export type McpServerListItem = { bound_to_agent: boolean, id: string, name: string, transport: string, config: string, is_global: boolean, created_at: number, updated_at: number, };
+export type McpServerListItem = { bound_to_agent: boolean, 
+/**
+ * Who bound it to this agent (`unknown` when not recorded); empty when this agent has not bound it.
+ */
+bound_by: string, 
+/**
+ * When, epoch milliseconds; 0 when not bound or not recorded.
+ */
+bound_at: number, id: string, name: string, transport: string, config: string, is_global: boolean, created_at: number, updated_at: number, added_by: string, changed_by: string, };

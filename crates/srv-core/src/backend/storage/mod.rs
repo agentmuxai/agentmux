@@ -49,6 +49,7 @@ pub mod host_lan_keys;
 pub mod identities;
 pub mod managed;
 pub mod project_instructions;
+pub mod mcp_origin;
 pub mod mcp_servers;
 pub mod bundles;
 pub mod bundle_scope;
@@ -94,6 +95,7 @@ pub use content::AgentContent;
 pub use error::StoreError;
 #[allow(unused_imports)]
 pub use history::AgentHistory;
+pub use mcp_origin::{McpBinding, McpOrigin};
 pub use mcp_servers::{McpServer, McpServerReach};
 pub use bundles::{format_global_bundle_block, global_bundle_sections, BundleReseedOutcome, GlobalMemorySection};
 pub use skills::{AgentSkill, Skill};

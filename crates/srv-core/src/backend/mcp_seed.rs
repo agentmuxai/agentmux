@@ -158,7 +158,7 @@ pub(crate) fn seed_starter_mcp_servers(mstore: &Arc<Store>) -> Result<usize, Sto
             created_at: now,
             updated_at: now,
         };
-        if let Err(e) = mstore.mcp_server_upsert_unique_global(&server) {
+        if let Err(e) = mstore.mcp_server_upsert_unique_global(&server, &crate::backend::rpc::actor::Actor::Srv.label()) {
             for id in &inserted_ids {
                 if let Err(cleanup_err) = mstore.mcp_server_delete(mstore, id) {
                     tracing::error!(
@@ -287,7 +287,7 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        mstore.mcp_server_upsert_unique_global(&colliding).unwrap();
+        mstore.mcp_server_upsert_unique_global(&colliding, "test").unwrap();
 
         let result = seed_starter_mcp_servers(&mstore);
         assert!(result.is_err(), "seeding must fail when a name collides");
@@ -316,7 +316,7 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        mstore.mcp_server_upsert_unique_global(&user_created).unwrap();
+        mstore.mcp_server_upsert_unique_global(&user_created, "test").unwrap();
 
         assert!(any_starter_mcp_server_name_exists(&mstore).unwrap());
         assert_eq!(

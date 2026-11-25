@@ -115,6 +115,8 @@
           <div class="mcp-detail">
             <p class="mcp-detail-note">
               "Bound to 0 agents"
+            <p class="mcp-detail-origin">
+              "Added by you"
             <p class="mcp-not-loaded">
               "Not loaded by AgentY. Restart it to apply."
             <div class="ui-field ui-field--inline">
@@ -360,6 +362,8 @@
           <div class="mcp-detail">
             <p class="mcp-detail-note">
               "Bound to 0 agents"
+            <p class="mcp-detail-origin">
+              "Added by you"
             <p class="mcp-not-loaded">
               "Not loaded by AgentY. Restart it to apply."
             <div class="ui-field ui-field--inline">

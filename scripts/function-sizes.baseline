@@ -214,7 +214,7 @@
 125 crates/srv-core/src/identity/resolver/oauth_probe.rs::probe_oauth_status
 148 crates/srv-core/src/migrations/m0022_identity_store_links_backfill.rs::M0022IdentityStoreLinksBackfill::up
 105 crates/srv-core/src/migrations/m0025_agents_launch_state_backfill.rs::backfill_launch_state
-147 crates/srv-core/src/migrations/m0031_carry_skills_and_mcp_servers_to_identity_store.rs::carry_mcp_servers
+146 crates/srv-core/src/migrations/m0031_carry_skills_and_mcp_servers_to_identity_store.rs::carry_mcp_servers
 198 crates/srv-core/src/migrations/m0031_carry_skills_and_mcp_servers_to_identity_store.rs::carry_skills
 228 crates/srv-core/src/muxbus/cloud_subscriber.rs::connect_and_run
 277 crates/srv-core/src/muxbus/cloud_subscriber.rs::run_loop
