@@ -12,6 +12,7 @@ import { t } from "@/app/i18n/i18n";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { getMcpCapability, watchMcpCapability, type McpCapabilityStatus } from "@/app/store/mcp-capabilities";
 import type { McpServerCatalogItem } from "@/types/rpc/McpServerCatalogItem";
+import { tip } from "@/app/element/tip";
 import { focusOnOpen } from "@/util/focusutil";
 import { McpUsesList } from "./mcp-in-use";
 import { reachLabel, type BoundAgent, type McpCatalogModel, type McpDraft } from "./mcp-model";
@@ -109,8 +110,10 @@ function McpBoundAgents(props: {
                         const boundBy = () => originLine("bound", agent.bound_by, agent.bound_at, props.agentNameOf);
                         return (
                             <li class="mcp-bound-agent">
-                                <span class="mcp-use-agent">{agent.name}</span>
-                                <span class="mcp-bound-by" title={boundBy()}>
+                                <span class="mcp-use-agent" {...tip(agent.name)}>
+                                    {agent.name}
+                                </span>
+                                <span class="mcp-bound-by" {...tip(boundBy())}>
                                     {boundBy()}
                                 </span>
                                 <Button

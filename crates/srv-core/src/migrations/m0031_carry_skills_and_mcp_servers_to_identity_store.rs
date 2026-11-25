@@ -568,6 +568,14 @@ fn carry_mcp_servers(mstore: &Store, identity_store: &Store, channel_salt: &str)
 
         if newly_inserted > 0 {
             carried += 1;
+            // Who added it and who last changed it go with the row: the starter seed records its origin in
+            // this channel's store, and Connectors reads origins from the identity store.
+            let origin = mstore.mcp_origin_of(&original_id).map_err(|e| format!("read origin of mcp server {original_id}: {e}"))?;
+            if origin != crate::backend::storage::McpOrigin::default() {
+                identity_store
+                    .mcp_origin_record(&final_id, &origin.added_by, &origin.changed_by)
+                    .map_err(|e| format!("carry origin of mcp server {final_id}: {e}"))?;
+            }
         }
 
         // See carry_skills's matching comment (ReAgent P1, PR #3181, round 3):
@@ -1107,6 +1115,28 @@ mod tests {
         assert!(identity_store.mcp_server_get(&expected_id).unwrap().is_some());
         assert!(identity_store.mcp_server_get("legacy-random-id").unwrap().is_none());
         assert!(mstore.mcp_server_get("legacy-random-id").unwrap().is_none());
+    }
+
+    /// The starter seed records `agentmux` as the adder in the channel store; the carry moves that record with the
+    /// server, and leaves no origin row behind for the id it replaced.
+    #[test]
+    fn a_carried_servers_origin_goes_with_it_and_none_is_left_for_the_replaced_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let mstore = Store::open(&dir.path().join("objects.db")).unwrap();
+        mstore.mcp_server_upsert_unique_global(&mcp("legacy-random-id", "git", true), "agentmux").unwrap();
+        mstore.mcp_server_upsert_unique_global(&mcp("own-id", "mine", true), "agent:korp").unwrap();
+        mstore.mcp_server_insert_raw(&mcp("no-record", "older", true)).unwrap();
+
+        let identity_dir = tempfile::tempdir().unwrap();
+        let identity_store = Store::open_identity_store(&identity_dir.path().join("identity-store.db")).unwrap();
+        carry_mcp_servers(&mstore, &identity_store, "channel").unwrap();
+
+        let starter = frozen_starter_mcp_server_id("git").to_string();
+        let origin = |id: &str| identity_store.mcp_origin_of(id).unwrap();
+        assert_eq!((origin(&starter).added_by.as_str(), origin(&starter).changed_by.as_str()), ("agentmux", "agentmux"));
+        assert_eq!(origin("own-id").added_by, "agent:korp");
+        assert_eq!(origin("no-record"), crate::backend::storage::McpOrigin::default());
+        assert!(!mstore.mcp_origin_all().unwrap().contains_key("legacy-random-id"), "no origin row left for the replaced id");
     }
 
     #[test]

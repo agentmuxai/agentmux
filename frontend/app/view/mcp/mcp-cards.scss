@@ -141,9 +141,16 @@
 
 .mcp-bound-by {
     @include mixins.truncate;
-    flex: 1 1 auto;
+    flex: 1 1 0;
     min-width: 0;
     color: var(--secondary-text-color);
+}
+
+// In a bound row the name keeps its width (cut with an ellipsis past half the row, whole on hover) and the
+// muted "Bound by" text gives way first.
+.mcp-bound-agent .mcp-use-agent {
+    flex: 0 0 auto;
+    max-width: 50%;
 }
 
 .mcp-use {
