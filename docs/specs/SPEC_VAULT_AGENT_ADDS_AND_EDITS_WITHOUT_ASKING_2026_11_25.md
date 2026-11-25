@@ -87,6 +87,7 @@ own shell reads, so the card's "silence is a no" cannot simply be dropped. Inste
 `import` or `capture` is **unseen** until the person has marked its change seen or has answered a use card for the entry
 once. While it is unseen, a *use* of it never goes ahead on silence (`goes_ahead` is false), offers no *Always*, and the
 card says "its value was set by <agent>, <when>; you have not looked at it". The same rule as R9, applied to the value.
+The *Always* grants the entry already holds are dropped when the value is marked, because a use on a grant asks nobody.
 Container agents are unaffected in what they can read (the grant); they get the same rule for the value. A value the
 Vault made (`generate`, `rotate`) is not unseen: nobody had it before.
 

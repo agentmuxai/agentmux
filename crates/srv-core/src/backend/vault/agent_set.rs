@@ -7,7 +7,7 @@
 //! An `import` reads with the host's own AWS setup and a `capture` reads a page or a command's output, and neither asks the
 //! person first. So the entry they write is marked unseen: a *use* of it never goes ahead on silence and offers no *Always*,
 //! and the card says who set the value and when. The mark goes when the person marks the change seen, or answers a use of
-//! the entry with a yes. A value the Vault made (`generate`, `rotate`) is not marked: nobody had it before.
+//! the entry with a yes. Marking also drops the entry's *Always* grants, which skip the card on a use. A value the Vault made (`generate`, `rotate`) is not marked: nobody had it before.
 
 use agentmux_common::time::now_ms;
 
@@ -79,6 +79,17 @@ mod tests {
         apply(&store, &mut seen);
         assert!(goes_ahead(&seen), "seen, it is used as any other");
         assert!(!clear(&store, "api-key-mail-key"), "nothing left to clear");
+    }
+
+    #[test]
+    fn marking_a_value_unseen_drops_the_always_grants_given_for_the_value_the_person_saw() {
+        let store = store();
+        entry(&store, "api-key-mail-key");
+        let created = store.vault_get("api-key-mail-key").unwrap().unwrap().created_at;
+        store.vault_grant_add("api-key-mail-key", "https://mail.example", 1, created).unwrap();
+        assert!(store.vault_grant_check("api-key-mail-key", "https://mail.example").unwrap());
+        mark(&store, "api-key-mail-key", "builder");
+        assert!(!store.vault_grant_check("api-key-mail-key", "https://mail.example").unwrap(), "a use on a grant skips the card, so the grant goes");
     }
 
     #[test]

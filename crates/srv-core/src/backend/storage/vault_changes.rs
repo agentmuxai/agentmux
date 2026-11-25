@@ -30,13 +30,18 @@ pub struct Unseen {
 }
 
 impl Store {
-    /// Records that `by_agent` set the value of `entry_id` (made at `entry_created_at`) at `at`, unseen by the person.
+    /// Records that `by_agent` set the value of `entry_id` (made at `entry_created_at`) at `at`, unseen by the person. The
+    /// entry's *Always* grants go in the same step: they were given for the value the person saw, and several uses skip the
+    /// card on a grant, so a value an agent replaced must ask again.
     pub fn vault_unseen_mark(&self, entry_id: &str, entry_created_at: i64, by_agent: &str, at: i64) -> Result<(), StoreError> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM db_vault_grants WHERE entry_id = ?1", params![entry_id])?;
+        tx.execute(
             "INSERT OR REPLACE INTO db_vault_unseen (entry_id, entry_created_at, by_agent, at) VALUES (?1, ?2, ?3, ?4)",
             params![entry_id, entry_created_at, by_agent, at],
         )?;
+        tx.commit()?;
         Ok(())
     }
 
