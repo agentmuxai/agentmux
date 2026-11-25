@@ -1088,24 +1088,6 @@ pub(crate) fn not_waiting_on_user(pane: &str) -> Result<(), (StatusCode, String)
     }
 }
 
-/// The most characters a hand-off's reason may have. The person reads all of it on the card, so it is never cut: an
-/// over-long one is refused with the limit, and the agent shortens it.
-pub(crate) const HANDOFF_REASON_MAX: usize = 600;
-
-/// The reason for a hand-off, whole, or why it is refused.
-pub(crate) fn handoff_reason(reason: &str) -> Result<String, String> {
-    let n = reason.chars().count();
-    if n == 0 {
-        return Err("say what the user should do (`reason`)".to_string());
-    }
-    if n > HANDOFF_REASON_MAX {
-        return Err(format!(
-            "the reason is {n} characters and the most a hand-off carries is {HANDOFF_REASON_MAX}: the person reads all of it on the card, so it is not cut. Shorten it to what they must do"
-        ));
-    }
-    Ok(reason.to_string())
-}
-
 /// `POST /api/v1/ui/browser/handoff` — backs `BrowserHandoff` (spec §5.2):
 /// a banner in the pane asks the user to do something the agent mustn't
 /// (sign in, a CAPTCHA), and the call waits for their Done or Cancel. The
@@ -1135,7 +1117,7 @@ pub(crate) async fn handle_ui_browser_handoff(
             "Browser's handoff action needs a browser pane: pass the `pane` its open action returned".to_string(),
         );
     }
-    let reason = match handoff_reason(req.reason.trim()) {
+    let reason = match crate::server::browser_handoff_reason::handoff_reason(req.reason.trim()) {
         Ok(r) => r,
         Err(why) => return err_response(StatusCode::BAD_REQUEST, why),
     };
