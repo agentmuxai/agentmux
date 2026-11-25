@@ -8,6 +8,7 @@
 
 import { createSignal, For, Index, Show, type JSX } from "solid-js";
 import { Button } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { ambientAskFailed, ambientFailures, ambientSummary } from "@/app/store/ambient-health";
 import {
     describeFailure,
@@ -28,12 +29,14 @@ function FailureLine(props: { failure: AmbientFailure }): JSX.Element {
         <div class="ambient-purpose-failure" data-state={state() ?? "failing"} {...tip(describeFailure(props.failure))}>
             <span class="ambient-purpose-failure-who">{failureEntity(props.failure)}</span>
             <span class="ambient-purpose-failure-what">
-                {state() ?? (props.failure.outcome === "timeout" ? "timed out" : "failed")}
+                {state() ?? (props.failure.outcome === "timeout" ? t("ambientPurposes.timedOut") : t("ambientPurposes.failedState"))}
                 {` ${props.failure.count.toLocaleString("en-US")}×`}
             </span>
             <Show when={props.failure.retry_at != null && props.failure.retry_at > Date.now()}>
                 <span class="ambient-purpose-failure-retry">
-                    {`retrying ${new Date(props.failure.retry_at as number).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
+                    {t("ambientPurposes.retrying", {
+                        time: new Date(props.failure.retry_at as number).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+                    })}
                 </span>
             </Show>
             <Show when={props.failure.reason}>
@@ -65,7 +68,9 @@ function PurposeLine(props: { row: AmbientPurposeRow; open: boolean; onToggle: (
                 <span class="ambient-purpose-name">{props.row.name}</span>
                 <Show when={props.row.counts.failed > 0 || props.row.unhealthy}>
                     <span class="ambient-purpose-failed">
-                        {props.row.counts.failed > 0 ? `${props.row.counts.failed} failed` : `${props.row.counts.refused} refused`}
+                        {props.row.counts.failed > 0
+                            ? t("ambientPurposes.failed", { n: props.row.counts.failed })
+                            : t("ambientPurposes.refused", { n: props.row.counts.refused })}
                     </span>
                 </Show>
                 <span class="ambient-purpose-total">{props.row.total}</span>
@@ -81,7 +86,7 @@ function PurposeLine(props: { row: AmbientPurposeRow; open: boolean; onToggle: (
                 </Show>
                 <div class="ambient-purpose-counts">
                     <div class="ambient-purpose-count">
-                        <span>Requests</span>
+                        <span>{t("ambientPurposes.requests")}</span>
                         <span>{props.row.total}</span>
                     </div>
                     <For each={BUCKETS}>
@@ -113,11 +118,11 @@ export function AmbientPurposes(): JSX.Element {
     return (
         <div class="ambient-purposes" data-testid="ambient-purposes">
             <Show when={ambientAskFailed()}>
-                <div class="ambient-purposes-note">Could not read the counts; showing the last ones.</div>
+                <div class="ambient-purposes-note">{t("ambientPurposes.askFailed")}</div>
             </Show>
             <Show
                 when={ambientSummary()}
-                fallback={<div class="ambient-purposes-note">No calls have ended since AgentMux's server started.</div>}
+                fallback={<div class="ambient-purposes-note">{t("ambientPurposes.none")}</div>}
             >
                 {(s) => (
                     <Index each={s().rows}>
@@ -132,8 +137,7 @@ export function AmbientPurposes(): JSX.Element {
                 )}
             </Show>
             <div class="ambient-purposes-note">
-                Requests include those that never reached the model. A purpose is failing when its refusals and
-                failures outnumber its accepted and kept answers. Counts restart with AgentMux's server.
+                {t("ambientPurposes.footnote")}
             </div>
         </div>
     );

@@ -20,16 +20,18 @@ import {
 import { topContributors, topContributorsLabel } from "./memory-aggregates";
 import { shareLabel, tokensLabel, tokensTitle, TOKEN_ESTIMATE_NOTE } from "./memory-tokens";
 import { tip } from "@/app/element/tip";
+import { t } from "@/app/i18n/i18n";
+import { Rich } from "@/app/i18n/rich";
 
 export function AgentLaunchCost(props: { cost: LaunchCost; window: AgentWindow | null }): JSX.Element {
     const total = () => deliveredTotal(props.cost);
     const budget = () => (props.window ? launchBudget(total(), props.window.window) : null);
     const top = () => topContributors(deliveredParts(props.cost).map((p) => p.tokens_est));
     return (
-        <section class="agent-launch-cost" aria-label="What this agent starts with" data-testid="agent-launch-cost">
+        <section class="agent-launch-cost" aria-label={t("launchCost.label")} data-testid="agent-launch-cost">
             <div class="agent-launch-cost-head">
                 <span {...tip(tokensTitle(total()))}>
-                    Starts with <strong>{tokensLabel(total())}</strong>
+                    <Rich k="launchCost.startsWith" params={{ tokens: tokensLabel(total()) }} />
                 </span>
                 <Show when={budget()}>
                     {(b) => (
@@ -42,8 +44,7 @@ export function AgentLaunchCost(props: { cost: LaunchCost; window: AgentWindow |
             </div>
             <Show when={props.cost.startup_file && !props.cost.delivered_by_file}>
                 <p class="agent-launch-cost-note">
-                    {props.cost.startup_file} in this agent's folder is your own file, so its launch doesn't add
-                    AgentMux's startup text to it, and that text isn't counted here.
+                    {t("launchCost.ownFile", { file: props.cost.startup_file ?? "" })}
                 </p>
             </Show>
             <div class="agent-launch-cost-bar" aria-hidden="true">
@@ -60,12 +61,12 @@ export function AgentLaunchCost(props: { cost: LaunchCost; window: AgentWindow |
             <table class="agent-launch-cost-table">
                 <thead>
                     <tr>
-                        <th scope="col">Part</th>
-                        <th scope="col">Arrives by</th>
+                        <th scope="col">{t("launchCost.part")}</th>
+                        <th scope="col">{t("launchCost.arrivesBy")}</th>
                         <th scope="col" {...tip(TOKEN_ESTIMATE_NOTE)}>
-                            Tokens
+                            {t("launchCost.tokens")}
                         </th>
-                        <th scope="col">Share</th>
+                        <th scope="col">{t("launchCost.share")}</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -84,13 +85,12 @@ export function AgentLaunchCost(props: { cost: LaunchCost; window: AgentWindow |
                 </tbody>
             </table>
             <Show when={top()}>
-                {(t) => <p class="agent-launch-cost-note">{topContributorsLabel(t(), "parts", "the launch")}.</p>}
+                {(lead) => <p class="agent-launch-cost-note">{topContributorsLabel(lead(), "parts", "the launch")}.</p>}
             </Show>
             <Show when={budget()}>
                 {(b) => (
                     <p class="agent-launch-cost-note">
-                        {tokensLabel(b().room)} left before auto-compaction, at launch, on{" "}
-                        {props.window?.model ?? "its model"}.
+                        {t("launchCost.room", { tokens: tokensLabel(b().room), model: props.window?.model ?? t("launchCost.itsModel") })}
                     </p>
                 )}
             </Show>
