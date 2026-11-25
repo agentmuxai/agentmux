@@ -6,6 +6,7 @@ import { AUTH_KEY_HEADER } from "@/util/sharedconst";
 import { type WebSocket, newWebSocket } from "@/util/wsutil";
 import { debugLog } from "@/util/debuglog";
 import { createSlowHandlerWatch } from "./ws-slow-handler";
+import { layoutReadProbe } from "./layout-read-probe";
 import { createHandlerCostTally } from "./ws-handler-cost";
 import { isOperatorProofSettled, operatorProofReady, reproveAfterRefusedInput, waitsForProof } from "./operator-proof";
 
@@ -258,10 +259,13 @@ class WSControl {
             reproveAfterRefusedInput(eventData.error);
         }
         if (this.messageCallback) {
+            layoutReadProbe.enter(eventData); // off unless debug:layoutreadprobe is on
             try {
                 this.messageCallback(eventData);
             } catch (e) {
                 console.log("[error] messageCallback", e);
+            } finally {
+                layoutReadProbe.leave();
             }
         }
         // A message handled in 200 ms or more is named in the log (ws-slow-handler.ts).
