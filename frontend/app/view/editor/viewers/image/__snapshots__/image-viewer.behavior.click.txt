@@ -17,12 +17,11 @@ translate(-253.03549074433965px, 56.405301974026685px) scale(5.7707996236288555)
       <div class="ui-tooltip-anchor">
         <button aria-label="Background: checker (B)" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
           <i aria-hidden="true" class="fa-solid fa-chess-board">
-    <div tabindex="0" aria-label="Image" class="image-viewer-content image-viewer-bg-checker">
+    <div tabindex="0" class="image-viewer-content image-viewer-bg-checker" aria-label="Image">
       <img class="image-viewer-img image-viewer-pixels" style="transition: opacity var(--duration-quick) ease; opacity: 1; transform: translate(-253.03549074433965px, 56.405301974026685px) scale(5.7707996236288555);" draggable="false" alt="C:/pics/a.png" src="blob:image">
       <div class="image-viewer-zoom-badge">
         <button title="Fit to the pane (0)" type="button" class="ui-button ui-tone-neutral ui-density-compact">
-          "231%"
-          "· Fit"
+          "231% · Fit"
 translate(-105.33275470285346px, 23.480207536473557px) scale(2.4022488679628626)
 translate(0px, 0px) scale(1)
 mac ctrl+click: translate(0px, 0px) scale(1)
@@ -40,9 +39,8 @@ mac alt+click: translate(0px, 0px) scale(1)
       <div class="ui-tooltip-anchor">
         <button aria-label="Background: checker (B)" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
           <i aria-hidden="true" class="fa-solid fa-chess-board">
-    <div tabindex="0" aria-label="Image" class="image-viewer-content image-viewer-bg-checker">
+    <div tabindex="0" class="image-viewer-content image-viewer-bg-checker" aria-label="Image">
       <img class="image-viewer-img image-viewer-pixels image-viewer-deepest" style="transition: opacity var(--duration-quick) ease; opacity: 1; transform: translate(-9339.574340785013px, 4669.787170392507px) scale(80);" draggable="false" alt="C:/pics/a.png" src="blob:image">
       <div class="image-viewer-zoom-badge">
         <button title="Fit to the pane (0)" type="button" class="ui-button ui-tone-neutral ui-density-compact">
-          "3200%"
-          "· Fit"
+          "3200% · Fit"

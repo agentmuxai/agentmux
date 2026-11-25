@@ -15,12 +15,11 @@ ResizeObserver observe
       <div class="ui-tooltip-anchor">
         <button aria-label="Background: checker (B)" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
           <i aria-hidden="true" class="fa-solid fa-chess-board">
-    <div tabindex="0" aria-label="Image" class="image-viewer-content image-viewer-bg-checker">
+    <div tabindex="0" class="image-viewer-content image-viewer-bg-checker" aria-label="Image">
       <img class="image-viewer-img image-viewer-pixels" style="transition: opacity var(--duration-quick) ease; opacity: 1; transform: translate(0px, 0px) scale(5.7707996236288555);" draggable="false" alt="C:/pics/a.png" src="blob:image">
       <div class="image-viewer-zoom-badge">
         <button title="Fit to the pane (0)" type="button" class="ui-button ui-tone-neutral ui-density-compact">
-          "231%"
-          "· Fit"
+          "231% · Fit"
 3 px: translate(0px, 0px) scale(5.7707996236288555)
 -- dragging
 <div>
@@ -35,12 +34,11 @@ ResizeObserver observe
       <div class="ui-tooltip-anchor">
         <button aria-label="Background: checker (B)" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
           <i aria-hidden="true" class="fa-solid fa-chess-board">
-    <div tabindex="0" aria-label="Image" class="image-viewer-content image-viewer-bg-checker">
+    <div tabindex="0" class="image-viewer-content image-viewer-bg-checker" aria-label="Image">
       <img class="image-viewer-img image-viewer-pixels image-viewer-dragging" style="transition: opacity var(--duration-quick) ease; opacity: 1; transform: translate(-20px, -20px) scale(5.7707996236288555);" draggable="false" alt="C:/pics/a.png" src="blob:image">
       <div class="image-viewer-zoom-badge">
         <button title="Fit to the pane (0)" type="button" class="ui-button ui-tone-neutral ui-density-compact">
-          "231%"
-          "· Fit"
+          "231% · Fit"
 -- released
 <div>
   <div class="editor-viewer image-viewer">
@@ -54,12 +52,11 @@ ResizeObserver observe
       <div class="ui-tooltip-anchor">
         <button aria-label="Background: checker (B)" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
           <i aria-hidden="true" class="fa-solid fa-chess-board">
-    <div tabindex="0" aria-label="Image" class="image-viewer-content image-viewer-bg-checker">
+    <div tabindex="0" class="image-viewer-content image-viewer-bg-checker" aria-label="Image">
       <img class="image-viewer-img image-viewer-pixels" style="transition: opacity var(--duration-quick) ease; opacity: 1; transform: translate(-20px, -20px) scale(5.7707996236288555);" draggable="false" alt="C:/pics/a.png" src="blob:image">
       <div class="image-viewer-zoom-badge">
         <button title="Fit to the pane (0)" type="button" class="ui-button ui-tone-neutral ui-density-compact">
-          "231%"
-          "· Fit"
+          "231% · Fit"
 -- cancelled
 <div>
   <div class="editor-viewer image-viewer">
@@ -73,12 +70,11 @@ ResizeObserver observe
       <div class="ui-tooltip-anchor">
         <button aria-label="Background: checker (B)" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
           <i aria-hidden="true" class="fa-solid fa-chess-board">
-    <div tabindex="0" aria-label="Image" class="image-viewer-content image-viewer-bg-checker">
+    <div tabindex="0" class="image-viewer-content image-viewer-bg-checker" aria-label="Image">
       <img class="image-viewer-img image-viewer-pixels" style="transition: opacity var(--duration-quick) ease; opacity: 1; transform: translate(-70px, -70px) scale(5.7707996236288555);" draggable="false" alt="C:/pics/a.png" src="blob:image">
       <div class="image-viewer-zoom-badge">
         <button title="Fit to the pane (0)" type="button" class="ui-button ui-tone-neutral ui-density-compact">
-          "231%"
-          "· Fit"
+          "231% · Fit"
 -- moved with no button
 <div>
   <div class="editor-viewer image-viewer">
@@ -92,11 +88,10 @@ ResizeObserver observe
       <div class="ui-tooltip-anchor">
         <button aria-label="Background: checker (B)" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
           <i aria-hidden="true" class="fa-solid fa-chess-board">
-    <div tabindex="0" aria-label="Image" class="image-viewer-content image-viewer-bg-checker">
+    <div tabindex="0" class="image-viewer-content image-viewer-bg-checker" aria-label="Image">
       <img class="image-viewer-img image-viewer-pixels" style="transition: opacity var(--duration-quick) ease; opacity: 1; transform: translate(-110px, -110px) scale(5.7707996236288555);" draggable="false" alt="C:/pics/a.png" src="blob:image">
       <div class="image-viewer-zoom-badge">
         <button title="Fit to the pane (0)" type="button" class="ui-button ui-tone-neutral ui-density-compact">
-          "231%"
-          "· Fit"
+          "231% · Fit"
 a move after it ended: translate(-110px, -110px) scale(5.7707996236288555)
 right button: translate(-110px, -110px) scale(5.7707996236288555)

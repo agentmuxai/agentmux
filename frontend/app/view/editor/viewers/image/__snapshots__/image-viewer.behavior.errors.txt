@@ -13,7 +13,7 @@ ResizeObserver observe
       <div class="ui-tooltip-anchor">
         <button aria-label="Background: checker (B)" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
           <i aria-hidden="true" class="fa-solid fa-chess-board">
-    <div tabindex="0" aria-label="Image" class="image-viewer-content image-viewer-bg-checker">
+    <div tabindex="0" class="image-viewer-content image-viewer-bg-checker" aria-label="Image">
       <div class="editor-viewer-message" role="alert">
         "Couldn't read the file."
 ResizeObserver disconnect
@@ -33,6 +33,6 @@ bytes setError "Couldn't display the image (unsupported format or a damaged file
       <div class="ui-tooltip-anchor">
         <button aria-label="Background: checker (B)" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
           <i aria-hidden="true" class="fa-solid fa-chess-board">
-    <div tabindex="0" aria-label="Image" class="image-viewer-content image-viewer-bg-checker">
+    <div tabindex="0" class="image-viewer-content image-viewer-bg-checker" aria-label="Image">
       <div class="editor-viewer-message" role="alert">
         "Couldn't display the image (unsupported format or a damaged file)."
