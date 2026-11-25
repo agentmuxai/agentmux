@@ -373,9 +373,9 @@
               "Bound to"
             <ul class="mcp-bound" aria-label="Agents it is bound to">
               <li class="mcp-bound-agent">
-                <span class="mcp-use-agent">
+                <span class="mcp-use-agent" data-hover-tip="Korp" aria-description="Korp">
                   "Korp"
-                <span class="mcp-bound-by" title="Bound by unknown (made before this was recorded)">
+                <span class="mcp-bound-by" data-hover-tip="Bound by unknown (made before this was recorded)" aria-description="Bound by unknown (made before this was recorded)">
                   "Bound by unknown (made before this was recorded)"
                 <button aria-label="Unbind Korp" type="button" class="ui-button ui-tone-neutral ui-density-compact">
                   "Unbind"
@@ -631,9 +631,9 @@
               "Bound to"
             <ul class="mcp-bound" aria-label="Agents it is bound to">
               <li class="mcp-bound-agent">
-                <span class="mcp-use-agent">
+                <span class="mcp-use-agent" data-hover-tip="Korp" aria-description="Korp">
                   "Korp"
-                <span class="mcp-bound-by" title="Bound by unknown (made before this was recorded)">
+                <span class="mcp-bound-by" data-hover-tip="Bound by unknown (made before this was recorded)" aria-description="Bound by unknown (made before this was recorded)">
                   "Bound by unknown (made before this was recorded)"
                 <button aria-label="Unbind Korp" type="button" class="ui-button ui-tone-neutral ui-density-compact">
                   "Unbind"
