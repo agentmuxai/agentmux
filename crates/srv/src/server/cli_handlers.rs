@@ -995,6 +995,14 @@ pub(crate) fn locate_for_ambient(provider_id: &str) -> std::pin::Pin<Box<dyn std
 
 async fn locate_provider_cli_with(provider_id: &str, use_path: bool) -> Option<LocatedCli> {
     let provider = crate::backend::providers::get_provider(provider_id)?;
+    // A custom harness the person installed themselves is registered under the absolute path its command has on PATH
+    // (`providers_custom::launch_command`); AgentMux installs nothing for it, so that file is the CLI.
+    if provider.tier == crate::backend::providers::Tier::Custom
+        && std::path::Path::new(provider.cli_command).is_absolute()
+        && std::path::Path::new(provider.cli_command).is_file()
+    {
+        return Some(LocatedCli { path: provider.cli_command.to_string(), source: CliSource::SystemPath });
+    }
     if use_path {
         if let Some(path) = resolve_provider_cli_on_path(provider.id, provider.cli_command).await {
             return Some(LocatedCli { path, source: CliSource::SystemPath });

@@ -171,3 +171,44 @@ fn a_directory_of_harnesses_loads_what_is_valid_and_reports_the_rest() {
     assert!(layer.get("custom-good").is_some() && layer.get("custom-misnamed").is_none());
     assert!(CustomLayer::new(1, 1).load_dir(&dir.path().join("missing")).loaded.is_empty());
 }
+
+/// A folder holding one runnable program named `name`, as a PATH value.
+fn path_with(name: &str) -> (tempfile::TempDir, std::ffi::OsString, std::path::PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join(if cfg!(windows) { format!("{name}.exe") } else { name.to_string() });
+    std::fs::write(&file, b"").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let path = std::env::join_paths([dir.path()]).unwrap();
+    (dir, path, file)
+}
+
+#[test]
+fn a_path_install_bare_command_is_registered_as_its_absolute_path_on_path() {
+    let (_dir, path, file) = path_with("demo-acp");
+    let mut m = manifest("custom-path");
+    m.install = Install::Path;
+    let command = launch_command(&m, Some(&path));
+    assert!(std::path::Path::new(&command).is_absolute(), "{command}");
+    assert_eq!(std::fs::canonicalize(&command).unwrap(), std::fs::canonicalize(&file).unwrap());
+    // The registered config carries it, so the launch finds the file instead of a managed shim that does not exist.
+    assert_eq!(leak_config(&m, &command).cli_command, command);
+}
+
+#[test]
+fn a_command_that_is_not_on_path_other_installs_and_commands_with_a_folder_keep_the_manifests_command() {
+    let (_dir, path, _file) = path_with("demo-acp");
+    let mut m = manifest("custom-path");
+    m.install = Install::Path;
+    m.command = "missing-acp".to_string();
+    assert_eq!(launch_command(&m, Some(&path)), "missing-acp");
+    assert_eq!(launch_command(&m, None), "missing-acp");
+    m.command = "tools/demo-acp".to_string();
+    assert_eq!(launch_command(&m, Some(&path)), "tools/demo-acp");
+    // An npm install is AgentMux's own, whatever else is on PATH.
+    let npm = manifest("custom-npm");
+    assert_eq!(launch_command(&npm, Some(&path)), "demo-acp");
+}
