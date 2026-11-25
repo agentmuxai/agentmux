@@ -64,6 +64,8 @@ const use = (over: Partial<UseRequest> = {}): UseRequest => ({
     deadline_ms: Date.now() + 30_000,
     expires_ms: Date.now() + 120_000,
     goes_ahead: true,
+    set_by: "",
+    set_ms: 0,
     ...over,
 });
 const request = (over: Partial<VaultRequest> = {}): VaultRequest => ({

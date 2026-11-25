@@ -4,8 +4,9 @@
 //! `POST /api/v1/vault/{show,update,verify,health}`: what an agent can ask the Vault about an entry and about itself
 //! (docs/specs/SPEC_VAULT_PARITY_ENTRY_HISTORY_REASONS_AND_IMPORT_2026_11_06.md §8). Each answers ids, names, states
 //! and counts, for the Vaults the proven agent may use; none returns a value. `update` changes details only and needs
-//! the agent's signed identity and a reason, as the record names who changed what. An update that changes where the
-//! entry's machine copy is asks the person first, showing the old place and the new one, and silence is a no.
+//! the agent's signed identity and a reason, as the record names who changed what. Nobody is asked, a change to where the
+//! entry's machine copy is included: the history line is the record
+//! (docs/specs/SPEC_VAULT_AGENT_ADDS_AND_EDITS_WITHOUT_ASKING_2026_11_25.md).
 
 use std::time::Duration;
 
@@ -18,14 +19,13 @@ use serde_json::json;
 
 use super::vault_handlers::{asking_agent, publish};
 use super::AppState;
-use crate::backend::vault::inspect::{self, KeyResult, LinkChange, UpdateRequest};
+use crate::backend::vault::inspect::{self, KeyResult, UpdateRequest};
+use crate::backend::vault::pace;
 use crate::backend::vault::seal;
 use crate::backend::vault::shares::{self, Ask, Asked};
-use crate::backend::vault::source_link::Link;
-use crate::backend::vault::uses::{Ended, UseHttpPrompt, UseLink, UseRequest};
+use crate::backend::vault::uses::{Ended, UseHttpPrompt, UseRequest};
 
-/// How long the person has to answer a change to an entry's machine copy by default, and at most.
-const ANSWER_WAIT: Duration = Duration::from_secs(120);
+/// The longest the person has to answer a share.
 const ANSWER_WAIT_MAX: Duration = Duration::from_secs(600);
 
 type Auth = Option<agentmux_common::api_types::UiAutomationAuth>;
@@ -102,89 +102,41 @@ pub(crate) struct UpdateBody {
     request: UpdateRequest,
     #[serde(default)]
     auth: Auth,
-    /// How long to wait for the person, when the update changes where the entry's machine copy is.
-    #[serde(default)]
-    wait_secs: Option<u64>,
-}
-
-/// The question for the person: the entry, the place its machine copy is in now and the place asked for, and what
-/// the agent says it is for.
-fn link_card(change: &LinkChange, agent: &str, pane: &str) -> UseRequest {
-    let place = |link: &Option<Link>| link.as_ref().map(Link::describe).unwrap_or_default();
-    UseRequest {
-        id: uuid::Uuid::new_v4().to_string(),
-        agent: agent.to_string(),
-        block_id: pane.to_string(),
-        entry_id: change.entry_id.clone(),
-        entry_label: change.label.clone(),
-        what: "machine copy".into(),
-        offer_always: false,
-        reason: "an agent asked to change where this entry's machine copy is".into(),
-        agent_reason: change.reason.clone(),
-        kind: change.kind.clone(),
-        requested_ms: agentmux_common::time::now_ms_u64(),
-        link: Some(UseLink { from: place(&change.from), to: place(&change.to), about_from: change.about_from.clone(), about_to: change.about_to.clone(), only: change.only }),
-        ..Default::default()
-    }
-}
-
-/// What the agent is told when the card didn't end in a yes: silence is a no for a new place, whatever the kind.
-fn link_not_allowed(ended: Ended) -> String {
-    match ended {
-        Ended::Expired => "nobody answered, and a change to where an entry's machine copy is needs a yes: nothing was changed; ask the person".to_string(),
-        other => other.refusal("nothing was changed"),
-    }
-}
-
-/// Whether `change` leaves the place as it is: the entry is a link, or only what it says of its key changes. The
-/// card's title asks the same of what it shows, so the headline and the card say one thing.
-fn about_only(change: &LinkChange) -> bool {
-    let place = |link: &Option<Link>| link.as_ref().map(Link::describe);
-    change.only || place(&change.from) == place(&change.to)
-}
-
-/// Asks the person to allow `change`; a refusal is recorded in the entry's history and answered.
-async fn allow_link_change(state: &AppState, change: &LinkChange, agent: &str, pane: &str, wait: Duration) -> Result<(), Response> {
-    let headline = match about_only(change) {
-        true => format!("{agent} wants to change what the Vault says about the key {}", change.label),
-        false => format!("{agent} wants to change where the machine copy of {} is", change.label),
-    };
-    let (ended, _) = super::vault_ask::ask(state, pane, link_card(change, agent, pane), wait, &headline).await;
-    if ended.allowed() {
-        return Ok(());
-    }
-    let (store, change, agent) = (state.identity_store.clone(), change.clone(), agent.to_string());
-    let _ = tokio::task::spawn_blocking(move || inspect::note_link_refused(&store, &change, &agent, ended.outcome())).await;
-    publish(state);
-    Err(error(StatusCode::FORBIDDEN, link_not_allowed(ended)))
 }
 
 /// `POST /api/v1/vault/update`
 pub(crate) async fn handle_vault_update(State(state): State<AppState>, caller: Option<axum::Extension<super::caller::Caller>>, Json(body): Json<UpdateBody>) -> Response {
     let (agent, pane) = asking_agent(&state, caller.as_deref(), body.auth.as_ref());
-    let Some(pane) = pane else {
+    if pane.is_none() {
         return error(StatusCode::FORBIDDEN, "update needs to know which agent asks (its token or its signed identity, neither of which verified): the Vault records who changed each entry; respawn the agent if it has neither");
-    };
+    }
     let request = body.request;
-    let (store, asked, by) = (state.identity_store.clone(), request.clone(), agent.clone());
-    let change = match blocking(move || inspect::link_change(&store, &asked, &by)).await {
-        Ok(change) => change,
+    // The call is checked before the pace is spent, and before a refusal is written for it: an invalid call costs nothing and
+    // leaves nothing on an entry.
+    let (store, checking, by) = (state.identity_store.clone(), request.clone(), agent.clone());
+    let checked = match blocking(move || inspect::check_update(&store, &checking, &by)).await {
+        Ok(checked) => checked,
         Err(refusal) => return refusal,
     };
-    if let Some(change) = &change {
-        let wait = body.wait_secs.map(Duration::from_secs).unwrap_or(ANSWER_WAIT).min(ANSWER_WAIT_MAX);
-        if let Err(refusal) = allow_link_change(&state, change, &agent, &pane, wait).await {
-            return refusal;
+    let spent = [pace::Act::Edit];
+    if let Err(why) = pace::admit(&agent, &spent) {
+        if pace::may_note_refusal(&agent) {
+            let (store, by) = (state.identity_store.clone(), agent.clone());
+            let _ = tokio::task::spawn_blocking(move || {
+                let line = crate::backend::vault::Line { entry_id: &checked.id, label: &checked.label, actor: &by, action: inspect::CHANGED_DETAILS, target: "", outcome: "refused: pace", reason: &checked.reason };
+                crate::backend::vault::record_line(&store, line);
+            })
+            .await;
         }
+        return error(StatusCode::TOO_MANY_REQUESTS, why);
     }
     let store = state.identity_store.clone();
-    let response = answer(move || match &change {
-        Some(allowed) => inspect::update_details_allowed(&store, &request, &agent, allowed),
-        None => inspect::update_details(&store, &request, &agent),
-    })
-    .await;
+    let by = agent.clone();
+    let response = answer(move || inspect::update_details(&store, &request, &by)).await;
     if response.status().is_success() {
         publish(&state);
+    } else {
+        pace::refund(&agent, &spent);
     }
     response
 }
@@ -320,58 +272,5 @@ pub(crate) async fn handle_vault_share(State(state): State<AppState>, caller: Op
             Json(shared_answer(&ask, always)).into_response()
         }
         Err(refusal) => refusal,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn change() -> LinkChange {
-        let to = Link { kind: "aws-secret".into(), location: "staging/app".into(), key: "db.password".into(), region: "eu-west-1".into(), profile: String::new() };
-        LinkChange {
-            entry_id: "api-key-example".into(),
-            label: "Example".into(),
-            kind: "api-key".into(),
-            from: None,
-            to: Some(to),
-            about_from: String::new(),
-            about_to: "Read by: invoice-sync (lambda): at run time.".into(),
-            only: false,
-            reason: "record where the staging copy is for task 28071".into(),
-        }
-    }
-
-    #[test]
-    fn the_card_shows_the_old_place_and_the_new_one_and_never_goes_ahead_on_silence() {
-        let card = link_card(&change(), "builder", "block-1");
-        let link = card.link.as_ref().unwrap();
-        assert_eq!((link.from.as_str(), link.to.as_str()), ("", "the AWS secret staging/app, key db.password, region eu-west-1"));
-        assert_eq!((card.entry_id.as_str(), card.entry_label.as_str(), card.block_id.as_str()), ("api-key-example", "Example", "block-1"));
-        assert_eq!(card.agent_reason, "record where the staging copy is for task 28071");
-        // An api-key use goes ahead on silence; a new place for its machine copy never does.
-        assert!(crate::backend::vault::uses::goes_ahead_on_silence("api-key", false));
-        assert!(!card.offer_always && !crate::backend::vault::uses::goes_ahead(&card));
-    }
-
-    #[test]
-    fn a_change_that_leaves_the_place_as_it_is_is_about_what_the_vault_says() {
-        // A new place: the headline speaks of the machine copy.
-        assert!(!about_only(&change()));
-        // The same place, other readers, on an entry that holds a value: the card's title rule, and the headline's.
-        let same = LinkChange { from: change().to, ..change() };
-        assert!(about_only(&same));
-        let card = link_card(&same, "builder", "block-1");
-        let link = card.link.as_ref().unwrap();
-        assert!(!link.only && link.from == link.to);
-        // A link holds no value, so any change to it is about what the Vault says.
-        assert!(about_only(&LinkChange { only: true, ..change() }));
-    }
-
-    #[test]
-    fn silence_on_a_new_place_says_it_needed_a_yes() {
-        let said = link_not_allowed(Ended::Expired);
-        assert!(said.contains("needs a yes") && said.contains("nothing was changed") && !said.contains("ID or card"), "{said}");
-        assert_eq!(link_not_allowed(Ended::Denied), "the person said no: nothing was changed");
     }
 }

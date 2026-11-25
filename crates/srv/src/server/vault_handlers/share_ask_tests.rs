@@ -384,3 +384,44 @@ async fn a11_the_browsers_credential_calls_answer_a_prompt_from_a_share_the_agen
     let own = broker(&state, "Lookup", &personal, Some(HOST_SECRET)).await.data.unwrap();
     assert_eq!((own["found"].as_bool(), own.get("shared")), (Some(true), None), "{own}");
 }
+
+#[tokio::test]
+async fn an_update_of_where_the_machine_copy_is_asks_nobody_and_the_thirty_first_change_in_an_hour_is_refused() {
+    let (app, state) = setup().await;
+    let token = agent(&state, "vid-noask-a");
+    let id = login(&app).await;
+    let place = json!({ "source_kind": "aws-secret", "source_location": "staging/app", "source_key": "db.password", "source_region": "eu-west-1" });
+    let (s, out) = call(&app, Some(&token), "/api/v1/vault/update", super::identity_tests::update(&id, "vid-noask-a", place)).await;
+    assert_eq!(s, StatusCode::OK, "{out}");
+    assert!(out["changed"].as_array().unwrap().iter().any(|c| c == "field source_location"), "{out}");
+    assert!(uses::uses().list().iter().all(|u| u.entry_id != id), "nobody was asked");
+    let line = lines_of(&state, &id).into_iter().find(|l| l.action == "changed details" && l.actor == "agent:vid-noask-a").expect("the history line is the record");
+    assert_eq!(line.reason, "tag the sign-in for the dashboard task");
+    // The pace: 30 changes an hour, then a refusal that says when there is room, and a line for it.
+    for i in 1..30 {
+        let (s, out) = call(&app, Some(&token), "/api/v1/vault/update", super::identity_tests::update(&id, "vid-noask-a", json!({ "notes": format!("note {i}") }))).await;
+        assert_eq!(s, StatusCode::OK, "{i}: {out}");
+    }
+    let (s, out) = call(&app, Some(&token), "/api/v1/vault/update", super::identity_tests::update(&id, "vid-noask-a", json!({ "notes": "one more" }))).await;
+    assert_eq!(s, StatusCode::TOO_MANY_REQUESTS, "{out}");
+    assert!(out["error"].as_str().unwrap().contains("in about"), "{out}");
+    assert!(lines_of(&state, &id).iter().any(|l| l.outcome == "refused: pace"), "a refused change is in the history too");
+    // A call that is not valid is answered as such and leaves nothing on an entry, over the pace or not; a valid one over the
+    // pace leaves a line for the first few refusals only.
+    let refused = |state: &crate::server::AppState| lines_of(state, &id).iter().filter(|l| l.outcome == "refused: pace").count();
+    let mut no_reason = super::identity_tests::update(&id, "vid-noask-a", json!({ "notes": "no reason" }));
+    no_reason["reason"] = json!("");
+    let (s, _) = call(&app, Some(&token), "/api/v1/vault/update", no_reason).await;
+    assert_eq!((s, refused(&state)), (StatusCode::BAD_REQUEST, 1), "an update with no reason is a 400 and writes no line");
+    let (s, _) = call(&app, Some(&token), "/api/v1/vault/update", super::identity_tests::update("api-key-nothing-here", "vid-noask-a", json!({ "notes": "x" }))).await;
+    assert_eq!((s, refused(&state)), (StatusCode::NOT_FOUND, 1), "an entry that isn't there gets no line");
+    for _ in 0..6 {
+        let (s, _) = call(&app, Some(&token), "/api/v1/vault/update", super::identity_tests::update(&id, "vid-noask-a", json!({ "notes": "again" }))).await;
+        assert_eq!(s, StatusCode::TOO_MANY_REQUESTS);
+    }
+    assert_eq!(refused(&state), crate::backend::vault::pace::REFUSAL_LINES, "an agent asking over its pace cannot fill an entry's history");
+    // Another agent has its own budget.
+    let other = agent(&state, "vid-noask-b");
+    let (s, out) = call(&app, Some(&other), "/api/v1/vault/update", super::identity_tests::update(&id, "vid-noask-b", json!({ "notes": "from b" }))).await;
+    assert_eq!(s, StatusCode::OK, "{out}");
+}

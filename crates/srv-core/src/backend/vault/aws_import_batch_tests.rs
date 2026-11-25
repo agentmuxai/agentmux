@@ -80,7 +80,7 @@ fn entry(s: &Store, label: &str, vault: &str) -> String {
 }
 
 #[test]
-fn a_batch_needs_a_name_a_reason_and_one_to_forty_items() {
+fn a_batch_needs_a_name_a_reason_and_one_to_twenty_items() {
     let s = store();
     let plan = check(&s, &three(), "builder").unwrap();
     assert_eq!((plan.name.as_str(), plan.vault_name.as_str(), plan.items.len(), plan.region.as_deref()), ("host passwords", "Personal", 3, Some("eu-west-1")));
@@ -90,10 +90,10 @@ fn a_batch_needs_a_name_a_reason_and_one_to_forty_items() {
     assert!(refused(&s, &BatchRequest { batch: "  ".into(), ..three() }).contains("needs batch"));
     assert!(refused(&s, &BatchRequest { batch: "x".repeat(61), ..three() }).contains("at most 60 characters"));
     assert!(refused(&s, &batch(vec![])).contains("needs items"));
-    let many = (0..41).map(|i| item(&format!("hosts/h{i}"), &format!("Host {i}"))).collect();
-    assert!(refused(&s, &batch(many)).contains("at most 40 items"));
-    let forty = (0..40).map(|i| item(&format!("hosts/h{i}"), &format!("Host {i}"))).collect();
-    assert_eq!(check(&s, &batch(forty), "builder").unwrap().items.len(), 40);
+    let many = (0..21).map(|i| item(&format!("hosts/h{i}"), &format!("Host {i}"))).collect();
+    assert!(refused(&s, &batch(many)).contains("at most 20 items"));
+    let twenty = (0..20).map(|i| item(&format!("hosts/h{i}"), &format!("Host {i}"))).collect();
+    assert_eq!(check(&s, &batch(twenty), "builder").unwrap().items.len(), 20);
 }
 
 #[test]

@@ -109,6 +109,16 @@ expires_ms: number,
  */
 goes_ahead: boolean, 
 /**
+ * The agent that set the entry's value, when an agent had the Vault read it (an import or a capture) and the person has
+ * not seen it yet (`agent_set`); empty for any other use. Such a use never goes ahead on silence, offers no *Always*, and
+ * the card says who set the value and when.
+ */
+set_by: string, 
+/**
+ * When `set_by` set it, in ms.
+ */
+set_ms: number, 
+/**
  * A secret an agent wants copied into the Vault from another service (`Vault` `import`); never goes ahead on silence.
  */
 import?: UseImport, 

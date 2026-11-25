@@ -25,7 +25,7 @@ use crate::identity::aws_broker::mint::Runner;
 /// The Activity action of the batch's own line.
 pub const IMPORTED_BATCH: &str = "imported a batch";
 /// The most rows one approval shows.
-pub const MAX_ITEMS: usize = 40;
+pub const MAX_ITEMS: usize = 20;
 /// What a batch's reference starts with, in the refs of its own line and of every line of its items.
 pub const BATCH_REF: &str = "batch:";
 /// How long a batch's reads may take together; a row not reached by then says so and the rest of the answer is kept.

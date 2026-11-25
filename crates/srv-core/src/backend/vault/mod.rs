@@ -9,6 +9,7 @@
 //! the Vault makes itself (`generate`), which no one has seen. Everything here
 //! is blocking (the store, the keychain): call it off the async runtime.
 
+pub mod agent_set;
 pub mod aws_import;
 pub mod aws_import_batch;
 pub mod backed;
@@ -28,6 +29,7 @@ pub mod kdbx_export;
 pub mod kdbx_names;
 pub mod kinds;
 pub mod linked;
+pub mod pace;
 pub mod plain_export;
 pub mod requests;
 pub mod endpoint_key;

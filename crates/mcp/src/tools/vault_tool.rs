@@ -49,15 +49,6 @@ async fn post_waiting(cx: &ToolCtx<'_>, url: &str, body: &Value, what: &str, wai
     Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
 }
 
-/// What an entry says of its key beside the place: who reads it, the date it last changed, where else it is kept.
-const SAID_OF_THE_KEY: [&str; 3] = ["readers", "rotated", "copies"];
-
-/// Whether an `update` changes where the entry's machine copy is (a `source_*` field) or what the entry says of its
-/// key: the person may be asked first, so the call waits as long as the answer may take.
-fn changes_machine_copy(arguments: &Value) -> bool {
-    arguments.get("fields").and_then(Value::as_object).is_some_and(|f| f.keys().any(|k| k.starts_with("source_") || SAID_OF_THE_KEY.contains(&k.as_str())))
-}
-
 /// `share`: ask the person to share a login with this agent's own browser profile. Only for the caller itself: srv
 /// refuses a request that names another agent, and the answer says the login's label and site, never the user name or password.
 async fn share(arguments: &Value, cx: &ToolCtx<'_>, base: &str) -> Result<String> {
@@ -92,11 +83,10 @@ async fn check(arguments: &Value, cx: &ToolCtx<'_>, base: &str) -> Result<String
     post_waiting(cx, &format!("{base}/api/v1/vault/check"), &body, "Vault check", 0).await
 }
 
-/// `show`, `verify` and `health` read the Vault; `update` changes an entry's details. None returns a value.
+/// `show`, `verify` and `health` read the Vault; `update` changes an entry's details and asks nobody. None returns a value.
 async fn inspect(action: &str, arguments: &Value, cx: &ToolCtx<'_>, base: &str) -> Result<String> {
     let text = |k: &str| arguments.get(k).and_then(Value::as_str);
     let auth = crate::identity::sign_ui_automation_auth();
-    let wait = arguments.get("wait_secs").and_then(Value::as_u64).unwrap_or(REQUEST_WAIT_SECS).min(REQUEST_WAIT_MAX_SECS);
     let body = match action {
         "show" | "verify" => {
             if action == "show" && text("id").is_none_or(|i| i.trim().is_empty()) {
@@ -110,20 +100,16 @@ async fn inspect(action: &str, arguments: &Value, cx: &ToolCtx<'_>, base: &str) 
             "fields": arguments.get("fields").filter(|f| f.is_object()).cloned().unwrap_or_else(|| json!({})),
             "tags": arguments.get("tags").cloned(),
             "reason": text("reason"),
-            "wait_secs": wait,
             "auth": auth.map_err(|e| anyhow::anyhow!("Vault update needs this agent's signed identity: {e}"))?,
         }),
         _ => json!({ "auth": auth.ok() }),
     };
     let what = format!("Vault {action}");
-    if action == "update" && changes_machine_copy(arguments) {
-        return post_waiting(cx, &format!("{base}/api/v1/vault/update"), &body, &what, wait).await;
-    }
     let result = crate::srv_http::srv_post_json(cx.client, &format!("{base}/api/v1/vault/{action}"), cx.auth_key, &body, &what).await?;
     Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
 }
 
-/// `import`: copy a secret from AWS Secrets Manager into the Vault. The person is asked once; the agent gets ids and names.
+/// `import`: copy a secret from AWS Secrets Manager into the Vault. Nobody is asked (a login to be shared aside); the agent gets ids and names.
 async fn import(arguments: &Value, cx: &ToolCtx<'_>, base: &str) -> Result<String> {
     let source = arguments.get("source").cloned().unwrap_or(Value::Null);
     if !source.get("aws_secret_id").is_some_and(Value::is_string) {
@@ -311,17 +297,5 @@ mod tests {
         srv_kinds.sort_unstable();
         ours.sort_unstable();
         assert_eq!(ours, srv_kinds);
-    }
-
-    #[test]
-    fn only_an_update_of_the_machine_copy_waits_for_the_person() {
-        assert!(changes_machine_copy(&json!({ "fields": { "source_kind": "aws-secret", "source_location": "staging/app" } })));
-        assert!(changes_machine_copy(&json!({ "fields": { "notes": "x", "source_key": "" } })));
-        // A linked entry's readers, date and other places are the person's to allow too.
-        for said in ["readers", "rotated", "copies"] {
-            assert!(changes_machine_copy(&json!({ "fields": { said: "x" } })), "{said}");
-        }
-        assert!(!changes_machine_copy(&json!({ "fields": { "service": "Example", "notes": "the source of truth" } })));
-        assert!(!changes_machine_copy(&json!({ "label": "Example" })));
     }
 }
