@@ -21,6 +21,7 @@ import {
     requestStreamFlush,
     streamSchedulerStats,
 } from "./stream-scheduler";
+import { holdForSwitchPaint, releaseSwitchPaint, resetSwitchPaintHold } from "@/app/store/switch-paint-hold";
 
 // Manual frames and a controllable clock.
 let frames: FrameRequestCallback[] = [];
@@ -374,6 +375,32 @@ describe("flush rates", () => {
         expect(order).toEqual(["full", "bg"]);
         advance(HIDDEN_DELAY_MS);
         expect(order).toEqual(["full", "bg", "hid"]);
+    });
+
+    it("a hidden pane's flush waits while a fast tab switch is held, a visible pane's does not", () => {
+        (globalThis as { __fastTabSwitch?: unknown }).__fastTabSwitch = true;
+        const order: string[] = [];
+        requestStreamFlush("hid", () => order.push("hid"), () => "hidden");
+        requestStreamFlush("full", () => order.push("full"));
+        const token = holdForSwitchPaint();
+        advance(HIDDEN_DELAY_MS);
+        expect(order).toEqual(["full"]);
+        releaseSwitchPaint(token);
+        clock += 16;
+        frame();
+        expect(order).toEqual(["full", "hid"]);
+        resetSwitchPaintHold();
+        delete (globalThis as { __fastTabSwitch?: unknown }).__fastTabSwitch;
+    });
+
+    it("keeps flushing hidden panes during a switch when the fast tab switch is off", () => {
+        const order: string[] = [];
+        requestStreamFlush("hid", () => order.push("hid"), () => "hidden");
+        const token = holdForSwitchPaint();
+        advance(HIDDEN_DELAY_MS);
+        expect(order).toEqual(["hid"]);
+        releaseSwitchPaint(token);
+        resetSwitchPaintHold();
     });
 
     it("at most one hidden pane flushes in a frame", () => {

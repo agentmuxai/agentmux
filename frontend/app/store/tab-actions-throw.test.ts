@@ -37,6 +37,8 @@ vi.mock("./tab-reveal", () => ({
     scheduleRevealLift: () => scheduleRevealLift(),
     logUngatedReveal: () => {},
     tabWasShown: () => false,
+    tabCanSwapAtClick: () => false,
+    whenGateLifted: (fn: () => void) => fn(),
 }));
 
 import { createMemo, createRoot } from "solid-js";

@@ -46,6 +46,8 @@
  * stopping the other panes' flushes in the same frame.
  */
 
+import { fastTabSwitch, switchPaintHeld } from "@/app/store/switch-paint-hold";
+
 /** How often a pane flushes: see the policy above. */
 export type FlushRate = "full" | "background" | "hidden";
 
@@ -297,6 +299,8 @@ function runFrame(): void {
         // The budget is checked before each pane after the first, so a slow flush cannot be followed by more.
         if (ran > 0 && now() - t >= FRAME_BUDGET_MS) break;
         if (d.rate === "hidden" && hiddenRan >= 1) continue;
+        // The fast tab switch: a hidden pane's flush dirties layout in a tab kept laid out; it waits for the paint.
+        if (d.rate === "hidden" && fastTabSwitch() && switchPaintHeld()) continue;
         runOne(d.id, d.req);
         ran++;
         if (d.rate === "hidden") hiddenRan++;

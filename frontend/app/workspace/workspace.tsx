@@ -27,6 +27,7 @@ import {
     markTabShown,
     scheduleRevealLift,
     tabSwitching,
+    tabCanSwapAtClick,
     tabWasShown,
 } from "@/store/tab-reveal";
 import { creatingTabId, switchIntentTabId } from "@/store/tab-actions";
@@ -40,6 +41,7 @@ import { mountedPaneIds } from "./mounted-panes";
 import { chosenReloadOffer, WindowReloadOffer } from "./window-reload-offer";
 import { peekLayoutModelForTab } from "@/layout/index";
 import { onWindowErrorBurst } from "@/app/util/window-error-burst";
+import { fastTabSwitch } from "@/app/store/switch-paint-hold";
 import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, untrack } from "solid-js";
 import type { JSX } from "solid-js";
 
@@ -103,7 +105,7 @@ function WorkspaceElem(): JSX.Element {
             intent: switchIntentTabId(),
             tabIds: [...(ws()?.pinnedtabids ?? []), ...(ws()?.tabids ?? [])],
             keepLaidOut: keepInactiveTabsLaidOut(),
-            wasShown: tabWasShown,
+            wasShown: tabCanSwapAtClick,
         });
     // The tab displayed until a moment ago, while it skips rendering instead
     // of restyling everything in it (window-tab-visibility.ts `leaving`).
@@ -121,7 +123,7 @@ function WorkspaceElem(): JSX.Element {
         if (next === prev) return;
         // A tab already shown and kept laid out swaps in one frame, as a
         // pane tab does: a cross-fade would only delay it (§6.4).
-        const instant = keepInactiveTabsLaidOut() && tabWasShown(next);
+        const instant = keepInactiveTabsLaidOut() && tabCanSwapAtClick(next);
         const apply = () => {
             if (instant) {
                 const seq = ++leavingSeq;
@@ -180,7 +182,7 @@ function WorkspaceElem(): JSX.Element {
     createEffect(() => {
         const id = displayTabId();
         const el = tabEls.get(id);
-        if (el) void el.getBoundingClientRect();
+        if (el && !(fastTabSwitch() && tabWasShown(id))) void el.getBoundingClientRect();
         if (focusWhenShown === id) {
             focusWhenShown = null;
             focusManager.focusShownTab(id);

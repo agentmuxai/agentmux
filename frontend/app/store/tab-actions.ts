@@ -17,7 +17,8 @@ import { markEnd, markStart } from "@/perf";
 import { fireAndForget } from "@/util/util";
 import { focusManager } from "./focusManager";
 import { WorkspaceService } from "./services";
-import { holdRevealGate, logUngatedReveal, markTabShown, scheduleRevealLift, tabWasShown } from "./tab-reveal";
+import { holdRevealGate, logUngatedReveal, markTabShown, scheduleRevealLift, tabCanSwapAtClick, tabWasShown, whenGateLifted } from "./tab-reveal";
+import { fastTabSwitch, holdForSwitchPaint, releaseSwitchPaint } from "./switch-paint-hold";
 import { dirtyAtClick } from "./switch-activity";
 import { pendingMuxUpdateCount } from "./mos-update-queue";
 import { activeTabId, workspace } from "./window-identity";
@@ -340,6 +341,16 @@ function snapshotDirty(clickedAt: number): (tabId: string) => void {
         );
 }
 
+/** The fast tab switch: hidden panes' flushes wait for this switch's paint (switch-paint-hold.ts), two frames on for a tab
+ *  that swaps at the click and when the reveal lifts for one that is gated. Let go at the cap whatever happens. */
+function holdHiddenFlushes(gated: boolean): void {
+    if (!fastTabSwitch()) return;
+    const token = holdForSwitchPaint();
+    const release = () => releaseSwitchPaint(token);
+    if (!gated) requestAnimationFrame(() => requestAnimationFrame(release));
+    else whenGateLifted(() => requestAnimationFrame(release));
+}
+
 /** One line per switch, always (#47767): the click to the RPC's return and to two frames later, how many browser
  *  panes a layout change must clip, and how many steps threw. A superseded switch says so. */
 function logSwitch(
@@ -405,9 +416,10 @@ export async function setActiveTab(tabId: string): Promise<void> {
     // Not for a tab already shown while inactive tabs are kept laid out: it
     // has no catch-up for the gate to hide (ANALYSIS_WINDOW_TAB_SWITCH_
     // SMOOTHNESS_2026_09_24.md §6.4, measured on #3686).
-    const gated = !(keepInactiveTabsLaidOut() && tabWasShown(tabId));
+    const gated = !(keepInactiveTabsLaidOut() && tabCanSwapAtClick(tabId));
     if (gated) guardStep("the reveal gate", guard, () => holdRevealGate(tabId));
     const logDirty = snapshotDirty(clickedAt);
+    holdHiddenFlushes(gated);
     const cancelIntent = showSwitchIntent(tabId, (write) => guardStep("the switch intent", guard, write));
     let rpcMs = -1;
     try {

@@ -16,7 +16,11 @@ import {
     holdRevealGate,
     scheduleLeafRevealLift,
     scheduleRevealLift,
+    markTabShown,
+    setTabSettledProbe,
+    tabCanSwapAtClick,
     tabSwitching,
+    whenGateLifted,
 } from "./tab-reveal";
 
 function read<T>(signal: () => T): T {
@@ -77,6 +81,31 @@ describe("tab-reveal gate", () => {
         vi.advanceTimersByTime(1000); // drain to the fallback lift
         expect(read(tabSwitching)).toBe(false);
         expect(read(gateTargetTabId)).toBe(null);
+    });
+
+    test("whenGateLifted runs at once with no gate up, and after the lift with one", () => {
+        const now = vi.fn();
+        whenGateLifted(now);
+        expect(now).toHaveBeenCalledTimes(1);
+        const later = vi.fn();
+        holdRevealGate("tab-w");
+        whenGateLifted(later);
+        expect(later).not.toHaveBeenCalled();
+        scheduleRevealLift();
+        vi.advanceTimersByTime(1000);
+        expect(later).toHaveBeenCalledTimes(1);
+    });
+
+    test("a settled cold tab swaps at the click only with the fast tab switch on", () => {
+        setTabSettledProbe((id) => id === "tab-settled");
+        markTabShown("tab-seen");
+        expect(tabCanSwapAtClick("tab-seen")).toBe(true);
+        expect(tabCanSwapAtClick("tab-settled")).toBe(false);
+        (globalThis as { __fastTabSwitch?: unknown }).__fastTabSwitch = true;
+        expect(tabCanSwapAtClick("tab-settled")).toBe(true);
+        expect(tabCanSwapAtClick("tab-unsettled")).toBe(false);
+        delete (globalThis as { __fastTabSwitch?: unknown }).__fastTabSwitch;
+        setTabSettledProbe(() => false);
     });
 
     test("a new holdRevealGate call replaces a stale target from a prior hold", () => {

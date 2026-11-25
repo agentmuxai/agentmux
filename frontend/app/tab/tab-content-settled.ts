@@ -9,7 +9,7 @@
  * (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §9).
  */
 
-import { markTabShown } from "@/app/store/tab-reveal";
+import { markTabShown, setTabSettledProbe } from "@/app/store/tab-reveal";
 import { paneContentSettled } from "@/app/store/pane-content-holds";
 import { peekLayoutModelForTab } from "@/layout/index";
 
@@ -26,6 +26,8 @@ export function tabContentSettled(tabId: string): boolean {
         return !blockId || paneContentSettled(blockId);
     });
 }
+
+setTabSettledProbe(tabContentSettled);
 
 /** Resolves true on the first frame the tab is settled, or false after `capMs`. */
 export function whenTabContentSettled(tabId: string, capMs: number): Promise<boolean> {

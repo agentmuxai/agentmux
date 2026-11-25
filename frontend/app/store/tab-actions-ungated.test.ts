@@ -46,6 +46,8 @@ vi.mock("./tab-reveal", () => ({
     scheduleRevealLift: () => scheduleRevealLift(),
     logUngatedReveal: (id: string) => logUngatedReveal(id),
     tabWasShown: (id: string) => shown.has(id),
+    tabCanSwapAtClick: (id: string) => shown.has(id),
+    whenGateLifted: (fn: () => void) => fn(),
 }));
 
 import { setActiveTab } from "./tab-actions";

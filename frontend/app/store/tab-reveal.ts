@@ -43,6 +43,7 @@
 import { createSignal } from "solid-js";
 import { fadeOutStartupSplash } from "@/app/init/startup-splash";
 import { scheduleOnSettle } from "@/app/util/settle-detector";
+import { fastTabSwitch } from "./switch-paint-hold";
 
 // Diagnostic only — answers "how often does a reveal actually hit
 // MAX_GATE_MS instead of settling naturally", which nothing logged before
@@ -78,6 +79,22 @@ export function markTabShown(tabId: string): void {
 
 export function tabWasShown(tabId: string): boolean {
     return shownTabIds.has(tabId);
+}
+
+let settledProbe: ((tabId: string) => boolean) | null = null;
+
+/** How `tabCanSwapAtClick` tells a tab's content is settled (tab-content-settled.ts registers it). */
+export function setTabSettledProbe(probe: (tabId: string) => boolean): void {
+    settledProbe = probe;
+}
+
+/**
+ * Whether the tab can swap in at the click, with no wait for the backend's answer and no reveal gate: it was shown
+ * while inactive tabs were kept laid out, or (the fast tab switch) its content is settled: its layout has loaded and
+ * every pane in it is mounted with no content hold outstanding, so it is laid out whole and nothing is left to arrive.
+ */
+export function tabCanSwapAtClick(tabId: string): boolean {
+    return shownTabIds.has(tabId) || (fastTabSwitch() && settledProbe?.(tabId) === true);
 }
 
 /** A closed tab's entry, dropped so the set doesn't grow over a long session
@@ -241,6 +258,17 @@ function liftTabGate(source: "settle" | "orphaned-hold", hitCap: boolean, elapse
     setTabSwitching(false);
     setGateTargetTabId(null);
     fadeOutStartupSplash();
+    const done = [...liftWaiters];
+    liftWaiters.clear();
+    for (const fn of done) fn();
+}
+
+const liftWaiters = new Set<() => void>();
+
+/** Runs `fn` once the whole-tab gate is lifted (now, when none is up). */
+export function whenGateLifted(fn: () => void): void {
+    if (!tabSwitching()) fn();
+    else liftWaiters.add(fn);
 }
 
 /**
