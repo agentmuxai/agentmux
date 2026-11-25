@@ -61,19 +61,11 @@
         max-height: 120px;
         overflow: auto;
     }
-
-    // A batch's rows at their full height: the card is the one scroll box, so the list never shrinks to a row
-    // and a row is never behind a second scroll bar.
-    .vault-batch-rows {
-        flex-shrink: 0;
-        max-height: none;
-        overflow-y: visible;
-    }
 }
 
 // A Vault card gets more of the pane than the other requests, which share 40% of it (pane-requests.scss). The
 // person answers for a secret, so what the card says comes before the transcript: at 40% a narrow, zoomed pane
-// had room for the title and the answers alone, and a batch showed two or three rows at a time in any pane.
+// had room for the title and the answers alone.
 .agent-request-stack:has(.vault-request-card) {
     max-height: 70%;
     // The larger share is the first thing to give way when the pane is too short for it: the rows under the stack

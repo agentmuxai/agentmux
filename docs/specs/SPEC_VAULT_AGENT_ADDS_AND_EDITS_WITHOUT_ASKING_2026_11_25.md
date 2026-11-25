@@ -1,7 +1,7 @@
 # Spec: An agent adds or edits a Vault entry without asking the person; the history line is the record
 
 **Task:** #48656 (the build is #48657). **Author:** Agent2-6 (Vault). **Date:** 2026-11-25.
-**Status:** active — approved 2026-11-25 with every recommended answer; built in three PRs (§11): PR 1 (adds and edits ask nobody, the pace, the unseen mark) is merged, PR 2 (details kept, a login's place) is merged, PR 3 (the pane: the strip, Undo, Seen, Accept and Dismiss, the row marks, the use card's line) is open, and the removal of the old card paths from `UseRequest` is a fourth, last PR.
+**Status:** active — approved 2026-11-25 with every recommended answer; built in three PRs (§11): PR 1 (adds and edits ask nobody, the pace, the unseen mark) is merged, PR 2 (details kept, a login's place) is merged, PR 3 (the pane: the strip, Undo, Seen, Accept and Dismiss, the row marks, the use card's line) is merged, and PR 4 (the removal of the old card paths from `UseRequest`) is the last.
 Written against origin/main `d7ebfaba77`. It changes
 `SPEC_VAULT_AGENT_ASKS_TO_BIND_A_LOGIN_TO_A_SITE_2026_11_19.md` (#48141): §7 says how. It builds on
 `SPEC_VAULT_PARITY_ENTRY_HISTORY_REASONS_AND_IMPORT_2026_11_06.md` (history lines, reasons, import) and
@@ -263,3 +263,8 @@ agent's reason is shown as text), the mark on an entry's row, Undo in the entry'
 inside their 7 days, and the use card's line for a value or place an agent set and the person has not looked at. The seen
 marks are on this machine only. The removal of the dead card types from `UseRequest` and their cards is left to a last
 small PR, so this one stays reviewable.
+
+**PR 4 as built.** The batch and link cards are gone from `UseRequest`, with their types, the batch rows and Vault choice of an
+answer, their cards, styles, words and tests: nothing can ask them since an agent's imports, captures and edits ask nobody.
+What stays is the question of an import that shares the new login with the agent, a rotation, a share, a sign-in, a fill and a
+new account.

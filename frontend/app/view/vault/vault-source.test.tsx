@@ -30,7 +30,6 @@ vi.mock("@/util/app-api", () => ({ getApi: () => ({ approvals: { vault } }) }));
 
 import { VaultEntries } from "./vault-entries";
 import { VaultEntryForm } from "./vault-entry-form";
-import { VaultUseItem as UsePrompt } from "./vault-requests-list";
 import { machineCopy, offersSource, sourceCheck, sourceFields } from "./vault-source";
 import { refreshVault } from "./vault-store";
 
@@ -204,70 +203,5 @@ describe("the machine copy in the entry form", () => {
         expect((screen.getByLabelText("Where") as HTMLInputElement).value).toBe("the office safe");
         save();
         expect(await fieldsSent()).toEqual({ source_kind: "other", source_location: "the office safe" });
-    });
-});
-
-describe("the question before an agent changes where a machine copy is", () => {
-    const use = (link: { from: string; to: string }): UseRequest => ({
-        id: "use-1",
-        agent: "Agent1",
-        entry_id: "api-key-staging",
-        entry_label: "Staging database",
-        what: "machine copy",
-        origin: "",
-        page: "",
-        field: "",
-        offer_always: false,
-        reason: "an agent asked to change where this entry's machine copy is",
-        agent_reason: "record where the staging copy is for task 28071",
-        needs_value: false,
-        kind: "api-key",
-        command: "",
-        cwd: "",
-        replaces: false,
-        signin: false,
-        share: false,
-        account: false,
-        change: false,
-        requested_ms: 1,
-        block_id: "pane-1",
-        deadline_ms: Date.now() + 120_000,
-        expires_ms: Date.now() + 120_000,
-        goes_ahead: false,
-        set_by: "",
-        set_ms: 0,
-        set_what: "",
-        link: { about_from: "", about_to: "", only: false, ...link },
-    });
-    const shown = async (link: { from: string; to: string }) => {
-        uses = [use(link)];
-        await refreshVault();
-        render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
-        return await screen.findByRole("group");
-    };
-
-    it("shows the place now and the place asked for, waits for a yes and offers no Always", async () => {
-        const card = await shown({ from: "the AWS secret staging/app, key db.password", to: "the AWS secret production/app, key db.password" });
-        expect(card.textContent).toContain("Agent1 wants to change where the machine copy of Staging database is");
-        expect(card.querySelector('[data-link="from"]')?.textContent).toContain("the AWS secret staging/app, key db.password");
-        expect(card.querySelector('[data-link="to"]')?.textContent).toContain("the AWS secret production/app, key db.password");
-        expect(card.textContent).toContain("record where the staging copy is for task 28071");
-        expect(card.textContent).toContain("the place is not changed without a yes");
-        expect(card.textContent).not.toContain("Goes ahead in");
-        expect(screen.getByRole("button", { name: "Allow once" })).toBeTruthy();
-        expect(screen.getByRole("button", { name: "Deny" })).toBeTruthy();
-        expect(screen.queryByRole("button", { name: /Always/ })).toBeNull();
-        fireEvent.click(screen.getByRole("button", { name: "Deny" }));
-        await waitFor(() => expect(calls("answer_use")).toEqual([expect.objectContaining({ id: "use-1", decision: "deny" })]));
-    });
-
-    it("says so when there was no place before, and when the record is being removed", async () => {
-        const first = await shown({ from: "", to: "the GitHub secret DEPLOY_TOKEN of example-org/example-app" });
-        expect(first.textContent).toContain("Agent1 wants to record where the machine copy of Staging database is");
-        expect(first.querySelector('[data-link="from"]')?.textContent).toContain("no place is recorded");
-        cleanup();
-        const second = await shown({ from: "the office safe", to: "" });
-        expect(second.textContent).toContain("Agent1 wants to remove where the machine copy of Staging database is");
-        expect(second.querySelector('[data-link="to"]')?.textContent).toContain("no place (the record is removed)");
     });
 });
