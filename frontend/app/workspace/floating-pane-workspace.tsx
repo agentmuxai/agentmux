@@ -48,7 +48,7 @@ import { TabContent } from "@/app/tab/tabcontent";
 import { atoms, getApi } from "@/store/global";
 import * as MOS from "@/store/mos";
 import { isFloaterHeaderMovePress } from "./floater-header-press";
-import { closeFloaterIfEmpty, tabIsEmpty } from "./floater-close";
+import { closeFloaterAfterRedock, closeFloaterIfEmpty, tabIsEmpty } from "./floater-close";
 import { holdRedock, redockInProgress } from "./floating-redock-guard";
 import { floaterPaneBlockId, floaterPanes, redockFloaterPane } from "./floater-panes";
 import { Show, createEffect, createMemo, onCleanup, onMount, type JSX } from "solid-js";
@@ -911,9 +911,9 @@ function installMouseMoveTracking(s: FloaterDragState, env: FloaterEnv): () => v
 // ── Redock ──────────────────────────────────────────────────────
 
 async function tryRedockAtCursor(s: FloaterDragState, env: FloaterEnv, screenX: number, screenY: number, expectedTarget: string | null) {
-    await holdRedock(() => tryRedockAtCursorInner(s, env, screenX, screenY, expectedTarget));
+    const redocked = await holdRedock(() => tryRedockAtCursorInner(s, env, screenX, screenY, expectedTarget));
     // The pane is docked: the window goes now, from here, not from the update that emptied its tab (which can throw).
-    if (!s.cleaned) closeFloaterIfEmpty(env.tabId(), env.windowLabel(), "redock by drag");
+    if (redocked && !s.cleaned) await closeFloaterAfterRedock(env.tabId(), env.windowLabel(), "redock by drag");
 }
 
 /** The window under the cursor that a redock would dock into, or null when there is none to dock into. */
