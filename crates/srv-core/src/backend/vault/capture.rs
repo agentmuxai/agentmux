@@ -441,6 +441,17 @@ impl Capture {
         self.rules.iter().map(|r| &r.into).filter(|i| matches!(i, Target::Existing { .. }))
     }
 
+    /// What this capture counts as for an agent's pace, a rule each.
+    pub fn acts(&self) -> Vec<super::pace::Act> {
+        self.rules
+            .iter()
+            .map(|r| match &r.into {
+                Target::Existing { id, .. } => super::pace::Act::Replace(id.clone()),
+                Target::New { .. } => super::pace::Act::New,
+            })
+            .collect()
+    }
+
     /// Applies the rules to `stdout` and stores what they match. `output` is the
     /// whole output as it would be published, kept for the person if the capture
     /// fails; `cut` says it was longer than [`MAX_HELD`].
@@ -569,6 +580,8 @@ impl Capture {
     /// Keeps the withheld output as a note only the person opens (with Reveal), and
     /// logs the failed capture against each entry that exists.
     fn withhold(&self, store: &Store, why: String, output: &str) -> Outcome {
+        // Nothing was stored: a capture that failed does not use up the agent's pace.
+        super::pace::refund(&self.agent, &self.acts());
         let mut cut = output.len().min(MAX_HELD);
         while !output.is_char_boundary(cut) {
             cut -= 1;

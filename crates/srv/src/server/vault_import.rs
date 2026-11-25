@@ -200,38 +200,49 @@ pub(crate) async fn handle_vault_import(State(state): State<AppState>, caller: O
         Ok(plan) => plan,
         Err(refusal) => return refusal,
     };
-    if let Err(why) = crate::backend::vault::pace::admit(&who.agent, &[act_of(&plan.target)]) {
+    let spent = [act_of(&plan.target)];
+    if let Err(why) = crate::backend::vault::pace::admit(&who.agent, &spent) {
         return refused(&state, &plan, &who, "refused: pace", StatusCode::TOO_MANY_REQUESTS, why);
     }
+    let response = import_admitted(&state, &body, &who, &plan).await;
+    if !response.status().is_success() {
+        // Nothing was stored: a call that failed does not use up the agent's pace.
+        crate::backend::vault::pace::refund(&who.agent, &spent);
+    }
+    response
+}
+
+/// The rest of an import the pace let through.
+async fn import_admitted(state: &AppState, body: &ImportBody, who: &Who, plan: &Plan) -> Response {
     // Nobody is asked to allow a copy of a secret: the history line is the record. A login to be shared is the one exception,
     // because the share is a use: its card, with the tick, is still asked (spec §4).
     let mut answer = None;
     if plan.share {
         let wait = body.wait_secs.map(Duration::from_secs).unwrap_or(ANSWER_WAIT).min(ANSWER_WAIT_MAX);
-        let (ended, said) = super::vault_ask::ask(&state, &who.pane, card(&plan, &who), wait, &headline(&plan, &who)).await;
+        let (ended, said) = super::vault_ask::ask(state, &who.pane, card(plan, who), wait, &headline(plan, who)).await;
         if !ended.allowed() {
-            return refused(&state, &plan, &who, ended.outcome(), StatusCode::FORBIDDEN, not_allowed(ended));
+            return refused(state, plan, who, ended.outcome(), StatusCode::FORBIDDEN, not_allowed(ended));
         }
         answer = said;
     }
-    let minted = match credentials(&state, &who, plan.source.profile.as_deref().unwrap_or_default(), &plan.reason).await {
+    let minted = match credentials(state, who, plan.source.profile.as_deref().unwrap_or_default(), &plan.reason).await {
         Ok(minted) => minted,
-        Err(why) => return refused(&state, &plan, &who, "failed", StatusCode::SERVICE_UNAVAILABLE, why),
+        Err(why) => return refused(state, plan, who, "failed", StatusCode::SERVICE_UNAVAILABLE, why),
     };
     let via = minted.as_ref().map_or(Via::Host, Via::Session);
-    match aws_import::perform(&state.identity_store, &HostRunner, &plan, via, &who.agent).await {
+    match aws_import::perform(&state.identity_store, &HostRunner, plan, via, &who.agent).await {
         Ok(done) => {
             let mut out = json!({ "status": "imported", "id": done.id, "label": done.label, "vault": done.vault });
             if plan.share {
                 let ticked = answer.as_ref().and_then(|a| a.share) == Some(true);
-                let (shared, said) = share_made(&state, &who, &done.id, ticked).await;
+                let (shared, said) = share_made(state, who, &done.id, ticked).await;
                 out["shared"] = json!(shared);
                 out["share_note"] = json!(said);
             }
-            super::vault_handlers::publish(&state);
+            super::vault_handlers::publish(state);
             Json(out).into_response()
         }
-        Err(why) => refused(&state, &plan, &who, "failed", StatusCode::BAD_GATEWAY, why),
+        Err(why) => refused(state, plan, who, "failed", StatusCode::BAD_GATEWAY, why),
     }
 }
 

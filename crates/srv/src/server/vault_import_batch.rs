@@ -18,6 +18,7 @@ use serde_json::{json, Value};
 use super::vault_import::{asker, credentials, error, Who};
 use super::AppState;
 use crate::backend::vault::aws_import::{self, Via};
+use crate::backend::vault::pace::{self, Act};
 use crate::backend::vault::aws_import_batch::{self, Approved, BatchPlan, BatchRequest, ItemResult, BUDGET};
 use crate::identity::aws_broker::mint::HostRunner;
 use crate::identity::aws_broker::policy;
@@ -84,17 +85,23 @@ fn answer(plan: &BatchPlan, approved: &Approved, results: &[ItemResult], outcome
 
 /// Reads the approved rows under one AWS session (one broker mint for a container agent, whatever the rows), and
 /// records the batch's own line.
-async fn run(state: &AppState, plan: &BatchPlan, approved: &Approved, who: &Who) -> Response {
+async fn run(state: &AppState, plan: &BatchPlan, approved: &Approved, who: &Who, spent: &[Act]) -> Response {
     // A link is made without a read, so a list of links only asks the broker for nothing.
     let minted = match approved.items.iter().any(|p| !p.is_link()) {
         true => match credentials(state, who, plan.profile.as_deref().unwrap_or_default(), &plan.reason).await {
             Ok(minted) => minted,
-            Err(why) => return refused(state, plan, who, "failed", StatusCode::SERVICE_UNAVAILABLE, why),
+            Err(why) => {
+                pace::refund(&who.agent, spent);
+                return refused(state, plan, who, "failed", StatusCode::SERVICE_UNAVAILABLE, why);
+            }
         },
         false => None,
     };
     let via = minted.as_ref().map_or(Via::Host, Via::Session);
     let results = aws_import_batch::perform(&state.identity_store, &HostRunner, &approved.items, via, &who.agent, BUDGET).await;
+    // A row that stored nothing does not use up the agent's pace.
+    let failed: Vec<Act> = spent.iter().enumerate().filter(|(i, _)| results.get(*i).map_or(true, |r| r.error.is_some())).map(|(_, a)| a.clone()).collect();
+    pace::refund(&who.agent, &failed);
     let (outcome, what) = plan.ran_text(approved, &results);
     aws_import_batch::note(&state.identity_store, plan, &who.agent, outcome, &what);
     super::vault_handlers::publish(state);
@@ -111,14 +118,14 @@ pub(crate) async fn handle_vault_import_batch(State(state): State<AppState>, cal
         Ok(plan) => plan,
         Err(refusal) => return refusal,
     };
-    let acts: Vec<crate::backend::vault::pace::Act> = plan.items.iter().map(|p| super::vault_import::act_of(&p.target)).collect();
-    if let Err(why) = crate::backend::vault::pace::admit(&who.agent, &acts) {
+    let acts: Vec<Act> = plan.items.iter().map(|p| super::vault_import::act_of(&p.target)).collect();
+    if let Err(why) = pace::admit(&who.agent, &acts) {
         return refused(&state, &plan, &who, "refused: pace", StatusCode::TOO_MANY_REQUESTS, why);
     }
     // Every row of the list, as the agent named it: nobody ticks rows.
     let every_row: Vec<usize> = (0..plan.items.len()).collect();
     let approved = plan.approved(&every_row);
-    run(&state, &plan, &approved, &who).await
+    run(&state, &plan, &approved, &who, &acts).await
 }
 
 #[cfg(test)]

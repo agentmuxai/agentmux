@@ -19,6 +19,9 @@ pub const REPLACES: usize = 6;
 pub const REPLACES_PER_ENTRY: usize = 5;
 /// New entries in the window.
 pub const NEW_ENTRIES: usize = 20;
+/// "Refused: pace" history lines one agent may have written for it in the window: a refusal is a record, and an agent that
+/// keeps asking over its pace must not be able to fill an entry's history with its own words.
+pub const REFUSAL_LINES: usize = 3;
 
 /// One thing an agent writes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +37,7 @@ pub enum Act {
 #[derive(Default)]
 pub struct Pace {
     log: Mutex<HashMap<String, Vec<(i64, Act)>>>,
+    refusals: Mutex<HashMap<String, Vec<i64>>>,
 }
 
 /// The time `limit` leaves room again: when the `count - limit + needed`-th oldest of `times` leaves the window.
@@ -52,14 +56,24 @@ fn when(now: i64, at: i64) -> String {
     }
 }
 
+/// The refusal when one call asks for more than the pace ever allows in an hour: waiting would not help.
+fn too_large(what: &str, asked: usize, most: usize) -> String {
+    format!("this call changes {asked} {what} and the Vault's pace allows at most {most} in an hour, so it can never be taken as one: split it into smaller calls")
+}
+
 impl Pace {
     /// Counts `acts` against `agent`'s budget at `now` (ms) and records them, or refuses all of them, saying when there is
     /// room. A batch is `acts` with one per row.
     pub fn admit(&self, agent: &str, acts: &[Act], now: i64) -> Result<(), String> {
+        let (new, replaces) = (acts.iter().filter(|a| **a == Act::New).count(), acts.iter().filter(|a| matches!(a, Act::Replace(_))).count());
+        for (what, asked, most) in [("things", acts.len(), WRITES), ("new entries", new, NEW_ENTRIES), ("values", replaces, REPLACES)] {
+            if asked > most {
+                return Err(too_large(what, asked, most));
+            }
+        }
         let mut log = self.log.lock().unwrap();
         let mine = log.entry(agent.to_string()).or_default();
         mine.retain(|(at, _)| now - at < WINDOW_MS);
-        let (new, replaces) = (acts.iter().filter(|a| **a == Act::New).count(), acts.iter().filter(|a| matches!(a, Act::Replace(_))).count());
         let times = |keep: &dyn Fn(&Act) -> bool| mine.iter().filter(|(_, a)| keep(a)).map(|(t, _)| *t).collect::<Vec<_>>();
         let refuse = |what: String, at: i64| Err(format!("this agent has {what}; the Vault's pace gives it room again {}", when(now, at)));
         if mine.len() + acts.len() > WRITES {
@@ -77,6 +91,9 @@ impl Pace {
         for id in acts.iter().filter_map(|a| if let Act::Replace(id) = a { Some(id) } else { None }) {
             let of_it = |a: &Act| matches!(a, Act::Replace(i) if i == id);
             let asked = acts.iter().filter(|a| of_it(a)).count();
+            if asked > REPLACES_PER_ENTRY {
+                return Err(too_large("new values of one entry", asked, REPLACES_PER_ENTRY));
+            }
             if times(&of_it).len() + asked > REPLACES_PER_ENTRY {
                 return refuse(format!("replaced the value of one entry {} times in the last hour (at most {REPLACES_PER_ENTRY})", times(&of_it).len()), room_at(times(&of_it), REPLACES_PER_ENTRY, asked));
             }
@@ -84,12 +101,46 @@ impl Pace {
         mine.extend(acts.iter().map(|a| (now, a.clone())));
         Ok(())
     }
+
+    /// Gives back `acts` an agent was admitted for and did not make (the call failed before anything was stored): the latest
+    /// matching entry of each is dropped.
+    pub fn refund(&self, agent: &str, acts: &[Act]) {
+        let mut log = self.log.lock().unwrap();
+        let Some(mine) = log.get_mut(agent) else { return };
+        for act in acts {
+            if let Some(at) = mine.iter().rposition(|(_, a)| a == act) {
+                mine.remove(at);
+            }
+        }
+    }
+
+    /// Whether a "refused: pace" line may be written for `agent` now, and counts it when so.
+    pub fn may_note_refusal(&self, agent: &str, now: i64) -> bool {
+        let mut notes = self.refusals.lock().unwrap();
+        let mine = notes.entry(agent.to_string()).or_default();
+        mine.retain(|at| now - at < WINDOW_MS);
+        if mine.len() >= REFUSAL_LINES {
+            return false;
+        }
+        mine.push(now);
+        true
+    }
 }
 
 /// The one budget every handler counts against.
 pub fn pace() -> &'static Pace {
     static PACE: OnceLock<Pace> = OnceLock::new();
     PACE.get_or_init(Pace::default)
+}
+
+/// [`Pace::refund`].
+pub fn refund(agent: &str, acts: &[Act]) {
+    pace().refund(agent, acts);
+}
+
+/// [`Pace::may_note_refusal`] now.
+pub fn may_note_refusal(agent: &str) -> bool {
+    pace().may_note_refusal(agent, agentmux_common::time::now_ms())
 }
 
 /// [`Pace::admit`] now.
@@ -145,6 +196,33 @@ mod tests {
         }
         assert!(p.admit("a", &[replace("same")], T + 1).unwrap_err().contains("one entry 5 times"));
         p.admit("a", &[replace("other")], T + 1).unwrap();
+    }
+
+    #[test]
+    fn a_call_larger_than_the_pace_ever_allows_is_told_to_split_not_to_wait() {
+        let p = Pace::default();
+        let why = p.admit("a", &vec![Act::New; NEW_ENTRIES + 1], T).unwrap_err();
+        assert!(why.contains("split it") && !why.contains("room again"), "{why}");
+        assert!(p.admit("a", &vec![Act::Edit; WRITES + 1], T).unwrap_err().contains("split it"));
+        p.admit("a", &vec![Act::New; NEW_ENTRIES], T).unwrap();
+    }
+
+    #[test]
+    fn a_refund_gives_back_what_a_failed_call_took_and_refusal_lines_are_few() {
+        let p = Pace::default();
+        for _ in 0..WRITES {
+            p.admit("a", &[Act::Edit], T).unwrap();
+        }
+        assert!(p.admit("a", &[Act::Edit], T + 1).is_err());
+        p.refund("a", &[Act::Edit]);
+        p.admit("a", &[Act::Edit], T + 2).unwrap();
+        p.refund("a", &[Act::New]);
+        assert!(p.admit("a", &[Act::Edit], T + 3).is_err(), "nothing of that kind was held, so nothing came back");
+        for _ in 0..REFUSAL_LINES {
+            assert!(p.may_note_refusal("a", T));
+        }
+        assert!(!p.may_note_refusal("a", T + 1) && p.may_note_refusal("b", T + 1));
+        assert!(p.may_note_refusal("a", T + WINDOW_MS + 1));
     }
 
     #[test]

@@ -275,6 +275,20 @@ fn planned(store: &Store, req: &UpdateRequest, agent: &str) -> Result<Planned, S
     Ok(Planned { row, reason, label, fields, tags, changed })
 }
 
+/// What an `update` that passed every check is about, for the line a refusal of it leaves.
+pub struct Checked {
+    pub id: String,
+    pub label: String,
+    pub reason: String,
+}
+
+/// Every check of an `update` with nothing written, so a refusal that follows (the pace) is only ever written for a call
+/// that was valid: a reason, an entry the agent may use, and a change.
+pub fn check_update(store: &Store, req: &UpdateRequest, agent: &str) -> Result<Checked, String> {
+    let planned = planned(store, req, agent)?;
+    Ok(Checked { id: planned.row.id, label: planned.row.label, reason: planned.reason })
+}
+
 /// `update`: changes an entry's label, plain fields and tags, with the agent's reason, for an entry in a Vault it may
 /// use. The sealed value is not opened or touched. Nobody is asked, a change to where the entry's machine copy is
 /// included: it records one `changed details` line, which is the record

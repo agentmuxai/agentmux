@@ -186,16 +186,9 @@ pub(super) async fn plan_capture(
         .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .map_err(|e| refuse(StatusCode::BAD_REQUEST, e))?;
     plan.reason = reason.to_string();
-    let acts: Vec<crate::backend::vault::pace::Act> = plan
-        .rules
-        .iter()
-        .map(|r| match &r.into {
-            capture::Target::Existing { id, .. } => crate::backend::vault::pace::Act::Replace(id.clone()),
-            capture::Target::New { .. } => crate::backend::vault::pace::Act::New,
-        })
-        .collect();
+    let acts = plan.acts();
     if let Err(why) = crate::backend::vault::pace::admit(&agent, &acts) {
-        for t in plan.replaces() {
+        for t in plan.replaces().filter(|_| crate::backend::vault::pace::may_note_refusal(&agent)) {
             if let capture::Target::Existing { id, label, .. } = t {
                 vault::record_line(&state.identity_store, vault::Line { entry_id: id, label, actor: &agent, action: capture::CAPTURED, target: &clip(cmd, 160), outcome: "refused: pace", reason });
             }

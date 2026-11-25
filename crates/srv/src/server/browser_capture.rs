@@ -34,10 +34,11 @@ use zeroize::Zeroizing;
 use agentmux_common::api_types::{CaptureFrom, CaptureInto, CaptureRule, UiAutomationAuth};
 
 use crate::backend::vault::capture::{self, Found, Target};
-use crate::backend::vault::pace::{admit, Act};
+use crate::backend::vault::pace::{admit, refund, Act};
 
 use super::browser_actions::{note, How, Kind};
 use super::browser_capture_read::{begin, check_shape, read_page, what_to_read};
+use agentmux_common::capture_shape::CaptureShape;
 use super::ui_handlers::{err_response, proxy_value, target_block_id};
 use super::AppState;
 
@@ -138,6 +139,31 @@ pub(crate) async fn handle_capture(
     handle_browser_capture(State(state), caller, Json(req)).await
 }
 
+/// What a capture read from the page: the value, the page's origin, the file's name when a file was taken, and the element's
+/// reference (text found beside a label has one now, which marks it once it is saved).
+struct Taken {
+    value: Zeroizing<String>,
+    origin: String,
+    file: Option<String>,
+    ref_: String,
+}
+
+/// Reads the element and checks what came back, or the answer for the agent when it can't be saved.
+async fn read_for_capture(state: &AppState, req: &CaptureRequest, block_id: &str, agent: &str, ref_: &str, shape: Option<&CaptureShape>) -> Result<(Taken, Option<super::browser_attention::Waiting>), Response> {
+    let (read, approved_click) = match read_page(state, req, block_id, agent, (ref_, shape)).await {
+        Ok(r) => r,
+        Err(refused) => return Err(super::browser_capture_read::counted(refused, shape, agent)),
+    };
+    let file = read.get("name").and_then(Value::as_str).map(|n| n.chars().take(200).collect::<String>());
+    let ref_ = read.get("ref").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| ref_.to_string());
+    let (value, origin) = take_read(read).map_err(|e| err_response(StatusCode::BAD_GATEWAY, e))?;
+    check_shape(shape, &value, agent).map_err(|e| err_response(StatusCode::UNPROCESSABLE_ENTITY, e))?;
+    if origin.is_empty() {
+        return Err(err_response(StatusCode::BAD_REQUEST, "AgentMux can't tell which site this page is, so nothing was saved".into()));
+    }
+    Ok((Taken { value, origin, file, ref_ }, approved_click))
+}
+
 async fn handle_browser_capture(
     State(state): State<AppState>,
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
@@ -177,8 +203,9 @@ async fn handle_browser_capture(
         Target::Existing { id, .. } => Act::Replace(id.clone()),
         Target::New { .. } => Act::New,
     };
-    if let Err(e) = admit(&agent, &[act]) {
-        if let Target::Existing { id, label, .. } = &plan.rules[0].into {
+    let spent = [act];
+    if let Err(e) = admit(&agent, &spent) {
+        if let (Target::Existing { id, label, .. }, true) = (&plan.rules[0].into, crate::backend::vault::pace::may_note_refusal(&agent)) {
             let line = crate::backend::vault::Line { entry_id: id, label, actor: &agent, action: capture::CAPTURED, target: "from a page", outcome: "refused: pace", reason: &reason };
             crate::backend::vault::record_line(&state.identity_store, line);
         }
@@ -186,25 +213,20 @@ async fn handle_browser_capture(
     }
 
     // Held until the approved click is made, if one waits for the person.
-    let (read, _approved_click) = match read_page(&state, &req, &block_id, &agent, (&ref_, shape.as_ref())).await {
+    let (taken, _approved_click) = match read_for_capture(&state, &req, &block_id, &agent, &ref_, shape.as_ref()).await {
         Ok(r) => r,
-        Err(refused) => return super::browser_capture_read::counted(refused, shape.as_ref(), &agent),
+        Err(refused) => {
+            // Nothing was stored: a capture that failed does not use up the agent's pace.
+            refund(&agent, &spent);
+            return refused;
+        }
     };
-    let file = read.get("name").and_then(Value::as_str).map(|n| n.chars().take(200).collect::<String>());
-    // Text found beside a label has a reference now, which marks it once it is saved.
-    let ref_ = read.get("ref").and_then(Value::as_str).map(str::to_string).unwrap_or(ref_);
-    let (value, origin) = match take_read(read) {
-        Ok(r) => r,
-        Err(e) => return err_response(StatusCode::BAD_GATEWAY, e),
-    };
-    if let Err(e) = check_shape(shape.as_ref(), &value, &agent) {
-        return err_response(StatusCode::UNPROCESSABLE_ENTITY, e);
-    }
-    if origin.is_empty() {
-        return err_response(StatusCode::BAD_REQUEST, "AgentMux can't tell which site this page is, so nothing was saved".into());
-    }
+    let Taken { value, origin, file, ref_ } = taken;
     let (store, given, from) = (state.identity_store.clone(), req.into, origin.clone());
     let stored = tokio::task::spawn_blocking(move || store_captured(&store, plan, value, &from, given.as_ref())).await;
+    if !matches!(stored, Ok(Ok(_))) {
+        refund(&agent, &spent);
+    }
     super::vault_handlers::publish(&state);
     // Only now that it is stored is the element marked: a refused capture leaves no
     // mark (one that would keep eval refused on the tab for nothing).

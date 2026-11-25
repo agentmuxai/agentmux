@@ -20,6 +20,7 @@ use serde_json::json;
 use super::vault_handlers::{asking_agent, publish};
 use super::AppState;
 use crate::backend::vault::inspect::{self, KeyResult, UpdateRequest};
+use crate::backend::vault::pace;
 use crate::backend::vault::seal;
 use crate::backend::vault::shares::{self, Ask, Asked};
 use crate::backend::vault::uses::{Ended, UseHttpPrompt, UseRequest};
@@ -110,22 +111,32 @@ pub(crate) async fn handle_vault_update(State(state): State<AppState>, caller: O
         return error(StatusCode::FORBIDDEN, "update needs to know which agent asks (its token or its signed identity, neither of which verified): the Vault records who changed each entry; respawn the agent if it has neither");
     }
     let request = body.request;
-    if let Err(why) = crate::backend::vault::pace::admit(&agent, &[crate::backend::vault::pace::Act::Edit]) {
-        let (store, id, by) = (state.identity_store.clone(), request.id.clone(), agent.clone());
-        let reason = request.reason.clone().unwrap_or_default();
-        let _ = tokio::task::spawn_blocking(move || {
-            if let Ok(Some(row)) = store.vault_get(id.trim()) {
-                let line = crate::backend::vault::Line { entry_id: &row.id, label: &row.label, actor: &by, action: inspect::CHANGED_DETAILS, target: "", outcome: "refused: pace", reason: &reason };
+    // The call is checked before the pace is spent, and before a refusal is written for it: an invalid call costs nothing and
+    // leaves nothing on an entry.
+    let (store, checking, by) = (state.identity_store.clone(), request.clone(), agent.clone());
+    let checked = match blocking(move || inspect::check_update(&store, &checking, &by)).await {
+        Ok(checked) => checked,
+        Err(refusal) => return refusal,
+    };
+    let spent = [pace::Act::Edit];
+    if let Err(why) = pace::admit(&agent, &spent) {
+        if pace::may_note_refusal(&agent) {
+            let (store, by) = (state.identity_store.clone(), agent.clone());
+            let _ = tokio::task::spawn_blocking(move || {
+                let line = crate::backend::vault::Line { entry_id: &checked.id, label: &checked.label, actor: &by, action: inspect::CHANGED_DETAILS, target: "", outcome: "refused: pace", reason: &checked.reason };
                 crate::backend::vault::record_line(&store, line);
-            }
-        })
-        .await;
+            })
+            .await;
+        }
         return error(StatusCode::TOO_MANY_REQUESTS, why);
     }
     let store = state.identity_store.clone();
-    let response = answer(move || inspect::update_details(&store, &request, &agent)).await;
+    let by = agent.clone();
+    let response = answer(move || inspect::update_details(&store, &request, &by)).await;
     if response.status().is_success() {
         publish(&state);
+    } else {
+        pace::refund(&agent, &spent);
     }
     response
 }
