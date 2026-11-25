@@ -1,8 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
-import { resolveDisplayedTabId, tabContainerVisibility } from "./window-tab-visibility";
+import { afterEach, describe, expect, it } from "vitest";
+import { nextWarmTabs, resolveDisplayedTabId, tabContainerVisibility, warmTabLimit } from "./window-tab-visibility";
 
 describe("tabContainerVisibility", () => {
     it("by default skips an inactive tab's layout with content-visibility", () => {
@@ -118,5 +118,25 @@ describe("resolveDisplayedTabId", () => {
 
     it("ignores an intent for a tab this window no longer has", () => {
         expect(resolveDisplayedTabId({ ...base, intent: "gone", wasShown: () => true })).toBe("a");
+    });
+});
+
+describe("warm tab limit", () => {
+    afterEach(() => {
+        delete (globalThis as { __warmTabs?: unknown }).__warmTabs;
+    });
+
+    it("keeps every tab warm unless a limit is set", () => {
+        expect(warmTabLimit()).toBe(0);
+        (globalThis as { __warmTabs?: unknown }).__warmTabs = 3.9;
+        expect(warmTabLimit()).toBe(3);
+        (globalThis as { __warmTabs?: unknown }).__warmTabs = "x";
+        expect(warmTabLimit()).toBe(0);
+    });
+
+    it("lists the displayed tab first, then the ones before it, up to the limit", () => {
+        expect(nextWarmTabs(["b", "a"], "c", 2)).toEqual(["c", "b"]);
+        expect(nextWarmTabs(["b", "a"], "a", 3)).toEqual(["a", "b"]);
+        expect(nextWarmTabs(["b", "a"], "c", 0)).toEqual(["c", "b", "a"]);
     });
 });

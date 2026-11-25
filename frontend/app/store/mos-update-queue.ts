@@ -26,6 +26,7 @@
 
 import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
 import { WpsEvent } from "./mps-events";
+import { afterSwitchPaint } from "./switch-paint-hold";
 
 /** The event that carries a single object update (`WpsEvent.MuxObjUpdate`). */
 export const MUX_OBJ_UPDATE_EVENT: string = WpsEvent.MuxObjUpdate;
@@ -151,7 +152,8 @@ export function setMuxUpdateApplier(fn: (updates: MuxObjUpdate[]) => void): void
 const queue = createMuxUpdateQueue({
     applyBatch: (updates) => applyBatchImpl(updates),
     now: () => performance.now(),
-    schedule: scheduleFrame,
+    // A window-tab switch in flight is painted first (switch-paint-hold.ts); the updates it was about to apply follow.
+    schedule: (fn) => afterSwitchPaint(() => scheduleFrame(fn)),
     log: (line) => console.warn(line),
 });
 

@@ -12,6 +12,7 @@ import { createRoot, createSignal } from "solid-js";
 import { getApi } from "@/util/app-api";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
+import { afterSwitchPaint, noteSwitchActivity } from "@/app/store/switch-paint-hold";
 import type { ExportResult } from "@/types/rpc/ExportResult";
 import type { ImportPreview } from "@/types/rpc/ImportPreview";
 import type { ImportResult } from "@/types/rpc/ImportResult";
@@ -62,6 +63,7 @@ export function vaultAvailable(): boolean {
 async function call<T>(op: string, args: Record<string, unknown> = {}): Promise<T> {
     const relay = getApi()?.approvals?.vault;
     if (!relay) throw new Error("The Vault needs the AgentMux desktop app.");
+    noteSwitchActivity("vault_op");
     return (await relay(op, args)) as T;
 }
 
@@ -186,7 +188,9 @@ export function followVault(): void {
 /** A Vault view is on screen until the returned function is called: the list is read when the first one
  *  appears, and kept current while any is. Opening the Vault's key happens only through this. */
 export function holdVaultShown(): () => void {
-    if (holders++ === 0) void refreshVault();
+    // Not inside a window-tab switch: the read opens the Vault key and decrypts every entry, and the switch's first
+    // paint does not need it (switch-paint-hold.ts).
+    if (holders++ === 0) afterSwitchPaint(() => void (holders > 0 ? refreshVault() : undefined));
     let released = false;
     return () => {
         if (released) return;

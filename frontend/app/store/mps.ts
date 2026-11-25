@@ -6,6 +6,7 @@ import { isBlank } from "@/util/util";
 import { Emitter } from "@/util/emitter";
 import { sendRawRpcMessage } from "./ws";
 import { noteListenerTime } from "./ws-slow-handler";
+import { afterSwitchPaint, noteSwitchActivity } from "./switch-paint-hold";
 import { flushPendingMuxUpdates, MUX_OBJ_UPDATE_EVENT, ORDER_INDEPENDENT_EVENTS } from "./mos-update-queue";
 import type { SubscriptionRequest } from "@/app/store/rpc-api";
 import type { MuxEvent } from "@/types/rpc/MuxEvent";
@@ -216,8 +217,10 @@ function dispatchToSubjects(event: MuxEvent) {
 }
 
 function handleMuxEvent(event: MuxEvent) {
+    noteSwitchActivity(event.event);
     if (DEFERRED_EVENTS.has(event.event)) {
-        setTimeout(() => dispatchToSubjects(event), 0);
+        // Telemetry also waits for the first paint of a tab switch in flight (switch-paint-hold.ts).
+        afterSwitchPaint(() => setTimeout(() => dispatchToSubjects(event), 0));
         return;
     }
     // Single-object updates wait for the next frame (mos-update-queue.ts). Any other event may read what they carry, so

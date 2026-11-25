@@ -18,7 +18,9 @@ import {
     WindowTabIdProvider,
     keepInactiveTabsLaidOut,
     resolveDisplayedTabId,
+    nextWarmTabs,
     tabContainerVisibility,
+    warmTabLimit,
 } from "./window-tab-visibility";
 import {
     clearShownTabs,
@@ -42,6 +44,21 @@ import { peekLayoutModelForTab } from "@/layout/index";
 import { onWindowErrorBurst } from "@/app/util/window-error-burst";
 import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, untrack } from "solid-js";
 import type { JSX } from "solid-js";
+
+/** Whether a tab is outside the tabs kept laid out while hidden (window-tab-visibility.ts `warmTabLimit`). A tab
+ *  that falls out of the list is cold again, so its next switch is gated like a first one. */
+function trackWarmTabs(displayTabId: () => string): (tabId: string) => boolean {
+    const [warmTabs, setWarmTabs] = createSignal<string[]>([]);
+    createEffect(() => {
+        const id = displayTabId();
+        if (!id) return;
+        const limit = warmTabLimit();
+        const all = nextWarmTabs(untrack(warmTabs), id, 0);
+        if (limit > 0) for (const gone of all.slice(limit)) forgetTabShown(gone);
+        setWarmTabs(limit > 0 ? all.slice(0, limit) : all);
+    });
+    return (tabId) => warmTabLimit() > 0 && !warmTabs().includes(tabId);
+}
 
 function WorkspaceElem(): JSX.Element {
     const tabId = atoms.activeTabId;
@@ -209,7 +226,7 @@ function WorkspaceElem(): JSX.Element {
         const id = displayTabId();
         if (id && keepInactiveTabsLaidOut() && !gateHides(id)) markTabShown(id);
     });
-
+    const outsideWarmTabs = trackWarmTabs(displayTabId);
     // A window whose tab content stopped following the active tab (Solid abandons
     // the bindings queued in a flush that throws) is shown the right tab again;
     // if that doesn't take, the person is offered a reload, never given one
@@ -363,7 +380,7 @@ function WorkspaceElem(): JSX.Element {
                                         keepLaidOut(),
                                         gateHides(tid),
                                         tid === leavingTabId(),
-                                        relayoutPending().has(tid)
+                                        relayoutPending().has(tid) || outsideWarmTabs(tid)
                                     ),
                                 );
                                 return (

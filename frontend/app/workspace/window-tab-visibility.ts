@@ -25,6 +25,23 @@ export function keepInactiveTabsLaidOut(): boolean {
     return getSettingsKeyAtom("window:keepinactivetabslaidout")() !== false;
 }
 
+/**
+ * How many tabs stay laid out while hidden (the displayed one and the most recently displayed): the rest hide with
+ * `content-visibility: hidden`, so what updates inside them costs no layout and a switch to one is a cold one. 0, the
+ * default, keeps every tab laid out. `globalThis.__warmTabs = n` sets it on one build, the switch an A/B run flips
+ * (a measured default follows the run).
+ */
+export function warmTabLimit(): number {
+    const n = (globalThis as { __warmTabs?: unknown }).__warmTabs;
+    return typeof n === "number" && Number.isFinite(n) && n >= 1 ? Math.floor(n) : 0;
+}
+
+/** The tab ids to keep laid out after `id` is displayed: `id` first, then those displayed before it, `limit` in all. */
+export function nextWarmTabs(recent: readonly string[], id: string, limit: number): string[] {
+    const next = [id, ...recent.filter((t) => t !== id)];
+    return limit > 0 ? next.slice(0, limit) : next;
+}
+
 const WindowTabDisplayedContext = createContext<Accessor<boolean>>(() => true);
 
 /** Provided per window tab by `workspace.tsx`: true while that tab is the
