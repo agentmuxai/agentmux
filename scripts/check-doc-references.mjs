@@ -273,7 +273,7 @@ export function checkDoc(text, index, { allow = new Set(), deny = [], anySymbol 
     // A denied term is wrong in a command in a code block as much as in a sentence.
     if (deny.length) {
         const here = path.replace(/\\/g, "/");
-        const excused = (term) => (deny.exceptions ?? []).some((e) => e.term === term && here.endsWith(e.path));
+        const excused = (term) => (deny.exceptions ?? []).some((e) => e.term === term && (here === e.path || here.endsWith(`/${e.path}`)));
         text.split("\n").forEach((line, i) => {
             for (const { term, say, re } of deny) {
                 if (!(re ? re.test(line) : line.includes(term))) continue;
@@ -297,7 +297,7 @@ export function checkDoc(text, index, { allow = new Set(), deny = [], anySymbol 
 export function parseDeny(text) {
     const out = [];
     const exceptions = [];
-    for (const raw of text.split("\n")) {
+    for (const [n, raw] of text.split("\n").entries()) {
         const line = raw.trim();
         if (!line || line.startsWith("#")) continue;
         if (line.startsWith("allow:")) {
@@ -316,7 +316,13 @@ export function parseDeny(text) {
         if (!t) continue;
         const entry = { term: t, say: rest.join("=>").trim() || "see the code" };
         const pattern = /^\/(.+)\/([a-z]*)$/.exec(t);
-        if (pattern) entry.re = new RegExp(pattern[1], pattern[2].replace(/[gy]/g, ""));
+        if (pattern) {
+            try {
+                entry.re = new RegExp(pattern[1], pattern[2].replace(/[gy]/g, ""));
+            } catch (err) {
+                throw new Error(`deny file line ${n + 1}: ${t} is not a valid regular expression (${err.message})`);
+            }
+        }
         out.push(entry);
     }
     out.exceptions = exceptions;

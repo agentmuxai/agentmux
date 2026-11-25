@@ -171,6 +171,13 @@ describe("checkDoc", () => {
         expect(checkDoc(doc, index, { deny, path: "src/content/docs/internals/jekt-protocol.md" })).toEqual([]);
         expect(kinds(checkDoc(doc, index, { deny, path: "src/content/docs/memory.md" }))).toEqual(["denied-term:formerly"]);
         expect(kinds(checkDoc(doc, index, { deny }))).toEqual(["denied-term:formerly"]);
+        // The path must match whole folder or file names: `jekt-protocol.md` does not excuse `agent-jekt-protocol.md`.
+        expect(kinds(checkDoc(doc, index, { deny, path: "src/content/docs/internals/agent-jekt-protocol.md" }))).toEqual(["denied-term:formerly"]);
+        expect(checkDoc(doc, index, { deny, path: "internals/jekt-protocol.md" })).toEqual([]);
+    });
+
+    it("names the line of an invalid regular expression in the deny file", () => {
+        expect(() => parseDeny("# a comment\n/(unclosed/ => say nothing\n")).toThrow(/deny file line 2: \/\(unclosed\/ is not a valid regular expression/);
     });
 
     it("refuses an exception with no reason or no path", () => {
