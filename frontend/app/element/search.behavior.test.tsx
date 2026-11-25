@@ -37,6 +37,8 @@ vi.mock("@floating-ui/dom", () => ({
         return { x: 111, y: 222 };
     },
 }));
+// The bar registers as a pane overlay (a native page above it): the real one schedules frames this log is not about.
+vi.mock("@/app/platform/pane-overlay", () => ({ usePaneOverlay: () => {} }));
 vi.mock("./input", () => ({
     Input: (p: any) => {
         h.input = p;
@@ -83,6 +85,10 @@ vi.mock("@/app/element/ui/CloseButton", () => ({
     ),
 }));
 vi.mock("./search.scss", () => ({}));
+// The key notation is the shortcut table's; here the names of a platform that spells them out.
+vi.mock("@/app/keybindings", () => ({
+    keyLabel: (spec: string) => spec.replace(/^shift\+/i, "Shift+").replace("Escape", "Esc"),
+}));
 
 import { Search, useSearch } from "./search";
 

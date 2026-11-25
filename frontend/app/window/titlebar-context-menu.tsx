@@ -6,14 +6,14 @@ import { hostHas } from "@/util/host-caps";
 import { RpcApi } from "@/app/store/rpc-api";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { createTab } from "@/store/tab-actions";
-import { openNewWindowFromHere } from "@/app/store/window-appearance";
+import { commandMenuParts } from "@/app/store/command-menu-parts";
 import { fireAndForget } from "@/util/util";
 import { createEffect, createSignal, untrack, type JSX } from "solid-js";
 import {
     getEffectiveGroupedChildKeys,
     getHiddenKeys,
     getSavedPinNames,
+    pinsToSave,
     isWidgetHidden,
     pinIdOf,
     widgetMenuIconColor,
@@ -54,7 +54,7 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
             : [...current, shortName];
         setLocalPinned(next); // optimistic — drives UI immediately
         fireAndForget(async () => {
-            await RpcApi.SetConfigCommand(TabRpcClient, { "widget:pinned": next } as any);
+            await RpcApi.SetConfigCommand(TabRpcClient, { "widget:pinned": pinsToSave(next, settings()) } as any);
         });
     };
 
@@ -68,22 +68,12 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
         const items: PopoverMenuItem[] = [];
 
         if (hostHas("multiWindow")) {
-            items.push({
-                label: "New Window",
-                icon: MENU_ICON.add,
-                click: () => {
-                    fireAndForget(async () => openNewWindowFromHere());
-                },
-            });
+            const newWindow = commandMenuParts("window:new");
+            items.push({ label: newWindow.label, icon: MENU_ICON.add, click: newWindow.run });
         }
 
-        items.push({
-            label: "New Tab",
-            icon: MENU_ICON.add,
-            click: () => {
-                createTab();
-            },
-        });
+        const newTab = commandMenuParts("tab:new");
+        items.push({ label: newTab.label, icon: MENU_ICON.add, click: newTab.run });
 
         items.push({
             type: "checkbox",

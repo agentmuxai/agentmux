@@ -53,6 +53,11 @@ describe("scopeVars", () => {
             expect(vars[`--${kind}-color`]).toBe(`var(--ink-${kind})`);
             expect(vars[`--${kind}-text-color`]).toBe(`var(--ink-${kind})`);
         }
+        // The attention magenta keeps its own hue in a pane; its filled button's text is the ink chosen for that fill.
+        expect(vars["--attention-color"]).toBe("var(--ink-attention)");
+        expect(vars["--attention-text-color"]).toBe("var(--ink-on-attention)");
+        expect(vars["--ink-attention"]).toBe(derived.ink.attention);
+        expect(vars["--ink-on-attention"]).toBe(derived.ink.onAttention);
     });
 
     it("re-points the fixed-colour tokens the agent pane paints with: panel, modal, hover, strip, solid block and grey", () => {

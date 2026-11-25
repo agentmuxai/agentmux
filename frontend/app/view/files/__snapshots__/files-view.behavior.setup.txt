@@ -10,7 +10,7 @@ ResizeObserver.observe(list)
 window.addEventListener(dragend, capture=true)
 setInterval(60000)
 model.applyRequestedSelection()
-model.navigate("/home/a", {"push":false})
+model.navigate("/home/a", {"push":false,"restore":true})
 model.applyRequestedSelection()
 pane content released
 model.applyRequestedSelection()

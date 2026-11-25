@@ -12,7 +12,7 @@
 import { t } from "@/app/i18n/i18n";
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { Button } from "@/app/element/ui";
-import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
+import { openAuditSection } from "@/app/view/audit/open-audit";
 import { type JSX } from "solid-js";
 import { lowDiskText, type DiskReading } from "./low-disk";
 
@@ -58,7 +58,7 @@ export const LowDiskNotice = (props: LowDiskNoticeProps): JSX.Element => {
                         density="compact"
                         onClick={() => {
                             props.onDismiss();
-                            void openOrFocusPaneByView("history");
+                            void openAuditSection("storage");
                         }}
                     >
                         {t("lowDiskNotice.openHistory")}

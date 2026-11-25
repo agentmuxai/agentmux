@@ -272,3 +272,22 @@ fn a_record_in_the_audit_file_counts_after_a_restart_and_only_the_windows_for_th
     assert!(!accepted(host, container), "deleting the agent forgets the choice, and what was found on record");
     set_audit_files_for_test(Vec::new());
 }
+
+#[test]
+fn a_host_agents_start_waits_for_the_person_and_says_so_until_the_person_has_gone_ahead() {
+    choices();
+    let store = Store::open_in_memory().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let container = saved(&store, definition("container", "Aria", &path(&root, "w"), "[]"));
+    let host = saved(&store, definition("host", "Hosty", &path(&root, "w/work"), "[]"));
+    let apart = saved(&store, definition("host", "Apart", &path(&root, "elsewhere"), "[]"));
+
+    let why = waiting_reason(&store, &host).expect("it shares a folder");
+    assert!(why.starts_with(OPEN_REFUSAL_CODE) && why.contains("waits for the person's go-ahead for a shared folder"), "{why}");
+    assert!(why.contains("Hosty (host) and Aria (container)"), "{why}");
+    assert_eq!(waiting_reason(&store, &apart), None, "a host agent that shares nothing waits for nothing");
+    assert_eq!(waiting_reason(&store, &container), None, "a container agent is asked when its folders are saved");
+
+    accept_as((&host.id, "Hosty"), (&container.id, "Aria")).unwrap();
+    assert_eq!(waiting_reason(&store, &host), None, "the person went ahead");
+}

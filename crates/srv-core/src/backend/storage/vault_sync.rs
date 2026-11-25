@@ -53,8 +53,9 @@ pub struct TakeWrite<'a> {
     /// The entry's whole row, its sealed parts under this machine's own key. A new entry's `created_at` is the record's;
     /// an existing entry keeps its own.
     pub row: &'a VaultRow,
-    /// The value the entry holds now, if it exists: it is written only if it still does.
-    pub was: Option<&'a [u8]>,
+    /// The entry as it was read, if it exists: it is written only if it still is exactly that (its value, kind, label, fields,
+    /// tags, Vault and time of change), so a change made here since it was read is never overwritten, whichever part it changed.
+    pub was: Option<&'a VaultRow>,
     pub primary: Option<&'a str>,
     pub aliases: &'a [String],
     pub revive: Option<&'a str>,
@@ -133,8 +134,9 @@ impl Store {
             Some(was) => {
                 // The incarnation (`created_at`) stays: the entry's earlier values are filed under it.
                 let n = tx.execute(
-                    "UPDATE db_vault_entries SET kind = ?2, label = ?3, fields = ?4, tags = ?5, sealed = ?6, updated_at = ?7, vault_id = ?8 WHERE id = ?1 AND sealed = ?9",
-                    params![row.id, row.kind, row.label, row.fields, row.tags, row.sealed, row.updated_at, row.vault_id, was],
+                    "UPDATE db_vault_entries SET kind = ?2, label = ?3, fields = ?4, tags = ?5, sealed = ?6, updated_at = ?7, vault_id = ?8 \
+                     WHERE id = ?1 AND sealed = ?9 AND kind = ?10 AND label = ?11 AND fields = ?12 AND tags = ?13 AND updated_at = ?14 AND vault_id = ?15",
+                    params![row.id, row.kind, row.label, row.fields, row.tags, row.sealed, row.updated_at, row.vault_id, was.sealed, was.kind, was.label, was.fields, was.tags, was.updated_at, was.vault_id],
                 )?;
                 if n == 0 {
                     return Ok(false);

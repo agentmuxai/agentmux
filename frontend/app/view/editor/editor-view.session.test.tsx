@@ -409,6 +409,33 @@ describe("switching and closing tabs", () => {
         await expect(out()).toMatchFileSnapshot(snap("tabs-dirty-close"));
     });
 
+    it("opens a file whose first line is too wide for CodeMirror in the Large text viewer, and a binary one is still refused", async () => {
+        const v = await mountView();
+        h.files.set("/home/u/wide.log", "x".repeat(100_001));
+        h.files.set("/home/u/blob.bin", `ab${String.fromCharCode(0)}cd`);
+        await open(v.model, "/home/u/wide.log");
+        expect(v.model.activeViewer()).toBe("large");
+        expect(v.model.activeTabAtom()?.loadError ?? null).toBeNull();
+        expect(v.model.viewerTabs.options(v.model.activeIdAtom()!, "large")).toEqual(["large", "info", "hex"]);
+        await open(v.model, "/home/u/blob.bin");
+        expect(v.model.activeViewer()).toBe("text");
+        expect(v.model.activeTabAtom()?.loadError).toMatch(/binary/);
+    });
+
+    it("a wide-first-line file that changes on disk stays in the Large text viewer without being read whole again", async () => {
+        const v = await mountView();
+        h.files.set("/home/u/wide.log", "x".repeat(100_001));
+        await open(v.model, "/home/u/wide.log");
+        expect(v.model.activeViewer()).toBe("large");
+        h.files.set("/home/u/wide.log", "x".repeat(100_050));
+        const mark = h.log.length;
+        await (v.model as any)._handleExternalFileChanged("/home/u/wide.log");
+        await settle();
+        expect(v.model.activeViewer()).toBe("large");
+        expect(h.log.slice(mark).filter((l) => l.startsWith("rpc ReadEditorFile"))).toEqual([]);
+        expect(v.model.activeTabAtom()?.loadError ?? null).toBeNull();
+    });
+
     it("a tab in another viewer leaves CodeMirror hidden, and coming back restores the text", async () => {
         const v = await mountView();
         const a = await open(v.model, "/home/u/a.ts");

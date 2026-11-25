@@ -19,6 +19,8 @@ import { useBrowserAuth } from "./use-browser-auth";
 import { Button } from "@/app/element/ui";
 import { BrowserSigninOffer, BrowserSigninPending } from "./browser-signin-offer";
 import { BrowserAttentionBanner } from "./browser-attention";
+import { Search } from "@/app/element/search";
+import { useBrowserFind } from "./browser-find";
 import { BrowserNavBar } from "./browser-nav-bar";
 import { StreamedBrowserPane } from "./streamed/StreamedBrowserPane";
 import { BrowserPopupNotes } from "./browser-popups";
@@ -215,6 +217,8 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
     diag(`view-mount window_label=${windowLabel} initial-urlAtom=${JSON.stringify(model.urlAtom())}`);
 
     let placeholderRef: HTMLDivElement | undefined;
+    // Find in page (Ctrl/Cmd+F): the find bar floats at the top-end of the page area.
+    const findBar = useBrowserFind(model, () => placeholderRef);
 
     const sl = usePaneSleep(model, diag);
     // Construction ORDER matters: freeze-frame reads paneRect()/paneCreated()
@@ -270,6 +274,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                 {(agent) => <DrivenByStrip model={model} agent={agent()} />}
             </Show>
             <DownloadStrip model={model} />
+            <Search {...findBar} />
             <Show when={model.errorAtom()}>
                 <div class="browser-error">{model.errorAtom()}</div>
             </Show>

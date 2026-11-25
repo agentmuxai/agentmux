@@ -25,8 +25,13 @@ impl Taker<'_> {
             return self.revoke(rec);
         }
         let body: GrantBody = open_body(self.ring, rec)?;
-        if body.origin.is_empty() || body.record_id() != h.record {
+        if body.record_id() != h.record {
             return Ok(Effect::Skipped("a grant whose id is not its entry's and its site's".to_string()));
+        }
+        // Only a site is granted from another machine: a key that names an agent or a setting is this machine's own, and no
+        // record makes one.
+        if !kinds::is_site(&body.origin) {
+            return Ok(Effect::Skipped("a grant for something that is not a site".to_string()));
         }
         self.apply_grant(&h.collection, &h.record, &body)
     }
@@ -62,6 +67,10 @@ impl Taker<'_> {
         let h = &rec.header;
         let mut ended = None;
         for (entry, origin, _) in self.store.vault_grant_rows().map_err(|e| e.to_string())? {
+            // A grant that is not a site's is never written, so no record ends it.
+            if !kinds::is_site(&origin) {
+                continue;
+            }
             let in_vault = self.store.vault_get(&entry).map_err(|e| e.to_string())?.is_some_and(|r| r.vault_id == h.collection);
             if in_vault && links_of(self.store, &entry)?.ids().iter().any(|id| sync_grant::record_id(id, &origin) == h.record) {
                 self.store.vault_grant_revoke(&entry, &origin).map_err(|e| e.to_string())?;

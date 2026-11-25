@@ -88,6 +88,12 @@ fn within(bind: &WritableBind, lexical: &str) -> Option<(usize, String)> {
     relative_to(lexical, &host).map(|rest| (host.len(), rest))
 }
 
+/// Whether `path` is a name or a path from the working folder: not rooted, and not led by a drive.
+fn is_relative(path: &str) -> bool {
+    let text = path.replace('\\', "/");
+    !text.starts_with('/') && !text.split_once('/').is_some_and(|(drive, _)| drive.ends_with(':'))
+}
+
 /// `asked`, as a message of the container agent of the pane `meta` wrote it, found in the agent's own folders.
 pub(crate) fn resolve(meta: &MetaMapType, asked: &str) -> Result<Found, String> {
     let binds = writable_binds(meta, None);
@@ -99,6 +105,9 @@ pub(crate) fn resolve(meta: &MetaMapType, asked: &str) -> Result<Found, String> 
     if asked.is_empty() || asked.starts_with('~') || asked.starts_with("\\\\") || asked.starts_with("//") {
         return Err(OUTSIDE.to_string());
     }
+    // A name with no folder is read from where the agent's shell starts, its workspace.
+    let from_workspace = format!("{}/{asked}", crate::backend::container::CONTAINER_WORKSPACE_DIR.trim_end_matches('/'));
+    let asked = if is_relative(asked) { from_workspace.as_str() } else { asked };
     let lexical = collapse(asked).ok_or_else(|| OUTSIDE.to_string())?;
     let (bind, rest) = binds
         .iter()
@@ -109,7 +118,13 @@ pub(crate) fn resolve(meta: &MetaMapType, asked: &str) -> Result<Found, String> 
     let canonical = crate::server::browser_uploads::canonical;
     let root = canonical(&bind.host).map_err(|_| "The agent's folder can't be read right now.".to_string())?;
     let spelled = if rest.is_empty() { bind.host.clone() } else { bind.host.join(&rest) };
-    let file = canonical(&spelled).map_err(|_| "That file doesn't exist.".to_string())?;
+    let Ok(file) = canonical(&spelled) else {
+        // A link on the way that leads out of the folder with nothing at its end is refused as one with a file is.
+        if crate::server::link_file_check::dangling_link_leaves(&spelled, &[&bind.host, &root]) {
+            return Err(LEADS_OUT.to_string());
+        }
+        return Err("That file doesn't exist.".to_string());
+    };
     if !file.starts_with(&root) {
         return Err(LEADS_OUT.to_string());
     }
@@ -204,7 +219,7 @@ mod tests {
     #[test]
     fn home_unc_drive_and_dot_dot_paths_are_refused() {
         let f = fixture();
-        for asked in ["~/img/a.png", "~", "//server/share/a.png", "\\\\server\\share\\a.png", "C:/Users/me/photo.png", "C:\\Users\\me\\photo.png", "/../x.png", "", "  ", "a.png"] {
+        for asked in ["~/img/a.png", "~", "//server/share/a.png", "\\\\server\\share\\a.png", "C:/Users/me/photo.png", "C:\\Users\\me\\photo.png", "/../x.png", "", "  "] {
             assert_eq!(resolve(&f.meta, asked).unwrap_err(), OUTSIDE, "{asked:?}");
         }
     }
@@ -228,6 +243,58 @@ mod tests {
         std::os::unix::fs::symlink(f.ws.join("img").join("a.png"), f.ws.join("in.png")).unwrap();
         assert_eq!(resolve(&f.meta, "/workspace/out.png").unwrap_err(), LEADS_OUT);
         assert_eq!(read(open(&f.meta, "/workspace/in.png")), "the agent's picture");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_out_of_the_folder_is_refused_alike_whether_or_not_its_target_is_there() {
+        let f = fixture();
+        std::os::unix::fs::symlink(f.private.join("not-there.png"), f.ws.join("gone.png")).unwrap();
+        std::os::unix::fs::symlink(f.private.join("not-there-dir"), f.ws.join("gone-dir")).unwrap();
+        std::os::unix::fs::symlink(f.ws.join("img").join("later.png"), f.ws.join("soon.png")).unwrap();
+        assert_eq!(resolve(&f.meta, "/workspace/gone.png").unwrap_err(), LEADS_OUT);
+        assert_eq!(resolve(&f.meta, "/workspace/gone-dir/a.png").unwrap_err(), LEADS_OUT);
+        // A link to a folder that is there, with nothing at the end of the path, is refused as one with a file is.
+        std::os::unix::fs::symlink(&f.private, f.ws.join("up")).unwrap();
+        assert_eq!(resolve(&f.meta, "/workspace/up/nothing.png").unwrap_err(), LEADS_OUT);
+        assert_eq!(resolve(&f.meta, "/workspace/up/photo.png").unwrap_err(), LEADS_OUT);
+        // A link inside the folder whose own target runs through that link answers alike, with or without a file at its end.
+        std::os::unix::fs::symlink(f.ws.join("up").join("nothing.png"), f.ws.join("via-up.png")).unwrap();
+        std::os::unix::fs::symlink(f.ws.join("up").join("photo.png"), f.ws.join("via-up-file.png")).unwrap();
+        std::fs::create_dir_all(f.ws.join("x").join("y")).unwrap();
+        std::os::unix::fs::symlink(&f.ws, f.ws.join("x").join("y").join("dirlink")).unwrap();
+        std::os::unix::fs::symlink("../probe.png", f.ws.join("d.png")).unwrap();
+        assert_eq!(resolve(&f.meta, "/workspace/x/y/dirlink/d.png").unwrap_err(), LEADS_OUT);
+        std::os::unix::fs::symlink("up/../probe.png", f.ws.join("dotdot.png")).unwrap();
+        assert_eq!(resolve(&f.meta, "/workspace/dotdot.png").unwrap_err(), LEADS_OUT);
+        assert_eq!(resolve(&f.meta, "/workspace/via-up.png").unwrap_err(), LEADS_OUT);
+        assert_eq!(resolve(&f.meta, "/workspace/via-up-file.png").unwrap_err(), LEADS_OUT);
+        let host = format!("{}/gone.png", f.ws.to_string_lossy());
+        assert_eq!(resolve(&f.meta, &host).unwrap_err(), LEADS_OUT);
+        // A link inside the folder whose target is not there yet is only a file that is not there.
+        assert_eq!(resolve(&f.meta, "/workspace/soon.png").unwrap_err(), "That file doesn't exist.");
+    }
+
+    #[test]
+    fn a_name_with_no_folder_is_read_from_the_workspace() {
+        let f = fixture();
+        assert_eq!(resolve(&f.meta, "img/a.png").unwrap().of, "/workspace/img/a.png");
+        assert_eq!(read(open(&f.meta, "img/a.png")), "the agent's picture");
+        assert_eq!(resolve(&f.meta, "img/none.png").unwrap_err(), "That file doesn't exist.");
+        assert_eq!(resolve(&f.meta, "../a.png").unwrap_err(), OUTSIDE);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_reached_through_a_link_above_it_says_a_missing_file_is_not_there() {
+        let mut f = fixture();
+        let door = f._tmp.path().join("door");
+        std::os::unix::fs::symlink(f._tmp.path(), &door).unwrap();
+        f.meta.insert(crate::backend::blockcontroller::META_KEY_CMD_CWD.to_string(), serde_json::json!(door.join("ws").to_string_lossy()));
+        assert_eq!(resolve(&f.meta, "/workspace/img/none.png").unwrap_err(), "That file doesn't exist.");
+        assert_eq!(read(open(&f.meta, "/workspace/img/a.png")), "the agent's picture");
+        std::os::unix::fs::symlink(&f.private, f.ws.join("up")).unwrap();
+        assert_eq!(resolve(&f.meta, "/workspace/up/nothing.png").unwrap_err(), LEADS_OUT);
     }
 
     #[test]

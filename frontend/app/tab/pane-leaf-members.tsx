@@ -9,14 +9,14 @@
  */
 
 import { Block } from "@/app/block/block";
-import { layoutBehind, markLayoutBehind, windowResizing } from "@/app/platform/window-resize";
+import { layoutBehind, markLayoutBehind, noteSplitterDrag, windowResizing } from "@/app/platform/window-resize";
 import { setKeepAliveBlockDormant } from "@/app/store/block-component-registry";
 import { AgentStalledBanner } from "@/app/tab/agent-stalled-banner";
 import { PaneStackMemberActiveProvider, usePaneStackMemberActive } from "@/app/tab/pane-stack-member";
 import type { NodeModel } from "@/layout/index";
 import { registerTabMember, tabLandingMountOf } from "@/layout/lib/tabLanding";
 import { Key } from "@/util/keyed";
-import { createEffect, For, onCleanup, Show, untrack, type Accessor, type JSX } from "solid-js";
+import { createEffect, For, on, onCleanup, Show, untrack, type Accessor, type JSX } from "solid-js";
 
 export interface PaneMembersInput {
     keepAlive: Accessor<boolean>;
@@ -28,7 +28,26 @@ export interface PaneMembersInput {
     lands?: (id: string) => boolean;
 }
 
-/** One kept-alive member: its dormant flag, its slot (visible or hidden) and its Block. */
+/**
+ * A splitter drag sends no window `resize` event, yet it resizes the pane's slot on every frame just the same: the
+ * catch-up of the other members pauses for it and resumes when it ends (window-resize.ts). Counted once per drag,
+ * and ended with the member if it goes while the drag does.
+ */
+function useSplitterDragPause(dragging: () => boolean): void {
+    let counted = false;
+    createEffect(
+        on(dragging, (now) => {
+            if (now === counted) return;
+            counted = now;
+            noteSplitterDrag(now);
+        })
+    );
+    onCleanup(() => {
+        if (counted) noteSplitterDrag(false);
+        counted = false;
+    });
+}
+
 function renderKeepAliveSlot(id: string, input: PaneMembersInput): JSX.Element {
     const { activeBlockId, keepAliveNodeModelFor } = input;
     // Every "all panes" consumer of the block-component registry
@@ -52,17 +71,19 @@ function renderKeepAliveSlot(id: string, input: PaneMembersInput): JSX.Element {
     const outerMemberActive = usePaneStackMemberActive();
     const memberActive = () => outerMemberActive() && id === activeBlockId();
 
-    // A dormant member does not lay its content out while the window is resized, nor until it is its turn to catch up
+    // A dormant member does not lay its content out while the window is resized or a splitter is dragged, nor until it is its turn to catch up
     // afterwards (window-resize.ts): four or five hidden agent views relaying out their transcripts and composers on
     // every frame of a drag is most of the lag, and only the active member changes what is on screen. The DOM, the
     // mount and the slot's box stay, so the observers inside fire once at the final size when it is released.
     const behindKey = `keepalive:${id}`;
+    const splitterDragging = () => keepAliveNodeModelFor(id).isSplitterDragging?.() ?? false;
     createEffect(() => {
         // Only the resize flag is tracked: a member that goes dormant mid-drag still skips (skipsLayout) and
         // simply has no catch-up turn of its own, so it lays out when the drag settles.
-        if (windowResizing() && untrack(() => id !== activeBlockId())) markLayoutBehind(behindKey);
+        if ((windowResizing() || splitterDragging()) && untrack(() => id !== activeBlockId())) markLayoutBehind(behindKey);
     });
-    const skipsLayout = () => id !== activeBlockId() && (windowResizing() || layoutBehind(behindKey));
+    useSplitterDragPause(splitterDragging);
+    const skipsLayout = () => id !== activeBlockId() && (windowResizing() || splitterDragging() || layoutBehind(behindKey));
 
     // The member's content, in an element of its own inside the slot: while the tab is dragged out of the
     // pane and its landing place is shown, the element stands in the place (layout/lib/tabLanding.ts), laid

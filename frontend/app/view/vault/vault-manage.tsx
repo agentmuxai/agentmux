@@ -24,11 +24,13 @@ export function parseAgentIds(text: string): string[] {
 
 type Mode = VaultAgents["mode"];
 
-const MODES = [
-    { value: "all", label: "All agents" },
-    { value: "named", label: "Named agents" },
-    { value: "none", label: "None" },
-] satisfies { value: Mode; label: string }[];
+// Built when drawn, so a change of language shows.
+const modes = () =>
+    [
+        { value: "all", label: t("vault.manage.modeAll") },
+        { value: "named", label: t("vault.manage.modeNamed") },
+        { value: "none", label: t("vault.manage.modeNone") },
+    ] satisfies { value: Mode; label: string }[];
 
 /** A Vault's name and its agents; `vault` is the one being changed, none for a new Vault. */
 function VaultEditor(props: { vault: VaultInfo | null; onDone: (created?: string) => void }): JSX.Element {
@@ -65,15 +67,15 @@ function VaultEditor(props: { vault: VaultInfo | null; onDone: (created?: string
                 void save();
             }}
         >
-            <Field label="Name" layout="stacked">
+            <Field label={t("vault.manage.name")} layout="stacked">
                 <TextInput value={name()} onInput={(e) => setName(e.currentTarget.value)} maxLength={60} autofocus />
             </Field>
-            <Field label="Agents that may use its entries" layout="stacked" description="An agent can't tell a Vault it may not use from one that doesn't exist. You can always use every entry yourself.">
-                <SegmentedControl density="compact" ariaLabel="Agents" options={MODES} value={mode()} onChange={setMode} />
+            <Field label={t("vault.manage.agents")} layout="stacked" description={t("vault.manage.agentsHelp")}>
+                <SegmentedControl density="compact" ariaLabel={t("vault.manage.agentsAria")} options={modes()} value={mode()} onChange={setMode} />
             </Field>
             <Show when={mode() === "named"}>
-                <Field label="Agent ids" layout="stacked" description="Separated by commas, as the Swarm shows them (for example agent2-6).">
-                    <TextInput value={ids()} onInput={(e) => setIds(e.currentTarget.value)} placeholder="agent2-6, builder" />
+                <Field label={t("vault.manage.ids")} layout="stacked" description={t("vault.manage.idsHelp")}>
+                    <TextInput value={ids()} onInput={(e) => setIds(e.currentTarget.value)} placeholder={t("vault.manage.idsExample")} />
                 </Field>
             </Show>
             <Show when={error()}>
@@ -83,10 +85,10 @@ function VaultEditor(props: { vault: VaultInfo | null; onDone: (created?: string
             </Show>
             <div class="vault-editor-actions">
                 <Button density="compact" onClick={() => props.onDone()} disabled={busy()}>
-                    Cancel
+                    {t("vault.manage.cancel")}
                 </Button>
                 <Button density="compact" tone="accent" busy={busy()} onClick={() => void save()}>
-                    {props.vault ? "Save" : "Add Vault"}
+                    {props.vault ? t("vault.manage.save") : t("vault.manage.add")}
                 </Button>
             </div>
         </form>

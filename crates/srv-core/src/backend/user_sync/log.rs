@@ -61,6 +61,12 @@ pub(crate) const SCHEMA: &str = "
         seq        INTEGER NOT NULL,
         PRIMARY KEY (collection, record)
     );
+    CREATE TABLE IF NOT EXISTS db_sync_recheck (
+        collection TEXT NOT NULL,
+        origin     TEXT NOT NULL,
+        seq        INTEGER NOT NULL,
+        PRIMARY KEY (collection, origin, seq)
+    );
     CREATE TABLE IF NOT EXISTS db_sync_mark (
         collection TEXT PRIMARY KEY,
         generation INTEGER NOT NULL DEFAULT 0,
@@ -170,20 +176,94 @@ pub fn set_epoch(conn: &Connection, id: &str, epoch: u32, ended: &Vector) -> rus
 
 /// Sets the collection's key epoch and the ends of the epochs before it to exactly what the membership chain says now,
 /// in either direction: a removal that lost a fork to another entry leaves no epoch and no ends behind. `cuts` holds,
-/// for each epoch left, what each remaining member had written at it.
+/// for each epoch left, what each remaining member had written at it. Several statements: the caller makes them one
+/// (`ops::sync_epoch` and `ops::store_chain` do), so a failure part-way leaves nothing changed.
 pub fn reset_epochs(conn: &Connection, id: &str, epoch: u32, cuts: &[(u32, &Vector)]) -> rusqlite::Result<()> {
-    let tx = conn.unchecked_transaction()?;
-    tx.execute("DELETE FROM db_sync_epoch_cut WHERE collection = ?1", params![id])?;
+    let before = standing(conn, id)?;
+    conn.execute("DELETE FROM db_sync_epoch_cut WHERE collection = ?1", params![id])?;
     for (left, ended) in cuts {
         for (origin, last) in ended.iter() {
-            tx.execute(
+            conn.execute(
                 "INSERT INTO db_sync_epoch_cut (collection, epoch, origin, last_seq) VALUES (?1, ?2, ?3, ?4)",
                 params![id, left, origin, *last as i64],
             )?;
         }
     }
-    tx.execute("UPDATE db_sync_collections SET epoch = ?2 WHERE id = ?1", params![id, epoch])?;
-    tx.commit()
+    conn.execute("UPDATE db_sync_collections SET epoch = ?2 WHERE id = ?1", params![id, epoch])?;
+    // A row that was void and no longer is (its removal lost a fork), or the other way round, is to be settled by
+    // [`recheck`], which has the collection's adapter.
+    let after = standing(conn, id)?;
+    for (key, now) in &after {
+        if before.get(key).is_some_and(|was| was != now) {
+            conn.execute(
+                "INSERT OR IGNORE INTO db_sync_recheck (collection, origin, seq) VALUES (?1, ?2, ?3)",
+                params![id, key.0, key.1 as i64],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// Whether each row of the collection counts: it is at the collection's epoch, or within the end its origin had at its
+/// own epoch. (A row at any other epoch is void: kept so its origin's sequence is unbroken, and changing nothing.)
+fn standing(conn: &Connection, id: &str) -> rusqlite::Result<BTreeMap<(String, u64), bool>> {
+    let mut stmt = conn.prepare(
+        "SELECT l.origin, l.seq, (l.epoch = (SELECT epoch FROM db_sync_collections WHERE id = ?1)
+                OR l.seq <= COALESCE((SELECT last_seq FROM db_sync_epoch_cut c
+                                      WHERE c.collection = ?1 AND c.origin = l.origin AND c.epoch = l.epoch), -1))
+         FROM db_sync_log l WHERE l.collection = ?1",
+    )?;
+    let rows = stmt.query_map(params![id], |r| Ok(((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64), r.get::<_, bool>(2)?)))?;
+    rows.collect()
+}
+
+/// Settles the records that a change of the epoch ends moved rows in or out of ([`reset_epochs`] notes them): a write
+/// stored as void under a removal that then lost a fork counts now and is merged as it would have been, and one that
+/// no longer counts stops being its record's state. What counts is merged oldest version first, as the adapter would
+/// have taken the records in; what `me` wrote is kept whether or not it counts (it is written again at the current
+/// epoch, which supersedes it). Answers how many records' state moved.
+pub fn recheck(conn: &Connection, collection: &str, me: &str, adapter: &dyn Adapter) -> rusqlite::Result<usize> {
+    let tx = conn.unchecked_transaction()?;
+    let records: Vec<String> = {
+        let mut stmt = tx.prepare(
+            "SELECT DISTINCT l.record FROM db_sync_recheck r
+             JOIN db_sync_log l ON l.collection = r.collection AND l.origin = r.origin AND l.seq = r.seq
+             WHERE r.collection = ?1 ORDER BY l.record",
+        )?;
+        let rows = stmt.query_map(params![collection], |r| r.get(0))?;
+        rows.collect::<Result<_, _>>()?
+    };
+    let standing = standing(&tx, collection)?;
+    let mut moved = 0;
+    for record in records {
+        let mut counted: Vec<Record> = {
+            let mut stmt = tx.prepare(&format!("SELECT {COLS}, sig, body FROM db_sync_log WHERE collection = ?1 AND record = ?2"))?;
+            let rows = stmt.query_map(params![collection, record], record_of)?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        counted.retain(|r| r.header.origin == me || standing.get(&(r.header.origin.clone(), r.header.seq)).copied().unwrap_or(false));
+        counted.sort_by(|a, b| a.header.version.cmp(&b.header.version));
+        let mut state: Option<&Header> = None;
+        for r in &counted {
+            match adapter.merge(state, &r.header) {
+                Merge::Applied | Merge::Conflict { current: Side::Incoming } => state = Some(&r.header),
+                Merge::KeptLocal | Merge::Conflict { current: Side::Local } => {}
+            }
+        }
+        let was = current(&tx, collection, &record)?.map(|r| (r.header.origin, r.header.seq));
+        if was != state.map(|h| (h.origin.clone(), h.seq)) {
+            moved += 1;
+            match state {
+                Some(h) => point_state(&tx, h)?,
+                None => {
+                    tx.execute("DELETE FROM db_sync_state WHERE collection = ?1 AND record = ?2", params![collection, record])?;
+                }
+            }
+        }
+    }
+    tx.execute("DELETE FROM db_sync_recheck WHERE collection = ?1", params![collection])?;
+    tx.commit()?;
+    Ok(moved)
 }
 
 /// The last sequence its origin had written at the epoch `h` is at, as the membership change that ended the epoch
@@ -277,6 +357,18 @@ pub fn current(conn: &Connection, collection: &str, record: &str) -> rusqlite::R
         record_of,
     )
     .optional()
+}
+
+/// Whether a collection other than `collection` holds `record` as a live record (not a tombstone): a record the log has
+/// moved to another collection is live in the new one while the old one ends it.
+pub fn live_elsewhere(conn: &Connection, collection: &str, record: &str) -> rusqlite::Result<bool> {
+    let n: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM db_sync_state s JOIN db_sync_log l ON l.collection = s.collection AND l.origin = s.origin AND l.seq = s.seq
+         WHERE s.collection != ?1 AND s.record = ?2 AND l.tombstone = 0",
+        params![collection, record],
+        |r| r.get(0),
+    )?;
+    Ok(n > 0)
 }
 
 /// The highest version this store holds in a collection, from any origin.
@@ -392,6 +484,9 @@ pub fn apply_remote(
         return Err(Refused::Gap { have: held }.into());
     }
     if void {
+        // Its date is checked as any record's is, but not taken in: a record that changes nothing must not move this
+        // machine's clock (its next writes would be refused as ahead by the others).
+        clock.clone().observe(&h.version, now_ms).map_err(Refused::Skew)?;
         let tx = conn.unchecked_transaction()?;
         insert_log(&tx, rec)?;
         tx.commit()?;

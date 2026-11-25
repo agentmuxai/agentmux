@@ -6,5 +6,5 @@ loading slow, protected: Waiting for you to answer macOS's prompt…
 error: This folder doesn't exist any more.Try again
 model.refresh()
 empty: This folder is empty.
-empty filtered: Nothing here matches “zz”.
+empty filtered: Nothing here matches “zz”.Clear filter
 only hidden: Only hidden files here.

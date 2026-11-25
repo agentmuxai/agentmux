@@ -9,6 +9,7 @@
 import { For, Index, Show, createMemo, createSignal, onMount, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import { Tooltip } from "@/app/element/tooltip";
+import { t } from "@/app/i18n/i18n";
 import { Button } from "@/app/element/ui";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -61,7 +62,7 @@ function PeerChips(props: { peer: LanInstance; showChannel?: boolean }): JSX.Ele
             <span class="status-bar-popover-mono lan-peer-channel">{installLabel(props.peer.install)}</span>
         </Show>
         <Show when={hasNoAgents(props.peer)}>
-            <span class="status-bar-popover-mono lan-peer-channel" data-testid="lan-peer-no-agents">no agents</span>
+            <span class="status-bar-popover-mono lan-peer-channel" data-testid="lan-peer-no-agents">{t("lanPeer.noAgents")}</span>
         </Show>
         </>
     );
@@ -78,7 +79,7 @@ export function LanPeerRow(props: {
     const tick = useTick(1000);
     const nowSecs = createMemo(() => (tick(), Math.floor(Date.now() / 1000)));
     const refusals = createMemo(() => peerKeyRefusals(props.peer, props.pins));
-    const name = () => props.peer.hostname || props.peer.instance_id || "resolving…";
+    const name = () => props.peer.hostname || props.peer.instance_id || t("lanPeer.resolving");
     const platform = () => peerRuns(props.peer);
     const agentCount = () => props.peer.agents.length;
     return (
@@ -100,44 +101,44 @@ export function LanPeerRow(props: {
                     <i
                         class="fa-solid fa-triangle-exclamation lan-peer-warn"
                         data-testid="lan-peer-key-warning-icon"
-                        {...tip("A message from this peer was refused: its key changed", { label: true })}
+                        {...tip(t("lanPeer.keyChanged"), { label: true })}
                     />
                 </Show>
             </Button>
             <Show when={props.open}>
                 <div class="lan-peer-body">
                     <div class="status-bar-popover-row">
-                        <span class="status-bar-popover-label">Address</span>
+                        <span class="status-bar-popover-label">{t("lanPeer.address")}</span>
                         <span class="status-bar-popover-mono">
                             {props.peer.address}:{props.peer.port}
                         </span>
                     </div>
                     <Show when={platform()}>
                         <div class="status-bar-popover-row">
-                            <span class="status-bar-popover-label">Runs</span>
+                            <span class="status-bar-popover-label">{t("lanPeer.runs")}</span>
                             <span>{platform()}</span>
                         </div>
                     </Show>
                     <Show when={props.peer.channel}>
                         <div class="status-bar-popover-row" data-testid="lan-peer-data-channel">
-                            <span class="status-bar-popover-label">Channel</span>
+                            <span class="status-bar-popover-label">{t("lanPeer.channel")}</span>
                             <span class="status-bar-popover-mono lan-peer-data-channel">{props.peer.channel}</span>
                         </div>
                     </Show>
                     <div class="status-bar-popover-row">
-                        <span class="status-bar-popover-label">Agents</span>
+                        <span class="status-bar-popover-label">{t("lanPeer.agents")}</span>
                         <span>
-                            {agentCount() === 0 && hasNoAgents(props.peer) ? "none: this install runs no agents" : agentCount()}
+                            {agentCount() === 0 && hasNoAgents(props.peer) ? t("lanPeer.noneHere") : agentCount()}
                             <Show when={agentCount() > 0}>
                                 {" "}
                                 <Button tone="accent" density="compact" onClick={openSwarm}>
-                                    Show in Swarm
+                                    {t("lanPeer.showSwarm")}
                                 </Button>
                             </Show>
                         </span>
                     </div>
                     <div class="status-bar-popover-row">
-                        <span class="status-bar-popover-label">Last seen</span>
+                        <span class="status-bar-popover-label">{t("lanPeer.lastSeen")}</span>
                         <span>{lastSeenText(props.peer.last_seen, nowSecs())}</span>
                     </div>
                     <Show when={refusals().length > 0}>
@@ -145,14 +146,16 @@ export function LanPeerRow(props: {
                             <For each={refusals()}>
                                 {(r) => (
                                     <div>
-                                        A different key was refused for {r.agent} {r.refused.count} time
-                                        {r.refused.count === 1 ? "" : "s"}; last{" "}
-                                        {lastSeenText(r.refused.last_seen_at, nowSecs())}.
+                                        {t("lanPeer.refused", {
+                                            agent: r.agent,
+                                            count: r.refused.count,
+                                            when: lastSeenText(r.refused.last_seen_at, nowSecs()),
+                                        })}
                                     </div>
                                 )}
                             </For>
                             <Button tone="attention" density="compact" onClick={openPinnedSenders}>
-                                Review in Settings › Devices › Pinned senders
+                                {t("lanPeer.review")}
                             </Button>
                         </div>
                     </Show>

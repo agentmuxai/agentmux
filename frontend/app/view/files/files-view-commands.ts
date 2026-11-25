@@ -56,10 +56,10 @@ export function useFilesCommands(fv: FilesLocal, win: FilesWindow, opening: File
                 model.refresh();
                 return true;
             case "files:trash":
-                void model.trash(model.selectedEntries());
+                void model.trash(model.topmostSelected());
                 return true;
             case "files:deletePermanently":
-                askDeletePermanently(model.selectedEntries());
+                askDeletePermanently(model.topmostSelected());
                 return true;
             case "files:selectAll":
                 model.setSelection(selectAll(sel, win.order()));
@@ -69,11 +69,11 @@ export function useFilesCommands(fv: FilesLocal, win: FilesWindow, opening: File
                 return true;
             case "files:copy":
                 // Both: the files for a paste in the Files pane, the paths for anywhere else.
-                model.copyToClipboard("copy", model.selectedEntries());
-                copyPaths(model.selectedEntries(), true);
+                model.copyToClipboard("copy", model.topmostSelected());
+                copyPaths(model.topmostSelected(), true);
                 return true;
             case "files:cut":
-                model.copyToClipboard("cut", model.selectedEntries());
+                model.copyToClipboard("cut", model.topmostSelected());
                 return true;
             case "files:paste":
                 void model.paste();

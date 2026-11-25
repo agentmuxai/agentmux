@@ -103,5 +103,34 @@ BUILD_SLOT_MAX=2 BUILD_SLOT_MAX_WAIT=2 bash "$SUT" -- true >/dev/null 2>&1; st=$
 [ "$st" = 75 ] && ok || bad "a third run with both slots held exited $st, wanted 75"
 wait
 
+# 7. The cargo shim: a call that only asks the tool to describe itself (--version, --help, help) runs the
+#    real tool at once and never reaches the slot; a build, a test with --help after `--`, and
+#    `cargo install <crate> --version <release>` (there --version names what to build) still do.
+SHIM_DIR="$TMP/shim/bin"; REAL_DIR="$TMP/shim/real"; mkdir -p "$SHIM_DIR" "$REAL_DIR"
+cp "$HERE/shim" "$SHIM_DIR/cargo"; chmod +x "$SHIM_DIR/cargo"
+printf '#!/bin/sh\necho "real $*" >>"$SHIMLOG"\n' >"$REAL_DIR/cargo"; chmod +x "$REAL_DIR/cargo"
+printf '#!/bin/bash\necho "slot $*" >>"$SHIMLOG"\n' >"$TMP/shim/slot.sh"
+shim_goes_to_slot() { # <args...> -> 0 when the shim sent the call to the slot, 1 when it ran the real tool
+  export SHIMLOG="$TMP/shim/log"; : >"$SHIMLOG"
+  PATH="$SHIM_DIR:$REAL_DIR:$PATH" AGENTMUX_BUILD_SLOT_SCRIPT="$TMP/shim/slot.sh" env -u AGENTMUX_BUILD_SLOT_OFF cargo "$@" >/dev/null 2>&1
+  grep -q '^slot ' "$SHIMLOG"
+}
+for args in "nextest --version" "test --help" "help build" "build -h" "-V" "nextest run --version"; do
+  # shellcheck disable=SC2086
+  if shim_goes_to_slot $args; then bad "cargo $args waited for the slot"; elif grep -q '^real ' "$SHIMLOG"; then ok; else bad "cargo $args did not run the real tool"; fi
+done
+# `-V` means "version" for cargo only: npm treats it as an unknown option and still runs the script.
+NPM_DIR="$TMP/shim/npmbin"; mkdir -p "$NPM_DIR"; cp "$HERE/shim" "$NPM_DIR/npm"; chmod +x "$NPM_DIR/npm"
+printf '#!/bin/sh
+echo "real $*" >>"$SHIMLOG"
+' >"$REAL_DIR/npm"; chmod +x "$REAL_DIR/npm"
+export SHIMLOG="$TMP/shim/log"; : >"$SHIMLOG"
+(cd "$TMP" && PATH="$NPM_DIR:$REAL_DIR:$PATH" AGENTMUX_BUILD_SLOT_SCRIPT="$TMP/shim/slot.sh" env -u AGENTMUX_BUILD_SLOT_OFF npm run build -V >/dev/null 2>&1)
+grep -q '^slot ' "$SHIMLOG" && ok || bad "npm run build -V skipped the slot"
+for args in "test" "nextest run" "build --release" "test -- --help" "install cargo-nextest --version 0.9.1"; do
+  # shellcheck disable=SC2086
+  shim_goes_to_slot $args && ok || bad "cargo $args skipped the slot"
+done
+
 echo "build-slot.test.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ]

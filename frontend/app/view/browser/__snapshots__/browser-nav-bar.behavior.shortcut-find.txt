@@ -1,0 +1,7 @@
+diag sync urlAtom="https://example.com/" addressBar="https://example.com/" focused=false willUpdate=false
+listen browser-pane-shortcut
+diag shortcut-find
+reclaimWindowFocus main
+find bar open=true
+diag shortcut-find
+reclaimWindowFocus main

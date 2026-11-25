@@ -15,6 +15,7 @@ import {
     getWidgetBarModel,
     isWidgetHidden,
     nextWidgetBarConfig,
+    pinsToSave,
     withVisibleOrder,
 } from "./action-widgets-config";
 
@@ -287,6 +288,63 @@ describe("a retired pin", () => {
         const withKanban = { ...wmap(), "defwidget@kanban": widget({ label: "Kanban", blockdef: { meta: { view: "kanban" } } }) };
         expect(getSavedPinNames({ "widget:pinned": ["term", "reviews", "agent"] }, withKanban)).toEqual(["term", "kanban", "agent"]);
         expect(getSavedPinNames({ "widget:pinned": ["kanban", "reviews"] }, withKanban)).toEqual(["kanban"]);
+    });
+
+    it("opens the Kanban a saved Reviews pin became on the cards with open pull requests", () => {
+        const withKanban = { ...wmap(), "defwidget@kanban": widget({ label: "Kanban", blockdef: { meta: { view: "kanban" } } }) };
+        const [, kanban] = getPinnedWidgets({ "widget:pinned": ["term", "reviews"] }, withKanban);
+        expect(kanban.key).toBe("defwidget@kanban");
+        expect(kanban.widget.blockdef.meta).toEqual({ view: "kanban", "kanban:waits": "open" });
+        // The configured entry itself is not changed.
+        expect(withKanban["defwidget@kanban"].blockdef.meta).toEqual({ view: "kanban" });
+    });
+
+    it("leaves a Kanban pin the person made alone, also beside a saved Reviews pin", () => {
+        const withKanban = { ...wmap(), "defwidget@kanban": widget({ label: "Kanban", blockdef: { meta: { view: "kanban" } } }) };
+        for (const saved of [["kanban"], ["kanban", "reviews"], ["reviews", "kanban"]]) {
+            const [kanban] = getPinnedWidgets({ "widget:pinned": saved }, withKanban);
+            expect(kanban.widget.blockdef.meta, saved.join(",")).toEqual({ view: "kanban" });
+        }
+    });
+
+    describe("a saved Reviews pin through the writes that save the pins again", () => {
+        const withKanban = () => ({
+            ...wmap(),
+            "defwidget@kanban": widget({ label: "Kanban", blockdef: { meta: { view: "kanban" } } }),
+            "defwidget@drone": widget({ label: "Drone", blockdef: { meta: { view: "drone" } } }),
+        });
+        const settings = { "widget:pinned": ["term", "reviews", "agent"] };
+        const opensOnOpenPrs = (saved: string[]) => {
+            const kanban = getPinnedWidgets({ "widget:pinned": saved }, withKanban()).find((e) => e.key === "defwidget@kanban");
+            return kanban?.widget.blockdef.meta["kanban:waits"] === "open";
+        };
+
+        it("is written back as the retired pin, so it still opens the Kanban on open pull requests", () => {
+            const names = getSavedPinNames(settings, withKanban());
+            expect(names).toEqual(["term", "kanban", "agent"]);
+            expect(pinsToSave(names, settings)).toEqual(["term", "reviews", "agent"]);
+            expect(pinsToSave(names, { "widget:pinned": ["term", "kanban", "agent"] })).toEqual(["term", "kanban", "agent"]);
+        });
+
+        it("keeps its destination when another widget is pinned, then unpinned, then the bar reordered", () => {
+            const pinned = nextWidgetBarConfig("defwidget@drone", "pinned", settings, withKanban())["widget:pinned"]!;
+            expect(pinned).toEqual(["term", "reviews", "agent", "drone"]);
+            expect(opensOnOpenPrs(pinned)).toBe(true);
+            const unpinned = nextWidgetBarConfig("defwidget@drone", "more", { "widget:pinned": pinned }, withKanban())["widget:pinned"]!;
+            expect(opensOnOpenPrs(unpinned)).toBe(true);
+            const names = getSavedPinNames({ "widget:pinned": unpinned }, withKanban());
+            const reordered = pinsToSave(withVisibleOrder(names, ["agent", "kanban", "term"]), { "widget:pinned": unpinned });
+            expect(reordered).toEqual(["agent", "reviews", "term"]);
+            expect(opensOnOpenPrs(reordered)).toBe(true);
+        });
+
+        it("goes when the Kanban is unpinned, and a Kanban pinned again afterwards is an ordinary one", () => {
+            const without = nextWidgetBarConfig("defwidget@kanban", "more", settings, withKanban())["widget:pinned"]!;
+            expect(without).toEqual(["term", "agent"]);
+            const again = nextWidgetBarConfig("defwidget@kanban", "pinned", { "widget:pinned": without }, withKanban())["widget:pinned"]!;
+            expect(again).toEqual(["term", "agent", "kanban"]);
+            expect(opensOnOpenPrs(again)).toBe(false);
+        });
     });
 
     it("isn't pinned twice when the Editor already is", () => {

@@ -14,10 +14,10 @@ vi.mock("@/app/util/menu-position", () => ({
 }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { SetConfigCommand: vi.fn(async () => undefined) } }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
-vi.mock("@/store/tab-actions", () => ({ createTab: vi.fn() }));
-vi.mock("@/app/store/window-appearance", async (importOriginal) => ({
-    ...(await importOriginal<object>()),
-    openNewWindowFromHere: vi.fn(),
+const ran = vi.hoisted(() => [] as string[]);
+// The registry itself is not loaded: a command's name and action come through this one seam.
+vi.mock("@/app/store/command-menu-parts", () => ({
+    commandMenuParts: (id: string) => ({ label: `name of ${id}`, shortcut: "", run: () => ran.push(id) }),
 }));
 vi.mock("@/util/host-caps", () => ({ hostHas: () => true }));
 
@@ -49,6 +49,17 @@ const mount = () =>
     ));
 
 describe("the window header's right-click menu", () => {
+    it("names New Window and New Tab from the command registry and runs them as it does", () => {
+        ran.length = 0;
+        mount();
+        const rows = [...document.body.querySelectorAll<HTMLElement>(".popover-menu-action")];
+        const row = (name: string) => rows.find((r) => r.querySelector(".label")?.textContent === name);
+        expect(row("New Window")).toBeUndefined();
+        row("name of window:new")?.click();
+        row("name of tab:new")?.click();
+        expect(ran).toEqual(["window:new", "tab:new"]);
+    });
+
     it("no longer offers to open widgets.json", () => {
         mount();
         expect(document.body.textContent).not.toContain("widgets.json");

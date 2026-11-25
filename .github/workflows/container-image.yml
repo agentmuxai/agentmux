@@ -106,7 +106,7 @@ jobs:
       contents: read
       packages: write
     outputs:
-      digest: ${{ steps.build.outputs.digest }}
+      digest: ${{ steps.build_again.outputs.digest || steps.build.outputs.digest }}
 
     steps:
       - name: Checkout
@@ -154,8 +154,18 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
+      # The base images are pulled anonymously from a public registry that limits how often one address may pull, and
+      # the runners share addresses: a release's build failed in half a minute on that limit. A build that fails before
+      # it could have compiled anything is a pull that was refused, so it is tried once more after a pause; a build
+      # that fails later is a real failure and is not repeated (it would cost another half hour). The base stays
+      # pinned by digest in the Dockerfile, and no credential is added.
+      - name: Note the time
+        id: began
+        run: echo "at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         id: build
+        continue-on-error: true
         uses: docker/build-push-action@v5
         with:
           # Repo root, not docker/ — the mcp-builder stage in
@@ -175,11 +185,55 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ needs.gate.outputs.version || format('dispatch-{0}', github.sha) }}
 
+      - name: Decide whether the build failed on the pull
+        id: retry
+        if: steps.build.outcome == 'failure'
+        env:
+          BEGAN: ${{ steps.began.outputs.at }}
+        run: |
+          elapsed=$(( $(date +%s) - BEGAN ))
+          if [ "$elapsed" -lt 300 ]; then
+            echo "the build failed after ${elapsed}s, before any compile could have run: the pull was refused; building again in 60 s"
+            echo "again=true" >> "$GITHUB_OUTPUT"
+            sleep 60
+          else
+            echo "the build failed after ${elapsed}s: a real failure, not tried again"
+          fi
+
+      - name: Build and push (second attempt)
+        id: build_again
+        if: steps.retry.outputs.again == 'true'
+        continue-on-error: true
+        uses: docker/build-push-action@v5
+        with:
+          # Repo root, not docker/ — the mcp-builder stage in
+          # Dockerfile.agent-agentmux needs the whole Cargo workspace to
+          # build agentmux-mcp/agentmux-bashwrap (#2939 workstream 1). The
+          # root .dockerignore keeps the actual context small (excludes
+          # target/, dist/, node_modules/, .git/, docs/, etc.).
+          context: .
+          file: docker/Dockerfile.agent-agentmux
+          push: true
+          # amd64 + arm64: native performance on Apple Silicon (OrbStack/Colima/Docker Desktop)
+          # without arm64 the image runs under qemu on M-series Macs.
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.tags.outputs.list }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.gate.outputs.version || format('dispatch-{0}', github.sha) }}
+
+      - name: The build must have worked
+        if: steps.build.outcome == 'failure' && steps.build_again.outcome != 'success'
+        run: |
+          echo "::error::the image build failed"
+          exit 1
+
       # The digest of what was just pushed is what the signed manifest names, so it must
       # be there and be the index digest (the one reference that selects the platform).
       - name: The pushed digest
         env:
-          DIGEST: ${{ steps.build.outputs.digest }}
+          DIGEST: ${{ steps.build_again.outputs.digest || steps.build.outputs.digest }}
         run: |
           if ! printf '%s' "$DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
             echo "::error::the push did not report an image digest ('$DIGEST')"

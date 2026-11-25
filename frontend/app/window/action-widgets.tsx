@@ -44,6 +44,7 @@ import {
     getPinnedKeys,
     getPinnedWidgets,
     getSavedPinNames,
+    pinsToSave,
     openWidget,
     preloadWidget,
     keyOfPinId,
@@ -757,6 +758,7 @@ const ActionWidgets = (): JSX.Element => {
         containerRef: () => s.containerRef,
         pinnedWidgets: s.pinnedWidgets,
         savedPins: () => getSavedPinNames(s.settings(), s.wmap()),
+        pinsToSave: (names) => pinsToSave(names, s.settings()),
     });
 
     onCleanup(() => disposeParentHovers(s));

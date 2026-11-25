@@ -232,6 +232,8 @@ events! {
     NotificationActivate: crate::backend::notify::router::EVENT_NOTIFICATION_ACTIVATE => crate::backend::notify::router::NotificationActivateEvent,
     /// Ask one window to open a pane as its own floating OS window (`app_api::pane`).
     OpenFloatingPane: "openfloatingpane" => OpenFloatingPaneEvent,
+    /// Ask a floating pane's own window to move, resize or report where it is (`server::pane_place`).
+    PlaceFloatingPane: "placefloatingpane" => PlaceFloatingPaneEvent,
     /// The LAN peers this instance sees (`lan::discovery`).
     LanInstances: "laninstances" => crate::backend::lan::discovery::LanInstanceList,
     /// LAN discovery couldn't start, or a daemon rebuild failed.
@@ -656,6 +658,25 @@ pub struct OpenFloatingPaneEvent {
     pub workspace_id: String,
     /// An agent's open: where the window goes and how it is shown. Absent for the person's own, which
     /// opens where it always did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub place: Option<FloaterPlace>,
+}
+
+/// `placefloatingpane`: an agent's `resize`, `move` or `place` of a floating pane it opened, or `Pane layout`'s
+/// question where the window is. Sent to the floating window itself, which answers with `pane.floatplaced`
+/// (SPEC_AGENT_PANE_PLACEMENT_FLOATING_2026_11_22.md §2.2, §2.3, §3).
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct PlaceFloatingPaneEvent {
+    /// The id the window answers with.
+    pub request_id: String,
+    pub block_id: String,
+    /// What the window keeps as it is: `position` (a resize) or `size` (a move). Absent for a place.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub keep: Option<String>,
+    /// What to apply. Absent: change nothing and say where the window is.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub place: Option<FloaterPlace>,

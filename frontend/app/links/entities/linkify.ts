@@ -72,7 +72,17 @@ function choose(considered: Considered[]): { chosen: Considered[]; outcome: Map<
         else if (!c.resolved && !c.cand.claims) outcome.set(c, "no such entity");
         else live.push(c);
     }
-    live.sort((a, b) => b.kind.priority - a.kind.priority || b.cand.end - b.cand.start - (a.cand.end - a.cand.start) || a.cand.start - b.cand.start);
+    // A whole agent name that holds another match (the number of `Loap #3`, which is also a task) is the match: the
+    // number is a part of the name there, not a reference of its own.
+    const byStart = [...live].sort((a, b) => a.cand.start - b.cand.start);
+    const holds = new Set<Considered>();
+    byStart.forEach((a, index) => {
+        if (a.kind.id !== "agent") return;
+        for (let next = index + 1; next < byStart.length && byStart[next].cand.start < a.cand.end; next++) {
+            if (byStart[next].cand.end <= a.cand.end) holds.add(a);
+        }
+    });
+    live.sort((a, b) => Number(holds.has(b)) - Number(holds.has(a)) || b.kind.priority - a.kind.priority || b.cand.end - b.cand.start - (a.cand.end - a.cand.start) || a.cand.start - b.cand.start);
     const taken = new RangeSet<Considered>();
     const chosen: Considered[] = [];
     for (const c of live) {

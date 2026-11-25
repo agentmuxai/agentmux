@@ -10,6 +10,8 @@
  *    (opened in the Editor, or in Files when it is a folder).
  *  - `task`: `agentmux://task/<n>`, the Kanban card for task #n.
  *  - `agent`: `agentmux://agent/<id>`, an agent's pane.
+ *  - `entityfile`: `agentmux://file?path=<path>`, a file a message names. It is opened only from the pane the
+ *    message is in, whose own folders srv checks the path against (links/entities/kinds/file.ts).
  *  - `blocked`: any other `agentmux:` URL. A link may only navigate, so it is never handed to the OS.
  *  - `other`: everything else (mailto:, ssh:, a relative link), left to the system handler as before.
  */
@@ -18,10 +20,12 @@ export type LinkTarget =
     | { kind: "file"; path: string }
     | { kind: "task"; num: number }
     | { kind: "agent"; id: string }
+    | { kind: "entityfile"; path: string }
     | { kind: "blocked" }
     | { kind: "other" };
 
 const TASK_LINK = /^agentmux:\/\/task\/(\d{1,9})\/?$/i;
+const FILE_ENTITY_LINK = /^agentmux:\/\/file\?path=([^&#\s]{1,2000})$/i;
 const AGENT_LINK = /^agentmux:\/\/agent\/([^/?#\s]{1,200})\/?$/i;
 const DRIVE_PATH = /^[A-Za-z]:(?:[\\/]|%5C)/i;
 const UNC_PATH = /^\\\\[^\\/]/;
@@ -55,6 +59,8 @@ export function classifyHref(href: string | null | undefined): LinkTarget {
     if (/^agentmux:/i.test(text)) {
         const task = TASK_LINK.exec(text);
         if (task) return { kind: "task", num: Number(task[1]) };
+        const entityFile = FILE_ENTITY_LINK.exec(text);
+        if (entityFile) return { kind: "entityfile", path: decode(entityFile[1]) };
         const agent = AGENT_LINK.exec(text);
         return agent ? { kind: "agent", id: decode(agent[1]) } : { kind: "blocked" };
     }

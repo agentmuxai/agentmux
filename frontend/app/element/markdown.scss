@@ -110,6 +110,18 @@
 
         a {
             color: var(--term-bright-blue);
+
+            // A file the agent named that is missing, or outside its folders, is text with a reason, not a link.
+            &.entity-link--dead {
+                color: var(--secondary-text-color);
+            }
+
+            // A bare name with no such file is only a word: it reads as the text around it, with no link look.
+            &.entity-link--plain {
+                color: inherit;
+                text-decoration: none;
+                cursor: var(--cursor-default);
+            }
         }
 
         ul {

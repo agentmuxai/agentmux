@@ -163,7 +163,7 @@ describe("agent opens", () => {
     it("stop at the caps of unused panes", async () => {
         const w = fakeWindow();
         const ex = new Executor(w.deps);
-        const views = ["history", "atlas", "swarm", "drone", "toolchain", "tower", "help", "shortcuts", "sysinfo"];
+        const views = ["memory", "atlas", "swarm", "drone", "toolchain", "tower", "help", "shortcuts", "sysinfo"];
         const outs = [];
         for (const v of views) outs.push(await ex.open(`agentmux://${v}`, { source: AGENT }));
         expect(outs.slice(0, AGENT_PANES_PER_TAB).every((o) => o.outcome === "opened")).toBe(true);
@@ -198,7 +198,7 @@ describe("agent opens", () => {
 });
 
 describe("R5: never replaced", () => {
-    const view = "history";
+    const view = "help";
     it.each<[string, PaneFacts]>([
         ["an agent pane with a running agent", { view: "agent", agentRunning: true, openedBy: "sorrel" }],
         ["a terminal with a process", { view: "term", termProcess: true, openedBy: "sorrel" }],
@@ -221,7 +221,7 @@ describe("R5: never replaced", () => {
 describe("person opens", () => {
     it("are at most five a second (G11)", async () => {
         const ex = new Executor(fakeWindow().deps);
-        const views = ["history", "atlas", "swarm", "drone", "toolchain", "tower"];
+        const views = ["memory", "atlas", "swarm", "drone", "toolchain", "tower"];
         const outs = [];
         for (const v of views) outs.push(await ex.open(`agentmux://${v}`, { source: PERSON }));
         expect(outs.slice(0, PERSON_OPENS_PER_SECOND).every((o) => o.outcome !== "refused")).toBe(true);

@@ -87,6 +87,9 @@ export interface AnchoredPopoverProps {
     class?: string;
     /** Inline style for the body (e.g. a fixed width, which then scales too). */
     style?: JSX.CSSProperties;
+    /** The panel's controls take input from the person only: the shell is marked `data-operator-only`, which the UI tool's click, query and
+     *  focus refuse and which holds keys and commands back while it is open (crates/cef/src/browser_api/scripts/query.js). */
+    operatorOnly?: boolean;
     /** Classes for the shell: stacking (z-index) and pointer-events only. */
     shellClass?: string;
     role?: JSX.HTMLAttributes<HTMLDivElement>["role"];
@@ -290,7 +293,7 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
                 ref={registerShell}
                 class={`anchored-popover${props.shellClass ? ` ${props.shellClass}` : ""}`}
                 style={shellStyle()}
-                data-pane-overlay
+                data-pane-overlay data-operator-only={props.operatorOnly ? "" : undefined}
                 data-window-tab-hidden={hiddenTab()}
                 data-zoom-scope={(props.zoom ?? "chrome") === "chrome" ? "chrome" : undefined}
             >

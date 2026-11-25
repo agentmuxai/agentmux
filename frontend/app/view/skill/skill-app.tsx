@@ -8,6 +8,7 @@
 
 import { createSignal, For, Show, type JSX } from "solid-js";
 import { Pill, SegmentedControl } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import type { AgentDefinition } from "@/types/rpc/AgentDefinition";
 import type { AppSkillHere } from "@/types/rpc/AppSkillHere";
 import type { SkillApp } from "@/types/rpc/SkillApp";
@@ -33,12 +34,12 @@ export function AppFilterRow(p: { value: AppFilter; onChange: (v: AppFilter) => 
     return (
         <SegmentedControl
             density="compact"
-            ariaLabel="Show skills"
+            ariaLabel={t("skill.app.showAria")}
             value={p.value}
             onChange={p.onChange}
             options={[
-                { value: "all", label: "All" },
-                { value: "app", label: "App skills" },
+                { value: "all", label: t("skill.app.filterAll") },
+                { value: "app", label: t("skill.app.filterApp") },
             ]}
         />
     );
@@ -71,7 +72,7 @@ function AppHereLine(p: { app: SkillApp; here: AppSkillHere | undefined; drift: 
         <Show when={fact()}>
             <p class={`skill-app-line${p.drift ? " skill-app-warn" : " skill-app-muted"}`}>
                 {fact()}
-                {p.drift ? " It was last tested on another version: check before trusting it." : ""}
+                {p.drift ? ` ${t("skill.app.drift")}` : ""}
             </p>
         </Show>
     );
@@ -91,26 +92,25 @@ export function SkillAppDetail(p: { skillId: string; app: SkillApp; here?: AppSk
             return next;
         });
     return (
-        <section class="skill-app" aria-label="App skill">
+        <section class="skill-app" aria-label={t("skill.app.aria")}>
             <h4 class="skill-app-title">
                 <Pill tone="accent" icon="desktop">
-                    App skill
+                    {t("skill.app.pill")}
                 </Pill>{" "}
-                {p.app.vendor} · version {p.app.version}
+                {t("skill.app.vendorVersion", { vendor: p.app.vendor, version: p.app.version })}
             </h4>
             <p class="skill-app-line">
-                Published by {p.app.publisher}. Works on {osNames(p.app.platforms) || "no platform listed"}.
+                {t("skill.app.published", { publisher: p.app.publisher, platforms: osNames(p.app.platforms) || t("skill.app.noPlatform") })}
             </p>
             <SignatureLines app={p.app} />
             <p class="skill-app-line">
-                <Pill tone={pillTone(status().tone)}>{status().label}</Pill> on this machine
-                ({platform}).
+                <Pill tone={pillTone(status().tone)}>{status().label}</Pill> {t("skill.app.onMachine", { platform })}
             </p>
             <AppHereLine app={p.app} here={p.here} drift={status().tone === "warn"} />
             <RunTest skillId={p.skillId} app={p.app} here={p.here} agents={p.agents ?? []} />
             <Show when={p.app.ladder.length > 0}>
-                <span class="agent-primitive-modal-field-label">Routes, best first</span>
-                <ol class="skill-app-list skill-app-list--ordered" aria-label="Routes">
+                <span class="agent-primitive-modal-field-label">{t("skill.app.routes")}</span>
+                <ol class="skill-app-list skill-app-list--ordered" aria-label={t("skill.app.routesAria")}>
                     <For each={p.app.ladder}>
                         {(step) => (
                             <li>
@@ -121,11 +121,11 @@ export function SkillAppDetail(p: { skillId: string; app: SkillApp; here?: AppSk
                 </ol>
             </Show>
             <Show when={p.app.mcp}>
-                <p class="skill-app-line">Plug-in: the MCP catalog entry {p.app.mcp}.</p>
+                <p class="skill-app-line">{t("skill.app.plugin", { mcp: p.app.mcp })}</p>
             </Show>
-            <span class="agent-primitive-modal-field-label">Files beside SKILL.md</span>
-            <ul class="skill-app-list" aria-label="Files">
-                <For each={p.app.files.filter((f) => !f.image)} fallback={<li>none</li>}>
+            <span class="agent-primitive-modal-field-label">{t("skill.app.files")}</span>
+            <ul class="skill-app-list" aria-label={t("skill.app.filesAria")}>
+                <For each={p.app.files.filter((f) => !f.image)} fallback={<li>{t("skill.app.none")}</li>}>
                     {(f) => (
                         <li>
                             {f.path} <span class="skill-app-muted">{fileSize(f.bytes)}</span>
@@ -143,22 +143,22 @@ export function SkillAppDetail(p: { skillId: string; app: SkillApp; here?: AppSk
                     )}
                 </For>
             </ul>
-            <span class="agent-primitive-modal-field-label">Tests</span>
-            <ul class="skill-app-list" aria-label="Tests">
-                <For each={p.app.verified} fallback={<li>No test recorded yet.</li>}>
+            <span class="agent-primitive-modal-field-label">{t("skill.app.tests")}</span>
+            <ul class="skill-app-list" aria-label={t("skill.app.testsAria")}>
+                <For each={p.app.verified} fallback={<li>{t("skill.app.noTest")}</li>}>
                     {(r) => (
                         <li>
-                            <Pill tone={r.result === "pass" ? "ok" : "error"}>{r.result}</Pill> {r.appVersion} on {r.platform},{" "}
-                            skill {r.skillVersion}, {r.date}
+                            <Pill tone={r.result === "pass" ? "ok" : "error"}>{r.result}</Pill>{" "}
+                            {t("skill.app.testLine", { app: r.appVersion, platform: r.platform, skill: r.skillVersion, date: r.date })}
                             <span class="skill-app-muted"> · {dash(r.route)} · {r.runner}</span>
                         </li>
                     )}
                 </For>
             </ul>
             <Show when={p.app.references.length > 0}>
-                <span class="agent-primitive-modal-field-label">Reference crops</span>
+                <span class="agent-primitive-modal-field-label">{t("skill.app.crops")}</span>
                 <Show when={drift()}>{(d) => <p class="skill-app-line skill-app-warn">{d()}</p>}</Show>
-                <ul class="skill-app-list" aria-label="Reference crops">
+                <ul class="skill-app-list" aria-label={t("skill.app.cropsAria")}>
                     <For each={p.app.references}>
                         {(r) => (
                             <li>

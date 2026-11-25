@@ -224,6 +224,7 @@ fn example(id: &str) -> Map<String, Value> {
         "agentmux.triage-failed-nightly" => json!({ "repo": "acme/site", "leader": "agenty", "triager": "masty" }),
         "agentmux.rerun-flaky-job" => json!({ "repo": "acme/site", "workflow": "CI", "leader": "agenty" }),
         "agentmux.merged-pr-still-claimed" => json!({ "repo": "acme/site", "steward": "masty" }),
+        "agentmux.verify-release" => json!({ "repo": "acme/site", "held_pr": 42, "leader": "agenty" }),
         other => panic!("no example for {other}"),
     };
     v.as_object().cloned().unwrap()
@@ -241,7 +242,8 @@ fn the_built_in_drone_templates_are_valid_and_render_with_example_parameters() {
             "agentmux.after-upgrade-check",
             "agentmux.triage-failed-nightly",
             "agentmux.rerun-flaky-job",
-            "agentmux.merged-pr-still-claimed"
+            "agentmux.merged-pr-still-claimed",
+            "agentmux.verify-release"
         ]
     );
     for b in DRONE_BUILTINS {
@@ -261,6 +263,7 @@ fn the_built_in_drone_templates_are_valid_and_render_with_example_parameters() {
                 "task" => &["title"],
                 "app_query" => &["query"],
                 "notify" => &["title"],
+                "approval" => &["title"],
                 "api" => &["url"],
                 "transform" => &["input"],
                 other => panic!("{}: node {} is a {other} node", b.id, node.id),
@@ -269,9 +272,9 @@ fn the_built_in_drone_templates_are_valid_and_render_with_example_parameters() {
                 assert!(node.data.get(*key).and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty()), "{}: node {} needs {key}", b.id, node.id);
             }
         }
-        // Nothing is secret-looking or private, and nothing writes outside AgentMux.
+        // Nothing is secret-looking or private, and nothing writes outside AgentMux unless an Approval is on every path to it.
         let writes = graph::summarize(pkg.graph.as_ref().unwrap()).writes_outside;
-        assert!(writes.is_empty(), "{}: {writes:?}", b.id);
+        assert!(writes.is_empty() || graph::approval_guards_every_write(pkg.graph.as_ref().unwrap()), "{}: {writes:?}", b.id);
         assert!(pkg.manifest.secrets.is_empty());
     }
 }
@@ -377,7 +380,7 @@ fn edges_from(g: &crate::backend::storage::drone_types::DroneGraph, from: &str, 
 
 #[test]
 fn the_acceptance_drones_poll_the_one_repository_their_calls_name_and_the_poll_accepts_the_trigger() {
-    for id in ["agentmux.triage-failed-nightly", "agentmux.rerun-flaky-job", "agentmux.merged-pr-still-claimed"] {
+    for id in ["agentmux.triage-failed-nightly", "agentmux.rerun-flaky-job", "agentmux.merged-pr-still-claimed", "agentmux.verify-release"] {
         let (_pkg, g, trigger) = rendered(id);
         assert_eq!((trigger["kind"].clone(), trigger["source"].clone()), (json!("event"), json!("poll")), "{id}");
         let filter = trigger["filter"].as_object().unwrap();
@@ -482,14 +485,17 @@ fn the_prompt_says_where_a_template_reads_a_credential() {
 }
 
 #[test]
-fn the_built_in_drones_that_poll_with_a_token_are_shown_with_it_and_none_of_them_writes_outside() {
+fn the_built_in_drones_that_poll_with_a_token_are_shown_with_it_and_any_that_writes_outside_has_an_approval_first() {
     for b in DRONE_BUILTINS {
         let pkg = package::load_embedded(b.id, b.files).unwrap_or_else(|e| panic!("{}: {e}", b.id));
         let credentials = graph::credentials(pkg.graph.as_ref().unwrap(), pkg.manifest.trigger.as_ref());
-        let polls_with_token = ["agentmux.triage-failed-nightly", "agentmux.rerun-flaky-job", "agentmux.merged-pr-still-claimed"].contains(&b.id);
+        let polls_with_token =
+            ["agentmux.triage-failed-nightly", "agentmux.rerun-flaky-job", "agentmux.merged-pr-still-claimed", "agentmux.verify-release"].contains(&b.id);
         assert_eq!(!credentials.is_empty(), polls_with_token, "{}: {credentials:?}", b.id);
-        if !credentials.is_empty() {
-            assert!(pkg.manifest.outside_writes().is_empty(), "{}: it reads untrusted text and uses a credential", b.id);
+        // Reading untrusted text with a credential and writing outside is for a person to decide, node by node: only a graph
+        // that puts an Approval on every path to its writes may.
+        if !credentials.is_empty() && !pkg.manifest.outside_writes().is_empty() {
+            assert!(graph::approval_guards_every_write(pkg.graph.as_ref().unwrap()), "{}: it reads untrusted text and uses a credential", b.id);
         }
     }
 }
@@ -582,4 +588,53 @@ fn a_parameter_put_into_a_condition_holds_no_quote_mark_or_backslash() {
     let pkg = package::load_embedded(b.id, b.files).unwrap();
     let given = json!({ "check": "Is the 'main' build green?" }).as_object().cloned().unwrap();
     assert!(graph::render(pkg.graph.as_ref().unwrap(), &pkg.manifest, &given).is_ok());
+}
+
+// ── Verify a release (acceptance drone c) ──
+
+#[test]
+fn verify_release_merges_only_behind_an_approval_and_the_template_guard_says_so() {
+    let (pkg, g, trigger) = rendered("agentmux.verify-release");
+    assert_eq!(trigger["delay"], 150, "two and a half hours after the release is published");
+    assert_eq!(pkg.manifest.outputs, ["message:owner", "pull_request"]);
+    // The one write is the merge, and the Approval is on its only path.
+    assert_eq!(graph::summarize(&g).writes_outside, ["merge: PUT https://api.github.com/repos/acme/site/pulls/42/merge"]);
+    assert!(graph::approval_guards_every_write(&g));
+    assert_eq!(edges_from(&g, "approve", None), ["merge"]);
+    assert_eq!(edges_from(&g, "found", Some("true")), ["tell"]);
+    assert_eq!(edges_from(&g, "found", Some("false")), ["missing"]);
+    // The release is fetched again after the delay, and every check reads that answer, not the event's old copy.
+    assert_eq!(edges_from(&g, "release", None), ["published"]);
+    assert_eq!(edges_from(&g, "published", Some("false")), ["skipped"]);
+    for id in ["published", "manifest"] {
+        let data = serde_json::to_string(&g.nodes.iter().find(|n| n.id == id).unwrap().data).unwrap();
+        assert!(data.contains("release.body") && !data.contains("trigger.item"), "{id}: {data}");
+    }
+    // The merge reads nothing from the release: only the template's own values.
+    let merge = g.nodes.iter().find(|n| n.id == "merge").unwrap();
+    assert!(!serde_json::to_string(&merge.data).unwrap().contains("trigger"), "{}", merge.data);
+    // The title is the template's own words.
+    let approve = g.nodes.iter().find(|n| n.id == "approve").unwrap();
+    assert!(!approve.data["title"].as_str().unwrap().contains("trigger"));
+}
+
+#[test]
+fn an_approval_that_is_not_on_every_path_to_a_write_does_not_satisfy_the_template_guard() {
+    let node = |id: &str, data: Value| json!({ "id": id, "position": { "x": 0, "y": 0 }, "data": data });
+    let put = json!({ "kind": "api", "method": "PUT", "url": "https://api.github.com/x" });
+    let g = |edges: Value| -> crate::backend::storage::drone_types::DroneGraph {
+        serde_json::from_value(json!({
+            "nodes": [node("a", json!({ "kind": "condition", "expr": "1 == 1" })), node("ok", json!({ "kind": "approval", "title": "t" })), node("w", put.clone())],
+            "edges": edges,
+        }))
+        .unwrap()
+    };
+    assert!(graph::approval_guards_every_write(&g(json!([{ "id": "1", "source": "a", "target": "ok" }, { "id": "2", "source": "ok", "target": "w" }]))));
+    assert!(!graph::approval_guards_every_write(&g(json!([{ "id": "1", "source": "a", "target": "ok" }, { "id": "2", "source": "a", "target": "w" }]))), "a second path to the write");
+    assert!(!graph::approval_guards_every_write(&g(json!([{ "id": "1", "source": "a", "target": "w" }]))), "no approval at all");
+    assert!(!graph::approval_guards_every_write(&g(json!([]))), "an unconnected write is reachable from its own start");
+    let error_edge = json!([{ "id": "1", "source": "a", "target": "ok" }, { "id": "2", "source": "ok", "target": "w", "sourceHandle": "error" }]);
+    assert!(!graph::approval_guards_every_write(&g(error_edge)), "the no and silence path of an Approval is not a yes");
+    let yes_edge = json!([{ "id": "1", "source": "a", "target": "ok" }, { "id": "2", "source": "ok", "target": "w", "sourceHandle": "approved" }]);
+    assert!(graph::approval_guards_every_write(&g(yes_edge)), "the yes path is guarded");
 }

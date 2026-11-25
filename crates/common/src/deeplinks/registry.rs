@@ -241,22 +241,14 @@ const VIEWS: &[View] = &[
                 anchor: None,
                 params: &[],
             },
-        ],
-    },
-    View {
-        id: "history",
-        pane_view: Some("history"),
-        label_key: "deeplinks.views.history",
-        icon: "clock-rotate-left",
-        build: 1,
-        effect: Effect::None,
-        sensitivity: Sensitivity::Public,
-        agent: AgentRule::Yes,
-        surfaces: &["desktop"],
-        command: Some("open:history"),
-        prefix: false,
-        requires_place: false,
-        places: &[
+            Place {
+                id: "section",
+                label_key: None,
+                segments: &[Segment::Var(Var { name: "section", kind: Kind::Enum, values: &[EnumValue { id: "events", label_key: "deeplinks.places.audit.events" }, EnumValue { id: "conversations", label_key: "deeplinks.places.audit.conversations" }, EnumValue { id: "typed", label_key: "deeplinks.places.audit.typed" }, EnumValue { id: "storage", label_key: "deeplinks.places.audit.storage" }], min: None, max: None, agent_own: false })],
+                sections: true,
+                anchor: None,
+                params: &[],
+            },
         ],
     },
     View {
@@ -568,6 +560,7 @@ const VIEWS: &[View] = &[
 const ALIASES: &[Alias] = &[
     Alias { from: &["task", "{task}"], to: &["kanban", "task", "{task}"] },
     Alias { from: &["reviews"], to: &["kanban", "pulls"] },
+    Alias { from: &["history"], to: &["audit", "conversations"] },
 ];
 
 const UNLINKED: &[Unlinked] = &[

@@ -165,6 +165,34 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
             { id: "false", label: "false", type: "any" },
         ],
     },
+    once: {
+        kind: "once",
+        emoji: "1️⃣",
+        label: "Once",
+        description: "Do this once for this key: the first run to reach it with a key goes out of `true`, a later run with the same key goes out of `false`. Keys are kept per drone on this computer.",
+        color: "#f59e0b", // colour: fixed (the block's identity colour)
+        defaultData: {
+            key: "",
+        },
+        inputs: [{ id: "in", label: "in", type: "any" }],
+        outputs: [
+            { id: "true", label: "first", type: "any" },
+            { id: "false", label: "seen", type: "any" },
+        ],
+    },
+    approval: {
+        kind: "approval",
+        emoji: "✋",
+        label: "Approval",
+        description: "Stop the run and ask the person. The card shows what is proposed and the items it was made from, with the ones from outside text marked. A yes goes on; a no, and silence, fail the block (approval_rejected, approval_timeout).",
+        color: "#ef4444", // colour: fixed (the block's identity colour)
+        defaultData: {
+            title: "",
+            show: [],
+        },
+        inputs: [{ id: "in", label: "in", type: "any" }],
+        outputs: [{ id: "out", label: "out", type: "object" }],
+    },
     transform: {
         kind: "transform",
         emoji: "🧮",
@@ -268,6 +296,8 @@ export const BLOCK_KINDS: BlockKind[] = [
     "spawn",
     "api",
     "condition",
+    "once",
+    "approval",
     "response",
 ];
 

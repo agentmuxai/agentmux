@@ -356,8 +356,7 @@ pub fn spawn_state_services(state: &AppState) {
     // One notice per account its agents are out of quota or signed out on
     // (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §6).
     crate::server::account_episodes::install(state.clone());
-    // Fleet Global Memory: entries scoped to the fleet are sent to the machines on the LAN that are behind.
-    crate::server::remote_ops::fleet_sync::install(state.clone());
+    install_lan_sync(state);
     // Agents' cargo caches are cleared as tasks finish, and the disk is watched
     // (SPEC_BUILD_CACHE_CLEANUP_2026_10_26.md).
     backend::build_cache_service::install(
@@ -367,6 +366,13 @@ pub fn spawn_state_services(state: &AppState) {
     // The version folders and unpacked portables an upgrade leaves behind are listed daily, and cleared on a host that turns it on.
     backend::old_versions_service::install(Arc::clone(&state.config_watcher), crate::server::external_host::host().is_some());
     install_turn_outcome_notes(state);
+}
+
+/// What this machine sends the machines on the LAN that are behind: fleet Global Memory entries, and the collections
+/// (Kanban boards) it shares with them (SPEC_USER_DATA_SYNC_LAYER §4.2).
+fn install_lan_sync(state: &AppState) {
+    crate::server::remote_ops::fleet_sync::install(state.clone());
+    crate::server::remote_ops::sync_loop::install(state.clone());
 }
 
 /// Tells whoever needs to know when a turn's outcome wasn't otherwise reported: a worker's leader
@@ -389,6 +395,8 @@ fn install_turn_outcome_notes(state: &AppState) {
         Arc::clone(&state.filestore),
         Arc::clone(&state.config_watcher),
     );
+    // A lead on another machine is sent the same note over the LAN (section 19 of that spec).
+    crate::server::quiet_remote::install(state.clone());
     backend::sender_failure_note::install(Arc::clone(&state.broker), Arc::clone(&state.mstore));
 }
 

@@ -1,32 +1,34 @@
 rpc AppUpdateStatus
 -- never checked
 <div>
-  <div class="instance-panel-section-title">
-    "Maintenance"
-  <div class="maintenance-row">
-    <div class="maintenance-message">
-      <span class="maintenance-row-text maintenance-row-text--dim">
-        "Not checked for updates yet"
-    <div class="maintenance-actions">
-      <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
-        "Check for update"
+  <div data-operator-only="">
+    <div class="instance-panel-section-title">
+      "Maintenance"
+    <div class="maintenance-row">
+      <div class="maintenance-message">
+        <span class="maintenance-row-text maintenance-row-text--dim">
+          "Not checked for updates yet"
+      <div class="maintenance-actions">
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+          "Check for update"
 rpc AppUpdateStatus
 -- download under way
 <div>
-  <div class="instance-panel-section-title">
-    "Maintenance"
-    <span class="maintenance-badge">
-      "↓ …"
-  <div class="maintenance-row">
-    <div class="maintenance-message">
-      <span aria-hidden="true" class="maintenance-icon maintenance-icon--working">
-        "↓"
-      <span class="maintenance-row-text maintenance-row-text--dim">
-        "Downloading v0.59.27… 25%"
-  <div class="maintenance-row">
-    <div class="maintenance-message">
-      <span class="maintenance-row-text maintenance-row-text--dim">
-        "Checked <time>"
-    <div class="maintenance-actions">
-      <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn" disabled="">
-        "Check again"
+  <div data-operator-only="">
+    <div class="instance-panel-section-title">
+      "Maintenance"
+      <span class="maintenance-badge">
+        "↓ …"
+    <div class="maintenance-row">
+      <div class="maintenance-message">
+        <span aria-hidden="true" class="maintenance-icon maintenance-icon--working">
+          "↓"
+        <span class="maintenance-row-text maintenance-row-text--dim">
+          "Downloading v0.59.27… 25%"
+    <div class="maintenance-row">
+      <div class="maintenance-message">
+        <span class="maintenance-row-text maintenance-row-text--dim">
+          "Checked <time>"
+      <div class="maintenance-actions">
+        <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn" disabled="">
+          "Check again"

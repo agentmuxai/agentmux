@@ -136,6 +136,26 @@ On 2026-11-10 main's `vitest (1/2)` went red for every PR. #6881 (Vite 8, merged
 - **Cost:** no added queue time. A full vitest leg takes about 280 to 305 s in a PR run (runs 42774863425 and 42882800554), and the queue's ubuntu Rust leg, which the group waits for anyway, takes about 410 s (run 42881131825). It is about 10 more runner minutes per group, not per PR, as the group of up to five PRs runs once.
 - **Still not in the queue:** the Windows and macOS legs, the rest of the Rust tests and the doc tests; each ran on its PR and runs again on the push to main.
 
+### Phase 9: an entry that changes no Rust input skips the Rust job (2026-11-24)
+
+On 2026-11-24 each queue entry took 13.5 to 18.5 minutes (the last twelve `merge_group` runs of "CI (PR) — compile tests + run"), and almost all of it was the Ubuntu Rust job, whose nextest step alone took 13 min 22 s in run 45447896545. An entry of four files under `frontend/` and a changeset paid all of it. A pull request like that already skips the Rust job (R8 of `SPEC_CI_PATH_CONDITIONAL_CHECKS_2026_09_21.md`); the queue did not, because its `merge_group` branch wrote `rust=true` before the classifier ran.
+
+- **What changes:** the `merge_group` branch of the `changes` job lists the files the entry changes (`git diff --name-only --no-renames base_sha head_sha`, the event's two shas) and runs `scripts/ci-classify-changes.mjs --queue`, which applies the pull-request rule to them. It takes one answer from it, `rust`. Everything else the queue sets stays: both frontend legs in full, the docs gates, `cef=false`, `deps=false`, `queue=true`, the Ubuntu-only matrix.
+- **Each entry is compared with the one ahead of it.** GitHub builds a group on the previous group's commit (the group's branch name ends in that base), so `base_sha` is the entry ahead, or main for the first. An entry is judged by what it adds, not by what the queue already holds.
+- **Why it is safe:** the Rust job's result depends only on the Rust inputs and the paths under `frontend/` the crates read (`RUST_READS_FRONTEND`, which a test checks against the crates). An entry that changes none of them leaves the tree's Rust inputs as its base had them, so its Rust result is the base's. The base's Rust job ran the last time an entry that did change those inputs went through the queue, or on the push to main. Both checks the job ends with, "RPC bindings are current" and "ts-rs parses every serde attribute", read only Rust types and the build's warnings and `frontend/types/rpc/`, which is in the list, so a frontend-only entry cannot change what they see and nothing is moved out of the job.
+- **What the queue no longer does:** it used to be a second chance for a path nobody listed (the R8 text said so). The test that lists every `frontend/` path the crates name is now the only guard for those, plus the push to main, which runs the whole suite and opens a `main-red` issue.
+- **Fail open (R2):** no sha, a failed fetch or diff, an empty list, an entry that is not a path, a classifier error: `rust=true`. The outputs are written once, after the decision. A workflow, a script, a manifest, a lock file, a Rust file or a path the classifier does not know runs the job. A release PR (R7) is not skipped in the queue: it changes manifests.
+- **`CI required`** reads a skipped `rust` job as passed, as for a pull request, and fails when it ran and failed or when `changes` failed.
+
+### Phase 10: the queue builds the core crate's test harness once (2026-11-24)
+
+A queue entry that does change Rust took 14.4 minutes in the Ubuntu job (job 138636759675), of which 13.2 were cargo compiling in three staged calls of `scripts/ci-nextest-run.sh` and the 1,212 tests took 6.9 seconds. The verbose log of a queue-shaped run on a PR shows the core crate's test harness compiled in the first call (`--lib`) and again in the third (the run's call), 3.5 minutes each. The two compiles are the same unit, built against two builds of one third-party dependency: the `--lib` call resolves it one way, and the server layer's call and the run's call resolve it the other way. Why a `--lib` call alone differs was not pinned down.
+
+- **What changes:** the queue lane drops the first call. It builds the server layer's harness alone (`--bin agentmux-srv`), checks the other crates, and the run's call builds the core's harness once, with only small crates beside it (mcp, common's one integration test).
+- **Tried and not used:** one call for everything with one job. It builds each unit once but took 14.3 minutes of compiling, because with one job each rustc also gets one LLVM thread (the core's harness took 5.5 minutes, not 3.5).
+- **Memory:** the staged calls existed so the core's harness (about 10 GB) and the server layer's (8 to 9 GB) are not compiled at the same time on a 16 GB runner. The order keeps that: the server layer's harness is built alone, and the core's is built later beside only small crates, as it already was in the third call. The resource trace, the memory ceiling, the time limits and the retry of a stalled attempt are unchanged.
+- **Unchanged:** the pull-request lane keeps its staged builds; the bindings checks and the tests the queue runs are the same.
+
 ## 6. Order and size
 
 1. Phase 0: #5118.

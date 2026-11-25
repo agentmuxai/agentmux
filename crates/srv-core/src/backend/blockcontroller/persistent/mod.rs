@@ -348,6 +348,7 @@ struct PersistentInner {
     /// restart token against it right before starting the child, so a Stop
     /// during the (possibly slow) credential gate still cancels it.
     restart_spawn_for: Option<u64>,
+    stop_watch: eager_resume::StopWatch,
     /// This spawn generation's stale-`--resume` retry decision, plus any
     /// held-back terminal error-result line — see
     /// `persistent_resume::ResumeState`'s own doc comment for the full
@@ -1072,6 +1073,7 @@ impl PersistentSubprocessController {
                 stop_pending: false,
                 config_restart_generation: None,
                 restart_spawn_for: None,
+                stop_watch: Default::default(),
                 resume: persistent_resume::ResumeState::default(),
                 spawning_in_progress: false,
                 pending_send_messages: VecDeque::new(),
@@ -1355,6 +1357,7 @@ impl Controller for PersistentSubprocessController {
                 // install a child for a closed pane (codex P1 on #3990).
                 g.config_restart_generation = None;
                 g.restart_spawn_for = None;
+                g.stop_watch.note_stop();
                 let running = if g.current_pid.is_none() {
                     // Never spawned (lazy), or already gone. A spawn still in
                     // flight is killed by the caller's tracker drop.

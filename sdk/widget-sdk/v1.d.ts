@@ -36,13 +36,15 @@ export type Visibility = "active" | "dormant" | "windowHidden";
 
 /** The sections of AgentMux's own sectioned panes, by view. A pane opens on one when its meta
  *  holds `<view>:section` (see `panes.open`); any other id opens its default section. Warden's
- *  Vault, History and Audit sections are panes of their own now (`vault`, `history`, `audit`);
- *  an old call naming one of them (`"warden:section": "vault"`) opens that pane. */
+ *  Vault, History and Audit sections are panes of their own now (`vault`, `audit`: History is Audit's
+ *  Conversations section); an old call naming one of them (`"warden:section": "vault"`, or the view
+ *  `history`) opens that pane. */
 export interface PaneSections {
     swarm: "supervisor" | "broadcast";
     warden: "jobs";
     vault: "personal" | "cards" | "api-keys" | "logins" | "notes" | "kept" | "activity";
     connectors: "accounts" | "mcp" | "remotes";
+    audit: "events" | "conversations" | "typed" | "storage";
     memory: "global" | "personal" | "skills" | "bundles";
     settings: "appearance" | "animations" | "window" | "browser" | "terminal" | "keyboard" | "sounds" | "notifications" | "recording" | "devices" | "widgets" | "agents" | "supervisor" | "kanban" | "advanced";
 }

@@ -19,11 +19,9 @@ onDirtyChange false
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -132,11 +130,9 @@ onDirtyChange false
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -242,11 +238,9 @@ NativeMemoryRevertCommand {"agent_id":"a1","filename":"MEMORY.md","target_versio
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -351,11 +345,9 @@ NativeMemoryReadFileCommand {"agent_id":"a1","filename":"MEMORY.md"}
                 <strong>
                   "~1.0k tok"
               <span>
-                "7 days:"
-                "+100 tok"
+                "7 days: +100 tok"
               <span>
-                "30 days:"
-                "+700 tok"
+                "30 days: +700 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -483,11 +475,9 @@ onDirtyChange false
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -603,11 +593,9 @@ onDirtyChange false
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -718,11 +706,9 @@ NativeMemoryRevertCommand {"agent_id":"a1","filename":"MEMORY.md","target_versio
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">

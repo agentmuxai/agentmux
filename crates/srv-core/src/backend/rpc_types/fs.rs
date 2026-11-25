@@ -210,6 +210,29 @@ pub struct FsAgentFolder {
     pub agent_folder: bool,
 }
 
+/// Request for `fs.link_file_check`: whether a file a message names is in its author's folders.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FsLinkFileReq {
+    /// The file as the message wrote it.
+    pub path: String,
+    /// The pane the message is shown in, which says who wrote it and whose folders the path may lead into.
+    pub block_id: String,
+}
+
+/// The answer of `fs.link_file_check`. Nothing is read; no host path is ever named in `reason`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FsLinkFileCheck {
+    /// `found`, `missing`, `outside` (not in the author's folders) or `limited` (asked too often; ask again later).
+    pub state: String,
+    /// Why, when it is not `found`, in words the reader can be shown.
+    pub reason: String,
+    /// Where a host agent's file is, once resolved, for the window to open. Empty for any other answer, and for a
+    /// container agent's file, which srv opens itself.
+    pub resolved: String,
+}
+
 /// Request for `fs.rename`: a new name in the same folder.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -349,6 +372,10 @@ pub struct FsPathReq {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub block_id: Option<String>,
+    /// For `fs.open`: the person has been asked and said yes to opening a file a container agent can write.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub confirmed: Option<bool>,
 }
 
 // ── Copy/move jobs (spec §7.1, §7.2) ─────────────────────────────────────

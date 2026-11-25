@@ -48,6 +48,8 @@ pub(crate) struct Origin {
     pub from_host: bool,
     /// The operator confirmed a job on a provider that reports no cost.
     pub confirm_no_cost: bool,
+    /// The operator read the turn-on prompt of a drone job and said yes (`drone_turn_on`).
+    pub confirm_turn_on: bool,
 }
 
 /// Settings' caps (`jobs:cap:*`).

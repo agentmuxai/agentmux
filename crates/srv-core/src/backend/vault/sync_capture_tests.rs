@@ -280,6 +280,47 @@ fn a_grant_follows_its_entry_out_of_a_vault_and_one_of_an_entry_that_stays_here_
 }
 
 #[test]
+fn only_a_site_grant_is_written_and_an_agent_s_or_a_setting_s_never_leaves_the_machine() {
+    let mut a = machine("a", 1);
+    a.store.vault_insert(&row("entry-1", "Invoice provider key", VAULT, "{}")).unwrap();
+    a.store.vault_grant_add("entry-1", "https://billing.example.com", NOW, 1).unwrap();
+    a.store.vault_grant_add("entry-1", "signin:agent-x|profile-y|https://billing.example.com", NOW, 1).unwrap();
+    a.store.vault_grant_add("entry-1", "setting:example-setting", NOW, 1).unwrap();
+    a.store.vault_grant_add("entry-1", "shell:agent-x|prompt:0123", NOW, 1).unwrap();
+    assert_eq!(a.capture(VAULT, NOW), Captured { written: 1, grants: 1, ..Captured::default() });
+    assert!(grant_record(&a, VAULT, "entry-1", "https://billing.example.com").is_some());
+    for key in ["signin:agent-x|profile-y|https://billing.example.com", "setting:example-setting", "shell:agent-x|prompt:0123"] {
+        assert!(grant_record(&a, VAULT, "entry-1", key).is_none(), "{key} is not written");
+    }
+    assert_eq!(a.capture(VAULT, NOW + 10), Captured::default());
+}
+
+#[test]
+fn a_line_made_after_its_entry_moved_to_another_vault_goes_to_that_vault_and_not_to_this_one() {
+    let mut a = machine("a", 1);
+    a.store.vault_insert(&row("entry-1", "Invoice provider key", VAULT, "{}")).unwrap();
+    a.capture(VAULT, NOW);
+    assert!(a.store.vault_move_entry("entry-1", "vault-b").unwrap());
+    let line = a.store.vault_activity_add(&made("entry-1", "Invoice provider key", "revealed")).unwrap();
+    assert_eq!(a.capture(VAULT, NOW + 10), Captured::default(), "the first Vault leaves the entry and its line alone");
+    assert!(a.line_record(VAULT, line.seq).is_none());
+    assert_eq!(a.capture("vault-b", NOW + 20), Captured { written: 1, tombstoned: 1, lines: 1, ..Captured::default() });
+    assert!(a.line_record("vault-b", line.seq).is_some());
+}
+
+#[test]
+fn a_line_of_an_entry_that_stays_on_this_machine_is_not_written_even_after_it_was_written_before() {
+    let mut a = machine("a", 1);
+    a.store.vault_insert(&row("entry-1", "Invoice provider key", VAULT, "{}")).unwrap();
+    a.capture(VAULT, NOW);
+    // The entry's profile is gone: it stays here from now on.
+    a.store.vault_run_sql_for_tests(&format!("UPDATE db_vault_entries SET fields = '{{\"{PROFILE}\":\"profile:agent-own\"}}' WHERE id = 'entry-1'"));
+    let line = a.store.vault_activity_add(&made("entry-1", "Invoice provider key", "revealed")).unwrap();
+    assert_eq!(a.capture(VAULT, NOW + 10), Captured::default());
+    assert!(a.line_record(VAULT, line.seq).is_none());
+}
+
+#[test]
 fn what_a_machine_wrote_beyond_a_removal_is_written_again_at_the_new_epoch_by_the_layer_and_still_opens() {
     let mut a = machine("a", 1);
     a.store.vault_insert(&row("entry-1", "Invoice provider key", VAULT, "{}")).unwrap();

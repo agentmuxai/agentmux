@@ -71,6 +71,10 @@ pub struct JobsSaveRequest {
     #[serde(default)]
     #[ts(optional)]
     pub confirm_no_cost: Option<bool>,
+    /// Confirms turning on a drone job after its prompt (what it changes outside AgentMux, the credentials it uses).
+    #[serde(default)]
+    #[ts(optional)]
+    pub confirm_turn_on: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, ts_rs::TS)]
@@ -87,6 +91,8 @@ pub struct JobsSaveResult {
     pub provider: Option<String>,
     /// Why the confirmation is needed, in words.
     pub error: Option<String>,
+    /// With `needs_confirmation: turn_on`: what turning the drone on lets it do, one line each.
+    pub lines: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, ts_rs::TS)]
@@ -214,7 +220,7 @@ fn changed_fields(before: &JobDefinition, sent: &Value) -> Result<Map<String, Va
 
 fn save(state: &AppState, req: JobsSaveRequest, ctx: &RpcContext) -> Result<JobsSaveResult, String> {
     ctx.operator_only("only the operator creates or edits a job here")?;
-    let origin = Origin { from_host: true, confirm_no_cost: req.confirm_no_cost == Some(true) };
+    let origin = Origin { from_host: true, confirm_no_cost: req.confirm_no_cost == Some(true), confirm_turn_on: req.confirm_turn_on == Some(true) };
     let (status, axum::Json(body)) = match req.job_id.as_deref().filter(|id| !id.is_empty()) {
         None => create_job(state, None, req.definition, origin),
         Some(id) => {
@@ -230,7 +236,8 @@ fn saved(status: StatusCode, body: &Value) -> Result<JobsSaveResult, String> {
     let error = body.get("error").and_then(Value::as_str).map(str::to_string);
     if let Some(kind) = body.get("needs_confirmation").and_then(Value::as_str) {
         let provider = body.get("provider").and_then(Value::as_str).map(str::to_string);
-        return Ok(JobsSaveResult { needs_confirmation: Some(kind.to_string()), provider, error, ..Default::default() });
+        let lines = body.get("lines").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+        return Ok(JobsSaveResult { needs_confirmation: Some(kind.to_string()), provider, error, lines, ..Default::default() });
     }
     if !status.is_success() {
         return Err(error.unwrap_or_else(|| format!("refused ({status})")));

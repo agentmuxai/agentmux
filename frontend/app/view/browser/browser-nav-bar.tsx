@@ -5,7 +5,8 @@ import { Show, type JSX } from "solid-js";
 import { paneCommandFor } from "@/app/keybindings";
 import { browserStartPageAtom } from "@/store/config-signals";
 import { DEFAULT_BROWSER_URL } from "./browser-model";
-import { BrowserProfileButton, openIncognitoTab } from "./browser-profile-menu";
+import { closeBrowserTab } from "./browser-close-tab";
+import { BrowserProfileButton, openIncognitoTab, openNewTab } from "./browser-profile-menu";
 import { DownloadsButton } from "./browser-downloads-button";
 import { BrowserSigninKey } from "./browser-signin-key";
 import { BrowserSigninList } from "./browser-signin-list";
@@ -51,12 +52,17 @@ export function BrowserNavBar(props: BrowserNavBarProps): JSX.Element {
                 // Ctrl+wheel over it zooms chrome too (store/chrome-zoom-target.ts).
                 data-zoom-scope="chrome"
                 // Ctrl/Cmd+Shift+N anywhere in the bar, the address bar included,
-                // opens an Incognito tab, as in Chrome, not the app's new window.
+                // opens an Incognito tab, as in Chrome, not the app's new window; Ctrl/Cmd+T opens a tab
+                // and Ctrl/Cmd+W closes this one.
                 onKeyDown={(e) => {
-                    if (e.defaultPrevented || paneCommandFor(e, "browser") !== "browser:newIncognito") return;
+                    if (e.defaultPrevented) return;
+                    const command = paneCommandFor(e, "browser");
+                    if (command === "browser:newIncognito") openIncognitoTab(model, home());
+                    else if (command === "browser:newTab") openNewTab(model, home());
+                    else if (command === "browser:closeTab") void closeBrowserTab(model);
+                    else return;
                     e.preventDefault();
                     e.stopPropagation();
-                    openIncognitoTab(model, home());
                 }}
             >
                 {/* One row in a wide pane, two in a thin one (buttons, a line, then the

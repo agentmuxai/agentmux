@@ -46,6 +46,13 @@ describe("classifyHref", () => {
         }
     });
 
+    it("reads agentmux://file?path=<path> as a file a message names, and blocks every other form of it", () => {
+        expect(classifyHref("agentmux://file?path=docs%2Fa%20b.md")).toEqual({ kind: "entityfile", path: "docs/a b.md" });
+        for (const href of ["agentmux://file", "agentmux://file?path=", "agentmux://file/docs/a.md", "agentmux://file?path=a.md&x=1", "agentmux://file?path=a b"]) {
+            expect(classifyHref(href)).toEqual({ kind: "blocked" });
+        }
+    });
+
     it("reads an agent link, and blocks every other form of it", () => {
         expect(classifyHref("agentmux://agent/opaz-0909m")).toEqual({ kind: "agent", id: "opaz-0909m" });
         expect(classifyHref("agentmux://agent/a%20b/")).toEqual({ kind: "agent", id: "a b" });

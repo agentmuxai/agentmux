@@ -27,6 +27,13 @@ pub const META_PHRASE_SRC: &str = "term:live_phrase_src";
 /// The id of the task whose title it is (source [`SRC_TASK`]), so the task's end retires it even if the
 /// task was renamed after the claim.
 pub const META_PHRASE_TASK: &str = "term:live_phrase_task";
+/// Until when a `waiting` line says the agent will be quiet, epoch milliseconds (`Presence status` with
+/// `until_minutes`); 0 when it gave none.
+pub const META_PHRASE_UNTIL: &str = "term:live_phrase_until";
+/// How long a `waiting` line with no time of its own stops the quiet watch (docs/specs/SPEC_LEADER_TOLD_WHEN_AN_AGENT_GOES_QUIET_2026_11_21.md §5).
+pub const WAITING_DEFAULT_MINUTES: u64 = 30;
+/// The most a `waiting` line may ask for.
+pub const WAITING_MAX_MINUTES: u64 = 240;
 
 /// The agent set the line itself.
 pub const SRC_AGENT: &str = "agent";
@@ -95,7 +102,29 @@ pub fn set_meta(line: &str, state: Option<&str>, src: &str, at_ms: i64) -> Value
         META_PHRASE_STATE: state.unwrap_or(""),
         META_PHRASE_SRC: src,
         META_PHRASE_TASK: "",
+        META_PHRASE_UNTIL: 0,
     })
+}
+
+/// [`set_meta`] for a `waiting` line that says it will be quiet for `minutes` (1 to [`WAITING_MAX_MINUTES`]) from `at_ms`.
+pub fn set_meta_waiting(line: &str, src: &str, at_ms: i64, minutes: u64) -> Value {
+    let mut meta = set_meta(line, Some("waiting"), src, at_ms);
+    meta[META_PHRASE_UNTIL] = json!(at_ms.saturating_add((minutes.min(WAITING_MAX_MINUTES) as i64).saturating_mul(60_000)));
+    meta
+}
+
+/// Until when the agent's own `waiting` line stops the quiet watch (unix ms), if it has one: the time it gave, else
+/// [`WAITING_DEFAULT_MINUTES`] from when it was set, and never more than [`WAITING_MAX_MINUTES`] from then: a line left
+/// up for hours is what the watch is there to catch.
+pub fn waiting_until(meta: &MetaMapType) -> Option<u64> {
+    let line = declared_of(meta)?;
+    if line.state.as_deref() != Some("waiting") || line.src != SRC_AGENT {
+        return None;
+    }
+    let given = meta.get(META_PHRASE_UNTIL).and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|f| f.max(0.0) as u64))).unwrap_or(0);
+    let cap = line.at_ms.saturating_add(WAITING_MAX_MINUTES * 60_000);
+    let until = if given > 0 { given } else { line.at_ms.saturating_add(WAITING_DEFAULT_MINUTES * 60_000) };
+    Some(until.min(cap))
 }
 
 /// The meta a task claim writes: [`set_meta`] for source [`SRC_TASK`], with the task's id.
@@ -112,6 +141,7 @@ pub fn clear_meta() -> Value {
         m.insert(k.to_string(), Value::String(String::new()));
     }
     m.insert(META_PHRASE_AT.to_string(), json!(0));
+    m.insert(META_PHRASE_UNTIL.to_string(), json!(0));
     Value::Object(m)
 }
 
@@ -249,5 +279,40 @@ mod tests {
         assert_eq!(task_line(Some(20816), "Build: the Swarm phrase").as_deref(), Some("#20816 Build: the Swarm phrase"));
         assert_eq!(task_line(None, "Fix the login race").as_deref(), Some("Fix the login race"));
         assert!(task_line(Some(1), &"w ".repeat(80)).unwrap().chars().count() <= MAX_CHARS);
+    }
+    fn to_meta(v: Value) -> MetaMapType {
+        v.as_object().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+    }
+
+    #[test]
+    fn a_waiting_line_stops_the_watch_for_the_time_it_gave_or_half_an_hour() {
+        let at = 1_700_000_000_000_i64;
+        let with_time = to_meta(set_meta_waiting("Waiting for the build", SRC_AGENT, at, 45));
+        assert_eq!(waiting_until(&with_time), Some(at as u64 + 45 * 60_000));
+        let bare = to_meta(set_meta("Waiting for an answer", Some("waiting"), SRC_AGENT, at));
+        assert_eq!(waiting_until(&bare), Some(at as u64 + 30 * 60_000));
+    }
+
+    #[test]
+    fn a_waiting_line_cannot_hold_the_watch_for_more_than_four_hours() {
+        let at = 1_700_000_000_000_i64;
+        let greedy = to_meta(set_meta_waiting("Waiting", SRC_AGENT, at, 10_000));
+        assert_eq!(waiting_until(&greedy), Some(at as u64 + 240 * 60_000));
+        // A hand-written meta can ask for more still; the cap holds.
+        let mut raw = set_meta_waiting("Waiting", SRC_AGENT, at, 60);
+        raw[META_PHRASE_UNTIL] = json!(at + 100 * 60 * 60_000);
+        assert_eq!(waiting_until(&to_meta(raw)), Some(at as u64 + 240 * 60_000));
+    }
+
+    #[test]
+    fn only_the_agents_own_waiting_line_counts() {
+        let at = 5_000;
+        assert_eq!(waiting_until(&to_meta(set_meta("Working", Some("working"), SRC_AGENT, at))), None);
+        assert_eq!(waiting_until(&to_meta(set_meta("Waiting", Some("waiting"), SRC_TASK, at))), None);
+        assert_eq!(waiting_until(&to_meta(set_meta("No state", None, SRC_AGENT, at))), None);
+        assert_eq!(waiting_until(&MetaMapType::new()), None);
+        // A new line after a timed wait takes the time with it.
+        let again = to_meta(set_meta("Waiting again", Some("waiting"), SRC_AGENT, at + 10));
+        assert_eq!(waiting_until(&again), Some(at as u64 + 10 + 30 * 60_000));
     }
 }

@@ -78,7 +78,7 @@ fn graph_of(m: &JobTemplateManifest, files: &BTreeMap<String, Vec<u8>>) -> Resul
                 return Err(format!("graph.json uses {{{{param.{name}}}}}, which isn't one of its parameters"));
             }
             // The credentials the graph and trigger use count for the Rule of Two, whatever `secrets` declares.
-            manifest::rule_of_two_with(m, !graph::credentials(&g, m.trigger.as_ref()).is_empty())?;
+            manifest::rule_of_two_with(m, !graph::credentials(&g, m.trigger.as_ref()).is_empty(), graph::approval_guards_every_write(&g))?;
             Ok(Some(g))
         }
         (true, None) => Err("a Drone template needs its graph in graph.json".to_string()),
