@@ -479,14 +479,13 @@ function AtlasNotes(props: {
     );
 }
 
-export function AtlasView(props: { data: AtlasData; ctx: PaneTabHostContext }): JSX.Element {
-    const { data, ctx } = props;
-    const mode = createMemo<AtlasLayoutMode>(() => readAtlasLayout(ctx.meta()));
-    const [selected, setSelected] = createSignal<string | null>(null);
-    // The pane is measured before the first draw and the layout is formed for its shape, so the first paint is
-    // already fitted (the view reads the layout lazily: it is made right below).
-    const zoom = useAtlasPanZoom(() => layout(), mode, () => setSelected(null));
-    // Zoomed in past the fitted view, the gaps close up (`zoom.spread`), so more of the cards are in the pane.
+/** The agent a node key names, if there is one (a key can also name a folded or extra node). */
+function agentOf(data: AtlasData, key: string | null): AtlasAgent | undefined {
+    return key ? data.agents().get(key) : undefined;
+}
+
+/** Each shown agent's tasks for its node, and the node heights they make when listed line by line. */
+function useNodeTasks(data: AtlasData) {
     const tasks = useAtlasTasks();
     const nodeTaskLists = createMemo(() =>
         nodeTasksOf(
@@ -495,6 +494,24 @@ export function AtlasView(props: { data: AtlasData; ctx: PaneTabHostContext }): 
         )
     );
     const lineHeights = createMemo(() => nodeHeights(nodeTaskLists()));
+    return { tasks, nodeTaskLists, lineHeights };
+}
+
+/** How a machine was found and what it says of itself, for the card of an agent on it. */
+function machineDetailOf(data: AtlasData, machine: string): string {
+    const m = data.graph().regions.find((r) => r.key === machine);
+    return m ? machineDetail(m) : "";
+}
+
+export function AtlasView(props: { data: AtlasData; ctx: PaneTabHostContext }): JSX.Element {
+    const { data, ctx } = props;
+    const mode = createMemo<AtlasLayoutMode>(() => readAtlasLayout(ctx.meta()));
+    const [selected, setSelected] = createSignal<string | null>(null);
+    // The pane is measured before the first draw and the layout is formed for its shape, so the first paint is
+    // already fitted (the view reads the layout lazily: it is made right below).
+    const zoom = useAtlasPanZoom(() => layout(), mode, () => setSelected(null));
+    // Zoomed in past the fitted view, the gaps close up (`zoom.spread`), so more of the cards are in the pane.
+    const { tasks, nodeTaskLists, lineHeights } = useNodeTasks(data);
     const layoutFor = (heights: NodeHeights, spread: number) =>
         mode() === "seat"
             ? layoutBySeat(data.graph(), zoom.shape(), spread, heights)
@@ -508,10 +525,7 @@ export function AtlasView(props: { data: AtlasData; ctx: PaneTabHostContext }): 
     const { hosts, ring, stopped } = useAtlasHosts(data);
     const shownCount = createMemo(() => data.graph().regions.reduce((n, r) => n + r.shown.length + r.orphans.length, 0));
     const stoppedCount = createMemo(() => data.graph().regions.reduce((n, r) => n + r.folded.length, 0));
-    const selectedAgent = () => {
-        const key = selected();
-        return key ? data.agents().get(key) : undefined;
-    };
+    const selectedAgent = () => agentOf(data, selected());
     const onPointerDown = (e: PointerEvent & { currentTarget: HTMLDivElement }) => {
         if (!sel.lasso.wants(e) || (e.target as HTMLElement).closest(NOT_BACKGROUND)) return zoom.onPointerDown(e);
         setSelected(null);
@@ -575,10 +589,7 @@ export function AtlasView(props: { data: AtlasData; ctx: PaneTabHostContext }): 
                         <Card
                             agent={agent()}
                             machineTitle={hosts().get(agent().machine)?.name ?? data.machines().get(agent().machine)?.title ?? ""}
-                            machineDetail={(() => {
-                                const m = data.graph().regions.find((r) => r.key === agent().machine);
-                                return m ? machineDetail(m) : "";
-                            })()}
+                            machineDetail={machineDetailOf(data, agent().machine)}
                             agents={data.agents()}
                             work={work()}
                             onClose={() => setSelected(null)}
