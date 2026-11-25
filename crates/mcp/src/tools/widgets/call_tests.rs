@@ -101,7 +101,7 @@ async fn an_install_srv_refuses_gives_its_reason() {
 }
 
 #[tokio::test]
-async fn opening_a_view_splits_beside_the_agent_with_the_widgets_defaults_and_the_agents_own_meta() {
+async fn opening_a_view_splits_only_when_asked_with_the_widgets_defaults_and_the_agents_own_meta() {
     let srv = stub_srv("200 OK", widgets("approved"));
     let fx = Fixture::new(&srv);
     let said = call("OpenWidget", &json!({ "view": "ext:a.b/main", "meta": { "k": "v" }, "split": "down" }), &fx.cx()).await.unwrap();
@@ -115,9 +115,11 @@ async fn opening_a_view_splits_beside_the_agent_with_the_widgets_defaults_and_th
             "meta": { "d": 1, "widget:a.b:k": "v", "view": "ext:a.b/main" }
         })
     );
-    // Any other split is to the right; an agent with no block opens nowhere in particular.
+    // A split a widget does not take, or none at all, asks for no split: srv opens the pane as a tab of the agent's own pane
+    // group. An agent with no block opens nowhere in particular.
     call("OpenWidget", &json!({ "view": "ext:a.b/main", "split": "left" }), &fx.cx()).await.unwrap();
-    assert_eq!(srv.seen.lock().unwrap()[3].1["split_direction"], "right");
+    let other = srv.seen.lock().unwrap()[3].1.clone();
+    assert!(other.get("split_direction").is_none() && other["split_reference_block_id"] == "blk", "{other}");
     let no_block = ToolCtx { block_id: "", ..fx.cx() };
     call("OpenWidget", &json!({ "view": "ext:a.b/main" }), &no_block).await.unwrap();
     let last = srv.seen.lock().unwrap()[5].1.clone();
