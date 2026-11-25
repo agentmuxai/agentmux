@@ -25,6 +25,16 @@ vi.mock("html-to-image", () => ({
 import { rasterisePane, resetDragPreviewRaster, warmDragPreview } from "./drag-preview-raster";
 
 const node = {} as HTMLElement;
+/** A preview element whose text is set in `family` (and a child set in `childFamily`). */
+function preview(family: string, childFamily = family): HTMLElement {
+    const el = document.createElement("div");
+    el.style.fontFamily = family;
+    const child = document.createElement("span");
+    child.style.fontFamily = childFamily;
+    el.appendChild(child);
+    document.body.appendChild(el);
+    return el;
+}
 const fontFaces = (n: number) => Object.defineProperty(document, "fonts", { value: { size: n }, configurable: true });
 
 beforeEach(() => {
@@ -48,6 +58,17 @@ describe("rasterisePane", () => {
         fontFaces(4);
         await rasterisePane(node, {});
         expect(lib.fontCalls).toBe(2);
+    });
+
+    it("embeds again for a preview that uses a family the first one did not, and once for each set", async () => {
+        const terminal = preview("Hack");
+        const branded = preview("Hack", "'Font Awesome 6 Brands'");
+        await rasterisePane(terminal, {});
+        await rasterisePane(branded, {});
+        await rasterisePane(terminal, {});
+        await rasterisePane(branded, {});
+        expect(lib.fontCalls).toBe(2);
+        expect(lib.fontNodes).toEqual([terminal, branded]);
     });
 
     it("draws the picture as it always did when the fonts could not be embedded, and tries again next time", async () => {
