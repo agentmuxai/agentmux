@@ -17,4 +17,9 @@ describe("shiki-themed.scss", () => {
         expect(css).toContain('[data-backdrop][data-backdrop-scheme=dark] .sh-tok { color: var(--shiki-dark)');
         expect(css).toContain('[data-backdrop][data-backdrop-scheme=light] .sh-tok { color: var(--shiki-light)');
     });
+
+    it("keeps a token to the lightness the pane's layers allow: raised on a dark page, lowered on a light one", () => {
+        expect(css).toContain('oklch(from var(--shiki-dark) max(l, var(--code-l, 0)) c h)');
+        expect(css).toContain('oklch(from var(--shiki-light) min(l, var(--code-l, 1)) c h)');
+    });
 });

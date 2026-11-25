@@ -10,7 +10,7 @@ import { ANSI_TOKENS } from "./ansi";
 import { BUILTINS, deriveBuiltin } from "./builtins";
 import { deriveInk } from "./ink";
 import { oklchToHex } from "../theme/oklch";
-import { getPaneScope, INK_TOKEN_MAP, MAPPED_TOKENS, registerPaneScope, releasePaneScope, scopeVars, SURFACE_TOKEN_MAP } from "./scope";
+import { codeLightness, getPaneScope, INK_TOKEN_MAP, MAPPED_TOKENS, registerPaneScope, releasePaneScope, scopeVars, SURFACE_TOKEN_MAP } from "./scope";
 
 // Any built-in will do: the first, on each of the app's two themes.
 const derived = deriveBuiltin(BUILTINS[0].id, "dark")!;
@@ -159,6 +159,25 @@ describe("scopeVars with the editor's syntax colours and the file-type icon colo
         }
         const keeps = deriveInk("#101820");
         expect(scopeVars(keeps, dark)["--file-icon-blue"]).toBe("#519aba");
+    });
+});
+
+describe("the lightness highlighted code is kept to", () => {
+    it("is high on a dark pane and low on a light one, and the pane carries it", () => {
+        const dark = deriveInk("#101820");
+        const pale = deriveInk("#f4efe0");
+        expect(codeLightness(dark.surfaces)).toBeGreaterThan(0.6);
+        expect(codeLightness(pale.surfaces)).toBeLessThan(0.55);
+        expect(scopeVars(dark)["--code-l"]).toBe(String(codeLightness(dark.surfaces)));
+    });
+
+    it("gives a grey of that lightness at least 5:1 on all three layers of a mid-tone backdrop, either side", () => {
+        for (const hex of ["#808080", "#336699", "#5f5f5f", "#9a9a9a"]) {
+            const d = deriveInk(hex);
+            const l = codeLightness(d.surfaces);
+            const grey = oklchToHex(l, 0, 0);
+            for (const layer of Object.values(d.surfaces)) expect(contrastRatio(grey, layer), `${hex}: L ${l} on ${layer}`).toBeGreaterThanOrEqual(5);
+        }
     });
 });
 

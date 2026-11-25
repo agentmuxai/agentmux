@@ -72,6 +72,15 @@ describe("a pane that follows a backdrop", () => {
         expect(stray, "map the token in frontend/app/backdrop/mapped-tokens.json (and run node scripts/gen-backdrop-aliases.mjs), or list it in KEEPS with why").toEqual([]);
     });
 
+    it("has no rgba() literal in the files, editor, Kanban and Swarm stylesheets: a white or black tint is a colour no backdrop reaches", () => {
+        // The agent pane keeps a few (shadows, a scrim) that its own look checks cover; these four have none to keep.
+        const found = agentSources(PANE_DIRS.slice(1))
+            .filter((file) => file.endsWith(".scss"))
+            .filter((file) => /\brgba?\(\s*\d/.test(stripComments(readFileSync(file, "utf8"))))
+            .map((file) => file.slice(ROOT.length + 1));
+        expect(found, "use a token (--tertiary-text-color, --hover-bg-color) or a color-mix of the pane's ink").toEqual([]);
+    });
+
     it("lists only tokens it still reads, so the list can't go stale", () => {
         const unused = [...named].filter((token) => !uses.has(token));
         expect(unused, "remove them from KEEPS").toEqual([]);
