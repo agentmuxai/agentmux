@@ -257,6 +257,9 @@ pub async fn cut(_args: &serde_json::Value) -> Result<serde_json::Value, String>
 mod tests {
     use super::{cut_pane, cut_pane_bgra, keep, take_kept, WindowPicture};
 
+    /// The kept pictures are one store for the whole process: the tests that fill it take turns.
+    static STORE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// A picture `w` x `h` whose left half is red and right half blue, as a JPEG.
     fn halves(w: u32, h: u32) -> Vec<u8> {
         let img = image::RgbImage::from_fn(w, h, |x, _| {
@@ -308,6 +311,7 @@ mod tests {
 
     #[test]
     fn a_kept_picture_is_handed_over_once_and_the_oldest_go_when_there_are_too_many() {
+        let _turn = STORE.lock().unwrap_or_else(|e| e.into_inner());
         let jpeg = |p: Option<WindowPicture>| match p {
             Some(WindowPicture::Jpeg(s)) => Some(s),
             _ => None,
@@ -324,6 +328,7 @@ mod tests {
 
     #[test]
     fn a_native_copy_is_dropped_by_its_cut_and_a_press_that_never_cuts_keeps_only_the_newest() {
+        let _turn = STORE.lock().unwrap_or_else(|e| e.into_inner());
         let copy = || WindowPicture::Bgra {
             width: 4,
             height: 4,
