@@ -408,10 +408,11 @@ impl Chain {
     /// The state the entry applies on: the state after the entries it follows, found by the hashes each names among `held`.
     /// It does not extend anything held when a link is missing.
     fn before(collection: &str, held: &[&Entry], entry: &Entry) -> Result<State, MemberError> {
+        let by_hash: BTreeMap<String, &Entry> = held.iter().map(|h| (h.hash(), *h)).collect();
         let mut path: Vec<&Entry> = Vec::new();
         let mut at = entry;
         while at.n > 1 {
-            let parent = held.iter().copied().find(|h| Some(h.hash()) == at.prev && h.n + 1 == at.n && h.collection == collection);
+            let parent = at.prev.as_ref().and_then(|p| by_hash.get(p)).copied().filter(|h| h.n + 1 == at.n && h.collection == collection);
             let parent = parent.ok_or(MemberError::DoesNotExtend)?;
             path.push(parent);
             at = parent;
@@ -433,15 +434,23 @@ impl Chain {
         let mut chain: Vec<Entry> = Vec::new();
         loop {
             let at = state.clone();
-            let next: Vec<Entry> = seen.iter().filter(|e| e.n == at.n + 1 && e.prev == at.head && state.clone().apply(e).is_ok()).cloned().collect();
+            // The entries that name the head and are valid on it, each with the state it leaves.
+            let next: Vec<(Entry, State)> = seen
+                .iter()
+                .filter(|e| e.n == at.n + 1 && e.prev == at.head)
+                .filter_map(|e| {
+                    let mut after = at.clone();
+                    after.apply(e).ok().map(|_| (e.clone(), after))
+                })
+                .collect();
+            let entries: Vec<Entry> = next.iter().map(|(e, _)| e.clone()).collect();
             let winner = match founder {
-                Some(f) if at.n == 0 && next.contains(f) => f.clone(),
-                _ if next.is_empty() => return chain,
-                _ => settle(&at, &next),
+                Some(f) if at.n == 0 && entries.contains(f) => f.clone(),
+                _ if entries.is_empty() => return chain,
+                _ => settle(&at, &entries),
             };
-            if state.apply(&winner).is_err() {
-                return chain;
-            }
+            let Some((_, after)) = next.into_iter().find(|(e, _)| *e == winner) else { return chain };
+            state = after;
             chain.push(winner);
         }
     }
@@ -502,6 +511,13 @@ impl Chain {
         {
             let held: Vec<&Entry> = seen.iter().collect();
             Chain::before(collection, &held, &entry)?.apply(&entry)?;
+        }
+        if self.entries.last().map(Entry::hash) == entry.prev && entry.n == self.entries.len() as u64 + 1 {
+            // The usual case: it goes on from the head, and nothing held can change what stands before it.
+            let rest: Vec<Entry> = self.side().cloned().collect();
+            self.entries.push(entry);
+            self.keep(rest);
+            return Ok(Taken::Extended);
         }
         seen.push(entry);
         let now = Chain::walk(collection, &seen, self.entries.first());

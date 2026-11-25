@@ -32,7 +32,11 @@ pub const MAX_BATCH_RECORDS: usize = 200;
 /// this goes alone (up to `MAX_RECORD_BYTES`).
 pub const MAX_BATCH_BYTES: usize = 256 * 1024;
 /// Most entries of a membership chain one answer carries; a longer chain is not served until it is compacted.
+#[cfg(not(test))]
 pub const MAX_ENTRIES: usize = 256;
+/// Small under test, so a chain over it is built with a few entries.
+#[cfg(test)]
+pub const MAX_ENTRIES: usize = 16;
 /// Most join requests one collection keeps waiting for a person.
 pub const MAX_PENDING: usize = 16;
 /// How long a join waits for a person before it is dropped (the machine asks again).
@@ -389,7 +393,9 @@ pub(super) fn discard_lost_keys(keys: &dyn KeyDelivery, collection: &str, chain:
             }
         }
     }
-}/// A former member is told how it was removed and nothing that came after.
+}
+
+/// A former member is told how it was removed and nothing that came after.
 fn visible_to_former(entries: &[Entry], caller: &str) -> usize {
     entries.iter().position(|e| matches!(&e.change, Change::Remove { id, .. } if id == caller)).map_or(0, |i| i + 1)
 }

@@ -447,3 +447,37 @@ fn machines_that_went_on_from_different_entries_settle_on_one_chain_in_one_round
     let again = round(&mut b, &mut a);
     assert!(!again.changed(), "{again:?}");
 }
+
+/// `a`'s chain grown to `len` entries by policy changes `a` signs, built whole (each one is checked once).
+fn grow(a: &mut Node, len: usize) {
+    let mut entries = a.chains[C].entries.clone();
+    while entries.len() < len {
+        let policy = if entries.len() % 2 == 0 { Policy::Approve } else { Policy::AutoProven };
+        let prev = entries.last().map(Entry::hash);
+        entries.push(Entry::sign(&a.private, C, entries.len() as u64 + 1, prev, Change::SetPolicy { policy }, &a.id).unwrap());
+    }
+    let chain = super::members::Chain::from_entries(C, entries).unwrap();
+    chain_store::save(&a.conn, C, &chain).unwrap();
+    a.chains.insert(C.to_string(), chain);
+}
+
+#[test]
+fn a_chain_over_the_cap_comes_over_in_batches_both_ways() {
+    let over = ops::MAX_ENTRIES + 20;
+    // The short chain asks the long one, and the long one asks the short one.
+    for long_asks in [false, true] {
+        let (mut a, mut b, _) = three("kanban");
+        grow(&mut a, over);
+        let r = if long_asks { round(&mut a, &mut b) } else { round(&mut b, &mut a) };
+        assert_eq!(r.ended, Ended::Synced, "{:?}", r.ended);
+        for _ in 0..3 {
+            if a.chains[C].entries == b.chains[C].entries {
+                break;
+            }
+            let r = if long_asks { round(&mut a, &mut b) } else { round(&mut b, &mut a) };
+            assert_eq!(r.ended, Ended::Synced, "{:?}", r.ended);
+        }
+        assert_eq!(a.chains[C].entries.len(), over, "long_asks {long_asks}");
+        assert_eq!(a.chains[C].entries, b.chains[C].entries, "long_asks {long_asks}");
+    }
+}
