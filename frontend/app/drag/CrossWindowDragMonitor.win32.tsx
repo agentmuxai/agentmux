@@ -71,7 +71,7 @@ function picturePaneOnPress(e: PointerEvent): void {
     if (e.button !== 0) return;
     const blockId = paneDragCandidate(e.target);
     if (!blockId) return;
-    probeNativePicture(); // the spike of #48707: off unless the window's debug flag is set
+    if (probeNativePicture()) return; // the spike of #48707: off unless the window's debug flag is set
     prewarmTearOffSnapshot(blockId, { x: e.clientX, y: e.clientY }, pressIsOnTab(e.target));
 }
 
