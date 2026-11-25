@@ -22,6 +22,8 @@ const shots = vi.hoisted(() => ({
     /** Holds the host's cut until it resolves. */
     cutGate: null as null | Promise<void>,
     page: "browser-page" as string | null,
+    /** The native argument of each of the host's window pictures asked for. */
+    native: [] as unknown[],
 }));
 vi.mock("@/app/store/global", () => ({
     MOS: {
@@ -44,8 +46,9 @@ vi.mock("@/app/store/global", () => ({
                 return shots.next ?? Promise.resolve({ jpeg_base64: btoa("full-viewport") });
             },
             // The host takes the window's picture and keeps it (a capture that fails fails here), then cuts the pane out.
-            keepViewport: (label: string) => {
+            keepViewport: (label: string, _quality?: number, native?: boolean) => {
                 shots.calls.push(label);
+                shots.native.push(native);
                 return (shots.next ?? Promise.resolve({ jpeg_base64: "" })).then(() => ({ pictureId: 7 }));
             },
             cutKeptViewport: (pictureId: number, rect: unknown, viewportWidth: number) => {
@@ -109,6 +112,7 @@ beforeEach(() => {
     shots.next = null;
     shots.drawn = [];
     shots.cut = [];
+    shots.native = [];
     shots.cutPicture = "cropped-pane";
     shots.cutGate = null;
     resetPaneCaptureGateForTests();
@@ -145,6 +149,24 @@ describe("tear-off snapshot", () => {
         expect(await takeTearOffSnapshot("b1")).toBe(btoa("cropped-pane"));
         expect(shots.cut).toEqual([]);
         expect(shots.drawn).toEqual([[20, 40, 600, 400, 0, 0, 600, 400]]);
+    });
+
+    it("a plain pane asks the host for its native copy of the window, not the page's screenshot", async () => {
+        mountPane("b1");
+        prewarmTearOffSnapshot("b1");
+        await takeTearOffSnapshot("b1");
+        expect(shots.native).toEqual([true]);
+    });
+
+    it("a pane that holds a native browser page asks for the screenshot, which carries it: the native copy does not", async () => {
+        mountPane("b1");
+        const ph = document.createElement("div");
+        ph.className = "browser-placeholder";
+        ph.checkVisibility = () => true;
+        document.querySelector('[data-blockid="b1"]')!.appendChild(ph);
+        prewarmTearOffSnapshot("b1");
+        await takeTearOffSnapshot("b1");
+        expect(shots.native).toEqual([false]);
     });
 
     it("the drag's drawing is released once the window is pictured, not held for the host's cut", async () => {
