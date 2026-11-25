@@ -22,6 +22,7 @@ pub mod live_follow;
 #[cfg(any(target_os = "windows", test))]
 mod live_follow_picture;
 mod pane_picture;
+mod native_picture;
 #[cfg(target_os = "windows")]
 pub mod drop_source_wrap;
 pub mod replace_page;
