@@ -45,10 +45,14 @@ const realClock: Clock = {
     stack: () => new Error().stack ?? "",
 };
 
-/** The first place in a stack that is not this file: `<script path>:<line>:<column>`, without the origin or a query. */
+/**
+ * The first place in a stack that is not this file: `<script path>:<line>:<column>`, without the origin or a query. A
+ * packaged build puts this file and its callers in one bundle, so the stack handed to it is cut at the wrapper
+ * (`stackAbove`) and this name filter only covers a development build's own frames.
+ */
 export function callerOf(stack: string): string {
     for (const line of stack.split("\n").slice(1)) {
-        if (line.includes("layout-read-probe")) continue;
+        if (/layout-read-probe\.ts\b/.test(line)) continue;
         const at = /\(?([^\s()]+):(\d+):(\d+)\)?\s*$/.exec(line.trim());
         if (at == null) continue;
         const path = at[1].replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i, "").replace(/[?#].*$/, "");
@@ -64,8 +68,8 @@ export function createLayoutReadProbe(clock: Clock = realClock) {
     let linesAt = clock.now();
     let lines = 0;
 
-    function write(api: string, ms: number): void {
-        const at = callerOf(clock.stack());
+    function write(api: string, ms: number, stack?: () => string): void {
+        const at = callerOf((stack ?? clock.stack)());
         const key = `${kind}|${api}|${at}`;
         const now = clock.now();
         let place = places.get(key);
@@ -114,8 +118,8 @@ export function createLayoutReadProbe(clock: Clock = realClock) {
         /** Whether a read now is inside a message's handling. */
         active: (): boolean => kind !== null,
         /** The browser's answer to a layout-reading call took `ms`. */
-        read(api: string, ms: number): void {
-            if (kind !== null && ms >= READ_MIN_MS) write(api, ms);
+        read(api: string, ms: number, stack?: () => string): void {
+            if (kind !== null && ms >= READ_MIN_MS) write(api, ms, stack);
         },
         now: clock.now,
     };
@@ -148,19 +152,26 @@ const GETTERS: [string, string][] = [
     ["Element", "scrollLeft"],
 ];
 
+/** The stack at this call without the frames from the top down to `above`, where V8 can cut it; the whole stack elsewhere. */
+function stackAbove(above: Function): string {
+    const holder: { stack?: string } = {};
+    (Error as { captureStackTrace?: (o: object, f: Function) => void }).captureStackTrace?.(holder, above);
+    return holder.stack ?? new Error().stack ?? "";
+}
+
 /**
  * Times those calls on the page's elements for the probe. Returns what undoes it. A call outside a message's handling
  * pays one check of the probe's state.
  */
 export function wrapLayoutReads(probe: LayoutReadProbe, scope: Record<string, any> = globalThis): () => void {
     const done: Wrapped[] = [];
-    const timed = <T>(name: string, run: () => T): T => {
+    const timed = <T>(name: string, run: () => T, wrapper: Function): T => {
         if (!probe.active()) return run();
         const start = probe.now();
         try {
             return run();
         } finally {
-            probe.read(name, probe.now() - start);
+            probe.read(name, probe.now() - start, () => stackAbove(wrapper));
         }
     };
     for (const [ctor, name] of METHODS) {
@@ -168,12 +179,10 @@ export function wrapLayoutReads(probe: LayoutReadProbe, scope: Record<string, an
         const original = proto && Object.getOwnPropertyDescriptor(proto, name);
         if (!original || typeof original.value !== "function") continue;
         const fn = original.value;
-        Object.defineProperty(proto, name, {
-            ...original,
-            value: function (this: unknown, ...args: unknown[]) {
-                return timed(name, () => fn.apply(this, args));
-            },
-        });
+        const value = function (this: unknown, ...args: unknown[]) {
+            return timed(name, () => fn.apply(this, args), value);
+        };
+        Object.defineProperty(proto, name, { ...original, value });
         done.push({ proto, name, original });
     }
     for (const [ctor, name] of GETTERS) {
@@ -181,12 +190,10 @@ export function wrapLayoutReads(probe: LayoutReadProbe, scope: Record<string, an
         const original = proto && Object.getOwnPropertyDescriptor(proto, name);
         if (!original || typeof original.get !== "function") continue;
         const get = original.get;
-        Object.defineProperty(proto, name, {
-            ...original,
-            get: function (this: unknown) {
-                return timed(name, () => get.call(this));
-            },
-        });
+        const wrapped = function (this: unknown) {
+            return timed(name, () => get.call(this), wrapped);
+        };
+        Object.defineProperty(proto, name, { ...original, get: wrapped });
         done.push({ proto, name, original });
     }
     return () => {

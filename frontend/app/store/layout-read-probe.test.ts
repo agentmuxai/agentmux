@@ -132,6 +132,11 @@ describe("layout-read probe", () => {
             );
         });
 
+        it("takes the first frame of a stack cut at the wrapper, when every frame is one bundle", () => {
+            const stack = ["Error", "    at sub (https://h/assets/index-1.js:1:900)", "    at run (https://h/assets/index-1.js:1:50)"];
+            expect(callerOf(stack.join("\n"))).toBe("/assets/index-1.js:1:900");
+        });
+
         it("reads a frame with no function name", () => {
             expect(callerOf("Error\n    at http://localhost:5173/src/a.ts:7:2")).toBe("/src/a.ts:7:2");
         });
@@ -194,7 +199,7 @@ describe("wrapLayoutReads", () => {
         expect(el.clientWidth).toBe(42);
         expect(el.offsetWidth).toBe(7);
         expect(lines.map((l) => /api=(\w+)/.exec(l)?.[1])).toEqual(["getBoundingClientRect", "clientWidth", "offsetWidth"]);
-        expect(lines[0]).toContain("at=/src/c.ts:3:4 ms=5.0");
+        expect(lines[0]).toMatch(/at=\S*layout-read-probe\.test\.ts:\d+:\d+ ms=5\.0$/);
     });
 
     it("does not time a call outside a message", () => {
@@ -212,6 +217,24 @@ describe("wrapLayoutReads", () => {
         expect(el.calls).toBe(0);
         el.getBoundingClientRect();
         expect(el.calls).toBe(1);
+    });
+
+    it("names the caller of the wrapped call even when the probe and its callers are one bundle", () => {
+        let t = 0;
+        const lines: string[] = [];
+        // The clock's own stack is the whole stack, probe frames and all, as in a packaged build's one file.
+        const probe = createLayoutReadProbe({ now: () => (t += 5), log: (l) => lines.push(l), stack: () => new Error().stack ?? "" });
+        probe.setEnabled(true);
+        const { FakeElement, FakeHTMLElement } = makeElements();
+        const undo = wrapLayoutReads(probe, { Element: FakeElement, HTMLElement: FakeHTMLElement });
+        probe.enter(eventMsg("a"));
+        new FakeHTMLElement().getBoundingClientRect();
+        new FakeHTMLElement().offsetWidth;
+        undo();
+        expect(lines).toHaveLength(2);
+        for (const line of lines) {
+            expect(line).toMatch(/at=\S*layout-read-probe\.test\.ts:\d+:\d+ /);
+        }
     });
 
     it("is undone, leaving the original calls", () => {
