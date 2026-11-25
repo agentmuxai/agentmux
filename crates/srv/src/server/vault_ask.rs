@@ -9,6 +9,7 @@
 
 use std::time::Duration;
 
+use crate::backend::vault::agent_set;
 use crate::backend::vault::uses::{self, Ended, UseAnswer, UseRequest};
 
 use super::browser_vault_fill::Waiting;
@@ -29,7 +30,8 @@ const ASKED: &str = "asked to use it";
 pub(super) async fn ask(state: &AppState, attention_block: &str, mut request: UseRequest, wait: Duration, headline: &str) -> (Ended, Option<UseAnswer>) {
     request.block_id = shown_pane(state, &request.block_id);
     // A value an agent had the Vault read, and the person has not seen, is never used on silence.
-    crate::backend::vault::agent_set::apply(&state.identity_store, &mut request);
+    agent_set::apply(&state.identity_store, &mut request);
+    let was_unseen = !request.set_by.is_empty();
     let (id, entry, label, agent) = (request.id.clone(), request.entry_id.clone(), request.entry_label.clone(), request.agent.clone());
     let agent_reason = request.agent_reason.clone();
     let target = target_of(&request);
@@ -45,10 +47,20 @@ pub(super) async fn ask(state: &AppState, attention_block: &str, mut request: Us
         Ok(Err(_)) => Some(UseAnswer::of(uses::Decision::Deny)),
         Err(_) => None,
     };
-    let ended = Ended::of(answer.as_ref());
+    let mut ended = Ended::of(answer.as_ref());
+    // The value was replaced by an agent while the person was being asked: the card did not say so, and silence does not
+    // approve a value nobody has seen. An answer they gave stands for this use, with no Always and no look at it counted.
+    let replaced_meanwhile = !was_unseen && agent_set::is_unseen(&state.identity_store, &entry);
+    if replaced_meanwhile {
+        ended = match ended {
+            Ended::WentAhead => Ended::NoAnswer,
+            Ended::Always => Ended::Once,
+            other => other,
+        };
+    }
     // The person's yes to a use of a value an agent had the Vault read is their look at it: it is trusted from now on.
-    if matches!(ended, Ended::Once | Ended::Always) {
-        crate::backend::vault::agent_set::clear(&state.identity_store, &entry);
+    if matches!(ended, Ended::Once | Ended::Always) && !replaced_meanwhile {
+        agent_set::clear(&state.identity_store, &entry);
     }
     if ended == Ended::WentAhead {
         let line = crate::backend::vault::Line { entry_id: &entry, label: &label, actor: &agent, action: ASKED, target: &target, outcome: uses::WENT_AHEAD_OUTCOME, reason: &agent_reason };

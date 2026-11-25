@@ -614,7 +614,7 @@ impl ShellNodeRunner {
 impl ShellNodeRunner {
     /// Runs the capture on the held output, then publishes it cleaned of the
     /// values, or, if the capture failed, one line saying it is withheld and why.
-    async fn publish_captured(&self, job: crate::backend::vault::capture::Job, held: Vec<(&'static str, String, u64)>, cut: bool, exit_code: i32, status: &Arc<Mutex<ShellStatusInfo>>) {
+    async fn publish_captured(&self, mut job: crate::backend::vault::capture::Job, held: Vec<(&'static str, String, u64)>, cut: bool, exit_code: i32, status: &Arc<Mutex<ShellStatusInfo>>) {
         use crate::backend::vault::capture::Outcome;
         let given = |line: &str| -> String {
             match &self.scrubber {
@@ -625,6 +625,8 @@ impl ShellNodeRunner {
         let stdout = zeroize::Zeroizing::new(held.iter().filter(|l| l.0 == "stdout").map(|l| l.1.as_str()).collect::<Vec<_>>().join("\n"));
         let output = zeroize::Zeroizing::new(held.iter().map(|l| given(&l.1)).collect::<Vec<_>>().join("\n"));
         let lines = held.len();
+        // The command has run: a capture that finds nothing gives the pace back itself.
+        job.reservation.settle();
         let (store, capture) = (job.store.clone(), job.capture.clone());
         let outcome = tokio::task::spawn_blocking(move || capture.finish(&store, &stdout, &output, cut, exit_code))
             .await
@@ -817,7 +819,7 @@ mod tests {
                 scrubber: None,
                 stdin_once: None,
                 secret_dir: None,
-                capture: Some(capture::Job { capture: plan, store: Arc::clone(&store), changed: Box::new(|| {}) }),
+                capture: Some(capture::Job { capture: plan, store: Arc::clone(&store), changed: Box::new(|| {}), reservation: Default::default() }),
             }
         };
         let published = |broker: &Broker, id: &str| {

@@ -133,6 +133,33 @@ pub fn pace() -> &'static Pace {
     PACE.get_or_init(Pace::default)
 }
 
+/// What an agent was admitted for and has not yet made. Dropped before it is settled (the call was denied, cancelled or
+/// failed on the way), it gives the pace back.
+#[derive(Default)]
+pub struct Reservation {
+    agent: String,
+    acts: Vec<Act>,
+}
+
+impl Reservation {
+    pub fn new(agent: &str, acts: Vec<Act>) -> Self {
+        Self { agent: agent.to_string(), acts }
+    }
+
+    /// The work it was for has begun: whatever becomes of it, its own steps give the pace back.
+    pub fn settle(&mut self) {
+        self.acts.clear();
+    }
+}
+
+impl Drop for Reservation {
+    fn drop(&mut self) {
+        if !self.acts.is_empty() {
+            refund(&self.agent, &self.acts);
+        }
+    }
+}
+
 /// [`Pace::refund`].
 pub fn refund(agent: &str, acts: &[Act]) {
     pace().refund(agent, acts);
@@ -223,6 +250,24 @@ mod tests {
         }
         assert!(!p.may_note_refusal("a", T + 1) && p.may_note_refusal("b", T + 1));
         assert!(p.may_note_refusal("a", T + WINDOW_MS + 1));
+    }
+
+    #[test]
+    fn a_reservation_dropped_unsettled_gives_the_pace_back_and_a_settled_one_does_not() {
+        let who = "reservation-test-agent";
+        let held = || pace().admit(who, &[Act::Edit], agentmux_common::time::now_ms());
+        for _ in 0..WRITES - 1 {
+            held().unwrap();
+        }
+        drop(Reservation::new(who, vec![Act::Edit; WRITES - 1]));
+        for _ in 0..WRITES {
+            held().unwrap();
+        }
+        assert!(held().is_err());
+        let mut settled = Reservation::new(who, vec![Act::Edit]);
+        settled.settle();
+        drop(settled);
+        assert!(held().is_err(), "a settled reservation gives nothing back");
     }
 
     #[test]

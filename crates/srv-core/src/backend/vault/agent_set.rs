@@ -28,6 +28,11 @@ pub fn clear(store: &Store, entry_id: &str) -> bool {
     store.vault_unseen_clear(entry_id).unwrap_or(false)
 }
 
+/// Whether the entry's value is one an agent set and the person has not seen.
+pub fn is_unseen(store: &Store, entry_id: &str) -> bool {
+    matches!(store.vault_unseen_get(entry_id), Ok(Some(_)))
+}
+
 /// Tells `request` that its entry's value was set by an agent and not seen, when it was: who and when. A use of it then never
 /// goes ahead on silence and offers no *Always*. Leaves a use of an entry the person has seen as it is.
 pub fn apply(store: &Store, request: &mut UseRequest) {

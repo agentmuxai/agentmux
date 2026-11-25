@@ -92,6 +92,9 @@ pub struct Job {
     pub capture: Capture,
     pub store: std::sync::Arc<Store>,
     pub changed: Box<dyn Fn() + Send + Sync>,
+    /// The agent's pace this capture holds until its command has run: a job dropped before then (the person said no to
+    /// another card of the same call, or the call was cancelled) gives it back.
+    pub reservation: super::pace::Reservation,
 }
 
 /// What a capture came to, once the command ended.

@@ -197,7 +197,7 @@ pub(super) async fn plan_capture(
         return Err(refuse(StatusCode::TOO_MANY_REQUESTS, why));
     }
     let changed_state = state.clone();
-    let job = capture::Job { capture: plan, store: state.identity_store.clone(), changed: Box::new(move || super::vault_handlers::publish(&changed_state)) };
+    let job = capture::Job { capture: plan, store: state.identity_store.clone(), changed: Box::new(move || super::vault_handlers::publish(&changed_state)), reservation: crate::backend::vault::pace::Reservation::new(&agent, acts) };
     Ok((Some(job), Vec::new()))
 }
 
