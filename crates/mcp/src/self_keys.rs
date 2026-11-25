@@ -27,7 +27,7 @@ use agentmux_common::AUTH_KEY_HEADER;
 use serde::Deserialize;
 
 /// Re-fetch a copy this old even with no expiry to go by (an older srv).
-const REFRESH_AFTER: Duration = Duration::from_secs(20 * 60 * 60);
+const REFRESH_AFTER: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Deserialize, Default, Clone)]
 struct Wire {
@@ -89,7 +89,7 @@ fn is_container_hint(value: Option<&str>) -> bool {
     value == Some("1")
 }
 
-/// Fetch the keys if there is no copy yet, or it is older than 20 h. Errors
+/// Fetch the keys if there is no copy yet, or it is older than five minutes (a key replaced while this process ran is picked up then; srv serves the same one until it is replaced). Errors
 /// leave the old copy (or none) in place: signing then falls back to the env
 /// keys, exactly as before M4d-3.
 pub(crate) async fn refresh_if_stale(client: &reqwest::Client, local_url: &str, auth_key: &str) {
@@ -320,7 +320,7 @@ mod tests {
         };
         assert!(still_good(&cached(Some(1_000)), 999));
         assert!(!still_good(&cached(Some(1_000)), 1_000), "expired: srv may rotate it now");
-        assert!(still_good(&cached(None), 1_000_000), "no expiry served: the 20 h clock");
+        assert!(still_good(&cached(None), 1_000_000), "no expiry served: the five minute clock");
     }
 
     #[test]
