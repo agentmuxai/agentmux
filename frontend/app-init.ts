@@ -11,6 +11,7 @@ import { registerLinkInPaneListener } from "@/app/element/link-open";
 import { installPaneSelectGuard } from "@/app/element/ui/pane-select";
 import { installTextDragGuard } from "@/app/element/ui/text-drag";
 import { installFloatModifier } from "@/app/store/float-modifier";
+import { installLayoutReadProbe } from "@/app/store/layout-read-probe-setting";
 import { initUiEventSubs } from "@/app/store/ui-event-subs";
 import "@/app/modals/modal-layer-panels";
 import "@/layout/lib/layout-model-factory";
@@ -1176,6 +1177,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     installPointerGuards();
     registerLinkInPaneListener();
     installFloatModifier();
+    installLayoutReadProbe();
     tlog("registerKeys", t);
 
     t = performance.now();

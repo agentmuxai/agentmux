@@ -286,7 +286,7 @@
 198 crates/srv/src/srv_ipc/server.rs::handle_connection
 213 frontend/app-init.ts::initAppInner
 163 frontend/app-init.ts::initHostNewWindow
-218 frontend/app-init.ts::initMux
+219 frontend/app-init.ts::initMux
 364 frontend/app/block/block.tsx::Block
 136 frontend/app/block/block.tsx::BlockFull
 263 frontend/app/block/blockframe.tsx::BlockFrame_Header
