@@ -228,3 +228,17 @@ fn undoing_changed_details_twice_is_refused_and_keeps_what_the_person_edited_sin
     assert!(agent_changes::undo(&s, change.seq).is_err(), "and a second try changes nothing");
     assert_eq!(s.vault_get(&id).unwrap().unwrap().tags, r#"["ops"]"#);
 }
+
+#[test]
+fn two_quick_changes_by_one_agent_each_undo_to_their_own_earlier_value() {
+    let s = store();
+    let id = key(&s, "GitHub", "ghp_a_000000000");
+    capture_over(&s, &id, "builder", "ghp_b_000000000");
+    capture_over(&s, &id, "builder", "ghp_c_000000000");
+    let all = agent_changes::list(&s, Some(&id), false).unwrap();
+    assert_eq!(all.len(), 2, "{all:?}");
+    let first = all.iter().min_by_key(|c| c.seq).unwrap();
+    assert_eq!(first.undo, "restore value");
+    agent_changes::undo(&s, first.seq).unwrap();
+    assert_eq!(reveal(&s, &id, "value", "revealed").unwrap().as_str(), "ghp_a_000000000", "the first change put back its own earlier value, not the second's");
+}

@@ -25,7 +25,7 @@ const LOOK_BACK_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 /// The most changes it lists.
 const MOST: i64 = 300;
 /// How near in time an earlier value or earlier details are to the line that replaced them: they are written in one call.
-const NEAR_MS: i64 = 60_000;
+const NEAR_MS: i64 = 5_000;
 /// The Activity action of the person putting earlier details back.
 pub const RESTORED_DETAILS: &str = "restored earlier details";
 
@@ -79,25 +79,41 @@ fn is_agent(row: &VaultActivityRow, agent_label: &str) -> bool {
     row.actor_kind == "agent" && history::actor_label(&row.actor) == agent_label
 }
 
+/// True when line `seq` is the one that wrote what was kept at `at`: of the lines by this agent on this entry that `keep`
+/// accepts, the nearest in time. A line is written in the same call as the version or details it replaced, so each of two
+/// quick changes by one agent keeps its own, and a kept row whose own line is gone belongs to no other line.
+fn written_by(rows: &[VaultActivityRow], entry_id: &str, label: &str, at: i64, seq: i64, keep: impl Fn(&VaultActivityRow) -> bool) -> bool {
+    let mine = rows.iter().filter(|r| r.entry_id == entry_id && is_agent(r, label) && keep(r));
+    mine.min_by_key(|r| ((r.at - at).abs(), r.seq)).is_some_and(|r| r.seq == seq && (r.at - at).abs() <= NEAR_MS)
+}
+
 /// The earlier value `row` replaced, while it is still kept.
-fn earlier_value(store: &Store, entry: &VaultRow, row: &VaultActivityRow) -> Option<i64> {
+fn earlier_value(store: &Store, entry: &VaultRow, row: &VaultActivityRow, rows: &[VaultActivityRow]) -> Option<i64> {
     let label = history::actor_label(&row.actor);
+    let value_line = |r: &VaultActivityRow| r.action != inspect::CHANGED_DETAILS && r.action != proposals::PROPOSED;
     store
         .vault_versions(&entry.id, entry.created_at)
         .ok()?
         .into_iter()
-        .find(|v| v.state == versions::PREVIOUS && history::actor_label(&v.replaced_by) == label && v.replaced_at <= row.at + 1000 && row.at - v.replaced_at <= NEAR_MS)
+        .filter(|v| v.state == versions::PREVIOUS && history::actor_label(&v.replaced_by) == label && written_by(rows, &entry.id, &label, v.replaced_at, row.seq, value_line))
+        .min_by_key(|v| (v.replaced_at - row.at).abs())
         .map(|v| v.seq)
 }
 
 /// The details `row` replaced, while they are still kept.
-fn earlier_details(store: &Store, entry: &VaultRow, row: &VaultActivityRow) -> Option<DetailsKept> {
+fn earlier_details(store: &Store, entry: &VaultRow, row: &VaultActivityRow, rows: &[VaultActivityRow]) -> Option<DetailsKept> {
     let label = history::actor_label(&row.actor);
-    store.vault_details_kept(&entry.id, entry.created_at).ok()?.into_iter().find(|d| d.changed_by == label && d.what == row.target && d.changed_at <= row.at + 1000 && row.at - d.changed_at <= NEAR_MS)
+    let same = |r: &VaultActivityRow| r.action == inspect::CHANGED_DETAILS && r.target == row.target;
+    store
+        .vault_details_kept(&entry.id, entry.created_at)
+        .ok()?
+        .into_iter()
+        .filter(|d| d.changed_by == label && d.what == row.target && written_by(rows, &entry.id, &label, d.changed_at, row.seq, same))
+        .min_by_key(|d| (d.changed_at - row.at).abs())
 }
 
 /// `row` as a change the person can look at, or none when it is not one now (the entry is gone, the proposal is settled).
-fn change_of(store: &Store, row: &VaultActivityRow, seen: bool) -> Option<AgentChange> {
+fn change_of(store: &Store, rows: &[VaultActivityRow], row: &VaultActivityRow, seen: bool) -> Option<AgentChange> {
     let entry = store.vault_get(&row.entry_id).ok()??;
     let first = store.vault_activity_first(&entry.id, entry.created_at).ok()?;
     let by_agent = first.as_ref().is_some_and(|f| f.actor_kind == "agent");
@@ -120,7 +136,10 @@ fn change_of(store: &Store, row: &VaultActivityRow, seen: bool) -> Option<AgentC
     let recent = now_ms() - row.at <= versions::KEEP_MS;
     if row.action == proposals::PROPOSED {
         let field = row.target.strip_prefix("field ").unwrap_or(&row.target).to_string();
-        let waiting = store.vault_proposals(Some(&entry.id), now_ms() - proposals::KEEP_MS).ok()?.into_iter().find(|p| p.field == field && p.at <= row.at + 1000 && p.at >= row.at - NEAR_MS)?;
+        let waiting = store.vault_proposals(Some(&entry.id), now_ms() - proposals::KEEP_MS).ok()?.into_iter().find(|p| {
+            let same = |r: &VaultActivityRow| r.action == proposals::PROPOSED && r.target == row.target;
+            p.field == field && history::actor_label(&p.agent) == history::actor_label(&row.actor) && written_by(rows, &entry.id, &history::actor_label(&row.actor), p.at, row.seq, same)
+        })?;
         let current = signins_field(&entry, &field);
         change.kind = "proposal".into();
         change.proposal = Some(ProposalInfo { field, value: waiting.value, current });
@@ -129,13 +148,13 @@ fn change_of(store: &Store, row: &VaultActivityRow, seen: bool) -> Option<AgentC
         change.undo = "remove".into();
     } else if row.action == inspect::CHANGED_DETAILS {
         change.kind = "changed details".into();
-        if recent && earlier_details(store, &entry, row).is_some() {
+        if recent && earlier_details(store, &entry, row, rows).is_some() {
             change.undo = "restore details".into();
         }
     } else {
         change.kind = "new value".into();
         change.replaces_yours = !by_agent;
-        if recent && earlier_value(store, &entry, row).is_some() {
+        if recent && earlier_value(store, &entry, row, rows).is_some() {
             change.undo = "restore value".into();
         }
     }
@@ -155,7 +174,7 @@ pub fn list(store: &Store, entry: Option<&str>, include_seen: bool) -> Result<Ve
     let mut out: Vec<AgentChange> = rows
         .iter()
         .filter(|r| entry.is_none_or(|id| r.entry_id == id))
-        .filter_map(|r| change_of(store, r, r.seq <= through || marked.contains(&r.seq)))
+        .filter_map(|r| change_of(store, &rows, r, r.seq <= through || marked.contains(&r.seq)))
         .filter(|c| include_seen || !c.seen)
         .collect();
     out.sort_by_key(|c| (!(c.kind == "proposal" || c.replaces_yours), std::cmp::Reverse(c.seq)));
@@ -213,15 +232,16 @@ pub fn seen_all(store: &Store) -> Result<(), String> {
 /// recorded as theirs. Refused when there is nothing to put back (past its 7 days).
 pub fn undo(store: &Store, seq: i64) -> Result<(), String> {
     let row = store.vault_activity_get(seq).map_err(|e| e.to_string())?.filter(|r| r.actor_kind == "agent").ok_or("no such change by an agent")?;
-    let change = change_of(store, &row, false).ok_or("that change is not there any more")?;
+    let rows = store.vault_activity_agent_changes(now_ms() - LOOK_BACK_MS, &ACTIONS, MOST).map_err(|e| e.to_string())?;
+    let change = change_of(store, &rows, &row, false).ok_or("that change is not there any more")?;
     let entry = store.vault_get(&change.entry_id).map_err(|e| e.to_string())?.ok_or("that entry is gone")?;
     match change.undo.as_str() {
         "remove" => super::delete(store, &entry.id)?,
         "restore value" => {
-            let version = earlier_value(store, &entry, &row).ok_or("the earlier value is past its 7 days")?;
+            let version = earlier_value(store, &entry, &row, &rows).ok_or("the earlier value is past its 7 days")?;
             versions::restore(store, &entry.id, version)?;
         }
-        "restore details" => restore_details(store, &entry, &row)?,
+        "restore details" => restore_details(store, &entry, &row, &rows)?,
         _ => return Err("there is nothing to put back for that change: the earlier version is past its 7 days".into()),
     }
     store.vault_change_seen(seq).map_err(|e| e.to_string())?;
@@ -230,8 +250,8 @@ pub fn undo(store: &Store, seq: i64) -> Result<(), String> {
 
 /// Puts back only what the agent's change touched (the names in its line's target), so a later edit of something else by the
 /// person is kept, and drops the kept row it read so the same change cannot be undone twice.
-fn restore_details(store: &Store, entry: &VaultRow, row: &VaultActivityRow) -> Result<(), String> {
-    let kept = earlier_details(store, entry, row).ok_or("the earlier details are past their 7 days")?;
+fn restore_details(store: &Store, entry: &VaultRow, row: &VaultActivityRow, rows: &[VaultActivityRow]) -> Result<(), String> {
+    let kept = earlier_details(store, entry, row, rows).ok_or("the earlier details are past their 7 days")?;
     let earlier: BTreeMap<String, String> = serde_json::from_str(&kept.fields).unwrap_or_default();
     let mut fields = super::signins::fields_of(entry);
     let (mut label, mut tags) = (entry.label.clone(), entry.tags.clone());
