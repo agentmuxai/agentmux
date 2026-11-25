@@ -308,12 +308,16 @@ async fn generate_makes_a_login_for_the_agents_own_profile_and_leaves_where_it_i
     let fields = vault::signins::fields_of(&row);
     let own = format!("profile:{}", crate::backend::browser_profiles_store::agent_profile_id("uid-vid-gen-a"));
     assert_eq!((fields.get("profile"), fields.get("site"), fields.get("username")), (Some(&own), Some(&"https://ci.example.com".to_string()), Some(&"bot".to_string())));
-    // Where a sign-in is offered, and who it is shared with, are the person's.
-    for field in ["realm", "proxy", "profile", "shared"] {
+    // Who it is shared with, and whose browser it is for, are not the agent's to name here; where it is offered is, but the
+    // site must be one exact origin.
+    for field in ["profile", "shared"] {
         let (s, out) = call(&app, Some(&token), "/api/v1/vault/generate", body(json!({ "site": "https://ci.example.com", field: "personal" }))).await;
         assert!(s.is_client_error(), "{field}: {out}");
-        assert!(out["error"].as_str().unwrap().contains("the person sets it in the Vault pane"), "{field}: {out}");
     }
+    let (s, out) = call(&app, Some(&token), "/api/v1/vault/generate", body(json!({ "site": "https://ci.example.com/login" }))).await;
+    assert!(s.is_client_error() && out["error"].as_str().unwrap().contains("exact origin"), "{out}");
+    let (s, with_realm) = call(&app, Some(&token), "/api/v1/vault/generate", body(json!({ "site": "https://ci2.example.com", "realm": "Staging" }))).await;
+    assert_eq!(s, StatusCode::OK, "{with_realm}");
     // A key or a note has no profile to belong to.
     let (s, key) = call(&app, Some(&token), "/api/v1/vault/generate", json!({ "kind": "api-key", "label": "Signing key", "why": "sign the test webhooks", "auth": keyless("vid-gen-a") })).await;
     assert_eq!(s, StatusCode::OK, "{key}");

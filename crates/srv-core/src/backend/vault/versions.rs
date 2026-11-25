@@ -100,6 +100,9 @@ pub fn prune(store: &Store) {
     if let Err(e) = store.vault_versions_prune(now_ms() - KEEP_MS, KEPT_PREFIX) {
         tracing::warn!(error = %e, "vault: couldn't delete old versions");
     }
+    if let Err(e) = store.vault_details_prune(now_ms() - KEEP_MS) {
+        tracing::warn!(error = %e, "vault: couldn't delete old details");
+    }
 }
 
 /// The entry's earlier values, newest first.

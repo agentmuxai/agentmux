@@ -576,6 +576,10 @@ pub fn store_value(store: &Store, plan: &Plan, value: &Zeroizing<String>, userna
     note(store, plan, &id, &label, agent, "done");
     // Nobody was asked, so the value is the agent's until the person has seen it (`agent_set`).
     super::agent_set::mark(store, &id, agent);
+    if matches!(&plan.target, Target::New { kind: "login", fields, .. } if fields.contains_key(super::signins::SITE)) {
+        // A site the agent chose, too: a use there never goes ahead on silence either (R9).
+        super::agent_set::mark_site(store, &id, agent);
+    }
     Ok(Imported { id, label, vault: plan.vault_name.clone() })
 }
 

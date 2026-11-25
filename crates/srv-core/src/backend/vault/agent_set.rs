@@ -8,16 +8,29 @@
 //! person first. So the entry they write is marked unseen: a *use* of it never goes ahead on silence and offers no *Always*,
 //! and the card says who set the value and when. The mark goes when the person marks the change seen, or answers a use of
 //! the entry with a yes. Marking also drops the entry's *Always* grants, which skip the card on a use. A value the Vault made (`generate`, `rotate`) is not marked: nobody had it before.
+//!
+//! A site, realm or proxy an agent chose for a login is marked the same way (R9): a use at a place the person never saw is
+//! the way a password reaches a site an agent picked.
 
 use agentmux_common::time::now_ms;
 
 use super::uses::UseRequest;
 use crate::backend::storage::store::Store;
+use crate::backend::storage::vault_changes::{SITE, VALUE};
 
 /// Marks the value of `entry_id` as set by `agent` and not yet seen by the person. A failure to mark is logged: the write
 /// it follows is already made, and the history line records it.
 pub fn mark(store: &Store, entry_id: &str, agent: &str) {
-    let marked = store.vault_get(entry_id).ok().flatten().map(|row| store.vault_unseen_mark(entry_id, row.created_at, agent, now_ms()));
+    mark_what(store, entry_id, agent, VALUE);
+}
+
+/// [`mark`] for a site, realm or proxy an agent set on the login.
+pub fn mark_site(store: &Store, entry_id: &str, agent: &str) {
+    mark_what(store, entry_id, agent, SITE);
+}
+
+fn mark_what(store: &Store, entry_id: &str, agent: &str, what: &str) {
+    let marked = store.vault_get(entry_id).ok().flatten().map(|row| store.vault_unseen_mark(entry_id, row.created_at, agent, now_ms(), what));
     if !matches!(marked, Some(Ok(()))) {
         tracing::warn!(entry = entry_id, "vault: couldn't mark an agent's value as unseen");
     }
@@ -42,6 +55,7 @@ pub fn apply(store: &Store, request: &mut UseRequest) {
     if let Ok(Some(unseen)) = store.vault_unseen_get(&request.entry_id) {
         request.set_by = unseen.by_agent;
         request.set_ms = u64::try_from(unseen.at).unwrap_or(0);
+        request.set_what = unseen.what;
         request.offer_always = false;
     }
 }

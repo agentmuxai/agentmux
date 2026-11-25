@@ -273,6 +273,7 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
     conn.execute_batch(super::vault::VAULT_SCHEMA)?; // The Vault's tables, no version bump: storage/vault.rs.
     conn.execute_batch(super::vault_sync::SCHEMA)?; // What a shared Vault keeps besides: storage/vault_sync.rs.
     conn.execute_batch(super::vault_changes::SCHEMA)?; // What agents changed that the person has not seen: storage/vault_changes.rs.
+    apply_additive_columns(conn, super::vault_changes::COLUMNS)?;
     store_schema::seed_identity_blank_bundle(conn)?;
     store_schema::add_identity_store_columns(conn)?;
 

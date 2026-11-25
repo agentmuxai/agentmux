@@ -60,6 +60,7 @@ const use = (over: Partial<UseRequest> = {}): UseRequest => ({
     goes_ahead: false,
     set_by: "",
     set_ms: 0,
+    set_what: "",
     batch: batch(),
     ...over,
 });

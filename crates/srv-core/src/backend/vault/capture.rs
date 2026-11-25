@@ -577,6 +577,12 @@ impl Capture {
             // Nobody was asked, so the value is the agent's until the person has seen it (`agent_set`).
             super::agent_set::mark(store, id, &self.agent);
         }
+        for (rule, (id, _)) in self.rules.iter().zip(&made) {
+            // A login given a site: the place is the agent's choice or the page's, and the person has not seen it (R9).
+            if matches!(&rule.into, Target::New { kind, fields, .. } if *kind == "login" && fields.contains_key(super::signins::SITE)) {
+                super::agent_set::mark_site(store, id, &self.agent);
+            }
+        }
         Ok(made.into_iter().map(|(id, _)| id).collect())
     }
 

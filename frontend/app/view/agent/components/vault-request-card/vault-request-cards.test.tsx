@@ -66,6 +66,7 @@ const use = (over: Partial<UseRequest> = {}): UseRequest => ({
     goes_ahead: true,
     set_by: "",
     set_ms: 0,
+    set_what: "",
     ...over,
 });
 const request = (over: Partial<VaultRequest> = {}): VaultRequest => ({

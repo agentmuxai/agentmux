@@ -236,6 +236,7 @@ describe("the question before an agent changes where a machine copy is", () => {
         goes_ahead: false,
         set_by: "",
         set_ms: 0,
+        set_what: "",
         link: { about_from: "", about_to: "", only: false, ...link },
     });
     const shown = async (link: { from: string; to: string }) => {
