@@ -69,6 +69,7 @@ export function startTileDrag(node: LayoutNode, model: LayoutModel): void {
     // The pane's picture is carried outside this layout's body only: over it, the layout shows the pane.
     watchEscapeDuringDrag(blockId ? { blockId, home: homeLayoutOf(model, () => model.activeDrag()) } : undefined);
     clearCrossTabDrop();
+    holdContainerFor(model);
     model.activeDrag._set(true);
     setCurrentDragPayload({ kind: "tile", node, sourceTabId: tabId });
 }
@@ -86,6 +87,30 @@ export function releaseTileDrag(model: LayoutModel): void {
     resetAllDropIntent();
     layoutDragEnded(model);
     markReleased();
+    releaseContainersAfterDrop();
+}
+
+/** The layouts whose container size the drag in progress holds (the source's, and one a pane from another tab is dragged over). */
+const held = new Set<LayoutModel>();
+
+/**
+ * Measure `model`'s container once for the whole drag: a drag does not change it, and re-measuring after the drop's writes
+ * laid the page out again inside the drop's listener. Also called for a layout a pane of another tab is dragged over.
+ */
+export function holdContainerFor(model: LayoutModel): void {
+    if (held.has(model) || typeof model.holdContainerRect !== "function") return;
+    held.add(model);
+    model.holdContainerRect();
+}
+
+/** After the drop's own handlers (the source's and the target's, in one event), the next frame: measure afresh again. */
+function releaseContainersAfterDrop(): void {
+    const release = () => {
+        for (const model of held) model.releaseContainerRect?.();
+        held.clear();
+    };
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(release);
+    else release();
 }
 
 export function endTileDrag(reason: DragEndReason): void {
