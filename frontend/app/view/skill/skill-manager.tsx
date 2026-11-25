@@ -50,7 +50,7 @@ function SkillBoundAgents(props: { model: SkillCatalogModel; skill: SkillCatalog
                             <Button
                                 density="compact"
                                 aria-label={t("skill.manager.unbindAria", { name: agent.name })}
-                                onClick={() => void props.model.unbindFromAgent(props.skill.id, agent.id)}
+                                onClick={() => props.model.unbindFromAgent(props.skill.id, agent.id)}
                             >
                                 {t("skill.manager.unbind")}
                             </Button>
@@ -351,7 +351,7 @@ function SkillReadOnly(p: { m: ManagerState; skill: Accessor<SkillCatalogItem> }
                 <Button
                     class="agent-primitive-modal-btn"
                     disabled={!model.bindAgentIdAtom()}
-                    onClick={() => void model.bindToAgent(skill().id, model.bindAgentIdAtom())}
+                    onClick={() => model.bindToAgent(skill().id, model.bindAgentIdAtom())}
                 >
                     {t("skill.manager.bind")}
                 </Button>
@@ -360,7 +360,7 @@ function SkillReadOnly(p: { m: ManagerState; skill: Accessor<SkillCatalogItem> }
                 <Button
                     tone="danger"
                     class="agent-primitive-modal-btn agent-primitive-modal-btn-danger"
-                    onClick={() => void model.deleteSkill(skill().id)}
+                    onClick={() => model.deleteSkill(skill().id)}
                 >
                     {t("skill.manager.delete")}
                 </Button>

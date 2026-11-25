@@ -87,7 +87,7 @@ export function GithubInstallationsSection(): JSX.Element {
                             {reposLine(row)}
                             <Show when={problemLine(row)}>{(why) => <> · {why()}</>}</Show>
                         </span>
-                        <Button density="compact" icon="link-slash" disabled={busy()} onClick={() => void unlink(row.installationId)}>
+                        <Button density="compact" icon="link-slash" disabled={busy()} onClick={() => unlink(row.installationId)}>
                             Unlink
                         </Button>
                     </div>
@@ -108,10 +108,10 @@ export function GithubInstallationsSection(): JSX.Element {
                 )}
             </Show>
             <div class="identity-key-actions">
-                <Button tone="accent" icon="arrow-up-right-from-square" disabled={busy()} onClick={() => void install()}>
+                <Button tone="accent" icon="arrow-up-right-from-square" disabled={busy()} onClick={() => install()}>
                     Install on repositories…
                 </Button>
-                <Button icon="rotate-right" disabled={busy()} onClick={() => void call("refresh")}>
+                <Button icon="rotate-right" disabled={busy()} onClick={() => call("refresh")}>
                     Check for installations
                 </Button>
             </div>

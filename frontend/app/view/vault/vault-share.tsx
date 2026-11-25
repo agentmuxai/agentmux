@@ -96,7 +96,7 @@ export function VaultShareDialog(props: { entry: VaultEntryInfo; onClose: () => 
                 <Button data-modal-dismiss onClick={props.onClose} disabled={busy()}>
                     {t("vault.share.cancel")}
                 </Button>
-                <Button tone="accent" busy={busy()} disabled={!pick()} onClick={() => void share()}>
+                <Button tone="accent" busy={busy()} disabled={!pick()} onClick={() => share()}>
                     {t("vault.share.confirm")}
                 </Button>
             </ModalFooter>
@@ -151,7 +151,7 @@ export function EntryShares(props: { entry: VaultEntryInfo }): JSX.Element {
                             <span class="vault-grant__text">
                                 {s.name} <span class="warden-manager-dim">({usedLine(s.uses, s.last_used_ms, s.always)})</span>
                             </span>
-                            <CloseButton size="sm" label={t("vault.share.stop", { label: props.entry.label, name: s.name })} onClick={() => void stop(s.agent)} />
+                            <CloseButton size="sm" label={t("vault.share.stop", { label: props.entry.label, name: s.name })} onClick={() => stop(s.agent)} />
                         </span>
                     )}
                 </For>

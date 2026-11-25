@@ -124,7 +124,7 @@ function BrowseItem(p: {
             >
                 {(a) => (
                     <div class="skill-browse-actions">
-                        <Button tone="accent" busy={busy()} onClick={() => void install()}>
+                        <Button tone="accent" busy={busy()} onClick={() => install()}>
                             {a().label}
                         </Button>
                         <Show when={a().note}>

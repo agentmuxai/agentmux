@@ -332,7 +332,7 @@ function ImportedView(props: { s: ImportState; r: Accessor<ImportResult> }): JSX
                         <p role="status">{t("vault.import.deleted")}</p>
                     }
                 >
-                    <Button tone="danger" density="compact" icon="trash" onClick={() => void removeFile(s)}>
+                    <Button tone="danger" density="compact" icon="trash" onClick={() => removeFile(s)}>
                         {t("vault.import.deleteFile")}
                     </Button>
                 </Show>
@@ -390,7 +390,7 @@ function KeyFileRow(props: { s: ImportState; cur: Accessor<Step<"needs_passphras
                 {(name) => (
                     <>
                         <span class="warden-manager-mono">{name()}</span>{" "}
-                        <Button density="compact" disabled={s.busy()} onClick={() => void keyFile(s, "clear")}>
+                        <Button density="compact" disabled={s.busy()} onClick={() => keyFile(s, "clear")}>
                             {t("vault.import.removeKeyFile")}
                         </Button>
                     </>
@@ -555,7 +555,7 @@ function FooterActions(props: { s: ImportState }): JSX.Element {
     return (
         <>
             <Show when={!s.result() && s.step()?.kind === "needs_mapping"}>
-                <Button tone="accent" busy={s.busy()} onClick={() => void map(s)}>
+                <Button tone="accent" busy={s.busy()} onClick={() => map(s)}>
                     {t("vault.import.continue")}
                 </Button>
             </Show>
@@ -565,7 +565,7 @@ function FooterActions(props: { s: ImportState }): JSX.Element {
                         tone="accent"
                         busy={s.busy()}
                         disabled={!s.pass() && !cur().keyFileName}
-                        onClick={() => void unlock(s)}
+                        onClick={() => unlock(s)}
                     >
                         {t("vault.import.openFile")}
                     </Button>
@@ -577,7 +577,7 @@ function FooterActions(props: { s: ImportState }): JSX.Element {
                         tone="accent"
                         busy={s.busy()}
                         disabled={preview().total === 0}
-                        onClick={() => void commit(s, preview())}
+                        onClick={() => commit(s, preview())}
                     >
                         {t("vault.import.import")}
                     </Button>

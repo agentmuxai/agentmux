@@ -83,7 +83,7 @@ function CheckCopyButton(props: { entry: VaultEntryInfo; onError: (message: stri
         setBusy(false);
     };
     const label = () => (isLinked(props.entry.fields) ? t("vault.linked.check") : t("vault.machineCopy.check"));
-    return <IconButton icon="arrows-rotate" label={label()} density="compact" disabled={busy()} onClick={() => void check()} />;
+    return <IconButton icon="arrows-rotate" label={label()} density="compact" disabled={busy()} onClick={() => check()} />;
 }
 
 /** An entry's plain details, the Vault it is in (when the list shows more than one), its expiry and its machine copy. */

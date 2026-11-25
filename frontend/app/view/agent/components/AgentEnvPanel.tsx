@@ -148,7 +148,7 @@ export const AgentEnvPanel = (props: AgentEnvPanelProps): JSX.Element => {
                 </Show>
                 <Show when={!loaded() && error()}>
                     <div class="agent-primitive-modal-actions">
-                        <Button onClick={() => void load()}>{t("agentEnv.retry")}</Button>
+                        <Button onClick={() => load()}>{t("agentEnv.retry")}</Button>
                     </div>
                 </Show>
                 <Show when={saved()}>
@@ -161,7 +161,7 @@ export const AgentEnvPanel = (props: AgentEnvPanelProps): JSX.Element => {
                     <Button disabled={!dirty() || busy()} onClick={() => setDraft(stored())}>
                         {t("agentEnv.revert")}
                     </Button>
-                    <Button tone="accent" busy={busy()} disabled={!dirty() || busy()} onClick={() => void save()}>
+                    <Button tone="accent" busy={busy()} disabled={!dirty() || busy()} onClick={() => save()}>
                         {t("agentEnv.save")}
                     </Button>
                 </div>

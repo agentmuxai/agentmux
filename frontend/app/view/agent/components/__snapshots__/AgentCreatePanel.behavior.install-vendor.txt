@@ -62,7 +62,7 @@
       <div class="agent-create-actions">
         <button type="button" class="ui-button ui-tone-neutral">
           "Cancel"
-        <button data-testid="agent-create-check-again" type="button" class="ui-button ui-tone-accent" disabled="" aria-busy="true">
+        <button data-testid="agent-create-check-again" type="button" class="ui-button ui-tone-accent" disabled="" aria-busy="true" data-pending="true">
           <i aria-hidden="true" class="fa-solid fa-spinner fa-spin">
           "Check again"
   call recheckInstalled []

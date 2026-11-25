@@ -31,7 +31,7 @@ export function FilesFooter(props: { model: FilesModel; summary: () => string })
                                 style={{ width: `${op.total_bytes > 0 ? Math.floor((op.done_bytes / op.total_bytes) * 100) : op.total_items > 0 ? Math.floor((op.done_items / op.total_items) * 100) : 0}%` }}
                             />
                         </span>
-                        <Button tone="quiet" class="files-status-undo" onClick={() => void model.ops.cancel(op.op_id)}>
+                        <Button tone="quiet" class="files-status-undo" onClick={() => model.ops.cancel(op.op_id)}>
                             Cancel
                         </Button>
                     </div>
@@ -60,7 +60,7 @@ export function FilesFooter(props: { model: FilesModel; summary: () => string })
                         <span classList={{ "files-status-error": msg().tone === "error" }}>
                             {msg().text}
                             <Show when={msg().undo}>
-                                <Button tone="quiet" class="files-status-undo" onClick={() => void model.undo()}>
+                                <Button tone="quiet" class="files-status-undo" onClick={() => model.undo()}>
                                     Undo
                                 </Button>
                             </Show>

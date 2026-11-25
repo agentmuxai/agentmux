@@ -582,6 +582,7 @@ describe("KanbanDrawer: taking it back", () => {
         const { act } = mount(claimed(), { answers: [{ ok: false }, null] });
         fireEvent.click(button("Take it back"));
         await waitFor(() => expect(act).toHaveBeenCalledTimes(1));
+        await waitFor(() => expect(document.querySelector("[data-pending]")).toBeNull());
         expect(screen.queryByRole("alert")).toBeNull();
         fireEvent.click(button("Take it back"));
         await waitFor(() => expect(act).toHaveBeenCalledTimes(2));
@@ -1074,6 +1075,7 @@ describe("KanbanDrawer: cancelling", () => {
         fireEvent.click(button("Cancel task"));
         await waitFor(() => expect(act).toHaveBeenCalledTimes(1));
         expect((act.mock.calls[0][0] as KanbanActRequest).followers).toBe("hold");
+        await waitFor(() => expect(document.querySelector("[data-pending]")).toBeNull());
         // Ticked again, it cancels.
         fireEvent.click(screen.getByRole("checkbox", { name: /Cancelling also cancels/ }));
         fireEvent.click(button("Cancel task"));

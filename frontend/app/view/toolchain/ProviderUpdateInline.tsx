@@ -38,7 +38,7 @@ export const ProviderUpdateInline = (props: ProviderUpdateInlineProps): JSX.Elem
             when={showsRun()}
             fallback={
                 <div class="toolchain-detail-row">
-                    <Button tone="accent" onClick={() => void session().start()}>
+                    <Button tone="accent" onClick={() => session().start()}>
                         {install() ? `Install ${props.pinned}` : `Update to ${props.pinned}`}
                     </Button>
                 </div>
@@ -56,7 +56,7 @@ export const ProviderUpdateInline = (props: ProviderUpdateInlineProps): JSX.Elem
                 {/* A run that ended is no reason to hide the way to run it again: the row may still be behind. */}
                 <Show when={session().state() === "failed" || session().state() === "done"}>
                     <div>
-                        <Button onClick={() => void session().start()}>
+                        <Button onClick={() => session().start()}>
                             {session().state() === "failed" ? "Retry" : "Update again"}
                         </Button>
                     </div>

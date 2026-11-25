@@ -103,7 +103,7 @@ export const HistoryUsagePopover = (props: HistoryUsagePopoverProps): JSX.Elemen
                         </Show>
                         <div class="history-usage-footer">
                             <span class="history-usage-note">{t("historyUsage.measured", { ago: measuredAgo(usage().computed_at_ms, Date.now(), formatLocale()) })}</span>
-                            <Button tone="quiet" density="compact" busy={refreshing()} onClick={() => void refresh()}>
+                            <Button tone="quiet" density="compact" busy={refreshing()} onClick={() => refresh()}>
                                 {refreshing() ? t("historyUsage.measuring") : t("historyUsage.measureAgain")}
                             </Button>
                             <Button

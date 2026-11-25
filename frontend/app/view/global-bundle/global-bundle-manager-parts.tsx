@@ -157,7 +157,7 @@ function RemovedSection(part: { s: GlobalBundleManagerState }): JSX.Element {
                             <span class="global-bundle-removed-meta">
                                 {`Removed by ${removedByLabel(entry.removed_by)} · ${formatFileAge(entry.removed_at)}`}
                             </span>
-                            <Button onClick={() => void model.restore(entry)}>Restore</Button>
+                            <Button onClick={() => model.restore(entry)}>Restore</Button>
                         </div>
                     )}
                 </For>

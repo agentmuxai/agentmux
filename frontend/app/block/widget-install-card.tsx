@@ -42,9 +42,9 @@ export function WidgetInstallCard(props: { request: WidgetInstallRequest; decide
                 )}
             </div>
             <div class="widget-install-card-actions">
-                <Button onClick={() => void answer(false)}>Don't install</Button>
+                <Button onClick={() => answer(false)}>Don't install</Button>
                 {/* Not signed by the publisher's usual key: the risky choice isn't the bright one. */}
-                <Button tone={r.signature?.state === "key_changed" ? "danger" : "attention"} onClick={() => void answer(true)}>
+                <Button tone={r.signature?.state === "key_changed" ? "danger" : "attention"} onClick={() => answer(true)}>
                     {installLabel(r)}
                 </Button>
             </div>

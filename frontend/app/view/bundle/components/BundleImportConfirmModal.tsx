@@ -159,7 +159,7 @@ export const BundleImportConfirmModalPanel = (
                     <Button onClick={() => props.onCancel()} disabled={submitting()} data-modal-dismiss>
                         Cancel
                     </Button>
-                    <Button onClick={() => void commit()} className="green solid" disabled={submitting()}>
+                    <Button onClick={() => commit()} className="green solid" disabled={submitting()}>
                         {submitting() ? "Importing…" : "Import"}
                     </Button>
                 </Show>

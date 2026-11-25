@@ -441,7 +441,7 @@ function ConfirmNote(p: { ed: EditorState; result: JobsSaveResult }): JSX.Elemen
                     tone="danger"
                     icon="check"
                     busy={p.ed.busy() === "save"}
-                    onClick={() => void saveJob(p.ed, p.result.needs_confirmation)}
+                    onClick={() => saveJob(p.ed, p.result.needs_confirmation)}
                 >
                     {p.result.needs_confirmation === "turn_on" ? t("jobs.turnOn.confirm") : t("jobs.editor.confirmSave")}
                 </Button>
@@ -462,7 +462,7 @@ function EditorActions(p: { ed: EditorState }): JSX.Element {
                 icon="floppy-disk"
                 busy={ed.busy() === "save"}
                 disabled={!showForm(ed) || ed.busy() != null}
-                onClick={() => void saveJob(ed)}
+                onClick={() => saveJob(ed)}
             >
                 {ed.draft.id ? t("jobs.editor.saveChanges") : t("jobs.editor.create")}
             </Button>
@@ -470,7 +470,7 @@ function EditorActions(p: { ed: EditorState }): JSX.Element {
                 icon="vial"
                 busy={ed.busy() === "dry"}
                 disabled={!showForm(ed) || ed.busy() != null}
-                onClick={() => void dryRunJob(ed)}
+                onClick={() => dryRunJob(ed)}
             >
                 {t("jobs.editor.dryRun")}
             </Button>

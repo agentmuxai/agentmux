@@ -132,7 +132,7 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
                         icon="link-slash"
                         label={tr("tower.view.forget")}
                         density="compact"
-                        onClick={() => void m.forget(m.connection())}
+                        onClick={() => m.forget(m.connection())}
                     />
                 </Show>
                 <Tabs<TowerViewKind>
@@ -295,7 +295,7 @@ function PairForm(props: { model: TowerViewModel; onDone: () => void }) {
                     density="compact"
                     busy={busy()}
                     disabled={!link().trim()}
-                    onClick={() => void submit()}
+                    onClick={() => submit()}
                 >
                     {tr("tower.view.pair")}
                 </Button>

@@ -30,7 +30,7 @@ dryRun j1
         <button type="button" class="ui-button ui-tone-neutral ui-density-compact" disabled="">
           <i aria-hidden="true" class="fa-solid fa-clone">
           "Clone"
-        <button title="What it would do, starting nothing" type="button" class="ui-button ui-tone-neutral ui-density-compact" disabled="" aria-busy="true">
+        <button title="What it would do, starting nothing" type="button" class="ui-button ui-tone-neutral ui-density-compact" disabled="" aria-busy="true" data-pending="true">
           <i aria-hidden="true" class="fa-solid fa-spinner fa-spin">
           "Dry run"
         <button type="button" class="ui-close ui-close--sm ui-close--text">

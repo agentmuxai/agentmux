@@ -228,7 +228,7 @@ NativeMemoryWriteFileCommand {"agent_id":"a1","filename":"MEMORY.md","content":"
       <div class="memory-pinned-layout" data-surface="armory-personal">
         <div class="memory-pinned-top" data-testid="memory-pinned-top">
           <div class="memory-editor-actions">
-            <button title="Save (⌘S)" type="button" class="ui-button ui-tone-accent ui-density-compact memory-editor-btn is-primary" disabled="">
+            <button title="Save (⌘S)" type="button" class="ui-button ui-tone-accent ui-density-compact memory-editor-btn is-primary" disabled="" aria-busy="true" data-pending="true">
               "Saving…"
             <button title="Cancel (Esc)" type="button" class="ui-button ui-tone-neutral ui-density-compact memory-editor-btn" disabled="">
               "Cancel"

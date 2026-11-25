@@ -77,7 +77,7 @@ function GrantRow(props: { s: AgentSiteGrantsState; d: Grants; row: BrowserGrant
             <Button
                 disabled={s.busy()}
                 aria-label={`Revoke ${s.nameOfSlug(row.agent)} on ${sitesLabel(row.origins)}`}
-                onClick={() => void s.run("revoke it", () => RpcApi.BrowserGrantsRevokeCommand(TabRpcClient, { id: row.id }))}
+                onClick={() => s.run("revoke it", () => RpcApi.BrowserGrantsRevokeCommand(TabRpcClient, { id: row.id }))}
             >
                 Revoke
             </Button>
@@ -119,7 +119,7 @@ function AddForm(props: { s: AgentSiteGrantsState }): JSX.Element {
                 }}
             />
             <TerminalChoices value={s.terminal()} onChange={s.setTerminal} />
-            <Button disabled={!s.picked() || !s.site().trim() || s.busy()} onClick={() => void s.add()}>
+            <Button disabled={!s.picked() || !s.site().trim() || s.busy()} onClick={() => s.add()}>
                 Allow
             </Button>
         </div>

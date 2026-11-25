@@ -364,7 +364,7 @@ export function DrawerPrs(props: { card: KanbanCardFields; now: number; act?: Pr
                                     density="compact"
                                     tone="quiet"
                                     icon="link-slash"
-                                    onClick={() => void act()({ action: "pr_unlink", pr: prName(p()) })}
+                                    onClick={() => act()({ action: "pr_unlink", pr: prName(p()) })}
                                 >
                                     {tr("kanban.prs.unlink", { pr: prName(p()) })}
                                 </Button>

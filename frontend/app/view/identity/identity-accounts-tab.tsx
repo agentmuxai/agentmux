@@ -165,7 +165,7 @@ export function AccountDeleteNotice({ model }: { model: IdentityViewModel }): JS
                                 density="compact"
                                 busy={busy() === "retry"}
                                 disabled={!!busy()}
-                                onClick={() => void run("retry")}
+                                onClick={() => run("retry")}
                             >
                                 {t("accountsTab.tryAgain")}
                             </Button>
@@ -174,7 +174,7 @@ export function AccountDeleteNotice({ model }: { model: IdentityViewModel }): JS
                                 tone="danger"
                                 busy={busy() === "remove"}
                                 disabled={!!busy()}
-                                onClick={() => void run("remove")}
+                                onClick={() => run("remove")}
                             >
                                 {t("accountsTab.removeAnyway")}
                             </Button>
