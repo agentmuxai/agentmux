@@ -39,6 +39,8 @@ import {
     setFullConfigAtom,
 } from "@/app/store/global";
 import { APP_LOCALE_KEY, bindAppLocaleSetting, t } from "@/app/i18n/i18n";
+import { registerTaskFollower } from "@/app/store/held-tasks";
+import { followTasks } from "@/app/view/kanban/kanban-task-feed";
 import { devModeOn } from "@/app/store/dev-mode";
 import * as MOS from "@/app/store/mos";
 import { createEffect, createRoot, createSignal } from "solid-js";
@@ -89,6 +91,9 @@ import { installSideButtons } from "@/app/store/side-buttons";
 import { reopenRestoredWindows } from "@/app/init/restored-windows";
 import { restoresLastWindow } from "@/app/init/last-window";
 import { installWorkspaceFlushOnBlur, surfaceWorkspaceRestoreNotice } from "@/app/store/user-workspace";
+
+// How a window reads the Kanban's boards, for the surfaces below the views that ask for it (store/held-tasks.ts).
+registerTaskFollower(followTasks);
 
 // Deferred — assigned inside initApp() after window.api is ready.
 // Do NOT call getApi() at module level: this file is statically imported by

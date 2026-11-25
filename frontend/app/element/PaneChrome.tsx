@@ -31,8 +31,9 @@ import type { NodeModel } from "@/layout/index";
 import { paneTabSelectionApi } from "./pane-tab-selection";
 import "./PaneChrome.scss";
 import { PaneHeaderTabStrip } from "./PaneHeaderTabStrip";
-import { PaneTabActions } from "@/app/block/pane-tab-actions";
 import { PaneTabIconView } from "./pane-tab-model";
+import { tabWantsYou } from "@/app/block/pane-action-menu";
+import { followHeldTasks } from "@/app/store/held-tasks";
 import { PaneTabRenameInput } from "./PaneTabRenameInput";
 import { usePaneTabProgress } from "@/app/store/pane-tab-progress";
 import { DropIndicator } from "@/app/drag/DropIndicator";
@@ -47,7 +48,12 @@ import {
     createTabIds,
     createTabInfos,
     createTabRename,
+    tabAgeOf,
+    tabContextOf,
+    tabIdleOf,
+    tabTaskOf,
     tabSeatOf,
+    tabWhereOf,
     tabSummaryOf,
     usePaneLocateFlash,
     usePaneStripReveal,
@@ -151,7 +157,18 @@ function renderShellHeader(
             getTooltipDetail={t.summaryOf}
             getTooltipSeat={tabSeatOf}
             getTooltipModel={(id) => t.tabInfos().get(id)?.modelLine}
-            getIcon={(id) => <PaneTabIconView icon={() => t.tabInfos().get(id)?.icon} badge={() => t.tabInfos().get(id)?.badge} />}
+            getTooltipWhere={tabWhereOf}
+            getTooltipAge={(id) => tabAgeOf(id)}
+            getTooltipTask={tabTaskOf}
+            getTooltipContext={tabContextOf}
+            getTooltipIdle={tabIdleOf}
+            getIcon={(id) => (
+                <PaneTabIconView
+                    icon={() => t.tabInfos().get(id)?.icon}
+                    badge={() => t.tabInfos().get(id)?.badge}
+                    alert={() => tabWantsYou(id)}
+                />
+            )}
             getColor={(id) => t.tabColors().get(id)}
             useProgress={usePaneTabProgress}
             collapsed={() => nodeModel.isMinimized?.() ?? false}
@@ -169,7 +186,6 @@ function renderShellHeader(
             selection={paneTabSelectionApi}
             onTabDoubleClick={(id) => t.tabInfos().get(id)?.rename && t.setRenamingId(id)}
             renderLabel={(id) => renderTabLabel(id, look, t)}
-            renderActions={() => <PaneTabActions viewModel={viewModel} nodeModel={nodeModel} />}
             connBtnRef={t.model()?.connBtnRef}
             changeConnModalAtom={t.model()?.changeConnModalAtom}
             onAdd={t.handlers.handleAdd}
@@ -182,6 +198,8 @@ function renderShellHeader(
 }
 
 export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element): JSX.Element {
+    // The boards are read once for the window, so an agent tab's hover card has its agent's task to say when the pointer arrives.
+    followHeldTasks();
     const s = createShellState(nodeModel);
     const look = createShellLook(nodeModel, s);
     const t = createShellTabs(nodeModel, s);

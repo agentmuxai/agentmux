@@ -7,6 +7,7 @@ import { For, Show, type Accessor, type JSX } from "solid-js";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { Button, Tag, TextInput } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import type { AskUserQuestionItem, AskUserQuestionOption, AskUserQuestionRequest } from "../../../agent-model/types";
 import { recommendedOptions } from "./question-panel-model";
 import type { QuestionActivity } from "./question-panel-activity";
@@ -36,9 +37,9 @@ function QuestionHeader(props: QuestionViewProps): JSX.Element {
     return (
         <div class="agent-question-panel-header">
             <span class="agent-question-panel-icon" aria-hidden="true">❓</span>
-            <span class="agent-question-panel-title">The agent is asking</span>
+            <span class="agent-question-panel-title">{t("questionPanel.asking")}</span>
             <Show when={s.queueDepth() > 1}>
-                <span class="agent-question-panel-queue">+{s.queueDepth() - 1} more</span>
+                <span class="agent-question-panel-queue">{t("questionPanel.more", { n: s.queueDepth() - 1 })}</span>
             </Show>
             {/* Rendered nothing (not just visually hidden) while paused —
                 SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md §3.4. */}
@@ -51,7 +52,7 @@ function QuestionHeader(props: QuestionViewProps): JSX.Element {
                             "agent-question-panel-countdown--critical": cd().band === "critical",
                         }}
                     >
-                        Auto-selects recommended in {cd().seconds}s
+                        {t("questionPanel.autoSelects", { seconds: cd().seconds })}
                     </span>
                 )}
             </Show>
@@ -104,11 +105,11 @@ function QuestionBlock(props: QuestionViewProps & { r: AskUserQuestionRequest; q
             <div class="agent-question-panel-options">
                 <For each={q.options}>{(opt) => <QuestionOption {...props} opt={opt} />}</For>
                 <label class="agent-question-panel-other">
-                    <span class="agent-question-panel-other-label">Other</span>
+                    <span class="agent-question-panel-other-label">{t("questionPanel.otherLabel")}</span>
                     <TextInput
                         variant="plain"
                         class="agent-question-panel-other-input"
-                        placeholder="Type a custom answer…"
+                        placeholder={t("questionPanel.customPlaceholder")}
                         value={s.state()[qi()]?.other ?? ""}
                         onInput={(e) => a.setOther(qi(), e.currentTarget.value, q.multiSelect)}
                         onContextMenu={showTextInputContextMenu}
@@ -120,14 +121,14 @@ function QuestionBlock(props: QuestionViewProps & { r: AskUserQuestionRequest; q
 }
 
 function QuestionActions(props: QuestionViewProps): JSX.Element {
-    const { a, rec, t } = props;
+    const { a, rec, t: timeout } = props;
     return (
         <div class="agent-question-panel-actions">
-            <Button class="agent-question-panel-btn agent-question-panel-btn--cancel" onClick={t.cancel}>
-                Cancel
+            <Button class="agent-question-panel-btn agent-question-panel-btn--cancel" onClick={timeout.cancel}>
+                {t("questionPanel.cancel")}
             </Button>
             <Button class="agent-question-panel-btn agent-question-panel-btn--recommended" onClick={rec.acceptRecommended}>
-                Accept Recommended
+                {t("questionPanel.acceptRecommended")}
             </Button>
             <Button
                 tone="attention"
@@ -135,7 +136,7 @@ function QuestionActions(props: QuestionViewProps): JSX.Element {
                 disabled={!a.allAnswered()}
                 onClick={() => a.submit()}
             >
-                Submit answer
+                {t("questionPanel.submit")}
             </Button>
         </div>
     );
@@ -154,7 +155,7 @@ export function QuestionPanelBody(props: QuestionViewProps & { r: AskUserQuestio
                 data-operator-only=""
                 data-operator-answers=""
                 role="group"
-                aria-label="Agent question"
+                aria-label={t("questionPanel.groupLabel")}
                 tabindex={-1}
                 onPointerEnter={activity.onPointerEnter}
                 onPointerMove={activity.onPointerMove}

@@ -22,9 +22,15 @@ import { currentTabInk } from "@/app/tab/tab-ink";
 import { paneChromeInk } from "@/app/backdrop/meta";
 import { useBackdropSuppressed } from "@/app/backdrop/usePaneBackdrop";
 import { appliedWindowTheme } from "@/app/store/window-appearance";
-import { MOS, pushNotification } from "@/app/store/global";
+import { atoms, MOS, pushNotification } from "@/app/store/global";
 import { shouldReduceMotion } from "@/app/motion/motion";
-import { readPaneSummary } from "@/app/store/swarm-line";
+import { readPaneSummary, readPaneSummaryAgeMs } from "@/app/store/swarm-line";
+import { t } from "@/app/i18n/i18n";
+import { remoteDisplay } from "@/app/store/remote-display";
+import { isContainerRuntime, runtimeKindOfBlockMeta } from "@/util/runtime-kind";
+import { heldTaskOf } from "@/app/store/held-tasks";
+import { unavailableOfMeta } from "@/app/store/agent-unavailable";
+import { contextReadingFromMeta } from "@/app/store/agent-pane-state/context-reading";
 import { readSeatMeta, seatTooltipLine } from "@/app/agent-model/seat-format";
 import {
     closeBlockInStack,
@@ -391,6 +397,56 @@ export function tabSummaryOf(id: string, tabInfos: Accessor<Map<string, PaneTabI
     const meta = blockMeta(id);
     if (meta?.view !== "agent") return undefined;
     return readPaneSummary(meta) ?? undefined;
+}
+
+/**
+ * Where an agent tab's agent runs, for its hover card: on this computer or on a named remote, and in a container or not.
+ * Read from the block's meta, so it is there the moment the pointer is. Undefined for a tab that is not an agent's.
+ */
+export function tabWhereOf(id: string): string | undefined {
+    const meta = blockMeta(id);
+    if (meta?.view !== "agent") return undefined;
+    const remote = remoteDisplay(atoms.fullConfigAtom()?.connections, meta?.connection as string | undefined)?.name;
+    const place = remote ? t("pane.tab.tip.on", { host: remote }) : t("pane.tab.tip.here");
+    return isContainerRuntime(runtimeKindOfBlockMeta(meta)) ? t("pane.tab.tip.container", { place }) : place;
+}
+
+/** The task an agent tab's agent holds, for its hover card ("#48669 Pane tabs: no extra buttons"); undefined when the boards say none or have not loaded. */
+export function tabTaskOf(id: string): string | undefined {
+    if (blockMeta(id)?.view !== "agent") return undefined;
+    const task = heldTaskOf(id);
+    return task ? `#${task.num} ${task.title}` : undefined;
+}
+
+/**
+ * Whether an agent tab's agent can start a turn now, so its card may call it idle. An agent with a usage limit that has not
+ * lifted, or a refused sign-in, has no progress line either, and reads as unavailable, not idle.
+ */
+export function tabIdleOf(id: string): boolean {
+    const meta = blockMeta(id);
+    return meta?.view === "agent" && unavailableOfMeta(meta, false, Date.now()) === null;
+}
+
+/** How full an agent tab's context window is, for its hover card ("41% of context"); undefined when the window is not known. */
+export function tabContextOf(id: string): string | undefined {
+    const meta = blockMeta(id);
+    if (meta?.view !== "agent") return undefined;
+    const reading = contextReadingFromMeta(meta?.["agent:context"]);
+    if (!reading?.window) return undefined;
+    return t("pane.tab.tip.context", { pct: Math.min(100, Math.round((reading.tokens / reading.window) * 100)) });
+}
+
+/** How long ago an agent tab's own status line was set, for its hover card ("12 min ago"); undefined when the line is not the agent's own. */
+export function tabAgeOf(id: string, now: number = Date.now()): string | undefined {
+    const meta = blockMeta(id);
+    if (meta?.view !== "agent") return undefined;
+    const age = readPaneSummaryAgeMs(meta, now);
+    if (age === null) return undefined;
+    const minutes = Math.floor(age / 60_000);
+    if (minutes < 1) return t("pane.tab.tip.agoNow");
+    if (minutes < 60) return t("pane.tab.tip.agoMin", { n: minutes });
+    const hours = Math.floor(minutes / 60);
+    return hours < 24 ? t("pane.tab.tip.agoHour", { n: hours }) : t("pane.tab.tip.agoDay", { n: Math.floor(hours / 24) });
 }
 
 /** An agent tab's seat, from the `agent:seat` srv seeds at agent.open (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §4). */

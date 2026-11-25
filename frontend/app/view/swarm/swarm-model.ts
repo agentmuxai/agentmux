@@ -931,6 +931,8 @@ export class SwarmViewModel {
     // activity/subagent-source.ts (the ActivityDock) needs one event per subagent.
     private loadSubagentsDebounceTimer: ReturnType<typeof setTimeout> | undefined;
     private static readonly LOAD_SUBAGENTS_DEBOUNCE_MS = 150;
+    private loadTrackedBlocksTimer: ReturnType<typeof setTimeout> | undefined;
+    private static readonly LOAD_TRACKED_BLOCKS_WINDOW_MS = 150;
 
     // Same debounce shape as loadSubagentsDebounceTimer above, kept separate
     // since shell_node_create/shell_chunk bursts are unrelated to subagent/
@@ -1069,34 +1071,30 @@ export class SwarmViewModel {
         if (unsubNamed) this.unsubs.push(unsubNamed);
     }
 
-    // Events that change which blocks are tracked: each re-reads the list.
+    // Events that change which blocks are tracked: one re-read per 150 ms window (process-added and -exited alone
+    // arrive in the tens of thousands a day, each used to run its own RPC). The reactive pair is distinct from the
+    // process pair so useTrackedProcesses doesn't count reactive registrations as OS processes; the broker event is the
+    // authoritative one, from blockcontroller::register_controller / delete_controller (docs/reports/REPORT_SWARM_MOUNT_DEPENDENT_TRACKING_GAP_2026_09_15.md).
     private listenTrackedBlockEvents(): void {
-        // When process trackers change, refresh the block list
-        const unsubProcAdded = onMuxEvent(WpsEvent.AgentProcessAdded, () => void this.loadTrackedBlocks());
-        if (unsubProcAdded) this.unsubs.push(unsubProcAdded);
+        const reload = () => this.scheduleLoadTrackedBlocks();
+        for (const unsub of [
+            onMuxEvent(WpsEvent.AgentProcessAdded, reload),
+            onMuxEvent(WpsEvent.AgentProcessExited, reload),
+            onMuxEvent(WpsEvent.AgentReactiveRegistered, reload),
+            onMuxEvent(WpsEvent.AgentReactiveUnregistered, reload),
+            onMuxEvent(WpsEvent.ProcessBrokerTrackedBlocksChanged, reload),
+        ]) {
+            if (unsub) this.unsubs.push(unsub);
+        }
+    }
 
-        const unsubProcExited = onMuxEvent(WpsEvent.AgentProcessExited, () => void this.loadTrackedBlocks());
-        if (unsubProcExited) this.unsubs.push(unsubProcExited);
-
-        // When a reactive-handler agent (Claude Code pane) registers or
-        // unregisters, refresh the block list. These events are distinct from
-        // agent:process-added / agent:process-exited so useTrackedProcesses
-        // doesn't treat reactive registrations as phantom OS processes.
-        const unsubReactiveReg = onMuxEvent(WpsEvent.AgentReactiveRegistered, () => void this.loadTrackedBlocks());
-        if (unsubReactiveReg) this.unsubs.push(unsubReactiveReg);
-
-        const unsubReactiveUnreg = onMuxEvent(WpsEvent.AgentReactiveUnregistered, () => void this.loadTrackedBlocks());
-        if (unsubReactiveUnreg) this.unsubs.push(unsubReactiveUnreg);
-
-        // Authoritative signal, in addition to the four above: published directly from
-        // blockcontroller::register_controller / delete_controller, the functions that determine
-        // what agent.tracked-blocks returns. The four above are process_tracker's 2s poll-and-diff
-        // and the separate `reactive` registration map, neither guaranteed to fire in step with a
-        // controller (de)registering, which is how a restored agent's controller could register
-        // server-side while this list stayed stale client-side indefinitely
-        // (docs/reports/REPORT_SWARM_MOUNT_DEPENDENT_TRACKING_GAP_2026_09_15.md).
-        const unsubTrackedBlocksChanged = onMuxEvent(WpsEvent.ProcessBrokerTrackedBlocksChanged, () => void this.loadTrackedBlocks());
-        if (unsubTrackedBlocksChanged) this.unsubs.push(unsubTrackedBlocksChanged);
+    // The window opens at the first event and later ones don't push it back, so a steady stream is read, not starved.
+    private scheduleLoadTrackedBlocks(): void {
+        if (this.loadTrackedBlocksTimer !== undefined) return;
+        this.loadTrackedBlocksTimer = setTimeout(() => {
+            this.loadTrackedBlocksTimer = undefined;
+            void this.loadTrackedBlocks();
+        }, SwarmViewModel.LOAD_TRACKED_BLOCKS_WINDOW_MS);
     }
 
     // The safety-net poll behind those events.
@@ -1828,6 +1826,8 @@ export class SwarmViewModel {
             clearTimeout(this.loadShellsDebounceTimer);
             this.loadShellsDebounceTimer = undefined;
         }
+        clearTimeout(this.loadTrackedBlocksTimer);
+        this.loadTrackedBlocksTimer = undefined;
         if (this.loadCronsDebounceTimer !== undefined) {
             clearTimeout(this.loadCronsDebounceTimer);
             this.loadCronsDebounceTimer = undefined;
