@@ -12,10 +12,11 @@ import { ModalBody, ModalFooter, ModalHeader } from "@/app/element/modal-parts";
 import { tip } from "@/app/element/tip";
 import { Button } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
+import type { AgentChange } from "@/types/rpc/AgentChange";
 import type { VaultActivity } from "@/types/rpc/VaultActivity";
 import type { VaultChain } from "@/types/rpc/VaultChain";
 import { formatWhen } from "./vault-format";
-import { loadChain, loadHistory } from "./vault-store";
+import { loadChain, loadEntryChanges, loadHistory, undoChange } from "./vault-store";
 
 type Filter = "all" | "changes" | "uses";
 
@@ -56,7 +57,7 @@ export function chainNote(c: VaultChain | undefined): string {
     return t("vault.history.chain", { checked: c.checked, before, older, head });
 }
 
-function HistoryRow(props: { row: VaultActivity; showHost: boolean }): JSX.Element {
+function HistoryRow(props: { row: VaultActivity; showHost: boolean; undo?: AgentChange; onUndo: (seq: number) => void; busy: boolean }): JSX.Element {
     const a = () => props.row;
     return (
         <tr data-outcome={a().outcome} data-seq={a().seq}>
@@ -79,13 +80,33 @@ function HistoryRow(props: { row: VaultActivity; showHost: boolean }): JSX.Eleme
                 </Show>
             </td>
             <td class="warden-manager-dim">{a().outcome}</td>
+            <td>
+                <Show when={props.undo}>
+                    <Button density="compact" disabled={props.busy} onClick={() => props.onUndo(a().seq)}>
+                        {t("vault.changes.undo")}
+                    </Button>
+                </Show>
+            </td>
         </tr>
     );
 }
 
 export function VaultHistoryDialog(props: { entryId: string; label: string; onClose: () => void }): JSX.Element {
-    const [history] = createResource(() => props.entryId, loadHistory);
+    const [history, { refetch }] = createResource(() => props.entryId, loadHistory);
     const [chain] = createResource(loadChain);
+    // The changes by agents still inside their 7 days that can be put back (a removal is the entry's own Delete).
+    const [changes, { refetch: refetchChanges }] = createResource(() => props.entryId, (id) => loadEntryChanges(id).catch(() => [] as AgentChange[]));
+    const undoable = (seq: number) => (changes() ?? []).find((c) => c.seq === seq && (c.undo === "restore value" || c.undo === "restore details"));
+    const [busy, setBusy] = createSignal(false);
+    const [undoError, setUndoError] = createSignal<string | null>(null);
+    const onUndo = (seq: number) => {
+        setBusy(true);
+        setUndoError(null);
+        undoChange(seq)
+            .then(() => Promise.all([refetch(), refetchChanges()]))
+            .catch((e) => setUndoError(e instanceof Error ? e.message : String(e)))
+            .finally(() => setBusy(false));
+    };
     const [filter, setFilter] = createSignal<Filter>("all");
     const rows = createMemo(() => historyFilter(history() ?? [], filter()));
     const showHost = createMemo(() => new Set((history() ?? []).map((r) => r.host).filter(Boolean)).size > 1);
@@ -103,6 +124,11 @@ export function VaultHistoryDialog(props: { entryId: string; label: string; onCl
                         )}
                     </For>
                 </div>
+                <Show when={undoError()}>
+                    <div class="warden-manager-error" role="alert">
+                        ⚠ {undoError()}
+                    </div>
+                </Show>
                 <Show when={history.error}>
                     <div class="warden-manager-error" role="alert">
                         ⚠ {String(history.error)}
@@ -120,10 +146,13 @@ export function VaultHistoryDialog(props: { entryId: string; label: string; onCl
                                 <th>{t("vault.history.colVersion")}</th>
                                 <th>{t("vault.activity.why")}</th>
                                 <th>{t("vault.secrets.outcome")}</th>
+                                <th>
+                                    <span class="vault-sr-only">{t("vault.changes.undo")}</span>
+                                </th>
                             </tr>
                         </thead>
                         <tbody>
-                            <For each={rows()}>{(r) => <HistoryRow row={r} showHost={showHost()} />}</For>
+                            <For each={rows()}>{(r) => <HistoryRow row={r} showHost={showHost()} undo={undoable(r.seq)} onUndo={onUndo} busy={busy()} />}</For>
                         </tbody>
                     </table>
                     </div>

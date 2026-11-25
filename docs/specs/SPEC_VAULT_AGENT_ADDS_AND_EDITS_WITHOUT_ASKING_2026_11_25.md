@@ -1,7 +1,7 @@
 # Spec: An agent adds or edits a Vault entry without asking the person; the history line is the record
 
 **Task:** #48656 (the build is #48657). **Author:** Agent2-6 (Vault). **Date:** 2026-11-25.
-**Status:** active — approved 2026-11-25 with every recommended answer; built in three PRs (§11): PR 1 (adds and edits ask nobody, the pace, the unseen mark) is merged, PR 2 (details kept, a login's place) is open, PR 3 (the pane) is not started.
+**Status:** active — approved 2026-11-25 with every recommended answer; built in three PRs (§11): PR 1 (adds and edits ask nobody, the pace, the unseen mark) is merged, PR 2 (details kept, a login's place) is merged, PR 3 (the pane: the strip, Undo, Seen, Accept and Dismiss, the row marks, the use card's line) is open, and the removal of the old card paths from `UseRequest` is a fourth, last PR.
 Written against origin/main `d7ebfaba77`. It changes
 `SPEC_VAULT_AGENT_ASKS_TO_BIND_A_LOGIN_TO_A_SITE_2026_11_19.md` (#48141): §7 says how. It builds on
 `SPEC_VAULT_PARITY_ENTRY_HISTORY_REASONS_AND_IMPORT_2026_11_06.md` (history lines, reasons, import) and
@@ -256,3 +256,10 @@ that Accept applies only if the login is as it was, and Dismiss drops), R9 (`set
 site an agent set; marking drops the entry's *Always* grants), R10, and R7 for `generate` (a site is one exact origin; realm and
 proxy may be given) and for `import` and `capture` of a login with a site (the place is marked unseen). Deriving the asking
 agent's own profile for an `import` or `capture` of a login is not in this PR.
+
+**PR 3 as built.** The strip above the entries list (a count that hides at zero, Review, *Seen all*), its list (proposals and a
+replaced value of an entry the person made first; Undo, Seen, Accept, Dismiss; a removal is confirmed in its row; the
+agent's reason is shown as text), the mark on an entry's row, Undo in the entry's History for a replaced value or details
+inside their 7 days, and the use card's line for a value or place an agent set and the person has not looked at. The seen
+marks are on this machine only. The removal of the dead card types from `UseRequest` and their cards is left to a last
+small PR, so this one stays reviewable.

@@ -163,6 +163,15 @@ async fn checked(state: &AppState, body: &ImportBody, who: &Who) -> Result<Plan,
     Ok(plan)
 }
 
+/// An import over the agent's pace: the agent is told when there is room, and a line records it only within the allowance of
+/// such lines (an agent that keeps asking cannot fill an entry's history).
+pub(super) fn pace_refused(state: &AppState, plan: &Plan, who: &Who, why: String) -> Response {
+    if crate::backend::vault::pace::may_note_refusal(&who.agent) {
+        return refused(state, plan, who, "refused: pace", StatusCode::TOO_MANY_REQUESTS, why);
+    }
+    error(StatusCode::TOO_MANY_REQUESTS, why)
+}
+
 /// Records what became of an import that stored nothing, and tells the agent.
 fn refused(state: &AppState, plan: &Plan, who: &Who, outcome: &str, status: StatusCode, said: String) -> Response {
     aws_import::note(&state.identity_store, plan, plan.entry_id(), plan.label(), &who.agent, outcome);
@@ -202,7 +211,7 @@ pub(crate) async fn handle_vault_import(State(state): State<AppState>, caller: O
     };
     let spent = [act_of(&plan.target)];
     if let Err(why) = crate::backend::vault::pace::admit(&who.agent, &spent) {
-        return refused(&state, &plan, &who, "refused: pace", StatusCode::TOO_MANY_REQUESTS, why);
+        return pace_refused(&state, &plan, &who, why);
     }
     let response = import_admitted(&state, &body, &who, &plan).await;
     if !response.status().is_success() {

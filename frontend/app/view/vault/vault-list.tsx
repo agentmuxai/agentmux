@@ -12,6 +12,7 @@ import { Button, FilterInput } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
 import type { VaultSection } from "@/types/rpc/VaultSection";
 import { VaultActivityLog } from "./vault-activity";
+import { VaultChangesStrip } from "./vault-changes";
 import { isNarrowing, narrowedEntries, VaultEntries } from "./vault-entries";
 import { expiryOf } from "./vault-format";
 import { VaultKept } from "./vault-kept";
@@ -69,6 +70,7 @@ export function VaultList(props: { model: VaultViewModel; vault?: string }): JSX
                     </Button>
                 </Show>
             </div>
+            <VaultChangesStrip />
             <div class="vault-list__sections" ref={scroller} aria-label={t("vault.list.sections")}>
                 <Show when={note()}>{(text) => <div class="warden-section-stub vault-list__note">{text()}</div>}</Show>
                 <For each={ENTRY_SECTIONS}>

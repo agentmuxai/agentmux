@@ -120,6 +120,10 @@ pub(crate) async fn handle_vault_import_batch(State(state): State<AppState>, cal
     };
     let acts: Vec<Act> = plan.items.iter().map(|p| super::vault_import::act_of(&p.target)).collect();
     if let Err(why) = pace::admit(&who.agent, &acts) {
+        // A line records it only within the allowance of such lines: an agent that keeps asking cannot fill an entry's history.
+        if !pace::may_note_refusal(&who.agent) {
+            return error(StatusCode::TOO_MANY_REQUESTS, why);
+        }
         return refused(&state, &plan, &who, "refused: pace", StatusCode::TOO_MANY_REQUESTS, why);
     }
     // Every row of the list, as the agent named it: nobody ticks rows.

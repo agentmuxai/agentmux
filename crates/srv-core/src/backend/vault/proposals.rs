@@ -19,6 +19,8 @@ use crate::backend::storage::vault_changes::{DetailsKept, Proposal};
 
 /// How long a proposal waits.
 pub const KEEP_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+/// What the person is told when the proposal they were shown has been replaced by another.
+pub const REPLACED: &str = "the agent changed its proposal since this was shown: look at the new one";
 /// The Activity action of an agent's proposal.
 pub const PROPOSED: &str = "proposed a change";
 /// The Activity action of the person accepting one.
@@ -66,7 +68,16 @@ fn waiting(store: &Store, id: &str, field: &str) -> Result<Proposal, String> {
 /// The person accepts the proposal for `field` of `id`: it is applied if the entry is as it was when proposed, with the
 /// details it replaces kept 7 days, and a line records it. An entry changed since is refused, saying so.
 pub fn accept(store: &Store, id: &str, field: &str) -> Result<(), String> {
+    accept_shown(store, id, field, None)
+}
+
+/// [`accept`] of the proposal the person was shown, made at `shown_at`: refused when an agent has replaced it since, so what
+/// is applied is what they saw. `None` accepts whichever is waiting.
+pub fn accept_shown(store: &Store, id: &str, field: &str, shown_at: Option<i64>) -> Result<(), String> {
     let p = waiting(store, id, field)?;
+    if shown_at.is_some_and(|at| at != p.at) {
+        return Err(REPLACED.into());
+    }
     let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {id}"))?;
     if row.created_at != p.entry_created_at || row.updated_at != p.entry_updated_at {
         return Err("the login changed after this was proposed: dismiss it, and the agent can propose again".into());
@@ -91,7 +102,7 @@ pub fn accept(store: &Store, id: &str, field: &str) -> Result<(), String> {
         changed_by: PERSON.to_string(),
         what: format!("field {field}"),
     };
-    let new = crate::backend::storage::vault::VaultRow { fields: serde_json::to_string(&fields).map_err(|e| e.to_string())?, updated_at: now_ms(), ..row.clone() };
+    let new = crate::backend::storage::vault::VaultRow { fields: serde_json::to_string(&fields).map_err(|e| e.to_string())?, updated_at: now_ms().max(row.updated_at + 1), ..row.clone() };
     if !store.vault_update_details_kept(&new, &was.0, &was.1, &kept, None).map_err(|e| e.to_string())? {
         return Err("the login changed while this was being applied, so nothing was changed: look at it again".into());
     }
@@ -105,10 +116,18 @@ pub fn accept(store: &Store, id: &str, field: &str) -> Result<(), String> {
 
 /// The person dismisses the proposal for `field` of `id`. True when there was one.
 pub fn dismiss(store: &Store, id: &str, field: &str) -> Result<bool, String> {
+    dismiss_shown(store, id, field, None)
+}
+
+/// [`dismiss`] of the proposal the person was shown (see [`accept_shown`]): a replacement is left waiting to be looked at.
+pub fn dismiss_shown(store: &Store, id: &str, field: &str, shown_at: Option<i64>) -> Result<bool, String> {
     let p = match waiting(store, id, field) {
         Ok(p) => p,
         Err(_) => return Ok(false),
     };
+    if shown_at.is_some_and(|at| at != p.at) {
+        return Err(REPLACED.into());
+    }
     let row = store.vault_get(id).map_err(|e| e.to_string())?;
     let gone = store.vault_proposal_delete(id, field).map_err(|e| e.to_string())?;
     if let (true, Some(row)) = (gone, row) {
