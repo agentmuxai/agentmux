@@ -37,31 +37,98 @@ pub(crate) fn cut_pane(
     Ok(Some(out))
 }
 
+/// How many window pictures are kept waiting for their cut at once, and for how long. One drag takes one picture
+/// per pane it shows (the press's, and the landing places'), and each is cut within moments of being taken.
+#[cfg(target_os = "windows")]
+const KEPT_MAX: usize = 4;
+#[cfg(target_os = "windows")]
+const KEPT_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// A window's picture the host has taken and keeps until the page asks for the pane's cut of it.
+#[cfg(target_os = "windows")]
+struct Kept {
+    id: u64,
+    at: std::time::Instant,
+    /// The window's whole viewport, a base64 JPEG as the capture answered it.
+    jpeg_base64: String,
+}
+
+#[cfg(target_os = "windows")]
+static KEPT: std::sync::LazyLock<std::sync::Mutex<Vec<Kept>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(Vec::new()));
+#[cfg(target_os = "windows")]
+static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// Keep a picture; the oldest go when there are too many or they are too old. Answers its id.
+#[cfg(target_os = "windows")]
+fn keep(jpeg_base64: String) -> u64 {
+    let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut kept = KEPT.lock().unwrap_or_else(|e| e.into_inner());
+    kept.retain(|k| k.at.elapsed() < KEPT_MAX_AGE);
+    kept.push(Kept {
+        id,
+        at: std::time::Instant::now(),
+        jpeg_base64,
+    });
+    while kept.len() > KEPT_MAX {
+        kept.remove(0);
+    }
+    id
+}
+
+/// The picture kept under `id`, handed over once.
+#[cfg(target_os = "windows")]
+fn take_kept(id: u64) -> Option<String> {
+    let mut kept = KEPT.lock().unwrap_or_else(|e| e.into_inner());
+    let at = kept.iter().position(|k| k.id == id)?;
+    let k = kept.remove(at);
+    (k.at.elapsed() < KEPT_MAX_AGE).then_some(k.jpeg_base64)
+}
+
 #[cfg(target_os = "windows")]
 fn num(args: &serde_json::Value, key: &str) -> Result<f64, String> {
     args.get(key)
         .and_then(|v| v.as_f64())
-        .ok_or_else(|| format!("capture_pane_picture: {} is required", key))
+        .ok_or_else(|| format!("cut_pane_picture: {} is required", key))
 }
 
-/// `capture_pane_picture`: take the window's picture and cut the pane out of it, for the page's tear-off
-/// snapshot. `label` (the window), `rect` (`left`, `top`, `width`, `height`: the pane, CSS px), `viewportWidth`
-/// (CSS px) and `quality` (of the window's picture). Answers `{ jpeg_base64 }`, null when the pane is not in the
-/// picture. The window is pictured whole, as for any tear-off picture (a clipped capture flickers the window).
+/// `capture_pane_picture`: take the window's picture and keep it in the host, for the cuts of the page's tear-off
+/// snapshots. `label` (the window) and `quality` (of the picture). Answers `{ pictureId }` as soon as the window
+/// has been pictured: the drag's drawing is held only until then, not for the cut. The window is pictured whole, as
+/// for any tear-off picture (a clipped capture flickers the window).
 #[cfg(target_os = "windows")]
 pub async fn capture(
     state: &Arc<AppState>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    use base64::Engine;
     let label = args
         .get("label")
         .and_then(|v| v.as_str())
         .ok_or("capture_pane_picture: label is required")?;
     let quality = args.get("quality").and_then(|v| v.as_u64()).unwrap_or(80) as u8;
+    let started = std::time::Instant::now();
+    let whole = crate::browser_api::routes::capture_window_viewport(state, label, quality).await?;
+    tracing::info!(
+        target: "dnd:tearoff",
+        pictured_ms = started.elapsed().as_millis() as u64,
+        "[tearoff-perf] the window was pictured and kept in the host"
+    );
+    Ok(serde_json::json!({ "pictureId": keep(whole) }))
+}
+
+/// `cut_pane_picture`: the pane cut out of the picture kept under `pictureId`. `rect` (`left`, `top`, `width`,
+/// `height`: the pane, CSS px) and `viewportWidth` (CSS px). Answers `{ jpeg_base64 }`, null when the pane is not in
+/// the picture; an error when the picture is gone (cut already, or too old).
+#[cfg(target_os = "windows")]
+pub async fn cut(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    use base64::Engine;
+    let id = args
+        .get("pictureId")
+        .and_then(|v| v.as_u64())
+        .ok_or("cut_pane_picture: pictureId is required")?;
     let rect = args
         .get("rect")
-        .ok_or("capture_pane_picture: rect is required")?;
+        .ok_or("cut_pane_picture: rect is required")?;
     let rect = (
         num(rect, "left")?,
         num(rect, "top")?,
@@ -69,9 +136,8 @@ pub async fn capture(
         num(rect, "height")?,
     );
     let viewport_width = num(args, "viewportWidth")?;
+    let whole = take_kept(id).ok_or("cut_pane_picture: the window picture is gone")?;
     let started = std::time::Instant::now();
-    let whole = crate::browser_api::routes::capture_window_viewport(state, label, quality).await?;
-    let pictured_ms = started.elapsed().as_millis() as u64;
     let cut = tokio::task::spawn_blocking(move || {
         let jpeg = base64::engine::general_purpose::STANDARD
             .decode(whole)
@@ -79,10 +145,10 @@ pub async fn capture(
         cut_pane(&jpeg, rect, viewport_width)
     })
     .await
-    .map_err(|e| format!("capture_pane_picture join error: {}", e))??;
+    .map_err(|e| format!("cut_pane_picture join error: {}", e))??;
     tracing::info!(
         target: "dnd:tearoff",
-        pictured_ms, total_ms = started.elapsed().as_millis() as u64, found = cut.is_some(),
+        cut_ms = started.elapsed().as_millis() as u64, found = cut.is_some(),
         "[tearoff-perf] the pane was cut out of the window picture in the host"
     );
     let b64 = cut.map(|bytes| base64::engine::general_purpose::STANDARD.encode(bytes));
@@ -98,9 +164,14 @@ pub async fn capture(
     Err("capture_pane_picture is only available on Windows".to_string())
 }
 
+#[cfg(not(target_os = "windows"))]
+pub async fn cut(_args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    Err("cut_pane_picture is only available on Windows".to_string())
+}
+
 #[cfg(all(test, target_os = "windows"))]
 mod tests {
-    use super::cut_pane;
+    use super::{cut_pane, keep, take_kept};
 
     /// A picture `w` x `h` whose left half is red and right half blue, as a JPEG.
     fn halves(w: u32, h: u32) -> Vec<u8> {
@@ -149,6 +220,18 @@ mod tests {
         assert!(cut_pane(&whole, (300.0, 0.0, 50.0, 50.0), 200.0)
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn a_kept_picture_is_handed_over_once_and_the_oldest_go_when_there_are_too_many() {
+        let first = keep("one".to_string());
+        assert_eq!(take_kept(first).as_deref(), Some("one"));
+        assert!(take_kept(first).is_none());
+        let ids: Vec<u64> = (0..super::KEPT_MAX + 1)
+            .map(|i| keep(format!("p{}", i)))
+            .collect();
+        assert!(take_kept(ids[0]).is_none());
+        assert_eq!(take_kept(ids[1]).as_deref(), Some("p1"));
     }
 
     #[test]
