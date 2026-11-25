@@ -1128,6 +1128,7 @@ pub(crate) async fn handle_ui_browser_handoff(
         return err_response(StatusCode::SERVICE_UNAVAILABLE, e);
     }
     let minutes = req.timeout_minutes.unwrap_or(15).clamp(1, 60);
+    let watch = crate::server::browser_attached::Watch::begin(&state, &block_id).await;
     tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, "[ui-automation] browser hand-off");
     let raised = match crate::server::browser_attention::raise(
         &state,
@@ -1147,7 +1148,7 @@ pub(crate) async fn handle_ui_browser_handoff(
     let (answer, waiting) = match raised.answer_within(crate::server::browser_waiting::grace()).await {
         Ok(answered) => answered,
         Err(raised) => {
-            let who = crate::server::browser_waiting::Handoff { agent: &req.auth.agent_id, block_id: &block_id, banner_at: &banner_at, reason: &reason };
+            let who = crate::server::browser_waiting::Handoff { agent: &req.auth.agent_id, block_id: &block_id, banner_at: &banner_at, reason: &reason, watch };
             return crate::server::browser_waiting::detach_handoff(&state, who, raised, tracked, wait, started);
         }
     };
@@ -1159,12 +1160,14 @@ pub(crate) async fn handle_ui_browser_handoff(
         .how(How::from_answer(answer))
         .detail(&crate::server::browser_handoffs::ended_words(answer.into(), open))
         .record(&state);
+    let done = matches!(answer, crate::server::browser_attention::Answer::Yes | crate::server::browser_attention::Answer::YesAlways | crate::server::browser_attention::Answer::YesAsking);
+    let attached = if done { Some(watch.sentence(&state, &block_id).await) } else { None };
     let answer = match answer {
         crate::server::browser_attention::Answer::Yes | crate::server::browser_attention::Answer::YesAlways | crate::server::browser_attention::Answer::YesAsking => "done",
         crate::server::browser_attention::Answer::Cancelled => "cancelled",
         crate::server::browser_attention::Answer::TimedOut => "timed_out",
     };
-    (StatusCode::OK, Json(json!({ "ok": true, "data": { "answer": answer, "handoff_id": handoff_id, "open_secs": open.as_secs() } }))).into_response()
+    (StatusCode::OK, Json(json!({ "ok": true, "data": { "answer": answer, "handoff_id": handoff_id, "open_secs": open.as_secs(), "attached": attached } }))).into_response()
 }
 
 /// `POST /api/v1/host/browser_attention` — the user's answer to a hand-off

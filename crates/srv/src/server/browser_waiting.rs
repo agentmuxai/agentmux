@@ -237,7 +237,10 @@ pub(crate) fn outcome_text_after(id: &str, kind: &str, question: &str, state: &S
     let quoted = |text: &str| quote_in_system_note(&agentmux_common::pii_mask::mask_short_text(text));
     let head = format!("Your Browser request {id} ({})", quoted(question));
     match (kind, state) {
-        ("handoff", State::Done(_)) => format!("{head}: the person clicked Done{after}. Take a new snapshot: don't assume what they changed."),
+        ("handoff", State::Done(files)) => {
+            let files = if files.is_empty() { String::new() } else { format!(" {}", quoted(files)) };
+            format!("{head}: the person clicked Done{after}.{files} Take a new snapshot: don't assume what they changed.")
+        }
         ("handoff", State::Declined) => format!("{head}: the person clicked Cancel{after}. Ask them in chat how to proceed."),
         (_, State::Done(d)) => format!("{head}: the person approved it and it was done. {}", quoted(d)),
         (_, State::Declined) => format!("{head}: the person declined it. Don't retry it; ask them what to do."),
@@ -288,6 +291,8 @@ pub(crate) struct Handoff<'a> {
     pub block_id: &'a str,
     pub banner_at: &'a str,
     pub reason: &'a str,
+    /// What the pane's file inputs held when the hand-off began (`browser_attached`).
+    pub watch: super::browser_attached::Watch,
 }
 
 /// The call that raised a hand-off returns "waiting" now; a task of srv's waits on for the person's Done or
@@ -303,8 +308,8 @@ pub(crate) fn detach_handoff(
     use axum::response::IntoResponse;
     let id = raised.id().to_string();
     open(&id, who.agent, who.banner_at, "handoff", who.reason, wait.saturating_sub(started.elapsed()));
-    let (state, agent, block_id, reason, task_id) =
-        (state.clone(), who.agent.to_string(), who.block_id.to_string(), who.reason.to_string(), id.clone());
+    let (state, agent, block_id, reason, task_id, watch) =
+        (state.clone(), who.agent.to_string(), who.block_id.to_string(), who.reason.to_string(), id.clone(), who.watch);
     tokio::spawn(async move {
         use crate::server::browser_attention::Answer;
         use crate::server::browser_actions::{note, How, Kind};
@@ -322,7 +327,7 @@ pub(crate) fn detach_handoff(
             .record(&state);
         let settled = match answer {
             _ if by_agent => State::Cancelled,
-            Answer::Yes | Answer::YesAlways | Answer::YesAsking => State::Done(String::new()),
+            Answer::Yes | Answer::YesAlways | Answer::YesAsking => State::Done(watch.sentence(&state, &block_id).await),
             Answer::Cancelled => State::Declined,
             Answer::TimedOut => State::TimedOut,
         };
@@ -438,6 +443,9 @@ mod tests {
         assert!(t("approval", State::Void("the page changed".into())).contains("void, nothing was done: the page changed"));
         assert!(t("approval", State::Failed("the form changed".into())).contains("wasn't done: the form changed"));
         assert!(t("handoff", State::Done(String::new())).contains("clicked Done. Take a new snapshot"));
+        // The files the person attached are in the note, before the advice to look at the page again.
+        let with_file = outcome_text_after("r1", "handoff", "upload", &State::Done("The person attached: \"a.pdf\".".to_string()), Some(7));
+        assert!(with_file.contains("clicked Done after 7 s.") && with_file.contains("a.pdf") && with_file.contains("Take a new snapshot"), "{with_file}");
         let after = outcome_text_after("r1", "handoff", "log in", &State::Done(String::new()), Some(7));
         assert!(after.contains("clicked Done after 7 s. Take a new snapshot"), "{after}");
         assert!(outcome_text_after("r1", "handoff", "log in", &State::Declined, Some(95)).contains("clicked Cancel after 1 min."));
