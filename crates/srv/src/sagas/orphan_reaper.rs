@@ -23,8 +23,9 @@
 // - blocks of any other kind than an agent or a management view (a terminal,
 //   an editor, a browser: they may hold running work or unsaved text). A
 //   management view (the Vault, Settings, the Kanban, ...: `MANAGEMENT_VIEWS`)
-//   shows only the app's own state, so it is closed like an agent block and the
-//   next click on its widget opens a fresh pane;
+//   shows only the app's own state, so it is put back in a pane (an interrupted
+//   create-then-place is finished), or closed when its tab already shows a pane
+//   of that view (the person's click opened one meanwhile: this one is a copy);
 // - sub-blocks (their parent is a block, not a pane — they sit in a parent's
 //   `subblockids`);
 // - blocks already closing;
@@ -111,15 +112,30 @@ pub(crate) async fn sweep(state: &AppState, watch: &mut Watch, now: Instant, min
             );
         }
         if u.is_repairable() {
-            due.push((u.block_id.clone(), u.view.clone(), u.is_management()));
+            due.push((u.tab_id.clone(), u.block_id.clone(), u.view.clone(), u.is_management()));
         }
     }
     watch.reported.retain(|key| still_violated.contains(key));
 
     let mut reaped = Vec::new();
-    for (id, view, management) in due {
+    // The (tab, view) pairs that have a pane: the tab's own, and each one this sweep put back.
+    let mut shown = scan.shown_views;
+    for (tab_id, id, view, management) in due {
+        if management && shown.insert((tab_id.clone(), view.clone())) {
+            tracing::warn!(tab_id = %tab_id, block_id = %id, view = %view, "layout-doctor: repair: a management view block has been in no pane for too long, putting it back in a pane");
+            match crate::server::service::layout_intents::place_block(state, &tab_id, &id, crate::server::service::layout_intents::Placement::Append { focused: false }).await {
+                Ok(()) => {
+                    watch.first_seen.remove(&id);
+                }
+                Err(e) => {
+                    shown.remove(&(tab_id, view));
+                    tracing::warn!(block_id = %id, error = %e, "layout-doctor: repair: putting the block back failed; will retry next sweep");
+                }
+            }
+            continue;
+        }
         if management {
-            tracing::warn!(block_id = %id, view = %view, "layout-doctor: repair: a management view block has been in no pane for too long, closing it (the next click on its widget opens a new pane)");
+            tracing::warn!(tab_id = %tab_id, block_id = %id, view = %view, "layout-doctor: repair: a management view block in no pane is a copy of a pane its tab shows, closing it");
         } else {
             tracing::warn!(block_id = %id, "orphan_reaper: agent block has been in no pane for too long — closing it");
         }
@@ -155,15 +171,16 @@ impl Unplaced {
         MANAGEMENT_VIEWS.contains(&self.view.as_str())
     }
 
-    /// What the doctor closes once it has been in no pane for too long.
+    /// What the doctor repairs once it has been in no pane for too long: an agent's block is closed, a management view's is
+    /// put back in a pane (or closed when its tab shows one of that view already).
     fn is_repairable(&self) -> bool {
         self.is_agent() || self.is_management()
     }
 }
 
 /// The built-in management views (the widget bar's one-per-tab panes). They show the app's own state, so a block of one
-/// that is in no pane holds no work: closing it costs nothing, and the next click on its widget opens a fresh pane. Any
-/// other view (a terminal, an editor with unsaved text, a browser) is only reported, never closed.
+/// that is in no pane holds no work: it is put back in a pane, or closed when it is a copy. Any other view (a terminal,
+/// an editor with unsaved text, a browser) is only reported, never moved or closed.
 const MANAGEMENT_VIEWS: &[&str] = &["atlas", "audit", "connectors", "drone", "help", "kanban", "memory", "settings", "swarm", "toolchain", "tower", "vault"];
 
 /// An agent's block: the `agent` view, or a `term` block with an `agentId` in
@@ -193,21 +210,25 @@ pub(crate) fn is_agent_block(state: &AppState, block_id: &str) -> bool {
 struct Scan {
     unplaced: Vec<Unplaced>,
     tree_violations: Vec<(String, String)>,
+    /// The (tab, view) pairs of the blocks that are in a pane of their tab.
+    shown_views: HashSet<(String, String)>,
 }
 
 async fn scan(state: &AppState) -> Scan {
-    let (unplaced, tree_violations) = {
+    let (unplaced, tree_violations, placed) = {
         let s = state.srv_state.lock().await;
-        let (mut unplaced, mut violations) = (Vec::new(), Vec::new());
+        let (mut unplaced, mut violations, mut placed) = (Vec::new(), Vec::new(), Vec::new());
         for tab in s.tabs.values().filter(|t| t.rootnode.is_some()) {
-            for block_id in crate::backend::layout::unplaced_blocks(&tab.rootnode, &tab.block_ids) {
+            let stray = crate::backend::layout::unplaced_blocks(&tab.rootnode, &tab.block_ids);
+            placed.extend(tab.block_ids.iter().filter(|b| !stray.contains(b)).map(|b| (tab.tab_id.clone(), b.clone())));
+            for block_id in stray {
                 unplaced.push((tab.tab_id.clone(), block_id));
             }
             for v in crate::backend::layout::validate_layout_invariants(&tab.rootnode) {
                 violations.push((tab.tab_id.clone(), v));
             }
         }
-        (unplaced, violations)
+        (unplaced, violations, placed)
     };
     // A block the backend has queued for placement (`agent.open`, docked
     // `pane.open`, redock) is in no leaf until a frontend applies the action
@@ -222,7 +243,7 @@ async fn scan(state: &AppState) -> Scan {
         .collect();
     let unplaced: Vec<(String, String)> = unplaced.into_iter().filter(|(_, b)| !pending.contains(b)).collect();
     if unplaced.is_empty() {
-        return Scan { unplaced: Vec::new(), tree_violations };
+        return Scan { unplaced: Vec::new(), tree_violations, shown_views: HashSet::new() };
     }
 
     let blocks: Vec<Block> = state.mstore.get_all::<Block>().unwrap_or_default();
@@ -238,6 +259,10 @@ async fn scan(state: &AppState) -> Scan {
             (&b.oid, (view, !crate::backend::obj::meta_get_string(&b.meta, "agentId", "").is_empty()))
         })
         .collect();
+    let shown_views = placed
+        .into_iter()
+        .filter_map(|(tab_id, id)| views.get(&id).map(|(view, _)| (tab_id, view.clone())))
+        .collect();
     let unplaced = unplaced
         .into_iter()
         .filter(|(_, id)| !sub_blocks.contains(id) && !blockcontroller::is_closing(id))
@@ -246,7 +271,7 @@ async fn scan(state: &AppState) -> Scan {
             Unplaced { tab_id, block_id, view, has_agent_id }
         })
         .collect();
-    Scan { unplaced, tree_violations }
+    Scan { unplaced, tree_violations, shown_views }
 }
 
 /// Blocks named by a queued, not-yet-applied placement action
@@ -315,6 +340,13 @@ mod tests {
             _ => None,
         })
         .unwrap()
+    }
+
+    /// The blocks of the tab that are in no pane of its layout.
+    async fn stray_blocks(state: &AppState, tab_id: &str) -> Vec<String> {
+        let s = state.srv_state.lock().await;
+        let tab = s.tabs.get(tab_id).unwrap();
+        crate::backend::layout::unplaced_blocks(&tab.rootnode, &tab.block_ids)
     }
 
     async fn place(state: &AppState, tab_id: &str, block_ids: &[&String]) {
@@ -563,11 +595,11 @@ mod tests {
         assert!(!seen.reported.contains(&key), "placed again: no longer a violation");
     }
 
-    /// A management view (the Vault, Settings, the Kanban, ...) holds nothing of the person's: left in no pane it is
-    /// closed after the minimum age, so the next click on its widget opens a fresh one. A terminal or an editor in the
-    /// same state is only reported: it may hold running work or unsaved text.
+    /// A management view (the Vault, Settings, the Kanban, ...) holds nothing of the person's: left in no pane it is put
+    /// back in one after the minimum age. A terminal or an editor in the same state is only reported: it may hold running
+    /// work or unsaved text, and it is not moved.
     #[tokio::test]
-    async fn an_unplaced_management_view_block_is_repaired_after_the_minimum_age_and_work_is_left() {
+    async fn an_unplaced_management_view_block_is_put_back_in_a_pane_after_the_minimum_age_and_work_is_left() {
         let state = test_state();
         let tab = seed_tab(&state).await;
         let placed = seed_block(&state, &tab, "agent").await;
@@ -581,14 +613,41 @@ mod tests {
         let mut seen = Watch::default();
         let age = Duration::from_secs(90);
         assert!(sweep(&state, &mut seen, t0, age).await.is_empty(), "first sighting: too young");
-        let mut repaired = sweep(&state, &mut seen, t0 + age, age).await;
-        repaired.sort();
-        let mut expected = vec![vault.clone(), settings.clone()];
+        assert_eq!(stray_blocks(&state, &tab).await.len(), 4, "too young: nothing moved");
+        assert!(sweep(&state, &mut seen, t0 + age, age).await.is_empty(), "nothing is closed");
+        let mut stray = stray_blocks(&state, &tab).await;
+        stray.sort();
+        let mut expected = vec![term.clone(), editor.clone()];
         expected.sort();
-        assert_eq!(repaired, expected);
+        assert_eq!(stray, expected, "the two management views have a pane; work is left where it was");
         let s = state.srv_state.lock().await;
-        assert!(!s.blocks.contains_key(&vault) && !s.blocks.contains_key(&settings), "management views closed");
-        assert!(s.blocks.contains_key(&term) && s.blocks.contains_key(&editor) && s.blocks.contains_key(&placed), "work left alone");
+        assert!(s.blocks.contains_key(&vault) && s.blocks.contains_key(&settings) && s.blocks.contains_key(&term) && s.blocks.contains_key(&editor));
+    }
+
+    /// The person's click opened a new Vault pane while the old block was in no pane: the old block is a copy, so it is
+    /// closed, and the tab keeps its one pane of the view. Two strays of one view leave one pane and one closed copy.
+    #[tokio::test]
+    async fn a_management_view_block_in_no_pane_is_closed_when_its_tab_already_shows_one_of_that_view() {
+        let state = test_state();
+        let tab = seed_tab(&state).await;
+        let shown = seed_block(&state, &tab, "vault").await;
+        let stray = seed_block(&state, &tab, "vault").await;
+        let twin_a = seed_block(&state, &tab, "settings").await;
+        let twin_b = seed_block(&state, &tab, "settings").await;
+        place(&state, &tab, &[&shown]).await;
+
+        let t0 = Instant::now();
+        let mut seen = Watch::default();
+        let age = Duration::from_secs(90);
+        sweep(&state, &mut seen, t0, age).await;
+        let closed = sweep(&state, &mut seen, t0 + age, age).await;
+        assert_eq!(closed.len(), 2, "the Vault copy and one of the two Settings: {closed:?}");
+        assert!(closed.contains(&stray));
+        let s = state.srv_state.lock().await;
+        assert!(s.blocks.contains_key(&shown));
+        assert_eq!([&twin_a, &twin_b].iter().filter(|b| s.blocks.contains_key(**b)).count(), 1, "one Settings block is kept");
+        drop(s);
+        assert!(stray_blocks(&state, &tab).await.is_empty(), "the kept Settings block has its pane");
     }
 
     /// A stored tree that breaks an invariant (here I1's other half: one
