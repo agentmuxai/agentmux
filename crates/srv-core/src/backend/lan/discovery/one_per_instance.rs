@@ -105,30 +105,19 @@ fn better(a: &LanInstance, b: &LanInstance) -> bool {
     key(a) < key(b)
 }
 
-/// Removes from the table every entry another entry at the same address and port has replaced (the better
-/// one stays), so a stale entry is not kept alive by the answers its successor's address gets.
-/// Whether anything was removed.
+/// Removes from the table every entry that another entry at the same address and port has replaced: one this
+/// machine last reached before the other was reached, so a stale entry is not kept alive by the probe answers
+/// its successor's address gets. An entry never reached is never removed (a peer that has just come back is
+/// new until its first poll), and neither is one reached as lately as the newest. Whether anything was removed.
 pub(super) fn drop_superseded(instances: &mut std::collections::HashMap<String, LanInstance>) -> bool {
-    let mut keep: std::collections::HashMap<(String, u16), String> = std::collections::HashMap::new();
-    let mut drop: Vec<String> = Vec::new();
-    for (key, inst) in instances.iter().filter(|(_, i)| !i.address.is_empty()) {
-        match keep.entry((inst.address.clone(), inst.port)) {
-            std::collections::hash_map::Entry::Vacant(v) => {
-                v.insert(key.clone());
-            }
-            std::collections::hash_map::Entry::Occupied(mut o) => {
-                if better(inst, &instances[o.get()]) {
-                    drop.push(std::mem::replace(o.get_mut(), key.clone()));
-                } else {
-                    drop.push(key.clone());
-                }
-            }
-        }
+    let mut newest: std::collections::HashMap<(String, u16), u64> = std::collections::HashMap::new();
+    for inst in instances.values().filter(|i| !i.address.is_empty()) {
+        let at = newest.entry((inst.address.clone(), inst.port)).or_default();
+        *at = (*at).max(inst.last_polled_ok);
     }
-    for key in &drop {
-        instances.remove(key);
-    }
-    !drop.is_empty()
+    let before = instances.len();
+    instances.retain(|_, i| i.last_polled_ok == 0 || i.address.is_empty() || i.last_polled_ok >= newest[&(i.address.clone(), i.port)]);
+    instances.len() != before
 }
 
 /// `peers` with each running instance once, in the order its first entry was listed.
@@ -329,6 +318,22 @@ mod tests {
         assert_eq!(table["udp:198.51.100.25:29700"].version, "0.60.41");
         assert!(table.contains_key("agentmux-charlie-29701._agentmux._tcp.local."), "another port is another instance");
         assert!(!drop_superseded(&mut table), "nothing left to remove");
+    }
+
+    /// A peer that has just come back is a new entry that was never polled: the old entry stays until the new
+    /// one has been reached, and only then goes.
+    #[test]
+    fn an_entry_not_yet_reached_is_not_removed_in_favour_of_the_old_one() {
+        let (old, mut new) = left_behind_and_current();
+        new.last_polled_ok = 0;
+        let mut table = std::collections::HashMap::new();
+        table.insert("old".to_string(), old);
+        table.insert("new".to_string(), new);
+        assert!(!drop_superseded(&mut table));
+        assert_eq!(table.len(), 2);
+        table.get_mut("new").unwrap().last_polled_ok = 1_000;
+        assert!(drop_superseded(&mut table));
+        assert_eq!(table.keys().collect::<Vec<_>>(), ["new"]);
     }
 
     #[test]
