@@ -92,12 +92,14 @@ pub async fn capture(_state: &Arc<AppState>, _args: &serde_json::Value) -> Resul
 }
 
 /// The picture's commands by name: `live_follow_begin`, `live_follow_resize`, `live_follow_capture`,
-/// `live_follow_quiet`, `live_follow_fade`, and `live_follow_end` for any other.
+/// `live_follow_quiet`, `live_follow_fade`, `capture_pane_picture` (the pane cut out of the window's picture for the
+/// tear-off, pane_picture.rs), and `live_follow_end` for any other.
 pub async fn route(cmd: &str, state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     match cmd {
         "live_follow_begin" => begin_blocking(state, args).await,
         "live_follow_resize" => resize_blocking(args).await,
         "live_follow_capture" => capture(state, args).await,
+        "capture_pane_picture" => super::pane_picture::capture(state, args).await,
         "live_follow_quiet" => quiet(args),
         "live_follow_fade" => fade(args),
         _ => end(),

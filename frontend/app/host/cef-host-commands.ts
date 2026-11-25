@@ -218,6 +218,8 @@ export const cefWindows: WindowHostApi = {
     getPaneDebugState: () => invokeCommand<Record<string, unknown>>("get_pane_debug_state", {}),
     captureViewport: (windowLabel, quality) =>
         invokeCommand<{ jpeg_base64: string }>("capture_window_viewport", { label: windowLabel, quality }),
+    capturePanePicture: (windowLabel, rect, viewportWidth, quality) =>
+        invokeCommand<{ jpeg_base64: string | null }>("capture_pane_picture", { label: windowLabel, rect, viewportWidth, quality }),
     recycleBegin: (windowLabel, reason) =>
         invokeCommand<{ before_mb: number | null }>("recycle_begin", { label: windowLabel, reason }),
     recycleDeclined: async (windowLabel, reason) => {

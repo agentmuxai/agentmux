@@ -408,6 +408,14 @@ declare global {
         getPaneDebugState(): Promise<Record<string, unknown>>;
         /** This window's whole viewport as a base64 JPEG, unclipped (a tear-off snapshot's source). */
         captureViewport(windowLabel: string, quality?: number): Promise<{ jpeg_base64: string }>;
+        /** The pane at `rect` (CSS px of the window, which is `viewportWidth` wide) cut out of this window's picture by
+         *  the host, as a base64 JPEG; null when none of it is in the picture. Windows only (the tear-off picture). */
+        capturePanePicture(
+            windowLabel: string,
+            rect: { left: number; top: number; width: number; height: number },
+            viewportWidth: number,
+            quality?: number
+        ): Promise<{ jpeg_base64: string | null }>;
         /** This window is about to reload to free its renderer's memory: the host measures it
          *  and keeps a picture of it to cover the reload (SPEC_RENDERER_RECYCLE_WHEN_IDLE §3). */
         recycleBegin(windowLabel: string, reason: string): Promise<{ before_mb: number | null }>;

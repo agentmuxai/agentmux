@@ -14,6 +14,10 @@ const shots = vi.hoisted(() => ({
     calls: [] as string[],
     next: null as null | Promise<{ jpeg_base64: string }>,
     drawn: [] as number[][],
+    /** What the host was asked to cut out of the window's picture: the rect and the viewport's width. */
+    cut: [] as Array<{ rect: unknown; viewportWidth: number }>,
+    /** What the host cuts out of the window's picture. */
+    cutPicture: "cropped-pane",
     page: "browser-page" as string | null,
 }));
 vi.mock("@/app/store/global", () => ({
@@ -35,6 +39,12 @@ vi.mock("@/app/store/global", () => ({
             captureViewport: (label: string) => {
                 shots.calls.push(label);
                 return shots.next ?? Promise.resolve({ jpeg_base64: btoa("full-viewport") });
+            },
+            // The host takes the window's picture and cuts the pane out of it: a capture that fails fails here too.
+            capturePanePicture: (label: string, rect: unknown, viewportWidth: number) => {
+                shots.calls.push(label);
+                shots.cut.push({ rect, viewportWidth });
+                return (shots.next ?? Promise.resolve({ jpeg_base64: "" })).then(() => ({ jpeg_base64: btoa(shots.cutPicture) }));
             },
         },
     }),
@@ -91,6 +101,8 @@ beforeEach(() => {
     shots.views = {};
     shots.next = null;
     shots.drawn = [];
+    shots.cut = [];
+    shots.cutPicture = "cropped-pane";
     shots.page = "browser-page";
     resetTearOffSnapshotForTests();
     stubImagePipeline();
@@ -110,8 +122,9 @@ describe("tear-off snapshot", () => {
         mountPane("b1");
         prewarmTearOffSnapshot("b1");
         expect(await takeTearOffSnapshot("b1")).toBe(btoa("cropped-pane"));
-        // The pane's CSS rect at 2 device px per CSS px.
-        expect(shots.drawn).toEqual([[20, 40, 600, 400, 0, 0, 600, 400]]);
+        // The host is asked for the pane's CSS rect of the window, and cuts it out: the page draws nothing.
+        expect(shots.cut).toEqual([{ rect: { left: 10, top: 20, width: 300, height: 200 }, viewportWidth: window.innerWidth }]);
+        expect(shots.drawn).toEqual([]);
     });
 
     it("a picture older than the age limit is dropped, unless the live follow has been showing it", async () => {
@@ -261,7 +274,7 @@ describe("tear-off snapshot", () => {
                 }
             }
         );
-        mountPane("b1");
+        mountBrowserPane("b1");
         prewarmTearOffSnapshot("b1");
         expect(await takeTearOffSnapshot("b2")).toBeUndefined();
         await settleTearOffSnapshotForTests();
@@ -302,7 +315,7 @@ describe("tear-off snapshot", () => {
     });
 
     it("drops a picture too large for the open-window request", async () => {
-        stubImagePipeline("x".repeat(MAX_SNAPSHOT_CHARS));
+        shots.cutPicture = "x".repeat(MAX_SNAPSHOT_CHARS);
         mountPane("b1");
         prewarmTearOffSnapshot("b1");
         expect(await takeTearOffSnapshot("b1")).toBeUndefined();
@@ -508,8 +521,9 @@ describe("which of a pane's tabs its picture shows", () => {
         mountTabs("b1");
         prewarmTearOffSnapshot("b1", { x: 250, y: 30 });
         expect(await peekTearOffSnapshot("b1", 500)).toMatchObject({ grab: { x: 240, y: 10 } });
-        // The pane's crop and nothing over it.
-        expect(shots.drawn).toEqual([[20, 40, 600, 400, 0, 0, 600, 400]]);
+        // The pane as the host cuts it, and nothing drawn over it.
+        expect(shots.cut).toHaveLength(1);
+        expect(shots.drawn).toEqual([]);
     });
 
     it("a tab's own drag pictures it alone: its pill drawn at the strip's start, held where it was pressed", async () => {

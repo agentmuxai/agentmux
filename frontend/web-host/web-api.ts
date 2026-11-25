@@ -143,6 +143,7 @@ function desktopOnlyApi() {
                 "getCursorScreenPoint",
                 "getPaneDebugState",
                 "captureViewport",
+                "capturePanePicture",
                 "recycleBegin",
                 "recycleDeclined",
                 "recycleCancel",
