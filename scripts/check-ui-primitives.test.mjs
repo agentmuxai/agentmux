@@ -910,6 +910,17 @@ describe("discardedClicks (rule 18)", () => {
         expect(countDiscardedClicks(source)).toBe(1);
     });
 
+    it("does not take a slash-star inside a string for the start of a comment", () => {
+        const source = [
+            '<input type="file" accept="image/*" />',
+            '<Button onClick={() => void save()}>Save</Button>',
+            '<input accept="*/*" />',
+            '<Button onClick={() => void other()}>Other</Button>',
+            '{/* upload controls */}',
+        ].join("\n");
+        expect(countDiscardedClicks(source)).toBe(2);
+    });
+
     it("still reads a quick action marker written as a comment on the line above", () => {
         const source = ["{/* quick action: opens a link */}", '<Button onClick={() => void open(url)}>Open</Button>'].join("\n");
         expect(countDiscardedClicks(source)).toBe(0);

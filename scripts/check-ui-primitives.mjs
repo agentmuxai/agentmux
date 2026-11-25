@@ -212,10 +212,14 @@ export function closeHoverOverrides(source) {
 
 const KIT_BUTTONS = new Set(["Button", "IconButton", "CloseButton"]);
 
-/** `source` with its block comments and whole-line `//` comments blanked to spaces: the same offsets and line breaks. */
+/**
+ * `source` with its block comments and whole-line `//` comments blanked to spaces: the same offsets and line breaks.
+ * A `/*` begins a comment only after a space, a line start or one of `{(;,}>`: not inside a string such as
+ * `accept="image/*"`, which would otherwise blank the code up to the next real comment.
+ */
 function blankComments(source) {
     const blank = (text) => text.replace(/[^\n]/g, " ");
-    return source.replace(/\/\*[\s\S]*?\*\//g, blank).replace(/^[ \t]*\/\/.*$/gm, blank);
+    return source.replace(/(?<![^\s{(;,}>])\/\*[\s\S]*?\*\//g, blank).replace(/^[ \t]*\/\/.*$/gm, blank);
 }
 
 /**
