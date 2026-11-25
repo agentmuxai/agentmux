@@ -323,7 +323,7 @@ function useDragPreview(
     const [previewElementGeneration, setPreviewElementGeneration] = createSignal(0);
     const [previewImageGeneration, setPreviewImageGeneration] = createSignal(0);
 
-    warmDragPreview(PREVIEW_RASTER);
+    warmDragPreview(getPreviewRef, PREVIEW_RASTER);
     // Monotonic token for in-flight rasterisations. `toPng` is async and a
     // pane can be resized between two hovers, so two requests can be pending
     // at once; without this the OLDER one resolving last overwrites the

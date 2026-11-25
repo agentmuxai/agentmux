@@ -41,13 +41,20 @@ export async function rasterisePane(node: HTMLElement, options: RasterOptions): 
 
 /**
  * Load the rasteriser and embed the fonts when the page is idle, once, so the first drag preview of a window is as quick as
- * the later ones. Nothing waits on it: it is not run before the first paint.
+ * the later ones. Nothing waits on it: it is not run before the first paint. The fonts are read from the pane's own preview
+ * element, never from the page: reading them walks every element under the node it is given, and the page's panes can hold
+ * very long transcripts.
  */
-export function warmDragPreview(options: RasterOptions): void {
+export function warmDragPreview(previewNode: () => HTMLElement | undefined, options: RasterOptions): void {
     if (warming || typeof document === "undefined") return;
     warming = true;
     const run = () => {
-        void import("html-to-image").then((lib) => fontCss(lib, document.body, options)).catch(() => {});
+        const node = previewNode();
+        if (!node) {
+            warming = false;
+            return;
+        }
+        void import("html-to-image").then((lib) => fontCss(lib, node, options)).catch(() => {});
     };
     if (typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 10000 });
     else setTimeout(run, 3000);

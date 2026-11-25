@@ -5,12 +5,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const lib = vi.hoisted(() => ({
     fontCalls: 0,
+    fontNodes: [] as unknown[],
     pngOptions: [] as unknown[],
     fontFails: false,
 }));
 vi.mock("html-to-image", () => ({
-    getFontEmbedCSS: async () => {
+    getFontEmbedCSS: async (node: unknown) => {
         lib.fontCalls++;
+        lib.fontNodes.push(node);
         if (lib.fontFails) throw new Error("no fonts");
         return "@font-face{}";
     },
@@ -20,7 +22,7 @@ vi.mock("html-to-image", () => ({
     },
 }));
 
-import { rasterisePane, resetDragPreviewRaster } from "./drag-preview-raster";
+import { rasterisePane, resetDragPreviewRaster, warmDragPreview } from "./drag-preview-raster";
 
 const node = {} as HTMLElement;
 const fontFaces = (n: number) => Object.defineProperty(document, "fonts", { value: { size: n }, configurable: true });
@@ -28,6 +30,7 @@ const fontFaces = (n: number) => Object.defineProperty(document, "fonts", { valu
 beforeEach(() => {
     resetDragPreviewRaster();
     lib.fontCalls = 0;
+    lib.fontNodes = [];
     lib.pngOptions = [];
     lib.fontFails = false;
     fontFaces(3);
@@ -55,5 +58,34 @@ describe("rasterisePane", () => {
         await rasterisePane(node, { pixelRatio: 1 });
         expect(lib.fontCalls).toBe(2);
         expect(lib.pngOptions[1]).toEqual({ pixelRatio: 1, fontEmbedCSS: "@font-face{}" });
+    });
+});
+
+describe("warmDragPreview", () => {
+    it("embeds the fonts from the pane's preview element, never the page, and only once", async () => {
+        const idle: (() => void)[] = [];
+        vi.stubGlobal("requestIdleCallback", (fn: () => void) => void idle.push(fn));
+        const preview = { id: "preview" } as unknown as HTMLElement;
+        warmDragPreview(() => preview, {});
+        warmDragPreview(() => preview, {});
+        expect(idle).toHaveLength(1);
+        expect(lib.fontCalls).toBe(0);
+        idle[0]();
+        await vi.waitFor(() => expect(lib.fontCalls).toBe(1));
+        expect(lib.fontNodes).toEqual([preview]);
+        await rasterisePane(preview, {});
+        expect(lib.fontCalls).toBe(1);
+        vi.unstubAllGlobals();
+    });
+
+    it("waits for a later tile when no preview element is mounted yet", async () => {
+        const idle: (() => void)[] = [];
+        vi.stubGlobal("requestIdleCallback", (fn: () => void) => void idle.push(fn));
+        warmDragPreview(() => undefined, {});
+        idle[0]();
+        expect(lib.fontCalls).toBe(0);
+        warmDragPreview(() => ({}) as HTMLElement, {});
+        expect(idle).toHaveLength(2);
+        vi.unstubAllGlobals();
     });
 });
