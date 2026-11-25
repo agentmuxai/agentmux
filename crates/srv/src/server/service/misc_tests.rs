@@ -205,7 +205,7 @@ async fn resolve_unnamed_backlog_returns_at_once() {
 
 #[tokio::test]
 async fn history_calls_that_name_a_session_need_the_id() {
-    for method in ["ListForAgent", "Get", "Delete"] {
+    for method in ["ListForAgent", "Get"] {
         let result = run("history", method, vec![]).await;
         assert!(!result.success, "{method}");
         assert_eq!(result.error.as_deref(), Some("missing argument at index 0"), "{method}");
@@ -221,11 +221,9 @@ async fn history_list_filtered_to_an_unknown_provider_succeeds() {
 }
 
 #[tokio::test]
-async fn history_get_and_delete_of_an_unknown_session_still_answer() {
+async fn history_get_of_an_unknown_session_still_answers() {
     let get = run("history", "Get", vec![serde_json::json!("no-such-session")]).await;
     assert!(get.success, "{:?}", get.error);
-    let delete = run("history", "Delete", vec![serde_json::json!("no-such-session")]).await;
-    assert!(delete.success, "{:?}", delete.error);
 }
 
 #[tokio::test]
@@ -235,22 +233,18 @@ async fn history_list_for_an_unknown_agent_succeeds() {
 }
 
 #[tokio::test]
-async fn history_clear_for_an_unknown_provider_succeeds() {
-    let args = vec![serde_json::json!("no-such-provider"), serde_json::json!("no-such-project")];
-    let result = run("history", "Clear", args).await;
-    assert!(result.success, "{:?}", result.error);
-}
-
-#[tokio::test]
-async fn agent_define_without_a_body_is_an_argument_error() {
-    let result = run("agent", "define", vec![]).await;
-    assert!(!result.success);
-    assert_eq!(result.error.as_deref(), Some("missing argument at index 0"));
-}
-
-#[tokio::test]
-async fn agent_define_with_a_malformed_body_is_an_argument_error() {
-    let result = run("agent", "define", vec![serde_json::json!("not an object")]).await;
-    assert!(!result.success);
-    assert!(result.error.unwrap().starts_with("invalid argument at index 0"));
+async fn the_route_refuses_to_delete_or_clear_history_and_to_define_an_agent_whatever_the_arguments() {
+    let valid_define = serde_json::json!({"name": "intruder"});
+    for (service, method, args) in [
+        ("history", "Delete", vec![serde_json::json!("no-such-session")]),
+        ("history", "Delete", vec![]),
+        ("history", "Clear", vec![serde_json::json!("no-such-provider"), serde_json::json!("no-such-project")]),
+        ("history", "Clear", vec![]),
+        ("agent", "define", vec![valid_define]),
+        ("agent", "define", vec![]),
+    ] {
+        let result = run(service, method, args).await;
+        assert!(!result.success, "{service}.{method}");
+        assert!(result.error.as_deref().is_some_and(|e| e.starts_with("FORBIDDEN: ")), "{service}.{method}: {:?}", result.error);
+    }
 }
