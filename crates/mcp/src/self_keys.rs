@@ -53,6 +53,23 @@ static CACHE: Mutex<Option<Cached>> = Mutex::new(None);
 #[cfg(test)]
 pub(crate) static ENV_LOCK: Mutex<()> = Mutex::new(());
 
+static FETCH: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// The answer srv gives a request whose identity signature does not verify: the key this process holds is not the
+/// one srv has (it was replaced while this process ran).
+const REJECTED_SIGNATURE: &str = "identity signature verification failed";
+
+/// Whether a tool's error is srv rejecting this agent's signature.
+pub(crate) fn is_rejected_signature(error: &str) -> bool {
+    error.contains(REJECTED_SIGNATURE)
+}
+
+/// Drop the held copy and the retry gate, so the next `refresh_if_stale` asks srv again at once.
+pub(crate) fn forget_fetched() {
+    *CACHE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    *LAST_ATTEMPT.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
 /// When a fetch was last tried. With no usable copy (an srv without the
 /// endpoint, an unreachable one), every tool call would otherwise retry and
 /// wait out the request; this spaces the retries.
@@ -76,6 +93,9 @@ fn is_container_hint(value: Option<&str>) -> bool {
 /// leave the old copy (or none) in place: signing then falls back to the env
 /// keys, exactly as before M4d-3.
 pub(crate) async fn refresh_if_stale(client: &reqwest::Client, local_url: &str, auth_key: &str) {
+    // One fetch at a time: a call made while the startup fetch is in flight waits for it (the start file holds
+    // no key to sign with meanwhile), then finds the copy it left.
+    let _one_fetch = FETCH.lock().await;
     let fresh = CACHE.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|c| still_good(c, agentmux_common::time::now_secs()));
     // In a container srv signs for the agent and refuses this route: the hint skips the call.
     if fresh || in_container() || local_url.is_empty() || std::env::var("AGENTMUX_AGENT_TOKEN").map_or(true, |t| t.trim().is_empty()) {
@@ -171,6 +191,60 @@ pub(crate) fn clear_for_test() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_srvs_own_rejection_is_a_rejected_signature() {
+        assert!(super::is_rejected_signature("srv returned 403: identity signature verification failed"));
+        assert!(!super::is_rejected_signature("agent_id=\"x\" is not currently registered with a pane"));
+    }
+
+    #[test]
+    fn forgetting_the_fetched_copy_lets_the_next_call_fetch_at_once() {
+        let _guard = super::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        super::set_for_test("aria", Some("AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="));
+        *super::LAST_ATTEMPT.lock().unwrap() = Some(std::time::Instant::now());
+        super::forget_fetched();
+        assert!(super::CACHE.lock().unwrap().is_none());
+        assert!(super::LAST_ATTEMPT.lock().unwrap().is_none(), "the 60 s retry gate is open again");
+    }
+
+    /// A call made while the first fetch is in flight waits for it and uses its answer, with one request made.
+    #[tokio::test]
+    async fn a_call_during_the_first_fetch_waits_for_it() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let _guard = super::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        super::forget_fetched();
+        std::env::set_var("AGENTMUX_AGENT_TOKEN", "t");
+        std::env::remove_var("AGENTMUX_IN_CONTAINER");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let served = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = served.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else { return };
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let mut buf = [0u8; 2048];
+                let _ = sock.read(&mut buf).await;
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                let body = r#"{"slug":"aria","jekt_key":"BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=","lan_key":null,"uid":""}"#;
+                let _ = sock
+                    .write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes())
+                    .await;
+            }
+        });
+        let client = reqwest::Client::new();
+        let (first, second) = tokio::join!(super::refresh_if_stale(&client, &url, "k"), async {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            super::refresh_if_stale(&client, &url, "k").await;
+            super::CACHE.lock().unwrap().is_some()
+        });
+        let _ = first;
+        assert!(second, "the second call returned with the first call's keys held");
+        assert_eq!(served.load(std::sync::atomic::Ordering::SeqCst), 1, "one request, not two");
+        super::forget_fetched();
+        std::env::remove_var("AGENTMUX_AGENT_TOKEN");
+    }
+
     #[test]
     fn only_a_one_is_the_container_hint() {
         assert!(super::is_container_hint(Some("1")));

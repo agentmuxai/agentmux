@@ -46,30 +46,8 @@ impl Migration for M0043RotateContainerAgentKeys {
             Store::open(&ctx.channel_store_path)
                 .map_err(|e| MigrationError(format!("rotate_container_agent_keys: open store: {e}")))?,
         );
-        // `wan.db` is shared by every version of the channel. Without a path to it, or when it can't be
-        // opened, the WAN key is left alone (and so is the legacy copy it would be imported from again).
-        let wan_path = wan_identity::resolve_wan_identity_path();
-        let wan = match &wan_path {
-            Some(path) if path.exists() => match WanIdentityStore::open(path) {
-                Ok(wan) => Wan::Store(wan),
-                Err(e) => {
-                    tracing::warn!(error = %e, "rotate_container_agent_keys: wan.db not opened; WAN keys not replaced");
-                    Wan::Unavailable
-                }
-            },
-            Some(_) => Wan::NoneYet,
-            None => Wan::Unavailable,
-        };
-        // The host's LAN keys (shared by every channel): one that is still the exposed key goes with it.
-        // A host database that exists but does not open fails the migration, which stays pending and runs
-        // again: going on without it would rotate this channel's keys and leave the exposed ones there.
-        let host = match crate::registry::resolve_identity_store_path().filter(|p| p.exists()) {
-            Some(path) => Some(
-                HostLanKeys::open(&path)
-                    .map_err(|e| MigrationError(format!("rotate_container_agent_keys: the host's LAN key table did not open: {e}")))?,
-            ),
-            None => None,
-        };
+        let wan = open_wan();
+        let host = open_host()?;
         let rotated = rotate_container_keys(&store, &wan, host.as_ref()).map_err(MigrationError)?;
         if rotated > 0 {
             tracing::info!(rotated, "rotate_container_agent_keys: replaced container agents' signing keys");
@@ -88,8 +66,37 @@ impl Migration for M0043RotateContainerAgentKeys {
     }
 }
 
+/// `wan.db` is shared by every version of the channel. Without a path to it, or when it can't be
+/// opened, the WAN key is left alone (and so is the legacy copy it would be imported from again).
+pub(super) fn open_wan() -> Wan {
+    let wan_path = wan_identity::resolve_wan_identity_path();
+    match &wan_path {
+        Some(path) if path.exists() => match WanIdentityStore::open(path) {
+            Ok(wan) => Wan::Store(wan),
+            Err(e) => {
+                tracing::warn!(error = %e, "rotate_agent_keys: wan.db not opened; WAN keys not replaced");
+                Wan::Unavailable
+            }
+        },
+        Some(_) => Wan::NoneYet,
+        None => Wan::Unavailable,
+    }
+}
+
+/// The host's LAN keys (shared by every channel): one that is still the exposed key goes with it.
+/// A host database that exists but does not open fails the migration, which stays pending and runs
+/// again: going on without it would rotate this channel's keys and leave the exposed ones there.
+pub(super) fn open_host() -> Result<Option<HostLanKeys>, MigrationError> {
+    match crate::registry::resolve_identity_store_path().filter(|p| p.exists()) {
+        Some(path) => HostLanKeys::open(&path)
+            .map(Some)
+            .map_err(|e| MigrationError(format!("rotate_agent_keys: the host's LAN key table did not open: {e}"))),
+        None => Ok(None),
+    }
+}
+
 /// The channel's WAN keys, as far as this migration can reach them.
-enum Wan {
+pub(super) enum Wan {
     Store(WanIdentityStore),
     /// No `wan.db` yet: only the legacy copy a later import would use exists.
     NoneYet,
@@ -149,10 +156,16 @@ fn fresh_lan_pair() -> AgentLanKeypair {
 /// one, so the next lookup cannot adopt it back; a key another channel put there is not the exposed one
 /// and stays, so no other channel's key changes.
 fn rotate_container_keys(store: &Store, wan: &Wan, host: Option<&HostLanKeys>) -> Result<usize, String> {
+    rotate_agent_keys(store, wan, host, container_agents(store)?)
+}
+
+/// Replace the keys of the given `(id, slug)` agents; how many had any. The body of
+/// [`rotate_container_keys`], shared with the migration that does the same for host agents.
+pub(super) fn rotate_agent_keys(store: &Store, wan: &Wan, host: Option<&HostLanKeys>, agents: Vec<(String, String)>) -> Result<usize, String> {
     let mut rotated = 0;
-    for (id, slug) in container_agents(store)? {
-        let old_name = store.agent_lan_key_load(&slug).map_err(|e| format!("rotate_container_agent_keys: LAN key of {slug}: {e}"))?;
-        let old_uid = store.agent_uid_lan_public_key_load(&id).map_err(|e| format!("rotate_container_agent_keys: UID LAN key of {slug}: {e}"))?;
+    for (id, slug) in agents {
+        let old_name = store.agent_lan_key_load(&slug).map_err(|e| format!("rotate_agent_keys: LAN key of {slug}: {e}"))?;
+        let old_uid = store.agent_uid_lan_public_key_load(&id).map_err(|e| format!("rotate_agent_keys: UID LAN key of {slug}: {e}"))?;
         // The host's keys first, with new keys made here: a failure leaves this channel untouched, so a
         // retry still finds the exposed keys to match. (Replacing them afterwards lost them on a retry.)
         // The channel's own rotation below makes keys of its own; once the host table is attached the
@@ -163,39 +176,39 @@ fn rotate_container_keys(store: &Store, wan: &Wan, host: Option<&HostLanKeys>) -
             if let Some(old) = &old_name {
                 let new = HostKey { pair: fresh_lan_pair(), created_at: now };
                 host.supersede(HostKeyKind::Name, &slug.to_lowercase(), &old.public_key, Some(&new))
-                    .map_err(|e| format!("rotate_container_agent_keys: host LAN key of {slug}: {e}"))?;
+                    .map_err(|e| format!("rotate_agent_keys: host LAN key of {slug}: {e}"))?;
             }
             if let Some(old) = &old_uid {
                 let new = HostKey { pair: fresh_lan_pair(), created_at: now };
                 host.supersede(HostKeyKind::Uid, &id, old, Some(&new))
-                    .map_err(|e| format!("rotate_container_agent_keys: host UID LAN key of {slug}: {e}"))?;
+                    .map_err(|e| format!("rotate_agent_keys: host UID LAN key of {slug}: {e}"))?;
             }
         }
         let uid_copies = store
             .agent_uid_keys_delete(&id)
-            .map_err(|e| format!("rotate_container_agent_keys: UID keys of {slug}: {e}"))?;
+            .map_err(|e| format!("rotate_agent_keys: UID keys of {slug}: {e}"))?;
         let wan_removed = match wan {
             Wan::Store(wan) => {
                 let current = wan
                     .agent_keys_delete(std::slice::from_ref(&slug))
-                    .map_err(|e| format!("rotate_container_agent_keys: WAN key of {slug}: {e}"))?;
+                    .map_err(|e| format!("rotate_agent_keys: WAN key of {slug}: {e}"))?;
                 // After the `wan.db` row, which would otherwise be imported from this one again.
                 let legacy = store
                     .agent_wan_key_delete(&slug)
-                    .map_err(|e| format!("rotate_container_agent_keys: legacy WAN key of {slug}: {e}"))?;
+                    .map_err(|e| format!("rotate_agent_keys: legacy WAN key of {slug}: {e}"))?;
                 current > 0 || legacy
             }
             Wan::NoneYet => store
                 .agent_wan_key_delete(&slug)
-                .map_err(|e| format!("rotate_container_agent_keys: legacy WAN key of {slug}: {e}"))?,
+                .map_err(|e| format!("rotate_agent_keys: legacy WAN key of {slug}: {e}"))?,
             Wan::Unavailable => false,
         };
         let jekt = store
             .agent_jekt_key_rotate(&slug)
-            .map_err(|e| format!("rotate_container_agent_keys: jekt key of {slug}: {e}"))?;
+            .map_err(|e| format!("rotate_agent_keys: jekt key of {slug}: {e}"))?;
         let lan = store
             .agent_lan_key_rotate(&slug)
-            .map_err(|e| format!("rotate_container_agent_keys: LAN key of {slug}: {e}"))?;
+            .map_err(|e| format!("rotate_agent_keys: LAN key of {slug}: {e}"))?;
         rotated += usize::from(jekt || lan || wan_removed || uid_copies);
     }
     Ok(rotated)
