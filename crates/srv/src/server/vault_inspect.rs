@@ -113,8 +113,9 @@ pub(crate) async fn handle_vault_update(State(state): State<AppState>, caller: O
     let request = body.request;
     // The call is checked before the pace is spent, and before a refusal is written for it: an invalid call costs nothing and
     // leaves nothing on an entry.
-    let (store, checking, by) = (state.identity_store.clone(), request.clone(), agent.clone());
-    let checked = match blocking(move || inspect::check_update(&store, &checking, &by)).await {
+    let own_profile = state.reactive_handler.get_agent(&agent).and_then(|a| a.uid).map(|uid| format!("profile:{}", crate::backend::browser_profiles_store::agent_profile_id(&uid)));
+    let (store, checking, by, own) = (state.identity_store.clone(), request.clone(), agent.clone(), own_profile.clone());
+    let checked = match blocking(move || inspect::check_update(&store, &checking, &by, own.as_deref())).await {
         Ok(checked) => checked,
         Err(refusal) => return refusal,
     };
@@ -132,7 +133,7 @@ pub(crate) async fn handle_vault_update(State(state): State<AppState>, caller: O
     }
     let store = state.identity_store.clone();
     let by = agent.clone();
-    let response = answer(move || inspect::update_details(&store, &request, &by)).await;
+    let response = answer(move || inspect::update_details_for(&store, &request, &by, own_profile.as_deref())).await;
     if response.status().is_success() {
         publish(&state);
     } else {

@@ -119,6 +119,10 @@ set_by: string,
  */
 set_ms: number, 
 /**
+ * What `set_by` set: `value`, `site` or `value and site` (a site, realm or proxy an agent chose for a login).
+ */
+set_what: string, 
+/**
  * A secret an agent wants copied into the Vault from another service (`Vault` `import`); never goes ahead on silence.
  */
 import?: UseImport, 

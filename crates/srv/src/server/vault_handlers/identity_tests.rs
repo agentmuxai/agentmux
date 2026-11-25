@@ -112,19 +112,25 @@ async fn c1_the_token_of_an_agent_that_is_not_running_is_refused() {
     assert_eq!(s, StatusCode::FORBIDDEN);
 }
 
-// C6: where a login may be used is not an agent's to change, a verified one included.
+// C6: where a login made by the person is offered is theirs to change: an agent's request is a proposal, a verified one included.
 #[tokio::test]
-async fn c6_an_agents_update_of_the_site_changes_nothing() {
+async fn c6_an_agents_update_of_the_site_of_a_login_it_did_not_make_is_a_proposal_that_changes_nothing() {
     let (app, state) = setup().await;
     let token = agent(&state, "vid-site");
     let id = login(&app).await;
-    for field in ["site", "realm", "profile", "proxy"] {
-        let (s, body) = call(&app, Some(&token), "/api/v1/vault/update", update(&id, "vid-site", json!({ field: "https://elsewhere.example.net" }))).await;
-        assert_eq!(s, StatusCode::BAD_REQUEST, "{field}: {body}");
-        assert!(body["error"].as_str().unwrap().contains("the person sets it"), "{body}");
+    for (field, value) in [("site", "https://elsewhere.example.net"), ("realm", "Elsewhere"), ("proxy", "yes")] {
+        let (s, body) = call(&app, Some(&token), "/api/v1/vault/update", update(&id, "vid-site", json!({ field: value }))).await;
+        assert_eq!(s, StatusCode::OK, "{field}: {body}");
+        assert_eq!(body["proposed"], json!([format!("field {field}")]), "{body}");
+        assert!(body["note"].as_str().unwrap().contains("when the person accepts it"), "{body}");
     }
+    // A profile is whose browser may use it: a share, and a share asks.
+    let (s, body) = call(&app, Some(&token), "/api/v1/vault/update", update(&id, "vid-site", json!({ "profile": "personal" }))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("Vault share"), "{body}");
     let row = state.identity_store.vault_get(&id).unwrap().unwrap();
     assert!(row.fields.contains("https://dash.example.com") && !row.fields.contains("elsewhere"), "{}", row.fields);
+    assert_eq!(crate::backend::vault::proposals::list(&state.identity_store).unwrap().len(), 3);
 }
 
 // C5: a Vault closed to all but one named agent is that agent's by its token, as by its signature.

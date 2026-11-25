@@ -305,6 +305,8 @@ impl Store {
         let tx = conn.unchecked_transaction()?;
         tx.execute("DELETE FROM db_vault_grants WHERE entry_id = ?1", params![id])?;
         tx.execute("DELETE FROM db_vault_versions WHERE entry_id = ?1", params![id])?;
+        tx.execute("DELETE FROM db_vault_details_kept WHERE entry_id = ?1", params![id])?;
+        tx.execute("DELETE FROM db_vault_proposals WHERE entry_id = ?1", params![id])?;
         // The ids that opened it are kept for good as retired, so none is given to another entry.
         tx.execute(
             "INSERT OR IGNORE INTO db_vault_link_retired (link_id) SELECT link_id FROM db_vault_link_ids WHERE entry_id = ?1 UNION SELECT link_id FROM db_vault_link_aliases WHERE entry_id = ?1",
@@ -685,6 +687,14 @@ impl Store {
         let mut stmt = conn.prepare(&format!("SELECT {ACTIVITY_COLUMNS} FROM db_vault_activity WHERE entry_id = ?1 AND at >= ?2 ORDER BY seq DESC LIMIT ?3"))?;
         let rows = stmt.query_map(params![entry_id, since_ms, limit], activity_of)?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// The first line of the entry's history from `since_ms` on (its `created_at`): who made it.
+    pub fn vault_activity_first(&self, entry_id: &str, since_ms: i64) -> Result<Option<VaultActivityRow>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(&format!("SELECT {ACTIVITY_COLUMNS} FROM db_vault_activity WHERE entry_id = ?1 AND at >= ?2 ORDER BY seq ASC LIMIT 1"))?;
+        let mut rows = stmt.query_map(params![entry_id, since_ms], activity_of)?;
+        Ok(rows.next().transpose()?)
     }
 
     /// One entry's latest `limit` activity rows with one of `actions`, from

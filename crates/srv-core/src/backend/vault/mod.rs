@@ -30,6 +30,7 @@ pub mod kdbx_names;
 pub mod kinds;
 pub mod linked;
 pub mod pace;
+pub mod proposals;
 pub mod plain_export;
 pub mod requests;
 pub mod endpoint_key;
@@ -539,8 +540,11 @@ pub fn generate_entry_in(store: &Store, req: GenerateRequest, actor: &str, own_p
         let names: Vec<&str> = GENERATED_KINDS.iter().map(|(k, _)| *k).collect();
         return Err(format!("generate makes {} entries, not {:?}: an ID number or a card is the person's, so ask for it with request", names.join(", "), req.kind));
     };
-    if let Some(name) = [shares::SHARED, signins::REALM, signins::PROXY, signins::PROFILE].into_iter().find(|f| req.fields.contains_key(*f)) {
+    if let Some(name) = [shares::SHARED, signins::PROFILE].into_iter().find(|f| req.fields.contains_key(*f)) {
         return Err(inspect::person_only_refusal(name));
+    }
+    if let Some(site) = req.fields.get(signins::SITE).filter(|s| !s.trim().is_empty()) {
+        inspect::agent_origin(site)?;
     }
     let signin_profile = match (*kind == "login" && req.fields.get(signins::SITE).is_some_and(|s| !s.trim().is_empty()), own_profile) {
         (false, _) => None,
@@ -577,6 +581,10 @@ pub fn generate_entry_in(store: &Store, req: GenerateRequest, actor: &str, own_p
         },
     };
     let id = insert_in_why(store, entry, actor, "generated", &target, &vault_id, &reason)?;
+    if signin_profile.is_some() {
+        // A site the person never saw: a use there never goes ahead on silence (R9).
+        agent_set::mark_site(store, &id, actor);
+    }
     Ok(Generated { id, label, kind: kind.to_string(), made: generate::describe(&rules) })
 }
 
@@ -959,6 +967,8 @@ pub fn activity(store: &Store, limit: i64) -> Result<Vec<VaultActivity>, String>
         .collect())
 }
 
+#[cfg(test)]
+mod agent_place_tests;
 #[cfg(test)]
 mod card_scan_tests;
 #[cfg(test)]

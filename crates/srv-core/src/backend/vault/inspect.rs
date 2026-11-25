@@ -13,8 +13,9 @@ use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
 
 use super::source_link::{self, Link};
-use super::{expiry, history, kinds, linked, record_line, seal, shares, signins, signups, validate, vaults, Line, Parts};
+use super::{agent_set, expiry, history, kinds, linked, record_line, seal, shares, signins, signups, validate, vaults, Line, Parts};
 use crate::backend::storage::store::Store;
+use crate::backend::storage::vault_changes::DetailsKept;
 use crate::backend::storage::vault::{VaultRow, VALUE_SETTING};
 
 /// The Activity action of a change to an entry's label, plain fields or tags.
@@ -166,21 +167,50 @@ pub struct Updated {
     pub label: String,
     /// What changed, as the history line says it: `label`, `field notes`, `expires 2027-01-31`, `tags`.
     pub changed: Vec<String>,
+    /// Where the login is offered (`field site`, `field realm`, `field proxy`) changes the agent asked for on a login it did
+    /// not make: recorded for the person, not made.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub proposed: Vec<String>,
+    /// Says what a proposal is, when there is one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
+
+/// What an agent is told about a change it proposed.
+pub const PROPOSED_NOTE: &str = "recorded as a proposal; it takes effect when the person accepts it. The login keeps its old site, realm and proxy until then.";
 
 /// Fields that say where a saved sign-in is offered (the site, the realm, which browser profile, a proxy): the
 /// person's to set, like choosing a sign-in Vault. An agent that could change them could point a login's password at
 /// a site of its own.
 /// What an agent is told when it names a field only the person sets.
 pub(super) fn person_only_refusal(name: &str) -> String {
+    if name == signins::PROFILE {
+        return format!("{name} is your own browser profile, which AgentMux sets for a login you make with a site: leave it out");
+    }
     if name == shares::SHARED {
         return format!("{name} decides where a saved sign-in is offered, and to whom: the person sets it in the Vault pane (an agent asks to be given a login with Vault share)");
     }
     format!("{name} decides where a saved sign-in is offered: the person sets it in the Vault pane")
 }
 
+/// Who may use a login is a grant of use, and a use asks: not an edit (R10).
 fn person_only(field: &str) -> bool {
-    [signins::SITE, signins::REALM, signins::PROFILE, signins::PROXY, shares::SHARED].contains(&field)
+    field == shares::SHARED
+}
+
+/// Fields that say where a login is offered. An agent changes them on a login it made, and proposes the change on any other.
+fn is_place(field: &str) -> bool {
+    [signins::SITE, signins::REALM, signins::PROXY, signins::PROFILE].contains(&field)
+}
+
+/// A site an agent gives: an exact origin (scheme, host, optional port; no path, query, user information or wildcard),
+/// kept in its canonical form. Empty is allowed for a field that can be removed (`allow_empty`).
+pub(super) fn agent_origin(site: &str) -> Result<String, String> {
+    let site = site.trim();
+    if site.contains('*') {
+        return Err(format!("a site is one exact origin, like https://example.com: {site:?} has a wildcard"));
+    }
+    agentmux_common::allowed_origins::bare_origin(site).ok_or_else(|| format!("a site is one exact origin, like https://example.com (scheme, host and optional port; no path, query or user information): {site:?} is not"))
 }
 
 /// Tags AgentMux itself sets to keep a sign-in from being offered (the site refused it, or it was made on a sign-up
@@ -252,27 +282,107 @@ struct Planned {
     fields: BTreeMap<String, String>,
     tags: Vec<String>,
     changed: Vec<String>,
+    /// Where-the-login-is-offered changes asked for on a login the agent did not make: (field, value).
+    proposals: Vec<(String, String)>,
+    /// A site, realm or proxy the agent changes on its own login in this call.
+    place_changed: bool,
+}
+
+/// The actions an agent's creation of an entry leaves as its first line.
+const CREATING: [&str; 3] = ["generated", "imported", "captured"];
+/// How long after an entry's creation its creation line is written: the two are made in one call.
+const CREATION_LINE_MS: i64 = 10_000;
+
+/// Whether the entry's first history line is `agent`'s creation of it: the login is one it made. The line must be a creation
+/// (an entry with no local creation line, one taken from another machine or imported in bulk, is nobody's here: an agent's
+/// later `import` over it, or a proposal, is not its making) and written when the entry was.
+fn made_by(store: &Store, row: &VaultRow, agent: &str) -> bool {
+    let first = store.vault_activity_first(&row.id, row.created_at).ok().flatten();
+    first.is_some_and(|line| {
+        line.actor_kind == "agent" && history::actor_label(&line.actor) == history::actor_label(agent) && CREATING.contains(&line.action.as_str()) && (0..=CREATION_LINE_MS).contains(&(line.at - row.created_at))
+    })
+}
+
+/// Splits the place fields out of what an agent asked for and settles each: on a login the agent made, a site, realm or proxy
+/// is set (a profile only to the agent's own, and only where there is none); on any other login it becomes a proposal.
+/// Returns the proposals; the rest of the asked fields come back in `rest`.
+fn settle_place(
+    store: &Store,
+    row: &VaultRow,
+    asked: &BTreeMap<String, String>,
+    agent: &str,
+    own_profile: Option<&str>,
+) -> Result<(BTreeMap<String, String>, Vec<(String, String)>), String> {
+    let mut rest: BTreeMap<String, String> = asked.iter().filter(|(k, _)| !is_place(k)).map(|(k, v)| (k.clone(), v.clone())).collect();
+    let place: Vec<(&String, &String)> = asked.iter().filter(|(k, _)| is_place(k)).collect();
+    if place.is_empty() {
+        return Ok((rest, Vec::new()));
+    }
+    if row.kind != "login" {
+        return Err(format!("a {} entry has no field {:?}", row.kind, place[0].0));
+    }
+    let mine = made_by(store, row, agent);
+    let have = fields_of(row);
+    let mut proposals = Vec::new();
+    for (field, value) in place {
+        let value = value.trim();
+        if field == signins::PROFILE {
+            let current = have.get(signins::PROFILE).map(String::as_str).filter(|p| !p.is_empty());
+            let fits = mine && (current == Some(value) || (current.is_none() && own_profile == Some(value)));
+            if !fits {
+                return Err(format!("{field} says whose browser may use a saved sign-in, which is a share: ask for it with Vault share (a login you made for your own profile already has it)"));
+            }
+            rest.insert(field.clone(), value.to_string());
+            continue;
+        }
+        let settled = if value.is_empty() && field != signins::SITE {
+            String::new()
+        } else if field == signins::SITE {
+            agent_origin(value)?
+        } else {
+            value.to_string()
+        };
+        if mine {
+            rest.insert(field.clone(), settled);
+        } else if have.get(field.as_str()).map(String::as_str).unwrap_or("") != settled {
+            proposals.push((field.clone(), settled));
+        }
+    }
+    Ok((rest, proposals))
 }
 
 /// Every check of an `update`, with nothing written: the reason, that the agent may use the entry, and that the new
 /// details are ones the entry can have and differ from what it has.
-fn planned(store: &Store, req: &UpdateRequest, agent: &str) -> Result<Planned, String> {
+fn planned(store: &Store, req: &UpdateRequest, agent: &str, own_profile: Option<&str>) -> Result<Planned, String> {
     let reason = history::require_reason(req.reason.as_deref())?;
     let row = entry_for(store, &req.id, Some(agent))?;
     let kind = kinds::kind(&row.kind).ok_or_else(|| format!("entry {} has an unknown kind", row.id))?;
     let label = req.label.as_deref().map(str::trim).filter(|l| !l.is_empty()).unwrap_or(&row.label).to_string();
-    let fields = apply_fields(kind, &fields_of(&row), &req.fields)?;
+    let (asked, proposals) = settle_place(store, &row, &req.fields, agent, own_profile)?;
+    let fields = apply_fields(kind, &fields_of(&row), &asked)?;
     let had: Vec<String> = serde_json::from_str(&row.tags).unwrap_or_default();
     let tags = match &req.tags {
         Some(tags) => apply_tags(&had, &tags.iter().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect::<Vec<_>>())?,
         None => had,
     };
     validate(kind, &label, &fields, &tags, &Parts::default())?;
+    // A proposal is held to the same rules as the change it asks for: it is never queued if it could not be applied.
+    if !proposals.is_empty() {
+        let mut proposed = fields.clone();
+        for (field, value) in &proposals {
+            match value.as_str() {
+                "" => proposed.remove(field),
+                v => proposed.insert(field.clone(), v.to_string()),
+            };
+        }
+        validate(kind, &label, &proposed, &tags, &Parts::default())?;
+    }
     let changed = what_changed(&row, &label, &fields, &tags);
-    if changed.is_empty() {
+    let place_changed = changed.iter().any(|c| matches!(c.as_str(), "field site" | "field realm" | "field proxy"));
+    if changed.is_empty() && proposals.is_empty() {
         return Err("nothing to change: give a new label, a field's new value or tags that differ from what the entry has".into());
     }
-    Ok(Planned { row, reason, label, fields, tags, changed })
+    Ok(Planned { row, reason, label, fields, tags, changed, proposals, place_changed })
 }
 
 /// What an `update` that passed every check is about, for the line a refusal of it leaves.
@@ -284,8 +394,8 @@ pub struct Checked {
 
 /// Every check of an `update` with nothing written, so a refusal that follows (the pace) is only ever written for a call
 /// that was valid: a reason, an entry the agent may use, and a change.
-pub fn check_update(store: &Store, req: &UpdateRequest, agent: &str) -> Result<Checked, String> {
-    let planned = planned(store, req, agent)?;
+pub fn check_update(store: &Store, req: &UpdateRequest, agent: &str, own_profile: Option<&str>) -> Result<Checked, String> {
+    let planned = planned(store, req, agent, own_profile)?;
     Ok(Checked { id: planned.row.id, label: planned.row.label, reason: planned.reason })
 }
 
@@ -294,22 +404,65 @@ pub fn check_update(store: &Store, req: &UpdateRequest, agent: &str) -> Result<C
 /// included: it records one `changed details` line, which is the record
 /// (docs/specs/SPEC_VAULT_AGENT_ADDS_AND_EDITS_WITHOUT_ASKING_2026_11_25.md).
 pub fn update_details(store: &Store, req: &UpdateRequest, agent: &str) -> Result<Updated, String> {
-    let plan = planned(store, req, agent)?;
-    let Planned { row, reason, label, fields, tags, changed } = plan;
-    let (was, was_fields) = (row.sealed.clone(), row.fields.clone());
-    let new = VaultRow {
-        label: label.clone(),
-        fields: serde_json::to_string(&fields).map_err(|e| e.to_string())?,
-        tags: serde_json::to_string(&tags).map_err(|e| e.to_string())?,
-        updated_at: now_ms(),
-        ..row
-    };
-    if !store.vault_update_kept(&new, &was, &was_fields, None).map_err(|e| e.to_string())? {
-        return Err(format!("{label} changed while this was being saved, so nothing was changed: look at it again"));
+    update_details_for(store, req, agent, None)
+}
+
+/// [`update_details`] for an agent whose own browser profile is `own_profile` (`profile:<id>`): on a login it made, it may
+/// set that profile where the login has none. On a login it made, a site, realm or proxy is set at once and left unseen
+/// (`agent_set`); on any other login each is recorded as a proposal and the login is unchanged ([`proposals`]). The
+/// details a change replaces are kept 7 days, in the same transaction.
+pub fn update_details_for(store: &Store, req: &UpdateRequest, agent: &str, own_profile: Option<&str>) -> Result<Updated, String> {
+    let plan = planned(store, req, agent, own_profile)?;
+    let Planned { row, reason, label, fields, tags, changed, proposals, place_changed } = plan;
+    let id = row.id.clone();
+    if !changed.is_empty() {
+        let (was, was_fields) = (row.sealed.clone(), row.fields.clone());
+        let kept = DetailsKept {
+            entry_id: row.id.clone(),
+            entry_created_at: row.created_at,
+            label: row.label.clone(),
+            fields: row.fields.clone(),
+            tags: row.tags.clone(),
+            changed_at: now_ms(),
+            changed_by: history::actor_label(agent),
+            what: changed.join(", "),
+        };
+        let new = VaultRow {
+            label: label.clone(),
+            fields: serde_json::to_string(&fields).map_err(|e| e.to_string())?,
+            tags: serde_json::to_string(&tags).map_err(|e| e.to_string())?,
+            updated_at: now_ms(),
+            ..row
+        };
+        // A place the person never saw is marked in the same transaction: a use there never goes ahead on silence (R9).
+        let mark = place_changed.then_some(agent);
+        if !store.vault_update_details_kept(&new, &was, &was_fields, &kept, mark).map_err(|e| e.to_string())? {
+            return Err(format!("{label} changed while this was being saved, so nothing was changed: look at it again"));
+        }
+        let target = changed.join(", ");
+        record_line(store, Line { entry_id: &new.id, label: &label, actor: agent, action: CHANGED_DETAILS, target: &target, outcome: "done", reason: &reason });
     }
-    let target = changed.join(", ");
-    record_line(store, Line { entry_id: &new.id, label: &label, actor: agent, action: CHANGED_DETAILS, target: &target, outcome: "done", reason: &reason });
-    Ok(Updated { id: new.id, label, changed })
+    let mut proposed = Vec::new();
+    let mut failed = Vec::new();
+    for (field, value) in &proposals {
+        match super::proposals::propose(store, &id, field, value, agent, &reason) {
+            Ok(()) => proposed.push(format!("field {field}")),
+            Err(e) => failed.push(format!("{field}: {e}")),
+        }
+    }
+    if changed.is_empty() && proposed.is_empty() && !failed.is_empty() {
+        return Err(failed.join("; "));
+    }
+    let mut notes = Vec::new();
+    if !proposed.is_empty() {
+        notes.push(PROPOSED_NOTE.to_string());
+    }
+    if !failed.is_empty() {
+        // What was changed stays changed: the agent is told, not given an error for a change that was made.
+        notes.push(format!("the change was made, but a proposal was not recorded ({}): ask again", failed.join("; ")));
+    }
+    let note = (!notes.is_empty()).then(|| notes.join(" "));
+    Ok(Updated { id, label, changed, proposed, note })
 }
 
 /// One thing `verify` found wrong. `id` is empty for the history as a whole.

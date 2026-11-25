@@ -1,7 +1,7 @@
 # Spec: An agent adds or edits a Vault entry without asking the person; the history line is the record
 
 **Task:** #48656 (the build is #48657). **Author:** Agent2-6 (Vault). **Date:** 2026-11-25.
-**Status:** active — approved 2026-11-25 with every recommended answer; built in three PRs (§11): PR 1 (adds and edits ask nobody, the pace, the unseen mark) is open, PRs 2 and 3 are not started.
+**Status:** active — approved 2026-11-25 with every recommended answer; built in three PRs (§11): PR 1 (adds and edits ask nobody, the pace, the unseen mark) is merged, PR 2 (details kept, a login's place) is open, PR 3 (the pane) is not started.
 Written against origin/main `d7ebfaba77`. It changes
 `SPEC_VAULT_AGENT_ASKS_TO_BIND_A_LOGIN_TO_A_SITE_2026_11_19.md` (#48141): §7 says how. It builds on
 `SPEC_VAULT_PARITY_ENTRY_HISTORY_REASONS_AND_IMPORT_2026_11_06.md` (history lines, reasons, import) and
@@ -249,3 +249,10 @@ Three PRs, in this order, each small enough to review:
    removal of the dead cards and their stubs, the dictionary entries; the macOS and Linux look check.
 
 The tool description for `Vault` and the agent-facing docs change in PRs 1 and 2 with the behaviour.
+
+**PR 2 as built.** R4 (the details an edit replaced, kept 7 days with the change; the pane's Undo for them is PR 3), R8 (a login the
+agent made takes `site`, `realm`, `proxy` at once and its own `profile` where it has none; any other login gets a proposal
+that Accept applies only if the login is as it was, and Dismiss drops), R9 (`set_what` on the use request names a value or a
+site an agent set; marking drops the entry's *Always* grants), R10, and R7 for `generate` (a site is one exact origin; realm and
+proxy may be given) and for `import` and `capture` of a login with a site (the place is marked unseen). Deriving the asking
+agent's own profile for an `import` or `capture` of a login is not in this PR.

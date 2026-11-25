@@ -148,9 +148,10 @@ fn update_refuses_without_a_reason_a_field_the_kind_lacks_a_bad_date_and_the_per
     assert!(update_details(&s, &with(&[("expires", "next week")]), "builder").is_err());
 
     let login = create(&s, NewEntry { kind: "login".into(), label: "Intranet".into(), fields: Default::default(), tags: vec![], parts: seal::Parts([("password".to_string(), "pw-1".to_string())].into()) }).unwrap();
-    for field in ["site", "realm", "profile", "proxy"] {
+    // Who may use a login is a grant of use (`shared`, `profile`); a place is an origin, so "yes" is not one.
+    for (field, said) in [("shared", "Vault share"), ("profile", "Vault share"), ("site", "exact origin")] {
         let err = update_details(&s, &UpdateRequest { fields: [(field.to_string(), "yes".to_string())].into(), ..asked(&login) }, "builder").unwrap_err();
-        assert!(err.contains("the person sets it"), "{field}: {err}");
+        assert!(err.contains(said), "{field}: {err}");
     }
     assert_eq!(history::history_for(&s, &id, Asker::Person, 20).unwrap().iter().filter(|r| r.action == CHANGED_DETAILS).count(), 0, "a refused change leaves no line");
 }

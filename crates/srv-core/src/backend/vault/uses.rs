@@ -105,6 +105,8 @@ pub struct UseRequest {
     /// When `set_by` set it, in ms.
     #[ts(type = "number")]
     pub set_ms: u64,
+    /// What `set_by` set: `value`, `site` or `value and site` (a site, realm or proxy an agent chose for a login).
+    pub set_what: String,
     /// A secret an agent wants copied into the Vault from another service (`Vault` `import`); never goes ahead on silence.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
