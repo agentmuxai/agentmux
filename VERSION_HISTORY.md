@@ -1,5 +1,68 @@
 # AgentMux Version History
 
+## 0.60.41 — 2026-11-24
+
+- A file a message names becomes a link in the agent pane when it is in the agent's own folders: srv checks it read-only and rate-limited, a missing or outside file is a muted word with the reason, and a click opens it as the agent's folders allow (#48249)
+- Restart resume no longer starts a host agent that shares a folder with a container agent until the person has gone ahead
+- A host agent in a folder a container agent can write is given fixed values for the git settings that name a program (fsmonitor, pagers, ask-pass, ssh command, editors, signing programs, ext remotes, credential helper, proxy command)
+- Vault sync: a record from another machine is taken into the Vault, a conflict keeps both values, and a delete or a later change settles the same on every machine
+- Vault sync: a Vault's collection tells entries, activity lines and site grants apart, and takes another machine's activity lines
+- Vault sync: an entry is one record whichever link ids it has, and a machine follows the record with the smaller id
+- Vault sync: a machine's activity lines and site grants are written into the Vault's records
+- Vault sync: a site grant from another machine is made here, and a revoke ends it
+- Drone: a drone is refused when it is turned on if outside text reaches a write with no Approval on the way (the Rule of Two); saving a drone's graph is checked the same way for every job that is on and runs it
+- Drone: turning on a drone job that changes things outside AgentMux or sends a Vault credential, or runs an agent on text from outside, asks you first, listing what it will do
+- An agent's pane.open for Reviews on a window that already has a Kanban applies the open-pull-requests filter and the task to show (#48505)
+- A leader or filer that sent an urgent message naming a task is told when the agent has gone quiet without answering it; only the sender, recipient, task numbers and time are kept, and only for a proven sender (#48288 phase 3b)
+- Files: copying, cutting, trashing or dragging a folder together with the rows opened inside it takes the folder alone; middle-click on a nested folder opens that folder; a folder watch asked before the pane moved elsewhere no longer takes the place of a same-named folder's
+- A wide History search answers inside its time limit with what it has: complete is false, time_limit says why, and a hint says how to narrow, instead of a timeout (#48607)
+- Dragging over the Atlas map no longer restyles the whole window at the first move
+- Sync: a write held as void under a removal that lost its fork is applied, and a void record dated far ahead is refused without moving the clock
+- fix(statusbar): the update and restart controls and the hosted workspace stop panel take input from the person only
+- A numbered agent name stays one link when a task or pull request has the same number, and a several-word name with a number no agent has is not linked as the plain name
+- A browser pane takes Ctrl+T (Cmd+T) for a new tab and Ctrl+W (Cmd+W) to close its tab
+- The command palette is more compact, with 24 px rows and 16 visible, and an agent's row is marked in the agent's colour
+- fix: a Stop, replacement or pane close during an eager resume's credential gate cancels the resume instead of starting a child nobody can reach
+- The quiet-agent watch does not nudge an agent that waits on its own background command, names that command in its note, tells a leader once for each quiet, and stops for an agent holding on purpose while quota mode is tight (#48605, #48606)
+- ci: a merge queue entry that changes only documentation or frontend files no Rust crate reads skips the Rust job
+- Ctrl+F (Cmd+F) in a browser pane opens a find bar that searches the page and shows the match count
+- A pane with a backdrop keeps the attention magenta on its own hue: the filled attention button and the Swarm's needs-you stage no longer paint the window theme's colours there
+- fix(editor): the note that shows more of a cut line shows the link hand
+- Pressing a pane header's button (minimize, close, menu) is no longer treated as the start of a pane drag, so the drag-preview picture is not started for it (#48231)
+- Editor: the tab strip counts the file tree toggle beside it when it decides how much room its tabs have, so tabs give up their labels in time
+- An installed or portable build no longer writes its instance key or host token to disk, and the browser approval banner is person-only
+- Text selected inside a pane starts at once in a busy window
+- fix: an eager resume refused by the credential gate no longer lets its stop cancel the next message's own spawn
+- A bare name that is also a web site, such as one ending in rs or sh, links to the site when the agent has no such file, instead of being shown as a missing file
+- A splitter drag that starts while hidden tabs are catching up pauses the catch-up instead of emptying its queue
+- Tower's Panes, Agents and Memory views, the pinned senders, outdated agent ids, Global Memory and Widgets settings read their words from the language files
+- The agent pane's working-status text, spinner and progress bar keep the pane's identity colour but take the lightness that reads on a pane's backdrop, so they are no longer faint on a white or light backdrop
+- A Reviews pin that became the Kanban keeps opening it on open pull requests after the bar's pins are saved again
+- Open with default app in the Files pane asks first for programs and scripts, and names the container agent whose folder holds the file
+- The find bar in a browser pane shows over the page on macOS and Linux too
+- Files: a filter that matches nothing offers Clear filter, so a filter whose box is hidden can still be cleared (also in the columns view)
+- A headless sign-in confirm is taken only from a process found outside every agent's tree; an unknown peer or a proxied one is refused
+- A word that ends like a source file and a country, such as parser.rs, is plain text when the agent has no such file, instead of a link to a site; well-known sites and www. names still link
+- A lead on another machine is now told, over the LAN, when an agent that owes it work has gone quiet
+- Drone: a verify-release template, a job that checks a release and asks before it posts
+- CI: the Linux dependency install finishes an interrupted dpkg before a retry and the queue's budget allows a third attempt; the container image build retries once when it fails on the base pull. Report: docs/reports/REPORT_CI_QUEUE_AND_RELEASE_TIME_2026_11_24.md
+- ci: the merge queue no longer builds the core crate's test harness twice
+- A pane with a backdrop has a header and tab pills that match it: the header takes the backdrop's surface and text, and a pill keeps its identity hue with a fill fitted so its label reads on the pane's side
+- The git settings given to a host agent's pane keep every GIT_CONFIG entry the environment already carries, even with a hundred or more, and still add each of their own
+- The block stats badge, Typed history, Help tips, attachment preview, session stats and skill import read their words from the language files
+- CI: vitest runs in four shards instead of two on pull requests and in the merge queue
+- An agent's connection creates and deletes sub-blocks only under its own pane, and no longer writes a tab, window or workspace's meta
+- UI check: a Button whose onClick throws its promise away (void) no longer passes unnoticed; the count may not go up
+- agent.send, which puts text into an agent's input as the person's own turn, is sent only by the AgentMux window
+- The job editor and update diff, PDF viewer, inline media notes, instance panel, token usage popover and LAN peer rows read their text from the language files
+- Dragging a text selection out of a pane over a field or handle no longer makes it leap back over other panes
+- Drone: an Agent block starts its CLI with only the tools it is allowed: reading tools and no MCP servers, plus exactly its allow_commands lines
+- The Messages panel, memory history, hex viewer, file info card, agent install step and skill script review read their text from the language files
+- Files: the buttons in a notice (Clear filter, Try again) work with Enter and Space, and a found row keeps room for its folder at a narrow pane
+- Docs check: an exception for a doc matches whole path parts (memory.md no longer excuses agent-memory.md), and an invalid regular expression in the deny file names its line
+- A picker card's Click to install ribbon no longer sits over the caption line at any pane width
+- A hyphenated bare name such as my-script.sh with no file is plain text like the other bare names, and a file made after the first check becomes a link on a later hover without a reload
+
 ## 0.60.40 — 2026-11-24
 
 - The job editor can set a job to run a drone, from the Jobs tab
