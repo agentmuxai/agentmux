@@ -89,6 +89,10 @@ pub(crate) use agent_define::{check_provider_unchanged, check_volumes, validate_
 // directly, same as `fleet`'s exposure just below.
 pub(crate) mod pane;
 pub(crate) mod floater_place;
+pub(crate) mod agent_tab_default;
+#[cfg(test)]
+#[path = "tests/agent_tab_default_tests.rs"]
+mod agent_tab_default_tests;
 mod pane_open_tab;
 mod pane_open_steps;
 #[cfg(test)]

@@ -2061,6 +2061,9 @@ async fn a_popup_tab_stacks_onto_its_opener_and_a_popup_window_splits() {
     // The agent's pane: its popup tab joins the pane without switching the
     // person's view away from the page they are looking at.
     crate::server::browser_agent_calls::note(&agents);
+    // The agent's own browser is a background tab of its pane group (an agent's open names no split), so what shows is
+    // whatever the person had open there: the popup must leave that as it is.
+    let (_, shown_before, _) = leaf_of(&agents);
     let body = popup(&agents, "https://console.example.com/home", "https://signin.example.com/", Some("tab"));
     let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", body, &host).await;
     assert_eq!(body["data"]["admitted"], true, "{body}");
@@ -2068,7 +2071,7 @@ async fn a_popup_tab_stacks_onto_its_opener_and_a_popup_window_splits() {
     let (agents_leaf, visible, stack) = leaf_of(&agents);
     assert_eq!(leaf_of(&tab).0, agents_leaf, "the agent's popup tab joins its pane");
     assert!(stack.contains(&tab), "{stack:?}");
-    assert_eq!(visible, agents, "an agent's popup doesn't take the view");
+    assert_eq!(visible, shown_before, "an agent's popup doesn't take the view");
 }
 
 /// A popup window (a native window a pane's page opened) is driven by the
