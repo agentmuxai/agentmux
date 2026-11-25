@@ -26,7 +26,7 @@
 
 import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
 import { WpsEvent } from "./mps-events";
-import { afterSwitchPaint } from "./switch-paint-hold";
+import { afterSwitchPaint, switchPaintHeld } from "./switch-paint-hold";
 
 /** The event that carries a single object update (`WpsEvent.MuxObjUpdate`). */
 export const MUX_OBJ_UPDATE_EVENT: string = WpsEvent.MuxObjUpdate;
@@ -56,6 +56,8 @@ export interface MuxUpdateQueueDeps {
     schedule(fn: () => void): void;
     /** A line for the log. */
     log(line: string): void;
+    /** True while a window-tab switch is being painted: a frame that finds it waits (switch-paint-hold.ts). */
+    held?(): boolean;
 }
 
 const keyOf = (u: MuxObjUpdate): string => `${u.otype}:${u.oid}`;
@@ -94,6 +96,11 @@ export function createMuxUpdateQueue(deps: MuxUpdateQueueDeps) {
 
     function flushSlice(): void {
         scheduled = false;
+        // Queued before the switch's click: its frame must not apply the updates inside the switch.
+        if (deps.held?.()) {
+            schedulePending();
+            return;
+        }
         const fit = Math.max(1, Math.floor(FLUSH_BUDGET_MS / perUpdateMs));
         applySlice(fit);
         if (pending.size > 0) schedulePending();
@@ -154,6 +161,7 @@ const queue = createMuxUpdateQueue({
     now: () => performance.now(),
     // A window-tab switch in flight is painted first (switch-paint-hold.ts); the updates it was about to apply follow.
     schedule: (fn) => afterSwitchPaint(() => scheduleFrame(fn)),
+    held: switchPaintHeld,
     log: (line) => console.warn(line),
 });
 

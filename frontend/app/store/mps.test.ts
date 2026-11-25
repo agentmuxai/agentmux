@@ -20,7 +20,8 @@ vi.mock("./ws", () => ({
     },
 }));
 
-import { muxEventSubscribe } from "./mps";
+import { handleMuxEvent, muxEventSubscribe } from "./mps";
+import { holdForSwitchPaint, releaseSwitchPaint, resetSwitchPaintHold } from "./switch-paint-hold";
 
 /** The scopes of the most recently sent eventsub command. */
 function lastScopes(): string[] {
@@ -114,5 +115,24 @@ describe("makeMuxReSubCommand scopes", () => {
 
         unsubs.forEach((u) => u());
         warn.mockRestore();
+    });
+});
+
+describe("telemetry during a window-tab switch", () => {
+    it("is delivered after the first paint, in arrival order, even when one arrives as the hold ends", () => {
+        vi.useFakeTimers();
+        resetSwitchPaintHold();
+        const got: number[] = [];
+        const off = muxEventSubscribe({ eventType: "sysinfo", handler: (e) => got.push((e.data as { n: number }).n) });
+        const token = holdForSwitchPaint();
+        handleMuxEvent({ event: "sysinfo", data: { n: 1 } } as never);
+        expect(got).toEqual([]);
+        releaseSwitchPaint(token);
+        handleMuxEvent({ event: "sysinfo", data: { n: 2 } } as never);
+        vi.advanceTimersByTime(5);
+        expect(got).toEqual([1, 2]);
+        off();
+        resetSwitchPaintHold();
+        vi.useRealTimers();
     });
 });

@@ -20,6 +20,7 @@ function rig(cost: { fixedMs: number; perUpdateMs: number }) {
     const sliceMs: number[] = [];
     const lines: string[] = [];
     let frame: (() => void) | null = null;
+    let held = false;
     const queue = createMuxUpdateQueue({
         applyBatch: (updates) => {
             batches.push(updates);
@@ -32,6 +33,7 @@ function rig(cost: { fixedMs: number; perUpdateMs: number }) {
             frame = fn;
         },
         log: (line) => lines.push(line),
+        held: () => held,
     });
     return {
         queue,
@@ -54,6 +56,9 @@ function rig(cost: { fixedMs: number; perUpdateMs: number }) {
         },
         advance: (ms: number) => {
             clock += ms;
+        },
+        setHeld: (on: boolean) => {
+            held = on;
         },
     };
 }
@@ -172,5 +177,19 @@ describe("mux update queue", () => {
         for (const kind of ["waveobj:batchedupdates", "config", "agentruntime:changed", "layout:action"]) {
             expect(ORDER_INDEPENDENT_EVENTS.has(kind)).toBe(false);
         }
+    });
+});
+
+describe("a window-tab switch in flight", () => {
+    it("keeps a frame queued before the click from applying updates until the hold ends", () => {
+        const r = rig({ fixedMs: 1, perUpdateMs: 1 });
+        r.queue.enqueue(update("a", 1));
+        r.setHeld(true);
+        r.runFrame();
+        expect(r.batches).toHaveLength(0);
+        expect(r.framePending()).toBe(true);
+        r.setHeld(false);
+        r.runFrame();
+        expect(r.batches).toHaveLength(1);
     });
 });

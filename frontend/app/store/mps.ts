@@ -216,11 +216,27 @@ function dispatchToSubjects(event: MuxEvent) {
     }
 }
 
+const heldTelemetry: MuxEvent[] = [];
+let telemetryScheduled = false;
+
+/** Telemetry runs in a task of its own, after the first paint of a tab switch in flight (switch-paint-hold.ts), and
+ *  always in arrival order: an event that arrives while an earlier one waits joins its drain. */
+function deferTelemetry(event: MuxEvent): void {
+    heldTelemetry.push(event);
+    if (telemetryScheduled) return;
+    telemetryScheduled = true;
+    afterSwitchPaint(() =>
+        setTimeout(() => {
+            telemetryScheduled = false;
+            for (const e of heldTelemetry.splice(0)) dispatchToSubjects(e);
+        }, 0)
+    );
+}
+
 function handleMuxEvent(event: MuxEvent) {
     noteSwitchActivity(event.event);
     if (DEFERRED_EVENTS.has(event.event)) {
-        // Telemetry also waits for the first paint of a tab switch in flight (switch-paint-hold.ts).
-        afterSwitchPaint(() => setTimeout(() => dispatchToSubjects(event), 0));
+        deferTelemetry(event);
         return;
     }
     // Single-object updates wait for the next frame (mos-update-queue.ts). Any other event may read what they carry, so
