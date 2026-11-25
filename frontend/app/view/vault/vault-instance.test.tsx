@@ -48,32 +48,8 @@ describe("the Vault pane", () => {
         expect(instance.liveTitle).toBeUndefined();
     });
 
-    it("has the Vault import, export and note actions", () => {
+    it("puts no buttons in the pane's tab: Import, Export and the note are in the Vault's body", () => {
         const instance = createRoot(() => create(host()));
-        expect(instance.headerActions?.().map((a) => (a as { title?: string }).title)).toEqual([
-            "Import into the Vault",
-            "Export the Vault",
-            "What the Vault may ask you",
-        ]);
-    });
-
-    it("moves its header buttons into the pane as the pane narrows", () => {
-        const instance = createRoot(() => create(host()));
-        const Component = instance.component;
-        render(() => <Component ctx={host()} />);
-        const titles = () => instance.headerActions?.().map((a) => (a as { title?: string }).title);
-        const setWidth = seen.model!.setWidth;
-
-        // Until the view has measured the pane, and in a wide one: the header as before.
-        expect(titles()).toHaveLength(3);
-        setWidth(900);
-        expect(titles()).toHaveLength(3);
-
-        // Too narrow for the title and the three buttons: the buttons are in the pane (vault-narrow-actions.tsx).
-        setWidth(420);
-        expect(titles()).toEqual([]);
-
-        setWidth(900);
-        expect(titles()).toHaveLength(3);
+        expect(instance.headerActions).toBeUndefined();
     });
 });

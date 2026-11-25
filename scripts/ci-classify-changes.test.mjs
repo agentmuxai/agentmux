@@ -617,6 +617,64 @@ describe("R8 in the merge queue — an entry that changes only documentation and
     });
 });
 
+describe("R12 — a documentation file a Rust test reads runs the Rust legs", () => {
+    const manifest = "docs/specs/app-api-manifest.json";
+    const vectors = "docs/specs/fixtures/redaction-vectors.json";
+
+    it("is not documentation-only", () => {
+        expect(isDocsOnlyPath(manifest)).toBe(false);
+        expect(isDocsOnlyPath(vectors)).toBe(false);
+        expect(isDocsOnlyPath("docs/specs/app-api-manifest.json.bak")).toBe(true);
+        expect(isDocsOnlyPath("docs/specs/SPEC_X.md")).toBe(true);
+    });
+
+    it("runs the Rust legs for one of them alone, and for one beside documentation", () => {
+        for (const files of [[manifest], [vectors], ["docs/specs/SPEC_X.md", manifest], [".changesets/1-x.md", vectors]]) {
+            expect(classifyChanges(files), files.join(",")).toMatchObject({ rust: true, docs_only: false });
+        }
+    });
+
+    it("still skips them for other documentation, and for frontend files no crate reads", () => {
+        expect(classifyChanges(["docs/specs/SPEC_X.md", "docs/specs/fixtures/other.json"])).toMatchObject({ rust: false, docs_only: true });
+        expect(classifyChanges(["frontend/app/a.ts", "docs/specs/SPEC_X.md"])).toMatchObject({ rust: false, frontend: true });
+    });
+
+    it("runs the Rust legs when a listed file moves, from a pull request's file list", () => {
+        const r = classifyPullFiles([{ filename: "docs/specs/archive/old.json", previous_filename: manifest, patch: "" }]);
+        expect(r).toMatchObject({ rust: true });
+    });
+
+    it("runs the Rust job in the merge queue too", () => {
+        expect(classifyQueueEntry([manifest]).rust).toBe(true);
+        expect(classifyQueueEntry(["docs/specs/SPEC_X.md", "frontend/app/a.ts"]).rust).toBe(false);
+    });
+
+    it("lists every file of docs/ that a crate reads from the manifest directory", () => {
+        const root = join(dirname(fileURLToPath(import.meta.url)), "..", "crates");
+        const rustFiles = (dir) =>
+            readdirSync(dir).flatMap((name) => {
+                const full = join(dir, name);
+                if (name === "target" || name === "node_modules") return [];
+                return statSync(full).isDirectory() ? rustFiles(full) : name.endsWith(".rs") ? [full] : [];
+            });
+        // A file of docs/ named within a few lines of where the test finds the repository root (CARGO_MANIFEST_DIR, or a
+        // call of a repo_root() helper). A bare docs path in a test fixture is not a read.
+        const found = new Map();
+        for (const file of rustFiles(root)) {
+            const lines = readFileSync(file, "utf8").split("\n");
+            lines.forEach((line, i) => {
+                for (const m of line.matchAll(/"(docs\/[^"\s*]*\.(?:json|jsonc|md|txt|toml|ya?ml))"/g)) {
+                    const near = lines.slice(Math.max(0, i - 6), i + 1).join("\n");
+                    if (/CARGO_MANIFEST_DIR|repo_root\(\)/.test(near)) found.set(m[1], file);
+                }
+            });
+        }
+        expect(found.size).toBeGreaterThanOrEqual(2);
+        const unlisted = [...found].filter(([path]) => isDocsOnlyPath(path)).map(([path, file]) => `${path} (${file})`);
+        expect(unlisted, "add these to RUST_READS_DOCS in scripts/ci-classify-changes.mjs").toEqual([]);
+    });
+});
+
 describe("R9 — the production frontend build runs unless only Rust files changed", () => {
     it("does not run for Rust sources, their manifests and documentation alone", () => {
         const r = classifyChanges([

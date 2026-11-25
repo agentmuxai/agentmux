@@ -27,19 +27,30 @@ pub(super) struct ResyncCtx<'a> {
     pub config: Option<Arc<crate::backend::wconfig::ConfigState>>,
 }
 
+/// The controllers that start the agent's CLI themselves, on the machine srv runs on.
+const HOST_SIDE_CONTROLLERS: [&str; 3] = [BLOCK_CONTROLLER_ACP, BLOCK_CONTROLLER_MSP, BLOCK_CONTROLLER_APP_SERVER];
+
 /// Container agents (agentMode == "container") require a subprocess controller for
 /// per-turn docker exec. Persistent is incompatible. Override any stale "persistent"
 /// value that may have been written before this invariant was enforced at creation time.
-pub(super) fn effective_controller_type(block: &Block, controller_type: String) -> String {
+/// A controller that starts the CLI on this computer (ACP, MSP, app-server) is refused for a container
+/// agent's pane, whatever its meta says: the agent runs in its container.
+pub(super) fn effective_controller_type(block: &Block, controller_type: String) -> Result<String, String> {
     let runtime = super::super::runtime_adapter::RuntimeKind::of_block_meta(&block.meta).adapter();
+    if runtime.kind().is_container() && HOST_SIDE_CONTROLLERS.contains(&controller_type.as_str()) {
+        tracing::warn!(block_id = %block.oid, controller_type = %controller_type, "container agent's pane has a host-side controller in meta — refusing to start it");
+        return Err(format!(
+            "this agent runs in its container; its pane's {controller_type} controller would start it on this computer, so it is not started"
+        ));
+    }
     if !runtime.accepts_persistent_controller() && controller_type == BLOCK_CONTROLLER_PERSISTENT {
         tracing::warn!(
             block_id = %block.oid,
             "container agent has persistent controller in meta — overriding to subprocess"
         );
-        BLOCK_CONTROLLER_SUBPROCESS.to_string()
+        Ok(BLOCK_CONTROLLER_SUBPROCESS.to_string())
     } else {
-        controller_type
+        Ok(controller_type)
     }
 }
 
