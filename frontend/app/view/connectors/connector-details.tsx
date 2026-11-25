@@ -6,7 +6,7 @@
 // (§4.10); and, for AgentMux Cloud, its session. Nothing here is new: the account cards and their details are the ones
 // Connectors' Accounts section showed, moved under the connector.
 
-import { Show, type Accessor, type JSX } from "solid-js";
+import { createEffect, onCleanup, Show, untrack, type Accessor, type JSX } from "solid-js";
 
 import { t } from "@/app/i18n/i18n";
 import { CardGrid, openMenuAt } from "@/app/element/ui";
@@ -16,7 +16,7 @@ import { AgentMuxConnectBody, type MuxBusController } from "@/app/view/accounts/
 import { requestReconnect } from "@/app/view/accounts/oauth-account-state";
 import { failoverToggle } from "@/app/view/identity/account-failover";
 import { buildAccountRowMenu } from "@/app/view/identity/bind-to-agent-menu";
-import { AccountDetailPanel } from "@/app/view/identity/identity-accounts-tab";
+import { AccountDetailPanel, DeleteAccountPanel } from "@/app/view/identity/identity-accounts-tab";
 import type { Account, IdentityViewModel } from "@/app/view/identity/identity-model";
 import type { ConnectorEntry } from "./connector-entries";
 
@@ -41,6 +41,21 @@ function Accounts(props: ConnectorDetailsProps): JSX.Element {
         e.stopPropagation();
         openMenuAt(buildAccountRowMenu(a, () => model.requestDelete(a), failoverToggle(a)), e);
     };
+    // The delete question hangs under the account it is about, if that account is one of this connector's.
+    const asked = () => {
+        const pending = model.pendingDeleteAtom();
+        return pending && props.entry().accounts.some((a) => a.id === pending.id) ? pending.id : null;
+    };
+    // The question goes with its row: an account that is gone (deleted elsewhere), or the card closing, answers it with
+    // nothing deleted.
+    createEffect(() => {
+        const pending = model.pendingDeleteAtom();
+        if (pending && !model.accountsAtom().some((a) => a.id === pending.id)) model.cancelDelete();
+    });
+    onCleanup(() => {
+        const pending = untrack(model.pendingDeleteAtom);
+        if (pending && untrack(() => props.entry().accounts).some((a) => a.id === pending.id)) model.cancelDelete();
+    });
     return (
         <CardGrid
             class="connector-accounts"
@@ -51,6 +66,13 @@ function Accounts(props: ConnectorDetailsProps): JSX.Element {
             minCardWidth={100000}
             selectedKey={model.selectedAccountAtom()?.id ?? null}
             onClose={() => model.setSelectedAccount(null)}
+            askKey={asked()}
+            renderAsk={() => (
+                // The pending account itself: what confirming deletes, and the label it asks about.
+                <Show when={model.pendingDeleteAtom()} keyed>
+                    {(pending) => <DeleteAccountPanel model={model} account={pending} />}
+                </Show>
+            )}
             renderCard={(a) => (
                 <AccountCard
                     account={a}
