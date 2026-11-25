@@ -6,6 +6,7 @@ import { isBlank } from "@/util/util";
 import { Emitter } from "@/util/emitter";
 import { sendRawRpcMessage } from "./ws";
 import { noteListenerTime } from "./ws-slow-handler";
+import { noteSwitchActivity } from "./switch-activity";
 import { flushPendingMuxUpdates, MUX_OBJ_UPDATE_EVENT, ORDER_INDEPENDENT_EVENTS } from "./mos-update-queue";
 import type { SubscriptionRequest } from "@/app/store/rpc-api";
 import type { MuxEvent } from "@/types/rpc/MuxEvent";
@@ -216,6 +217,7 @@ function dispatchToSubjects(event: MuxEvent) {
 }
 
 function handleMuxEvent(event: MuxEvent) {
+    noteSwitchActivity(event.event);
     if (DEFERRED_EVENTS.has(event.event)) {
         setTimeout(() => dispatchToSubjects(event), 0);
         return;

@@ -12,6 +12,7 @@ import { createRoot, createSignal } from "solid-js";
 import { getApi } from "@/util/app-api";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
+import { noteSwitchActivity } from "@/app/store/switch-activity";
 import type { ExportResult } from "@/types/rpc/ExportResult";
 import type { ImportPreview } from "@/types/rpc/ImportPreview";
 import type { ImportResult } from "@/types/rpc/ImportResult";
@@ -62,6 +63,7 @@ export function vaultAvailable(): boolean {
 async function call<T>(op: string, args: Record<string, unknown> = {}): Promise<T> {
     const relay = getApi()?.approvals?.vault;
     if (!relay) throw new Error("The Vault needs the AgentMux desktop app.");
+    noteSwitchActivity("vault_op");
     return (await relay(op, args)) as T;
 }
 
