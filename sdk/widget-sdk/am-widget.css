@@ -16,6 +16,7 @@
     --am-accent: #58c142;
     --am-border: #3a3a3a;
     --am-surface-raised: #252526;
+    /* 3:1 on a backdrop: hints, placeholders and large text. Body text is --am-fg or --am-muted. */
     --am-fg-faint: #6b6b6b;
     --am-info: #9b6ce0;
     --am-error: #e5484d;
