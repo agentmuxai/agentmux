@@ -8,7 +8,7 @@
  * and view models; the pieces it hands props to are probes that record them.
  */
 
-import { cleanup, render } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -56,6 +56,12 @@ vi.mock("@/element/blockstats", async (orig) => ({
     BlockStatsBadge: (p: { noHeader: boolean; connection?: string }) => (
         <div data-testid="stats" data-noheader={String(p.noHeader)} data-connection={p.connection ?? ""} />
     ),
+}));
+// The menu a right-click on the header opens: here, the rows it was handed.
+const menus = vi.hoisted(() => ({ opened: [] as { label?: string; type?: string; checked?: boolean }[][] }));
+vi.mock("@/app/element/ui", async (orig) => ({
+    ...(await orig<Record<string, unknown>>()),
+    openMenuAt: (items: { label?: string }[]) => void menus.opened.push(items),
 }));
 vi.mock("./titlebar", () => ({
     TitleBar: (p: { title: string }) => <div data-testid="titlebar" data-title={p.title} />,
@@ -215,13 +221,30 @@ describe("the header", () => {
     it("draws none of the view's own buttons in the header, which keeps the grip just left of minimize", () => {
         const t = setup({ noHeader: false, meta: { view: "term" }, endButtons: 2 });
         const header = q(t.view.container, ".block-frame-default-header") as HTMLElement;
-        // They are the selected tab's now (PaneTabActions): the header holds the pane's own controls only.
+        // They are rows of the pane's menu (pane-action-menu.ts): the header holds the pane's own controls only.
         expect(header.querySelector('[aria-label="Aux 0"], [title="Aux 0"]')).toBeNull();
         expect(q(header, ".block-frame-btn-separator")).toBeNull();
         expect(q(header, ".block-frame-end-kept")).toBeNull();
         const grip = q(header, ".pane-grip") as HTMLElement;
         const minimize = q(header, ".block-frame-minimize") as HTMLElement;
         expect(grip.nextElementSibling).toBe(minimize);
+    });
+
+    it("puts the view's own buttons first in the header's right-click menu, above the shared pane items, each with its words", () => {
+        menus.opened.length = 0;
+        const t = setup({ noHeader: false, meta: { view: "term" }, endButtons: 2 });
+        fireEvent.contextMenu(q(t.view.container, ".block-frame-default-header") as HTMLElement);
+        const [menu] = menus.opened;
+        expect(menu.slice(0, 3).map((i) => i.label ?? i.type)).toEqual(["Aux 0", "Aux 1", "separator"]);
+        // The shared items follow them.
+        expect(menu.length).toBeGreaterThan(3);
+    });
+
+    it("has no view buttons to put in the menu for a view that declares none", () => {
+        menus.opened.length = 0;
+        const t = setup({ noHeader: false, meta: { view: "term" } });
+        fireEvent.contextMenu(q(t.view.container, ".block-frame-default-header") as HTMLElement);
+        expect(menus.opened[0].some((i) => i.label === "Aux 0")).toBe(false);
     });
 
     it("draws no grip in a drag preview", () => {
@@ -350,6 +373,24 @@ describe("the identity colour inside a backdrop", () => {
     it.each(["#000000", "#101820", "#1b1b2f"])("is left as it was on a dark backdrop (%s) where it already reads", (hex) => {
         const own = computeBlockIdentityColor(base as never, false)!;
         expect(identityOf(pick(hex))).toBe(own);
+    });
+});
+
+describe("the header of a pane with a backdrop", () => {
+    const base = { view: "agent", "frame:hue": 270 };
+    const headerOf = (meta: Record<string, unknown>) => {
+        const t = setup({ meta, noHeader: false });
+        const el = t.view.container.querySelector<HTMLElement>('[data-role="block-header"]');
+        const out = el ? { bg: el.style.backgroundColor, color: el.style.color } : undefined;
+        cleanup();
+        return out;
+    };
+
+    it("takes the pane's surface and ink, not the identity tint", () => {
+        const plain = headerOf(base);
+        const inside = headerOf({ ...base, backdrop: { kind: "color", hex: "#fff6b0", polarity: "follow", version: 1 } });
+        expect(inside).toEqual({ bg: "var(--block-bg-solid-color)", color: "var(--main-text-color)" });
+        expect(plain?.bg).not.toBe("var(--block-bg-solid-color)");
     });
 });
 

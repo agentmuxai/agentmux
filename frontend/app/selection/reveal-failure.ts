@@ -16,7 +16,7 @@ const FAIL_TEXT: Record<string, string> = {
     "not-found": "it is no longer open",
     "resolve-timeout": "it took too long to find",
     "tab-timeout": "its tab did not open in time",
-    "layout-timeout": "its tab is still loading",
+    "layout-timeout": "the tab did not show it in time. Click again",
     mismatch: "it did not come to the front",
     stuck: "it did not respond in time",
     "remote-timeout": "the other window did not answer",

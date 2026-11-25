@@ -14,7 +14,7 @@ export function PairButtons(props: { s: PairDeviceState; lan: Accessor<boolean> 
             <Show
                 when={s.pairing()}
                 fallback={
-                    <Button density="compact" disabled={!lan() || s.busy()} onClick={() => void s.start()}>
+                    <Button density="compact" disabled={!lan() || s.busy()} onClick={() => s.start()}>
                         Pair a device
                     </Button>
                 }
@@ -22,7 +22,7 @@ export function PairButtons(props: { s: PairDeviceState; lan: Accessor<boolean> 
                 <Button density="compact" onClick={s.hide}>
                     Hide
                 </Button>
-                <Button density="compact" disabled={s.busy()} onClick={() => void s.start()}>
+                <Button density="compact" disabled={s.busy()} onClick={() => s.start()}>
                     New code
                 </Button>
                 <Button density="compact" disabled={!s.live()} onClick={s.copyLink}>

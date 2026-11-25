@@ -37,6 +37,8 @@ vi.mock("@floating-ui/dom", () => ({
         return { x: 111, y: 222 };
     },
 }));
+// The bar registers as a pane overlay (a native page above it): the real one schedules frames this log is not about.
+vi.mock("@/app/platform/pane-overlay", () => ({ usePaneOverlay: () => {} }));
 vi.mock("./input", () => ({
     Input: (p: any) => {
         h.input = p;

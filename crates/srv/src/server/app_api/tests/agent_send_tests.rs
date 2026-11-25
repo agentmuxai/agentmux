@@ -74,3 +74,21 @@ async fn agent_send_refuses_at_the_identity_gate_before_spawning() {
     assert!(err.starts_with("identity spawn gate: "), "{err}");
     assert!(err.contains("no claude account is linked to this agent"), "{err}");
 }
+
+/// The text of `agent.send` goes into the agent's input unmarked, as the person's own turn: a connection that is not the
+/// AgentMux window does not send it, whether it registered as an agent or not.
+#[tokio::test]
+async fn agent_send_is_the_windows_alone_and_a_connection_that_is_not_gets_what_to_use() {
+    use crate::backend::rpc_types::RpcContext;
+    let state = test_state();
+    let cmd = || send_cmd("no-such-block");
+    let registered = RpcContext { agent_id: "agent9".into(), ..Default::default() };
+    let unproven = RpcContext::default();
+    for ctx in [registered, unproven] {
+        let refused = super::agent_io::agent_send_from(&state, &ctx, cmd()).await.unwrap_err();
+        assert!(refused.starts_with("FORBIDDEN") && refused.contains("Message tool"), "{refused}");
+    }
+    // The window is not refused: it reaches the send itself, which finds no controller for this block.
+    let reached = super::agent_io::agent_send_from(&state, &RpcContext::operator_for_tests(), cmd()).await.unwrap_err();
+    assert!(reached.starts_with("NOT_RUNNING"), "{reached}");
+}

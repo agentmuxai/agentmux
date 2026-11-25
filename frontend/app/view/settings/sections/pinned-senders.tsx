@@ -148,7 +148,7 @@ export function PinnedSenders(): JSX.Element {
     const actions = (change: Omit<PinChange, "how" | "expect">, shown?: string, first = false): JSX.Element => (
         <span class="setting-pins-actions">
             <Show when={shown}>
-                <Button disabled={busy()} onClick={() => void press({ ...change, how: "adopt", expect: shown })}>
+                <Button disabled={busy()} onClick={() => press({ ...change, how: "adopt", expect: shown })}>
                     {same(asking(), { ...change, how: "adopt", expect: shown })
                         ? t("settings.pins.pressAccept")
                         : first
@@ -157,7 +157,7 @@ export function PinnedSenders(): JSX.Element {
                 </Button>
             </Show>
             <Show when={!first}>
-                <Button disabled={busy()} onClick={() => void press({ ...change, how: "forget" })}>
+                <Button disabled={busy()} onClick={() => press({ ...change, how: "forget" })}>
                     {same(asking(), { ...change, how: "forget" }) ? t("settings.pins.pressForget") : t("settings.pins.forget")}
                 </Button>
             </Show>

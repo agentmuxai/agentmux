@@ -75,6 +75,7 @@ import { MEMORY_AGENT_KEY } from "@/app/store/section-panes";
 import "./native-memory-manager.scss";
 import { matchesEveryWord } from "@/app/util/fuzzysearch";
 import { Button } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { tip } from "@/app/element/tip";
 
 const MEMORY_SORT_STORAGE_KEY = "nativeMemory:sortBy";
@@ -457,7 +458,7 @@ function watchPaneRequest(s: ManagerState, confirm: PaneConfirm): void {
         if (!wanted || untrack(s.selectedAgent)?.id === id) return;
         // Unsaved edits in the open file stay: the same confirm Back asks.
         if (untrack(s.detailDirty)) {
-            void askDiscard(confirm)("Discard your unsaved changes?").then((ok) => {
+            void askDiscard(confirm)(t("nativeMemory.discard")).then((ok) => {
                 if (ok) s.setSelectedAgentState(wanted);
                 // Declined: the pane's request is withdrawn, so a later refresh doesn't ask again.
                 else s.props.pane?.setMeta({ [MEMORY_AGENT_KEY]: untrack(s.selectedAgent)?.id ?? null });
@@ -793,14 +794,13 @@ function renderAgentGrid(s: ManagerState): JSX.Element {
     return (
         <div class="native-memory-manager-grid-view">
             <p class="native-memory-manager-hint">
-                Each agent's own native memory — what it has chosen to remember. Select an agent to browse
-                its files, versions and diffs.
+                {t("nativeMemory.hint")}
             </p>
             <Show
                 when={s.agents().length > 0}
                 fallback={
                     <div class="native-memory-manager-empty">
-                        {s.agentsLoading() ? "Loading agents…" : "No agents defined yet."}
+                        {s.agentsLoading() ? t("nativeMemory.loadingAgents") : t("nativeMemory.noAgents")}
                     </div>
                 }
             >
@@ -822,8 +822,8 @@ function renderAgentGrid(s: ManagerState): JSX.Element {
                                 means zero agents exist at all; this means the fetch
                                 succeeded but the current filter(s) matched nothing. */}
                             {s.nameFilter()
-                                ? `No agents match "${s.nameFilter()}"`
-                                : "No agents match the current filter."}
+                                ? t("nativeMemory.noMatchNamed", { name: s.nameFilter() })
+                                : t("nativeMemory.noMatch")}
                         </div>
                     }
                 >
@@ -896,20 +896,20 @@ function renderDetailHeader(s: ManagerState, agent: Accessor<AgentDefinition>, c
                         setSelectedAgent(s, null);
                         return;
                     }
-                    if (s.detailDirty() && !(await askDiscard(confirm)("Discard your unsaved changes?"))) return;
+                    if (s.detailDirty() && !(await askDiscard(confirm)(t("nativeMemory.discard")))) return;
                     s.setSelectedFilename("");
                 }}
             >
-                {s.selectedFilename() ? "← All files" : "← All agents"}
+                {s.selectedFilename() ? t("nativeMemory.backFiles") : t("nativeMemory.backAgents")}
             </Button>
             <span class="native-memory-manager-crumbs">
                 <span class="native-memory-manager-agent-name">{agentLabel(agent())}</span>
                 <Show when={s.unverified()}>
                     <span
                         class="native-memory-manager-unverified"
-                        {...tip("Found from the agent's settings, not from its own launch. Read-only until the agent launches.")}
+                        {...tip(t("nativeMemory.unverifiedTip"))}
                     >
-                        Unverified folder
+                        {t("nativeMemory.unverified")}
                     </span>
                 </Show>
                 <Show when={s.selectedFilename()}>
@@ -957,15 +957,15 @@ function renderFileGrid(s: ManagerState, agent: Accessor<AgentDefinition>): JSX.
                 MemoryAgentCard takes with its own count. */}
             <Show
                 when={!s.filesLoading()}
-                fallback={<div class="native-memory-manager-empty">Loading files…</div>}
+                fallback={<div class="native-memory-manager-empty">{t("nativeMemory.loadingFiles")}</div>}
             >
                 <Show
                     when={s.sortedFiles().length > 0}
                     fallback={
                         <div class="native-memory-manager-empty">
                             {s.filesError()
-                                ? "This agent's memory directory could not be read."
-                                : "This agent hasn't remembered anything yet."}
+                                ? t("nativeMemory.unreadable")
+                                : t("nativeMemory.empty")}
                         </div>
                     }
                 >

@@ -154,13 +154,23 @@ for mode in pr queue; do
     env PATH="$ARGS_BIN:$PATH" IN_QUEUE=$in_queue CI_BUILD_LOG="$log" CI_TRACE_FILE="$TMP/order.trace" bash "$SCRIPT" --attempt > /dev/null 2>&1
     mapfile -t calls < <(grep "^cargo nextest run" "$log")
     sets=$(for call in "${calls[@]}"; do echo "$call" | packages; echo; done | sort -u | grep -c .)
-    # A PR attempt has one call more than the queue's: the last build, with its own job count, before the run.
-    want_calls=3
-    [ "$mode" = pr ] && want_calls=4
-    [ "${#calls[@]}" -eq "$want_calls" ] && [ "$sets" = 1 ] && ok "$mode lane: the two builds and the run name the same packages" \
-        || bad "$mode lane: the two builds and the run name the same packages" "$(cat "$log")"
-    case "${calls[0]:-}" in *"--no-run"*"--lib") ok "$mode lane: the core's harness is built first" ;; *) bad "$mode lane: the core's harness is built first" "${calls[0]:-}" ;; esac
-    case "${calls[1]:-}" in *"--no-run"*"--bin agentmux-srv") ok "$mode lane: the server layer's harness is built second" ;; *) bad "$mode lane: the server layer's harness is built second" "${calls[1]:-}" ;; esac
+    if [ "$mode" = queue ]; then
+        # The queue has no `--lib` call of its own: the run's call builds the core's harness, after the server layer's
+        # (2026-11-24: with the `--lib` call first, the core's harness was compiled twice, 3.5 minutes). Two calls: the
+        # server layer's build, then the run.
+        [ "${#calls[@]}" -eq 2 ] && [ "$sets" = 1 ] && ok "queue lane: the server layer's build and the run name the same packages"             || bad "queue lane: the server layer's build and the run name the same packages" "$(cat "$log")"
+        case "${calls[0]:-}" in *"--no-run"*"--bin agentmux-srv") ok "queue lane: the server layer's harness is built first" ;; *) bad "queue lane: the server layer's harness is built first" "${calls[0]:-}" ;; esac
+        if grep "^cargo nextest run --no-run" "$log" | grep -q -- "--lib"; then bad "queue lane: no call builds the core's harness on its own" "$(cat "$log")"; else ok "queue lane: no call builds the core's harness on its own"; fi
+        case "${calls[1]:-}" in *"--profile queue"*"--lib"*"--bin agentmux-srv"*"--bin agentmux-mcp"*"--test spawn_no_window_inventory"*) ok "queue lane: the run names every target" ;; *) bad "queue lane: the run names every target" "${calls[1]:-}" ;; esac
+        want_calls=2
+    else
+        # A PR attempt has one call more than the queue's used to: the last build, with its own job count, before the run.
+        want_calls=4
+        [ "${#calls[@]}" -eq "$want_calls" ] && [ "$sets" = 1 ] && ok "$mode lane: the two builds and the run name the same packages" \
+            || bad "$mode lane: the two builds and the run name the same packages" "$(cat "$log")"
+        case "${calls[0]:-}" in *"--no-run"*"--lib") ok "$mode lane: the core's harness is built first" ;; *) bad "$mode lane: the core's harness is built first" "${calls[0]:-}" ;; esac
+        case "${calls[1]:-}" in *"--no-run"*"--bin agentmux-srv") ok "$mode lane: the server layer's harness is built second" ;; *) bad "$mode lane: the server layer's harness is built second" "${calls[1]:-}" ;; esac
+    fi
     last="${calls[$((want_calls - 1))]:-}"
     case "$last" in *"--no-run"*) bad "$mode lane: the run comes last" "$last" ;; *"--profile"*) ok "$mode lane: the run comes last" ;; *) bad "$mode lane: the run comes last" "$last" ;; esac
 done

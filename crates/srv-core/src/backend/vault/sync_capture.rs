@@ -19,13 +19,13 @@ use rusqlite::{params, Connection, OptionalExtension};
 use zeroize::Zeroizing;
 
 use super::seal::{self, Key};
+use super::sync_capture_kinds as kinds;
 use super::sync_links;
 use super::sync_record::{stays_here, EntryBody, Profiles};
-use super::sync_seal::{self, Place};
 use super::sync_store::links_of;
 use crate::backend::storage::store::Store;
 use crate::backend::storage::vault::VaultRow;
-use crate::backend::user_sync::log::{self, SealAt, Signer};
+use crate::backend::user_sync::log::{self, Signer};
 use crate::backend::user_sync::seal::KeyRing;
 
 /// The kind of a Vault's collection.
@@ -60,7 +60,8 @@ const SCHEMA: &str = "
 /// Creates the log's tables and this module's.
 pub fn init(conn: &Connection) -> rusqlite::Result<()> {
     log::init(conn)?;
-    conn.execute_batch(SCHEMA)
+    conn.execute_batch(SCHEMA)?;
+    conn.execute_batch(kinds::SCHEMA)
 }
 
 /// What a capture did.
@@ -68,19 +69,18 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
 pub struct Captured {
     /// Records written: an entry's first version, or a changed one.
     pub written: usize,
-    /// Records ended with a tombstone: an entry deleted, or moved to another Vault.
+    /// Records ended with a tombstone: an entry deleted, or moved to another Vault, or a grant revoked.
     pub tombstoned: usize,
+    /// Activity lines written.
+    pub lines: usize,
+    /// Site grants written.
+    pub grants: usize,
 }
 
 /// For `log::append_local_with`: seals `body` for the place the record will have, under the Vault's key at the epoch the
-/// record carries. The associated data is the Vault's (`sync_seal::AAD_PREFIX`).
-pub fn sealer<'a>(ring: &'a KeyRing, body: &'a [u8]) -> impl FnOnce(&SealAt) -> Result<Vec<u8>, String> + 'a {
-    move |at| {
-        let key = ring.get(at.epoch).ok_or_else(|| format!("no key for epoch {}", at.epoch))?;
-        let place = Place { vault: &at.collection, record: &at.record, version: &at.version, base: at.base.as_ref(), epoch: at.epoch };
-        sync_seal::seal_raw(key, &place, body)
-    }
-}
+/// record carries. It is the layer's own seal, so the layer can open what a Vault wrote when it writes the record again at a
+/// new epoch (`ops::reissue`) without knowing anything of the Vault.
+pub use crate::backend::user_sync::seal::sealer;
 
 /// What is kept of a body to tell later whether it changed: an HMAC under this machine's own key, never a bare hash. A
 /// hash of the body would let anyone holding the database test guesses at a low-entropy secret (everything else in the body
@@ -181,7 +181,7 @@ fn seen_of(conn: &Connection, entry_id: &str) -> rusqlite::Result<Option<Seen>> 
 }
 
 /// Ends a record, if it is live.
-fn tombstone(conn: &Connection, signer: &mut Signer, collection: &str, record: &str, now_ms: i64) -> Result<bool, String> {
+pub(super) fn tombstone(conn: &Connection, signer: &mut Signer, collection: &str, record: &str, now_ms: i64) -> Result<bool, String> {
     match log::current(conn, collection, record).map_err(|e| e.to_string())? {
         Some(cur) if !cur.header.tombstone => {
             log::append_local(conn, signer, collection, record, Vec::new(), true, now_ms).map_err(|e| format!("{e:?}"))?;
@@ -203,8 +203,12 @@ struct Pending {
 /// Writes what changed in `vault_id`'s entries into its collection. `key` is this machine's own key, which opens the
 /// entries' values; `ring` holds the Vault's keys; `profiles` names the person's browser profiles here.
 pub fn capture(store: &Store, signer: &mut Signer, vault_id: &str, ring: &KeyRing, key: &Key, profiles: &dyn Profiles, now_ms: i64) -> Result<Captured, String> {
-    // Everything that reads the store comes first: the connection is the store's own, and is taken only after.
-    let rows: Vec<_> = store.vault_list().map_err(|e| e.to_string())?.into_iter().filter(|r| r.vault_id == vault_id && !stays_here(r, profiles)).collect();
+    // Everything that reads the store comes first: the connection is the store's own, and is taken only after. The lines and
+    // grants are read before the entries, so a line is never read for an entry that was made after the entries were.
+    let more = kinds::read(store, vault_id)?;
+    let all: Vec<_> = store.vault_list().map_err(|e| e.to_string())?.into_iter().filter(|r| r.vault_id == vault_id).collect();
+    let here: std::collections::HashSet<&str> = all.iter().map(|r| r.id.as_str()).collect();
+    let rows: Vec<_> = all.iter().filter(|r| !stays_here(r, profiles)).cloned().collect();
     let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
     let link_of = super::link_ids(store, &ids)?;
     let written_as = records_written(store)?;
@@ -253,6 +257,11 @@ pub fn capture(store: &Store, signer: &mut Signer, vault_id: &str, ring: &KeyRin
         )
         .map_err(|e| e.to_string())?;
     }
+    let records: std::collections::HashMap<String, String> = pending.iter().map(|p| (p.entry_id.clone(), p.record.clone())).collect();
+    let wrote = kinds::write(&conn, signer, vault_id, ring, &more, &rows, &records, &here, now_ms)?;
+    out.lines = wrote.lines;
+    out.grants = wrote.grants;
+    out.tombstoned += wrote.tombstoned;
     // Entries this Vault had recorded that no longer exist: deleted. One moved to another Vault is left to that Vault's
     // capture, which ends this record when it writes the entry; one that is only no longer kept here (its profile is
     // gone) is not deleted for the other machines.

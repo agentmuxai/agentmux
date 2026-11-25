@@ -317,6 +317,15 @@ function registerWindowCommands(): void {
         execute: () => fireAndForget(async () => getApi().signOutThisBrowser?.()),
     });
     commandRegistry.register({
+        id: "window:sign-out-everywhere",
+        label: "Sign Out of Every Browser",
+        category: "Window",
+        icon: "right-from-bracket",
+        keywords: "log out logout session headless sign out all every browsers",
+        when: () => typeof getApi().signOutEverywhere === "function",
+        execute: () => fireAndForget(async () => getApi().signOutEverywhere?.()),
+    });
+    commandRegistry.register({
         id: "window:new",
         label: "New Window",
         category: "Window",

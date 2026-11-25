@@ -136,7 +136,7 @@ export function McpServerDetail(props: {
                                 <Button
                                     density="compact"
                                     aria-label={t("mcp.detail.unbindAria", { name: agent.name })}
-                                    onClick={() => void model.unbindFromAgent(server().id, agent.id)}
+                                    onClick={() => model.unbindFromAgent(server().id, agent.id)}
                                 >
                                     {t("mcp.detail.unbind")}
                                 </Button>
@@ -158,7 +158,7 @@ export function McpServerDetail(props: {
                     />
                     <Button
                         disabled={!model.bindAgentIdAtom()}
-                        onClick={() => void model.bindToAgent(server().id, model.bindAgentIdAtom())}
+                        onClick={() => model.bindToAgent(server().id, model.bindAgentIdAtom())}
                     >
                         {t("mcp.detail.bind")}
                     </Button>

@@ -1,0 +1,50 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// ConfirmPanel: a confirm that asks inside the element that asked, in the flow, covering nothing. Line style, square
+// corners, tokens only (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md L1, L2, L6); sizes read the density variables,
+// so the panel follows the chrome zoom like the rest of the pane.
+
+.ui-confirm-panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    min-width: 0;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--accent-color);
+    background: var(--panel-bg-color);
+
+    &--destructive {
+        border-color: var(--error-color);
+    }
+
+    // Focus lands on the panel when it opens: it is a place, not a control, so no ring around the whole of it.
+    &:focus {
+        outline: none;
+    }
+
+    &__title {
+        font-weight: 600;
+        overflow-wrap: anywhere;
+    }
+
+    &__body {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+        min-width: 0;
+        overflow-wrap: anywhere;
+
+        p {
+            margin: 0;
+        }
+    }
+
+    // Wraps in a narrow pane: Cancel first, the confirm last, both always reachable.
+    &__actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: var(--space-1-5);
+    }
+}

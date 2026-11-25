@@ -48,7 +48,7 @@ decideWidget ["acme.notes","abc123",true,"99:99"]
             <div data-stand="WidgetApprovalDetails">
               "acme.notes"
             <div class="widget-approval-actions">
-              <button type="button" class="ui-button ui-tone-danger" disabled="">
+              <button type="button" class="ui-button ui-tone-danger" disabled="" aria-busy="true" data-pending="true">
                 "Install acme.notes"
               <button type="button" class="ui-button ui-tone-neutral" disabled="">
                 "Cancel"

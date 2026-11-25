@@ -90,11 +90,11 @@ function DesktopRequestPrompt(props: { request: DesktopRequest } & ModalClosePro
                 )}
             </ModalBody>
             <ModalFooter>
-                <Button data-modal-dismiss onClick={() => void decide("deny")}>
+                <Button data-modal-dismiss onClick={() => decide("deny")}>
                     Don't allow
                 </Button>
-                <Button onClick={() => void decide("session")}>Allow for this session</Button>
-                <Button tone="attention" onClick={() => void decide("timed")}>
+                <Button onClick={() => decide("session")}>Allow for this session</Button>
+                <Button tone="attention" onClick={() => decide("timed")}>
                     {`Allow for ${r.grant_minutes} min`}
                 </Button>
             </ModalFooter>

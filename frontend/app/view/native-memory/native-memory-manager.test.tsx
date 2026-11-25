@@ -1141,6 +1141,7 @@ describe("NativeMemoryManager — create actions", () => {
         fireEvent.input(screen.getByLabelText("File name"), { target: { value: "bad name" } });
         fireEvent.click(screen.getByRole("button", { name: "Create" }));
         expect(await screen.findByText("Filename may only use letters, numbers, '-' and '_'.")).toBeInTheDocument();
+        await waitFor(() => expect(document.querySelector("[data-pending]")).toBeNull());
 
         fireEvent.input(screen.getByLabelText("File name"), { target: { value: "taken" } });
         fireEvent.click(screen.getByRole("button", { name: "Create" }));

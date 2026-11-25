@@ -537,9 +537,11 @@
     overflow: hidden;
     text-overflow: ellipsis;
 
-    // A found row that shows a folder: the name stays whole while the folder after it takes the ellipsis.
+    // A found row that shows a folder: the name stays whole while the folder after it takes the ellipsis, down to the
+    // width the folder keeps (below), and then the name takes the ellipsis too.
     &.files-name--found {
-        flex-shrink: 0;
+        flex-shrink: 1;
+        min-width: 8ch;
         max-width: 100%;
     }
 }
@@ -587,6 +589,8 @@
 // ── States: waiting, denied, empty, the macOS notice ───────────────────────
 
 .files-notice {
+    // Painted after (so above) the columns view's layer, which covers the whole list area, in the view's order.
+    position: relative;
     padding: 24px 16px;
     color: var(--secondary-text-color);
     text-align: center;
@@ -631,7 +635,8 @@
 // A found row's folder, after its name.
 .files-where {
     margin-left: 8px;
-    min-width: 0;
+    // What stays of it however long the name is: the folder is what tells two files of one name apart.
+    min-width: 12ch;
     // The folder gives way before the name does: it takes the ellipsis while the name is whole.
     flex: 0 100 auto;
     overflow: hidden;

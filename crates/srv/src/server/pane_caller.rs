@@ -38,6 +38,38 @@ pub(crate) fn agent_acts_on_own_pane(mstore: &Store, ctx: &RpcContext, block_id:
     }
 }
 
+/// Whether the connection `ctx` may delete the block `block_id` as a sub-block: always, unless it is registered as an agent
+/// and the block is not a sub-block of the pane that agent runs. The pane itself is not a sub-block of anything, so an agent
+/// never deletes its own pane this way.
+pub(crate) fn agent_deletes_own_sub_block(mstore: &Store, ctx: &RpcContext, block_id: &str) -> Result<(), String> {
+    agent_acts_on_own_pane(mstore, ctx, block_id, "deleting a sub-block")?;
+    if ctx.agent_id.is_empty() {
+        return Ok(());
+    }
+    let hangs_from_a_pane = mstore.get::<Block>(block_id).ok().flatten().is_some_and(|b| b.parentoref.starts_with("block:"));
+    if hangs_from_a_pane {
+        Ok(())
+    } else {
+        Err("FORBIDDEN: deleting a pane is the person's act; an agent releases its shell drawer with Terminal close and closes a pane it opened with Pane close".to_string())
+    }
+}
+
+/// Whether the connection `ctx` may write the meta of `oref` (`block:<id>`, `tab:<id>`, ...): always, unless it is registered
+/// as an agent. An agent writes the meta of its own pane; a tab, window, workspace or any other object holds the person's
+/// layout, names and settings, so it is refused with what to do instead.
+pub(crate) fn agent_writes_meta_of(mstore: &Store, ctx: &RpcContext, oref: &str) -> Result<(), String> {
+    if ctx.agent_id.is_empty() {
+        return Ok(());
+    }
+    match oref.split_once(':') {
+        Some(("block", block_id)) => agent_acts_on_own_pane(mstore, ctx, block_id, "writing pane meta"),
+        Some((kind, _)) => Err(format!(
+            "FORBIDDEN: writing a {kind}'s meta is the person's act (the layout, names and settings of their window); an agent changes its own pane with the Pane and UI tools; to change this, ask the person"
+        )),
+        None => Err("FORBIDDEN: writing this object's meta is the person's act; an agent changes its own pane with the Pane and UI tools; to change this, ask the person".to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

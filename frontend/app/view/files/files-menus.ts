@@ -9,7 +9,7 @@ import { revealInFileManagerLabel } from "@/app/util/file-manager-label";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import type { FsEntry } from "@/types/rpc/FsEntry";
 import { errorText, type FilesModel } from "./files-model";
-import { openInEditor, openTerminalHere, openWithOs, revealInOs } from "./files-open";
+import { openInEditor, openTerminalHere, revealInOs } from "./files-open";
 import { clipboard } from "./files-ops";
 import { isPinned, togglePin, type PlaceRef } from "./files-pins";
 import { CONFINED_MENU } from "./files-view-text";
@@ -34,13 +34,14 @@ const pinItem = (model: FilesModel, path: string): ContextMenuItem => {
 /** What a row menu calls back into the view for. */
 export type RowMenuActions = {
     openEntry: (entry: FsEntry) => void;
+    openWithDefaultApp: (entry: FsEntry) => void;
     openInNewTab: (dir: string) => void;
     copyPaths: (list: FsEntry[], quiet?: boolean) => void;
     askDeletePermanently: (list: FsEntry[]) => void;
 };
 
 export const buildRowMenu = (model: FilesModel, entry: FsEntry, actions: RowMenuActions): ContextMenuItem[] => {
-    const { openEntry, openInNewTab, copyPaths, askDeletePermanently } = actions;
+    const { openEntry, openWithDefaultApp, openInNewTab, copyPaths, askDeletePermanently } = actions;
     // More than one row selected: the menu acts on the selection, as the topmost rows of it (a folder and the rows opened in it
     // are the folder), which may be a single one.
     const many = model.selectedEntries().length > 1;
@@ -56,7 +57,7 @@ export const buildRowMenu = (model: FilesModel, entry: FsEntry, actions: RowMenu
     if (!entry.is_dir) {
         items.push(
             { type: "action", label: "Open in Editor", icon: MENU_ICON.openInEditor, onSelect: () => void openInEditor(model, path).catch(fail) },
-            { type: "action", label: "Open with default app", icon: MENU_ICON.open, onSelect: () => void openWithOs(path, model.blockId).catch(fail) }
+            { type: "action", label: "Open with default app", icon: MENU_ICON.open, onSelect: () => openWithDefaultApp(entry) }
         );
     } else {
         items.push({ type: "action", label: "Open terminal here", icon: MENU_ICON.openTerminal, onSelect: () => void openTerminalHere(path, model.blockId, model.connection() || undefined).catch(fail) });

@@ -11,6 +11,7 @@ import { tip } from "@/app/element/tip";
 import { Button } from "@/app/element/ui";
 import { openLink } from "@/app/store/misc-utils";
 import { clockTime } from "@/app/store/muxbus-delivery";
+import { t } from "@/app/i18n/i18n";
 import { RuntimeBadge } from "@/app/view/agent/components/RuntimeBadge";
 import { createMemo, For, Show, type JSX } from "solid-js";
 import { accountSharers, type AtlasAgent, type AtlasContainer } from "./atlas-graph";
@@ -83,6 +84,9 @@ function WorkRows(props: { work: AtlasWork }): JSX.Element {
                                     <span class="atlas-card__task" {...tip(task.title)}>
                                         #{task.num} {task.title}
                                     </span>
+                                    <Show when={!task.held}>
+                                        <span class="atlas-card__note">{t("atlas.card.taskWaiting")}</span>
+                                    </Show>
                                     <Show when={task.pr}>
                                         {(pr) => (
                                             <Button
@@ -97,6 +101,11 @@ function WorkRows(props: { work: AtlasWork }): JSX.Element {
                                 </li>
                             )}
                         </For>
+                        <Show when={props.work.more > 0}>
+                            <li class="atlas-card__note" data-testid="atlas-card-more-tasks">
+                                {t("atlas.node.moreTasks", { n: props.work.more })}
+                            </li>
+                        </Show>
                     </ul>
                 </dd>
             </Show>

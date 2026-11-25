@@ -9,6 +9,7 @@
 
 import { PaneRestoreGlyph } from "@/app/element/pane-control-glyphs";
 import * as MOS from "@/app/store/mos";
+import { closeFloaterAfterRedock } from "@/app/workspace/floater-close";
 import { holdRedock } from "@/app/workspace/floating-redock-guard";
 import { floaterPanes, redockFloaterPane } from "@/app/workspace/floater-panes";
 import { atoms, getApi } from "@/store/global";
@@ -142,13 +143,16 @@ export async function redockThisFloater(): Promise<boolean> {
     // closes the window as soon as the tab empties, which is before the saga call returns
     // (the backend broadcasts the tab update first), and a closed window runs no more code.
     // The guard releases at the end and the floater then closes.
-    return holdRedock(async () => {
+    const redocked = await holdRedock(async () => {
         const result = await redockFloater(target, true);
         if (!result) return false;
         const label = result.placed === "fallback" ? target.label : await windowLabelShowing(result.workspaceId, target.label);
         await getApi().focusWindow(label).catch(console.error);
         return true;
     });
+    // The pane is docked: close the window from here, not from the update that emptied its tab (which can throw).
+    if (redocked) await closeFloaterAfterRedock(atoms.activeTabId(), floatingWindowLabel() ?? "", "redock by command or button");
+    return redocked;
 }
 
 /** Header Redock button for a floating pane. Hidden when no window can take the pane; the check

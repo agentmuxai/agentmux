@@ -43,7 +43,7 @@ export function VaultRowAsks(props: { agent?: string }): JSX.Element {
                         {(id) => <Countdown use={uses().find((u) => u.id === id)!} />}
                     </Show>
                 </span>
-                <Button tone="danger" density="compact" onClick={() => void deny()}>
+                <Button tone="danger" density="compact" onClick={() => deny()}>
                     {count() > 1 ? "Deny all" : "Deny"}
                 </Button>
                 <Button tone="attention" density="compact" onClick={() => void openVaultAt(uses()[0]?.id ?? asks()[0]?.id)}>

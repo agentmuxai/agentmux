@@ -97,6 +97,145 @@ pub(crate) fn to_absolute(sx: i32, sy: i32, vx: i32, vy: i32, vw: u32, vh: u32) 
     (norm(sx, vx, vw), norm(sy, vy, vh))
 }
 
+/// A drag passes through at most this many given points besides its two ends.
+pub(crate) const MAX_DRAG_WAYPOINTS: usize = 8;
+/// The most mouse moves one drag sends, however far it goes.
+pub(crate) const MAX_DRAG_MOVES: usize = 80;
+/// Roughly one move per this many pixels, so an app that samples the pointer
+/// sees a path, not a jump.
+const DRAG_PIXELS_PER_MOVE: f64 = 12.0;
+/// Every leg of a drag has at least this many moves.
+const DRAG_MIN_MOVES_PER_LEG: usize = 4;
+
+/// The screen points a drag moves through, from `start` to `end` by way of
+/// `via`, in order. Each leg is cut into short steps (the last step of a leg
+/// lands exactly on its end), and the whole drag is at most
+/// [`MAX_DRAG_MOVES`] moves. The first point is `start` itself.
+pub(crate) fn drag_path(start: (i32, i32), via: &[(i32, i32)], end: (i32, i32)) -> Vec<(i32, i32)> {
+    let mut stops = vec![start];
+    stops.extend_from_slice(via);
+    stops.push(end);
+    let legs = stops.len() - 1;
+    // Each leg gets the moves its length asks for, within the drag's total.
+    let wanted: Vec<usize> = stops
+        .windows(2)
+        .map(|w| {
+            let d = (((w[1].0 - w[0].0) as f64).powi(2) + ((w[1].1 - w[0].1) as f64).powi(2)).sqrt();
+            ((d / DRAG_PIXELS_PER_MOVE).ceil() as usize).max(DRAG_MIN_MOVES_PER_LEG)
+        })
+        .collect();
+    let total: usize = wanted.iter().sum();
+    let budget = MAX_DRAG_MOVES.max(legs);
+    let mut path = vec![start];
+    for (i, w) in stops.windows(2).enumerate() {
+        let n = if total <= budget { wanted[i] } else { (wanted[i] * budget / total).max(1) };
+        for k in 1..=n {
+            let f = k as f64 / n as f64;
+            let p = if k == n {
+                w[1]
+            } else {
+                (
+                    (w[0].0 as f64 + (w[1].0 - w[0].0) as f64 * f).round() as i32,
+                    (w[0].1 as f64 + (w[1].1 - w[0].1) as f64 * f).round() as i32,
+                )
+            };
+            path.push(p);
+        }
+    }
+    path
+}
+
+/// What a drag does to the mouse and keyboard, one step at a time, for
+/// [`run_drag`] to hand to whatever sends it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) enum DragStep {
+    /// Move the pointer to a screen point.
+    Move(i32, i32),
+    KeyDown(u16),
+    KeyUp(u16),
+    ButtonDown,
+    ButtonUp,
+    /// Wait this many milliseconds.
+    Pause(u64),
+}
+
+/// Pause after the pointer arrives and the modifiers go down, before the press.
+const DRAG_SETTLE_MS: u64 = 40;
+/// Pause after the press, before the first move: an app that starts a drag on
+/// the first motion needs to have seen the press.
+const DRAG_PRESS_MS: u64 = 120;
+/// Pause between moves.
+const DRAG_STEP_MS: u64 = 8;
+/// Pause on the last point before the release, so a drop target registers.
+const DRAG_DROP_MS: u64 = 150;
+
+/// Hold `modifiers`, press the button at the first point, move through the
+/// rest, pause, and let go at the last. `out` does each step. Whatever was
+/// pressed is let go again on every exit, including when a step fails: the
+/// button first, then the modifiers in reverse, so a failed drag never leaves
+/// one held. The first error is the one returned.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn run_drag(
+    points: &[(i32, i32)],
+    modifiers: &[u16],
+    out: &mut dyn FnMut(DragStep) -> Result<(), String>,
+) -> Result<(), String> {
+    let mut button_down = false;
+    let mut modifiers_down = 0usize;
+    let result = (|| -> Result<(), String> {
+        let (first, rest) = points.split_first().ok_or("a drag needs points")?;
+        out(DragStep::Move(first.0, first.1))?;
+        for m in modifiers {
+            out(DragStep::KeyDown(*m))?;
+            modifiers_down += 1;
+        }
+        out(DragStep::Pause(DRAG_SETTLE_MS))?;
+        out(DragStep::ButtonDown)?;
+        button_down = true;
+        out(DragStep::Pause(DRAG_PRESS_MS))?;
+        for p in rest {
+            out(DragStep::Move(p.0, p.1))?;
+            out(DragStep::Pause(DRAG_STEP_MS))?;
+        }
+        out(DragStep::Pause(DRAG_DROP_MS))?;
+        out(DragStep::ButtonUp)?;
+        button_down = false;
+        Ok(())
+    })();
+    // Let go of whatever is still held, whatever happened above. Each is tried
+    // even if an earlier one fails.
+    if button_down {
+        let _ = out(DragStep::ButtonUp);
+    }
+    for m in modifiers.iter().take(modifiers_down).rev() {
+        let _ = out(DragStep::KeyUp(*m));
+    }
+    result
+}
+
+/// The modifiers `drag` may hold while it drags: ctrl, alt and shift, written
+/// like a chord without a key (`ctrl+shift`). The Windows key is refused for
+/// the same reason `key` refuses it.
+pub(crate) fn parse_hold(spec: &str) -> Result<Vec<u16>, String> {
+    let mut modifiers = Vec::new();
+    for m in spec.split('+').map(str::trim).filter(|p| !p.is_empty()) {
+        let code = match m.to_lowercase().as_str() {
+            "ctrl" | "control" => VK_CONTROL,
+            "alt" | "option" => VK_MENU,
+            "shift" => VK_SHIFT,
+            "win" | "windows" | "meta" | "cmd" | "command" | "super" => {
+                return Err("the Windows/Command key is not allowed: it acts on the operating system, not the app".into())
+            }
+            other => return Err(format!("unknown key to hold {other:?}; use ctrl, alt or shift")),
+        };
+        if !modifiers.contains(&code) {
+            modifiers.push(code);
+        }
+    }
+    Ok(modifiers)
+}
+
 /// A key chord such as `ctrl+shift+s`: modifiers held, then one key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Chord {
@@ -210,7 +349,7 @@ pub(crate) mod win {
         GA_ROOT, GA_ROOTOWNER, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_RESTORE,
     };
 
-    use super::{to_absolute, Chord, Rect};
+    use super::{to_absolute, Chord, DragStep, Rect};
 
     pub(crate) fn ensure_dpi_aware() {
         static ONCE: Once = Once::new();
@@ -360,15 +499,37 @@ pub(crate) mod win {
         mouse(ax, ay, 0, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK)
     }
 
+    fn button_flags(button: &str) -> Result<(MOUSE_EVENT_FLAGS, MOUSE_EVENT_FLAGS), String> {
+        match button {
+            "left" => Ok((MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP)),
+            "right" => Ok((MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP)),
+            "middle" => Ok((MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP)),
+            other => Err(format!("unknown button {other:?}; use left, right or middle")),
+        }
+    }
+
+    /// Hold `modifiers`, press `button` at the first point, move through the
+    /// rest in short steps and let go at the last (see `run_drag`). It takes
+    /// about a second at most, and lets go on every exit path.
+    pub(crate) fn drag(points: &[(i32, i32)], button: &str, modifiers: &[u16]) -> Result<(), String> {
+        let (down, up) = button_flags(button)?;
+        super::run_drag(points, modifiers, &mut |step| match step {
+            DragStep::Move(x, y) => send(&[move_to(x, y)]),
+            DragStep::KeyDown(vk) => send(&[key(vk, 0, 0)]),
+            DragStep::KeyUp(vk) => send(&[key(vk, 0, KEYEVENTF_KEYUP)]),
+            DragStep::ButtonDown => send(&[mouse(0, 0, 0, down)]),
+            DragStep::ButtonUp => send(&[mouse(0, 0, 0, up)]),
+            DragStep::Pause(ms) => {
+                std::thread::sleep(Duration::from_millis(ms));
+                Ok(())
+            }
+        })
+    }
+
     /// Click `count` times at a screen point with `button` ("left", "right",
     /// "middle").
     pub(crate) fn click(sx: i32, sy: i32, button: &str, count: u32) -> Result<(), String> {
-        let (down, up) = match button {
-            "left" => (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP),
-            "right" => (MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP),
-            "middle" => (MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP),
-            other => return Err(format!("unknown button {other:?}; use left, right or middle")),
-        };
+        let (down, up) = button_flags(button)?;
         let mut events = vec![move_to(sx, sy)];
         for _ in 0..count.clamp(1, 3) {
             events.push(mouse(0, 0, 0, down));
@@ -464,6 +625,9 @@ pub(crate) mod win {
     pub(crate) fn scroll(_sx: i32, _sy: i32, _dx: i32, _dy: i32) -> Result<(), String> {
         Err(NOT_YET.into())
     }
+    pub(crate) fn drag(_points: &[(i32, i32)], _button: &str, _modifiers: &[u16]) -> Result<(), String> {
+        Err(NOT_YET.into())
+    }
     pub(crate) fn press(_chord: &Chord) -> Result<(), String> {
         Err(NOT_YET.into())
     }
@@ -557,9 +721,259 @@ mod tests {
     }
 
     #[test]
+    fn a_drag_starts_and_ends_exactly_where_it_was_told() {
+        let path = drag_path((100, 100), &[], (400, 100));
+        assert_eq!(path.first(), Some(&(100, 100)));
+        assert_eq!(path.last(), Some(&(400, 100)));
+        // 300 px in steps of about 12 px, never a jump.
+        assert!(path.len() > 20, "{}", path.len());
+        assert!(path.windows(2).all(|w| (w[1].0 - w[0].0).abs() <= 13), "{path:?}");
+        // Moves only go forward along a straight leg.
+        assert!(path.windows(2).all(|w| w[1].0 >= w[0].0));
+    }
+
+    #[test]
+    fn a_short_drag_still_moves_in_several_steps() {
+        let path = drag_path((10, 10), &[], (14, 10));
+        assert!(path.len() >= 5, "{path:?}");
+        assert_eq!(path.last(), Some(&(14, 10)));
+    }
+
+    #[test]
+    fn a_drag_passes_through_each_waypoint_in_order() {
+        let path = drag_path((0, 0), &[(100, 0), (100, 100)], (0, 100));
+        let at = |p: (i32, i32)| path.iter().position(|q| *q == p).unwrap_or_else(|| panic!("{p:?} not on {path:?}"));
+        assert!(at((100, 0)) < at((100, 100)));
+        assert!(at((100, 100)) < at((0, 100)));
+        assert_eq!(path.last(), Some(&(0, 100)));
+    }
+
+    #[test]
+    fn a_long_drag_is_capped_but_keeps_every_stop() {
+        let via = [(5000, 0), (5000, 5000), (0, 5000), (0, 0), (5000, 5000), (1, 1), (4000, 40), (2, 2)];
+        let path = drag_path((0, 0), &via, (9000, 9000));
+        assert!(path.len() <= MAX_DRAG_MOVES + 1, "{}", path.len());
+        for stop in via {
+            assert!(path.contains(&stop), "{stop:?} missing");
+        }
+        assert_eq!(path.last(), Some(&(9000, 9000)));
+    }
+
+    #[test]
+    fn a_drag_may_hold_ctrl_alt_and_shift_only() {
+        assert_eq!(parse_hold("ctrl"), Ok(vec![VK_CONTROL]));
+        assert_eq!(parse_hold("Ctrl + Shift"), Ok(vec![VK_CONTROL, VK_SHIFT]));
+        assert_eq!(parse_hold("alt+alt"), Ok(vec![VK_MENU]));
+        assert_eq!(parse_hold(""), Ok(vec![]));
+        assert!(parse_hold("win").unwrap_err().contains("not allowed"));
+        assert!(parse_hold("ctrl+cmd").unwrap_err().contains("not allowed"));
+        assert!(parse_hold("ctrl+a").unwrap_err().contains("unknown key to hold"));
+    }
+
+    /// Run a drag against a recorder that fails at its `fail_at`th step (counting from 0).
+    fn record_drag(points: &[(i32, i32)], mods: &[u16], fail_at: Option<usize>) -> (Result<(), String>, Vec<DragStep>) {
+        let mut steps = Vec::new();
+        let mut n = 0usize;
+        let r = run_drag(points, mods, &mut |s| {
+            let this = n;
+            n += 1;
+            // Only the steps of the drag itself can fail; the cleanup is tried regardless.
+            if fail_at == Some(this) {
+                return Err("input refused".into());
+            }
+            steps.push(s);
+            Ok(())
+        });
+        (r, steps)
+    }
+
+    #[test]
+    fn a_drag_presses_moves_and_lets_go_once() {
+        let (r, steps) = record_drag(&[(1, 1), (5, 5), (9, 9)], &[VK_SHIFT], None);
+        assert_eq!(r, Ok(()));
+        assert_eq!(steps.first(), Some(&DragStep::Move(1, 1)));
+        assert_eq!(steps.iter().filter(|s| **s == DragStep::ButtonDown).count(), 1);
+        assert_eq!(steps.iter().filter(|s| **s == DragStep::ButtonUp).count(), 1);
+        // The release is at the last point and the drop pause comes first.
+        let up = steps.iter().position(|s| *s == DragStep::ButtonUp).unwrap();
+        assert_eq!(steps[up - 3], DragStep::Move(9, 9));
+        assert!(matches!(steps[up - 1], DragStep::Pause(ms) if ms >= 100));
+        // The modifier goes down before the press and up after the release.
+        let down = steps.iter().position(|s| *s == DragStep::ButtonDown).unwrap();
+        assert!(steps.iter().position(|s| *s == DragStep::KeyDown(VK_SHIFT)).unwrap() < down);
+        assert!(steps.iter().position(|s| *s == DragStep::KeyUp(VK_SHIFT)).unwrap() > up);
+    }
+
+    #[test]
+    fn a_drag_that_fails_after_the_press_still_lets_go_of_everything() {
+        let points = [(1, 1), (5, 5), (9, 9)];
+        let mods = [VK_CONTROL, VK_SHIFT];
+        // Fail at each step in turn: after the press, whatever was pressed is released.
+        let (_, clean) = record_drag(&points, &mods, None);
+        // The last steps are the modifiers coming up; only the drag proper can fail with an error.
+        for fail_at in 0..clean.len() - mods.len() {
+            let (r, steps) = record_drag(&points, &mods, Some(fail_at));
+            assert_eq!(r, Err("input refused".into()), "fail_at {fail_at}");
+            let downs = steps.iter().filter(|s| **s == DragStep::ButtonDown).count();
+            let ups = steps.iter().filter(|s| **s == DragStep::ButtonUp).count();
+            assert_eq!(downs, ups, "a button was left held when step {fail_at} failed: {steps:?}");
+            for m in mods {
+                let d = steps.iter().filter(|s| **s == DragStep::KeyDown(m)).count();
+                let u = steps.iter().filter(|s| **s == DragStep::KeyUp(m)).count();
+                assert_eq!(d, u, "{m:#x} was left held when step {fail_at} failed: {steps:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn modifiers_are_let_go_in_reverse_after_the_button() {
+        let (r, steps) = record_drag(&[(0, 0), (3, 3)], &[VK_CONTROL, VK_SHIFT], Some(7));
+        assert!(r.is_err());
+        let tail: Vec<DragStep> = steps.iter().rev().take(3).rev().copied().collect();
+        assert_eq!(tail, vec![DragStep::ButtonUp, DragStep::KeyUp(VK_SHIFT), DragStep::KeyUp(VK_CONTROL)], "{steps:?}");
+    }
+
+    #[test]
+    fn a_drag_with_no_points_does_nothing() {
+        let (r, steps) = record_drag(&[], &[VK_CONTROL], None);
+        assert!(r.is_err());
+        assert!(steps.is_empty());
+    }
+
+    #[test]
     fn looks_are_remembered_per_window() {
         remember_look(7001, look());
         assert_eq!(last_look(7001), Some(look()));
         assert_eq!(last_look(7002), None);
+    }
+}
+
+/// A real drag, with the real mouse: a throwaway window with a slider and a
+/// canvas, driven by `win::drag`. It takes the pointer and the screen for a few
+/// seconds, so it is ignored by default; run it by hand on a machine nobody is
+/// working at:
+/// `cargo test -p agentmux-mcp real_drag -- --ignored --nocapture`.
+#[cfg(all(test, windows))]
+mod real_input {
+    use super::*;
+    use serde_json::Value;
+    use std::path::Path;
+    use std::process::{Child, Command};
+    use std::time::{Duration, Instant};
+
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL, VK_LBUTTON};
+
+    /// A form with a slider (0 to 100) and a white canvas. It writes where they are
+    /// (`ready.json`, in physical screen pixels) and what happened to them
+    /// (`result.json`, after each press, release and slider change).
+    const FORM: &str = r##"
+param($dir)
+Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public class Dpi { [DllImport("user32.dll")] public static extern bool SetProcessDPIAware(); }'
+[Dpi]::SetProcessDPIAware() | Out-Null
+Add-Type -AssemblyName System.Windows.Forms
+$f = New-Object Windows.Forms.Form
+$f.StartPosition = 'Manual'; $f.Location = New-Object Drawing.Point(80, 80); $f.Size = New-Object Drawing.Size(640, 360); $f.TopMost = $true
+$tb = New-Object Windows.Forms.TrackBar
+$tb.Minimum = 0; $tb.Maximum = 100; $tb.Value = 0; $tb.Location = New-Object Drawing.Point(20, 20); $tb.Size = New-Object Drawing.Size(560, 45)
+$p = New-Object Windows.Forms.Panel
+$p.Location = New-Object Drawing.Point(20, 100); $p.Size = New-Object Drawing.Size(560, 180); $p.BackColor = [Drawing.Color]::White
+$f.Controls.Add($tb); $f.Controls.Add($p)
+$s = @{ slider = 0; downs = 0; ups = 0; moves = 0; ctrl_at_down = $false; first = @(0, 0); last = @(0, 0) }
+function Save { ($s | ConvertTo-Json -Compress) | Set-Content -Path (Join-Path $dir 'result.json') -Encoding ASCII }
+$tb.add_ValueChanged({ $s.slider = $tb.Value; Save })
+$p.add_MouseDown({ param($o, $e) $s.downs++; $s.ctrl_at_down = ([Windows.Forms.Control]::ModifierKeys -band [Windows.Forms.Keys]::Control) -ne 0; $s.first = @($e.X, $e.Y); Save })
+$p.add_MouseMove({ param($o, $e) if ($s.downs -gt $s.ups) { $s.moves++; $s.last = @($e.X, $e.Y) } })
+$p.add_MouseUp({ param($o, $e) $s.ups++; $s.last = @($e.X, $e.Y); Save })
+$f.add_Shown({
+  $f.Activate()
+  $a = $tb.PointToScreen((New-Object Drawing.Point(0, 0))); $b = $p.PointToScreen((New-Object Drawing.Point(0, 0)))
+  $r = @{ slider = @($a.X, $a.Y, $tb.Width, $tb.Height); canvas = @($b.X, $b.Y, $p.Width, $p.Height) }
+  ($r | ConvertTo-Json -Compress) | Set-Content -Path (Join-Path $dir 'ready.json') -Encoding ASCII
+})
+[Windows.Forms.Application]::Run($f)
+"##;
+
+    struct Form(Child);
+    impl Drop for Form {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    fn wait_for_json(path: &Path, secs: u64) -> Value {
+        let end = Instant::now() + Duration::from_secs(secs);
+        while Instant::now() < end {
+            if let Ok(text) = std::fs::read_to_string(path) {
+                if let Ok(v) = serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')) {
+                    return v;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        panic!("{} did not appear", path.display());
+    }
+
+    /// What the form recorded, once it has had time to see the last event.
+    fn settled_result(dir: &Path) -> Value {
+        wait_for_json(&dir.join("result.json"), 5);
+        std::thread::sleep(Duration::from_millis(700));
+        wait_for_json(&dir.join("result.json"), 5)
+    }
+
+    fn rect(v: &Value, key: &str) -> (i32, i32, i32, i32) {
+        let a = v[key].as_array().unwrap_or_else(|| panic!("{key} missing in {v}"));
+        let n = |i: usize| a[i].as_i64().unwrap() as i32;
+        (n(0), n(1), n(2), n(3))
+    }
+
+    fn down(vk: u16) -> bool {
+        unsafe { GetAsyncKeyState(vk as i32) as u16 & 0x8000 != 0 }
+    }
+
+    #[test]
+    #[ignore = "takes the real mouse and screen for a few seconds; run by hand"]
+    fn real_drag_moves_a_slider_and_draws_on_a_canvas() {
+        win::ensure_dpi_aware();
+        let dir = std::env::temp_dir().join(format!("am-real-drag-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("form.ps1");
+        std::fs::write(&script, FORM).unwrap();
+        let child = Command::new("powershell")
+            .args(["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-File"])
+            .arg(&script)
+            .arg(&dir)
+            .spawn()
+            .expect("start powershell");
+        let _form = Form(child);
+        let ready = wait_for_json(&dir.join("ready.json"), 30);
+        std::thread::sleep(Duration::from_millis(800));
+
+        // The slider: press on its thumb (at the left end) and drag to the right end.
+        let (sx, sy, sw, sh) = rect(&ready, "slider");
+        let from = (sx + 14, sy + sh / 3);
+        let to = (sx + sw - 14, sy + sh / 3);
+        win::drag(&drag_path(from, &[], to), "left", &[]).expect("drag the slider");
+        let r = settled_result(&dir);
+        assert!(r["slider"].as_i64().unwrap() >= 90, "the slider only reached {}: {r}", r["slider"]);
+        assert!(!down(VK_LBUTTON as u16), "the left button is still held");
+
+        // The canvas: a drag through a waypoint, holding ctrl.
+        let _ = std::fs::remove_file(dir.join("result.json"));
+        let (cx, cy, cw, ch) = rect(&ready, "canvas");
+        let start = (cx + 30, cy + 30);
+        let mid = (cx + cw / 2, cy + ch - 30);
+        let end = (cx + cw - 30, cy + 30);
+        win::drag(&drag_path(start, &[mid], end), "left", &[0x11]).expect("drag on the canvas");
+        let r = settled_result(&dir);
+        assert_eq!(r["downs"].as_i64(), Some(1), "{r}");
+        assert_eq!(r["ups"].as_i64(), Some(1), "{r}");
+        assert!(r["moves"].as_i64().unwrap() >= 20, "{r}");
+        assert_eq!(r["ctrl_at_down"].as_bool(), Some(true), "ctrl was not held at the press: {r}");
+        let last = (r["last"][0].as_i64().unwrap(), r["last"][1].as_i64().unwrap());
+        assert!((last.0 - (cw as i64 - 30)).abs() <= 3 && (last.1 - 30).abs() <= 3, "released at {last:?}: {r}");
+        assert!(!down(VK_LBUTTON as u16), "the left button is still held");
+        assert!(!down(VK_CONTROL as u16), "ctrl is still held");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

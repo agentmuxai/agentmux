@@ -10,34 +10,78 @@ vi.mock("../file-check-store", () => ({ checkFileNow: (...a: unknown[]) => check
 vi.mock("@/app/store/misc-utils", () => ({ openLink: (...a: unknown[]) => openLink(...a) }));
 vi.mock("@/app/element/link-destinations", () => ({ openPathLink: (...a: unknown[]) => openPathLink(...a) }));
 
-import { siteOf } from "./bare-domain";
+import { isWebName, plainWhenMissing, siteOf } from "./bare-domain";
 import { openFileEntity } from "./openers";
 
-// [what is written, the site it may be, or null when it is only ever a file]
-const CASES: [string, string | null][] = [
+// [what is written, the site it is when no such file is there, or null]
+const SITES: [string, string | null][] = [
+    // The short list of well-known sites.
     ["docs.rs", "https://docs.rs"],
-    ["pkg.sh", "https://pkg.sh"],
-    ["www.example.rs", "https://www.example.rs"],
+    ["lib.rs", "https://lib.rs"],
     ["rustup.rs", "https://rustup.rs"],
-    // A name that is a file whatever is on disk.
-    ["findings.md", null],
-    ["notes.md", null],
+    ["bun.sh", "https://bun.sh"],
+    ["astral.sh", "https://astral.sh"],
+    ["Docs.rs", "https://Docs.rs"],
+    // Any other name with those endings is not a site.
+    ["pkg.sh", null],
+    ["parser.rs", null],
+    ["nope.rs", null],
+    ["analyze.py", null],
     ["main.rs", null],
-    ["setup.py", null],
-    ["run.sh", null],
-    ["README.rs", null],
-    ["lib_utils.rs", null],
-    ["my-script.sh", null],
-    ["a.tsx", null],
-    // A path, a drive path, a line, or a name with a folder is never a site.
+    ["findings.md", null],
     ["docs/docs.rs", null],
     ["./docs.rs", null],
     ["C:/docs.rs", null],
+    ["a.tsx", null],
 ];
 
-describe("a bare name that may also be a web site", () => {
-    it.each(CASES)("%s", (written, site) => {
+describe("a bare name that is a well-known site", () => {
+    it.each(SITES)("%s", (written, site) => {
         expect(siteOf(written)).toBe(site);
+    });
+    it("is kept short", () => {
+        expect(SITES.filter(([, site]) => site).length).toBeLessThan(10);
+    });
+});
+
+// [what is written, whether it is plain text when the file check says there is no such file]
+const PLAIN: [string, boolean][] = [
+    ["parser.rs", true],
+    ["nope.rs", true],
+    ["pkg.sh", true],
+    ["analyze.py", true],
+    ["tool.pl", true],
+    ["parse.ml", true],
+    // A hyphen or an underscore is no different: it is a word that may or may not be a file.
+    // A site, a file by its stem or its case, another ending, or a path: not plain.
+    ["docs.rs", false],
+    ["main.rs", false],
+    ["setup.py", false],
+    ["README.rs", false],
+    ["lib_utils.rs", true],
+    ["my-script.sh", true],
+    ["gone.md", false],
+    ["gone.ts", false],
+    ["www.example.rs", false],
+    ["src/parser.rs", false],
+];
+
+describe("a bare name with no such file is plain text, not a muted file and not a link", () => {
+    it.each(PLAIN)("%s", (written, plain) => {
+        expect(plainWhenMissing(written)).toBe(plain);
+    });
+});
+
+describe("a name written with www.", () => {
+    it.each([
+        ["www.example.rs", true],
+        ["www.pkg.sh", true],
+        ["WWW.Example.py", true],
+        ["example.rs", false],
+        ["www.example.ts", false],
+        ["www.example.md", false],
+    ] as [string, boolean][])("%s", (written, web) => {
+        expect(isWebName(written)).toBe(web);
     });
 });
 

@@ -105,7 +105,7 @@ function FlowMark(props: { flow: AtlasFlow; mark: Mark | undefined }): JSX.Eleme
                                 x={ring().x - RING_GAP}
                                 y={ring().y - RING_GAP}
                                 width={NODE_W + RING_GAP * 2}
-                                height={NODE_H + RING_GAP * 2}
+                                height={(ring().h ?? NODE_H) + RING_GAP * 2}
                                 rx="6"
                             />
                         )}

@@ -4,6 +4,7 @@
 
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { useBlockStats, type BlockStats } from "@/app/hook/useBlockStats";
+import { t } from "@/app/i18n/i18n";
 import { RpcApi } from "@/app/store/rpc-api";
 import type {
     BlockStatsConnection,
@@ -45,9 +46,8 @@ function formatMem(bytes: number): string {
 export function describeProcesses(figures: BlockStatsFigures): string {
     const shown = figures.names.slice(0, 3).map((n) => (n.count > 1 ? `${n.name} ×${n.count}` : n.name));
     const rest = figures.names.slice(3).reduce((sum, n) => sum + n.count, 0);
-    const names = rest > 0 ? `${shown.join(", ")} and ${rest} more` : shown.join(", ");
-    const count = figures.processes === 1 ? "1 process" : `${figures.processes} processes`;
-    return `${names} (${count})`;
+    const names = rest > 0 ? t("blockStats.andMore", { names: shown.join(", "), count: rest }) : shown.join(", ");
+    return t("blockStats.describe", { names, processes: t("blockStats.processes", { count: figures.processes }) });
 }
 
 /** A start time: "13:20" today, "Oct 11, 13:20" before. */
@@ -55,24 +55,24 @@ export function formatSince(ms: number, now = new Date()): string {
     const at = new Date(ms);
     const time = at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     if (at.toDateString() === now.toDateString()) return time;
-    return `${at.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`;
+    return t("blockStats.dateTime", { date: at.toLocaleDateString([], { month: "short", day: "numeric" }), time });
 }
 
 const since = (f: BlockStatsFigures) =>
-    f.started_at_ms != null ? `, running since ${formatSince(f.started_at_ms)}` : "";
+    f.started_at_ms != null ? t("blockStats.runningSince", { time: formatSince(f.started_at_ms) }) : "";
 
 /**
  * A remote pane's machine: "Connected to build (build.example.net, 203.0.113.5)",
  * "Connected to WSL Ubuntu (198.51.100.5)".
  */
 export function describeConnection(c: BlockStatsConnection): string {
-    const name = c.kind === "wsl" ? `WSL ${c.host ?? c.name.replace(/^wsl:\/\//, "")}` : c.name;
+    const name = c.kind === "wsl" ? t("blockStats.wsl", { host: c.host ?? c.name.replace(/^wsl:\/\//, "") }) : c.name;
     // The host only when it says more than the name does (an alias's HostName).
     const destHost = c.name.replace(/^.*@/, "").replace(/:\d+$/, "");
     const host = c.kind === "ssh" && c.host && c.host !== destHost && c.host !== c.address ? c.host : undefined;
     const address = c.address !== destHost ? c.address : undefined;
     const where = [host, address].filter(Boolean).join(", ");
-    return where ? `Connected to ${name} (${where})` : `Connected to ${name}`;
+    return where ? t("blockStats.connectedWhere", { name, where }) : t("blockStats.connected", { name });
 }
 
 /**
@@ -97,11 +97,11 @@ export function isRemoteConnection(connection: string | undefined): boolean {
 function privateMeaning(metric: string): string {
     switch (metric) {
         case "private working set":
-            return "in RAM and used only by these processes";
+            return t("blockStats.private.windows");
         case "memory footprint":
-            return "what macOS counts as theirs, compressed and swapped included";
+            return t("blockStats.private.mac");
         default:
-            return "their own memory, in RAM or swap";
+            return t("blockStats.private.generic");
     }
 }
 
@@ -110,16 +110,16 @@ function privateMeaning(metric: string): string {
  * the machine wouldn't measure some (other users' on macOS), only the rest.
  */
 export function hostCoverage(h: { processes: number; unmeasured: number }): string {
-    if (h.unmeasured === 0) return `all its ${h.processes} processes`;
+    if (h.unmeasured === 0) return t("blockStats.coverage.all", { count: h.processes });
     const mine = h.processes - h.unmeasured;
-    return `your ${mine} processes only; ${h.unmeasured} others' can't be read`;
+    return t("blockStats.coverage.mine", { count: mine, others: h.unmeasured });
 }
 
 /** A note when some of a pane's processes weren't measured: its figures leave them out. */
 export function partial(f: BlockStatsFigures): string {
     const n = f.unmeasured ?? 0;
     if (n === 0) return "";
-    return ` ${n === 1 ? "1 of them runs" : `${n} of them run`} as another user and can't be read: the figures below leave ${n === 1 ? "it" : "them"} out.`;
+    return ` ${t("blockStats.partial", { count: n })}`;
 }
 
 /** The badge's two figures for a remote pane, and whether they are the whole host's. */
@@ -146,7 +146,7 @@ function RendererRow(props: { blockId: string }) {
     return (
         <Show when={termRendererOf(props.blockId)}>
             {(r) => (
-                <Row label="Renderer" value={describeTermRenderer(r()).value} meaning={describeTermRenderer(r()).meaning} />
+                <Row label={t("blockStats.row.renderer")} value={describeTermRenderer(r()).value} meaning={describeTermRenderer(r()).meaning} />
             )}
         </Show>
     );
@@ -181,41 +181,41 @@ function LocalTooltip(props: { blockId: string; stats: BlockStats }) {
             <div class="bst-title">
                 <Show
                     when={detail()}
-                    fallback={`This pane's processes (${props.stats.pids === 1 ? "1 process" : `${props.stats.pids} processes`})`}
+                    fallback={t("blockStats.local.titleCount", { processes: t("blockStats.processes", { count: props.stats.pids }) })}
                 >
-                    {(d) => `This pane's processes: ${describeProcesses(d())}${since(d())}`}
+                    {(d) => t("blockStats.local.title", { described: describeProcesses(d()), since: since(d()) })}
                 </Show>
             </div>
             <div class="bst-grid">
                 <Row
-                    label="CPU"
+                    label={t("blockStats.row.cpu")}
                     value={`${props.stats.cpu.toFixed(1)}%`}
-                    meaning="of one core; above 100% is more than one core"
+                    meaning={t("blockStats.meaning.cpu")}
                 />
                 <Row
-                    label="Memory"
+                    label={t("blockStats.row.memory")}
                     value={formatBytes(props.stats.mem)}
-                    meaning={`in RAM now, including pages shared with other processes${windows() ? "; Windows trims it when the shell is idle" : ""}`}
+                    meaning={windows() ? t("blockStats.meaning.memoryWindows") : t("blockStats.meaning.memory")}
                 />
                 <Show when={detail()?.mem_private != null}>
                     <Row
-                        label="Private"
+                        label={t("blockStats.row.private")}
                         value={formatBytes(detail()!.mem_private!)}
                         meaning={privateMeaning(detail()!.memory_metric)}
                     />
                 </Show>
                 <Show when={detail()?.mem_commit != null}>
                     <Row
-                        label="Committed"
+                        label={t("blockStats.row.committed")}
                         value={formatBytes(detail()!.mem_commit!)}
-                        meaning="what they have allocated, in RAM or not; the steadiest measure of growth"
+                        meaning={t("blockStats.meaning.committed")}
                     />
                 </Show>
-                <Row label="Peak" value={formatBytes(props.stats.peak)} meaning="the highest Memory has been" />
+                <Row label={t("blockStats.row.peak")} value={formatBytes(props.stats.peak)} meaning={t("blockStats.meaning.peak")} />
                 <RendererRow blockId={props.blockId} />
             </div>
             <div class="bst-footer">
-                The shell and everything started in it. Updated every second; hide with term:showstatsbadge.
+                {t("blockStats.local.footer")}
             </div>
         </div>
     );
@@ -229,24 +229,21 @@ function RemoteTooltip(props: { blockId: string; detail: BlockStatsDetail }) {
     return (
         <div class="block-stats-tooltip">
             <div class="bst-title">
-                {props.detail.connection ? describeConnection(props.detail.connection) : "A remote pane"}
+                {props.detail.connection ? describeConnection(props.detail.connection) : t("blockStats.remote.title")}
             </div>
             <div class="bst-meaning bst-how">
                 <Switch>
                     <Match when={figures() && remote()?.found === "session"}>
-                        Measured on that machine: {describeProcesses(figures()!)}
-                        {since(figures()!)}, the pane's durable session.{partial(figures()!)}
+                        {t("blockStats.remote.session", { described: describeProcesses(figures()!), since: since(figures()!), partial: partial(figures()!) })}
                     </Match>
                     <Match when={figures()}>
-                        Measured on that machine: {describeProcesses(figures()!)}
-                        {since(figures()!)}, found by the pane's id in their environment.{partial(figures()!)}
+                        {t("blockStats.remote.found", { described: describeProcesses(figures()!), since: since(figures()!), partial: partial(figures()!) })}
                     </Match>
                     <Match when={remote()?.found === "none"}>
-                        That machine can't tell this pane's processes from the rest: these are its own totals. A durable
-                        pane, or a server that accepts AgentMux's variables (AcceptEnv AGENTMUX_*), shows the pane's.
+                        {t("blockStats.remote.none")}
                     </Match>
                     <Match when={remote()?.found === "unavailable"}>
-                        Not measured: {remote()?.reason ?? "the machine couldn't be asked"}.
+                        {t("blockStats.remote.unavailable", { reason: remote()?.reason ?? t("blockStats.remote.noAnswer") })}
                     </Match>
                 </Switch>
             </div>
@@ -255,29 +252,29 @@ function RemoteTooltip(props: { blockId: string; detail: BlockStatsDetail }) {
                     {(f) => (
                         <>
                             <Row
-                                label="CPU"
+                                label={t("blockStats.row.cpu")}
                                 value={f().cpu == null ? "–" : `${f().cpu!.toFixed(1)}%`}
-                                meaning="of one core; above 100% is more than one core"
+                                meaning={t("blockStats.meaning.cpu")}
                             />
                             <Show when={f().mem_resident != null}>
                                 <Row
-                                    label="Memory"
+                                    label={t("blockStats.row.memory")}
                                     value={formatBytes(f().mem_resident!)}
-                                    meaning="in RAM now, including pages shared with other processes"
+                                    meaning={t("blockStats.meaning.memory")}
                                 />
                             </Show>
                             <Show when={f().mem_private != null}>
                                 <Row
-                                    label="Private"
+                                    label={t("blockStats.row.private")}
                                     value={formatBytes(f().mem_private!)}
                                     meaning={privateMeaning(f().memory_metric)}
                                 />
                             </Show>
                             <Show when={remote()?.peak != null}>
                                 <Row
-                                    label="Peak"
+                                    label={t("blockStats.row.peak")}
                                     value={formatBytes(remote()!.peak!)}
-                                    meaning="the highest Memory has been"
+                                    meaning={t("blockStats.meaning.peak")}
                                 />
                             </Show>
                         </>
@@ -287,14 +284,14 @@ function RemoteTooltip(props: { blockId: string; detail: BlockStatsDetail }) {
                     {(h) => (
                         <>
                             <Row
-                                label="Host CPU"
+                                label={t("blockStats.row.hostCpu")}
                                 value={h().cpu == null ? "–" : `${h().cpu!.toFixed(1)}%`}
-                                meaning={`of one core, across ${h().cpu_count} cores; ${hostCoverage(h())}`}
+                                meaning={t("blockStats.meaning.hostCpu", { count: h().cpu_count, coverage: hostCoverage(h()) })}
                             />
                             <Row
-                                label="Host memory"
+                                label={t("blockStats.row.hostMemory")}
                                 value={formatBytes(h().mem)}
-                                meaning={`private memory of ${hostCoverage(h())}`}
+                                meaning={t("blockStats.meaning.hostMemory", { coverage: hostCoverage(h()) })}
                             />
                         </>
                     )}
@@ -302,7 +299,7 @@ function RemoteTooltip(props: { blockId: string; detail: BlockStatsDetail }) {
                 <RendererRow blockId={props.blockId} />
             </div>
             <div class="bst-footer">
-                Updated every 2 seconds while the pane is visible; hide with term:showstatsbadge.
+                {t("blockStats.remote.footer")}
             </div>
         </div>
     );
@@ -362,7 +359,7 @@ function RemoteBadge(props: { blockId: string; noHeader?: boolean }) {
                         content={<RemoteTooltip blockId={props.blockId} detail={d()} />}
                     >
                         <span class="stats-cpu">
-                            {shown() ? (shown()!.host ? `host ${shown()!.cpu}` : shown()!.cpu) : "–"}
+                            {shown() ? (shown()!.host ? t("blockStats.hostCpu", { cpu: shown()!.cpu }) : shown()!.cpu) : "–"}
                         </span>
                         <Show when={shown()}>
                             <span class="stats-mem">{shown()!.mem}</span>
@@ -418,7 +415,7 @@ function InlineChip(props: {
     setPinned: (v: boolean) => void;
     setDismissed: (v: boolean) => void;
 }) {
-    const reading = () => `CPU ${props.stats.cpu.toFixed(1)}%, memory ${formatMem(props.stats.mem)}`;
+    const reading = () => t("blockStats.reading", { cpu: props.stats.cpu.toFixed(1), mem: formatMem(props.stats.mem) });
     return (
         <span
             class="stats-reading"

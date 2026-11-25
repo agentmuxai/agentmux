@@ -388,7 +388,7 @@ const StatusRow = (p: { s: MigrationState }): JSX.Element => {
                 {statusLine(s)}
             </span>
             <Show when={unfinished(s)}>
-                <Button tone="accent" busy={s.phase() === "applying"} disabled={busy(s)} onClick={() => void apply(s)}>
+                <Button tone="accent" busy={s.phase() === "applying"} disabled={busy(s)} onClick={() => apply(s)}>
                     {t("settings.forkSlugs.finish")}
                 </Button>
             </Show>
@@ -464,7 +464,7 @@ const RefusedNote = (p: { s: MigrationState; c: ForkSlugCandidate; why: string }
                             tone="accent"
                             density="compact"
                             disabled={!canPick(s)}
-                            onClick={() => void useId(s, c, sug())}
+                            onClick={() => useId(s, c, sug())}
                         >
                             {t("settings.forkSlugs.use", { id: sug() })}
                         </Button>
@@ -504,7 +504,7 @@ const CustomIdRow = (p: { s: MigrationState; c: ForkSlugCandidate }): JSX.Elemen
                 tone="accent"
                 density="compact"
                 disabled={!canPick(s) || s.customId().trim() === ""}
-                onClick={() => void useId(s, c, s.customId())}
+                onClick={() => useId(s, c, s.customId())}
             >
                 {t("settings.forkSlugs.useThis")}
             </Button>

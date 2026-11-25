@@ -27,11 +27,11 @@ const DEFAULT_MAX_FAIL_PERCENTAGE = 50;
 
 /** Shown on Stop when every selected agent is on another machine: a broadcast
  *  reaches a LAN peer's agents, a stop doesn't yet. */
-const NOTHING_REACHABLE = "Stopping agents on another machine isn't supported yet";
+const nothingReachable = () => t("swarm.fleet.nothingReachable");
 
 /** Shown when no selected agent is this AgentMux's own: each AgentMux
  *  supervises its own agents. */
-const NOTHING_SUPERVISABLE = "The Supervisor runs in each AgentMux for its own agents; select agents of this one";
+const nothingSupervisable = () => t("swarm.fleet.nothingSupervisable");
 
 /** The one read-only line the Swarm keeps about the Supervisor, only while it is off: the switch is in Settings. */
 function SupervisorOffLine(): JSX.Element {
@@ -73,7 +73,7 @@ export function SuperviseActions(props: {
     });
     const split = (action: FleetAction) => partitionTargets([...selected()], action, known());
     const reachable = (action: FleetAction) => split(action).reachable.length;
-    const plural = (n: number) => `agent${n === 1 ? "" : "s"}`;
+    const agents = (n: number) => t("swarm.fleet.agentCount", { count: n });
 
     const [stopConfirmOpen, setStopConfirmOpen] = createSignal(false);
     const [useStaging, setUseStaging] = createSignal(false);
@@ -97,10 +97,10 @@ export function SuperviseActions(props: {
                     tone="danger"
                     class="swarm-fleet-btn swarm-fleet-btn--destructive"
                     disabled={model.fleetActionInFlightAtom() || reachable("stop") === 0}
-                    title={count() === 0 ? "Select agents to stop" : reachable("stop") === 0 ? NOTHING_REACHABLE : undefined}
+                    title={count() === 0 ? t("swarm.fleet.selectToStop") : reachable("stop") === 0 ? nothingReachable() : undefined}
                     onClick={() => setStopConfirmOpen(true)}
                 >
-                    <i class="fa-solid fa-stop" /> Stop {reachable("stop")}
+                    <i class="fa-solid fa-stop" /> {t("swarm.fleet.stopN", { n: reachable("stop") })}
                 </Button>
                 {/* Sets the Supervisor's mode on the selection, from a menu of the three modes. Not
                     destructive, so no confirm, like Broadcast; the result panel reports each agent
@@ -108,28 +108,28 @@ export function SuperviseActions(props: {
                 <Button
                     class="swarm-fleet-btn"
                     disabled={model.fleetActionInFlightAtom() || reachable("supervise") === 0}
-                    title={count() === 0 ? "Select agents to supervise" : reachable("supervise") === 0 ? NOTHING_SUPERVISABLE : undefined}
+                    title={count() === 0 ? t("swarm.fleet.selectToSupervise") : reachable("supervise") === 0 ? nothingSupervisable() : undefined}
                     onClick={(e: MouseEvent) => {
                         // The same menu as an agent's chip, for the selection: switched off, srv refuses Steady and Drive.
                         const on = supervisorEnabled(settingsAtom());
                         openMenuAt(
                             supervisorMenuItems(null, (mode) => void model.superviseSelection(mode), on),
                             e,
-                            { header: supervisorMenuHeader(on, `${reachable("supervise")} ${plural(reachable("supervise"))}`) }
+                            { header: supervisorMenuHeader(on, agents(reachable("supervise"))) }
                         );
                     }}
                 >
-                    <i class="fa-solid fa-user-shield" /> Mode
+                    <i class="fa-solid fa-user-shield" /> {t("swarm.fleet.mode")}
                 </Button>
                 <SupervisorOffLine />
             </div>
 
             <ConfirmModal
                 open={stopConfirmOpen()} scope="pane"
-                title={`Stop ${reachable("stop")} ${plural(reachable("stop"))}?`}
-                description="This stops the selected agent panes. Each pane's own stop outcome is reported individually — a partial failure never shows as a single pass/fail."
+                title={t("swarm.fleet.stopTitle", { count: reachable("stop") })}
+                description={t("swarm.fleet.stopDescription")}
                 destructive
-                confirmLabel={`Stop ${reachable("stop")}`}
+                confirmLabel={t("swarm.fleet.stopN", { n: reachable("stop") })}
                 onConfirm={confirmStop}
                 onCancel={() => setStopConfirmOpen(false)}
             >
@@ -141,12 +141,12 @@ export function SuperviseActions(props: {
                 <Show when={reachable("stop") >= STAGING_ELIGIBLE_AT}>
                     <label class="swarm-fleet-staging-toggle">
                         <input type="checkbox" checked={useStaging()} onChange={(e) => setUseStaging(e.currentTarget.checked)} />
-                        Staged rollout — cap blast radius on a bad selection
+                        {t("swarm.fleet.staged")}
                     </label>
                     <Show when={useStaging()}>
                         <div class="swarm-fleet-staging-fields">
                             <label>
-                                Batch size
+                                {t("swarm.fleet.batchSize")}
                                 <TextInput
                                     variant="plain"
                                     type="number"
@@ -156,7 +156,7 @@ export function SuperviseActions(props: {
                                 />
                             </label>
                             <label>
-                                Abort if a batch's failure rate exceeds (%)
+                                {t("swarm.fleet.abortRate")}
                                 <TextInput
                                     variant="plain"
                                     type="number"
@@ -218,11 +218,17 @@ export function StopTargetRows(props: { model: SwarmViewModel }): JSX.Element {
     );
 }
 
-const FLEET_ACTION_TITLES: Record<FleetResultEntry["action"], string> = {
-    broadcast: "Broadcast",
-    "bulk-stop": "Bulk stop",
-    supervisor: "Supervisor",
-};
+/** The result panel's title for an action; read where it is drawn, so it follows the language. */
+function fleetActionTitle(action: FleetResultEntry["action"]): string {
+    switch (action) {
+        case "broadcast":
+            return t("swarm.fleet.titleBroadcast");
+        case "bulk-stop":
+            return t("swarm.fleet.titleBulkStop");
+        default:
+            return t("swarm.fleet.titleSupervisor");
+    }
+}
 
 /** `quietWhenClean`: a broadcast's result shows only when something failed or was kept, since the Broadcast
  *  input says "Sent to N" itself. Another action's result always shows. */
@@ -241,12 +247,15 @@ export function FleetResultPanel(props: { model: SwarmViewModel; quietWhenClean?
                 <div class="swarm-fleet-result-panel">
                     <div class="swarm-fleet-result-header">
                         <span>
-                            {FLEET_ACTION_TITLES[e().action]} — {e().result.succeeded.length} succeeded,{" "}
-                            {e().result.failed.length} failed
+                            {t("swarm.fleet.resultSummary", {
+                                title: fleetActionTitle(e().action),
+                                succeeded: e().result.succeeded.length,
+                                failed: e().result.failed.length,
+                            })}
                             <Show when={(e().result.held ?? []).length > 0}>{t("swarm.broadcast.kept", { count: (e().result.held ?? []).length })}</Show>
-                            <Show when={e().result.aborted_early}> — staged rollout aborted early</Show>
+                            <Show when={e().result.aborted_early}> — {t("swarm.fleet.abortedEarly")}</Show>
                         </span>
-                        <CloseButton size="sm" label="Dismiss" onClick={() => model.dismissFleetResult()} />
+                        <CloseButton size="sm" label={t("swarm.fleet.dismiss")} onClick={() => model.dismissFleetResult()} />
                     </div>
                     {/* Per-target rows, never a single aggregate line alone — see
                         this panel's own reason for existing (spec §3/§5.4). */}

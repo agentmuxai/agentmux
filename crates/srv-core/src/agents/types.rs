@@ -57,6 +57,9 @@ pub struct AgentTask {
     /// Hard cap on turns. `None` = use the provider default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_turns: Option<u32>,
+    /// The tools the one-shot CLI may use. A task that says nothing is limited to the reading tools.
+    #[serde(default)]
+    pub tools: super::tool_limit::ToolLimit,
 }
 
 /// Discriminated streaming event. Same union for both the agent

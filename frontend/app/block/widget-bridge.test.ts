@@ -8,7 +8,7 @@
 import { existsSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { WidgetPackageInfo } from "@/app/store/rpc-api/widgets";
-import { BridgeError, ERR, handleBridgeRequest, originMatches, permissionFor, type BridgeHost, type BridgeState } from "./widget-bridge";
+import { BridgeError, bridgeTheme, ERR, handleBridgeRequest, originMatches, permissionFor, type BridgeHost, type BridgeState } from "./widget-bridge";
 import { registerPaneTab } from "@/app/store/pane-tab-registry";
 
 // Two sectioned panes, as their manifests declare them (pane-sections.ts).
@@ -102,6 +102,59 @@ async function ready(h: BridgeHost): Promise<BridgeState> {
 
 type Err = { code: number; message: string; data?: Record<string, unknown> };
 const errorOf = (r: unknown): Err => (r as { error: Err }).error;
+
+describe("a widget's theme", () => {
+    it("is the app's in a pane with no backdrop, with the three added colors", () => {
+        const t = bridgeTheme({ default_hue: 120 });
+        for (const name of ["--am-surface-raised", "--am-fg-faint", "--am-info"]) expect(t.vars[name], name).toBeTruthy();
+    });
+
+    // jsdom does not resolve var() through a computed style, so what is proved here is where the colors are read and which
+    // side the mode names; the colors themselves are looked at in a real window (the PR's look checks).
+    it("is read on the pane's frame when it has a backdrop, not on the document, and its side is the mode", () => {
+        const frame = document.createElement("div");
+        frame.setAttribute("data-backdrop", "teal");
+        frame.style.setProperty("color-scheme", "light");
+        document.body.appendChild(frame);
+        const onFrame = vi.spyOn(frame, "appendChild");
+        const onDocument = vi.spyOn(document.documentElement, "appendChild");
+        try {
+            const t = bridgeTheme({ default_hue: 120 }, frame);
+            expect(t.mode).toBe("light");
+            expect(onFrame.mock.calls.length).toBeGreaterThanOrEqual(10);
+            expect(onDocument).not.toHaveBeenCalled();
+            frame.style.setProperty("color-scheme", "dark");
+            expect(bridgeTheme({ default_hue: 120 }, frame).mode).toBe("dark");
+        } finally {
+            vi.restoreAllMocks();
+            frame.remove();
+        }
+    });
+
+    it("is read on the document when the pane has no scope", () => {
+        const onDocument = vi.spyOn(document.documentElement, "appendChild");
+        try {
+            bridgeTheme({ default_hue: 120 });
+            expect(onDocument.mock.calls.length).toBeGreaterThanOrEqual(10);
+        } finally {
+            vi.restoreAllMocks();
+        }
+    });
+
+    it("is sent in the handshake from the host's scope", async () => {
+        const frame = document.createElement("div");
+        frame.style.setProperty("color-scheme", "light");
+        document.body.appendChild(frame);
+        try {
+            const h = { ...host(pkg({ granted: [] })), themeScope: () => frame } as BridgeHost;
+            const state: BridgeState = { ready: false, inFlight: 0 };
+            const r = (await handleBridgeRequest(h, state, "hello", { protocol: 1 })) as { result: Record<string, any> };
+            expect(r.result.theme.mode).toBe("light");
+        } finally {
+            frame.remove();
+        }
+    });
+});
 
 describe("the handshake", () => {
     it("answers hello with the widget, AgentMux, grants, theme, meta and visibility", async () => {

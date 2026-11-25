@@ -136,7 +136,7 @@ import { getPaneTab } from "@/app/store/pane-tab-registry";
 import { runCommand } from "@/app/keybindings/app-api";
 import { setPlatform } from "@/util/platformutil";
 import { FilesModel } from "./files-model";
-import { openTargetOf } from "./files-open";
+import { openTargetOf, runsWhenOpenedByOs } from "./files-open";
 import { clipboard, setClipboard } from "./files-ops";
 import { buildRowMenu } from "./files-menus";
 import { recentPlaces, resetPlacesForTests } from "./files-pins";
@@ -471,6 +471,66 @@ describe("the Files pane: navigation", () => {
         expect(h.rpc.FsOpenCommand).not.toHaveBeenCalled();
         fireEvent.click(screen.getByText("Run"));
         expect(h.rpc.FsOpenCommand).toHaveBeenCalledWith(expect.anything(), { path: `${HOME}\\setup.exe`, block_id: "b1" });
+    });
+
+    it("knows what each system runs when it opens a file with its default app, and still opens scripts in the Editor", async () => {
+        expect(runsWhenOpenedByOs("setup.exe")).toBe(true);
+        expect(runsWhenOpenedByOs("notes.docx")).toBe(false);
+        // The tests run as Windows.
+        for (const name of ["a.bat", "a.CMD", "a.vbs", "a.js", "a.hta", "a.jar", "a.wsf", "a.msc"]) expect(runsWhenOpenedByOs(name), name).toBe(true);
+        expect(runsWhenOpenedByOs("a.command")).toBe(false);
+        setPlatform("darwin");
+        for (const name of ["a.command", "a.tool", "a.terminal", "a.jar", "a.app"]) expect(runsWhenOpenedByOs(name), name).toBe(true);
+        for (const name of ["a.js", "a.bat", "a.desktop"]) expect(runsWhenOpenedByOs(name), name).toBe(false);
+        setPlatform("linux");
+        for (const name of ["a.desktop", "a.AppImage", "a.jar"]) expect(runsWhenOpenedByOs(name), name).toBe(true);
+        for (const name of ["a.js", "a.command", "a.bat"]) expect(runsWhenOpenedByOs(name), name).toBe(false);
+        setPlatform("win32");
+        // A double-click on source still opens it in the Editor.
+        expect(openTargetOf("build.bat")).toBe("editor");
+        expect(openTargetOf("app.js")).toBe("editor");
+    });
+
+    const chooseFromMenu = async (v: ReturnType<typeof mount>, name: string, label: string) => {
+        fireEvent.contextMenu(v.row(name));
+        const item = [...document.body.querySelectorAll(".ctx-menu .ctx-menu-item")].find((row) => row.querySelector(".ctx-menu-label")?.textContent === label);
+        fireEvent.pointerDown(item!);
+    };
+
+    it("asks before the menu's Open with default app runs a script, and not for a document", async () => {
+        h.state.dirs.set(HOME, [f("build.bat"), f("notes.docx")]);
+        const v = mount();
+        await waitFor(() => expect(v.names()).toEqual(["build.bat", "notes.docx"]));
+        await chooseFromMenu(v, "build.bat", "Open with default app");
+        expect(h.rpc.FsOpenCommand).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByText("Run"));
+        expect(h.rpc.FsOpenCommand).toHaveBeenCalledWith(expect.anything(), { path: `${HOME}\\build.bat`, block_id: "b1" });
+        h.rpc.FsOpenCommand.mockClear();
+        fireEvent.keyDown(document.body, { key: "Escape" });
+        await chooseFromMenu(v, "notes.docx", "Open with default app");
+        expect(h.rpc.FsOpenCommand).toHaveBeenCalledWith(expect.anything(), { path: `${HOME}\\notes.docx`, block_id: "b1" });
+    });
+
+    it("asks first, naming the agent, for a file srv says a container agent can write, and opens it once confirmed", async () => {
+        h.state.dirs.set(HOME, [f("notes.docx")]);
+        h.rpc.FsOpenCommand.mockRejectedValueOnce(new Error("[asks-first:aria] This file is in the folder of aria, a container agent that can change it."));
+        const v = mount();
+        await waitFor(() => expect(v.names()).toEqual(["notes.docx"]));
+        await chooseFromMenu(v, "notes.docx", "Open with default app");
+        await waitFor(() => expect(screen.getByText("Open notes.docx?")).toBeTruthy());
+        expect(document.body.textContent).toContain("the folder of aria, a container agent that can change it");
+        fireEvent.click(screen.getByText("Open"));
+        expect(h.rpc.FsOpenCommand).toHaveBeenLastCalledWith(expect.anything(), { path: `${HOME}\\notes.docx`, block_id: "b1", confirmed: true });
+    });
+
+    it("shows any other failure to open as a status, not a question", async () => {
+        h.state.dirs.set(HOME, [f("notes.docx")]);
+        h.rpc.FsOpenCommand.mockRejectedValueOnce(new Error("no app for this file"));
+        const v = mount();
+        await waitFor(() => expect(v.names()).toEqual(["notes.docx"]));
+        await chooseFromMenu(v, "notes.docx", "Open with default app");
+        await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toContain("no app for this file"));
+        expect(screen.queryByText("Open notes.docx?")).toBeNull();
     });
 
     it("shows each agent's name in its pane colour, at the theme's text lightness", async () => {
@@ -889,12 +949,48 @@ describe("the Files pane: preview and filter (Phase 2a)", () => {
         await waitFor(() => expect(v.names()).toHaveLength(4));
     });
 
+    it("offers to clear a filter that matches nothing, also when its box is hidden, in the list and in columns", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        fireEvent.keyDown(v.list(), { key: "/" });
+        const input = v.container.querySelector<HTMLInputElement>(".files-filter-input")!;
+        fireEvent.input(input, { target: { value: "zzz" } });
+        await waitFor(() => expect(v.names()).toHaveLength(0));
+        // A press elsewhere hides the box and keeps the filter applied.
+        fireEvent.pointerDown(document.body);
+        await waitFor(() => expect(v.container.querySelector(".files-filter-input")).toBeNull());
+        expect(v.model.filter()).toBe("zzz");
+        v.model.toggleColumns();
+        await waitFor(() => expect(v.model.columnsOn()).toBe(true));
+        expect(v.container.querySelector(".files-notice p")?.textContent).toBe("Nothing here matches “zzz”.");
+        // The columns layer covers the whole list area: it is not drawn under the notice, so the button is what a click reaches.
+        expect(v.container.querySelector(".files-columns")).toBeNull();
+        fireEvent.click(v.getByText("Clear filter"));
+        await waitFor(() => expect(v.model.filter()).toBe(""));
+        await waitFor(() => expect(v.container.querySelector(".files-notice")).toBeNull());
+    });
+
+    it("takes Enter and Space on a notice button as pressing it, not as opening the selection or the preview", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        v.model.setFilter("zzz");
+        await waitFor(() => expect(v.container.querySelector(".files-notice button")).not.toBeNull());
+        const button = v.container.querySelector(".files-notice button")!;
+        const preview = v.model.showPreview();
+        // Not prevented: the browser's own activation of the button (a click) goes ahead.
+        expect(fireEvent.keyDown(button, { key: "Enter" })).toBe(true);
+        expect(fireEvent.keyDown(button, { key: " " })).toBe(true);
+        expect(v.model.showPreview()).toBe(preview);
+        // The list's own Space still toggles the preview.
+        expect(fireEvent.keyDown(v.list(), { key: " " })).toBe(false);
+    });
+
     it("a new folder clears the filter", async () => {
         const v = mount();
         await waitFor(() => expect(v.names()).toHaveLength(4));
         v.model.setFilter("zzz");
         await waitFor(() => expect(v.names()).toHaveLength(0));
-        expect(v.container.querySelector(".files-notice")?.textContent).toBe("Nothing here matches “zzz”.");
+        expect(v.container.querySelector(".files-notice p")?.textContent).toBe("Nothing here matches “zzz”.");
         v.model.setFilter("sr");
         await waitFor(() => expect(v.names()).toEqual(["src"]));
         fireEvent.dblClick(v.row("src"));
@@ -2041,7 +2137,7 @@ describe("the Files pane: tree view, rows that share a label or a name with anot
         // Both rows selected: the menu of the inner one acts on the selection, which is the folder.
         v.model.setSelection({ names: new Set(["src", "src/main.rs"]), focus: "src/main.rs", anchor: "src" });
         const entry = v.model.entries().find((e) => e.name === "src/main.rs")!;
-        const menu = buildRowMenu(v.model, entry, { openEntry: () => {}, openInNewTab: () => {}, copyPaths: () => {}, askDeletePermanently: () => {} });
+        const menu = buildRowMenu(v.model, entry, { openEntry: () => {}, openWithDefaultApp: () => {}, openInNewTab: () => {}, copyPaths: () => {}, askDeletePermanently: () => {} });
         (menu.find((i) => i.type === "action" && i.label === "Copy") as { onSelect: () => void }).onSelect();
         expect(clipboard()).toEqual({ kind: "copy", paths: [SRC] });
     });
@@ -2132,6 +2228,8 @@ describe("the Files pane: find in subfolders", () => {
         v.model.setFilter("util");
         await waitFor(() => expect(v.names()).toEqual(["util.ts"]));
         expect(where(v)).toEqual(["src/lib"]);
+        // The folder is whole in its tooltip, however little of it the row has room for.
+        expect(v.container.querySelector(".files-rows .files-where")?.getAttribute("data-hover-tip")).toBe("src/lib");
         expect(v.model.pathOf("src/lib/util.ts")).toBe(`${LIB}\\util.ts`);
         // Folders and files both match, best first.
         v.model.setFilter("lib");
@@ -2250,6 +2348,19 @@ describe("the Files pane: columns view", () => {
         await waitFor(() => expect(v.meta()["files:view"]).toBeUndefined());
         expect(columns(v)).toHaveLength(0);
         await waitFor(() => expect(v.names()).toHaveLength(4));
+    });
+
+    it("shows only the notice, over no column, when a filter matches nothing in the first one, and the chain is back with the filter gone", async () => {
+        const v = mount({ "files:view": "columns" });
+        await waitFor(() => expect(labels(v, 0)).toHaveLength(4));
+        fireEvent.click(rowIn(v, 0, "src"));
+        await waitFor(() => expect(labels(v, 1)).toEqual(["lib", "main.rs"]));
+        v.model.setFilter("zzz");
+        await waitFor(() => expect(columns(v)).toHaveLength(0));
+        expect(v.container.querySelector(".files-notice p")?.textContent).toBe("Nothing here matches “zzz”.");
+        fireEvent.click(v.getByText("Clear filter"));
+        await waitFor(() => expect(columns(v)).toHaveLength(2));
+        expect(labels(v, 1)).toEqual(["lib", "main.rs"]);
     });
 
     it("shows what is in a chosen folder as the next column, and drops it when a file is chosen instead", async () => {

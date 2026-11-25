@@ -55,7 +55,7 @@ function EditorBar(props: { model: GlobalBundleViewModel; isNew: boolean; confir
                     tone="accent"
                     class="memory-editor-btn is-primary"
                     disabled={draft.savingAtom() || !value().name.trim()}
-                    onClick={() => void props.model.save()}
+                    onClick={() => props.model.save()}
                     title={t("globalMemory.full.saveTip", { key: keyLabel("mod+s") })}
                 >
                     {draft.savingAtom() ? t("globalMemory.full.saving") : props.isNew ? t("globalMemory.full.add") : t("globalMemory.full.save")}
@@ -147,7 +147,7 @@ function EntryView(props: { model: GlobalBundleViewModel; id: string; confirm: P
                                 class="memory-editor-btn"
                                 title={t("globalMemory.full.moveEarlier")}
                                 disabled={ordIndex() <= 0}
-                                onClick={() => void model.move(id, -1)}
+                                onClick={() => model.move(id, -1)}
                             >
                                 ↑
                             </Button>
@@ -156,7 +156,7 @@ function EntryView(props: { model: GlobalBundleViewModel; id: string; confirm: P
                                 class="memory-editor-btn"
                                 title={t("globalMemory.full.moveLater")}
                                 disabled={ordIndex() === -1 || ordIndex() === model.ordinarySectionsAtom().length - 1}
-                                onClick={() => void model.move(id, 1)}
+                                onClick={() => model.move(id, 1)}
                             >
                                 ↓
                             </Button>

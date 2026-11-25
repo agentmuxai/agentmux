@@ -74,9 +74,23 @@ use crate::state::AppState;
 /// sizes and places an overlay in. Windows and Linux divide by the window's display scale
 /// (Views works in DIP, the page's CSS pixels); macOS uses the rect as sent, as it always has.
 pub(crate) fn views_rect(window: Option<&Window>, rect: &Rect) -> Rect {
-    let scale = views_scale(window);
+    dip_rect(rect, views_scale(window))
+}
+
+/// `rect` (physical pixels) in Views units, `scale` physical pixels to one unit.
+pub(crate) fn dip_rect(rect: &Rect, scale: f64) -> Rect {
     let dip = |v: i32| (v as f64 / scale).round() as i32;
     Rect { x: dip(rect.x), y: dip(rect.y), width: dip(rect.width), height: dip(rect.height) }
+}
+
+/// The scale of `window`'s display (1 for a window with no display): how many physical pixels one
+/// Views unit is there.
+pub(crate) fn display_scale(window: Option<&Window>) -> f64 {
+    window
+        .and_then(|w| w.display())
+        .map(|d| cef::ImplDisplay::device_scale_factor(&d) as f64)
+        .filter(|s| *s > 0.0)
+        .unwrap_or(1.0)
 }
 
 /// How many of the page's physical pixels one Views unit is in `window`: its display's scale on
@@ -85,15 +99,23 @@ pub(crate) fn views_rect(window: Option<&Window>, rect: &Rect) -> Rect {
 /// pane placed with the rect as sent sat 1.5 times too far out at a display scale of 1.5.
 pub(crate) fn views_scale(window: Option<&Window>) -> f64 {
     #[cfg(not(target_os = "macos"))]
-    if let Some(scale) = window
-        .and_then(|w| w.display())
-        .map(|d| cef::ImplDisplay::device_scale_factor(&d) as f64)
-        .filter(|s| *s > 0.0)
+    return display_scale(window);
+    #[cfg(target_os = "macos")]
     {
-        return scale;
+        let _ = window;
+        1.0
     }
-    let _ = window;
-    1.0
+}
+
+/// `place_overlay` for a pane's first placement. On macOS the ObjC frame is set right after it and does not
+/// wait for it, but the page's view takes its size from this call: given the physical rect as sent, a new
+/// pane's page laid out at twice its width, then again at its own (306, then 153, for a pane of 153).
+/// There it goes in the units Views takes, the display's scale; elsewhere it is `place_overlay`.
+pub(crate) fn place_new_overlay(controller: &cef::OverlayController, window: Option<&Window>, rect: &Rect) {
+    #[cfg(target_os = "macos")]
+    place_overlay(controller, window, &dip_rect(rect, display_scale(window)));
+    #[cfg(not(target_os = "macos"))]
+    place_overlay(controller, window, rect);
 }
 
 /// The two setters `place_at` calls on an overlay, so the order it calls them in has a test.
@@ -772,7 +794,18 @@ pub fn detach_browser_pane_view(state: &Arc<AppState>, label: &str) {
 
 #[cfg(test)]
 mod place_tests {
-    use super::{place_at, OverlayPlace, Rect};
+    use super::{dip_rect, place_at, OverlayPlace, Rect};
+
+    /// A pane's rect is in physical pixels; Views takes it in units of the display's scale. The one
+    /// macOS sizes a new pane with before its frame is set, so a 2x display gets half of it.
+    #[test]
+    fn a_rect_is_halved_for_a_2x_display_and_unchanged_for_1x() {
+        let rect = Rect { x: 2006, y: 628, width: 306, height: 816 };
+        let half = dip_rect(&rect, 2.0);
+        assert_eq!((half.x, half.y, half.width, half.height), (1003, 314, 153, 408));
+        let same = dip_rect(&rect, 1.0);
+        assert_eq!((same.x, same.y, same.width, same.height), (2006, 628, 306, 816));
+    }
     use std::cell::Cell;
 
     /// An overlay as CEF keeps one: every new bounds is cut to the window's.

@@ -47,7 +47,7 @@ name: CI (PR) — compile tests + run
 #
 # NOTE: adding this workflow makes the checks RUN on PRs; to ENFORCE them, add
 # "CI required" (the aggregate job below) as a required status check in
-# branch protection — NOT "check --tests + test (windows-latest)" or "vitest (1/2)"
+# branch protection — NOT "check --tests + test (windows-latest)" or "vitest (1/4)"
 # individually. #3506: pinning the matrix leg by its expanded name broke the
 # instant that leg was made path-conditional (#3491) — a matrix job skipped
 # by a job-level `if:` reports under its UNEXPANDED name only, so the pinned
@@ -439,12 +439,13 @@ jobs:
         # archive, and `apt-get install` below still fails loudly if a package
         # cannot be found.
         # A hung apt call must cost this step, not the job's 35 minutes; scripts/ci-apt.sh bounds each attempt, this bounds the step.
-        # In the queue the script gets a smaller budget, resolver wait and per-attempt limits: one timed-out install (90 s
-        # plus the kill) and the 45 s pause still fit the 150 s budget, so a hang costs a retry; the worst case, every call
-        # hanging, is about 10 minutes and fits the step's 12.
-        timeout-minutes: ${{ needs.changes.outputs.queue == 'true' && 12 || 20 }}
+        # In the queue the script gets a smaller budget, resolver wait and per-attempt limits: two timed-out installs (90 s
+        # plus the kill each), the refreshes and the pauses between them still fit the 360 s budget, so a slow mirror that
+        # costs two attempts still gets a third; the worst case, every call hanging, is about 14.5 minutes and fits the
+        # step's 16.
+        timeout-minutes: ${{ needs.changes.outputs.queue == 'true' && 16 || 20 }}
         env:
-          CI_APT_BUDGET: ${{ needs.changes.outputs.queue == 'true' && 150 || 600 }}
+          CI_APT_BUDGET: ${{ needs.changes.outputs.queue == 'true' && 360 || 600 }}
           CI_APT_DNS_WAIT: ${{ needs.changes.outputs.queue == 'true' && 60 || 180 }}
           CI_APT_UPDATE_LIMIT: ${{ needs.changes.outputs.queue == 'true' && 60 || 120 }}
           CI_APT_INSTALL_LIMIT: ${{ needs.changes.outputs.queue == 'true' && 90 || 240 }}
@@ -1290,11 +1291,12 @@ jobs:
       - name: npm advisories
         run: node scripts/npm-audit-gate.mjs
 
-  # Two shards: the suite alone took about 3.6 min on one runner even with
-  # jsdom limited to DOM tests (vitest.config.ts). `needs.frontend.result`
-  # covers both legs, so "CI required" gates on them without naming either.
+  # Four shards: the suite alone took about 3.6 min on one runner even with
+  # jsdom limited to DOM tests (vitest.config.ts), and two shards were still the longest part of a
+  # frontend-only queue entry. `needs.frontend.result` covers every leg, so "CI required" gates on
+  # them without naming any.
   frontend:
-    name: vitest (${{ matrix.shard }}/2)
+    name: vitest (${{ matrix.shard }}/4)
     needs: changes
     # See the `rust` job's note — same inversion, same reason.
     if: ${{ !cancelled() && needs.changes.outputs.frontend != 'false' }}
@@ -1302,7 +1304,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: ${{ fromJSON(needs.changes.outputs.frontend_shards || '[1, 2]') }}
+        shard: ${{ fromJSON(needs.changes.outputs.frontend_shards || '[1, 2, 3, 4]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -1351,6 +1353,11 @@ jobs:
       - name: generated broker event types are current
         if: matrix.shard == 1
         run: node scripts/gen-mux-events.mjs --check
+      # frontend/app/store/operator-commands.generated.ts (the commands that wait for the window's proof), from
+      # srv's own decision of who may call what (action_commands.rs and action_access.rs).
+      - name: generated window-only command list is current
+        if: matrix.shard == 1
+        run: node scripts/gen-operator-commands.mjs --check
       # frontend/app/deeplinks/registry.generated.ts, crates/common/src/deeplinks/registry.rs and
       # docs/deep-links.md, from crates/common/deeplinks/destinations.json (the deep-link registry).
       - name: generated deep-link tables are current
@@ -1405,12 +1412,12 @@ jobs:
       # i18n and colour ratchets, Shiki's bundle), so it can fail on two PRs that each passed it alone.
       - name: vitest run
         id: vitest
-        run: npx vitest run --shard=${{ matrix.shard }}/2
+        run: npx vitest run --shard=${{ matrix.shard }}/4
       # The production build the packaging runs (Taskfile.yml `build:frontend`, on Linux). tsc and vitest read past
       # what only the bundler rejects: on 2026-11-15 a byte that is not UTF-8 in one source file passed every PR
       # check and broke the Linux packaging on main. No PR job built the frontend; only the release and nightly
       # packaging did. One build, on Linux, as a step of this leg and not a job of its own: the checkout and
-      # `npm ci` are already paid for here, and this leg is the shorter of the two, so the lane takes no longer.
+      # `npm ci` are already paid for here, and its cost is small next to a shard's vitest run.
       #
       # It runs unless the PR changes only Rust files and documentation (the classifier's R9, which fails toward
       # running), and in the merge queue and on a push to main, as the rest of this job does. It also runs when

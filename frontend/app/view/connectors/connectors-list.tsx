@@ -14,7 +14,7 @@ import { t } from "@/app/i18n/i18n";
 import { AddAccountSection } from "@/app/view/accounts/AddAccountSection";
 import { OtherAgentsSection } from "@/app/view/accounts/OtherAgentsSection";
 import { AccountForm } from "@/app/view/identity/identity-account-form";
-import { AccountDeleteNotice, DeleteAccountConfirm } from "@/app/view/identity/identity-accounts-tab";
+import { AccountDeleteNotice } from "@/app/view/identity/identity-accounts-tab";
 import { ConnectorCard } from "./connector-card";
 import { ConnectorDetails } from "./connector-details";
 import type { ConnectorEntry } from "./connector-entries";
@@ -139,9 +139,7 @@ export function ConnectorsList(): JSX.Element {
                 </section>
             </div>
 
-            <Show when={s.model.pendingDeleteAtom()} keyed>
-                {(account) => <DeleteAccountConfirm model={s.model} account={account} />}
-            </Show>
+            {/* Deleting an account asks in a panel under its row (connector-details.tsx), not over the pane. */}
 
             {/* Editing an account is the pane's form; adding one opens in the add section. */}
             <Show when={s.model.formOpenAtom() && s.model.editingAccountAtom()}>

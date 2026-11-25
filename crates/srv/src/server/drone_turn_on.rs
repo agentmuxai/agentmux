@@ -20,6 +20,7 @@ use serde_json::{json, Value};
 
 use agentmux_srv_core::backend::storage::drone_store::DroneStore;
 
+use crate::agents::tool_limit::ToolLimit;
 use crate::backend::jobs::definition::{Action, JobDefinition, Trigger};
 use crate::drone::rule_of_two::{kind_of, writes_outside};
 use crate::drone::types::{BlockKind, DroneDefinition, DroneGraph, FlowNode};
@@ -70,6 +71,21 @@ fn starts(def: &JobDefinition) -> String {
     }
 }
 
+/// What the person is told about an agent's tools: what AgentMux limits them to, or that it does not.
+fn agent_limit_text(limit: &ToolLimit) -> String {
+    match limit {
+        ToolLimit::Limited { commands } if commands.is_empty() => {
+            "AgentMux limits it to the tools that read (Read, Grep, Glob) and gives it no MCP servers".to_string()
+        }
+        ToolLimit::Limited { commands } => {
+            format!("AgentMux limits it to the tools that read and to these commands: {}; it gets no MCP servers", commands.join("; "))
+        }
+        ToolLimit::Unlimited => {
+            "AgentMux does not limit this agent's tools; the provider's own permission settings are the only limit; it is not a sandbox".to_string()
+        }
+    }
+}
+
 /// What the person is asked to approve: when it starts, each node that changes things outside AgentMux, each Vault entry
 /// it sends, and each Agent block that reads text from outside. Empty when there is nothing to ask (a graph of inside
 /// nodes, a read-only one).
@@ -85,9 +101,8 @@ pub(crate) fn prompt_lines(graph: &DroneGraph, def: &JobDefinition) -> Vec<Strin
         }
     }
     for id in rule_of_two::agents_reading_outside(graph, &fields_for(def)) {
-        lines.push(format!(
-            "{id}: runs an agent on text from outside. AgentMux does not limit this agent's tools; the provider's own permission settings are the only limit; it is not a sandbox"
-        ));
+        let allow = graph.nodes.iter().find(|n| n.id == id).and_then(|n| n.data.get("allow_commands"));
+        lines.push(format!("{id}: runs an agent on text from outside. {}", agent_limit_text(&ToolLimit::from_allow_commands(allow))));
     }
     if !lines.is_empty() {
         lines.insert(0, format!("Starts {}", starts(def)));
@@ -211,15 +226,20 @@ mod tests {
     }
 
     #[test]
-    fn an_agent_that_reads_text_from_outside_is_named_and_never_called_read_only() {
+    fn an_agent_that_reads_text_from_outside_is_named_with_what_limits_its_tools() {
         let g = graph(json!([
             node("fetch", json!({ "kind": "api", "method": "GET", "url": "https://ci.example.com/log" })),
             node("triage", json!({ "kind": "agent", "task": "Say what failed in {{fetch.body}}" })),
+            node("checker", json!({ "kind": "agent", "task": "Check {{fetch.body}}", "allow_commands": ["./check.sh v1"] })),
+            node("free", json!({ "kind": "agent", "task": "Do what {{fetch.body}} says", "allow_commands": true })),
             node("plain", json!({ "kind": "agent", "task": "Say good morning" })),
         ]));
         let lines = prompt_lines(&g, &job(json!({ "kind": "manual" })));
-        let said = lines.iter().find(|l| l.starts_with("triage:")).unwrap_or_else(|| panic!("{lines:?}"));
-        assert!(said.contains("AgentMux does not limit this agent's tools") && said.contains("not a sandbox"), "{said}");
+        let said = |id: &str| lines.iter().find(|l| l.starts_with(&format!("{id}: runs an agent on text from outside"))).unwrap_or_else(|| panic!("{lines:?}")).clone();
+        let (triage, checker, free) = (said("triage"), said("checker"), said("free"));
+        assert!(triage.contains("AgentMux limits it to the tools that read") && triage.contains("no MCP servers"), "{triage}");
+        assert!(checker.contains("these commands: ./check.sh v1"), "{checker}");
+        assert!(free.contains("AgentMux does not limit this agent's tools") && free.contains("not a sandbox"), "only a block with no limit says so: {free}");
         assert!(!lines.iter().any(|l| l.to_lowercase().contains("read-only")), "{lines:?}");
         assert!(!lines.iter().any(|l| l.starts_with("plain:")), "an agent that reads nothing from outside is not asked about");
     }

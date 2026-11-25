@@ -48,6 +48,7 @@ import { TabContent } from "@/app/tab/tabcontent";
 import { atoms, getApi } from "@/store/global";
 import * as MOS from "@/store/mos";
 import { isFloaterHeaderMovePress } from "./floater-header-press";
+import { closeFloaterAfterRedock, closeFloaterIfEmpty, tabIsEmpty } from "./floater-close";
 import { holdRedock, redockInProgress } from "./floating-redock-guard";
 import { floaterPaneBlockId, floaterPanes, redockFloaterPane } from "./floater-panes";
 import { Show, createEffect, createMemo, onCleanup, onMount, type JSX } from "solid-js";
@@ -910,7 +911,9 @@ function installMouseMoveTracking(s: FloaterDragState, env: FloaterEnv): () => v
 // ── Redock ──────────────────────────────────────────────────────
 
 async function tryRedockAtCursor(s: FloaterDragState, env: FloaterEnv, screenX: number, screenY: number, expectedTarget: string | null) {
-    await holdRedock(() => tryRedockAtCursorInner(s, env, screenX, screenY, expectedTarget));
+    const redocked = await holdRedock(() => tryRedockAtCursorInner(s, env, screenX, screenY, expectedTarget));
+    // The pane is docked: the window goes now, from here, not from the update that emptied its tab (which can throw).
+    if (redocked && !s.cleaned) await closeFloaterAfterRedock(env.tabId(), env.windowLabel(), "redock by drag");
 }
 
 /** The window under the cursor that a redock would dock into, or null when there is none to dock into. */
@@ -1194,6 +1197,36 @@ function useCloseWhenTabEmpties(tabId: typeof atoms.activeTabId, windowLabel: ()
     });
 }
 
+const EMPTY_FLOATER_CHECK_MS = 1000;
+/** Ticks in a row a floater's tab must be empty before the backstop closes it (the saga's own close has had its turn). */
+export const EMPTY_FLOATER_TICKS = 2;
+
+/**
+ * The watcher above is a reactive effect. When the floater's own teardown throws inside Solid (the pane's views
+ * dispose in the same update that empties the tab), the runtime drops the queued effects and it never runs, which
+ * left an empty window behind, black, still showing the pane's name. This timer reads the tab's current value
+ * outside the reactive graph and closes the window itself, saying why.
+ */
+export function useCloseEmptyFloaterBackstop(tabId: typeof atoms.activeTabId, windowLabel: () => string): void {
+    let hadBlocks = false;
+    let emptyTicks = 0;
+    const timer = setInterval(() => {
+        const empty = tabIsEmpty(tabId());
+        if (!windowLabel() || redockInProgress() || empty === null) {
+            if (empty === null || redockInProgress()) emptyTicks = 0;
+            return;
+        }
+        if (!empty) {
+            hadBlocks = true;
+            emptyTicks = 0;
+        } else if (hadBlocks && ++emptyTicks >= EMPTY_FLOATER_TICKS) {
+            clearInterval(timer);
+            closeFloaterIfEmpty(tabId(), windowLabel(), "backstop: the empty-tab watcher did not run");
+        }
+    }, EMPTY_FLOATER_CHECK_MS);
+    onCleanup(() => clearInterval(timer));
+}
+
 function FloatingPaneWorkspaceElem(): JSX.Element {
     const tabId = atoms.activeTabId;
     const ws = atoms.workspace;
@@ -1211,6 +1244,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
     });
 
     useCloseWhenTabEmpties(tabId, windowLabel);
+    useCloseEmptyFloaterBackstop(tabId, windowLabel);
 
     // Pane-header drag — Windows: Win32BeginMoveTask host-side loop (PR #1276).
     // macOS + Linux: JS-driven get/set_window_position polling (see the

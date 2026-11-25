@@ -15,6 +15,7 @@
  */
 
 import { createEffect, createSignal, on, Show } from "solid-js";
+import { getPaneScope } from "@/app/backdrop/scope";
 import { Button } from "@/app/element/ui";
 import { createBlockSplitHorizontally, createBlockSplitVertically } from "@/app/store/block-layout-actions";
 import { pushNotification } from "@/app/store/flash-notifications";
@@ -53,6 +54,17 @@ export function makeSandboxedPaneManifest(pkg: WidgetPackageInfo, pane: WidgetPa
         capabilities: { noPadding: true },
         create: (ctx) => createSandboxedInstance(pkg, pane, ctx),
     };
+}
+
+/**
+ * Calls `send` when the app's theme changes and when the pane's backdrop does (set, changed, cleared, or re-derived for
+ * a new app theme), once the frame has the new properties. The observer is the caller's to disconnect.
+ */
+function followTheme(blockId: string, send: () => void): MutationObserver {
+    const observer = new MutationObserver(send);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style", "data-theme"] });
+    createEffect(on(getPaneScope(blockId), () => setTimeout(send, 0), { defer: true }));
+    return observer;
 }
 
 function createSandboxedInstance(pkg: WidgetPackageInfo, pane: WidgetPaneInfo, ctx: PaneTabHostContext): PaneTabInstance {
@@ -126,6 +138,7 @@ function createSandboxedInstance(pkg: WidgetPackageInfo, pane: WidgetPaneInfo, c
         },
         agentmuxVersion: () => UI_VERSION,
         hostName: () => getHostName(),
+        themeScope: () => iframe?.closest("[data-backdrop]") ?? undefined,
         srv: async (method, params) => {
             const token = await sessionToken();
             try {
@@ -213,8 +226,7 @@ function createSandboxedInstance(pkg: WidgetPackageInfo, pane: WidgetPaneInfo, c
     const unsubscribeStorage = onMuxEvent(WpsEvent.WidgetStorage, (data) => {
         if (state.ready && data.id === pkg.id && pkg.granted.includes("storage")) notify("storage", { keys: data.keys });
     });
-    const themeObserver = new MutationObserver(() => state.ready && notify("theme", bridgeTheme(pkg)));
-    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style", "data-theme"] });
+    const themeObserver = followTheme(ctx.blockId, () => state.ready && notify("theme", bridgeTheme(pkg, host.themeScope?.())));
 
     const src = (): string =>
         `${getWebServerEndpoint()}${pkg.files_url}${pane.entry}?pane=${encodeURIComponent(crypto.randomUUID())}`;

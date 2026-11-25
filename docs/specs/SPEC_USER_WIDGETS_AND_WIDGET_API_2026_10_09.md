@@ -17,7 +17,7 @@ User widgets already work, for a trusted author. Pane Tab contract v1, Phase 6 (
 |---|---|---|
 | The contract | [`frontend/app/store/pane-tab-registry.ts`](../../frontend/app/store/pane-tab-registry.ts) (`PaneTabManifest` :138, `registerPaneTab` :178) | One registry for every pane type, built-in or not: `apiVersion: 1`, `view`, `label`, `icon`, `defaultHue`, `capabilities`, `create(ctx)` returning a `PaneTabInstance` (`component`, `liveTitle`, `headerActions`, `contextMenu`, `dispose`, …) |
 | What a widget gets | `PaneTabHostContext` (`pane-tab-registry.ts:76`, built in `pane-tab-host.tsx:22`) | `blockId`, reactive `meta`, `setMeta(patch)`, `isFocused`, `visibility` |
-| Where a user declares one | the user's `widgets.json`, next to `settings.json` ([`crates/srv/src/backend/user_widgets.rs`](../../crates/srv/src/backend/user_widgets.rs)) | Merged over the built-ins (new key adds, same key replaces), hot-reloaded, a parse error keeps the last good set. An entry with `"module": "<path>"` and `blockdef.meta.view: "ext:<name>"` is a user widget |
+| Where a user declares one | the user's `widgets.json`, next to `settings.json` (`crates/srv/src/backend/user_widgets.rs`, no longer at that path) | Merged over the built-ins (new key adds, same key replaces), hot-reloaded, a parse error keeps the last good set. An entry with `"module": "<path>"` and `blockdef.meta.view: "ext:<name>"` is a user widget |
 | How it loads | [`frontend/app/block/widget-loader.ts`](../../frontend/app/block/widget-loader.ts) | Reads the module through the `readeditorfile` RPC, points its `solid-js` imports at the app's own Solid, imports it from a blob URL, validates the default export |
 | Containment | `BlockErrorBoundary`, a caught `create` | A throwing widget shows an error pane, not a broken app |
 | Sample | [`docs/examples/widgets/hello/index.js`](../examples/widgets/hello/index.js) | Copy to `~/.agentmux/widgets/hello/`, add the `ext@hello` entry |
@@ -204,7 +204,7 @@ Details:
 - **`agents.send`** delivers `text` to one of the user's own agents running on this machine (error `1003` if none has that name), as a message marked as sent by the widget (`FROM=widget:<id>`, `DELIVERY=host`, `TRUST=self-declared`), which the agent treats like any unverified message; the usual keyword escalation applies. At most 10 messages a minute per package, 8 KB each.
 - **`ui.setHeaderActions` / `ui.setContextMenu`** are drawn by AgentMux, in its own style; a click comes back as the `action` event.
 
-`Theme` is `{ mode: "dark" | "light", vars: { [name: string]: string } }`: the app's colors as CSS custom properties (`--am-bg`, `--am-fg`, `--am-muted`, `--am-accent`, `--am-border`, `--am-error`, `--am-warning`, `--am-success`, `--am-font`, `--am-font-mono`, `--am-radius`, plus the pane's hue as `--am-pane-hue`). The SDK applies them to the document (§7).
+`Theme` is `{ mode: "dark" | "light", vars: { [name: string]: string } }`: the app's colors as CSS custom properties (`--am-bg`, `--am-fg`, `--am-muted`, `--am-accent`, `--am-border`, `--am-error`, `--am-warning`, `--am-success`, `--am-font`, `--am-font-mono`, `--am-radius`, plus the pane's hue as `--am-pane-hue`, and `--am-surface-raised`, `--am-fg-faint` and `--am-info`). In a pane with a backdrop the colors are the pane's, and `mode` is its side; the `theme` event follows a change of backdrop. The SDK applies them to the document (§7).
 
 ### 6.4 Permissions
 

@@ -13,6 +13,8 @@
 import { createSignal, For, Show, type JSX } from "solid-js";
 
 import { Button, TextArea } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
+import { Rich } from "@/app/i18n/rich";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { seatBadgeText } from "../../../agent-model/seat-format";
@@ -36,6 +38,13 @@ interface Outcome {
     name: string;
     error: string | null;
 }
+
+/** What one "Will set" line says: who, the seat's badge and whom it reports to. */
+const lineParams = (line: RosterPlan["seats"][number]) => ({
+    name: line.agent.name,
+    badge: seatBadgeText({ role: line.seat.role, qualifier: line.seat.qualifier ?? null }),
+    lead: line.leadName,
+});
 
 const EXAMPLE = `{
   "AgentX": { "role": "leader", "qualifier": "product", "lead": null, "area": "agent pane, identity" },
@@ -79,14 +88,13 @@ export const SeatRosterImport = (props: SeatRosterImportProps): JSX.Element => {
 
     return (
         <div class="agent-seat-roster" data-testid="agent-seat-roster">
-            <span class="agent-primitive-modal-field-label">Import roster</span>
+            <span class="agent-primitive-modal-field-label">{t("seatRoster.title")}</span>
             <p class="agent-primitive-modal-global-note">
-                A JSON of agent (name or uid) → role, qualifier, lead, area. A lead of null or "operator" means you.
-                Names must match exactly.
+                {t("seatRoster.help")}
             </p>
             <TextArea variant="plain"
                 class="agent-primitive-modal-textarea agent-seat-roster-input"
-                aria-label="Roster JSON"
+                aria-label={t("seatRoster.jsonLabel")}
                 placeholder={EXAMPLE}
                 value={text()}
                 disabled={applying()}
@@ -104,13 +112,12 @@ export const SeatRosterImport = (props: SeatRosterImportProps): JSX.Element => {
                 {(p) => (
                     <div class="agent-seat-roster-preview" data-testid="agent-seat-roster-preview">
                         <Show when={p().seats.length > 0}>
-                            <span class="agent-primitive-modal-field-label">Will set</span>
+                            <span class="agent-primitive-modal-field-label">{t("seatRoster.willSet")}</span>
                             <ul class="agent-seat-roster-list">
                                 <For each={p().seats}>
                                     {(line) => (
                                         <li>
-                                            <strong>{line.agent.name}</strong> — {seatBadgeText({ role: line.seat.role, qualifier: line.seat.qualifier ?? null })}{" "}
-                                            — reports to {line.leadName}
+                                            <Rich k="seatRoster.line" params={lineParams(line)} />
                                             <Show when={line.seat.area}> — {line.seat.area}</Show>
                                         </li>
                                     )}
@@ -118,7 +125,7 @@ export const SeatRosterImport = (props: SeatRosterImportProps): JSX.Element => {
                             </ul>
                         </Show>
                         <Show when={p().unresolved.length > 0}>
-                            <span class="agent-primitive-modal-field-label">Not resolved (left alone)</span>
+                            <span class="agent-primitive-modal-field-label">{t("seatRoster.unresolved")}</span>
                             <ul class="agent-seat-roster-list" data-testid="agent-seat-roster-unresolved">
                                 <For each={p().unresolved}>
                                     {(line) => (
@@ -138,7 +145,7 @@ export const SeatRosterImport = (props: SeatRosterImportProps): JSX.Element => {
                         <For each={list()}>
                             {(o) => (
                                 <li classList={{ "agent-seat-roster-failed": o.error != null }}>
-                                    <strong>{o.name}</strong>: {o.error ?? "seat set"}
+                                    <strong>{o.name}</strong>: {o.error ?? t("seatRoster.seatSet")}
                                 </li>
                             )}
                         </For>
@@ -147,14 +154,14 @@ export const SeatRosterImport = (props: SeatRosterImportProps): JSX.Element => {
             </Show>
             <div class="agent-primitive-modal-actions">
                 <Button disabled={applying()} onClick={() => props.onDone()}>
-                    {outcomes() ? "Done" : "Cancel"}
+                    {outcomes() ? t("seatRoster.done") : t("seatRoster.cancel")}
                 </Button>
                 <Show
                     when={plan() && !outcomes()}
                     fallback={
                         <Show when={!outcomes()}>
                             <Button tone="accent" disabled={!text().trim()} onClick={preview}>
-                                Preview
+                                {t("seatRoster.preview")}
                             </Button>
                         </Show>
                     }
@@ -163,9 +170,9 @@ export const SeatRosterImport = (props: SeatRosterImportProps): JSX.Element => {
                         tone="accent"
                         busy={applying()}
                         disabled={(plan()?.seats.length ?? 0) === 0}
-                        onClick={() => void apply()}
+                        onClick={() => apply()}
                     >
-                        Apply {plan()?.seats.length ?? 0} {plan()?.seats.length === 1 ? "seat" : "seats"}
+                        {t("seatRoster.apply", { count: plan()?.seats.length ?? 0 })}
                     </Button>
                 </Show>
             </div>

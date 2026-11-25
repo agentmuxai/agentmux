@@ -3,8 +3,7 @@ model.updateDiff j1
 <div>
   <section class="warden-jobs-update" aria-label="Update for Nightly build">
     <h3 class="warden-jobs-heading">
-      "Update for"
-      "Nightly build"
+      "Update for Nightly build"
     <p>
       "nightly-build"
       ":"
@@ -63,8 +62,7 @@ model.updateDiff j1
 <div>
   <section class="warden-jobs-update" aria-label="Update for Nightly build">
     <h3 class="warden-jobs-heading">
-      "Update for"
-      "Nightly build"
+      "Update for Nightly build"
     <p>
       "nightly-build"
       ":"
@@ -87,8 +85,7 @@ model.updateDiff j1
 <div>
   <section class="warden-jobs-update" aria-label="Update for Nightly build">
     <h3 class="warden-jobs-heading">
-      "Update for"
-      "Nightly build"
+      "Update for Nightly build"
     <p>
       "nightly-build"
       ":"

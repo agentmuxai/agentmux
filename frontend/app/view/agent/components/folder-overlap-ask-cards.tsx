@@ -44,7 +44,10 @@ export function FolderOverlapAskCard(props: FolderOverlapAskCardProps): JSX.Elem
             setBusy(false);
         }
     };
-    const title = () => t("agentPicker.sharedFolder.askTitle", { agent: props.ask.agent, host: props.ask.host_name });
+    const title = () =>
+        props.ask.agent
+            ? t("agentPicker.sharedFolder.askTitle", { agent: props.ask.agent, host: props.ask.host_name })
+            : t("agentPicker.sharedFolder.resumeTitle", { host: props.ask.host_name });
     return (
         <section class="vault-request-card" aria-label={title()} data-testid="folder-overlap-ask-card">
             <h3 class="vault-request-card-title">{title()}</h3>
@@ -58,10 +61,10 @@ export function FolderOverlapAskCard(props: FolderOverlapAskCardProps): JSX.Elem
                 </Show>
             </div>
             <div class="vault-request-card-actions">
-                <Button tone="quiet" disabled={busy()} onClick={() => void answer(props.decline)} data-testid="folder-overlap-ask-decline">
+                <Button tone="quiet" disabled={busy()} onClick={() => answer(props.decline)} data-testid="folder-overlap-ask-decline">
                     {t("agentPicker.sharedFolder.cancel")}
                 </Button>
-                <Button tone="accent" busy={busy()} onClick={() => void answer(props.goAhead)} data-testid="folder-overlap-ask-go-ahead">
+                <Button tone="accent" busy={busy()} onClick={() => answer(props.goAhead)} data-testid="folder-overlap-ask-go-ahead">
                     {t("agentPicker.sharedFolder.goAhead")}
                 </Button>
             </div>
@@ -79,8 +82,8 @@ function showCard(ask: FolderAsk): PaneRequestHandle {
         operatorOnly: true,
         Component: FolderOverlapAskCard,
         props: { ask, goAhead: () => goAheadWithSharedFolder([ask]), decline: () => declineSharedFolder(ask) },
-        what: "asks you to open an agent",
-        summary: `${ask.agent}: open ${ask.host_name}`,
+        what: ask.agent ? "asks you to open an agent" : "waits for your go-ahead to resume",
+        summary: ask.agent ? `${ask.agent}: open ${ask.host_name}` : `${ask.host_name}: waits for your go-ahead`,
     });
 }
 

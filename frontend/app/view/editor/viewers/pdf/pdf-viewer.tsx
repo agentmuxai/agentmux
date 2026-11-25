@@ -12,6 +12,7 @@
  */
 
 import { Button, IconButton } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { keyLabel } from "@/app/keybindings";
 import { Show, type JSX } from "solid-js";
 import { ViewerBar } from "../viewer-bar";
@@ -43,43 +44,43 @@ function PdfViewerControls(props: { s: PdfViewerState }): JSX.Element {
     const s = props.s;
     return (
         <>
-            <IconButton icon="chevron-up" density="compact" label="Previous page" disabled={s.page() <= 1} onClick={() => goTo(s, s.page() - 1)} />
+            <IconButton icon="chevron-up" density="compact" label={t("pdf.previous")} disabled={s.page() <= 1} onClick={() => goTo(s, s.page() - 1)} />
             <input
                 ref={(el) => (s.pageInput = el)}
                 class="pdf-viewer-page-input" data-raw-text-field="the viewer bar's page number: a few digits between the arrows, with its own mod+g focus and Enter to go, not a form field"
-                aria-label="Page"
-                title={`Page (${keyLabel("mod+g")})`}
+                aria-label={t("pdf.page")}
+                title={t("pdf.pageTip", { key: keyLabel("mod+g") })}
                 value={s.page()}
                 onChange={(e) => goTo(s, Number(e.currentTarget.value) || s.page())}
                 onKeyDown={(e) => e.key === "Enter" && goTo(s, Number(e.currentTarget.value) || s.page())}
             />
             <span class="pdf-viewer-of">/ {s.pages() || "–"}</span>
-            <IconButton icon="chevron-down" density="compact" label="Next page" disabled={s.page() >= s.pages()} onClick={() => goTo(s, s.page() + 1)} />
-            <IconButton icon="magnifying-glass-minus" density="compact" label={`Zoom out (${keyLabel("mod+-")})`} onClick={() => zoomBy(s, "out")} />
-            <span class="pdf-viewer-scale" aria-label="Zoom">
+            <IconButton icon="chevron-down" density="compact" label={t("pdf.next")} disabled={s.page() >= s.pages()} onClick={() => goTo(s, s.page() + 1)} />
+            <IconButton icon="magnifying-glass-minus" density="compact" label={t("pdf.zoomOut", { key: keyLabel("mod+-") })} onClick={() => zoomBy(s, "out")} />
+            <span class="pdf-viewer-scale" aria-label={t("pdf.zoom")}>
                 {Math.round(s.scale() * 100)}%
             </span>
-            <IconButton icon="magnifying-glass-plus" density="compact" label={`Zoom in (${keyLabel("mod+=")})`} onClick={() => zoomBy(s, "in")} />
-            <Button density="compact" title="Fit the page width" onClick={() => zoomBy(s, "page-width")}>
-                Width
+            <IconButton icon="magnifying-glass-plus" density="compact" label={t("pdf.zoomIn", { key: keyLabel("mod+=") })} onClick={() => zoomBy(s, "in")} />
+            <Button density="compact" title={t("pdf.fitWidthTip")} onClick={() => zoomBy(s, "page-width")}>
+                {t("pdf.fitWidth")}
             </Button>
-            <Button density="compact" title="Fit the whole page" onClick={() => zoomBy(s, "page-fit")}>
-                Page
+            <Button density="compact" title={t("pdf.fitPageTip")} onClick={() => zoomBy(s, "page-fit")}>
+                {t("pdf.fitPage")}
             </Button>
             <IconButton
                 icon="circle-half-stroke"
                 density="compact"
                 pressed={s.invert()}
-                label={s.invert() ? "Show the pages as they are" : "Invert the pages (for a dark theme)"}
+                label={s.invert() ? t("pdf.invertOff") : t("pdf.invertOn")}
                 onClick={() => s.setInvert(!s.invert())}
             />
             <input
                 ref={(el) => (s.findInput = el)}
                 class="pdf-viewer-find" data-raw-text-field="the viewer bar's find box: it sits in the bar's row with its own mod+f focus and Enter for the next match, not a form field"
                 type="search"
-                placeholder="Find"
-                aria-label="Find in the document"
-                title={`Find (${keyLabel("mod+f")}); ${keyLabel("Enter")} for the next match, ${keyLabel("shift+Enter")} for the previous`}
+                placeholder={t("pdf.find")}
+                aria-label={t("pdf.findAria")}
+                title={t("pdf.findTip", { find: keyLabel("mod+f"), next: keyLabel("Enter"), prev: keyLabel("shift+Enter") })}
                 value={s.query()}
                 onInput={(e) => {
                     s.setQuery(e.currentTarget.value);
@@ -94,7 +95,9 @@ function PdfViewerControls(props: { s: PdfViewerState }): JSX.Element {
             />
             <Show when={s.query() && s.matches()}>
                 <span class="pdf-viewer-matches" role="status">
-                    {s.matches()!.total ? `${s.matches()!.current} of ${s.matches()!.total}` : "No matches"}
+                    {s.matches()!.total
+                        ? t("pdf.matchOf", { current: s.matches()!.current, total: s.matches()!.total })
+                        : t("pdf.noMatches")}
                 </span>
             </Show>
         </>

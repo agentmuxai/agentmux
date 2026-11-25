@@ -17,6 +17,7 @@ import { createMemo, createSignal, For, Show, type Accessor, type JSX } from "so
 import { LOCAL_PROVIDER_UNKNOWN, SwarmProviderIcon } from "./swarm-provider-icon";
 import { HeldNote } from "./swarm-row-notes";
 import { tip } from "@/app/element/tip";
+import { t } from "@/app/i18n/i18n";
 
 /** The meta of the block a stopped agent keeps its desired state and held input in, once it has one. */
 function blockMeta(blockId: string | undefined): Record<string, any> | undefined {
@@ -78,7 +79,7 @@ function NoPaneRow(props: { agent: AgentRuntime; runner: Runner; onOpen: Action;
                 }}
             >
                 <SwarmProviderIcon provider={agent().provider} unknownTitle={LOCAL_PROVIDER_UNKNOWN} />
-                <span class="swarm-stopped__name" {...tip(`${agent().name}: click to open`)}>
+                <span class="swarm-stopped__name" {...tip(t("swarm.stopped.clickToOpen", { name: agent().name }))}>
                     {agent().name}
                 </span>
                 <HeldNote meta={blockMeta(agent().block_id)} />
@@ -86,22 +87,22 @@ function NoPaneRow(props: { agent: AgentRuntime; runner: Runner; onOpen: Action;
                 <Show when={!runsWithoutPane(agent())}>
                     <Button
                         density="compact"
-                        aria-label={`Start ${agent().name}`}
-                        title="Run it with no pane, resuming its session"
+                        aria-label={t("swarm.stopped.startNamed", { name: agent().name })}
+                        title={t("swarm.stopped.startTitle")}
                         disabled={runner.busy().has(agent().agent_id)}
-                        onClick={() => void runner.run(agent(), props.onStart)}
+                        onClick={() => runner.run(agent(), props.onStart)}
                     >
-                        {runner.busy().has(agent().agent_id) ? "Starting…" : "Start"}
+                        {runner.busy().has(agent().agent_id) ? t("swarm.stopped.starting") : t("swarm.stopped.start")}
                     </Button>
                 </Show>
                 <Button
                     density="compact"
-                    aria-label={`Open ${agent().name}`}
-                    title={runsWithoutPane(agent()) ? "Show it in a pane" : "Open it in a pane (starts it)"}
+                    aria-label={t("swarm.stopped.openNamed", { name: agent().name })}
+                    title={runsWithoutPane(agent()) ? t("swarm.stopped.showInPane") : t("swarm.stopped.openInPane")}
                     disabled={runner.busy().has(agent().agent_id)}
-                    onClick={() => void runner.run(agent(), props.onOpen)}
+                    onClick={() => runner.run(agent(), props.onOpen)}
                 >
-                    Open
+                    {t("swarm.stopped.open")}
                 </Button>
             </div>
             <Show when={runner.refused()[agent().agent_id]}>
@@ -133,9 +134,9 @@ export function StoppedAgents(props: {
     return (
         <>
             <Show when={running().length > 0}>
-                <section class="swarm-stopped swarm-nopane" aria-label="Running with no pane">
+                <section class="swarm-stopped swarm-nopane" aria-label={t("swarm.stopped.runningNoPane")}>
                     <div class="swarm-stopped__heading swarm-nopane__heading">
-                        Running with no pane
+                        {t("swarm.stopped.runningNoPane")}
                         <span class="swarm-stopped__count">{running().length}</span>
                     </div>
                     <For each={running()}>
@@ -144,7 +145,7 @@ export function StoppedAgents(props: {
                 </section>
             </Show>
             <Show when={stopped().length > 0}>
-                <section class="swarm-stopped" aria-label="Stopped agents">
+                <section class="swarm-stopped" aria-label={t("swarm.stopped.heading")}>
                     <Button
                         tone="quiet"
                         density="compact"
@@ -153,7 +154,7 @@ export function StoppedAgents(props: {
                         aria-expanded={!isFolded()}
                         onClick={() => setFolded(!isFolded())}
                     >
-                        Stopped agents
+                        {t("swarm.stopped.heading")}
                         <span class="swarm-stopped__count">{stopped().length}</span>
                     </Button>
                     <Show when={!isFolded()}>

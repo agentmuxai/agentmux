@@ -16,4 +16,21 @@
         font-style: var(--shiki-light-font-style);
         font-weight: var(--shiki-light-font-weight);
     }
+
+    // Inside a pane's backdrop the pane's own side decides, not the window's: a White backdrop in a dark theme is a light page.
+    // `--code-l` is the lightness the pane's layers allow (scope.ts `codeLightness`): a token is moved to it only when it is
+    // on the wrong side of it, which keeps its hue and chroma. A browser without relative colours keeps the plain colour.
+    [data-backdrop][data-backdrop-scheme="dark"] & {
+        color: var(--shiki-dark);
+        color: oklch(from var(--shiki-dark) max(l, var(--code-l, 0)) c h);
+        font-style: var(--shiki-dark-font-style);
+        font-weight: var(--shiki-dark-font-weight);
+    }
+
+    [data-backdrop][data-backdrop-scheme="light"] & {
+        color: var(--shiki-light);
+        color: oklch(from var(--shiki-light) min(l, var(--code-l, 1)) c h);
+        font-style: var(--shiki-light-font-style);
+        font-weight: var(--shiki-light-font-weight);
+    }
 }

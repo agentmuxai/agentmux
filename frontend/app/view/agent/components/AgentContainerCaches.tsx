@@ -82,7 +82,7 @@ export const AgentContainerCaches = (props: AgentContainerCachesProps): JSX.Elem
                                     </Button>
                                 }
                             >
-                                <Button tone="danger" busy={busy()} onClick={() => void clear()} data-testid="container-caches-confirm">
+                                <Button tone="danger" busy={busy()} onClick={() => clear()} data-testid="container-caches-confirm">
                                     {t("containerCaches.remove", { size: formatBytes(total()) })}
                                 </Button>
                                 <Button disabled={busy()} onClick={() => setConfirming(false)}>

@@ -13,6 +13,7 @@
 import { createEffect, createMemo, createSignal, on, Show, type Accessor, type JSX } from "solid-js";
 
 import { Button, Select, TextInput } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AgentArchiveRow } from "@/types/rpc/AgentArchiveRow";
@@ -47,7 +48,7 @@ export const SESSIONS_TIMEOUT_MS = 300_000;
 
 /** "Oct 17, 4:27 PM". */
 export function shortWhen(ms: number): string {
-    if (!ms) return "unknown time";
+    if (!ms) return t("historyNav.unknownTime");
     return new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
@@ -61,9 +62,9 @@ export function endOfDayMs(day: string): number | null {
 
 /** A session in the "Jump to" list. */
 export function sessionLabel(s: HistorySession): string {
-    const id = `Session ${s.session_id.slice(0, 8)}`;
+    const id = t("historyNav.session", { id: s.session_id.slice(0, 8) });
     // Sessions older than the receive-time sidecar have no times.
-    if (!s.first_ms && !s.last_ms) return `${id} · no time recorded`;
+    if (!s.first_ms && !s.last_ms) return `${id} · ${t("historyNav.noTime")}`;
     return `${id} · ${shortWhen(s.first_ms)} – ${shortWhen(s.last_ms)}`;
 }
 
@@ -128,14 +129,14 @@ export function HistoryNavigator(props: HistoryNavigatorProps): JSX.Element {
     };
 
     const conversationOptions = createMemo(() => [
-        { value: CURRENT, label: "Current conversation" },
+        { value: CURRENT, label: t("historyNav.current") },
         ...archives().map((a) => ({
             value: a.archive_zoneid,
-            label: `Archived ${shortWhen(a.archived_at_ms)}${a.preview ? ` · ${a.preview.slice(0, 60)}` : ""}`,
+            label: `${t("historyNav.archived", { when: shortWhen(a.archived_at_ms) })}${a.preview ? ` · ${a.preview.slice(0, 60)}` : ""}`,
         })),
     ]);
     const jumpOptions = createMemo(() => [
-        { value: "", label: shown().length ? "Jump to a session…" : "No sessions in the record" },
+        { value: "", label: shown().length ? t("historyNav.jumpPrompt") : t("historyNav.noSessions") },
         ...shown().map((s) => ({ value: String(s.end_byte), label: sessionLabel(s) })),
     ]);
 
@@ -147,15 +148,15 @@ export function HistoryNavigator(props: HistoryNavigatorProps): JSX.Element {
                     value={props.archiveZone() ?? CURRENT}
                     onChange={(v) => props.onOpenArchive(v === CURRENT ? null : v)}
                     density="compact"
-                    ariaLabel="Conversation"
+                    ariaLabel={t("historyNav.conversation")}
                 />
             </Show>
             <Show when={counting()}>
-                <span class="agent-history-nav-count">counting sessions…</span>
+                <span class="agent-history-nav-count">{t("historyNav.counting")}</span>
             </Show>
             <Show when={sessions() !== null}>
                 <span class="agent-history-nav-count">
-                    {shown().length} {shown().length === 1 ? "session" : "sessions"}
+                    {t("historyNav.sessions", { count: shown().length })}
                 </span>
                 <Select
                     options={jumpOptions()}
@@ -166,14 +167,14 @@ export function HistoryNavigator(props: HistoryNavigatorProps): JSX.Element {
                     }}
                     density="compact"
                     disabled={jumping() || shown().length === 0}
-                    ariaLabel="Jump to a session"
+                    ariaLabel={t("historyNav.jumpLabel")}
                 />
             </Show>
             <TextInput
                 type="date"
                 density="compact"
                 value={day()}
-                aria-label="Jump to a date"
+                aria-label={t("historyNav.jumpDate")}
                 disabled={jumping()}
                 onChange={(e) => {
                     const value = e.currentTarget.value;
@@ -184,17 +185,17 @@ export function HistoryNavigator(props: HistoryNavigatorProps): JSX.Element {
             />
             <Show when={props.hasOlder?.() && props.onShowOlder}>
                 <Button tone="quiet" density="compact" icon="arrow-up" onClick={() => props.onShowOlder?.()}>
-                    Show older
+                    {t("historyNav.showOlder")}
                 </Button>
             </Show>
             <Show when={props.mode() !== "live" && props.hasNewer()}>
                 <Button tone="quiet" density="compact" onClick={() => props.onShowNewer()}>
-                    Show newer
+                    {t("historyNav.showNewer")}
                 </Button>
             </Show>
             <Show when={props.mode() !== "live"}>
                 <Button tone="quiet" density="compact" icon="arrow-down" onClick={() => props.onLatest()}>
-                    {props.mode() === "archive" ? "Back to current" : "Back to latest"}
+                    {props.mode() === "archive" ? t("historyNav.backCurrent") : t("historyNav.backLatest")}
                 </Button>
             </Show>
             <Show when={error()}>

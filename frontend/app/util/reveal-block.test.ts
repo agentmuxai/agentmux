@@ -104,7 +104,7 @@ vi.mock("@/app/store/services", () => ({
 
 import { isWorkspaceClosedFailure } from "@/app/selection/reveal-failure";
 import { registerPaneTab } from "@/app/store/pane-tab-registry";
-import { findOpenBlockByView, revealBlock, showBlockInPane, showBlockWithoutFocus } from "./reveal-block";
+import { findOpenBlockByView, revealBlock, showBlockInPane, showBlockWithoutFocus, tellRevealFailure } from "./reveal-block";
 
 /** A layout model whose one pane holds `members` as tabs. */
 function modelWithPane(nodeId: string, members: string[], magnified?: string, minimized = false) {
@@ -210,7 +210,7 @@ describe("revealBlock in this window only", () => {
         const p = revealBlock("agentB", { localOnly: true });
         await vi.advanceTimersByTimeAsync(2000);
         expect((await p).ok).toBe(false);
-        expect(notices.map((n) => n.message)).toEqual(["its tab is still loading"]);
+        expect(notices.map((n) => n.message)).toEqual(["the tab did not show it in time. Click again"]);
     });
 
     it("a tabId hint is tried first", async () => {
@@ -487,5 +487,17 @@ describe("isWorkspaceClosedFailure", () => {
         ] as const) {
             expect(isWorkspaceClosedFailure(other as any)).toBe(false);
         }
+    });
+});
+
+describe("tellRevealFailure", () => {
+    it("gives the notice a caller held back, with the true words, and none for a newer click or a block that is not here", () => {
+        const before = notices.length;
+        tellRevealFailure("remote", { reason: "layout-timeout" }, "widget");
+        expect(notices.slice(before)).toHaveLength(1);
+        expect(notices[before].message).toBe("the tab did not show it in time. Click again");
+        tellRevealFailure("remote", { reason: "superseded" }, "widget");
+        tellRevealFailure("remote", { reason: "not-found" }, "widget");
+        expect(notices).toHaveLength(before + 1);
     });
 });

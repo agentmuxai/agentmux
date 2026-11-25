@@ -639,26 +639,31 @@ describe("AccountForm: key egress note", () => {
 });
 
 describe("AccountForm: key submit", () => {
-    it("asks for a name first, then for a key, without calling the backend", () => {
+    it("asks for a name first, then for a key, without calling the backend", async () => {
+        const settled = () => waitFor(() => expect(document.querySelector("[data-pending]")).toBeNull());
         renderForm();
         fireEvent.click(button("Validate & Save"));
+        await settled();
         expect(document.querySelector(".identity-key-actions")?.previousElementSibling?.textContent).toBe(
             "Name is required"
         );
 
         typeInto(inputOf("Name *"), "   ");
         fireEvent.click(button("Save without validating"));
+        await settled();
         expect(document.querySelector(".identity-key-actions")?.previousElementSibling?.textContent).toBe(
             "Name is required"
         );
 
         typeInto(inputOf("Name *"), "gh");
         fireEvent.click(button("Validate & Save"));
+        await settled();
         expect(document.querySelector(".identity-key-actions")?.previousElementSibling?.textContent).toBe(
             "Enter a key first"
         );
         typeInto(inputOf("Key / token"), "   ");
         fireEvent.click(button("Validate & Save"));
+        await settled();
         expect(document.querySelector(".identity-key-actions")?.previousElementSibling?.textContent).toBe(
             "Enter a key first"
         );

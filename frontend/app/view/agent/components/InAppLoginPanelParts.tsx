@@ -101,7 +101,7 @@ export function PasteStep(props: { s: LoginPasteState }): JSX.Element {
                 </Button>
                 <Button
                     className="grey solid"
-                    onClick={() => void s.submitCode()}
+                    onClick={() => s.submitCode()}
                     disabled={s.pasting()}
                 >
                     {submitLabel()}

@@ -12,7 +12,57 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { OPERATOR_COMMANDS } from "./operator-proof";
+import { OPERATOR_COMMANDS as WINDOW_ONLY_COMMANDS } from "./operator-commands.generated";
+
+/** The commands whose srv handler refuses anything but the person's window (`operator_only`), by name. A command is added here when
+ * its handler is: srv's own table of who may call what (WINDOW_ONLY_COMMANDS) is wider, every command that is not open. */
+const OPERATOR_COMMANDS: ReadonlySet<string> = new Set([
+    "agentanswer",
+    "agentcancel",
+    "agentinput",
+    "agent.pane.unregister",
+    "agent.setSeat",
+    "agent.takeover",
+    "agent.move-here",
+    "audit.query",
+    "blockstats.detail",
+    "browser.signin_fill",
+    "browser.signin_offer_answer",
+    "browser.signin_stop",
+    "browser.signup_password",
+    "browser_profiles.create",
+    "browser_profiles.delete",
+    "browser_profiles.update",
+    "fleet.broadcast",
+    "gpu.sample",
+    "history.agent_sessions",
+    "history.agents",
+    "history.locate",
+    "history.reclaim",
+    "history.usage",
+    "identity.account.availability",
+    "identity.account.move_agents",
+    "identity.account.signed_in",
+    "identity.account.usage",
+    "jobs.act",
+    "jobs.save",
+    "jobs.templates.approve",
+    "jobs.templates.catalog",
+    "jobs.templates.catalog.install",
+    "jobs.templates.install",
+    "jobs.templates.uninstall",
+    "kanban.act",
+    "pins.adopt",
+    "pins.forget",
+    "pins.list",
+    "tooldecision",
+    "tower.forget",
+    "tower.pair",
+    "tower.peers",
+    "tower.sample",
+    "widgets.session",
+    "writeagentconfig",
+]);
 
 const FRONTEND = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -98,6 +148,11 @@ function methodsByCommand(): Map<string, string> {
 
 describe("prompts that speak for the person", () => {
     const methods = methodsByCommand();
+
+    it("names only commands that srv keeps for the window", () => {
+        const wider = [...OPERATOR_COMMANDS].filter((c) => !WINDOW_ONLY_COMMANDS.has(c));
+        expect(wider, `${wider.join(", ")} is open to every connection in action_access.rs, so it cannot be person-only`).toEqual([]);
+    });
 
     it("finds an RpcApi method for every command only the person's window may send", () => {
         const missing = [...OPERATOR_COMMANDS].filter((c) => !methods.has(c));

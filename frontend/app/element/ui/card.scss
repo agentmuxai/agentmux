@@ -38,6 +38,14 @@
     }
 }
 
+// A question about a card (a delete confirm): a full-width row under the card's row, before its details. It is in the
+// flow, so what is below it moves down and nothing is covered.
+.ui-card-ask {
+    grid-column: 1 / -1;
+    min-width: 0;
+    margin-top: var(--space-1);
+}
+
 // The open card's details: a full-width row under the card's row, with a
 // caret pointing up at the card.
 .ui-card-detail {

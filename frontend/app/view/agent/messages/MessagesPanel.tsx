@@ -24,6 +24,7 @@ import {
 
 import type { DocumentNode, JektMessageNode } from "@/app/agent-model/node-types";
 import { Button } from "@/app/element/ui/Button";
+import { t } from "@/app/i18n/i18n";
 import { Select } from "@/app/element/ui/inputs";
 import { Pill } from "@/app/element/ui/Pill";
 import { SidePanel } from "@/app/element/ui/SidePanel";
@@ -36,7 +37,7 @@ import { awaitingYou, dismissAwaiting } from "../hooks/useJektsAwaitingYou";
 import { deliveredAt } from "../jekts-awaiting-you";
 import { proseDoc, rawDoc } from "../preview-text/docs";
 import { scrollMessagesTo } from "../scroll/one-way-flow";
-import { MESSAGES_TOGGLE_CLASS, publishHeaderButton } from "./messages-header";
+import { publishHeaderButton } from "./messages-header";
 import "./messages-panel.scss";
 import {
     applyFilter,
@@ -93,11 +94,12 @@ function MessagesDock(props: MessagesPanelProps): JSX.Element {
     let dock: HTMLDivElement | undefined;
     const close = () => {
         controls.patch({ open: false });
-        // Back to the header button it came from, so the keyboard is not left on a panel that is gone.
+        // Back to the composer (the Messages button is a row of the pane's menu now), so the keyboard is not left on a
+        // panel that is gone.
         queueMicrotask(() =>
             document
                 .querySelector(`[data-blockid="${CSS.escape(props.blockId)}"]:not(.block-preview)`)
-                ?.querySelector<HTMLElement>(`.${MESSAGES_TOGGLE_CLASS}`)
+                ?.querySelector<HTMLElement>(".agent-input")
                 ?.focus()
         );
     };
@@ -232,9 +234,9 @@ function MessagesColumn(props: MessagesPanelProps & { model: Model; onClose: () 
         applyFilter(model.messages(), filter(), { seen: controls.state().seen, waiting: model.waitingIds() })
     );
     const filterOptions = createMemo(() => [
-        { value: "all", label: "All" },
-        { value: "needs-me", label: "Needs me" },
-        { value: "unread", label: "Unread" },
+        { value: "all", label: t("messagesPanel.all") },
+        { value: "needs-me", label: t("messagesPanel.needsMe") },
+        { value: "unread", label: t("messagesPanel.unread") },
         ...topSenders(model.messages()).map((from) => ({ value: `from:${from}`, label: from })),
     ]);
 
@@ -262,10 +264,10 @@ function MessagesColumn(props: MessagesPanelProps & { model: Model; onClose: () 
     return (
         <SidePanel
             class="messages-panel"
-            label="Messages"
+            label={t("messagesPanel.title")}
             title={
                 <>
-                    Messages
+                    {t("messagesPanel.title")}
                     <Show when={model.unread() > 0}>
                         {" "}
                         <Pill tone="accent">{badgeText(model.unread())}</Pill>
@@ -284,17 +286,17 @@ function MessagesColumn(props: MessagesPanelProps & { model: Model; onClose: () 
             <div class="messages-panel__tools">
                 <Select
                     density="compact"
-                    ariaLabel="Show"
+                    ariaLabel={t("messagesPanel.show")}
                     value={filter()}
                     options={filterOptions()}
                     onChange={(v) => setFilter(v as MessagesFilter)}
                 />
                 <Button variant="link" disabled={model.unread() === 0} onClick={markAllRead}>
-                    Mark all read
+                    {t("messagesPanel.markAllRead")}
                 </Button>
             </div>
             <ul class="messages-panel__list" ref={(el) => (list = el)} onScroll={moves.onScroll}>
-                <For each={visible()} fallback={<li class="messages-panel__empty">No messages</li>}>
+                <For each={visible()} fallback={<li class="messages-panel__empty">{t("messagesPanel.none")}</li>}>
                     {(m) => (
                         <MessageRow
                             node={m}
@@ -310,7 +312,7 @@ function MessagesColumn(props: MessagesPanelProps & { model: Model; onClose: () 
             </ul>
             <Show when={moves.newBelow() > 0}>
                 <Button class="messages-panel__new" tone="accent" icon="arrow-down" onClick={moves.toTail}>
-                    {moves.newBelow()} new
+                    {t("messagesPanel.newBelow", { count: moves.newBelow() })}
                 </Button>
             </Show>
         </SidePanel>
@@ -325,19 +327,18 @@ function NeedsYou(props: {
 }): JSX.Element {
     const newest = () => props.waiting[props.waiting.length - 1];
     return (
-        <section class="messages-panel__needs" aria-label="Needs you">
-            <strong>Needs you</strong>
+        <section class="messages-panel__needs" aria-label={t("messagesPanel.needsYou")}>
+            <strong>{t("messagesPanel.needsYou")}</strong>
             <span>
-                {newest().from} sent a sensitive message. Confirm it in this conversation; another agent's reply does
-                not count.
-                <Show when={props.waiting.length > 1}> {props.waiting.length - 1} earlier ones wait too.</Show>
+                {t("messagesPanel.sensitive", { from: newest().from })}
+                <Show when={props.waiting.length > 1}> {t("messagesPanel.earlier", { count: props.waiting.length - 1 })}</Show>
             </span>
             <div class="messages-panel__needs-actions">
                 <Button variant="link" onClick={() => props.onShow(newest().id)}>
-                    Show message
+                    {t("messagesPanel.showMessage")}
                 </Button>
                 <Button variant="link" onClick={props.onDismiss}>
-                    Dismiss
+                    {t("messagesPanel.dismiss")}
                 </Button>
             </div>
         </section>
@@ -363,7 +364,7 @@ function MessageRow(props: {
             <Button variant="row" class="messages-row__head" pressed={props.open} onClick={props.onToggle}>
                 <span class="messages-row__from">{props.node.from}</span>
                 <Show when={props.unread}>
-                    <span class="messages-row__dot" role="img" aria-label="Unread" />
+                    <span class="messages-row__dot" role="img" aria-label={t("messagesPanel.unread")} />
                 </Show>
                 <time class="messages-row__time">{timeOf(props.node.timestamp)}</time>
             </Button>
@@ -389,7 +390,7 @@ function MessageRow(props: {
                 </div>
                 <JektMeta node={props.node} />
                 <details class="messages-row__raw">
-                    <summary>Raw payload</summary>
+                    <summary>{t("messagesPanel.raw")}</summary>
                     <div class="messages-row__raw-body">
                         <PreviewLines doc={rawPayload()} />
                     </div>
@@ -398,7 +399,7 @@ function MessageRow(props: {
                     <Show when={props.onShow}>
                         {(show) => (
                             <Button variant="link" onClick={show()}>
-                                Show in conversation
+                                {t("messagesPanel.showInConversation")}
                             </Button>
                         )}
                     </Show>
@@ -406,7 +407,7 @@ function MessageRow(props: {
                     <Show when={props.node.msgId}>
                         {(msgId) => (
                             <Button variant="link" opens onClick={() => void openAuditAtMessage(msgId(), deliveredAt(props.node))}>
-                                Open in Audit
+                                {t("messagesPanel.openAudit")}
                             </Button>
                         )}
                     </Show>

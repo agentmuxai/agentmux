@@ -440,7 +440,7 @@ function PassphraseFields(props: { s: ExportState }): JSX.Element {
                         value={s.pass()}
                         onInput={(e) => s.setPass(e.currentTarget.value)}
                     />
-                    <Button density="compact" tone="quiet" icon="wand-magic-sparkles" onClick={() => void suggest(s)}>
+                    <Button density="compact" tone="quiet" icon="wand-magic-sparkles" onClick={() => suggest(s)}>
                         {t("vault.export.suggest")}
                     </Button>
                 </div>
@@ -532,7 +532,7 @@ function ExportButton(props: { s: ExportState }): JSX.Element {
                 tone="danger"
                 busy={s.busy()}
                 disabled={!ready(s) || !confirmed(s)}
-                onClick={() => void exportUnencrypted(s)}
+                onClick={() => exportUnencrypted(s)}
             >
                 {t("vault.export.unencrypted")}
             </Button>

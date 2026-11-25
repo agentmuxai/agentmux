@@ -15,6 +15,12 @@ import mapped from "./mapped-tokens.json";
 /** The `--term-*` tokens the agent pane's transcript reads as syntax and status colours. */
 export const ANSI_TOKENS: ReadonlyArray<string> = mapped.ansi;
 
+/**
+ * The colours a pane moves to read on its layers: the terminal palette, the editor's syntax colours (they come as one set
+ * for a dark page and one for a light page, and a pane's backdrop can be the other side) and the file-type icon colours.
+ */
+export const TONE_TOKENS: ReadonlyArray<string> = [...mapped.ansi, ...mapped.syntax, ...mapped.glyphs];
+
 /** A token's value as `#rrggbb`, by token. A token the theme does not set as a hex is left out. */
 export type AnsiColours = Record<string, string>;
 
@@ -26,11 +32,11 @@ function plainHex(value: string): string | undefined {
     return /^#[0-9a-f]{6}$/i.test(hex) && hexToRgb(hex) ? hex.toLowerCase() : undefined;
 }
 
-/** The transcript's palette as `el` has it now: one style read of the nine tokens. */
+/** The palette as `el` has it now: one style read of the tokens in `TONE_TOKENS`. */
 export function readAnsi(el: Element = document.documentElement): AnsiColours {
     const style = getComputedStyle(el);
     const out: AnsiColours = {};
-    for (const token of ANSI_TOKENS) {
+    for (const token of TONE_TOKENS) {
         const hex = plainHex(style.getPropertyValue(token));
         if (hex) out[token] = hex;
     }

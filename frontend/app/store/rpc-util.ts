@@ -43,6 +43,7 @@ function initWshrpc(tabId: string): WSControl {
         void proveOperatorConnection({
             challenge: () => RpcApi.OperatorChallengeCommand(TabRpcClient),
             attest: attest ? (nonce) => attest.call(getApi().approvals, nonce) : undefined,
+            connected: () => globalWS?.open === true,
         });
     });
     globalWS.connectNow("connectWshrpc");

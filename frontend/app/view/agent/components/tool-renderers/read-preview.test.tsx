@@ -14,9 +14,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({
     createBlock: vi.fn(async () => "new-block"),
     fsOpen: vi.fn<(client: unknown, req: { path: string }) => Promise<object>>(async () => ({})),
+    notify: vi.fn(),
 }));
 vi.mock("@/app/store/block-layout-actions", () => ({ createBlock: h.createBlock }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { FsOpenCommand: h.fsOpen } }));
+vi.mock("@/app/store/global", async (orig) => ({ ...(await orig<typeof import("@/app/store/global")>()), pushNotification: h.notify }));
 
 import { ClaudeTranslator } from "../../providers/claude-translator";
 import type { ToolNode } from "../../../../agent-model/types";
@@ -132,6 +134,16 @@ describe("a Read of a PDF", () => {
         fireEvent.click(buttons[0]);
         expect(h.fsOpen.mock.lastCall?.[1]).toEqual({ path: "C:/docs/a.pdf" });
         delete (window as unknown as { api?: unknown }).api;
+    });
+
+    it("says why nothing opened, without the marker, instead of doing nothing", async () => {
+        h.fsOpen.mockRejectedValueOnce(new Error("[asks-first:aria] This file is in the folder of aria, a container agent that can change it."));
+        const { container } = show(node({ params: { file_path: "C:/docs/a.pdf" }, result: result() }));
+        fireEvent.click(container.querySelectorAll(".agent-tool-read-open")[0]);
+        await waitFor(() => expect(h.notify).toHaveBeenCalled());
+        const note = h.notify.mock.lastCall?.[0] as { title: string; message: string };
+        expect(note.title).toBe("Couldn't open the file");
+        expect(note.message).toBe("This file is in the folder of aria, a container agent that can change it.");
     });
 });
 

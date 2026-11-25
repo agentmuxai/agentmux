@@ -45,6 +45,20 @@ fn close_pane_outcome_says_what_the_user_decided() {
 }
 
 #[test]
+fn a_tab_close_names_the_tab_and_says_whether_its_pane_went_with_it() {
+    let done = serde_json::json!({ "status": "shut_down" });
+    let last = close_pane_outcome_for("b", &done, Some(true)).unwrap();
+    assert!(last.starts_with("Closed tab \"b\"") && last.contains("last tab") && last.contains("pane closes with it"), "{last}");
+    let kept = close_pane_outcome_for("b", &done, Some(false)).unwrap();
+    assert!(kept.contains("The pane stays"), "{kept}");
+    assert!(!close_pane_outcome_for("b", &done, None).unwrap().contains("pane"), "no claim about the pane without srv's word");
+    let pending = serde_json::json!({ "request_id": "r1", "by": "me", "via": "Browser close", "deadline_ms": 110_000, "tab": "b", "pane_closes": false });
+    let said: Value = serde_json::from_str(&close_pane_pending("b", &pending, 100_000)).unwrap();
+    assert_eq!((said["tab"].as_str(), said["pane_closes"].as_bool()), (Some("b"), Some(false)));
+    assert!(said["note"].as_str().unwrap().contains("The pane stays"), "{said}");
+}
+
+#[test]
 fn stop_agents_notes_say_what_no_longer_applies_and_which_target_kept_its_pane() {
     let pending = vec![
         serde_json::json!({ "block_id": "a", "request_id": "r1", "effect": "close_tab" }),

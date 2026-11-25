@@ -24,6 +24,4 @@ rpc AgentInputHistorySearch agent=a1 query="zzz" limit=200
     <div class="warden-section-stub">
       "Nothing typed to this agent matches."
     <div class="warden-manager-footnote">
-      "What was typed to an agent is kept with the agent, up to its limit (the agent:inputhistory:max setting), and goes when the agent is deleted. Forgotten entries can be restored for"
-      "7"
-      "days, then they are gone."
+      "What was typed to an agent is kept with the agent, up to its limit (the agent:inputhistory:max setting), and goes when the agent is deleted. Forgotten entries can be restored for 7 days, then they are gone."

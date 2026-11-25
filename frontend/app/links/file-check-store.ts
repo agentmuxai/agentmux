@@ -10,7 +10,7 @@
 import { createStore } from "solid-js/store";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { siteOf } from "./entities/bare-domain";
+import { plainWhenMissing, siteOf } from "./entities/bare-domain";
 
 export type FileCheck = { state: "found" | "missing" | "outside" | "limited"; reason: string; resolved: string };
 
@@ -39,8 +39,19 @@ async function ask(blockId: string, path: string): Promise<FileCheck> {
 /** Ask once (a hover or a focus): a later call, or a second link to the same path, reuses the answer. An answer of
  *  "limited" is not kept, so it can be asked again later. */
 export function requestFileCheck(blockId: string, path: string): void {
-    if (fileCheck(blockId, path)) return;
+    const known = fileCheck(blockId, path);
+    if (known && !(known.state === "missing" && staleMissing(blockId, path))) return;
     void checkFileNow(blockId, path);
+}
+
+/** How long a "missing" answer is trusted: a hover after that asks again, so a file made since turns into a link without a
+ *  reload. A found or outside answer is kept for the page. The cost is one request per missing name per hover, at most one in
+ *  this span. */
+const MISSING_TRUSTED_MS = 10_000;
+const missingAt = new Map<string, number>();
+
+function staleMissing(blockId: string, path: string): boolean {
+    return Date.now() - (missingAt.get(keyOf(blockId, path)) ?? 0) > MISSING_TRUSTED_MS;
 }
 
 /** Ask now and wait for the answer (a click): always fresh, because the click is what opens the file. */
@@ -52,6 +63,8 @@ export async function checkFileNow(blockId: string, path: string): Promise<FileC
         asking.delete(key);
         if (got.state === "limited") setAnswers(key, undefined as unknown as FileCheck);
         else setAnswers(key, got);
+        if (got.state === "missing") missingAt.set(key, Date.now());
+        else missingAt.delete(key);
         return got;
     });
     asking.set(key, run);
@@ -62,6 +75,13 @@ export async function checkFileNow(blockId: string, path: string): Promise<FileC
 export function deadReason(blockId: string, path: string): string | undefined {
     // A name that is also a web site is not dead when no such file is there: it is the site.
     if (siteOf(path)) return undefined;
+    // A bare name with no such file is text, not a muted file (see `isPlain`).
+    if (plainWhenMissing(path) && fileCheck(blockId, path)?.state === "missing") return undefined;
     const got = fileCheck(blockId, path);
     return got && (got.state === "missing" || got.state === "outside") ? got.reason : undefined;
+}
+
+/** Whether a link to this file is drawn as plain text: a bare name that could be a site's, and srv says no such file. */
+export function isPlain(blockId: string, path: string): boolean {
+    return plainWhenMissing(path) && fileCheck(blockId, path)?.state === "missing";
 }

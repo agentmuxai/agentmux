@@ -6,7 +6,10 @@
 import { describe, expect, it } from "vitest";
 import { BUILTINS, deriveBuiltin } from "./builtins";
 import { deriveInk } from "./ink";
-import { BACKDROP_VERSION, parseBackdrop, resolveBackdrop, sameBackdrop, sameResolved, supportsBackdrop } from "./meta";
+import { contrastRatio } from "../block/pane-color-scheme";
+import { PALETTE } from "../theme/palette";
+import { tabPaint } from "../theme/paint";
+import { BACKDROP_VERSION, paneChromeInk, parseBackdrop, resolveBackdrop, sameBackdrop, sameResolved, supportsBackdrop } from "./meta";
 
 const teal = { kind: "builtin", id: "teal", polarity: "follow", version: BACKDROP_VERSION };
 
@@ -116,9 +119,9 @@ describe("resolveBackdrop", () => {
 });
 
 describe("supportsBackdrop", () => {
-    it("is the agent pane for now, and no terminal, widget or browser view", () => {
-        expect(supportsBackdrop("agent")).toBe(true);
-        for (const view of ["term", "files", "browser", "sysinfo", "kanban", "", undefined, null, 7]) expect(supportsBackdrop(view), String(view)).toBe(false);
+    it("is the agent pane, the panes built from the app's own components and any widget pane, and no terminal or browser view", () => {
+        for (const view of ["agent", "files", "editor", "kanban", "swarm", "ext:acme.clock/main"]) expect(supportsBackdrop(view), view).toBe(true);
+        for (const view of ["term", "browser", "sysinfo", "ext", "", undefined, null, 7]) expect(supportsBackdrop(view), String(view)).toBe(false);
     });
 });
 
@@ -146,4 +149,41 @@ describe("sameBackdrop and sameResolved", () => {
         expect(sameResolved(a, undefined)).toBe(false);
         expect(sameResolved(undefined, undefined)).toBe(true);
     });
+});
+
+describe("paneChromeInk (the header and tab pills of a pane with a backdrop)", () => {
+    it("is none for a pane with no backdrop and for a view that takes none", () => {
+        expect(paneChromeInk({ view: "agent" }, "dark")).toBeUndefined();
+        expect(paneChromeInk({ view: "term", backdrop: teal }, "dark")).toBeUndefined();
+        expect(paneChromeInk(undefined, "dark")).toBeUndefined();
+    });
+
+    it("says which side the surface is on, with the ink the labels have there", () => {
+        const dark = paneChromeInk({ view: "agent", backdrop: { kind: "color", hex: "#0b3d1e" } }, "light")!;
+        const light = paneChromeInk({ view: "agent", backdrop: { kind: "color", hex: "#fff6b0" } }, "dark")!;
+        expect(dark.light).toBe(false);
+        expect(light.light).toBe(true);
+        const d = deriveInk("#fff6b0");
+        expect(light.ink).toEqual({ selected: d.ink.text, unselected: d.ink.muted });
+        expect(light.surface).toBe(d.surfaces.surface);
+    });
+
+    it("follows the app theme for a built-in set to follow, and not for one fixed to a side", () => {
+        const follow = { view: "agent", backdrop: teal };
+        expect(paneChromeInk(follow, "dark")!.light).toBe(false);
+        expect(paneChromeInk(follow, "light")!.light).toBe(true);
+        expect(paneChromeInk({ view: "agent", backdrop: { ...teal, polarity: "dark" } }, "light")!.light).toBe(false);
+    });
+
+    it.each(["#ffffff", "#fff6b0", "#e8f4ff", "#000000", "#0b3d1e", "#336699", "#808080"])(
+        "gives a pill on %s a fill its labels read on, for every colour of the palette",
+        (hex) => {
+            const c = paneChromeInk({ view: "agent", backdrop: { kind: "color", hex } }, "dark")!;
+            for (const slot of PALETTE) {
+                const p = tabPaint(slot, c.light, c.ink);
+                expect(contrastRatio(c.ink.selected, p.selected), `${slot.id} selected on ${hex}`).toBeGreaterThanOrEqual(4.5);
+                expect(contrastRatio(c.ink.unselected, p.unselected), `${slot.id} unselected on ${hex}`).toBeGreaterThanOrEqual(4.5);
+            }
+        }
+    );
 });

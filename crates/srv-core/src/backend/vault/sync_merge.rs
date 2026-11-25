@@ -170,7 +170,13 @@ pub fn merge(held: Option<&Held>, change: &Change) -> Decision {
                 (Side::Incoming, false) => Kept::ChangedWhileDeleted { machine: local_machine },
                 (Side::Incoming, true) => Kept::Deleted { machine: local_machine },
             };
-            Decision::Conflict { current: side, kept, tags: h.tags.clone() }
+            // A value that takes the place of a delete is the current value, so its tags are the value's (with any the delete
+            // held), as they are on the machine that kept the value. Any other side leaves the tags of what is current.
+            let tags = match (deleted_here, side, value_in) {
+                (true, Side::Incoming, Some(theirs)) => union_tags(theirs, &h.tags),
+                _ => h.tags.clone(),
+            };
+            Decision::Conflict { current: side, kept, tags }
         }
     }
 }

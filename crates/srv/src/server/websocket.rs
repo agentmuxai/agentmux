@@ -275,6 +275,7 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState, session: O
 
     // Register handlers
     register_handlers(&engine, state.clone(), conn_id.clone());
+    super::dispatch_guard::install(&engine);
     tracing::info!("[ws-perf] create_engine+register_handlers: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0);
     tracing::info!("[ws-perf] TOTAL ws_setup: {:.2}ms", ws_start.elapsed().as_secs_f64() * 1000.0);
 
@@ -715,6 +716,10 @@ pub(super) fn refuse_agent_input(ctx: &RpcContext) -> Result<(), String> {
 /// as a `bus:error` frame (the one agent clients already read); a closed socket is the only `Err`.
 async fn input_command(wscommand: &str, incoming: &WSIncoming, engine: &Arc<WshRpcEngine>, socket: &mut WebSocket) -> Result<(), ()> {
     let Some(block_id) = incoming.blockid.as_deref() else { return Ok(()) };
+    if let Err(refusal) = engine.check_dispatch(wscommand, &serde_json::Value::Null) {
+        let frame = serde_json::to_string(&json!({ "type": "bus:error", "error": refusal })).unwrap_or_default();
+        return socket.send(Message::Text(frame.into())).await.map_err(|_| ());
+    }
     let ctx = engine.rpc_context();
     let result = if wscommand == "blockinput" {
         let Some(data64) = incoming.inputdata64.as_deref().filter(|d| !d.is_empty()) else { return Ok(()) };
@@ -728,8 +733,7 @@ async fn input_command(wscommand: &str, incoming: &WSIncoming, engine: &Arc<WshR
     } else {
         let Some(ts_val) = incoming.termsize.as_ref() else { return Ok(()) };
         match serde_json::from_value::<TermSize>(ts_val.clone()) {
-            Ok(ts) => refuse_agent_input(&ctx)
-                .and_then(|()| blockcontroller::send_input(block_id, blockcontroller::BlockInputUnion::resize(ts), None)),
+            Ok(ts) => dispatch_termsize(&ctx, block_id, ts),
             Err(e) => {
                 tracing::warn!("ws: setblocktermsize parse error: {}", e);
                 return Ok(());
@@ -744,6 +748,12 @@ async fn input_command(wscommand: &str, incoming: &WSIncoming, engine: &Arc<WshR
         }
     }
     Ok(())
+}
+
+/// `setblocktermsize`: a resize for a block's controller. The window's alone: an agent connection is refused.
+pub(super) fn dispatch_termsize(ctx: &RpcContext, block_id: &str, size: TermSize) -> Result<(), String> {
+    refuse_agent_input(ctx)?;
+    blockcontroller::send_input(block_id, blockcontroller::BlockInputUnion::resize(size), None)
 }
 
 /// Route a decoded `blockinput` payload — the actual human-keystroke path
@@ -1034,6 +1044,20 @@ mod tests {
             Err(format!("no controller for block {unlocked_id}")),
             "an unlocked blockinput call must still reach send_input for real"
         );
+    }
+
+    /// `setblocktermsize` is the window's: an agent connection is refused whichever block it names, the window and a
+    /// connection that is not registered as an agent reach the controller as before.
+    #[test]
+    fn setblocktermsize_is_refused_for_a_connection_registered_as_an_agent() {
+        let agent = RpcContext { agent_id: "agent9".to_string(), ..Default::default() };
+        let pane = "ws-termsize-agent-test-pane";
+        let size = || crate::backend::obj::TermSize { rows: 24, cols: 80 };
+        let refused = dispatch_termsize(&agent, pane, size());
+        assert!(refused.as_ref().is_err_and(|e| e.starts_with("FORBIDDEN") && e.contains("Terminal tool")), "{refused:?}");
+        for person in [RpcContext::operator_for_tests(), RpcContext::default()] {
+            assert_eq!(dispatch_termsize(&person, pane, size()), Err(format!("no controller for block {pane}")));
+        }
     }
 
     /// An agent's connection writes into no block through the window's input commands, whatever block it names (another

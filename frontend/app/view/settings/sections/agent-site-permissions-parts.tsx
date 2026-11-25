@@ -71,7 +71,7 @@ function PermissionRow(props: { s: AgentSiteGrantsState; d: Grants; row: SitePer
             <Button
                 disabled={s.busy()}
                 aria-label={`Revoke the page permissions of ${who()}`}
-                onClick={() => void s.run("revoke it", () => RpcApi.BrowserGrantsPermissionRevokeCommand(TabRpcClient, { id: row.id }))}
+                onClick={() => s.run("revoke it", () => RpcApi.BrowserGrantsPermissionRevokeCommand(TabRpcClient, { id: row.id }))}
             >
                 Revoke
             </Button>
@@ -113,7 +113,7 @@ function AddPermission(props: { s: AgentSiteGrantsState; d: Grants }): JSX.Eleme
                 label="the new site"
                 onToggle={(kind, on) => setKinds((k) => withKind(k, kind, on))}
             />
-            <Button disabled={!ready()} onClick={() => void add()}>
+            <Button disabled={!ready()} onClick={() => add()}>
                 Allow on this site
             </Button>
             <Show when={!s.picked()}>
