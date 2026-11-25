@@ -22,7 +22,7 @@ pub(super) static GEMINI: ProviderConfig = ProviderConfig {
     auth_extra_env: &[("GEMINI_FORCE_FILE_STORAGE", "true")],
     unset_env: &[],
     npm_package: "@google/gemini-cli",
-    pinned_version: "0.67.0",
+    pinned_version: "0.71.1",
     base_url_env_var: None,
     supported_vendors: &["google"],
     // Confirmed: Gemini CLI docs — context files default to GEMINI.md;

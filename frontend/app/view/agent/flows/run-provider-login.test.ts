@@ -390,7 +390,7 @@ describe("runProviderLogin", () => {
 
         const outcome = await runProviderLogin({
             provider: pi,
-            cliPath: "C:/cli/pi/0.0.34/node_modules/.bin/pi-acp.cmd",
+            cliPath: "C:/cli/pi/0.0.35/node_modules/.bin/pi-acp.cmd",
             authEnv: { PI_CODING_AGENT_DIR: "C:/shared/providers/pi" },
             setAuthUrl: vi.fn(),
             log: vi.fn(),
@@ -399,18 +399,18 @@ describe("runProviderLogin", () => {
 
         expect(outcome).toBe("terminal-cli-signed-in");
         const terminalEnv = {
-            PI_ACP_PI_COMMAND: "C:/cli/pi/0.0.34/node_modules/.bin/pi.cmd",
+            PI_ACP_PI_COMMAND: "C:/cli/pi/0.0.35/node_modules/.bin/pi.cmd",
             PI_CODING_AGENT_DIR: "C:/shared/providers/pi",
         };
         expect(hub.openLoginTerminal).toHaveBeenCalledWith(
-            "C:/cli/pi/0.0.34/node_modules/.bin/pi-acp.cmd",
+            "C:/cli/pi/0.0.35/node_modules/.bin/pi-acp.cmd",
             ["--terminal-login"],
             terminalEnv,
         );
         expect(hub.checkCliAuthCommand).toHaveBeenCalledWith(
             {},
             {
-                cli_path: "C:/cli/pi/0.0.34/node_modules/.bin/pi-acp.cmd",
+                cli_path: "C:/cli/pi/0.0.35/node_modules/.bin/pi-acp.cmd",
                 auth_check_args: ["--list-models"],
                 auth_env: terminalEnv,
             },

@@ -309,7 +309,7 @@ fn pi_is_acp_controller() {
     assert_eq!(p.npm_package, "pi-acp");
     assert_eq!(
         p.npm_install_specs(p.pinned_version),
-        vec!["pi-acp@0.0.34".to_string(), "@earendil-works/pi-coding-agent@1.0.4".to_string()]
+        vec!["pi-acp@0.0.35".to_string(), "@earendil-works/pi-coding-agent@1.0.4".to_string()]
     );
     // Everyone else installs just the one package.
     let claude = get_provider("claude").unwrap();

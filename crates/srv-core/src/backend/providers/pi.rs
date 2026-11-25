@@ -28,7 +28,7 @@ pub(super) static PI: ProviderConfig = ProviderConfig {
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "pi-acp",
-    pinned_version: "0.0.34",
+    pinned_version: "0.0.35",
     base_url_env_var: None,
     supported_vendors: &["pi"],
     // AGENTS.md, a context file pi always loads. pi 1.0.4 treats

@@ -7,7 +7,7 @@ use super::{Tier, ControllerType, ProviderConfig};
 // downloads the pinned release itself (`cli_download::SPECS`), and a copy the user
 // installed is still found on PATH or in `known_install_paths`. Checked against
 // 1.0.52 on 2026-10-14 (SPEC_NINE_NEW_HARNESSES_2026_10_14.md §7.5); pin moved to 1.0.77
-// on 2026-11-09 after an ACP `initialize` against the real binary.
+// on 2026-11-09 after an ACP `initialize` against the real binary, and to 1.0.92 on 2026-11-25 with its hashes, no live run.
 pub(super) static GROK: ProviderConfig = ProviderConfig {
     id: "grok",
     tier: Tier::FirstClass,
@@ -45,7 +45,7 @@ pub(super) static GROK: ProviderConfig = ProviderConfig {
     ],
     unset_env: &[],
     npm_package: "",
-    pinned_version: "1.0.77",
+    pinned_version: "1.0.92",
     base_url_env_var: None,
     supported_vendors: &["xai"],
     // Read only in a trusted folder: srv trusts the agent's own
