@@ -501,6 +501,12 @@
     color: var(--secondary-text-color);
 }
 
+// On a pane's backdrop a selected row is washed with the pane's ink, which takes the muted ink under 4.5:1 on some of them:
+// its grey cells read in the main ink there.
+[data-backdrop] .files-row-selected :is(.files-col-modified, .files-col-size, .files-col-kind) {
+    color: var(--main-text-color);
+}
+
 .files-icon-box {
     display: inline-flex;
     align-items: center;

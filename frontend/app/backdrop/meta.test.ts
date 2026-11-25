@@ -180,9 +180,32 @@ describe("paneChromeInk (the header and tab pills of a pane with a backdrop)", (
         (hex) => {
             const c = paneChromeInk({ view: "agent", backdrop: { kind: "color", hex } }, "dark")!;
             for (const slot of PALETTE) {
-                const p = tabPaint(slot, c.light, c.ink);
+                const p = tabPaint(slot, c.light, c.ink, c.surface);
                 expect(contrastRatio(c.ink.selected, p.selected), `${slot.id} selected on ${hex}`).toBeGreaterThanOrEqual(4.5);
                 expect(contrastRatio(c.ink.unselected, p.unselected), `${slot.id} unselected on ${hex}`).toBeGreaterThanOrEqual(4.5);
+            }
+        }
+    );
+
+    it.each(["#ffffff", "#fff6b0", "#e8f4ff", "#000000", "#0b3d1e", "#336699", "#808080", "#9a9a9a", "#6a6a6a"])(
+        "sets the selected pill apart from the header on %s, by its fill (3:1 where its label allows) or else by a hairline at 3:1, and its bar by 3:1",
+        (hex) => {
+            const c = paneChromeInk({ view: "agent", backdrop: { kind: "color", hex } }, "dark")!;
+            for (const slot of PALETTE) {
+                const p = tabPaint(slot, c.light, c.ink, c.surface);
+                const before = tabPaint(slot, c.light, c.ink);
+                const fill = contrastRatio(p.selected, c.surface);
+                expect(fill, `${slot.id} pill on ${hex} is no nearer the header than it was`).toBeGreaterThanOrEqual(Math.min(contrastRatio(before.selected, c.surface), 3));
+                if (fill < 3) {
+                    expect(p.edge, `${slot.id} edge on ${hex}`).toBeDefined();
+                    expect(contrastRatio(p.edge!, c.surface), `${slot.id} edge on ${hex}`).toBeGreaterThanOrEqual(3);
+                } else {
+                    expect(p.edge, `${slot.id} has no edge on ${hex}`).toBeUndefined();
+                }
+                expect(contrastRatio(p.bar, c.surface), `${slot.id} bar on ${hex}`).toBeGreaterThanOrEqual(3);
+                expect(contrastRatio(p.bar, p.selected), `${slot.id} bar on its pill on ${hex}`).toBeGreaterThanOrEqual(3);
+                expect(contrastRatio(c.ink.selected, p.selected), `${slot.id} label on ${hex}`).toBeGreaterThanOrEqual(4.5);
+                expect(contrastRatio(c.ink.unselected, p.selected), `${slot.id} close mark on ${hex}`).toBeGreaterThanOrEqual(3);
             }
         }
     );

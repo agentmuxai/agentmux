@@ -595,9 +595,10 @@ describe("renderPaneChromeShell — a pane with a backdrop", () => {
         render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1" }), <div>content</div>) as any);
         const c = headerCalls.at(-1).getColor("b1")!;
         const d = resolveBackdrop({ backdrop: yellow }, "dark")!.derived;
-        const own = tabPaint(slotOf(270)!, d.scheme === "light", { selected: d.ink.text, unselected: d.ink.muted });
+        const own = tabPaint(slotOf(270)!, d.scheme === "light", { selected: d.ink.text, unselected: d.ink.muted }, d.surfaces.surface);
         expect(c.background).toBe(own.unselected);
         expect(c.activeBackground).toBe(own.selected);
+        expect(c.edge).toBe(own.edge);
         expect(c.neutralBackground).toBe(d.surfaces.surface);
         expect(c.background).not.toBe(tabPaint(slotOf(270)!, false, undefined).unselected);
     });
