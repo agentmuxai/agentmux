@@ -56,6 +56,7 @@ pub mod nav_settle;
 mod orphan_labels;
 pub mod page_state;
 pub mod page_probe;
+pub mod file_inputs;
 pub mod page_url;
 pub mod press;
 mod read_back_text;
@@ -92,6 +93,7 @@ pub fn register_routes(router: Router<Arc<AppState>>, state: Arc<AppState>) -> R
         .route("/agentmux/browser/query", post(routes::query))
         .route("/agentmux/browser/focus_info", post(routes::focus_info))
         .route("/agentmux/browser/eval", post(routes::eval))
+        .route("/agentmux/browser/file_inputs", post(file_inputs::file_inputs_route))
         .route("/agentmux/browser/page_url", post(page_url::page_url_route))
         .route("/agentmux/browser/last_input", post(last_input::last_input_route))
         .route("/agentmux/browser/snapshot", post(act::snapshot_route))

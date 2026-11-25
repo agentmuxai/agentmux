@@ -292,10 +292,14 @@ async fn run_handoff(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     if let Some(waiting) = super::browser_waiting::waiting_text(&body) {
         return Ok(waiting);
     }
-    let answer = handoff_answer_text(
+    let mut answer = handoff_answer_text(
         body.pointer("/data/answer").and_then(|v| v.as_str()).unwrap_or(""),
         body.pointer("/data/open_secs").and_then(|v| v.as_u64()),
     );
+    // Which files the person attached, as srv worded it (names only; the file itself is never sent here).
+    if let Some(files) = body.pointer("/data/attached").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+        answer = format!("{answer} {files}");
+    }
     Ok(match body.pointer("/data/handoff_id").and_then(|v| v.as_str()) {
         Some(id) => format!("{answer} (handoff_id: {id})"),
         None => answer,

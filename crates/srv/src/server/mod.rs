@@ -178,6 +178,7 @@ pub(crate) mod browser_dialog;
 pub(crate) mod browser_permission;
 pub(crate) mod browser_find;
 pub(crate) mod browser_locate;
+pub(crate) mod browser_attached;
 pub(crate) mod browser_handoff_reason;
 pub(crate) mod browser_handoffs;
 pub(crate) mod browser_waiting;

@@ -117,6 +117,14 @@ fn drop_if(target: &str, id: &str) {
     }
 }
 
+/// The pane goes to the person: cancel the chooser the agent's click left parked. The files already put in an earlier
+/// chooser stay, since the page may read them when the form is sent.
+pub(crate) fn release_held(target: &str) {
+    if let Some(e) = held().lock().remove(target) {
+        e.callback.cancel();
+    }
+}
+
 /// The pane is closing: cancel its chooser and remove the files chosen in it.
 pub(crate) fn cancel_for_block(target: &str) {
     if let Some(e) = held().lock().remove(target) {

@@ -47,7 +47,18 @@ fn handoff() -> &'static Mutex<HashSet<String>> {
 }
 
 pub(crate) fn set_handoff(panes: Vec<String>) {
-    *handoff().lock() = panes.into_iter().collect();
+    let now: HashSet<String> = panes.into_iter().collect();
+    let started: Vec<String> = {
+        let mut held = handoff().lock();
+        let started = now.iter().filter(|p| !held.contains(*p)).cloned().collect();
+        *held = now;
+        started
+    };
+    // A chooser the agent's own click left parked is the agent's: once the pane is the person's it is let go, so the
+    // person's click opens their own dialog and nothing of the agent's answers into it later.
+    for pane in started {
+        super::chooser_hold::release_held(&pane);
+    }
 }
 
 fn recent() -> &'static Mutex<HashMap<String, VecDeque<Instant>>> {
