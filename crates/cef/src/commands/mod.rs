@@ -21,6 +21,7 @@ mod promote_front;
 pub mod live_follow;
 #[cfg(any(target_os = "windows", test))]
 mod live_follow_picture;
+mod pane_picture;
 #[cfg(target_os = "windows")]
 pub mod drop_source_wrap;
 pub mod replace_page;
