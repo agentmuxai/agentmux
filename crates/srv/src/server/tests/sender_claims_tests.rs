@@ -60,6 +60,29 @@ fn sender_requests(from: &str) -> Vec<(&'static str, Value)> {
     ]
 }
 
+/// The three bus send routes act for an agent: a request that carries no token, or one this srv did not mint,
+/// is refused whoever it says it is from, and nothing is queued or delivered.
+#[tokio::test]
+async fn a_bus_send_with_no_token_is_refused_and_queues_nothing() {
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
+    let (state, _token) = state_with_alpha();
+    state.messagebus.register_http("sc-inbox");
+    for (uri, body) in sender_requests("sc-alpha").into_iter().skip(1) {
+        let body = match uri {
+            "/api/bus/send" => json!({ "from": "sc-alpha", "to": "sc-inbox", "payload": "tokenless" }),
+            "/api/bus/inject" => json!({ "from": "sc-alpha", "target": "sc-inbox", "message": "tokenless" }),
+            _ => body,
+        };
+        let (status, v) = post(&state, None, uri, body.clone()).await;
+        assert_eq!(status, StatusCode::OK, "{uri}");
+        assert!(refused(&v), "{uri} with no token: {v}");
+        let (_, v) = post(&state, Some("not-a-token-this-srv-minted"), uri, body).await;
+        assert!(refused(&v), "{uri} with a token nobody holds: {v}");
+    }
+    let held: Vec<String> = state.messagebus.read_messages("sc-inbox", 20).into_iter().map(|m| m.payload).collect();
+    assert!(held.iter().all(|p| p != "tokenless"), "{held:?}");
+}
+
 #[tokio::test]
 async fn a_token_cannot_send_as_another_agent() {
     let _counters = M4_ACTOR_COUNTERS.lock().await;
@@ -99,12 +122,13 @@ async fn a_token_may_still_send_under_a_slug_its_agent_was_renamed_from() {
     }
 }
 
-/// With no token there is nothing to compare the claim with: the UI, `muxsh` and a peer srv send as before.
+/// With no token there is nothing to compare the claim with: the jekt inject (the UI, `muxsh` and a peer srv) still takes
+/// a sender's name; the three bus send routes need a token (below).
 #[tokio::test]
 async fn an_unattributed_request_may_name_any_sender() {
     let _counters = M4_ACTOR_COUNTERS.lock().await;
     let (state, _token) = state_with_alpha();
-    for (uri, body) in sender_requests("sc-beta") {
+    for (uri, body) in sender_requests("sc-beta").into_iter().take(1) {
         let (status, v) = post(&state, None, uri, body).await;
         assert_eq!(status, StatusCode::OK, "{uri}");
         assert!(!refused(&v), "{uri}: {v}");
