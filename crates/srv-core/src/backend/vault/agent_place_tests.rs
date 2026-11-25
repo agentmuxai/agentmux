@@ -215,3 +215,23 @@ fn a_proposal_is_held_to_the_rules_of_the_change_it_asks_for_when_proposed_and_w
     assert!(proposals::accept(&s, &id, "proxy").is_err());
     assert!(fields(&s, &id).get("proxy").is_none());
 }
+
+#[test]
+fn an_entry_with_no_local_creation_line_is_nobodys_to_set_however_the_agents_own_lines_pile_up() {
+    let s = store();
+    // An entry that arrived with no line of its own here (taken from another machine, or imported in bulk): written as a row,
+    // an hour old, under an id nothing here ever recorded.
+    let source = persons_login(&s);
+    let mut row = s.vault_get(&source).unwrap().unwrap();
+    row.id = "login-arrived-intranet".into();
+    row.created_at -= 3_600_000;
+    row.updated_at = row.created_at;
+    s.vault_insert(&row).unwrap();
+    let id = row.id.clone();
+    assert!(history::history_for(&s, &id, history::Asker::Person, 20).unwrap().is_empty(), "no line of its own");
+    // The agent's first line on it is a proposal; its next change of the site is still a proposal, not a change.
+    update_details_for(&s, &asked(&id, &[("realm", "Corp")]), "builder", Some(OWN)).unwrap();
+    let again = update_details_for(&s, &asked(&id, &[("site", "https://elsewhere.example.net")]), "builder", Some(OWN)).unwrap();
+    assert!(again.changed.is_empty() && again.proposed == ["field site"], "{again:?}");
+    assert_eq!(fields(&s, &id).get("site").map(String::as_str), Some("https://intranet.example.com"));
+}

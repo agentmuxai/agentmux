@@ -288,10 +288,19 @@ struct Planned {
     place_changed: bool,
 }
 
-/// Whether the entry's first history line is `agent`'s: the login is one it made.
+/// The actions an agent's creation of an entry leaves as its first line.
+const CREATING: [&str; 3] = ["generated", "imported", "captured"];
+/// How long after an entry's creation its creation line is written: the two are made in one call.
+const CREATION_LINE_MS: i64 = 10_000;
+
+/// Whether the entry's first history line is `agent`'s creation of it: the login is one it made. The line must be a creation
+/// (an entry with no local creation line, one taken from another machine or imported in bulk, is nobody's here: an agent's
+/// later `import` over it, or a proposal, is not its making) and written when the entry was.
 fn made_by(store: &Store, row: &VaultRow, agent: &str) -> bool {
     let first = store.vault_activity_first(&row.id, row.created_at).ok().flatten();
-    first.is_some_and(|line| line.actor_kind == "agent" && history::actor_label(&line.actor) == history::actor_label(agent))
+    first.is_some_and(|line| {
+        line.actor_kind == "agent" && history::actor_label(&line.actor) == history::actor_label(agent) && CREATING.contains(&line.action.as_str()) && (0..=CREATION_LINE_MS).contains(&(line.at - row.created_at))
+    })
 }
 
 /// Splits the place fields out of what an agent asked for and settles each: on a login the agent made, a site, realm or proxy
