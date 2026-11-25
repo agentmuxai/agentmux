@@ -3,7 +3,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { beginBorderDrag, endBorderDrag, LATE_LAG_MS, summarizeLags } from "./border-drag-lag";
+import { beginBorderDrag, endBorderDrag, LATE_LAG_MS, summarizeLags } from "./drag-lag";
 
 describe("summarizeLags", () => {
     it("is the median, the 95th percentile, the worst and the count over the late line", () => {

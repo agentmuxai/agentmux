@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DRAG_SLOP_PX, installPaneSelectGuard, OWNER_ATTR, paneOf, ROOT_ATTR } from "./pane-select";
+import { DRAG_SLOP_PX, installPaneSelectGuard, OFF_ATTR, OWNER_ATTR, paneOf } from "./pane-select";
 
 let uninstall: () => void;
 
@@ -40,7 +40,7 @@ function pointer(type: string, buttons: number, target: Element = document.body,
     target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, buttons, clientX: 100 + dx, clientY: 100 }));
 }
 
-const locked = () => document.documentElement.hasAttribute(ROOT_ATTR);
+const locked = () => document.querySelector(`[${OFF_ATTR}]`) !== null;
 
 function key(target: Element, init: KeyboardEventInit): KeyboardEvent {
     const ev = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
