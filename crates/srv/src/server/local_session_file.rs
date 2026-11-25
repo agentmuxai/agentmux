@@ -186,13 +186,13 @@ pub(crate) fn load(path: &Path, binding: &KeyBinding, now_secs: u64) -> Result<O
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(_) => {
-            let _ = std::fs::remove_file(path);
+            let _ = clear(path, binding, now_secs);
             return Err(Refused::TooOpen);
         }
     };
     let result = private_enough(path).and_then(|()| decode(binding, now_secs, &bytes));
     if result.is_err() {
-        let _ = std::fs::remove_file(path);
+        let _ = clear(path, binding, now_secs);
     }
     result.map(Some)
 }
@@ -225,9 +225,15 @@ pub(crate) fn save(path: &Path, binding: &KeyBinding, saved_secs: u64, records: 
     renamed
 }
 
-/// Delete the file (a logout, or a refusal). Nothing is wrong if it is not there.
-pub(crate) fn clear(path: &Path) {
-    let _ = std::fs::remove_file(path);
+/// Delete the file (a logout, or a refusal). Nothing is wrong if it is not there. When it cannot be deleted (a sharing
+/// violation, a scanner holding it) it is replaced by a file with no sessions; only when that fails too is the error returned,
+/// and the file, with whatever sessions it holds, is still there.
+pub(crate) fn clear(path: &Path, binding: &KeyBinding, now_secs: u64) -> std::io::Result<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => save(path, binding, now_secs, &[]),
+    }
 }
 
 #[cfg(test)]

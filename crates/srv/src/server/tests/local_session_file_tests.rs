@@ -375,3 +375,34 @@ fn a_store_with_no_file_given_keeps_nothing() {
     assert!(admitted(&store, &grant, Instant::now()));
     assert_eq!(store.revoke_all(), 1);
 }
+
+#[test]
+fn a_socket_that_stays_open_is_written_at_most_every_few_minutes_like_any_other_use() {
+    use crate::server::local_session::SessionId;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(FILE_NAME);
+    let store = SessionStore::default();
+    let t0 = Instant::now();
+    store.keep_in(path.clone(), KeyBinding::Generated, t0, wall());
+    let grant = signed_in(&store, t0);
+    let id = SessionId::of_cookie(&grant.cookie);
+    let written = std::fs::read(&path).unwrap();
+    assert!(store.is_live(id, t0 + Duration::from_secs(30)));
+    assert_eq!(std::fs::read(&path).unwrap(), written);
+    assert!(store.is_live(id, t0 + SAVE_EVERY + Duration::from_secs(1)));
+    let after = std::fs::read(&path).unwrap();
+    let last_seen = |bytes: &[u8]| decode(&KeyBinding::Generated, u64::MAX, bytes).unwrap()[0].last_seen_secs;
+    assert!(last_seen(&after) >= last_seen(&written));
+    assert_ne!(after, written, "a session kept alive by a socket alone has its time of last use saved");
+}
+
+#[test]
+fn a_file_that_cannot_be_deleted_is_emptied_and_one_that_cannot_be_either_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    // Nothing there: nothing wrong.
+    assert!(clear(&dir.path().join(FILE_NAME), &KeyBinding::Generated, NOW).is_ok());
+    // A folder where the file should be cannot be deleted as a file nor replaced: the failure is returned, not swallowed.
+    let blocked = dir.path().join("blocked");
+    std::fs::create_dir(&blocked).unwrap();
+    assert!(clear(&blocked, &KeyBinding::Generated, NOW).is_err());
+}

@@ -424,9 +424,7 @@ impl SessionStore {
         };
         if token_ok {
             session.touch(now);
-            if inner.persist.as_ref().is_some_and(|p| p.last_saved.is_none_or(|t| now.duration_since(t) >= file::SAVE_EVERY)) {
-                save(&mut inner, now);
-            }
+            save_if_due(&mut inner, now);
         }
         token_ok
     }
@@ -464,7 +462,11 @@ impl SessionStore {
     pub(crate) fn is_live(&self, id: SessionId, now: Instant) -> bool {
         let mut inner = self.lock();
         prune(&mut inner, now);
-        inner.sessions.get_mut(&id.0).map(|s| s.touch(now)).is_some()
+        let live = inner.sessions.get_mut(&id.0).map(|s| s.touch(now)).is_some();
+        if live {
+            save_if_due(&mut inner, now);
+        }
+        live
     }
 
     /// Completes when the session has ended: at a logout, and at the first re-check after it
@@ -501,17 +503,26 @@ impl SessionStore {
     }
 }
 
+/// A use of a session is written at most every [`file::SAVE_EVERY`].
+fn save_if_due(inner: &mut Inner, now: Instant) {
+    if inner.persist.as_ref().is_some_and(|p| p.last_saved.is_none_or(|t| now.duration_since(t) >= file::SAVE_EVERY)) {
+        save(inner, now);
+    }
+}
+
 /// Write the live sessions to the file, or delete it when there are none. A write that fails is logged (its kind only) and the
 /// sessions stay in memory: nothing is lost but a sign-in surviving the next restart.
 fn save(inner: &mut Inner, now: Instant) {
     let Inner { sessions, persist, .. } = inner;
     let Some(p) = persist.as_mut() else { return };
     p.last_saved = Some(now);
+    let wall = agentmux_common::time::now_secs_u64();
     if sessions.is_empty() {
-        file::clear(&p.path);
+        if let Err(e) = file::clear(&p.path, &p.binding, wall) {
+            tracing::warn!(kind = ?e.kind(), "the file of browser sign-ins could not be deleted or emptied; sessions that have ended may come back after a restart");
+        }
         return;
     }
-    let wall = agentmux_common::time::now_secs_u64();
     let records: Vec<Record> = sessions
         .iter()
         .map(|(cookie, s)| Record {
@@ -522,7 +533,11 @@ fn save(inner: &mut Inner, now: Instant) {
         })
         .collect();
     if let Err(e) = file::save(&p.path, &p.binding, wall, &records) {
-        tracing::warn!(kind = ?e.kind(), "the browser sign-ins could not be saved; they end at the next restart");
+        // The old file may hold a session that has just ended: take it away, so nothing that ended comes back.
+        match file::clear(&p.path, &p.binding, wall) {
+            Ok(()) => tracing::warn!(kind = ?e.kind(), "the browser sign-ins could not be saved; they end at the next restart"),
+            Err(_) => tracing::warn!(kind = ?e.kind(), "the browser sign-ins could not be saved or the old file removed; sessions that have ended may come back after a restart"),
+        }
     }
 }
 
