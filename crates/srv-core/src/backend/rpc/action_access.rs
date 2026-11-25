@@ -14,10 +14,8 @@
 /// launcher's proof). The window makes these before its own proof lands.
 pub const OPEN: &[&str] = &[
     "app.update-check", "app.update-status", "eventreadhistory", "eventsub", "eventunsub", "eventunsuball",
-    "fileindexlines", "fileprobe", "filesearchbytes", "filesearchtext", "fs.list", "fs.places", "getfullconfig",
-    "getwaveairatelimit", "jobs.list", "kanban.list", "listeditordir", "notify.ack", "presence.status",
-    "readeditorfile", "routeannounce", "routeunannounce", "setconfig", "waveinfo", "widgets.catalog", "widgets.list",
-    "widgets.readfile", "operator.challenge",
+    "getfullconfig", "getwaveairatelimit", "jobs.list", "kanban.list", "notify.ack", "presence.status",
+    "routeannounce", "routeunannounce", "setconfig", "waveinfo", "widgets.catalog", "widgets.list", "operator.challenge",
 ];
 
 /// Calls a connection registered as an agent may make although they are the window's: the handler lets the
@@ -59,6 +57,9 @@ mod tests {
         for name in [
             "agent.output", "agent:session:read", "agent:memory:read_file", "getmemory", "listrecentsessions", "session:export",
             "agent.input-history", "getagentcontent", "bundle.export", "exportagents", "getmeta", "searchagenthistory",
+            // Reads of a path the caller names (also over a saved connection): the window's own.
+            "readeditorfile", "listeditordir", "fs.list", "fs.places", "fileprobe", "filesearchtext", "filesearchbytes",
+            "fileindexlines", "widgets.readfile",
         ] {
             assert!(!is_open(name), "{name} must be the window's alone");
         }

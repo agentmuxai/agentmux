@@ -150,6 +150,35 @@ describe("WSControl holds the window's keystrokes until its proof settles", () =
         expect(lastSocket.sent.map((m) => JSON.parse(m).tag).filter((t) => t !== undefined)).toEqual(["key"]);
     });
 
+    it("proves the connection again when srv refuses an input as unproven, and holds what follows", async () => {
+        vi.useFakeTimers();
+        resetOperatorProofForTests();
+        let finish: () => void = () => {};
+        const attest = vi
+            .fn<(nonce: string) => Promise<void>>()
+            .mockResolvedValueOnce(undefined)
+            .mockImplementationOnce(() => new Promise<void>((resolve) => (finish = resolve)));
+        await proveOperatorConnection({ challenge: async () => ({ nonce: "n" }), attest });
+        const ws = new WSControl("ws://127.0.0.1:1", "tab", () => {});
+        ws.connectNow("test");
+        lastSocket.onopen(new Event("open"));
+        const tags = () => lastSocket.sent.map((m) => JSON.parse(m).tag).filter((t) => t !== undefined);
+        ws.pushMessage(cmd({ wscommand: "blockinput", tag: "before" }));
+        expect(tags()).toEqual(["before"]);
+        lastSocket.onmessage({ data: JSON.stringify({ type: "bus:error", error: "FORBIDDEN: x (this connection isn't the AgentMux window)" }) } as MessageEvent);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(attest).toHaveBeenCalledTimes(2);
+        ws.pushMessage(cmd({ wscommand: "blockinput", tag: "after" }));
+        expect(tags()).toEqual(["before"]);
+        finish();
+        await vi.advanceTimersByTimeAsync(20);
+        expect(tags()).toEqual(["before", "after"]);
+        // A refusal that is not about the proof leaves it alone.
+        lastSocket.onmessage({ data: JSON.stringify({ type: "bus:error", error: "FORBIDDEN: an agent writes into its own terminal" }) } as MessageEvent);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(attest).toHaveBeenCalledTimes(2);
+    });
+
     it("does not hold anything when there is no host to prove the connection", () => {
         resetOperatorProofForTests();
         const ws = new WSControl("ws://127.0.0.1:1", "tab", () => {});

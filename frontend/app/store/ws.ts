@@ -7,7 +7,7 @@ import { type WebSocket, newWebSocket } from "@/util/wsutil";
 import { debugLog } from "@/util/debuglog";
 import { createSlowHandlerWatch } from "./ws-slow-handler";
 import { createHandlerCostTally } from "./ws-handler-cost";
-import { isOperatorProofSettled, operatorProofReady } from "./operator-proof";
+import { isOperatorProofSettled, operatorProofReady, reproveAfterRefusedInput } from "./operator-proof";
 
 const dlog = debugLog("wave:ws");
 
@@ -249,6 +249,10 @@ class WSControl {
         if (eventData.type == "pong") {
             // nothing
             return;
+        }
+        if (eventData.type == "bus:error") {
+            // A keystroke or resize srv refused for a lapsed proof: prove the connection again.
+            reproveAfterRefusedInput(eventData.error);
         }
         if (this.messageCallback) {
             try {

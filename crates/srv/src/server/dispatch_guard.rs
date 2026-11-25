@@ -76,6 +76,16 @@ pub(crate) fn decide(command: &str, ctx: &RpcContext, mode: Mode) -> Verdict {
 
 /// How this srv was started, read once.
 fn mode() -> Mode {
+    // The srv's own tests drive commands over sockets that are not the window (the router's tests, the live ones); the
+    // guard is tested with explicit modes, through `decide` and `guard_with`.
+    #[cfg(test)]
+    return Mode { dev_open: true, ..Mode::default() };
+    #[cfg(not(test))]
+    live_mode()
+}
+
+#[cfg(not(test))]
+fn live_mode() -> Mode {
     static DEV_OPEN: OnceLock<bool> = OnceLock::new();
     let dev_open = *DEV_OPEN.get_or_init(|| {
         dev_open_from(agentmux_common::RuntimeMode::from_env(), std::env::var(DEV_SWITCH).ok().as_deref())

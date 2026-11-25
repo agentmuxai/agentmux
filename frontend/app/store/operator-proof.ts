@@ -116,6 +116,13 @@ export function isOperatorCommand(command: string): boolean {
     return OPERATOR_COMMANDS.has(command);
 }
 
+/** srv refused one of the window's own keystrokes or resizes (a `bus:error` frame, not an RPC answer) because this
+ *  connection's proof had lapsed: prove it again, so the input that follows is held until it has. The refused input
+ *  itself is not repeated. Anything else in the frame is not this module's. */
+export function reproveAfterRefusedInput(error: unknown): void {
+    if (isUnproven(error)) void reprove();
+}
+
 function isUnproven(e: unknown): boolean {
     const message = e instanceof Error ? e.message : String(e);
     return message.includes(UNPROVEN);
