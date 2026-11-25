@@ -44,12 +44,14 @@ vi.mock("@/app/util/reveal-app-scope", () => ({ appRevealDeps: {} }));
 /** Panes open in the window but not mounted (an inactive tab of a pane's stack), by view; `shown` when in the shown tab. */
 const unmounted = vi.hoisted(() => new Map<string, { id: string; shown: boolean }>());
 const searched = vi.hoisted(() => [] as unknown[]);
+const strays = vi.hoisted(() => new Set<string>());
 vi.mock("@/app/util/reveal-block", () => ({
     findOpenBlockByView: async (view: string, _identity?: string, opts?: { shownTabOnly?: boolean }) => {
         searched.push(opts);
         const found = unmounted.get(view);
         return found && (found.shown || !opts?.shownTabOnly) ? found.id : null;
     },
+    isUnplacedInShownTab: async (id: string) => strays.has(id),
     revealBlock: async (id: string, opts?: unknown) => {
         calls.push(`reveal:${id}`);
         return revealBlock(id, opts);
@@ -78,6 +80,7 @@ describe("openOrFocusPaneIdByView", () => {
         layout.nodes.clear();
         layout.magnified = undefined;
         unmounted.clear();
+        strays.clear();
         for (const id of ["warden-1", "mem-1", "settings-1"]) unregisterBlockComponentModel(id);
     });
 
@@ -146,6 +149,14 @@ describe("openOrFocusPaneIdByView", () => {
         expect(await openOrFocusPaneIdByView("memory")).toBe("new-block");
         expect(revealBlock).not.toHaveBeenCalled();
         expect(createBlock).toHaveBeenCalledTimes(1);
+    });
+
+    it("opens a new pane, and never waits on the block, when the tab's block of the view is in no pane of its layout", async () => {
+        unmounted.set("vault", { id: "vault-stray", shown: true });
+        strays.add("vault-stray");
+        expect(await openOrFocusPaneIdByView("vault")).toBe("new-block");
+        expect(createBlock).toHaveBeenCalledTimes(1);
+        expect(calls.filter((c) => c.startsWith("reveal:"))).toEqual([]);
     });
 
     it("opens a new pane only when the shown tab has none, mounted or not", async () => {
