@@ -30,7 +30,7 @@ use crate::server::AppState;
 use super::*;
 
 /// Actions `authorize` is asked about.
-const ACTIONS: &[&str] = &["look", "click", "scroll", "type", "key", "wait"];
+const ACTIONS: &[&str] = &["look", "click", "scroll", "drag", "type", "key", "wait"];
 
 static ASKING: Mutex<Option<crate::backend::user_attention::Asking>> = Mutex::new(None);
 

@@ -1,6 +1,6 @@
 # SPEC: Desktop driving: an agent looks at and controls a native app, with the user's consent for each app
 
-**Status:** active — Phase 1 (Windows) in #5334: the Desktop tool (apps, look, click, scroll, type, key, wait, release), per-app consent, the blocklist, Stop and the audit log. Remaining: Phase 2 and later (§8), and the hands-on test of real input.
+**Status:** active — Phase 1 (Windows) in #5334: the Desktop tool (apps, look, click, scroll, drag, type, key, wait, release), per-app consent, the blocklist, Stop and the audit log. Remaining: Phase 2 and later (§8), and the hands-on test of real input.
 **Date:** 2026-10-20
 **Author:** Manoz@Area54, at the operator's request
 **Trigger (operator, 2026-10-20):** "write spec to file and lets build it", after a review of issue #261 and of how Claude Cowork, Perplexity and OpenAI's CUA do computer use.
@@ -73,12 +73,13 @@ One tool, `Desktop`, with an `action`, like the other MuxAPI tools. It is listed
 | `look` | `window` | A screenshot of one window, like `CaptureWindow`, scaled to at most 1568 px on the long edge. Records the window's geometry for later clicks. |
 | `click` | `window`, `x`, `y`, `button` (left, right, middle), `count` (1–3) | A click. |
 | `scroll` | `window`, `x`, `y`, `dx`, `dy` | A wheel scroll at a point. |
+| `drag` | `window`, `x`, `y` (press), `x2`, `y2` (release), `via` (up to 8 points between), `button`, `hold` (ctrl, alt, shift) | Presses at one point, moves through the rest in short steps with a pause after the press and before the release, and lets go. Every point must be inside the window and not covered by another; the button and held keys are let go on every exit path. It is one bounded call (about a second), so Stop takes effect before the next action. There is no separate `mouse_down` / `mouse_up`: a button held across calls could not be let go if the agent stopped. |
 | `type` | `window`, `text` (at most 500 characters) | Types text into the focused control. |
 | `key` | `window`, `keys` (for example `ctrl+s`) | Presses a key or chord. |
 | `wait` | `ms` (at most 5000) | Waits. It touches no app, so it does not ask srv. |
 | `release` | `window` | Gives up the grant early. |
 
-Phase 2 adds `drag`, and `tree` (the accessibility tree of the window with names, roles and bounds, which is the structured route inside this tool). Phase 3 adds macOS and Phase 4 Linux.
+Phase 2 adds `tree` (the accessibility tree of the window with names, roles and bounds, which is the structured route inside this tool). Phase 3 adds macOS and Phase 4 Linux.
 
 ### 5.2 Coordinates
 
