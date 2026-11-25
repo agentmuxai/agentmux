@@ -151,7 +151,7 @@ fn cases() -> Vec<Case> {
             json!({}),
             "/api/v1/agent/pane/close",
             json!({ "block_id": "b7", "reason": "done" }),
-            &["Closed pane \"b7\""],
+            &["Closed tab \"b7\""],
         ),
         c(
             "RegisterDevServer",

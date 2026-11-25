@@ -64,7 +64,7 @@ pub enum Action {
     /// Another agent's `Stop agents` over several agents at once: one window for all of them, each
     /// closed as a `CloseTab` is. The user can keep one of them (`batch::keep_member`) or all.
     CloseTabs { block_ids: Vec<String>, detail: String },
-    /// Another agent's `ClosePane block_id=`: close the whole pane.
+    /// Another agent's `ClosePane block_id=`: close the named tab (and its pane when it was the last).
     ClosePane { block_ids: Vec<String> },
     /// Stop the controller and keep the block, as `agent.stop` does. Internal
     /// only (the fork slug migration): no tool an agent can call opens one.
@@ -649,7 +649,12 @@ async fn run_action(state: &AppState, block_id: &str, action: Action) -> Result<
                 .map(|_| ())
         }
         Action::CloseTabs { .. } => Err("a batch closes through batch::run".to_string()),
-        Action::ClosePane { block_ids } => super::close_pane::run(state, block_ids).await.map(|_| ()),
+        // The window still shows every tab it was asked to close, whether or not its pane stays: the
+        // frontend is told to drop each one (a kept pane just loses that tab; the last takes the pane).
+        Action::ClosePane { block_ids } => {
+            let opts = super::close_pane::CloseOpts { frontend_waits: true, ..Default::default() };
+            super::close_pane::run_with(state, block_ids, opts).await.map(|_| ())
+        }
         Action::Stop { signal, stop_background } => {
             crate::server::app_api::agent_io::stop_one_agent_block(state, block_id, signal.as_deref(), stop_background)
                 .await

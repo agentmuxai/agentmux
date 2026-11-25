@@ -134,17 +134,31 @@ pub(crate) fn public_stop(via: &str) -> &str {
     }
 }
 
-/// What `ClosePane block_id=` tells the agent once the target's user has
-/// answered (§6.5).
+/// What srv said about the pane when it took the close of a tab (`pane_closes`): whether the pane goes with it.
+pub(crate) fn pane_goes_note(pane_closes: Option<bool>) -> &'static str {
+    match pane_closes {
+        Some(true) => " It was the pane's last tab, so the pane closes with it.",
+        Some(false) => " The pane stays, with its other tabs.",
+        None => "",
+    }
+}
+
+/// `close_pane_outcome` for an answer that did not carry `pane_closes`.
 pub(crate) fn close_pane_outcome(block: &str, now: &Value) -> anyhow::Result<String> {
+    close_pane_outcome_for(block, now, None)
+}
+
+/// What `ClosePane block_id=` and `Browser close` tell the agent once the tab's user has
+/// answered (§6.5): the tab is named, and so is whether its pane went with it.
+pub(crate) fn close_pane_outcome_for(block: &str, now: &Value, pane_closes: Option<bool>) -> anyhow::Result<String> {
     // Joined a shutdown already under way that does less than close the pane. Browser close is a pane close too.
     if let Some(via) = now["via"].as_str().filter(|v| !matches!(*v, "ClosePane" | "Browser close")).map(public_stop) {
         let by = now["by"].as_str().unwrap_or("another agent");
         return match now["status"].as_str().unwrap_or("") {
-            "kept_by_user" => Ok(format!("Not closed: the user chose to keep pane {block:?} running.")),
+            "kept_by_user" => Ok(format!("Not closed: the user chose to keep tab {block:?} running.")),
             // Found gone (closed, or its agent already stopped): retrying
             // would only find it gone again.
-            "superseded" => Ok(format!("Pane {block:?} was already closed, or its agent already stopped: nothing more to do.")),
+            "superseded" => Ok(format!("Tab {block:?} was already closed, or its agent already stopped: nothing more to do.")),
             "failed" => anyhow::bail!("close failed: {}", now["error"].as_str().unwrap_or("no detail")),
             "" | "pending" => anyhow::bail!("close of {block:?}: no answer from the user's override window"),
             state => Ok(format!(
@@ -153,10 +167,10 @@ pub(crate) fn close_pane_outcome(block: &str, now: &Value) -> anyhow::Result<Str
         };
     }
     match now["status"].as_str().unwrap_or("") {
-        "shut_down" => Ok(format!("Closed pane {block:?}. Its user was given a few seconds to keep it and did not.")),
-        "kept_by_user" => Ok(format!("Not closed: the user chose to keep pane {block:?} running.")),
-        "superseded" => Ok(format!("Pane {block:?} was already closed.")),
-        "proceeding" => Ok(format!("Pane {block:?} is closing. Its user was given a few seconds to keep it and did not.")),
+        "shut_down" => Ok(format!("Closed tab {block:?}. Its user was given a few seconds to keep it and did not.{}", pane_goes_note(pane_closes))),
+        "kept_by_user" => Ok(format!("Not closed: the user chose to keep tab {block:?} running.")),
+        "superseded" => Ok(format!("Tab {block:?} was already closed.")),
+        "proceeding" => Ok(format!("Tab {block:?} is closing. Its user was given a few seconds to keep it and did not.{}", pane_goes_note(pane_closes))),
         "failed" => anyhow::bail!("close failed: {}", now["error"].as_str().unwrap_or("no detail")),
         _ => anyhow::bail!("close of {block:?}: no answer from the user's override window"),
     }
@@ -217,11 +231,19 @@ pub(crate) fn close_pane_pending(block: &str, body: &Value, now_ms: i64) -> Stri
     // A browser pane's window is shorter than the 30 s of the rest: say what srv set.
     let secs = body["deadline_ms"].as_i64().map_or(30, |d| ((d - now_ms).max(0) as u64).div_ceil(1000));
     let mut note = pending_note(secs);
+    note.push_str(pane_goes_note(body["pane_closes"].as_bool()));
     if let Some(via) = body["via"].as_str().filter(|v| !matches!(*v, "ClosePane" | "Browser close")).map(public_stop) {
         let by = body["by"].as_str().unwrap_or("another agent");
         note.push_str(&format!(" It joined {by}'s {via}, already under way, which may leave the pane itself open: check Pane layout."));
     }
-    let out = json!({ "status": "pending", "pending": pending_windows(&[entry], None, now_ms), "note": note });
+    let mut out = json!({ "status": "pending", "pending": pending_windows(&[entry], None, now_ms), "note": note });
+    // The tab closed, and whether its pane goes with it, named as srv answered.
+    if let Some(tab) = body["tab"].as_str() {
+        out["tab"] = json!(tab);
+    }
+    if let Some(closes) = body["pane_closes"].as_bool() {
+        out["pane_closes"] = json!(closes);
+    }
     serde_json::to_string_pretty(&out).unwrap_or_else(|_| out.to_string())
 }
 
@@ -533,16 +555,16 @@ mod close_answer_tests {
     #[test]
     fn a_closed_pane_says_it_closed_and_that_its_user_did_not_keep_it() {
         let closed = close_pane_outcome("b1", &json!({ "status": "shut_down" })).unwrap();
-        assert!(closed.starts_with("Closed pane \"b1\"."), "{closed}");
+        assert!(closed.starts_with("Closed tab \"b1\"."), "{closed}");
         assert!(closed.contains("was given a few seconds to keep it and did not"), "{closed}");
         assert!(!closed.contains("in time"), "{closed}");
         let closing = close_pane_outcome("b1", &json!({ "status": "proceeding" })).unwrap();
-        assert!(closing.starts_with("Pane \"b1\" is closing."), "{closing}");
+        assert!(closing.starts_with("Tab \"b1\" is closing."), "{closing}");
     }
 
     #[test]
     fn a_pane_the_person_kept_still_says_so() {
         let kept = close_pane_outcome("b1", &json!({ "status": "kept_by_user" })).unwrap();
-        assert!(kept.starts_with("Not closed: the user chose to keep pane"), "{kept}");
+        assert!(kept.starts_with("Not closed: the user chose to keep tab"), "{kept}");
     }
 }
