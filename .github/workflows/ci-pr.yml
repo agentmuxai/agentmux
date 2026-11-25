@@ -152,6 +152,8 @@ jobs:
       docs_index: ${{ steps.classify.outputs.docs_index }}
       # The agentmux-cef crate's tests (the `cef-crate` job): a PR that changes what the crate is built from (R10).
       cef: ${{ steps.classify.outputs.cef }}
+      # The srv binary's tests in one process, on the Ubuntu leg (the classifier's R12): a srv crate or this step's files changed.
+      srv: ${{ steps.classify.outputs.srv }}
       # The known-vulnerability check (the `advisories` job): a lock file, a manifest or the check itself changed (R11).
       deps: ${{ steps.classify.outputs.deps }}
       version_only: ${{ steps.classify.outputs.version_only }}
@@ -190,7 +192,7 @@ jobs:
           # $3 is whether the known-vulnerability check runs: yes unless a caller says no (a push to main, where the
           # nightly owns it).
           run_everything() {
-            printf 'rust=true\nfrontend=true\nfrontend_build=true\ndocs_only=false\ndocs_index=true\nversion_only=false\ncef=%s\ndeps=%s\n' "${2:-true}" "${3:-true}" >> "$GITHUB_OUTPUT"
+            printf 'rust=true\nfrontend=true\nfrontend_build=true\ndocs_only=false\ndocs_index=true\nversion_only=false\ncef=%s\ndeps=%s\nsrv=true\n' "${2:-true}" "${3:-true}" >> "$GITHUB_OUTPUT"
             echo "::notice::running all checks — $1"
           }
 
@@ -219,7 +221,7 @@ jobs:
             else
               echo "::notice::merge queue: no usable file list for this entry, so the Rust job runs (R2)"
             fi
-            printf 'rust=%s\nfrontend=true\nfrontend_build=true\ndocs_only=false\ndocs_index=true\nversion_only=false\ncef=false\ndeps=false\nqueue=true\n' "$QUEUE_RUST" >> "$GITHUB_OUTPUT"
+            printf 'rust=%s\nfrontend=true\nfrontend_build=true\ndocs_only=false\ndocs_index=true\nversion_only=false\ncef=false\ndeps=false\nsrv=false\nqueue=true\n' "$QUEUE_RUST" >> "$GITHUB_OUTPUT"
             printf 'rust_os=["ubuntu-latest"]\ndocs_index_os=["ubuntu-latest"]\n' >> "$GITHUB_OUTPUT"
             echo "::notice::merge queue: fast gates and the tests that read the tree (rust job: $QUEUE_RUST)"
             exit 0
@@ -542,6 +544,19 @@ jobs:
         # unit test binary was built first on its own; even alone rustc reaches ~14 GB on the test crate (hence the
         # extra swap above).
         run: bash scripts/ci-nextest-run.sh
+      # The srv binary's tests again, in ONE process on one thread: how the nightly runs them (`cargo test --workspace --
+      # --test-threads=1`), which the nextest step above (one process per test) never does. A test that shares a
+      # process-wide value with another passed every PR and failed four nights running (2026-11-21 to 11-24); here it
+      # fails on the PR that adds it. Builds nothing: it runs the binary the nextest step built (the script says how).
+      # Only for a PR that changes a srv crate or this step's files (the classifier's R12), never in the merge queue,
+      # and no other PR waits on it: when it is not needed the step shows as skipped and the next one says so.
+      - name: srv tests in one process (the nightly's way)
+        if: matrix.os == 'ubuntu-latest' && needs.changes.outputs.srv != 'false' && needs.changes.outputs.queue != 'true'
+        timeout-minutes: 15
+        run: bash scripts/ci-srv-single-process.sh
+      - name: srv tests in one process skipped
+        if: matrix.os == 'ubuntu-latest' && (needs.changes.outputs.srv == 'false' || needs.changes.outputs.queue == 'true')
+        run: echo "::notice::the srv single-process step did not run (no srv crate changed in this PR, or this is a merge queue entry); the nightly still runs it"
       # What a stalled or failed step leaves: the 5-second resource trace (the script's watchdog also prints why it
       # killed a process), and the kernel's out-of-memory lines.
       - name: Keep the resource trace of a failed test step
@@ -1201,6 +1216,10 @@ jobs:
       # The nextest step's stall handling: which attempt statuses are retried, and when memory counts as gone.
       - name: nextest step script self-test
         run: bash scripts/ci-nextest-run.test.sh
+
+      # The single-process srv step's script: the folder and flag it runs the binary with, and how it finds the binary.
+      - name: srv single-process step script self-test
+        run: bash scripts/ci-srv-single-process.test.sh
 
       - name: Input-handler layout-read gate
         run: bash tools/lint/check-input-handler-layout-reads.sh

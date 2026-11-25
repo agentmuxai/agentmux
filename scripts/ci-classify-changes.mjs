@@ -56,12 +56,18 @@
  *   docs_only=true|false     every changed file was documentation
  *   docs_index=true|false    run the specs-index generator on all three OSes
  *   cef=true|false           run the agentmux-cef crate's tests on Linux (R10)
+ *   srv=true|false           run the srv binary's tests in one process on Linux (R12)
  *   deps=true|false          run the known-vulnerability check (R11)
  *   version_only=true|false  the PR only moves the release version (R7)
  *
  *   R11 The known-vulnerability check (ci-pr.yml's `advisories`) runs on a PR only when a changed file is a
  *       lock file, a manifest or part of the check itself (DEPENDENCY_INPUTS), and, like every output here, on
  *       anything unrecognised (R2). The nightly and the push to main never depend on this output.
+ *
+ *   R12 The srv binary's tests also run in ONE process on a PR (ci-pr.yml's `srv tests in one process` step) only when a
+ *       changed file is one of the two srv crates or the step's own files (SRV_SINGLE_PROCESS_INPUTS), and, like every
+ *       output here, on anything unrecognised (R2). The nightly runs every test in one process; PR CI runs one process per
+ *       test, so a test that only passes in a fresh process shows on the PR, not four nights later.
  *
  *   R10 The agentmux-cef crate's tests run on a PR only when a changed file is one the crate is built from
  *       (CEF_BUILT_FROM), and, like every output here, on anything unrecognised (R2). That check reports and
@@ -171,6 +177,16 @@ const CEF_BUILT_FROM = [
     /^frontend\/app\/store\/low-disk-levels\.json$/,
     /^\.github\/workflows\/ci-pr\.yml$/,
     /^scripts\/(ci-apt|ci-require-tools|ci-classify-changes)\./,
+];
+
+/**
+ * R12. What can make a srv test depend on the process it runs in: the two srv crates (the core's tests run in the
+ * core's own binary, the server layer's in agentmux-srv's), and the step's own workflow, script and this classifier.
+ */
+const SRV_SINGLE_PROCESS_INPUTS = [
+    /^crates\/srv(-core)?\//,
+    /^\.github\/workflows\/ci-pr\.yml$/,
+    /^scripts\/(ci-srv-single-process|ci-classify-changes)\./,
 ];
 
 /**
@@ -309,6 +325,12 @@ export function isCefInput(rawPath) {
     return CEF_BUILT_FROM.some((re) => re.test(p));
 }
 
+/** R12: a file that can make a srv test depend on the process it runs in. */
+export function isSrvSingleProcessInput(rawPath) {
+    const p = normalize(rawPath);
+    return SRV_SINGLE_PROCESS_INPUTS.some((re) => re.test(p));
+}
+
 /** R11: a file the known-vulnerability check reads. */
 export function isDependencyInput(rawPath) {
     const p = normalize(rawPath);
@@ -345,6 +367,7 @@ export function classifyChanges(files) {
             docs_only: false,
             docs_index: true,
             cef: true,
+            srv: true,
             deps: true,
             reason: "no files resolved — running everything (R2)",
         };
@@ -356,6 +379,8 @@ export function classifyChanges(files) {
     const docs_index = malformed || paths.some((p) => DOCS_INDEX_PATTERNS.some((re) => re.test(p)));
     // R2 for the agentmux-cef check as well; otherwise only a change to what the crate is built from runs it (R10).
     const cef = malformed || paths.some(isCefInput);
+    // R2 for the srv single-process step too; otherwise only a change to a srv crate or the step's own files runs it (R12).
+    const srv = malformed || paths.some(isSrvSingleProcessInput);
     // R2 for the known-vulnerability check too; otherwise only a change to what it reads runs it (R11).
     const deps = malformed || paths.some(isDependencyInput);
 
@@ -368,6 +393,7 @@ export function classifyChanges(files) {
             docs_only: true,
             docs_index,
             cef,
+            srv,
             deps,
             reason: `all ${paths.length} changed file(s) are documentation`,
         };
@@ -382,6 +408,7 @@ export function classifyChanges(files) {
             docs_only: false,
             docs_index,
             cef,
+            srv,
             deps,
             reason: `all ${nonDocs.length} non-doc file(s) are frontend files no Rust crate reads, e.g. ${nonDocs[0]} (R8)`,
         };
@@ -396,6 +423,7 @@ export function classifyChanges(files) {
         docs_only: false,
         docs_index,
         cef,
+        srv,
         deps,
         // Naming a concrete file makes a wrong decision debuggable from the log
         // alone, without re-deriving the whole list.
@@ -446,6 +474,7 @@ export function classifyPullFiles(entries) {
             docs_only: false,
             docs_index: false,
             cef: false,
+            srv: false,
             // The release moves only the version lines of the lock files: no dependency changes.
             deps: false,
             version_only: true,
@@ -495,6 +524,7 @@ if (isMain(import.meta.url)) {
     console.log(`docs_only=${result.docs_only}`);
     console.log(`docs_index=${result.docs_index}`);
     console.log(`cef=${result.cef}`);
+    console.log(`srv=${result.srv}`);
     console.log(`deps=${result.deps}`);
     console.log(`version_only=${result.version_only}`);
     console.error(`ci-classify-changes: ${result.reason}`);
