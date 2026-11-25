@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
     focusSearchField,
     registerSearchControls,
-    restoreFocusToMagnifier,
+    restoreFocusToComposer,
     searchControlsFor,
     searchHeaderButtons,
 } from "./search-bridge";
@@ -33,7 +33,6 @@ describe("the find bar's bridge", () => {
         expect(button).toMatchObject({
             elemtype: "toggleiconbutton",
             icon: "magnifying-glass",
-            className: "agent-search-toggle",
         });
         expect(button.title).toBe("Find in conversation (Ctrl+F)");
         off();
@@ -89,11 +88,11 @@ describe("the find bar's bridge", () => {
 });
 
 describe("focus", () => {
-    function frame(): { field: HTMLInputElement; toggle: HTMLButtonElement } {
-        document.body.innerHTML = `<div data-blockid="blk"><button class="agent-search-toggle"></button><div class="agent-search-bar"><input class="agent-search-input" value="hello"></div></div><input id="elsewhere">`;
+    function frame(): { field: HTMLInputElement; toggle: HTMLTextAreaElement } {
+        document.body.innerHTML = `<div data-blockid="blk"><textarea class="agent-input"></textarea><div class="agent-search-bar"><input class="agent-search-input" value="hello"></div></div><input id="elsewhere">`;
         return {
             field: document.querySelector(".agent-search-input") as HTMLInputElement,
-            toggle: document.querySelector(".agent-search-toggle") as HTMLButtonElement,
+            toggle: document.querySelector(".agent-input") as HTMLTextAreaElement,
         };
     }
 
@@ -105,13 +104,13 @@ describe("focus", () => {
         expect(field.selectionEnd).toBe(5);
     });
 
-    it("returns focus to the magnifier when focus was in the bar, or nowhere", () => {
+    it("returns focus to the composer when focus was in the bar, or nowhere", () => {
         const { field, toggle } = frame();
         field.focus();
-        restoreFocusToMagnifier("blk");
+        restoreFocusToComposer("blk");
         expect(document.activeElement).toBe(toggle);
         (document.activeElement as HTMLElement).blur();
-        restoreFocusToMagnifier("blk");
+        restoreFocusToComposer("blk");
         expect(document.activeElement).toBe(toggle);
     });
 
@@ -119,7 +118,7 @@ describe("focus", () => {
         frame();
         const elsewhere = document.getElementById("elsewhere") as HTMLInputElement;
         elsewhere.focus();
-        restoreFocusToMagnifier("blk");
+        restoreFocusToComposer("blk");
         expect(document.activeElement).toBe(elsewhere);
     });
 });

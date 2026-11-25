@@ -5,6 +5,7 @@
 // resolver about its text, and the tasks it publishes so a number in any text can be checked against the boards.
 
 import { publishTasks } from "@/app/links/task-index-store";
+import { publishHeldTasks } from "@/app/store/held-tasks";
 import type { SurfaceContext } from "@/app/links/link-context";
 import { boardSlugOf, defaultSlugOf } from "./kanban-boards";
 import type { KanbanBoard, KanbanTask } from "./kanban-types";
@@ -17,6 +18,8 @@ export function surfaceOf(t: KanbanTask): SurfaceContext {
 
 /** Every board's tasks as the numbers and titles the resolver checks a reference against. */
 export function publishBoardTasks(raw: KanbanBoard): void {
+    // The task each agent pane holds, for an agent tab's hover card (store/held-tasks.ts).
+    publishHeldTasks(raw.tasks);
     const fallback = defaultSlugOf(raw);
     publishTasks(
         raw.tasks.map((t) => ({ board: boardSlugOf(t, fallback), number: t.card.num, title: t.title, state: t.state })),

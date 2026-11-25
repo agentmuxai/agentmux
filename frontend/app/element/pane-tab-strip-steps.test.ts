@@ -4,7 +4,7 @@
 
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createStripSteps, stripRoom } from "./pane-tab-strip-steps";
+import { activeTabNeeds, createStripSteps, stripRoom } from "./pane-tab-strip-steps";
 
 /** A header range (`rangeWidth` wide) holding: a 45px item, the tab strip holder, a 0px spacer, a 45px item. */
 function header(rangeWidth: number, addWidth: number, labels: Array<{ scroll: number; client: number }>) {
@@ -242,6 +242,146 @@ describe("createStripSteps", () => {
         m.setRevision(1);
         await vi.advanceTimersByTimeAsync(40);
         expect(m.steps.step()).toBe("full");
+        m.dispose();
+    });
+});
+
+/** A strip with the selected tab's pill: its items stand where they would in a layout (`at`: left, width), the title between them. */
+function selectedPill(strip: HTMLElement, items: Array<{ cls: string; left: number; width: number }>, pill = { left: 0, width: 47 }) {
+    const el = document.createElement("div");
+    el.className = "pane-tab pane-tab--active";
+    const box = (left: number, width: number) => ({ left, width, right: left + width }) as DOMRect;
+    el.getBoundingClientRect = () => box(pill.left, pill.width);
+    Object.defineProperty(el, "offsetParent", { value: document.body });
+    for (const it of items) {
+        const child = document.createElement("span");
+        child.className = it.cls;
+        child.getBoundingClientRect = () => box(it.left, it.width);
+        Object.defineProperty(child, "offsetParent", { value: document.body });
+        el.append(child);
+    }
+    strip.prepend(el);
+    return el;
+}
+
+describe("activeTabNeeds", () => {
+    beforeEach(() => {
+        vi.spyOn(window, "getComputedStyle").mockImplementation(() => ({ position: "static" }) as CSSStyleDeclaration);
+    });
+    afterEach(() => {
+        vi.restoreAllMocks();
+        document.body.replaceChildren();
+    });
+
+    // An agent's tab squeezed to 47: icon at 8, the title squeezed to nothing, six buttons of 22 and a gap of 2, the close button.
+    const squeezed = [
+        { cls: "pane-tab-icon", left: 8, width: 16 },
+        { cls: "pane-tab-label", left: 28, width: 0 },
+        { cls: "pane-tab-actions", left: 32, width: 142 },
+        { cls: "pane-tab-close", left: 178, width: 16 },
+    ];
+
+    it("reads what is not the title and how long the title is, from where the items stand, so a squeezed tab says the same as a whole one", () => {
+        const { strip } = header(600, 28, []);
+        const pill = selectedPill(strip, squeezed);
+        const label = pill.querySelector<HTMLElement>(".pane-tab-label")!;
+        Object.defineProperty(label, "scrollWidth", { value: 160 });
+        Object.defineProperty(label, "clientWidth", { value: 0 });
+        const squeezedNeeds = activeTabNeeds(strip, 1)!;
+        // 194 - 8 = 186 between the first item's left and the last one's right, plus the 8 of padding and 5 at the right.
+        expect(squeezedNeeds.fixed).toBe(186 + 8 + 5);
+        expect(squeezedNeeds.label).toBe(160);
+        // The same tab with its title showing: 120 wide, the buttons and the close button pushed along by it.
+        pill.replaceChildren();
+        const whole = selectedPill(strip, [
+            { cls: "pane-tab-icon", left: 8, width: 16 },
+            { cls: "pane-tab-label", left: 28, width: 120 },
+            { cls: "pane-tab-actions", left: 152, width: 142 },
+            { cls: "pane-tab-close", left: 298, width: 16 },
+        ], { left: 0, width: 320 });
+        whole.className = "pane-tab pane-tab--active";
+        pill.remove();
+        const label2 = whole.querySelector<HTMLElement>(".pane-tab-label")!;
+        Object.defineProperty(label2, "scrollWidth", { value: 160 });
+        Object.defineProperty(label2, "clientWidth", { value: 120 });
+        const wholeNeeds = activeTabNeeds(strip, 1)!;
+        expect(wholeNeeds.fixed).toBe(squeezedNeeds.fixed);
+        // The title is as long as its content, scaled as its box is (a box that shows 120 of 160 is not cut by the scale).
+        expect(wholeNeeds.label).toBe(160);
+    });
+
+    it("is in unzoomed px at a strip zoom", () => {
+        const { strip } = header(600, 28, []);
+        const pill = selectedPill(strip, squeezed.map((it) => ({ ...it, left: it.left * 2, width: it.width * 2 })), { left: 0, width: 94 });
+        const label = pill.querySelector<HTMLElement>(".pane-tab-label")!;
+        Object.defineProperty(label, "scrollWidth", { value: 160 });
+        Object.defineProperty(label, "clientWidth", { value: 0 });
+        expect(activeTabNeeds(strip, 2)!.fixed).toBe(186 + 8 + 5);
+    });
+
+    it("is nothing with no selected tab", () => {
+        const { strip } = header(600, 28, [{ scroll: 40, client: 40 }]);
+        expect(activeTabNeeds(strip, 1)).toBeNull();
+    });
+});
+
+describe("a strip whose selected tab carries buttons", () => {
+    beforeEach(() => {
+        stubStyle();
+        vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "setTimeout", "clearTimeout"] });
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+        vi.restoreAllMocks();
+        document.body.replaceChildren();
+    });
+
+    function mountWith(rangeWidth: number, count: number) {
+        const h = header(rangeWidth, 28, []);
+        const pill = selectedPill(h.strip, [
+            { cls: "pane-tab-icon", left: 8, width: 16 },
+            { cls: "pane-tab-label", left: 28, width: 0 },
+            { cls: "pane-tab-actions", left: 32, width: 142 },
+            { cls: "pane-tab-close", left: 178, width: 16 },
+        ]);
+        const label = pill.querySelector<HTMLElement>(".pane-tab-label")!;
+        Object.defineProperty(label, "scrollWidth", { value: 160 });
+        Object.defineProperty(label, "clientWidth", { value: 0 });
+        // Another tab's label, cut, so the strip needs a step.
+        const other = document.createElement("span");
+        other.className = "pane-tab-label";
+        Object.defineProperty(other, "scrollWidth", { value: 200 });
+        Object.defineProperty(other, "clientWidth", { value: 20 });
+        h.strip.append(other);
+        let steps!: ReturnType<typeof createStripSteps>;
+        const dispose = createRoot((d) => {
+            steps = createStripSteps({ strip: () => h.strip, tabCount: () => count, zoom: () => 1, revision: () => 0 });
+            return d;
+        });
+        return { ...h, steps, dispose };
+    }
+
+    it("writes the selected tab's floor on the strip: its buttons whole and the start of its title", async () => {
+        const m = mountWith(600, 5);
+        await vi.advanceTimersByTimeAsync(40);
+        // fixed 199 (the items' span, padding), plus the 56 of title
+        expect(m.strip.style.getPropertyValue("--pane-tab-active-floor")).toBe("255px");
+        m.dispose();
+    });
+
+    it("steps the other tabs by what the selected tab leaves them, not by an equal share", async () => {
+        // 600 - 114 - 28 = 458 for five tabs: an equal share is 91 (full). The selected tab asks 199 + 160, so the others have 25.
+        const m = mountWith(600, 5);
+        await vi.advanceTimersByTimeAsync(40);
+        expect(m.steps.step()).toBe("icon");
+        m.dispose();
+    });
+
+    it("does not let the strip shrink past the selected tab's floor and the others'", async () => {
+        const m = mountWith(120, 5);
+        await vi.advanceTimersByTimeAsync(40);
+        // 255 + 4 * 27 + the add button
+        expect(m.steps.room()).toBe(255 + 4 * 27 + 28);
         m.dispose();
     });
 });
