@@ -25,13 +25,18 @@
  *       but none of the Rust ones (rust=false, frontend=true). The Rust side
  *       reads exactly the paths in RUST_READS_FRONTEND; a test lists every
  *       frontend path the crates name, so a new read cannot go unlisted. The
- *       merge queue runs everything on the merged result (see below).
+ *       merge queue applies the same rule to each entry's own diff against the
+ *       entry ahead of it (classifyQueueEntry, `--queue`) and takes only `rust`
+ *       from it; the rest of what the queue runs is set by ci-pr.yml.
  *
  *   R7  A PR that only moves the release version (a release PR) needs none
  *       of the build jobs: every changed file is documentation or a version
  *       manifest, and every changed manifest line is that one version moving
  *       from A to B. Proven from the diff itself, never from a path or a
  *       title, so a "release" PR that also bumps a dependency runs everything.
+ *
+ *   R12 A documentation file a Rust test reads (RUST_READS_DOCS: the app API manifest and the redaction vectors)
+ *       is not documentation-only: a change to it runs the Rust legs, in a PR and in the merge queue.
  *
  *   R9  The production frontend build (a step of the frontend job) runs unless
  *       every changed file is documentation or one of BUILD_NEVER_READS: the
@@ -40,6 +45,7 @@
  * Usage:
  *   ci-classify-changes.mjs            # newline-separated paths on stdin
  *   ci-classify-changes.mjs a.md b.rs  # or as arguments (comment-hygiene: allow)
+ *   ci-classify-changes.mjs --queue    # a merge queue entry: paths on stdin, prints only rust=
  *   ... | ci-classify-changes.mjs      # or a JSON array of {filename, patch}
  *                                      # (the PR files API), which R7 needs
  *
@@ -126,6 +132,16 @@ const RUST_READS_FRONTEND = [
     /^frontend\/app\/util\/widgets-json-template\.jsonc$/,
     /^frontend\/app\/store\/low-disk-levels\.json$/,
 ];
+
+/**
+ * R12. The documentation files the Rust tests read at run time (the app API manifest, which three crates check
+ * their routes against, and the redaction vectors the frontend shares with the common crate). They are under
+ * docs/ but are test inputs, so a change to one is not documentation-only: the Rust legs run (R1, R2). A PR of
+ * these alone skipped the Rust job, in a pull request and, since the merge queue applies the same rule to an
+ * entry's diff, in the queue; only the push to main ran the tests. scripts/ci-classify-changes.test.mjs scans the
+ * crates for a path of docs/ read from the manifest directory and fails when one is not listed here.
+ */
+const RUST_READS_DOCS = [/^docs\/specs\/app-api-manifest\.json$/, /^docs\/specs\/fixtures\/redaction-vectors\.json$/];
 
 /**
  * R9. What the production frontend build never bundles: the Rust sources and what configures only their build. A
@@ -305,6 +321,7 @@ export function isDocsOnlyPath(rawPath) {
     if (p === "") return false; // R2
     if (NEVER_DOCS_EXACT.includes(p)) return false; // R3
     if (NEVER_DOCS_PREFIXES.some((prefix) => p.startsWith(prefix))) return false; // R3
+    if (RUST_READS_DOCS.some((re) => re.test(p))) return false; // R12
     return DOCS_ONLY_PATTERNS.some((re) => re.test(p));
 }
 
@@ -387,6 +404,23 @@ export function classifyChanges(files) {
 }
 
 /**
+ * The merge queue's decision for one entry (R8 applied in the queue): whether the Rust job runs. `files` are the
+ * paths the entry changes against its own base (the entry ahead of it in the queue, or main), a rename listed under
+ * both names. The answer is only `rust`: everything else the queue runs stays as ci-pr.yml's `merge_group` branch
+ * sets it. It is the same decision as a PR's (classifyChanges), with R2 made stricter: a list that is empty, or has
+ * an entry that is not a non-empty string, runs the Rust job, where classifyChanges would drop the bad entry and
+ * judge the rest.
+ */
+export function classifyQueueEntry(files) {
+    const list = Array.isArray(files) ? files : [];
+    if (list.length === 0 || list.some((f) => typeof f !== "string" || normalize(f) === "")) {
+        return { rust: true, reason: "no usable file list for this queue entry, so the Rust job runs (R2)" };
+    }
+    const r = classifyChanges(list);
+    return { rust: r.rust, reason: `queue entry: ${r.reason}` };
+}
+
+/**
  * Classify the PR files API's entries ({filename, patch, previous_filename}). A version-only PR
  * (R7) skips the build jobs; anything else is classified by its paths exactly
  * as classifyChanges does, and an entry without a string filename is malformed
@@ -433,6 +467,13 @@ async function readStdin() {
 // functions above without this running.
 if (isMain(import.meta.url)) {
     const fromArgs = process.argv.slice(2);
+    if (fromArgs[0] === "--queue") {
+        // The merge queue: newline-separated paths on stdin (git diff --name-only). Prints only `rust=`.
+        const queue = classifyQueueEntry((await readStdin()).split("\n").filter((l) => l.trim() !== ""));
+        console.log(`rust=${queue.rust}`);
+        console.error(`ci-classify-changes: ${queue.reason}`);
+        process.exit(0);
+    }
     const input = fromArgs.length > 0 ? null : await readStdin();
     let result;
     if (input !== null && input.trimStart().startsWith("[")) {

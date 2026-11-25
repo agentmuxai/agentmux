@@ -184,6 +184,7 @@ impl PersistentSubprocessController {
         inner.stop_pending = true;
         if !config_restart {
             inner.config_restart_generation = None;
+            inner.stop_watch.note_stop();
         }
         let drained = if drain_deferred {
             inner.deferred_deliveries.drain(..).collect()

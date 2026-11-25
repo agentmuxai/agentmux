@@ -77,6 +77,39 @@ pub fn release(target_id: &str) {
     lock().owners.remove(target_id);
 }
 
+/// The pages one pane has claimed, owned by the pane: they are all released when it is dropped, whether it ended through
+/// `Pane::finish`, by a panic or because its task was dropped before `finish` ran.
+#[derive(Default)]
+pub struct Claims(Vec<String>);
+
+impl Claims {
+    /// The pane shows `target_id` (as [`claim`]): released with the pane at the latest.
+    pub fn claim(&mut self, target_id: &str, tx: UnboundedSender<TargetEvent>) {
+        claim(target_id, tx);
+        if !self.0.iter().any(|t| t == target_id) {
+            self.0.push(target_id.to_string());
+        }
+    }
+
+    /// The pane no longer shows `target_id`.
+    pub fn release(&mut self, target_id: &str) {
+        release(target_id);
+        self.0.retain(|t| t != target_id);
+    }
+}
+
+impl Drop for Claims {
+    fn drop(&mut self) {
+        if self.0.is_empty() {
+            return;
+        }
+        let mut r = lock();
+        for t in self.0.drain(..) {
+            r.owners.remove(&t);
+        }
+    }
+}
+
 /// A pane is about to ask the browser for a page. Until it says it is done (`Making::done`), a new page that has no opener is
 /// held as maybe-the-one-being-made instead of being closed.
 pub struct Making(());
@@ -247,6 +280,23 @@ mod tests {
         assert!(b_rx.try_recv().is_err());
         release("t-a-3");
         release("t-b-3");
+    }
+
+    #[tokio::test]
+    async fn the_claims_of_a_pane_dropped_without_finishing_are_released() {
+        let _turn = serial().await;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut claims = Claims::default();
+        claims.claim("t-held-6", tx.clone());
+        claims.claim("t-held-7", tx);
+        claims.release("t-held-7");
+        // While the pane lives its page is its own: a window it opens is told to it, not closed.
+        assert!(route("Target.targetCreated", &created("t-pop-6", Some("t-held-6"), "page")).is_empty());
+        assert!(matches!(rx.try_recv(), Ok(TargetEvent::Opened { .. })));
+        // Dropped with no finish (a panic, a task dropped): nothing of it is claimed, though its channel is still open.
+        drop(claims);
+        assert_eq!(only(route("Target.targetCreated", &created("t-pop-7", Some("t-held-6"), "page"))).as_deref(), Some("t-pop-7"));
+        assert!(rx.try_recv().is_err(), "a page of a dropped pane is still told its news");
     }
 
     #[tokio::test]

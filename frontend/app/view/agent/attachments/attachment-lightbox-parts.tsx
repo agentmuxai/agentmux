@@ -5,12 +5,14 @@
 
 import { Match, Show, Switch, type JSX } from "solid-js";
 import { Button, CloseButton, IconButton } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { showMediaCopyMenu, sourceFromUrl } from "@/app/element/media-copy";
 import { tip } from "@/app/element/tip";
 import { formatBytes } from "@/util/format-bytes";
 import type { AttachmentInfo } from "@/types/rpc/AttachmentInfo";
 import { extLabel, fileKind, isPicture, kindIcon, kindLabel } from "./file-kind";
 import type { LightboxProps, LightboxState } from "./attachment-lightbox-state";
+import { keyLabel } from "@/app/keybindings";
 
 /** A file with no preview: its type icon and what the agent is told about it. */
 function FileDetails(props: { name: string; kind: ReturnType<typeof fileKind>; info?: AttachmentInfo }) {
@@ -31,18 +33,18 @@ function FileDetails(props: { name: string; kind: ReturnType<typeof fileKind>; i
                     {(n) => (
                         <>
                             {" "}
-                            · {n()} {n() === 1 ? "page" : "pages"}
+                            · {t("attachments.lightbox.pages", { count: n() })}
                         </>
                     )}
                 </Show>
             </span>
             <Show when={props.info?.text_bytes}>
-                {(n) => <span class="facts">Text version extracted ({formatBytes(n())}); the agent gets both.</span>}
+                {(n) => <span class="facts">{t("attachments.lightbox.textExtracted", { size: formatBytes(n()) })}</span>}
             </Show>
             <Show when={props.info?.text_note}>{(note) => <span class="facts">{note()}</span>}</Show>
             <Show when={props.info?.macros}>
                 <span class="warn">
-                    <i class="fa-solid fa-triangle-exclamation" /> Contains macros. AgentMux never opens or runs them.
+                    <i class="fa-solid fa-triangle-exclamation" /> {t("attachments.lightbox.macros")}
                 </span>
             </Show>
         </div>
@@ -55,13 +57,13 @@ function PictureView(props: { s: LightboxState }): JSX.Element {
         <Show
             when={s.url()}
             fallback={
-                <span class="agent-attachment-lightbox__missing">{s.url() === null ? s.missing() : "Loading…"}</span>
+                <span class="agent-attachment-lightbox__missing">{s.url() === null ? s.missing() : t("attachments.lightbox.loading")}</span>
             }
         >
             <img
                 src={s.url()!}
                 alt={s.item()?.name ?? ""}
-                {...tip(s.actual() ? "Fit to the window (1)" : "Actual size (1)")}
+                {...tip(s.actual() ? t("attachments.lightbox.fit") : t("attachments.lightbox.actual"))}
                 onClick={s.toggleActual}
                 onContextMenu={(e) => showMediaCopyMenu(e, sourceFromUrl(s.url()!, { mime: s.item()?.info?.mime }))}
             />
@@ -76,14 +78,14 @@ function TextView(props: { s: LightboxState }): JSX.Element {
             when={s.preview() != null}
             fallback={
                 <span class="agent-attachment-lightbox__missing">
-                    {s.preview() === null ? s.missing() : "Loading…"}
+                    {s.preview() === null ? s.missing() : t("attachments.lightbox.loading")}
                 </span>
             }
         >
             <div class="agent-attachment-lightbox__text">
                 <pre>{s.preview()}</pre>
                 <Show when={s.info() && s.info()!.bytes > s.previewBytes() + 1}>
-                    <span class="note">The first lines. The agent gets the whole file.</span>
+                    <span class="note">{t("attachments.lightbox.firstLines")}</span>
                 </Show>
             </div>
         </Show>
@@ -99,7 +101,7 @@ export function LightboxBody(props: { s: LightboxState }): JSX.Element {
                 <span class="agent-attachment-lightbox__missing">{s.missing()}</span>
             </Match>
             <Match when={s.item()?.pending}>
-                <span class="agent-attachment-lightbox__missing">Processing…</span>
+                <span class="agent-attachment-lightbox__missing">{t("attachments.lightbox.processing")}</span>
             </Match>
             <Match when={!s.item()?.id}>
                 <span class="agent-attachment-lightbox__missing">{s.missing()}</span>
@@ -131,8 +133,13 @@ function Meta(props: { s: LightboxState }): JSX.Element {
                         {i().width}×{i().height} · {formatBytes(i().bytes)}
                         <span class="sent">
                             {" "}
-                            · sent as {i().send_width}×{i().send_height}, {formatBytes(i().send_bytes)}
-                            {i().first_frame_only ? " (first frame)" : ""}
+                            ·{" "}
+                            {t("attachments.lightbox.sentAs", {
+                                width: i().send_width,
+                                height: i().send_height,
+                                size: formatBytes(i().send_bytes),
+                            })}
+                            {i().first_frame_only ? ` ${t("attachments.lightbox.firstFrame")}` : ""}
                         </span>
                     </Show>
                 </span>
@@ -148,9 +155,9 @@ function Actions(props: { s: LightboxState; p: LightboxProps }): JSX.Element {
             <Show when={p.items.length > 1}>
                 <IconButton
                     icon="chevron-left"
-                    label={`Previous ${s.noun()}`}
+                    label={t("attachments.lightbox.previous", { noun: s.noun() })}
                     tooltip={false}
-                    title="Previous (←)"
+                    title={t("attachments.lightbox.previousTip")}
                     onClick={() => s.go(-1)}
                 />
                 <span class="pos">
@@ -158,18 +165,18 @@ function Actions(props: { s: LightboxState; p: LightboxProps }): JSX.Element {
                 </span>
                 <IconButton
                     icon="chevron-right"
-                    label={`Next ${s.noun()}`}
+                    label={t("attachments.lightbox.next", { noun: s.noun() })}
                     tooltip={false}
-                    title="Next (→)"
+                    title={t("attachments.lightbox.nextTip")}
                     onClick={() => s.go(1)}
                 />
             </Show>
             <Show when={p.onRemove}>
                 <Button tone="danger" onClick={() => p.onRemove!(s.item()!.key)}>
-                    Remove
+                    {t("attachments.lightbox.remove")}
                 </Button>
             </Show>
-            <CloseButton label="Close preview" tooltip={false} title="Close (Esc)" onClick={() => p.onClose()} />
+            <CloseButton label={t("attachments.lightbox.close")} tooltip={false} title={t("attachments.lightbox.closeTip", { key: keyLabel("Escape") })} onClick={() => p.onClose()} />
         </span>
     );
 }

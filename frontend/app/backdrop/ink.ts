@@ -21,6 +21,8 @@ export interface Signals {
     warning: string;
     success: string;
     info: string;
+    /** "An agent needs you": a hue no other signal uses, so it keeps its own (theme.scss `--attention-color`). */
+    attention: string;
 }
 
 /** The hues the default app theme paints (theme.scss: `--accent-color`, `--error-color`, ...). */
@@ -30,6 +32,7 @@ export const APP_SIGNALS: Signals = {
     warning: "#e0b956", // colour: fixed (the app's own hue, an input to the derivation)
     success: "#4e9a06", // colour: fixed (the app's own hue, an input to the derivation)
     info: "#419fe0", // colour: fixed (the app's own hue, an input to the derivation)
+    attention: "#ff2bd6", // colour: fixed (the app's own hue, an input to the derivation)
 };
 
 /**
@@ -56,6 +59,9 @@ export interface Ink {
     warning: string;
     success: string;
     info: string;
+    attention: string;
+    /** The text on a fill of `attention` (a filled button): whichever of near-black and white reads better on it. */
+    onAttention: string;
     focus: string;
     /** The ink at 8 percent, as `#rrggbbaa`: a wash over the surface. */
     hover: string;
@@ -225,6 +231,12 @@ function toneSignal(hex: string, against: string, light: boolean): string {
     return solveTone(against, light, o.h, o.c, INK_TARGETS.signal.aim, o.l).hex;
 }
 
+/** The text colour for a filled button of `fill`: near-black or white, whichever has more contrast with it. */
+function readableOnFill(fill: string): string {
+    const DARK = "#1a0016"; // colour: fixed (theme.scss `--attention-text-color`, the dark default's)
+    return contrastRatio(DARK, fill) >= contrastRatio(WHITE, fill) ? DARK : WHITE;
+}
+
 /** What `toneMove` did to a colour. */
 export interface ToneMoved {
     /** The colour to use: `hex` itself when it already reads, else the same hue and chroma moved in lightness. */
@@ -272,6 +284,7 @@ export function deriveInk(chosen: string, signals: Signals = APP_SIGNALS): Deriv
     const divider = solveTone(hard, light, h, c, INK_TARGETS.divider.aim, from).hex;
     const tone = (hex: string) => toneSignal(hex, hard, light);
     const accent = tone(signals.accent);
+    const attention = tone(signals.attention);
     const ink: Ink = {
         text,
         muted,
@@ -283,6 +296,8 @@ export function deriveInk(chosen: string, signals: Signals = APP_SIGNALS): Deriv
         warning: tone(signals.warning),
         success: tone(signals.success),
         info: tone(signals.info),
+        attention,
+        onAttention: readableOnFill(attention),
         focus: accent,
         hover: withAlpha(text, 0.08),
         selected: withAlpha(text, SELECTED_WASH),
@@ -300,6 +315,8 @@ export function deriveInk(chosen: string, signals: Signals = APP_SIGNALS): Deriv
         ["warning", ink.warning, INK_TARGETS.signal.floor],
         ["success", ink.success, INK_TARGETS.signal.floor],
         ["info", ink.info, INK_TARGETS.signal.floor],
+        ["attention", ink.attention, INK_TARGETS.signal.floor],
+        ["onAttention", ink.onAttention, INK_TARGETS.signal.floor, attention],
     ];
     return {
         scheme: light ? "dark" : "light",

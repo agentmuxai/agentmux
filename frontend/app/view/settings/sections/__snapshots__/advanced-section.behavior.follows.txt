@@ -262,6 +262,18 @@
             <span data-cb="onChange">
               "change"
     <div class="settings-subheader">
+      "Conversation history"
+    <div class="setting-row" id="setting-advanced.history_storage">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Where history is kept"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "How much disk the recorded conversations, what you typed and the event history use, where they are kept and for how long. Opens the Audit pane's Storage section"
+        <div class="ui-field-control">
+          <button type="button" class="ui-button ui-tone-neutral">
+            "Open Storage"
+    <div class="settings-subheader">
       "Developer"
     <div class="setting-row" id="setting-advanced.dev_mode">
       <div class="ui-field ui-field--inline">
@@ -539,6 +551,18 @@
           <div data-stand="KeyValueEditor" data-value="{}">
             <span data-cb="onChange">
               "change"
+    <div class="settings-subheader">
+      "Conversation history"
+    <div class="setting-row" id="setting-advanced.history_storage">
+      <div class="ui-field ui-field--inline">
+        <div class="ui-field-text">
+          <label class="ui-field-label" id="ui-field-label-cl-N">
+            "Where history is kept"
+          <div class="ui-field-description" id="ui-field-desc-cl-N">
+            "How much disk the recorded conversations, what you typed and the event history use, where they are kept and for how long. Opens the Audit pane's Storage section"
+        <div class="ui-field-control">
+          <button type="button" class="ui-button ui-tone-neutral">
+            "Open Storage"
     <div class="settings-subheader">
       "Developer"
     <div class="setting-row" id="setting-advanced.dev_mode">

@@ -33,7 +33,7 @@ function LoginShell(p: {
             // Over an agent pane, the dialog follows the pane's zoom, not the chrome's (accounts-gallery.scss).
             panelClass={p.scope === "pane" ? "accounts-chooser accounts-chooser--pane" : "accounts-chooser"}
         >
-            {p.children}
+            <div class="accounts-chooser-login-body">{p.children}</div>
         </Modal>
     );
 }

@@ -10,6 +10,7 @@ import { createSignal, For, Show, type JSX } from "solid-js";
 import { t as tr } from "@/app/i18n/i18n";
 import { Button, CloseButton, Pill, TextInput, type PillTone } from "@/app/element/ui";
 import { openLink } from "@/app/store/misc-utils";
+import { openConnectors } from "@/app/store/section-panes";
 import { formatAge } from "@/app/view/warden-shared/warden-shared";
 
 import type { KanbanActRequest, KanbanActResult, KanbanCardFields, KanbanCardPr, KanbanWaitsOn } from "./kanban-types";
@@ -299,6 +300,22 @@ function PrFlowDetail(props: { pr: KanbanCardPr }): JSX.Element {
     );
 }
 
+/** "Not followed" with the way out where the drawer can act: the Accounts pane, where GitHub is connected. */
+function NotFollowed(props: { act?: PrAct }): JSX.Element {
+    return (
+        <>
+            <Pill tone="warn" title={tr("kanban.prs.notFollowedWhy")}>
+                {tr("kanban.prs.notFollowed")}
+            </Pill>
+            <Show when={props.act}>
+                <Button density="compact" tone="quiet" icon="plug" onClick={() => void openConnectors("accounts")}>
+                    {tr("kanban.prs.connectGithub")}
+                </Button>
+            </Show>
+        </>
+    );
+}
+
 /**
  * The drawer's list: each pull request of the card, its state and age, newest first, each with Unlink; one pull
  * request keeps the drawer's own button and gets an Unlink beside the add box. `act` is absent where the card is
@@ -324,9 +341,7 @@ export function DrawerPrs(props: { card: KanbanCardFields; now: number; act?: Pr
                                 </a>
                                 <Pill tone={p.state === "merged" ? "ok" : p.state === "closed" ? "neutral" : "accent"}>{prStateWords(p)}</Pill>
                                 <Show when={p.followed === false}>
-                                    <Pill tone="warn" title={tr("kanban.prs.notFollowedWhy")}>
-                                        {tr("kanban.prs.notFollowed")}
-                                    </Pill>
+                                    <NotFollowed act={props.act} />
                                 </Show>
                                 <Show when={prAge(p, props.now)}>{(age) => <span class="warden-manager-dim">{age()}</span>}</Show>
                                 <Show when={props.act}>{(act) => <UnlinkPr pr={p} act={act()} />}</Show>
@@ -338,9 +353,7 @@ export function DrawerPrs(props: { card: KanbanCardFields; now: number; act?: Pr
             </Show>
             <Show when={prs().length === 1 ? prs()[0] : undefined}>{(p) => <PrFlowDetail pr={p()} />}</Show>
             <Show when={prs().length === 1 && prs()[0].followed === false}>
-                <Pill tone="warn" title={tr("kanban.prs.notFollowedWhy")}>
-                    {tr("kanban.prs.notFollowed")}
-                </Pill>
+                <NotFollowed act={props.act} />
             </Show>
             <Show when={props.act}>
                 {(act) => (
@@ -351,7 +364,7 @@ export function DrawerPrs(props: { card: KanbanCardFields; now: number; act?: Pr
                                     density="compact"
                                     tone="quiet"
                                     icon="link-slash"
-                                    onClick={() => void act()({ action: "pr_unlink", pr: prName(p()) })}
+                                    onClick={() => act()({ action: "pr_unlink", pr: prName(p()) })}
                                 >
                                     {tr("kanban.prs.unlink", { pr: prName(p()) })}
                                 </Button>

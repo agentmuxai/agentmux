@@ -263,10 +263,25 @@
                     "id": "message",
                     "label": "deeplinks.places.audit.message",
                     "segments": ["message", { "var": "message", "kind": "id" }]
+                },
+                {
+                    "id": "section",
+                    "sections": true,
+                    "segments": [
+                        {
+                            "var": "section",
+                            "kind": "enum",
+                            "values": [
+                                { "id": "events", "label": "deeplinks.places.audit.events" },
+                                { "id": "conversations", "label": "deeplinks.places.audit.conversations" },
+                                { "id": "typed", "label": "deeplinks.places.audit.typed" },
+                                { "id": "storage", "label": "deeplinks.places.audit.storage" }
+                            ]
+                        }
+                    ]
                 }
             ]
         },
-        { "id": "history", "label": "deeplinks.views.history", "icon": "clock-rotate-left", "build": 1, "effect": "none", "sensitivity": "public", "agent": "yes", "surfaces": ["desktop"], "command": "open:history", "group": "views", "places": [] },
         { "id": "atlas", "label": "deeplinks.views.atlas", "icon": "map", "build": 1, "effect": "none", "sensitivity": "public", "agent": "yes", "surfaces": ["desktop"], "group": "views", "places": [] },
         { "id": "drone", "label": "deeplinks.views.drone", "icon": "diagram-project", "build": 1, "effect": "none", "sensitivity": "public", "agent": "yes", "surfaces": ["desktop"], "group": "views", "places": [] },
         { "id": "toolchain", "label": "deeplinks.views.toolchain", "icon": "wrench", "build": 1, "effect": "none", "sensitivity": "public", "agent": "yes", "surfaces": ["desktop"], "group": "views", "places": [] },
@@ -422,7 +437,8 @@
     ],
     "aliases": [
         { "from": ["task", "{task}"], "to": ["kanban", "task", "{task}"] },
-        { "from": ["reviews"], "to": ["kanban", "pulls"] }
+        { "from": ["reviews"], "to": ["kanban", "pulls"] },
+        { "from": ["history"], "to": ["audit", "conversations"] }
     ],
     "unlinked": [
         { "view": "identity", "reason": "retired: its parts live in Connectors and the agent pane" },

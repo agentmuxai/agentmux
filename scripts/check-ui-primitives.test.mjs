@@ -23,6 +23,7 @@ import {
     countMenus,
     closeHoverOverrides,
     countCloseControls,
+    countDiscardedClicks,
     CLOSE_CONTROLS_ALLOWLIST,
     deadFallbacks,
     declarations,
@@ -856,5 +857,62 @@ describe("menus (rule 16)", () => {
         const before = collect([{ path: "frontend/app/view/x/x.tsx", source: "<FlyoutMenu/>" }]);
         expect(compare(now, before).grew).toEqual(["menus: frontend/app/view/x/x.tsx has 2, base 1"]);
         expect(compare(before, now).shrank).toEqual(["menus: frontend/app/view/x/x.tsx has 1, base 2"]);
+    });
+});
+
+describe("discardedClicks (rule 18)", () => {
+    it("counts a kit button whose onClick starts with void, in one line, over several lines and in a block", () => {
+        const source = [
+            '<Button onClick={() => void save()}>Save</Button>',
+            '<IconButton icon="copy" label="Copy" onClick={(e) => void copy(e)} />',
+            '<CloseButton',
+            '    label="Dismiss"',
+            '    onClick={() =>',
+            '        void dismiss(id)',
+            '    }',
+            '/>',
+            '<Button onClick={() => { void install(); }}>Install</Button>',
+        ].join("\n");
+        expect(countDiscardedClicks(source)).toBe(4);
+    });
+
+    it("does not count a handler that returns its promise, a plain element, a comment, or a line marked quick action", () => {
+        const source = [
+            '<Button onClick={() => save()}>Save</Button>',
+            '<Button onClick={save}>Save</Button>',
+            '<div onClick={() => void save()}>x</div>',
+            '// <Button onClick={() => void save()}>',
+            '<Button onClick={() => void openLink(url)}>Open</Button> // quick action: opens a link',
+            '{/* quick action: reveals the file */}',
+            '<IconButton icon="folder" label="Reveal" onClick={() => void reveal(path)} />',
+        ].join("\n");
+        expect(countDiscardedClicks(source)).toBe(0);
+    });
+
+    it("takes a button from the tag it is on, not from one before it", () => {
+        const source = [
+            '<div onClick={() => void a()}>',
+            '    <Button onClick={() => b()}>B</Button>',
+            '</div>',
+            '<Button density="compact" disabled={busy()} onClick={() => void c()}>C</Button>',
+        ].join("\n");
+        expect(countDiscardedClicks(source)).toBe(1);
+    });
+
+    it("is counted per file by collect, outside the kit", () => {
+        const source = '<Button onClick={() => void save()}>Save</Button>';
+        const counts = collect([
+            { path: "frontend/app/view/a/a.tsx", source },
+            { path: "frontend/app/element/ui/Button.tsx", source },
+        ]);
+        expect(counts.discardedClicks).toEqual({ "frontend/app/view/a/a.tsx": 1 });
+    });
+
+    it("fails a file that gains one against its base, and passes one that loses one", () => {
+        const base = { discardedClicks: { "frontend/app/view/a/a.tsx": 2 } };
+        expect(compare({ discardedClicks: { "frontend/app/view/a/a.tsx": 3 } }, base).grew).toEqual([
+            "discardedClicks: frontend/app/view/a/a.tsx has 3, base 2",
+        ]);
+        expect(compare({ discardedClicks: { "frontend/app/view/a/a.tsx": 1 } }, base).grew).toEqual([]);
     });
 });

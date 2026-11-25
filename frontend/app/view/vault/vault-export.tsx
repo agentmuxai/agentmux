@@ -14,6 +14,7 @@ import { Modal } from "@/app/element/modal";
 import { ModalBody, ModalFooter, ModalHeader } from "@/app/element/modal-parts";
 import { Button, Field, TextInput } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
+import { Rich } from "@/app/i18n/rich";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import type { VaultSection } from "@/types/rpc/VaultSection";
 import { SECTION_LABELS } from "./vault-kinds";
@@ -39,13 +40,13 @@ export type Strength = { level: 0 | 1 | 2 | 3; label: string };
 /** A rough strength for the meter: length matters most; mixed kinds of characters, or
  *  several words, add a little. It only helps the person choose: srv enforces the minimum. */
 export function passphraseStrength(p: string): Strength {
-    if (p.length < MIN_PASSPHRASE) return { level: 0, label: p ? "Too short" : "" };
+    if (p.length < MIN_PASSPHRASE) return { level: 0, label: p ? t("vault.export.strength.short") : "" };
     const kinds = [/[a-z]/, /[A-Z]/, /\d/, /[^A-Za-z0-9]/].filter((r) => r.test(p)).length;
     const words = p.split(/[\s-]+/).filter(Boolean).length;
     const score = p.length + (kinds - 1) * 3 + (words >= 4 ? 8 : 0);
-    if (score < 16) return { level: 1, label: "Weak" };
-    if (score < 24) return { level: 2, label: "Fair" };
-    return { level: 3, label: "Strong" };
+    if (score < 16) return { level: 1, label: t("vault.export.strength.weak") };
+    if (score < 24) return { level: 2, label: t("vault.export.strength.fair") };
+    return { level: 3, label: t("vault.export.strength.strong") };
 }
 
 const ORDER: VaultSection[] = ["personal", "cards", "api-keys", "logins", "notes"];
@@ -257,13 +258,13 @@ export function VaultExportDialog(props: { onClose: () => void }): JSX.Element {
             panelClass="vault-form"
         >
             <ModalHeader
-                title="Export the Vault"
+                title={t("vault.export.title")}
                 description={
                     plainFormat(s)
-                        ? "Saves a file with every secret in it, unencrypted, for another password manager. Anyone who can open the file can read them."
+                        ? t("vault.export.aboutPlain")
                         : s.format() === "links"
                           ? t("vault.export.linksAbout")
-                          : "Saves a password-protected backup. Anyone with the file and its passphrase can read every secret in it."
+                          : t("vault.export.aboutVault")
                 }
             />
             <ModalBody>
@@ -288,7 +289,7 @@ export function VaultExportDialog(props: { onClose: () => void }): JSX.Element {
             </ModalBody>
             <ModalFooter>
                 <Button data-modal-dismiss onClick={() => close(s)} disabled={s.busy()}>
-                    {s.done() ? "Close" : "Cancel"}
+                    {s.done() ? t("vault.export.close") : t("vault.export.cancel")}
                 </Button>
                 <Show when={!s.done()}>
                     <ExportButton s={s} />
@@ -304,8 +305,7 @@ function ExportDone(props: { s: ExportState }): JSX.Element {
     return (
         <div class="vault-export-done" role="status">
             <p>
-                Saved {s.done()!.count} {s.done()!.count === 1 ? "entry" : "entries"} to{" "}
-                <strong>{s.done()!.file_name}</strong>.
+                <Rich k="vault.export.saved" params={{ count: s.done()!.count, file: s.done()!.file_name }} />
             </p>
             <Show when={s.done()!.whole}>
                 <p class="warden-manager-error" role="alert">
@@ -314,11 +314,8 @@ function ExportDone(props: { s: ExportState }): JSX.Element {
             </Show>
             <Show when={plainFormat(s)}>
                 <p class="warden-manager-error" role="alert">
-                    This file isn't encrypted. Import it into the other manager, then delete it, and empty the trash or
-                    recycle bin.
-                    {plainFormat(s) === "csv"
-                        ? " Don't open it in a spreadsheet and save it: a spreadsheet changes values it takes for numbers or formulas."
-                        : ""}
+                    {t("vault.export.plainDone")}
+                    {plainFormat(s) === "csv" ? ` ${t("vault.export.csvWarn")}` : ""}
                 </p>
             </Show>
             {/* A plain file has no passphrase and isn't an age file: only the warning above applies. */}
@@ -327,18 +324,10 @@ function ExportDone(props: { s: ExportState }): JSX.Element {
                     <Show
                         when={s.format() === "kdbx"}
                         fallback={
-                            <>
-                                {
-                                    "Keep the passphrase somewhere safe: nothing can recover the file without it. It's an age file, so `age -d "
-                                }
-                                {s.done()!.file_name}
-                                {"` opens it without AgentMux."}
-                            </>
+                            <>{t("vault.export.ageDone", { file: s.done()!.file_name })}</>
                         }
                     >
-                        {
-                            "Open it in KeePassXC, KeePassDX or Strongbox with that password. Keep the password somewhere safe: nothing can recover the file without it. It is a KDBX 4.1 file, so a KeePass app from before 2022 can't open it."
-                        }
+                        {t("vault.export.kdbxDone")}
                     </Show>
                 </p>
             </Show>
@@ -362,12 +351,12 @@ function FormatOption(props: { s: ExportState; value: Format; name: string; hint
 
 function FormatPicker(props: { s: ExportState }): JSX.Element {
     return (
-        <div class="vault-export-format" role="radiogroup" aria-label="File format">
+        <div class="vault-export-format" role="radiogroup" aria-label={t("vault.export.formatAria")}>
             <FormatOption
                 s={props.s}
                 value="vault"
-                name="AgentMux Vault file"
-                hint=".vault, recommended: every kind, part and detail"
+                name={t("vault.export.fmt.vault")}
+                hint={t("vault.export.fmt.vaultHint")}
             />
             <Show when={props.s.entries().some((e) => isLinked(e.fields))}>
                 <FormatOption s={props.s} value="links" name={t("vault.export.linksName")} hint={t("vault.export.linksHint")} />
@@ -375,20 +364,20 @@ function FormatPicker(props: { s: ExportState }): JSX.Element {
             <FormatOption
                 s={props.s}
                 value="kdbx"
-                name="KeePass database"
-                hint=".kdbx, to open in KeePassXC, KeePassDX or Strongbox"
+                name={t("vault.export.fmt.kdbx")}
+                hint={t("vault.export.fmt.kdbxHint")}
             />
             <FormatOption
                 s={props.s}
                 value="csv"
-                name="CSV, unencrypted"
-                hint=".csv, Bitwarden's layout, which most managers import"
+                name={t("vault.export.fmt.csv")}
+                hint={t("vault.export.fmt.csvHint")}
             />
             <FormatOption
                 s={props.s}
                 value="json"
-                name="JSON, unencrypted"
-                hint=".json, every kind and detail; AgentMux imports it back"
+                name={t("vault.export.fmt.json")}
+                hint={t("vault.export.fmt.jsonHint")}
             />
         </div>
     );
@@ -398,7 +387,7 @@ function FormatPicker(props: { s: ExportState }): JSX.Element {
 function EntryChoices(props: { s: ExportState }): JSX.Element {
     const s = props.s;
     return (
-        <div class="vault-export-entries" role="group" aria-label="What to export">
+        <div class="vault-export-entries" role="group" aria-label={t("vault.export.whatAria")}>
             <For each={s.groups()}>
                 {(g) => (
                     <div class="vault-export-group">
@@ -427,7 +416,7 @@ function EntryChoices(props: { s: ExportState }): JSX.Element {
                 )}
             </For>
             <Show when={s.entries().length === 0}>
-                <p class="warden-manager-dim">The Vault is empty: there is nothing to export.</p>
+                <p class="warden-manager-dim">{t("vault.export.empty")}</p>
             </Show>
         </div>
     );
@@ -439,9 +428,9 @@ function PassphraseFields(props: { s: ExportState }): JSX.Element {
     return (
         <>
             <Field
-                label="Passphrase"
+                label={t("vault.export.passphrase")}
                 layout="stacked"
-                hint={s.strength().label ? `Strength: ${s.strength().label}` : `At least ${MIN_PASSPHRASE} characters.`}
+                hint={s.strength().label ? t("vault.export.strengthIs", { label: s.strength().label }) : t("vault.export.atLeast", { min: MIN_PASSPHRASE })}
             >
                 <div class="vault-part">
                     <TextInput
@@ -451,8 +440,8 @@ function PassphraseFields(props: { s: ExportState }): JSX.Element {
                         value={s.pass()}
                         onInput={(e) => s.setPass(e.currentTarget.value)}
                     />
-                    <Button density="compact" tone="quiet" icon="wand-magic-sparkles" onClick={() => void suggest(s)}>
-                        Suggest one
+                    <Button density="compact" tone="quiet" icon="wand-magic-sparkles" onClick={() => suggest(s)}>
+                        {t("vault.export.suggest")}
                     </Button>
                 </div>
                 <meter
@@ -460,13 +449,13 @@ function PassphraseFields(props: { s: ExportState }): JSX.Element {
                     min={0}
                     max={3}
                     value={s.strength().level}
-                    aria-label="Passphrase strength"
+                    aria-label={t("vault.export.strengthAria")}
                 />
             </Field>
             <Field
-                label="Type it again"
+                label={t("vault.export.again")}
                 layout="stacked"
-                error={s.again() && !matches(s) ? "The two don't match." : undefined}
+                error={s.again() && !matches(s) ? t("vault.export.noMatch") : undefined}
             >
                 <TextInput
                     type={s.show() ? "text" : "password"}
@@ -477,8 +466,8 @@ function PassphraseFields(props: { s: ExportState }): JSX.Element {
                 />
             </Field>
             <label class="vault-check">
-                <input type="checkbox" checked={s.show()} onChange={(e) => s.setShow(e.currentTarget.checked)} /> Show
-                the passphrase
+                <input type="checkbox" checked={s.show()} onChange={(e) => s.setShow(e.currentTarget.checked)} />{" "}
+                {t("vault.export.show")}
             </label>
         </>
     );
@@ -490,25 +479,24 @@ function PlaceChoice(props: { s: ExportState }): JSX.Element {
     return (
         <Show when={s.place()}>
             {(at) => (
-                <div class="vault-export-place" role="group" aria-label="Where it will be saved">
+                <div class="vault-export-place" role="group" aria-label={t("vault.export.placeAria")}>
                     <p>
-                        It will be saved as <strong>{at().fileName}</strong> in <strong>{at().folder}</strong>.{" "}
+                        <Rich k="vault.export.willSave" params={{ file: at().fileName, folder: at().folder }} />{" "}
                         <Button density="compact" tone="quiet" disabled={s.busy()} onClick={() => void choosePlace(s)}>
-                            Choose another place
+                            {t("vault.export.otherPlace")}
                         </Button>
                     </p>
                     <Show when={at().syncedFolder}>
                         {(service) => (
                             <p class="warden-manager-error" role="alert">
-                                That folder is synced by {service()}: a copy may reach the cloud, and stay in its file
-                                history, even after you delete the file here.
+                                {t("vault.export.synced", { service: service() })}
                             </p>
                         )}
                     </Show>
                     <Field
-                        label={`Type "${PLAIN_CONFIRM_WORD}" to confirm`}
+                        label={t("vault.export.typeWord", { word: PLAIN_CONFIRM_WORD })}
                         layout="stacked"
-                        description="Windows or macOS then asks you to confirm it is you, as it does for Show and Copy."
+                        description={t("vault.export.osConfirm")}
                     >
                         <TextInput
                             autocomplete="off"
@@ -536,7 +524,7 @@ function ExportButton(props: { s: ExportState }): JSX.Element {
                     disabled={!ready(s)}
                     onClick={() => void (plainFormat(s) ? choosePlace(s) : save(s))}
                 >
-                    Choose where to save…
+                    {t("vault.export.chooseWhere")}
                 </Button>
             }
         >
@@ -544,9 +532,9 @@ function ExportButton(props: { s: ExportState }): JSX.Element {
                 tone="danger"
                 busy={s.busy()}
                 disabled={!ready(s) || !confirmed(s)}
-                onClick={() => void exportUnencrypted(s)}
+                onClick={() => exportUnencrypted(s)}
             >
-                Export unencrypted
+                {t("vault.export.unencrypted")}
             </Button>
         </Show>
     );

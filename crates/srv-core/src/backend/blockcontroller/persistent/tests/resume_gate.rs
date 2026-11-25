@@ -475,6 +475,13 @@ fn a_head_recorded_before_identity_keys_under_another_person_is_not_relocated() 
 
 /// A lease store in its own temp registry, so the fixture's [`UID`] never
 /// meets another test's lease.
+/// The tests that take the agent's lease share [`UID`] and the process's table of which pane holds which agent, so
+/// one that holds the agent live would make another's spawn read "open in another pane". Each runs alone.
+fn one_at_a_time() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 fn lease_registry() -> (tempfile::TempDir, Arc<crate::registry::Registry>) {
     let tmp = tempfile::tempdir().unwrap();
     let registry = Arc::new(crate::registry::Registry::open(tmp.path().to_path_buf()).unwrap());
@@ -498,6 +505,7 @@ fn relocatable(f: &Fixture) -> tempfile::TempDir {
 /// sweeps, relocates or copies anything.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_spawn_the_lease_refuses_never_reaches_the_gate() {
+    let _alone = one_at_a_time();
     let f = fixture(&[]);
     let _old = relocatable(&f);
     let (_reg, registry) = lease_registry();
@@ -517,6 +525,7 @@ async fn a_spawn_the_lease_refuses_never_reaches_the_gate() {
 /// first one's copy.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_second_controller_cannot_sweep_the_holders_relocation() {
+    let _alone = one_at_a_time();
     let f = fixture(&[]);
     let _old = relocatable(&f);
     let (_reg, registry) = lease_registry();
@@ -539,6 +548,7 @@ async fn a_second_controller_cannot_sweep_the_holders_relocation() {
 /// never answer with a fresh session.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_other_pane_holding_the_conversation_is_reported_as_held_elsewhere() {
+    let _alone = one_at_a_time();
     let f = fixture(&[]);
     let sid = format!("sid-{}", uuid::Uuid::new_v4());
     let (_reg, registry) = lease_registry();
@@ -566,6 +576,7 @@ async fn the_other_pane_holding_the_conversation_is_reported_as_held_elsewhere()
 /// callers settle queued prompts instead of falling back to a fresh session.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_stale_pane_refused_by_the_agents_live_pane_is_held_elsewhere() {
+    let _alone = one_at_a_time();
     let f = fixture(&[]);
     let (_reg, registry) = lease_registry();
     let store = crate::backend::agent_admission::lease_store_for(Some(Arc::clone(&registry))).unwrap();

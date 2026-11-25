@@ -12,9 +12,11 @@ use zeroize::Zeroizing;
 use super::*;
 use crate::backend::storage::vault::{VaultInfoRow, VaultRow};
 use crate::backend::user_sync::log::{Signer, Vector};
+use crate::backend::storage::vault_sync::TakeWrite;
 use crate::backend::user_sync::seal::KeyRing;
 use crate::backend::vault::sync_capture::{self, capture};
 use crate::backend::vault::sync_record::Known;
+use crate::backend::vault::{sync_activity, sync_grant};
 
 const NOW: i64 = 1_800_000_000_000;
 const VAULT: &str = "vault-a";
@@ -122,8 +124,14 @@ fn ship(from: &Machine, to: &mut Machine, pins: &Pins, at: i64) -> Vec<Taken> {
     records.extend(log::since(&from.store.conn().lock().unwrap(), "vault-b", &other, 100).unwrap());
     records.sort_by(|x, y| x.header.version.cmp(&y.header.version));
     let own = key();
-    let taker = Taker { store: &to.store, ring: &to.ring, key: &own, profiles: &Known(&[]) };
+    let taker = Taker { machine: &to.id, store: &to.store, ring: &to.ring, key: &own, profiles: &Known(&[]) };
     records.iter().map(|r| taker.receive(r, pins, &mut to.clock, at).unwrap()).collect()
+}
+
+/// What a sync round does first: takes again what was deferred in the last one, which settles the deletes that waited.
+fn settle(to: &Machine, at: i64) -> Vec<(String, Result<Effect, String>)> {
+    let own = key();
+    Taker { machine: &to.id, store: &to.store, ring: &to.ring, key: &own, profiles: &Known(&[]) }.retake(VAULT, at).unwrap()
 }
 
 /// Two machines that both hold one entry, written on `a` and taken by `b`.
@@ -217,7 +225,10 @@ fn a_delete_removes_the_entry_with_its_versions_and_a_second_delete_changes_noth
     a.store.vault_delete("entry-a").unwrap();
     a.capture(VAULT, NOW + 200);
     let taken = ship(&a, &mut b, &p, NOW + 210);
-    assert_eq!(taken[0].effect, Effect::Deleted { entry: on_b.clone() });
+    // The delete waits one round, in case the entry moved to another Vault: the next round's start takes it.
+    assert!(matches!(&taken[0].effect, Effect::Deferred(why) if why.contains("moved")), "{taken:?}");
+    assert!(b.store.vault_get(&on_b).unwrap().is_some());
+    assert!(matches!(&settle(&b, NOW + 220)[..], [(_, Ok(Effect::Deleted { entry }))] if *entry == on_b));
     assert!(b.store.vault_get(&on_b).unwrap().is_none());
     assert!(b.store.vault_versions(&on_b, 1).unwrap().is_empty());
     assert_eq!(b.entry_of(&link), None);
@@ -280,7 +291,9 @@ fn a_delete_made_after_a_change_ends_the_entry_and_the_change_stays_in_the_log()
     assert_eq!(b.entry_of(&link), None);
     // a takes the delete: the entry ends there too, and its last value is still in a's log, sealed.
     let on_a_taken = ship(&b, &mut a, &p, NOW + 310);
-    assert_eq!(on_a_taken[0].effect, Effect::KeptInLog("changed on a while it was deleted elsewhere".to_string()));
+    assert!(matches!(&on_a_taken[0].effect, Effect::Deferred(_)), "{on_a_taken:?}");
+    // The retake keeps the conflict the delete won: the change is in the log, and says so.
+    assert_eq!(settle(&a, NOW + 320).into_iter().map(|(_, e)| e).collect::<Vec<_>>(), [Ok(Effect::KeptInLog("changed on a while it was deleted elsewhere".to_string()))]);
     assert!(a.store.vault_get("entry-a").unwrap().is_none());
 }
 
@@ -295,6 +308,81 @@ fn a_delete_does_not_take_an_entry_that_moved_to_another_vault() {
     let row = b.store.vault_get(&on_b).unwrap().expect("the entry is still on b");
     assert_eq!(row.vault_id, "vault-b");
     assert_eq!(b.value(&on_b).as_deref(), Some("sk_test_invented_0001"));
+}
+
+#[test]
+fn a_rotation_started_while_a_delete_waited_is_not_deleted_with_the_entry() {
+    let (mut a, mut b, p, _, on_b) = both_hold_one();
+    a.store.vault_delete("entry-a").unwrap();
+    a.capture(VAULT, NOW + 100);
+    let taken = ship(&a, &mut b, &p, NOW + 110);
+    assert!(matches!(&taken[0].effect, Effect::Deferred(_)), "{taken:?}");
+    // A rotation starts here before the next round: its new value waits beside the entry.
+    let row = b.store.vault_get(&on_b).unwrap().unwrap();
+    let pending = VaultVersionRow { seq: 0, entry_id: on_b.clone(), entry_created_at: row.created_at, sealed: row.sealed.clone(), replaced_at: NOW + 150, replaced_by: "you".into(), how: "rotation".into(), state: versions::PENDING.into() };
+    b.store.vault_version_add(&pending).unwrap();
+    let again = settle(&b, NOW + 200);
+    assert!(matches!(&again[..], [(_, Ok(Effect::Wrote { .. }))]), "{again:?}");
+    assert!(b.store.vault_get(&on_b).unwrap().is_some(), "the entry and its pending value stay");
+    // The delete holds no value, so there is nothing in it to put back: the flag is false, as for any kept delete.
+    assert!(b.versions(&on_b).iter().any(|(s, v)| s == &format!("{KEPT_PREFIX}deleted on a while this was being rotated") && !*v), "{:?}", b.versions(&on_b));
+}
+
+#[test]
+fn the_new_vaults_record_taken_before_the_old_vaults_history_keeps_the_entry_in_the_new_vault() {
+    let mut a = machine("a", 1);
+    let mut c = machine("c", 3);
+    let p = pins(&a, &c);
+    a.store.vault_insert(&entry("entry-a", "Invoice provider key", "api-key", "sk_test_invented_0001", "[]")).unwrap();
+    a.capture(VAULT, NOW);
+    a.edit("entry-a", "sk_test_invented_moved", "[]", NOW + 50);
+    a.store.vault_move_entry("entry-a", "vault-b").unwrap();
+    a.capture(VAULT, NOW + 100);
+    a.capture("vault-b", NOW + 100);
+    // A machine that is new: it takes the new Vault first, then the old Vault's whole history (a live record, then the tombstone).
+    let own = key();
+    let taker = Taker { machine: &c.id, store: &c.store, ring: &c.ring, key: &own, profiles: &Known(&[]) };
+    let all = |vault: &str| log::since(&a.store.conn().lock().unwrap(), vault, &Vector::default(), 100).unwrap();
+    for rec in all("vault-b").iter().chain(all(VAULT).iter()) {
+        taker.receive(rec, &p, &mut c.clock, NOW + 200).unwrap();
+    }
+    let on_c = c.entry_of(&a.link("entry-a")).expect("the entry is on c");
+    let row = c.store.vault_get(&on_c).unwrap().unwrap();
+    assert_eq!(row.vault_id, "vault-b", "the old Vault's earlier record does not move it back");
+    assert_eq!(c.value(&on_c).as_deref(), Some("sk_test_invented_moved"), "nor does it put the older value back");
+    assert_eq!(settle(&c, NOW + 300).len(), 0);
+}
+
+#[test]
+fn the_old_vaults_tombstone_taken_before_the_new_vaults_record_does_not_delete_the_entry() {
+    let (mut a, mut b, p, _, on_b) = both_hold_one();
+    // A kept earlier value the entry has on b: a delete and a re-make would lose it.
+    let held = b.store.vault_get(&on_b).unwrap().unwrap();
+    let earlier = VaultVersionRow { seq: 0, entry_id: on_b.clone(), entry_created_at: held.created_at, sealed: held.sealed.clone(), replaced_at: NOW + 90, replaced_by: "you".into(), how: "edit".into(), state: "kept".into() };
+    b.store.vault_version_add(&earlier).unwrap();
+    a.store.vault_move_entry("entry-a", "vault-b").unwrap();
+    a.capture(VAULT, NOW + 100);
+    a.capture("vault-b", NOW + 100);
+    let own = key();
+    let taker = Taker { machine: &b.id, store: &b.store, ring: &b.ring, key: &own, profiles: &Known(&[]) };
+    let first = |vault: &str| log::since(&a.store.conn().lock().unwrap(), vault, &Vector::default(), 100).unwrap();
+    // The old Vault's tombstone comes first, on its own.
+    let old = first(VAULT);
+    let tomb = old.iter().find(|r| r.header.tombstone).expect("the old Vault ends the record");
+    let taken = taker.receive(tomb, &p, &mut b.clock, NOW + 200).unwrap();
+    assert!(matches!(taken.effect, Effect::Deferred(_)), "{taken:?}");
+    assert_eq!(b.store.vault_get(&on_b).unwrap().unwrap().vault_id, VAULT, "still there");
+    // Then the new Vault's record: it moves the same entry.
+    for rec in first("vault-b") {
+        taker.receive(&rec, &p, &mut b.clock, NOW + 210).unwrap();
+    }
+    let row = b.store.vault_get(&on_b).unwrap().expect("the entry is the same one, not made again");
+    assert_eq!(row.vault_id, "vault-b");
+    assert_eq!(b.versions(&on_b).len(), 1, "its kept value is still there");
+    // The next round takes the delete again, and finds the entry in another Vault: nothing is deleted.
+    let again = taker.retake(VAULT, NOW + 300).unwrap();
+    assert!(matches!(&again[..], [(_, Ok(Effect::None))]), "{again:?}");
+    assert!(b.store.vault_get(&on_b).unwrap().is_some());
 }
 
 #[test]
@@ -329,8 +417,75 @@ fn a_kind_this_machine_does_not_know_is_not_taken() {
     a.store.vault_insert(&entry("odd", "From a newer version", "hologram", "x", "[]")).unwrap();
     a.capture(VAULT, NOW);
     let taken = ship(&a, &mut b, &p, NOW + 5);
-    assert!(matches!(&taken[0].effect, Effect::Skipped(why) if why.contains("hologram")), "{taken:?}");
+    assert!(matches!(&taken[0].effect, Effect::Deferred(why) if why.contains("hologram")), "{taken:?}");
     assert!(b.store.vault_list().unwrap().is_empty());
+    // The log holds it, so it is not sent again: it stays noted, and a retake (after an upgrade) tries it again.
+    let again = Taker { machine: &b.id, store: &b.store, ring: &b.ring, key: &key(), profiles: &Known(&[]) }.retake(VAULT, NOW + 10).unwrap();
+    assert!(matches!(&again[..], [(_, Ok(Effect::Deferred(_)))]), "{again:?}");
+}
+
+#[test]
+fn a_record_the_store_could_not_take_is_taken_again_from_the_log_by_retake() {
+    let mut a = machine("a", 1);
+    let mut b = machine("b", 2);
+    let p = pins(&a, &b);
+    a.store.vault_insert(&entry("entry-a", "Invoice provider key", "api-key", "sk_test_invented_0001", "[]")).unwrap();
+    a.capture(VAULT, NOW);
+    // b has no key for the record's epoch yet: the layer holds the record, and the store cannot open it.
+    let vector: Vector = log::vector(&b.store.conn().lock().unwrap(), VAULT).unwrap();
+    let records = log::since(&a.store.conn().lock().unwrap(), VAULT, &vector, 100).unwrap();
+    let (own, none) = (key(), KeyRing::new());
+    let blind = Taker { machine: &b.id, store: &b.store, ring: &none, key: &own, profiles: &Known(&[]) };
+    let failed: Vec<_> = records.iter().map(|r| blind.receive(r, &p, &mut b.clock, NOW + 5)).collect();
+    assert!(failed.iter().all(|r| r.as_ref().is_err_and(|e| e.contains("no key for epoch") && e.contains("retake"))), "{failed:?}");
+    assert!(b.store.vault_list().unwrap().is_empty());
+    // A resend finds nothing to send: the log has the record. The key comes, and the retake takes it.
+    assert!(ship(&a, &mut b, &p, NOW + 6).is_empty());
+    let sighted = Taker { machine: &b.id, store: &b.store, ring: &b.ring, key: &own, profiles: &Known(&[]) };
+    let again = sighted.retake(VAULT, NOW + 10).unwrap();
+    assert!(matches!(&again[..], [(_, Ok(Effect::Wrote { .. }))]), "{again:?}");
+    let on_b = b.entry_of(&a.link("entry-a")).expect("the entry is taken");
+    assert_eq!(b.value(&on_b).as_deref(), Some("sk_test_invented_0001"));
+    // Taken once: nothing is left to retake.
+    assert!(sighted.retake(VAULT, NOW + 20).unwrap().is_empty());
+}
+
+#[test]
+fn a_conflict_won_by_a_record_that_could_not_be_taken_is_kept_as_a_conflict_when_retaken() {
+    let (mut a, mut b, p, _, on_b) = both_hold_one();
+    // Changed apart: a's change is the later one, so it wins on b, and what b held is kept.
+    b.edit(&on_b, "sk_test_invented_from_b", "[\"prod\",\"b\"]", NOW + 100);
+    a.edit("entry-a", "sk_test_invented_from_a", "[\"prod\",\"a\"]", NOW + 200);
+    b.capture(VAULT, NOW + 100);
+    a.capture(VAULT, NOW + 200);
+    let vector: Vector = log::vector(&b.store.conn().lock().unwrap(), VAULT).unwrap();
+    let records = log::since(&a.store.conn().lock().unwrap(), VAULT, &vector, 100).unwrap();
+    let (own, none) = (key(), KeyRing::new());
+    let blind = Taker { machine: &b.id, store: &b.store, ring: &none, key: &own, profiles: &Known(&[]) };
+    assert!(records.iter().all(|r| blind.receive(r, &p, &mut b.clock, NOW + 300).is_err()));
+    // The retake takes it as the conflict it was: the value b held is kept for good, not for 7 days, and the tags are both sides'.
+    let again = settle(&b, NOW + 400);
+    assert!(matches!(&again[..], [(_, Ok(Effect::Wrote { .. }))]), "{again:?}");
+    assert_eq!(b.value(&on_b).as_deref(), Some("sk_test_invented_from_a"));
+    assert_eq!(b.versions(&on_b), [(format!("{KEPT_PREFIX}changed on b at the same time"), true)]);
+    let tags: Vec<String> = serde_json::from_str(&b.store.vault_get(&on_b).unwrap().unwrap().tags).unwrap();
+    assert!(["prod", "a", "b"].iter().all(|x| tags.iter().any(|t| t == x)), "{tags:?}");
+}
+
+#[test]
+fn a_label_edited_here_between_the_read_and_the_write_is_not_overwritten() {
+    let (_a, b, _p, _, on_b) = both_hold_one();
+    let read = b.store.vault_get(&on_b).unwrap().unwrap();
+    // A change made here after the read that touches neither the value nor the time of change.
+    let mut edited = read.clone();
+    edited.label = "Renamed here".into();
+    b.store.vault_update(&edited).unwrap();
+    let mut next = read.clone();
+    next.tags = "[\"from-the-record\"]".into();
+    let write = TakeWrite { row: &next, was: Some(&read), primary: None, aliases: &[], revive: None, kept: &[] };
+    assert!(!b.store.vault_take_write(&write).unwrap(), "the write sees that the entry is no longer as it was read");
+    let now = b.store.vault_get(&on_b).unwrap().unwrap();
+    assert_eq!((now.label.as_str(), now.tags.as_str()), ("Renamed here", read.tags.as_str()));
 }
 
 #[test]
@@ -352,4 +507,246 @@ impl Machine {
     fn run_last_used(&self, entry_id: &str, at: i64) {
         self.store.vault_run_sql_for_tests(&format!("UPDATE db_vault_entries SET last_used_at = {at} WHERE id = '{entry_id}'"));
     }
+}
+
+/// Writes `body`, sealed for the place the record will have, as the machine's own record.
+fn write_sealed<T: serde::Serialize>(m: &mut Machine, record: &str, body: &T, at: i64) {
+    let bytes = serde_json::to_vec(body).unwrap();
+    let mut signer = Signer { machine: &m.id, private: &m.private, clock: &mut m.clock };
+    let conn = m.store.conn().lock().unwrap();
+    log::append_local_with(&conn, &mut signer, VAULT, record, false, at, sync_capture::sealer(&m.ring, &bytes)).unwrap();
+}
+
+fn line(label: &str) -> ActivityBody {
+    ActivityBody {
+        at: NOW,
+        entry_id: "entry-a".into(),
+        entry_label: label.into(),
+        actor: "you".into(),
+        action: "used".into(),
+        target: "example.com".into(),
+        outcome: "done".into(),
+        version: 1,
+        actor_kind: "person".into(),
+        host: "a".into(),
+        reason: String::new(),
+        refs: String::new(),
+    }
+}
+
+#[test]
+fn an_activity_line_from_another_machine_is_added_once_beside_this_machine_s_own() {
+    let mut a = machine("a", 1);
+    let mut b = machine("b", 2);
+    let p = pins(&a, &b);
+    write_sealed(&mut a, &sync_activity::record_id("a", 1), &line("Invoice provider key"), NOW);
+    let taken = ship(&a, &mut b, &p, NOW + 5);
+    assert_eq!(taken[0].effect, Effect::Line { machine: "a".into(), seq: 1 });
+    let shown = b.store.vault_activity_remote_list(10).unwrap();
+    assert_eq!(shown.len(), 1);
+    assert_eq!((shown[0].0.as_str(), shown[0].1.seq, shown[0].1.entry_label.as_str()), ("a", 1, "Invoice provider key"));
+    // Sent again, it is the same line: the layer holds it, and nothing is added.
+    let again = ship(&a, &mut b, &p, NOW + 10);
+    assert!(again.is_empty());
+    assert_eq!(b.store.vault_activity_remote_list(10).unwrap().len(), 1);
+}
+
+#[test]
+fn an_activity_line_named_for_another_machine_or_ended_is_not_taken() {
+    let mut a = machine("a", 1);
+    let mut b = machine("b", 2);
+    let p = pins(&a, &b);
+    // a makes a line that says machine b made it.
+    write_sealed(&mut a, &sync_activity::record_id("b", 1), &line("Forged"), NOW);
+    let taken = ship(&a, &mut b, &p, NOW + 5);
+    assert!(matches!(&taken[0].effect, Effect::Skipped(why) if why.contains("another machine")), "{taken:?}");
+    assert!(b.store.vault_activity_remote_list(10).unwrap().is_empty());
+}
+
+#[test]
+fn a_grant_that_is_not_its_entry_s_and_site_s_or_a_record_that_is_not_an_entry_s_is_kept_in_the_log_and_not_taken_into_the_store() {
+    let mut a = machine("a", 1);
+    let mut b = machine("b", 2);
+    let p = pins(&a, &b);
+    // A grant record whose id is not the one its entry and site make.
+    let grant = format!("g-{}", "0123456789abcdef0123456789abcdef");
+    write_sealed(&mut a, &grant, &sync_grant::GrantBody::new("entry-a", "https://example.com", NOW, 1), NOW);
+    write_sealed(&mut a, "plain-name", &serde_json::json!({ "label": "Not an entry" }), NOW + 1);
+    let taken = ship(&a, &mut b, &p, NOW + 5);
+    assert_eq!(taken.len(), 2);
+    assert!(taken.iter().all(|t| matches!(t.effect, Effect::Skipped(_))), "{taken:?}");
+    assert!(b.store.vault_list().unwrap().is_empty());
+    // The layer still holds both, so the other members get them from here.
+    let conn = b.store.conn().lock().unwrap();
+    assert!(log::current(&conn, VAULT, &grant).unwrap().is_some());
+}
+
+const P_A: &str = "e_0000000000000001";
+const P_B: &str = "e_0000000000000002";
+
+/// Two machines that hold the same entry under different link ids, and b knows a's as its alias (as when the person has said
+/// the two are one entry). The ids are picked so that a's is the smaller. Each has written its own record.
+fn diverged(value_on_b: &str) -> (Machine, Machine, Pins) {
+    let mut a = machine("a", 1);
+    let mut b = machine("b", 2);
+    let p = pins(&a, &b);
+    a.store.vault_insert(&entry("entry-a", "Invoice provider key", "api-key", "sk_test_invented_0001", "[\"prod\"]")).unwrap();
+    b.store.vault_insert(&entry("entry-b", "Invoice provider key", "api-key", value_on_b, "[\"prod\"]")).unwrap();
+    a.store.vault_link_id_assign("entry-a", P_A).unwrap();
+    b.store.vault_link_id_assign("entry-b", P_B).unwrap();
+    b.store.vault_links_set("entry-b", Some(P_B), &[P_A.to_string()]).unwrap();
+    a.capture(VAULT, NOW);
+    b.capture(VAULT, NOW + 1);
+    (a, b, p)
+}
+
+#[test]
+fn an_entry_with_two_ids_is_followed_under_the_smaller_one_and_the_larger_record_is_ended() {
+    let (mut a, mut b, p) = diverged("sk_test_invented_0001");
+    // b's record is the larger: a does not take it, but learns its id, so a link made on b opens the entry.
+    let on_a = ship(&b, &mut a, &p, NOW + 10);
+    assert!(matches!(&on_a[0].effect, Effect::Skipped(why) if why.contains("smaller id")), "{on_a:?}");
+    assert_eq!(a.entry_of(P_B).as_deref(), Some("entry-a"));
+    assert_eq!(a.store.vault_list().unwrap().len(), 1);
+    // b takes a's record, which it holds as an alias: it follows that record from now on.
+    let on_b = ship(&a, &mut b, &p, NOW + 20);
+    assert_eq!(on_b[0].effect, Effect::Wrote { entry: "entry-b".into() });
+    assert_eq!(b.store.vault_list().unwrap().len(), 1, "one entry, not two");
+    assert_eq!(b.capture(VAULT, NOW + 30), sync_capture::Captured { tombstoned: 1, ..Default::default() }, "its own record is ended");
+    // The end of the larger record does not delete the entry on a, which follows the smaller.
+    let ended = ship(&b, &mut a, &p, NOW + 40);
+    assert_eq!(ended[0].effect, Effect::None);
+    assert!(a.store.vault_get("entry-a").unwrap().is_some());
+    // An edit on either end is taken by the other, as one record.
+    a.edit("entry-a", "sk_test_invented_0002", "[\"prod\"]", NOW + 100);
+    a.capture(VAULT, NOW + 100);
+    ship(&a, &mut b, &p, NOW + 110);
+    assert_eq!(b.value("entry-b").as_deref(), Some("sk_test_invented_0002"));
+    b.edit("entry-b", "sk_test_invented_0003", "[\"prod\"]", NOW + 200);
+    b.capture(VAULT, NOW + 200);
+    ship(&b, &mut a, &p, NOW + 210);
+    assert_eq!(a.value("entry-a").as_deref(), Some("sk_test_invented_0003"));
+}
+
+#[test]
+fn a_delete_made_under_the_followed_record_ends_the_entry_on_both_machines() {
+    let (mut a, mut b, p) = diverged("sk_test_invented_0001");
+    ship(&b, &mut a, &p, NOW + 10);
+    ship(&a, &mut b, &p, NOW + 20);
+    b.capture(VAULT, NOW + 30);
+    ship(&b, &mut a, &p, NOW + 40);
+    a.store.vault_delete("entry-a").unwrap();
+    a.capture(VAULT, NOW + 100);
+    // A delete in a Vault waits one round, in case the entry moved: the next round deletes it.
+    let on_b = ship(&a, &mut b, &p, NOW + 110);
+    assert!(matches!(on_b.last().unwrap().effect, Effect::Deferred(_)), "{on_b:?}");
+    let settled = settle(&b, NOW + 120);
+    assert_eq!(settled.last().unwrap().1, Ok(Effect::Deleted { entry: "entry-b".into() }));
+    assert!(b.store.vault_list().unwrap().is_empty());
+}
+
+#[test]
+fn what_this_machine_held_under_its_larger_record_is_kept_beside_the_smaller_one() {
+    let (mut a, mut b, p) = diverged("sk_test_invented_only_on_b");
+    ship(&b, &mut a, &p, NOW + 10);
+    let on_b = ship(&a, &mut b, &p, NOW + 20);
+    assert_eq!(b.value("entry-b").as_deref(), Some("sk_test_invented_0001"), "the smaller record's value is current");
+    let kept = b.versions("entry-b");
+    assert_eq!(kept, [(format!("{KEPT_PREFIX}changed on b at the same time"), true)], "b's own value is still there");
+    assert_eq!(b.capture(VAULT, NOW + 30).written, 0, "and taking it is not a change to write back");
+}
+
+const SITE: &str = "https://billing.example.com";
+
+/// Sends what `from` holds and `to` lacks, the records `first` made before all the others (each machine's own in order, as
+/// the layer requires).
+fn ship_first_from(from: &Machine, to: &mut Machine, pins: &Pins, first: &str, at: i64) -> Vec<Taken> {
+    let vector: Vector = log::vector(&to.store.conn().lock().unwrap(), VAULT).unwrap();
+    let mut records = log::since(&from.store.conn().lock().unwrap(), VAULT, &vector, 100).unwrap();
+    records.sort_by(|x, y| (x.header.origin != first, &x.header.version).cmp(&(y.header.origin != first, &y.header.version)));
+    let own = key();
+    let taker = Taker { machine: &to.id, store: &to.store, ring: &to.ring, key: &own, profiles: &Known(&[]) };
+    records.iter().map(|r| taker.receive(r, pins, &mut to.clock, at).unwrap()).collect()
+}
+
+#[test]
+fn a_grant_that_comes_before_its_entry_waits_and_is_made_when_the_entry_is_taken() {
+    // a makes the entry; c takes it and grants a site; b gets c's records, the grant among them, before a's entry.
+    let mut a = machine("a", 1);
+    let mut b = machine("b", 2);
+    let mut c = machine("c", 3);
+    let p: Pins = [(a.id.clone(), a.public), (b.id.clone(), b.public), (c.id.clone(), c.public)].into_iter().collect();
+    a.store.vault_insert(&entry("entry-a", "Invoice provider key", "api-key", "sk_test_invented_0001", "[]")).unwrap();
+    a.capture(VAULT, NOW);
+    ship(&a, &mut c, &p, NOW + 5);
+    let on_c = c.entry_of(&a.link("entry-a")).unwrap();
+    c.store.vault_grant_add(&on_c, SITE, NOW + 6, 1).unwrap();
+    c.capture(VAULT, NOW + 7);
+    let taken = ship_first_from(&c, &mut b, &p, "c", NOW + 10);
+    assert!(taken.iter().any(|t| matches!(&t.effect, Effect::Skipped(why) if why.contains("waits"))), "{taken:?}");
+    let on_b = b.entry_of(&a.link("entry-a")).expect("the entry came after the grant");
+    assert!(b.store.vault_grant_check(&on_b, SITE).unwrap(), "the grant is made once the entry is here");
+}
+
+#[test]
+fn a_grant_made_for_another_entry_of_the_same_name_is_not_made_here() {
+    let mut a = machine("a", 1);
+    let mut b = machine("b", 2);
+    let p = pins(&a, &b);
+    a.store.vault_insert(&entry("entry-a", "Invoice provider key", "api-key", "sk_test_invented_0001", "[]")).unwrap();
+    a.capture(VAULT, NOW);
+    ship(&a, &mut b, &p, NOW + 10);
+    let on_b = b.entry_of(&a.link("entry-a")).unwrap();
+    // A grant for the entry as it was made at another time.
+    let body = sync_grant::GrantBody::new(&a.link("entry-a"), SITE, NOW, 2);
+    write_sealed(&mut a, &body.record_id(), &body, NOW + 20);
+    let taken = ship(&a, &mut b, &p, NOW + 30);
+    assert!(matches!(&taken[0].effect, Effect::Skipped(why) if why.contains("another entry")), "{taken:?}");
+    assert!(!b.store.vault_grant_check(&on_b, SITE).unwrap());
+}
+
+#[test]
+fn an_activity_line_names_its_entry_by_the_id_it_has_on_the_machine_that_takes_it() {
+    let mut a = machine("a", 1);
+    let mut b = machine("b", 2);
+    let p = pins(&a, &b);
+    a.store.vault_insert(&entry("entry-a", "Invoice provider key", "api-key", "sk_test_invented_0001", "[]")).unwrap();
+    a.store.vault_activity_add(&crate::backend::storage::vault::VaultActivityRow { at: NOW, entry_id: "entry-a".into(), entry_label: "Invoice provider key".into(), action: "revealed".into(), actor: "you".into(), ..Default::default() }).unwrap();
+    a.capture(VAULT, NOW);
+    ship(&a, &mut b, &p, NOW + 10);
+    let on_b = b.entry_of(&a.link("entry-a")).unwrap();
+    let lines = b.store.vault_activity_remote_list(10).unwrap();
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].1.entry_id, on_b, "b's own id for the entry, not a's");
+}
+
+#[test]
+fn a_grant_record_for_an_agent_or_a_setting_is_not_made_here_and_its_revoke_ends_nothing() {
+    let mut a = machine("a", 1);
+    let mut b = machine("b", 2);
+    let p = pins(&a, &b);
+    a.store.vault_insert(&entry("entry-a", "Invoice provider key", "api-key", "sk_test_invented_0001", "[]")).unwrap();
+    a.capture(VAULT, NOW);
+    ship(&a, &mut b, &p, NOW + 10);
+    let on_b = b.entry_of(&a.link("entry-a")).unwrap();
+    // Grants of this machine's own that no record may make or end.
+    let agent_key = "signin:agent-x|profile-y|https://billing.example.com";
+    b.store.vault_grant_add(&on_b, agent_key, NOW + 11, 1).unwrap();
+    // A record from a machine that says it grants an agent key.
+    let body = sync_grant::GrantBody::new(&a.link("entry-a"), "setting:example-setting", NOW, 1);
+    write_sealed(&mut a, &body.record_id(), &body, NOW + 20);
+    let taken = ship(&a, &mut b, &p, NOW + 30);
+    assert!(matches!(&taken[0].effect, Effect::Skipped(why) if why.contains("not a site")), "{taken:?}");
+    assert!(!b.store.vault_grant_check(&on_b, "setting:example-setting").unwrap());
+    // A revoke of the record an agent key would make ends nothing here.
+    let agent = sync_grant::GrantBody::new(&a.link("entry-a"), agent_key, NOW, 1);
+    write_sealed(&mut a, &agent.record_id(), &agent, NOW + 40);
+    ship(&a, &mut b, &p, NOW + 50);
+    {
+        let mut signer = Signer { machine: &a.id, private: &a.private, clock: &mut a.clock };
+        let conn = a.store.conn().lock().unwrap();
+        log::append_local(&conn, &mut signer, VAULT, &agent.record_id(), Vec::new(), true, NOW + 60).unwrap();
+    }
+    ship(&a, &mut b, &p, NOW + 70);
+    assert!(b.store.vault_grant_check(&on_b, agent_key).unwrap(), "this machine's own agent grant is still there");
 }

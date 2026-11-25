@@ -6,14 +6,17 @@
  * out, and a link's destination is built from the entity a recogniser found, never from the characters written.
  */
 
-export type EntityKindId = "address" | "pull" | "task" | "agent";
+export type EntityKindId = "address" | "pull" | "task" | "agent" | "file";
 
 /** Where a click goes. Built by a kind from the entity it resolved; the text never supplies one. */
 export type Destination =
     | { kind: "agent"; id: string; name: string; computer?: string }
     | { kind: "task"; number: number; board?: string }
     | { kind: "pull"; repo: string; number: number; issue: boolean }
-    | { kind: "url"; url: string };
+    | { kind: "url"; url: string }
+    /** A file a message names: `blockId` is the pane the message is shown in (never read from the text), which tells
+     *  srv whose folders the path may lead into. */
+    | { kind: "file"; path: string; blockId: string; confined: boolean };
 
 export type LinkState = "ready" | "unchecked" | "dead";
 
@@ -50,6 +53,10 @@ export type AgentIndex = {
      * another plain word than the display name counts only with its computer (`withComputer`).
      */
     find(written: string, withComputer?: boolean): AgentEntry | undefined;
+    /** The longest display name with a space (`Loap #3`) that `text` holds at `start`, whole, if any. */
+    longestName(text: string, start: number): string | undefined;
+    /** Whether some agent is named `base` and a number (`Loap` for `Loap #3`): then `base #N` is a numbered agent's name. */
+    isNumberedFamily(base: string): boolean;
     /** Whether `written` is one of the names that link only with their computer (D3). */
     neverAlone(written: string): boolean;
     /** First characters any name starts with, to skip most words without a lookup. */

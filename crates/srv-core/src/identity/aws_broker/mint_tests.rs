@@ -76,7 +76,7 @@ fn policy() -> Policy {
 }
 
 fn ctx<'a>(p: &'a Policy, grant: &str, reason: &'a str) -> MintCtx<'a> {
-    MintCtx { agent_slug: "jcont", grant: &p.grants[grant], reason, seconds: 1800, now_ms: 1_793_448_000_000 }
+    MintCtx { agent_slug: "jcont", grant: &p.grants[grant], reason, tag: "", seconds: 1800, now_ms: 1_793_448_000_000 }
 }
 
 #[test]
@@ -117,7 +117,7 @@ fn a_session_name_is_at_most_64_characters_and_keeps_its_time() {
     let mut p = policy();
     let long = "x".repeat(60);
     p.grants.get_mut("deploy").unwrap().name = long.clone();
-    let c = MintCtx { agent_slug: "jcont", grant: &p.grants["deploy"], reason: "r", seconds: 900, now_ms: 1_793_448_000_000 };
+    let c = MintCtx { agent_slug: "jcont", grant: &p.grants["deploy"], reason: "r", tag: "", seconds: 900, now_ms: 1_793_448_000_000 };
     let name = c.session_name();
     assert!(name.len() <= 64, "{name}");
     assert!(name.ends_with("-1793448000000") && !name.starts_with('-'), "{name}");

@@ -4,7 +4,10 @@
 // A label the palette cuts off is the one whose full text the row's tooltip gives (R14); a whole one needs no tooltip.
 // Which labels are cut is known only from the layout, so it is read here for the whole list at once, in one pass that
 // only reads (one layout) followed by one that only writes, after the frame that drew the rows: never row by row while
-// they are built, which made every keystroke measure, write and measure again.
+// they are built, which made every keystroke measure, write and measure again. After the frame is drawn, not in the
+// rendering step before it: that read forced the layout of the rows into the first frame.
+
+import { afterNextPaint } from "./palette-after-paint";
 
 const ITEM = ".command-palette-item";
 const LABEL = ".command-palette-item-label";
@@ -31,14 +34,14 @@ export function markCutLabels(list: HTMLElement): void {
 /**
  * Keeps `list`'s cut labels marked: `schedule()` after the rows changed, and on its own when the list's width changes
  * (a window resized with the palette open cuts other labels, and whole ones that were cut). Several calls before the
- * next frame are one pass. Returns the stop.
+ * next frame is drawn are one pass. Returns the stop.
  */
 export function watchCutLabels(list: HTMLElement): { schedule: () => void; stop: () => void } {
-    let frame = 0;
+    let cancel: (() => void) | undefined;
     const schedule = (): void => {
-        if (frame) return;
-        frame = requestAnimationFrame(() => {
-            frame = 0;
+        if (cancel) return;
+        cancel = afterNextPaint(() => {
+            cancel = undefined;
             if (list.isConnected) markCutLabels(list);
         });
     };
@@ -50,8 +53,8 @@ export function watchCutLabels(list: HTMLElement): { schedule: () => void; stop:
     return {
         schedule,
         stop: () => {
-            if (frame) cancelAnimationFrame(frame);
-            frame = 0;
+            cancel?.();
+            cancel = undefined;
             observer?.disconnect();
         },
     };

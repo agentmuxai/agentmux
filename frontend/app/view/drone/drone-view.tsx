@@ -13,6 +13,8 @@ import { BLOCK_KINDS, blockMeta } from "./block-registry";
 import type { DroneViewModel } from "./drone-model";
 import { DroneTemplatePicker } from "./drone-template-picker";
 import { TriggerCard } from "./drone-trigger-card";
+import { DroneApprovals } from "./drone-approval-cards";
+import { ApprovalFields } from "./drone-approval-fields";
 import type { BlockKind, FlowEdge, FlowNode } from "./drone-types";
 import "./drone-view.scss";
 import type { Bundle } from "@/app/store/rpc-api";
@@ -46,6 +48,7 @@ export const DroneView = (props: { model: DroneViewModel }): JSX.Element => {
                     <DroneTemplatePicker model={m} onClose={() => setTemplatesOpen(false)} />
                 </Show>
                 <TriggerCard model={m} />
+                <DroneApprovals droneId={() => m.draftAtom().id} />
                 <div class="drone-stage-body">
                     <Canvas model={m} />
                     <RunPanel model={m} />
@@ -113,7 +116,7 @@ const NodeTypeBar = (p: { model: DroneViewModel; onTemplates: () => void }): JSX
                 <Button class="drone-btn" onClick={() => p.onTemplates()}>
                     {t("drone.templates.open")}
                 </Button>
-                <Button class="drone-btn" onClick={() => void m.save()}>
+                <Button class="drone-btn" onClick={() => m.save()}>
                     Save
                 </Button>
                 <Button
@@ -121,7 +124,7 @@ const NodeTypeBar = (p: { model: DroneViewModel; onTemplates: () => void }): JSX
                     class="drone-btn drone-btn--primary"
                     disabled={!validation().ok || m.runningAtom()}
                     title={validation().errors.join(" · ")}
-                    onClick={() => void m.run()}
+                    onClick={() => m.run()}
                 >
                     {m.runningAtom() ? "Running…" : "▶ Run"}
                 </Button>
@@ -730,6 +733,10 @@ export function nodeSummary(n: FlowNode): string {
             return `${(n.data["method"] as string) ?? "GET"} ${truncate((n.data["url"] as string) ?? "")}`;
         case "condition":
             return `if ${truncate((n.data["expr"] as string) ?? "")}`;
+        case "once":
+            return `once ${truncate((n.data["key"] as string) ?? "")}`;
+        case "approval":
+            return truncate((n.data["title"] as string) ?? "");
         case "response":
             return truncate((n.data["template"] as string) ?? "<empty>");
         case "variables": {
@@ -900,6 +907,12 @@ const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element =
                         onContextMenu={showTextInputContextMenu}
                         placeholder="{{var.count}} > 0"
                     />
+                </NodeField>
+            </Show>
+            <Show when={p.node.data.kind === "approval"}><ApprovalFields node={p.node} update={update} /></Show>
+            <Show when={p.node.data.kind === "once"}>
+                <NodeField label={t("drone.once.key")}>
+                    <TextInput variant="plain" class="drone-input nodrag" value={(p.node.data["key"] as string) ?? ""} onInput={(e) => update({ key: e.currentTarget.value })} onContextMenu={showTextInputContextMenu} placeholder={t("drone.once.keyPlaceholder")} />
                 </NodeField>
             </Show>
             <Show when={p.node.data.kind === "response"}>

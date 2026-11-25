@@ -4,14 +4,14 @@
 /**
  * HistoryUsagePopover: where the agent history on this machine is kept, from
  * the status-bar total. Read-only. Nothing here deletes history, because
- * AgentMux keeps it forever. "Open History" goes to the History pane. The sibling of DiskVolumesPopover.
+ * AgentMux keeps it forever. "Open Storage" goes to the Audit pane's Storage section. The sibling of DiskVolumesPopover.
  */
 
 import { createSignal, For, Show, type JSX } from "solid-js";
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { Button } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
-import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
+import { openAuditSection } from "@/app/view/audit/open-audit";
 import type { HistoryUsage } from "@/types/rpc/HistoryUsage";
 import { formatLocale } from "@/app/i18n/i18n";
 import { formatBytes } from "@/util/format-bytes";
@@ -103,7 +103,7 @@ export const HistoryUsagePopover = (props: HistoryUsagePopoverProps): JSX.Elemen
                         </Show>
                         <div class="history-usage-footer">
                             <span class="history-usage-note">{t("historyUsage.measured", { ago: measuredAgo(usage().computed_at_ms, Date.now(), formatLocale()) })}</span>
-                            <Button tone="quiet" density="compact" busy={refreshing()} onClick={() => void refresh()}>
+                            <Button tone="quiet" density="compact" busy={refreshing()} onClick={() => refresh()}>
                                 {refreshing() ? t("historyUsage.measuring") : t("historyUsage.measureAgain")}
                             </Button>
                             <Button
@@ -111,7 +111,7 @@ export const HistoryUsagePopover = (props: HistoryUsagePopoverProps): JSX.Elemen
                                 density="compact"
                                 onClick={() => {
                                     props.onClose();
-                                    void openOrFocusPaneByView("history");
+                                    void openAuditSection("storage");
                                 }}
                             >
                                 {t("historyUsage.openHistory")}

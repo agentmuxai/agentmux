@@ -37,8 +37,8 @@ function reportedLinks(run: JobRunRow): { label: string; url: string }[] {
 }
 
 function transcriptBlock(run: JobRunRow): string | null {
-    const t = (run.links as { transcript?: { block_id?: unknown } }).transcript;
-    return typeof t?.block_id === "string" && t.block_id ? t.block_id : null;
+    const transcript = (run.links as { transcript?: { block_id?: unknown } }).transcript;
+    return typeof transcript?.block_id === "string" && transcript.block_id ? transcript.block_id : null;
 }
 
 function droneRunId(run: JobRunRow): string | null {
@@ -51,14 +51,14 @@ function RunRow(props: { run: JobRunRow; now: number }): JSX.Element {
     const r = () => props.run;
     const when = () => r().scheduled_for_ms ?? r().started_at_ms;
     const duration = () => (r().ended_at_ms != null && r().state === "finished" ? formatDurationShort(r().ended_at_ms! - r().started_at_ms) : "");
-    const cost = () => (r().cost_known ? costText(r().cost_usd, true) + (r().cost_partial ? " (shared turn)" : "") : "");
+    const cost = () => (r().cost_known ? costText(r().cost_usd, true) + (r().cost_partial ? ` (${t("jobs.history.sharedTurn")})` : "") : "");
     const transcript = () => transcriptBlock(r());
     return (
         <tr data-failed={r().failed ? "true" : undefined}>
             <td {...tip(new Date(when()).toLocaleString())}>
                 {formatTimeAgo(when(), props.now)}
                 <Show when={r().trigger !== "schedule"}>
-                    <span class="warden-manager-dim"> · {r().trigger === "manual" ? "Run now" : r().trigger.replace("_", "-")}</span>
+                    <span class="warden-manager-dim"> · {r().trigger === "manual" ? t("jobs.history.runNow") : r().trigger.replace("_", "-")}</span>
                 </Show>
             </td>
             <td>
@@ -80,18 +80,18 @@ function RunRow(props: { run: JobRunRow; now: number }): JSX.Element {
                 <Show when={transcript()}>
                     {(b) => (
                         <Button density="compact" tone="quiet" icon="message" onClick={() => void revealBlock(b(), { source: "jobs" })}>
-                            Agent
+                            {t("jobs.history.agent")}
                         </Button>
                     )}
                 </Show>
                 <Show when={kanbanTask(r())}>
-                    {(t) => (
-                        <Button density="compact" tone="quiet" icon="table-columns" title="The incident's task, in the Kanban" onClick={() => void openWarden("kanban")}>
-                            Kanban #{t().num}
+                    {(task) => (
+                        <Button density="compact" tone="quiet" icon="table-columns" title={t("jobs.history.incidentTip")} onClick={() => void openWarden("kanban")}>
+                            {t("jobs.history.kanban", { num: task().num })}
                         </Button>
                     )}
                 </Show>
-                <Show when={droneRunId(r())}>{(id) => <span class="warden-manager-dim" {...tip(id())}>Drone run</span>}</Show>
+                <Show when={droneRunId(r())}>{(id) => <span class="warden-manager-dim" {...tip(id())}>{t("jobs.history.droneRun")}</span>}</Show>
                 <For each={reportedLinks(r())}>
                     {(l) => (
                         <Button density="compact" tone="quiet" icon="arrow-up-right-from-square" title={l.url} onClick={() => void openLink(l.url)}>
@@ -111,10 +111,10 @@ function IncidentButton(props: { num: number; failures: number }): JSX.Element {
             density="compact"
             tone="quiet"
             icon="table-columns"
-            title="Its failures go to this task until the job succeeds again"
+            title={t("jobs.history.failingTip")}
             onClick={() => void openWarden("kanban")}
         >
-            Failing: Kanban #{props.num} · {props.failures} in a row
+            {t("jobs.history.failing", { num: props.num, failures: props.failures })}
         </Button>
     );
 }
@@ -128,7 +128,7 @@ export function HistoryTitle(part: { props: JobHistoryProps }): JSX.Element {
             <strong>{props.job.name}</strong>
             <Pill tone={state().tone}>{state().label}</Pill>
             <Show when={props.job.owner}>
-                <span class="warden-manager-dim">by {props.job.owner}</span>
+                <span class="warden-manager-dim">{t("jobs.history.by", { owner: props.job.owner })}</span>
             </Show>
             <Show when={props.job.target}>
                 <span class="warden-manager-dim">→ {props.job.target}</span>
@@ -154,55 +154,55 @@ export function HistoryActions(part: { props: JobHistoryProps; h: JobHistoryStat
                     icon="play"
                     busy={busy() === "run_now"}
                     disabled={props.pausedAll || busy() != null}
-                    title={props.pausedAll ? "Every job is paused (Pause all)" : "Run it once now"}
-                    onClick={() => void doAct("run_now")}
+                    title={props.pausedAll ? t("jobs.history.allPaused") : t("jobs.history.runOnce")}
+                    onClick={() => doAct("run_now")}
                 >
-                    Run now
+                    {t("jobs.history.runNow")}
                 </Button>
                 <Show
                     when={paused()}
                     fallback={
-                        <Button density="compact" icon="pause" busy={busy() === "pause"} disabled={busy() != null} onClick={() => void doAct("pause")}>
-                            Pause
+                        <Button density="compact" icon="pause" busy={busy() === "pause"} disabled={busy() != null} onClick={() => doAct("pause")}>
+                            {t("jobs.history.pause")}
                         </Button>
                     }
                 >
-                    <Button density="compact" icon="play" busy={busy() === "resume"} disabled={busy() != null} onClick={() => void doAct("resume")}>
-                        Resume
+                    <Button density="compact" icon="play" busy={busy() === "resume"} disabled={busy() != null} onClick={() => doAct("resume")}>
+                        {t("jobs.history.resume")}
                     </Button>
                 </Show>
                 <Show
                     when={confirmDelete()}
                     fallback={
                         <Button density="compact" tone="danger" icon="trash" disabled={busy() != null} onClick={() => setConfirmDelete(true)}>
-                            Delete
+                            {t("jobs.history.delete")}
                         </Button>
                     }
                 >
-                    <Button density="compact" tone="danger" icon="trash" busy={busy() === "delete"} onClick={() => void doAct("delete")}>
-                        Delete it, keep its runs
+                    <Button density="compact" tone="danger" icon="trash" busy={busy() === "delete"} onClick={() => doAct("delete")}>
+                        {t("jobs.history.deleteKeep")}
                     </Button>
                     <Button density="compact" tone="quiet" onClick={() => setConfirmDelete(false)}>
-                        Keep
+                        {t("jobs.history.keep")}
                     </Button>
                 </Show>
             </Show>
             <Show when={props.job.actions}>
                 <Button density="compact" icon="pen" disabled={busy() != null} onClick={() => props.onEdit()}>
-                    Edit
+                    {t("jobs.history.edit")}
                 </Button>
                 <Button density="compact" icon="clone" disabled={busy() != null} onClick={() => props.onClone()}>
-                    Clone
+                    {t("jobs.history.clone")}
                 </Button>
-                <Button density="compact" icon="vial" busy={busy() === "dryrun"} disabled={busy() != null} title="What it would do, starting nothing" onClick={() => void doDryRun()}>
-                    Dry run
+                <Button density="compact" icon="vial" busy={busy() === "dryrun"} disabled={busy() != null} title={t("jobs.history.dryRunTip")} onClick={() => doDryRun()}>
+                    {t("jobs.history.dryRun")}
                 </Button>
             </Show>
             <Show when={props.job.cloud}>{(c) => <CloudRunNow cloud={c()} />}</Show>
             <Show when={props.job.template?.update}>
                 {(u) => (
                     <Button density="compact" tone="accent" icon="circle-up" onClick={() => props.onReviewUpdate()}>
-                        {u().approved ? `Update to ${u().version}` : `Review ${u().version}`}
+                        {u().approved ? t("jobs.history.updateTo", { version: u().version }) : t("jobs.history.review", { version: u().version })}
                     </Button>
                 )}
             </Show>
@@ -214,11 +214,11 @@ export function HistoryActions(part: { props: JobHistoryProps; h: JobHistoryStat
             <Show when={props.job.owner_block_id}>
                 {(b) => (
                     <Button density="compact" tone="quiet" icon="user" onClick={() => void revealBlock(b(), { source: "jobs" })}>
-                        Open owner
+                        {t("jobs.history.openOwner")}
                     </Button>
                 )}
             </Show>
-            <CloseButton size="sm" text="Close" onClick={() => props.onClose()} />
+            <CloseButton size="sm" text={t("jobs.history.close")} onClick={() => props.onClose()} />
         </div>
     );
 }
@@ -244,17 +244,17 @@ export function HistoryRuns(part: { props: JobHistoryProps; h: JobHistoryState }
     const { props, h } = part;
     const { runs, more, loadOlder } = h;
     return (
-        <Show when={runs().length > 0} fallback={<div class="warden-section-stub">No runs yet.</div>}>
+        <Show when={runs().length > 0} fallback={<div class="warden-section-stub">{t("jobs.history.noRuns")}</div>}>
             <table class="warden-manager-table warden-jobs-runs">
                 <thead>
                     <tr>
-                        <th>When</th>
-                        <th>Run</th>
-                        <th>Took</th>
-                        <th>Summary</th>
-                        <th>Cost</th>
-                        <th>Account</th>
-                        <th>Links</th>
+                        <th>{t("jobs.history.colWhen")}</th>
+                        <th>{t("jobs.history.colRun")}</th>
+                        <th>{t("jobs.history.colTook")}</th>
+                        <th>{t("jobs.history.colSummary")}</th>
+                        <th>{t("jobs.history.colCost")}</th>
+                        <th>{t("jobs.history.colAccount")}</th>
+                        <th>{t("jobs.history.colLinks")}</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -262,8 +262,8 @@ export function HistoryRuns(part: { props: JobHistoryProps; h: JobHistoryState }
                 </tbody>
             </table>
             <Show when={more()}>
-                <Button density="compact" tone="quiet" onClick={() => void loadOlder()}>
-                    Older runs
+                <Button density="compact" tone="quiet" onClick={() => loadOlder()}>
+                    {t("jobs.history.older")}
                 </Button>
             </Show>
         </Show>

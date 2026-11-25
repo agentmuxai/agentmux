@@ -208,6 +208,39 @@ const RETIRED_PINS = new Map<string, string>([
     ["reviews", "kanban"],
 ]);
 
+/** What a retired pin opens its replacement on: a saved Reviews pin opens the Kanban on the cards
+ *  with open pull requests, which is what the Reviews pane showed (the spec's choice B). */
+const RETIRED_PIN_META: Record<string, Record<string, unknown>> = {
+    reviews: { "kanban:waits": "open" },
+};
+
+/** The pins that stand in for a retired one in `settings` (and are not also pinned as themselves),
+ *  by the replacement's short name: the retired id and the meta that retired pin opens its replacement on. */
+function migratedPins(settings: Record<string, any>): Map<string, { from: string; meta: Record<string, unknown> }> {
+    const saved: string[] = settings["widget:pinned"] ?? [];
+    const out = new Map<string, { from: string; meta: Record<string, unknown> }>();
+    for (const id of saved) {
+        const to = RETIRED_PINS.get(id);
+        if (to != null && RETIRED_PIN_META[id] != null && !saved.includes(to) && !out.has(to)) out.set(to, { from: id, meta: RETIRED_PIN_META[id] });
+    }
+    return out;
+}
+
+function migratedPinMeta(settings: Record<string, any>): Map<string, Record<string, unknown>> {
+    return new Map([...migratedPins(settings)].map(([to, { meta }]) => [to, meta]));
+}
+
+/**
+ * The pins as they are written to `widget:pinned`: `names` (as getSavedPinNames gives them), with a pin that stands in
+ * for a retired one that opens somewhere special (a saved Reviews pin: the Kanban on open pull requests) written back
+ * under its retired id. Written as the replacement's own name it could no longer be told from an ordinary pin, and the
+ * next read would open it plain. Unpinning it, or pinning the replacement afresh, leaves nothing to keep.
+ */
+export function pinsToSave(names: string[], settings: Record<string, any>): string[] {
+    const migrated = migratedPins(settings);
+    return migrated.size === 0 ? names : names.map((n) => migrated.get(n)?.from ?? n);
+}
+
 /**
  * The pins as saved, hidden or not: `widget:pinned` (or the fresh-install
  * default). Every write of `widget:pinned` starts from this, not from getPinnedKeys, so a pinned
@@ -238,15 +271,23 @@ export function withVisibleOrder(saved: string[], visibleOrder: string[]): strin
     return next;
 }
 
+function withBlockMeta(widget: WidgetConfigType, meta: Record<string, unknown>): WidgetConfigType {
+    return { ...widget, blockdef: { ...widget.blockdef, meta: { ...widget.blockdef?.meta, ...meta } } };
+}
+
 export function getPinnedWidgets(
     settings: Record<string, any>,
     wmap: Record<string, WidgetConfigType>
 ): { key: string; widget: WidgetConfigType }[] {
     if (!wmap) return [];
+    const migrated = migratedPinMeta(settings);
     return getPinnedKeys(settings, wmap)
         .map((id) => {
             const key = keyOfPinId(id);
-            return { key, widget: wmap[key] };
+            const widget = wmap[key];
+            const meta = migrated.get(id);
+            // A pin that stood for a retired pane opens its replacement where the retired one showed.
+            return { key, widget: meta && widget ? withBlockMeta(widget, meta) : widget };
         })
         .filter((e) => e.widget != null);
 }
@@ -353,13 +394,20 @@ export function preloadWidget(widget: WidgetConfigType) {
     if (typeof view === "string") getPaneTab(view)?.preload?.();
 }
 
+/** The meta an entry asks a pane that is already open to take: its section, and a filter the entry names. */
+function focusKeysIn(meta: Record<string, unknown> | undefined): MetaType | undefined {
+    const waits = meta?.["kanban:waits"];
+    const keys = { ...sectionKeysIn(meta), ...(typeof waits === "string" ? { "kanban:waits": waits } : {}) };
+    return Object.keys(keys).length > 0 ? (keys as MetaType) : undefined;
+}
+
 export async function openWidget(widget: WidgetConfigType, opts: { forceNew?: boolean } = {}) {
     // An entry that still names a section that moved (the Kanban, of Warden or the Swarm) opens where it lives now.
     const meta = movedMeta(widget.blockdef?.meta as Record<string, unknown> | undefined);
     const blockdef = meta === widget.blockdef?.meta ? widget.blockdef : { ...widget.blockdef, meta: meta as MetaType };
     const view = meta?.["view"] as string | undefined;
     if (view && (widget.singleton ?? isSingletonView(view)) && !opts.forceNew && !widget.magnified) {
-        await openOrFocusPaneByView(view, blockdef, sectionKeysIn(meta) as MetaType | undefined);
+        await openOrFocusPaneByView(view, blockdef, focusKeysIn(meta));
         return;
     }
     createBlock(blockdef, widget.magnified);
@@ -369,7 +417,7 @@ export function pinWidget(shortName: string, settings: Record<string, any>, wmap
     fireAndForget(async () => {
         const current = getSavedPinNames(settings, wmap);
         if (current.includes(shortName)) return;
-        await RpcApi.SetConfigCommand(TabRpcClient, { "widget:pinned": [...current, shortName] });
+        await RpcApi.SetConfigCommand(TabRpcClient, { "widget:pinned": pinsToSave([...current, shortName], settings) });
     });
 }
 
@@ -377,7 +425,7 @@ export function unpinWidget(shortName: string, settings: Record<string, any>, wm
     fireAndForget(async () => {
         const current = getSavedPinNames(settings, wmap);
         await RpcApi.SetConfigCommand(TabRpcClient, {
-            "widget:pinned": current.filter((k) => k !== shortName),
+            "widget:pinned": pinsToSave(current.filter((k) => k !== shortName), settings),
         });
     });
 }
@@ -478,7 +526,7 @@ export function nextWidgetBarConfig(
     if (state === "hidden") {
         if (UNHIDEABLE_WIDGET_KEYS.has(key)) return out;
         out["widget:hidden"] = [...withoutKey, key];
-        if (pinned.includes(shortName)) out["widget:pinned"] = pinned.filter((n) => n !== shortName);
+        if (pinned.includes(shortName)) out["widget:pinned"] = pinsToSave(pinned.filter((n) => n !== shortName), settings);
         return out;
     }
     // A group hidden only because every child is hidden (isWidgetHidden): showing or pinning the
@@ -491,9 +539,9 @@ export function nextWidgetBarConfig(
     }
     if (nextHidden.length !== rawHidden.length) out["widget:hidden"] = nextHidden.length > 0 ? nextHidden : null;
     if (state === "pinned") {
-        if (!pinned.includes(shortName)) out["widget:pinned"] = [...pinned, shortName];
+        if (!pinned.includes(shortName)) out["widget:pinned"] = pinsToSave([...pinned, shortName], settings);
     } else if (pinned.includes(shortName)) {
-        out["widget:pinned"] = pinned.filter((n) => n !== shortName);
+        out["widget:pinned"] = pinsToSave(pinned.filter((n) => n !== shortName), settings);
     }
     return out;
 }
@@ -524,7 +572,7 @@ export async function movePinnedWidget(
     if (from < 0 || to < 0 || to >= visible.length) return;
     const next = [...visible];
     [next[from], next[to]] = [next[to], next[from]];
-    await RpcApi.SetConfigCommand(TabRpcClient, { "widget:pinned": withVisibleOrder(getSavedPinNames(settings, wmap), next) });
+    await RpcApi.SetConfigCommand(TabRpcClient, { "widget:pinned": pinsToSave(withVisibleOrder(getSavedPinNames(settings, wmap), next), settings) });
 }
 
 /** Back to the fresh-install bar: the default pins, nothing hidden. */

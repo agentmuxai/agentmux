@@ -90,7 +90,7 @@ export function NativeMemoryCreate(props: NativeMemoryCreateProps): JSX.Element 
                                 busy={busy()}
                                 disabled={props.readOnly}
                                 title={props.readOnly ? READ_ONLY_TITLE : "Starts the index Claude loads every session"}
-                                onClick={() => void create("MEMORY.md", MEMORY_MD_TEMPLATE)}
+                                onClick={() => create("MEMORY.md", MEMORY_MD_TEMPLATE)}
                             >
                                 Create MEMORY.md
                             </Button>
@@ -128,7 +128,7 @@ export function NativeMemoryCreate(props: NativeMemoryCreateProps): JSX.Element 
                     <Button density="compact" onClick={stopNaming}>
                         Cancel
                     </Button>
-                    <Button density="compact" tone="accent" busy={busy()} onClick={() => void submitName()}>
+                    <Button density="compact" tone="accent" busy={busy()} onClick={() => submitName()}>
                         Create
                     </Button>
                 </div>

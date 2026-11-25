@@ -36,45 +36,50 @@ import type {
 } from "./kanban-types";
 import { agentsByRecentUse } from "./kanban-agent-order";
 
-const EVENT_WORDS: Record<string, string> = {
-    created: "created it",
-    filed_for_later: "filed it for later",
-    claimed: "took it",
-    started: "started it",
-    held: "put it on hold",
-    unheld: "released it from hold",
-    assigned: "moved it",
-    edited: "edited it",
-    updated: "updated it",
-    asked: "asked",
-    answered: "answered",
-    submitted: "handed it in",
-    completed: "finished it",
-    accepted: "accepted it",
-    reopened: "took the acceptance back",
-    sent_back: "sent it back",
-    released: "handed it back",
-    handed_back: "handed it back: not its area",
-    expired: "lost its lease",
-    cancelled: "cancelled it",
-    retried: "tried it again",
-    linked: "linked",
-    reminded: "reminded its agent",
-    tracked: "started following it",
-    taken_back: "took it back",
-    reassigned: "took it back and gave it to someone else",
+/** The dictionary key of each event's line: a sentence with the actor in it ({{who}}). */
+const EVENT_KEYS: Record<string, string> = {
+    created: "kanban.drawer.event.created",
+    filed_for_later: "kanban.drawer.event.filedForLater",
+    claimed: "kanban.drawer.event.claimed",
+    started: "kanban.drawer.event.started",
+    held: "kanban.drawer.event.held",
+    unheld: "kanban.drawer.event.unheld",
+    assigned: "kanban.drawer.event.assigned",
+    edited: "kanban.drawer.event.edited",
+    updated: "kanban.drawer.event.updated",
+    asked: "kanban.drawer.event.asked",
+    answered: "kanban.drawer.event.answered",
+    submitted: "kanban.drawer.event.submitted",
+    completed: "kanban.drawer.event.completed",
+    accepted: "kanban.drawer.event.accepted",
+    reopened: "kanban.drawer.event.reopened",
+    sent_back: "kanban.drawer.event.sentBack",
+    released: "kanban.drawer.event.released",
+    handed_back: "kanban.drawer.event.handedBack",
+    expired: "kanban.drawer.event.expired",
+    cancelled: "kanban.drawer.event.cancelled",
+    retried: "kanban.drawer.event.retried",
+    linked: "kanban.drawer.event.linked",
+    reminded: "kanban.drawer.event.reminded",
+    tracked: "kanban.drawer.event.tracked",
+    taken_back: "kanban.drawer.event.takenBack",
+    reassigned: "kanban.drawer.event.reassigned",
 };
 
 /** The "Give it to…" choice for anyone: no agent in particular. */
 const ANYONE = "__anyone";
 
 function EventLine(props: { ev: KanbanEvent; now: number }): JSX.Element {
-    const who = () => (props.ev.actor_kind === "operator" ? "You" : props.ev.actor || "AgentMux");
+    const who = () => (props.ev.actor_kind === "operator" ? tr("kanban.drawer.you") : props.ev.actor || tr("kanban.drawer.agentmux"));
+    const line = () => {
+        const key = EVENT_KEYS[props.ev.kind];
+        return key ? tr(key, { who: who() }) : tr("kanban.drawer.event.unknown", { who: who(), kind: props.ev.kind });
+    };
     return (
         <li class="kanban-history__line">
             <span class="kanban-history__age">{formatAge(Math.max(0, props.now - props.ev.at))}</span>
             <span>
-                <Linkified text={`${who()} ${EVENT_WORDS[props.ev.kind] ?? props.ev.kind}`} />
+                <Linkified text={line()} />
                 <Show when={props.ev.body}>
                     {(b) => (
                         <span class="kanban-history__body">
@@ -187,7 +192,7 @@ function createDrawerState(props: DrawerProps): DrawerState {
         isResearchKind(t().kind)
             ? (t().card.followers ?? [])
                   .filter((f) => f.state === "open" || f.state === "held")
-                  .map((f) => `Unlocks #${f.num} "${f.title}"`)
+                  .map((f) => tr("kanban.drawer.unlocks", { num: f.num, title: f.title }))
                   .join("; ")
             : "";
     const runningAgents = () => agentsByRecentUse(props.agents.filter((a) => a.state !== "stopped" && a.state !== "gone"));
@@ -246,20 +251,21 @@ function DrawerFacts(props: { m: DrawerState }): JSX.Element {
                     </span>
                 )}
             </Show>
-            <span class="warden-manager-dim">asked by {requestedBy(t())}</span>
+            <span class="warden-manager-dim">{tr("kanban.drawer.askedBy", { who: requestedBy(t()) })}</span>
             <Show when={t().card.repo}>
                 <span class="warden-manager-dim">{t().card.repo}{t().card.branch ? ` · ${t().card.branch}` : ""}</span>
             </Show>
             <Show when={t().card.pr_url}>
                 <Button density="compact" tone="quiet" icon="code-pull-request" onClick={() => void openLink(t().card.pr_url)}>
-                    Open the PR
+                    {tr("kanban.drawer.openPr")}
                 </Button>
             </Show>
             <Show when={t().card.pr?.merged_at}>
                 {(at) => (
                     <span class="warden-manager-dim">
-                        merged {formatAge(Math.max(0, m.props.now - at()))} ago
-                        {t().card.pr?.released_in ? ` · released in ${t().card.pr?.released_in}` : ""}
+                        {t().card.pr?.released_in
+                            ? tr("kanban.drawer.mergedReleased", { age: formatAge(Math.max(0, m.props.now - at())), release: t().card.pr?.released_in ?? "" })
+                            : tr("kanban.drawer.merged", { age: formatAge(Math.max(0, m.props.now - at())) })}
                     </span>
                 )}
             </Show>
@@ -283,7 +289,7 @@ function DrawerAbout(props: { m: DrawerState }): JSX.Element {
 
             <Show when={t().card.request_text}>
                 <section class="kanban-drawer__section">
-                    <h4>What you asked</h4>
+                    <h4>{tr("kanban.drawer.whatYouAsked")}</h4>
                     <blockquote class="kanban-drawer__quote">
                         <Linkified text={t().card.request_text} surface={surfaceOf(t())} />
                     </blockquote>
@@ -291,7 +297,7 @@ function DrawerAbout(props: { m: DrawerState }): JSX.Element {
             </Show>
 
             <section class="kanban-drawer__section">
-                <h4>The task</h4>
+                <h4>{tr("kanban.drawer.theTask")}</h4>
                 <div class="kanban-drawer__payload">
                     <Linkified text={t().payload} surface={surfaceOf(t())} />
                 </div>
@@ -299,7 +305,7 @@ function DrawerAbout(props: { m: DrawerState }): JSX.Element {
 
             <Show when={t().card.checklist.length > 0}>
                 <section class="kanban-drawer__section">
-                    <h4>Checklist</h4>
+                    <h4>{tr("kanban.drawer.checklist")}</h4>
                     <ul class="kanban-checklist">
                         <For each={t().card.checklist}>
                             {(item) => (
@@ -323,7 +329,7 @@ function DrawerDocs(props: { m: DrawerState }): JSX.Element {
     return (
         <Show when={props.m.docs().length > 0}>
             <section class="kanban-drawer__section">
-                <h4>Document</h4>
+                <h4>{tr("kanban.drawer.document")}</h4>
                 <For each={props.m.docs()}>
                     {(d) => (
                         <div class="kanban-drawer__row">
@@ -337,7 +343,7 @@ function DrawerDocs(props: { m: DrawerState }): JSX.Element {
                                 icon="file-lines"
                                 onClick={() => void createBlock({ meta: { view: "editor", file: d.path } })}
                             >
-                                Open
+                                {tr("kanban.drawer.open")}
                             </Button>
                         </div>
                     )}
@@ -356,7 +362,7 @@ function DrawerResult(props: { m: DrawerState }): JSX.Element {
     return (
         <Show when={t().result}>
             <section class="kanban-drawer__section">
-                <h4>{HANDED_BACK_STATES.has(t().state) ? "Last handed back because" : "Result"}</h4>
+                <h4>{HANDED_BACK_STATES.has(t().state) ? tr("kanban.drawer.lastHandedBack") : tr("kanban.drawer.result")}</h4>
                 <div class="kanban-drawer__payload">
                     <Linkified text={t().result} surface={surfaceOf(t())} />
                 </div>
@@ -373,7 +379,7 @@ function TakeBackRows(props: { m: DrawerState }): JSX.Element {
         <Show when={m.heldByAgent()}>
             <Show when={t().holder_unavailable}>
                 <p class="warden-manager-dim">
-                    {t().claimed_by ? ownerLabel(t()) : "Its agent"} can't work right now. Take the task back to let someone else do it.
+                    {tr("kanban.drawer.cantWork", { who: t().claimed_by ? ownerLabel(t()) : tr("kanban.drawer.itsAgent") })}
                 </p>
             </Show>
             <div class="kanban-drawer__row">
@@ -381,19 +387,19 @@ function TakeBackRows(props: { m: DrawerState }): JSX.Element {
                     density="compact"
                     icon="rotate-left"
                     disabled={m.busy()}
-                    title="Return it to the backlog; its agent is told to stop"
-                    onClick={() => void m.takeBack({ action: "release" })}
+                    title={tr("kanban.drawer.takeItBackTitle")}
+                    onClick={() => m.takeBack({ action: "release" })}
                 >
-                    Take it back
+                    {tr("kanban.drawer.takeItBack")}
                 </Button>
                 <Select
                     value={m.giveTo()}
                     onChange={m.setGiveTo}
                     density="compact"
-                    ariaLabel="Agent to give it to"
+                    ariaLabel={tr("kanban.drawer.giveAria")}
                     options={[
-                        { value: "", label: "Give it to…" },
-                        { value: ANYONE, label: "Anyone" },
+                        { value: "", label: tr("kanban.drawer.giveTo") },
+                        { value: ANYONE, label: tr("kanban.drawer.anyone") },
                         ...m.otherAgents().map((a) => ({ value: a.name, label: `${agentLabel(a)} (${agentStateWords(a.state)})` })),
                     ]}
                 />
@@ -402,9 +408,9 @@ function TakeBackRows(props: { m: DrawerState }): JSX.Element {
                     tone="accent"
                     icon="share"
                     disabled={!m.giveTo() || m.busy()}
-                    onClick={() => void m.takeBack({ action: "reassign", agent: m.giveTo() === ANYONE ? "" : m.giveTo() })}
+                    onClick={() => m.takeBack({ action: "reassign", agent: m.giveTo() === ANYONE ? "" : m.giveTo() })}
                 >
-                    Give
+                    {tr("kanban.drawer.give")}
                 </Button>
             </div>
             <Show when={m.confirming()}>
@@ -417,12 +423,12 @@ function TakeBackRows(props: { m: DrawerState }): JSX.Element {
                                 tone="danger"
                                 icon="rotate-left"
                                 disabled={m.busy()}
-                                onClick={() => void m.takeBack({ ...c().req, confirm: true })}
+                                onClick={() => m.takeBack({ ...c().req, confirm: true })}
                             >
-                                Take it back anyway
+                                {tr("kanban.drawer.takeAnyway")}
                             </Button>
                             <Button density="compact" tone="quiet" disabled={m.busy()} onClick={() => m.setConfirming(null)}>
-                                Leave it
+                                {tr("kanban.drawer.leaveIt")}
                             </Button>
                         </div>
                     </div>
@@ -443,18 +449,18 @@ function StartRows(props: { m: DrawerState }): JSX.Element {
                     value={m.startOn()}
                     onChange={m.setStartOn}
                     density="compact"
-                    ariaLabel="Agent to start it on"
-                    options={[{ value: "", label: "Start on…" }, ...m.runningAgents().map((a) => ({ value: a.name, label: `${agentLabel(a)} (${agentStateWords(a.state)})` }))]}
+                    ariaLabel={tr("kanban.drawer.startOnAria")}
+                    options={[{ value: "", label: tr("kanban.drawer.startOn") }, ...m.runningAgents().map((a) => ({ value: a.name, label: `${agentLabel(a)} (${agentStateWords(a.state)})` }))]}
                 />
-                <Button density="compact" tone="accent" icon="play" disabled={!m.startOn() || m.busy()} onClick={() => void m.act({ action: "start", agent: m.startOn() })}>
-                    Start
+                <Button density="compact" tone="accent" icon="play" disabled={!m.startOn() || m.busy()} onClick={() => m.act({ action: "start", agent: m.startOn() })}>
+                    {tr("kanban.drawer.start")}
                 </Button>
-                <Button density="compact" icon={t().state === "held" ? "play" : "pause"} disabled={m.busy()} onClick={() => void m.act({ action: "move", hold: t().state !== "held" })}>
-                    {t().state === "held" ? "Release hold" : "Hold"}
+                <Button density="compact" icon={t().state === "held" ? "play" : "pause"} disabled={m.busy()} onClick={() => m.act({ action: "move", hold: t().state !== "held" })}>
+                    {t().state === "held" ? tr("kanban.drawer.releaseHold") : tr("kanban.drawer.hold")}
                 </Button>
                 <Show when={t().target_agent}>
-                    <Button density="compact" tone="quiet" disabled={m.busy()} onClick={() => void m.act({ action: "move", agent: "" })}>
-                        Give to anyone
+                    <Button density="compact" tone="quiet" disabled={m.busy()} onClick={() => m.act({ action: "move", agent: "" })}>
+                        {tr("kanban.drawer.giveAnyone")}
                     </Button>
                 </Show>
             </div>
@@ -470,7 +476,7 @@ function WordsBox(props: { m: DrawerState }): JSX.Element {
             <TextArea variant="plain"
                 class="kanban-drawer__text"
                 rows={3}
-                placeholder={m.t().state === "blocked" ? "Your answer" : "What to fix (for Send back)"}
+                placeholder={m.t().state === "blocked" ? tr("kanban.drawer.yourAnswer") : tr("kanban.drawer.whatToFix")}
                 value={m.text()}
                 onInput={(e) => m.setText(e.currentTarget.value)}
             />
@@ -485,8 +491,8 @@ function MoveButtons(props: { m: DrawerState }): JSX.Element {
     return (
         <div class="kanban-drawer__row">
             <Show when={t().state === "blocked"}>
-                <Button density="compact" tone="accent" icon="reply" disabled={!m.text().trim() || m.busy()} onClick={() => void m.act({ action: "answer", text: m.text() })}>
-                    Answer
+                <Button density="compact" tone="accent" icon="reply" disabled={!m.text().trim() || m.busy()} onClick={() => m.act({ action: "answer", text: m.text() })}>
+                    {tr("kanban.drawer.answer")}
                 </Button>
             </Show>
             <Show when={t().state === "review"}>
@@ -496,12 +502,12 @@ function MoveButtons(props: { m: DrawerState }): JSX.Element {
                     icon="check"
                     disabled={m.busy()}
                     title={m.specUnlocks() || undefined}
-                    onClick={() => void m.act({ action: "accept" })}
+                    onClick={() => m.act({ action: "accept" })}
                 >
-                    {isResearchKind(t().kind) ? `Accept ${t().kind.trim().toLowerCase()}` : "Accept"}
+                    {isResearchKind(t().kind) ? tr("kanban.drawer.acceptKind", { kind: t().kind.trim().toLowerCase() }) : tr("kanban.drawer.accept")}
                 </Button>
-                <Button density="compact" icon="rotate-left" disabled={m.busy()} onClick={() => void m.act({ action: "send_back", text: m.text() })}>
-                    Send back
+                <Button density="compact" icon="rotate-left" disabled={m.busy()} onClick={() => m.act({ action: "send_back", text: m.text() })}>
+                    {tr("kanban.drawer.sendBack")}
                 </Button>
             </Show>
             <Show when={t().accepted_by}>
@@ -510,22 +516,22 @@ function MoveButtons(props: { m: DrawerState }): JSX.Element {
                         density="compact"
                         icon="rotate-left"
                         disabled={m.busy()}
-                        title={`${a().name} accepted it. This puts it back in Review.`}
-                        onClick={() => void m.act({ action: "reopen", text: m.text() })}
+                        title={tr("kanban.drawer.reopenTitle", { name: a().name })}
+                        onClick={() => m.act({ action: "reopen", text: m.text() })}
                     >
-                        Reopen
+                        {tr("kanban.drawer.reopen")}
                     </Button>
                 )}
             </Show>
             <Show when={t().state === "failed"}>
-                <Button density="compact" tone="accent" icon="rotate-right" disabled={m.busy()} onClick={() => void m.act({ action: "retry" })}>
-                    Try again
+                <Button density="compact" tone="accent" icon="rotate-right" disabled={m.busy()} onClick={() => m.act({ action: "retry" })}>
+                    {tr("kanban.drawer.tryAgain")}
                 </Button>
             </Show>
             <Show when={t().holder}>
                 {(h) => (
                     <Button density="compact" tone="quiet" icon="arrow-up-right-from-square" onClick={() => m.props.onOpenAgent(h().block_id)}>
-                        Open {h().name}
+                        {tr("kanban.drawer.openHolder", { name: h().name })}
                     </Button>
                 )}
             </Show>
@@ -546,19 +552,18 @@ function CancelControls(props: { m: DrawerState }): JSX.Element {
                         checked={m.cancelBuild()}
                         onChange={(e) => m.setCancelBuild(e.currentTarget.checked)}
                     />
-                    Cancelling also cancels {m.openFollowers().map((f) => `#${f.num}`).join(", ")} (else they go on
-                    hold)
+                    {tr("kanban.drawer.cancelAlso", { tasks: m.openFollowers().map((f) => `#${f.num}`).join(", ") })}
                 </label>
             </Show>
             <Show when={!isFinishedColumn(m.column())}>
                 <Button density="compact" tone="danger" icon="ban" disabled={m.busy()} onClick={() =>
-                        void m.act({
+                        m.act({
                             action: "cancel",
                             text: m.text(),
                             followers: m.openFollowers().length ? (m.cancelBuild() ? "cancel" : "hold") : undefined,
                         })
                     }>
-                    Cancel task
+                    {tr("kanban.drawer.cancelTask")}
                 </Button>
             </Show>
         </>
@@ -573,9 +578,9 @@ function MoveToBoardRows(props: { m: DrawerState }): JSX.Element {
     return (
         <Show when={entries().length > 0 && !m.heldByAgent()}>
             <div class="kanban-drawer__row">
-                <MenuTrigger items={entries()} aria-label="Boards to move it to">
-                    <Button density="compact" icon="arrow-right-arrow-left" disabled={m.busy()} title="File this task on another board">
-                        Move to board…
+                <MenuTrigger items={entries()} aria-label={tr("kanban.drawer.boardsAria")}>
+                    <Button density="compact" icon="arrow-right-arrow-left" disabled={m.busy()} title={tr("kanban.drawer.moveTitle")}>
+                        {tr("kanban.drawer.moveToBoard")}
                     </Button>
                 </MenuTrigger>
             </div>
@@ -583,15 +588,14 @@ function MoveToBoardRows(props: { m: DrawerState }): JSX.Element {
                 {(b) => (
                     <div class="kanban-drawer__confirm" role="alert">
                         <p class="kanban-drawer__reason">
-                            Dependencies stay inside one board, so moving it to {b().name} drops the tasks it starts after and the ones
-                            that start after it.
+                            {tr("kanban.drawer.movingWarn", { board: b().name })}
                         </p>
                         <div class="kanban-drawer__row">
-                            <Button density="compact" tone="danger" disabled={m.busy()} onClick={() => void m.moveToBoard(b())}>
-                                Move and drop them
+                            <Button density="compact" tone="danger" disabled={m.busy()} onClick={() => m.moveToBoard(b())}>
+                                {tr("kanban.drawer.moveAndDrop")}
                             </Button>
                             <Button density="compact" tone="quiet" disabled={m.busy()} onClick={() => m.setMoving(null)}>
-                                Leave it
+                                {tr("kanban.drawer.leaveIt")}
                             </Button>
                         </div>
                     </div>
@@ -616,8 +620,8 @@ function DrawerActions(props: { m: DrawerState }): JSX.Element {
 function DrawerHistory(props: { m: DrawerState }): JSX.Element {
     return (
         <section class="kanban-drawer__section">
-            <h4>History</h4>
-            <Show when={props.m.detail()?.events} fallback={<p class="warden-manager-dim">Loading…</p>}>
+            <h4>{tr("kanban.drawer.history")}</h4>
+            <Show when={props.m.detail()?.events} fallback={<p class="warden-manager-dim">{tr("kanban.drawer.loading")}</p>}>
                 {(events) => (
                     <ul class="kanban-history">
                         <For each={events()}>{(ev) => <EventLine ev={ev} now={props.m.props.now} />}</For>
@@ -633,13 +637,13 @@ export function KanbanDrawer(props: DrawerProps): JSX.Element {
     return (
         <SidePanel
             class="kanban-drawer"
-            label={`Task ${refOf(m.t()).replace(/^#/, "")}`}
+            label={tr("kanban.drawer.taskLabel", { ref: refOf(m.t()).replace(/^#/, "") })}
             lead={
                 <>
                     <span class="kanban-card__num">{refOf(m.t())}</span>
                     <IconButton
                         icon="copy"
-                        label={`Copy ${refOf(m.t())}`}
+                        label={tr("kanban.drawer.copyRef", { ref: refOf(m.t()) })}
                         density="compact"
                         onClick={() => void writeText(refOf(m.t()))}
                     />

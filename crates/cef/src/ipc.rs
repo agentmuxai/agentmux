@@ -501,16 +501,8 @@ async fn route_command(
                 .await
                 .map_err(|e| format!("copy_file_to_dir join error: {}", e))?
         }
-        // Paths of the OS file drag that entered the caller's window. The
-        // renderer passes its own `?windowLabel=`; see drag_stash.rs.
-        "consume_drag_paths" => {
-            let label = args.get("windowLabel").and_then(|v| v.as_str());
-            Ok(serde_json::json!(crate::drag_stash::take(label)))
-        }
-        "peek_drag_paths" => {
-            let label = args.get("windowLabel").and_then(|v| v.as_str());
-            Ok(serde_json::json!(crate::drag_stash::peek(label)))
-        }
+        // The drag IPCs: the paths of an OS drag into a window (`drag_stash.rs`) and the files a drag out will carry.
+        "consume_drag_paths" | "peek_drag_paths" | "register_file_drag" => commands::file_drag::ipc(cmd, args),
 
         // ---- Command palette ----
         "run_command" => commands::palette::run_command(state, args),
@@ -690,6 +682,7 @@ async fn route_command(
             state.browser_panes.reload(block_id, state);
             Ok(serde_json::json!(true))
         }
+        "browser_pane_find" | "browser_pane_stop_find" => { state.browser_panes.run_find_command(cmd, args, state); Ok(serde_json::json!(true)) }
         "browser_pane_stop" => {
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
             state.browser_panes.stop(block_id, state);

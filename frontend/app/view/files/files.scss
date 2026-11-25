@@ -227,6 +227,7 @@
 
     i {
         width: 14px;
+        flex-shrink: 0;
         color: var(--secondary-text-color);
     }
 
@@ -237,6 +238,51 @@
         i {
             color: var(--accent-color);
         }
+    }
+}
+
+// The tree view: each level indents by 16px, and a folder has a chevron to open it in place.
+.files-tree-indent {
+    flex-shrink: 0;
+}
+
+.files-twisty {
+    flex-shrink: 0;
+    width: 14px;
+    font-size: var(--text-2xs);
+    text-align: center;
+    color: var(--secondary-text-color);
+    cursor: pointer;
+
+    &:hover {
+        color: var(--main-text-color);
+    }
+}
+
+.files-twisty-none {
+    cursor: default;
+}
+
+
+// A pinned folder: its row, and the button that unpins it, which shows while the row is hovered or focused.
+.files-place-row {
+    display: flex;
+    align-items: center;
+
+    .ui-button.files-place {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .files-place-unpin {
+        flex-shrink: 0;
+        margin-right: 4px;
+        visibility: hidden;
+    }
+
+    &:hover .files-place-unpin,
+    &:focus-within .files-place-unpin {
+        visibility: visible;
     }
 }
 
@@ -289,6 +335,39 @@
             opacity: 0.6;
         }
     }
+}
+
+// The columns view: a strip of lists, one per level, filling the list's room.
+.files-columns {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.files-column {
+    position: relative;
+    flex: 0 0 240px;
+    overflow-y: auto;
+    border-right: 1px solid var(--border-color);
+
+    // A folder in the way to the last column: marked, lighter than the one chosen in the column the keys are in.
+    .files-row-onpath {
+        background: var(--hover-bg-color);
+    }
+
+    .files-row-in-column .files-col-name {
+        flex: 1;
+        min-width: 0;
+    }
+}
+
+.files-column-arrow {
+    margin-left: auto;
+    padding-left: 6px;
+    font-size: var(--text-2xs);
+    color: var(--secondary-text-color);
 }
 
 .files-header {
@@ -457,6 +536,14 @@
 .files-name {
     overflow: hidden;
     text-overflow: ellipsis;
+
+    // A found row that shows a folder: the name stays whole while the folder after it takes the ellipsis, down to the
+    // width the folder keeps (below), and then the name takes the ellipsis too.
+    &.files-name--found {
+        flex-shrink: 1;
+        min-width: 8ch;
+        max-width: 100%;
+    }
 }
 
 .files-entry-error {
@@ -502,6 +589,8 @@
 // ── States: waiting, denied, empty, the macOS notice ───────────────────────
 
 .files-notice {
+    // Painted after (so above) the columns view's layer, which covers the whole list area, in the view's order.
+    position: relative;
     padding: 24px 16px;
     color: var(--secondary-text-color);
     text-align: center;
@@ -543,6 +632,19 @@
 
 // The filter button, while the box is shown or a filter is applied: the kit's accent tone and pressed look,
 // and a dot when the box is hidden but the list is still filtered.
+// A found row's folder, after its name.
+.files-where {
+    margin-left: 8px;
+    // What stays of it however long the name is: the folder is what tells two files of one name apart.
+    min-width: 12ch;
+    // The folder gives way before the name does: it takes the ellipsis while the name is whole.
+    flex: 0 100 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--secondary-text-color);
+    font-size: var(--text-xs);
+}
+
 .files-filter-button {
     position: relative;
 

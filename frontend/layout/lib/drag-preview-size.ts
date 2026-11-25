@@ -1,6 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { pressOnControl } from "@/app/util/press-on-control";
+
+
 /**
  * Size of the drag "ghost" — the native drag image you hold while dragging a
  * pane out of the tiled layout.
@@ -185,10 +188,14 @@ export const PANE_DRAG_EXCLUDED = ".pane-tab, .pane-tab-strip-add";
 
 /**
  * Could a press on `target` start a whole-pane drag — on the pane's header,
- * but not on a tab pill or "+"? Only then is it worth rasterising the ghost
- * at once: switching tabs is a header click too (ReAgent P1 on #3940).
+ * but not on a tab pill, "+" or a control (Minimize, Close, a menu button)? Only
+ * then is it worth rasterising the ghost at once: switching tabs is a header
+ * click too (#3940), and so is a click on Minimize (#48231).
  */
 export function pressCanStartPaneDrag(target: Element | null): boolean {
-    if (!target?.closest?.('[data-role="block-header"]')) return false;
-    return !target.closest(PANE_DRAG_EXCLUDED);
+    const header = target?.closest?.('[data-role="block-header"]');
+    if (!target || !header) return false;
+    // A press on one of the header's controls (Minimize, Close, a menu) is never a pane drag (`guardControlPress`), and
+    // the picture it would start costs the click that is being made: the main thread is busy drawing it.
+    return !target.closest(PANE_DRAG_EXCLUDED) && !pressOnControl(target, header);
 }

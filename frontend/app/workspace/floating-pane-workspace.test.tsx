@@ -108,10 +108,13 @@ vi.mock("@/store/global", async () => {
 vi.mock("@/store/mos", async () => {
     const { createSignal } = await import("solid-js");
     const [tab, setTab] = createSignal<{ blockids: string[] } | null>({ blockids: ["b1"] });
+    // What a plain read of the tab gives, apart from the reactive signal (the backstop reads it without the graph).
+    let plain: string[] = ["b1"];
     return {
         makeORef: (type: string, id: string) => `${type}:${id}`,
         useMuxObjectValue: () => [tab],
-        getObjectValue: () => ({ meta: {} }),
+        getObjectValue: () => ({ meta: {}, blockids: plain }),
+        __setPlain: (v: string[]) => (plain = v),
         reloadMuxObject: (...a: unknown[]) => h.reload(...a),
         __setTab: setTab,
     };
@@ -136,6 +139,7 @@ const globalSet = (Global as unknown as { __set: { setTab: (v: string | null) =>
 const setTab = globalSet.setTab;
 const setWs = globalSet.setWs;
 const setTabValue = (MOS as unknown as { __setTab: (v: { blockids: string[] } | null) => void }).__setTab;
+const setPlainBlocks = (MOS as unknown as { __setPlain: (v: string[]) => void }).__setPlain;
 
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -165,10 +169,12 @@ beforeEach(() => {
     setTab("tab1");
     setWs({ oid: "ws1" });
     setTabValue({ blockids: ["b1"] });
+    setPlainBlocks(["b1"]);
 });
 
 afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     delete document.documentElement.dataset.floaterEdge;
 });
 
@@ -225,6 +231,75 @@ describe("FloatingPaneWorkspace: closing when the tab empties", () => {
     it("has no window to close without a label", () => {
         mount("");
         setTabValue({ blockids: [] });
+        expect(h.api.closeWindowByLabel).not.toHaveBeenCalled();
+    });
+});
+
+describe("FloatingPaneWorkspace: closing an empty window when the watcher did not run", () => {
+    // The empty-tab effect above is a reactive computation: when the floater's own teardown throws inside Solid the
+    // runtime drops the queued effects, so it never runs and the window stays, black. The timer reads the tab plainly.
+    const emptyBehindTheGraph = () => setPlainBlocks([]);
+
+    it("closes the window itself after the tab has been empty for two ticks, and says why", () => {
+        vi.useFakeTimers();
+        const warn = vi.spyOn(console, "log").mockImplementation(() => {});
+        mount();
+        vi.advanceTimersByTime(1000);
+        emptyBehindTheGraph();
+        vi.advanceTimersByTime(1000);
+        expect(h.api.closeWindowByLabel).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(1000);
+        expect(h.api.closeWindowByLabel).toHaveBeenCalledTimes(1);
+        expect(h.api.closeWindowByLabel).toHaveBeenCalledWith(LABEL);
+        expect(warn.mock.calls.some((c) => String(c[0]).includes("pane has left it"))).toBe(true);
+        vi.advanceTimersByTime(5000);
+        expect(h.api.closeWindowByLabel).toHaveBeenCalledTimes(1);
+        warn.mockRestore();
+    });
+
+    it("does not close while a redock is in flight, and closes after it lets go", async () => {
+        vi.useFakeTimers();
+        const { holdRedock } = await import("./floating-redock-guard");
+        mount();
+        vi.advanceTimersByTime(1000);
+        emptyBehindTheGraph();
+        const gate = h.unresolved<void>();
+        const held = holdRedock(() => gate.promise);
+        vi.advanceTimersByTime(10_000);
+        expect(h.api.closeWindowByLabel).not.toHaveBeenCalled();
+        gate.resolve();
+        await held;
+        vi.advanceTimersByTime(3000);
+        expect(h.api.closeWindowByLabel).toHaveBeenCalledWith(LABEL);
+    });
+
+    it("leaves a window that never had a pane (the initial load) and one that still has one", () => {
+        vi.useFakeTimers();
+        emptyBehindTheGraph();
+        mount();
+        vi.advanceTimersByTime(10_000);
+        expect(h.api.closeWindowByLabel).not.toHaveBeenCalled();
+        cleanup();
+        setPlainBlocks(["b1"]);
+        mount();
+        vi.advanceTimersByTime(10_000);
+        expect(h.api.closeWindowByLabel).not.toHaveBeenCalled();
+    });
+
+    it("stops with the window, and has nothing to close without a label", () => {
+        vi.useFakeTimers();
+        mount("");
+        vi.advanceTimersByTime(1000);
+        emptyBehindTheGraph();
+        vi.advanceTimersByTime(10_000);
+        expect(h.api.closeWindowByLabel).not.toHaveBeenCalled();
+        cleanup();
+        setPlainBlocks(["b1"]);
+        mount();
+        vi.advanceTimersByTime(1000);
+        emptyBehindTheGraph();
+        cleanup();
+        vi.advanceTimersByTime(10_000);
         expect(h.api.closeWindowByLabel).not.toHaveBeenCalled();
     });
 });
@@ -579,7 +654,7 @@ describe("FloatingPaneWorkspace: header drag on macOS and Linux (JS-driven)", ()
             h.reload.mockImplementation(async (oref: string) =>
                 oref === "window:w1" ? { workspaceid: "ws2" } : { oid: "ws2", activetabid: "" }
             );
-            const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+            const warn = vi.spyOn(console, "log").mockImplementation(() => {});
             release();
             await flush();
             await flush();
@@ -775,6 +850,28 @@ describe("FloatingPaneWorkspace: header drag on Windows (host-side move loop)", 
                 exclude_label: LABEL,
             });
         });
+    });
+
+    it("closes the floater itself once a drag redock has returned and its tab is empty, without waiting for the watcher", async () => {
+        h.arming.isArmed.mockReturnValue(true);
+        h.arming.target.mockReturnValue("main-1");
+        h.api.windows.resolveWindowAtCursor.mockResolvedValue({ label: "main-1", window_id: "w1" });
+        h.reload.mockImplementation(async (oref: string) =>
+            oref === "window:w1" ? { workspaceid: "ws2" } : { oid: "ws2", activetabid: "tab9" }
+        );
+        // The saga takes the pane out of the floater's tab; the reactive watcher is lost (the plain read sees it, the graph does not).
+        h.redockFloaterPane.mockImplementation(async () => {
+            setPlainBlocks([]);
+        });
+        const log = vi.spyOn(console, "log").mockImplementation(() => {});
+        const { gap } = mount();
+        await flush();
+        press(gap);
+        document.dispatchEvent(mouse("mouseup", { screenX: 640, screenY: 360 }));
+        h.listeners["window_drag_ended"]({ label: LABEL, moved: true });
+        await vi.waitFor(() => expect(h.api.closeWindowByLabel).toHaveBeenCalledWith(LABEL));
+        expect(h.api.closeWindowByLabel).toHaveBeenCalledTimes(1);
+        log.mockRestore();
     });
 
     describe("the host's hover samples", () => {

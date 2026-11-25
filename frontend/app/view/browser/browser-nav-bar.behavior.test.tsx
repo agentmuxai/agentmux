@@ -6,7 +6,7 @@
  * What the browser pane's nav bar does, pinned as ordered logs: the address bar's two-way sync
  * with the page's URL, what Enter and a picked suggestion navigate to, the suggestions (inline
  * completion, the arrow keys, Escape, blur, an IME composition), the pane shortcuts the host
- * sends (focus address, Home, a new Incognito tab), the Bookmarks menu (the first load, a refresh,
+ * sends (focus address, Home, find, a new tab, a new Incognito tab, close this tab), the Bookmarks menu (the first load, a refresh,
  * adding and removing, a failed save) and the Home page. The profile button and the sign-in key
  * are stand-ins; everything else is the real nav bar. A refactor of the nav bar must leave the
  * committed snapshots as they are; regenerate with `vitest -u` only for a change meant to behave
@@ -64,7 +64,8 @@ vi.mock("@/app/store/rpc-api", async (original) => ({
 }));
 vi.mock("@/app/keybindings", async (original) => ({
     ...(await original<Record<string, unknown>>()),
-    paneCommandFor: (e: KeyboardEvent) => (e.key === "N" && e.shiftKey ? "browser:newIncognito" : null),
+    paneCommandFor: (e: KeyboardEvent) =>
+        e.key === "N" && e.shiftKey ? "browser:newIncognito" : e.ctrlKey && e.key === "t" ? "browser:newTab" : e.ctrlKey && e.key === "w" ? "browser:closeTab" : null,
 }));
 vi.mock("@/app/element/ui/open-menu-at", async (original) => ({
     ...(await original<Record<string, unknown>>()),
@@ -74,7 +75,11 @@ vi.mock("@/app/element/ui/open-menu-at", async (original) => ({
     },
 }));
 vi.mock("@/app/platform/pane-overlay", async (original) => ({ ...(await original<Record<string, unknown>>()), usePaneOverlay: () => {} }));
+vi.mock("./browser-close-tab", () => ({
+    closeBrowserTab: async (model: { blockId: string }) => log(`closeBrowserTab ${model.blockId}`),
+}));
 vi.mock("./browser-profile-menu", () => ({
+    openNewTab: (model: { blockId: string }, home: string) => log(`openNewTab ${model.blockId} home=${home}`),
     openIncognitoTab: (model: { blockId: string }, home: string) => log(`openIncognitoTab ${model.blockId} home=${home}`),
     BrowserProfileButton: (p: { home: () => string; containWithin?: () => HTMLElement | null | undefined }) => {
         const el = document.createElement("div");
@@ -113,6 +118,7 @@ interface Rig {
 
 function mount(url = "https://example.com/"): Rig {
     const paneNavFails = { value: false };
+    const findOpen = { value: false };
     const [urlAtom, setUrl] = createSignal(url);
     const [controls, setControls] = createSignal(true);
     const [paneCreated, setPaneCreated] = createSignal(true);
@@ -156,6 +162,14 @@ function mount(url = "https://example.com/"): Rig {
         goBack: () => {},
         goForward: () => {},
         onError: (m: string) => log(`model onError ${m}`),
+        searchAtoms: {
+            isOpen: Object.assign(() => findOpen.value, {
+                _set: (v: boolean) => {
+                    findOpen.value = v;
+                    log(`find bar open=${v}`);
+                },
+            }),
+        },
     } as unknown as BrowserViewModel;
     const { container } = render(() => (
         <div class="browser-view">
@@ -563,6 +577,33 @@ describe("the pane shortcuts the host sends", () => {
         rig.input.dispatchEvent(plain);
         log(`plain prevented=${plain.defaultPrevented}`);
         await expect(out()).toMatchFileSnapshot(snap("shortcut-incognito"));
+    });
+
+    it("find opens the find bar after taking OS focus back, and leaves it open the second time", async () => {
+        mount();
+        await flush();
+        await send("block-1", "find");
+        await send("block-1", "find");
+        await send("other-block", "find");
+        await expect(out()).toMatchFileSnapshot(snap("shortcut-find"));
+    });
+
+    it("new-tab and close-tab open and close a tab, and so do Ctrl+T and Ctrl+W anywhere in the bar", async () => {
+        const rig = mount();
+        await flush();
+        await send("block-1", "new-tab");
+        await send("block-1", "close-tab");
+        await send("other-block", "new-tab");
+        await send("other-block", "close-tab");
+        for (const key of ["t", "w"]) {
+            const ev = new KeyboardEvent("keydown", { key, ctrlKey: true, bubbles: true, cancelable: true });
+            rig.input.dispatchEvent(ev);
+            log(`ctrl+${key} prevented=${ev.defaultPrevented}`);
+        }
+        const plain = new KeyboardEvent("keydown", { key: "t", bubbles: true, cancelable: true });
+        rig.input.dispatchEvent(plain);
+        log(`plain t prevented=${plain.defaultPrevented}`);
+        await expect(out()).toMatchFileSnapshot(snap("shortcut-tabs"));
     });
 });
 

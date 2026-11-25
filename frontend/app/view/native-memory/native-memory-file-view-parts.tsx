@@ -42,7 +42,7 @@ function EditorActions(props: Props & { confirm: PaneConfirm }): JSX.Element {
                     tone="accent"
                     class="memory-editor-btn is-primary"
                     disabled={draft.savingAtom()}
-                    onClick={() => void props.t.save()}
+                    onClick={() => props.t.save()}
                     title={`Save (${keyLabel("mod+s")})`}
                 >
                     {draft.savingAtom() ? "Saving…" : "Save"}
@@ -54,7 +54,7 @@ function EditorActions(props: Props & { confirm: PaneConfirm }): JSX.Element {
                     // Its click waits for the person's answer to the discard question, which is not work in progress.
                     pending={false}
                     onClick={() => requestCancel({ isDirty: draft.dirtyAtom, onCancel: props.t.cancel, confirm: askDiscard(props.confirm) })}
-                    title="Cancel (Esc)"
+                    title={`Cancel (${keyLabel("Escape")})`}
                 >
                     Cancel
                 </Button>

@@ -94,15 +94,15 @@ export function AgentNoticeCard(props: { notice: NoticeView; decide: (choice: No
                 </Show>
             </div>
             <div class="agent-notice-actions">
-                <Button tone="danger" disabled={busy()} onClick={() => void answer("veto")}>
+                <Button tone="danger" disabled={busy()} onClick={() => answer("veto")}>
                     Stop it
                 </Button>
                 <Show when={n.always_label}>
-                    <Button disabled={busy()} onClick={() => void answer("always")}>
+                    <Button disabled={busy()} onClick={() => answer("always")}>
                         {n.always_label}
                     </Button>
                 </Show>
-                <Button tone="accent" disabled={busy()} onClick={() => void answer("now")}>
+                <Button tone="accent" disabled={busy()} onClick={() => answer("now")}>
                     {words.now}
                 </Button>
             </div>

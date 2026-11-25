@@ -332,4 +332,9 @@ fn a_confirm_is_recorded_under_the_check_phrase_and_the_record_is_capped() {
     assert_eq!(ConfirmHow::Refused("agent:opaz".into()).label(), "refused: agent:opaz");
     assert_eq!(ConfirmHow::Outside.label(), "peer outside agent trees");
     assert_eq!(ConfirmHow::Unknown.label(), "peer unknown");
+    assert_eq!(ConfirmHow::Forwarded.label(), "peer forwarded");
+    assert!(ConfirmHow::Outside.is_taken());
+    for not_taken in [ConfirmHow::Unknown, ConfirmHow::Forwarded, ConfirmHow::Refused("agent:x".into())] {
+        assert!(!not_taken.is_taken());
+    }
 }

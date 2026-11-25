@@ -87,7 +87,7 @@ function VaultRequestItem(props: {
             <Button tone="attention" density="compact" onClick={() => props.onFill(r)}>
                 Fill in
             </Button>
-            <Button tone="quiet" density="compact" onClick={() => void dismiss()}>
+            <Button tone="quiet" density="compact" onClick={() => dismiss()}>
                 Dismiss
             </Button>
         </div>
@@ -131,7 +131,7 @@ export function VaultRequestsList(props: { onFill: (r: VaultRequest) => void; fo
                     <div class="vault-requests-deny-all">
                         <For each={several()}>
                             {(agent) => (
-                                <Button tone="danger" density="compact" onClick={() => void denyAllFrom(agent)}>
+                                <Button tone="danger" density="compact" onClick={() => denyAllFrom(agent)}>
                                     Deny all from <Clipped text={agent} max={CLIP.name} />
                                 </Button>
                             )}

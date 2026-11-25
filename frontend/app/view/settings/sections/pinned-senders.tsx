@@ -10,12 +10,14 @@
 // (crates/srv/src/server/app_api/pins.rs).
 
 import { Button } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { createSignal, For, Show, type JSX } from "solid-js";
 
 import { createDomainStore } from "@/app/store/domain-store";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { LanPinInfo } from "@/types/rpc/LanPinInfo";
+import type { WanPinInfo } from "@/types/rpc/WanPinInfo";
 import type { PinnedSendersResult } from "@/types/rpc/PinnedSendersResult";
 import { settingEntry, type SettingsIndexEntry } from "../settings-model";
 
@@ -33,10 +35,10 @@ export type PinChange = { kind: "lan" | "wan"; agentId: string; channel?: string
 /** "3 days ago", "just now": when a pin was set or a refusal last seen. */
 export function ago(epochSecs: number, nowSecs: number): string {
     const s = Math.max(0, nowSecs - epochSecs);
-    if (s < 60) return "just now";
-    if (s < 3600) return `${Math.round(s / 60)} min ago`;
-    if (s < 86400) return `${Math.round(s / 3600)} h ago`;
-    return `${Math.round(s / 86400)} days ago`;
+    if (s < 60) return t("settings.pins.ago.now");
+    if (s < 3600) return t("settings.pins.ago.minutes", { n: Math.round(s / 60) });
+    if (s < 86400) return t("settings.pins.ago.hours", { n: Math.round(s / 3600) });
+    return t("settings.pins.ago.days", { count: Math.round(s / 86400) });
 }
 
 const same = (a: PinChange | null, b: PinChange) =>
@@ -57,23 +59,50 @@ function LanPinDetails(props: { pin: LanPinInfo; now: number }): JSX.Element {
     const pinned = () => props.pin.key_fp !== "";
     return (
         <>
-            <Show when={pinned()} fallback={<div>Not pinned yet: no install you trust vouched for the key below.</div>}>
+            <Show when={pinned()} fallback={<div>{t("settings.pins.lan.notPinned")}</div>}>
                 <div>
-                    Key {props.pin.key_fp}, pinned {ago(props.pin.pinned_at, props.now)}
+                    {t("settings.pins.lan.pinned", { fp: props.pin.key_fp, ago: ago(props.pin.pinned_at, props.now) })}
                 </div>
                 <div>
                     {props.pin.bound_to
-                        ? `Vouched for by the install on ${props.pin.bound_to}; only it, or one it handed over to, moves this key on its own.`
-                        : "Not tied to an install yet: until this agent next sends a message that checks out, only you can move this key."}
+                        ? t("settings.pins.lan.boundTo", { install: props.pin.bound_to })
+                        : t("settings.pins.lan.unbound")}
                 </div>
             </Show>
             <Show when={props.pin.refused}>
                 {(r) => (
                     <div class="setting-pin-refused" role="status">
-                        {pinned() ? "A different key" : "A key"}, {r().key_fp}, was {pinned() ? "refused" : "shown"} {r().count} time
-                        {r().count === 1 ? "" : "s"}; last {ago(r().last_seen_at, props.now)}.
-                        {pinned() ? " Accepting it makes it the key for this name from now on." : " Its messages arrive unproven until you accept it."}
-                        <Show when={r().why}>{(why) => <> Why it was not accepted: {why()}.</>}</Show>
+                        {t(pinned() ? "settings.pins.lan.refusedDifferent" : "settings.pins.lan.refusedShown", {
+                            fp: r().key_fp,
+                            count: r().count,
+                            ago: ago(r().last_seen_at, props.now),
+                        })}{" "}
+                        {pinned() ? t("settings.pins.lan.acceptNote") : t("settings.pins.lan.unprovenNote")}
+                        <Show when={r().why}>{(why) => <> {t("settings.pins.lan.why", { why: why() })}</>}</Show>
+                    </div>
+                )}
+            </Show>
+        </>
+    );
+}
+
+/** What a cloud pin shows: the install it is pinned to and when, and what was refused beside it. */
+function WanPinDetails(props: { pin: WanPinInfo; now: number }): JSX.Element {
+    return (
+        <>
+            <div class="setting-pin-name">
+                {props.pin.agent_id}{" "}
+                <span class="setting-devices-muted">{t("settings.pins.wan.through", { channel: props.pin.channel })}</span>
+            </div>
+            <div>{t("settings.pins.wan.pinned", { instance: props.pin.instance, ago: ago(props.pin.pinned_at, props.now) })}</div>
+            <Show when={props.pin.refused}>
+                {(r) => (
+                    <div class="setting-pin-refused" role="status">
+                        {t("settings.pins.wan.refused", {
+                            instance: r().instance,
+                            count: r().count,
+                            ago: ago(r().last_seen_at, props.now),
+                        })}
                     </div>
                 )}
             </Show>
@@ -119,13 +148,17 @@ export function PinnedSenders(): JSX.Element {
     const actions = (change: Omit<PinChange, "how" | "expect">, shown?: string, first = false): JSX.Element => (
         <span class="setting-pins-actions">
             <Show when={shown}>
-                <Button disabled={busy()} onClick={() => void press({ ...change, how: "adopt", expect: shown })}>
-                    {same(asking(), { ...change, how: "adopt", expect: shown }) ? "Press again to accept" : first ? "Accept this key" : "Accept the new one"}
+                <Button disabled={busy()} onClick={() => press({ ...change, how: "adopt", expect: shown })}>
+                    {same(asking(), { ...change, how: "adopt", expect: shown })
+                        ? t("settings.pins.pressAccept")
+                        : first
+                          ? t("settings.pins.acceptKey")
+                          : t("settings.pins.acceptNew")}
                 </Button>
             </Show>
             <Show when={!first}>
-                <Button disabled={busy()} onClick={() => void press({ ...change, how: "forget" })}>
-                    {same(asking(), { ...change, how: "forget" }) ? "Press again to forget" : "Forget"}
+                <Button disabled={busy()} onClick={() => press({ ...change, how: "forget" })}>
+                    {same(asking(), { ...change, how: "forget" }) ? t("settings.pins.pressForget") : t("settings.pins.forget")}
                 </Button>
             </Show>
         </span>
@@ -139,17 +172,17 @@ export function PinnedSenders(): JSX.Element {
                     {error()}
                 </div>
             </Show>
-            <Show when={pins()} fallback={<Show when={!error()}><div class="setting-devices-empty">Loading…</div></Show>}>
+            <Show when={pins()} fallback={<Show when={!error()}><div class="setting-devices-empty">{t("settings.pins.loading")}</div></Show>}>
                 {(all) => (
                     <Show
                         when={all().lan.length + all().wan.length > 0}
-                        fallback={<div class="setting-devices-empty">Nothing is pinned yet. A name is pinned the first time another computer speaks for it.</div>}
+                        fallback={<div class="setting-devices-empty">{t("settings.pins.none")}</div>}
                     >
                         <ul class="setting-pins">
                             <For each={all().lan}>
                                 {(pin) => (
                                     <li class="setting-pin" data-kind="lan">
-                                        <div class="setting-pin-name">{pin.agent_id} <span class="setting-devices-muted">on your network</span></div>
+                                        <div class="setting-pin-name">{pin.agent_id} <span class="setting-devices-muted">{t("settings.pins.onNetwork")}</span></div>
                                         <LanPinDetails pin={pin} now={now()} />
                                         {actions({ kind: "lan", agentId: pin.agent_id }, pin.refused?.key_fp, !pin.key_fp)}
                                     </li>
@@ -158,20 +191,7 @@ export function PinnedSenders(): JSX.Element {
                             <For each={all().wan}>
                                 {(pin) => (
                                     <li class="setting-pin" data-kind="wan">
-                                        <div class="setting-pin-name">
-                                            {pin.agent_id} <span class="setting-devices-muted">through your account, {pin.channel}</span>
-                                        </div>
-                                        <div>
-                                            Pinned to {pin.instance} {ago(pin.pinned_at, now())}
-                                        </div>
-                                        <Show when={pin.refused}>
-                                            {(r) => (
-                                                <div class="setting-pin-refused" role="status">
-                                                    {r().instance} spoke for it {r().count} time{r().count === 1 ? "" : "s"} and was refused; last{" "}
-                                                    {ago(r().last_seen_at, now())}.
-                                                </div>
-                                            )}
-                                        </Show>
+                                        <WanPinDetails pin={pin} now={now()} />
                                         {actions({ kind: "wan", agentId: pin.agent_id, channel: pin.channel }, pin.refused?.instance)}
                                     </li>
                                 )}

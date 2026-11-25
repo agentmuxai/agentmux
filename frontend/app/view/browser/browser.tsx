@@ -28,6 +28,6 @@ export const browserPaneTab = lazyPaneTab({
         icon: (ctx) => (readSleep(ctx.meta?.[SLEEP_META_KEY]) ? { kind: "fa", name: "moon" } : undefined),
         badge: (ctx) => (readSleep(ctx.meta?.[SLEEP_META_KEY]) ? undefined : identityBadge(parseIdentity(ctx.meta?.[IDENTITY_META_KEY]))),
     },
-    members: ["liveTitle", "liveFavicon", "contextMenu", "focus"],
+    members: ["liveTitle", "liveFavicon", "contextMenu", "focus", "search"],
     load: () => import("./browser-instance"),
 });

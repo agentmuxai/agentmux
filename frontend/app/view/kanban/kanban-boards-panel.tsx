@@ -80,12 +80,12 @@ function BoardRow(props: { s: KanbanSectionState; b: KanbanBoardInfo; now: numbe
                     </Button>
                 </MenuTrigger>
                 <Show when={!b.default && !b.archived}>
-                    <Button density="compact" tone="quiet" onClick={() => void act("board_default")}>
+                    <Button density="compact" tone="quiet" onClick={() => act("board_default")}>
                         Make default
                     </Button>
                 </Show>
                 <Show when={!b.default}>
-                    <Button density="compact" tone="quiet" onClick={() => void act(b.archived ? "board_unarchive" : "board_archive")}>
+                    <Button density="compact" tone="quiet" onClick={() => act(b.archived ? "board_unarchive" : "board_archive")}>
                         {b.archived ? "Unarchive" : "Archive"}
                     </Button>
                 </Show>
@@ -95,13 +95,13 @@ function BoardRow(props: { s: KanbanSectionState; b: KanbanBoardInfo; now: numbe
                         tone="danger"
                         icon="trash"
                         {...tip(b.total > 0 ? `Deletes the board and its ${b.total} task(s), after a 15 second countdown you can stop` : "Deletes the board")}
-                        onClick={() => void act("board_delete")}
+                        onClick={() => act("board_delete")}
                     >
                         Delete
                     </Button>
                 </Show>
                 <Show when={b.pending_delete_at}>
-                    <Button density="compact" tone="accent" icon="rotate-left" onClick={() => void act("board_cancel_delete")}>
+                    <Button density="compact" tone="accent" icon="rotate-left" onClick={() => act("board_cancel_delete")}>
                         Keep it ({left()} s)
                     </Button>
                 </Show>

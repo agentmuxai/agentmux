@@ -15,7 +15,9 @@ export type SortDir = "asc" | "desc";
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
 /** The extension a Kind column sorts and shows by: lower case, no dot. */
-export function extensionOf(name: string): string {
+export function extensionOf(path: string): string {
+    // A tree row is named by its path from the shown folder (`a.d/Makefile`): the name's own dot, not a folder's.
+    const name = path.slice(path.lastIndexOf("/") + 1);
     const dot = name.lastIndexOf(".");
     return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
 }

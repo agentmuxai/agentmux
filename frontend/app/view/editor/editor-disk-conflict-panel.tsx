@@ -20,10 +20,10 @@ export function EditorDiskConflictPanel(props: { model: EditorViewModel }): JSX.
                         {t("editor.diskConflict.message", { name: tb().displayName ?? tb().filePath.split(/[\\/]/).pop() })}
                     </span>
                     <span class="editor-disk-conflict-actions">
-                        <Button density="compact" tone="danger" onClick={() => void model.diskConflicts.reload(tb())}>
+                        <Button density="compact" tone="danger" onClick={() => model.diskConflicts.reload(tb())}>
                             {t("editor.diskConflict.reload")}
                         </Button>
-                        <Button density="compact" onClick={() => void model.diskConflicts.keep(tb())}>
+                        <Button density="compact" onClick={() => model.diskConflicts.keep(tb())}>
                             {t("editor.diskConflict.keepMine")}
                         </Button>
                     </span>

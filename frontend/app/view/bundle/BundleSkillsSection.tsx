@@ -42,7 +42,7 @@ function skillCard(model: BundleSkillModel, skill: SkillBundleListItem): JSX.Ele
                 <Button
                     density="compact"
                     class="bundle-primitive-section-btn"
-                    onClick={() => void model.unbind(skill.id)}
+                    onClick={() => model.unbind(skill.id)}
                 >
                     {unbindWord(skill)}
                 </Button>

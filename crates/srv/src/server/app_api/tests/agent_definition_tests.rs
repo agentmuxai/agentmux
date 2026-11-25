@@ -501,19 +501,18 @@ mod fresh_on_a_model_change {
     }
 
     #[tokio::test]
-    async fn a_container_pane_cannot_start_fresh_and_the_model_stays_where_it_was() {
+    async fn a_container_pane_starts_fresh_on_a_model_change_as_a_host_pane_does() {
         let state = test_state();
         let (me, target) = (agent(&state, "Editor"), agent(&state, "Routed"));
         on_route(&state, &target);
         with_route_key(&state);
-        let before = model_of(&state, &target);
         let block = pane_of(&state, &target, "container").await;
-        let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "model": PRO, "fresh": true })).await;
-        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-        let said = body["error"].as_str().unwrap();
-        assert!(said.contains("not built for container agents yet") && said.contains("compact the conversation first"), "it says why and what to do instead: {body}");
-        assert_eq!(model_of(&state, &target), before, "a refusal changes nothing");
-        assert_eq!(session_of(&state, &block), "sess-old");
+        let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "model": PRO, "fresh": true, "handoff": "Task 48260: the next step is the card." })).await;
+        assert_eq!(status, StatusCode::OK, "a container agent is no longer refused: {body}");
+        assert_eq!(body["changed"], json!(["model"]));
+        assert!(body.get("warning").is_none(), "a fresh session has no conversation to warn about: {body}");
+        assert_eq!(model_of(&state, &target), PRO);
+        assert_eq!(session_of(&state, &block), "", "a stopped container pane forgets the session it would resume");
     }
 
     #[tokio::test]

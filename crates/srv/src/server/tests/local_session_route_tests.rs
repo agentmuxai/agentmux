@@ -85,6 +85,15 @@ impl Open {
 
     /// Send a command and read the answer, which must carry the channel's proof; returns the body.
     async fn ask(&mut self, router: &Router, path: &str, body: &str) -> String {
+        // The person's accept is taken only from a process found outside every agent's tree: the lookup finds that here.
+        if path == "/auth/confirm" && body.contains(r#""accept":true"#) {
+            return self.ask_from(router, path, body, ConfirmHow::Outside).await;
+        }
+        self.ask_raw(router, path, body).await
+    }
+
+    /// [`Self::ask`] with no peer address and no process lookup: the request as a bare connection carries it.
+    async fn ask_raw(&mut self, router: &Router, path: &str, body: &str) -> String {
         let (req, seq) = self.command(path, body);
         let (status, hs, answer) = call(router, req).await;
         assert_eq!(status, 200, "{path}: {answer}");
@@ -343,21 +352,49 @@ async fn a_confirm_from_an_agents_process_tree_is_refused_with_what_to_do_and_re
 }
 
 #[tokio::test]
-async fn a_confirm_whose_process_cannot_be_found_goes_through_and_is_recorded_as_unknown() {
+async fn a_confirm_whose_process_cannot_be_found_is_refused_with_what_works_and_recorded_as_unknown() {
     let _one = ONE_AT_A_TIME.lock().await;
     ensure_shape();
     let router = build_router(test_state());
     let mut open = Open::connect(&router).await;
     let (code, _handle, phrase) = entered_code(&router, &mut open).await;
-    let taken = open.ask_from(&router, "/auth/confirm", &format!(r#"{{"code":"{code}","accept":true}}"#), ConfirmHow::Unknown).await;
-    assert_eq!(field(&taken, "found"), "true");
+    let refused = open.ask_from(&router, "/auth/confirm", &format!(r#"{{"code":"{code}","accept":true}}"#), ConfirmHow::Unknown).await;
+    assert_eq!(field(&refused, "found"), "false");
+    assert!(field(&refused, "refused").contains("agentmux-srv open"), "{refused}");
     assert!(listed_confirms(&router, &mut open).await.contains(&format!("{phrase}: peer unknown")));
+    // Nothing changed: the session still waits for the person.
+    assert_eq!(field(&open.ask(&router, "/auth/pending", &format!(r#"{{"code":"{code}"}}"#)).await, "state"), "entered");
 
-    // A connection that carries no peer address is the same: nothing to look up, so it is unknown.
-    let (code, _handle, phrase) = entered_code(&router, &mut open).await;
+    // A connection that carries no peer address is the same: nothing to look up, so it is not taken.
+    let refused = open.ask_raw(&router, "/auth/confirm", &format!(r#"{{"code":"{code}","accept":true}}"#)).await;
+    assert_eq!(field(&refused, "found"), "false");
+    assert_eq!(field(&open.ask(&router, "/auth/pending", &format!(r#"{{"code":"{code}"}}"#)).await, "state"), "entered");
+    // The person's own terminal, found outside every agent's tree, is taken.
     let taken = open.ask(&router, "/auth/confirm", &format!(r#"{{"code":"{code}","accept":true}}"#)).await;
     assert_eq!(field(&taken, "found"), "true");
-    assert!(listed_confirms(&router, &mut open).await.contains(&format!("{phrase}: peer unknown")));
+}
+
+#[tokio::test]
+async fn a_confirm_that_came_through_a_proxy_is_refused_whatever_the_lookup_finds() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    ensure_shape();
+    let router = build_router(test_state());
+    let mut open = Open::connect(&router).await;
+    for header in ["x-forwarded-for", "forwarded", "x-forwarded-host", "x-forwarded-proto", "x-real-ip", "via"] {
+        let (code, _handle, phrase) = entered_code(&router, &mut open).await;
+        let body = format!(r#"{{"code":"{code}","accept":true}}"#);
+        let (mut req, _seq) = open.command("/auth/confirm", &body);
+        req.headers_mut().insert(header, "203.0.113.9".parse().unwrap());
+        // The peer is the proxy, an ordinary process outside every agent's tree: that alone must not carry the confirm.
+        let (peer, local) = ("127.0.0.1:50124".parse().unwrap(), HOST.parse().unwrap());
+        req.extensions_mut().insert(ConnectInfo(crate::server::confirm_peer::Conn { peer, local: Some(local) }));
+        let (status, _, answer) = call(&router, req).await;
+        assert_eq!(status, 200, "{header}: {answer}");
+        assert_eq!(field(&answer, "found"), "false", "{header}");
+        assert!(listed_confirms(&router, &mut open).await.contains(&format!("{phrase}: peer forwarded")), "{header}");
+        // Discard it so the next round starts clean.
+        open.ask(&router, "/auth/confirm", &format!(r#"{{"code":"{code}","accept":false}}"#)).await;
+    }
 }
 
 #[tokio::test]
@@ -668,6 +705,15 @@ async fn the_sign_in_page_and_its_files_carry_the_policy_and_cannot_be_framed() 
     let block = &js[no_code..no_code_end];
     assert!(block.contains("not signed in") && block.contains("agentmux open") && !block.contains("fail()") && !block.contains("not accepted"), "{block}");
     assert_eq!(js.matches("not accepted").count(), 1, "one refusal text, for every failed attempt");
+    // A new code in the fragment of the same tab (a hash-only navigation) starts a new attempt and ends the last: the refusal of an old
+    // attempt is never shown over the new one.
+    assert!(js.contains("addEventListener(\"hashchange\", begin)"), "a hash-only navigation starts again");
+    let fail = js.find("const fail = () => {").expect("the refusal");
+    let after_fail: String = js[fail..].split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(after_fail.starts_with("const fail = () => { if (!current()) return;"), "a superseded attempt shows nothing");
+    // A link that breaks across lines in a narrow terminal is not needed: the page takes the code pasted, and puts it where the link would.
+    assert!(body.contains(r#"id="paste""#) && body.contains(r#"id="code""#), "the paste form is on the page");
+    assert!(js.contains("location.hash = typed") && js.contains("paste.hidden = false"));
 }
 
 #[test]

@@ -158,3 +158,18 @@ describe("agents' asks for the go-ahead with a shared folder", () => {
         expect(cardOf("b3")?.summary).toBe("Lead: open Korp");
     });
 });
+
+describe("an ask restart resume makes", () => {
+    it("is a card in the agent's own block that says restart left it waiting, with the same two answers", async () => {
+        onEvent!({ asks: [{ ...ASK, agent: "", block_id: "parked-1" }] });
+        await Promise.resolve();
+        const card = paneRequests.of("parked-1").find((c) => c.source === "folder-overlap-ask")!;
+        expect(card.operatorOnly).toBe(true);
+        expect(card.summary).toBe("Hosty: waits for your go-ahead");
+        const Card = card.Component;
+        render(() => <Card {...card.props} close={vi.fn()} />);
+        expect(screen.getByLabelText("Hosty was running when AgentMux stopped and is waiting for your go-ahead")).toBeTruthy();
+        expect(screen.getByTestId("folder-overlap-ask-go-ahead")).toBeTruthy();
+        expect(screen.getByTestId("folder-overlap-ask-decline")).toBeTruthy();
+    });
+});

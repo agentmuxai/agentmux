@@ -18,6 +18,8 @@ use crate::backend::storage::vault::VaultActivityRow;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ActivityBody {
     pub at: i64,
+    /// In a record, the record the entry is written under (its link id), the same on every machine; in a row, the id the entry
+    /// has here.
     pub entry_id: String,
     pub entry_label: String,
     pub actor: String,

@@ -84,7 +84,7 @@ export function LimitsMessages(props: { s: ContainerLimitsState }): JSX.Element 
             </Show>
             <Show when={s.limits() == null && s.error()}>
                 <div class="agent-primitive-modal-actions">
-                    <Button onClick={() => void s.load()}>Retry</Button>
+                    <Button onClick={() => s.load()}>Retry</Button>
                 </div>
             </Show>
             <Show when={s.saved()}>
@@ -102,7 +102,7 @@ export function LimitsActions(props: { s: ContainerLimitsState; onClose?: () => 
     return (
         <div class="agent-primitive-modal-actions">
             <Show when={props.onClose}>{(close) => <Button onClick={() => close()()}>Close</Button>}</Show>
-            <Button tone="accent" busy={s.busy()} disabled={!s.dirty() || s.busy()} onClick={() => void s.save()}>
+            <Button tone="accent" busy={s.busy()} disabled={!s.dirty() || s.busy()} onClick={() => s.save()}>
                 Save
             </Button>
         </div>

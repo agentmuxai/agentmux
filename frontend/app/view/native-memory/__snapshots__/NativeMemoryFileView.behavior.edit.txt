@@ -23,11 +23,9 @@ onDirtyChange false
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -134,11 +132,9 @@ onDirtyChange true
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -232,7 +228,7 @@ NativeMemoryWriteFileCommand {"agent_id":"a1","filename":"MEMORY.md","content":"
       <div class="memory-pinned-layout" data-surface="armory-personal">
         <div class="memory-pinned-top" data-testid="memory-pinned-top">
           <div class="memory-editor-actions">
-            <button title="Save (⌘S)" type="button" class="ui-button ui-tone-accent ui-density-compact memory-editor-btn is-primary" disabled="">
+            <button title="Save (⌘S)" type="button" class="ui-button ui-tone-accent ui-density-compact memory-editor-btn is-primary" disabled="" aria-busy="true" data-pending="true">
               "Saving…"
             <button title="Cancel (Esc)" type="button" class="ui-button ui-tone-neutral ui-density-compact memory-editor-btn" disabled="">
               "Cancel"
@@ -245,11 +241,9 @@ NativeMemoryWriteFileCommand {"agent_id":"a1","filename":"MEMORY.md","content":"
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -353,11 +347,9 @@ NativeMemoryReadFileCommand {"agent_id":"a1","filename":"MEMORY.md"}
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -465,11 +457,9 @@ NativeMemoryReadFileCommand {"agent_id":"a1","filename":"MEMORY.md"}
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -571,11 +561,9 @@ NativeMemoryReadFileCommand {"agent_id":"a1","filename":"MEMORY.md"}
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -686,11 +674,9 @@ onDirtyChange true
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -810,11 +796,9 @@ onDirtyChange true
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -918,11 +902,9 @@ onDirtyChange false
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -1033,11 +1015,9 @@ onDirtyChange true
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -1154,11 +1134,9 @@ onDirtyChange false
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -1263,11 +1241,9 @@ onDirtyChange false
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -1378,11 +1354,9 @@ NativeMemoryReadFileCommand {"agent_id":"a1","filename":"MEMORY.md"}
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -1501,11 +1475,9 @@ onDirtyChange true
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -1622,11 +1594,9 @@ NativeMemoryWriteFileCommand {"agent_id":"a1","filename":"MEMORY.md","content":"
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">

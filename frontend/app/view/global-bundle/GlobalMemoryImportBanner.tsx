@@ -73,7 +73,7 @@ export const GlobalMemoryImportBanner = (props: { onImported?: () => void }): JS
                             <Button
                                 class="global-memory-import-button"
                                 disabled={busy() !== null}
-                                onClick={() => void bring(src.index)}
+                                onClick={() => bring(src.index)}
                             >
                                 {busy() === src.index ? "Bringing…" : "Bring them here"}
                             </Button>

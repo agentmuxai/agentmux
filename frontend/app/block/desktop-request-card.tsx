@@ -50,9 +50,9 @@ export function DesktopRequestCard(
                 )}
             </div>
             <div class="desktop-request-card-actions">
-                <Button onClick={() => void answer("deny")}>Don't allow</Button>
-                <Button onClick={() => void answer("session")}>Allow for this session</Button>
-                <Button tone="attention" onClick={() => void answer("timed")}>
+                <Button onClick={() => answer("deny")}>Don't allow</Button>
+                <Button onClick={() => answer("session")}>Allow for this session</Button>
+                <Button tone="attention" onClick={() => answer("timed")}>
                     {`Allow for ${r.grant_minutes} min`}
                 </Button>
             </div>

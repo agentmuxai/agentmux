@@ -11,13 +11,12 @@ use super::*;
 /// The built-in management views, as `BUILTIN_SINGLETON_VIEWS` in `frontend/app/store/widget-singleton.ts`
 /// has them (a test keeps the two equal). A view that a widget entry flags singleton is the window's to
 /// enforce: srv doesn't read `widgets.json`.
-pub(super) const SINGLETON_VIEWS: [&str; 13] = [
+pub(super) const SINGLETON_VIEWS: [&str; 12] = [
     "atlas",
     "audit",
     "connectors",
     "drone",
     "help",
-    "history",
     "kanban",
     "memory",
     "settings",
@@ -41,6 +40,43 @@ pub(super) fn wants_existing(cmd: &CommandPaneOpenData) -> bool {
         && SINGLETON_VIEWS.contains(&cmd.view.as_str())
 }
 
+/// The view a stored `meta.view` stands for. A Reviews pane saved before it was folded into the Kanban keeps
+/// `reviews` in its meta while it renders as the Kanban, so it is the window's Kanban (`pane_open_steps`).
+fn stands_for(stored: &str) -> &str {
+    match stored {
+        "reviews" => "kanban",
+        other => other,
+    }
+}
+
+/// What an open of `view` asks of the pane the window already has: the filter keys of the Kanban (`kanban:waits`,
+/// and `kanban:open`, the card to show), which a redirected open of Reviews carries. Nothing for any other view, and
+/// nothing for a Kanban open that names none, so a plain open leaves the pane as the person left it.
+fn reuse_patch(view: &str, meta: &MetaMapType) -> Option<serde_json::Value> {
+    if view != "kanban" {
+        return None;
+    }
+    let patch: serde_json::Map<String, serde_json::Value> =
+        ["kanban:waits", "kanban:open"].iter().filter_map(|k| meta.get(*k).map(|v| (k.to_string(), v.clone()))).collect();
+    (!patch.is_empty()).then_some(serde_json::Value::Object(patch))
+}
+
+/// Give the pane the window already has what this open asked of it (`reuse_patch`).
+pub(super) async fn apply_to_existing(state: &AppState, block_id: &str, view: &str, meta: &MetaMapType) {
+    let Some(meta_patch) = reuse_patch(view, meta) else { return };
+    let events = crate::server::service::dispatch_to_reducer(
+        state,
+        agentmux_common::ipc::Command::UpdateBlockMeta { block_id: block_id.to_string(), meta_patch },
+    )
+    .await;
+    for ev in &events {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore) {
+            tracing::warn!("pane.open: the window's pane: UpdateBlockMeta mstore apply failed: {e}");
+        }
+    }
+    crate::server::service::publish_events(state, &events);
+}
+
 /// The pane of `view` in the window that shows `tab_id`, as `(block id, its tab id)`.
 pub(super) fn in_window(mstore: &Store, tab_id: &str, view: &str) -> Option<(String, String)> {
     let workspaces: Vec<Workspace> = mstore.get_all::<Workspace>().ok()?;
@@ -49,7 +85,7 @@ pub(super) fn in_window(mstore: &Store, tab_id: &str, view: &str) -> Option<(Str
         let Ok(Some(tab)) = mstore.get::<Tab>(tab_id) else { continue };
         for block_id in &tab.blockids {
             let Ok(Some(block)) = mstore.get::<Block>(block_id) else { continue };
-            if block.meta.get("view").and_then(|v| v.as_str()) == Some(view) {
+            if block.meta.get("view").and_then(|v| v.as_str()).map(stands_for) == Some(view) {
                 return Some((block_id.clone(), tab_id.clone()));
             }
         }
@@ -194,6 +230,48 @@ mod tests {
         let plain = open_pane(&state, open("kanban", &tab)).await.unwrap();
         assert!(!again.created && !plain.created);
         assert_eq!((again.block_id.as_str(), plain.block_id.as_str()), (first.block_id.as_str(), first.block_id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn a_reviews_pane_saved_before_the_fold_is_the_windows_kanban() {
+        let state = test_state();
+        let tab = window(&state, "one").await;
+        // What a restored layout holds: a pane whose stored view is still `reviews`.
+        let mut block = Block {
+            oid: uuid::Uuid::new_v4().to_string(),
+            meta: MetaMapType::from([("view".to_string(), serde_json::json!("reviews"))]),
+            ..Default::default()
+        };
+        state.mstore.insert(&mut block).unwrap();
+        let mut t = state.mstore.must_get::<Tab>(&tab).unwrap();
+        t.blockids.push(block.oid.clone());
+        state.mstore.update(&mut t).unwrap();
+        for view in ["kanban", "reviews"] {
+            let found = open_pane(&state, open(view, &tab)).await.unwrap();
+            assert_eq!((found.block_id.as_str(), found.created), (block.oid.as_str(), false), "an open of {view}");
+        }
+        assert_eq!(panes(&state, &tab), 1, "no second Kanban");
+    }
+
+    #[tokio::test]
+    async fn an_open_of_reviews_gives_the_kanban_already_open_its_filter_and_task() {
+        let state = test_state();
+        let tab = window(&state, "one").await;
+        let plain = open_pane(&state, open("kanban", &tab)).await.unwrap();
+        let waits = |state: &AppState| {
+            let block = state.mstore.get::<Block>(&plain.block_id).unwrap().unwrap();
+            (block.meta.get("kanban:waits").cloned(), block.meta.get("kanban:open").cloned())
+        };
+        assert_eq!(waits(&state), (None, None), "a plain Kanban has no filter");
+        // An agent's pane.open for Reviews, with a task to show.
+        let mut ask = open("reviews", &tab);
+        ask.meta.as_mut().unwrap().insert("reviews:task".to_string(), serde_json::json!("work#7"));
+        let again = open_pane(&state, ask).await.unwrap();
+        assert_eq!((again.block_id.as_str(), again.created), (plain.block_id.as_str(), false));
+        assert_eq!(waits(&state), (Some(serde_json::json!("open")), Some(serde_json::json!("work#7"))));
+        // A plain Kanban open afterwards leaves what the person (or the last ask) set.
+        open_pane(&state, open("kanban", &tab)).await.unwrap();
+        assert_eq!(waits(&state), (Some(serde_json::json!("open")), Some(serde_json::json!("work#7"))));
     }
 
     /// srv can't read the frontend's list at run time, so a test keeps its copy equal.

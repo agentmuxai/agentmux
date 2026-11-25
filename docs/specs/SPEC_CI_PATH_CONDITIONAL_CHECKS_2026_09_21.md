@@ -173,9 +173,12 @@ plain frontend path still runs the Rust legs.
 What the skipped Rust job used to check for these files is not lost: the RPC codegen hygiene check (pure node over the
 committed generated types and `frontend/app`) moved into the frontend job, which every non-documentation PR runs; the
 bindings gate, the ts-rs warnings check and the tests only read what the list above sends to the Rust legs. A skipped
-job counts as passed for `CI required` (R5's aggregate), as for a documentation-only PR, and the merge queue runs
-everything on the merged result (the Ubuntu leg, the fast gates and both frontend legs), so a frontend change that
-breaks a Rust test through a path nobody listed is caught at merge time, not released.
+job counts as passed for `CI required` (R5's aggregate), as for a documentation-only PR. The merge queue applies the
+same rule to each entry's own diff against the entry ahead of it (`classifyQueueEntry`, `ci-classify-changes.mjs
+--queue`; `SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19.md` Phase 9) and takes only `rust` from it: an entry that
+changes no Rust input has its base's Rust result, so the queue skips the Rust job for it and still runs the fast gates
+and both frontend legs on the merged result. (Until 2026-11-24 the queue ran the Ubuntu Rust leg for every entry, as a
+second chance for a path nobody listed; now the list and its test are the guard, and the push to main runs the suite.)
 
 The nextest step itself no longer costs 40 silent minutes when a runner stalls: `scripts/ci-nextest-run.sh` keeps a
 5-second resource trace in a file (uploaded when the step fails or is cancelled), kills the biggest process when memory
@@ -203,6 +206,19 @@ scans what the build bundles for a path that reaches into `crates/`. The merge q
 It needs no change to the branch protection. A failing step fails the frontend job, which `CI required` reads (R5's
 aggregate). Where the step does not run it is skipped inside a job that reports as usual, so no check is left
 pending.
+
+### R12 — A documentation file a Rust test reads is not documentation-only (added 2026-11-24)
+
+Two files under `docs/specs/` are inputs of Rust tests: the app API manifest (`app-api-manifest.json`, which three crates
+check their routes against) and the redaction vectors (`fixtures/redaction-vectors.json`, shared with the frontend).
+`docs/**` counts as documentation, so a change to only one of them set `rust` false: the Rust job was skipped on the pull
+request and, since the merge queue applies the same rule to each entry's diff (`SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19.md`
+Phase 9), in the queue too; only the push to main would have run the tests that read them.
+
+`RUST_READS_DOCS` (`scripts/ci-classify-changes.mjs`) lists them, and `isDocsOnlyPath` treats a listed file like a CI
+file (R3): not documentation, so the Rust legs run, and with them the frontend legs (conservative: the classifier does
+not know whether a frontend test also reads them). A test scans the crates for a file of `docs/` named within a few
+lines of `CARGO_MANIFEST_DIR` or a `repo_root()` call and fails when one is not listed, as R8's test does for `frontend/`.
 
 ## 3. Design
 

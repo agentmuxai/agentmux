@@ -39,6 +39,8 @@ export function useFilesKeys(fv: FilesLocal, win: FilesWindow, opening: FilesOpe
 
     const onKeyDown = (e: KeyboardEvent): void => {
         if (model.renaming() || editingPath()) return;
+        // A button in a notice (Clear filter, Try again) is pressed with Enter or Space, not taken as "open" or "preview".
+        if ((e.key === "Enter" || e.key === " ") && e.target instanceof Element && e.target.closest(".files-notice button")) return;
         const sel = model.selection();
         // In the grid, up and down move a row of tiles, left and right one.
         const step = grid() ? gridCols() : 1;
@@ -52,6 +54,10 @@ export function useFilesKeys(fv: FilesLocal, win: FilesWindow, opening: FilesOpe
         const listKey = (): boolean => {
             if (e.key === "ArrowDown") move({ delta: step });
             else if (e.key === "ArrowUp") move({ delta: -step });
+            else if (model.columnsOn() && (e.key === "ArrowRight" || e.key === "ArrowLeft") && !e.altKey && !e.shiftKey && !isMod(e))
+                model.cols.arrow(e.key === "ArrowRight" ? "right" : "left");
+            else if (model.treeOn() && (e.key === "ArrowRight" || e.key === "ArrowLeft") && !e.altKey && !e.shiftKey && !isMod(e))
+                model.treeArrow(e.key === "ArrowRight" ? "right" : "left");
             else if (grid() && e.key === "ArrowRight" && !e.altKey) move({ delta: 1 });
             else if (grid() && e.key === "ArrowLeft" && !e.altKey) move({ delta: -1 });
             else if (e.key === "PageDown") move({ delta: page });

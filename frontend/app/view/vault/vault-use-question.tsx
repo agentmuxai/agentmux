@@ -85,48 +85,47 @@ export function promptTitle(u: UseRequest, short = false): string {
         return linksOnly(u.batch) ? t("vault.batchCard.titleLinks", params) : t("vault.batchCard.title", params);
     }
     if (u.import) {
-        const from = u.import.service;
-        return u.import.replaces ? `${agent} wants to replace the value of ${label} with a secret from ${from}` : `${agent} wants to copy a secret from ${from} into your Vault as ${label}`;
+        return t(u.import.replaces ? "vault.use.title.importReplaces" : "vault.use.title.import", { agent, label, from: u.import.service });
     }
     if (u.link) {
         // A link holds no value, so its place is where the key itself lives; and a change that leaves the place alone
         // is to what the entry says of the key (who reads it, when it last changed, where else it is kept).
         if (u.link.only || u.link.from === u.link.to) return t("vault.linkCard.titleAbout", { agent, label });
-        if (!u.link.from) return `${agent} wants to record where the machine copy of ${label} is`;
-        return u.link.to ? `${agent} wants to change where the machine copy of ${label} is` : `${agent} wants to remove where the machine copy of ${label} is`;
+        if (!u.link.from) return t("vault.use.title.linkAdd", { agent, label });
+        return t(u.link.to ? "vault.use.title.linkChange" : "vault.use.title.linkRemove", { agent, label });
     }
     if (u.share) return t(u.prompt ? "vault.shareCard.titlePrompt" : "vault.shareCard.title", { agent, site: siteOf(u.origin), label });
-    if (u.account && u.change) return `${agent} wants to change your password on ${siteOf(u.origin)}`;
-    if (u.account) return `${agent} wants to create an account on ${siteOf(u.origin)}`;
-    if (u.signin) return `${agent} wants to sign in to ${siteOf(u.origin)} as ${short ? clip(u.field, CLIP.label) : u.field}`;
-    if (u.replaces) return `${agent} wants to replace ${label} with what a command prints`;
-    if (u.command) return `${agent} wants to run a command with your ${u.what}`;
-    return u.needs_value ? `${agent} needs your ${u.what}` : `${agent} wants to fill your ${u.what}`;
+    if (u.account && u.change) return t("vault.use.title.accountChange", { agent, site: siteOf(u.origin) });
+    if (u.account) return t("vault.use.title.account", { agent, site: siteOf(u.origin) });
+    if (u.signin) return t("vault.use.title.signin", { agent, site: siteOf(u.origin), field: short ? clip(u.field, CLIP.label) : u.field });
+    if (u.replaces) return t("vault.use.title.replaces", { agent, label });
+    if (u.command) return t("vault.use.title.command", { agent, what: u.what });
+    return t(u.needs_value ? "vault.use.title.needsValue" : "vault.use.title.fill", { agent, what: u.what });
 }
 
 /** The line under the question: what the agent never sees. */
 function promptNote(u: UseRequest): string {
     if (u.batch) return linksOnly(u.batch) ? t("vault.batchCard.noteLinks") : t("vault.batchCard.note", { count: u.batch.items.length });
-    if (u.import) return "The agent never sees the value: AgentMux reads it.";
+    if (u.import) return t("vault.use.note.import");
     if (u.link?.only) return t("vault.linkCard.noteLinked");
-    if (u.link) return "The place decides what a check of this entry reads. No value is in it, and the agent never sees one.";
-    if (u.replaces) return "The agent never sees the new value: the command's output is cleaned of it.";
-    if (u.command) return "The agent never sees the value, and the command's output is cleaned of it.";
+    if (u.link) return t("vault.use.note.link");
+    if (u.replaces) return t("vault.use.note.replaces");
+    if (u.command) return t("vault.use.note.command");
     if (u.share) return t(u.prompt ? "vault.shareCard.notePrompt" : "vault.shareCard.note");
-    if (u.account && u.change) return "The Vault makes the new password. The agent never sees it. The old one is kept for 7 days, and you can put it back. Check the site is the one you expect.";
-    if (u.account) return "The Vault makes the password and keeps it for you. The agent never sees it. Check the site is the one you expect.";
-    if (u.signin) return "The agent never sees the user name or the password. Check the site is the one you expect.";
-    return "The agent never sees the value. Check the site is the one you expect.";
+    if (u.account && u.change) return t("vault.use.note.accountChange");
+    if (u.account) return t("vault.use.note.account");
+    if (u.signin) return t("vault.use.note.signin");
+    return t("vault.use.note.fill");
 }
 
 /** The "Always" button: for the agent, on the site, or both for a sign-in (a shared one the browser answers a prompt
  *  with included). */
 function alwaysLabel(u: UseRequest): string {
     const agent = clip(u.agent, CLIP.name);
-    if (u.signin || u.account || u.share) return `Always for ${agent} on ${clip(siteOf(u.origin), CLIP.label)}`;
+    if (u.signin || u.account || u.share) return t("vault.use.always.agentOnSite", { agent, site: clip(siteOf(u.origin), CLIP.label) });
     // A field in another site's frame is granted as that frame on that page.
-    if (u.page) return `Always on ${siteOf(u.page)} (${siteOf(u.origin)} fields)`;
-    return u.command ? `Always for ${agent}` : `Always on ${siteOf(u.origin)}`;
+    if (u.page) return t("vault.use.always.frame", { page: siteOf(u.page), origin: siteOf(u.origin) });
+    return u.command ? t("vault.use.always.agent", { agent }) : t("vault.use.always.site", { site: siteOf(u.origin) });
 }
 
 /** Where a fill or a sign-in goes, for a use that runs no command. */
@@ -147,7 +146,7 @@ function UseTarget(props: { use: UseRequest }): JSX.Element {
             when={u.signin || u.account}
             fallback={
                 <p>
-                    Into{" "}
+                    {t("vault.use.target.into")}{" "}
                     <strong>
                         <Clipped text={u.field} max={CLIP.label} />
                     </strong>{" "}
@@ -155,27 +154,27 @@ function UseTarget(props: { use: UseRequest }): JSX.Element {
                         when={u.page}
                         fallback={
                             <>
-                                on <strong>{siteOf(u.origin)}</strong>
+                                {t("vault.use.target.on")} <strong>{siteOf(u.origin)}</strong>
                                 <span class="warden-manager-dim"> ({u.origin})</span>
                             </>
                         }
                     >
-                        in a frame from <strong>{siteOf(u.origin)}</strong>
-                        <span class="warden-manager-dim"> ({u.origin})</span> on <strong>{siteOf(u.page)}</strong>
+                        {t("vault.use.target.frameFrom")} <strong>{siteOf(u.origin)}</strong>
+                        <span class="warden-manager-dim"> ({u.origin})</span> {t("vault.use.target.on")} <strong>{siteOf(u.page)}</strong>
                         <span class="warden-manager-dim"> ({u.page})</span>
                     </Show>
                 </p>
             }
         >
             <p>
-                <Show when={u.account} fallback={<>The user name and password are typed into the sign-in form on</>}>
-                    <Show when={u.change} fallback={<>A password the Vault makes is kept in your Vault and typed into the sign-up form on</>}>
-                        A new password the Vault makes is typed into the password-change form on
+                <Show when={u.account} fallback={<>{t("vault.use.target.signin")}</>}>
+                    <Show when={u.change} fallback={<>{t("vault.use.target.signup")}</>}>
+                        {t("vault.use.target.change")}
                     </Show>
                 </Show>{" "}
                 <strong>{siteOf(u.origin)}</strong>
-                <span class="warden-manager-dim"> ({u.origin})</span> in <Clipped text={u.agent} max={CLIP.name} />
-                's tab.
+                <span class="warden-manager-dim"> ({u.origin})</span> {t("vault.use.target.in")} <Clipped text={u.agent} max={CLIP.name} />
+                {t("vault.use.target.tab")}
             </p>
         </Show>
     );
@@ -250,25 +249,25 @@ function UseImportSubject(props: { use: UseRequest; import: NonNullable<UseReque
     return (
         <>
             <p>
-                The secret <strong class="warden-manager-mono vault-import-id"><ClippedId text={i.secret} max={CLIP.secret} /></strong>
+                {t("vault.use.import.secret")} <strong class="warden-manager-mono vault-import-id"><ClippedId text={i.secret} max={CLIP.secret} /></strong>
                 <Show when={i.key}>
                     {" "}
-                    (key <strong class="warden-manager-mono vault-import-id"><ClippedId text={i.key} max={CLIP.label} /></strong>)
+                    ({t("vault.use.import.key")} <strong class="warden-manager-mono vault-import-id"><ClippedId text={i.key} max={CLIP.label} /></strong>)
                 </Show>
                 <Show when={i.region}>
                     {" "}
-                    in <strong class="warden-manager-mono vault-import-region">{i.region}</strong>
+                    {t("vault.use.target.in")} <strong class="warden-manager-mono vault-import-region">{i.region}</strong>
                 </Show>{" "}
-                from {i.service}.
+                {t("vault.use.import.fromService", { service: i.service })}
             </p>
             <p>
                 <Show
                     when={i.profile}
-                    fallback="It is read with this computer's default AWS login."
+                    fallback={t("vault.use.import.defaultLogin")}
                 >
-                    {i.grant ? "It is read under the AWS grant " : "It is read with the AWS profile "}
+                    {i.grant ? t("vault.use.import.readGrant") : t("vault.use.import.readProfile")}{" "}
                     <strong class="warden-manager-mono vault-import-id"><Clipped text={i.profile} max={CLIP.label} /></strong>
-                    {i.grant ? "." : " on this computer."}
+                    {i.grant ? "." : ` ${t("vault.use.import.onThisComputer")}.`}
                 </Show>
             </p>
             <Show
@@ -276,7 +275,7 @@ function UseImportSubject(props: { use: UseRequest; import: NonNullable<UseReque
                 fallback={
                     <>
                         <p>
-                            It is saved to the Vault <strong><Clipped text={i.vault} max={CLIP.label} /></strong> as a new {props.use.kind} entry, <strong><Clipped text={props.use.entry_label} max={CLIP.label} /></strong>.
+                            {t("vault.use.import.savedTo")} <strong><Clipped text={i.vault} max={CLIP.label} /></strong> {t("vault.use.import.asNew", { kind: props.use.kind })} <strong><Clipped text={props.use.entry_label} max={CLIP.label} /></strong>.
                         </p>
                         <ImportLogin
                             import={i}
@@ -289,7 +288,7 @@ function UseImportSubject(props: { use: UseRequest; import: NonNullable<UseReque
                 }
             >
                 <p>
-                    It replaces the value of <strong><Clipped text={props.use.entry_label} max={CLIP.label} /></strong> in <strong><Clipped text={i.vault} max={CLIP.label} /></strong>. The old value is kept for 7 days, and you can put it back from the Vault pane.
+                    {t("vault.use.import.replacesValue")} <strong><Clipped text={props.use.entry_label} max={CLIP.label} /></strong> {t("vault.use.target.in")} <strong><Clipped text={i.vault} max={CLIP.label} /></strong>. {t("vault.use.import.oldKept")}
                 </p>
             </Show>
         </>
@@ -420,16 +419,16 @@ function UseCommand(props: { use: UseRequest }): JSX.Element {
                 when={u.replaces}
                 fallback={
                     <p>
-                        The command, with{" "}
+                        {t("vault.use.command.with")}{" "}
                         <strong>
                             <Clipped text={u.entry_label} max={CLIP.label} />
                         </strong>{" "}
-                        in its environment as <strong class="warden-manager-mono">{u.field}</strong>:
+                        {t("vault.use.command.envAs")} <strong class="warden-manager-mono">{u.field}</strong>:
                     </p>
                 }
             >
                 <p>
-                    The command, whose output becomes the {u.what} of{" "}
+                    {t("vault.use.command.output", { what: u.what })}{" "}
                     <strong>
                         <Clipped text={u.entry_label} max={CLIP.label} />
                     </strong>
@@ -437,7 +436,9 @@ function UseCommand(props: { use: UseRequest }): JSX.Element {
                 </p>
             </Show>
             <pre class="vault-command">{u.command}</pre>
-            <p class="warden-manager-dim">In {u.cwd || "its default folder"}. A command can do anything its line says, including sending the value somewhere: read it first.</p>
+            <p class="warden-manager-dim">
+                {t("vault.use.command.where", { where: u.cwd || t("vault.use.command.defaultFolder") })} {t("vault.use.command.warn")}
+            </p>
         </>
     );
 }
@@ -468,13 +469,13 @@ function UseDeadline(props: { use: UseRequest }): JSX.Element {
             fallback={
                 <Show when={!props.use.needs_value}>
                     <p class="vault-use-deadline">
-                        <strong>Waiting for you</strong>: {props.use.batch && linksOnly(props.use.batch) ? t("vault.batchCard.needsYesLinks") : props.use.import || props.use.batch ? "nothing is copied without a yes." : props.use.share ? t("vault.shareCard.needsYes") : props.use.link ? t(props.use.link.only || props.use.link.from === props.use.link.to ? "vault.linkCard.needsYesAbout" : "vault.linkCard.needsYes") : "ID and card details are never used without a yes."}
+                        <strong>{t("vault.use.deadline.waiting")}</strong>: {props.use.batch && linksOnly(props.use.batch) ? t("vault.batchCard.needsYesLinks") : props.use.import || props.use.batch ? t("vault.use.deadline.copyNeedsYes") : props.use.share ? t("vault.shareCard.needsYes") : props.use.link ? t(props.use.link.only || props.use.link.from === props.use.link.to ? "vault.linkCard.needsYesAbout" : "vault.linkCard.needsYes") : t("vault.use.deadline.idNeedsYes")}
                     </p>
                 </Show>
             }
         >
             <p class="vault-use-deadline" role="timer">
-                <strong>Goes ahead in {clock(left())}</strong> unless you deny.
+                <Rich k="vault.use.deadline.goesAhead" params={{ time: clock(left()) }} />
             </p>
         </Show>
     );
@@ -592,7 +593,7 @@ function TypedValue(props: { use: UseRequest; answer: UseAnswerState; focus: boo
         return (
             <CardTyped
                 label={clip(u.entry_label, CLIP.label)}
-                why={`You're asked because ${clip(u.reason, CLIP.reason)}.`}
+                why={t("vault.use.askedBecause", { reason: clip(u.reason, CLIP.reason) })}
                 busy={a.busy()}
                 answered={a.answered()}
                 focus={props.focus}
@@ -612,12 +613,12 @@ function TypedValue(props: { use: UseRequest; answer: UseAnswerState; focus: boo
                 if (a.typed()) void a.decide("once");
             }}
         >
-            <Field label={clip(u.entry_label, CLIP.label)} layout="stacked" description={`You're asked because ${clip(u.reason, CLIP.reason)}.`}>
+            <Field label={clip(u.entry_label, CLIP.label)} layout="stacked" description={t("vault.use.askedBecause", { reason: clip(u.reason, CLIP.reason) })}>
                 <TextInput type="password" autocomplete="new-password" spellcheck={false} autofocus={props.focus} value={a.typed()} onInput={(e) => a.setTyped(e.currentTarget.value)} disabled={a.busy()} />
             </Field>
             <label class="vault-check">
                 <input type="checkbox" checked={a.save()} onChange={(e) => a.setSave(e.currentTarget.checked)} disabled={a.busy()} />
-                Save to the Vault as "{clip(u.entry_label, CLIP.label)}"
+                {t("vault.use.saveAs", { label: clip(u.entry_label, CLIP.label) })}
             </label>
             <input type="submit" hidden />
         </form>
@@ -631,7 +632,7 @@ function UseSays(props: { use: UseRequest }): JSX.Element {
     return (
         <Show when={props.use.agent_reason}>
             <p class="vault-use-says">
-                <strong>{clip(props.use.agent, CLIP.name)}</strong> says: <q><Clipped text={props.use.agent_reason} max={CLIP.agent_reason} /></q>
+                <strong>{clip(props.use.agent, CLIP.name)}</strong> {t("vault.use.says")} <q><Clipped text={props.use.agent_reason} max={CLIP.agent_reason} /></q>
             </p>
         </Show>
     );
@@ -642,13 +643,13 @@ function CardPicker(props: { use: UseRequest; answer: UseAnswerState }): JSX.Ele
     const u = props.use;
     const a = props.answer;
     const options = (): SelectOption[] => [
-        { value: "", label: "Choose a card…", disabled: true },
-        ...(u.choices ?? []).map((c) => ({ value: c.id, label: `${clip(c.label, CLIP.label)}: ${c.detail}${c.default ? " (default)" : ""}` })),
+        { value: "", label: t("vault.use.card.choose"), disabled: true },
+        ...(u.choices ?? []).map((c) => ({ value: c.id, label: `${clip(c.label, CLIP.label)}: ${c.detail}${c.default ? ` (${t("vault.use.card.default")})` : ""}` })),
     ];
     return (
         <>
-            <Field label="Card" layout="stacked" description={`You're asked because: ${clip(u.reason, CLIP.reason)}.`}>
-                <Select value={a.card()} onChange={a.setCard} options={options()} ariaLabel="Card" disabled={a.busy()} />
+            <Field label={t("vault.use.card.label")} layout="stacked" description={t("vault.use.askedBecauseColon", { reason: clip(u.reason, CLIP.reason) })}>
+                <Select value={a.card()} onChange={a.setCard} options={options()} ariaLabel={t("vault.use.card.label")} disabled={a.busy()} />
             </Field>
         </>
     );
@@ -678,15 +679,15 @@ function UseSubject(props: { use: UseRequest; answer: UseAnswerState; focus: boo
                             when={u.replaces}
                             fallback={
                                 <>
-                                    From your Vault entry{" "}
+                                    {t("vault.use.subject.fromEntry")}{" "}
                                     <strong>
                                         <Clipped text={u.entry_label} max={CLIP.label} />
                                     </strong>
-                                    . You're asked because: <Clipped text={u.reason} max={CLIP.reason} />.
+                                    . {t("vault.use.subject.askedBecause")} <Clipped text={u.reason} max={CLIP.reason} />.
                                 </>
                             }
                         >
-                            The current value is kept for 7 days, and you can put it back from the Vault pane.
+                            {t("vault.use.subject.currentKept")}
                         </Show>
                     </p>
                         }
@@ -760,16 +761,16 @@ export function UseQuestion(props: { use: UseRequest; answer: UseAnswerState; Bo
                 </Show>
             </props.Body>
             <props.Actions>
-                <Button data-modal-dismiss tone="danger" disabled={a.busy()} onClick={() => void a.decide("deny")}>
-                    Deny
+                <Button data-modal-dismiss tone="danger" disabled={a.busy()} onClick={() => a.decide("deny")}>
+                    {t("vault.use.deny")}
                 </Button>
                 {/* The yeses wrap as one group, so a narrow card never puts Always beside Deny. */}
                 <span class="vault-use-allow">
-                    <Button tone={u.needs_value ? "accent" : "neutral"} disabled={a.busy() || (u.needs_value && !a.typed()) || (!!u.choices?.length && !a.card()) || (!!u.batch && a.rows().length === 0)} onClick={() => void a.decide("once")}>
-                        {u.batch ? t("vault.batchCard.allow", { count: a.rows().length }) : u.needs_value ? "Fill it in" : u.share ? t("vault.shareCard.allow") : "Allow once"}
+                    <Button tone={u.needs_value ? "accent" : "neutral"} disabled={a.busy() || (u.needs_value && !a.typed()) || (!!u.choices?.length && !a.card()) || (!!u.batch && a.rows().length === 0)} onClick={() => a.decide("once")}>
+                        {u.batch ? t("vault.batchCard.allow", { count: a.rows().length }) : u.needs_value ? t("vault.use.fillIn") : u.share ? t("vault.shareCard.allow") : t("vault.use.allowOnce")}
                     </Button>
                     <Show when={u.offer_always && !pickedExpired(u, a)}>
-                        <Button tone="attention" disabled={a.busy() || (!!u.choices?.length && !a.card())} onClick={() => void a.decide("always")}>
+                        <Button tone="attention" disabled={a.busy() || (!!u.choices?.length && !a.card())} onClick={() => a.decide("always")}>
                             {alwaysLabel(u)}
                         </Button>
                     </Show>

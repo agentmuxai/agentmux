@@ -11,6 +11,7 @@ export { CloseButton, type CloseButtonProps, type CloseButtonSize } from "./Clos
 export { PENDING_SPINNER_DELAY_MS, type PendingMode } from "./pending-press";
 export { Card, type CardProps } from "./Card";
 export { CardGrid, columnsFor, rowEnd, type CardGridProps } from "./CardGrid";
+export { ConfirmPanel, type ConfirmPanelProps } from "./ConfirmPanel";
 export { Field, useField, type FieldProps } from "./Field";
 export { EmptyState, type EmptyStateProps } from "./EmptyState";
 export { FilterInput, SearchIcon, type FilterInputProps } from "./FilterInput";

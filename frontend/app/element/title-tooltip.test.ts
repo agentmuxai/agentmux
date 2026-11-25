@@ -12,7 +12,8 @@ vi.mock("@floating-ui/dom", () => ({
     shift: vi.fn(() => ({})),
 }));
 
-import { giveTitleBack, initTitleTooltips, takeTitle } from "./title-tooltip";
+import { computePosition, type VirtualElement } from "@floating-ui/dom";
+import { giveTitleBack, initTitleTooltips, takeTitle, tipTarget } from "./title-tooltip";
 import { claimOpen, forgetOpen, isWarm, resetTooltipTiming } from "./tooltip-timing";
 
 let stop: () => void;
@@ -467,5 +468,40 @@ describe("data-hover-tip (tip.ts)", () => {
         over(empty);
         await settle(150);
         expect(panel()).toBeNull();
+    });
+});
+
+describe("where a tip goes (tipTarget)", () => {
+    const rect = (el: Element, r: { left: number; top: number; width: number; height: number }) =>
+        vi.spyOn(el, "getBoundingClientRect").mockReturnValue(new DOMRect(r.left, r.top, r.width, r.height));
+
+    it("is above the element, unless it is in a panel that asks for its tips beside it", () => {
+        const el = add('<span data-hover-tip="Name">x</span>');
+        expect(tipTarget(el)).toEqual({ reference: el, placement: "top" });
+    });
+
+    it("is beside the panel, level with the element: the panel's width and the element's height", () => {
+        const host = add('<div data-hover-tip-beside><div><button data-hover-tip="Folds it">x</button></div></div>');
+        const button = host.querySelector("button")!;
+        rect(host, { left: 300, top: 100, width: 200, height: 260 });
+        rect(button, { left: 330, top: 220, width: 60, height: 24 });
+        const { reference, placement } = tipTarget(button);
+        expect(placement).toBe("left");
+        const box = reference.getBoundingClientRect();
+        expect([box.left, box.right, box.top, box.bottom]).toEqual([300, 500, 220, 244]);
+    });
+
+    it("is placed from that reference when the tooltip opens, and follows the control as it moves", async () => {
+        const host = add('<div data-hover-tip-beside><button data-hover-tip="Folds it" data-hover-tip-instant>x</button></div>');
+        const button = host.querySelector("button")!;
+        rect(host, { left: 300, top: 100, width: 200, height: 260 });
+        rect(button, { left: 330, top: 220, width: 60, height: 24 });
+        vi.mocked(computePosition).mockClear();
+        over(button);
+        await settle(0);
+        const [reference, , options] = vi.mocked(computePosition).mock.calls[0] as unknown as [VirtualElement, unknown, { placement: string }];
+        expect(options.placement).toBe("left");
+        expect(reference.getBoundingClientRect().left).toBe(300);
+        expect(reference.contextElement).toBe(button);
     });
 });

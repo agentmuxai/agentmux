@@ -59,6 +59,8 @@ import type { AgentSpendResult } from "@/types/rpc/AgentSpendResult";
 import type { AgentStartResult } from "@/types/rpc/AgentStartResult";
 import type { AgentTakeoverResult } from "@/types/rpc/AgentTakeoverResult";
 import type { AgentTrackedBlocksResult } from "@/types/rpc/AgentTrackedBlocksResult";
+import type { AnswerDroneApprovalReq } from "@/types/rpc/AnswerDroneApprovalReq";
+import type { AnswerDroneApprovalResp } from "@/types/rpc/AnswerDroneApprovalResp";
 import type { ApiRetryEvent } from "@/types/rpc/ApiRetryEvent";
 import type { AppInfoResult } from "@/types/rpc/AppInfoResult";
 import type { AppSkillInstallResult } from "@/types/rpc/AppSkillInstallResult";
@@ -330,6 +332,8 @@ import type { DeleteDroneResp } from "@/types/rpc/DeleteDroneResp";
 import type { DeleteEditorFileReq } from "@/types/rpc/DeleteEditorFileReq";
 import type { DeleteIdentityAccountResult } from "@/types/rpc/DeleteIdentityAccountResult";
 import type { DesktopEvent } from "@/types/rpc/DesktopEvent";
+import type { DroneAccess } from "@/types/rpc/DroneAccess";
+import type { DroneApproval } from "@/types/rpc/DroneApproval";
 import type { DroneDefinition } from "@/types/rpc/DroneDefinition";
 import type { DroneRun } from "@/types/rpc/DroneRun";
 import type { EditorRootsReq } from "@/types/rpc/EditorRootsReq";
@@ -360,6 +364,8 @@ import type { FsCreateResult } from "@/types/rpc/FsCreateResult";
 import type { FsDeleteReq } from "@/types/rpc/FsDeleteReq";
 import type { FsEmptyResult } from "@/types/rpc/FsEmptyResult";
 import type { FsGitStatus } from "@/types/rpc/FsGitStatus";
+import type { FsLinkFileCheck } from "@/types/rpc/FsLinkFileCheck";
+import type { FsLinkFileReq } from "@/types/rpc/FsLinkFileReq";
 import type { FsListReq } from "@/types/rpc/FsListReq";
 import type { FsListResult } from "@/types/rpc/FsListResult";
 import type { FsOpCancelReq } from "@/types/rpc/FsOpCancelReq";
@@ -377,6 +383,7 @@ import type { FsTrashReq } from "@/types/rpc/FsTrashReq";
 import type { FsUnwatchReq } from "@/types/rpc/FsUnwatchReq";
 import type { FsWatchReq } from "@/types/rpc/FsWatchReq";
 import type { FsWatchResult } from "@/types/rpc/FsWatchResult";
+import type { GetDroneAccessReq } from "@/types/rpc/GetDroneAccessReq";
 import type { GetDroneReq } from "@/types/rpc/GetDroneReq";
 import type { GetEditorHomeResult } from "@/types/rpc/GetEditorHomeResult";
 import type { GetEditorRootsResult } from "@/types/rpc/GetEditorRootsResult";
@@ -464,6 +471,7 @@ import type { LayoutIntentResult } from "@/types/rpc/LayoutIntentResult";
 import type { LayoutOpenResult } from "@/types/rpc/LayoutOpenResult";
 import type { LayoutPreviewResult } from "@/types/rpc/LayoutPreviewResult";
 import type { LayoutSaveResult } from "@/types/rpc/LayoutSaveResult";
+import type { ListDroneApprovalsReq } from "@/types/rpc/ListDroneApprovalsReq";
 import type { ListDronesReq } from "@/types/rpc/ListDronesReq";
 import type { ListEditorDirReq } from "@/types/rpc/ListEditorDirReq";
 import type { ListEditorDirResult } from "@/types/rpc/ListEditorDirResult";
@@ -566,6 +574,7 @@ import type { SessionArchiveResult } from "@/types/rpc/SessionArchiveResult";
 import type { SessionExportResult } from "@/types/rpc/SessionExportResult";
 import type { SessionRestoreResult } from "@/types/rpc/SessionRestoreResult";
 import type { SessionResumePreflightResult } from "@/types/rpc/SessionResumePreflightResult";
+import type { SetDroneAgentsReq } from "@/types/rpc/SetDroneAgentsReq";
 import type { ShellExecResult } from "@/types/rpc/ShellExecResult";
 import type { ShellList } from "@/types/rpc/ShellList";
 import type { ShellStatusResult } from "@/types/rpc/ShellStatusResult";
@@ -1495,6 +1504,10 @@ export const GeneratedApi = {
   FsAgentFolderCommand(client: RpcClient, data: FsPathReq, opts?: RpcOpts): Promise<FsAgentFolder> {
     return client.rpcCall("fs.agent_folder", data, opts);
   },
+  // command "fs.link_file_check"
+  FsLinkFileCheckCommand(client: RpcClient, data: FsLinkFileReq, opts?: RpcOpts): Promise<FsLinkFileCheck> {
+    return client.rpcCall("fs.link_file_check", data, opts);
+  },
   // command "fs.git_status"
   FsGitStatusCommand(client: RpcClient, data: FsPathReq, opts?: RpcOpts): Promise<FsGitStatus> {
     return client.rpcCall("fs.git_status", data, opts);
@@ -1986,6 +1999,30 @@ export const GeneratedApi = {
   // command "listmemories"
   ListBundlesCommand(client: RpcClient, data?: CommandListBundlesData, opts?: RpcOpts): Promise<Array<Bundle>> {
     return client.rpcCall("listmemories", data ?? {}, opts);
+  },
+  // command "getdroneaccess"
+  GetDroneAccessCommand(client: RpcClient, data: GetDroneAccessReq, opts?: RpcOpts): Promise<DroneAccess> {
+    return client.rpcCall("getdroneaccess", data, opts);
+  },
+  // command "setdroneagents"
+  SetDroneAgentsCommand(client: RpcClient, data: SetDroneAgentsReq, opts?: RpcOpts): Promise<DroneAccess> {
+    return client.rpcCall("setdroneagents", data, opts);
+  },
+  // command "listdroneapprovals"
+  ListDroneApprovalsCommand(
+    client: RpcClient,
+    data?: ListDroneApprovalsReq | null,
+    opts?: RpcOpts
+  ): Promise<Array<DroneApproval>> {
+    return client.rpcCall("listdroneapprovals", data, opts);
+  },
+  // command "answerdroneapproval"
+  AnswerDroneApprovalCommand(
+    client: RpcClient,
+    data: AnswerDroneApprovalReq,
+    opts?: RpcOpts
+  ): Promise<AnswerDroneApprovalResp> {
+    return client.rpcCall("answerdroneapproval", data, opts);
   },
   // command "getdronepayloadschema"
   GetDronePayloadSchemaCommand(client: RpcClient, data: PayloadSchemaReq, opts?: RpcOpts): Promise<PayloadSchemaResp> {

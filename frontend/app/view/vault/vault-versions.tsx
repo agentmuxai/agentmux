@@ -10,17 +10,18 @@ import { createResource, createSignal, For, Show, type JSX } from "solid-js";
 import { Modal } from "@/app/element/modal";
 import { ModalBody, ModalFooter, ModalHeader } from "@/app/element/modal-parts";
 import { Button } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import { formatWhen } from "./vault-format";
 import { loadVersions, restoreVersion } from "./vault-store";
 
 /** What a version that isn't a plain earlier value is: a rotation's new value. */
 export function stateNote(state: string): string | undefined {
-    if (state === "pending") return "New value from a rotation that is still running";
-    if (state === "rotation interrupted") return "New value from a rotation that never finished: the service may hold it";
-    if (state.startsWith("rotation failed at step 3")) return "New value: the service took it but its check failed, so it may hold it";
-    if (state.startsWith("rotation failed at step 2")) return "New value from a rotation whose set command failed";
-    if (state.startsWith("rotation")) return "New value from a rotation that didn't finish: the service may hold it";
+    if (state === "pending") return t("vault.versions.pending");
+    if (state === "rotation interrupted") return t("vault.versions.interrupted");
+    if (state.startsWith("rotation failed at step 3")) return t("vault.versions.step3");
+    if (state.startsWith("rotation failed at step 2")) return t("vault.versions.step2");
+    if (state.startsWith("rotation")) return t("vault.versions.unfinished");
     return undefined;
 }
 
@@ -45,8 +46,8 @@ export function VaultVersionsDialog(props: { entry: VaultEntryInfo; onClose: () 
     return (
         <Modal open={true} scope="pane" onClose={props.onClose} size="md" panelClass="vault-form">
             <ModalHeader
-                title={`Earlier values of ${props.entry.label}`}
-                description="Each is kept for 7 days after it was replaced. Restore makes it the value agents use; the current one is kept here in its place."
+                title={t("vault.versions.title", { label: props.entry.label })}
+                description={t("vault.versions.description")}
             />
             <ModalBody>
                 <Show when={error()}>
@@ -54,19 +55,19 @@ export function VaultVersionsDialog(props: { entry: VaultEntryInfo; onClose: () 
                         ⚠ {error()}
                     </div>
                 </Show>
-                <Show when={(versions() ?? []).length > 0} fallback={<div class="warden-section-stub">{versions.loading ? "Loading…" : "No earlier value is kept."}</div>}>
+                <Show when={(versions() ?? []).length > 0} fallback={<div class="warden-section-stub">{versions.loading ? t("vault.versions.loading") : t("vault.versions.none")}</div>}>
                     <div class="vault-versions">
                         <For each={versions()}>
                             {(v) => (
                                 <div class="vault-version" data-seq={v.seq}>
                                     <span class="warden-manager-mono">{v.tail ? `•••• ${v.tail}` : "••••"}</span>
                                     <span class="warden-manager-dim">
-                                        {v.how} by {v.replaced_by}, {formatWhen(v.replaced_at)}
+                                        {t("vault.versions.how", { how: v.how, by: v.replaced_by, when: formatWhen(v.replaced_at) })}
                                     </span>
                                     <Show when={stateNote(v.state)}>{(note) => <span class="warden-manager-dim">{note()}</span>}</Show>
                                     <Show when={v.state !== "pending"}>
-                                        <Button density="compact" icon="rotate-left" busy={busy() === v.seq} onClick={() => void restore(v.seq)}>
-                                            Restore
+                                        <Button density="compact" icon="rotate-left" busy={busy() === v.seq} onClick={() => restore(v.seq)}>
+                                            {t("vault.versions.restore")}
                                         </Button>
                                     </Show>
                                 </div>
@@ -77,7 +78,7 @@ export function VaultVersionsDialog(props: { entry: VaultEntryInfo; onClose: () 
             </ModalBody>
             <ModalFooter>
                 <Button data-modal-dismiss onClick={props.onClose}>
-                    Close
+                    {t("vault.versions.close")}
                 </Button>
             </ModalFooter>
         </Modal>

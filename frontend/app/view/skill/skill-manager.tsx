@@ -16,6 +16,7 @@ import type { AppSkillHere } from "@/types/rpc/AppSkillHere";
 import type { SkillCatalogItem } from "@/types/rpc/SkillCatalogItem";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { t } from "@/app/i18n/i18n";
 import { Markdown } from "@/app/element/markdown";
 import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
@@ -41,17 +42,17 @@ function SkillBoundAgents(props: { model: SkillCatalogModel; skill: SkillCatalog
     );
     return (
         <Show when={(bound() ?? []).length > 0}>
-            <ul class="agent-primitive-modal-bound" aria-label="Agents it is bound to">
+            <ul class="agent-primitive-modal-bound" aria-label={t("skill.manager.boundAria")}>
                 <For each={bound()}>
                     {(agent) => (
                         <li class="agent-primitive-modal-bound-agent">
                             <span>{agent.name}</span>
                             <Button
                                 density="compact"
-                                aria-label={`Unbind ${agent.name}`}
-                                onClick={() => void props.model.unbindFromAgent(props.skill.id, agent.id)}
+                                aria-label={t("skill.manager.unbindAria", { name: agent.name })}
+                                onClick={() => props.model.unbindFromAgent(props.skill.id, agent.id)}
                             >
-                                Unbind
+                                {t("skill.manager.unbind")}
                             </Button>
                         </li>
                     )}
@@ -64,23 +65,23 @@ function SkillBoundAgents(props: { model: SkillCatalogModel; skill: SkillCatalog
 /** Who gets a skill without a bind: every agent, or the agents created from now on. */
 function SkillReach(props: { model: SkillCatalogModel; skill: SkillCatalogItem }): JSX.Element {
     return (
-        <div class="agent-primitive-modal-reach" aria-label="Who gets this skill">
+        <div class="agent-primitive-modal-reach" aria-label={t("skill.manager.reachAria")}>
             <div class="agent-primitive-modal-reach-row">
                 <Switch
                     checked={props.skill.all_agents}
-                    ariaLabel="Every agent gets this skill"
+                    ariaLabel={t("skill.manager.everyAgentAria")}
                     onChange={(on) => void props.model.setReach(props.skill.id, on, props.skill.new_agents || on)}
                 />
-                <span>Every agent gets it (the ones to come too)</span>
+                <span>{t("skill.manager.everyAgentGets")}</span>
             </div>
             <div class="agent-primitive-modal-reach-row">
                 <Switch
                     checked={props.skill.all_agents || props.skill.new_agents}
                     disabled={props.skill.all_agents}
-                    ariaLabel="New agents get this skill"
+                    ariaLabel={t("skill.manager.newAgentsAria")}
                     onChange={(on) => void props.model.setReach(props.skill.id, false, on)}
                 />
-                <span>New agents get it</span>
+                <span>{t("skill.manager.newAgentsGet")}</span>
             </div>
         </div>
     );
@@ -157,10 +158,10 @@ function goBack(m: ManagerState): void {
 
 /** Who gets a skill, as the short facts a card shows: every agent, the new ones, or how many it is bound to. */
 function reachFacts(skill: SkillCatalogItem): string[] {
-    if (skill.all_agents) return ["Every agent"];
-    const bound = `${skill.bound_count} ${skill.bound_count === 1 ? "agent" : "agents"}`;
+    if (skill.all_agents) return [t("skill.manager.everyAgent")];
+    const bound = t("skill.manager.agents", { count: skill.bound_count });
     if (!skill.new_agents) return [bound];
-    return skill.bound_count > 0 ? ["New agents", bound] : ["New agents"];
+    return skill.bound_count > 0 ? [t("skill.manager.newAgents"), bound] : [t("skill.manager.newAgents")];
 }
 
 function SkillCard(p: { m: ManagerState; skill: SkillCatalogItem }): JSX.Element {
@@ -172,9 +173,9 @@ function SkillCard(p: { m: ManagerState; skill: SkillCatalogItem }): JSX.Element
     const facts = () => [
         ...(app() ? [<span>{status()!.label}</span>] : []),
         ...(hereFact() ? [<span>{hereFact()}</span>] : []),
-        ...(app() && firstRoute(app()!) ? [<span>route: {firstRoute(app()!)}</span>] : []),
+        ...(app() && firstRoute(app()!) ? [<span>{t("skill.manager.route", { route: firstRoute(app()!) ?? "" })}</span>] : []),
         ...reachFacts(p.skill).map((fact) => <span>{fact}</span>),
-        ...(p.skill.source && !app() ? [<span>Imported from {p.skill.source.location}</span>] : []),
+        ...(p.skill.source && !app() ? [<span>{t("skill.manager.importedFrom", { location: p.skill.source.location })}</span>] : []),
     ];
     return (
         <Card
@@ -184,7 +185,7 @@ function SkillCard(p: { m: ManagerState; skill: SkillCatalogItem }): JSX.Element
             subtitle={
                 app() ? (
                     <>
-                        <Pill tone="accent">App skill</Pill> {app()!.vendor}
+                        <Pill tone="accent">{t("skill.manager.appSkill")}</Pill> {app()!.vendor}
                     </>
                 ) : (
                     p.skill.description || undefined
@@ -210,10 +211,10 @@ function SkillList(p: { m: ManagerState }): JSX.Element {
         <div class="agent-primitive-modal-list ui-density-compact">
             <div class="primitive-card-actions">
                 <Button density="compact" onClick={() => model.startNew()}>
-                    + New skill
+                    {t("skill.manager.newSkill")}
                 </Button>
                 <Button density="compact" onClick={() => startImport(p.m)}>
-                    Import a skill…
+                    {t("skill.manager.import")}
                 </Button>
                 <Button
                     density="compact"
@@ -225,7 +226,7 @@ function SkillList(p: { m: ManagerState }): JSX.Element {
                         p.m.setShowBrowse(true);
                     }}
                 >
-                    Browse the catalog
+                    {t("skill.manager.browse")}
                 </Button>
                 <Button
                     density="compact"
@@ -237,7 +238,7 @@ function SkillList(p: { m: ManagerState }): JSX.Element {
                         p.m.setShowMatrix(true);
                     }}
                 >
-                    Agents and skills
+                    {t("skill.manager.matrix")}
                 </Button>
             </div>
             <Show when={model.errorAtom()}>
@@ -250,13 +251,13 @@ function SkillList(p: { m: ManagerState }): JSX.Element {
                 when={shown().length > 0}
                 fallback={
                     <div class="agent-primitive-modal-list-empty">
-                        {p.m.filter() === "app" ? "No App skills yet. Import one, or write your own." : "No skills yet"}
+                        {p.m.filter() === "app" ? t("skill.manager.emptyApp") : t("skill.manager.empty")}
                     </div>
                 }
             >
                 <div class="primitive-card-body">
                     <CardGrid
-                        ariaLabel="Skills"
+                        ariaLabel={t("skill.manager.skillsAria")}
                         items={shown()}
                         keyOf={(skill) => skill.id}
                         renderCard={(skill) => <SkillCard m={p.m} skill={skill} />}
@@ -271,17 +272,17 @@ function SkillList(p: { m: ManagerState }): JSX.Element {
 function SkillCheck(p: { m: ManagerState; imp: Importing; skill: SkillCatalogItem }): JSX.Element {
     return (
         <div class="agent-primitive-modal-form skill-import">
-            <h3 class="agent-primitive-modal-name">{p.skill.name}: check for changes</h3>
+            <h3 class="agent-primitive-modal-name">{t("skill.manager.checkTitle", { name: p.skill.name })}</h3>
             <Show when={p.imp.model.errorAtom()}>
                 <div class="agent-primitive-modal-error">{p.imp.model.errorAtom()}</div>
             </Show>
             <Show when={p.imp.model.busyAtom() && !p.imp.model.previewAtom()}>
-                <p class="agent-primitive-modal-global-note">Reading the source…</p>
+                <p class="agent-primitive-modal-global-note">{t("skill.manager.reading")}</p>
             </Show>
-            <SkillImportResult model={p.imp.model} verb="Update" />
+            <SkillImportResult model={p.imp.model} verb={t("skill.manager.update")} />
             <div class="agent-primitive-modal-actions">
                 <Button class="agent-primitive-modal-btn" onClick={() => p.m.setImporting(null)}>
-                    Close
+                    {t("skill.manager.close")}
                 </Button>
             </div>
         </div>
@@ -296,8 +297,8 @@ function SkillReadOnly(p: { m: ManagerState; skill: Accessor<SkillCatalogItem> }
             <h3 class="agent-primitive-modal-name">{skill().name}</h3>
             <p class="agent-primitive-modal-global-note">
                 {skill().all_agents
-                    ? "Used by every agent"
-                    : `Used by ${skill().bound_count} ${skill().bound_count === 1 ? "agent" : "agents"}`}
+                    ? t("skill.manager.usedByEvery")
+                    : t("skill.manager.usedBy", { count: skill().bound_count })}
             </p>
             <Show when={skill().app}>{(app) => <SkillAppDetail skillId={skill().id} app={app()} here={p.m.appHere()[skill().id]} agents={model.agentsAtom()} />}</Show>
             <SkillReach model={model} skill={skill()} />
@@ -305,7 +306,7 @@ function SkillReadOnly(p: { m: ManagerState; skill: Accessor<SkillCatalogItem> }
             <Show when={skill().source}>
                 {(src) => (
                     <>
-                        <span class="agent-primitive-modal-field-label">Imported from</span>
+                        <span class="agent-primitive-modal-field-label">{t("skill.manager.importedFromLabel")}</span>
                         <pre class="agent-primitive-modal-field-value">
                             {src().location}
                             {src().git_ref ? ` (${src().git_ref})` : ""}
@@ -313,58 +314,58 @@ function SkillReadOnly(p: { m: ManagerState; skill: Accessor<SkillCatalogItem> }
                         </pre>
                         <div class="agent-primitive-modal-actions">
                             <Button class="agent-primitive-modal-btn" onClick={() => startCheck(p.m, skill())}>
-                                Check for changes
+                                {t("skill.manager.checkForChanges")}
                             </Button>
                         </div>
                     </>
                 )}
             </Show>
             <Show when={skill().description}>
-                <span class="agent-primitive-modal-field-label">Description</span>
+                <span class="agent-primitive-modal-field-label">{t("skill.manager.description")}</span>
                 <pre class="agent-primitive-modal-field-value">{skill().description}</pre>
             </Show>
-            <span class="agent-primitive-modal-field-label">Format</span>
+            <span class="agent-primitive-modal-field-label">{t("skill.manager.format")}</span>
             <pre class="agent-primitive-modal-field-value">
-                {skill().skill_type === "agent-skill" ? "Agent Skill (SKILL.md)" : "Slash command"}
+                {skill().skill_type === "agent-skill" ? t("skill.manager.formatAgentSkill") : t("skill.manager.formatSlash")}
             </pre>
             <Show when={skill().skill_type !== "agent-skill" && skill().trigger}>
-                <span class="agent-primitive-modal-field-label">Trigger</span>
+                <span class="agent-primitive-modal-field-label">{t("skill.manager.trigger")}</span>
                 <pre class="agent-primitive-modal-field-value">{skill().trigger}</pre>
             </Show>
-            <span class="agent-primitive-modal-field-label">Content</span>
-            <Show when={skill().content} fallback={<pre class="agent-primitive-modal-field-value">(none)</pre>}>
+            <span class="agent-primitive-modal-field-label">{t("skill.manager.content")}</span>
+            <Show when={skill().content} fallback={<pre class="agent-primitive-modal-field-value">{t("skill.manager.none")}</pre>}>
                 <div class="agent-primitive-modal-field-value agent-primitive-modal-field-value--markdown">
                     <Markdown text={skill().content} scrollable={false} />
                 </div>
             </Show>
-            <span class="agent-primitive-modal-field-label">Bind to agent</span>
+            <span class="agent-primitive-modal-field-label">{t("skill.manager.bindToAgent")}</span>
             <div class="agent-primitive-modal-bind-row">
                 <select
                     class="agent-primitive-modal-input"
                     value={model.bindAgentIdAtom()}
                     onChange={(e) => model.setBindAgentId(e.currentTarget.value)}
                 >
-                    <option value="">Select an agent…</option>
+                    <option value="">{t("skill.manager.selectAgent")}</option>
                     <For each={model.agentsAtom()}>{(agent) => <option value={agent.id}>{agent.name}</option>}</For>
                 </select>
                 <Button
                     class="agent-primitive-modal-btn"
                     disabled={!model.bindAgentIdAtom()}
-                    onClick={() => void model.bindToAgent(skill().id, model.bindAgentIdAtom())}
+                    onClick={() => model.bindToAgent(skill().id, model.bindAgentIdAtom())}
                 >
-                    Bind
+                    {t("skill.manager.bind")}
                 </Button>
             </div>
             <div class="agent-primitive-modal-actions">
                 <Button
                     tone="danger"
                     class="agent-primitive-modal-btn agent-primitive-modal-btn-danger"
-                    onClick={() => void model.deleteSkill(skill().id)}
+                    onClick={() => model.deleteSkill(skill().id)}
                 >
-                    Delete
+                    {t("skill.manager.delete")}
                 </Button>
                 <Button class="agent-primitive-modal-btn" onClick={() => model.startEdit(skill())}>
-                    Edit
+                    {t("skill.manager.edit")}
                 </Button>
             </div>
         </div>
@@ -382,38 +383,38 @@ function SkillForm(p: { model: SkillCatalogModel; draft: Accessor<SkillDraft> })
                 void model.saveDraft();
             }}
         >
-            <span class="agent-primitive-modal-field-label">Name *</span>
+            <span class="agent-primitive-modal-field-label">{t("skill.manager.nameLabel")}</span>
             <TextInput
                 variant="plain"
                 class="agent-primitive-modal-input"
                 value={draft().name}
                 onInput={(e) => model.setDraft({ ...draft(), name: e.currentTarget.value })}
                 onContextMenu={showTextInputContextMenu}
-                placeholder="e.g. pdf-extraction"
+                placeholder={t("skill.manager.namePlaceholder")}
                 required
                 ref={(el) => focusOnOpen(el, { select: true })}
             />
-            <span class="agent-primitive-modal-field-label">Format</span>
+            <span class="agent-primitive-modal-field-label">{t("skill.manager.format")}</span>
             <select
                 class="agent-primitive-modal-input"
                 value={draft().skill_type || "prompt"}
                 onChange={(e) => model.setDraft({ ...draft(), skill_type: e.currentTarget.value })}
             >
-                <option value="prompt">Slash command (/trigger)</option>
-                <option value="agent-skill">Agent Skill (SKILL.md) — beta ABF format</option>
+                <option value="prompt">{t("skill.manager.typeSlash")}</option>
+                <option value="agent-skill">{t("skill.manager.typeAgentSkill")}</option>
             </select>
             <Show when={(draft().skill_type || "prompt") !== "agent-skill"}>
-                <span class="agent-primitive-modal-field-label">Trigger</span>
+                <span class="agent-primitive-modal-field-label">{t("skill.manager.trigger")}</span>
                 <TextInput
                     variant="plain"
                     class="agent-primitive-modal-input"
                     value={draft().trigger}
                     onInput={(e) => model.setDraft({ ...draft(), trigger: e.currentTarget.value })}
                     onContextMenu={showTextInputContextMenu}
-                    placeholder="When should this skill be invoked?"
+                    placeholder={t("skill.manager.triggerPlaceholder")}
                 />
             </Show>
-            <span class="agent-primitive-modal-field-label">Description</span>
+            <span class="agent-primitive-modal-field-label">{t("skill.manager.description")}</span>
             <TextInput
                 variant="plain"
                 class="agent-primitive-modal-input"
@@ -421,7 +422,7 @@ function SkillForm(p: { model: SkillCatalogModel; draft: Accessor<SkillDraft> })
                 onInput={(e) => model.setDraft({ ...draft(), description: e.currentTarget.value })}
                 onContextMenu={showTextInputContextMenu}
             />
-            <span class="agent-primitive-modal-field-label">Content</span>
+            <span class="agent-primitive-modal-field-label">{t("skill.manager.content")}</span>
             <TextArea
                 variant="plain"
                 class="agent-primitive-modal-textarea"
@@ -433,7 +434,7 @@ function SkillForm(p: { model: SkillCatalogModel; draft: Accessor<SkillDraft> })
             />
             <div class="agent-primitive-modal-actions">
                 <Button class="agent-primitive-modal-btn" onClick={() => model.cancelDraft()} disabled={model.savingAtom()}>
-                    Cancel
+                    {t("skill.manager.cancel")}
                 </Button>
                 <Button
                     type="submit"
@@ -441,7 +442,7 @@ function SkillForm(p: { model: SkillCatalogModel; draft: Accessor<SkillDraft> })
                     class="agent-primitive-modal-btn agent-primitive-modal-btn-primary"
                     disabled={model.savingAtom() || !draft().name.trim()}
                 >
-                    {model.savingAtom() ? "Saving…" : "Save"}
+                    {model.savingAtom() ? t("skill.manager.saving") : t("skill.manager.save")}
                 </Button>
             </div>
         </form>

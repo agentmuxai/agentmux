@@ -19,6 +19,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use zeroize::Zeroizing;
 
 use super::seal::{self, Key};
+use super::sync_capture_kinds as kinds;
 use super::sync_links;
 use super::sync_record::{stays_here, EntryBody, Profiles};
 use super::sync_seal::{self, Place};
@@ -39,12 +40,29 @@ const SCHEMA: &str = "
         vault    TEXT NOT NULL,
         record   TEXT NOT NULL,
         hash     TEXT NOT NULL
+    );
+    -- Records the log holds that the store could not take (an error, or a kind this version does not know yet): taken again
+    -- from the log by `Taker::retake`, because a record the log holds is never sent again.
+    CREATE TABLE IF NOT EXISTS db_sync_vault_retake (
+        vault  TEXT NOT NULL,
+        record TEXT NOT NULL,
+        -- Why the other side of a conflict was kept, when the record won one: the retake keeps it the same way.
+        kept   TEXT,
+        PRIMARY KEY (vault, record)
+    );
+    -- Records this machine no longer writes an entry under (it follows another machine's, see `sync_take`): ended with a
+    -- tombstone by the next capture.
+    CREATE TABLE IF NOT EXISTS db_sync_vault_ended (
+        vault  TEXT NOT NULL,
+        record TEXT NOT NULL,
+        PRIMARY KEY (vault, record)
     );";
 
 /// Creates the log's tables and this module's.
 pub fn init(conn: &Connection) -> rusqlite::Result<()> {
     log::init(conn)?;
-    conn.execute_batch(SCHEMA)
+    conn.execute_batch(SCHEMA)?;
+    conn.execute_batch(kinds::SCHEMA)
 }
 
 /// What a capture did.
@@ -52,8 +70,12 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
 pub struct Captured {
     /// Records written: an entry's first version, or a changed one.
     pub written: usize,
-    /// Records ended with a tombstone: an entry deleted, or moved to another Vault.
+    /// Records ended with a tombstone: an entry deleted, or moved to another Vault, or a grant revoked.
     pub tombstoned: usize,
+    /// Activity lines written.
+    pub lines: usize,
+    /// Site grants written.
+    pub grants: usize,
 }
 
 /// For `log::append_local_with`: seals `body` for the place the record will have, under the Vault's key at the epoch the
@@ -94,6 +116,56 @@ pub(super) fn mark_seen(store: &Store, row: &VaultRow, record: &str, key: &Key, 
     Ok(())
 }
 
+/// Notes that the store did not take `record` of `vault`, which the log holds: `Taker::retake` takes it again.
+/// `kept` is why the side of a conflict this machine held is kept, if the record won one.
+pub(super) fn retake_mark(store: &Store, vault: &str, record: &str, kept: Option<&str>) -> Result<(), String> {
+    let conn = store.conn().lock().unwrap_or_else(|e| e.into_inner());
+    conn.execute("INSERT OR IGNORE INTO db_sync_vault_retake (vault, record, kept) VALUES (?1, ?2, ?3)", params![vault, record, kept]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// `record` of `vault` is in the store, or is no longer to be taken.
+pub(super) fn retake_clear(store: &Store, vault: &str, record: &str) -> Result<(), String> {
+    let conn = store.conn().lock().unwrap_or_else(|e| e.into_inner());
+    conn.execute("DELETE FROM db_sync_vault_retake WHERE vault = ?1 AND record = ?2", params![vault, record]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// The records of `vault` to take again, in the order they were noted.
+pub(super) fn retake_pending(store: &Store, vault: &str) -> Result<Vec<(String, Option<String>)>, String> {
+    let conn = store.conn().lock().unwrap_or_else(|e| e.into_inner());
+    let mut stmt = conn.prepare("SELECT record, kept FROM db_sync_vault_retake WHERE vault = ?1 ORDER BY rowid").map_err(|e| e.to_string())?;
+    let rows = stmt.query_map(params![vault], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))).map_err(|e| e.to_string())?;
+    rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
+}
+
+/// Every entry that has been written: the record it is written under.
+fn records_written(store: &Store) -> Result<std::collections::HashMap<String, String>, String> {
+    let conn = store.conn().lock().unwrap_or_else(|e| e.into_inner());
+    let mut stmt = conn.prepare("SELECT entry_id, record FROM db_sync_vault_seen").map_err(|e| e.to_string())?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))).map_err(|e| e.to_string())?;
+    rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
+}
+
+/// The Vault and record `entry_id` is written under, if it has been written; otherwise the record it will be written
+/// under, which is its own link id, with no Vault (nothing of it is in any log).
+pub(super) fn identity_of(store: &Store, entry_id: &str) -> Result<Option<(String, String)>, String> {
+    {
+        let conn = store.conn().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(s) = seen_of(&conn, entry_id).map_err(|e| e.to_string())? {
+            return Ok(Some((s.vault, s.record)));
+        }
+    }
+    Ok(store.vault_link_primary(entry_id).map_err(|e| e.to_string())?.map(|p| (String::new(), p)))
+}
+
+/// Notes that `record` in `vault` is no longer written: the next capture of that Vault ends it with a tombstone.
+pub(super) fn end_record(store: &Store, vault: &str, record: &str) -> Result<(), String> {
+    let conn = store.conn().lock().unwrap_or_else(|e| e.into_inner());
+    conn.execute("INSERT OR IGNORE INTO db_sync_vault_ended (vault, record) VALUES (?1, ?2)", params![vault, record]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Forgets an entry that was deleted here because a record said so: its tombstone is already in the log.
 pub(super) fn forget(store: &Store, entry_id: &str) -> Result<(), String> {
     let conn = store.conn().lock().unwrap_or_else(|e| e.into_inner());
@@ -115,7 +187,7 @@ fn seen_of(conn: &Connection, entry_id: &str) -> rusqlite::Result<Option<Seen>> 
 }
 
 /// Ends a record, if it is live.
-fn tombstone(conn: &Connection, signer: &mut Signer, collection: &str, record: &str, now_ms: i64) -> Result<bool, String> {
+pub(super) fn tombstone(conn: &Connection, signer: &mut Signer, collection: &str, record: &str, now_ms: i64) -> Result<bool, String> {
     match log::current(conn, collection, record).map_err(|e| e.to_string())? {
         Some(cur) if !cur.header.tombstone => {
             log::append_local(conn, signer, collection, record, Vec::new(), true, now_ms).map_err(|e| format!("{e:?}"))?;
@@ -137,13 +209,20 @@ struct Pending {
 /// Writes what changed in `vault_id`'s entries into its collection. `key` is this machine's own key, which opens the
 /// entries' values; `ring` holds the Vault's keys; `profiles` names the person's browser profiles here.
 pub fn capture(store: &Store, signer: &mut Signer, vault_id: &str, ring: &KeyRing, key: &Key, profiles: &dyn Profiles, now_ms: i64) -> Result<Captured, String> {
-    // Everything that reads the store comes first: the connection is the store's own, and is taken only after.
-    let rows: Vec<_> = store.vault_list().map_err(|e| e.to_string())?.into_iter().filter(|r| r.vault_id == vault_id && !stays_here(r, profiles)).collect();
+    // Everything that reads the store comes first: the connection is the store's own, and is taken only after. The lines and
+    // grants are read before the entries, so a line is never read for an entry that was made after the entries were.
+    let more = kinds::read(store, vault_id)?;
+    let all: Vec<_> = store.vault_list().map_err(|e| e.to_string())?.into_iter().filter(|r| r.vault_id == vault_id).collect();
+    let here: std::collections::HashSet<&str> = all.iter().map(|r| r.id.as_str()).collect();
+    let rows: Vec<_> = all.iter().filter(|r| !stays_here(r, profiles)).cloned().collect();
     let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
     let link_of = super::link_ids(store, &ids)?;
+    let written_as = records_written(store)?;
     let mut pending = Vec::new();
     for row in &rows {
-        let Some(record) = link_of.get(&row.id) else { continue };
+        // The record an entry is written under is the one it was first written (or taken) as, whatever link ids it has
+        // learned since: one entry is one record (`identity_of`). Until then, its own link id.
+        let Some(record) = written_as.get(&row.id).or_else(|| link_of.get(&row.id)) else { continue };
         if !sync_links::is_link_id(record) {
             continue;
         }
@@ -156,6 +235,15 @@ pub fn capture(store: &Store, signer: &mut Signer, vault_id: &str, ring: &KeyRin
     let conn = store.conn().lock().unwrap_or_else(|e| e.into_inner());
     let mut out = Captured::default();
     log::ensure_collection(&conn, vault_id, KIND, now_ms).map_err(|e| e.to_string())?;
+    // Records that an entry has left for another machine's: ended once.
+    let mut ended = conn.prepare("SELECT record FROM db_sync_vault_ended WHERE vault = ?1").map_err(|e| e.to_string())?;
+    let ended: Vec<String> = ended.query_map(params![vault_id], |r| r.get(0)).map_err(|e| e.to_string())?.collect::<Result<_, _>>().map_err(|e| e.to_string())?;
+    for record in ended {
+        if tombstone(&conn, signer, vault_id, &record, now_ms)? {
+            out.tombstoned += 1;
+        }
+        conn.execute("DELETE FROM db_sync_vault_ended WHERE vault = ?1 AND record = ?2", params![vault_id, record]).map_err(|e| e.to_string())?;
+    }
     for p in &pending {
         let seen = seen_of(&conn, &p.entry_id).map_err(|e| e.to_string())?;
         if seen.as_ref().is_some_and(|s| s.vault == vault_id && s.record == p.record && s.hash == p.hash) {
@@ -175,6 +263,11 @@ pub fn capture(store: &Store, signer: &mut Signer, vault_id: &str, ring: &KeyRin
         )
         .map_err(|e| e.to_string())?;
     }
+    let records: std::collections::HashMap<String, String> = pending.iter().map(|p| (p.entry_id.clone(), p.record.clone())).collect();
+    let wrote = kinds::write(&conn, signer, vault_id, ring, &more, &rows, &records, &here, now_ms)?;
+    out.lines = wrote.lines;
+    out.grants = wrote.grants;
+    out.tombstoned += wrote.tombstoned;
     // Entries this Vault had recorded that no longer exist: deleted. One moved to another Vault is left to that Vault's
     // capture, which ends this record when it writes the entry; one that is only no longer kept here (its profile is
     // gone) is not deleted for the other machines.

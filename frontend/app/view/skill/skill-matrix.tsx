@@ -74,7 +74,7 @@ export function SkillMatrix(props: { catalog: SkillCatalogModel }): JSX.Element 
                                                             disabled={state() === "bundle"}
                                                             title={`${cellAction(state())}: ${agent.name} and ${skill.name}`}
                                                             aria-label={`${agent.name}, ${skill.name}: ${CELL_TEXT[state()] || "not given"}. ${cellAction(state())}`}
-                                                            onClick={() => void matrix.toggle(agent, skill, state(), props.catalog.agentsAtom())}
+                                                            onClick={() => matrix.toggle(agent, skill, state(), props.catalog.agentsAtom())}
                                                         >
                                                             {CELL_TEXT[state()] || "—"}
                                                         </Button>

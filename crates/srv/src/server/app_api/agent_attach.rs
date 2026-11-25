@@ -20,8 +20,6 @@ pub(crate) const DESIRED_STOPPED: &str = "stopped";
 
 /// Marks an open that is a start: the block it makes is parked, not placed in a layout.
 pub(super) const START_PARKED: &str = "agent:start_parked";
-/// Marks the start that restart resume makes for an agent that was running when AgentMux stopped (srv's own call, never a caller's).
-pub(super) const RESUME_START: &str = "agent:resume_start";
 
 /// The blocks whose agent was set to stopped since this srv started and not started again, and when
 /// (unix ms). A recorded `stopped` read from the database at startup is not in it: it may be stale
@@ -333,30 +331,26 @@ pub(super) async fn tab_or_reuse(
 pub(crate) async fn start_agent(state: &AppState, agent_id: &str) -> Result<String, String> {
     // A start over the cap (or the host's commit limit) stops an idle agent with no view, or is refused.
     crate::server::agent_lifecycle::admit_start(state, agent_id).await?;
-    start_admitted(state, agent_id, false).await
+    start_admitted(state, agent_id).await
 }
 
 /// [`start_agent`] that never stops another agent to make room: over the cap or the commit limit it is
 /// refused (`Err("capacity: ...")`). Restart resume starts the agents that were running this way.
 pub(crate) async fn start_agent_without_eviction(state: &AppState, agent_id: &str) -> Result<String, String> {
     crate::server::agent_lifecycle::admit_start_without_eviction(state, agent_id).await?;
-    start_admitted(state, agent_id, true).await
+    start_admitted(state, agent_id).await
 }
 
-/// What a start tells `agent.open`: it makes no pane, and, for restart resume only, it goes on for a host agent that
-/// shares a folder with a container agent the person has not gone ahead with (it was running already).
-pub(super) fn start_markers(resume: bool) -> obj::MetaMapType {
+/// What a start tells `agent.open`: it makes no pane.
+pub(super) fn start_markers() -> obj::MetaMapType {
     let mut marker = obj::MetaMapType::new();
     marker.insert(START_PARKED.to_string(), json!(true));
-    if resume {
-        marker.insert(RESUME_START.to_string(), json!(true));
-    }
     marker
 }
 
 /// The start itself, once admitted: a failure gives the admission's room back.
-async fn start_admitted(state: &AppState, agent_id: &str, resume: bool) -> Result<String, String> {
-    let marker = start_markers(resume);
+async fn start_admitted(state: &AppState, agent_id: &str) -> Result<String, String> {
+    let marker = start_markers();
     let opened = super::agent_open::open_agent_inner(
         state,
         CommandAgentOpenData {

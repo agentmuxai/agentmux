@@ -189,10 +189,10 @@ shortcutFor pane:close
       <div class="flex flex-col gap-2 text-secondary text-sm">
         <p>
           "AgentMux is"
-          <b>
+          <strong>
             "alpha software"
           ". Features may be incomplete, unstable, or change between releases. AI agents generate code, text, and other outputs that may be"
-          <b>
+          <strong>
             "inaccurate, incomplete, or inappropriate"
           ". Always review agent outputs before using them."
         <p>
@@ -389,10 +389,10 @@ tipLabel zoom mac
       <div class="flex flex-col gap-2 text-secondary text-sm">
         <p>
           "AgentMux is"
-          <b>
+          <strong>
             "alpha software"
           ". Features may be incomplete, unstable, or change between releases. AI agents generate code, text, and other outputs that may be"
-          <b>
+          <strong>
             "inaccurate, incomplete, or inappropriate"
           ". Always review agent outputs before using them."
         <p>
@@ -589,10 +589,10 @@ tipLabel zoom mac
       <div class="flex flex-col gap-2 text-secondary text-sm">
         <p>
           "AgentMux is"
-          <b>
+          <strong>
             "alpha software"
           ". Features may be incomplete, unstable, or change between releases. AI agents generate code, text, and other outputs that may be"
-          <b>
+          <strong>
             "inaccurate, incomplete, or inappropriate"
           ". Always review agent outputs before using them."
         <p>

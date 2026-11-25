@@ -133,10 +133,10 @@ function CapActions(props: { c: SpendCap; r: AgentSpendResult }): JSX.Element {
     const alreadyNone = () => props.r.own_cap && props.r.cap_usd === null;
     return (
         <>
-            <Button disabled={c.busy() || !props.r.own_cap} onClick={() => void c.change("default", null)} data-testid="agent-spend-default">
+            <Button disabled={c.busy() || !props.r.own_cap} onClick={() => c.change("default", null)} data-testid="agent-spend-default">
                 {defaultCap() === null ? t("agentSpend.useDefaultNone") : t("agentSpend.useDefault", { cap: cents(defaultCap()!) })}
             </Button>
-            <Button disabled={c.busy() || alreadyNone()} onClick={() => void c.change("set", null)} data-testid="agent-spend-nocap">
+            <Button disabled={c.busy() || alreadyNone()} onClick={() => c.change("set", null)} data-testid="agent-spend-nocap">
                 {t("agentSpend.noCap")}
             </Button>
             <Button tone="accent" busy={c.busy()} disabled={c.busy()} onClick={c.setFromBox} data-testid="agent-spend-set">
@@ -171,7 +171,7 @@ export const AgentSpendPanel = (props: AgentSpendPanelProps): JSX.Element => {
                 </Show>
                 <Show when={!c.state() && c.error()}>
                     <div class="agent-primitive-modal-actions">
-                        <Button onClick={() => void c.load()}>{t("agentSpend.retry")}</Button>
+                        <Button onClick={() => c.load()}>{t("agentSpend.retry")}</Button>
                     </div>
                 </Show>
                 <Show when={c.saved()}>

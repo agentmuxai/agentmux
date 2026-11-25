@@ -19,11 +19,11 @@ fn lim() -> Limits {
 }
 
 fn idle(activity_ms: u64) -> Reading {
-    Reading { activity_ms, turn_active: false }
+    Reading { activity_ms, turn_active: false, background: false }
 }
 
 fn running(activity_ms: u64) -> Reading {
-    Reading { activity_ms, turn_active: true }
+    Reading { activity_ms, turn_active: true, background: false }
 }
 
 #[test]
@@ -55,7 +55,7 @@ fn an_idle_agent_is_nudged_at_the_quiet_time_and_its_watchers_told_five_minutes_
     assert_eq!(w.step("a", idle(T0), &l, T0 + 20 * MIN + 30_000), Some(Action::Tell { running: false, idle_ms: 20 * MIN + 30_000 }), "not delivered: again");
     w.mark_told("a", T0 + 20 * MIN + 30_000);
     assert_eq!(w.step("a", idle(T0), &l, T0 + 40 * MIN), None, "told once");
-    assert_eq!(w.step("a", idle(T0), &l, T0 + 81 * MIN), Some(Action::Tell { running: false, idle_ms: 81 * MIN }), "an hour later, still quiet");
+    assert_eq!(w.step("a", idle(T0), &l, T0 + 81 * MIN), None, "told once for this quiet: not again an hour later");
 }
 
 /// The nudge is allowed once an hour: an agent that answers it and goes quiet again within the hour is not
@@ -354,13 +354,283 @@ fn a_message_the_agent_sends_is_activity_and_one_sent_to_it_is_not() {
 
 #[test]
 fn the_note_to_a_watcher_says_who_what_and_how_long() {
-    let tasks = vec![OwedTask { num: 1234, filer_uid: String::new(), updated_ms: 0 }, OwedTask { num: 1240, filer_uid: String::new(), updated_ms: 0 }];
-    assert_eq!(quiet_body("Pulp", false, &tasks, 22, false, ""), "Your agent Pulp has been quiet for 22 min on #1234, #1240. It is idle.");
+    let tasks = vec![OwedTask { num: 1234, filer_uid: String::new(), updated_ms: 0, asked: false }, OwedTask { num: 1240, filer_uid: String::new(), updated_ms: 0, asked: false }];
+    assert_eq!(quiet_body("Pulp", false, &tasks, 22, false, "", ""), "Your agent Pulp has been quiet for 22 min on #1234, #1240. It is idle.");
     assert_eq!(
-        quiet_body("Pulp", true, &[], 20, false, "next I run the check"),
+        quiet_body("Pulp", true, &[], 20, false, "next I run the check", ""),
         "Your worker Pulp has been quiet for 20 min without reporting to you. It is idle after a turn that ended: \"next I run the check\""
     );
-    assert_eq!(quiet_body("Pulp", false, &tasks[..1], 35, true, ""), "Your agent Pulp has been quiet for 35 min on #1234. Its turn is still running but has written nothing.");
+    assert_eq!(quiet_body("Pulp", false, &tasks[..1], 35, true, "", ""), "Your agent Pulp has been quiet for 35 min on #1234. Its turn is still running but has written nothing.");
     assert_eq!(nudge_text(&tasks[..1], 15), "You hold #1234 and nothing has run for 15 minutes. Carry on, or say what you are waiting on.");
     assert_eq!(nudge_text(&[], 15), "You have not reported to your leader and nothing has run for 15 minutes. Carry on, or say what you are waiting on.");
+}
+
+/// What the Swarm and the Kanban show (`quiet_since`): quiet from the quiet time, whether or not it was nudged or told, a
+/// running turn only from the longer running time, and never while the agent moves.
+#[test]
+fn an_agent_shows_as_quiet_from_the_quiet_time_whether_or_not_it_was_told() {
+    let mut w = Watch::default();
+    let l = lim();
+    assert_eq!(w.quiet_since("a", false, false, &l, T0), None, "never seen");
+    w.step("a", idle(T0), &l, T0);
+    assert_eq!(w.quiet_since("a", false, false, &l, T0 + 14 * MIN), None);
+    assert_eq!(w.quiet_since("a", false, false, &l, T0 + 15 * MIN), Some(T0), "quiet since its last activity, before any nudge");
+    w.step("a", idle(T0), &l, T0 + 15 * MIN);
+    assert_eq!(w.quiet_since("a", false, false, &l, T0 + 16 * MIN), Some(T0), "still quiet after the nudge");
+    assert_eq!(w.quiet_since("a", true, false, &l, T0 + 16 * MIN), None, "a running turn is quiet only after the running time");
+    assert_eq!(w.quiet_since("a", true, false, &l, T0 + 30 * MIN), Some(T0));
+    w.step("a", idle(T0 + 17 * MIN), &l, T0 + 17 * MIN);
+    assert_eq!(w.quiet_since("a", false, false, &l, T0 + 17 * MIN), None, "it moved: not quiet");
+}
+
+
+fn status_meta(v: serde_json::Value) -> MetaMapType {
+    v.as_object().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+}
+
+#[test]
+fn a_new_status_line_is_something_the_agent_did() {
+    let line = status_meta(live_phrase::set_meta("Fixing the login race", Some("working"), live_phrase::SRC_AGENT, T0 as i64));
+    assert_eq!(paused_activity(&line, None, T0 + 20 * MIN), T0);
+    assert_eq!(paused_activity(&MetaMapType::new(), None, T0), 0, "no line, no activity");
+}
+
+#[test]
+fn a_waiting_line_with_a_time_stops_the_clock_and_it_runs_again_from_the_end() {
+    let line = status_meta(live_phrase::set_meta_waiting("Waiting for the build", live_phrase::SRC_AGENT, T0 as i64, 40));
+    let (mut w, l) = (Watch::default(), lim());
+    // While it waits the agent counts as active now, however long it has written nothing.
+    for at in [T0 + MIN, T0 + 20 * MIN, T0 + 39 * MIN] {
+        assert_eq!(w.step("wait", idle(paused_activity(&line, None, at)), &l, at), None, "waiting at {at}");
+    }
+    // The wait ends at 40 minutes: a whole quiet time from there, not from when it last wrote.
+    assert_eq!(w.step("wait", idle(paused_activity(&line, None, T0 + 54 * MIN)), &l, T0 + 54 * MIN), None);
+    assert_eq!(w.step("wait", idle(paused_activity(&line, None, T0 + 55 * MIN)), &l, T0 + 55 * MIN), Some(Action::Nudge));
+}
+
+#[test]
+fn a_waiting_line_with_no_time_stops_the_clock_for_half_an_hour_only() {
+    let line = status_meta(live_phrase::set_meta("Waiting for an answer", Some("waiting"), live_phrase::SRC_AGENT, T0 as i64));
+    let (mut w, l) = (Watch::default(), lim());
+    assert_eq!(w.step("bare", idle(paused_activity(&line, None, T0 + 29 * MIN)), &l, T0 + 29 * MIN), None);
+    assert_eq!(w.step("bare", idle(paused_activity(&line, None, T0 + 44 * MIN)), &l, T0 + 44 * MIN), None, "30 + 14 minutes");
+    assert_eq!(w.step("bare", idle(paused_activity(&line, None, T0 + 45 * MIN)), &l, T0 + 45 * MIN), Some(Action::Nudge), "30 + 15 minutes: a status line left up is what the watch catches");
+}
+
+#[test]
+fn a_leaders_mute_stops_the_clock_for_the_stated_time_and_no_longer() {
+    let m = mute("mute-a", 40, "  building\nthe release  ", "agentx", T0).unwrap();
+    assert_eq!((m.until_ms, m.reason.as_str(), m.by.as_str()), (T0 + 40 * MIN, "building the release", "agentx"));
+    assert_eq!(mute_of("mute-a", T0 + 39 * MIN), Some(m.clone()));
+    let (mut w, l) = (Watch::default(), lim());
+    let none = MetaMapType::new();
+    let at = |t: u64| idle(paused_activity(&none, mute_of("mute-a", t).as_ref(), t));
+    assert_eq!(w.step("mute-a", at(T0 + 20 * MIN), &l, T0 + 20 * MIN), None);
+    assert_eq!(mute_of("mute-a", T0 + 40 * MIN), None, "ended: no longer in force");
+    // A sweep that comes late (the machine slept from minute 20 to 45) still starts the clock at the mute's end.
+    let late = mute_for_clock("mute-a", T0 + 45 * MIN);
+    assert_eq!(late.as_ref(), Some(&m), "kept for the clock");
+    assert_eq!(paused_activity(&none, late.as_ref(), T0 + 45 * MIN), T0 + 40 * MIN);
+    assert_eq!(w.step("mute-a", idle(paused_activity(&none, late.as_ref(), T0 + 45 * MIN)), &l, T0 + 45 * MIN), None, "5 of 15 minutes after the end: no nudge yet");
+    assert_eq!(w.step("mute-a", idle(paused_activity(&none, late.as_ref(), T0 + 55 * MIN)), &l, T0 + 55 * MIN), Some(Action::Nudge), "15 minutes after the end");
+    assert_eq!(mute_for_clock("mute-a", T0 + 40 * MIN + 24 * 60 * MIN), None, "a day after its end it is dropped");
+    // The mute's own end is the clock's start again.
+    assert_eq!(paused_activity(&none, Some(&m), T0 + 50 * MIN), T0 + 40 * MIN);
+}
+
+#[test]
+fn a_mute_asks_for_one_to_240_minutes_and_zero_lifts_it() {
+    assert!(mute("mute-b", 0, "x", "a", T0).is_err());
+    assert!(mute("mute-b", 241, "x", "a", T0).is_err());
+    assert!(mute("mute-b", 240, "x", "a", T0).is_ok());
+    assert!(unmute("mute-b", T0 + MIN), "one was in force");
+    assert!(!unmute("mute-b", T0 + MIN), "and now none");
+    let long = "w".repeat(500);
+    assert_eq!(mute("mute-c", 5, &long, "a", T0).unwrap().reason.chars().count(), 120);
+}
+
+fn ask_at(tasks: &[i64], at_ms: u64) -> Ask {
+    Ask { sender: "agenty".into(), block_id: "b".into(), tasks: tasks.to_vec(), at_ms }
+}
+
+fn held_task(num: i64, updated_ms: u64) -> OwedTask {
+    OwedTask { num, filer_uid: String::new(), updated_ms, asked: false }
+}
+
+#[test]
+fn an_urgent_ask_is_answered_by_a_message_to_its_sender_by_a_move_on_a_task_it_named_or_by_the_task_leaving() {
+    let ask = ask_at(&[48288], 1_000);
+    // Nothing since: open.
+    assert!(!ask_answered(&ask, None, &[], true));
+    // A message to the sender before the ask does not answer it; one at or after does.
+    assert!(!ask_answered(&ask, Some(999), &[], true));
+    assert!(ask_answered(&ask, Some(1_000), &[], true));
+    // A task it named that moved after the ask; one that moved before, or another task, does not.
+    assert!(ask_answered(&ask, None, &[held_task(48288, 1_001)], true));
+    assert!(!ask_answered(&ask, None, &[held_task(48288, 1_000)], true));
+    assert!(!ask_answered(&ask, None, &[held_task(1, 9_999)], true));
+    // None of the tasks it named is waiting on the agent any more.
+    assert!(ask_answered(&ask, None, &[], false));
+}
+
+#[test]
+fn the_nudge_and_the_note_name_the_urgent_message_and_the_tasks_it_was_about() {
+    let asked = |num| OwedTask { num, filer_uid: "y".into(), updated_ms: 0, asked: true };
+    assert_eq!(nudge_text(&[asked(48288)], 15), "You have an unanswered urgent message about #48288 and nothing has run for 15 minutes. Carry on, or say what you are waiting on.");
+    assert_eq!(
+        nudge_text(&[held_task(7, 0), asked(48288)], 15),
+        "You hold #7, have an unanswered urgent message about #48288 and nothing has run for 15 minutes. Carry on, or say what you are waiting on."
+    );
+    assert_eq!(quiet_body("Pulp", false, &[asked(48288)], 22, false, "", ""), "Your agent Pulp has been quiet for 22 min without answering your urgent message about #48288. It is idle.");
+    assert_eq!(
+        quiet_body("Pulp", false, &[held_task(7, 0), asked(48288)], 22, false, "", ""),
+        "Your agent Pulp has been quiet for 22 min on #7, and has not answered your urgent message about #48288. It is idle."
+    );
+}
+
+/// From the record to the watch: an urgent message from a proven sender that names a task waiting on the recipient
+/// makes the recipient owe an answer to the sender, until the task is no longer waiting on it.
+#[tokio::test]
+async fn an_urgent_message_makes_the_recipient_owe_its_sender_an_answer_until_the_task_leaves() {
+    use crate::backend::reactive::{InjectionRequest, InjectionResponse};
+    let state = crate::test_support::core_parts();
+    let tab = tab(&state).await;
+    let id = uuid::Uuid::new_v4().to_string();
+    let (sender_id, recipient_id) = (format!("asker-{id}"), format!("owner-{id}"));
+    let mut sender = test_agent_def(&sender_id, &format!("Asker {}", &id[..8]), "claude", "host", 1, "");
+    let mut recipient = test_agent_def(&recipient_id, &format!("Owner {}", &id[..8]), "claude", "host", 1, "");
+    for d in [&mut sender, &mut recipient] {
+        state.mstore.agent_def_insert(d).unwrap();
+    }
+    let _sender_pane = pane(&state, &tab, &sender_id).await;
+    let recipient_pane = pane(&state, &tab, &recipient_id).await;
+    let (work, _dir) = work_store();
+    // A task the recipient holds (claimed, so its card has a number); the empty `claimed` map below keeps the watch
+    // from counting it as held work, so only the ask is under test.
+    work.work_queue_enqueue(&item("waiting", "uid-filer")).unwrap();
+    let holder = ClaimFilter { agent_id: recipient.slug.clone(), agent_uid: recipient_id.clone(), ..ClaimFilter::default() };
+    let claim_ms = 1_000_000_000_000i64;
+    work.work_queue_claim(&holder, claim_ms, 120_000).unwrap().expect("claimed");
+    let num = read_claimed(&work, claim_ms).first().expect("a claimed task").card.num;
+    let delivered = |block: &str| -> InjectionResponse { serde_json::from_value(json!({ "success": true, "request_id": "r", "block_id": block, "timestamp": 1 })).unwrap() };
+    let urgent = |message: String| InjectionRequest {
+        source_agent: Some(sender.slug.clone()),
+        priority: Some("urgent".into()),
+        message,
+        delivery_tier: Some("host".into()),
+        sig_verified: Some(true),
+        ..Default::default()
+    };
+    let defs = vec![sender.clone(), recipient.clone()];
+    let now = agentmux_common::time::now_ms_u64() + 1_000;
+
+    let _turn = urgent_asks::TEST_TURN.lock();
+    urgent_asks::note_delivery(&urgent(format!("please do #{num} now")), &delivered(&recipient_pane));
+    let open = open_asks_by_def(&state.mstore, &work, &defs, &HashMap::new(), now);
+    let owed = open.get(&recipient_id).expect("the recipient owes an answer");
+    assert_eq!(owed.len(), 1);
+    assert_eq!((owed[0].num, owed[0].filer_uid.as_str(), owed[0].asked), (num, sender_id.as_str(), true), "owed to the sender, as a filer is");
+    assert!(open.get(&sender_id).is_none(), "the sender owes nothing");
+
+    // Still open at the next sweep: a read does not settle it.
+    assert!(open_asks_by_def(&state.mstore, &work, &defs, &HashMap::new(), now).contains_key(&recipient_id));
+
+    // An urgent message that names a task not waiting on the recipient is settled at once.
+    urgent_asks::note_delivery(&urgent("about #999999".into()), &delivered(&recipient_pane));
+    let open = open_asks_by_def(&state.mstore, &work, &defs, &HashMap::new(), now);
+    assert_eq!(open.get(&recipient_id).map(|v| v.iter().map(|t| t.num).collect::<Vec<_>>()), Some(vec![num]), "only the task that waits on it");
+    assert!(urgent_asks::open_asks(now).iter().all(|a| !a.tasks.contains(&999_999)), "forgotten");
+
+    // The recipient holds the task the message named: the ask stays open until that task moves after the message.
+    let held = |updated_ms| HashMap::from([(recipient_id.clone(), vec![OwedTask { num, filer_uid: "filer".into(), updated_ms, asked: false }])]);
+    assert!(open_asks_by_def(&state.mstore, &work, &defs, &held(1), now).contains_key(&recipient_id), "held and not moved since: still owed");
+    assert!(!open_asks_by_def(&state.mstore, &work, &defs, &held(now), now).contains_key(&recipient_id), "the held task moved after the message: answered");
+}
+
+#[test]
+fn a_task_the_agent_holds_and_was_also_asked_about_is_owed_both_ways() {
+    let asked = OwedTask { num: 7, filer_uid: "sender".into(), updated_ms: 5, asked: true };
+    let held = OwedTask { num: 7, filer_uid: "filer".into(), updated_ms: 1, asked: false };
+    let owed = with_asked(vec![held.clone()], vec![asked.clone(), asked.clone()]);
+    assert_eq!(owed, vec![held, asked], "the held task and the ask, the ask once");
+    let filers: Vec<&str> = owed.iter().map(|t| t.filer_uid.as_str()).collect();
+    assert_eq!(filers, ["filer", "sender"], "the sender of the message is a watcher, as the filer is");
+    assert_eq!(
+        quiet_body("Pulp", false, &owed, 22, false, "", ""),
+        "Your agent Pulp has been quiet for 22 min on #7, and has not answered your urgent message about #7. It is idle."
+    );
+}
+
+/// #48605, #48606: an agent whose turn ended with a command of its own running is waiting on it, not stuck.
+#[test]
+fn an_agent_waiting_on_its_own_background_command_is_not_nudged_and_is_told_late() {
+    let on_job = |activity_ms| Reading { activity_ms, turn_active: false, background: true };
+    let mut w = Watch::default();
+    let l = lim();
+    w.step("a", on_job(T0), &l, T0);
+    assert_eq!(w.step("a", on_job(T0), &l, T0 + 15 * MIN), None, "no nudge at the usual quiet time");
+    assert_eq!(w.step("a", on_job(T0), &l, T0 + 59 * MIN), None, "nor before four times it");
+    assert_eq!(w.quiet_since("a", false, true, &l, T0 + 59 * MIN), None, "and it is not shown as quiet");
+    assert_eq!(w.step("a", on_job(T0), &l, T0 + 60 * MIN), Some(Action::Tell { running: false, idle_ms: 60 * MIN }), "its watchers hear at the longer time, with no nudge before");
+    assert_eq!(w.quiet_since("a", false, true, &l, T0 + 60 * MIN), Some(T0));
+    w.mark_told("a", T0 + 60 * MIN);
+    assert_eq!(w.step("a", on_job(T0), &l, T0 + 200 * MIN), None, "told once for this quiet");
+    // The command ends and the agent stays silent: it is no longer waiting on anything, and the usual time applies.
+    let mut b = Watch::default();
+    b.step("b", on_job(T0), &l, T0);
+    assert_eq!(b.step("b", idle(T0), &l, T0 + 15 * MIN), Some(Action::Nudge), "its job ended: the usual rules apply");
+}
+
+#[test]
+fn the_note_names_the_command_that_is_still_running() {
+    assert_eq!(
+        quiet_body("Wren", false, &[held_task(8078, 0)], 62, false, "", "gh pr checks 8078 --watch"),
+        "Your agent Wren has been quiet for 62 min on #8078. Its turn ended, and a background command is still running: gh pr checks 8078 --watch"
+    );
+    // A turn that is running says that, whatever else runs.
+    assert_eq!(
+        quiet_body("Wren", false, &[held_task(8078, 0)], 35, true, "", "ignored"),
+        "Your agent Wren has been quiet for 35 min on #8078. Its turn is still running but has written nothing."
+    );
+}
+
+#[test]
+fn an_agent_that_holds_on_purpose_while_quota_mode_is_tight_stops_its_clock() {
+    let waiting = status_meta(live_phrase::set_meta("Holding: quota mode is tight", Some("waiting"), live_phrase::SRC_AGENT, T0 as i64));
+    let working = status_meta(live_phrase::set_meta("Fixing the login race", Some("working"), live_phrase::SRC_AGENT, T0 as i64));
+    let claim = status_meta(live_phrase::set_meta("#12 a task", Some("waiting"), live_phrase::SRC_TASK, T0 as i64));
+    assert!(holding_for_quota(&waiting, true), "its own waiting line, quota tight");
+    assert!(!holding_for_quota(&waiting, false), "quota mode is not tight");
+    assert!(!holding_for_quota(&working, true), "a working line is not a hold");
+    assert!(!holding_for_quota(&claim, true), "a line srv wrote for a claim is not the agent saying it holds");
+    assert!(!holding_for_quota(&MetaMapType::default(), true), "no line");
+}
+
+/// Each sender of an urgent message about one task is told, and an ask is not the recipient's own activity (#8271).
+#[test]
+fn every_sender_of_an_urgent_message_about_a_task_is_kept_and_an_ask_is_not_the_agents_activity() {
+    let asked_by = |who: &str, at| OwedTask { num: 7, filer_uid: who.into(), updated_ms: at, asked: true };
+    let owed = with_asked(vec![], vec![asked_by("first", 5), asked_by("second", 6), asked_by("first", 5)]);
+    let filers: Vec<&str> = owed.iter().map(|t| t.filer_uid.as_str()).collect();
+    assert_eq!(filers, ["first", "second"], "each sender once");
+    assert_eq!(quiet_body("Pulp", false, &owed, 22, false, "", ""), "Your agent Pulp has been quiet for 22 min without answering your urgent message about #7. It is idle.", "the task once");
+    // Only the tasks it holds count as its own activity: a later ask does not restart its quiet time.
+    let mut tasks = vec![held_task(7, 100)];
+    tasks.extend(owed);
+    assert_eq!(held_moved_ms(&tasks), 100);
+    assert_eq!(held_moved_ms(&[asked_by("first", 5_000)]), 0);
+}
+
+/// A lead on another machine hears once: nothing is queued for it while the note to the watchers here is not taken, so a
+/// sweep that asks again does not send a second one.
+#[test]
+fn a_lead_on_another_machine_is_sent_a_note_only_at_the_sweep_that_tells() {
+    use std::cell::Cell;
+    let sent = Cell::new(0);
+    assert!(!told_both(true, || false, || sent.set(sent.get() + 1)), "the local note is held: not told yet");
+    assert_eq!(sent.get(), 0, "and nothing went to the lead");
+    assert!(told_both(true, || true, || sent.set(sent.get() + 1)));
+    assert_eq!(sent.get(), 1);
+    assert!(told_both(false, || panic!("nobody here watches"), || sent.set(sent.get() + 1)), "no watcher here, only the remote lead");
+    assert_eq!(sent.get(), 2);
 }

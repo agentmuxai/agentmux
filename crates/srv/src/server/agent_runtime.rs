@@ -229,6 +229,7 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
                 effort: model.effort,
                 pending_switch: model.pending_label,
                 definition_model_label: model.definition_label,
+                quiet_since_ms: crate::backend::quiet_watch::quiet_view(&d.id).map(|q| q.since_ms),
                 blocked,
                 color,
                 agent_id: d.id,
@@ -475,6 +476,7 @@ mod tests {
             effort: None,
             pending_switch: None,
             definition_model_label: None,
+            quiet_since_ms: None,
         }
     }
 

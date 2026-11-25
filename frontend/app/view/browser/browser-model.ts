@@ -202,6 +202,8 @@ export class BrowserViewModel {
      * closes and the ViewModel is GC'd.
      */
     private _navUnsub: (() => void) | null = null;
+    /** The find bar's state (Ctrl/Cmd+F), set by the view (browser-find.ts); the host opens and closes the bar through it. */
+    searchAtoms?: SearchAtoms;
 
     /**
      * Unsubscribe from the backend's `browser-pane-clicked` event.

@@ -55,6 +55,7 @@ export function variantOf(node: SystemNoteNode): Variant {
     }
     switch (origin.kind) {
         case "agent":
+            if (from?.startsWith("?")) return { kind: "agent", label: `Message claiming to be ${from.slice(1)} (not proven)`, icon: "paper-plane" };
             return { kind: "agent", label: from ? `Message from ${from}` : "Message from an agent", icon: "paper-plane" };
         case "service":
             return { kind: "service", label: from ? `Notice from ${from}` : "Notice", icon: "bell" };

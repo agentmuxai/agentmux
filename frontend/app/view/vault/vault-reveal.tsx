@@ -13,6 +13,7 @@ import { createStore } from "solid-js/store";
 import { Modal } from "@/app/element/modal";
 import { ModalBody, ModalFooter, ModalHeader } from "@/app/element/modal-parts";
 import { Button } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import { getPlatform } from "@/util/platformutil";
 import { vaultKind } from "./vault-kinds";
@@ -28,10 +29,10 @@ export function canConfirmPerson(platform: string = getPlatform()): boolean {
 
 /** What confirms the person on this OS, in its own words. */
 function confirmedBy(platform: string): string {
-    return platform === "darwin" ? "Touch ID, or your Mac's password," : "Windows Hello";
+    return platform === "darwin" ? t("vault.reveal.byMac") : t("vault.reveal.byWindows");
 }
 
-export const CONFIRM_UNAVAILABLE = "Reveal and Copy aren't available on this system yet: there is no standard way to confirm it is you without administrator rights, which the Vault never asks for.";
+export const confirmUnavailable = (): string => t("vault.reveal.unavailable");
 
 /** Whether the Vault is on screen: its pane is in the active tab of a shown window. */
 export const VaultShown = createContext<Accessor<boolean>>(() => true);
@@ -98,17 +99,17 @@ export function VaultRevealDialog(props: { entry: VaultEntryInfo; onClose: () =>
     const copy = (part: string) =>
         run(`copy:${part}`, async () => {
             const secs = await copyVaultPart(entry.id, part, entry.label);
-            setNotice(`Copied. It clears from the clipboard in ${secs} seconds.`);
+            setNotice(t("vault.reveal.copied", { secs }));
         });
 
     return (
         <Modal open={true} scope="pane" onClose={props.onClose} size="md" closeOnBackdropClick={false} panelClass="vault-form">
             <ModalHeader
-                title={`Show or copy ${entry.label}`}
+                title={t("vault.reveal.title", { label: entry.label })}
                 description={
                     available
-                        ? `${confirmedBy(getPlatform())} confirms it's you each time. A revealed value hides after 15 seconds.`
-                        : CONFIRM_UNAVAILABLE
+                        ? t("vault.reveal.description", { by: confirmedBy(getPlatform()) })
+                        : confirmUnavailable()
                 }
             />
             <ModalBody>
@@ -128,15 +129,15 @@ export function VaultRevealDialog(props: { entry: VaultEntryInfo; onClose: () =>
                                             icon="eye"
                                             disabled={!available}
                                             busy={busy() === p.name}
-                                            title={available ? undefined : CONFIRM_UNAVAILABLE}
+                                            title={available ? undefined : confirmUnavailable()}
                                             onClick={() => void reveal(p.name)}
                                         >
-                                            Reveal
+                                            {t("vault.reveal.reveal")}
                                         </Button>
                                     }
                                 >
                                     <Button density="compact" icon="eye-slash" onClick={() => hide(p.name)}>
-                                        Hide
+                                        {t("vault.reveal.hide")}
                                     </Button>
                                 </Show>
                                 <Button
@@ -144,10 +145,10 @@ export function VaultRevealDialog(props: { entry: VaultEntryInfo; onClose: () =>
                                     icon="copy"
                                     disabled={!available}
                                     busy={busy() === `copy:${p.name}`}
-                                    title={available ? undefined : CONFIRM_UNAVAILABLE}
-                                    onClick={() => void copy(p.name)}
+                                    title={available ? undefined : confirmUnavailable()}
+                                    onClick={() => copy(p.name)}
                                 >
-                                    Copy
+                                    {t("vault.reveal.copy")}
                                 </Button>
                             </div>
                         )}
@@ -166,7 +167,7 @@ export function VaultRevealDialog(props: { entry: VaultEntryInfo; onClose: () =>
             </ModalBody>
             <ModalFooter>
                 <Button data-modal-dismiss onClick={props.onClose}>
-                    Close
+                    {t("vault.reveal.close")}
                 </Button>
             </ModalFooter>
         </Modal>

@@ -29,6 +29,13 @@ pub(super) fn composer_origin(ctx: &RpcContext, lowered: bool) -> Result<TurnOri
     composer_origin_in(ctx, lowered, crate::headless::active())
 }
 
+/// Whether the caller may put text into an agent's input as the person does (`agent.send`): the same decision as the
+/// composer's, for a call that has no turn origin of its own. Refused for a registered agent in every mode, and for any
+/// connection the CEF host did not prove when srv has a host.
+pub(crate) fn window_only(ctx: &RpcContext) -> Result<(), String> {
+    composer_origin(ctx, false).map(|_| ())
+}
+
 fn composer_origin_in(ctx: &RpcContext, lowered: bool, headless: bool) -> Result<TurnOrigin, String> {
     // A registered agent is refused in every mode, whatever else it claims.
     if !ctx.agent_id.is_empty() {

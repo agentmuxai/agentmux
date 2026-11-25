@@ -4,7 +4,7 @@
 /**
  * The command palette's place and size, measured in a real browser (SPEC_COMMAND_PALETTE_TOP_CENTRE_2026_11_17.md
  * R1 to R5, R12, R14): it hangs 6 px below the window's top edge, centred, 600 px wide at 100% zoom and never wider
- * than the window less 8 px each side, at every chrome zoom. It lists at most twelve rows and then scrolls, with the
+ * than the window less 8 px each side, at every chrome zoom. It lists at most sixteen rows and then scrolls, with the
  * search row staying put, and never grows past the window's height less 48 px. Nothing behind it is dimmed. A label
  * too long for its row is cut, and the shortcut and the group's name stay whole.
  *
@@ -92,6 +92,7 @@ describe.skipIf(!BROWSER)("command palette place and size", () => {
         [600, 1],
         [900, 1],
         [1600, 1],
+        [600, 0.8],
         [600, 1.5],
         [1600, 1.5],
         [600, 2],
@@ -109,12 +110,12 @@ describe.skipIf(!BROWSER)("command palette place and size", () => {
         }, 60_000);
     }
 
-    it("is as tall as its rows need when there are few, and scrolls its list past twelve rows with the search row in place", async () => {
+    it("is as tall as its rows need when there are few, and scrolls its list past sixteen rows with the search row in place", async () => {
         const fewM = await measureInBrowser<Measured>(BROWSER!, page(1, few), { width: 900, height: 700 });
         expect(fewM.listScroll).toBeLessThanOrEqual(fewM.listClient + 1);
         const manyM = await measureInBrowser<Measured>(BROWSER!, page(1, many), { width: 900, height: 700 });
         expect(manyM.listScroll).toBeGreaterThan(manyM.listClient);
-        expect(manyM.listClient).toBeLessThanOrEqual(12 * 30 + 8 + 1);
+        expect(manyM.listClient).toBeLessThanOrEqual(16 * 24 + 8 + 1);
         expect(manyM.scrolled).toBe(true);
         expect(manyM.inputTop).toBeLessThanOrEqual(1); // the panel's own border
         expect(manyM.height).toBeGreaterThan(fewM.height);

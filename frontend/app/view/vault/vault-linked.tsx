@@ -127,7 +127,7 @@ export function CopyPlaceButton(props: { entry: VaultEntryInfo; onError: (messag
             props.onError(err instanceof Error ? err.message : String(err));
         }
     };
-    return <IconButton icon="copy" label={t("vault.linked.copyPlace")} density="compact" onClick={() => void copy()} />;
+    return <IconButton icon="copy" label={t("vault.linked.copyPlace")} density="compact" onClick={() => copy()} />;
 }
 
 /** The form's inputs for what an entry says of its key: on a new entry, whether it is a link at all; then who reads

@@ -469,6 +469,18 @@ impl Store {
         self.managed_is_accessible_to::<McpServer>(catalog, Owner::Agent, agent_id, mcp_id)
     }
 
+    /// The agents that hold a direct ref binding to this MCP server (`db_agent_mcp_ref`).
+    pub fn mcp_server_bound_agent_ids(&self, mcp_id: &str) -> Result<Vec<String>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT agent_id FROM db_agent_mcp_ref WHERE mcp_id = ?1 ORDER BY agent_id")?;
+        let rows = stmt.query_map(params![mcp_id], |row| row.get::<_, String>(0))?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
     /// Return true if the agent has a direct ref binding to this MCP server.
     /// Used for delete access — an agent may only delete servers it directly bound.
     pub fn mcp_server_is_bound_to(&self, agent_id: &str, mcp_id: &str) -> Result<bool, StoreError> {

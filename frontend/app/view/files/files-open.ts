@@ -17,9 +17,10 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { openInEditorPaneOnScreen } from "@/app/util/editor-open";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { getLayoutModelForStaticTab } from "@/layout/lib/layoutModelHooks";
-import { addWidgetAsPaneTab, closeBlockInStack, effectiveStack } from "@/layout/lib/layoutStack";
+import { addWidgetAsPaneTab } from "@/layout/lib/layoutStack";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { errorText, type FilesModel } from "./files-model";
+import { isLinux, isMacOS, isWindows } from "@/util/platformutil";
+import type { FilesModel } from "./files-model";
 import { extensionOf } from "./files-sort";
 
 export type OpenTarget = "editor" | "os" | "program";
@@ -35,6 +36,23 @@ const OS_APP = new Set(
 
 /** Files that run something when the OS opens them. */
 const PROGRAM = new Set("exe msi com scr lnk app pkg appx msix url reg".split(" "));
+
+/** What the system also runs when it opens the file with its default app: a script host, a launcher or a Java
+ *  launcher. These files still open in the Editor on a double-click (they are source there); only opening them
+ *  with the default app asks first. */
+const RUNS_WHEN_OPENED = {
+    windows: new Set("bat cmd vbs vbe js jse wsf wsh hta jar msc cpl pif application appref-ms".split(" ")),
+    macos: new Set("command tool terminal jar".split(" ")),
+    linux: new Set("desktop appimage jar".split(" ")),
+};
+
+/** Whether opening `name` with the system's default app runs something (a program, a shortcut, a script). */
+export function runsWhenOpenedByOs(name: string): boolean {
+    const ext = extensionOf(name);
+    if (PROGRAM.has(ext)) return true;
+    const own = isWindows() ? RUNS_WHEN_OPENED.windows : isMacOS() ? RUNS_WHEN_OPENED.macos : isLinux() ? RUNS_WHEN_OPENED.linux : undefined;
+    return !!own?.has(ext);
+}
 
 export function openTargetOf(name: string): OpenTarget {
     const ext = extensionOf(name);
@@ -71,16 +89,10 @@ export function openInEditor(model: FilesModel, path: string): Promise<void> {
     return openInPane("editor", path, model.blockId, model.connection() || undefined, !!model.root());
 }
 
-/** A file of `model`'s pane with the system's default app; not from a confined pane. */
-export function openEntryWithOs(model: FilesModel, name: string): void {
-    if (model.refuseInRoot("Opening with another program")) return;
-    void openWithOs(model.pathOf(name), model.blockId).catch((err) =>
-        model.setStatus({ text: `Couldn't open ${name}: ${errorText(err)}`, tone: "error" })
-    );
-}
-
-export async function openWithOs(path: string, blockId?: string): Promise<void> {
-    await RpcApi.FsOpenCommand(TabRpcClient, { path, block_id: blockId });
+/** `path` with the system's default app. `confirmed`: the person has been asked and said yes (a file a container
+ *  agent can write is opened only then). */
+export async function openWithOs(path: string, blockId?: string, confirmed?: boolean): Promise<void> {
+    await RpcApi.FsOpenCommand(TabRpcClient, { path, block_id: blockId, ...(confirmed ? { confirmed: true } : {}) });
 }
 
 export async function revealInOs(path: string, blockId?: string): Promise<void> {
@@ -127,13 +139,4 @@ export async function openFolderInNewTab(fromBlockId: string, dir: string, conne
     });
 }
 
-/** Close `blockId`'s pane tab, but never the pane itself: false when it is
- *  the pane's only tab (the pane's own × closes that). */
-export async function closeOwnTab(blockId: string): Promise<boolean> {
-    const pane = paneOf(blockId);
-    if (!pane) return false;
-    const node = pane.model.getNodeByBlockId(blockId);
-    if (!node?.data || effectiveStack(node.data).length <= 1) return false;
-    await closeBlockInStack(pane.model, pane.nodeId, blockId);
-    return true;
-}
+export { closeOwnTab } from "@/app/util/close-own-tab";

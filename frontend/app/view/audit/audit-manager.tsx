@@ -141,7 +141,7 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
                 />
                 <Show when={list.cursor()}>
                     <div class="audit-more">
-                        <Button tone="quiet" density="compact" icon="arrow-down" busy={list.loadingMore()} onClick={() => void list.loadMore()}>
+                        <Button tone="quiet" density="compact" icon="arrow-down" busy={list.loadingMore()} onClick={() => list.loadMore()}>
                             Show older
                         </Button>
                     </div>

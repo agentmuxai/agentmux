@@ -38,6 +38,7 @@ import "./toolchain-view.scss";
 import { Button, Card, CardGrid, EmptyState, FilterInput, IconButton, Pill, SectionHeader } from "@/app/element/ui";
 import { matchesEveryWord } from "@/app/util/fuzzysearch";
 import { tip } from "@/app/element/tip";
+import { t } from "@/app/i18n/i18n";
 
 // ── Port/localStorage helpers (unchanged from modal) ─────────────────────────
 
@@ -535,11 +536,11 @@ function toolActions(row: ToolRow): JSX.Element {
             {/* A CLI AgentMux installs has its own Install in the details; this one opens a web page. */}
             <Show when={!row.loading && !row.found && row.installUrl && !row.installable}>
                 <Button density="compact" icon="arrow-up-right-from-square" onClick={() => open(row.installUrl)}>
-                    Install
+                    {t("toolchain.install")}
                 </Button>
             </Show>
             <Show when={row.docsUrl}>
-                <IconButton density="compact" icon="book" label="Docs" onClick={() => open(row.docsUrl)} />
+                <IconButton density="compact" icon="book" label={t("toolchain.docs")} onClick={() => open(row.docsUrl)} />
             </Show>
         </>
     );
@@ -562,7 +563,7 @@ function toolCard(s: ToolchainState, key: string): JSX.Element {
                         subtitle={status().subtitle}
                         meta={[
                             ...(row().tier === "preview"
-                                ? [<span {...tip("Installable and working, but not supported to the same depth as the first-class agents")}>Preview</span>]
+                                ? [<span {...tip(t("toolchain.previewTip"))}>{t("toolchain.preview")}</span>]
                                 : []),
                             ...notes().map((n) => <span {...tip(n.title)}>{n.text}</span>),
                         ]}
@@ -613,7 +614,7 @@ function toolDetail(s: ToolchainState, key: string): JSX.Element {
             {(row) => (
                 <div class="toolchain-detail">
                     <Show when={row().found && row().path}>
-                        <span class="toolchain-detail-label">Path</span>
+                        <span class="toolchain-detail-label">{t("toolchain.detail.path")}</span>
                         <code class="toolchain-detail-value">{row().path}</code>
                     </Show>
                     <For each={toolNotes(row(), rowDrift(row())).filter((n) => n.title)}>
@@ -621,25 +622,25 @@ function toolDetail(s: ToolchainState, key: string): JSX.Element {
                     </For>
                     <Show when={row().kind === "provider"}>{providerControls(s, row)}</Show>
                     <Show when={row().loading}>
-                        <p class="toolchain-detail-note">Looking for {row().label} on this machine…</p>
+                        <p class="toolchain-detail-note">{t("toolchain.detail.looking", { label: row().label })}</p>
                     </Show>
                     <Show when={!row().loading && !row().found}>
                         <p class="toolchain-detail-note">
                             {row().installable
-                                ? `AgentMux's own copy of ${row().label} is not installed. A copy on your PATH is not used unless "Use the CLI on my PATH" is on.`
-                                : "Not found on this machine's PATH."}
+                                ? t("toolchain.detail.notInstalled", { label: row().label })
+                                : t("toolchain.detail.notOnPath")}
                         </p>
                         <Show when={row().installCommand}>
-                            <span class="toolchain-detail-label">Install command</span>
+                            <span class="toolchain-detail-label">{t("toolchain.detail.installCommand")}</span>
                             <div class="toolchain-detail-row">
                                 <code class="toolchain-detail-value">{row().installCommand}</code>
-                                <IconButton density="compact" icon="copy" label="Copy command" onClick={() => copy(row().installCommand)} />
+                                <IconButton density="compact" icon="copy" label={t("toolchain.detail.copyCommand")} onClick={() => copy(row().installCommand)} />
                             </div>
                         </Show>
                         <Show when={row().kind === "core" && SYSTEM_INSTALLABLE_IDS.has(row().id) && !s.unavailableInstalls().has(row().id)}>
                             <div class="toolchain-detail-row">
                                 <Button onClick={() => toggleInstallPanel(s, row().id)} pressed={s.expandedInstalls().has(row().id)}>
-                                    Install it for me
+                                    {t("toolchain.detail.installForMe")}
                                 </Button>
                             </div>
                         </Show>
@@ -709,11 +710,11 @@ function widgetCard(s: ToolchainState, key: string): JSX.Element {
                                             })
                                         }
                                     >
-                                        Open pane
+                                        {t("toolchain.detail.openPane")}
                                     </Button>
                                 </Show>
                                 <Show when={row().docsUrl}>
-                                    <IconButton density="compact" icon="book" label="Docs" onClick={() => open(row().docsUrl)} />
+                                    <IconButton density="compact" icon="book" label={t("toolchain.docs")} onClick={() => open(row().docsUrl)} />
                                 </Show>
                             </>
                         }
@@ -732,7 +733,7 @@ function widgetDetail(s: ToolchainState, key: string): JSX.Element {
                     <p class="toolchain-detail-note">{row().description}</p>
                     <Show when={!row().running && row().requires.some((id) => !isAvailable(id))}>
                         <p class="toolchain-detail-note">
-                            Requires: {row().requires.filter((id) => !isAvailable(id)).join(", ")}
+                            {t("toolchain.detail.requires", { list: row().requires.filter((id) => !isAvailable(id)).join(", ") })}
                         </p>
                     </Show>
                     <WidgetPortField
@@ -773,16 +774,16 @@ function group(
 function renderEnvironment(s: ToolchainState): JSX.Element {
     return (
         <section class="toolchain-section">
-            <SectionHeader variant="group" level={4} title="Environment" />
-            <Show when={s.env()} fallback={<div class="toolchain-env-line">Loading…</div>}>
+            <SectionHeader variant="group" level={4} title={t("toolchain.env.title")} />
+            <Show when={s.env()} fallback={<div class="toolchain-env-line">{t("toolchain.env.loading")}</div>}>
                 {(e) => (
                     <>
                         <div class="toolchain-env-line">
-                            <span class="toolchain-env-key">Platform</span>
+                            <span class="toolchain-env-key">{t("toolchain.env.platform")}</span>
                             <span>{e().os} · {e().arch}</span>
                         </div>
                         <div class="toolchain-env-line">
-                            <span class="toolchain-env-key">PATH source</span>
+                            <span class="toolchain-env-key">{t("toolchain.env.pathSource")}</span>
                             <Pill
                                 tone={
                                     e().pathSource === "login-shell"
@@ -796,7 +797,7 @@ function renderEnvironment(s: ToolchainState): JSX.Element {
                             </Pill>
                         </div>
                         <Button tone="quiet" class="toolchain-path-toggle" onClick={() => s.setShowPath((v) => !v)}>
-                            {s.showPath() ? "Hide" : "Show"} effective PATH
+                            {s.showPath() ? t("toolchain.env.hidePath") : t("toolchain.env.showPath")}
                         </Button>
                         <Show when={s.showPath()}>
                             <pre class="toolchain-path-dump">
@@ -820,28 +821,28 @@ export function ToolchainView(props: { zoom?: () => number } = {}): JSX.Element 
 
     return (
         <div class="toolchain-view ui-density-compact" style={{ zoom: props.zoom?.() ?? 1 }}>
-            <SectionHeader class="toolchain-view-header" title="Toolchain">
+            <SectionHeader class="toolchain-view-header" title={t("toolchain.title")}>
                 {/* The one-glance answer to "am I behind?" — counts only what
                     the user can act on. A pin trailing upstream is ours and is
                     deliberately excluded, so this never nags about something
                     they cannot fix. */}
                 <Show when={s.behindCount() > 0}>
-                    <Pill tone="warn" icon="circle-up" title="Open a tool that offers Update to move it to the version AgentMux validates against">
-                        {s.behindCount()} {s.behindCount() === 1 ? "tool is" : "tools are"} behind
+                    <Pill tone="warn" icon="circle-up" title={t("toolchain.behindTip")}>
+                        {t("toolchain.behind", { count: s.behindCount() })}
                     </Pill>
                 </Show>
-                <FilterInput class="ui-card-section-filter" value={s.filter()} onInput={s.setFilter} placeholder="Filter tools" />
-                <Button tone="quiet" icon="rotate" busy={s.refreshing()} onClick={() => void refresh(s)}>
-                    Refresh
+                <FilterInput class="ui-card-section-filter" value={s.filter()} onInput={s.setFilter} placeholder={t("toolchain.filter")} />
+                <Button tone="quiet" icon="rotate" busy={s.refreshing()} onClick={() => refresh(s)}>
+                    {t("toolchain.refresh")}
                 </Button>
                 <Button
                     tone="quiet"
                     icon="arrow-up"
                     busy={s.latestLoading()}
-                    onClick={() => void checkLatestVersions(s)}
-                    title="Fetch latest published versions from npm registry"
+                    onClick={() => checkLatestVersions(s)}
+                    title={t("toolchain.checkLatestTip")}
                 >
-                    Check latest versions
+                    {t("toolchain.checkLatest")}
                 </Button>
             </SectionHeader>
             <div class="toolchain-body">
@@ -849,13 +850,13 @@ export function ToolchainView(props: { zoom?: () => number } = {}): JSX.Element 
 
                 <CliDiskSpace />
 
-                {group(s, "Core tools", () => toolKeys(s, "core"), (key) => toolCard(s, key), (key) => toolDetail(s, key))}
-                {group(s, "Local models", () => toolKeys(s, "local"), (key) => toolCard(s, key), (key) => toolDetail(s, key))}
-                {group(s, "Agent CLIs", () => toolKeys(s, "provider", "first_class"), (key) => toolCard(s, key), (key) => toolDetail(s, key))}
-                {group(s, "Preview agent CLIs", () => toolKeys(s, "provider", "preview"), (key) => toolCard(s, key), (key) => toolDetail(s, key))}
-                {group(s, "External widgets", () => widgetKeys(s), (key) => widgetCard(s, key), (key) => widgetDetail(s, key))}
+                {group(s, t("toolchain.group.core"), () => toolKeys(s, "core"), (key) => toolCard(s, key), (key) => toolDetail(s, key))}
+                {group(s, t("toolchain.group.local"), () => toolKeys(s, "local"), (key) => toolCard(s, key), (key) => toolDetail(s, key))}
+                {group(s, t("toolchain.group.agentClis"), () => toolKeys(s, "provider", "first_class"), (key) => toolCard(s, key), (key) => toolDetail(s, key))}
+                {group(s, t("toolchain.group.previewClis"), () => toolKeys(s, "provider", "preview"), (key) => toolCard(s, key), (key) => toolDetail(s, key))}
+                {group(s, t("toolchain.group.widgets"), () => widgetKeys(s), (key) => widgetCard(s, key), (key) => widgetDetail(s, key))}
                 <Show when={nothingMatches(s)}>
-                    <EmptyState>No tools match “{s.filter()}”.</EmptyState>
+                    <EmptyState>{t("toolchain.noMatch", { filter: s.filter() })}</EmptyState>
                 </Show>
             </div>
         </div>

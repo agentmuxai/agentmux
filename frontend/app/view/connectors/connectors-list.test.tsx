@@ -11,6 +11,7 @@ const rpc = vi.hoisted(() => ({
     ListAllAgentIdentitiesCommand: vi.fn(),
     ListAgentDefinitionsCommand: vi.fn(),
     UnlinkAgentIdentityCommand: vi.fn(),
+    DeleteIdentityAccountCommand: vi.fn(),
     MuxBusStatusCommand: vi.fn(),
     MuxBusCloudConfigCommand: vi.fn(),
     GithubConnectionCommand: vi.fn(),
@@ -114,6 +115,29 @@ describe("Connectors as cards", () => {
         // No Connect button for an agent that signs in inside its own pane.
         expect(screen.queryByRole("button", { name: "Connect xAI" })).toBeNull();
         expect(screen.getByRole("button", { name: "How to connect xAI" })).toBeTruthy();
+    });
+
+    it("puts the control in a square at the card's right edge, an icon named for what it does, with the chevron just left of it", async () => {
+        render(() => <ConnectorsList />);
+        await ready();
+        const control = (key: string) => document.querySelector(`[data-connector="${key}"] .connector-card-control`)!;
+        const kinds = (el: Element) => [...el.children].map((c) => (c.classList.contains("connector-card-chevron") ? "chevron" : c.classList.contains("connector-card-square") ? "square" : "?"));
+        // A connected card: the chevron, then the square to add another account.
+        const connected = control("anthropic");
+        expect(kinds(connected)).toEqual(["chevron", "square"]);
+        const add = connected.querySelector(".connector-card-square")!;
+        expect(add.textContent).toBe("");
+        expect(add.getAttribute("aria-label")).toBe("Connect another Anthropic account");
+        expect(add.getAttribute("data-hover-tip")).toBe("Connect");
+        // One that is not: the square alone, and it still opens the Connect section.
+        const available = control("gmail");
+        expect(kinds(available)).toEqual(["square"]);
+        const connect = screen.getByRole("button", { name: "Connect Gmail" });
+        expect(connect.classList.contains("connector-card-square")).toBe(true);
+        fireEvent.click(connect);
+        await waitFor(() => expect(connect.getAttribute("aria-expanded")).toBe("true"));
+        // A card whose account needs sign-in again keeps the same square, to add another account.
+        expect(control("github").querySelector(".connector-card-square")?.getAttribute("aria-label")).toBe("Connect another GitHub account");
     });
 
     it("opens a connected card's details under its row, labelled by the card, and closes them again", async () => {
@@ -233,6 +257,97 @@ describe("Connectors as cards", () => {
         expect(menu.build.mock.calls[0][0].id).toBe("a2");
     });
 
+    describe("deleting an account asks in a panel under its row", () => {
+        const TWO = [
+            account("g1", "github", "one@example.com", { kind: "pat" }),
+            account("g2", "github", "two@example.com", { kind: "pat" }),
+        ];
+        const open = async () => {
+            rpc.ListIdentityAccountsCommand.mockResolvedValue(TWO);
+            rpc.ListAllAgentIdentitiesCommand.mockResolvedValue([]);
+            render(() => <ConnectorsList />);
+            await waitFor(() => expect(document.querySelector('[data-connector="github"]')?.classList.contains("is-connected")).toBe(true));
+            fireEvent.click(disclosure(/^GitHub/));
+            return screen.findByRole("group", { name: "GitHub accounts" });
+        };
+        /** Asks for the delete of an account, as its row menu's Delete does. */
+        const ask = async (accounts: HTMLElement, email: string) => {
+            menu.build.mockClear();
+            fireEvent.contextMenu(within(accounts).getByRole("button", { name: new RegExp(`^${email}`) }));
+            await waitFor(() => expect(menu.build).toHaveBeenCalled());
+            menu.build.mock.calls[menu.build.mock.calls.length - 1][1]();
+        };
+        const question = (email: string) => screen.queryByRole("group", { name: `Delete ${email}?` });
+
+        it("opens under the account asked about, in the flow, with no modal over the pane", async () => {
+            const accounts = await open();
+            await ask(accounts, "one@example.com");
+            const panel = await screen.findByRole("group", { name: "Delete one@example.com?" });
+            const cells = [...accounts.children].map((el) =>
+                el.classList.contains("ui-card-ask") ? "Q" : el.classList.contains("ui-card-cell") ? el.getAttribute("data-card-key") : "?",
+            );
+            expect(cells.slice(0, 3)).toEqual(["g1", "Q", "g2"]);
+            expect(accounts.contains(panel)).toBe(true);
+            expect(document.querySelector('[role="dialog"]')).toBeNull();
+            expect(panel.textContent).toContain("AgentMux forgets this account");
+            expect(document.activeElement).toBe(panel);
+            expect(rpc.DeleteIdentityAccountCommand).not.toHaveBeenCalled();
+        });
+
+        it("deletes nothing on Cancel or Escape, and puts focus back on the account's row", async () => {
+            const accounts = await open();
+            await ask(accounts, "one@example.com");
+            fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+            await waitFor(() => expect(question("one@example.com")).toBeNull());
+            expect(document.activeElement).toBe(within(accounts).getByRole("button", { name: /^one@example\.com/ }));
+            await ask(accounts, "one@example.com");
+            fireEvent.keyDown(await screen.findByRole("group", { name: "Delete one@example.com?" }), { key: "Escape" });
+            await waitFor(() => expect(question("one@example.com")).toBeNull());
+            expect(rpc.DeleteIdentityAccountCommand).not.toHaveBeenCalled();
+        });
+
+        it("deletes the account on the confirm", async () => {
+            const accounts = await open();
+            rpc.DeleteIdentityAccountCommand.mockResolvedValue({ deleted: true });
+            await ask(accounts, "two@example.com");
+            fireEvent.click(await screen.findByRole("button", { name: "Delete account" }));
+            await waitFor(() => expect(rpc.DeleteIdentityAccountCommand).toHaveBeenCalledWith({}, { id: "g2" }));
+            await waitFor(() => expect(question("two@example.com")).toBeNull());
+        });
+
+        it("is replaced when another account's delete is asked", async () => {
+            const accounts = await open();
+            await ask(accounts, "one@example.com");
+            await screen.findByRole("group", { name: "Delete one@example.com?" });
+            await ask(accounts, "two@example.com");
+            await screen.findByRole("group", { name: "Delete two@example.com?" });
+            expect(question("one@example.com")).toBeNull();
+            expect(document.querySelectorAll(".ui-confirm-panel")).toHaveLength(1);
+        });
+
+        it("goes when its row goes (deleted elsewhere), and deletes nothing", async () => {
+            const accounts = await open();
+            await ask(accounts, "one@example.com");
+            await screen.findByRole("group", { name: "Delete one@example.com?" });
+            rpc.ListIdentityAccountsCommand.mockResolvedValue(TWO.filter((a) => a.id !== "g1"));
+            await refreshAccountCache();
+            await waitFor(() => expect(question("one@example.com")).toBeNull());
+            expect(rpc.DeleteIdentityAccountCommand).not.toHaveBeenCalled();
+        });
+
+        it("goes when the card closes, and is not asked again when it opens", async () => {
+            const accounts = await open();
+            await ask(accounts, "one@example.com");
+            await screen.findByRole("group", { name: "Delete one@example.com?" });
+            fireEvent.click(disclosure(/^GitHub/));
+            await waitFor(() => expect(screen.queryByRole("group", { name: "GitHub accounts" })).toBeNull());
+            fireEvent.click(disclosure(/^GitHub/));
+            await screen.findByRole("group", { name: "GitHub accounts" });
+            expect(question("one@example.com")).toBeNull();
+            expect(rpc.DeleteIdentityAccountCommand).not.toHaveBeenCalled();
+        });
+    });
+
     it("moves between cards: opening another closes the first", async () => {
         render(() => <ConnectorsList />);
         await ready();
@@ -254,6 +369,31 @@ describe("Connectors as cards", () => {
 });
 
 describe("Connect", () => {
+    it("draws the Connect button of every card at the comfortable size, not the compact one", async () => {
+        render(() => <ConnectorsList />);
+        await ready();
+        const buttons = [...document.querySelectorAll<HTMLElement>(".connector-card-control .ui-button")];
+        expect(buttons.length).toBeGreaterThan(3);
+        for (const b of buttons) {
+            expect(b.classList.contains("ui-density-comfortable"), b.getAttribute("aria-label") ?? "").toBe(true);
+            expect(b.classList.contains("ui-density-compact")).toBe(false);
+        }
+    });
+
+    it("opens a connected card's Connect section above its accounts, so it shows however many accounts the card has", async () => {
+        const many = Array.from({ length: 8 }, (_, i) => account(`m${i}`, "claude", `m${i}@example.com`));
+        rpc.ListIdentityAccountsCommand.mockResolvedValue([...ACCOUNTS, ...many]);
+        render(() => <ConnectorsList />);
+        await ready();
+        const button = screen.getByRole("button", { name: "Connect another Anthropic account" });
+        fireEvent.click(button);
+        const section = await screen.findByRole("group", { name: "Connect Anthropic" });
+        const accounts = document.querySelector(".connector-accounts")!;
+        // Under the card, before the nine accounts: below them it was out of sight and the press looked dead.
+        expect(section.compareDocumentPosition(accounts) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(button.getAttribute("aria-expanded")).toBe("true");
+    });
+
     it("opens the add section under the card, in the caret-topped details, with no dialog over the pane", async () => {
         render(() => <ConnectorsList />);
         await ready();
@@ -376,7 +516,9 @@ describe("Connect", () => {
         await ready();
         expect(document.querySelector('[data-connector="agentmux"] .connector-card-control button')).toBeNull();
         expect(document.querySelector('[data-connector="agentmux"] .connector-card-chevron')).toBeTruthy();
-        expect(document.querySelector('[data-connector="aws"] .connector-card-control button')?.textContent).toBe("Connect");
+        const aws = document.querySelector('[data-connector="aws"] .connector-card-control button');
+        expect(aws?.classList.contains("connector-card-square")).toBe(true);
+        expect(aws?.getAttribute("aria-label")).toBe("Connect another AWS account");
     });
 
     it("flashes Connected in place when another account is added, and leaves its accounts open", async () => {

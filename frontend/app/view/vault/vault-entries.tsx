@@ -42,11 +42,11 @@ function profileDetail(e: VaultEntryInfo): string {
     // The names load on first need; the line follows once they have.
     ensureBrowserProfiles();
     const id = p.replace(/^profile:/, "");
-    return `profile ${profileById(id)?.name ?? "(deleted)"}`;
+    return t("vault.entries.profile", { name: profileById(id)?.name ?? t("vault.entries.deleted") });
 }
 
 export function entryDetails(e: VaultEntryInfo): string {
-    return [...DETAIL_FIELDS.map((f) => (f === "realm" && e.fields.proxy ? `proxy ${e.fields[f] ?? ""}`.trim() : e.fields[f])), profileDetail(e)]
+    return [...DETAIL_FIELDS.map((f) => (f === "realm" && e.fields.proxy ? t("vault.entries.proxy", { realm: e.fields[f] ?? "" }).trim() : e.fields[f])), profileDetail(e)]
         .filter(Boolean)
         .join(" · ");
 }
@@ -83,7 +83,7 @@ function CheckCopyButton(props: { entry: VaultEntryInfo; onError: (message: stri
         setBusy(false);
     };
     const label = () => (isLinked(props.entry.fields) ? t("vault.linked.check") : t("vault.machineCopy.check"));
-    return <IconButton icon="arrows-rotate" label={label()} density="compact" disabled={busy()} onClick={() => void check()} />;
+    return <IconButton icon="arrows-rotate" label={label()} density="compact" disabled={busy()} onClick={() => check()} />;
 }
 
 /** An entry's plain details, the Vault it is in (when the list shows more than one), its expiry and its machine copy. */
@@ -92,14 +92,14 @@ function EntryDetails(props: { entry: VaultEntryInfo; showVault: boolean; onErro
         <>
             {entryDetails(props.entry)}
             <Show when={props.showVault && vaultList().length > 1}>
-                <div class="vault-in-vault">in {vaultNameOf(props.entry.vault_id)}</div>
+                <div class="vault-in-vault">{t("vault.entries.inVault", { vault: vaultNameOf(props.entry.vault_id) })}</div>
             </Show>
             <Show when={expiryOf(props.entry.fields.expires)}>
                 {(x) => (
                     <div class={x().warn ? "vault-expiry vault-expiry-warn" : "vault-expiry"} {...tip(props.entry.fields.expires)}>
                         <Show when={props.entry.kind === "card" && x().days < 0}>
                             <Pill tone="error" icon="triangle-exclamation">
-                                Expired
+                                {t("vault.entries.expired")}
                             </Pill>{" "}
                         </Show>
                         {x().text}
@@ -121,7 +121,7 @@ function EntryLabel(props: { entry: VaultEntryInfo }): JSX.Element {
             <span>{props.entry.label}</span>
             <Show when={props.entry.kind === "card" && props.entry.fields.default === "yes"}>
                 <Pill tone="accent" class="vault-default-pill">
-                    Default
+                    {t("vault.entries.default")}
                 </Pill>
             </Show>
             <LinkedBadges entry={props.entry} />
@@ -148,20 +148,20 @@ function EntryActions(props: { entry: VaultEntryInfo; on: (what: "reveal" | "cha
     return (
         <td class="vault-actions">
             <Show when={!isLinked(props.entry.fields)} fallback={<CopyPlaceButton entry={props.entry} onError={props.onError} />}>
-                <IconButton icon="eye" label="Show or copy" density="compact" onClick={() => props.on("reveal")} />
+                <IconButton icon="eye" label={t("vault.entries.showCopy")} density="compact" onClick={() => props.on("reveal")} />
             </Show>
-            <IconButton icon="pen" label="Change" density="compact" onClick={() => props.on("change")} />
+            <IconButton icon="pen" label={t("vault.entries.change")} density="compact" onClick={() => props.on("change")} />
             <Show when={vaultList().length > 1}>
-                <IconButton icon="folder-open" label="Move to another Vault" density="compact" onClick={() => props.on("move")} />
+                <IconButton icon="folder-open" label={t("vault.entries.move")} density="compact" onClick={() => props.on("move")} />
             </Show>
             <Show when={canShare(props.entry)}>
                 <ShareButton entry={props.entry} />
             </Show>
-            <IconButton icon="book" label="History" density="compact" onClick={() => props.on("history")} />
+            <IconButton icon="book" label={t("vault.entries.history")} density="compact" onClick={() => props.on("history")} />
             <Show when={props.entry.versions > 0}>
-                <IconButton icon="rotate-left" label="Earlier values" density="compact" onClick={() => props.on("versions")} />
+                <IconButton icon="rotate-left" label={t("vault.entries.earlier")} density="compact" onClick={() => props.on("versions")} />
             </Show>
-            <IconButton icon="trash" label="Delete" density="compact" onClick={() => props.on("delete")} />
+            <IconButton icon="trash" label={t("vault.entries.delete")} density="compact" onClick={() => props.on("delete")} />
         </td>
     );
 }
@@ -171,14 +171,14 @@ function DeleteEntryConfirm(props: { entry: VaultEntryInfo; onConfirm: () => Pro
         <ConfirmModal
             open={true}
             scope="pane"
-            title={`Delete ${props.entry.label}?`}
+            title={t("vault.entries.deleteTitle", { label: props.entry.label })}
             description={
                 // A link keeps no value: what goes is the record of where the key lives.
                 isLinked(props.entry.fields)
                     ? t("vault.linked.deleteAbout")
-                    : "Its value is deleted from this computer. Agents that use it by name will be told it's gone."
+                    : t("vault.entries.deleteAbout")
             }
-            confirmLabel="Delete"
+            confirmLabel={t("vault.entries.delete")}
             destructive
             onConfirm={props.onConfirm}
             onCancel={props.onCancel}
@@ -274,13 +274,13 @@ function EntryTable(props: { s: EntriesState; section: VaultSection; showVault: 
             </colgroup>
             <thead class="vault-entry-columns">
                 <tr>
-                    <th>Label</th>
+                    <th>{t("vault.entries.colLabel")}</th>
                     <Show when={kinds()}>
-                        <th>Kind</th>
+                        <th>{t("vault.entries.colKind")}</th>
                     </Show>
-                    <th>Details</th>
-                    <th>Value</th>
-                    <th>Changed</th>
+                    <th>{t("vault.entries.colDetails")}</th>
+                    <th>{t("vault.entries.colValue")}</th>
+                    <th>{t("vault.entries.colChanged")}</th>
                     <th />
                 </tr>
             </thead>

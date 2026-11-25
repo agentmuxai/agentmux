@@ -13,9 +13,7 @@
           "Create"
     <div class="agent-create-install" data-testid="agent-create-vendor-install">
       <p class="agent-create-panel-text">
-        "AgentMux doesn't install"
-        "Antigravity"
-        ": install it with its own installer, which puts it on your PATH, outside AgentMux's isolation. Then check again."
+        "AgentMux doesn't install Antigravity: install it with its own installer, which puts it on your PATH, outside AgentMux's isolation. Then check again."
       <div class="agent-create-command">
         <code data-testid="agent-create-vendor-command">
           "curl -fsSL https://example.test/install.sh | bash"
@@ -23,8 +21,7 @@
           <i class="fa-solid fa-copy" aria-hidden="true">
           "Copy"
       <a class="agent-create-tool-link" href="https://example.test/agy-docs">
-        "Antigravity"
-        "'s install instructions"
+        "Antigravity's install instructions"
         <span aria-hidden="true">
           "↗"
       <div class="agent-create-actions">
@@ -51,9 +48,7 @@
           "Create"
     <div class="agent-create-install" data-testid="agent-create-vendor-install">
       <p class="agent-create-panel-text">
-        "AgentMux doesn't install"
-        "Antigravity"
-        ": install it with its own installer, which puts it on your PATH, outside AgentMux's isolation. Then check again."
+        "AgentMux doesn't install Antigravity: install it with its own installer, which puts it on your PATH, outside AgentMux's isolation. Then check again."
       <div class="agent-create-command">
         <code data-testid="agent-create-vendor-command">
           "curl -fsSL https://example.test/install.sh | bash"
@@ -61,14 +56,13 @@
           <i class="fa-solid fa-copy" aria-hidden="true">
           "Copy"
       <a class="agent-create-tool-link" href="https://example.test/agy-docs">
-        "Antigravity"
-        "'s install instructions"
+        "Antigravity's install instructions"
         <span aria-hidden="true">
           "↗"
       <div class="agent-create-actions">
         <button type="button" class="ui-button ui-tone-neutral">
           "Cancel"
-        <button data-testid="agent-create-check-again" type="button" class="ui-button ui-tone-accent" disabled="" aria-busy="true">
+        <button data-testid="agent-create-check-again" type="button" class="ui-button ui-tone-accent" disabled="" aria-busy="true" data-pending="true">
           <i aria-hidden="true" class="fa-solid fa-spinner fa-spin">
           "Check again"
   call recheckInstalled []
@@ -89,9 +83,7 @@
           "Create"
     <div class="agent-create-install" data-testid="agent-create-vendor-install">
       <p class="agent-create-panel-text">
-        "AgentMux doesn't install"
-        "Antigravity"
-        ": install it with its own installer, which puts it on your PATH, outside AgentMux's isolation. Then check again."
+        "AgentMux doesn't install Antigravity: install it with its own installer, which puts it on your PATH, outside AgentMux's isolation. Then check again."
       <div class="agent-create-command">
         <code data-testid="agent-create-vendor-command">
           "curl -fsSL https://example.test/install.sh | bash"
@@ -99,8 +91,7 @@
           <i class="fa-solid fa-copy" aria-hidden="true">
           "Copy"
       <a class="agent-create-tool-link" href="https://example.test/agy-docs">
-        "Antigravity"
-        "'s install instructions"
+        "Antigravity's install instructions"
         <span aria-hidden="true">
           "↗"
       <div class="agent-create-actions">
@@ -123,9 +114,7 @@
           "Create"
     <div class="agent-create-install" data-testid="agent-create-vendor-install">
       <p class="agent-create-panel-text">
-        "AgentMux doesn't install"
-        "Antigravity"
-        ": install it with its own installer, which puts it on your PATH, outside AgentMux's isolation. Then check again."
+        "AgentMux doesn't install Antigravity: install it with its own installer, which puts it on your PATH, outside AgentMux's isolation. Then check again."
       <div class="agent-create-command">
         <code data-testid="agent-create-vendor-command">
           "irm https://example.test/install.ps1 | iex"
@@ -133,8 +122,7 @@
           <i class="fa-solid fa-copy" aria-hidden="true">
           "Copy"
       <a class="agent-create-tool-link" href="https://example.test/agy-docs">
-        "Antigravity"
-        "'s install instructions"
+        "Antigravity's install instructions"
         <span aria-hidden="true">
           "↗"
       <div class="agent-create-actions">
@@ -201,9 +189,7 @@
           "Create"
     <div class="agent-create-install" data-testid="agent-create-vendor-install">
       <p class="agent-create-panel-text">
-        "AgentMux doesn't install"
-        "NoDocs"
-        ": install it with its own installer, which puts it on your PATH, outside AgentMux's isolation. Then check again."
+        "AgentMux doesn't install NoDocs: install it with its own installer, which puts it on your PATH, outside AgentMux's isolation. Then check again."
       <div class="agent-create-actions">
         <button type="button" class="ui-button ui-tone-neutral">
           "Cancel"

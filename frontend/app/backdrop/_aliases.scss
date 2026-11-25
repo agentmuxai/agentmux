@@ -40,10 +40,12 @@
     --kanban-stage-backlog: var(--secondary-text-color);
     --kanban-stage-research: var(--process-kind-agentmux);
     --kanban-stage-progress: var(--process-kind-agents);
+    --kanban-stage-needs: var(--attention-color);
     --kanban-stage-review: var(--process-kind-builds);
     --kanban-stage-merged: var(--process-kind-shells);
     --kanban-stage-released: var(--process-kind-runtimes);
     --seat-leader: var(--accent-color);
+    --seat-super: var(--attention-color);
     --model-other: var(--secondary-text-color);
     --seat-leader-edge: color-mix(in srgb, var(--seat-leader) 60%, var(--main-text-color));
     --seat-super-edge: color-mix(in srgb, var(--seat-super) 60%, var(--main-text-color));

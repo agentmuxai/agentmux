@@ -3,8 +3,8 @@
 
 // A connector's card in Connectors' list (docs/specs/SPEC_CONNECTORS_ONE_LIST_2026_11_19.md §4.2, §4.7). Line style,
 // square corners, tokens only (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md L1, L2, L6). The card's layout follows
-// the card's own width: a row (icon, text, control at the right) from 340 px, stacked (the control under the text)
-// below it. The cell around the card is the container, so the layout never depends on the window or the column count.
+// the card's own width: always a row, icon, text, then the control, a square at the right edge. The cell around the card
+// is the container, so the layout never depends on the window or the column count.
 
 @use "../../mixins.scss";
 @use "../../element/ui/card-text" as cardText;
@@ -148,6 +148,23 @@
     justify-self: end;
 }
 
+// The control is a square, centred on the card's height: an icon whose name is its label and tooltip.
+.connector-card-square {
+    --connector-square: 44px;
+    flex: none;
+    width: var(--connector-square);
+    height: var(--connector-square);
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+    justify-content: center;
+}
+
+// The button whose section is open is held down, so a press that opened something below it reads as done.
+.connector-card-control .ui-button[aria-expanded="true"] {
+    --ui-bg: color-mix(in srgb, var(--accent-color) var(--ui-tint-hover), transparent);
+}
+
 .connector-card-chevron {
     display: inline-block;
     padding: 0 var(--space-1);
@@ -163,24 +180,6 @@
 
     &[data-open]::before {
         transform: rotate(90deg);
-    }
-}
-
-// Under 340 px the card stacks: icon and name, the line, then the control under the text, at the bottom edge so the
-// controls of a row of cards line up.
-@container (max-width: 339px) {
-    .connector-card {
-        grid-template-columns: auto minmax(0, 1fr);
-        grid-template-rows: 1fr auto;
-        grid-template-areas:
-            "icon text"
-            ". control";
-        align-items: start;
-        row-gap: var(--space-1-5);
-    }
-
-    .connector-card-control {
-        justify-self: start;
     }
 }
 

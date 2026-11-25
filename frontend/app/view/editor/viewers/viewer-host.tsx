@@ -13,6 +13,7 @@ import { pushNotification } from "@/app/store/global";
 import { createMemo, Match, Show, Switch, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { withoutAskMarker } from "@/app/util/open-asks-first";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { copyEditorMedia } from "../editor-media-copy";
 import type { EditorViewModel } from "../editor-model";
@@ -23,8 +24,9 @@ import { HexViewer } from "./hex/hex-viewer";
 import { InfoCard } from "./info/info-card";
 import { LargeTextViewer } from "./large/large-text-viewer";
 import { PdfViewer } from "./pdf/pdf-viewer";
+import { TableViewer } from "./table/table-viewer";
 import { ViewerBar, type ViewerBarProps } from "./viewer-bar";
-import { isProgramPath, TEXT_MAX_BYTES, type ViewerId } from "./viewer-choice";
+import { isProgramPath, TEXT_MAX_BYTES, textNeedsSwitch, type ViewerId } from "./viewer-choice";
 import { droppedFileOf, isDroppedPath, neighbourInFolder } from "./viewer-tabs";
 import "./viewers.scss";
 
@@ -47,14 +49,15 @@ export function ViewerHost(props: { model: EditorViewModel }): JSX.Element {
 }
 
 /** The switch over the text editor for a file that isn't text (an image or
- *  binary shown as text): the only way back to its own viewer. A text file
- *  shown as text gets none. */
+ *  binary shown as text): the only way back to its own viewer. A delimited
+ *  file gets it too, to reach its table. Any other text file shown as text
+ *  gets none. */
 export function TextViewerSwitch(props: { model: EditorViewModel }): JSX.Element {
     const model = props.model;
     const tabId = () => model.activeTabAtom()?.id ?? null;
     const options = (): ViewerId[] => {
         const probe = model.viewerTabs.probe(tabId());
-        return probe && probe.kind !== "text" ? model.viewerTabs.options(tabId(), "text") : [];
+        return probe && textNeedsSwitch(probe) ? model.viewerTabs.options(tabId(), "text") : [];
     };
     const reopen = (v: ViewerId) => {
         const id = tabId();
@@ -73,12 +76,17 @@ function openWithTheSystemsApp(path: string): void {
         pushNotification({
             icon: "fa-triangle-exclamation",
             title: "Couldn't open the file",
-            message: e instanceof Error ? e.message : String(e),
+            message: withoutAskMarker(e instanceof Error ? e.message : String(e)),
             timestamp: new Date().toISOString(),
             type: "error",
             expiration: Date.now() + 8000,
         })
     );
+}
+
+/** A PDF's external link: a Browser pane beside this one, never the app. */
+function openLinkBeside(blockId: string, url: string): void {
+    void RpcApi.PaneOpenCommand(TabRpcClient, { view: "browser", url, split_direction: "right", split_reference_block_id: blockId }, {}).catch(() => {});
 }
 
 function ViewerFor(props: { model: EditorViewModel; tabId: string; viewer: ViewerId }): JSX.Element {
@@ -111,11 +119,7 @@ function ViewerFor(props: { model: EditorViewModel; tabId: string; viewer: Viewe
         onOpenWithSystem: dropped() || isProgramPath(path()) ? undefined : openWithSystem,
     });
     const mime = () => probe()?.mime || file()?.type || "";
-    // A PDF's external link: a Browser pane beside this one, never the app.
-    const openLink = (url: string) =>
-        void RpcApi.PaneOpenCommand(TabRpcClient, { view: "browser", url, split_direction: "right", split_reference_block_id: model.blockId }, {}).catch(
-            () => {}
-        );
+    const openLink = (url: string) => openLinkBeside(model.blockId, url);
 
     return (
         <Switch>
@@ -158,6 +162,9 @@ function ViewerFor(props: { model: EditorViewModel; tabId: string; viewer: Viewe
             </Match>
             <Match when={props.viewer === "large"}>
                 <LargeTextViewer path={dropped() ? "" : path()} revision={revision()} probe={probe()} blockId={model.blockId} bar={bar()} />
+            </Match>
+            <Match when={props.viewer === "table"}>
+                <TableViewer path={dropped() ? "" : path()} revision={revision()} probe={probe()} blockId={model.blockId} bar={bar()} />
             </Match>
             <Match when={props.viewer === "info"}>
                 <InfoCard

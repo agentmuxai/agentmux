@@ -14,6 +14,7 @@ pub mod window;
 pub mod backend;
 pub mod providers;
 pub mod drag;
+pub mod file_drag;
 pub mod tear_off_hook;
 pub mod window_pool;
 mod promote_front;

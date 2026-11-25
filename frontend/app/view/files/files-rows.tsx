@@ -7,6 +7,7 @@
  */
 
 import { tip } from "@/app/element/tip";
+import { t } from "@/app/i18n/i18n";
 import type { Touch } from "@/app/store/touched-files";
 import type { FsEntry } from "@/types/rpc/FsEntry";
 import type { FsGitState } from "@/types/rpc/FsGitState";
@@ -16,6 +17,7 @@ import { type FilesModel, windowsNames } from "./files-model";
 import { nameProblem, stemLength } from "./files-path";
 import { extensionOf } from "./files-sort";
 import { cachedThumbnail, hasThumbnail, thumbnail } from "./files-thumbs";
+import { labelOf, type TreeRow } from "@/app/fs/tree/tree-rows";
 import { TypeIcon } from "./files-type-icon";
 export const ROW_HEIGHT = 24;
 /** A grid tile's box (thumbnail and a two-line name). */
@@ -56,6 +58,28 @@ const GIT_MARKS: Record<Exclude<FsGitState, "ignored">, { letter: string; title:
     conflicted: { letter: "!", title: "Merge conflict" },
 };
 
+/** A tree row's indent and the chevron that opens or closes its folder (a file gets the chevron's room, empty). */
+function TreeIndent(props: { row: TreeRow; onToggle?: () => void }): JSX.Element {
+    return (
+        <>
+            <span class="files-tree-indent" style={{ width: `${props.row.depth * 16}px` }} />
+            <Show when={props.row.expandable} fallback={<span class="files-twisty files-twisty-none" />}>
+                <i
+                    class={`fa fa-chevron-${props.row.expanded ? "down" : "right"} files-twisty`}
+                    role="button"
+                    aria-label={props.row.expanded ? t("files.tree.close", { name: props.row.label }) : t("files.tree.open", { name: props.row.label })}
+                    aria-expanded={props.row.expanded}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        props.onToggle?.();
+                    }}
+                    onDblClick={(e) => e.stopPropagation()}
+                />
+            </Show>
+        </>
+    );
+}
+
 export function FileRow(props: {
     model: FilesModel;
     entry: FsEntry;
@@ -68,17 +92,28 @@ export function FileRow(props: {
     onContextMenu: (e: MouseEvent) => void;
     onRenameDone: () => void;
     onDragStart: (e: DragEvent) => void;
+    onPointerDown?: (e: PointerEvent) => void;
     onDragEnd: () => void;
     git?: FsGitState;
     touch?: Touch;
     onDragOver: () => void;
     dropTarget: boolean;
+    /** In the tree view: the row's depth and whether it is open; `onToggle` opens or closes it. */
+    tree?: TreeRow;
+    onToggle?: () => void;
+    /** A found row: the folder it is in, from the shown folder, shown after its name ("" at the first level). */
+    where?: string;
+    /** In a column of the columns view: the name alone (and an arrow on a folder), no size, date or kind. */
+    inColumn?: { id?: string; onPath: boolean };
 }): JSX.Element {
     return (
         <div
-            id={`files-${props.model.blockId}-row-${props.index}`}
+            id={props.inColumn?.id ?? `files-${props.model.blockId}-row-${props.index}`}
             class="files-row"
+            data-name={props.entry.name}
             classList={{
+                "files-row-in-column": !!props.inColumn,
+                "files-row-onpath": !!props.inColumn?.onPath && !props.selected,
                 "files-row-selected": props.selected,
                 "files-row-focused": props.focused,
                 "files-row-hidden": props.entry.hidden,
@@ -93,12 +128,14 @@ export function FileRow(props: {
             onDblClick={props.onOpen}
             onContextMenu={props.onContextMenu}
             draggable={!props.renaming}
+            onPointerDown={props.onPointerDown}
             onDragStart={props.onDragStart}
             onDragOver={props.onDragOver}
             onDragEnd={props.onDragEnd}
             {...tip(props.entry.error ?? (props.entry.link_target ? `→ ${props.entry.link_target}` : undefined))}
         >
-            <div class="files-cell files-col-name" role="gridcell">
+            <div class="files-cell files-col-name" role="gridcell" aria-level={props.tree ? props.tree.depth + 1 : undefined}>
+                <Show when={props.tree}>{(row) => <TreeIndent row={row()} onToggle={props.onToggle} />}</Show>
                 <span class="files-icon-box"><TypeIcon model={props.model} entry={props.entry} cssPx={16} glyphClass="files-icon" /></span>
                 <Show when={props.entry.is_symlink}>
                     <i class="fa fa-share files-link-mark" aria-label="link" />
@@ -113,8 +150,11 @@ export function FileRow(props: {
                         />
                     )}
                 </Show>
-                <Show when={props.renaming} fallback={<span class="files-name">{props.entry.name}</span>}>
+                <Show when={props.renaming} fallback={<span class="files-name" classList={{ "files-name--found": !!props.where }}>{props.tree?.label ?? labelOf(props.entry.name)}</span>}>
                     <RenameInput model={props.model} entry={props.entry} onDone={props.onRenameDone} />
+                </Show>
+                <Show when={props.where}>
+                    <span class="files-where" {...tip(props.where)}>{props.where}</span>
                 </Show>
                 <Show when={props.entry.error}>
                     <i class="fa fa-triangle-exclamation files-entry-error" aria-label={props.entry.error} />
@@ -126,7 +166,21 @@ export function FileRow(props: {
                         </span>
                     )}
                 </Show>
+                <Show when={props.inColumn && props.entry.is_dir && !props.entry.is_symlink}>
+                    <i class="fa fa-chevron-right files-column-arrow" aria-hidden="true" />
+                </Show>
             </div>
+            <Show when={!props.inColumn}>
+                <FileRowDetails entry={props.entry} />
+            </Show>
+        </div>
+    );
+}
+
+/** A details row's modified, size and kind cells. */
+function FileRowDetails(props: { entry: FsEntry }): JSX.Element {
+    return (
+        <>
             <div class="files-cell files-col-modified" role="gridcell">
                 {formatModified(props.entry.mtime)}
             </div>
@@ -136,7 +190,7 @@ export function FileRow(props: {
             <div class="files-cell files-col-kind" role="gridcell">
                 {kindOf(props.entry)}
             </div>
-        </div>
+        </>
     );
 }
 
@@ -158,6 +212,7 @@ export function GridTile(props: {
     onOpen: () => void;
     onContextMenu: (e: MouseEvent) => void;
     onDragStart: (e: DragEvent) => void;
+    onPointerDown?: (e: PointerEvent) => void;
     onDragOver: () => void;
     onDragEnd: () => void;
     onRenameDone: () => void;
@@ -191,6 +246,7 @@ export function GridTile(props: {
         <div
             id={`files-${props.model.blockId}-row-${props.index}`}
             class="files-tile"
+            data-name={props.entry.name}
             classList={{
                 "files-row-selected": props.selected,
                 "files-row-focused": props.focused,
@@ -205,6 +261,7 @@ export function GridTile(props: {
             onDblClick={props.onOpen}
             onContextMenu={props.onContextMenu}
             draggable={!props.renaming}
+            onPointerDown={props.onPointerDown}
             onDragStart={props.onDragStart}
             onDragOver={props.onDragOver}
             onDragEnd={props.onDragEnd}
@@ -252,7 +309,7 @@ function RenameInput(props: { model: FilesModel; entry: FsEntry; onDone: () => v
     });
     onMount(() => {
         input?.focus();
-        input?.setSelectionRange(0, stemLength(props.entry.name, props.entry.is_dir));
+        input?.setSelectionRange(0, stemLength(labelOf(props.entry.name), props.entry.is_dir));
     });
     /** Enter commits and stays in the box on a problem, so it can be fixed.
      *  Leaving the box (blur) commits too, but on a problem it cancels: with
@@ -260,8 +317,8 @@ function RenameInput(props: { model: FilesModel; entry: FsEntry; onDone: () => v
      *  is typing in (ReAgent on #4201). */
     const finish = async (commit: boolean, leaving = false): Promise<void> => {
         if (busy || finished) return;
-        const value = input?.value ?? props.entry.name;
-        if (commit && value !== props.entry.name) {
+        const value = input?.value ?? labelOf(props.entry.name);
+        if (commit && value !== labelOf(props.entry.name)) {
             const why = nameProblem(value, windowsNames());
             if (why && !leaving) {
                 setProblem(why);
@@ -283,9 +340,9 @@ function RenameInput(props: { model: FilesModel; entry: FsEntry; onDone: () => v
             <input
                 ref={input}
                 class="files-rename-input" data-raw-text-field="the inline rename in a file row: it sits in the row's own line and commits or cancels on Enter, Escape or blur, not a form field"
-                value={props.entry.name}
+                value={labelOf(props.entry.name)}
                 spellcheck={false}
-                aria-label={`New name for ${props.entry.name}`}
+                aria-label={`New name for ${labelOf(props.entry.name)}`}
                 aria-invalid={problem() != null}
                 onClick={(e) => e.stopPropagation()}
                 onDblClick={(e) => e.stopPropagation()}

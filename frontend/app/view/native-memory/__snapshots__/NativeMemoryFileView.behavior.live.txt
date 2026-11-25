@@ -21,11 +21,9 @@ NativeMemoryReadFileCommand {"agent_id":"a1","filename":"MEMORY.md"}
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -143,11 +141,9 @@ onDirtyChange false
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -276,11 +272,9 @@ NativeMemoryReadFileCommand {"agent_id":"a1","filename":"MEMORY.md"}
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -404,11 +398,9 @@ NativeMemoryReadFileCommand {"agent_id":"a1","filename":"MEMORY.md"}
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -514,11 +506,9 @@ NativeMemoryReadFileCommand {"agent_id":"a1","filename":"MEMORY.md"}
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -634,11 +624,9 @@ NativeMemoryReadFileCommand {"agent_id":"a1","filename":"MEMORY.md"}
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -767,11 +755,9 @@ NativeMemoryReadFileCommand {"agent_id":"a1","filename":"MEMORY.md"}
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -875,11 +861,9 @@ NativeMemoryReadFileCommand {"agent_id":"a1","filename":"MEMORY.md"}
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -1012,11 +996,9 @@ NativeMemoryReadFileCommand {"agent_id":"a1","filename":"MEMORY.md"}
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">
@@ -1120,11 +1102,9 @@ onDirtyChange false
                 <strong>
                   "~1.2k tok"
               <span>
-                "7 days:"
-                "+300 tok"
+                "7 days: +300 tok"
               <span>
-                "30 days:"
-                "+900 tok"
+                "30 days: +900 tok"
               <svg class="memory-history-sparkline" aria-hidden="true">
                 <polyline>
             <div class="native-memory-history-hint">

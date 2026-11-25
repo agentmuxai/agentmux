@@ -115,7 +115,7 @@ export const DEFAULT_KEYBINDINGS: KeyBindingRow[] = [
             ["open:swarm", "Open Swarm", "s"],
             ["open:kanban", "Open Kanban", "k"],
             ["open:vault", "Open Vault", "v"],
-            ["open:history", "Open History", "h"],
+            ["open:history", "Open Audit: Conversations", "h"],
             ["open:sysinfo", "Open System Info", "i"],
             ["app:connectors", "Connectors", "c"],
             ["app:memory", "Memory", "m"],
@@ -163,6 +163,8 @@ export const DEFAULT_KEYBINDINGS: KeyBindingRow[] = [
     // In the page itself the host catches these keys (crates/cef handlers.rs
     // `pane_shortcut_before_app_keys`); this row covers the pane's own bar
     // (address bar, buttons), where focus is in the app, as in Chrome.
+    { command: "browser:newTab", label: "New tab (browser pane)", category: "Tabs & windows", pane: "browser", mac: ["meta+t"], other: ["ctrl+t"] },
+    { command: "browser:closeTab", label: "Close this tab (browser pane)", category: "Tabs & windows", pane: "browser", mac: ["meta+w"], other: ["ctrl+w"] },
     { command: "browser:newIncognito", label: "New Incognito tab (browser pane)", category: "Tabs & windows", pane: "browser", mac: ["meta+shift+n"], other: ["ctrl+shift+n"] },
 
     // ── Files pane ──

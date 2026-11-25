@@ -397,7 +397,7 @@ export function BrowserSection(): JSX.Element {
                             if (e.key === "Enter") void add();
                         }}
                     />
-                    <Button icon="plus" disabled={!newName().trim()} onClick={() => void add()}>
+                    <Button icon="plus" disabled={!newName().trim()} onClick={() => add()}>
                         {t("settings.browser.profile.add")}
                     </Button>
                 </div>
