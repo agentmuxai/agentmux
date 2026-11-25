@@ -6,11 +6,11 @@ import { companionCliEnv } from "./companion-env";
 
 describe("companionCliEnv", () => {
     it("points pi-acp at the pi installed beside it", () => {
-        expect(companionCliEnv("pi", String.raw`C:\cli\pi\0.0.34\node_modules\.bin\pi-acp.cmd`)).toEqual({
-            PI_ACP_PI_COMMAND: String.raw`C:\cli\pi\0.0.34\node_modules\.bin\pi.cmd`,
+        expect(companionCliEnv("pi", String.raw`C:\cli\pi\0.0.35\node_modules\.bin\pi-acp.cmd`)).toEqual({
+            PI_ACP_PI_COMMAND: String.raw`C:\cli\pi\0.0.35\node_modules\.bin\pi.cmd`,
         });
-        expect(companionCliEnv("pi", "/home/u/cli/pi/0.0.34/node_modules/.bin/pi-acp")).toEqual({
-            PI_ACP_PI_COMMAND: "/home/u/cli/pi/0.0.34/node_modules/.bin/pi",
+        expect(companionCliEnv("pi", "/home/u/cli/pi/0.0.35/node_modules/.bin/pi-acp")).toEqual({
+            PI_ACP_PI_COMMAND: "/home/u/cli/pi/0.0.35/node_modules/.bin/pi",
         });
     });
 

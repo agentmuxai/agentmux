@@ -27,7 +27,7 @@ pub(super) static KILO: ProviderConfig = ProviderConfig {
     auth_extra_env: &[("KILO_DISABLE_AUTOUPDATE", "1"), ("KILO_DISABLE_CLAUDE_CODE_PROMPT", "1")],
     unset_env: &[],
     npm_package: "@kilocode/cli",
-    pinned_version: "7.8.27",
+    pinned_version: "7.8.32",
     base_url_env_var: None,
     supported_vendors: &["kilo"],
     startup_instructions_filename: Some("AGENTS.md"),

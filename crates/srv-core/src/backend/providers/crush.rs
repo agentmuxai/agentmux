@@ -31,7 +31,7 @@ pub(super) static CRUSH: ProviderConfig = ProviderConfig {
     ],
     unset_env: &[],
     npm_package: "@charmland/crush",
-    pinned_version: "0.98.1",
+    pinned_version: "0.102.0",
     base_url_env_var: None,
     supported_vendors: &["crush"],
     startup_instructions_filename: Some("AGENTS.md"),

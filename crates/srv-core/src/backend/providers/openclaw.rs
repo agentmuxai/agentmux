@@ -35,7 +35,7 @@ pub(super) static OPENCLAW: ProviderConfig = ProviderConfig {
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "openclaw",
-    pinned_version: "2026.11.2",
+    pinned_version: "2026.11.10",
     base_url_env_var: None,
     supported_vendors: &["openai", "anthropic", "google"],
     // Confirmed convention, UNCONFIRMED path: docs.openclaw.ai/reference/AGENTS.default

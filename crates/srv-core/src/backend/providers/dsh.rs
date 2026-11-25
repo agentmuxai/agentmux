@@ -28,7 +28,7 @@ pub(super) static DSH: ProviderConfig = ProviderConfig {
     auth_extra_env: &[("DSH_TELEMETRY_DISABLED", "1")],
     unset_env: &[],
     npm_package: "@deepseek-ai/dsh",
-    pinned_version: "0.2.2-rc.1",
+    pinned_version: "0.2.2-rc.5",
     base_url_env_var: None,
     supported_vendors: &["deepseek"],
     startup_instructions_filename: Some("AGENTS.md"),

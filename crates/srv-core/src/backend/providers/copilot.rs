@@ -26,7 +26,7 @@ pub(super) static COPILOT: ProviderConfig = ProviderConfig {
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "@github/copilot",
-    pinned_version: "1.0.108",
+    pinned_version: "1.0.115",
     base_url_env_var: None,
     supported_vendors: &["github"],
     // Confirmed: GitHub Copilot CLI custom-instructions docs — supports
