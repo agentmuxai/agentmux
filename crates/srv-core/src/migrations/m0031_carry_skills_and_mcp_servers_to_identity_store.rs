@@ -460,6 +460,22 @@ fn carry_skills(mstore: &Store, identity_store: &Store, channel_salt: &str) -> R
     Ok((carried, rewritten))
 }
 
+/// Who added a carried server and who last changed it go with the row: the starter seed records its origin in
+/// this channel's store, and Connectors reads origins from the identity store. Only a server this call put
+/// there (`newly_inserted`): one already there keeps its own.
+fn carry_mcp_origin(mstore: &Store, identity_store: &Store, original_id: &str, final_id: &str, newly_inserted: bool) -> Result<(), String> {
+    if !newly_inserted {
+        return Ok(());
+    }
+    let origin = mstore.mcp_origin_of(original_id).map_err(|e| format!("read origin of mcp server {original_id}: {e}"))?;
+    if origin == crate::backend::storage::McpOrigin::default() {
+        return Ok(());
+    }
+    identity_store
+        .mcp_origin_record(final_id, &origin.added_by, &origin.changed_by)
+        .map_err(|e| format!("carry origin of mcp server {final_id}: {e}"))
+}
+
 /// Mirrors `carry_skills` exactly, for MCP servers — see that function's
 /// comments for the reasoning behind every decision here.
 fn carry_mcp_servers(mstore: &Store, identity_store: &Store, channel_salt: &str) -> Result<(usize, usize), String> {
@@ -566,17 +582,8 @@ fn carry_mcp_servers(mstore: &Store, identity_store: &Store, channel_salt: &str)
             }
         };
 
-        if newly_inserted > 0 {
-            carried += 1;
-            // Who added it and who last changed it go with the row: the starter seed records its origin in
-            // this channel's store, and Connectors reads origins from the identity store.
-            let origin = mstore.mcp_origin_of(&original_id).map_err(|e| format!("read origin of mcp server {original_id}: {e}"))?;
-            if origin != crate::backend::storage::McpOrigin::default() {
-                identity_store
-                    .mcp_origin_record(&final_id, &origin.added_by, &origin.changed_by)
-                    .map_err(|e| format!("carry origin of mcp server {final_id}: {e}"))?;
-            }
-        }
+        carried += usize::from(newly_inserted > 0);
+        carry_mcp_origin(mstore, identity_store, &original_id, &final_id, newly_inserted > 0)?;
 
         // See carry_skills's matching comment (ReAgent P1, PR #3181, round 3):
         // use the identity store's actual winning content whenever this
