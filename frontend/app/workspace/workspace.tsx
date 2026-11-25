@@ -47,15 +47,17 @@ import type { JSX } from "solid-js";
 
 /** Whether a tab is outside the tabs kept laid out while hidden (window-tab-visibility.ts `warmTabLimit`). A tab
  *  that falls out of the list is cold again, so its next switch is gated like a first one. */
-function trackWarmTabs(displayTabId: () => string): (tabId: string) => boolean {
+function trackWarmTabs(displayTabId: () => string, allTabIds: () => string[]): (tabId: string) => boolean {
     const [warmTabs, setWarmTabs] = createSignal<string[]>([]);
     createEffect(() => {
         const id = displayTabId();
         if (!id) return;
         const limit = warmTabLimit();
         const all = nextWarmTabs(untrack(warmTabs), id, 0);
-        if (limit > 0) for (const gone of all.slice(limit)) forgetTabShown(gone);
-        setWarmTabs(limit > 0 ? all.slice(0, limit) : all);
+        const kept = limit > 0 ? all.slice(0, limit) : all;
+        // Also a tab startup counted as shown without it ever being displayed.
+        if (limit > 0) for (const t of untrack(allTabIds)) if (!kept.includes(t)) forgetTabShown(t);
+        setWarmTabs(kept);
     });
     return (tabId) => warmTabLimit() > 0 && !warmTabs().includes(tabId);
 }
@@ -226,7 +228,6 @@ function WorkspaceElem(): JSX.Element {
         const id = displayTabId();
         if (id && keepInactiveTabsLaidOut() && !gateHides(id)) markTabShown(id);
     });
-    const outsideWarmTabs = trackWarmTabs(displayTabId);
     // A window whose tab content stopped following the active tab (Solid abandons
     // the bindings queued in a flush that throws) is shown the right tab again;
     // if that doesn't take, the person is offered a reload, never given one
@@ -292,6 +293,7 @@ function WorkspaceElem(): JSX.Element {
         if (!w) return [];
         return [...(w.pinnedtabids ?? []), ...(w.tabids ?? [])];
     });
+    const outsideWarmTabs = trackWarmTabs(displayTabId, allTabIds);
 
     // Hidden tabs kept laid out skip layout while the window is being resized,
     // so each frame of a resize lays out only the displayed tab, then catch up
@@ -341,7 +343,7 @@ function WorkspaceElem(): JSX.Element {
         const ids = allTabIds();
         if (ids.length === 0) return;
         cancelLoadedTabsMark = untrack(() =>
-            keepInactiveTabsLaidOut() ? markLoadedTabsShownWhenSettled(ids, keepInactiveTabsLaidOut) : () => {}
+            keepInactiveTabsLaidOut() && warmTabLimit() === 0 ? markLoadedTabsShownWhenSettled(ids, keepInactiveTabsLaidOut) : () => {}
         );
     });
 

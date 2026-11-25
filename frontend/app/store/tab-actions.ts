@@ -17,7 +17,7 @@ import { markEnd, markStart } from "@/perf";
 import { fireAndForget } from "@/util/util";
 import { focusManager } from "./focusManager";
 import { WorkspaceService } from "./services";
-import { holdRevealGate, logUngatedReveal, markTabShown, scheduleRevealLift, tabWasShown } from "./tab-reveal";
+import { holdRevealGate, logUngatedReveal, markTabShown, scheduleRevealLift, tabWasShown, whenGateLifted } from "./tab-reveal";
 import { dirtyAtClick, holdForSwitchPaint, releaseSwitchPaint } from "./switch-paint-hold";
 import { pendingMuxUpdateCount } from "./mos-update-queue";
 import { activeTabId, workspace } from "./window-identity";
@@ -330,12 +330,14 @@ function guardStep(name: string, counter: { threw: number }, step: () => void): 
 
 /** What was pending at the click, one line per switch: long-task time in the second before it, what arrived in that
  *  second (websocket events, Vault calls) by kind, the object updates still queued, and the work this switch held back. */
-function logDirtyAtClick(tabId: string, clickedAt: number, held: number): void {
+function snapshotDirty(clickedAt: number): (tabId: string, held: number) => void {
     const dirty = dirtyAtClick(clickedAt);
     const busy = blockedMsBetween(clickedAt - 1000, clickedAt);
-    console.info(
-        `[perf] tab-switch-dirty to=${tabId} busy-before=${busy == null ? "n/a" : `${busy}ms`} arrived-1s=${dirty.total}${dirty.mix ? `(${dirty.mix})` : ""} pending-updates=${pendingMuxUpdateCount()} held-for-paint=${held}`
-    );
+    const pending = pendingMuxUpdateCount();
+    return (tabId, held) =>
+        console.info(
+            `[perf] tab-switch-dirty to=${tabId} busy-before=${busy == null ? "n/a" : `${busy}ms`} arrived-1s=${dirty.total}${dirty.mix ? `(${dirty.mix})` : ""} pending-updates=${pending} held-for-paint=${held}`
+        );
 }
 
 /** One line per switch, always (#47767): the click to the RPC's return and to two frames later, how many browser
@@ -405,13 +407,18 @@ export async function setActiveTab(tabId: string): Promise<void> {
     // SMOOTHNESS_2026_09_24.md §6.4, measured on #3686).
     const gated = !(keepInactiveTabsLaidOut() && tabWasShown(tabId));
     if (gated) guardStep("the reveal gate", guard, () => holdRevealGate(tabId));
+    const logDirty = snapshotDirty(clickedAt);
     const paintToken = holdForSwitchPaint();
     // A tab already warm is on screen two frames on, before the RPC answers; a gated one when its reveal ends below.
-    let heldCount = 0;
+    let paintReleased = false;
     const releasePaint = () => {
-        heldCount += releaseSwitchPaint(paintToken);
+        if (paintReleased) return;
+        paintReleased = true;
+        logDirty(tabId, releaseSwitchPaint(paintToken));
     };
     if (!gated) requestAnimationFrame(() => requestAnimationFrame(releasePaint));
+    // A cold tab is on screen when its reveal lifts, not when the RPC returns.
+    else whenGateLifted(() => requestAnimationFrame(releasePaint));
     const cancelIntent = showSwitchIntent(tabId, (write) => guardStep("the switch intent", guard, write));
     let rpcMs = -1;
     try {
@@ -432,8 +439,6 @@ export async function setActiveTab(tabId: string): Promise<void> {
         requestAnimationFrame(() =>
             requestAnimationFrame(() => {
                 logSwitch(tabId, mySeq === tabSwitchSeq, gated, rpcMs, performance.now() - clickedAt, guard.threw, clickedAt);
-                releasePaint();
-                logDirtyAtClick(tabId, clickedAt, heldCount);
                 if (mySeq === tabSwitchSeq) {
                     markEnd("tab-switch");
                     tabSwitchInFlight = false;
