@@ -16,7 +16,7 @@ vi.mock("../kanban/kanban-model", () => ({
 vi.mock("@/app/store/auth-headers", () => ({ authHeaders: () => ({ "X-AuthKey": "k" }) }));
 vi.mock("@/util/endpoints", () => ({ getWebServerEndpoint: () => "http://srv" }));
 
-import { REFRESH_MS, useAtlasWork } from "./atlas-work-store";
+import { REFRESH_MS, useAtlasTasks, useAtlasWork } from "./atlas-work-store";
 
 function serve(agents: unknown[]) {
     const fetched = vi.fn(async () => ({ ok: true, json: async () => ({ channel: "stable", agents }) }));
@@ -28,11 +28,13 @@ function serve(agents: unknown[]) {
 function mount(initial: string | null) {
     const [block, setBlock] = createSignal<string | null>(initial);
     let work!: ReturnType<typeof useAtlasWork>;
+    let tasks!: ReturnType<typeof useAtlasTasks>;
     const dispose = createRoot((d) => {
-        work = useAtlasWork(block);
+        tasks = useAtlasTasks();
+        work = useAtlasWork(() => (block() ? { blockId: block(), name: "Ann" } : null), tasks);
         return d;
     });
-    return { work, setBlock, dispose };
+    return { work, tasks, setBlock, dispose };
 }
 
 const settle = async () => {
@@ -50,24 +52,37 @@ describe("useAtlasWork", () => {
         vi.unstubAllGlobals();
     });
 
-    it("asks nothing with no card open", async () => {
+    it("asks srv for nothing with no card open, but follows the Kanban for the nodes' tasks", async () => {
         const fetched = serve([]);
         const { work, dispose } = mount(null);
         await settle();
         expect(fetched).not.toHaveBeenCalled();
-        expect(kanban.visible).not.toContain(true);
+        expect(kanban.visible).toEqual([true]);
         expect(work()).toBeNull();
+        dispose();
+        expect(kanban.visible).toEqual([true, false]);
+    });
+
+    it("hands the board's tasks to the nodes", async () => {
+        serve([]);
+        kanban.tasks = [{ title: "T" }];
+        const { tasks, dispose } = mount(null);
+        expect(tasks()).toEqual([{ title: "T" }]);
         dispose();
     });
 
-    it("reads the work facts and follows the Kanban while a card is open", async () => {
+    it("reads the work facts while a card is open, with the tasks it holds", async () => {
         const fetched = serve([{ block_id: "b1", repo: "o/r", branch: "ann/fix" }]);
         kanban.tasks = [{ title: "T", state: "claimed", updated_at: 1, card: { num: 5, repo: "", branch: "", pr_url: "" }, holder: { block_id: "b1" } }];
         const { work, dispose } = mount("b1");
         await settle();
         expect(fetched).toHaveBeenCalledWith("http://srv/api/v1/work-facts", { headers: { "X-AuthKey": "k" } });
-        expect(kanban.visible).toEqual([true]);
-        expect(work()).toEqual({ repo: "o/r", branch: "ann/fix", tasks: [{ num: 5, title: "T", pr: null }] });
+        expect(work()).toEqual({
+            repo: "o/r",
+            branch: "ann/fix",
+            tasks: [{ num: 5, title: "T", pr: null, column: "progress", held: true }],
+            more: 0,
+        });
         dispose();
     });
 
@@ -79,7 +94,6 @@ describe("useAtlasWork", () => {
         expect(fetched).toHaveBeenCalledTimes(2);
         setBlock(null);
         await settle();
-        expect(kanban.visible.at(-1)).toBe(false);
         expect(work()).toBeNull();
         await vi.advanceTimersByTimeAsync(REFRESH_MS * 3);
         expect(fetched).toHaveBeenCalledTimes(2);
