@@ -4,11 +4,9 @@
       "path": ".mcp.json",
       "differs": [
         "/mcpServers/agentmux/env/AGENTMUX_CHANNEL",
-        "/mcpServers/agentmux/env/AGENTMUX_JEKT_KEY",
-        "/mcpServers/agentmux/env/AGENTMUX_LAN_KEY",
         "/mcpServers/hostfs/command"
       ],
-      "why": "A container agent gets only the catalog servers switched on for containers (the fixture's host-only server is left out), and no signing keys or AGENTMUX_CHANNEL: the workspace is mounted into the container, so a key written there would be readable from it."
+      "why": "A container agent gets only the catalog servers switched on for containers (the fixture's host-only server is left out), and no AGENTMUX_CHANNEL (its keys are made for a native agent only). No agent's file holds a signing value: the file holds references, not values."
     },
     {
       "path": "CLAUDE.md",
@@ -24,11 +22,9 @@
       "path": ".mcp.json",
       "differs": [
         "/mcpServers/agentmux/env/AGENTMUX_CHANNEL",
-        "/mcpServers/agentmux/env/AGENTMUX_JEKT_KEY",
-        "/mcpServers/agentmux/env/AGENTMUX_LAN_KEY",
         "/mcpServers/hostfs/command"
       ],
-      "why": "Same rule as agent.open: catalog servers switched on for containers only, and no signing keys or AGENTMUX_CHANNEL."
+      "why": "Same rule as agent.open: catalog servers switched on for containers only, and no AGENTMUX_CHANNEL."
     },
     {
       "path": "CLAUDE.md",

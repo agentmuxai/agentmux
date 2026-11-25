@@ -413,7 +413,7 @@ pub(crate) fn sign_ui_automation_auth() -> Result<agentmux_common::api_types::Ui
             );
         }
         anyhow::bail!(
-            "AGENTMUX_JEKT_KEY is not set (or not valid base64) and srv served no key — this agent \
+            "srv served no signing key (it was not reachable, or did not accept this agent's token) — this agent \
              needs to be respawned to get a signing key before it can use UI automation \
              (the UI tool)"
         );
