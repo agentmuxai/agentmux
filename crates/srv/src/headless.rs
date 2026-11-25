@@ -46,6 +46,9 @@ static WEB: OnceLock<WebOptions> = OnceLock::new();
 
 /// The directory srv keeps its databases in (`--wavedata`, else the resolved data dir), set once headless started.
 static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
+/// What the file of kept browser sessions is bound to: nothing for a key srv generated (new at every start), the key itself for one
+/// the person provided.
+static SESSION_BINDING: OnceLock<crate::server::local_session_file::KeyBinding> = OnceLock::new();
 
 /// The file the key was read from or written to, when it came from a file (not the environment).
 static KEY_FILE: OnceLock<PathBuf> = OnceLock::new();
@@ -158,12 +161,18 @@ pub fn prepare_env() -> Result<Option<PathBuf>, String> {
     }
 
     let mut generated = None;
-    if !agentmux_common::secret_env::is_set("AGENTMUX_AUTH_KEY") {
+    let mut binding = crate::server::local_session_file::KeyBinding::Generated;
+    if agentmux_common::secret_env::is_set("AGENTMUX_AUTH_KEY") {
+        if let Some(key) = env_key() {
+            binding = crate::server::local_session_file::KeyBinding::Provided(key.into_bytes());
+        }
+    } else {
         let key_file = cli.auth_key_file.clone().or_else(|| std::env::var_os("AGENTMUX_AUTH_KEY_FILE").map(PathBuf::from));
         let key = match key_file {
             Some(file) => {
                 let key = read_provided_key_file(&file, serves_ui)?;
                 let _ = KEY_FILE.set(file);
+                binding = crate::server::local_session_file::KeyBinding::Provided(key.clone().into_bytes());
                 key
             }
             None => {
@@ -176,6 +185,7 @@ pub fn prepare_env() -> Result<Option<PathBuf>, String> {
         std::env::set_var("AGENTMUX_AUTH_KEY", key);
     }
 
+    let _ = SESSION_BINDING.set(binding);
     let _ = PORTS.set((cli.web_port, cli.ws_port));
     let _ = WEB.set(web);
 
@@ -360,6 +370,15 @@ pub(crate) fn publish_port(port: u16) {
             }
         }
     }
+}
+
+/// Where the browser sessions are kept across a restart (the data root's `sessions.bin`) and what the file is bound to. Only a
+/// headless srv that serves its own UI.
+pub(crate) fn session_file() -> Option<(PathBuf, crate::server::local_session_file::KeyBinding)> {
+    if !local_sign_in() {
+        return None;
+    }
+    Some((DATA_DIR.get()?.join(crate::server::local_session_file::FILE_NAME), SESSION_BINDING.get()?.clone()))
 }
 
 /// Remove the port file at a clean exit.
