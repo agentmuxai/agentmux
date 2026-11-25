@@ -375,19 +375,21 @@ fn epoch_to_chain(conn: &Connection, collection: &str, chain: &Chain) -> Result<
 }
 
 /// A removal that lost a fork to another entry leaves no key behind for its epoch, whichever machine signed it or made
-/// the key: the winner's key is the one that counts, and is taken when it is offered.
+/// the key: the winner's key is the one that counts, and is taken when it is offered. A branch that lost may hold several
+/// removals, each at the epoch the entries before it on that branch made.
 pub(super) fn discard_lost_keys(keys: &dyn KeyDelivery, collection: &str, chain: &Chain, taken: &[Result<Taken, MemberError>]) {
+    let removes = |e: &Entry| matches!(e.change, Change::Remove { .. });
     for t in taken {
-        if let Ok(Taken::Replaced(old)) = t {
-            if matches!(old.change, Change::Remove { .. }) {
-                let before = chain.entries.iter().take(old.n.saturating_sub(1) as usize).filter(|e| matches!(e.change, Change::Remove { .. })).count();
-                keys.discard(collection, before as u32 + 1);
+        if let Ok(Taken::Replaced(lost)) = t {
+            // The entries before the first one lost are the chain's own, which the lost branch shared.
+            let mut epoch = chain.entries.iter().take(lost.first().map_or(0, |e| e.n.saturating_sub(1) as usize)).filter(|e| removes(e)).count() as u32;
+            for e in lost.iter().filter(|e| removes(e)) {
+                epoch += 1;
+                keys.discard(collection, epoch);
             }
         }
     }
-}
-
-/// A former member is told how it was removed and nothing that came after.
+}/// A former member is told how it was removed and nothing that came after.
 fn visible_to_former(entries: &[Entry], caller: &str) -> usize {
     entries.iter().position(|e| matches!(&e.change, Change::Remove { id, .. } if id == caller)).map_or(0, |i| i + 1)
 }

@@ -424,3 +424,26 @@ fn a_write_cut_off_by_a_removal_is_not_written_again_over_a_later_write_of_anoth
     }
     assert_eq!(r.reissued, 0, "{r:?}");
 }
+
+
+#[test]
+fn machines_that_went_on_from_different_entries_settle_on_one_chain_in_one_round() {
+    // `a` appended two entries and `b` one at the same place as `a`'s first: the chains differ two places back from
+    // `a`'s head, and `b`'s head is not `a`'s.
+    let (mut a, mut b, _) = three("kanban");
+    ops::change(&mut a.ctx(), C, Change::SetPolicy { policy: Policy::Approve }).unwrap();
+    ops::change(&mut a.ctx(), C, Change::SetPolicy { policy: Policy::AutoProven }).unwrap();
+    ops::change(&mut b.ctx(), C, Change::SetPolicy { policy: Policy::AutoProven }).unwrap();
+    assert_eq!((a.chains[C].entries.len(), b.chains[C].entries.len()), (5, 4));
+    assert_ne!(a.chains[C].entries[3], b.chains[C].entries[3]);
+    // Whichever way the hash falls, both end on the one chain, and the round does not distrust the other.
+    let r = round(&mut a, &mut b);
+    assert_eq!(r.ended, Ended::Synced, "{:?}", r.ended);
+    let r = round(&mut b, &mut a);
+    assert_eq!(r.ended, Ended::Synced, "{:?}", r.ended);
+    assert_eq!(a.chains[C].entries, b.chains[C].entries, "one chain on both");
+    assert_eq!(chain_store::load_all(&a.conn).unwrap(), a.chains, "stored");
+    assert_eq!(chain_store::load_all(&b.conn).unwrap(), b.chains, "stored");
+    let again = round(&mut b, &mut a);
+    assert!(!again.changed(), "{again:?}");
+}
