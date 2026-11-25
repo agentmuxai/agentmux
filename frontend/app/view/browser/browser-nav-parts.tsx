@@ -10,6 +10,7 @@ import { Show, type JSX } from "solid-js";
 import clsx from "clsx";
 import { getApi } from "@/util/app-api";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
+import { t } from "@/app/i18n/i18n";
 import { browserStartPageAtom } from "@/store/config-signals";
 import { Button, type MenuEntry, MenuTrigger, openMenuAt } from "@/app/element/ui";
 import { MENU_ICON } from "@/app/util/menu-icons";
@@ -45,14 +46,14 @@ export function NavButtons(props: {
                 class="ui-icon-button browser-nav-btn"
                 disabled={!model.canGoBackAtom()}
                 onClick={() => model.goBack()}
-                title="Back"
+                title={t("browserNav.back")}
             >{"←"}</Button>
             <Button
                 tone="quiet"
                 class="ui-icon-button browser-nav-btn"
                 disabled={!model.canGoForwardAtom()}
                 onClick={() => model.goForward()}
-                title="Forward"
+                title={t("browserNav.forward")}
             >{"→"}</Button>
             <Button
                 tone="quiet"
@@ -70,8 +71,8 @@ export function NavButtons(props: {
                 tone="quiet"
                 class="ui-icon-button browser-nav-btn"
                 data-testid="browser-home"
-                title={`Home: ${props.home()}`}
-                aria-label={`Home: ${props.home()}`}
+                title={t("browserNav.home", { url: props.home() })}
+                aria-label={t("browserNav.home", { url: props.home() })}
                 onClick={props.goHome}
                 onContextMenu={(e) => {
                     e.preventDefault();
@@ -118,10 +119,10 @@ export function BookmarksButton(props: {
                     class="ui-icon-button browser-nav-btn"
                     title={
                         props.bookmarksError()
-                            ? `Bookmarks: ${props.bookmarksError()}`
+                            ? t("browserNav.bookmarksError", { error: props.bookmarksError() ?? "" })
                             : props.startPageError()
-                              ? `Home page: ${props.startPageError()}`
-                              : "Bookmarks"
+                              ? t("browserNav.homePageError", { error: props.startPageError() ?? "" })
+                              : t("browserNav.bookmarks")
                     }
                 >
                     <ToolbarBookmarkIcon
@@ -236,7 +237,7 @@ export function AddressInput(props: {
         <div class="browser-address-wrap">
             <input
                 ref={props.address.bindInput}
-                class="browser-address-bar" data-raw-text-field="the address bar: a combobox that takes IME composition, inline completion and the first-click select-all itself, in the nav bar's own row, not a form field" aria-label="Address"
+                class="browser-address-bar" data-raw-text-field="the address bar: a combobox that takes IME composition, inline completion and the first-click select-all itself, in the nav bar's own row, not a form field" aria-label={t("browserNav.address")}
                 type="text"
                 value={addressBar()}
                 role="combobox"
@@ -251,7 +252,7 @@ export function AddressInput(props: {
                 onMouseUp={(e) => firstClickSelectAll.onMouseUp(e.currentTarget)}
                 onFocus={on.onFocus}
                 onBlur={on.onBlur}
-                placeholder="Enter URL or search..."
+                placeholder={t("browserNav.addressPlaceholder")}
             />
             <Show when={autocomplete.open()}>
                 <AddressSuggestions

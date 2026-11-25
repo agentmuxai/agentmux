@@ -20,6 +20,7 @@
 
 import type { JSX } from "solid-js";
 import { createMemo, For, Show } from "solid-js";
+import { t } from "@/app/i18n/i18n";
 
 import "./sysinfo-overview.scss";
 
@@ -226,11 +227,11 @@ export function MeasureTable(props: { plotData: DataItem[]; focus?: AreaChoice; 
         <table class="sysinfo-overview-table">
             <thead>
                 <tr>
-                    <th scope="col">Measure</th>
-                    <th scope="col">Now</th>
-                    <th scope="col">Low</th>
-                    <th scope="col">High</th>
-                    <th scope="col">Average</th>
+                    <th scope="col">{t("sysinfo.measure")}</th>
+                    <th scope="col">{t("sysinfo.now")}</th>
+                    <th scope="col">{t("sysinfo.low")}</th>
+                    <th scope="col">{t("sysinfo.high")}</th>
+                    <th scope="col">{t("sysinfo.average")}</th>
                 </tr>
             </thead>
             <tbody>
@@ -264,12 +265,12 @@ function EverythingCharts(props: ChartProps): JSX.Element {
                 targetLen={props.targetLen}
                 intervalSecs={props.intervalSecs}
                 syncKey={props.syncKey}
-                title="CPU"
+                title={t("sysinfo.cpu")}
                 class="sysinfo-overview-wide"
             />
             <Show when={cores().length > 0}>
                 <div class="sysinfo-overview-wide sysinfo-overview-cores">
-                    <div class="sysinfo-chart-title">{`Cores (${cores().length})`}</div>
+                    <div class="sysinfo-chart-title">{t("sysinfo.cores", { n: cores().length })}</div>
                     <CoreHeatmap
                         plotData={rows()}
                         cores={cores()}
@@ -287,7 +288,7 @@ function EverythingCharts(props: ChartProps): JSX.Element {
                 targetLen={props.targetLen}
                 intervalSecs={props.intervalSecs}
                 syncKey={props.syncKey}
-                title="Memory used"
+                title={t("sysinfo.memoryUsed")}
             />
             <TimeChart
                 plotData={rows()}
@@ -297,7 +298,7 @@ function EverythingCharts(props: ChartProps): JSX.Element {
                 targetLen={props.targetLen}
                 intervalSecs={props.intervalSecs}
                 syncKey={props.syncKey}
-                title="Network: in above, out below"
+                title={t("sysinfo.network")}
             />
             <TimeChart
                 plotData={rows()}
@@ -307,7 +308,7 @@ function EverythingCharts(props: ChartProps): JSX.Element {
                 targetLen={props.targetLen}
                 intervalSecs={props.intervalSecs}
                 syncKey={props.syncKey}
-                title="Disk: read above, write below"
+                title={t("sysinfo.disk")}
                 class="sysinfo-overview-wide"
             />
         </div>

@@ -27,9 +27,8 @@ translate(-48.220475800134324px, 0px) scale(1.2411023790006717)
       <div class="ui-tooltip-anchor">
         <button aria-label="Background: checker (B)" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
           <i aria-hidden="true" class="fa-solid fa-chess-board">
-    <div tabindex="0" aria-label="Image" class="image-viewer-content image-viewer-bg-checker">
+    <div tabindex="0" class="image-viewer-content image-viewer-bg-checker" aria-label="Image">
       <img class="image-viewer-img" style="transition: opacity var(--duration-quick) ease; opacity: 1; transform: translate(-48.220475800134324px, 0px) scale(1.2411023790006717);" draggable="false" alt="C:/pics/a.png" src="blob:image">
       <div class="image-viewer-zoom-badge">
         <button title="Fit to the pane (0)" type="button" class="ui-button ui-tone-neutral ui-density-compact">
-          "50%"
-          "· Fit"
+          "50% · Fit"
