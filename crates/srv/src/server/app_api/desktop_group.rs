@@ -126,14 +126,23 @@ pub(crate) fn flush(key: &str, is_open: &dyn Fn(&str) -> bool) -> Option<Done> {
     Some((g.block_id.clone(), note(&g, is_open)))
 }
 
-/// Record how `request_id` ended. Returns the note to send when that finished its group.
-pub(crate) fn settle(request_id: &str, outcome: Settled, is_open: &dyn Fn(&str) -> bool) -> Option<Done> {
+/// Record how `request_id` ended. Returns whether it is a member, and the note to send when that
+/// finished its group. Both come from one look at the groups, so a deadline that ends the group in
+/// between can't make a request look held when it is not.
+pub(crate) fn settle_member(request_id: &str, outcome: Settled, is_open: &dyn Fn(&str) -> bool) -> (bool, Option<Done>) {
     let mut groups = GROUPS.lock().unwrap_or_else(|e| e.into_inner());
-    let at = groups.iter().position(|g| g.members.iter().any(|m| m.request_id == request_id))?;
+    let Some(at) = groups.iter().position(|g| g.members.iter().any(|m| m.request_id == request_id)) else {
+        return (false, None);
+    };
     if let Some(m) = groups[at].members.iter_mut().find(|m| m.request_id == request_id) {
         m.outcome.get_or_insert(outcome);
     }
-    take_if_finished(&mut groups, at, is_open)
+    (true, take_if_finished(&mut groups, at, is_open))
+}
+
+/// Record how `request_id` ended. Returns the note to send when that finished its group.
+pub(crate) fn settle(request_id: &str, outcome: Settled, is_open: &dyn Fn(&str) -> bool) -> Option<Done> {
+    settle_member(request_id, outcome, is_open).1
 }
 
 /// The call has filed every request: from now on the group may finish. Returns the note when every one
@@ -168,9 +177,10 @@ pub(crate) fn request_is_open(request_id: &str) -> bool {
     requests::registry().get(request_id).is_some_and(|r| r.status.is_open())
 }
 
-/// The `Request` of a note being sent is held when it belongs to a group.
+/// A request's notes are held for its group only when its group's agent is the only one that asked
+/// for it. One that another agent joined sends its own notes to every asker.
 pub(crate) fn holds(request: &Request) -> bool {
-    is_member(&request.id)
+    request.askers().len() == 1 && is_member(&request.id)
 }
 
 #[cfg(test)]
@@ -303,5 +313,18 @@ mod tests {
         // Its requests send their own notes again, and the slot is free.
         assert!(!is_member("st-b"));
         assert_eq!(flush(&k, &|_| true), None);
+    }
+
+    #[test]
+    fn settling_says_whether_the_request_was_in_a_group() {
+        let k = fresh("member");
+        assert!(add(&k, "block-1", "mem-a", "one").grouped());
+        assert_eq!(settle_member("not-in-a-group", Settled::Allowed, &|_| true), (false, None));
+        let (member, done) = settle_member("mem-a", Settled::Allowed, &|_| true);
+        assert!(member);
+        assert_eq!(done, None, "an unsealed group does not finish");
+        flush(&k, &|_| true);
+        // After the deadline took the group, the same request is no longer a member.
+        assert_eq!(settle_member("mem-a", Settled::Allowed, &|_| true), (false, None));
     }
 }

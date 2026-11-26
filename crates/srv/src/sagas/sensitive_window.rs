@@ -242,7 +242,9 @@ pub fn answered_by_another(state: &AppState, op: &str, key: &str, value: &str, h
         }
         if requests::registry().finish(&request.id, Status::Done, now_ms()).is_ok() {
             let what = crate::backend::reactive::sanitize::quote_in_system_note(&request.summary);
-            tell_askers(&request, &format!("[AgentMux] {how}, so your request to {what} is no longer needed."));
+            if !crate::server::app_api::desktop::settled(&request, crate::server::app_api::desktop_group::Settled::Ended) {
+                tell_askers(&request, &format!("[AgentMux] {how}, so your request to {what} is no longer needed."));
+            }
         }
     }
 }
