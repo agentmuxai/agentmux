@@ -260,6 +260,7 @@ than none. Add the line when you touch one and know which area it belongs to.
 
 | Spec | Title | Status | Date | Replaces / replaced by |
 |---|---|---|---|---|
+| [`SPEC_BACK_FORWARD_FOLLOW_THE_WHOLE_TRAIL_2026_11_26`](SPEC_BACK_FORWARD_FOLLOW_THE_WHOLE_TRAIL_2026_11_26.md) | Back and Forward follow the whole trail: pane selections and link-driven moves, one history per window | active | 2026-11-26 |  |
 | [`SPEC_TEAROFF_HOST_ARMED_PICTURE_2026_11_25`](SPEC_TEAROFF_HOST_ARMED_PICTURE_2026_11_25.md) | Spec: tear-off, the host arms the pane's picture at the press (#48707) | active | 2026-11-25 |  |
 | [`SPEC_VAULT_AGENT_ADDS_AND_EDITS_WITHOUT_ASKING_2026_11_25`](SPEC_VAULT_AGENT_ADDS_AND_EDITS_WITHOUT_ASKING_2026_11_25.md) | Spec: An agent adds or edits a Vault entry without asking the person; the history line is the record | active | 2026-11-25 |  |
 | [`SPEC_AGENT_PANE_PLACEMENT_FLOATING_2026_11_22`](SPEC_AGENT_PANE_PLACEMENT_FLOATING_2026_11_22.md) | Spec: Agents place their panes: open floating (browser included), with a size and position, then resize, move and dock them | active | 2026-11-22 |  |
