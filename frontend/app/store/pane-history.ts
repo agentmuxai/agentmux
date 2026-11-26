@@ -57,8 +57,12 @@ let epoch = 0;
 let pending = 0;
 let queue: Promise<void> = Promise.resolve();
 let lastPush: { at: number; index: number } | null = null;
-/** The last gesture's place: where it was recorded, and whether it made an entry of its own. */
-let lastGesture: { blockId: string; at: number; index: number; pushed: boolean } | null = null;
+/** Entries pushed so far (a replaced or repeated place is not one). */
+let pushes = 0;
+/** `pushes` when the running gesture began. */
+let gestureStart = 0;
+/** When the last gesture ended, and `pushes` when it began: a link's request that arrives late belongs to it. */
+let lastGesture: { at: number; startPushes: number } | null = null;
 let idleWaiters: Array<() => void> = [];
 
 export function paneHistorySnapshot(): PaneHistory {
@@ -75,6 +79,8 @@ export function resetPaneHistory(): void {
     queue = Promise.resolve();
     lastPush = null;
     lastGesture = null;
+    pushes = 0;
+    gestureStart = 0;
     idleWaiters = [];
 }
 
@@ -101,6 +107,7 @@ function commit(place: PaneRef): boolean {
     if (next === history) return false;
     history = next;
     epoch++;
+    pushes++;
     lastPush = { at: now, index: history.index };
     return true;
 }
@@ -186,8 +193,9 @@ async function step(dir: -1 | 1, startEpoch: number): Promise<void> {
                 const goOn = samePlace(currentPlace(), before);
                 history = setViewAt(history, history.index, goOn ? undefined : shown);
                 if (goOn) continue;
-            } else if (restored === "none" && shown && !target.view) {
-                // A pane whose view had not joined when the entry was recorded: the entry is what it shows now.
+            } else if (shown && !sameView(shown, target.view)) {
+                // The view landed somewhere else (a board that is gone falls back) or had not joined when the entry was
+                // recorded: the entry is what the pane shows now.
                 history = setViewAt(history, history.index, shown);
             }
             return;
@@ -236,6 +244,7 @@ export function paneHistoryForward(): void {
  * person's gesture is run through here; an agent's open takes no focus and records nothing.
  */
 export async function runGesture<T>(run: () => Promise<T> | T): Promise<T> {
+    if (gestures === 0) gestureStart = pushes;
     gestures++;
     try {
         return await run();
@@ -246,10 +255,8 @@ export async function runGesture<T>(run: () => Promise<T> | T): Promise<T> {
             gestures--;
             if (gestures === 0) {
                 const here = blocked() ? null : currentPlace();
-                if (here) {
-                    const pushed = commit(here);
-                    lastGesture = { blockId: here.blockId, at: performance.now(), index: history.index, pushed };
-                }
+                if (here) commit(here);
+                lastGesture = { at: performance.now(), startPushes: gestureStart };
                 const waiting = idleWaiters;
                 idleWaiters = [];
                 for (const resolve of waiting) resolve();
@@ -302,11 +309,14 @@ export function recordPlaceMove(blockId: string): void {
  */
 export function recordLinkedPlace(blockId: string): void {
     const g = lastGesture;
-    if (blocked() || !g || g.blockId !== blockId || performance.now() - g.at > LATE_REQUEST_MS) return;
+    if (blocked() || !g || performance.now() - g.at > LATE_REQUEST_MS) return;
     const here = currentPlace();
-    if (!here || here.blockId !== blockId || history.index !== g.index) return;
+    if (!here || here.blockId !== blockId) return;
     lastGesture = null;
-    if (g.pushed) history = setViewAt(history, g.index, here.view);
+    // The entry the gesture made (or the selection that followed it) is the cursor's: the card is part of it.
+    // Otherwise the person was already in the pane, and the card it now shows is a step of its own.
+    const mine = pushes > g.startPushes && lastPush?.index === history.index && history.entries[history.index]?.blockId === blockId;
+    if (mine) history = setViewAt(history, history.index, here.view);
     else commit(here);
 }
 

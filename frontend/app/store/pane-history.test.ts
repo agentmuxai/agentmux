@@ -70,7 +70,7 @@ import { registerPlaceSource, resetPlaceSourcesForTests } from "./place-sources"
 import { asGesture, withoutTrail } from "./trail-hooks";
 
 /** The Kanban's own state: the card open in it, and what its restore does. */
-const kanban = { task: undefined as string | undefined, restoreOk: true, gone: new Set<unknown>(), restored: [] as unknown[] };
+const kanban = { task: undefined as string | undefined, landOn: undefined as string | undefined, restoreOk: true, gone: new Set<unknown>(), restored: [] as unknown[] };
 let dispose: () => void;
 let unregister: () => void;
 
@@ -92,6 +92,7 @@ beforeEach(async () => {
     w.s.setFocus("A");
     kanban.task = undefined;
     kanban.restoreOk = true;
+    kanban.landOn = undefined;
     kanban.gone = new Set();
     kanban.restored = [];
     resetPaneHistory();
@@ -101,7 +102,7 @@ beforeEach(async () => {
         restore: (place) => {
             kanban.restored.push(place);
             const ok = kanban.restoreOk && !kanban.gone.has(place.task);
-            if (ok) kanban.task = place.task as string | undefined;
+            if (ok) kanban.task = kanban.landOn ?? (place.task as string | undefined);
             return ok;
         },
     });
@@ -225,6 +226,19 @@ describe("the trail of places", () => {
         expect([w.s.focus(), kanban.task]).toEqual(["K", "x"]);
     });
 
+    it("a card whose pane is selected after the gesture ended (the reveal is slow) is part of the link's step too", async () => {
+        const link = runGesture(async () => {});
+        await settle();
+        await link;
+        w.s.setFocus("K"); // the pane comes to the front a moment later, on its own
+        await settle();
+        expect(trail()).toEqual(["A", "K"]);
+        kanban.task = "x";
+        recordLinkedPlace("K");
+        await settle();
+        expect(trail()).toEqual(["A", "K:x"]);
+    });
+
     it("a link followed where the person already is shows its card as one step of its own, and nothing else is moved by a request", async () => {
         await select("tab1", "K");
         kanban.task = "y";
@@ -306,6 +320,25 @@ describe("the trail of places", () => {
         expect(paneHistorySnapshot().index).toBe(1);
         // The dead place was dropped from its entry, which is now a plain Kanban entry too.
         expect(trail()).toEqual(["A", "K", "K", "K:y"]);
+    });
+
+    it("a restore that lands somewhere else makes the entry what the pane shows, so the next Back goes on", async () => {
+        const link = runGesture(async () => {
+            w.s.setFocus("K");
+            kanban.task = "x";
+        });
+        await settle();
+        await link;
+        await select("tab1", "B");
+        kanban.task = "elsewhere";
+        kanban.landOn = "fallback"; // the saved board is gone: the view shows another place and says it restored
+        paneHistoryBack();
+        await settle();
+        expect([w.s.focus(), kanban.task]).toEqual(["K", "fallback"]);
+        expect(trail()).toEqual(["A", "K:fallback", "B"]);
+        paneHistoryBack();
+        await settle();
+        expect(w.s.focus()).toBe("A");
     });
 
     it("a pane that was closed is skipped and removed, never an error", async () => {
