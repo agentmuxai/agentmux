@@ -59,8 +59,6 @@ const REFRESH_KEY = "agentmux:pane-drag-refresh-ms";
 export const DRAG_PAUSE_MS = 80;
 /** A frame that began this long, in ms, after the one before it means the page is behind: no body catches up in it. */
 export const BEHIND_FRAME_MS = 28;
-/** A heavy body (its catch-up made the next frame late) catches up mid-drag only every this many paces, or on a pause. */
-export const HEAVY_ROUNDS = 4;
 /** Unless the bodies have waited this many paces: a page that is always behind is not left held until release. */
 export const STARVED_ROUNDS = 3;
 
@@ -95,10 +93,11 @@ let lastMoveAt = 0;
 let lastFrameAt = 0;
 let lastRoundAt = 0;
 let round: CatchUp[] | null = null;
-// A body whose catch-up was followed by a frame that began late is heavy: it waits for a pause, or HEAVY_ROUNDS paces.
+// A body whose catch-up was followed by a frame that began late is heavy: it waits for a pause (or the release), never
+// for the pace, because its layout (80 to 100 ms for a long transcript) is a late frame for the border each time.
 const heavy = new WeakSet<CatchUp>();
 let lastRan: { run: CatchUp; at: number } | null = null;
-let lastHeavyRoundAt = 0;
+
 
 function onDragPointerMove(e: Event): void {
     lastMoveAt = e.timeStamp;
@@ -117,9 +116,7 @@ function clockStep(t: number): void {
     if ((!behind || starved) && pace > 0) {
         const paused = t - lastMoveAt >= DRAG_PAUSE_MS;
         if (!round && (paused || t - lastRoundAt >= pace)) {
-            const heavyDue = paused || t - lastHeavyRoundAt >= pace * HEAVY_ROUNDS;
-            round = [...catchUps].filter((run) => heavyDue || !heavy.has(run));
-            if (heavyDue) lastHeavyRoundAt = t;
+            round = [...catchUps].filter((run) => paused || !heavy.has(run));
         }
         if (round) {
             // The bodies that have nothing to do cost nothing: the frame is spent on the first that lays out.
@@ -144,7 +141,6 @@ function addCatchUp(run: CatchUp): void {
     if (catchUps.size === 0) {
         lastFrameAt = 0;
         lastRoundAt = performance.now();
-        lastHeavyRoundAt = lastRoundAt;
         lastMoveAt = lastRoundAt;
         window.addEventListener("pointermove", onDragPointerMove, { capture: true, passive: true });
         if (typeof requestAnimationFrame === "function" && dragRefreshMs() > 0) clockFrame = requestAnimationFrame(clockStep);
