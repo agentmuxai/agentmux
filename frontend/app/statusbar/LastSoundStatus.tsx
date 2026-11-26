@@ -54,8 +54,11 @@ export function LastSoundStatus(props: { rows?: Accessor<AgentRuntime[]> }): JSX
     const tick = useTick(1000);
     const now = createMemo(() => (tick(), Date.now()));
     const sound = createMemo(() => lastSound(sounds(), now()));
-    // It comes and goes while a narrow bar may hide its slot, which changes no size the bar watches.
-    createEffect(on(() => !!sound(), refitStatusBar, { defer: true }));
+    // It comes and goes while a narrow bar may hide its slot, which changes no size the bar watches. Its own memo:
+    // `on` runs for every update of what it reads, and `sound()` is a new object each second while sounds play, so
+    // the bar was fitted again each second (a layout a step) although the item had neither come nor gone.
+    const present = createMemo(() => !!sound());
+    createEffect(on(present, refitStatusBar, { defer: true }));
     const line = (s: PlayedSound) => soundText(s, who(), now());
     const who = () => (props.rows ?? sharedAgentRuntime().rows)().find((r) => r.block_id === sound()?.blockId)?.name;
     return (

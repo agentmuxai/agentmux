@@ -70,6 +70,30 @@ describe("LastSoundStatus", () => {
         }
     });
 
+    it("does not have the bar fit again for each new sound while one is already shown", async () => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+        vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => (cb(0), 0));
+        const bar = document.createElement("div");
+        bar.className = "status-bar";
+        document.body.append(bar);
+        try {
+            render(() => <LastSoundStatus rows={() => []} />, { container: bar });
+            noteSound({ blockId: "blk-a", event: "tool", tool: "Bash", at: Date.now() });
+            expect(bar.querySelector(".status-last-sound")?.textContent).toMatch(/Bash/);
+            bar.setAttribute("data-fit", "2"); // what a fit would take away
+            for (const tool of ["Read", "Edit"]) {
+                noteSound({ blockId: "blk-a", event: "tool", tool, at: Date.now() });
+                vi.advanceTimersByTime(SOUND_REFRESH_MS);
+                expect(bar.querySelector(".status-last-sound")?.textContent).toMatch(new RegExp(tool));
+            }
+            expect(bar.getAttribute("data-fit")).toBe("2");
+        } finally {
+            bar.remove();
+            vi.unstubAllGlobals();
+            vi.useRealTimers();
+        }
+    });
+
     it("draws the first sound at once and the sounds after it once a second, however many play", async () => {
         vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
         try {
