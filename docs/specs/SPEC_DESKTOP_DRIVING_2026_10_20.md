@@ -70,6 +70,7 @@ One tool, `Desktop`, with an `action`, like the other MuxAPI tools. It is listed
 | Action | Arguments | Does |
 |---|---|---|
 | `apps` | none | Lists windows the agent could control: id, title, app name, tier, and whether granted or blocked (with the reason). |
+| `request` | `windows` (up to 8 ids from `apps`) | Asks for several apps in one call. Each app is its own request, with its own card, countdown, veto and grant; no app is allowed because another was, and a timeout or veto on one never allows another. One `[AgentMux]` note names each app as allowed, declined, vetoed or not decided once all have ended. |
 | `look` | `window` | A screenshot of one window, like `CaptureWindow`, scaled to at most 1568 px on the long edge. Records the window's geometry for later clicks. |
 | `click` | `window`, `x`, `y`, `button` (left, right, middle), `count` (1–3) | A click. |
 | `scroll` | `window`, `x`, `y`, `dx`, `dy` | A wheel scroll at a point. |

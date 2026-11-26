@@ -1255,6 +1255,11 @@ pub struct DesktopAuthorizeRequest {
     /// `look`, `click`, `scroll`, `type`, `key` or `wait`.
     pub action: String,
     pub window: DesktopWindowRef,
+    /// The id of a call that asks for several apps at once. Each app is still its own request; the
+    /// requests of one call share one note when they have all ended. `action` `seal` with this id says
+    /// the call has asked for every app.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
 }
 
 /// `POST /api/v1/agent/desktop/record` — what an authorized action did

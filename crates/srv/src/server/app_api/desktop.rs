@@ -27,6 +27,7 @@ use crate::backend::rpc_types::*;
 use crate::backend::wconfig::SettingsType;
 use crate::server::AppState;
 
+use super::desktop_group::{self as group, Settled};
 use super::*;
 
 /// Actions `authorize` is asked about.
@@ -156,6 +157,35 @@ fn publish(state: &AppState) {
     state.broker.publish_event::<crate::backend::mps_events::AppDesktop>(&event, vec![], 0);
 }
 
+/// The uid of the agent that is calling: from its token, else from the running agent of that name.
+fn asker_uid(caller: Option<&axum::Extension<crate::server::caller::Caller>>, agent: &str) -> String {
+    caller
+        .map(|c| &c.0)
+        .and_then(crate::server::caller::Caller::uid)
+        .map(str::to_string)
+        .or_else(|| crate::backend::reactive::get_global_handler().get_agent(agent).and_then(|r| r.uid))
+        .unwrap_or_default()
+}
+
+/// A request of a call that asked for several apps has ended. Records how, and returns whether the
+/// request belongs to such a call, so its own note is not sent: when the last one ends, the agent is
+/// told once about all of them.
+pub(crate) fn settled(request: &crate::backend::sensitive_requests::Request, outcome: Settled) -> bool {
+    if !group::holds(request) {
+        return false;
+    }
+    if let Some((block_id, said)) = group::settle(&request.id, outcome, &group::request_is_open) {
+        tell(&block_id, &said);
+    }
+    true
+}
+
+/// Whether the notes about this request's progress (approved, counting down) are left out, because
+/// its call asked for several apps and says it once at the end.
+pub(crate) fn holds_progress_notes(request: &crate::backend::sensitive_requests::Request) -> bool {
+    group::holds(request)
+}
+
 /// Tell the agent in pane `block_id` something, as an `[AgentMux]` note.
 fn tell(block_id: &str, text: &str) {
     let handler = crate::backend::reactive::get_global_handler();
@@ -269,6 +299,16 @@ pub(crate) async fn handle_authorize(
     };
     let agent = req.auth.agent_id.clone();
     let w = &req.window;
+    if req.action == "seal" {
+        let Some(call) = req.group.as_deref().filter(|c| !c.is_empty() && c.len() <= 64) else {
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": "seal needs the call's group id" }))).into_response();
+        };
+        let uid = asker_uid(caller.as_ref(), &agent);
+        if let Some((pane, said)) = group::seal(&group::key(&uid, &block_id, call), &group::request_is_open) {
+            tell(&pane, &said);
+        }
+        return reply("sealed", "");
+    }
     if !ACTIONS.contains(&req.action.as_str()) {
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("unknown desktop action {:?}", req.action) }))).into_response();
     }
@@ -301,12 +341,7 @@ pub(crate) async fn handle_authorize(
             Check::Ask => {
                 // Asked for like any sensitive operation: the super agent decides and the person
                 // can veto the countdown. Asking again for the same thing joins the open request.
-                let uid = caller
-                    .as_deref()
-                    .and_then(crate::server::caller::Caller::uid)
-                    .map(str::to_string)
-                    .or_else(|| crate::backend::reactive::get_global_handler().get_agent(&agent).and_then(|r| r.uid))
-                    .unwrap_or_default();
+                let uid = asker_uid(caller.as_ref(), &agent);
                 if uid.is_empty() {
                     return reply("refused", "This needs the agent's own token to ask for.");
                 }
@@ -324,7 +359,9 @@ pub(crate) async fn handle_authorize(
                         let id = filed["id"].as_str().unwrap_or_default().to_string();
                         remember_target(&id, GrantTarget { uid: uid.clone(), agent: agent.clone(), block_id: block_id.clone(), app: app.clone(), minutes: p.grant_minutes });
                         audit_line(&agent, w, &req.action, "asked", json!({ "request": id }));
-                        reply("pending", &pending_message(&app, filed["review"].as_str().unwrap_or("")))
+                        let review = filed["review"].as_str().unwrap_or("");
+                        let grouped = req.group.as_deref().is_some_and(|call| group::add(&group::key(&uid, &block_id, call), &block_id, &id, &app));
+                        reply("pending", &if grouped { grouped_pending_message(&app, review) } else { pending_message(&app, review) })
                     }
                     Err(e) => reply("refused", &e),
                 };
@@ -341,6 +378,11 @@ fn pending_message(app: &str, review: &str) -> String {
          super agent approves, the person sees a countdown and can veto it. Don't wait for it: carry on with other \
          work or end your turn. An [AgentMux] note brings the answer, then call Desktop again."
     )
+}
+
+/// What a call that asked for several apps answers for each app that had to be asked.
+fn grouped_pending_message(app: &str, review: &str) -> String {
+    format!("Asked for permission to control {app} as a sensitive operation ({review}); nothing was done yet.")
 }
 
 /// `POST /api/v1/agent/desktop/record`: what an authorized action did.

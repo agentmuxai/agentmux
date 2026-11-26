@@ -132,14 +132,18 @@ async fn act_inner(state: &AppState, uid: &str, slug: &str, action: &str, body: 
             }
             requests::registry().approve(&id, slug, now_ms())?;
             let view = window::open(state, &id, Duration::from_secs(spec.window_secs))?;
-            window::tell_askers(&request, &approved_note(&request, slug, spec.window_secs));
+            if !crate::server::app_api::desktop::holds_progress_notes(&request) {
+                window::tell_askers(&request, &approved_note(&request, slug, spec.window_secs));
+            }
             Ok(json!({ "id": id, "status": "pending", "deadline_ms": view.deadline_ms, "window_secs": spec.window_secs }))
         }
         "deny" => {
             require_super(state, uid)?;
             let request = must_get(&id)?;
             let denied = requests::registry().deny(&id, slug, &text(body, "reason"), now_ms())?;
-            window::tell_askers(&denied, &denied_note(&denied, slug));
+            if !crate::server::app_api::desktop::settled(&denied, crate::server::app_api::desktop_group::Settled::Declined) {
+                window::tell_askers(&denied, &denied_note(&denied, slug));
+            }
             Ok(json!({ "id": id, "status": "denied", "requester": request.requester_slug }))
         }
         "cancel" => {
@@ -147,6 +151,8 @@ async fn act_inner(state: &AppState, uid: &str, slug: &str, action: &str, body: 
             // The last agent that asked withdrew it while its countdown ran: stop the banner.
             if request.status == requests::Status::Cancelled {
                 window::cancelled(state, &id);
+                // A request of a call for several apps that was withdrawn must not hold the others' answer back.
+                crate::server::app_api::desktop::settled(&request, crate::server::app_api::desktop_group::Settled::Ended);
             }
             Ok(json!({ "id": id, "status": request.status }))
         }

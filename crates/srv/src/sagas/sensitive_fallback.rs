@@ -97,6 +97,9 @@ fn go_ahead(state: &AppState, request_id: &str, no_reviewer: bool) {
         return;
     }
     window::audit_step(state, "no super agent", &request, "sensitive.fallback", true, None, &format!("countdown {window_secs} s, no super agent reviewed it"));
+    if crate::server::app_api::desktop::holds_progress_notes(&request) {
+        return;
+    }
     window::tell_askers(
         &request,
         &format!("[AgentMux] Nobody reviewed your request to {} ({why}). The person has {window_secs} s to veto it; after that it happens.", request.summary),

@@ -194,7 +194,13 @@ pub fn open(state: &AppState, request_id: &str, window: Duration) -> Result<Sens
         };
         cleared(&state, &v.request_id, "proceeding");
         let outcome = run(&state, request.clone()).await;
-        tell_askers(&request, &ran_note(&request, &outcome));
+        let settled = match &outcome {
+            Ok(()) => crate::server::app_api::desktop_group::Settled::Allowed,
+            Err(e) => crate::server::app_api::desktop_group::Settled::Failed(e.clone()),
+        };
+        if !crate::server::app_api::desktop::settled(&request, settled) {
+            tell_askers(&request, &ran_note(&request, &outcome));
+        }
         let (status, error, end) = match outcome {
             Ok(()) => ("done", None, Status::Done),
             Err(e) => ("failed", Some(e), Status::Failed),
@@ -287,7 +293,9 @@ pub fn veto(state: &AppState, request_id: &str) -> &'static str {
     let _ = requests::registry().finish(request_id, Status::Vetoed, now_ms());
     let request = requests::registry().get(request_id);
     if let Some(r) = &request {
-        tell_askers(r, &vetoed_note(r));
+        if !crate::server::app_api::desktop::settled(r, crate::server::app_api::desktop_group::Settled::Vetoed) {
+            tell_askers(r, &vetoed_note(r));
+        }
     }
     cleared(state, request_id, "vetoed");
     audit(state, &view, "sensitive.veto", true, None, "vetoed", request.as_ref().map(|r| &r.facts));

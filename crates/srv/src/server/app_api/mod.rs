@@ -160,6 +160,7 @@ pub(crate) mod pr_merge;
 pub(crate) mod push_scan;
 pub(crate) mod app_update;
 pub(crate) mod desktop;
+pub(crate) mod desktop_group;
 pub(crate) mod viewer;
 mod input_history;
 mod presence;
