@@ -510,8 +510,13 @@ export function onResizeMove(
 export function onResizeEnd(model: LayoutModel) {
     endBorderDrag();
     model.splitterHeldNodeIds?._set(null);
-    if (model.resizeContext) {
-        model.resizeContext = undefined;
+    if (!model.resizeContext) return;
+    // The commit reads the container's size, and the drag still holds it (a drag does not change the container). With the
+    // context gone first it measured the page instead, which laid the whole page out again right after the release
+    // (130 to 320 ms in a window of many panes).
+    try {
         model.treeReducer({ type: LayoutTreeActionType.CommitPendingAction });
+    } finally {
+        model.resizeContext = undefined;
     }
 }
