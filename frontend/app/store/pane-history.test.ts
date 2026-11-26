@@ -283,6 +283,10 @@ describe("the trail of places", () => {
         await settle();
         expect(w.s.focus()).toBe("K");
         expect(trail()).toEqual(["A", "K", "B"]);
+        // The entry is what the Kanban shows now, so the next Back goes on to pane A.
+        paneHistoryBack();
+        await settle();
+        expect(w.s.focus()).toBe("A");
     });
 
     it("when the pane is the same and its place is gone, the press goes on to the entry before: it never looks like nothing happened", async () => {

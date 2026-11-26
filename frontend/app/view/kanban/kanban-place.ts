@@ -10,7 +10,7 @@ import { mergeProps, onCleanup } from "solid-js";
 import { recordLinkedPlace, recordPlaceMove } from "@/app/store/pane-history";
 import { registerPlaceSource } from "@/app/store/place-sources";
 
-import { taskForOpenRequestAnywhere } from "./kanban-boards";
+import { boardSlugOf, defaultSlugOf, taskForOpenRequestAnywhere } from "./kanban-boards";
 import type { KanbanSectionState, SectionProps } from "./kanban-section-state";
 import type { KanbanTask } from "./kanban-types";
 
@@ -61,7 +61,10 @@ export function withKanbanPlace(base: KanbanSectionState, props: SectionProps): 
                 }
                 // Loaded and the task is on no board: it was deleted. Not loaded yet: show it when it arrives.
                 const everything = base.model.everything();
-                if (everything && !taskForOpenRequestAnywhere(everything, task)) return false;
+                const found = everything ? taskForOpenRequestAnywhere(everything, task) : undefined;
+                if (everything && !found) return false;
+                // On the board it is on now: it may have been moved since the place was recorded.
+                if (everything && found) base.selectBoard(boardSlugOf(found, defaultSlugOf(everything)));
                 base.setOpenId(task);
                 return true;
             },

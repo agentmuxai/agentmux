@@ -179,10 +179,16 @@ async function step(dir: -1 | 1, startEpoch: number): Promise<void> {
             history = moveTo(history, target);
             const restored = await restoreView(target);
             if (restored === "ok") place = "restored";
+            const shown = readPlace(target.blockId);
             if (restored === "gone") {
-                history = setViewAt(history, history.index, undefined);
-                // The pane is the same and its place was gone: it shows nothing new, so go on.
-                if (samePlace(currentPlace(), before)) continue;
+                // The pane is the same and its place was gone: it shows nothing new, so go on (the entry is then plain).
+                // Otherwise the entry becomes what the pane shows, which the next press compares the person's place with.
+                const goOn = samePlace(currentPlace(), before);
+                history = setViewAt(history, history.index, goOn ? undefined : shown);
+                if (goOn) continue;
+            } else if (restored === "none" && shown && !target.view) {
+                // A pane whose view had not joined when the entry was recorded: the entry is what it shows now.
+                history = setViewAt(history, history.index, shown);
             }
             return;
         }
