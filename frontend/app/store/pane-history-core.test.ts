@@ -9,6 +9,10 @@ import {
     PANE_HISTORY_CAP,
     locatePane,
     recordPane,
+    replacePlace,
+    samePlace,
+    sameView,
+    setViewAt,
     stepHistory,
     type PaneHistory,
     type PaneRef,
@@ -161,5 +165,99 @@ describe("pane history", () => {
         expect(h.entries).toHaveLength(PANE_HISTORY_CAP);
         expect(h.entries[0].blockId).toBe("b5");
         expect(h.entries[h.index].blockId).toBe(`b${PANE_HISTORY_CAP + 4}`);
+    });
+});
+
+// The trail of places: a pane and where its view stands inside it (SPEC_BACK_FORWARD_FOLLOW_THE_WHOLE_TRAIL_2026_11_26.md).
+describe("the trail of places", () => {
+    const K = (task?: string, board = "work"): PaneRef => ({ tabId: "tab1", blockId: "K", view: task ? { board, task } : { board } });
+    const A = ref("tab1", "A");
+
+    it("the operator's trail: pane A, a task in the Kanban, an agent's pane, pane B; Back walks it in reverse and Forward replays", () => {
+        const agent = ref("tab1", "agent");
+        const h = record(A, K("x"), agent, B);
+        const names: string[] = [];
+        let cur = h;
+        for (let i = 0; i < 3; i++) {
+            const r = stepHistory(cur, -1, alive);
+            names.push(`${r.target?.blockId}:${JSON.stringify(r.target?.view ?? {})}`);
+            cur = moveTo(r.history, r.target!);
+        }
+        expect(names).toEqual(['agent:{}', 'K:{"board":"work","task":"x"}', "A:{}"]);
+        const fwd = stepHistory(cur, 1, alive);
+        expect(fwd.target?.blockId).toBe("K");
+    });
+
+    it("another card in the same pane is a new place, the same card is not", () => {
+        let h = record(A, K("x"));
+        expect(recordPane(h, K("x"))).toBe(h);
+        h = recordPane(h, K("y"));
+        expect(h.entries.map((e) => e.view?.task)).toEqual([undefined, "x", "y"]);
+    });
+
+    it("compares places by their data, not by the order the keys were written in", () => {
+        const a: PaneRef = { tabId: "t", blockId: "K", view: { board: "w", task: "x" } };
+        const b: PaneRef = { tabId: "t", blockId: "K", view: { task: "x", board: "w" } };
+        expect(samePlace(a, b)).toBe(true);
+        expect(samePlace(a, { tabId: "t", blockId: "K" })).toBe(false);
+        // A key with no value is no key; a pane with no place and one with an empty place are the same.
+        expect(sameView({ task: undefined }, undefined)).toBe(true);
+    });
+
+    it("a place recorded after Back drops what was ahead, view places included", () => {
+        let h = record(A, K("x"), B);
+        const back = stepHistory(h, -1, alive);
+        h = moveTo(back.history, back.target!);
+        h = recordPane(h, K("z"));
+        expect(h.entries.map((e) => e.view?.task ?? e.blockId)).toEqual(["A", "x", "z"]);
+    });
+
+    it("replacing stands for a push made a moment ago, and an entry that would repeat the one before goes", () => {
+        let h = record(A, K("x"));
+        h = replacePlace(h, K("y"));
+        expect(h.entries.map((e) => e.view?.task ?? e.blockId)).toEqual(["A", "y"]);
+        expect(replacePlace(h, K("y"))).toBe(h);
+        // Replacing the current entry with the pane before it leaves one entry of it.
+        const back = replacePlace(h, A);
+        expect(back.entries).toEqual([A]);
+        expect(back.index).toBe(0);
+        expect(replacePlace(emptyHistory(), A).entries).toEqual([A]);
+    });
+
+    it("an entry keeps its place when its pane is followed to another tab", () => {
+        const h = record(K("x"), B);
+        const r = stepHistory(h, -1, (e) => (e.blockId === "K" ? ref("tab9", "K") : e));
+        expect(r.target).toEqual({ tabId: "tab9", blockId: "K", view: { board: "work", task: "x" } });
+    });
+
+    it("a view place can be cleared when the view says it is gone, and read back after a restore", () => {
+        let h = record(A, K("x"));
+        h = setViewAt(h, 1, undefined);
+        expect(h.entries[1].view).toBeUndefined();
+        expect(setViewAt(h, 1, undefined)).toBe(h);
+        h = setViewAt(h, 1, { board: "work", task: "q" });
+        expect(h.entries[1].view).toEqual({ board: "work", task: "q" });
+        expect(h.index).toBe(1);
+    });
+
+    it("when an agent moved the person (the trail did not record it), Back goes to the entry at the cursor first", () => {
+        const h = record(A, B);
+        const elsewhere = ref("tab1", "C");
+        // The person is on C; the cursor entry is B: Back lands on B, not on A.
+        expect(stepHistory(h, -1, alive, elsewhere).target).toEqual(B);
+        // Forward from there goes to what is after the cursor: nothing here.
+        expect(stepHistory(h, 1, alive, elsewhere).target).toBeNull();
+        // Where the person is the cursor entry, Back is a step back as ever.
+        expect(stepHistory(h, -1, alive, B).target).toEqual(A);
+        // And with the place unknown, as before.
+        expect(stepHistory(h, -1, alive, null).target).toEqual(A);
+    });
+
+    it("the cursor entry itself may be dead when an agent moved the person: it is removed and the cursor stays behind it", () => {
+        const h = record(A, B);
+        const r = stepHistory(h, -1, (e) => (e.blockId === "B" ? null : e), ref("tab1", "C"));
+        expect(r.target).toEqual(A);
+        expect(r.history.entries).toEqual([A]);
+        expect(r.history.index).toBe(0);
     });
 });

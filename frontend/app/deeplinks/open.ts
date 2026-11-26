@@ -71,6 +71,8 @@ export interface ExecutorDeps {
     now(): number;
     sleep(ms: number): Promise<void>;
     translate(key: string): string;
+    /** Runs a person's open as one step of the window's trail of places (Back and Forward walk it); tests may leave it out. */
+    gesture?<T>(run: () => Promise<T>): Promise<T>;
     /** A person's open: the window's own `openOrFocusPaneIdByView` (it focuses), or a new or floating pane. */
     openForPerson(plan: PanePlan, how: { newPane: boolean; floating: boolean }): Promise<string | undefined>;
     /** The pane of `view` (and its identity) in `tabId`, or in the shown tab when no tab is named. */
@@ -170,7 +172,8 @@ export class Executor {
             const running = this.inFlight.get(key);
             if (running) return running;
             if (!this.takePersonSlot()) return refused("rate_limited", label);
-            const p = this.openForPerson(plan, label, options).finally(() => this.inFlight.delete(key));
+            const run = () => this.openForPerson(plan, label, options);
+            const p = (this.deps.gesture ? this.deps.gesture(run) : run()).finally(() => this.inFlight.delete(key));
             this.inFlight.set(key, p);
             return p;
         }
