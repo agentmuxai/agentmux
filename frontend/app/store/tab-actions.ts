@@ -346,14 +346,18 @@ function snapshotDirty(clickedAt: number): (tabId: string) => void {
  * started in that time. The `[tab-switch]` line's `frames` runs to two frames after the backend's answer, which a tab
  * already shown does not wait for. A separate line, because a cold tab's swap comes after that one is written.
  */
-function logSwapWhenPainted(tabId: string, clickedAt: number, cold: boolean): void {
+function logSwapWhenPainted(tabId: string, clickedAt: number, cold: boolean, seq: number): void {
     const painted = () =>
         requestAnimationFrame(() =>
             requestAnimationFrame(() => {
+                const current = seq === tabSwitchSeq;
+                // A cold tab is on screen once the backend has committed it: a gate lifted earlier (the answer was
+                // slow, the hold timed out) is not its reveal, so wait for the next lift.
+                if (cold && current && activeTabId() !== tabId) return whenGateLifted(painted);
                 const end = performance.now();
                 const longest = longestTaskStartedBetween(clickedAt, end);
                 console.info(
-                    `[perf] tab-switch-swap to=${tabId} kind=${cold ? "cold" : "warm"} swap=${Math.round(end - clickedAt)}ms longest-task=${longest == null ? "n/a" : `${longest}ms`}`
+                    `[perf] tab-switch-swap to=${tabId} kind=${cold ? "cold" : "warm"} swap=${Math.round(end - clickedAt)}ms longest-task=${longest == null ? "n/a" : `${longest}ms`}${current ? "" : " superseded=true"}`
                 );
             })
         );
@@ -429,7 +433,7 @@ export async function setActiveTab(tabId: string): Promise<void> {
     const gated = !(keepInactiveTabsLaidOut() && tabWasShown(tabId));
     if (gated) guardStep("the reveal gate", guard, () => holdRevealGate(tabId));
     const logDirty = snapshotDirty(clickedAt);
-    logSwapWhenPainted(tabId, clickedAt, gated);
+    logSwapWhenPainted(tabId, clickedAt, gated, mySeq);
     const cancelIntent = showSwitchIntent(tabId, (write) => guardStep("the switch intent", guard, write));
     let rpcMs = -1;
     try {
