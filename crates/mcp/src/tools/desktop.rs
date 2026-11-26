@@ -31,11 +31,16 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             match str_arg(arguments, "action").as_deref() {
                 Some("apps") => apps(cx).await,
                 Some("look") => look(arguments, cx).await,
-                Some("click") => click(arguments, cx).await,
-                Some("scroll") => scroll(arguments, cx).await,
-                Some("drag") => drag(arguments, cx).await,
-                Some("type") => type_text(arguments, cx).await,
-                Some("key") => key(arguments, cx).await,
+                Some(a @ ("click" | "scroll" | "drag" | "type" | "key")) => {
+                    let said = match a {
+                        "click" => click(arguments, cx).await?,
+                        "scroll" => scroll(arguments, cx).await?,
+                        "drag" => drag(arguments, cx).await?,
+                        "type" => type_text(arguments, cx).await?,
+                        _ => key(arguments, cx).await?,
+                    };
+                    Ok(with_look(arguments, cx, said).await)
+                }
                 Some("wait") => wait(arguments).await,
                 Some("release") => release(arguments, cx).await,
                 other => anyhow::bail!(
@@ -210,43 +215,124 @@ async fn apps(cx: &ToolCtx<'_>) -> Result<String> {
     ))
 }
 
+/// `region` of a `look`: x, y, w, h in the pixels of the last look.
+fn parse_region(args: &Value) -> Result<Option<(i64, i64, i64, i64)>> {
+    let Some(r) = args.get("region").filter(|r| !r.is_null()) else { return Ok(None) };
+    let g = |k: &str| int_arg(r, k).ok_or_else(|| anyhow::anyhow!("region needs x, y, w and h (pixels of your last look); {k} is missing"));
+    Ok(Some((g("x")?, g("y")?, g("w")?, g("h")?)))
+}
+
+/// What a `look` made: the image's path and hash, and either the whole
+/// window's look or the zoom of a region.
+struct Captured {
+    path: String,
+    sha: Option<String>,
+    kind: CaptureKind,
+}
+
+enum CaptureKind {
+    Whole(Look),
+    Zoom { of: Look, region: input::Region, zoom: f64, w: u32, h: u32 },
+}
+
 async fn look(args: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let id = window_id(args)?;
+    let region = parse_region(args)?;
     input::win::ensure_dpi_aware();
     let w = find_window(id)?;
+    // A region is of the last look, so it needs one.
+    let prior = input::last_look(id);
+    if region.is_some() && prior.is_none() {
+        anyhow::bail!("look at the whole window first: a region is in the pixels of that look");
+    }
     let grant = authorize(cx, "look", &w, id).await?;
     // Look at the window as it is after the user answered.
     let w = find_window(id)?;
-    let result = (|| -> Result<(String, Look, Option<String>)> {
+    let restored = input::win::restore_if_minimized(id);
+    let result = (|| -> Result<Captured> {
         let rect = input::win::window_rect(id).ok_or_else(|| anyhow::anyhow!("couldn't read the window's size"))?;
         let image = w.window.capture_image().map_err(|e| anyhow::anyhow!("capture failed: {e}"))?;
-        let (tw, th) = input::scaled_size(image.width(), image.height());
-        let shown = if (tw, th) == (image.width(), image.height()) {
-            image
-        } else {
-            image::imageops::resize(&image, tw, th, image::imageops::FilterType::Triangle)
-        };
+        if image.width() == 0 || image.height() == 0 {
+            anyhow::bail!("the window has no size to capture (it may be minimised or hidden); call look again, and ask the user to restore it if this repeats");
+        }
         let dir = capture_window_dir().map_err(|e| anyhow::anyhow!("cannot resolve the AgentMux root for captures: {e}"))?;
         std::fs::create_dir_all(&dir)?;
         let path = dir.join(format!("{}.png", uuid::Uuid::new_v4()));
-        shown.save(&path).map_err(|e| anyhow::anyhow!("failed to save the capture: {e}"))?;
+        let kind = if let Some((x, y, rw, rh)) = region {
+            let of = prior.ok_or_else(|| anyhow::anyhow!("look at the whole window first"))?;
+            if of.rect != rect {
+                anyhow::bail!("the window moved or resized since look #{}; take a whole look first, then a region of it", of.n);
+            }
+            let r = input::check_region(&of, x, y, rw, rh).map_err(|e| anyhow::anyhow!("{e}"))?;
+            // The look was scaled down from the capture: cut the same region from the capture itself.
+            let (fx, fy) = (image.width() as f64 / of.image_w as f64, image.height() as f64 / of.image_h as f64);
+            let (cx0, cy0) = ((r.x as f64 * fx).round() as u32, (r.y as f64 * fy).round() as u32);
+            let cw = ((r.w as f64 * fx).round() as u32).clamp(1, image.width().saturating_sub(cx0).max(1));
+            let ch = ((r.h as f64 * fy).round() as u32).clamp(1, image.height().saturating_sub(cy0).max(1));
+            let cut = image::imageops::crop_imm(&image, cx0, cy0, cw, ch).to_image();
+            let zoom = input::zoom_for(r.w, r.h);
+            let (ow, oh) = (((r.w as f64 * zoom).round() as u32).max(1), ((r.h as f64 * zoom).round() as u32).max(1));
+            let shown = image::imageops::resize(&cut, ow, oh, image::imageops::FilterType::CatmullRom);
+            shown.save(&path).map_err(|e| anyhow::anyhow!("failed to save the capture: {e}"))?;
+            CaptureKind::Zoom { of, region: r, zoom, w: ow, h: oh }
+        } else {
+            let (tw, th) = input::scaled_size(image.width(), image.height());
+            let shown = if (tw, th) == (image.width(), image.height()) {
+                image
+            } else {
+                image::imageops::resize(&image, tw, th, image::imageops::FilterType::Triangle)
+            };
+            shown.save(&path).map_err(|e| anyhow::anyhow!("failed to save the capture: {e}"))?;
+            CaptureKind::Whole(Look { rect, image_w: shown.width(), image_h: shown.height(), n: 0 })
+        };
         prune_old_captures(&dir);
-        let look = Look { rect, image_w: shown.width(), image_h: shown.height() };
-        Ok((path.display().to_string(), look, sha256_file(&path)))
+        Ok(Captured { sha: sha256_file(&path), path: path.display().to_string(), kind })
     })();
     match result {
-        Ok((path, look, sha)) => {
-            input::remember_look(id, look);
-            record(cx, &grant, "look", &w, id, json!({ "image": [look.image_w, look.image_h], "sha256": sha }), "ok").await;
-            Ok(format!(
-                "Looked at {:?}: {path} — use Read on that path to see it. The image is {}×{} pixels; click, scroll and the other actions take x and y in the pixels of this image. Look again after anything changes, or if the window moves.",
-                w.title, look.image_w, look.image_h
-            ))
+        Ok(c) => {
+            let woke = if restored { " The window was minimised; it has been restored." } else { "" };
+            let said = match c.kind {
+                CaptureKind::Whole(look0) => {
+                    let (look, before) = input::remember_look(id, look0);
+                    record(cx, &grant, "look", &w, id, json!({ "image": [look.image_w, look.image_h], "look": look.n, "sha256": c.sha }), "ok").await;
+                    format!(
+                        "Looked at {:?}: {} — use Read on that path to see it. {} click, scroll, drag and the other actions take x and y in the pixels of this image (pass of_look {} to be told if they are from an older look). Look again after anything changes, or if the window moves.{woke}",
+                        w.title,
+                        c.path,
+                        input::describe_scale(&look, before.as_ref()),
+                        look.n
+                    )
+                }
+                CaptureKind::Zoom { of, region: r, zoom, w: zw, h: zh } => {
+                    record(cx, &grant, "look", &w, id, json!({ "region": [r.x, r.y, r.w, r.h], "of_look": of.n, "sha256": c.sha }), "ok").await;
+                    format!(
+                        "Looked at region ({}, {}, {}×{}) of look #{} in {:?}, enlarged ×{zoom:.1}: {} — use Read on that path to see it. The image is {zw}×{zh} pixels. It does not replace look #{}: keep clicking in look #{}'s pixels (a point (zx, zy) in this zoom is at x = {} + zx×{}/{zw}, y = {} + zy×{}/{zh} in look #{}).{woke}",
+                        r.x, r.y, r.w, r.h, of.n, w.title, c.path, of.n, of.n, r.x, r.w, r.y, r.h, of.n
+                    )
+                }
+            };
+            Ok(said)
         }
         Err(e) => {
             record(cx, &grant, "look", &w, id, Value::Null, &format!("error: {e}")).await;
             Err(e)
         }
+    }
+}
+
+/// After an action that asked for it (`look: true`), the fresh look at the
+/// window, appended to what the action said: one call instead of three. A look
+/// that fails doesn't fail the action, which has happened.
+async fn with_look(args: &Value, cx: &ToolCtx<'_>, said: String) -> String {
+    if args.get("look").and_then(Value::as_bool) != Some(true) {
+        return said;
+    }
+    let Ok(id) = window_id(args) else { return said };
+    // Give the app a moment to draw what the action did.
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    match look(&json!({ "window": id }), cx).await {
+        Ok(l) => format!("{said}\nThe window now: {l}"),
+        Err(e) => format!("{said}\n(The look afterwards failed: {e})"),
     }
 }
 
@@ -266,11 +352,17 @@ async fn drive(
     action: &str,
     id: u32,
     points: &[(i64, i64)],
+    of_look: Option<i64>,
     details: Value,
     act: impl FnOnce(&[(i32, i32)]) -> Result<(), String>,
 ) -> Result<AgentMuxWindowInfo> {
     input::win::ensure_dpi_aware();
     let w = find_window(id)?;
+    // Coordinates the agent says are from an older look than the latest are stale.
+    if let (Some(of), false) = (of_look, points.is_empty()) {
+        let latest = input::last_look(id).ok_or_else(|| anyhow::anyhow!("look at the window first: x and y are pixels of that image"))?;
+        input::check_of_look(&latest, of).map_err(|e| anyhow::anyhow!("{e}"))?;
+    }
     // Check the points before asking, so a bad one doesn't use up a slot.
     for (x, y) in points {
         screen_point(id, *x, *y)?;
@@ -305,7 +397,7 @@ async fn click(args: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let count = int_arg(args, "count").unwrap_or(1).clamp(1, 3) as u32;
     let details = json!({ "x": x, "y": y, "button": button, "count": count });
     let b = button.clone();
-    let w = drive(cx, "click", id, &[(x, y)], details, move |p| {
+    let w = drive(cx, "click", id, &[(x, y)], int_arg(args, "of_look"), details, move |p| {
         let (sx, sy) = *p.first().ok_or("no point")?;
         input::win::click(sx, sy, &b, count)
     })
@@ -322,7 +414,7 @@ async fn scroll(args: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     if dx == 0 && dy == 0 {
         anyhow::bail!("scroll needs dy (notches, positive is up) or dx (positive is right)");
     }
-    let w = drive(cx, "scroll", id, &[(x, y)], json!({ "x": x, "y": y, "dx": dx, "dy": dy }), move |p| {
+    let w = drive(cx, "scroll", id, &[(x, y)], int_arg(args, "of_look"), json!({ "x": x, "y": y, "dx": dx, "dy": dy }), move |p| {
         let (sx, sy) = *p.first().ok_or("no point")?;
         input::win::scroll(sx, sy, dx, dy)
     })
@@ -391,7 +483,7 @@ async fn drag(args: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         "hold": d.hold_text,
     });
     let (button, hold) = (d.button.clone(), d.hold.clone());
-    let w = drive(cx, "drag", id, &d.points, details, move |screen| {
+    let w = drive(cx, "drag", id, &d.points, int_arg(args, "of_look"), details, move |screen| {
         let last = screen.len() - 1;
         input::win::drag(&input::drag_path(screen[0], &screen[1..last], screen[last]), &button, &hold)
     })
@@ -409,7 +501,7 @@ async fn type_text(args: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     input::check_text(&text).map_err(|e| anyhow::anyhow!("{e}"))?;
     let chars = text.chars().count();
     // The log gets the length, never the text.
-    let w = drive(cx, "type", id, &[], json!({ "chars": chars }), move |_| input::win::type_text(&text)).await?;
+    let w = drive(cx, "type", id, &[], None, json!({ "chars": chars }), move |_| input::win::type_text(&text)).await?;
     Ok(format!("Typed {chars} characters into {:?}. Don't type passwords: ask the user to. Look again to see the result.", w.title))
 }
 
@@ -417,7 +509,7 @@ async fn key(args: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let id = window_id(args)?;
     let keys = str_arg(args, "keys").ok_or_else(|| anyhow::anyhow!("key needs keys, such as \"enter\" or \"ctrl+s\""))?;
     let chord = input::parse_keys(&keys).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let w = drive(cx, "key", id, &[], json!({ "keys": keys }), move |_| input::win::press(&chord)).await?;
+    let w = drive(cx, "key", id, &[], None, json!({ "keys": keys }), move |_| input::win::press(&chord)).await?;
     Ok(format!("Pressed {keys} in {:?}. Look again to see the result.", w.title))
 }
 
@@ -495,5 +587,13 @@ mod tests {
     fn a_drag_that_returns_to_its_start_by_way_of_a_waypoint_is_allowed() {
         let d = parse_drag(&json!({ "x": 5, "y": 5, "x2": 5, "y2": 5, "via": [{ "x": 50, "y": 5 }] })).unwrap();
         assert_eq!(d.points, vec![(5, 5), (50, 5), (5, 5)]);
+    }
+
+    #[test]
+    fn a_region_is_read_from_the_call() {
+        assert_eq!(parse_region(&json!({})).unwrap(), None);
+        assert_eq!(parse_region(&json!({ "region": null })).unwrap(), None);
+        assert_eq!(parse_region(&json!({ "region": { "x": 1, "y": 2, "w": 30, "h": 40 } })).unwrap(), Some((1, 2, 30, 40)));
+        assert!(parse_region(&json!({ "region": { "x": 1, "y": 2, "w": 30 } })).unwrap_err().to_string().contains("h is missing"));
     }
 }
