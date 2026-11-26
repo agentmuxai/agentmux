@@ -108,7 +108,10 @@ pub(crate) fn check_region(look: &Look, x: i64, y: i64, w: i64, h: i64) -> Resul
     if w < MIN_REGION as i64 || h < MIN_REGION as i64 {
         return Err(format!("the region is {w}×{h}; it must be at least {MIN_REGION}×{MIN_REGION} pixels"));
     }
-    if x < 0 || y < 0 || x + w > look.image_w as i64 || y + h > look.image_h as i64 {
+    // Checked sums: a huge x or y from the caller must read as outside, not overflow.
+    let right = x.checked_add(w);
+    let bottom = y.checked_add(h);
+    if x < 0 || y < 0 || right.is_none_or(|r| r > look.image_w as i64) || bottom.is_none_or(|b| b > look.image_h as i64) {
         return Err(format!(
             "the region ({x}, {y}, {w}×{h}) is not inside look #{}'s image, which is {}×{}",
             look.n, look.image_w, look.image_h
@@ -1058,6 +1061,11 @@ mod tests {
         assert!(check_region(&l, 901, 450, 100, 50).unwrap_err().contains("not inside look #4"));
         assert!(check_region(&l, -1, 0, 100, 50).is_err());
         assert!(check_region(&l, 0, 0, 7, 50).unwrap_err().contains("at least 8"));
+        // Huge numbers from the caller are outside the image, never an overflow.
+        assert!(check_region(&l, i64::MAX, 0, 8, 8).unwrap_err().contains("not inside"));
+        assert!(check_region(&l, 0, i64::MAX, 8, 8).unwrap_err().contains("not inside"));
+        assert!(check_region(&l, 0, 0, i64::MAX, 8).unwrap_err().contains("not inside"));
+        assert!(check_region(&l, i64::MAX, i64::MAX, i64::MAX, i64::MAX).is_err());
     }
 
     #[test]

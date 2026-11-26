@@ -306,8 +306,8 @@ async fn look(args: &Value, cx: &ToolCtx<'_>) -> Result<String> {
                 CaptureKind::Zoom { of, region: r, zoom, w: zw, h: zh } => {
                     record(cx, &grant, "look", &w, id, json!({ "region": [r.x, r.y, r.w, r.h], "of_look": of.n, "sha256": c.sha }), "ok").await;
                     format!(
-                        "Looked at region ({}, {}, {}×{}) of look #{} in {:?}, enlarged ×{zoom:.1}: {} — use Read on that path to see it. The image is {zw}×{zh} pixels. It does not replace look #{}: keep clicking in look #{}'s pixels (a point in this zoom is at x = {} + zx/{zoom:.1}, y = {} + zy/{zoom:.1}).{woke}",
-                        r.x, r.y, r.w, r.h, of.n, w.title, c.path, of.n, of.n, r.x, r.y
+                        "Looked at region ({}, {}, {}×{}) of look #{} in {:?}, enlarged ×{zoom:.1}: {} — use Read on that path to see it. The image is {zw}×{zh} pixels. It does not replace look #{}: keep clicking in look #{}'s pixels (a point (zx, zy) in this zoom is at x = {} + zx×{}/{zw}, y = {} + zy×{}/{zh} in look #{}).{woke}",
+                        r.x, r.y, r.w, r.h, of.n, w.title, c.path, of.n, of.n, r.x, r.w, r.y, r.h, of.n
                     )
                 }
             };
